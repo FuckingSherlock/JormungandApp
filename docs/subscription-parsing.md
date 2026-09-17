@@ -104,8 +104,28 @@ detect_format(body, content_type):
 
 1. **Фильтр явно нерабочих**: ноды с истёкшим сроком (если сервер пишет expiry в имени), дубли после дедупликации
 2. **Протокольный приоритет** (настраивается пользователем): Reality > Hysteria2 > VLESS > VMess > Trojan > SS
-3. **Latency-тест**: параллельно для всех нод, timeout 5 сек, URL из настроек (default: `http://www.gstatic.com/generate_204`)
+3. **Latency-тест**: параллельно для всех нод, timeout 5 сек, URL выбирается автоматически из списка ниже
 4. Финальная сортировка: работающие по latency ASC, нерабочие в конец
+
+### Fallback-список URL для latency-теста
+
+Тестовый URL выбирается один раз при первом запуске / смене региона и кешируется. Логика:
+
+1. Пробовать по порядку с таймаутом 3 сек каждый (прямым соединением, без прокси):
+   ```
+   http://www.gstatic.com/generate_204      # Google, быстрый, заблокирован в CN/IR/RU
+   http://connectivitycheck.gstatic.com/generate_204
+   http://cp.cloudflare.com/                # Cloudflare
+   http://detectportal.firefox.com/success.txt  # Mozilla
+   http://www.msftconnecttest.com/connecttest.txt  # Microsoft
+   http://www.apple.com/library/test/success.html  # Apple
+   http://204.ustclug.org/                  # USTC, работает в CN
+   ```
+2. Первый ответивший 204/200 за <3 сек → использовать для всех latency-тестов
+3. Если все недоступны напрямую → fallback на `tcp_ping` (просто измерять время TCP-handshake к адресу ноды без HTTP)
+4. Пользователь может задать свой URL в настройках — он идёт первым в списке
+
+**Важно:** latency-тест гоняется **через ноду** (через sing-box API), а выбор URL влияет только на то, что считается "рабочей" нодой. TCP-ping как fallback даёт хотя бы относительное ранжирование даже если все HTTP-цели заблокированы.
 
 ---
 
