@@ -109,23 +109,31 @@ detect_format(body, content_type):
 
 ### Fallback-список URL для latency-теста
 
-Тестовый URL выбирается один раз при первом запуске / смене региона и кешируется. Логика:
+Karing использует статический список без автовыбора — пользователь выбирает вручную.
+Мы делаем автодетект: при первом запуске (и при смене сети) проверяем список **напрямую** (без прокси) и кешируем первый рабочий.
 
-1. Пробовать по порядку с таймаутом 3 сек каждый (прямым соединением, без прокси):
-   ```
-   http://www.gstatic.com/generate_204      # Google, быстрый, заблокирован в CN/IR/RU
-   http://connectivitycheck.gstatic.com/generate_204
-   http://cp.cloudflare.com/                # Cloudflare
-   http://detectportal.firefox.com/success.txt  # Mozilla
-   http://www.msftconnecttest.com/connecttest.txt  # Microsoft
-   http://www.apple.com/library/test/success.html  # Apple
-   http://204.ustclug.org/                  # USTC, работает в CN
-   ```
-2. Первый ответивший 204/200 за <3 сек → использовать для всех latency-тестов
-3. Если все недоступны напрямую → fallback на `tcp_ping` (просто измерять время TCP-handshake к адресу ноды без HTTP)
-4. Пользователь может задать свой URL в настройках — он идёт первым в списке
+Список (приоритет сверху вниз):
+```
+https://www.gstatic.com/generate_204          # Google — быстрый, заблокирован в CN/IR/RU
+http://cp.cloudflare.com/generate_204         # Cloudflare
+http://www.msftconnecttest.com/connecttest.txt # Microsoft
+http://detectportal.firefox.com/success.txt   # Mozilla
+http://connectivity-check.ubuntu.com          # Ubuntu
+http://checkip.amazonaws.com                  # AWS (работает в большинстве стран)
+```
 
-**Важно:** latency-тест гоняется **через ноду** (через sing-box API), а выбор URL влияет только на то, что считается "рабочей" нодой. TCP-ping как fallback даёт хотя бы относительное ранжирование даже если все HTTP-цели заблокированы.
+Логика выбора:
+1. Проверить все параллельно с таймаутом 3 сек (прямое соединение, без прокси)
+2. Взять первый ответивший с кодом 200/204
+3. Закешировать результат — перепроверять при смене сети (смена IP/интерфейса) или по запросу пользователя
+4. Если все недоступны напрямую → fallback на `tcp_ping` (TCP-handshake к хосту ноды, без HTTP)
+5. Пользователь может задать свой URL в настройках — он идёт первым в списке перед автодетектом
+
+> **Karing-источник:** `setting_manager.dart:1621` — `kUrlTestList` — тот же набор URL,
+> но без автовыбора. DNS по региону там есть (`getResolverDns`, `getDirectDns`),
+> а urlTest URL — всегда статика.
+
+**Важно:** latency-тест гоняется **через ноду** (через sing-box API `/proxies/{name}/delay`). TCP-ping как fallback даёт относительное ранжирование даже если все HTTP-цели заблокированы.
 
 ---
 
