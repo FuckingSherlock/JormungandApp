@@ -11,7 +11,14 @@
    original = the first mockup palette (navy, default);
    karing   = refreshed Karing (neutral greys, blue accent);
    github   = GitHub Dark palette. */
+/* Flag emoji: Windows has none and shows "US"/"DE" as letters. This font covers
+   only regional-indicator / tag code points, so everything else still uses Inter. */
+@font-face{font-family:'Flags';font-display:swap;
+  src:url(https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1.10/dist/TwemojiCountryFlags.woff2) format('woff2');
+  unicode-range:U+1F1E6-1F1FF,U+1F3F4,U+E0062-E007F}
+
 :root, :root[data-theme="original"] {
+  --mono:      'Flags','JetBrains Mono',monospace;
   --bg:        #0B0F1A;
   --surface:   #131929;
   --card:      #1A2035;
@@ -30,7 +37,7 @@
   --t3:        #4A5880;
   --sheet:     #171E30;
   --r:         14px;
-  --font:      'Inter',system-ui,sans-serif;
+  --font:      'Flags','Inter',system-ui,sans-serif;
 }
 :root[data-theme="karing"] {
   --bg:        #151515;
@@ -51,7 +58,7 @@
   --t3:        #6B6B6B;
   --sheet:     #1D1D1D;
   --r:         14px;
-  --font:      'Inter',system-ui,sans-serif;
+  --font:      'Flags','Inter',system-ui,sans-serif;
 }
 :root[data-theme="github"] {
   --bg:        #0D1117;
@@ -139,7 +146,7 @@ body {
 .stat-card{padding:12px 10px;display:flex;flex-direction:column;min-height:118px}
 .stat-card-half{padding:10px 12px;flex:1;display:flex;flex-direction:column;justify-content:center;gap:2px}
 .stat-card-half .card-label{margin-bottom:4px}
-.stat-row{display:flex;align-items:baseline;gap:4px;font-family:'JetBrains Mono',monospace}
+.stat-row{display:flex;align-items:baseline;gap:4px;font-family:var(--mono)}
 .stat-arrow{font-size:14px;font-weight:600}
 .stat-arrow.down{color:var(--accent)}
 .stat-arrow.up{color:var(--warn)}
@@ -147,13 +154,13 @@ body {
 .stat-unit{font-size:11px;color:var(--t2)}
 .stat-divider{height:1px;background:var(--border);margin:8px 0}
 .stat-total-label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
-.stat-total-row{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--t2)}
+.stat-total-row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:13px;color:var(--t2)}
 .stat-total-row span.v{color:var(--t1);font-weight:500}
 
-.ip-addr{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600;color:var(--t1);word-break:break-all;line-height:1.3}
+.ip-addr{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--t1);word-break:break-all;line-height:1.3}
 .ip-loc{font-size:12px;color:var(--t2);margin-top:4px}
 
-.conn-num{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;color:var(--t1);line-height:1}
+.conn-num{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--t1);line-height:1}
 
 /* ── Profiles card (full width, row 2) ── */
 .profiles-icon{
@@ -165,11 +172,11 @@ body {
 .profiles-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .profiles-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .profiles-sub{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.profiles-meta{text-align:right;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.profiles-meta{text-align:right;flex-shrink:0;font-family:var(--mono)}
 .profiles-meta .count{font-size:15px;font-weight:600;color:var(--t1)}
 .profiles-meta .src{font-size:12px;color:var(--t2)}
-.proto-badge{background:rgba(var(--accent-rgb),.15);color:var(--accent);border-radius:4px;padding:1px 5px;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
-.latency{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--active);font-weight:600}
+.proto-badge{background:rgba(var(--accent-rgb),.15);color:var(--accent);border-radius:4px;padding:1px 5px;font-size:12px;font-weight:600;font-family:var(--mono)}
+.latency{font-family:var(--mono);font-size:12px;color:var(--active);font-weight:600}
 
 /* ── Segmented controls (shared block, row 3) — vertical stacks ── */
 .segments-card{
@@ -266,7 +273,7 @@ body {
 .sub-icon.set{background:rgba(var(--active-rgb),.10)}
 .sub-icon.node{background:rgba(var(--purple-rgb),.12)}
 .sub-name{font-size:14px;color:var(--t1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sub-count{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.sub-count{font-size:13px;color:var(--t2);font-family:var(--mono)}
 
 .sheet-divider{height:1px;background:var(--border);margin:6px 0}
 .sheet-action{display:flex;align-items:center;gap:10px;padding:11px 18px;cursor:pointer;color:var(--accent);font-size:15px;font-weight:600;transition:background .12s}
@@ -293,11 +300,11 @@ body {
 /* Live connections sheet rows */
 .live-conn-row{padding:10px 18px;border-bottom:1px solid rgba(255,255,255,.03)}
 .live-conn-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
-.live-conn-host{font-size:14px;font-weight:600;color:var(--t1);font-family:'JetBrains Mono',monospace}
+.live-conn-host{font-size:14px;font-weight:600;color:var(--t1);font-family:var(--mono)}
 .live-conn-proto{font-size:12px;font-weight:700;padding:1px 6px;border-radius:4px}
 .live-conn-proto.tcp{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
 .live-conn-proto.udp{background:rgba(var(--purple-rgb),.15);color:var(--purple)}
-.live-conn-meta{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.live-conn-meta{font-size:13px;color:var(--t2);font-family:var(--mono)}
 
 /* ── Forms (add source / rule / create profile / create chain) ── */
 .form-group{padding:10px 18px}
@@ -324,7 +331,7 @@ body {
 .pick-row{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;transition:background .12s}
 .pick-row:hover{background:rgba(255,255,255,.03)}
 .pick-row-name{font-size:15px;font-weight:600;color:var(--t1);flex:1}
-.pick-row-sub{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.pick-row-sub{font-size:13px;color:var(--t2);font-family:var(--mono)}
 
 .sheet-footer{padding:12px 18px 16px;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:4px}
 .btn-primary{
@@ -445,7 +452,7 @@ body {
 .src-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
 .src-meta{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;margin-top:3px;white-space:nowrap;overflow:hidden}
 .src-meta .dot{color:var(--t3)}
-.fmt-tag{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.06);color:var(--t2)}
+.fmt-tag{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.06);color:var(--t2)}
 .src-chevron{transition:transform .2s;color:var(--t3)}
 .src-card.open .src-chevron{transform:rotate(180deg)}
 .src-card.off .src-main,.src-card.off .src-usage,.src-card.off .src-body{opacity:.45}
@@ -456,7 +463,7 @@ body {
 .usage-bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}
 .usage-fill{height:100%;background:var(--accent);border-radius:2px}
 .usage-fill.hi{background:var(--warn)}
-.usage-text{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--t2);font-family:'JetBrains Mono',monospace;margin-top:6px}
+.usage-text{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--t2);font-family:var(--mono);margin-top:6px}
 
 .src-body{border-top:1px solid var(--border);display:none}
 .src-card.open .src-body{display:block}
@@ -465,8 +472,8 @@ body {
 .node-row + .node-row{border-top:1px solid rgba(255,255,255,.035)}
 .node-flag{font-size:16px;width:20px;text-align:center;flex-shrink:0}
 .node-name{flex:1;min-width:0;font-size:14px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.node-proto{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
-.lat{cursor:pointer;padding:4px 0;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;min-width:60px;text-align:right;flex-shrink:0}
+.node-proto{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
+.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:60px;text-align:right;flex-shrink:0}
 .lat.good{color:var(--active)}
 .lat.mid{color:var(--warn)}
 .lat.bad{color:var(--muted)}
@@ -501,7 +508,7 @@ body {
 .section-toggle{display:flex;align-items:center;gap:6px;padding:8px 18px 4px;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;cursor:pointer}
 .section-toggle svg{transition:transform .2s}
 .section-toggle.open svg{transform:rotate(90deg)}
-textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.45}
+textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-height:1.45}
 
 /* ── Toast ── */
 .toast{
@@ -591,8 +598,8 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
           <div class="card-label">Connections</div>
           <div style="display:flex;align-items:baseline;gap:8px">
             <span class="conn-num" style="font-size:18px">51</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent)">TCP 43</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--purple)">UDP 8</span>
+            <span style="font-family:var(--mono);font-size:13px;color:var(--accent)">TCP 43</span>
+            <span style="font-family:var(--mono);font-size:13px;color:var(--purple)">UDP 8</span>
           </div>
         </div>
       </div>
@@ -1975,7 +1982,7 @@ function renderRules() {
     return `<div class="config-row ${!r.enabled?'dimmed':''}">
       <div style="flex:1;min-width:0">
         <div class="config-name">${r.type}</div>
-        <div class="config-sub" style="font-family:'JetBrains Mono',monospace">${r.value}</div>
+        <div class="config-sub" style="font-family:var(--mono)">${r.value}</div>
       </div>
       <span class="rule-action-badge ${r.action}">${r.action}</span>
       ${miniToggleHtml(id, 'toggleRuleEnabled', r.enabled)}

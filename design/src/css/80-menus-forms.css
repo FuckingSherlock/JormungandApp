@@ -23,5 +23,5 @@
 .section-toggle{display:flex;align-items:center;gap:6px;padding:8px 18px 4px;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;cursor:pointer}
 .section-toggle svg{transition:transform .2s}
 .section-toggle.open svg{transform:rotate(90deg)}
-textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.45}
+textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-height:1.45}
 

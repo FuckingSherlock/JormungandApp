@@ -49,7 +49,7 @@
 .sub-icon.set{background:rgba(var(--active-rgb),.10)}
 .sub-icon.node{background:rgba(var(--purple-rgb),.12)}
 .sub-name{font-size:14px;color:var(--t1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sub-count{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.sub-count{font-size:13px;color:var(--t2);font-family:var(--mono)}
 
 .sheet-divider{height:1px;background:var(--border);margin:6px 0}
 .sheet-action{display:flex;align-items:center;gap:10px;padding:11px 18px;cursor:pointer;color:var(--accent);font-size:15px;font-weight:600;transition:background .12s}
@@ -76,11 +76,11 @@
 /* Live connections sheet rows */
 .live-conn-row{padding:10px 18px;border-bottom:1px solid rgba(255,255,255,.03)}
 .live-conn-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
-.live-conn-host{font-size:14px;font-weight:600;color:var(--t1);font-family:'JetBrains Mono',monospace}
+.live-conn-host{font-size:14px;font-weight:600;color:var(--t1);font-family:var(--mono)}
 .live-conn-proto{font-size:12px;font-weight:700;padding:1px 6px;border-radius:4px}
 .live-conn-proto.tcp{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
 .live-conn-proto.udp{background:rgba(var(--purple-rgb),.15);color:var(--purple)}
-.live-conn-meta{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.live-conn-meta{font-size:13px;color:var(--t2);font-family:var(--mono)}
 
 /* ── Forms (add source / rule / create profile / create chain) ── */
 .form-group{padding:10px 18px}
@@ -107,7 +107,7 @@
 .pick-row{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;transition:background .12s}
 .pick-row:hover{background:rgba(255,255,255,.03)}
 .pick-row-name{font-size:15px;font-weight:600;color:var(--t1);flex:1}
-.pick-row-sub{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.pick-row-sub{font-size:13px;color:var(--t2);font-family:var(--mono)}
 
 .sheet-footer{padding:12px 18px 16px;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:4px}
 .btn-primary{

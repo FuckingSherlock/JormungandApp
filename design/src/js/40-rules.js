@@ -7,7 +7,7 @@ function renderRules() {
     return `<div class="config-row ${!r.enabled?'dimmed':''}">
       <div style="flex:1;min-width:0">
         <div class="config-name">${r.type}</div>
-        <div class="config-sub" style="font-family:'JetBrains Mono',monospace">${r.value}</div>
+        <div class="config-sub" style="font-family:var(--mono)">${r.value}</div>
       </div>
       <span class="rule-action-badge ${r.action}">${r.action}</span>
       ${miniToggleHtml(id, 'toggleRuleEnabled', r.enabled)}
