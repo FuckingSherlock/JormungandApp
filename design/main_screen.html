@@ -405,7 +405,10 @@ body {
 .search input:focus{outline:none}
 
 .src-card{flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
-.src-head{display:flex;align-items:center;gap:4px;padding:10px 6px 10px 4px;cursor:pointer}
+.src-top{display:flex;align-items:stretch}
+.src-top > .drag-handle{width:26px;margin-left:4px}
+.src-top-main{flex:1;min-width:0}
+.src-head{display:flex;align-items:center;gap:4px;padding:10px 6px 10px 0;cursor:pointer}
 .src-head .src-main{margin-right:4px}
 .src-head .mini-toggle{margin:0 4px}
 .src-main{flex:1;min-width:0}
@@ -419,7 +422,7 @@ body {
 .spin{animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.src-usage{padding:0 14px 12px 30px}
+.src-usage{padding:0 14px 12px 0}
 .usage-bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}
 .usage-fill{height:100%;background:var(--accent);border-radius:2px}
 .usage-fill.hi{background:var(--warn)}
@@ -1568,8 +1571,10 @@ function renderSourceCard(id, q) {
     ? `<button class="icon-btn ghost" onclick="event.stopPropagation();updateSource('${id}')" title="Update"><span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : '';
 
   return `<div class="src-card ${isOpen ? 'open' : ''} ${s.enabled ? '' : 'off'}" data-id="${id}">
+    <div class="src-top">
+    ${grip}
+    <div class="src-top-main">
     <div class="src-head" onclick="toggleSourceOpen('${id}')">
-      ${grip}
       <div class="src-main">
         <div class="src-name">${esc(s.name)}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
         <div class="src-meta">${srcMetaHtml(s)}</div>
@@ -1582,6 +1587,8 @@ function renderSourceCard(id, q) {
       </button>
     </div>
     ${usageHtml(s)}
+    </div>
+    </div>
     <div class="src-body">${nodeRows}${addRow}</div>
   </div>`;
 }
