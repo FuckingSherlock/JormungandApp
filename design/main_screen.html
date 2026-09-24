@@ -382,6 +382,34 @@ body {
 .conn-tag.warn{background:rgba(var(--warn-rgb),.15);color:var(--warn)}
 .conn-row.skip .conn-main{opacity:.5}
 .conn-state{flex-shrink:0;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--active)}
+
+/* Profile editor: source cards (tick to use, tap name to see nodes, update / ping) */
+.ps-card{margin:0 14px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;transition:border-color .2s}
+.ps-card.sel{border-color:rgba(var(--accent-rgb),.45)}
+.ps-head{display:flex;align-items:center;gap:2px;padding:6px 6px 6px 0}
+.ps-check{align-self:stretch;display:flex;align-items:center;padding:0 12px 0 14px;cursor:pointer}
+.ps-main{flex:1;min-width:0;cursor:pointer;padding:4px 0}
+.ps-name{font-size:15px;font-weight:600;color:var(--t1);display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ps-card .src-meta{font-size:12px;margin-top:2px}
+.ps-card.open .src-chevron{transform:rotate(180deg)}
+.ps-body{display:none;border-top:1px solid var(--border)}
+.ps-card.open .ps-body{display:block}
+.node-row.static{cursor:default}
+.node-row.fixed{background:rgba(var(--warn-rgb),.08)}
+.pick-row.disabled{opacity:.35;cursor:default}
+.conn-tag.bad{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
+.menu-row.disabled{opacity:.45}
+
+/* Chain editor: route check (exit nodes pinged through the entry node) */
+.route-box{display:flex;align-items:center;gap:12px;margin:0 14px;padding:10px 10px 10px 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--r)}
+.route-sum{flex:1;font-size:13px;line-height:1.4;color:var(--t2)}
+.route-sum.good{color:var(--active)}
+.route-sum.bad{color:var(--muted)}
+.route-sum.warn{color:var(--warn)}
+.btn-secondary{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;padding:8px 12px;border-radius:10px;border:1px solid rgba(var(--accent-rgb),.35);background:rgba(var(--accent-rgb),.1);color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.btn-secondary svg{width:15px;height:15px}
+.btn-secondary:disabled{opacity:.4;cursor:default}
+.route-list{margin:8px 14px 0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -878,7 +906,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <input class="form-input" id="cp-name" placeholder="New profile">
       </div>
       <div class="form-group" style="padding-bottom:0">
-        <div class="form-label">Select subscriptions &amp; servers</div>
+        <div class="form-label">Subscriptions &amp; servers</div>
       </div>
       <div id="cp-source-list"></div>
 
@@ -930,6 +958,10 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="form-label">Exit — where traffic leaves</div>
       </div>
       <div id="cc-out-list"></div>
+      <div class="form-group" style="padding-bottom:4px;padding-top:6px">
+        <div class="form-label">Route check</div>
+      </div>
+      <div id="cc-test"></div>
       <div class="set-group" style="margin-top:14px">
         <div class="set-row">
           <div style="flex:1"><div class="set-label">Use in Auto</div><div class="set-hint">Auto may connect this chain, in list order</div></div>
@@ -1274,7 +1306,7 @@ let profileSeq = 1;
 let chainsData = {
   cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    inAuto:true },
   cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', inAuto:true },
-  cpwork:    { id:'cpwork',    name:'Work Only',      inId:'work',    outId:'work',    inAuto:false },
+  cpwork:    { id:'cpwork',    name:'Work via Gaming', inId:'gaming',  outId:'work',    inAuto:false },
 };
 let chainSeq = 1;
 
@@ -1344,7 +1376,11 @@ function profileNode(p) {
 }
 
 function isUsable(id) {
-  if (chainsData[id]) { const c = chainsData[id]; return isUsable(c.inId) && isUsable(c.outId); }
+  if (chainsData[id]) {
+    const c = chainsData[id];
+    if (c.test && !c.test.reachable) return false;   // last route check: no exit reachable
+    return isUsable(c.inId) && isUsable(c.outId);
+  }
   const n = profileNode(profilesData[id]);
   return !!n && isAlive(n);
 }
@@ -1378,6 +1414,7 @@ function renderConnectRow(id) {
   const chain = !!chainsData[id];
   const current = id === effectiveConnectId();
   const tags = (chain ? '<span class="conn-tag">chain</span>' : '')
+    + (chain && e.test && !e.test.reachable ? '<span class="conn-tag bad">no route</span>' : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
     <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
@@ -1425,7 +1462,8 @@ function openCreateMenu() {
   openActions('Create',
     menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Nodes from chosen subscriptions — best or fixed</div>', close + 'openCreateProfile()') +
     menuRow('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
-      'Chain<div class="menu-sub">Enter through one profile, exit through another</div>', close + 'openCreateChain()'));
+      'Chain<div class="menu-sub">' + (getProfileIds().length < 2 ? 'Needs at least two profiles' : 'Enter through one profile, exit through another') + '</div>',
+      close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
 }
 
 /* ── Node picker (fixed node for a profile being edited) ── */
@@ -1651,6 +1689,14 @@ function toggleSourceEnabled(id) {
   renderAll();
 }
 
+// Other screens that show node latency / update state (the profile editor) register
+// a re-render here, so ping and update results reach every open view.
+const sourceViewHooks = [];
+function refreshSourceViews() {
+  renderNodes();
+  sourceViewHooks.forEach(fn => fn());
+}
+
 function renderAll() {
   renderNodes();
   renderConnects();
@@ -1664,13 +1710,13 @@ function testLatency(pairs) {
     const n = sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid);
     if (n) n.latency = 'testing';
   });
-  renderNodes();
+  refreshSourceViews();
   pairs.forEach(([sid, nid]) => {
     setTimeout(() => {
       const n = sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid);
       if (!n) return;
       n.latency = randLatency();
-      renderNodes();
+      refreshSourceViews();
       updateMainConnectCard();
     }, 300 + Math.random() * 1400);
   });
@@ -1695,11 +1741,11 @@ function updateSource(sid) {
   const s = sourcesData[sid];
   if (s.kind !== 'sub' || s.updating) return;
   s.updating = true;
-  renderNodes();
+  refreshSourceViews();
   setTimeout(() => {
     s.updating = false;
     s.updatedAt = Date.now();
-    renderNodes();
+    refreshSourceViews();
     if (s.testAfterUpdate) testSourceLatency(sid);
   }, 900 + Math.random() * 600);
 }
@@ -2072,6 +2118,7 @@ let cpDraft = { autoSelect: true, manualNodeId: null };
 function setCpMode(auto) {
   cpDraft.autoSelect = auto;
   renderCpNode();
+  renderCreateProfileSources();
 }
 function renderCpNode() {
   document.querySelectorAll('#cp-mode .chip').forEach((c, i) => c.classList.toggle('active', i === (cpDraft.autoSelect ? 0 : 1)));
@@ -2081,7 +2128,7 @@ function renderCpNode() {
 }
 function pickCpNode() {
   openPickNode({ sources: [...createProfileSelected], current: cpDraft.manualNodeId,
-    onPick: key => { cpDraft.manualNodeId = key; renderCpNode(); } });
+    onPick: key => { cpDraft.manualNodeId = key; renderCpNode(); renderCreateProfileSources(); } });
 }
 
 function openCreateProfile(editId) {
@@ -2104,6 +2151,7 @@ function openCreateProfile(editId) {
     cpDraft = { autoSelect: true, manualNodeId: null };
     document.getElementById('cp-inauto').classList.add('on');
   }
+  cpOpen.clear();
   renderCreateProfileSources();
   renderCpNode();
   openSheet('createprofile');
@@ -2111,20 +2159,57 @@ function openCreateProfile(editId) {
 
 function openEditProfile(id) { openCreateProfile(id); }
 
+// Each source is a collapsible card: tick = use it in the profile; tap the name to see
+// its nodes; update / ping act on the whole source. In "Fixed node" mode, tapping a
+// node of a ticked source makes it the fixed node.
+const cpOpen = new Set();
+
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
   el.innerHTML = sourceOrder.map(id => {
     const s = sourcesData[id];
-    const icon = subIcon(s.kind);
     const checked = createProfileSelected.has(id);
-    return `<div class="sub-item" style="padding-left:18px" onclick="toggleCreateProfileSource('${id}')">
-      <div class="sub-checkbox ${checked?'checked':''}"></div>
-      <div class="sub-icon ${icon.cls}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${icon.color}" stroke-width="2.5" stroke-linecap="round">${icon.svg}</svg></div>
-      <span class="sub-name">${s.name}</span>
-      <span class="sub-count">${s.count} nodes</span>
+    const open = cpOpen.has(id);
+    const alive = s.nodes.filter(isAlive).length;
+    const meta = [s.kind === 'sub' ? 'subscription' : 'manual', `${s.nodes.length} nodes`, `${alive} alive`]
+      .concat(s.enabled ? [] : ['disabled']).join('<span class="dot">·</span>');
+    const pickable = checked && !cpDraft.autoSelect && s.enabled;
+    const rows = open ? s.nodes.map(n => {
+      const key = id + '::' + n.id;
+      const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
+      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="cpDraft.manualNodeId='${key}';renderCpNode();renderCreateProfileSources()"` : ''}>
+        <span class="node-flag">${n.flag}</span>
+        <span class="node-name">${esc(n.name)}</span>
+        ${fixed ? '<span class="conn-tag warn">fixed</span>' : ''}
+        <span class="node-proto">${n.protocol}</span>
+        <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
+      </div>`;
+    }).join('') : '';
+    return `<div class="ps-card ${open ? 'open' : ''} ${checked ? 'sel' : ''}" data-id="${id}">
+      <div class="ps-head">
+        <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${checked ? 'checked' : ''}"></div></div>
+        <div class="ps-main" onclick="toggleCpOpen('${id}')">
+          <div class="ps-name">${esc(s.name)}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+          <div class="src-meta">${meta}</div>
+        </div>
+        ${s.kind === 'sub' ? `<button class="icon-btn ghost" onclick="updateSource('${id}')" title="Update"><span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : ''}
+        <button class="icon-btn ghost" onclick="cpOpen.add('${id}');testSourceLatency('${id}')" title="Ping all">${ICON.bolt}</button>
+      </div>
+      <div class="ps-body">${rows}</div>
     </div>`;
   }).join('');
 }
+
+function toggleCpOpen(id) {
+  if (cpOpen.has(id)) cpOpen.delete(id); else cpOpen.add(id);
+  renderCreateProfileSources();
+}
+
+sourceViewHooks.push(() => {
+  if (!document.getElementById('sh-createprofile').classList.contains('open')) return;
+  renderCreateProfileSources();
+  renderCpNode();
+});
 
 function toggleCreateProfileSource(id) {
   if (createProfileSelected.has(id)) createProfileSelected.delete(id); else createProfileSelected.add(id);
@@ -2162,6 +2247,11 @@ function deleteEditingProfile() {
   Object.values(chainsData).forEach(c => {
     if (c.inId === editingProfileId) c.inId = fallback;
     if (c.outId === editingProfileId) c.outId = fallback;
+    if (c.inId === c.outId) {   // a chain through one profile is pointless: drop it
+      delete chainsData[c.id];
+      connectOrder = connectOrder.filter(x => x !== c.id);
+      if (activeConnectId === c.id) activeConnectId = fallback;
+    }
   });
   editingProfileId = null;
   renderConnects();
@@ -2169,74 +2259,129 @@ function deleteEditingProfile() {
   closeSheet('createprofile');
 }
 
-/* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════ */
+/* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
+   Entry and exit must be different profiles. "Check route" pings every exit node
+   through the entry's current node, so a chain that cannot work is visible before
+   it is saved; the result is kept on the chain (a chain with no reachable exit is
+   not usable, so Auto skips it). */
 
-let chainDraft = { inId: null, outId: null };
+let chainDraft = { inId: null, outId: null, test: null };
 let editingChainId = null;
 
 function openCreateChain(editId) {
   editingChainId = editId || null;
+  const ids = getProfileIds();
+  if (!editingChainId && ids.length < 2) { toast('A chain needs two profiles — create another profile first'); return; }
   if (editingChainId) {
     const c = chainsData[editingChainId];
     document.getElementById('ccTitle').textContent = 'Edit chain';
     document.getElementById('ccSaveBtn').textContent = 'Save changes';
     document.getElementById('ccDeleteBtn').style.display = '';
     document.getElementById('cc-name').value = c.name;
-    chainDraft = { inId: c.inId, outId: c.outId };
+    chainDraft = { inId: c.inId, outId: c.outId, test: c.test || null };
     document.getElementById('cc-inauto').classList.toggle('on', c.inAuto);
   } else {
     document.getElementById('ccTitle').textContent = 'Create chain';
     document.getElementById('ccSaveBtn').textContent = 'Create chain';
     document.getElementById('ccDeleteBtn').style.display = 'none';
     document.getElementById('cc-name').value = '';
-    const ids = getProfileIds();
-    chainDraft = { inId: ids[0], outId: ids[0] };
+    chainDraft = { inId: ids[0], outId: ids[1], test: null };
     document.getElementById('cc-inauto').classList.add('on');
   }
-  renderChainPicker('cc-in-list', 'in');
-  renderChainPicker('cc-out-list', 'out');
+  renderChainEditor();
   openSheet('createchain');
 }
 
 function openEditChain(id) { openCreateChain(id); }
 
+function renderChainEditor() {
+  renderChainPicker('cc-in-list', 'in');
+  renderChainPicker('cc-out-list', 'out');
+  renderChainTest();
+}
+
 function renderChainPicker(elId, side) {
   const el = document.getElementById(elId);
   const current = side === 'in' ? chainDraft.inId : chainDraft.outId;
+  const other = side === 'in' ? chainDraft.outId : chainDraft.inId;
   el.innerHTML = getProfileIds().map(id => {
     const p = profilesData[id];
-    return `<div class="pick-row" onclick="pickChainSide('${side}','${id}')">
+    const taken = id === other;
+    const n = profileNode(p);
+    return `<div class="pick-row ${taken ? 'disabled' : ''}" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
       <div class="profile-radio ${id===current?'active':''}"></div>
-      <span class="pick-row-name">${p.name}</span>
-      <span class="pick-row-sub">${profileNodeCount(p)} nodes</span>
+      <span class="pick-row-name">${esc(p.name)}</span>
+      <span class="pick-row-sub">${taken ? (side === 'in' ? 'exit' : 'entry') : (n ? n.flag + ' ' : '') + profileNodeCount(p) + ' nodes'}</span>
     </div>`;
   }).join('');
 }
 
 function pickChainSide(side, id) {
   if (side === 'in') chainDraft.inId = id; else chainDraft.outId = id;
-  renderChainPicker('cc-in-list', 'in');
-  renderChainPicker('cc-out-list', 'out');
+  chainDraft.test = null;   // ends changed: the old check no longer applies
+  renderChainEditor();
+}
+
+function renderChainTest() {
+  const el = document.getElementById('cc-test');
+  const entry = profileNode(profilesData[chainDraft.inId]);
+  const exits = profileNodeRefs(profilesData[chainDraft.outId]);
+  const t = chainDraft.test;
+  const btn = `<button class="btn-secondary" onclick="testChainRoute()" ${!entry || !isAlive(entry) || (t && t.running) ? 'disabled' : ''}>${ICON.bolt}${t ? 'Check again' : 'Check route'}</button>`;
+  let head;
+  if (!entry || !isAlive(entry)) head = `<div class="route-sum warn">Entry has no working node — ping its subscriptions first.</div>`;
+  else if (!t) head = `<div class="route-sum">Pings every exit node through the entry node ${entry.flag} ${esc(entry.name)}.</div>`;
+  else if (t.running) head = `<div class="route-sum">Checking ${exits.length} exit nodes via ${entry.flag} ${esc(entry.name)}…</div>`;
+  else {
+    const ok = Object.values(t.results).filter(v => v >= 0).length;
+    head = ok
+      ? `<div class="route-sum good">${ok} of ${exits.length} exit nodes reachable via ${entry.flag} ${esc(entry.name)}</div>`
+      : `<div class="route-sum bad">No exit node is reachable through the entry — this chain will not connect.</div>`;
+  }
+  const rows = t ? exits.map(({ sid, node }) => {
+    const v = t.results[sid + '::' + node.id];
+    return `<div class="node-row static">
+      <span class="node-flag">${node.flag}</span>
+      <span class="node-name">${esc(node.name)}</span>
+      ${latHtml({ latency: v === undefined ? 'testing' : v })}
+    </div>`;
+  }).join('') : '';
+  el.innerHTML = `<div class="route-box">${head}${btn}</div>${rows ? `<div class="route-list">${rows}</div>` : ''}`;
+}
+
+function testChainRoute() {
+  const entry = profileNode(profilesData[chainDraft.inId]);
+  const exits = profileNodeRefs(profilesData[chainDraft.outId]);
+  const t = chainDraft.test = { running: true, results: {} };
+  renderChainTest();
+  let left = exits.length;
+  exits.forEach(({ sid, node }) => setTimeout(() => {
+    if (chainDraft.test !== t) return;   // ends changed meanwhile
+    // Mock: the exit answers through the entry unless it is down or blocks the entry's IP.
+    t.results[sid + '::' + node.id] = !isAlive(node) || Math.random() < .25 ? -1 : entry.latency + node.latency + Math.round(Math.random() * 60);
+    if (--left === 0) t.running = false;
+    renderChainTest();
+  }, 400 + Math.random() * 1200));
+  if (!exits.length) { t.running = false; renderChainTest(); }
 }
 
 function saveCreateChain() {
+  if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different profiles'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
-  const wasEditing = editingChainId;
+  const t = chainDraft.test && !chainDraft.test.running ? chainDraft.test : null;
+  const fields = { inId: chainDraft.inId, outId: chainDraft.outId,
+                   inAuto: document.getElementById('cc-inauto').classList.contains('on'),
+                   test: t ? { reachable: Object.values(t.results).filter(v => v >= 0).length, results: t.results } : null };
   if (editingChainId) {
-    const c = chainsData[editingChainId];
-    c.name = name;
-    c.inId = chainDraft.inId;
-    c.outId = chainDraft.outId;
-    c.inAuto = document.getElementById('cc-inauto').classList.contains('on');
+    Object.assign(chainsData[editingChainId], { name }, fields);
   } else {
     const id = 'chain' + Date.now();
-    chainsData[id] = { id, name, inId: chainDraft.inId, outId: chainDraft.outId,
-                     inAuto: document.getElementById('cc-inauto').classList.contains('on') };
+    chainsData[id] = Object.assign({ id, name }, fields);
     connectOrder.push(id);
   }
   editingChainId = null;
   renderConnects();
-  if (wasEditing === activeConnectId) updateMainConnectCard();
+  updateMainConnectCard();
   closeSheet('createchain');
 }
 
@@ -2250,7 +2395,6 @@ function deleteEditingChain() {
   updateMainConnectCard();
   closeSheet('createchain');
 }
-
 /* ══════════════════════ ADD RULE ══════════════════════ */
 
 function openAddRule() {

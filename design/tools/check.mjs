@@ -50,8 +50,8 @@ const SHOTS = {
   dock:       async p => ({ clip: await clipOf(p, '.dock', 60) }),
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
-  'profile-edit': async p => { await p.evaluate(() => { openProfiles(); openEditProfile('gaming'); }); await settle(p); },
-  'chain-edit': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); }); await settle(p); },
+  'profile-edit': async p => { await p.evaluate(() => { openProfiles(); openEditProfile('gaming'); toggleCpOpen('src4'); }); await settle(p); },
+  'chain-edit': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); testChainRoute(); }); await p.waitForTimeout(1800); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
   nodeform:   async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodeForm()); await settle(p); },
@@ -261,6 +261,33 @@ async function runChecks() {
     const p = await page.evaluate(() => profilesData.work);
     expect(!p.autoSelect && p.manualNodeId && !p.inAuto, JSON.stringify(p));
     expect(await page.$eval('.conn-row[data-id=work]', el => /fixed/i.test(el.textContent) && /not in auto/i.test(el.textContent)), 'row does not show fixed / not in Auto');
+    await page.evaluate(() => closeSheet('profiles'));
+  });
+
+  await check('profile editor: expand a source, ping it, pick a fixed node from its list', async () => {
+    await page.evaluate(() => { openProfiles(); openEditProfile('default'); }); await settle(page);
+    await page.click('.ps-card[data-id=src1] .ps-main');
+    expect(await page.$$eval('.ps-card[data-id=src1] .node-row', r => r.length) > 0, 'nodes not shown');
+    await page.click('.ps-card[data-id=src1] button[title="Ping all"]');
+    expect(await page.$$eval('.ps-card[data-id=src1] .lat.testing', r => r.length) > 0, 'ping did not start');
+    await page.waitForFunction(() => !document.querySelector('.ps-card[data-id=src1] .lat.testing'));
+    await page.click('#cp-mode .chip >> nth=1');
+    await page.click('.ps-card[data-id=src1] .node-row >> nth=1');
+    expect(await page.evaluate(() => cpDraft.manualNodeId === 'src1::' + sourcesData.src1.nodes[1].id), 'tap did not fix the node');
+    await page.evaluate(() => { closeSheet('createprofile'); closeSheet('profiles'); });
+  });
+
+  await check('chain editor: same entry/exit blocked, route check reports exits', async () => {
+    await page.evaluate(() => { sourcesData.src1.nodes.forEach(n => n.latency = 50); openProfiles(); openEditChain('cpdefault'); }); await settle(page);
+    const inId = await page.evaluate(() => chainDraft.inId);
+    const idx = await page.evaluate(id => getProfileIds().indexOf(id), inId);
+    await page.click(`#cc-out-list .pick-row >> nth=${idx}`, { force: true });
+    expect(await page.evaluate(() => chainDraft.inId !== chainDraft.outId), 'exit could be set to the entry');
+    await page.click('#cc-test .btn-secondary');
+    await page.waitForFunction(() => chainDraft.test && !chainDraft.test.running);
+    expect(/reachable|will not connect/.test(await page.textContent('#cc-test')), 'no route summary');
+    await page.click('#ccSaveBtn');
+    expect(await page.evaluate(() => typeof chainsData.cpdefault.test.reachable === 'number'), 'result not saved');
     await page.evaluate(() => closeSheet('profiles'));
   });
 

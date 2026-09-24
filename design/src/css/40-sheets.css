@@ -157,3 +157,31 @@
 .conn-tag.warn{background:rgba(var(--warn-rgb),.15);color:var(--warn)}
 .conn-row.skip .conn-main{opacity:.5}
 .conn-state{flex-shrink:0;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--active)}
+
+/* Profile editor: source cards (tick to use, tap name to see nodes, update / ping) */
+.ps-card{margin:0 14px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;transition:border-color .2s}
+.ps-card.sel{border-color:rgba(var(--accent-rgb),.45)}
+.ps-head{display:flex;align-items:center;gap:2px;padding:6px 6px 6px 0}
+.ps-check{align-self:stretch;display:flex;align-items:center;padding:0 12px 0 14px;cursor:pointer}
+.ps-main{flex:1;min-width:0;cursor:pointer;padding:4px 0}
+.ps-name{font-size:15px;font-weight:600;color:var(--t1);display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ps-card .src-meta{font-size:12px;margin-top:2px}
+.ps-card.open .src-chevron{transform:rotate(180deg)}
+.ps-body{display:none;border-top:1px solid var(--border)}
+.ps-card.open .ps-body{display:block}
+.node-row.static{cursor:default}
+.node-row.fixed{background:rgba(var(--warn-rgb),.08)}
+.pick-row.disabled{opacity:.35;cursor:default}
+.conn-tag.bad{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
+.menu-row.disabled{opacity:.45}
+
+/* Chain editor: route check (exit nodes pinged through the entry node) */
+.route-box{display:flex;align-items:center;gap:12px;margin:0 14px;padding:10px 10px 10px 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--r)}
+.route-sum{flex:1;font-size:13px;line-height:1.4;color:var(--t2)}
+.route-sum.good{color:var(--active)}
+.route-sum.bad{color:var(--muted)}
+.route-sum.warn{color:var(--warn)}
+.btn-secondary{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;padding:8px 12px;border-radius:10px;border:1px solid rgba(var(--accent-rgb),.35);background:rgba(var(--accent-rgb),.1);color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.btn-secondary svg{width:15px;height:15px}
+.btn-secondary:disabled{opacity:.4;cursor:default}
+.route-list{margin:8px 14px 0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}

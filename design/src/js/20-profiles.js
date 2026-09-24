@@ -30,7 +30,11 @@ function profileNode(p) {
 }
 
 function isUsable(id) {
-  if (chainsData[id]) { const c = chainsData[id]; return isUsable(c.inId) && isUsable(c.outId); }
+  if (chainsData[id]) {
+    const c = chainsData[id];
+    if (c.test && !c.test.reachable) return false;   // last route check: no exit reachable
+    return isUsable(c.inId) && isUsable(c.outId);
+  }
   const n = profileNode(profilesData[id]);
   return !!n && isAlive(n);
 }
@@ -64,6 +68,7 @@ function renderConnectRow(id) {
   const chain = !!chainsData[id];
   const current = id === effectiveConnectId();
   const tags = (chain ? '<span class="conn-tag">chain</span>' : '')
+    + (chain && e.test && !e.test.reachable ? '<span class="conn-tag bad">no route</span>' : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
     <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
@@ -111,7 +116,8 @@ function openCreateMenu() {
   openActions('Create',
     menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Nodes from chosen subscriptions — best or fixed</div>', close + 'openCreateProfile()') +
     menuRow('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
-      'Chain<div class="menu-sub">Enter through one profile, exit through another</div>', close + 'openCreateChain()'));
+      'Chain<div class="menu-sub">' + (getProfileIds().length < 2 ? 'Needs at least two profiles' : 'Enter through one profile, exit through another') + '</div>',
+      close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
 }
 
 /* ── Node picker (fixed node for a profile being edited) ── */

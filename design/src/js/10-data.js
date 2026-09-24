@@ -70,7 +70,7 @@ let profileSeq = 1;
 let chainsData = {
   cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    inAuto:true },
   cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', inAuto:true },
-  cpwork:    { id:'cpwork',    name:'Work Only',      inId:'work',    outId:'work',    inAuto:false },
+  cpwork:    { id:'cpwork',    name:'Work via Gaming', inId:'gaming',  outId:'work',    inAuto:false },
 };
 let chainSeq = 1;
 

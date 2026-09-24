@@ -167,6 +167,14 @@ function toggleSourceEnabled(id) {
   renderAll();
 }
 
+// Other screens that show node latency / update state (the profile editor) register
+// a re-render here, so ping and update results reach every open view.
+const sourceViewHooks = [];
+function refreshSourceViews() {
+  renderNodes();
+  sourceViewHooks.forEach(fn => fn());
+}
+
 function renderAll() {
   renderNodes();
   renderConnects();
@@ -180,13 +188,13 @@ function testLatency(pairs) {
     const n = sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid);
     if (n) n.latency = 'testing';
   });
-  renderNodes();
+  refreshSourceViews();
   pairs.forEach(([sid, nid]) => {
     setTimeout(() => {
       const n = sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid);
       if (!n) return;
       n.latency = randLatency();
-      renderNodes();
+      refreshSourceViews();
       updateMainConnectCard();
     }, 300 + Math.random() * 1400);
   });
@@ -211,11 +219,11 @@ function updateSource(sid) {
   const s = sourcesData[sid];
   if (s.kind !== 'sub' || s.updating) return;
   s.updating = true;
-  renderNodes();
+  refreshSourceViews();
   setTimeout(() => {
     s.updating = false;
     s.updatedAt = Date.now();
-    renderNodes();
+    refreshSourceViews();
     if (s.testAfterUpdate) testSourceLatency(sid);
   }, 900 + Math.random() * 600);
 }
