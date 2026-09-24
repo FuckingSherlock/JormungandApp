@@ -7,31 +7,79 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <style>
-:root {
+/* Themes, switched in Settings → Appearance:
+   original = the first mockup palette (navy, default);
+   karing   = refreshed Karing (neutral greys, blue accent);
+   github   = GitHub Dark palette. */
+:root, :root[data-theme="original"] {
   --bg:        #0B0F1A;
   --surface:   #131929;
   --card:      #1A2035;
   --card-hi:   #1F273F;
   --border:    #252D45;
   --border-hi: #303A58;
-  --accent:    #4F8EFF;
+  --accent:    #4F8EFF;  --accent-rgb: 79,142,255;
   --accent-dim:#2D5FCC;
-  --active:    #00C896;
+  --active:    #00C896;  --active-rgb: 0,200,150;
   --active-dim:#009E78;
-  --warn:      #F0A040;
-  --muted:     #F05060;
+  --warn:      #F0A040;  --warn-rgb:   240,160,64;
+  --muted:     #F05060;  --muted-rgb:  240,80,96;
+  --purple:    #A064FF;  --purple-rgb: 160,100,255;
   --t1:        #D4DEFF;
-  --t2:        #7B8EC8;
+  --t2:        #7B8EC8;  --t2-rgb:     123,142,200;
   --t3:        #4A5880;
   --sheet:     #171E30;
   --r:         14px;
+  --font:      'Inter',system-ui,sans-serif;
+}
+:root[data-theme="karing"] {
+  --bg:        #151515;
+  --surface:   #1B1B1B;
+  --card:      #212121;
+  --card-hi:   #292929;
+  --border:    #2E2E2E;
+  --border-hi: #3C3C3C;
+  --accent:    #4F8EFF;  --accent-rgb: 79,142,255;
+  --accent-dim:#2D5FCC;
+  --active:    #2FBF6A;  --active-rgb: 47,191,106;
+  --active-dim:#23994F;
+  --warn:      #F0A040;  --warn-rgb:   240,160,64;
+  --muted:     #EF5350;  --muted-rgb:  239,83,80;
+  --purple:    #A78BFA;  --purple-rgb: 167,139,250;
+  --t1:        #EDEDED;
+  --t2:        #A3A3A3;  --t2-rgb:     163,163,163;
+  --t3:        #6B6B6B;
+  --sheet:     #1D1D1D;
+  --r:         14px;
+  --font:      'Inter',system-ui,sans-serif;
+}
+:root[data-theme="github"] {
+  --bg:        #0D1117;
+  --surface:   #161B22;
+  --card:      #161B22;
+  --card-hi:   #1C2128;
+  --border:    #30363D;
+  --border-hi: #3D444D;
+  --accent:    #2F81F7;  --accent-rgb: 47,129,247;
+  --accent-dim:#1F6FEB;
+  --active:    #3FB950;  --active-rgb: 63,185,80;
+  --active-dim:#238636;
+  --warn:      #D29922;  --warn-rgb:   210,153,34;
+  --muted:     #F85149;  --muted-rgb:  248,81,73;
+  --purple:    #A371F7;  --purple-rgb: 163,113,247;
+  --t1:        #E6EDF3;
+  --t2:        #8B949E;  --t2-rgb:     139,148,158;
+  --t3:        #6E7681;
+  --sheet:     #161B22;
+  --r:         8px;
+  --font:      -apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 input, textarea{user-select:text;-webkit-user-select:text}
 
 body {
   background:var(--bg);
-  font-family:'Inter',system-ui,sans-serif;
+  font-family:var(--font);
   min-height:100vh;color:var(--t1);
 }
 
@@ -53,11 +101,11 @@ body {
 
 .conn-badge {
   display:flex;align-items:center;gap:6px;
-  background:rgba(0,200,150,.12);border:1px solid rgba(0,200,150,.25);
+  background:rgba(var(--active-rgb),.12);border:1px solid rgba(var(--active-rgb),.25);
   border-radius:20px;padding:5px 12px;
   font-size:14px;font-weight:600;color:var(--active);cursor:pointer;
 }
-.conn-badge.off{background:rgba(240,80,96,.10);border-color:rgba(240,80,96,.22);color:var(--muted)}
+.conn-badge.off{background:rgba(var(--muted-rgb),.10);border-color:rgba(var(--muted-rgb),.22);color:var(--muted)}
 .conn-dot{width:6px;height:6px;border-radius:50%;background:var(--active)}
 .conn-badge.off .conn-dot{background:var(--muted)}
 
@@ -109,7 +157,7 @@ body {
 .profiles-card{padding:12px 14px;display:flex;align-items:center;gap:12px}
 .profiles-icon{
   width:38px;height:38px;border-radius:10px;flex-shrink:0;
-  background:rgba(0,200,150,.13);
+  background:rgba(var(--active-rgb),.13);
   display:flex;align-items:center;justify-content:center;
 }
 .profiles-main{flex:1;min-width:0}
@@ -119,7 +167,7 @@ body {
 .profiles-meta{text-align:right;flex-shrink:0;font-family:'JetBrains Mono',monospace}
 .profiles-meta .count{font-size:15px;font-weight:600;color:var(--t1)}
 .profiles-meta .src{font-size:12px;color:var(--t2)}
-.proto-badge{background:rgba(79,142,255,.15);color:var(--accent);border-radius:4px;padding:1px 5px;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.proto-badge{background:rgba(var(--accent-rgb),.15);color:var(--accent);border-radius:4px;padding:1px 5px;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
 .latency{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--active);font-weight:600}
 
 /* ── Segmented controls (shared block, row 3) — vertical stacks ── */
@@ -151,11 +199,11 @@ body {
 
 /* ── Nav cards ── */
 .nav-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:10px}
-.nav-icon.blue{background:rgba(79,142,255,.15)}
-.nav-icon.teal{background:rgba(0,200,150,.13)}
-.nav-icon.amber{background:rgba(240,160,64,.13)}
-.nav-icon.purple{background:rgba(160,100,255,.13)}
-.nav-icon.slate{background:rgba(123,142,200,.13)}
+.nav-icon.blue{background:rgba(var(--accent-rgb),.15)}
+.nav-icon.teal{background:rgba(var(--active-rgb),.13)}
+.nav-icon.amber{background:rgba(var(--warn-rgb),.13)}
+.nav-icon.purple{background:rgba(var(--purple-rgb),.13)}
+.nav-icon.slate{background:rgba(var(--t2-rgb),.13)}
 .nav-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:2px}
 .nav-sub{font-size:13px;color:var(--t2)}
 
@@ -167,9 +215,10 @@ body {
 .nav-btn.active span{color:var(--accent)}
 
 /* ── Sheets (level 1) ── */
-.overlay{position:fixed;inset:0;background:rgba(5,8,18,.7);opacity:0;pointer-events:none;transition:opacity .25s;z-index:10}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .25s;z-index:10}
 .overlay.open{opacity:1;pointer-events:all}
 .sheet{position:fixed;top:30px;left:0;right:0;bottom:0;background:var(--sheet);border-radius:20px 20px 0 0;border-top:1px solid var(--border-hi);transform:translateY(100%);transition:transform .32s cubic-bezier(.32,1,.4,1);z-index:11;display:flex;flex-direction:column}
+.sheet:not(.open){visibility:hidden;transition:transform .32s cubic-bezier(.32,1,.4,1),visibility 0s .32s}
 .sheet.open{transform:translateY(0)}
 .sheet.dragging{transition:none}
 .sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--border-hi);margin:10px auto 0;flex-shrink:0;touch-action:none;cursor:grab}
@@ -203,7 +252,7 @@ body {
 .profile-item-name{font-size:15px;font-weight:600;color:var(--t1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .profile-item-count{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
 .profile-expand-btn{width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;transition:transform .2s,background .15s;flex-shrink:0}
-.profile-expand-btn.open{transform:rotate(90deg);background:rgba(79,142,255,.15)}
+.profile-expand-btn.open{transform:rotate(90deg);background:rgba(var(--accent-rgb),.15)}
 .profile-subs{max-height:0;overflow:hidden;transition:max-height .25s ease}
 .profile-subs.open{max-height:400px}
 
@@ -222,15 +271,15 @@ body {
 .sub-checkbox.checked{background:var(--accent);border-color:var(--accent)}
 .sub-checkbox.checked::after{content:'✓';color:#fff;font-size:12px;font-weight:700}
 .sub-icon{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.sub-icon.sub{background:rgba(79,142,255,.12)}
-.sub-icon.set{background:rgba(0,200,150,.10)}
-.sub-icon.node{background:rgba(160,100,255,.12)}
+.sub-icon.sub{background:rgba(var(--accent-rgb),.12)}
+.sub-icon.set{background:rgba(var(--active-rgb),.10)}
+.sub-icon.node{background:rgba(var(--purple-rgb),.12)}
 .sub-name{font-size:14px;color:var(--t1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sub-count{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
 
 .sheet-divider{height:1px;background:var(--border);margin:6px 0}
 .sheet-action{display:flex;align-items:center;gap:10px;padding:11px 18px;cursor:pointer;color:var(--accent);font-size:15px;font-weight:600;transition:background .12s}
-.sheet-action:hover{background:rgba(79,142,255,.07)}
+.sheet-action:hover{background:rgba(var(--accent-rgb),.07)}
 .sheet-action.dim{color:var(--t2)}
 .sheet-action.dim:hover{background:rgba(255,255,255,.03)}
 
@@ -238,8 +287,8 @@ body {
 .chain-inout{display:flex;align-items:center;gap:5px;margin-top:6px;padding-left:46px;flex-wrap:wrap}
 .chain-badge{padding:3px 8px;border-radius:6px;font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;white-space:nowrap;cursor:pointer;transition:filter .12s}
 .chain-badge:hover{filter:brightness(1.25)}
-.chain-badge.in{background:rgba(79,142,255,.15);color:var(--accent)}
-.chain-badge.out{background:rgba(0,200,150,.12);color:var(--active)}
+.chain-badge.in{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
+.chain-badge.out{background:rgba(var(--active-rgb),.12);color:var(--active)}
 
 /* All-configs / rule rows */
 .config-row{display:flex;align-items:center;gap:12px;padding:11px 18px;transition:background .12s}
@@ -248,21 +297,21 @@ body {
 .config-name{font-size:15px;font-weight:600;color:var(--t1)}
 .config-sub{font-size:13px;color:var(--t2)}
 .row-del{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--t3);cursor:pointer;flex-shrink:0;transition:background .12s,color .12s}
-.row-del:hover{background:rgba(240,80,96,.12);color:var(--muted)}
+.row-del:hover{background:rgba(var(--muted-rgb),.12);color:var(--muted)}
 
 /* Rule rows */
 .rule-action-badge{padding:3px 9px;border-radius:6px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;flex-shrink:0}
-.rule-action-badge.proxy{background:rgba(79,142,255,.15);color:var(--accent)}
-.rule-action-badge.direct{background:rgba(0,200,150,.12);color:var(--active)}
-.rule-action-badge.block{background:rgba(240,80,96,.14);color:var(--muted)}
+.rule-action-badge.proxy{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
+.rule-action-badge.direct{background:rgba(var(--active-rgb),.12);color:var(--active)}
+.rule-action-badge.block{background:rgba(var(--muted-rgb),.14);color:var(--muted)}
 
 /* Live connections sheet rows */
 .live-conn-row{padding:10px 18px;border-bottom:1px solid rgba(255,255,255,.03)}
 .live-conn-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
 .live-conn-host{font-size:14px;font-weight:600;color:var(--t1);font-family:'JetBrains Mono',monospace}
 .live-conn-proto{font-size:12px;font-weight:700;padding:1px 6px;border-radius:4px}
-.live-conn-proto.tcp{background:rgba(79,142,255,.15);color:var(--accent)}
-.live-conn-proto.udp{background:rgba(160,100,255,.15);color:#A064FF}
+.live-conn-proto.tcp{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
+.live-conn-proto.udp{background:rgba(var(--purple-rgb),.15);color:var(--purple)}
 .live-conn-meta{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
 
 /* ── Forms (add source / rule / create profile / create chain) ── */
@@ -317,6 +366,123 @@ body {
 }
 .mini-toggle.on .mini-toggle-thumb{left:15px}
 .dimmed{opacity:.45}
+
+/* ── Views (bottom-nav tabs) ── */
+.phone{display:flex;flex-direction:column}
+.view{display:none;flex:1}
+.view.active{display:block}
+.bottomnav{position:sticky;bottom:0;z-index:5}
+.nav-btn svg{stroke:var(--t3)}
+.nav-btn.active svg{stroke:var(--accent)}
+
+/* ── Nodes screen ── */
+.nodes-summary{font-size:13px;color:var(--t2);margin-top:2px}
+.head-actions{display:flex;gap:8px}
+.icon-btn{
+  width:36px;height:36px;border-radius:10px;background:var(--card);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;color:var(--t2);cursor:pointer;flex-shrink:0;
+  transition:background .15s;
+}
+.icon-btn:active{background:var(--card-hi)}
+.icon-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.icon-btn.ghost{background:transparent;border-color:transparent;width:30px;height:30px}
+.icon-btn.ghost:active{background:rgba(255,255,255,.06)}
+
+.search{
+  margin:0 14px 10px;display:flex;align-items:center;gap:8px;
+  background:var(--card);border:1px solid var(--border);border-radius:12px;padding:0 6px 0 12px;
+}
+.search:focus-within{border-color:var(--accent)}
+.search input{flex:1;min-width:0;background:none;border:none;color:var(--t1);font:inherit;font-size:15px;padding:10px 0}
+.search input::placeholder{color:var(--t3)}
+.search input:focus{outline:none}
+
+.src-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.src-head{display:flex;align-items:center;gap:12px;padding:12px 8px 12px 14px;cursor:pointer}
+.src-main{flex:1;min-width:0}
+.src-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.src-meta{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap}
+.src-meta .dot{color:var(--t3)}
+.fmt-tag{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.06);color:var(--t2)}
+.src-chevron{transition:transform .2s;color:var(--t3)}
+.src-card.open .src-chevron{transform:rotate(180deg)}
+.src-card.off .src-main,.src-card.off .src-usage,.src-card.off .src-body{opacity:.45}
+.spin{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.src-usage{padding:0 14px 12px}
+.usage-bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}
+.usage-fill{height:100%;background:var(--accent);border-radius:2px}
+.usage-fill.hi{background:var(--warn)}
+.usage-text{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--t2);font-family:'JetBrains Mono',monospace;margin-top:6px}
+
+.src-body{border-top:1px solid var(--border);display:none}
+.src-card.open .src-body{display:block}
+.node-row{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .12s}
+.node-row:active{background:rgba(255,255,255,.04)}
+.node-row + .node-row{border-top:1px solid rgba(255,255,255,.035)}
+.node-flag{font-size:16px;width:20px;text-align:center;flex-shrink:0}
+.node-name{flex:1;min-width:0;font-size:14px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-proto{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
+.lat{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;min-width:60px;text-align:right;flex-shrink:0}
+.lat.good{color:var(--active)}
+.lat.mid{color:var(--warn)}
+.lat.bad{color:var(--muted)}
+.lat.none{color:var(--t3)}
+.lat.testing{color:var(--t3);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.3}}
+.node-add{display:flex;align-items:center;gap:8px;padding:11px 14px;font-size:14px;font-weight:600;color:var(--accent);cursor:pointer;border-top:1px solid rgba(255,255,255,.035)}
+.nodes-empty{text-align:center;padding:40px 20px;color:var(--t2);font-size:14px;line-height:1.5}
+
+/* ── Compact action sheets (menus) ── */
+.sheet.compact{top:auto;max-height:85vh}
+.sheet.compact .sheet-body{padding:6px 0 18px}
+.menu-row{display:flex;align-items:center;gap:14px;padding:13px 20px;cursor:pointer;transition:background .12s;color:var(--t1)}
+.menu-row:active{background:rgba(255,255,255,.04)}
+.menu-row svg{flex-shrink:0;color:var(--t2)}
+.menu-label{flex:1;font-size:15px;font-weight:500}
+.menu-sub{font-size:13px;color:var(--t2);margin-top:1px;font-weight:400}
+.menu-row.danger,.menu-row.danger svg{color:var(--muted)}
+.menu-caption{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;padding:10px 20px 6px}
+
+/* ── Settings-style groups inside forms ── */
+.set-group{margin:6px 18px 12px;background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.set-row{display:flex;align-items:center;gap:12px;padding:11px 14px;min-height:46px}
+.set-row + .set-row{border-top:1px solid var(--border)}
+.set-label{flex:1;font-size:15px;color:var(--t1)}
+.set-hint{font-size:12px;color:var(--t2);margin-top:2px}
+.set-input{width:44%;background:none;border:none;text-align:right;color:var(--t1);font:inherit;font-size:15px}
+.set-input::placeholder{color:var(--t3)}
+.set-input:focus{outline:none}
+.set-row .chip-row{padding:0}
+.set-row.stack{flex-direction:column;align-items:stretch;gap:8px}
+.section-toggle{display:flex;align-items:center;gap:6px;padding:8px 18px 4px;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;cursor:pointer}
+.section-toggle svg{transition:transform .2s}
+.section-toggle.open svg{transform:rotate(90deg)}
+textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.45}
+
+/* ── Toast ── */
+.toast{
+  position:fixed;left:50%;bottom:92px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
+  background:var(--card-hi);border:1px solid var(--border-hi);color:var(--t1);font-size:14px;
+  padding:10px 16px;border-radius:12px;transition:opacity .2s,transform .2s;z-index:40;
+  max-width:calc(100% - 32px);text-align:center;
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+/* ── Settings screen ── */
+.settings-caption{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;padding:14px 6px 6px}
+.settings-group{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.settings-row{display:flex;align-items:center;gap:12px;padding:13px 14px;cursor:pointer;transition:background .12s}
+.settings-row + .settings-row{border-top:1px solid var(--border)}
+.settings-row:active{background:var(--card-hi)}
+.settings-row.soon{cursor:default;opacity:.5}
+.settings-row.soon:active{background:none}
+.settings-label{flex:1;font-size:15px;color:var(--t1)}
+.settings-sub{font-size:13px;color:var(--t2);margin-top:2px}
+.settings-value{font-size:14px;color:var(--t2)}
+.soon-tag{font-size:11px;font-weight:600;color:var(--t3);border:1px solid var(--border-hi);border-radius:4px;padding:1px 5px}
+.theme-swatch{display:flex;width:44px;height:30px;border-radius:7px;overflow:hidden;border:1px solid var(--border-hi);flex-shrink:0}
+.theme-swatch span{flex:1}
 </style>
 
 <div class="phone">
@@ -326,20 +492,23 @@ body {
     <span class="time">01:07</span>
     <div style="display:flex;gap:6px;align-items:center">
       <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-        <rect x="0" y="4" width="3" height="8" rx="1" fill="#7B8EC8"/>
-        <rect x="4.5" y="2.5" width="3" height="9.5" rx="1" fill="#7B8EC8"/>
-        <rect x="9" y="0" width="3" height="12" rx="1" fill="#7B8EC8"/>
-        <rect x="13.5" y="0" width="2.5" height="12" rx="1" fill="#D4DEFF"/>
+        <rect x="0" y="4" width="3" height="8" rx="1" fill="var(--t2)"/>
+        <rect x="4.5" y="2.5" width="3" height="9.5" rx="1" fill="var(--t2)"/>
+        <rect x="9" y="0" width="3" height="12" rx="1" fill="var(--t2)"/>
+        <rect x="13.5" y="0" width="2.5" height="12" rx="1" fill="var(--t1)"/>
       </svg>
       <svg width="16" height="12" viewBox="0 0 24 24" fill="none">
-        <path d="M1 6s4.5-4 11-4 11 4 11 4" stroke="#7B8EC8" stroke-width="2" stroke-linecap="round"/>
-        <path d="M5 10s2.5-2.5 7-2.5S19 10 19 10" stroke="#7B8EC8" stroke-width="2" stroke-linecap="round"/>
-        <path d="M9 14s1-1 3-1 3 1 3 1" stroke="#D4DEFF" stroke-width="2" stroke-linecap="round"/>
-        <circle cx="12" cy="18" r="1.5" fill="#D4DEFF"/>
+        <path d="M1 6s4.5-4 11-4 11 4 11 4" stroke="var(--t2)" stroke-width="2" stroke-linecap="round"/>
+        <path d="M5 10s2.5-2.5 7-2.5S19 10 19 10" stroke="var(--t2)" stroke-width="2" stroke-linecap="round"/>
+        <path d="M9 14s1-1 3-1 3 1 3 1" stroke="var(--t1)" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="12" cy="18" r="1.5" fill="var(--t1)"/>
       </svg>
-      <span style="font-family:monospace;font-size:13px;color:#D4DEFF">100%</span>
+      <span style="font-family:monospace;font-size:13px;color:var(--t1)">100%</span>
     </div>
   </div>
+
+  <!-- ══════════ VIEW: HOME ══════════ -->
+  <div class="view active" id="view-home">
 
   <!-- Top bar -->
   <div class="topbar">
@@ -381,7 +550,7 @@ body {
           <div style="display:flex;align-items:baseline;gap:8px">
             <span class="conn-num" style="font-size:18px">51</span>
             <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent)">TCP 43</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#A064FF">UDP 8</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--purple)">UDP 8</span>
           </div>
         </div>
       </div>
@@ -426,18 +595,18 @@ body {
 
     <!-- ROW 4: All configs + Rules -->
     <div class="row2">
-      <div class="card" style="padding:14px" onclick="openSheet('allconfigs')">
+      <div class="card" style="padding:14px" onclick="switchTab('nodes')">
         <div class="nav-icon slate">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7B8EC8" stroke-width="2" stroke-linecap="round">
-            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
           </svg>
         </div>
-        <div class="nav-title">All configs</div>
-        <div class="nav-sub" id="configsCardSub">3 imported · 1 manual</div>
+        <div class="nav-title">Nodes</div>
+        <div class="nav-sub" id="configsCardSub">4 sources · 70 nodes</div>
       </div>
       <div class="card" style="padding:14px" onclick="openSheet('rules')">
         <div class="nav-icon amber">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F0A040" stroke-width="2" stroke-linecap="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linecap="round">
             <path d="M4 6h16M4 12h16M4 18h10"/>
           </svg>
         </div>
@@ -450,7 +619,7 @@ body {
     <div class="row2">
       <div class="card" style="padding:14px">
         <div class="nav-icon teal">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00C896" stroke-width="2" stroke-linecap="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round">
             <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
           </svg>
         </div>
@@ -459,7 +628,7 @@ body {
       </div>
       <div class="card" style="padding:14px">
         <div class="nav-icon purple">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A064FF" stroke-width="2" stroke-linecap="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round">
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
           </svg>
         </div>
@@ -469,32 +638,91 @@ body {
     </div>
 
   </div><!-- /scroll -->
+  </div><!-- /view-home -->
+
+  <!-- ══════════ VIEW: NODES (subscriptions + manual servers) ══════════ -->
+  <div class="view" id="view-nodes">
+    <div class="topbar">
+      <div>
+        <div class="app-name">Nodes</div>
+        <div class="nodes-summary" id="nodesSummary"></div>
+      </div>
+      <div class="head-actions">
+        <button class="icon-btn" onclick="testAllLatency()" title="Test latency">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </button>
+        <button class="icon-btn" onclick="openNodesMore()" title="More">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        </button>
+        <button class="icon-btn primary" onclick="openSheet('addmenu')" title="Add">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="nodeSearch" placeholder="Search nodes" oninput="renderNodes()">
+      <button class="icon-btn ghost" id="nodeSearchClear" style="display:none" onclick="clearNodeSearch()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="scroll" id="nodes-list"></div>
+  </div><!-- /view-nodes -->
+
+  <!-- ══════════ VIEW: SETTINGS (only Appearance works for now) ══════════ -->
+  <div class="view" id="view-settings">
+    <div class="topbar"><div class="app-name">Settings</div></div>
+    <div class="scroll" style="gap:0">
+      <div class="settings-caption">Appearance</div>
+      <div class="settings-group" id="theme-list"></div>
+
+      <div class="settings-caption">General</div>
+      <div class="settings-group">
+        <div class="settings-row soon"><div class="settings-label">Language</div><span class="settings-value">English</span><span class="soon-tag">soon</span></div>
+        <div class="settings-row soon"><div class="settings-label">Launch at startup</div><span class="soon-tag">soon</span></div>
+        <div class="settings-row soon"><div class="settings-label">Auto-connect</div><span class="soon-tag">soon</span></div>
+      </div>
+
+      <div class="settings-caption">Connection</div>
+      <div class="settings-group">
+        <div class="settings-row soon"><div class="settings-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
+        <div class="settings-row soon"><div class="settings-label">Latency test URL</div><span class="settings-value">auto</span><span class="soon-tag">soon</span></div>
+        <div class="settings-row soon"><div class="settings-label">DNS</div><span class="settings-value">1.1.1.1 · DoH</span><span class="soon-tag">soon</span></div>
+      </div>
+
+      <div class="settings-caption">Data</div>
+      <div class="settings-group">
+        <div class="settings-row soon"><div class="settings-label">Backup &amp; restore</div><span class="soon-tag">soon</span></div>
+        <div class="settings-row soon"><div class="settings-label">About</div><span class="settings-value">v0.1 mockup</span></div>
+      </div>
+    </div>
+  </div><!-- /view-settings -->
 
   <!-- Bottom nav -->
   <div class="bottomnav">
-    <div class="nav-btn active">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke="var(--accent)">
+    <div class="nav-btn active" data-tab="home" onclick="switchTab('home')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
         <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
         <polyline points="9 22 9 12 15 12 15 22"/>
       </svg>
       <span>Home</span>
     </div>
-    <div class="nav-btn">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke="var(--t3)">
+    <div class="nav-btn" data-tab="nodes" onclick="switchTab('nodes')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
       </svg>
       <span>Nodes</span>
     </div>
-    <div class="nav-btn">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke="var(--t3)">
+    <div class="nav-btn" onclick="toast('Logs are not in this mockup yet')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
         <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
         <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
       </svg>
       <span>Logs</span>
     </div>
-    <div class="nav-btn">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke="var(--t3)">
+    <div class="nav-btn" data-tab="settings" onclick="switchTab('settings')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
         <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7"/>
       </svg>
       <span>Settings</span>
@@ -523,32 +751,6 @@ body {
       <div class="sheet-action dim" onclick="openCopyFromProfile()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
         Copy from connection profile
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════ ALL CONFIGS SHEET ══════════ -->
-  <div class="overlay" id="ov-allconfigs" onclick="closeSheet('allconfigs')"></div>
-  <div class="sheet" id="sh-allconfigs">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">All configs</span>
-      <button class="sheet-close" onclick="closeSheet('allconfigs')">×</button>
-    </div>
-    <div class="sheet-body">
-      <div id="configs-list"></div>
-      <div class="sheet-divider"></div>
-      <div class="sheet-action" onclick="openAddSource()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Add subscription or server
-      </div>
-      <div class="sheet-action dim">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Import config file
-      </div>
-      <div class="sheet-action dim">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Export / backup
       </div>
     </div>
   </div>
@@ -596,88 +798,6 @@ body {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Add rule
       </div>
-    </div>
-  </div>
-
-  <!-- ══════════ NESTED: ADD SOURCE ══════════ -->
-  <div class="overlay overlay-l2" id="ov-addsource" onclick="closeSheet('addsource')"></div>
-  <div class="sheet sheet-l2" id="sh-addsource">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title" id="addSourceTitle">Add subscription / server</span>
-      <button class="sheet-close" onclick="closeSheet('addsource')">×</button>
-    </div>
-    <div class="sheet-tabs">
-      <div class="sheet-tab active" id="astab-sub" onclick="switchAddSourceTab('sub')">Subscription</div>
-      <div class="sheet-tab" id="astab-manual" onclick="switchAddSourceTab('manual')">Manual server</div>
-    </div>
-    <div class="sheet-body">
-      <div id="aspane-sub">
-        <div class="form-group">
-          <div class="form-label">Name</div>
-          <input class="form-input" id="as-sub-name" placeholder="My new subscription">
-        </div>
-        <div class="form-group">
-          <div class="form-label">Subscription URL</div>
-          <input class="form-input" id="as-sub-url" placeholder="https://example.com/sub?token=...">
-        </div>
-        <div class="form-group">
-          <div class="form-label">User-Agent</div>
-          <div class="chip-row" id="as-sub-ua">
-            <div class="chip active" onclick="pickChip(this,'as-sub-ua')">sing-box</div>
-            <div class="chip" onclick="pickChip(this,'as-sub-ua')">mihomo</div>
-            <div class="chip" onclick="pickChip(this,'as-sub-ua')">ClashMeta</div>
-          </div>
-        </div>
-        <div class="form-group form-row2">
-          <div>
-            <div class="form-label">Update interval (h)</div>
-            <input class="form-input" id="as-sub-interval" placeholder="12">
-          </div>
-          <div style="display:flex;flex-direction:column;justify-content:flex-end">
-            <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:10px;padding:9px 12px">
-              <span style="font-size:14px;color:var(--t1)">Reload after update</span>
-              <div class="mini-toggle on" id="as-sub-reload" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div id="aspane-manual" style="display:none">
-        <div class="form-group">
-          <div class="form-label">Name</div>
-          <input class="form-input" id="as-man-name" placeholder="My server">
-        </div>
-        <div class="form-group">
-          <div class="form-label">Protocol</div>
-          <div class="chip-row" id="as-man-proto">
-            <div class="chip active" onclick="pickChip(this,'as-man-proto')">VLESS</div>
-            <div class="chip" onclick="pickChip(this,'as-man-proto')">VMess</div>
-            <div class="chip" onclick="pickChip(this,'as-man-proto')">Trojan</div>
-            <div class="chip" onclick="pickChip(this,'as-man-proto')">Shadowsocks</div>
-            <div class="chip" onclick="pickChip(this,'as-man-proto')">Hysteria2</div>
-            <div class="chip" onclick="pickChip(this,'as-man-proto')">SOCKS5</div>
-            <div class="chip" onclick="pickChip(this,'as-man-proto')">HTTP</div>
-          </div>
-        </div>
-        <div class="form-group form-row2">
-          <div>
-            <div class="form-label">Address</div>
-            <input class="form-input" id="as-man-addr" placeholder="1.2.3.4">
-          </div>
-          <div>
-            <div class="form-label">Port</div>
-            <input class="form-input" id="as-man-port" placeholder="443">
-          </div>
-        </div>
-        <div class="form-group">
-          <div class="form-label">UUID / Password</div>
-          <input class="form-input" id="as-man-secret" placeholder="••••••••••••">
-        </div>
-      </div>
-    </div>
-    <div class="sheet-footer">
-      <button class="btn-primary" id="addSourceSaveBtn" onclick="saveAddSource()">Save</button>
-      <button class="btn-danger-text" id="addSourceDeleteBtn" style="display:none" onclick="deleteEditingSource()">Delete</button>
     </div>
   </div>
 
@@ -762,47 +882,6 @@ body {
     </div>
   </div>
 
-  <!-- ══════════ NESTED: ADD NODE (inside a subscription/server) ══════════ -->
-  <div class="overlay overlay-l2" id="ov-addnode" onclick="closeSheet('addnode')"></div>
-  <div class="sheet sheet-l2" id="sh-addnode">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">Add node</span>
-      <button class="sheet-close" onclick="closeSheet('addnode')">×</button>
-    </div>
-    <div class="sheet-body">
-      <div class="form-group">
-        <div class="form-label">Name</div>
-        <input class="form-input" id="an-name" placeholder="Node name">
-      </div>
-      <div class="form-group">
-        <div class="form-label">Protocol</div>
-        <div class="chip-row" id="an-proto">
-          <div class="chip active" onclick="pickChip(this,'an-proto')">VLESS</div>
-          <div class="chip" onclick="pickChip(this,'an-proto')">VMess</div>
-          <div class="chip" onclick="pickChip(this,'an-proto')">Trojan</div>
-          <div class="chip" onclick="pickChip(this,'an-proto')">Shadowsocks</div>
-          <div class="chip" onclick="pickChip(this,'an-proto')">Hysteria2</div>
-          <div class="chip" onclick="pickChip(this,'an-proto')">SOCKS5</div>
-          <div class="chip" onclick="pickChip(this,'an-proto')">HTTP</div>
-        </div>
-      </div>
-      <div class="form-group form-row2">
-        <div>
-          <div class="form-label">Address</div>
-          <input class="form-input" id="an-addr" placeholder="1.2.3.4">
-        </div>
-        <div>
-          <div class="form-label">Port</div>
-          <input class="form-input" id="an-port" placeholder="443">
-        </div>
-      </div>
-    </div>
-    <div class="sheet-footer">
-      <button class="btn-primary" onclick="saveAddNode()">Add node</button>
-    </div>
-  </div>
-
   <!-- ══════════ NESTED: ADD RULE ══════════ -->
   <div class="overlay overlay-l2" id="ov-addrule" onclick="closeSheet('addrule')"></div>
   <div class="sheet sheet-l2" id="sh-addrule">
@@ -839,33 +918,267 @@ body {
     </div>
   </div>
 
+  <!-- ══════════ NODES: ADD MENU ══════════ -->
+  <div class="overlay overlay-l2" id="ov-addmenu" onclick="closeSheet('addmenu')"></div>
+  <div class="sheet sheet-l2 compact" id="sh-addmenu">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Add</span>
+      <button class="sheet-close" onclick="closeSheet('addmenu')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="menu-row" onclick="closeSheet('addmenu');openSrcForm()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        <div class="menu-label">Subscription<div class="menu-sub">Paste a subscription URL</div></div>
+      </div>
+      <div class="menu-row" onclick="closeSheet('addmenu');pasteFromClipboard()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+        <div class="menu-label">From clipboard<div class="menu-sub">Subscription URL or vless:// / hy2:// … link</div></div>
+      </div>
+      <div class="menu-row" onclick="closeSheet('addmenu');openNodeForm()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/></svg>
+        <div class="menu-label">Manual server<div class="menu-sub">Fill in address, port and key</div></div>
+      </div>
+      <div class="menu-row" onclick="closeSheet('addmenu');toast('Camera is not available in the mockup')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>
+        <div class="menu-label">Scan QR code</div>
+      </div>
+      <div class="menu-row" onclick="closeSheet('addmenu');toast('File picker is not available in the mockup')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <div class="menu-label">Import config file<div class="menu-sub">sing-box JSON, Clash YAML</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ NODES: MORE MENU ══════════ -->
+  <div class="overlay overlay-l2" id="ov-nodesmore" onclick="closeSheet('nodesmore')"></div>
+  <div class="sheet sheet-l2 compact" id="sh-nodesmore">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Nodes</span>
+      <button class="sheet-close" onclick="closeSheet('nodesmore')">×</button>
+    </div>
+    <div class="sheet-body" id="nodesmore-body"></div>
+  </div>
+
+  <!-- ══════════ NODES: SOURCE / NODE ACTIONS (built dynamically) ══════════ -->
+  <div class="overlay overlay-l2" id="ov-actions" onclick="closeSheet('actions')"></div>
+  <div class="sheet sheet-l2 compact" id="sh-actions">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="actionsTitle"></span>
+      <button class="sheet-close" onclick="closeSheet('actions')">×</button>
+    </div>
+    <div class="sheet-body" id="actions-body"></div>
+  </div>
+
+  <!-- ══════════ NODES: SUBSCRIPTION / GROUP FORM ══════════ -->
+  <div class="overlay overlay-l2" id="ov-srcform" onclick="closeSheet('srcform')"></div>
+  <div class="sheet sheet-l2" id="sh-srcform">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="sfTitle">Add subscription</span>
+      <button class="sheet-close" onclick="closeSheet('srcform')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="sf-sub-only-top">
+        <div class="form-group">
+          <div class="form-label">Subscription URL</div>
+          <textarea class="form-input" id="sf-url" rows="3" placeholder="https://…/api/sub/…"></textarea>
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="sf-name" placeholder="Taken from the subscription if empty">
+      </div>
+
+      <div id="sf-sub-only">
+        <div class="form-label" style="padding:8px 18px 0">Updates</div>
+        <div class="set-group">
+          <div class="set-row">
+            <div class="set-label">Update every</div>
+            <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="12"><span style="color:var(--t2);font-size:15px">h</span>
+          </div>
+          <div class="set-row">
+            <div class="set-label">Reconnect after update</div>
+            <div class="mini-toggle" id="sf-reload" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+          </div>
+          <div class="set-row">
+            <div class="set-label">Test latency after update</div>
+            <div class="mini-toggle" id="sf-testafter" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+          </div>
+        </div>
+
+        <div class="section-toggle" id="sf-adv-toggle" onclick="toggleSrcAdvanced()">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Advanced
+        </div>
+        <div id="sf-adv" style="display:none">
+          <div class="set-group">
+            <div class="set-row stack">
+              <div>
+                <div class="set-label">User-Agent</div>
+                <div class="set-hint">Auto asks the server as sing-box and mihomo and merges the results</div>
+              </div>
+              <div class="chip-row" id="sf-ua">
+                <div class="chip" onclick="pickChip(this,'sf-ua')">Auto</div>
+                <div class="chip" onclick="pickChip(this,'sf-ua')">sing-box</div>
+                <div class="chip" onclick="pickChip(this,'sf-ua')">mihomo</div>
+                <div class="chip" onclick="pickChip(this,'sf-ua')">v2ray</div>
+              </div>
+            </div>
+            <div class="set-row stack">
+              <div class="set-label">Download via</div>
+              <div class="chip-row" id="sf-channel">
+                <div class="chip" onclick="pickChip(this,'sf-channel')">Direct first</div>
+                <div class="chip" onclick="pickChip(this,'sf-channel')">Proxy first</div>
+                <div class="chip" onclick="pickChip(this,'sf-channel')">Direct</div>
+                <div class="chip" onclick="pickChip(this,'sf-channel')">Proxy</div>
+              </div>
+            </div>
+            <div class="set-row">
+              <div class="set-label">Send X-HWID</div>
+              <div class="mini-toggle" id="sf-hwid" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+            </div>
+            <div class="set-row">
+              <div>
+                <div class="set-label">Keep provider rules</div>
+                <div class="set-hint">Use routing rules shipped in the subscription</div>
+              </div>
+              <div class="mini-toggle" id="sf-keeprules" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+            </div>
+            <div class="set-row">
+              <div class="set-label">Filter</div>
+              <input class="set-input" id="sf-filter" placeholder="regex, e.g. DE|NL">
+            </div>
+            <div class="set-row">
+              <div class="set-label">Decrypt password</div>
+              <input class="set-input" id="sf-password" type="password" placeholder="none">
+            </div>
+            <div class="set-row">
+              <div class="set-label">Website</div>
+              <input class="set-input" id="sf-website" placeholder="https://">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="sfSaveBtn" onclick="saveSrcForm()">Add</button>
+      <button class="btn-danger-text" id="sfDeleteBtn" style="display:none" onclick="deleteSource(editingSourceId);closeSheet('srcform')">Delete</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NODES: MANUAL SERVER FORM ══════════ -->
+  <div class="overlay overlay-l2" id="ov-nodeform" onclick="closeSheet('nodeform')"></div>
+  <div class="sheet sheet-l2" id="sh-nodeform">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="nfTitle">Add server</span>
+      <button class="sheet-close" onclick="closeSheet('nodeform')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Share link</div>
+        <input class="form-input" id="nf-link" placeholder="vless://… — fills the fields below" oninput="parseNodeLink()">
+      </div>
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="nf-name" placeholder="My server">
+      </div>
+      <div class="form-group">
+        <div class="form-label">Protocol</div>
+        <div class="chip-row" id="nf-proto" style="padding:0">
+          <div class="chip" onclick="pickChip(this,'nf-proto')">VLESS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">VMess</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">Trojan</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">SS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">HY2</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">TUIC</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">SOCKS</div>
+        </div>
+      </div>
+      <div class="form-group form-row2">
+        <div>
+          <div class="form-label">Address</div>
+          <input class="form-input" id="nf-addr" placeholder="1.2.3.4">
+        </div>
+        <div>
+          <div class="form-label">Port</div>
+          <input class="form-input" id="nf-port" inputmode="numeric" placeholder="443">
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">UUID / Password</div>
+        <input class="form-input" id="nf-secret" placeholder="••••••••••••">
+      </div>
+      <div class="form-group" id="nf-group-wrap">
+        <div class="form-label">Group</div>
+        <div class="chip-row" id="nf-group" style="padding:0"></div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="nfSaveBtn" onclick="saveNodeForm()">Add server</button>
+      <button class="btn-danger-text" id="nfDeleteBtn" style="display:none" onclick="deleteNode(editingNode.sid, editingNode.nid);closeSheet('nodeform')">Delete</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
 </div><!-- /phone -->
 
 <script>
 /* ══════════════════════ DATA MODEL ══════════════════════ */
 
+const NODE_POOL = [
+  ['🇩🇪','Frankfurt'],['🇳🇱','Amsterdam'],['🇫🇮','Helsinki'],['🇸🇪','Stockholm'],['🇵🇱','Warsaw'],
+  ['🇫🇷','Paris'],['🇬🇧','London'],['🇪🇸','Madrid'],['🇺🇸','New York'],['🇯🇵','Tokyo'],
+  ['🇸🇬','Singapore'],['🇹🇷','Istanbul'],['🇰🇿','Almaty'],['🇱🇻','Riga'],
+];
+const PROTOS = ['vless','hy2','vless','trojan','ss','tuic','vmess'];
+
+function randLatency() {
+  const r = Math.random();
+  if (r < 0.08) return -1;                         // timeout
+  if (r < 0.7)  return Math.round(35 + Math.random() * 110);
+  if (r < 0.92) return Math.round(150 + Math.random() * 250);
+  return Math.round(400 + Math.random() * 500);
+}
+
 function genNodes(count, kind) {
-  const flags = ['🇩🇪','🇳🇱','🇫🇷','🇬🇧','🇺🇸','🇯🇵','🇸🇬','🇨🇦'];
-  const protos = ['vless','vmess','trojan','ss','hy2'];
   const nodes = [];
   for (let i = 0; i < count; i++) {
+    const [flag, city] = NODE_POOL[(i * 5 + count) % NODE_POOL.length];
     nodes.push({
       id: 'n' + i,
-      flag: flags[i % flags.length],
-      name: kind === 'node' ? 'Manual node' : ('Node ' + (i + 1)),
-      protocol: protos[i % protos.length],
-      warn: i % 7 === 6,
+      flag,
+      name: kind === 'node' ? ('VPS ' + city) : (city + ' ' + String(Math.floor(i / NODE_POOL.length) + 1).padStart(2, '0')),
+      protocol: PROTOS[i % PROTOS.length],
+      address: kind === 'node' ? ('185.22.' + (10 + i) + '.' + (40 + i * 7)) : '',
+      port: '443',
+      latency: randLatency(),
     });
   }
   return nodes;
 }
 
+function mkSub(id, name, count, extra) {
+  return Object.assign({
+    id, kind:'sub', name, enabled:true, nodes:genNodes(count,'sub'),
+    url:'https://sub.example.net/api/sub/' + id + 'Xk7PCg04NKVzp', format:'sing-box',
+    updatedAt: Date.now() - 2*3600e3, usage:{ used:0, total:0 }, expire:null,
+    updateInterval:12, reloadAfterUpdate:true, testAfterUpdate:true,
+    userAgent:'Auto', channel:'Direct first', hwid:false, keepRules:false, filter:'', password:'', website:'',
+  }, extra);
+}
+
 let sourcesData = {
-  src1: { id:'src1', kind:'sub',  name:'My Subscription',  count:47, meta:'updated 2h ago', nodes:genNodes(47,'sub'), userAgent:'sing-box', updateInterval:12, reloadAfterUpdate:true },
-  src2: { id:'src2', kind:'set',  name:'Work Servers',      count:12, meta:'updated 1d ago', nodes:genNodes(12,'set'), userAgent:'sing-box', updateInterval:24, reloadAfterUpdate:true },
-  src3: { id:'src3', kind:'node', name:'VPS Manual',        count:3,  meta:'manual entry',   nodes:genNodes(3,'node') },
-  src4: { id:'src4', kind:'sub',  name:'Gaming Low-Ping',   count:8,  meta:'updated 5h ago', nodes:genNodes(8,'sub'), userAgent:'mihomo', updateInterval:6, reloadAfterUpdate:false },
+  src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, website:'https://jormungand.example' }),
+  src2: mkSub('src2', 'Work Servers', 9, { format:'clash', updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
+  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, nodes:genNodes(2,'node') },
+  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
 };
+Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
 let sourceOrder = ['src1','src2','src3','src4'];
 let sourceSeq = 5;
 
@@ -909,16 +1222,16 @@ function miniToggleHtml(id, onFnName, isOn) {
 const expandState = {};
 
 function subIcon(kind) {
-  if (kind === 'sub')  return {cls:'sub',  color:'#4F8EFF', svg:'<path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>'};
-  if (kind === 'set')  return {cls:'set',  color:'#00C896', svg:'<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>'};
-  return {cls:'node', color:'#A064FF', svg:'<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/>'};
+  if (kind === 'sub')  return {cls:'sub',  color:'var(--accent)', svg:'<path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>'};
+  if (kind === 'set')  return {cls:'set',  color:'var(--active)', svg:'<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>'};
+  return {cls:'node', color:'var(--purple)', svg:'<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/>'};
 }
 
 function profileNodeCount(p) {
   return p.sources.reduce((sum, sid) => {
     const s = sourcesData[sid];
-    if (!s) return sum;
-    return sum + s.count;
+    if (!s || !s.enabled) return sum;
+    return sum + s.nodes.length;
   }, 0);
 }
 
@@ -926,7 +1239,7 @@ function getProfileNodes(p) {
   const nodes = [];
   p.sources.forEach(sid => {
     const s = sourcesData[sid];
-    if (!s) return;
+    if (!s || !s.enabled) return;
     s.nodes.forEach(n => nodes.push({ id: sid + '::' + n.id, label: s.name + ' · ' + n.name }));
   });
   return nodes;
@@ -963,7 +1276,7 @@ function renderProfileRow(id, i) {
       <span class="sub-name" onclick="event.stopPropagation();toggleProfileSource('${id}','${sid}')">${s.name}</span>
       <span class="sub-count">${s.count} nodes</span>
     </div>`;
-  }).join('') + `<div class="sub-item" style="padding-left:46px;padding-top:4px;padding-bottom:4px" onclick="event.stopPropagation();openAddSource()">
+  }).join('') + `<div class="sub-item" style="padding-left:46px;padding-top:4px;padding-bottom:4px" onclick="event.stopPropagation();openSheet('addmenu')">
       <div style="font-size:13px;color:var(--accent);cursor:pointer">+ Add subscription or server</div>
     </div>`;
 
@@ -1003,7 +1316,7 @@ function renderChainRow(id, i) {
       <div class="profile-item-head" onclick="selectConnect('${id}')">
         <div class="profile-radio ${id===activeConnectId?'active':''}"></div>
         <span class="profile-item-name ${!c.enabled?'dimmed':''}">${c.name}</span>
-        <span style="font-size:11px;color:var(--accent);font-weight:700;background:rgba(79,142,255,.15);padding:1px 5px;border-radius:4px">CHAIN</span>
+        <span style="font-size:11px;color:var(--accent);font-weight:700;background:rgba(var(--accent-rgb),.15);padding:1px 5px;border-radius:4px">CHAIN</span>
         <div class="profile-expand-btn" onclick="event.stopPropagation();openEditChain('${id}')" title="Edit">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         </div>
@@ -1036,7 +1349,6 @@ function renderConnects() {
 function toggleExpand(id) {
   expandState[id] = !expandState[id];
   renderConnects();
-  renderConfigs();
 }
 
 function toggleProfileSource(pid, sid) {
@@ -1109,7 +1421,7 @@ function updateMainConnectCard() {
     document.getElementById('profMetaSrc').textContent = 'chain';
     badge.textContent = 'CHAIN';
     badge.style.color = 'var(--accent)';
-    badge.style.background = 'rgba(79,142,255,.15)';
+    badge.style.background = 'rgba(var(--accent-rgb),.15)';
     detail.textContent = inName + ' → ' + outName;
     return;
   }
@@ -1121,12 +1433,12 @@ function updateMainConnectCard() {
   if (p.autoSelect) {
     badge.textContent = 'AUTO';
     badge.style.color = 'var(--active)';
-    badge.style.background = 'rgba(0,200,150,.15)';
+    badge.style.background = 'rgba(var(--active-rgb),.15)';
     detail.textContent = 'best latency · 38ms';
   } else {
     badge.textContent = 'MANUAL';
     badge.style.color = 'var(--warn)';
-    badge.style.background = 'rgba(240,160,64,.15)';
+    badge.style.background = 'rgba(var(--warn-rgb),.15)';
     detail.textContent = manualNodeLabel(p);
   }
 }
@@ -1141,113 +1453,482 @@ function cycleChainSide(chainId, side) {
   if (chainId === activeConnectId) updateMainConnectCard();
 }
 
-/* ══════════════════════ RENDER: ALL CONFIGS (sources) ══════════════════════ */
+/* ══════════════════════ NODES SCREEN (subscriptions + manual servers) ══════════════════════
+   Replaces the old "All configs" sheet. A source is either a subscription (kind 'sub')
+   or a group of manual servers (kind 'node'); both render as one collapsible group. */
 
-function renderConfigs() {
-  const el = document.getElementById('configs-list');
-  el.innerHTML = sourceOrder.map((id, i) => {
-    const s = sourcesData[id];
-    const icon = subIcon(s.kind);
-    const isOpen = !!expandState[id];
+let nodeSort = 'order';   // 'order' | 'latency' | 'name'
 
-    const actionsRow = `<div class="sub-item" style="padding-left:18px;gap:16px">
-        <div style="display:flex;align-items:center;gap:5px;color:var(--t2);font-size:13px;cursor:pointer" onclick="event.stopPropagation();refreshSource('${id}')">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-          Refresh
-        </div>
-        <div style="display:flex;align-items:center;gap:5px;color:var(--t2);font-size:13px;cursor:pointer" onclick="event.stopPropagation();openEditSource('${id}')">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          Edit
-        </div>
-        <div style="margin-left:auto;font-size:12px;color:var(--t3)">${s.meta}</div>
-      </div>`;
+const ICON = {
+  refresh: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',
+  bolt:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>',
+  edit:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
+  copy:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>',
+  qr:      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>',
+  web:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>',
+  trash:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>',
+  plus:    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  collapse:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>',
+  expand:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>',
+};
 
-    const nodeRows = s.nodes.map(n => `<div class="sub-item" style="padding-left:46px">
-        <span style="font-size:16px;width:16px;text-align:center;flex-shrink:0">${n.flag}</span>
-        <span class="sub-name">${n.name}</span>
-        <span class="proto-badge" style="text-transform:uppercase">${n.protocol}</span>
-        ${n.warn ? '<span style="color:var(--muted);font-size:15px" title="Unreachable">⚠</span>' : ''}
-        <div class="row-del" onclick="removeNode('${id}','${n.id}')">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </div>
-      </div>`).join('');
-
-    const addNodeRow = `<div class="sub-item" style="padding-left:46px;padding-top:6px;padding-bottom:6px" onclick="event.stopPropagation();openAddNode('${id}')">
-        <div style="font-size:13px;color:var(--accent);cursor:pointer">+ Add node</div>
-      </div>`;
-
-    return `<div class="config-row" style="flex-wrap:wrap">
-      <div class="config-icon" style="background:${icon.color}22">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${icon.color}" stroke-width="2.5" stroke-linecap="round">${icon.svg}</svg>
-      </div>
-      <div style="flex:1;min-width:0;cursor:pointer" onclick="openEditSource('${id}')">
-        <div class="config-name">${s.name}</div>
-        <div class="config-sub">${s.count} nodes${s.protocol ? ' · '+s.protocol : ''} · ${s.meta}</div>
-      </div>
-      <div class="row-del" onclick="removeSource('${id}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </div>
-      <div class="profile-expand-btn ${isOpen?'open':''}" onclick="toggleExpand('${id}')">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>
-      <div class="profile-subs ${isOpen?'open':''}" style="flex-basis:100%;max-height:${isOpen?'2000px':'0'}">
-        ${actionsRow}${nodeRows}${addNodeRow}
-      </div>
-    </div>`;
-  }).join('');
-
-  let imported = 0, manual = 0;
-  sourceOrder.forEach(id => { sourcesData[id].kind === 'node' ? manual++ : imported++; });
-  document.getElementById('configsCardSub').textContent = imported + ' imported · ' + manual + ' manual';
+function esc(str) {
+  return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-let addNodeSourceId = null;
-function openAddNode(sourceId) {
-  addNodeSourceId = sourceId;
-  document.getElementById('an-name').value = '';
-  document.getElementById('an-addr').value = '';
-  document.getElementById('an-port').value = '';
-  document.querySelectorAll('#an-proto .chip').forEach((c,i) => c.classList.toggle('active', i===0));
-  openSheet('addnode');
+function timeAgo(ts) {
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  const h = Math.round(m / 60);
+  if (h < 24) return h + ' h ago';
+  return Math.round(h / 24) + ' d ago';
 }
-function saveAddNode() {
-  if (!addNodeSourceId) return;
-  const s = sourcesData[addNodeSourceId];
-  const protoChip = document.querySelector('#an-proto .chip.active');
-  const protocol = (protoChip ? protoChip.textContent : 'VLESS').toLowerCase();
-  const name = document.getElementById('an-name').value.trim() || ('Node ' + (s.nodes.length + 1));
-  const flags = ['🇩🇪','🇳🇱','🇫🇷','🇬🇧','🇺🇸','🇯🇵'];
-  s.nodes.push({ id: 'n' + Date.now(), flag: flags[Math.floor(Math.random()*flags.length)], name, protocol, warn:false });
-  s.count = s.nodes.length;
-  expandState[addNodeSourceId] = true;
-  addNodeSourceId = null;
-  renderConfigs();
+
+function fmtDate(iso) {
+  const [y, mo, d] = iso.split('-');
+  return d + '.' + mo + '.' + y;
+}
+
+function latHtml(n) {
+  if (n.latency === 'testing') return '<span class="lat testing">testing</span>';
+  if (n.latency == null) return '<span class="lat none">—</span>';
+  if (n.latency < 0) return '<span class="lat bad">timeout</span>';
+  const cls = n.latency < 150 ? 'good' : n.latency < 400 ? 'mid' : 'bad';
+  return `<span class="lat ${cls}">${n.latency} ms</span>`;
+}
+
+function sortedNodes(nodes) {
+  const list = nodes.slice();
+  if (nodeSort === 'name') list.sort((a, b) => a.name.localeCompare(b.name));
+  if (nodeSort === 'latency') {
+    const key = n => (typeof n.latency === 'number' && n.latency >= 0) ? n.latency : 1e9;
+    list.sort((a, b) => key(a) - key(b));
+  }
+  return list;
+}
+
+function srcMetaHtml(s) {
+  const parts = [];
+  if (s.kind === 'sub') {
+    parts.push(`<span class="fmt-tag">${s.format}</span>`);
+    parts.push(`${s.nodes.length} nodes`);
+    parts.push(s.updating
+      ? `<span style="display:inline-flex;align-items:center;gap:4px"><span class="spin" style="display:inline-flex">${ICON.refresh.replace(/18/g,'12')}</span>updating</span>`
+      : timeAgo(s.updatedAt));
+  } else {
+    parts.push(`<span class="fmt-tag">manual</span>`);
+    parts.push(`${s.nodes.length} server${s.nodes.length === 1 ? '' : 's'}`);
+  }
+  return parts.join('<span class="dot">·</span>');
+}
+
+function usageHtml(s) {
+  if (s.kind !== 'sub') return '';
+  const u = s.usage || { used:0, total:0 };
+  const left = u.total ? `${u.used} / ${u.total} GB` : `${u.used} GB · unlimited`;
+  const right = s.expire ? `until ${fmtDate(s.expire)}` : 'no expiry';
+  const pct = u.total ? Math.min(100, u.used / u.total * 100) : 0;
+  const bar = u.total ? `<div class="usage-bar"><div class="usage-fill ${pct > 80 ? 'hi' : ''}" style="width:${pct}%"></div></div>` : '';
+  return `<div class="src-usage">${bar}<div class="usage-text" style="${u.total ? '' : 'margin-top:0'}"><span>${left}</span><span>${right}</span></div></div>`;
+}
+
+function renderSourceCard(id, q) {
+  const s = sourcesData[id];
+  let nodes = s.nodes;
+  if (q) {
+    nodes = nodes.filter(n => (n.name + ' ' + n.protocol).toLowerCase().includes(q));
+    if (!nodes.length && !s.name.toLowerCase().includes(q)) return '';
+    if (s.name.toLowerCase().includes(q) && !nodes.length) nodes = s.nodes;
+  }
+  const isOpen = q ? true : !!expandState[id];
+  const nodeRows = sortedNodes(nodes).map(n => `<div class="node-row" onclick="openNodeActions('${id}','${n.id}')">
+      <span class="node-flag">${n.flag}</span>
+      <span class="node-name">${esc(n.name)}</span>
+      <span class="node-proto">${n.protocol}</span>
+      ${latHtml(n)}
+    </div>`).join('');
+  const addRow = s.kind === 'node'
+    ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
+
+  return `<div class="src-card ${isOpen ? 'open' : ''} ${s.enabled ? '' : 'off'}">
+    <div class="src-head" onclick="toggleSourceOpen('${id}')">
+      <div class="src-main">
+        <div class="src-name">${esc(s.name)}</div>
+        <div class="src-meta">${srcMetaHtml(s)}</div>
+      </div>
+      <div title="Use this source">${miniToggleHtml(id, 'toggleSourceEnabled', s.enabled)}</div>
+      <button class="icon-btn ghost" onclick="event.stopPropagation();openSourceActions('${id}')" title="Actions">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button>
+      <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    ${usageHtml(s)}
+    <div class="src-body">${nodeRows}${addRow}</div>
+  </div>`;
+}
+
+function renderNodes() {
+  const input = document.getElementById('nodeSearch');
+  const q = input.value.trim().toLowerCase();
+  document.getElementById('nodeSearchClear').style.display = q ? '' : 'none';
+  const html = sourceOrder.map(id => renderSourceCard(id, q)).join('');
+  document.getElementById('nodes-list').innerHTML = html ||
+    (q ? `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`
+       : `<div class="nodes-empty">No subscriptions or servers yet.<br>Tap <b>+</b> to add one.</div>`);
+
+  const total = sourceOrder.reduce((sum, id) => sum + sourcesData[id].nodes.length, 0);
+  const summary = sourceOrder.length + ' source' + (sourceOrder.length === 1 ? '' : 's') + ' · ' + total + ' nodes';
+  document.getElementById('nodesSummary').textContent = summary;
+  document.getElementById('configsCardSub').textContent = summary;
+}
+
+function clearNodeSearch() {
+  document.getElementById('nodeSearch').value = '';
+  renderNodes();
+}
+
+function toggleSourceOpen(id) {
+  expandState[id] = !expandState[id];
+  renderNodes();
+}
+
+function setAllOpen(open) {
+  sourceOrder.forEach(id => expandState[id] = open);
+  renderNodes();
+  closeSheet('nodesmore');
+}
+
+function toggleSourceEnabled(id) {
+  sourcesData[id].enabled = !sourcesData[id].enabled;
+  renderAll();
+}
+
+function renderAll() {
+  renderNodes();
   renderConnects();
   updateMainConnectCard();
-  closeSheet('addnode');
 }
 
-function removeNode(sourceId, nodeId) {
-  const s = sourcesData[sourceId];
-  s.nodes = s.nodes.filter(n => n.id !== nodeId);
-  s.count = s.nodes.length;
-  renderConfigs();
-  renderConnects();
-  updateMainConnectCard();
+/* ── Latency ── */
+
+function testLatency(pairs) {
+  pairs.forEach(([sid, nid]) => {
+    const n = sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid);
+    if (n) n.latency = 'testing';
+  });
+  renderNodes();
+  pairs.forEach(([sid, nid]) => {
+    setTimeout(() => {
+      const n = sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid);
+      if (!n) return;
+      n.latency = randLatency();
+      renderNodes();
+    }, 300 + Math.random() * 1400);
+  });
+}
+function testSourceLatency(sid) {
+  const s = sourcesData[sid];
+  expandState[sid] = true;
+  testLatency(s.nodes.map(n => [sid, n.id]));
+}
+function testAllLatency() {
+  const pairs = [];
+  sourceOrder.forEach(sid => {
+    if (sourcesData[sid].enabled) sourcesData[sid].nodes.forEach(n => pairs.push([sid, n.id]));
+  });
+  testLatency(pairs);
+  closeSheet('nodesmore');
 }
 
-function refreshSource(id) {
-  sourcesData[id].meta = 'just refreshed';
-  renderConfigs();
+/* ── Update subscriptions ── */
+
+function updateSource(sid) {
+  const s = sourcesData[sid];
+  if (s.kind !== 'sub' || s.updating) return;
+  s.updating = true;
+  renderNodes();
+  setTimeout(() => {
+    s.updating = false;
+    s.updatedAt = Date.now();
+    renderNodes();
+    if (s.testAfterUpdate) testSourceLatency(sid);
+  }, 900 + Math.random() * 600);
+}
+function updateAllSources() {
+  sourceOrder.forEach(sid => { if (sourcesData[sid].enabled) updateSource(sid); });
+  closeSheet('nodesmore');
 }
 
-function removeSource(id) {
+/* ── Menus ── */
+
+function menuRow(icon, label, onclick, extraCls) {
+  return `<div class="menu-row ${extraCls || ''}" onclick="${onclick}">${icon}<div class="menu-label">${label}</div></div>`;
+}
+
+function openNodesMore() {
+  const sortChip = (key, label) => `<div class="chip ${nodeSort === key ? 'active' : ''}" onclick="setNodeSort('${key}')">${label}</div>`;
+  const anyOpen = sourceOrder.some(id => expandState[id]);
+  document.getElementById('nodesmore-body').innerHTML =
+    menuRow(ICON.refresh, 'Update all subscriptions', 'updateAllSources()') +
+    menuRow(ICON.bolt, 'Test latency of all nodes', 'testAllLatency()') +
+    (anyOpen ? menuRow(ICON.collapse, 'Collapse all', 'setAllOpen(false)')
+             : menuRow(ICON.expand, 'Expand all', 'setAllOpen(true)')) +
+    `<div class="menu-caption">Sort nodes</div>
+     <div class="chip-row" style="padding:0 20px 6px">${sortChip('order','As in source')}${sortChip('latency','By latency')}${sortChip('name','By name')}</div>`;
+  openSheet('nodesmore');
+}
+
+function setNodeSort(key) {
+  nodeSort = key;
+  renderNodes();
+  openNodesMore();
+}
+
+function openActions(title, rowsHtml) {
+  document.getElementById('actionsTitle').textContent = title;
+  document.getElementById('actions-body').innerHTML = rowsHtml;
+  openSheet('actions');
+}
+
+function openSourceActions(sid) {
+  const s = sourcesData[sid];
+  const close = "closeSheet('actions');";
+  let rows = '';
+  if (s.kind === 'sub') rows += menuRow(ICON.refresh, 'Update now', close + `updateSource('${sid}')`);
+  rows += menuRow(ICON.bolt, 'Test latency', close + `testSourceLatency('${sid}')`);
+  rows += menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`);
+  if (s.kind === 'sub') {
+    rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
+    rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
+    if (s.website) rows += menuRow(ICON.web, 'Open website', close + `toast('Opens ${esc(s.website)}')`);
+  }
+  rows += menuRow(ICON.trash, 'Delete', close + `deleteSource('${sid}')`, 'danger');
+  openActions(s.name, rows);
+}
+
+function openNodeActions(sid, nid) {
+  const s = sourcesData[sid];
+  const n = s.nodes.find(x => x.id === nid);
+  const close = "closeSheet('actions');";
+  let rows = menuRow(ICON.bolt, 'Test latency', close + `testLatency([['${sid}','${nid}']])`);
+  rows += menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
+  rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
+  if (s.kind === 'node') {
+    rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
+    rows += menuRow(ICON.trash, 'Delete', close + `deleteNode('${sid}','${nid}')`, 'danger');
+  }
+  openActions(n.flag + '  ' + n.name, rows);
+}
+
+/* ── Delete ── */
+
+function deleteSource(id) {
+  if (!id || !sourcesData[id]) return;
   sourceOrder = sourceOrder.filter(x => x !== id);
   delete sourcesData[id];
-  Object.values(profilesData).forEach(p => { p.sources = p.sources.filter(x => x !== id); });
-  renderConfigs();
-  renderConnects();
-  updateMainConnectCard();
+  Object.values(profilesData).forEach(p => {
+    p.sources = p.sources.filter(x => x !== id);
+    if (p.manualNodeId && p.manualNodeId.startsWith(id + '::')) p.manualNodeId = null;
+  });
+  renderAll();
+}
+
+function deleteNode(sid, nid) {
+  const s = sourcesData[sid];
+  if (!s) return;
+  s.nodes = s.nodes.filter(n => n.id !== nid);
+  s.count = s.nodes.length;
+  Object.values(profilesData).forEach(p => { if (p.manualNodeId === sid + '::' + nid) p.manualNodeId = null; });
+  renderAll();
+}
+
+/* ── Subscription / group form ── */
+
+let editingSourceId = null;
+
+function setChip(groupId, value) {
+  document.querySelectorAll('#' + groupId + ' .chip').forEach(c => c.classList.toggle('active', c.textContent === value));
+}
+function chipValue(groupId, fallback) {
+  const c = document.querySelector('#' + groupId + ' .chip.active');
+  return c ? c.textContent : fallback;
+}
+
+function toggleSrcAdvanced(force) {
+  const box = document.getElementById('sf-adv');
+  const open = force !== undefined ? force : box.style.display === 'none';
+  box.style.display = open ? '' : 'none';
+  document.getElementById('sf-adv-toggle').classList.toggle('open', open);
+}
+
+function openSrcForm(id, prefillUrl) {
+  editingSourceId = id || null;
+  const s = id ? sourcesData[id] : mkSub('draft', '', 0);
+  const isGroup = s.kind === 'node';
+  document.getElementById('sfTitle').textContent = !id ? 'Add subscription' : isGroup ? 'Rename group' : 'Edit subscription';
+  document.getElementById('sfSaveBtn').textContent = id ? 'Save' : 'Add';
+  document.getElementById('sfDeleteBtn').style.display = id ? '' : 'none';
+  document.getElementById('sf-sub-only-top').style.display = isGroup ? 'none' : '';
+  document.getElementById('sf-sub-only').style.display = isGroup ? 'none' : '';
+
+  document.getElementById('sf-url').value = prefillUrl || (id && !isGroup ? s.url : '');
+  document.getElementById('sf-name').value = id ? s.name : '';
+  if (!isGroup) {
+    document.getElementById('sf-interval').value = s.updateInterval;
+    document.getElementById('sf-reload').classList.toggle('on', !!s.reloadAfterUpdate);
+    document.getElementById('sf-testafter').classList.toggle('on', !!s.testAfterUpdate);
+    document.getElementById('sf-hwid').classList.toggle('on', !!s.hwid);
+    document.getElementById('sf-keeprules').classList.toggle('on', !!s.keepRules);
+    document.getElementById('sf-filter').value = s.filter;
+    document.getElementById('sf-password').value = s.password;
+    document.getElementById('sf-website').value = s.website;
+    setChip('sf-ua', s.userAgent);
+    setChip('sf-channel', s.channel);
+  }
+  toggleSrcAdvanced(false);
+  openSheet('srcform');
+}
+
+function saveSrcForm() {
+  const name = document.getElementById('sf-name').value.trim();
+  const fields = {
+    url: document.getElementById('sf-url').value.trim(),
+    updateInterval: parseInt(document.getElementById('sf-interval').value, 10) || 12,
+    reloadAfterUpdate: document.getElementById('sf-reload').classList.contains('on'),
+    testAfterUpdate: document.getElementById('sf-testafter').classList.contains('on'),
+    hwid: document.getElementById('sf-hwid').classList.contains('on'),
+    keepRules: document.getElementById('sf-keeprules').classList.contains('on'),
+    filter: document.getElementById('sf-filter').value.trim(),
+    password: document.getElementById('sf-password').value,
+    website: document.getElementById('sf-website').value.trim(),
+    userAgent: chipValue('sf-ua', 'Auto'),
+    channel: chipValue('sf-channel', 'Direct first'),
+  };
+
+  if (editingSourceId) {
+    const s = sourcesData[editingSourceId];
+    if (name) s.name = name;
+    if (s.kind === 'sub') Object.assign(s, fields);
+  } else {
+    if (!fields.url) { toast('Paste a subscription URL first'); return; }
+    const id = 'src' + (sourceSeq++);
+    let host = 'New subscription';
+    try { host = new URL(fields.url).hostname; } catch (e) {}
+    const s = mkSub(id, name || host, 0, fields);
+    s.nodes = [];
+    s.count = 0;
+    s.updatedAt = Date.now();
+    sourcesData[id] = s;
+    sourceOrder.push(id);
+    expandState[id] = true;
+    // Simulate the first fetch: nodes appear after the discovery request.
+    s.updating = true;
+    setTimeout(() => {
+      s.nodes = genNodes(8 + Math.floor(Math.random() * 20), 'sub');
+      s.count = s.nodes.length;
+      s.usage = { used: 0, total: 0 };
+      s.updating = false;
+      renderAll();
+    }, 1200);
+  }
+  editingSourceId = null;
+  closeSheet('srcform');
+  renderAll();
+}
+
+function pasteFromClipboard() {
+  // Mockup: pretend the clipboard held a subscription URL.
+  openSrcForm(null, 'https://sub.example.net/api/sub/LvRxk-PCg04NKVzp');
+  toast('Subscription URL found in clipboard');
+}
+
+/* ── Manual server form ── */
+
+let editingNode = { sid: null, nid: null };
+
+function manualGroups() { return sourceOrder.filter(id => sourcesData[id].kind === 'node'); }
+
+function openNodeForm(sid, nid) {
+  editingNode = { sid: sid || null, nid: nid || null };
+  const n = sid && nid ? sourcesData[sid].nodes.find(x => x.id === nid) : null;
+  document.getElementById('nfTitle').textContent = n ? 'Edit server' : 'Add server';
+  document.getElementById('nfSaveBtn').textContent = n ? 'Save' : 'Add server';
+  document.getElementById('nfDeleteBtn').style.display = n ? '' : 'none';
+  document.getElementById('nf-link').value = '';
+  document.getElementById('nf-name').value = n ? n.name : '';
+  document.getElementById('nf-addr').value = n ? n.address : '';
+  document.getElementById('nf-port').value = n ? n.port : '';
+  document.getElementById('nf-secret').value = n ? (n.secret || '') : '';
+  setChip('nf-proto', n ? n.protocol.toUpperCase().replace('VMESS','VMess') : 'VLESS');
+
+  // Group picker only when adding; existing groups + "New group".
+  const groups = manualGroups();
+  const target = sid || groups[0] || '__new';
+  document.getElementById('nf-group-wrap').style.display = n ? 'none' : '';
+  document.getElementById('nf-group').innerHTML =
+    groups.map(g => `<div class="chip ${g === target ? 'active' : ''}" data-gid="${g}" onclick="pickChip(this,'nf-group')">${esc(sourcesData[g].name)}</div>`).join('') +
+    `<div class="chip ${target === '__new' ? 'active' : ''}" data-gid="__new" onclick="pickChip(this,'nf-group')">+ New group</div>`;
+  openSheet('nodeform');
+}
+
+function parseNodeLink() {
+  const link = document.getElementById('nf-link').value.trim();
+  const m = link.match(/^(vless|vmess|trojan|ss|hy2|hysteria2|tuic|socks5?):\/\/(?:[^@]*@)?([^:/?#]+):(\d+)[^#]*(?:#(.*))?$/i);
+  if (!m) return;
+  const proto = m[1].toLowerCase().replace('hysteria2','hy2').replace(/^socks5?$/,'socks');
+  const map = { vless:'VLESS', vmess:'VMess', trojan:'Trojan', ss:'SS', hy2:'HY2', tuic:'TUIC', socks:'SOCKS' };
+  setChip('nf-proto', map[proto]);
+  document.getElementById('nf-addr').value = m[2];
+  document.getElementById('nf-port').value = m[3];
+  if (m[4]) document.getElementById('nf-name').value = decodeURIComponent(m[4]);
+}
+
+function saveNodeForm() {
+  const protocol = chipValue('nf-proto', 'VLESS').toLowerCase();
+  const address = document.getElementById('nf-addr').value.trim();
+  const port = document.getElementById('nf-port').value.trim() || '443';
+  const secret = document.getElementById('nf-secret').value.trim();
+  const name = document.getElementById('nf-name').value.trim() || address || 'Server';
+
+  if (editingNode.nid) {
+    const n = sourcesData[editingNode.sid].nodes.find(x => x.id === editingNode.nid);
+    Object.assign(n, { name, protocol, address, port, secret });
+  } else {
+    if (!address) { toast('Address is required'); return; }
+    const chip = document.querySelector('#nf-group .chip.active');
+    let gid = chip ? chip.dataset.gid : '__new';
+    if (gid === '__new') {
+      gid = 'src' + (sourceSeq++);
+      sourcesData[gid] = { id:gid, kind:'node', name:'Manual ' + (manualGroups().length + 1), enabled:true, nodes:[] };
+      sourceOrder.push(gid);
+    }
+    const g = sourcesData[gid];
+    g.nodes.push({ id:'n' + Date.now(), flag:'🌐', name, protocol, address, port, secret, latency:null });
+    g.count = g.nodes.length;
+    expandState[gid] = true;
+  }
+  closeSheet('nodeform');
+  renderAll();
+}
+
+/* ── Toast ── */
+
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+/* ── Tabs ── */
+
+function switchTab(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  document.querySelectorAll('.nav-btn[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  window.scrollTo(0, 0);
 }
 
 /* ══════════════════════ RENDER: RULES ══════════════════════ */
@@ -1310,13 +1991,6 @@ function closeSheet(name) {
   document.getElementById('sh-'+name).classList.remove('open');
 }
 
-function switchAddSourceTab(name) {
-  document.getElementById('astab-sub').classList.toggle('active', name === 'sub');
-  document.getElementById('astab-manual').classList.toggle('active', name === 'manual');
-  document.getElementById('aspane-sub').style.display = name === 'sub' ? '' : 'none';
-  document.getElementById('aspane-manual').style.display = name === 'manual' ? '' : 'none';
-}
-
 function pickChip(el, groupId) {
   document.getElementById(groupId).querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
@@ -1330,106 +2004,6 @@ function pickActionChip(el, value) {
   el.classList.add('active');
   if (value === 'direct') el.classList.add('act-direct');
   if (value === 'block') el.classList.add('act-block');
-}
-
-/* ══════════════════════ ADD / EDIT SOURCE ══════════════════════ */
-
-let editingSourceId = null;
-
-function openAddSource(editId) {
-  editingSourceId = editId || null;
-  document.getElementById('as-sub-name').value = '';
-  document.getElementById('as-sub-url').value = '';
-  document.getElementById('as-sub-interval').value = '12';
-  document.getElementById('as-sub-reload').classList.add('on');
-  document.querySelectorAll('#as-sub-ua .chip').forEach((c,i) => c.classList.toggle('active', i===0));
-  document.getElementById('as-man-name').value = '';
-  document.getElementById('as-man-addr').value = '';
-  document.getElementById('as-man-port').value = '';
-  document.getElementById('as-man-secret').value = '';
-  document.querySelectorAll('#as-man-proto .chip').forEach((c,i) => c.classList.toggle('active', i===0));
-
-  if (editingSourceId) {
-    const s = sourcesData[editingSourceId];
-    document.getElementById('addSourceTitle').textContent = 'Edit ' + (s.kind === 'sub' ? 'subscription' : 'server');
-    document.getElementById('addSourceSaveBtn').textContent = 'Save changes';
-    document.getElementById('addSourceDeleteBtn').style.display = '';
-    if (s.kind === 'sub' || s.kind === 'set') {
-      switchAddSourceTab('sub');
-      document.getElementById('as-sub-name').value = s.name;
-      document.getElementById('as-sub-url').value = s.url || '';
-      document.getElementById('as-sub-interval').value = s.updateInterval || 12;
-      document.getElementById('as-sub-reload').classList.toggle('on', !!s.reloadAfterUpdate);
-      document.querySelectorAll('#as-sub-ua .chip').forEach(c => c.classList.toggle('active', c.textContent === (s.userAgent || 'sing-box')));
-    } else {
-      switchAddSourceTab('manual');
-      document.getElementById('as-man-name').value = s.name;
-      document.getElementById('as-man-addr').value = s.address || '';
-      document.getElementById('as-man-port').value = s.port || '';
-      document.getElementById('as-man-secret').value = s.secret || '';
-      document.querySelectorAll('#as-man-proto .chip').forEach(c => c.classList.toggle('active', c.textContent === (s.protocol || 'VLESS')));
-    }
-  } else {
-    document.getElementById('addSourceTitle').textContent = 'Add subscription / server';
-    document.getElementById('addSourceSaveBtn').textContent = 'Save';
-    document.getElementById('addSourceDeleteBtn').style.display = 'none';
-    switchAddSourceTab('sub');
-  }
-  openSheet('addsource');
-}
-
-function openEditSource(id) { openAddSource(id); }
-
-function saveAddSource() {
-  const isSub = document.getElementById('astab-sub').classList.contains('active');
-  const protoChip = document.querySelector('#as-man-proto .chip.active');
-  const protocol = protoChip ? protoChip.textContent : 'VLESS';
-
-  const uaChip = document.querySelector('#as-sub-ua .chip.active');
-  const userAgent = uaChip ? uaChip.textContent : 'sing-box';
-  const updateInterval = parseInt(document.getElementById('as-sub-interval').value, 10) || 12;
-  const reloadAfterUpdate = document.getElementById('as-sub-reload').classList.contains('on');
-
-  if (editingSourceId) {
-    const s = sourcesData[editingSourceId];
-    if (isSub) {
-      if (s.kind !== 'sub' && s.kind !== 'set') s.kind = 'sub';
-      s.name = document.getElementById('as-sub-name').value.trim() || s.name;
-      s.url = document.getElementById('as-sub-url').value.trim();
-      s.userAgent = userAgent;
-      s.updateInterval = updateInterval;
-      s.reloadAfterUpdate = reloadAfterUpdate;
-    } else {
-      s.kind = 'node';
-      s.name = document.getElementById('as-man-name').value.trim() || s.name;
-      s.protocol = protocol;
-      s.address = document.getElementById('as-man-addr').value.trim();
-      s.port = document.getElementById('as-man-port').value.trim();
-      s.secret = document.getElementById('as-man-secret').value.trim();
-    }
-  } else {
-    const id = 'src' + (sourceSeq++);
-    if (isSub) {
-      const name = document.getElementById('as-sub-name').value.trim() || 'New subscription';
-      const count = Math.floor(10 + Math.random()*40);
-      sourcesData[id] = { id, kind:'sub', name, url: document.getElementById('as-sub-url').value.trim(), count, meta:'just added', nodes:genNodes(count,'sub'), userAgent, updateInterval, reloadAfterUpdate };
-    } else {
-      const name = document.getElementById('as-man-name').value.trim() || 'New server';
-      sourcesData[id] = { id, kind:'node', name, protocol, address: document.getElementById('as-man-addr').value.trim(), port: document.getElementById('as-man-port').value.trim(), secret: document.getElementById('as-man-secret').value.trim(), count: 1, meta:'manual entry', nodes:genNodes(1,'node') };
-    }
-    sourceOrder.push(id);
-  }
-  editingSourceId = null;
-  renderConfigs();
-  renderConnects();
-  closeSheet('addsource');
-}
-
-function deleteEditingSource() {
-  if (!editingSourceId) return;
-  removeSource(editingSourceId);
-  editingSourceId = null;
-  closeSheet('addsource');
 }
 
 /* ══════════════════════ CREATE / EDIT PROFILE ══════════════════════ */
@@ -1729,12 +2303,39 @@ function makeDraggable(name) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
 }
-['profiles','allconfigs','connections','rules','addsource','createprofile','createchain','copyprofile','addrule','pickmanualnode','addnode'].forEach(makeDraggable);
+['profiles','connections','rules','createprofile','createchain','copyprofile','addrule','pickmanualnode','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
+
+/* ══════════════════════ THEMES ══════════════════════ */
+
+const THEMES = [
+  { id:'original', name:'Original', sub:'Navy, blue accent',         swatch:['#0B0F1A','#1A2035','#4F8EFF','#00C896'] },
+  { id:'karing',   name:'Karing',   sub:'Neutral grey, blue accent', swatch:['#151515','#212121','#4F8EFF','#2FBF6A'] },
+  { id:'github',  name:'GitHub',  sub:'GitHub Dark palette',       swatch:['#0D1117','#161B22','#2F81F7','#3FB950'] },
+];
+let currentTheme = 'original';
+try { currentTheme = localStorage.getItem('jmg-theme') || 'original'; } catch (e) {}
+
+function applyTheme(id) {
+  currentTheme = THEMES.some(t => t.id === id) ? id : 'original';
+  document.documentElement.setAttribute('data-theme', currentTheme);
+  try { localStorage.setItem('jmg-theme', currentTheme); } catch (e) {}
+  renderThemeList();
+}
+
+function renderThemeList() {
+  document.getElementById('theme-list').innerHTML = THEMES.map(t => `<div class="settings-row" onclick="applyTheme('${t.id}')">
+      <div class="theme-swatch">${t.swatch.map(c => `<span style="background:${c}"></span>`).join('')}</div>
+      <div style="flex:1"><div class="settings-label">${t.name}</div><div class="settings-sub">${t.sub}</div></div>
+      <div class="profile-radio ${t.id === currentTheme ? 'active' : ''}"></div>
+    </div>`).join('');
+}
 
 /* ══════════════════════ INITIAL RENDER ══════════════════════ */
 
+applyTheme(currentTheme);
+
 renderConnects();
-renderConfigs();
+renderNodes();
 renderRules();
 updateMainConnectCard();
 </script>
