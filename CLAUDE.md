@@ -42,8 +42,10 @@ chain-edit, addmenu,
 srcform, nodeform, actions, more. Add a preset in `check.mjs` rather than writing
 one-off Playwright scripts; add a check there for each new interaction.
 
-Commit both `design/src` changes and the rebuilt `design/main_screen.html`, then
-send the user `design/main_screen.html` (render) so they can see it.
+Commit both `design/src` changes and the rebuilt `design/main_screen.html` and push:
+the push redeploys the site (see Deploy), which is how the user views the mockup.
+Check the "Deploy mockup" workflow run succeeded, then tell the user it is live.
+Do not send `main_screen.html` as a file unless asked.
 
 ## Deploy (Cloudflare Worker)
 
