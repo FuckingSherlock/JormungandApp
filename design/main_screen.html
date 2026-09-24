@@ -75,6 +75,9 @@
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 input, textarea{user-select:text;-webkit-user-select:text}
+html, body, *{scrollbar-width:none;-ms-overflow-style:none}
+*::-webkit-scrollbar{display:none;width:0;height:0}
+html, body{overflow-x:hidden}
 
 body {
   background:var(--bg);
@@ -396,11 +399,13 @@ body {
 .search input::placeholder{color:var(--t3)}
 .search input:focus{outline:none}
 
-.src-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
-.src-head{display:flex;align-items:center;gap:12px;padding:12px 8px 12px 14px;cursor:pointer}
+.src-card{flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.src-head{display:flex;align-items:center;gap:4px;padding:10px 6px 10px 4px;cursor:pointer}
+.src-head .src-main{margin-right:4px}
+.src-head .mini-toggle{margin:0 4px}
 .src-main{flex:1;min-width:0}
-.src-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.src-meta{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap}
+.src-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+.src-meta{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;margin-top:3px;white-space:nowrap;overflow:hidden}
 .src-meta .dot{color:var(--t3)}
 .fmt-tag{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.06);color:var(--t2)}
 .src-chevron{transition:transform .2s;color:var(--t3)}
@@ -409,7 +414,7 @@ body {
 .spin{animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.src-usage{padding:0 14px 12px}
+.src-usage{padding:0 14px 12px 30px}
 .usage-bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}
 .usage-fill{height:100%;background:var(--accent);border-radius:2px}
 .usage-fill.hi{background:var(--warn)}
@@ -423,7 +428,7 @@ body {
 .node-flag{font-size:16px;width:20px;text-align:center;flex-shrink:0}
 .node-name{flex:1;min-width:0;font-size:14px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .node-proto{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
-.lat{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;min-width:60px;text-align:right;flex-shrink:0}
+.lat{cursor:pointer;padding:4px 0;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;min-width:60px;text-align:right;flex-shrink:0}
 .lat.good{color:var(--active)}
 .lat.mid{color:var(--warn)}
 .lat.bad{color:var(--muted)}
@@ -1512,9 +1517,7 @@ function srcMetaHtml(s) {
   if (s.kind === 'sub') {
     parts.push(`<span class="fmt-tag">${s.format}</span>`);
     parts.push(`${s.nodes.length} nodes`);
-    parts.push(s.updating
-      ? `<span style="display:inline-flex;align-items:center;gap:4px"><span class="spin" style="display:inline-flex">${ICON.refresh.replace(/18/g,'12')}</span>updating</span>`
-      : timeAgo(s.updatedAt));
+    parts.push(timeAgo(s.updatedAt));
   } else {
     parts.push(`<span class="fmt-tag">manual</span>`);
     parts.push(`${s.nodes.length} server${s.nodes.length === 1 ? '' : 's'}`);
@@ -1545,22 +1548,30 @@ function renderSourceCard(id, q) {
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
-      ${latHtml(n)}
+      <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`).join('');
   const addRow = s.kind === 'node'
     ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
 
-  return `<div class="src-card ${isOpen ? 'open' : ''} ${s.enabled ? '' : 'off'}">
+  const grip = q ? '' : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
+      </div>`;
+  const updateBtn = s.kind === 'sub'
+    ? `<button class="icon-btn ghost" onclick="event.stopPropagation();updateSource('${id}')" title="Update"><span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : '';
+
+  return `<div class="src-card ${isOpen ? 'open' : ''} ${s.enabled ? '' : 'off'}" data-id="${id}">
     <div class="src-head" onclick="toggleSourceOpen('${id}')">
+      ${grip}
       <div class="src-main">
-        <div class="src-name">${esc(s.name)}</div>
+        <div class="src-name">${esc(s.name)}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
         <div class="src-meta">${srcMetaHtml(s)}</div>
       </div>
+      ${updateBtn}
+      <button class="icon-btn ghost" onclick="event.stopPropagation();testSourceLatency('${id}')" title="Test latency">${ICON.bolt}</button>
       <div title="Use this source">${miniToggleHtml(id, 'toggleSourceEnabled', s.enabled)}</div>
-      <button class="icon-btn ghost" onclick="event.stopPropagation();openSourceActions('${id}')" title="Actions">
+      <button class="icon-btn ghost" onclick="event.stopPropagation();openSourceActions('${id}')" title="More">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
-      <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     ${usageHtml(s)}
     <div class="src-body">${nodeRows}${addRow}</div>
@@ -1670,7 +1681,6 @@ function openNodesMore() {
   const anyOpen = sourceOrder.some(id => expandState[id]);
   document.getElementById('nodesmore-body').innerHTML =
     menuRow(ICON.refresh, 'Update all subscriptions', 'updateAllSources()') +
-    menuRow(ICON.bolt, 'Test latency of all nodes', 'testAllLatency()') +
     (anyOpen ? menuRow(ICON.collapse, 'Collapse all', 'setAllOpen(false)')
              : menuRow(ICON.expand, 'Expand all', 'setAllOpen(true)')) +
     `<div class="menu-caption">Sort nodes</div>
@@ -1693,10 +1703,7 @@ function openActions(title, rowsHtml) {
 function openSourceActions(sid) {
   const s = sourcesData[sid];
   const close = "closeSheet('actions');";
-  let rows = '';
-  if (s.kind === 'sub') rows += menuRow(ICON.refresh, 'Update now', close + `updateSource('${sid}')`);
-  rows += menuRow(ICON.bolt, 'Test latency', close + `testSourceLatency('${sid}')`);
-  rows += menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`);
+  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`);
   if (s.kind === 'sub') {
     rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
     rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
@@ -1710,8 +1717,7 @@ function openNodeActions(sid, nid) {
   const s = sourcesData[sid];
   const n = s.nodes.find(x => x.id === nid);
   const close = "closeSheet('actions');";
-  let rows = menuRow(ICON.bolt, 'Test latency', close + `testLatency([['${sid}','${nid}']])`);
-  rows += menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
+  let rows = menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
   rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
   if (s.kind === 'node') {
     rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
@@ -2218,21 +2224,30 @@ function saveAddRule() {
 
 let dragCtx = null;
 
-function startConnectDrag(e, id) {
+function startRowDrag(e, rowEl, itemSelector, order, render) {
   e.preventDefault();
-  const rowEl = document.querySelector('#connects-list .profile-item[data-id="'+id+'"]');
+  e.stopPropagation();
   if (!rowEl) return;
-  const container = rowEl.parentElement;
-  const items = Array.from(container.querySelectorAll(':scope > .profile-item'));
+  const items = Array.from(rowEl.parentElement.querySelectorAll(':scope > ' + itemSelector));
   const rects = items.map(el => el.getBoundingClientRect());
   dragCtx = {
-    id, rowEl, items, rects,
+    id: rowEl.dataset.id, rowEl, items, rects, order, render,
     startY: e.clientY,
     origIndex: items.indexOf(rowEl),
   };
   rowEl.classList.add('dragging-row');
   rowEl.style.position = 'relative';
   rowEl.style.zIndex = '5';
+}
+
+function startConnectDrag(e, id) {
+  const rowEl = document.querySelector('#connects-list .profile-item[data-id="'+id+'"]');
+  startRowDrag(e, rowEl, '.profile-item', () => connectOrder, renderConnects);
+}
+
+function startSourceDrag(e, id) {
+  const rowEl = document.querySelector('#nodes-list .src-card[data-id="'+id+'"]');
+  startRowDrag(e, rowEl, '.src-card', () => sourceOrder, () => { renderNodes(); renderConnects(); });
 }
 
 function onRowDragMove(e) {
@@ -2260,13 +2275,15 @@ function onRowDragEnd(e) {
   dragCtx.rowEl.style.zIndex = '';
   dragCtx.rowEl.classList.remove('dragging-row');
 
-  const curIndex = connectOrder.indexOf(dragCtx.id);
+  const order = dragCtx.order();
+  const curIndex = order.indexOf(dragCtx.id);
   if (targetIndex !== curIndex) {
-    connectOrder.splice(curIndex, 1);
-    connectOrder.splice(targetIndex, 0, dragCtx.id);
+    order.splice(curIndex, 1);
+    order.splice(targetIndex, 0, dragCtx.id);
   }
+  const render = dragCtx.render;
   dragCtx = null;
-  renderConnects();
+  render();
 }
 window.addEventListener('pointermove', onRowDragMove);
 window.addEventListener('pointerup', onRowDragEnd);
