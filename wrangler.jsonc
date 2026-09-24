@@ -1,0 +1,8 @@
+// Cloudflare Worker that serves the design mockup as static assets (no worker code).
+// `npm run deploy` builds design/main_screen.html, stages it as design/.deploy/index.html
+// and uploads that folder. CI does the same on every push (.github/workflows/deploy.yml).
+{
+  "name": "jormungand-design",
+  "compatibility_date": "2026-09-01",
+  "assets": { "directory": "./design/.deploy" }
+}

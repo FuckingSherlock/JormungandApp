@@ -6,6 +6,8 @@
     "build": "node design/tools/build.mjs",
     "check": "node design/tools/build.mjs --check && node design/tools/check.mjs",
     "shot": "node design/tools/check.mjs shot",
-    "geometry": "node design/tools/geometry.mjs"
+    "geometry": "node design/tools/geometry.mjs",
+    "stage": "node design/tools/build.mjs && node design/tools/stage.mjs",
+    "deploy": "npm run -s stage && npx -y wrangler@4 deploy"
   }
 }

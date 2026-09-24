@@ -45,6 +45,16 @@ one-off Playwright scripts; add a check there for each new interaction.
 Commit both `design/src` changes and the rebuilt `design/main_screen.html`, then
 send the user `design/main_screen.html` (render) so they can see it.
 
+## Deploy (Cloudflare Worker)
+
+The mockup is served by the Worker `jormungand-design` (static assets only,
+config in `wrangler.jsonc`). Every push touching `design/` deploys it via
+`.github/workflows/deploy.yml`; CI fails if `main_screen.html` was not rebuilt.
+The workflow needs repo secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare
+Workers") and `CLOUDFLARE_ACCOUNT_ID`. Manual deploy: `npm run deploy` (runs
+wrangler 4 via npx; log in once with `npx wrangler login` or set the same env vars).
+URL: `https://jormungand-design.<account-subdomain>.workers.dev`.
+
 ## Design rules
 
 - Colours only via CSS variables from `css/00-themes.css`; three themes

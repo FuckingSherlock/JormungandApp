@@ -1,2 +1,4 @@
 design/.shots/
 node_modules/
+design/.deploy/
+.wrangler/
