@@ -1,0 +1,148 @@
+  <!-- ══════════ VIEW: HOME ══════════ -->
+  <div class="view active" id="view-home">
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <span class="app-name">Jormungand</span>
+    <div class="conn-badge" id="mainToggle" onclick="toggleMain()">
+      <div class="conn-dot"></div>
+      <span id="connLabel">Connected</span>
+    </div>
+  </div>
+
+  <!-- Main scroll -->
+  <div class="scroll">
+
+    <!-- ROW 1: Speed | (IP over Connections) -->
+    <div class="row1">
+      <div class="card stat-card">
+        <div class="card-label">Speed</div>
+        <div class="stat-row"><span class="stat-arrow down">↓</span><span class="stat-val">48.3</span><span class="stat-unit">MB/s</span></div>
+        <div class="stat-row" style="margin-top:2px"><span class="stat-arrow up">↑</span><span class="stat-val">6.1</span><span class="stat-unit">MB/s</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat-total-label">Traffic (session)</div>
+        <div class="stat-total-row"><span>↓ down</span><span class="v">1.84 GB</span></div>
+        <div class="stat-total-row"><span>↑ up</span><span class="v">312 MB</span></div>
+      </div>
+
+      <div class="row1-right">
+        <div class="card stat-card-half">
+          <div class="card-label">Exit IP</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:18px">🇩🇪</span>
+            <div>
+              <div class="ip-addr" style="font-size:14px">91.108.4.12</div>
+              <div class="ip-loc" style="margin-top:1px">Frankfurt, DE</div>
+            </div>
+          </div>
+        </div>
+        <div class="card stat-card-half" onclick="openSheet('connections')">
+          <div class="card-label">Connections</div>
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span class="conn-num" style="font-size:18px">51</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent)">TCP 43</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--purple)">UDP 8</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROW 3: Segmented controls -->
+    <div class="card segments-card">
+      <div class="segment-control mode-tun" id="seg-mode">
+        <div class="segment-pill" id="pill-mode"></div>
+        <div class="segment active" id="seg-mode-tun" onclick="setSegment('mode','tun',0)">TUN</div>
+        <div class="segment" id="seg-mode-proxy" onclick="setSegment('mode','proxy',1)">Proxy</div>
+      </div>
+      <div class="segment-control" id="seg-route">
+        <div class="segment-pill" id="pill-route"></div>
+        <div class="segment" id="seg-route-global" onclick="setSegment('route','global',0)">Global</div>
+        <div class="segment active" id="seg-route-rules" onclick="setSegment('route','rules',1)">Rules</div>
+      </div>
+    </div>
+
+    <!-- ROW 4: All configs + Rules -->
+    <div class="row2">
+      <div class="card" style="padding:14px" onclick="switchTab('nodes')">
+        <div class="nav-icon slate">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
+          </svg>
+        </div>
+        <div class="nav-title">Nodes</div>
+        <div class="nav-sub" id="configsCardSub">4 sources · 70 nodes</div>
+      </div>
+      <div class="card" style="padding:14px" onclick="openSheet('rules')">
+        <div class="nav-icon amber">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linecap="round">
+            <path d="M4 6h16M4 12h16M4 18h10"/>
+          </svg>
+        </div>
+        <div class="nav-title">Rules</div>
+        <div class="nav-sub" id="rulesCardSub">3 rules · RU region</div>
+      </div>
+    </div>
+
+    <!-- ROW 5: DNS + Speed Test -->
+    <div class="row2">
+      <div class="card" style="padding:14px">
+        <div class="nav-icon teal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="nav-title">DNS</div>
+        <div class="nav-sub">1.1.1.1 · DoH</div>
+      </div>
+      <div class="card" style="padding:14px">
+        <div class="nav-icon purple">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+        </div>
+        <div class="nav-title">Speed Test</div>
+        <div class="nav-sub">Last: 312 Mbps</div>
+      </div>
+    </div>
+
+  </div><!-- /scroll -->
+
+  <!-- Connect dock: power button in a trapezoid tab + active profile -->
+  <div class="dock">
+    <button class="power-tab on" id="powerBtn" onclick="toggleMain()" aria-label="Connect / disconnect">
+      <svg class="power-shape" viewBox="0 0 200 52" preserveAspectRatio="none" aria-hidden="true">
+        <!-- shared frame: dock edge rising into the tab (all tab corners rounded alike) -->
+        <path class="frame-fill" d="{{geo.frameFill}}"/>
+        <path class="frame-line" d="{{geo.frameLine}}"/>
+        <!-- the button: three framed pieces — elongated hexagon in the middle, a wedge in each lower corner -->
+        <path class="power-body" d="{{geo.powerHex}}"/>
+        <path class="power-body" d="{{geo.powerWedgeL}}"/>
+        <path class="power-body" d="{{geo.powerWedgeR}}"/>
+      </svg>
+      <svg class="power-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+    </button>
+    <div class="dock-profile" onclick="openSheet('profiles')">
+      <div class="profiles-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+        </svg>
+      </div>
+      <div class="profiles-main">
+        <div class="profiles-top">
+          <span class="card-label" style="margin-bottom:0">Profiles</span>
+          <span class="profiles-name" id="profCardName">default</span>
+        </div>
+        <div class="profiles-sub">
+          <span class="proto-badge" id="profModeBadge">AUTO</span>
+          <span style="color:var(--t3)" id="profModeDetail">best latency · 38ms</span>
+        </div>
+      </div>
+      <div class="profiles-meta">
+        <div class="count" id="profMetaCount">74</div>
+        <div class="src" id="profMetaSrc">nodes · 3 src</div>
+      </div>
+      <svg class="dock-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+  </div>
+  </div><!-- /view-home -->
+

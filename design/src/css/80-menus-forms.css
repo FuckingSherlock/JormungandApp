@@ -1,0 +1,27 @@
+/* ── Compact action sheets (menus) ── */
+.sheet.compact{top:auto;max-height:85vh}
+.sheet.compact .sheet-body{padding:6px 0 18px}
+.menu-row{display:flex;align-items:center;gap:14px;padding:13px 20px;cursor:pointer;transition:background .12s;color:var(--t1)}
+.menu-row:active{background:rgba(255,255,255,.04)}
+.menu-row svg{flex-shrink:0;color:var(--t2)}
+.menu-label{flex:1;font-size:15px;font-weight:500}
+.menu-sub{font-size:13px;color:var(--t2);margin-top:1px;font-weight:400}
+.menu-row.danger,.menu-row.danger svg{color:var(--muted)}
+.menu-caption{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;padding:10px 20px 6px}
+
+/* ── Settings-style groups inside forms ── */
+.set-group{margin:6px 18px 12px;background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.set-row{display:flex;align-items:center;gap:12px;padding:11px 14px;min-height:46px}
+.set-row + .set-row{border-top:1px solid var(--border)}
+.set-label{flex:1;font-size:15px;color:var(--t1)}
+.set-hint{font-size:12px;color:var(--t2);margin-top:2px}
+.set-input{width:44%;background:none;border:none;text-align:right;color:var(--t1);font:inherit;font-size:15px}
+.set-input::placeholder{color:var(--t3)}
+.set-input:focus{outline:none}
+.set-row .chip-row{padding:0}
+.set-row.stack{flex-direction:column;align-items:stretch;gap:8px}
+.section-toggle{display:flex;align-items:center;gap:6px;padding:8px 18px 4px;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;cursor:pointer}
+.section-toggle svg{transition:transform .2s}
+.section-toggle.open svg{transform:rotate(90deg)}
+textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.45}
+

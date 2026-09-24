@@ -1,0 +1,207 @@
+  <!-- ══════════ NODES: ADD MENU ══════════ -->
+  <div class="overlay overlay-l2" id="ov-addmenu" onclick="closeSheet('addmenu')"></div>
+  <div class="sheet sheet-l2 compact" id="sh-addmenu">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Add</span>
+      <button class="sheet-close" onclick="closeSheet('addmenu')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="menu-row" onclick="closeSheet('addmenu');openSrcForm()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        <div class="menu-label">Subscription<div class="menu-sub">Paste a subscription URL</div></div>
+      </div>
+      <div class="menu-row" onclick="closeSheet('addmenu');pasteFromClipboard()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+        <div class="menu-label">From clipboard<div class="menu-sub">Subscription URL or vless:// / hy2:// … link</div></div>
+      </div>
+      <div class="menu-row" onclick="closeSheet('addmenu');openNodeForm()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/></svg>
+        <div class="menu-label">Manual server<div class="menu-sub">Fill in address, port and key</div></div>
+      </div>
+      <div class="menu-row" onclick="closeSheet('addmenu');toast('Camera is not available in the mockup')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>
+        <div class="menu-label">Scan QR code</div>
+      </div>
+      <div class="menu-row" onclick="closeSheet('addmenu');toast('File picker is not available in the mockup')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <div class="menu-label">Import config file<div class="menu-sub">sing-box JSON, Clash YAML</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ NODES: MORE MENU ══════════ -->
+  <div class="overlay overlay-l2" id="ov-nodesmore" onclick="closeSheet('nodesmore')"></div>
+  <div class="sheet sheet-l2 compact" id="sh-nodesmore">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Nodes</span>
+      <button class="sheet-close" onclick="closeSheet('nodesmore')">×</button>
+    </div>
+    <div class="sheet-body" id="nodesmore-body"></div>
+  </div>
+
+  <!-- ══════════ NODES: SOURCE / NODE ACTIONS (built dynamically) ══════════ -->
+  <div class="overlay overlay-l2" id="ov-actions" onclick="closeSheet('actions')"></div>
+  <div class="sheet sheet-l2 compact" id="sh-actions">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="actionsTitle"></span>
+      <button class="sheet-close" onclick="closeSheet('actions')">×</button>
+    </div>
+    <div class="sheet-body" id="actions-body"></div>
+  </div>
+
+  <!-- ══════════ NODES: SUBSCRIPTION / GROUP FORM ══════════ -->
+  <div class="overlay overlay-l2" id="ov-srcform" onclick="closeSheet('srcform')"></div>
+  <div class="sheet sheet-l2" id="sh-srcform">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="sfTitle">Add subscription</span>
+      <button class="sheet-close" onclick="closeSheet('srcform')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="sf-sub-only-top">
+        <div class="form-group">
+          <div class="form-label">Subscription URL</div>
+          <textarea class="form-input" id="sf-url" rows="3" placeholder="https://…/api/sub/…"></textarea>
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="sf-name" placeholder="Taken from the subscription if empty">
+      </div>
+
+      <div id="sf-sub-only">
+        <div class="form-label" style="padding:8px 18px 0">Updates</div>
+        <div class="set-group">
+          <div class="set-row">
+            <div class="set-label">Update every</div>
+            <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="12"><span style="color:var(--t2);font-size:15px">h</span>
+          </div>
+          <div class="set-row">
+            <div class="set-label">Reconnect after update</div>
+            <div class="mini-toggle" id="sf-reload" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+          </div>
+          <div class="set-row">
+            <div class="set-label">Test latency after update</div>
+            <div class="mini-toggle" id="sf-testafter" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+          </div>
+        </div>
+
+        <div class="section-toggle" id="sf-adv-toggle" onclick="toggleSrcAdvanced()">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Advanced
+        </div>
+        <div id="sf-adv" style="display:none">
+          <div class="set-group">
+            <div class="set-row stack">
+              <div>
+                <div class="set-label">User-Agent</div>
+                <div class="set-hint">Auto asks the server as sing-box and mihomo and merges the results</div>
+              </div>
+              <div class="chip-row" id="sf-ua">
+                <div class="chip" onclick="pickChip(this,'sf-ua')">Auto</div>
+                <div class="chip" onclick="pickChip(this,'sf-ua')">sing-box</div>
+                <div class="chip" onclick="pickChip(this,'sf-ua')">mihomo</div>
+                <div class="chip" onclick="pickChip(this,'sf-ua')">v2ray</div>
+              </div>
+            </div>
+            <div class="set-row stack">
+              <div class="set-label">Download via</div>
+              <div class="chip-row" id="sf-channel">
+                <div class="chip" onclick="pickChip(this,'sf-channel')">Direct first</div>
+                <div class="chip" onclick="pickChip(this,'sf-channel')">Proxy first</div>
+                <div class="chip" onclick="pickChip(this,'sf-channel')">Direct</div>
+                <div class="chip" onclick="pickChip(this,'sf-channel')">Proxy</div>
+              </div>
+            </div>
+            <div class="set-row">
+              <div class="set-label">Send X-HWID</div>
+              <div class="mini-toggle" id="sf-hwid" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+            </div>
+            <div class="set-row">
+              <div>
+                <div class="set-label">Keep provider rules</div>
+                <div class="set-hint">Use routing rules shipped in the subscription</div>
+              </div>
+              <div class="mini-toggle" id="sf-keeprules" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+            </div>
+            <div class="set-row">
+              <div class="set-label">Filter</div>
+              <input class="set-input" id="sf-filter" placeholder="regex, e.g. DE|NL">
+            </div>
+            <div class="set-row">
+              <div class="set-label">Decrypt password</div>
+              <input class="set-input" id="sf-password" type="password" placeholder="none">
+            </div>
+            <div class="set-row">
+              <div class="set-label">Website</div>
+              <input class="set-input" id="sf-website" placeholder="https://">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="sfSaveBtn" onclick="saveSrcForm()">Add</button>
+      <button class="btn-danger-text" id="sfDeleteBtn" style="display:none" onclick="deleteSource(editingSourceId);closeSheet('srcform')">Delete</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NODES: MANUAL SERVER FORM ══════════ -->
+  <div class="overlay overlay-l2" id="ov-nodeform" onclick="closeSheet('nodeform')"></div>
+  <div class="sheet sheet-l2" id="sh-nodeform">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="nfTitle">Add server</span>
+      <button class="sheet-close" onclick="closeSheet('nodeform')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Share link</div>
+        <input class="form-input" id="nf-link" placeholder="vless://… — fills the fields below" oninput="parseNodeLink()">
+      </div>
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="nf-name" placeholder="My server">
+      </div>
+      <div class="form-group">
+        <div class="form-label">Protocol</div>
+        <div class="chip-row" id="nf-proto" style="padding:0">
+          <div class="chip" onclick="pickChip(this,'nf-proto')">VLESS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">VMess</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">Trojan</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">SS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">HY2</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">TUIC</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto')">SOCKS</div>
+        </div>
+      </div>
+      <div class="form-group form-row2">
+        <div>
+          <div class="form-label">Address</div>
+          <input class="form-input" id="nf-addr" placeholder="1.2.3.4">
+        </div>
+        <div>
+          <div class="form-label">Port</div>
+          <input class="form-input" id="nf-port" inputmode="numeric" placeholder="443">
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">UUID / Password</div>
+        <input class="form-input" id="nf-secret" placeholder="••••••••••••">
+      </div>
+      <div class="form-group" id="nf-group-wrap">
+        <div class="form-label">Group</div>
+        <div class="chip-row" id="nf-group" style="padding:0"></div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="nfSaveBtn" onclick="saveNodeForm()">Add server</button>
+      <button class="btn-danger-text" id="nfDeleteBtn" style="display:none" onclick="deleteNode(editingNode.sid, editingNode.nid);closeSheet('nodeform')">Delete</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+

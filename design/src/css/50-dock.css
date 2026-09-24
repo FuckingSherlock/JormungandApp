@@ -1,0 +1,25 @@
+/* ── Connect dock (home) ── */
+#view-home > .scroll{padding-bottom:60px}
+.dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
+.power-tab{
+  position:absolute;left:50%;top:-50px;transform:translateX(-50%);
+  width:200px;height:52px;padding:0;border:none;background:none;cursor:pointer;
+  color:var(--t2);filter:drop-shadow(0 0 0 rgba(var(--active-rgb),0));
+  transition:color .7s ease,filter .9s ease;
+}
+.power-shape{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.frame-fill{fill:var(--surface)}
+.frame-line{fill:none;stroke:var(--border);stroke-width:1;vector-effect:non-scaling-stroke}
+.power-body{fill:var(--card);stroke:var(--border-hi);stroke-width:1.5;vector-effect:non-scaling-stroke;transition:fill .7s ease,stroke .7s ease}
+.power-icon{position:absolute;left:50%;top:14.5px;transform:translateX(-50%);transition:transform .15s}
+.power-tab:active .power-icon{transform:translateX(-50%) scale(.88)}
+.power-tab.on{color:var(--active);filter:drop-shadow(0 0 8px rgba(var(--active-rgb),.28))}
+.power-tab.on .power-body{fill:rgba(var(--active-rgb),.14);stroke:var(--active)}
+.power-tab.busy{color:var(--accent);transition-duration:.35s}
+.power-tab.busy .power-body{fill:rgba(var(--accent-rgb),.12);stroke:var(--accent);transition-duration:.35s}
+.power-tab.busy .power-icon{animation:power-pulse 1s ease-in-out infinite}
+@keyframes power-pulse{50%{opacity:.4}}
+.dock-profile{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer}
+.dock-profile:active{background:rgba(255,255,255,.02)}
+.dock-chevron{color:var(--t3);flex-shrink:0}
+

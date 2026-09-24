@@ -1,0 +1,189 @@
+  <!-- ══════════ PROFILES SHEET (profiles + chains: one unified, reorderable list) ══════════ -->
+  <div class="overlay" id="ov-profiles" onclick="closeSheet('profiles')"></div>
+  <div class="sheet" id="sh-profiles">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Profiles</span>
+      <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="connects-list"></div>
+      <div class="sheet-divider"></div>
+      <div class="sheet-action" onclick="openCreateProfile()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Create new profile
+      </div>
+      <div class="sheet-action" onclick="openCreateChain()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Create new chain
+      </div>
+      <div class="sheet-action dim" onclick="openCopyFromProfile()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        Copy from connection profile
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ LIVE CONNECTIONS SHEET ══════════ -->
+  <div class="overlay" id="ov-connections" onclick="closeSheet('connections')"></div>
+  <div class="sheet" id="sh-connections">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Live connections</span>
+      <button class="sheet-close" onclick="closeSheet('connections')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="live-conn-row">
+        <div class="live-conn-top"><span class="live-conn-host">discord.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
+        <div class="live-conn-meta">DE-FRA-01 · ↓ 128 KB/s · chrome.exe</div>
+      </div>
+      <div class="live-conn-row">
+        <div class="live-conn-top"><span class="live-conn-host">1.1.1.1:53</span><span class="live-conn-proto udp">UDP</span></div>
+        <div class="live-conn-meta">direct · DNS query · svchost.exe</div>
+      </div>
+      <div class="live-conn-row">
+        <div class="live-conn-top"><span class="live-conn-host">googlevideo.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
+        <div class="live-conn-meta">DE-FRA-01 · ↓ 3.2 MB/s · chrome.exe</div>
+      </div>
+      <div class="live-conn-row">
+        <div class="live-conn-top"><span class="live-conn-host">api.github.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
+        <div class="live-conn-meta">DE-FRA-01 · ↓ 4 KB/s · Code.exe</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ RULES SHEET ══════════ -->
+  <div class="overlay" id="ov-rules" onclick="closeSheet('rules')"></div>
+  <div class="sheet" id="sh-rules">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Rules</span>
+      <button class="sheet-close" onclick="closeSheet('rules')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="rules-list"></div>
+      <div class="sheet-divider"></div>
+      <div class="sheet-action" onclick="openAddRule()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add rule
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: CREATE / EDIT PROFILE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-createprofile" onclick="closeSheet('createprofile')"></div>
+  <div class="sheet sheet-l2" id="sh-createprofile">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="cpTitle">Create profile</span>
+      <button class="sheet-close" onclick="closeSheet('createprofile')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="cp-name" placeholder="New profile">
+      </div>
+      <div class="form-group" style="padding-bottom:0">
+        <div class="form-label">Select subscriptions &amp; servers</div>
+      </div>
+      <div id="cp-source-list"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
+      <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="deleteEditingProfile()">Delete profile</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: CREATE / EDIT CHAIN ══════════ -->
+  <div class="overlay overlay-l2" id="ov-createchain" onclick="closeSheet('createchain')"></div>
+  <div class="sheet sheet-l2" id="sh-createchain">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="ccTitle">Create chain</span>
+      <button class="sheet-close" onclick="closeSheet('createchain')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="cc-name" placeholder="New chain">
+      </div>
+      <div class="form-group" style="padding-bottom:4px">
+        <div class="form-label">Inbound profile</div>
+      </div>
+      <div id="cc-in-list"></div>
+      <div class="form-group" style="padding-bottom:4px;padding-top:6px">
+        <div class="form-label">Outbound profile</div>
+      </div>
+      <div id="cc-out-list"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
+      <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: COPY FROM CONNECTION PROFILE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-copyprofile" onclick="closeSheet('copyprofile')"></div>
+  <div class="sheet sheet-l2" id="sh-copyprofile">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Copy from profile</span>
+      <button class="sheet-close" onclick="closeSheet('copyprofile')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group" style="padding-bottom:4px">
+        <div class="form-label">Tap a profile to copy it into a new chain (same profile used as both in &amp; out)</div>
+      </div>
+      <div id="copy-source-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: PICK MANUAL NODE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-pickmanualnode" onclick="closeSheet('pickmanualnode')"></div>
+  <div class="sheet sheet-l2" id="sh-pickmanualnode">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Choose node</span>
+      <button class="sheet-close" onclick="closeSheet('pickmanualnode')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="pickmanualnode-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: ADD RULE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-addrule" onclick="closeSheet('addrule')"></div>
+  <div class="sheet sheet-l2" id="sh-addrule">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Add rule</span>
+      <button class="sheet-close" onclick="closeSheet('addrule')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Match</div>
+        <div class="chip-row" id="ar-type">
+          <div class="chip active" onclick="pickChip(this,'ar-type')">Domain</div>
+          <div class="chip" onclick="pickChip(this,'ar-type')">IP / CIDR</div>
+          <div class="chip" onclick="pickChip(this,'ar-type')">Geosite</div>
+          <div class="chip" onclick="pickChip(this,'ar-type')">Process</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Value</div>
+        <input class="form-input" id="ar-value" placeholder="*.example.com">
+      </div>
+      <div class="form-group">
+        <div class="form-label">Action</div>
+        <div class="chip-row" id="ar-action">
+          <div class="chip active" onclick="pickActionChip(this,'proxy')">Proxy</div>
+          <div class="chip" onclick="pickActionChip(this,'direct')">Direct</div>
+          <div class="chip" onclick="pickActionChip(this,'block')">Block</div>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" onclick="saveAddRule()">Add rule</button>
+    </div>
+  </div>
+

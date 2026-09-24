@@ -1,0 +1,11 @@
+{
+  "name": "jormungand",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node design/tools/build.mjs",
+    "check": "node design/tools/build.mjs --check && node design/tools/check.mjs",
+    "shot": "node design/tools/check.mjs shot",
+    "geometry": "node design/tools/geometry.mjs"
+  }
+}
