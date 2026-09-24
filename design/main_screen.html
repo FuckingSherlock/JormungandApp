@@ -1,0 +1,1742 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jormungand</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg:        #0B0F1A;
+  --surface:   #131929;
+  --card:      #1A2035;
+  --card-hi:   #1F273F;
+  --border:    #252D45;
+  --border-hi: #303A58;
+  --accent:    #4F8EFF;
+  --accent-dim:#2D5FCC;
+  --active:    #00C896;
+  --active-dim:#009E78;
+  --warn:      #F0A040;
+  --muted:     #F05060;
+  --t1:        #D4DEFF;
+  --t2:        #7B8EC8;
+  --t3:        #4A5880;
+  --sheet:     #171E30;
+  --r:         14px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+input, textarea{user-select:text;-webkit-user-select:text}
+
+body {
+  background:var(--bg);
+  font-family:'Inter',system-ui,sans-serif;
+  min-height:100vh;color:var(--t1);
+}
+
+/* ── App shell (no phone-frame chrome) ── */
+.phone {
+  width:100%;max-width:100%;background:var(--bg);
+  position:relative;
+  min-height:100vh;
+}
+
+.statusbar {
+  display:flex;justify-content:space-between;align-items:center;
+  padding:14px 28px 8px;font-size:14px;font-weight:600;color:var(--t2);
+}
+.statusbar .time{color:var(--t1);font-size:15px}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:4px 20px 12px}
+.app-name{font-size:22px;font-weight:600;color:var(--t1);letter-spacing:-.3px}
+
+.conn-badge {
+  display:flex;align-items:center;gap:6px;
+  background:rgba(0,200,150,.12);border:1px solid rgba(0,200,150,.25);
+  border-radius:20px;padding:5px 12px;
+  font-size:14px;font-weight:600;color:var(--active);cursor:pointer;
+}
+.conn-badge.off{background:rgba(240,80,96,.10);border-color:rgba(240,80,96,.22);color:var(--muted)}
+.conn-dot{width:6px;height:6px;border-radius:50%;background:var(--active)}
+.conn-badge.off .conn-dot{background:var(--muted)}
+
+/* ── Scroll ── */
+.scroll {
+  padding:0 14px 24px;
+  display:flex;flex-direction:column;gap:10px;
+}
+
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row1{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row1-right{display:flex;flex-direction:column;gap:10px}
+
+/* ── Card base ── */
+.card {
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--r);padding:14px;
+  cursor:pointer;position:relative;overflow:hidden;
+  transition:border-color .15s,background .15s;
+}
+.card:active{background:var(--card-hi)}
+
+.card-label {
+  font-size:12px;font-weight:600;letter-spacing:.8px;
+  text-transform:uppercase;color:var(--t3);margin-bottom:8px;
+}
+
+/* ── ROW 1: Speed | IP | Connections ── */
+.stat-card{padding:12px 10px;display:flex;flex-direction:column;min-height:118px}
+.stat-card-half{padding:10px 12px;flex:1;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.stat-card-half .card-label{margin-bottom:4px}
+.stat-row{display:flex;align-items:baseline;gap:4px;font-family:'JetBrains Mono',monospace}
+.stat-arrow{font-size:14px;font-weight:600}
+.stat-arrow.down{color:var(--accent)}
+.stat-arrow.up{color:var(--warn)}
+.stat-val{font-size:17px;font-weight:600;color:var(--t1)}
+.stat-unit{font-size:11px;color:var(--t2)}
+.stat-divider{height:1px;background:var(--border);margin:8px 0}
+.stat-total-label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+.stat-total-row{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--t2)}
+.stat-total-row span.v{color:var(--t1);font-weight:500}
+
+.ip-addr{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600;color:var(--t1);word-break:break-all;line-height:1.3}
+.ip-loc{font-size:12px;color:var(--t2);margin-top:4px}
+
+.conn-num{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;color:var(--t1);line-height:1}
+
+/* ── Profiles card (full width, row 2) ── */
+.profiles-card{padding:12px 14px;display:flex;align-items:center;gap:12px}
+.profiles-icon{
+  width:38px;height:38px;border-radius:10px;flex-shrink:0;
+  background:rgba(0,200,150,.13);
+  display:flex;align-items:center;justify-content:center;
+}
+.profiles-main{flex:1;min-width:0}
+.profiles-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.profiles-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.profiles-sub{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.profiles-meta{text-align:right;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.profiles-meta .count{font-size:15px;font-weight:600;color:var(--t1)}
+.profiles-meta .src{font-size:12px;color:var(--t2)}
+.proto-badge{background:rgba(79,142,255,.15);color:var(--accent);border-radius:4px;padding:1px 5px;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.latency{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--active);font-weight:600}
+
+/* ── Segmented controls (shared block, row 3) — vertical stacks ── */
+.segments-card{
+  padding:12px 14px;display:flex;flex-direction:row;gap:10px;
+  cursor:default;
+}
+.segments-card:active{background:var(--card)}
+.segment-control{
+  position:relative;display:flex;flex-direction:column;flex:1;
+  background:rgba(255,255,255,.04);border-radius:10px;
+  height:76px;padding:3px;
+}
+.segment-pill{
+  position:absolute;top:3px;left:3px;
+  width:calc(100% - 6px);height:calc(50% - 3px);
+  border-radius:8px;background:var(--accent);
+  transition:transform .28s cubic-bezier(.65,0,.35,1);
+  z-index:0;
+}
+.segment-control.mode-tun .segment-pill{background:var(--active)}
+.segment{
+  flex:1;position:relative;z-index:1;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:600;color:var(--t2);cursor:pointer;
+  transition:color .2s;
+}
+.segment.active{color:#fff}
+
+/* ── Nav cards ── */
+.nav-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:10px}
+.nav-icon.blue{background:rgba(79,142,255,.15)}
+.nav-icon.teal{background:rgba(0,200,150,.13)}
+.nav-icon.amber{background:rgba(240,160,64,.13)}
+.nav-icon.purple{background:rgba(160,100,255,.13)}
+.nav-icon.slate{background:rgba(123,142,200,.13)}
+.nav-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:2px}
+.nav-sub{font-size:13px;color:var(--t2)}
+
+/* ── Bottom nav ── */
+.bottomnav{display:flex;justify-content:space-around;align-items:center;padding:10px 0 20px;border-top:1px solid var(--border);background:var(--surface)}
+.nav-btn{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 16px;cursor:pointer;opacity:.45}
+.nav-btn.active{opacity:1}
+.nav-btn span{font-size:12px;font-weight:600;letter-spacing:.4px;color:var(--t2)}
+.nav-btn.active span{color:var(--accent)}
+
+/* ── Sheets (level 1) ── */
+.overlay{position:fixed;inset:0;background:rgba(5,8,18,.7);opacity:0;pointer-events:none;transition:opacity .25s;z-index:10}
+.overlay.open{opacity:1;pointer-events:all}
+.sheet{position:fixed;top:30px;left:0;right:0;bottom:0;background:var(--sheet);border-radius:20px 20px 0 0;border-top:1px solid var(--border-hi);transform:translateY(100%);transition:transform .32s cubic-bezier(.32,1,.4,1);z-index:11;display:flex;flex-direction:column}
+.sheet.open{transform:translateY(0)}
+.sheet.dragging{transition:none}
+.sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--border-hi);margin:10px auto 0;flex-shrink:0;touch-action:none;cursor:grab}
+.sheet-head{touch-action:none;display:flex;align-items:center;justify-content:space-between;padding:12px 18px 10px;flex-shrink:0;border-bottom:1px solid var(--border)}
+.sheet-title{font-size:17px;font-weight:600;color:var(--t1)}
+.sheet-close{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.06);border:none;color:var(--t2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.sheet-body{overflow-y:auto;padding:12px 0;scrollbar-width:none;flex:1}
+.sheet-body::-webkit-scrollbar{display:none}
+
+/* ── Sheets (level 2 — nested modals for add/create flows) ── */
+.overlay-l2{z-index:20}
+.sheet-l2{z-index:21}
+
+/* Sheet tab switcher (Connections / Chains, Subscription / Manual) */
+.sheet-tabs{display:flex;gap:6px;padding:10px 18px 4px;flex-shrink:0}
+.sheet-tab{
+  flex:1;text-align:center;padding:8px;border-radius:9px;
+  font-size:14px;font-weight:600;color:var(--t2);cursor:pointer;
+  background:rgba(255,255,255,.04);transition:background .15s,color .15s;
+}
+.sheet-tab.active{background:var(--accent);color:#fff}
+
+/* Profile / chain list items */
+.profile-item{padding:10px 18px;transition:background .12s;display:flex;gap:8px}
+.profile-item:hover{background:rgba(255,255,255,.03)}
+.profile-item-body{flex:1;min-width:0;cursor:pointer}
+.profile-item-head{display:flex;align-items:center;gap:10px}
+.profile-radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--border-hi);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s}
+.profile-radio.active{border-color:var(--accent)}
+.profile-radio.active::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.profile-item-name{font-size:15px;font-weight:600;color:var(--t1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.profile-item-count{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.profile-expand-btn{width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;transition:transform .2s,background .15s;flex-shrink:0}
+.profile-expand-btn.open{transform:rotate(90deg);background:rgba(79,142,255,.15)}
+.profile-subs{max-height:0;overflow:hidden;transition:max-height .25s ease}
+.profile-subs.open{max-height:400px}
+
+/* Priority: drag handle (reorder by dragging the left grip) */
+.drag-handle{
+  width:22px;align-self:stretch;display:flex;align-items:center;justify-content:center;
+  color:var(--t3);cursor:grab;touch-action:none;flex-shrink:0;
+}
+.drag-handle:active{cursor:grabbing;color:var(--t1)}
+.dragging-row{opacity:.45;background:rgba(255,255,255,.05);border-radius:8px}
+
+/* Sub items (checkbox rows inside expanded profile) */
+.sub-item{display:flex;align-items:center;gap:10px;padding:8px 18px 8px 46px;cursor:pointer}
+.sub-item:hover{background:rgba(255,255,255,.025)}
+.sub-checkbox{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border-hi);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,border-color .15s}
+.sub-checkbox.checked{background:var(--accent);border-color:var(--accent)}
+.sub-checkbox.checked::after{content:'✓';color:#fff;font-size:12px;font-weight:700}
+.sub-icon{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sub-icon.sub{background:rgba(79,142,255,.12)}
+.sub-icon.set{background:rgba(0,200,150,.10)}
+.sub-icon.node{background:rgba(160,100,255,.12)}
+.sub-name{font-size:14px;color:var(--t1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub-count{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+
+.sheet-divider{height:1px;background:var(--border);margin:6px 0}
+.sheet-action{display:flex;align-items:center;gap:10px;padding:11px 18px;cursor:pointer;color:var(--accent);font-size:15px;font-weight:600;transition:background .12s}
+.sheet-action:hover{background:rgba(79,142,255,.07)}
+.sheet-action.dim{color:var(--t2)}
+.sheet-action.dim:hover{background:rgba(255,255,255,.03)}
+
+/* Chain rows */
+.chain-inout{display:flex;align-items:center;gap:5px;margin-top:6px;padding-left:46px;flex-wrap:wrap}
+.chain-badge{padding:3px 8px;border-radius:6px;font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;white-space:nowrap;cursor:pointer;transition:filter .12s}
+.chain-badge:hover{filter:brightness(1.25)}
+.chain-badge.in{background:rgba(79,142,255,.15);color:var(--accent)}
+.chain-badge.out{background:rgba(0,200,150,.12);color:var(--active)}
+
+/* All-configs / rule rows */
+.config-row{display:flex;align-items:center;gap:12px;padding:11px 18px;transition:background .12s}
+.config-row:hover{background:rgba(255,255,255,.03)}
+.config-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.config-name{font-size:15px;font-weight:600;color:var(--t1)}
+.config-sub{font-size:13px;color:var(--t2)}
+.row-del{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--t3);cursor:pointer;flex-shrink:0;transition:background .12s,color .12s}
+.row-del:hover{background:rgba(240,80,96,.12);color:var(--muted)}
+
+/* Rule rows */
+.rule-action-badge{padding:3px 9px;border-radius:6px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;flex-shrink:0}
+.rule-action-badge.proxy{background:rgba(79,142,255,.15);color:var(--accent)}
+.rule-action-badge.direct{background:rgba(0,200,150,.12);color:var(--active)}
+.rule-action-badge.block{background:rgba(240,80,96,.14);color:var(--muted)}
+
+/* Live connections sheet rows */
+.live-conn-row{padding:10px 18px;border-bottom:1px solid rgba(255,255,255,.03)}
+.live-conn-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
+.live-conn-host{font-size:14px;font-weight:600;color:var(--t1);font-family:'JetBrains Mono',monospace}
+.live-conn-proto{font-size:12px;font-weight:700;padding:1px 6px;border-radius:4px}
+.live-conn-proto.tcp{background:rgba(79,142,255,.15);color:var(--accent)}
+.live-conn-proto.udp{background:rgba(160,100,255,.15);color:#A064FF}
+.live-conn-meta{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+
+/* ── Forms (add source / rule / create profile / create chain) ── */
+.form-group{padding:10px 18px}
+.form-label{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px}
+.form-input{
+  width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);
+  border-radius:10px;padding:11px 12px;font-size:15px;color:var(--t1);
+  font-family:inherit;
+}
+.form-input::placeholder{color:var(--t3)}
+.form-input:focus{outline:none;border-color:var(--accent)}
+.form-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+.chip-row{display:flex;gap:6px;flex-wrap:wrap;padding:0 18px}
+.chip{
+  padding:7px 12px;border-radius:8px;background:rgba(255,255,255,.05);
+  border:1px solid var(--border);font-size:14px;font-weight:600;
+  color:var(--t2);cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+}
+.chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip.active.act-direct{background:var(--active);border-color:var(--active)}
+.chip.active.act-block{background:var(--muted);border-color:var(--muted)}
+
+.pick-row{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;transition:background .12s}
+.pick-row:hover{background:rgba(255,255,255,.03)}
+.pick-row-name{font-size:15px;font-weight:600;color:var(--t1);flex:1}
+.pick-row-sub{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+
+.sheet-footer{padding:12px 18px 16px;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:4px}
+.btn-primary{
+  width:100%;background:var(--accent);color:#fff;border:none;border-radius:12px;
+  padding:13px;font-size:16px;font-weight:600;cursor:pointer;transition:opacity .15s;
+}
+.btn-primary:active{opacity:.8}
+.btn-danger-text{
+  width:100%;background:transparent;border:none;color:var(--muted);
+  font-size:15px;font-weight:600;padding:8px;cursor:pointer;text-align:center;
+}
+.btn-danger-text:hover{text-decoration:underline}
+
+/* ── Mini toggle (enable/disable for auto-select) ── */
+.mini-toggle{
+  width:32px;height:19px;border-radius:10px;background:var(--border-hi);
+  position:relative;cursor:pointer;flex-shrink:0;transition:background .2s;
+}
+.mini-toggle.on{background:var(--active)}
+.mini-toggle-thumb{
+  width:15px;height:15px;border-radius:50%;background:#fff;
+  position:absolute;top:2px;left:2px;transition:left .2s cubic-bezier(.34,1.56,.64,1);
+  box-shadow:0 1px 3px rgba(0,0,0,.3);
+}
+.mini-toggle.on .mini-toggle-thumb{left:15px}
+.dimmed{opacity:.45}
+</style>
+
+<div class="phone">
+
+  <!-- Status bar -->
+  <div class="statusbar">
+    <span class="time">01:07</span>
+    <div style="display:flex;gap:6px;align-items:center">
+      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
+        <rect x="0" y="4" width="3" height="8" rx="1" fill="#7B8EC8"/>
+        <rect x="4.5" y="2.5" width="3" height="9.5" rx="1" fill="#7B8EC8"/>
+        <rect x="9" y="0" width="3" height="12" rx="1" fill="#7B8EC8"/>
+        <rect x="13.5" y="0" width="2.5" height="12" rx="1" fill="#D4DEFF"/>
+      </svg>
+      <svg width="16" height="12" viewBox="0 0 24 24" fill="none">
+        <path d="M1 6s4.5-4 11-4 11 4 11 4" stroke="#7B8EC8" stroke-width="2" stroke-linecap="round"/>
+        <path d="M5 10s2.5-2.5 7-2.5S19 10 19 10" stroke="#7B8EC8" stroke-width="2" stroke-linecap="round"/>
+        <path d="M9 14s1-1 3-1 3 1 3 1" stroke="#D4DEFF" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="12" cy="18" r="1.5" fill="#D4DEFF"/>
+      </svg>
+      <span style="font-family:monospace;font-size:13px;color:#D4DEFF">100%</span>
+    </div>
+  </div>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <span class="app-name">Jormungand</span>
+    <div class="conn-badge" id="mainToggle" onclick="toggleMain()">
+      <div class="conn-dot"></div>
+      <span id="connLabel">Connected</span>
+    </div>
+  </div>
+
+  <!-- Main scroll -->
+  <div class="scroll">
+
+    <!-- ROW 1: Speed | (IP over Connections) -->
+    <div class="row1">
+      <div class="card stat-card">
+        <div class="card-label">Speed</div>
+        <div class="stat-row"><span class="stat-arrow down">↓</span><span class="stat-val">48.3</span><span class="stat-unit">MB/s</span></div>
+        <div class="stat-row" style="margin-top:2px"><span class="stat-arrow up">↑</span><span class="stat-val">6.1</span><span class="stat-unit">MB/s</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat-total-label">Traffic (session)</div>
+        <div class="stat-total-row"><span>↓ down</span><span class="v">1.84 GB</span></div>
+        <div class="stat-total-row"><span>↑ up</span><span class="v">312 MB</span></div>
+      </div>
+
+      <div class="row1-right">
+        <div class="card stat-card-half">
+          <div class="card-label">Exit IP</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:18px">🇩🇪</span>
+            <div>
+              <div class="ip-addr" style="font-size:14px">91.108.4.12</div>
+              <div class="ip-loc" style="margin-top:1px">Frankfurt, DE</div>
+            </div>
+          </div>
+        </div>
+        <div class="card stat-card-half" onclick="openSheet('connections')">
+          <div class="card-label">Connections</div>
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span class="conn-num" style="font-size:18px">51</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent)">TCP 43</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#A064FF">UDP 8</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROW 2: Profiles -->
+    <div class="card profiles-card" onclick="openSheet('profiles')">
+      <div class="profiles-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+        </svg>
+      </div>
+      <div class="profiles-main">
+        <div class="profiles-top">
+          <span class="card-label" style="margin-bottom:0">Profiles</span>
+          <span class="profiles-name" id="profCardName">default</span>
+        </div>
+        <div class="profiles-sub">
+          <span class="proto-badge" id="profModeBadge">AUTO</span>
+          <span style="color:var(--t3)" id="profModeDetail">best latency · 38ms</span>
+        </div>
+      </div>
+      <div class="profiles-meta">
+        <div class="count" id="profMetaCount">74</div>
+        <div class="src" id="profMetaSrc">nodes · 3 src</div>
+      </div>
+    </div>
+
+    <!-- ROW 3: Segmented controls -->
+    <div class="card segments-card">
+      <div class="segment-control mode-tun" id="seg-mode">
+        <div class="segment-pill" id="pill-mode"></div>
+        <div class="segment active" id="seg-mode-tun" onclick="setSegment('mode','tun',0)">TUN</div>
+        <div class="segment" id="seg-mode-proxy" onclick="setSegment('mode','proxy',1)">Proxy</div>
+      </div>
+      <div class="segment-control" id="seg-route">
+        <div class="segment-pill" id="pill-route"></div>
+        <div class="segment" id="seg-route-global" onclick="setSegment('route','global',0)">Global</div>
+        <div class="segment active" id="seg-route-rules" onclick="setSegment('route','rules',1)">Rules</div>
+      </div>
+    </div>
+
+    <!-- ROW 4: All configs + Rules -->
+    <div class="row2">
+      <div class="card" style="padding:14px" onclick="openSheet('allconfigs')">
+        <div class="nav-icon slate">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7B8EC8" stroke-width="2" stroke-linecap="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          </svg>
+        </div>
+        <div class="nav-title">All configs</div>
+        <div class="nav-sub" id="configsCardSub">3 imported · 1 manual</div>
+      </div>
+      <div class="card" style="padding:14px" onclick="openSheet('rules')">
+        <div class="nav-icon amber">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F0A040" stroke-width="2" stroke-linecap="round">
+            <path d="M4 6h16M4 12h16M4 18h10"/>
+          </svg>
+        </div>
+        <div class="nav-title">Rules</div>
+        <div class="nav-sub" id="rulesCardSub">3 rules · RU region</div>
+      </div>
+    </div>
+
+    <!-- ROW 5: DNS + Speed Test -->
+    <div class="row2">
+      <div class="card" style="padding:14px">
+        <div class="nav-icon teal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00C896" stroke-width="2" stroke-linecap="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="nav-title">DNS</div>
+        <div class="nav-sub">1.1.1.1 · DoH</div>
+      </div>
+      <div class="card" style="padding:14px">
+        <div class="nav-icon purple">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A064FF" stroke-width="2" stroke-linecap="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+        </div>
+        <div class="nav-title">Speed Test</div>
+        <div class="nav-sub">Last: 312 Mbps</div>
+      </div>
+    </div>
+
+  </div><!-- /scroll -->
+
+  <!-- Bottom nav -->
+  <div class="bottomnav">
+    <div class="nav-btn active">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke="var(--accent)">
+        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+      <span>Home</span>
+    </div>
+    <div class="nav-btn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke="var(--t3)">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
+      </svg>
+      <span>Nodes</span>
+    </div>
+    <div class="nav-btn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke="var(--t3)">
+        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+        <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+      </svg>
+      <span>Logs</span>
+    </div>
+    <div class="nav-btn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke="var(--t3)">
+        <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7"/>
+      </svg>
+      <span>Settings</span>
+    </div>
+  </div>
+
+  <!-- ══════════ PROFILES SHEET (profiles + chains: one unified, reorderable list) ══════════ -->
+  <div class="overlay" id="ov-profiles" onclick="closeSheet('profiles')"></div>
+  <div class="sheet" id="sh-profiles">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Profiles</span>
+      <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="connects-list"></div>
+      <div class="sheet-divider"></div>
+      <div class="sheet-action" onclick="openCreateProfile()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Create new profile
+      </div>
+      <div class="sheet-action" onclick="openCreateChain()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Create new chain
+      </div>
+      <div class="sheet-action dim" onclick="openCopyFromProfile()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        Copy from connection profile
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ ALL CONFIGS SHEET ══════════ -->
+  <div class="overlay" id="ov-allconfigs" onclick="closeSheet('allconfigs')"></div>
+  <div class="sheet" id="sh-allconfigs">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">All configs</span>
+      <button class="sheet-close" onclick="closeSheet('allconfigs')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="configs-list"></div>
+      <div class="sheet-divider"></div>
+      <div class="sheet-action" onclick="openAddSource()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add subscription or server
+      </div>
+      <div class="sheet-action dim">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Import config file
+      </div>
+      <div class="sheet-action dim">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Export / backup
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ LIVE CONNECTIONS SHEET ══════════ -->
+  <div class="overlay" id="ov-connections" onclick="closeSheet('connections')"></div>
+  <div class="sheet" id="sh-connections">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Live connections</span>
+      <button class="sheet-close" onclick="closeSheet('connections')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="live-conn-row">
+        <div class="live-conn-top"><span class="live-conn-host">discord.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
+        <div class="live-conn-meta">DE-FRA-01 · ↓ 128 KB/s · chrome.exe</div>
+      </div>
+      <div class="live-conn-row">
+        <div class="live-conn-top"><span class="live-conn-host">1.1.1.1:53</span><span class="live-conn-proto udp">UDP</span></div>
+        <div class="live-conn-meta">direct · DNS query · svchost.exe</div>
+      </div>
+      <div class="live-conn-row">
+        <div class="live-conn-top"><span class="live-conn-host">googlevideo.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
+        <div class="live-conn-meta">DE-FRA-01 · ↓ 3.2 MB/s · chrome.exe</div>
+      </div>
+      <div class="live-conn-row">
+        <div class="live-conn-top"><span class="live-conn-host">api.github.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
+        <div class="live-conn-meta">DE-FRA-01 · ↓ 4 KB/s · Code.exe</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ RULES SHEET ══════════ -->
+  <div class="overlay" id="ov-rules" onclick="closeSheet('rules')"></div>
+  <div class="sheet" id="sh-rules">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Rules</span>
+      <button class="sheet-close" onclick="closeSheet('rules')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="rules-list"></div>
+      <div class="sheet-divider"></div>
+      <div class="sheet-action" onclick="openAddRule()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add rule
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: ADD SOURCE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-addsource" onclick="closeSheet('addsource')"></div>
+  <div class="sheet sheet-l2" id="sh-addsource">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="addSourceTitle">Add subscription / server</span>
+      <button class="sheet-close" onclick="closeSheet('addsource')">×</button>
+    </div>
+    <div class="sheet-tabs">
+      <div class="sheet-tab active" id="astab-sub" onclick="switchAddSourceTab('sub')">Subscription</div>
+      <div class="sheet-tab" id="astab-manual" onclick="switchAddSourceTab('manual')">Manual server</div>
+    </div>
+    <div class="sheet-body">
+      <div id="aspane-sub">
+        <div class="form-group">
+          <div class="form-label">Name</div>
+          <input class="form-input" id="as-sub-name" placeholder="My new subscription">
+        </div>
+        <div class="form-group">
+          <div class="form-label">Subscription URL</div>
+          <input class="form-input" id="as-sub-url" placeholder="https://example.com/sub?token=...">
+        </div>
+        <div class="form-group">
+          <div class="form-label">User-Agent</div>
+          <div class="chip-row" id="as-sub-ua">
+            <div class="chip active" onclick="pickChip(this,'as-sub-ua')">sing-box</div>
+            <div class="chip" onclick="pickChip(this,'as-sub-ua')">mihomo</div>
+            <div class="chip" onclick="pickChip(this,'as-sub-ua')">ClashMeta</div>
+          </div>
+        </div>
+        <div class="form-group form-row2">
+          <div>
+            <div class="form-label">Update interval (h)</div>
+            <input class="form-input" id="as-sub-interval" placeholder="12">
+          </div>
+          <div style="display:flex;flex-direction:column;justify-content:flex-end">
+            <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:10px;padding:9px 12px">
+              <span style="font-size:14px;color:var(--t1)">Reload after update</span>
+              <div class="mini-toggle on" id="as-sub-reload" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="aspane-manual" style="display:none">
+        <div class="form-group">
+          <div class="form-label">Name</div>
+          <input class="form-input" id="as-man-name" placeholder="My server">
+        </div>
+        <div class="form-group">
+          <div class="form-label">Protocol</div>
+          <div class="chip-row" id="as-man-proto">
+            <div class="chip active" onclick="pickChip(this,'as-man-proto')">VLESS</div>
+            <div class="chip" onclick="pickChip(this,'as-man-proto')">VMess</div>
+            <div class="chip" onclick="pickChip(this,'as-man-proto')">Trojan</div>
+            <div class="chip" onclick="pickChip(this,'as-man-proto')">Shadowsocks</div>
+            <div class="chip" onclick="pickChip(this,'as-man-proto')">Hysteria2</div>
+            <div class="chip" onclick="pickChip(this,'as-man-proto')">SOCKS5</div>
+            <div class="chip" onclick="pickChip(this,'as-man-proto')">HTTP</div>
+          </div>
+        </div>
+        <div class="form-group form-row2">
+          <div>
+            <div class="form-label">Address</div>
+            <input class="form-input" id="as-man-addr" placeholder="1.2.3.4">
+          </div>
+          <div>
+            <div class="form-label">Port</div>
+            <input class="form-input" id="as-man-port" placeholder="443">
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="form-label">UUID / Password</div>
+          <input class="form-input" id="as-man-secret" placeholder="••••••••••••">
+        </div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="addSourceSaveBtn" onclick="saveAddSource()">Save</button>
+      <button class="btn-danger-text" id="addSourceDeleteBtn" style="display:none" onclick="deleteEditingSource()">Delete</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: CREATE / EDIT PROFILE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-createprofile" onclick="closeSheet('createprofile')"></div>
+  <div class="sheet sheet-l2" id="sh-createprofile">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="cpTitle">Create profile</span>
+      <button class="sheet-close" onclick="closeSheet('createprofile')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="cp-name" placeholder="New profile">
+      </div>
+      <div class="form-group" style="padding-bottom:0">
+        <div class="form-label">Select subscriptions &amp; servers</div>
+      </div>
+      <div id="cp-source-list"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
+      <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="deleteEditingProfile()">Delete profile</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: CREATE / EDIT CHAIN ══════════ -->
+  <div class="overlay overlay-l2" id="ov-createchain" onclick="closeSheet('createchain')"></div>
+  <div class="sheet sheet-l2" id="sh-createchain">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="ccTitle">Create chain</span>
+      <button class="sheet-close" onclick="closeSheet('createchain')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="cc-name" placeholder="New chain">
+      </div>
+      <div class="form-group" style="padding-bottom:4px">
+        <div class="form-label">Inbound profile</div>
+      </div>
+      <div id="cc-in-list"></div>
+      <div class="form-group" style="padding-bottom:4px;padding-top:6px">
+        <div class="form-label">Outbound profile</div>
+      </div>
+      <div id="cc-out-list"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
+      <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: COPY FROM CONNECTION PROFILE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-copyprofile" onclick="closeSheet('copyprofile')"></div>
+  <div class="sheet sheet-l2" id="sh-copyprofile">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Copy from profile</span>
+      <button class="sheet-close" onclick="closeSheet('copyprofile')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group" style="padding-bottom:4px">
+        <div class="form-label">Tap a profile to copy it into a new chain (same profile used as both in &amp; out)</div>
+      </div>
+      <div id="copy-source-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: PICK MANUAL NODE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-pickmanualnode" onclick="closeSheet('pickmanualnode')"></div>
+  <div class="sheet sheet-l2" id="sh-pickmanualnode">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Choose node</span>
+      <button class="sheet-close" onclick="closeSheet('pickmanualnode')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="pickmanualnode-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: ADD NODE (inside a subscription/server) ══════════ -->
+  <div class="overlay overlay-l2" id="ov-addnode" onclick="closeSheet('addnode')"></div>
+  <div class="sheet sheet-l2" id="sh-addnode">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Add node</span>
+      <button class="sheet-close" onclick="closeSheet('addnode')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="an-name" placeholder="Node name">
+      </div>
+      <div class="form-group">
+        <div class="form-label">Protocol</div>
+        <div class="chip-row" id="an-proto">
+          <div class="chip active" onclick="pickChip(this,'an-proto')">VLESS</div>
+          <div class="chip" onclick="pickChip(this,'an-proto')">VMess</div>
+          <div class="chip" onclick="pickChip(this,'an-proto')">Trojan</div>
+          <div class="chip" onclick="pickChip(this,'an-proto')">Shadowsocks</div>
+          <div class="chip" onclick="pickChip(this,'an-proto')">Hysteria2</div>
+          <div class="chip" onclick="pickChip(this,'an-proto')">SOCKS5</div>
+          <div class="chip" onclick="pickChip(this,'an-proto')">HTTP</div>
+        </div>
+      </div>
+      <div class="form-group form-row2">
+        <div>
+          <div class="form-label">Address</div>
+          <input class="form-input" id="an-addr" placeholder="1.2.3.4">
+        </div>
+        <div>
+          <div class="form-label">Port</div>
+          <input class="form-input" id="an-port" placeholder="443">
+        </div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" onclick="saveAddNode()">Add node</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: ADD RULE ══════════ -->
+  <div class="overlay overlay-l2" id="ov-addrule" onclick="closeSheet('addrule')"></div>
+  <div class="sheet sheet-l2" id="sh-addrule">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Add rule</span>
+      <button class="sheet-close" onclick="closeSheet('addrule')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Match</div>
+        <div class="chip-row" id="ar-type">
+          <div class="chip active" onclick="pickChip(this,'ar-type')">Domain</div>
+          <div class="chip" onclick="pickChip(this,'ar-type')">IP / CIDR</div>
+          <div class="chip" onclick="pickChip(this,'ar-type')">Geosite</div>
+          <div class="chip" onclick="pickChip(this,'ar-type')">Process</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Value</div>
+        <input class="form-input" id="ar-value" placeholder="*.example.com">
+      </div>
+      <div class="form-group">
+        <div class="form-label">Action</div>
+        <div class="chip-row" id="ar-action">
+          <div class="chip active" onclick="pickActionChip(this,'proxy')">Proxy</div>
+          <div class="chip" onclick="pickActionChip(this,'direct')">Direct</div>
+          <div class="chip" onclick="pickActionChip(this,'block')">Block</div>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" onclick="saveAddRule()">Add rule</button>
+    </div>
+  </div>
+
+</div><!-- /phone -->
+
+<script>
+/* ══════════════════════ DATA MODEL ══════════════════════ */
+
+function genNodes(count, kind) {
+  const flags = ['🇩🇪','🇳🇱','🇫🇷','🇬🇧','🇺🇸','🇯🇵','🇸🇬','🇨🇦'];
+  const protos = ['vless','vmess','trojan','ss','hy2'];
+  const nodes = [];
+  for (let i = 0; i < count; i++) {
+    nodes.push({
+      id: 'n' + i,
+      flag: flags[i % flags.length],
+      name: kind === 'node' ? 'Manual node' : ('Node ' + (i + 1)),
+      protocol: protos[i % protos.length],
+      warn: i % 7 === 6,
+    });
+  }
+  return nodes;
+}
+
+let sourcesData = {
+  src1: { id:'src1', kind:'sub',  name:'My Subscription',  count:47, meta:'updated 2h ago', nodes:genNodes(47,'sub'), userAgent:'sing-box', updateInterval:12, reloadAfterUpdate:true },
+  src2: { id:'src2', kind:'set',  name:'Work Servers',      count:12, meta:'updated 1d ago', nodes:genNodes(12,'set'), userAgent:'sing-box', updateInterval:24, reloadAfterUpdate:true },
+  src3: { id:'src3', kind:'node', name:'VPS Manual',        count:3,  meta:'manual entry',   nodes:genNodes(3,'node') },
+  src4: { id:'src4', kind:'sub',  name:'Gaming Low-Ping',   count:8,  meta:'updated 5h ago', nodes:genNodes(8,'sub'), userAgent:'mihomo', updateInterval:6, reloadAfterUpdate:false },
+};
+let sourceOrder = ['src1','src2','src3','src4'];
+let sourceSeq = 5;
+
+/* connectOrder is the SINGLE priority list shared by profiles and chains —
+   they live in one merged menu, so auto-selection isn't scoped to one type. */
+let connectOrder = ['default','work','gaming','cpdefault','cpgaming','cpwork'];
+let activeConnectId = 'default';
+
+let profilesData = {
+  default: { id:'default', name:'default', sources:['src1','src2','src3'], autoSelect:true,  manualNodeId:null },
+  work:    { id:'work',    name:'Work',    sources:['src2'],               autoSelect:true,  manualNodeId:null },
+  gaming:  { id:'gaming',  name:'Gaming',  sources:['src4'],               autoSelect:false, manualNodeId:'src4::n0' },
+};
+let profileSeq = 1;
+
+let chainsData = {
+  cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    enabled:true },
+  cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', enabled:true },
+  cpwork:    { id:'cpwork',    name:'Work Only',      inId:'work',    outId:'work',    enabled:true },
+};
+let chainSeq = 1;
+
+function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
+function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
+function isChain(id)     { return !!chainsData[id]; }
+
+let rulesData = {
+  r1: { id:'r1', type:'Geosite', value:'cn + geoip:cn', action:'direct', enabled:true },
+  r2: { id:'r2', type:'Domain',  value:'*.corp.local',  action:'direct', enabled:true },
+  r3: { id:'r3', type:'Process', value:'steam.exe',     action:'proxy',  enabled:true },
+};
+let ruleOrder = ['r1','r2','r3'];
+let ruleSeq = 4;
+
+function miniToggleHtml(id, onFnName, isOn) {
+  return `<div class="mini-toggle ${isOn?'on':''}" onclick="event.stopPropagation();${onFnName}('${id}')">
+    <div class="mini-toggle-thumb"></div>
+  </div>`;
+}
+
+const expandState = {};
+
+function subIcon(kind) {
+  if (kind === 'sub')  return {cls:'sub',  color:'#4F8EFF', svg:'<path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>'};
+  if (kind === 'set')  return {cls:'set',  color:'#00C896', svg:'<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>'};
+  return {cls:'node', color:'#A064FF', svg:'<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/>'};
+}
+
+function profileNodeCount(p) {
+  return p.sources.reduce((sum, sid) => {
+    const s = sourcesData[sid];
+    if (!s) return sum;
+    return sum + s.count;
+  }, 0);
+}
+
+function getProfileNodes(p) {
+  const nodes = [];
+  p.sources.forEach(sid => {
+    const s = sourcesData[sid];
+    if (!s) return;
+    s.nodes.forEach(n => nodes.push({ id: sid + '::' + n.id, label: s.name + ' · ' + n.name }));
+  });
+  return nodes;
+}
+
+function manualNodeLabel(p) {
+  if (!p.manualNodeId) return 'Not set — tap to choose';
+  const found = getProfileNodes(p).find(n => n.id === p.manualNodeId);
+  return found ? found.label : 'Not set — tap to choose';
+}
+
+/* ══════════════════════ RENDER: UNIFIED PROFILES + CHAINS LIST ══════════════════════
+   Profiles and chains are peers in the SAME list: one shared drag-priority order
+   (connectOrder) and one shared "active" radio, so auto-selection can span both
+   types instead of being scoped to just profiles or just chains. */
+
+function renderProfileRow(id, i) {
+  const p = profilesData[id];
+  const isOpen = !!expandState[id];
+  const manualRow = !p.autoSelect ? `<div class="sub-item" style="padding-left:18px" onclick="event.stopPropagation();openPickManualNode('${id}')">
+      <div style="flex:1">
+        <div style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Manual node</div>
+        <div style="font-size:14px;color:var(--t1);font-weight:600">${manualNodeLabel(p)}</div>
+      </div>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </div><div class="sheet-divider" style="margin:4px 18px"></div>` : '';
+  const subsHtml = manualRow + sourceOrder.map(sid => {
+    const s = sourcesData[sid];
+    const icon = subIcon(s.kind);
+    const checked = p.sources.includes(sid);
+    return `<div class="sub-item">
+      <div class="sub-checkbox ${checked ? 'checked' : ''}" onclick="event.stopPropagation();toggleProfileSource('${id}','${sid}')"></div>
+      <div class="sub-icon ${icon.cls}" onclick="event.stopPropagation();toggleProfileSource('${id}','${sid}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${icon.color}" stroke-width="2.5" stroke-linecap="round">${icon.svg}</svg></div>
+      <span class="sub-name" onclick="event.stopPropagation();toggleProfileSource('${id}','${sid}')">${s.name}</span>
+      <span class="sub-count">${s.count} nodes</span>
+    </div>`;
+  }).join('') + `<div class="sub-item" style="padding-left:46px;padding-top:4px;padding-bottom:4px" onclick="event.stopPropagation();openAddSource()">
+      <div style="font-size:13px;color:var(--accent);cursor:pointer">+ Add subscription or server</div>
+    </div>`;
+
+  return `<div class="profile-item" data-id="${id}">
+    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to reorder">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
+    </div>
+    <div class="profile-item-body">
+      <div class="profile-item-head" onclick="selectConnect('${id}')">
+        <div class="profile-radio ${id===activeConnectId?'active':''}"></div>
+        <span class="profile-item-name">${p.name}</span>
+        ${!p.autoSelect ? '<span style="font-size:11px;color:var(--warn);font-weight:700">MANUAL</span>' : ''}
+        <span class="profile-item-count">${profileNodeCount(p)} nodes</span>
+        <div class="profile-expand-btn" onclick="event.stopPropagation();openEditProfile('${id}')" title="Edit">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <div title="Auto-select best node">${miniToggleHtml(id, 'toggleProfileAuto', p.autoSelect)}</div>
+        <div class="profile-expand-btn ${isOpen?'open':''}" onclick="event.stopPropagation();toggleExpand('${id}')">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+      <div class="profile-subs ${isOpen?'open':''}" id="subs-${id}">${subsHtml}</div>
+    </div>
+  </div>` + (i < connectOrder.length-1 ? '<div class="sheet-divider"></div>' : '');
+}
+
+function renderChainRow(id, i) {
+  const c = chainsData[id];
+  const isOpen = !!expandState[id];
+  const inName = profilesData[c.inId] ? profilesData[c.inId].name : '—';
+  const outName = profilesData[c.outId] ? profilesData[c.outId].name : '—';
+  return `<div class="profile-item" data-id="${id}">
+    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to reorder">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
+    </div>
+    <div class="profile-item-body">
+      <div class="profile-item-head" onclick="selectConnect('${id}')">
+        <div class="profile-radio ${id===activeConnectId?'active':''}"></div>
+        <span class="profile-item-name ${!c.enabled?'dimmed':''}">${c.name}</span>
+        <span style="font-size:11px;color:var(--accent);font-weight:700;background:rgba(79,142,255,.15);padding:1px 5px;border-radius:4px">CHAIN</span>
+        <div class="profile-expand-btn" onclick="event.stopPropagation();openEditChain('${id}')" title="Edit">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <div title="Eligible for auto-select">${miniToggleHtml(id, 'toggleChainEnabled', c.enabled)}</div>
+        <div class="profile-expand-btn ${isOpen?'open':''}" onclick="event.stopPropagation();toggleExpand('${id}')">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+      <div class="profile-subs ${isOpen?'open':''}">
+        <div class="chain-inout">
+          <span style="font-size:12px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">IN</span>
+          <span class="chain-badge in" onclick="event.stopPropagation();cycleChainSide('${id}','in')">${inName}</span>
+          <span style="color:var(--t3);font-size:14px">→</span>
+          <span style="font-size:12px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">OUT</span>
+          <span class="chain-badge out" onclick="event.stopPropagation();cycleChainSide('${id}','out')">${outName}</span>
+        </div>
+        <div class="sub-item" style="padding-left:46px;padding-top:6px;padding-bottom:4px">
+          <div style="font-size:13px;color:var(--t2)">Tap badges to cycle profiles</div>
+        </div>
+      </div>
+    </div>
+  </div>` + (i < connectOrder.length-1 ? '<div class="sheet-divider"></div>' : '');
+}
+
+function renderConnects() {
+  const el = document.getElementById('connects-list');
+  el.innerHTML = connectOrder.map((id, i) => isChain(id) ? renderChainRow(id, i) : renderProfileRow(id, i)).join('');
+}
+
+function toggleExpand(id) {
+  expandState[id] = !expandState[id];
+  renderConnects();
+  renderConfigs();
+}
+
+function toggleProfileSource(pid, sid) {
+  const p = profilesData[pid];
+  const idx = p.sources.indexOf(sid);
+  if (idx === -1) p.sources.push(sid); else p.sources.splice(idx, 1);
+  expandState[pid] = true;
+  renderConnects();
+  if (pid === activeConnectId) updateMainConnectCard();
+}
+
+function selectConnect(id) {
+  activeConnectId = id;
+  updateMainConnectCard();
+  renderConnects();
+  closeSheet('profiles');
+}
+
+function toggleProfileAuto(id) {
+  const p = profilesData[id];
+  p.autoSelect = !p.autoSelect;
+  if (!p.autoSelect && !p.manualNodeId) {
+    const nodes = getProfileNodes(p);
+    p.manualNodeId = nodes.length ? nodes[0].id : null;
+  }
+  renderConnects();
+  if (id === activeConnectId) updateMainConnectCard();
+}
+
+let pickManualProfileId = null;
+function openPickManualNode(pid) {
+  pickManualProfileId = pid;
+  const p = profilesData[pid];
+  const nodes = getProfileNodes(p);
+  const el = document.getElementById('pickmanualnode-list');
+  el.innerHTML = nodes.length ? nodes.map(n => `<div class="pick-row" onclick="chooseManualNode('${n.id}')">
+      <div class="profile-radio ${p.manualNodeId===n.id?'active':''}"></div>
+      <span class="pick-row-name">${n.label}</span>
+    </div>`).join('') : `<div class="form-group"><div style="font-size:14px;color:var(--t2)">No enabled subscriptions or servers in this profile yet.</div></div>`;
+  openSheet('pickmanualnode');
+}
+function chooseManualNode(nodeId) {
+  if (!pickManualProfileId) return;
+  profilesData[pickManualProfileId].manualNodeId = nodeId;
+  renderConnects();
+  if (pickManualProfileId === activeConnectId) updateMainConnectCard();
+  closeSheet('pickmanualnode');
+}
+
+function toggleChainEnabled(id) {
+  chainsData[id].enabled = !chainsData[id].enabled;
+  renderConnects();
+}
+
+function toggleRuleEnabled(id) {
+  rulesData[id].enabled = !rulesData[id].enabled;
+  renderRules();
+}
+
+function updateMainConnectCard() {
+  const badge = document.getElementById('profModeBadge');
+  const detail = document.getElementById('profModeDetail');
+
+  if (isChain(activeConnectId)) {
+    const c = chainsData[activeConnectId];
+    const inName = profilesData[c.inId] ? profilesData[c.inId].name : '—';
+    const outName = profilesData[c.outId] ? profilesData[c.outId].name : '—';
+    document.getElementById('profCardName').textContent = c.name;
+    document.getElementById('profMetaCount').textContent = '';
+    document.getElementById('profMetaSrc').textContent = 'chain';
+    badge.textContent = 'CHAIN';
+    badge.style.color = 'var(--accent)';
+    badge.style.background = 'rgba(79,142,255,.15)';
+    detail.textContent = inName + ' → ' + outName;
+    return;
+  }
+
+  const p = profilesData[activeConnectId];
+  document.getElementById('profCardName').textContent = p.name;
+  document.getElementById('profMetaCount').textContent = profileNodeCount(p);
+  document.getElementById('profMetaSrc').textContent = 'nodes · ' + p.sources.length + ' src';
+  if (p.autoSelect) {
+    badge.textContent = 'AUTO';
+    badge.style.color = 'var(--active)';
+    badge.style.background = 'rgba(0,200,150,.15)';
+    detail.textContent = 'best latency · 38ms';
+  } else {
+    badge.textContent = 'MANUAL';
+    badge.style.color = 'var(--warn)';
+    badge.style.background = 'rgba(240,160,64,.15)';
+    detail.textContent = manualNodeLabel(p);
+  }
+}
+
+function cycleChainSide(chainId, side) {
+  const c = chainsData[chainId];
+  const key = side === 'in' ? 'inId' : 'outId';
+  const ids = getProfileIds();
+  const idx = ids.indexOf(c[key]);
+  c[key] = ids[(idx + 1) % ids.length];
+  renderConnects();
+  if (chainId === activeConnectId) updateMainConnectCard();
+}
+
+/* ══════════════════════ RENDER: ALL CONFIGS (sources) ══════════════════════ */
+
+function renderConfigs() {
+  const el = document.getElementById('configs-list');
+  el.innerHTML = sourceOrder.map((id, i) => {
+    const s = sourcesData[id];
+    const icon = subIcon(s.kind);
+    const isOpen = !!expandState[id];
+
+    const actionsRow = `<div class="sub-item" style="padding-left:18px;gap:16px">
+        <div style="display:flex;align-items:center;gap:5px;color:var(--t2);font-size:13px;cursor:pointer" onclick="event.stopPropagation();refreshSource('${id}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;color:var(--t2);font-size:13px;cursor:pointer" onclick="event.stopPropagation();openEditSource('${id}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          Edit
+        </div>
+        <div style="margin-left:auto;font-size:12px;color:var(--t3)">${s.meta}</div>
+      </div>`;
+
+    const nodeRows = s.nodes.map(n => `<div class="sub-item" style="padding-left:46px">
+        <span style="font-size:16px;width:16px;text-align:center;flex-shrink:0">${n.flag}</span>
+        <span class="sub-name">${n.name}</span>
+        <span class="proto-badge" style="text-transform:uppercase">${n.protocol}</span>
+        ${n.warn ? '<span style="color:var(--muted);font-size:15px" title="Unreachable">⚠</span>' : ''}
+        <div class="row-del" onclick="removeNode('${id}','${n.id}')">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </div>
+      </div>`).join('');
+
+    const addNodeRow = `<div class="sub-item" style="padding-left:46px;padding-top:6px;padding-bottom:6px" onclick="event.stopPropagation();openAddNode('${id}')">
+        <div style="font-size:13px;color:var(--accent);cursor:pointer">+ Add node</div>
+      </div>`;
+
+    return `<div class="config-row" style="flex-wrap:wrap">
+      <div class="config-icon" style="background:${icon.color}22">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${icon.color}" stroke-width="2.5" stroke-linecap="round">${icon.svg}</svg>
+      </div>
+      <div style="flex:1;min-width:0;cursor:pointer" onclick="openEditSource('${id}')">
+        <div class="config-name">${s.name}</div>
+        <div class="config-sub">${s.count} nodes${s.protocol ? ' · '+s.protocol : ''} · ${s.meta}</div>
+      </div>
+      <div class="row-del" onclick="removeSource('${id}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </div>
+      <div class="profile-expand-btn ${isOpen?'open':''}" onclick="toggleExpand('${id}')">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+      <div class="profile-subs ${isOpen?'open':''}" style="flex-basis:100%;max-height:${isOpen?'2000px':'0'}">
+        ${actionsRow}${nodeRows}${addNodeRow}
+      </div>
+    </div>`;
+  }).join('');
+
+  let imported = 0, manual = 0;
+  sourceOrder.forEach(id => { sourcesData[id].kind === 'node' ? manual++ : imported++; });
+  document.getElementById('configsCardSub').textContent = imported + ' imported · ' + manual + ' manual';
+}
+
+let addNodeSourceId = null;
+function openAddNode(sourceId) {
+  addNodeSourceId = sourceId;
+  document.getElementById('an-name').value = '';
+  document.getElementById('an-addr').value = '';
+  document.getElementById('an-port').value = '';
+  document.querySelectorAll('#an-proto .chip').forEach((c,i) => c.classList.toggle('active', i===0));
+  openSheet('addnode');
+}
+function saveAddNode() {
+  if (!addNodeSourceId) return;
+  const s = sourcesData[addNodeSourceId];
+  const protoChip = document.querySelector('#an-proto .chip.active');
+  const protocol = (protoChip ? protoChip.textContent : 'VLESS').toLowerCase();
+  const name = document.getElementById('an-name').value.trim() || ('Node ' + (s.nodes.length + 1));
+  const flags = ['🇩🇪','🇳🇱','🇫🇷','🇬🇧','🇺🇸','🇯🇵'];
+  s.nodes.push({ id: 'n' + Date.now(), flag: flags[Math.floor(Math.random()*flags.length)], name, protocol, warn:false });
+  s.count = s.nodes.length;
+  expandState[addNodeSourceId] = true;
+  addNodeSourceId = null;
+  renderConfigs();
+  renderConnects();
+  updateMainConnectCard();
+  closeSheet('addnode');
+}
+
+function removeNode(sourceId, nodeId) {
+  const s = sourcesData[sourceId];
+  s.nodes = s.nodes.filter(n => n.id !== nodeId);
+  s.count = s.nodes.length;
+  renderConfigs();
+  renderConnects();
+  updateMainConnectCard();
+}
+
+function refreshSource(id) {
+  sourcesData[id].meta = 'just refreshed';
+  renderConfigs();
+}
+
+function removeSource(id) {
+  sourceOrder = sourceOrder.filter(x => x !== id);
+  delete sourcesData[id];
+  Object.values(profilesData).forEach(p => { p.sources = p.sources.filter(x => x !== id); });
+  renderConfigs();
+  renderConnects();
+  updateMainConnectCard();
+}
+
+/* ══════════════════════ RENDER: RULES ══════════════════════ */
+
+function renderRules() {
+  const el = document.getElementById('rules-list');
+  el.innerHTML = ruleOrder.map(id => {
+    const r = rulesData[id];
+    return `<div class="config-row ${!r.enabled?'dimmed':''}">
+      <div style="flex:1;min-width:0">
+        <div class="config-name">${r.type}</div>
+        <div class="config-sub" style="font-family:'JetBrains Mono',monospace">${r.value}</div>
+      </div>
+      <span class="rule-action-badge ${r.action}">${r.action}</span>
+      ${miniToggleHtml(id, 'toggleRuleEnabled', r.enabled)}
+      <div class="row-del" onclick="removeRule('${id}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </div>
+    </div>`;
+  }).join('');
+  const activeRules = ruleOrder.filter(id => rulesData[id].enabled).length;
+  document.getElementById('rulesCardSub').textContent = activeRules + ' active · ' + ruleOrder.length + ' total';
+}
+
+function removeRule(id) {
+  ruleOrder = ruleOrder.filter(x => x !== id);
+  delete rulesData[id];
+  renderRules();
+}
+
+/* ══════════════════════ MAIN TOGGLE ══════════════════════ */
+
+let connected = true;
+function toggleMain() {
+  connected = !connected;
+  document.getElementById('mainToggle').classList.toggle('off', !connected);
+  document.getElementById('connLabel').textContent = connected ? 'Connected' : 'Tap to connect';
+}
+
+/* ══════════════════════ SEGMENTED CONTROLS ══════════════════════ */
+
+const segState = { mode: 'tun', route: 'rules' };
+function setSegment(group, value, index) {
+  segState[group] = value;
+  const opts = group === 'mode' ? ['tun','proxy'] : ['global','rules'];
+  opts.forEach(o => document.getElementById('seg-'+group+'-'+o).classList.toggle('active', o === value));
+  document.getElementById('pill-'+group).style.transform = index === 1 ? 'translateY(100%)' : 'translateY(0)';
+}
+setSegment('mode', 'tun', 0);
+setSegment('route', 'rules', 1);
+
+/* ══════════════════════ SHEETS (open/close + tabs) ══════════════════════ */
+
+function openSheet(name) {
+  document.getElementById('ov-'+name).classList.add('open');
+  document.getElementById('sh-'+name).classList.add('open');
+}
+function closeSheet(name) {
+  document.getElementById('ov-'+name).classList.remove('open');
+  document.getElementById('sh-'+name).classList.remove('open');
+}
+
+function switchAddSourceTab(name) {
+  document.getElementById('astab-sub').classList.toggle('active', name === 'sub');
+  document.getElementById('astab-manual').classList.toggle('active', name === 'manual');
+  document.getElementById('aspane-sub').style.display = name === 'sub' ? '' : 'none';
+  document.getElementById('aspane-manual').style.display = name === 'manual' ? '' : 'none';
+}
+
+function pickChip(el, groupId) {
+  document.getElementById(groupId).querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
+let ruleDraftAction = 'proxy';
+function pickActionChip(el, value) {
+  ruleDraftAction = value;
+  const group = document.getElementById('ar-action');
+  group.querySelectorAll('.chip').forEach(c => c.classList.remove('active','act-direct','act-block'));
+  el.classList.add('active');
+  if (value === 'direct') el.classList.add('act-direct');
+  if (value === 'block') el.classList.add('act-block');
+}
+
+/* ══════════════════════ ADD / EDIT SOURCE ══════════════════════ */
+
+let editingSourceId = null;
+
+function openAddSource(editId) {
+  editingSourceId = editId || null;
+  document.getElementById('as-sub-name').value = '';
+  document.getElementById('as-sub-url').value = '';
+  document.getElementById('as-sub-interval').value = '12';
+  document.getElementById('as-sub-reload').classList.add('on');
+  document.querySelectorAll('#as-sub-ua .chip').forEach((c,i) => c.classList.toggle('active', i===0));
+  document.getElementById('as-man-name').value = '';
+  document.getElementById('as-man-addr').value = '';
+  document.getElementById('as-man-port').value = '';
+  document.getElementById('as-man-secret').value = '';
+  document.querySelectorAll('#as-man-proto .chip').forEach((c,i) => c.classList.toggle('active', i===0));
+
+  if (editingSourceId) {
+    const s = sourcesData[editingSourceId];
+    document.getElementById('addSourceTitle').textContent = 'Edit ' + (s.kind === 'sub' ? 'subscription' : 'server');
+    document.getElementById('addSourceSaveBtn').textContent = 'Save changes';
+    document.getElementById('addSourceDeleteBtn').style.display = '';
+    if (s.kind === 'sub' || s.kind === 'set') {
+      switchAddSourceTab('sub');
+      document.getElementById('as-sub-name').value = s.name;
+      document.getElementById('as-sub-url').value = s.url || '';
+      document.getElementById('as-sub-interval').value = s.updateInterval || 12;
+      document.getElementById('as-sub-reload').classList.toggle('on', !!s.reloadAfterUpdate);
+      document.querySelectorAll('#as-sub-ua .chip').forEach(c => c.classList.toggle('active', c.textContent === (s.userAgent || 'sing-box')));
+    } else {
+      switchAddSourceTab('manual');
+      document.getElementById('as-man-name').value = s.name;
+      document.getElementById('as-man-addr').value = s.address || '';
+      document.getElementById('as-man-port').value = s.port || '';
+      document.getElementById('as-man-secret').value = s.secret || '';
+      document.querySelectorAll('#as-man-proto .chip').forEach(c => c.classList.toggle('active', c.textContent === (s.protocol || 'VLESS')));
+    }
+  } else {
+    document.getElementById('addSourceTitle').textContent = 'Add subscription / server';
+    document.getElementById('addSourceSaveBtn').textContent = 'Save';
+    document.getElementById('addSourceDeleteBtn').style.display = 'none';
+    switchAddSourceTab('sub');
+  }
+  openSheet('addsource');
+}
+
+function openEditSource(id) { openAddSource(id); }
+
+function saveAddSource() {
+  const isSub = document.getElementById('astab-sub').classList.contains('active');
+  const protoChip = document.querySelector('#as-man-proto .chip.active');
+  const protocol = protoChip ? protoChip.textContent : 'VLESS';
+
+  const uaChip = document.querySelector('#as-sub-ua .chip.active');
+  const userAgent = uaChip ? uaChip.textContent : 'sing-box';
+  const updateInterval = parseInt(document.getElementById('as-sub-interval').value, 10) || 12;
+  const reloadAfterUpdate = document.getElementById('as-sub-reload').classList.contains('on');
+
+  if (editingSourceId) {
+    const s = sourcesData[editingSourceId];
+    if (isSub) {
+      if (s.kind !== 'sub' && s.kind !== 'set') s.kind = 'sub';
+      s.name = document.getElementById('as-sub-name').value.trim() || s.name;
+      s.url = document.getElementById('as-sub-url').value.trim();
+      s.userAgent = userAgent;
+      s.updateInterval = updateInterval;
+      s.reloadAfterUpdate = reloadAfterUpdate;
+    } else {
+      s.kind = 'node';
+      s.name = document.getElementById('as-man-name').value.trim() || s.name;
+      s.protocol = protocol;
+      s.address = document.getElementById('as-man-addr').value.trim();
+      s.port = document.getElementById('as-man-port').value.trim();
+      s.secret = document.getElementById('as-man-secret').value.trim();
+    }
+  } else {
+    const id = 'src' + (sourceSeq++);
+    if (isSub) {
+      const name = document.getElementById('as-sub-name').value.trim() || 'New subscription';
+      const count = Math.floor(10 + Math.random()*40);
+      sourcesData[id] = { id, kind:'sub', name, url: document.getElementById('as-sub-url').value.trim(), count, meta:'just added', nodes:genNodes(count,'sub'), userAgent, updateInterval, reloadAfterUpdate };
+    } else {
+      const name = document.getElementById('as-man-name').value.trim() || 'New server';
+      sourcesData[id] = { id, kind:'node', name, protocol, address: document.getElementById('as-man-addr').value.trim(), port: document.getElementById('as-man-port').value.trim(), secret: document.getElementById('as-man-secret').value.trim(), count: 1, meta:'manual entry', nodes:genNodes(1,'node') };
+    }
+    sourceOrder.push(id);
+  }
+  editingSourceId = null;
+  renderConfigs();
+  renderConnects();
+  closeSheet('addsource');
+}
+
+function deleteEditingSource() {
+  if (!editingSourceId) return;
+  removeSource(editingSourceId);
+  editingSourceId = null;
+  closeSheet('addsource');
+}
+
+/* ══════════════════════ CREATE / EDIT PROFILE ══════════════════════ */
+
+let createProfileSelected = new Set();
+let editingProfileId = null;
+
+function openCreateProfile(editId) {
+  editingProfileId = editId || null;
+  if (editingProfileId) {
+    const p = profilesData[editingProfileId];
+    document.getElementById('cpTitle').textContent = 'Edit profile';
+    document.getElementById('cpSaveBtn').textContent = 'Save changes';
+    document.getElementById('cpDeleteBtn').style.display = '';
+    document.getElementById('cp-name').value = p.name;
+    createProfileSelected = new Set(p.sources);
+  } else {
+    document.getElementById('cpTitle').textContent = 'Create profile';
+    document.getElementById('cpSaveBtn').textContent = 'Create profile';
+    document.getElementById('cpDeleteBtn').style.display = 'none';
+    document.getElementById('cp-name').value = '';
+    createProfileSelected = new Set();
+  }
+  renderCreateProfileSources();
+  openSheet('createprofile');
+}
+
+function openEditProfile(id) { openCreateProfile(id); }
+
+function renderCreateProfileSources() {
+  const el = document.getElementById('cp-source-list');
+  el.innerHTML = sourceOrder.map(id => {
+    const s = sourcesData[id];
+    const icon = subIcon(s.kind);
+    const checked = createProfileSelected.has(id);
+    return `<div class="sub-item" style="padding-left:18px" onclick="toggleCreateProfileSource('${id}')">
+      <div class="sub-checkbox ${checked?'checked':''}"></div>
+      <div class="sub-icon ${icon.cls}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${icon.color}" stroke-width="2.5" stroke-linecap="round">${icon.svg}</svg></div>
+      <span class="sub-name">${s.name}</span>
+      <span class="sub-count">${s.count} nodes</span>
+    </div>`;
+  }).join('');
+}
+
+function toggleCreateProfileSource(id) {
+  if (createProfileSelected.has(id)) createProfileSelected.delete(id); else createProfileSelected.add(id);
+  renderCreateProfileSources();
+}
+
+function saveCreateProfile() {
+  const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
+  if (editingProfileId) {
+    const p = profilesData[editingProfileId];
+    p.name = name;
+    p.sources = Array.from(createProfileSelected);
+  } else {
+    const id = 'profile' + Date.now();
+    profilesData[id] = { id, name, sources: Array.from(createProfileSelected), autoSelect:true, manualNodeId:null };
+    connectOrder.push(id);
+  }
+  editingProfileId = null;
+  renderConnects();
+  updateMainConnectCard();
+  closeSheet('createprofile');
+}
+
+function deleteEditingProfile() {
+  if (!editingProfileId) return;
+  if (getProfileIds().length <= 1) { editingProfileId = null; closeSheet('createprofile'); return; }
+  connectOrder = connectOrder.filter(x => x !== editingProfileId);
+  delete profilesData[editingProfileId];
+  const fallback = getProfileIds()[0];
+  if (activeConnectId === editingProfileId) activeConnectId = fallback;
+  Object.values(chainsData).forEach(c => {
+    if (c.inId === editingProfileId) c.inId = fallback;
+    if (c.outId === editingProfileId) c.outId = fallback;
+  });
+  editingProfileId = null;
+  renderConnects();
+  updateMainConnectCard();
+  closeSheet('createprofile');
+}
+
+/* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════ */
+
+let chainDraft = { inId: null, outId: null };
+let editingChainId = null;
+
+function openCreateChain(editId) {
+  editingChainId = editId || null;
+  if (editingChainId) {
+    const c = chainsData[editingChainId];
+    document.getElementById('ccTitle').textContent = 'Edit chain';
+    document.getElementById('ccSaveBtn').textContent = 'Save changes';
+    document.getElementById('ccDeleteBtn').style.display = '';
+    document.getElementById('cc-name').value = c.name;
+    chainDraft = { inId: c.inId, outId: c.outId };
+  } else {
+    document.getElementById('ccTitle').textContent = 'Create chain';
+    document.getElementById('ccSaveBtn').textContent = 'Create chain';
+    document.getElementById('ccDeleteBtn').style.display = 'none';
+    document.getElementById('cc-name').value = '';
+    const ids = getProfileIds();
+    chainDraft = { inId: ids[0], outId: ids[0] };
+  }
+  renderChainPicker('cc-in-list', 'in');
+  renderChainPicker('cc-out-list', 'out');
+  openSheet('createchain');
+}
+
+function openEditChain(id) { openCreateChain(id); }
+
+function renderChainPicker(elId, side) {
+  const el = document.getElementById(elId);
+  const current = side === 'in' ? chainDraft.inId : chainDraft.outId;
+  el.innerHTML = getProfileIds().map(id => {
+    const p = profilesData[id];
+    return `<div class="pick-row" onclick="pickChainSide('${side}','${id}')">
+      <div class="profile-radio ${id===current?'active':''}"></div>
+      <span class="pick-row-name">${p.name}</span>
+      <span class="pick-row-sub">${profileNodeCount(p)} nodes</span>
+    </div>`;
+  }).join('');
+}
+
+function pickChainSide(side, id) {
+  if (side === 'in') chainDraft.inId = id; else chainDraft.outId = id;
+  renderChainPicker('cc-in-list', 'in');
+  renderChainPicker('cc-out-list', 'out');
+}
+
+function saveCreateChain() {
+  const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
+  const wasEditing = editingChainId;
+  if (editingChainId) {
+    const c = chainsData[editingChainId];
+    c.name = name;
+    c.inId = chainDraft.inId;
+    c.outId = chainDraft.outId;
+  } else {
+    const id = 'chain' + Date.now();
+    chainsData[id] = { id, name, inId: chainDraft.inId, outId: chainDraft.outId, enabled:true };
+    connectOrder.push(id);
+  }
+  editingChainId = null;
+  renderConnects();
+  if (wasEditing === activeConnectId) updateMainConnectCard();
+  closeSheet('createchain');
+}
+
+function deleteEditingChain() {
+  if (!editingChainId) return;
+  connectOrder = connectOrder.filter(x => x !== editingChainId);
+  delete chainsData[editingChainId];
+  if (activeConnectId === editingChainId) activeConnectId = getProfileIds()[0];
+  editingChainId = null;
+  renderConnects();
+  updateMainConnectCard();
+  closeSheet('createchain');
+}
+
+/* ══════════════════════ COPY FROM CONNECTION PROFILE ══════════════════════ */
+
+function openCopyFromProfile() {
+  const el = document.getElementById('copy-source-list');
+  el.innerHTML = getProfileIds().map(id => {
+    const p = profilesData[id];
+    return `<div class="pick-row" onclick="createChainFromProfile('${id}')">
+      <span class="pick-row-name">${p.name}</span>
+      <span class="pick-row-sub">${profileNodeCount(p)} nodes</span>
+    </div>`;
+  }).join('');
+  openSheet('copyprofile');
+}
+
+function createChainFromProfile(profileId) {
+  const p = profilesData[profileId];
+  const id = 'chain' + Date.now();
+  chainsData[id] = { id, name: p.name + ' Chain', inId: profileId, outId: profileId, enabled:true };
+  connectOrder.push(id);
+  renderConnects();
+  closeSheet('copyprofile');
+}
+
+/* ══════════════════════ ADD RULE ══════════════════════ */
+
+function openAddRule() {
+  document.getElementById('ar-value').value = '';
+  document.getElementById('ar-type').querySelectorAll('.chip').forEach((c,i) => c.classList.toggle('active', i===0));
+  document.getElementById('ar-action').querySelectorAll('.chip').forEach((c,i) => { c.classList.toggle('active', i===0); c.classList.remove('act-direct','act-block'); });
+  ruleDraftAction = 'proxy';
+  openSheet('addrule');
+}
+
+function saveAddRule() {
+  const type = document.getElementById('ar-type').querySelector('.chip.active').textContent;
+  const value = document.getElementById('ar-value').value.trim() || '*';
+  const id = 'r' + (ruleSeq++);
+  rulesData[id] = { id, type, value, action: ruleDraftAction, enabled:true };
+  ruleOrder.push(id);
+  renderRules();
+  closeSheet('addrule');
+}
+
+/* ══════════════════════ PRIORITY: DRAG TO REORDER (left grip) ══════════════════════
+   Important: we must NOT re-render (replace DOM) the row while the drag is in
+   progress — on touch devices the browser holds an implicit pointer capture on
+   the element that received pointerdown, and destroying that element mid-gesture
+   fires pointercancel immediately (symptom: row flashes gray once, then nothing
+   moves). So during the drag we only visually translateY() the single dragged
+   row; the actual array reorder + re-render happens once, on drop.
+──────────────────────────────────────────────────────────────────────────── */
+
+let dragCtx = null;
+
+function startConnectDrag(e, id) {
+  e.preventDefault();
+  const rowEl = document.querySelector('#connects-list .profile-item[data-id="'+id+'"]');
+  if (!rowEl) return;
+  const container = rowEl.parentElement;
+  const items = Array.from(container.querySelectorAll(':scope > .profile-item'));
+  const rects = items.map(el => el.getBoundingClientRect());
+  dragCtx = {
+    id, rowEl, items, rects,
+    startY: e.clientY,
+    origIndex: items.indexOf(rowEl),
+  };
+  rowEl.classList.add('dragging-row');
+  rowEl.style.position = 'relative';
+  rowEl.style.zIndex = '5';
+}
+
+function onRowDragMove(e) {
+  if (!dragCtx) return;
+  const dy = e.clientY - dragCtx.startY;
+  dragCtx.rowEl.style.transform = 'translateY(' + dy + 'px)';
+}
+
+function onRowDragEnd(e) {
+  if (!dragCtx) return;
+  const dy = e.clientY - dragCtx.startY;
+  const origRect = dragCtx.rects[dragCtx.origIndex];
+  const draggedCenter = origRect.top + origRect.height / 2 + dy;
+
+  let targetIndex = 0;
+  dragCtx.items.forEach((el, i) => {
+    if (i === dragCtx.origIndex) return;
+    const r = dragCtx.rects[i];
+    const c = r.top + r.height / 2;
+    if (c < draggedCenter) targetIndex++;
+  });
+
+  dragCtx.rowEl.style.transform = '';
+  dragCtx.rowEl.style.position = '';
+  dragCtx.rowEl.style.zIndex = '';
+  dragCtx.rowEl.classList.remove('dragging-row');
+
+  const curIndex = connectOrder.indexOf(dragCtx.id);
+  if (targetIndex !== curIndex) {
+    connectOrder.splice(curIndex, 1);
+    connectOrder.splice(targetIndex, 0, dragCtx.id);
+  }
+  dragCtx = null;
+  renderConnects();
+}
+window.addEventListener('pointermove', onRowDragMove);
+window.addEventListener('pointerup', onRowDragEnd);
+window.addEventListener('pointercancel', onRowDragEnd);
+
+/* ══════════════════════ SWIPE-DOWN-TO-DISMISS (all sheets) ══════════════════════ */
+
+function makeDraggable(name) {
+  const sheet = document.getElementById('sh-'+name);
+  const zones = [sheet.querySelector('.sheet-handle'), sheet.querySelector('.sheet-head')];
+  let startY = 0, dy = 0, dragging = false;
+
+  function onDown(e) {
+    dragging = true; dy = 0;
+    startY = e.touches ? e.touches[0].clientY : e.clientY;
+    sheet.classList.add('dragging');
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    dy = Math.max(0, y - startY);
+    sheet.style.transform = 'translateY(' + dy + 'px)';
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    sheet.classList.remove('dragging');
+    if (dy > 110) closeSheet(name);
+    sheet.style.transform = '';
+  }
+
+  zones.forEach(zone => { if (zone) zone.addEventListener('pointerdown', onDown); });
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+['profiles','allconfigs','connections','rules','addsource','createprofile','createchain','copyprofile','addrule','pickmanualnode','addnode'].forEach(makeDraggable);
+
+/* ══════════════════════ INITIAL RENDER ══════════════════════ */
+
+renderConnects();
+renderConfigs();
+renderRules();
+updateMainConnectCard();
+</script>
+</body>
+</html>
