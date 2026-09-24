@@ -374,19 +374,22 @@ body {
 .power-tab{
   position:absolute;left:50%;top:-50px;transform:translateX(-50%);
   width:200px;height:52px;padding:0;border:none;background:none;cursor:pointer;
-  color:var(--t2);transition:color .25s,filter .25s;
+  color:var(--t2);filter:drop-shadow(0 0 0 rgba(var(--active-rgb),0));
+  transition:color .7s ease,filter .9s ease;
 }
 .power-shape{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .frame-fill{fill:var(--surface)}
 .frame-line{fill:none;stroke:var(--border);stroke-width:1;vector-effect:non-scaling-stroke}
-.power-body{fill:var(--card);stroke:var(--border-hi);stroke-width:1.5;vector-effect:non-scaling-stroke;transition:fill .25s,stroke .25s}
+.power-body{fill:var(--card);stroke:var(--border-hi);stroke-width:1.5;vector-effect:non-scaling-stroke;transition:fill .7s ease,stroke .7s ease}
+.power-cut{fill:none;stroke:var(--surface);stroke-width:4.5;stroke-linecap:butt}
 .power-icon{position:absolute;left:50%;top:14px;transform:translateX(-50%);transition:transform .15s}
 .power-tab:active .power-icon{transform:translateX(-50%) scale(.88)}
 .power-tab.on{color:var(--active);filter:drop-shadow(0 0 8px rgba(var(--active-rgb),.28))}
 .power-tab.on .power-body{fill:rgba(var(--active-rgb),.14);stroke:var(--active)}
-.power-tab.busy{color:var(--accent);animation:power-pulse 1s ease-in-out infinite}
-.power-tab.busy .power-body{fill:rgba(var(--accent-rgb),.12);stroke:var(--accent)}
-@keyframes power-pulse{50%{filter:drop-shadow(0 0 10px rgba(var(--accent-rgb),.45))}}
+.power-tab.busy{color:var(--accent);transition-duration:.35s}
+.power-tab.busy .power-body{fill:rgba(var(--accent-rgb),.12);stroke:var(--accent);transition-duration:.35s}
+.power-tab.busy .power-icon{animation:power-pulse 1s ease-in-out infinite}
+@keyframes power-pulse{50%{opacity:.4}}
 .dock-profile{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer}
 .dock-profile:active{background:rgba(255,255,255,.02)}
 .dock-chevron{color:var(--t3);flex-shrink:0}
@@ -659,6 +662,12 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
         <path class="frame-line" d="M0,50 L5,50 Q12,50 16.31,44.48 L46.69,5.52 Q51,0 58,0 L142,0 Q149,0 153.31,5.52 L183.69,44.48 Q188,50 195,50 L200,50"/>
         <!-- the button: its own closed trapezoid inside the tab -->
         <path class="power-body" d="M27.2,40.27 L50.24,10.73 Q53.93,6 59.93,6 L140.07,6 Q146.07,6 149.76,10.73 L172.8,40.27 Q176.49,45 170.49,45 L29.51,45 Q23.51,45 27.2,40.27 Z"/>
+        <!-- two slits ("pauses") cutting the lower corners off the button -->
+        <path class="power-cut" d="M33.6,27.2 L57.3,45.6"/>
+        <path class="power-cut" d="M166.4,27.2 L142.7,45.6"/>
+        <!-- two slits ("pauses") cutting the lower corners off the button -->
+        <path class="power-cut" d="M33.6,27.2 L57.3,45.6"/>
+        <path class="power-cut" d="M166.4,27.2 L142.7,45.6"/>
       </svg>
       <svg class="power-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
     </button>
