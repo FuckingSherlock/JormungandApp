@@ -444,6 +444,7 @@ body {
 .se-bar{display:flex;align-items:center;gap:6px;padding:4px 14px 8px 20px}
 .se-count{flex:1;font-size:13px;color:var(--t2)}
 .se-bar .chip{padding:4px 12px}
+.cc-bar{padding:6px 10px 6px 14px;border-bottom:1px solid var(--border)}
 .se-nodes{margin:0 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .cc-grip{margin:-10px -4px -10px -8px;padding:10px 4px 10px 8px;touch-action:none;cursor:grab;color:var(--t3)}
 .cc-rank{width:14px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0}
@@ -2464,7 +2465,6 @@ function openCreateChain(editId) {
   }
   chainTest = null;
   ccOpen.clear();
-  if (chainDraft.exitMode === 'priority') ccOpen.add('out:' + chainDraft.outId);
   renderChainEditor();
   openSheet('createchain');
 }
@@ -2518,7 +2518,7 @@ function renderChainPicker(elId, side) {
         <span class="pick-row-sub">${sub}</span>
       </div>
       ${all.length > 1 ? `<button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">${CHEVRON}</button>` : '<span class="cc-expand"></span>'}
-      ${open ? `<div class="cc-nodes">${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
+      ${open ? `<div class="cc-nodes">${active && all.length ? `<div class="se-bar cc-bar"><span class="se-count">${nOn} of ${all.length} ticked</span><div class="chip" onclick="setChainNodesAll('${side}')">${nOn === all.length ? 'None' : 'All'}</div></div>` : ''}${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
   if (side === 'out') {
@@ -2539,6 +2539,13 @@ function toggleCcOpen(side, id) {
 function toggleChainNode(side, key) {
   const k = side === 'in' ? 'inOff' : 'outOff';
   chainDraft[k] = chainDraft[k].includes(key) ? chainDraft[k].filter(x => x !== key) : chainDraft[k].concat(key);
+  chainTest = null;
+  renderChainEditor();
+}
+
+function setChainNodesAll(side) {
+  const k = side === 'in' ? 'inOff' : 'outOff';
+  chainDraft[k] = chainDraft[k].length ? [] : unitRefs(side === 'in' ? chainDraft.inId : chainDraft.outId).map(refKey);
   chainTest = null;
   renderChainEditor();
 }

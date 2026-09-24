@@ -54,7 +54,7 @@ const SHOTS = {
   'profiles-menu': async p => { await p.evaluate(() => { openProfiles(); openProfilesMenu(); }); await settle(p); },
   'source-entry': async p => { await p.evaluate(() => { openProfiles(); openSourceEntry('src1'); }); await settle(p); },
   'simple-chain': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
-  'chain-priority': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); }); await settle(p); },
+  'chain-priority': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
   'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
     const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
@@ -407,6 +407,20 @@ async function runChecks() {
     await page.click('#cc-in-list .cc-nodes .node-row >> nth=1');
     expect(await page.evaluate(() => chainDraft.inOff.length === 1), 'entry untick');
     await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
+  });
+
+  await check('chain editor: opens collapsed, All/None toggles every node', async () => {
+    await page.evaluate(() => { setConnectMode('simple'); openProfiles(); openCreateChain(); pickChainSide('in', 'src2'); pickChainSide('out', 'src1'); setChainExitMode('priority'); saveCreateChain(); }); await settle(page);
+    const id = await page.evaluate(() => Object.keys(chainsData).pop());
+    await page.evaluate(id => openEditChain(id), id); await settle(page);
+    expect(await page.$$eval('#cc-out-list .cc-nodes, #cc-in-list .cc-nodes', e => e.length) === 0, 'nodes expanded on open');
+    await page.click('#cc-in-list .cc-prof[data-id=src2] button.cc-expand');
+    await page.click('#cc-in-list .cc-bar .chip');
+    const n = await page.evaluate(() => [chainDraft.inOff.length, unitRefs(chainDraft.inId).length]);
+    expect(n[0] === n[1] && n[0] > 1, 'None: ' + n);
+    await page.click('#cc-in-list .cc-bar .chip');
+    expect(await page.evaluate(() => chainDraft.inOff.length === 0), 'All did not re-tick');
+    await page.evaluate(id => { closeSheet('createchain'); closeSheet('profiles'); dropConnectEntry(id); delete chainsData[id]; renderConnects(); }, id);
   });
 
   await check('chain editor: priority exit uses the top working server, drag reorders', async () => {

@@ -216,6 +216,7 @@
 .se-bar{display:flex;align-items:center;gap:6px;padding:4px 14px 8px 20px}
 .se-count{flex:1;font-size:13px;color:var(--t2)}
 .se-bar .chip{padding:4px 12px}
+.cc-bar{padding:6px 10px 6px 14px;border-bottom:1px solid var(--border)}
 .se-nodes{margin:0 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .cc-grip{margin:-10px -4px -10px -8px;padding:10px 4px 10px 8px;touch-action:none;cursor:grab;color:var(--t3)}
 .cc-rank{width:14px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0}

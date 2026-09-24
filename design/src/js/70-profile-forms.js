@@ -195,7 +195,6 @@ function openCreateChain(editId) {
   }
   chainTest = null;
   ccOpen.clear();
-  if (chainDraft.exitMode === 'priority') ccOpen.add('out:' + chainDraft.outId);
   renderChainEditor();
   openSheet('createchain');
 }
@@ -249,7 +248,7 @@ function renderChainPicker(elId, side) {
         <span class="pick-row-sub">${sub}</span>
       </div>
       ${all.length > 1 ? `<button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">${CHEVRON}</button>` : '<span class="cc-expand"></span>'}
-      ${open ? `<div class="cc-nodes">${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
+      ${open ? `<div class="cc-nodes">${active && all.length ? `<div class="se-bar cc-bar"><span class="se-count">${nOn} of ${all.length} ticked</span><div class="chip" onclick="setChainNodesAll('${side}')">${nOn === all.length ? 'None' : 'All'}</div></div>` : ''}${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
   if (side === 'out') {
@@ -270,6 +269,13 @@ function toggleCcOpen(side, id) {
 function toggleChainNode(side, key) {
   const k = side === 'in' ? 'inOff' : 'outOff';
   chainDraft[k] = chainDraft[k].includes(key) ? chainDraft[k].filter(x => x !== key) : chainDraft[k].concat(key);
+  chainTest = null;
+  renderChainEditor();
+}
+
+function setChainNodesAll(side) {
+  const k = side === 'in' ? 'inOff' : 'outOff';
+  chainDraft[k] = chainDraft[k].length ? [] : unitRefs(side === 'in' ? chainDraft.inId : chainDraft.outId).map(refKey);
   chainTest = null;
   renderChainEditor();
 }
