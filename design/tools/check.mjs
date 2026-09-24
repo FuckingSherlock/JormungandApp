@@ -50,6 +50,7 @@ const SHOTS = {
   dock:       async p => ({ clip: await clipOf(p, '.dock', 60) }),
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
+  'profiles-open': async p => { await p.evaluate(() => { expandState.default = true; expandState.gaming = true; expandState.cpdefault = true; renderConnects(); }); await p.click('.dock-profile'); await settle(p); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
   nodeform:   async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodeForm()); await settle(p); },
