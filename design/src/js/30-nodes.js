@@ -289,7 +289,6 @@ function deleteSource(id) {
     p.sources = p.sources.filter(x => x !== id);
     p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
   });
-  Object.values(nodeEntries).filter(e => e.sid === id).forEach(e => { delete nodeEntries[e.id]; dropConnectEntry(e.id); });
   dropConnectEntry(id);
   renderAll();
 }
@@ -300,7 +299,6 @@ function deleteNode(sid, nid) {
   s.nodes = s.nodes.filter(n => n.id !== nid);
   s.count = s.nodes.length;
   Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => k !== sid + '::' + nid); });
-  if (nodeEntries['nd_' + sid + '_' + nid]) removeNodeEntry('nd_' + sid + '_' + nid);
   renderAll();
 }
 

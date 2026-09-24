@@ -17,7 +17,7 @@
       <div id="connects-list"></div>
       <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span id="createEntryLabel">Add chain or server</span>
+        <span id="createEntryLabel">Create chain</span>
       </div>
     </div>
   </div>
@@ -97,6 +97,38 @@
     <div class="sheet-footer">
       <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
       <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="deleteEditingProfile()">Delete profile</button>
+    </div>
+  </div>
+
+  <!-- ══════════ NESTED: SOURCE ENTRY (simple mode) ══════════ -->
+  <div class="overlay overlay-l2" id="ov-sourceentry" onclick="closeSheet('sourceentry')"></div>
+  <div class="sheet sheet-l2" id="sh-sourceentry">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="seTitle">Source</span>
+      <button class="sheet-close" onclick="closeSheet('sourceentry')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="set-group">
+        <div class="set-row">
+          <div style="flex:1"><div class="set-label">Use in Auto</div><div class="set-hint">Auto may connect this entry, in list order</div></div>
+          <div class="mini-toggle" id="se-inauto" onclick="toggleSourceEntryAuto()"><div class="mini-toggle-thumb"></div></div>
+        </div>
+      </div>
+      <div class="form-group" style="padding-bottom:4px">
+        <div class="form-label">Servers</div>
+        <div class="set-hint" style="margin-top:4px">Untick servers this entry should not use. It connects through the fastest ticked one; servers added by an update start ticked.</div>
+      </div>
+      <div class="se-bar">
+        <span class="se-count" id="se-count"></span>
+        <button class="chip" id="se-all" onclick="setSourceEntryAll()">All</button>
+        <button class="icon-btn ghost" id="se-update" onclick="updateSource(seId)" title="Update"></button>
+        <button class="icon-btn ghost" onclick="testSourceLatency(seId)" title="Ping all"></button>
+      </div>
+      <div class="se-nodes" id="se-nodes"></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" onclick="closeSheet('sourceentry')">Done</button>
     </div>
   </div>
 

@@ -52,7 +52,7 @@ const SHOTS = {
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
   'profiles-full': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); }); await settle(p); },
   'profiles-menu': async p => { await p.evaluate(() => { openProfiles(); openProfilesMenu(); }); await settle(p); },
-  'addserver': async p => { await p.evaluate(() => { openProfiles(); openCreateMenu(); openPickNodeEntry(); }); await settle(p); },
+  'source-entry': async p => { await p.evaluate(() => { openProfiles(); openSourceEntry('src1'); }); await settle(p); },
   'simple-chain': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
   'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
@@ -260,38 +260,43 @@ async function runChecks() {
   await check('simple mode is the default: sources and source chains in the list', async () => {
     expect(await page.evaluate(() => connectMode === 'simple'), 'not simple by default');
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
-    expect(ids.includes('src1') && ids.includes('sc1') && ids.includes('nd_src1_n2') && !ids.includes('default') && !ids.includes('cpdefault'), ids.join());
+    expect(ids.includes('src1') && ids.includes('sc1') && !ids.includes('default') && !ids.includes('cpdefault'), ids.join());
     expect(/Servers/.test(await page.textContent('#profilesTitle')), 'title');
   });
 
-  await check('simple mode: tap a source for Manual, ⋯ toggles its Auto participation', async () => {
+  await check('simple mode: tap a source for Manual, second tap back to Auto', async () => {
     await page.click('.conn-row[data-id=src2] .conn-main'); await settle(page);
     expect(await page.evaluate(() => !autoConnect && effectiveConnectId() === 'src2'), 'source not pinned');
     await page.click('.conn-row[data-id=src2] .conn-main'); await settle(page);
     expect(await page.evaluate(() => autoConnect), 'second tap did not re-enable auto');
-    await page.click('.conn-row[data-id=src3] .icon-btn'); await settle(page);
-    await page.click('#actions-body .menu-row >> nth=0');
-    expect(await page.evaluate(() => !sourcesData.src3.inAuto), 'inAuto not toggled');
-    expect(await page.$eval('.conn-row[data-id=src3]', el => /not in auto/i.test(el.textContent)), 'row not marked');
-    await page.click('#actions-body .menu-row >> nth=0');
-    await page.evaluate(() => closeSheet('actions')); await settle(page);
   });
 
-  await check('simple mode: add a single server as its own entry', async () => {
-    await page.click('#sh-profiles .sheet-action'); await settle(page);
-    await page.click('#actions-body .menu-row >> nth=1'); await settle(page);
-    await page.click('#actions-body .node-row:not(.static) >> nth=0'); await settle(page);
-    const added = await page.evaluate(() => connectOrder[connectOrder.length - 1]);
-    expect(added.startsWith('nd_') && await page.$(`.conn-row[data-id=${added}]`), 'server entry not added: ' + added);
-    await page.click(`.conn-row[data-id=${added}] .conn-main`);
-    expect(await page.evaluate(id => effectiveConnectId() === id, added), 'server entry not pinned');
-    await page.evaluate(id => { removeNodeEntry(id); setAutoConnect(true); }, added);
-    expect(await page.evaluate(id => !connectOrder.includes(id), added), 'not removed');
+  await check('simple mode: ⋯ opens the source entry — servers on/off, all/none, Auto', async () => {
+    await page.click('.conn-row[data-id=src2] .icon-btn'); await settle(page);
+    const total = await page.evaluate(() => sourcesData.src2.nodes.length);
+    await page.click('#se-nodes .node-row >> nth=0');
+    expect(await page.evaluate(n => unitRefs('src2').length === n - 1, total), 'node not switched off');
+    expect(await page.$eval('.conn-row[data-id=src2]', el => /1 off/.test(el.textContent)), 'row has no "1 off" tag');
+    await page.click('#se-all');
+    expect(await page.evaluate(() => unitRefs('src2').length === sourcesData.src2.nodes.length), '"All" did not switch all on');
+    await page.click('#se-all');
+    expect(await page.evaluate(() => unitRefs('src2').length === 0 && !isUsable('src2')), '"None" left nodes on');
+    await page.click('#se-all');
+    await page.click('#se-inauto');
+    expect(await page.evaluate(() => !sourcesData.src2.inAuto), 'inAuto not toggled');
+    await page.click('#se-inauto');
+    await page.evaluate(() => closeSheet('sourceentry')); await settle(page);
+  });
+
+  await check('simple mode: a one-server entry has no expander in the chain editor', async () => {
+    await page.evaluate(() => { sourcesData.src3.offNodes = sourcesData.src3.nodes.slice(1).map(n => n.id); openEditChain('sc1'); }); await settle(page);
+    const r = await page.evaluate(() => [unitRefs('src3').length, !!document.querySelector('#cc-in-list .cc-prof[data-id=src3] button.cc-expand'), !!document.querySelector('#cc-in-list .cc-prof[data-id=src2] button.cc-expand')]);
+    await page.evaluate(() => { sourcesData.src3.offNodes = []; closeSheet('createchain'); }); await settle(page);
+    expect(r[0] === 1 && !r[1] && r[2], 'expanders: ' + r);
   });
 
   await check('simple mode: chain of two sources, route check works', async () => {
     await page.click('#sh-profiles .sheet-action'); await settle(page);
-    await page.click('#actions-body .menu-row >> nth=0'); await settle(page);
     expect(await page.evaluate(() => document.getElementById('sh-createchain').classList.contains('open') && !!sourcesData[chainDraft.inId] && !!sourcesData[chainDraft.outId]), 'chain ends are not sources');
     await page.evaluate(() => testChainRoute());
     await page.waitForFunction(() => !chainTest.running, null, { timeout: 30000 });
@@ -378,14 +383,14 @@ async function runChecks() {
   });
 
   await check('chain editor: expand exit profile, tap a server to fix the exit', async () => {
-    await page.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); }); await settle(page);
-    const outIdx = await page.evaluate(() => getProfileIds().indexOf(chainDraft.outId));
-    await page.click(`#cc-out-list .cc-expand >> nth=${outIdx}`);
+    await page.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); pickChainSide('in', 'work'); pickChainSide('out', 'default'); }); await settle(page);
+    const outId = await page.evaluate(() => chainDraft.outId);
+    await page.click(`#cc-out-list .cc-prof[data-id=${outId}] button.cc-expand`);
     await page.click('#cc-out-list .cc-nodes .node-row >> nth=0');
     expect(await page.evaluate(() => !!chainDraft.exitNodeId), 'exit not fixed');
     await page.click('#cc-out-list .cc-nodes .node-row >> nth=0');
     expect(await page.evaluate(() => !chainDraft.exitNodeId), 'second tap did not unfix');
-    await page.click('#cc-in-list .cc-expand >> nth=0');
+    await page.click('#cc-in-list button.cc-expand >> nth=0');
     expect(await page.$$eval('#cc-in-list .cc-nodes .node-row', r => r.length) > 0, 'entry nodes not shown');
     await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
   });

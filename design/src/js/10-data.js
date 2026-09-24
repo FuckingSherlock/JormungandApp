@@ -33,7 +33,7 @@ function genNodes(count, kind) {
 
 function mkSub(id, name, count, extra) {
   return Object.assign({
-    id, kind:'sub', name, enabled:true, inAuto:true, nodes:genNodes(count,'sub'),
+    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], nodes:genNodes(count,'sub'),
     url:'https://sub.example.net/api/sub/' + id + 'Xk7PCg04NKVzp', format:'sing-box',
     updatedAt: Date.now() - 2*3600e3, usage:{ used:0, total:0 }, expire:null,
     updateInterval:12, reloadAfterUpdate:true, testAfterUpdate:true,
@@ -42,9 +42,9 @@ function mkSub(id, name, count, extra) {
 }
 
 let sourcesData = {
-  src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, website:'https://jormungand.example' }),
+  src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, offNodes:['n5','n11'], website:'https://jormungand.example' }),
   src2: mkSub('src2', 'Work Servers', 9, { format:'clash', updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
-  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, nodes:genNodes(2,'node') },
+  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], nodes:genNodes(2,'node') },
   src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
 };
 Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
@@ -55,12 +55,12 @@ let sourceSeq = 5;
    subscriptions, server groups — plus chains of two sources. 'profiles': it lists profiles
    (hand-picked nodes from sources) plus chains of two profiles. Each mode keeps its own
    priority list, pinned entry and Auto flag; the active mode's live in the globals below,
-   the other mode's wait in modeState. Simple mode also lists single servers picked from
-   any source (nodeEntries, id 'nd_<sid>_<nid>'). */
+   the other mode's wait in modeState. In simple mode a source's offNodes (node ids) are
+   the servers the user switched off for it; servers a later update adds start on. */
 let connectMode = 'simple';
 /* connectOrder is the priority list of the active mode (entries and chains together):
    with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
-let connectOrder = ['src1','src2','src3','nd_src1_n2','src4','sc1'];
+let connectOrder = ['src1','src2','src3','src4','sc1'];
 let activeConnectId = 'src1';
 let autoConnect = true;
 const modeState = {
@@ -83,18 +83,10 @@ let chainsData = {
 };
 let chainSeq = 1;
 
-// Simple mode: a single server as its own list entry. The name follows the server.
-function mkNodeEntry(sid, nid, inAuto = true) {
-  const id = 'nd_' + sid + '_' + nid;
-  return { id, sid, nid, inAuto, get node() { const s = sourcesData[sid]; return s && s.nodes.find(n => n.id === nid); },
-           get name() { const n = this.node; return n ? n.name : '—'; } };
-}
-let nodeEntries = {};
-[mkNodeEntry('src1', 'n2')].forEach(e => nodeEntries[e.id] = e);
 
 function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
 // Chain-able entries of the active mode: sources in simple mode, profiles otherwise.
-function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] || nodeEntries[id] : profilesData[id]); }
+function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] : profilesData[id]); }
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 

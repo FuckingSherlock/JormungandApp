@@ -212,3 +212,9 @@
 .route-sub{background:rgba(var(--accent-rgb),.04);border-top:1px solid var(--border)}
 .route-sub .route-pair{padding-left:26px}
 .route-end.route-count{flex:0 0 auto;margin-right:auto}
+
+/* Source entry editor (simple mode) */
+.se-bar{display:flex;align-items:center;gap:6px;padding:4px 14px 8px 20px}
+.se-count{flex:1;font-size:13px;color:var(--t2)}
+.se-bar .chip{padding:4px 12px}
+.se-nodes{margin:0 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}

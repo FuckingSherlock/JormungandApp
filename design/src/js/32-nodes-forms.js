@@ -156,7 +156,7 @@ function saveNodeForm() {
     let gid = chip ? chip.dataset.gid : '__new';
     if (gid === '__new') {
       gid = 'src' + (sourceSeq++);
-      sourcesData[gid] = { id:gid, kind:'node', name:'Manual ' + (manualGroups().length + 1), enabled:true, inAuto:true, nodes:[] };
+      sourcesData[gid] = { id:gid, kind:'node', name:'Manual ' + (manualGroups().length + 1), enabled:true, inAuto:true, offNodes:[], nodes:[] };
       sourceOrder.push(gid);
       sourceAdded(gid);
     }

@@ -228,15 +228,15 @@ function renderChainPicker(elId, side) {
         <span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>
       </div>`;
     }).join('') : '';
-    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}">
+    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}" data-id="${id}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
         <span class="pick-row-name">${esc(unitName(id))}${fixedHere ? ' <span class="conn-tag warn">fixed exit</span>' : ''}</span>
         <span class="pick-row-sub">${sub}</span>
       </div>
-      <button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">
+      ${unitRefs(id).length > 1 ? `<button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">
         <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
+      </button>` : '<span class="cc-expand"></span>'}
       ${open ? `<div class="cc-nodes">${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');

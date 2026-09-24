@@ -4,7 +4,7 @@
    inAuto wins. Tapping an entry pins it (Auto off). Everything else about an entry —
    sources and picked nodes, chain ends, "use in Auto" — lives in its editor (⋯). */
 
-const connectEntry = id => profilesData[id] || chainsData[id] || sourcesData[id] || nodeEntries[id];
+const connectEntry = id => profilesData[id] || chainsData[id] || sourcesData[id];
 const simpleMode = () => connectMode === 'simple';
 const unitWord = () => simpleMode() ? 'source' : 'profile';
 
@@ -22,15 +22,16 @@ function profileNodeRefs(p) {
   return refs;
 }
 
+const isNodeOff = (s, nid) => !!s.offNodes && s.offNodes.includes(nid);
+const offCount = s => s.nodes.filter(n => isNodeOff(s, n.id)).length;
+
 // A "unit" is what a list entry / chain end stands for: a profile, or (simple mode) a source.
 function unitRefs(id) {
   if (profilesData[id]) return profileNodeRefs(profilesData[id]);
-  const e = nodeEntries[id];
-  if (e) return e.node && sourcesData[e.sid].enabled ? [{ sid: e.sid, node: e.node }] : [];
   const s = sourcesData[id];
-  return s && s.enabled ? s.nodes.map(node => ({ sid: id, node })) : [];
+  return s && s.enabled ? s.nodes.filter(n => !isNodeOff(s, n.id)).map(node => ({ sid: id, node })) : [];
 }
-const unitName = id => { const u = profilesData[id] || sourcesData[id] || nodeEntries[id]; return u ? u.name : '—'; };
+const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u ? u.name : '—'; };
 
 // The node a unit would connect through: the best alive one.
 function unitNode(id) {
@@ -79,10 +80,6 @@ function entrySummaryHtml(id) {
       + (c.exitNodeId ? '<span class="conn-tag warn">fixed</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
   if (sourcesData[id] && !sourcesData[id].enabled) return '<span>Disabled in Nodes</span>';
-  if (nodeEntries[id]) {
-    const e = nodeEntries[id], n = e.node;
-    return `<span>${n.flag}</span><span class="conn-node">${esc(sourcesData[e.sid].name)}</span>${latHtml(n)}`;
-  }
   return nodeSummaryHtml(unitNode(id), false);
 }
 
@@ -92,7 +89,7 @@ function renderConnectRow(id) {
   const e = connectEntry(id);
   const chain = !!chainsData[id];
   const current = id === effectiveConnectId();
-  const tags = (chain ? '<span class="conn-tag">chain</span>' : nodeEntries[id] ? '<span class="conn-tag">server</span>' : '')
+  const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
     <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
@@ -101,7 +98,7 @@ function renderConnectRow(id) {
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
     ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
-    <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : profilesData[id] ? 'openEditProfile' : nodeEntries[id] ? 'openNodeEntryActions' : 'openConnectSourceActions'}('${id}')" title="Edit">
+    <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : profilesData[id] ? 'openEditProfile' : 'openSourceEntry'}('${id}')" title="Edit">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
     </button>
   </div>`;
@@ -112,7 +109,7 @@ function renderConnects() {
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
   document.getElementById('profilesTitle').textContent = simpleMode() ? 'Servers' : 'Profiles';
-  document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Add chain or server' : 'Create profile or chain';
+  document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Create chain' : 'Create profile or chain';
   document.getElementById('connects-list').innerHTML = connectOrder.map(renderConnectRow).join('');
 }
 
@@ -143,13 +140,7 @@ const CHAIN_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" 
 
 function openCreateMenu() {
   const close = "closeSheet('actions');";
-  if (simpleMode()) {   // subscriptions and groups come from Nodes; here: chains and single servers
-    const few = getUnitIds().length < 2;
-    openActions('Add',
-      menuRow(CHAIN_ICON, 'Chain<div class="menu-sub">' + (few ? 'Needs at least two entries' : 'Enter through one entry, exit through another') + '</div>', close + 'openCreateChain()', few ? 'disabled' : '') +
-      menuRow(ICON.plus.replace(/16/g, '18'), 'Single server<div class="menu-sub">Any node from your subscriptions and groups</div>', 'openPickNodeEntry()'));
-    return;
-  }
+  if (simpleMode()) { openCreateChain(); return; }   // entries themselves come from Nodes
   openActions('Create',
     menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Chosen subscriptions or single servers — uses the fastest</div>', close + 'openCreateProfile()') +
     menuRow(CHAIN_ICON,
@@ -162,7 +153,7 @@ function openCreateMenu() {
 function openProfilesMenu() {
   const radio = on => `<div class="profile-radio ${on ? 'active' : ''}"></div>`;
   openActions('Mode',
-    menuRow(radio(simpleMode()), 'Simple<div class="menu-sub">Subscriptions, server groups and single servers, plus chains of them</div>', "setConnectMode('simple')") +
+    menuRow(radio(simpleMode()), 'Simple<div class="menu-sub">Subscriptions and server sets from Nodes, plus chains of them</div>', "setConnectMode('simple')") +
     menuRow(radio(!simpleMode()), 'Profiles<div class="menu-sub">Group servers into profiles, plus chains of profiles</div>', "setConnectMode('profiles')"));
 }
 
@@ -183,6 +174,7 @@ function setModeOrder(mode, order) { if (mode === connectMode) connectOrder = or
 // A new source joins the end of the simple-mode list.
 function sourceAdded(id) {
   if (sourcesData[id].inAuto === undefined) sourcesData[id].inAuto = true;
+  if (!sourcesData[id].offNodes) sourcesData[id].offNodes = [];
   setModeOrder('simple', modeOrder('simple').concat(id));
   if (document.getElementById('sh-profiles').classList.contains('open')) renderConnects();
 }
@@ -203,67 +195,6 @@ function dropConnectEntry(id) {
   updateMainConnectCard();
 }
 
-// Simple mode ⋯ on a source row: Auto participation plus the source's own actions.
-function openConnectSourceActions(sid) {
-  const s = sourcesData[sid];
-  const close = "closeSheet('actions');";
-  let rows = `<div class="menu-row" onclick="toggleSourceInAuto('${sid}')"><div class="menu-label">Use in Auto<div class="menu-sub">Auto may connect this ${s.kind === 'sub' ? 'subscription' : 'group'}, in list order</div></div>${miniToggleHtml(sid, 'toggleSourceInAuto', s.inAuto)}</div>`;
-  rows += menuRow(ICON.bolt, 'Ping all nodes', close + `testSourceLatency('${sid}')`);
-  if (s.kind === 'sub') rows += menuRow(ICON.refresh, 'Update subscription', close + `updateSource('${sid}')`);
-  rows += menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`);
-  openActions(s.name, rows);
-}
-
-// Pick a server for its own list entry: every node, grouped by source, sorted as in Nodes.
-function openPickNodeEntry() {
-  const rows = sourceOrder.map(sid => {
-    const s = sourcesData[sid];
-    return `<div class="menu-caption">${esc(s.name)}</div>` + sortedNodes(s.nodes).map(n => {
-      const id = 'nd_' + sid + '_' + n.id, added = !!nodeEntries[id];
-      return `<div class="node-row ${added ? 'static' : ''}" ${added ? '' : `onclick="addNodeEntry('${sid}','${n.id}')"`}>
-        <span class="node-flag">${n.flag}</span><span class="node-name">${esc(n.name)}</span>
-        ${added ? '<span class="conn-tag muted">in list</span>' : ''}<span class="node-proto">${n.protocol}</span>${latHtml(n)}</div>`;
-    }).join('');
-  }).join('');
-  openActions('Single server', rows);
-}
-
-function addNodeEntry(sid, nid) {
-  const e = mkNodeEntry(sid, nid);
-  nodeEntries[e.id] = e;
-  connectOrder.push(e.id);
-  closeSheet('actions');
-  renderConnects();
-  updateMainConnectCard();
-}
-
-function openNodeEntryActions(id) {
-  const e = nodeEntries[id];
-  const close = "closeSheet('actions');";
-  openActions(e.node.flag + '  ' + e.name,
-    `<div class="menu-row" onclick="toggleNodeEntryInAuto('${id}')"><div class="menu-label">Use in Auto<div class="menu-sub">Auto may connect this server, in list order</div></div>${miniToggleHtml(id, 'toggleNodeEntryInAuto', e.inAuto)}</div>` +
-    menuRow(ICON.bolt, 'Ping', close + `pingNodes([nodeEntries['${id}'].node])`) +
-    menuRow(ICON.trash, 'Remove from list', close + `removeNodeEntry('${id}')`, 'danger'));
-}
-
-function toggleNodeEntryInAuto(id) {
-  nodeEntries[id].inAuto = !nodeEntries[id].inAuto;
-  renderConnects();
-  updateMainConnectCard();
-  openNodeEntryActions(id);
-}
-
-function removeNodeEntry(id) {
-  delete nodeEntries[id];
-  dropConnectEntry(id);
-}
-
-function toggleSourceInAuto(sid) {
-  sourcesData[sid].inAuto = !sourcesData[sid].inAuto;
-  renderConnects();
-  updateMainConnectCard();
-  openConnectSourceActions(sid);
-}
 
 function toggleRuleEnabled(id) {
   rulesData[id].enabled = !rulesData[id].enabled;
@@ -294,5 +225,5 @@ function updateMainConnectCard() {
   detail.textContent = n ? n.flag + ' ' + n.name + (isAlive(n) ? ' · ' + ping(n) + ' ms' : '') : 'no working nodes';
   document.getElementById('profMetaCount').textContent = unitRefs(id).length;
   document.getElementById('profMetaSrc').textContent = profilesData[id] ? 'nodes · ' + profilesData[id].sources.length + ' src'
-    : nodeEntries[id] ? 'server' : sourcesData[id] && sourcesData[id].kind === 'sub' ? 'nodes · sub' : 'servers';
+    : sourcesData[id] && sourcesData[id].kind === 'sub' ? 'nodes · sub' : 'servers';
 }
