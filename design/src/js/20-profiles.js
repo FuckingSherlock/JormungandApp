@@ -79,12 +79,7 @@ function renderConnectRow(id) {
 }
 
 function renderConnects() {
-  const pick = connectEntry(effectiveConnectId());
-  document.getElementById('auto-row').className = 'auto-row' + (autoConnect ? ' on' : '');
-  document.getElementById('autoRowSub').textContent = autoConnect
-    ? 'Now: ' + (pick ? pick.name : '—') + ' — first working below'
-    : 'Off — a pinned profile is used';
-  document.getElementById('autoToggle').classList.toggle('on', autoConnect);
+  document.getElementById('autoBadge').classList.toggle('off', !autoConnect);
   document.getElementById('connects-list').innerHTML = connectOrder.map(renderConnectRow).join('');
 }
 

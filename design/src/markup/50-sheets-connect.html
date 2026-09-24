@@ -4,19 +4,12 @@
     <div class="sheet-handle"></div>
     <div class="sheet-head">
       <span class="sheet-title">Profiles</span>
+      <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order">
+        <div class="conn-dot"></div><span>Auto</span>
+      </div>
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="sheet-body">
-      <div class="auto-row" id="auto-row" onclick="setAutoConnect(!autoConnect)">
-        <div class="auto-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        </div>
-        <div style="flex:1;min-width:0">
-          <div class="conn-name">Auto</div>
-          <div class="conn-sub" id="autoRowSub"></div>
-        </div>
-        <div class="mini-toggle" id="autoToggle"><div class="mini-toggle-thumb"></div></div>
-      </div>
       <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap to pin / unpin</span></div>
       <div id="connects-list"></div>
       <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
