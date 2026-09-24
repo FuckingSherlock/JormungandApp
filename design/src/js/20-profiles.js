@@ -14,7 +14,6 @@ function profileNodeRefs(p) {
   });
   return refs;
 }
-const isAlive = n => typeof n.latency === 'number' && n.latency >= 0;
 
 // The node a profile would connect through: best alive node, or its fixed node.
 function profileNode(p) {
@@ -25,14 +24,13 @@ function profileNode(p) {
     return r ? r.node : null;
   }
   let best = null;
-  refs.forEach(({ node }) => { if (isAlive(node) && (!best || node.latency < best.latency)) best = node; });
+  refs.forEach(({ node }) => { if (isAlive(node) && (!best || ping(node) < ping(best))) best = node; });
   return best;
 }
 
 function isUsable(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    if (c.test && !c.test.reachable) return false;   // last route check: no exit reachable
     return isUsable(c.inId) && isUsable(c.outId);
   }
   const n = profileNode(profilesData[id]);
@@ -68,7 +66,6 @@ function renderConnectRow(id) {
   const chain = !!chainsData[id];
   const current = id === effectiveConnectId();
   const tags = (chain ? '<span class="conn-tag">chain</span>' : '')
-    + (chain && e.test && !e.test.reachable ? '<span class="conn-tag bad">no route</span>' : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
     <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
@@ -127,7 +124,7 @@ function openPickNode(ctx) {
   pickCtx = ctx;
   const refs = profileNodeRefs({ sources: ctx.sources });
   const el = document.getElementById('pickmanualnode-list');
-  el.innerHTML = refs.length ? refs.map(({ sid, node }) => {
+  el.innerHTML = refs.length ? sortedNodes(refs, r => r.node).map(({ sid, node }) => {
     const key = sid + '::' + node.id;
     return `<div class="pick-row" onclick="chooseManualNode('${key}')">
       <div class="profile-radio ${ctx.current === key ? 'active' : ''}"></div>
@@ -170,7 +167,7 @@ function updateMainConnectCard() {
   }
   const p = profilesData[id];
   const n = profileNode(p);
-  detail.textContent = n ? n.flag + ' ' + n.name + (isAlive(n) ? ' · ' + n.latency + ' ms' : '') : 'no working nodes';
+  detail.textContent = n ? n.flag + ' ' + n.name + (isAlive(n) ? ' · ' + ping(n) + ' ms' : '') : 'no working nodes';
   document.getElementById('profMetaCount').textContent = profileNodeCount(p);
   document.getElementById('profMetaSrc').textContent = 'nodes · ' + p.sources.length + ' src';
 }

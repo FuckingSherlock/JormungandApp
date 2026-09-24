@@ -51,7 +51,7 @@ const SHOTS = {
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { openProfiles(); openEditProfile('gaming'); toggleCpOpen('src4'); }); await settle(p); },
-  'chain-edit': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); testChainRoute(); }); await p.waitForTimeout(1800); },
+  'chain-edit': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 }); await settle(p); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
   nodeform:   async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodeForm()); await settle(p); },
@@ -141,7 +141,7 @@ async function runChecks() {
     await page.evaluate(() => { expandState[sourceOrder[0]] = true; renderNodes(); });
     await page.click('.node-row >> nth=0 >> .lat');
     const [testing, sheetOpen] = await page.evaluate(() => [
-      sourcesData[sourceOrder[0]].nodes.filter(n => n.latency === 'testing').length,
+      sourcesData[sourceOrder[0]].nodes.filter(n => ping(n) === 'testing').length,
       document.getElementById('sh-actions').classList.contains('open')]);
     expect(testing === 1, `${testing} nodes testing`);
     expect(!sheetOpen, 'actions sheet opened');
@@ -277,18 +277,26 @@ async function runChecks() {
     await page.evaluate(() => { closeSheet('createprofile'); closeSheet('profiles'); });
   });
 
-  await check('chain editor: same entry/exit blocked, route check reports exits', async () => {
-    await page.evaluate(() => { sourcesData.src1.nodes.forEach(n => n.latency = 50); openProfiles(); openEditChain('cpdefault'); }); await settle(page);
-    const inId = await page.evaluate(() => chainDraft.inId);
-    const idx = await page.evaluate(id => getProfileIds().indexOf(id), inId);
+  await check('chain editor: same entry/exit blocked, route check lists working pairs', async () => {
+    await page.evaluate(() => { openProfiles(); openEditChain('cpdefault'); }); await settle(page);
+    const idx = await page.evaluate(() => getProfileIds().indexOf(chainDraft.inId));
     await page.click(`#cc-out-list .pick-row >> nth=${idx}`, { force: true });
     expect(await page.evaluate(() => chainDraft.inId !== chainDraft.outId), 'exit could be set to the entry');
     await page.click('#cc-test .btn-secondary');
-    await page.waitForFunction(() => chainDraft.test && !chainDraft.test.running);
-    expect(/reachable|will not connect/.test(await page.textContent('#cc-test')), 'no route summary');
-    await page.click('#ccSaveBtn');
-    expect(await page.evaluate(() => typeof chainsData.cpdefault.test.reachable === 'number'), 'result not saved');
-    await page.evaluate(() => closeSheet('profiles'));
+    await page.waitForFunction(() => chainTest && !chainTest.running, null, { timeout: 30000 });
+    const r = await page.evaluate(() => ({ n: chainTest.pairs.length, sorted: chainTest.pairs.every((p, i, a) => !i || a[i-1].ms <= p.ms), rows: document.querySelectorAll('#cc-test .route-pair').length }));
+    expect(r.sorted, 'pairs not sorted by latency');
+    expect(r.rows === Math.min(4, r.n), `shows ${r.rows} rows for ${r.n} pairs`);
+    await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
+  });
+
+  await check('ping cache: one result per server, shared by every view', async () => {
+    const ok = await page.evaluate(async () => {
+      const n = sourcesData.src1.nodes[0];
+      await pingNodes([n]);
+      return ping(n) === pingCache.get(serverKey(n)).ms && pingAge(n) < 5000;
+    });
+    expect(ok, 'cache not updated by pingNodes');
   });
 
   await check('every sheet opens and closes', async () => {

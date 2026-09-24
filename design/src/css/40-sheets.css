@@ -185,3 +185,11 @@
 .btn-secondary svg{width:15px;height:15px}
 .btn-secondary:disabled{opacity:.4;cursor:default}
 .route-list{margin:8px 14px 0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.route-progress{height:3px;margin-top:6px;border-radius:2px;background:rgba(var(--accent-rgb),.15);overflow:hidden}
+.route-progress div{height:100%;background:var(--accent);transition:width .3s}
+.route-pair{display:flex;align-items:center;gap:6px;padding:10px 12px}
+.route-pair + .route-pair{border-top:1px solid var(--border)}
+.route-end{flex:1;min-width:0;display:flex;align-items:center;gap:6px}
+.route-pair .conn-arrow{flex-shrink:0}
+.route-pair .lat{min-width:0;padding-left:6px}
+.route-more{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent);cursor:pointer}

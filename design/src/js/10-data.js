@@ -24,9 +24,8 @@ function genNodes(count, kind) {
       flag,
       name: kind === 'node' ? ('VPS ' + city) : (city + ' ' + String(Math.floor(i / NODE_POOL.length) + 1).padStart(2, '0')),
       protocol: PROTOS[i % PROTOS.length],
-      address: kind === 'node' ? ('185.22.' + (10 + i) + '.' + (40 + i * 7)) : '',
+      address: kind === 'node' ? ('185.22.' + (10 + i) + '.' + (40 + i * 7)) : (city.toLowerCase().replace(' ', '') + '-' + count + '-' + i + '.edge.example'),
       port: '443',
-      latency: randLatency(),
     });
   }
   return nodes;

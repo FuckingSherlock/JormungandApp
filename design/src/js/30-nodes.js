@@ -35,19 +35,22 @@ function fmtDate(iso) {
   return d + '.' + mo + '.' + y;
 }
 
-function latHtml(n) {
-  if (n.latency === 'testing') return '<span class="lat testing">testing</span>';
-  if (n.latency == null) return '<span class="lat none">—</span>';
-  if (n.latency < 0) return '<span class="lat bad">timeout</span>';
-  const cls = n.latency < 150 ? 'good' : n.latency < 400 ? 'mid' : 'bad';
-  return `<span class="lat ${cls}">${n.latency} ms</span>`;
+function latMsHtml(v) {
+  if (v === 'testing') return '<span class="lat testing">testing</span>';
+  if (v == null) return '<span class="lat none">—</span>';
+  if (v < 0) return '<span class="lat bad">timeout</span>';
+  const cls = v < 150 ? 'good' : v < 400 ? 'mid' : 'bad';
+  return `<span class="lat ${cls}">${v} ms</span>`;
 }
+const latHtml = n => latMsHtml(ping(n));
 
-function sortedNodes(nodes) {
-  const list = nodes.slice();
-  if (nodeSort === 'name') list.sort((a, b) => a.name.localeCompare(b.name));
+// The sort chosen on Nodes applies to every node list in the app. `nodeOf` lets it
+// sort {sid, node} refs as well as bare nodes.
+function sortedNodes(list, nodeOf = x => x) {
+  list = list.slice();
+  if (nodeSort === 'name') list.sort((a, b) => nodeOf(a).name.localeCompare(nodeOf(b).name));
   if (nodeSort === 'latency') {
-    const key = n => (typeof n.latency === 'number' && n.latency >= 0) ? n.latency : 1e9;
+    const key = x => isAlive(nodeOf(x)) ? ping(nodeOf(x)) : 1e9;
     list.sort((a, b) => key(a) - key(b));
   }
   return list;
@@ -172,6 +175,8 @@ function toggleSourceEnabled(id) {
 const sourceViewHooks = [];
 function refreshSourceViews() {
   renderNodes();
+  renderConnects();
+  updateMainConnectCard();
   sourceViewHooks.forEach(fn => fn());
 }
 
@@ -184,25 +189,12 @@ function renderAll() {
 /* ── Latency ── */
 
 function testLatency(pairs) {
-  pairs.forEach(([sid, nid]) => {
-    const n = sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid);
-    if (n) n.latency = 'testing';
-  });
-  refreshSourceViews();
-  pairs.forEach(([sid, nid]) => {
-    setTimeout(() => {
-      const n = sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid);
-      if (!n) return;
-      n.latency = randLatency();
-      refreshSourceViews();
-      updateMainConnectCard();
-    }, 300 + Math.random() * 1400);
-  });
+  return pingNodes(pairs.map(([sid, nid]) => sourcesData[sid] && sourcesData[sid].nodes.find(x => x.id === nid)).filter(Boolean));
 }
 function testSourceLatency(sid) {
   const s = sourcesData[sid];
   expandState[sid] = true;
-  testLatency(s.nodes.map(n => [sid, n.id]));
+  return testLatency(s.nodes.map(n => [sid, n.id]));
 }
 function testAllLatency() {
   const pairs = [];

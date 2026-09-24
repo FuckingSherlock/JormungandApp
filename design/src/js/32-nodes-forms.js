@@ -159,7 +159,7 @@ function saveNodeForm() {
       sourceOrder.push(gid);
     }
     const g = sourcesData[gid];
-    g.nodes.push({ id:'n' + Date.now(), flag:'🌐', name, protocol, address, port, secret, latency:null });
+    g.nodes.push({ id:'n' + Date.now(), flag:'🌐', name, protocol, address, port, secret });
     g.count = g.nodes.length;
     expandState[gid] = true;
   }

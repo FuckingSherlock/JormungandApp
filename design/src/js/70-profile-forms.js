@@ -63,7 +63,7 @@ function renderCreateProfileSources() {
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual', `${s.nodes.length} nodes`, `${alive} alive`]
       .concat(s.enabled ? [] : ['disabled']).join('<span class="dot">·</span>');
     const pickable = checked && !cpDraft.autoSelect && s.enabled;
-    const rows = open ? s.nodes.map(n => {
+    const rows = open ? sortedNodes(s.nodes).map(n => {
       const key = id + '::' + n.id;
       const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
       return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="cpDraft.manualNodeId='${key}';renderCpNode();renderCreateProfileSources()"` : ''}>
@@ -149,12 +149,12 @@ function deleteEditingProfile() {
 }
 
 /* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
-   Entry and exit must be different profiles. "Check route" pings every exit node
-   through the entry's current node, so a chain that cannot work is visible before
-   it is saved; the result is kept on the chain (a chain with no reachable exit is
-   not usable, so Auto skips it). */
+   Entry and exit must be different profiles. "Check route" is informational only (it
+   does not change the chain or Auto): it tells the user whether the chain can work
+   and which entry -> exit pairs are fastest. See testChainRoute for the procedure. */
 
-let chainDraft = { inId: null, outId: null, test: null };
+let chainDraft = { inId: null, outId: null };
+let chainTest = null;   // { running, stage, done, total, pairs: [{entry, exit, ms}], showAll }
 let editingChainId = null;
 
 function openCreateChain(editId) {
@@ -167,16 +167,17 @@ function openCreateChain(editId) {
     document.getElementById('ccSaveBtn').textContent = 'Save changes';
     document.getElementById('ccDeleteBtn').style.display = '';
     document.getElementById('cc-name').value = c.name;
-    chainDraft = { inId: c.inId, outId: c.outId, test: c.test || null };
+    chainDraft = { inId: c.inId, outId: c.outId };
     document.getElementById('cc-inauto').classList.toggle('on', c.inAuto);
   } else {
     document.getElementById('ccTitle').textContent = 'Create chain';
     document.getElementById('ccSaveBtn').textContent = 'Create chain';
     document.getElementById('ccDeleteBtn').style.display = 'none';
     document.getElementById('cc-name').value = '';
-    chainDraft = { inId: ids[0], outId: ids[1], test: null };
+    chainDraft = { inId: ids[0], outId: ids[1] };
     document.getElementById('cc-inauto').classList.add('on');
   }
+  chainTest = null;
   renderChainEditor();
   openSheet('createchain');
 }
@@ -207,60 +208,98 @@ function renderChainPicker(elId, side) {
 
 function pickChainSide(side, id) {
   if (side === 'in') chainDraft.inId = id; else chainDraft.outId = id;
-  chainDraft.test = null;   // ends changed: the old check no longer applies
+  chainTest = null;   // ends changed: the old check no longer applies (a running one stops)
   renderChainEditor();
 }
 
+const ROUTE_TOP = 4;   // working pairs shown before "show all"
+
 function renderChainTest() {
   const el = document.getElementById('cc-test');
-  const entry = profileNode(profilesData[chainDraft.inId]);
-  const exits = profileNodeRefs(profilesData[chainDraft.outId]);
-  const t = chainDraft.test;
-  const btn = `<button class="btn-secondary" onclick="testChainRoute()" ${!entry || !isAlive(entry) || (t && t.running) ? 'disabled' : ''}>${ICON.bolt}${t ? 'Check again' : 'Check route'}</button>`;
-  let head;
-  if (!entry || !isAlive(entry)) head = `<div class="route-sum warn">Entry has no working node — ping its subscriptions first.</div>`;
-  else if (!t) head = `<div class="route-sum">Pings every exit node through the entry node ${entry.flag} ${esc(entry.name)}.</div>`;
-  else if (t.running) head = `<div class="route-sum">Checking ${exits.length} exit nodes via ${entry.flag} ${esc(entry.name)}…</div>`;
-  else {
-    const ok = Object.values(t.results).filter(v => v >= 0).length;
-    head = ok
-      ? `<div class="route-sum good">${ok} of ${exits.length} exit nodes reachable via ${entry.flag} ${esc(entry.name)}</div>`
-      : `<div class="route-sum bad">No exit node is reachable through the entry — this chain will not connect.</div>`;
-  }
-  const rows = t ? exits.map(({ sid, node }) => {
-    const v = t.results[sid + '::' + node.id];
-    return `<div class="node-row static">
-      <span class="node-flag">${node.flag}</span>
-      <span class="node-name">${esc(node.name)}</span>
-      ${latHtml({ latency: v === undefined ? 'testing' : v })}
+  if (!el) return;
+  const t = chainTest;
+  const nEntry = profileNodeRefs(profilesData[chainDraft.inId]).length;
+  const nExit = profileNodeRefs(profilesData[chainDraft.outId]).length;
+  const btn = t && t.running
+    ? `<button class="btn-secondary" onclick="stopChainRoute()">Stop</button>`
+    : `<button class="btn-secondary" onclick="testChainRoute()" ${nEntry && nExit ? '' : 'disabled'}>${ICON.bolt}${t ? 'Check again' : 'Check route'}</button>`;
+  let sum;
+  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} profile has no enabled nodes.</div>`;
+  else if (!t) sum = `<div class="route-sum">Tries every exit node through the entry nodes, fastest entries first.</div>`;
+  else if (t.running) sum = `<div class="route-sum">${t.stage}<div class="route-progress"><div style="width:${t.total ? t.done / t.total * 100 : 0}%"></div></div></div>`;
+  else if (t.pairs.length) sum = `<div class="route-sum good">${t.pairs.length} working pair${t.pairs.length === 1 ? '' : 's'}${t.stopped ? ' (stopped early)' : ''} · best ${t.pairs[0].ms} ms</div>`;
+  else sum = `<div class="route-sum bad">${t.stopped ? 'Stopped — no working pair found yet.' : 'No exit node answers through any entry node — this chain will not connect.'}</div>`;
+
+  let list = '';
+  if (t && t.pairs.length) {
+    const shown = t.showAll ? t.pairs : t.pairs.slice(0, ROUTE_TOP);
+    list = `<div class="route-list">${shown.map(({ entry, exit, ms }) => `<div class="route-pair">
+        <span class="route-end"><span class="node-flag">${entry.flag}</span><span class="node-name">${esc(entry.name)}</span></span>
+        <span class="conn-arrow">→</span>
+        <span class="route-end"><span class="node-flag">${exit.flag}</span><span class="node-name">${esc(exit.name)}</span></span>
+        ${latMsHtml(ms)}
+      </div>`).join('')}
+      ${t.pairs.length > ROUTE_TOP ? `<div class="route-more" onclick="chainTest.showAll=!chainTest.showAll;renderChainTest()">${t.showAll ? 'Show top ' + ROUTE_TOP : 'Show all ' + t.pairs.length}
+        <svg class="src-chevron" style="${t.showAll ? 'transform:rotate(180deg)' : ''}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>` : ''}
     </div>`;
-  }).join('') : '';
-  el.innerHTML = `<div class="route-box">${head}${btn}</div>${rows ? `<div class="route-list">${rows}</div>` : ''}`;
+  }
+  el.innerHTML = `<div class="route-box">${sum}${btn}</div>${list}`;
 }
 
-function testChainRoute() {
-  const entry = profileNode(profilesData[chainDraft.inId]);
-  const exits = profileNodeRefs(profilesData[chainDraft.outId]);
-  const t = chainDraft.test = { running: true, results: {} };
+/* Route check:
+   1. Entry nodes: use cached pings if all are younger than 5 min, otherwise ping them all.
+   2. Take alive entries fastest first; for each, ping every exit through it (exits in
+      parallel, entries one after another) and collect the working pairs.
+   3. If cached entry pings were used and the first 2 entries gave no working pair, the
+      cache is probably stale: re-ping the entries once and start over.
+   A server never pairs with itself (both profiles may share a subscription).
+   Results: working pairs sorted by total latency. */
+async function testChainRoute() {
+  const entries = profileNodeRefs(profilesData[chainDraft.inId]).map(r => r.node);
+  const exits = profileNodeRefs(profilesData[chainDraft.outId]).map(r => r.node);
+  const t = chainTest = { running: true, stage: '', done: 0, total: 0, pairs: [], showAll: false };
+  const live = () => chainTest === t && !t.stopped;
+  const step = stage => { t.stage = stage; renderChainTest(); };
+
+  let fromCache = entries.every(n => pingAge(n) < PING_FRESH_MS);
+  if (!fromCache) { step(`Pinging ${entries.length} entry nodes…`); await pingNodes(entries); }
+
+  for (let attempt = 0; attempt < 2 && live(); attempt++) {
+    const alive = entries.filter(isAlive).sort((a, b) => ping(a) - ping(b));
+    t.pairs = []; t.done = 0; t.total = alive.length;
+    let retry = false;
+    for (let i = 0; i < alive.length && live(); i++) {
+      const entry = alive[i];
+      step(`Entry ${i + 1} of ${alive.length}: ${entry.flag} ${esc(entry.name)} → ${exits.length} exits`);
+      const res = await Promise.all(exits.filter(exit => serverKey(exit) !== serverKey(entry)).map(exit => pingPair(entry, exit).then(ms => ({ entry, exit, ms }))));
+      if (!live()) return;
+      t.pairs.push(...res.filter(r => r.ms >= 0));
+      t.pairs.sort((a, b) => a.ms - b.ms);
+      t.done = i + 1;
+      if (fromCache && i === 1 && !t.pairs.length) { retry = true; break; }
+    }
+    if (!retry) break;
+    step('No pair through the first entries — re-pinging entry nodes…');
+    fromCache = false;
+    await pingNodes(entries);
+  }
+  if (chainTest !== t) return;
+  t.running = false;
   renderChainTest();
-  let left = exits.length;
-  exits.forEach(({ sid, node }) => setTimeout(() => {
-    if (chainDraft.test !== t) return;   // ends changed meanwhile
-    // Mock: the exit answers through the entry unless it is down or blocks the entry's IP.
-    t.results[sid + '::' + node.id] = !isAlive(node) || Math.random() < .25 ? -1 : entry.latency + node.latency + Math.round(Math.random() * 60);
-    if (--left === 0) t.running = false;
-    renderChainTest();
-  }, 400 + Math.random() * 1200));
-  if (!exits.length) { t.running = false; renderChainTest(); }
+}
+
+function stopChainRoute() {
+  if (!chainTest) return;
+  chainTest.stopped = true;
+  chainTest.running = false;
+  renderChainTest();
 }
 
 function saveCreateChain() {
   if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different profiles'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
-  const t = chainDraft.test && !chainDraft.test.running ? chainDraft.test : null;
   const fields = { inId: chainDraft.inId, outId: chainDraft.outId,
-                   inAuto: document.getElementById('cc-inauto').classList.contains('on'),
-                   test: t ? { reachable: Object.values(t.results).filter(v => v >= 0).length, results: t.results } : null };
+                   inAuto: document.getElementById('cc-inauto').classList.contains('on') };
   if (editingChainId) {
     Object.assign(chainsData[editingChainId], { name }, fields);
   } else {
@@ -269,6 +308,7 @@ function saveCreateChain() {
     connectOrder.push(id);
   }
   editingChainId = null;
+  chainTest = null;
   renderConnects();
   updateMainConnectCard();
   closeSheet('createchain');
