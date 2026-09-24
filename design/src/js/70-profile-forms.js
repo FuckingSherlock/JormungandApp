@@ -8,7 +8,7 @@ let editingProfileId = null;
 
 function cpSourceState(id) {
   if (createProfileSelected.has(id)) return 'all';
-  return sourcesData[id].nodes.some(n => cpNodes.has(id + '::' + n.id)) ? 'some' : 'none';
+  return liveNodes(sourcesData[id]).some(n => cpNodes.has(id + '::' + n.id)) ? 'some' : 'none';
 }
 
 function openCreateProfile(editId) {
@@ -47,16 +47,17 @@ const cpOpen = new Set();
 // those show greyed ("off in Nodes") so the user sees why, picks kept for when it's back.
 const cpSourceIds = () => sourceOrder.filter(id => sourcesData[id].enabled || cpSourceState(id) !== 'none');
 const cpOffPicked = () => sourceOrder.filter(id => !sourcesData[id].enabled && cpSourceState(id) !== 'none');
-// Servers the draft would use now: must be at least one to save.
-const cpPickedCount = () => cpSourceIds().filter(id => sourcesData[id].enabled).reduce((sum, id) => sum + (createProfileSelected.has(id) ? sourcesData[id].nodes.length
-  : sourcesData[id].nodes.filter(n => cpNodes.has(id + '::' + n.id)).length), 0);
+// Servers the draft would use now: must be at least one to save. Servers switched off in
+// Nodes are hidden here (picks kept) — cpDraftRefs(true) counts them to explain an empty draft.
+const cpDraftRefs = withOff => profileNodeRefs({ sources: [...createProfileSelected], nodes: [...cpNodes] }, withOff);
+const cpPickedCount = () => cpDraftRefs().length;
 
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
-  const none = !cpPickedCount(), offs = cpOffPicked().map(id => sourcesData[id].name);
+  const none = !cpPickedCount(), offs = offReasons(cpDraftRefs(true));
   const warn = document.getElementById('cp-warn');
   warn.hidden = !none;
-  warn.textContent = offs.length ? `${offs.join(', ')} ${offs.length > 1 ? 'are' : 'is'} off in Nodes — switch it on there or tick another server`
+  warn.textContent = offs.length ? `${reasonsText(offs)} — switch ${offs.length > 1 ? 'one' : 'it'} on there or tick another server`
     : 'Tick at least 1 server — a profile with none can’t connect';
   document.getElementById('cpSaveBtn').disabled = none;
   el.innerHTML = cpSourceIds().map(id => {
@@ -68,13 +69,13 @@ function renderCreateProfileSources() {
         <div class="ps-main"><div class="ps-name">${esc(s.name)}</div><div class="src-meta"><span class="off-meta">off in Nodes</span><span class="dot">·</span>untick to drop it</div></div>
       </div>
     </div>`;
-    const open = cpOpen.has(id);
-    const alive = s.nodes.filter(isAlive).length;
-    const picked = state === 'all' ? s.nodes.length : s.nodes.filter(n => cpNodes.has(id + '::' + n.id)).length;
+    const open = cpOpen.has(id), live = liveNodes(s);
+    const alive = live.filter(isAlive).length;
+    const picked = state === 'all' ? live.length : live.filter(n => cpNodes.has(id + '::' + n.id)).length;
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
-                  state === 'some' ? `${picked} of ${s.nodes.length} nodes` : `${s.nodes.length} nodes`, `${alive} alive`]
+                  state === 'some' ? `${picked} of ${live.length} nodes` : `${live.length} nodes`, `${alive} alive`]
       .concat((s.gone || []).length ? [`<span class="gone-meta">${s.gone.length} unavailable</span>`] : []).join('<span class="dot">·</span>');
-    const rows = open ? sortedNodes(s.nodes).map(n => {
+    const rows = open ? sortedNodes(live).map(n => {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
       return `<div class="node-row ps-node ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
@@ -138,7 +139,7 @@ function toggleCpNode(sid, nid) {
   } else if (cpNodes.has(key)) cpNodes.delete(key);
   else {
     cpNodes.add(key);
-    if (s.nodes.every(n => cpNodes.has(sid + '::' + n.id))) { cpDropNodes(sid); createProfileSelected.add(sid); }
+    if (s.nodes.every(n => cpNodes.has(sid + '::' + n.id))) { cpDropNodes(sid); createProfileSelected.add(sid); }   // disabled ones count: a pick is kept as a pick
   }
   renderCreateProfileSources();
 }
@@ -294,9 +295,9 @@ function renderChainPicker(elId, side) {
 
 // Each end needs at least one ticked server, and nothing it stands on switched off in Nodes.
 function chainProblems(d = chainDraft) {
-  return [['entry', chainEntryRefs(d), d.inId], ['exit', chainExitRefs(d), d.outId]].map(([name, refs, uid]) =>
-    isBroken(uid) ? `The ${name} needs ${brokenBy(uid).join(', ')}, off in Nodes — switch it on there or pick another`
-    : !refs.length && unitRefs(uid).length ? `Tick at least 1 server of the ${name}` : '').filter(Boolean);
+  return [['entry', chainEntryRefs(d), chainEntryRefs(d, true), d.inId], ['exit', chainExitRefs(d), chainExitRefs(d, true), d.outId]].map(([name, refs, all, uid]) =>
+    refs.length ? '' : offReasons(all).length ? `The ${name}: ${reasonsText(offReasons(all))} — switch it on there or tick another server`
+    : unitRefs(uid).length ? `Tick at least 1 server of the ${name}` : '').filter(Boolean);
 }
 function renderChainWarn() {
   const problems = chainProblems();

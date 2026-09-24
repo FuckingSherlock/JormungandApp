@@ -2,6 +2,7 @@
    The simple-mode counterpart of the profile editor: which of the source's servers this
    entry may use (tick / untick, all / none), Auto participation, ping and update.
    Changes apply at once. Unticked servers are s.offNodes; new ones after an update are on.
+   Servers switched off in Nodes (s.disabledNodes) are not listed; their ticks are kept.
    At least one server must stay ticked: with none, a warning shows and closing the sheet
    puts the selection back to what it was when opened. */
 
@@ -18,19 +19,19 @@ function openSourceEntry(sid) {
 function renderSourceEntry() {
   const s = sourcesData[seId];
   if (!s) return;
-  const on = s.nodes.length - offCount(s);
+  const live = liveNodes(s), on = live.length - offCount(s), hidden = s.nodes.length - live.length;
   document.getElementById('seTitle').textContent = s.name;
   document.getElementById('se-inauto').classList.toggle('on', s.inAuto);
-  document.getElementById('se-count').textContent = `${on} of ${s.nodes.length} on`;
-  const none = !on && s.nodes.length > 0;
+  document.getElementById('se-count').innerHTML = `${on} of ${live.length} on` + (hidden ? ` <span class="dis-meta">· ${hidden} off in Nodes</span>` : '');
+  const none = !on && live.length > 0;
   document.getElementById('se-warn').hidden = !none;
   document.getElementById('se-done').disabled = none;
   const upd = document.getElementById('se-update');
   upd.style.display = s.kind === 'sub' ? '' : 'none';
   upd.innerHTML = `<span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span>`;
   upd.nextElementSibling.innerHTML = ICON.bolt;
-  document.getElementById('se-all').textContent = on === s.nodes.length ? 'None' : 'All';
-  document.getElementById('se-nodes').innerHTML = sortedNodes(s.nodes).map(n => {
+  document.getElementById('se-all').textContent = on === live.length ? 'None' : 'All';
+  document.getElementById('se-nodes').innerHTML = sortedNodes(live).map(n => {
     const off = isNodeOff(s, n.id);
     return `<div class="node-row ps-node ${off ? '' : 'on'}" onclick="toggleSourceEntryNode('${n.id}')">
       <div class="sub-checkbox ${off ? '' : 'checked'}"></div>
@@ -58,7 +59,7 @@ function toggleSourceEntryNode(nid) {
 
 function setSourceEntryAll() {
   const s = sourcesData[seId];
-  const ids = s.nodes.map(n => n.id), kept = (s.offNodes || []).filter(id => !ids.includes(id));   // dropped servers keep theirs
+  const ids = liveNodes(s).map(n => n.id), kept = (s.offNodes || []).filter(id => !ids.includes(id));   // dropped / disabled servers keep theirs
   s.offNodes = offCount(s) ? kept : kept.concat(ids);
   sourceEntryChanged();
 }
@@ -70,7 +71,7 @@ function toggleSourceEntryAuto() {
 
 sheetCloseHooks.sourceentry = () => {
   const s = sourcesData[seId];
-  if (s && s.nodes.length && !(s.nodes.length - offCount(s))) {
+  if (s && liveNodes(s).length && !(liveNodes(s).length - offCount(s))) {
     s.offNodes = seSnapshot;
     toast('At least 1 server is needed — previous selection kept');
     renderConnects();

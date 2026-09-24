@@ -69,6 +69,10 @@ const SHOTS = {
   'chain-groups': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); toggleCcOpen('out', chainDraft.outId); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 });
     await p.evaluate(() => { chainTest.view = 'entry'; const g = chainTest.pairs[0]; if (g) chainTest.open.add(serverKey(g.entry)); renderChainTest(); document.querySelector('#sh-createchain .sheet-body').scrollTop = 9999; }); await settle(p); },
   'chain-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 }); await settle(p); },
+  automode:   async p => { await p.click('#autoCard'); await settle(p); },
+  'node-off': async p => { await tab(p, 'nodes'); await p.evaluate(() => { sourcesData.src2.disabledNodes.push('n2'); expandState.src2 = true; renderNodes(); document.querySelector('#view-nodes .scroll').scrollTop = 150; }); },
+  'broken-node': async p => { await p.evaluate(() => { sourcesData.src4.disabledNodes = ['n0', 'n1']; setConnectMode('profiles'); openProfiles(); }); await settle(p); },
+  'delete-confirm': async p => { await tab(p, 'nodes'); await p.evaluate(() => confirmDeleteSource('src2')); await settle(p); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
   nodeform:   async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodeForm()); await settle(p); },
@@ -291,12 +295,12 @@ async function runChecks() {
 
   await check('simple mode: ⋯ opens the source entry — servers on/off, all/none, Auto', async () => {
     await page.click('.conn-row[data-id=src2] .icon-btn'); await settle(page);
-    const total = await page.evaluate(() => sourcesData.src2.nodes.length);
+    const total = await page.evaluate(() => liveNodes(sourcesData.src2).length);
     await page.click('#se-nodes .node-row >> nth=0');
     expect(await page.evaluate(n => unitRefs('src2').length === n - 1, total), 'node not switched off');
     expect(await page.$eval('.conn-row[data-id=src2]', el => /1 off/.test(el.textContent)), 'row has no "1 off" tag');
     await page.click('#se-all');
-    expect(await page.evaluate(() => unitRefs('src2').length === sourcesData.src2.nodes.length), '"All" did not switch all on');
+    expect(await page.evaluate(() => unitRefs('src2').length === liveNodes(sourcesData.src2).length), '"All" did not switch all on');
     await page.click('#se-all');
     expect(await page.evaluate(() => unitRefs('src2').length === 0 && !isUsable('src2')), '"None" left nodes on');
     await page.click('#se-all');
@@ -544,6 +548,122 @@ async function runChecks() {
       setConnectMode('profiles'); const pw = autoConnect; autoConnect = false; activeConnectId = 'default'; updateMainConnectCard();
       out.profile = document.getElementById('profCardLabel').textContent === 'Profile' && !!det().querySelector('.dock-src');
       autoConnect = pw; setConnectMode('simple'); updateMainConnectCard();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('server off in Nodes: hidden everywhere, users with nothing left marked off, settings back when on', async () => {
+    const r = await page.evaluate(() => {
+      setConnectMode('simple'); const out = {}, s2 = sourcesData.src2;
+      s2.offNodes = []; s2.disabledNodes = ['n8'];
+      out.hidden = !unitRefs('src2').some(r => r.node.id === 'n8');
+      openSourceEntry('src2'); out.se = document.querySelectorAll('#se-nodes > .node-row').length === s2.nodes.length - 1; closeSheet('sourceentry');
+      // a chain whose entry uses only n0 of src2
+      chainsData.tc4 = { id:'tc4', name:'t4', inId:'src2', outId:'src3', inAuto:true, inOff: s2.nodes.filter(n => n.id !== 'n0').map(n => 'src2::' + n.id), outOff:[], exitMode:'fastest', exitOrder:[] };
+      connectOrder.unshift('tc4');
+      return out;
+    });
+    await tab(page, 'nodes');
+    await page.evaluate(() => { expandState.src2 = true; renderNodes(); });
+    await page.click('.src-card[data-id=src2] .node-row[data-nid=n0] .mini-toggle');
+    const r2 = await page.evaluate(() => {
+      const out = {}, s2 = sourcesData.src2;
+      out.toggled = isNodeDisabled(s2, 'n0') && !!document.querySelector('.src-card[data-id=src2] .node-row.disabled[data-nid=n0]');
+      openProfiles();
+      out.broken = !!document.querySelector('.conn-broken-list .conn-row[data-id=tc4]') && brokenBy('tc4')[0].nid === 'n0';
+      document.querySelector('.conn-row.broken[data-id=tc4]').click();
+      out.explain = /Switch on/.test(document.getElementById('actions-body').textContent);
+      document.querySelector('#actions-body .menu-row').click();   // Switch on 🇩🇪 …
+      out.back = !isNodeDisabled(s2, 'n0') && chainsData.tc4.inOff.length === s2.nodes.length - 1 && !!document.querySelector('#connects-list > .conn-row[data-id=tc4]');
+      // simple entry: only n1 ticked, then n1 switched off → the entry itself is broken
+      s2.offNodes = s2.nodes.filter(n => n.id !== 'n1').map(n => n.id);
+      toggleNodeEnabled('src2', 'n1');
+      out.entry = !!document.querySelector('.conn-broken-list .conn-row[data-id=src2]') && effectiveConnectId() !== 'src2';
+      toggleNodeEnabled('src2', 'n1'); s2.offNodes = [];
+      // profiles: a profile of one picked server that is switched off
+      setConnectMode('profiles');
+      profilesData.tp3 = { id:'tp3', name:'tp3', sources:[], nodes:['src2::n8'], inAuto:true }; connectOrder.push('tp3'); renderConnects();
+      out.profile = !!document.querySelector('.conn-broken-list .conn-row[data-id=tp3]');
+      openEditProfile('tp3'); out.cpWarn = /off in Nodes/.test(document.getElementById('cp-warn').textContent) && document.getElementById('cpSaveBtn').disabled; closeSheet('createprofile');
+      delete profilesData.tp3; connectOrder = connectOrder.filter(x => x !== 'tp3');
+      setConnectMode('simple');
+      delete chainsData.tc4; connectOrder = connectOrder.filter(x => x !== 'tc4');
+      closeSheet('actions'); closeSheet('profiles'); renderAll();
+      return out;
+    });
+    await tab(page, 'home');
+    expect(Object.values(r).concat(Object.values(r2)).every(Boolean), JSON.stringify([r, r2]));
+  });
+
+  await check('delete asks first and lists what it breaks; cancel keeps everything', async () => {
+    const r = await page.evaluate(() => {
+      const out = {};
+      sourcesData.tmp = { id:'tmp', kind:'node', name:'Tmp', enabled:true, inAuto:true, offNodes:[], disabledNodes:[], nodes: genNodes(3, 'node') };
+      sourceOrder.push('tmp'); sourceAdded('tmp');
+      chainsData.tc5 = { id:'tc5', name:'Tmp chain', inId:'src2', outId:'tmp', inAuto:true, inOff:[], outOff:[], exitMode:'fastest', exitOrder:[] };
+      connectOrder.push('tc5');
+      modeState.profiles.order.push('tp4');
+      profilesData.tp4 = { id:'tp4', name:'Only tmp', sources:[], nodes:['tmp::n0'], inAuto:true };
+      openSourceActions('tmp');
+      [...document.querySelectorAll('#actions-body .menu-row')].find(e => /Delete/.test(e.textContent)).click();
+      const body = () => document.getElementById('actions-body').textContent;
+      out.asks = !!sourcesData.tmp && /Delete Tmp\?/.test(document.getElementById('actionsTitle').textContent);
+      out.impact = /Tmp chain.*deleted with it/.test(body()) && /Only tmp.*no servers/.test(body());
+      [...document.querySelectorAll('#actions-body .menu-row')].find(e => /Cancel/.test(e.textContent)).click();
+      out.cancel = !!sourcesData.tmp && !!chainsData.tc5;
+      confirmDeleteNode('tmp', 'n0');
+      out.node = /Only tmp.*no servers/.test(body()) && /Tmp chain.*exit loses 1 server/.test(body());
+      document.querySelector('#actions-body .menu-row.danger').click();
+      out.nodeGone = sourcesData.tmp.nodes.length === 2 && !profilesData.tp4.nodes.length;
+      confirmDeleteSource('tmp');
+      document.querySelector('#actions-body .menu-row.danger').click();
+      out.gone = !sourcesData.tmp && !chainsData.tc5 && !connectOrder.includes('tc5');
+      delete profilesData.tp4; modeState.profiles.order = modeState.profiles.order.filter(x => x !== 'tp4');
+      renderAll();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('unavailable servers are kept 15 days each, then forgotten with their settings', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, s = sourcesData.src1, day = 864e5;
+      const [a, b] = genNodes(40, 'sub').slice(30, 32).map((n, i) => Object.assign(n, { id: 'x' + i, goneAt: Date.now() - (i ? 16 : 13) * day }));
+      s.gone = (s.gone || []).concat(a, b);
+      profilesData.default.nodes.push('src1::x0', 'src1::x1');
+      purgeExpiredGone();
+      out.purged = !s.gone.some(n => n.id === 'x1') && !profilesData.default.nodes.includes('src1::x1');
+      out.kept = s.gone.some(n => n.id === 'x0') && profilesData.default.nodes.includes('src1::x0');
+      expandState.src1 = true; goneOpen.add('nodes:src1'); renderNodes();
+      out.left = /2 d left/.test(document.querySelector('.src-card[data-id=src1] .gone-block').textContent);
+      openGoneActions('src1', 'x0'); document.querySelector('#actions-body .menu-row.danger').click();
+      out.forgot = !s.gone.some(n => n.id === 'x0') && !profilesData.default.nodes.includes('src1::x0');
+      goneOpen.delete('nodes:src1'); renderNodes();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('Auto mode card opens its sheet; settings apply; subscriptions default to auto', async () => {
+    await page.click('#autoCard'); await settle(page);
+    const r = await page.evaluate(() => {
+      const out = {};
+      out.open = document.getElementById('sh-automode').classList.contains('open');
+      [...document.querySelectorAll('#automode-body .chip')].find(e => e.textContent === '100 ms').click();
+      out.threshold = autoCfg.threshold === 100 && /−100 ms/.test(document.getElementById('autoCardStats').textContent);
+      out.standby = document.querySelectorAll('#automode-body .am-sb-row').length === Math.min(autoCfg.standby, visibleOrder().filter(id => id !== effectiveConnectId() && connectEntry(id).inAuto).length);
+      document.getElementById('autoCardToggle').click();
+      out.manual = !autoConnect && /Manual/.test(document.getElementById('autoCardSub').textContent) && /no failover/.test(document.getElementById('automode-body').textContent);
+      document.getElementById('autoCardToggle').click();
+      setAutoCfg('threshold', 50);
+      closeSheet('automode');
+      openSrcForm('src1');
+      out.auto = document.getElementById('sf-interval').value === '' && /auto · 12 h/.test(document.getElementById('sf-interval').placeholder);
+      document.getElementById('sf-interval').value = '8'; saveSrcForm();
+      out.own = sourcesData.src1.updateInterval === 8;
+      openSrcForm('src1'); document.getElementById('sf-interval').value = ''; saveSrcForm();
+      out.back = sourcesData.src1.updateInterval === 'auto';
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));

@@ -1,0 +1,28 @@
+/* ── AutoCard (Home) ── */
+.auto-card{padding:12px 14px}
+.auto-card-top{display:flex;align-items:center;gap:12px}
+.auto-card-main{flex:1;min-width:0}
+.auto-card-main .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.auto-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.auto-stat{background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:8px;padding:6px 4px;text-align:center}
+.auto-stat-val{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap}
+.auto-stat-val.good{color:var(--active)}
+.auto-stat-val.mid{color:var(--warn)}
+.auto-stat-val.bad{color:var(--muted)}
+.auto-stat-label{font-size:11px;color:var(--t3);margin-top:1px}
+
+/* ── Auto mode sheet ── */
+.am-now{display:flex;align-items:center;gap:12px;margin:4px 18px 8px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:rgba(var(--accent-rgb),.06)}
+.am-now-main{flex:1;min-width:0}
+.am-now-name{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:2px}
+.am-now-ms{text-align:right;flex-shrink:0}
+.am-now-ms .lat{font-size:15px;min-width:0;cursor:default;padding:0}
+.am-checked{font-size:11px;color:var(--t3);margin-top:2px}
+.am-actions{display:flex;gap:8px;padding:0 18px 6px}
+.am-standby{margin:6px 18px 12px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.am-standby .route-empty{padding:12px 14px}
+.am-sb-row{display:flex;align-items:center;gap:10px;padding:9px 12px}
+.am-sb-row + .am-sb-row{border-top:1px solid var(--border)}
+.am-sb-main{flex:1;min-width:0}
+.am-sb-name{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
+.am-sb-row .lat{min-width:0;cursor:default}

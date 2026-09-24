@@ -76,8 +76,8 @@
         <div class="form-label" style="padding:8px 18px 0">Updates</div>
         <div class="set-group">
           <div class="set-row">
-            <div class="set-label">Update every</div>
-            <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="12"><span style="color:var(--t2);font-size:15px">h</span>
+            <div class="set-label">Update every<div class="set-hint">Empty = auto, the period set in Auto mode · 0 = never</div></div>
+            <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="auto"><span style="color:var(--t2);font-size:15px">h</span>
           </div>
           <div class="set-row">
             <div class="set-label">Reconnect after update</div>
@@ -145,7 +145,7 @@
     </div>
     <div class="sheet-footer">
       <button class="btn-primary" id="sfSaveBtn" onclick="saveSrcForm()">Add</button>
-      <button class="btn-danger-text" id="sfDeleteBtn" style="display:none" onclick="deleteSource(editingSourceId);closeSheet('srcform')">Delete</button>
+      <button class="btn-danger-text" id="sfDeleteBtn" style="display:none" onclick="closeSheet('srcform');confirmDeleteSource(editingSourceId)">Delete</button>
     </div>
   </div>
 

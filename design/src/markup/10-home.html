@@ -61,6 +61,21 @@
       </div>
     </div>
 
+    <!-- AutoCard: how Auto picks and keeps the connection (opens the Auto mode sheet) -->
+    <div class="card auto-card" id="autoCard" onclick="openAutoMode()">
+      <div class="auto-card-top">
+        <div class="nav-icon teal" style="margin-bottom:0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg>
+        </div>
+        <div class="auto-card-main">
+          <div class="nav-title" style="margin-bottom:0">Auto mode</div>
+          <div class="nav-sub" id="autoCardSub"></div>
+        </div>
+        <div class="mini-toggle" id="autoCardToggle" onclick="event.stopPropagation();setAutoConnect(!autoConnect)"><div class="mini-toggle-thumb"></div></div>
+      </div>
+      <div class="auto-stats" id="autoCardStats"></div>
+    </div>
+
     <!-- ROW 4: Rules · DNS · Speed Test -->
     <div class="row3">
       <div class="card" style="padding:14px" onclick="openSheet('rules')">

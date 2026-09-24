@@ -8,29 +8,43 @@ const connectEntry = id => profilesData[id] || chainsData[id] || sourcesData[id]
 const simpleMode = () => connectMode === 'simple';
 const unitWord = () => simpleMode() ? 'source' : 'profile';
 
-// Nodes a profile can use right now (enabled sources only), as {sid, node}.
+/* Servers switched off one by one in Nodes: s.disabledNodes (node ids). Like a source
+   switched off, a disabled server is hidden from every list and picker (entries, profiles,
+   chains) but every setting naming it is kept — switched back on, it is where it was.
+   liveNodes(s) = the servers the rest of the app sees. */
+const isNodeDisabled = (s, nid) => !!s.disabledNodes && s.disabledNodes.includes(nid);
+const liveNodes = s => s.nodes.filter(n => !isNodeDisabled(s, n.id));
+
+/* Delete preview: while simExclude(ref) is set, units act as if those servers were gone
+   (see deleteImpact in 30-nodes.js). */
+let simExclude = null;
+const simKeep = r => !simExclude || !simExclude(r);
+
+// Nodes a profile can use right now (enabled sources, live servers only), as {sid, node}.
 // p.sources = whole sources (every node, including ones a subscription update adds later);
 // p.nodes = individually picked nodes as 'sid::nid' (kept while the provider has dropped
 // the server too — see s.gone — so the pick is back when the server is).
-function profileNodeRefs(p) {
+// withOff: also what is switched off in Nodes (to tell why a profile has nothing).
+function profileNodeRefs(p, withOff) {
   const refs = [];
   sourceOrder.forEach(sid => {
     const s = sourcesData[sid];
-    if (!s || !s.enabled) return;
+    if (!s || !(s.enabled || withOff)) return;
     const whole = p.sources.includes(sid);
-    s.nodes.forEach(n => { if (whole || p.nodes.includes(sid + '::' + n.id)) refs.push({ sid, node: n }); });
+    (withOff ? s.nodes : liveNodes(s)).forEach(n => { if (whole || p.nodes.includes(sid + '::' + n.id)) refs.push({ sid, node: n }); });
   });
-  return refs;
+  return refs.filter(simKeep);
 }
 
 const isNodeOff = (s, nid) => !!s.offNodes && s.offNodes.includes(nid);
-const offCount = s => s.nodes.filter(n => isNodeOff(s, n.id)).length;
+const offCount = s => liveNodes(s).filter(n => isNodeOff(s, n.id)).length;
 
 // A "unit" is what a list entry / chain end stands for: a profile, or (simple mode) a source.
-function unitRefs(id) {
-  if (profilesData[id]) return profileNodeRefs(profilesData[id]);
+function unitRefs(id, withOff) {
+  if (profilesData[id]) return profileNodeRefs(profilesData[id], withOff);
   const s = sourcesData[id];
-  return s && s.enabled ? s.nodes.filter(n => !isNodeOff(s, n.id)).map(node => ({ sid: id, node })) : [];
+  if (!s || !(s.enabled || withOff)) return [];
+  return (withOff ? s.nodes : liveNodes(s)).filter(n => !isNodeOff(s, n.id)).map(node => ({ sid: id, node })).filter(simKeep);
 }
 // Servers of a unit the provider dropped (s.gone), shown under "Unavailable" with their
 // kept settings. Disabled sources show nothing, like their live nodes.
@@ -46,24 +60,38 @@ function unitGoneRefs(id) {
   return refs;
 }
 
-/* Switching a source off in Nodes never edits what uses it: switched back on, it is back
-   in its profiles and chains with the same ticks and priority.
-   - simple mode: the source's own entry is hidden while off;
-   - a profile / chain that has nothing left without it is "broken": greyed with a red
+/* Switching a source or a single server off in Nodes never edits what uses it: switched
+   back on, it is back in its profiles and chains with the same ticks and priority.
+   - simple mode: a switched-off source's own entry is hidden;
+   - an entry / chain that has nothing left without it is "broken": greyed with a red
      edge, shown below the list (its priority slot is kept), skipped by Auto; tapping it
-     says which required source is off. brokenBy(id) = names of those sources, or []. */
-function profileOffSources(p) {
-  return sourceOrder.filter(sid => !sourcesData[sid].enabled
-    && (p.sources.includes(sid) || p.nodes.some(k => k.startsWith(sid + '::'))));
+     says what is off. brokenBy(id) = what to switch back on — {sid} for a source,
+     {sid, nid} for a server — or [] when the entry works. */
+function offReasons(allRefs) {
+  const m = new Map();
+  allRefs.forEach(r => {
+    const s = sourcesData[r.sid];
+    if (!s.enabled) m.set(r.sid, { sid: r.sid });
+    else if (isNodeDisabled(s, r.node.id)) m.set(refKey(r), { sid: r.sid, nid: r.node.id });
+  });
+  return [...m.values()];
 }
+// Sides that have no live server, but would with everything in Nodes switched on.
+const sideReasons = (live, all) => live.length ? [] : offReasons(all);
 function brokenBy(id) {
   if (chainsData[id]) {
-    const c = chainsData[id];
-    return [...new Set(brokenBy(c.inId).concat(brokenBy(c.outId)))];
+    const c = chainsData[id], seen = new Set();
+    return sideReasons(chainEntryRefs(c), chainEntryRefs(c, true)).concat(sideReasons(chainExitRefs(c), chainExitRefs(c, true)))
+      .filter(r => { const k = r.sid + '::' + (r.nid || ''); return !seen.has(k) && seen.add(k); });
   }
-  if (sourcesData[id]) return sourcesData[id].enabled ? [] : [sourcesData[id].name];
-  const p = profilesData[id];
-  return p && !profileNodeRefs(p).length ? profileOffSources(p).map(sid => sourcesData[sid].name) : [];
+  return connectEntry(id) ? sideReasons(unitRefs(id), unitRefs(id, true)) : [];
+}
+const reasonNode = r => sourcesData[r.sid].nodes.find(n => n.id === r.nid);
+const reasonLabel = r => r.nid ? reasonNode(r).flag + ' ' + reasonNode(r).name : sourcesData[r.sid].name;
+// "Remnawave is off" / "🇩🇪 Frankfurt 01, 🇳🇱 Amsterdam 01 are off" (up to 3 named).
+function reasonsText(rs) {
+  const names = rs.slice(0, 3).map(reasonLabel).join(', ') + (rs.length > 3 ? ` +${rs.length - 3}` : '');
+  return names + (rs.length > 1 ? ' are' : ' is') + ' off in Nodes';
 }
 const isBroken = id => brokenBy(id).length > 0;
 const entryVisible = id => !(sourcesData[id] && !sourcesData[id].enabled);
@@ -88,15 +116,15 @@ function bestAlive(nodes) {
   nodes.forEach(n => { if (isAlive(n) && (!best || ping(n) < ping(best))) best = n; });
   return best;
 }
-function chainEntryRefs(c) { return unitRefs(c.inId).filter(r => !(c.inOff || []).includes(refKey(r))); }
-// Every exit server in priority order, switched-off ones included.
-function chainExitOrder(c) {
+function chainEntryRefs(c, withOff) { return unitRefs(c.inId, withOff).filter(r => !(c.inOff || []).includes(refKey(r))); }
+// Every exit server in priority order, unticked ones included.
+function chainExitOrder(c, withOff) {
   const order = c.exitOrder || [];
   const pos = k => { const i = order.indexOf(k); return i < 0 ? Infinity : i; };
-  return unitRefs(c.outId).map((r, i) => ({ r, i }))
+  return unitRefs(c.outId, withOff).map((r, i) => ({ r, i }))
     .sort((a, b) => (pos(refKey(a.r)) - pos(refKey(b.r))) || a.i - b.i).map(x => x.r);
 }
-function chainExitRefs(c) { return chainExitOrder(c).filter(r => !(c.outOff || []).includes(refKey(r))); }
+function chainExitRefs(c, withOff) { return chainExitOrder(c, withOff).filter(r => !(c.outOff || []).includes(refKey(r))); }
 const chainEntryNode = c => bestAlive(chainEntryRefs(c).map(r => r.node));
 function chainExitNode(c) {
   const exits = chainExitRefs(c).map(r => r.node);
@@ -175,22 +203,30 @@ function renderBrokenRow(id) {
     <div class="drag-handle"></div>
     <div class="conn-main">
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
-      <div class="conn-sub"><span>${esc(brokenBy(id).join(', '))} ${brokenBy(id).length > 1 ? 'are' : 'is'} off in Nodes</span></div>
+      <div class="conn-sub"><span>${esc(reasonsText(brokenBy(id)))}</span></div>
     </div>
   </div>`;
 }
 
 function explainBroken(id) {
-  const names = brokenBy(id), kind = chainsData[id] ? 'chain' : 'profile';
-  const offIds = sourceOrder.filter(sid => !sourcesData[sid].enabled && names.includes(sourcesData[sid].name));
+  const rs = brokenBy(id), kind = chainsData[id] ? 'chain' : profilesData[id] ? 'profile' : 'entry';
   const close = "closeSheet('actions');";
+  const what = rs.some(r => !r.nid) ? (rs.some(r => r.nid) ? 'sources and servers' : rs.length > 1 ? 'sources' : 'source')
+    : rs.length > 1 ? 'servers' : 'server';
+  const edit = chainsData[id] ? `openEditChain('${id}')` : profilesData[id] ? `openEditProfile('${id}')` : `openSourceEntry('${id}')`;
   openActions(connectEntry(id).name,
-    `<div class="menu-note">This ${kind} needs <b>${esc(names.join(', '))}</b>, switched off in Nodes. Switch it on, or pick another ${chainsData[id] ? unitWord() : 'subscription or server'} for the ${kind}. Its settings are kept either way.</div>`
-    + offIds.map(sid => menuRow(ICON.power, 'Switch on ' + esc(sourcesData[sid].name), close + `enableSource('${sid}')`)).join('')
-    + menuRow(ICON.edit, 'Edit ' + kind, close + `${chainsData[id] ? 'openEditChain' : 'openEditProfile'}('${id}')`));
+    `<div class="menu-note">This ${kind} has nothing to connect through: the ${what} it uses ${rs.length > 1 ? 'are' : 'is'} switched off in Nodes. Switch ${rs.length > 1 ? 'one' : 'it'} on, or tick another server in the ${kind}. Its settings are kept either way.</div>`
+    + rs.map(r => menuRow(ICON.power, 'Switch on ' + esc(reasonLabel(r)) + (r.nid ? `<div class="menu-sub">${esc(sourcesData[r.sid].name)}</div>` : ''),
+        close + (r.nid ? `enableNode('${r.sid}','${r.nid}')` : `enableSource('${r.sid}')`))).join('')
+    + menuRow(ICON.edit, 'Edit ' + kind, close + edit));
 }
 function enableSource(sid) {
   sourcesData[sid].enabled = true;
+  renderAll();
+}
+function enableNode(sid, nid) {
+  const s = sourcesData[sid];
+  s.disabledNodes = (s.disabledNodes || []).filter(x => x !== nid);
   renderAll();
 }
 
@@ -316,4 +352,6 @@ function updateMainConnectCard() {
   }
   document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;
   document.getElementById('profMetaSrc').textContent = 'ms';
+  renderAutoCard();
+  if (document.getElementById('sh-automode').classList.contains('open')) renderAutoMode();
 }

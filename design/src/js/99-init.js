@@ -1,6 +1,7 @@
 /* ══════════════════════ INITIAL RENDER ══════════════════════ */
 
 applyTheme(currentTheme);
+purgeExpiredGone();
 
 renderConnects();
 renderNodes();

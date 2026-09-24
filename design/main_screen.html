@@ -475,6 +475,25 @@ body {
 .ps-card.off{border-color:rgba(var(--muted-rgb),.55)}
 .ps-card.off .ps-main{opacity:.6}
 .cc-prof.off .pick-row-name{color:var(--t3)}
+
+/* Server switched off in Nodes: the row stays in Nodes (dimmed), hidden everywhere else */
+.mini-toggle.sm{width:28px;height:17px}
+.mini-toggle.sm .mini-toggle-thumb{width:13px;height:13px}
+.mini-toggle.sm.on .mini-toggle-thumb{left:13px}
+.node-row.disabled > :not(.mini-toggle){opacity:.4}
+.node-row.disabled .node-name{text-decoration:line-through;text-decoration-color:var(--t3)}
+.dis-meta{color:var(--t3)}
+.node-row.gone.tap{cursor:pointer}
+.gone-left.soon{color:var(--warn)}
+
+/* Delete confirmation: what the deletion does to each user of the source / server */
+.impact-list{margin:0 20px 10px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.impact-row{padding:9px 12px;border-left:3px solid var(--warn)}
+.impact-row.bad{border-left-color:var(--muted)}
+.impact-row + .impact-row{border-top:1px solid var(--border)}
+.impact-name{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
+.impact-what{font-size:12.5px;color:var(--t2);margin-top:2px;line-height:1.35}
+.impact-row.bad .impact-what{color:var(--muted)}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -500,6 +519,34 @@ body {
 .dock-profile:active{background:rgba(255,255,255,.02)}
 .dock-chevron{color:var(--t3);flex-shrink:0}
 
+/* ── AutoCard (Home) ── */
+.auto-card{padding:12px 14px}
+.auto-card-top{display:flex;align-items:center;gap:12px}
+.auto-card-main{flex:1;min-width:0}
+.auto-card-main .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.auto-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.auto-stat{background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:8px;padding:6px 4px;text-align:center}
+.auto-stat-val{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap}
+.auto-stat-val.good{color:var(--active)}
+.auto-stat-val.mid{color:var(--warn)}
+.auto-stat-val.bad{color:var(--muted)}
+.auto-stat-label{font-size:11px;color:var(--t3);margin-top:1px}
+
+/* ── Auto mode sheet ── */
+.am-now{display:flex;align-items:center;gap:12px;margin:4px 18px 8px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:rgba(var(--accent-rgb),.06)}
+.am-now-main{flex:1;min-width:0}
+.am-now-name{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:2px}
+.am-now-ms{text-align:right;flex-shrink:0}
+.am-now-ms .lat{font-size:15px;min-width:0;cursor:default;padding:0}
+.am-checked{font-size:11px;color:var(--t3);margin-top:2px}
+.am-actions{display:flex;gap:8px;padding:0 18px 6px}
+.am-standby{margin:6px 18px 12px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.am-standby .route-empty{padding:12px 14px}
+.am-sb-row{display:flex;align-items:center;gap:10px;padding:9px 12px}
+.am-sb-row + .am-sb-row{border-top:1px solid var(--border)}
+.am-sb-main{flex:1;min-width:0}
+.am-sb-name{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
+.am-sb-row .lat{min-width:0;cursor:default}
 /* ── Views (bottom-nav tabs) ── */
 /* App frame is exactly one screen tall: status bar, section header and bottom nav
    stay put; only each view's .scroll area scrolls. */
@@ -715,6 +762,21 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
     </div>
 
+    <!-- AutoCard: how Auto picks and keeps the connection (opens the Auto mode sheet) -->
+    <div class="card auto-card" id="autoCard" onclick="openAutoMode()">
+      <div class="auto-card-top">
+        <div class="nav-icon teal" style="margin-bottom:0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg>
+        </div>
+        <div class="auto-card-main">
+          <div class="nav-title" style="margin-bottom:0">Auto mode</div>
+          <div class="nav-sub" id="autoCardSub"></div>
+        </div>
+        <div class="mini-toggle" id="autoCardToggle" onclick="event.stopPropagation();setAutoConnect(!autoConnect)"><div class="mini-toggle-thumb"></div></div>
+      </div>
+      <div class="auto-stats" id="autoCardStats"></div>
+    </div>
+
     <!-- ROW 4: Rules · DNS · Speed Test -->
     <div class="row3">
       <div class="card" style="padding:14px" onclick="openSheet('rules')">
@@ -896,6 +958,17 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <span id="createEntryLabel">Create chain</span>
       </div>
     </div>
+  </div>
+
+  <!-- ══════════ AUTO MODE SHEET (settings of Auto + current / standby servers) ══════════ -->
+  <div class="overlay" id="ov-automode" onclick="closeSheet('automode')"></div>
+  <div class="sheet" id="sh-automode">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Auto mode</span>
+      <button class="sheet-close" onclick="closeSheet('automode')">×</button>
+    </div>
+    <div class="sheet-body" id="automode-body"></div>
   </div>
 
   <!-- ══════════ LIVE CONNECTIONS SHEET ══════════ -->
@@ -1164,8 +1237,8 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="form-label" style="padding:8px 18px 0">Updates</div>
         <div class="set-group">
           <div class="set-row">
-            <div class="set-label">Update every</div>
-            <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="12"><span style="color:var(--t2);font-size:15px">h</span>
+            <div class="set-label">Update every<div class="set-hint">Empty = auto, the period set in Auto mode · 0 = never</div></div>
+            <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="auto"><span style="color:var(--t2);font-size:15px">h</span>
           </div>
           <div class="set-row">
             <div class="set-label">Reconnect after update</div>
@@ -1233,7 +1306,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     </div>
     <div class="sheet-footer">
       <button class="btn-primary" id="sfSaveBtn" onclick="saveSrcForm()">Add</button>
-      <button class="btn-danger-text" id="sfDeleteBtn" style="display:none" onclick="deleteSource(editingSourceId);closeSheet('srcform')">Delete</button>
+      <button class="btn-danger-text" id="sfDeleteBtn" style="display:none" onclick="closeSheet('srcform');confirmDeleteSource(editingSourceId)">Delete</button>
     </div>
   </div>
 
@@ -1331,20 +1404,20 @@ function genNodes(count, kind) {
 
 function mkSub(id, name, count, extra) {
   return Object.assign({
-    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], gone:[], nodes:genNodes(count,'sub'),
+    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], disabledNodes:[], gone:[], nodes:genNodes(count,'sub'),
     url:'https://sub.example.net/api/sub/' + id + 'Xk7PCg04NKVzp', format:'sing-box',
     updatedAt: Date.now() - 2*3600e3, usage:{ used:0, total:0 }, expire:null,
-    updateInterval:12, reloadAfterUpdate:true, testAfterUpdate:true,
+    updateInterval:'auto', reloadAfterUpdate:true, testAfterUpdate:true,
     userAgent:'Auto', channel:'Direct first', hwid:false, keepRules:false, filter:'', password:'', website:'',
   }, extra);
 }
 
 let sourcesData = {
   src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, offNodes:['n5','n11','n19'], website:'https://jormungand.example',
-    gone: genNodes(20, 'sub').slice(18).map(n => Object.assign(n, { goneAt: Date.now() - 30*3600e3 })), demoChurn: true }),
-  src2: mkSub('src2', 'Work Servers', 9, { format:'clash', updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
-  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], nodes:genNodes(2,'node') },
-  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
+    gone: genNodes(20, 'sub').slice(18).map((n, i) => Object.assign(n, { goneAt: Date.now() - (i ? 13*24 : 30) * 3600e3 })), demoChurn: true }),
+  src2: mkSub('src2', 'Work Servers', 9, { format:'clash', disabledNodes:['n8'], updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
+  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], disabledNodes:[], nodes:genNodes(2,'node') },
+  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updateInterval:6, updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
 };
 Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
 let sourceOrder = ['src1','src2','src3','src4'];
@@ -1362,7 +1435,9 @@ let sourceSeq = 5;
    profile picks, chain inOff/outOff/exitOrder) survives a reshuffled subscription.
    s.gone = servers the provider dropped in an update (with goneAt): settings naming them
    are kept, so when a server comes back it returns ticked/unticked and in its old
-   priority place. The UI lists them under "Unavailable"; Forget purges them for good. */
+   priority place. The UI lists them under "Unavailable"; Forget purges them for good.
+   s.disabledNodes = servers switched off one by one in Nodes: hidden everywhere, settings
+   naming them kept (see liveNodes). */
 let connectMode = 'simple';
 /* connectOrder is the priority list of the active mode (entries and chains together):
    with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
@@ -1489,29 +1564,43 @@ const connectEntry = id => profilesData[id] || chainsData[id] || sourcesData[id]
 const simpleMode = () => connectMode === 'simple';
 const unitWord = () => simpleMode() ? 'source' : 'profile';
 
-// Nodes a profile can use right now (enabled sources only), as {sid, node}.
+/* Servers switched off one by one in Nodes: s.disabledNodes (node ids). Like a source
+   switched off, a disabled server is hidden from every list and picker (entries, profiles,
+   chains) but every setting naming it is kept — switched back on, it is where it was.
+   liveNodes(s) = the servers the rest of the app sees. */
+const isNodeDisabled = (s, nid) => !!s.disabledNodes && s.disabledNodes.includes(nid);
+const liveNodes = s => s.nodes.filter(n => !isNodeDisabled(s, n.id));
+
+/* Delete preview: while simExclude(ref) is set, units act as if those servers were gone
+   (see deleteImpact in 30-nodes.js). */
+let simExclude = null;
+const simKeep = r => !simExclude || !simExclude(r);
+
+// Nodes a profile can use right now (enabled sources, live servers only), as {sid, node}.
 // p.sources = whole sources (every node, including ones a subscription update adds later);
 // p.nodes = individually picked nodes as 'sid::nid' (kept while the provider has dropped
 // the server too — see s.gone — so the pick is back when the server is).
-function profileNodeRefs(p) {
+// withOff: also what is switched off in Nodes (to tell why a profile has nothing).
+function profileNodeRefs(p, withOff) {
   const refs = [];
   sourceOrder.forEach(sid => {
     const s = sourcesData[sid];
-    if (!s || !s.enabled) return;
+    if (!s || !(s.enabled || withOff)) return;
     const whole = p.sources.includes(sid);
-    s.nodes.forEach(n => { if (whole || p.nodes.includes(sid + '::' + n.id)) refs.push({ sid, node: n }); });
+    (withOff ? s.nodes : liveNodes(s)).forEach(n => { if (whole || p.nodes.includes(sid + '::' + n.id)) refs.push({ sid, node: n }); });
   });
-  return refs;
+  return refs.filter(simKeep);
 }
 
 const isNodeOff = (s, nid) => !!s.offNodes && s.offNodes.includes(nid);
-const offCount = s => s.nodes.filter(n => isNodeOff(s, n.id)).length;
+const offCount = s => liveNodes(s).filter(n => isNodeOff(s, n.id)).length;
 
 // A "unit" is what a list entry / chain end stands for: a profile, or (simple mode) a source.
-function unitRefs(id) {
-  if (profilesData[id]) return profileNodeRefs(profilesData[id]);
+function unitRefs(id, withOff) {
+  if (profilesData[id]) return profileNodeRefs(profilesData[id], withOff);
   const s = sourcesData[id];
-  return s && s.enabled ? s.nodes.filter(n => !isNodeOff(s, n.id)).map(node => ({ sid: id, node })) : [];
+  if (!s || !(s.enabled || withOff)) return [];
+  return (withOff ? s.nodes : liveNodes(s)).filter(n => !isNodeOff(s, n.id)).map(node => ({ sid: id, node })).filter(simKeep);
 }
 // Servers of a unit the provider dropped (s.gone), shown under "Unavailable" with their
 // kept settings. Disabled sources show nothing, like their live nodes.
@@ -1527,24 +1616,38 @@ function unitGoneRefs(id) {
   return refs;
 }
 
-/* Switching a source off in Nodes never edits what uses it: switched back on, it is back
-   in its profiles and chains with the same ticks and priority.
-   - simple mode: the source's own entry is hidden while off;
-   - a profile / chain that has nothing left without it is "broken": greyed with a red
+/* Switching a source or a single server off in Nodes never edits what uses it: switched
+   back on, it is back in its profiles and chains with the same ticks and priority.
+   - simple mode: a switched-off source's own entry is hidden;
+   - an entry / chain that has nothing left without it is "broken": greyed with a red
      edge, shown below the list (its priority slot is kept), skipped by Auto; tapping it
-     says which required source is off. brokenBy(id) = names of those sources, or []. */
-function profileOffSources(p) {
-  return sourceOrder.filter(sid => !sourcesData[sid].enabled
-    && (p.sources.includes(sid) || p.nodes.some(k => k.startsWith(sid + '::'))));
+     says what is off. brokenBy(id) = what to switch back on — {sid} for a source,
+     {sid, nid} for a server — or [] when the entry works. */
+function offReasons(allRefs) {
+  const m = new Map();
+  allRefs.forEach(r => {
+    const s = sourcesData[r.sid];
+    if (!s.enabled) m.set(r.sid, { sid: r.sid });
+    else if (isNodeDisabled(s, r.node.id)) m.set(refKey(r), { sid: r.sid, nid: r.node.id });
+  });
+  return [...m.values()];
 }
+// Sides that have no live server, but would with everything in Nodes switched on.
+const sideReasons = (live, all) => live.length ? [] : offReasons(all);
 function brokenBy(id) {
   if (chainsData[id]) {
-    const c = chainsData[id];
-    return [...new Set(brokenBy(c.inId).concat(brokenBy(c.outId)))];
+    const c = chainsData[id], seen = new Set();
+    return sideReasons(chainEntryRefs(c), chainEntryRefs(c, true)).concat(sideReasons(chainExitRefs(c), chainExitRefs(c, true)))
+      .filter(r => { const k = r.sid + '::' + (r.nid || ''); return !seen.has(k) && seen.add(k); });
   }
-  if (sourcesData[id]) return sourcesData[id].enabled ? [] : [sourcesData[id].name];
-  const p = profilesData[id];
-  return p && !profileNodeRefs(p).length ? profileOffSources(p).map(sid => sourcesData[sid].name) : [];
+  return connectEntry(id) ? sideReasons(unitRefs(id), unitRefs(id, true)) : [];
+}
+const reasonNode = r => sourcesData[r.sid].nodes.find(n => n.id === r.nid);
+const reasonLabel = r => r.nid ? reasonNode(r).flag + ' ' + reasonNode(r).name : sourcesData[r.sid].name;
+// "Remnawave is off" / "🇩🇪 Frankfurt 01, 🇳🇱 Amsterdam 01 are off" (up to 3 named).
+function reasonsText(rs) {
+  const names = rs.slice(0, 3).map(reasonLabel).join(', ') + (rs.length > 3 ? ` +${rs.length - 3}` : '');
+  return names + (rs.length > 1 ? ' are' : ' is') + ' off in Nodes';
 }
 const isBroken = id => brokenBy(id).length > 0;
 const entryVisible = id => !(sourcesData[id] && !sourcesData[id].enabled);
@@ -1569,15 +1672,15 @@ function bestAlive(nodes) {
   nodes.forEach(n => { if (isAlive(n) && (!best || ping(n) < ping(best))) best = n; });
   return best;
 }
-function chainEntryRefs(c) { return unitRefs(c.inId).filter(r => !(c.inOff || []).includes(refKey(r))); }
-// Every exit server in priority order, switched-off ones included.
-function chainExitOrder(c) {
+function chainEntryRefs(c, withOff) { return unitRefs(c.inId, withOff).filter(r => !(c.inOff || []).includes(refKey(r))); }
+// Every exit server in priority order, unticked ones included.
+function chainExitOrder(c, withOff) {
   const order = c.exitOrder || [];
   const pos = k => { const i = order.indexOf(k); return i < 0 ? Infinity : i; };
-  return unitRefs(c.outId).map((r, i) => ({ r, i }))
+  return unitRefs(c.outId, withOff).map((r, i) => ({ r, i }))
     .sort((a, b) => (pos(refKey(a.r)) - pos(refKey(b.r))) || a.i - b.i).map(x => x.r);
 }
-function chainExitRefs(c) { return chainExitOrder(c).filter(r => !(c.outOff || []).includes(refKey(r))); }
+function chainExitRefs(c, withOff) { return chainExitOrder(c, withOff).filter(r => !(c.outOff || []).includes(refKey(r))); }
 const chainEntryNode = c => bestAlive(chainEntryRefs(c).map(r => r.node));
 function chainExitNode(c) {
   const exits = chainExitRefs(c).map(r => r.node);
@@ -1656,22 +1759,30 @@ function renderBrokenRow(id) {
     <div class="drag-handle"></div>
     <div class="conn-main">
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
-      <div class="conn-sub"><span>${esc(brokenBy(id).join(', '))} ${brokenBy(id).length > 1 ? 'are' : 'is'} off in Nodes</span></div>
+      <div class="conn-sub"><span>${esc(reasonsText(brokenBy(id)))}</span></div>
     </div>
   </div>`;
 }
 
 function explainBroken(id) {
-  const names = brokenBy(id), kind = chainsData[id] ? 'chain' : 'profile';
-  const offIds = sourceOrder.filter(sid => !sourcesData[sid].enabled && names.includes(sourcesData[sid].name));
+  const rs = brokenBy(id), kind = chainsData[id] ? 'chain' : profilesData[id] ? 'profile' : 'entry';
   const close = "closeSheet('actions');";
+  const what = rs.some(r => !r.nid) ? (rs.some(r => r.nid) ? 'sources and servers' : rs.length > 1 ? 'sources' : 'source')
+    : rs.length > 1 ? 'servers' : 'server';
+  const edit = chainsData[id] ? `openEditChain('${id}')` : profilesData[id] ? `openEditProfile('${id}')` : `openSourceEntry('${id}')`;
   openActions(connectEntry(id).name,
-    `<div class="menu-note">This ${kind} needs <b>${esc(names.join(', '))}</b>, switched off in Nodes. Switch it on, or pick another ${chainsData[id] ? unitWord() : 'subscription or server'} for the ${kind}. Its settings are kept either way.</div>`
-    + offIds.map(sid => menuRow(ICON.power, 'Switch on ' + esc(sourcesData[sid].name), close + `enableSource('${sid}')`)).join('')
-    + menuRow(ICON.edit, 'Edit ' + kind, close + `${chainsData[id] ? 'openEditChain' : 'openEditProfile'}('${id}')`));
+    `<div class="menu-note">This ${kind} has nothing to connect through: the ${what} it uses ${rs.length > 1 ? 'are' : 'is'} switched off in Nodes. Switch ${rs.length > 1 ? 'one' : 'it'} on, or tick another server in the ${kind}. Its settings are kept either way.</div>`
+    + rs.map(r => menuRow(ICON.power, 'Switch on ' + esc(reasonLabel(r)) + (r.nid ? `<div class="menu-sub">${esc(sourcesData[r.sid].name)}</div>` : ''),
+        close + (r.nid ? `enableNode('${r.sid}','${r.nid}')` : `enableSource('${r.sid}')`))).join('')
+    + menuRow(ICON.edit, 'Edit ' + kind, close + edit));
 }
 function enableSource(sid) {
   sourcesData[sid].enabled = true;
+  renderAll();
+}
+function enableNode(sid, nid) {
+  const s = sourcesData[sid];
+  s.disabledNodes = (s.disabledNodes || []).filter(x => x !== nid);
   renderAll();
 }
 
@@ -1797,6 +1908,8 @@ function updateMainConnectCard() {
   }
   document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;
   document.getElementById('profMetaSrc').textContent = 'ms';
+  renderAutoCard();
+  if (document.getElementById('sh-automode').classList.contains('open')) renderAutoMode();
 }
 /* ══════════════════════ NODES SCREEN (subscriptions + manual servers) ══════════════════════
    Replaces the old "All configs" sheet. A source is either a subscription (kind 'sub')
@@ -1813,6 +1926,7 @@ const ICON = {
   web:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>',
   trash:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>',
   power:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>',
+  close:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>',
   plus:    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
   collapse:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>',
   expand:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>',
@@ -1860,16 +1974,22 @@ function sortedNodes(list, nodeOf = x => x) {
 /* ── Servers the provider dropped (s.gone) ──
    One collapsible "Unavailable · N" block, used by Nodes and by every node picker. The
    rows are read-only; `extra(ref)` draws the kept setting (tick, priority) before the
-   flag. `ctx` names the block so each view remembers its own open state. */
+   flag; `rowClick(ref)` (Nodes only) opens the server's own menu. `ctx` names the block
+   so each view remembers its own open state.
+   Each dropped server is kept GONE_KEEP_DAYS from its own goneAt, then forgotten with
+   its settings (purgeExpiredGone: on start and after every update). The list lives in
+   the source, so deleting the source deletes it too. */
+const GONE_KEEP_DAYS = 15;
+const goneLeftDays = n => Math.ceil((n.goneAt + GONE_KEEP_DAYS * 864e5 - Date.now()) / 864e5);
 const goneOpen = new Set();
-function goneBlockHtml(ctx, refs, extra = () => '', action = '') {
+function goneBlockHtml(ctx, refs, extra = () => '', action = '', rowClick = null) {
   if (!refs.length) return '';
   const open = goneOpen.has(ctx);
-  const rows = open ? refs.map(r => `<div class="node-row gone">${extra(r)}
+  const rows = open ? refs.map(r => `<div class="node-row gone ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>${extra(r)}
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
       <span class="node-proto">${r.node.protocol}</span>
-      <span class="lat none">${timeAgo(r.node.goneAt)}</span>
+      <span class="lat none gone-left ${goneLeftDays(r.node) <= 3 ? 'soon' : ''}" title="Removed ${timeAgo(r.node.goneAt)}">${goneLeftDays(r.node)} d left</span>
     </div>`).join('') : '';
   return `<div class="gone-block ${open ? 'open' : ''}">
     <div class="gone-head" onclick="event.stopPropagation();toggleGone('${ctx}')">
@@ -1885,16 +2005,36 @@ function toggleGone(ctx) {
 }
 const goneRefs = sid => (sourcesData[sid].gone || []).map(node => ({ sid, node }));
 
-// Forget dropped servers: they and every setting naming them are gone for good.
-function forgetGone(sid) {
-  const s = sourcesData[sid];
-  const ids = new Set((s.gone || []).map(n => n.id)), keys = new Set([...ids].map(nid => sid + '::' + nid));
-  s.gone = [];
+// Every setting that names these servers of a source, gone for good.
+function purgeNodeSettings(sid, ids) {
+  const s = sourcesData[sid], keys = new Set([...ids].map(nid => sid + '::' + nid));
   s.offNodes = (s.offNodes || []).filter(nid => !ids.has(nid));
+  s.disabledNodes = (s.disabledNodes || []).filter(nid => !ids.has(nid));
   Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => !keys.has(k)); });
   Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !keys.has(k)); }));
+}
+// Forget dropped servers (all of a source, or the given ids) with their settings.
+function forgetGone(sid, only) {
+  const s = sourcesData[sid];
+  const ids = new Set((s.gone || []).map(n => n.id).filter(nid => !only || only.includes(nid)));
+  s.gone = (s.gone || []).filter(n => !ids.has(n.id));
+  purgeNodeSettings(sid, ids);
   toast(`Forgot ${ids.size} unavailable server${ids.size === 1 ? '' : 's'}`);
   refreshSourceViews();
+}
+function purgeExpiredGone() {
+  sourceOrder.forEach(sid => {
+    const s = sourcesData[sid], ids = new Set((s.gone || []).filter(n => goneLeftDays(n) <= 0).map(n => n.id));
+    if (!ids.size) return;
+    s.gone = s.gone.filter(n => !ids.has(n.id));
+    purgeNodeSettings(sid, ids);
+  });
+}
+function openGoneActions(sid, nid) {
+  const n = sourcesData[sid].gone.find(x => x.id === nid), days = goneLeftDays(n);
+  openActions(n.flag + '  ' + n.name,
+    `<div class="menu-note">Removed by the provider ${timeAgo(n.goneAt)}. If a subscription update brings it back within <b>${days} day${days === 1 ? '' : 's'}</b>, its settings in profiles and chains come back with it; after that it is forgotten.</div>`
+    + menuRow(ICON.trash, 'Forget now<div class="menu-sub">Drops it and its settings everywhere</div>', `closeSheet('actions');forgetGone('${sid}',['${nid}'])`, 'danger'));
 }
 
 function srcMetaHtml(s) {
@@ -1902,11 +2042,13 @@ function srcMetaHtml(s) {
   if (s.kind === 'sub') {
     parts.push(`<span class="fmt-tag">${s.format}</span>`);
     parts.push(`${s.nodes.length} nodes`);
+    if ((s.disabledNodes || []).length) parts.push(`<span class="dis-meta">${s.nodes.length - liveNodes(s).length} off</span>`);
     if ((s.gone || []).length) parts.push(`<span class="gone-meta">${s.gone.length} unavailable</span>`);
     parts.push(timeAgo(s.updatedAt));
   } else {
     parts.push(`<span class="fmt-tag">manual</span>`);
     parts.push(`${s.nodes.length} server${s.nodes.length === 1 ? '' : 's'}`);
+    if ((s.disabledNodes || []).length) parts.push(`<span class="dis-meta">${s.nodes.length - liveNodes(s).length} off</span>`);
   }
   return parts.join('<span class="dot">·</span>');
 }
@@ -1930,12 +2072,14 @@ function renderSourceCard(id, q) {
     if (s.name.toLowerCase().includes(q) && !nodes.length) nodes = s.nodes;
   }
   const isOpen = q ? true : !!expandState[id];
-  const nodeRows = sortedNodes(nodes).map(n => `<div class="node-row" onclick="openNodeActions('${id}','${n.id}')">
+  // Each server has its own switch: off = hidden from every list and picker, settings kept.
+  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row ${on ? '' : 'disabled'}" data-nid="${n.id}" onclick="openNodeActions('${id}','${n.id}')">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
       <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
-    </div>`).join('');
+      <div class="mini-toggle sm ${on ? 'on' : ''}" title="Use this server" onclick="event.stopPropagation();toggleNodeEnabled('${id}','${n.id}')"><div class="mini-toggle-thumb"></div></div>
+    </div>`; }).join('');
   const addRow = s.kind === 'node'
     ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
 
@@ -1965,7 +2109,7 @@ function renderSourceCard(id, q) {
     </div>
     </div>
     <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), undefined,
-      `<div class="chip gone-forget" onclick="event.stopPropagation();forgetGone('${id}')">Forget</div>`)}</div>
+      `<div class="chip gone-forget" onclick="event.stopPropagation();forgetGone('${id}')">Forget all</div>`, r => `openGoneActions('${id}','${r.node.id}')`)}</div>
   </div>`;
 }
 
@@ -2011,6 +2155,11 @@ function toggleSourceEnabled(id) {
   sourcesData[id].enabled = !sourcesData[id].enabled;
   renderAll();
 }
+function toggleNodeEnabled(sid, nid) {
+  const s = sourcesData[sid];
+  s.disabledNodes = isNodeDisabled(s, nid) ? s.disabledNodes.filter(x => x !== nid) : (s.disabledNodes || []).concat(nid);
+  refreshSourceViews();
+}
 
 // Other screens that show node latency / update state (the profile editor) register
 // a re-render here, so ping and update results reach every open view.
@@ -2036,12 +2185,12 @@ function testLatency(pairs) {
 function testSourceLatency(sid) {
   const s = sourcesData[sid];
   expandState[sid] = true;
-  return testLatency(s.nodes.map(n => [sid, n.id]));
+  return testLatency(liveNodes(s).map(n => [sid, n.id]));
 }
 function testAllLatency() {
   const pairs = [];
   sourceOrder.forEach(sid => {
-    if (sourcesData[sid].enabled) sourcesData[sid].nodes.forEach(n => pairs.push([sid, n.id]));
+    if (sourcesData[sid].enabled) liveNodes(sourcesData[sid]).forEach(n => pairs.push([sid, n.id]));
   });
   testLatency(pairs);
   closeSheet('nodesmore');
@@ -2058,6 +2207,7 @@ function updateSource(sid) {
     s.updating = false;
     s.updatedAt = Date.now();
     if (s.demoChurn) demoProviderChurn(s);
+    purgeExpiredGone();
     refreshSourceViews();
     if (s.testAfterUpdate) testSourceLatency(sid);
   }, 900 + Math.random() * 600);
@@ -2125,7 +2275,7 @@ function openSourceActions(sid) {
     rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
     if (s.website) rows += menuRow(ICON.web, 'Open website', close + `toast('Opens ${esc(s.website)}')`);
   }
-  rows += menuRow(ICON.trash, 'Delete', close + `deleteSource('${sid}')`, 'danger');
+  rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteSource('${sid}')`, 'danger');
   openActions(s.name, rows);
 }
 
@@ -2133,16 +2283,77 @@ function openNodeActions(sid, nid) {
   const s = sourcesData[sid];
   const n = s.nodes.find(x => x.id === nid);
   const close = "closeSheet('actions');";
-  let rows = menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
+  const on = !isNodeDisabled(s, nid);
+  let rows = menuRow(ICON.power, on ? 'Switch off<div class="menu-sub">Hidden everywhere, its settings kept</div>' : 'Switch on', close + `toggleNodeEnabled('${sid}','${nid}')`);
+  rows += menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
   rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
   if (s.kind === 'node') {
     rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
-    rows += menuRow(ICON.trash, 'Delete', close + `deleteNode('${sid}','${nid}')`, 'danger');
+    rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteNode('${sid}','${nid}')`, 'danger');
   }
   openActions(n.flag + '  ' + n.name, rows);
 }
 
-/* ── Delete ── */
+/* ── Delete ──
+   Always asks first. The confirmation lists what the deletion does to everything that
+   uses the source / server, found by previewing the lists without it (simExclude):
+   chains ending on a deleted source are deleted; an entry, profile or chain end left
+   with no server won't connect; others lose servers (a priority exit drops them from
+   its order). Settings naming the deleted servers are removed for good. */
+
+function deleteImpact(excl, sid) {
+  const lines = [];
+  const both = f => { simExclude = null; const a = f(); simExclude = excl; const b = f(); simExclude = null; return [a, b]; };
+  const srv = k => k + ' server' + (k === 1 ? '' : 's');
+  // The connection right now.
+  const id0 = effectiveConnectId(), c0 = chainsData[id0];
+  const using = (c0 ? [chainEntryRefs(c0).find(r => r.node === chainEntryNode(c0)), chainExitRefs(c0).find(r => r.node === chainExitNode(c0))]
+    : [unitRefs(id0).find(r => r.node === unitNode(id0))]).filter(Boolean);
+  if (using.some(excl)) lines.push(['Current connection', '', 'goes through it — will reconnect through the next working server', 'warn']);
+  ['simple', 'profiles'].forEach(mode => modeOrder(mode).forEach(id => {
+    const e = connectEntry(id);
+    if (!e || id === sid) return;
+    if (chainsData[id]) {
+      const c = chainsData[id];
+      if (sid && (c.inId === sid || c.outId === sid)) { lines.push([e.name, 'chain', 'is deleted with it', 'bad']); return; }
+      const [ei, eo] = both(() => chainEntryRefs(c).length), [xi, xo] = both(() => chainExitRefs(c).length);
+      if ((ei && !eo) || (xi && !xo)) lines.push([e.name, 'chain', `its ${ei && !eo ? 'entry' : 'exit'} is left with no servers — won't connect until you tick another`, 'bad']);
+      else if (eo < ei || xo < xi) lines.push([e.name, 'chain', [eo < ei ? `entry loses ${srv(ei - eo)}` : '',
+        xo < xi ? `exit loses ${srv(xi - xo)}${c.exitMode === 'priority' ? ' (out of its priority order)' : ''}` : ''].filter(Boolean).join(', '), 'warn']);
+      return;
+    }
+    const [a, b] = both(() => unitRefs(id).length), kind = profilesData[id] ? 'profile' : 'entry';
+    if (a && !b) lines.push([e.name, kind, "is left with no servers — won't connect until you tick another", 'bad']);
+    else if (b < a && profilesData[id]) lines.push([e.name, kind, `loses ${srv(a - b)} of ${a}`, 'warn']);
+  }));
+  return lines;
+}
+
+function confirmDeleteHtml(note, lines, doIt, label) {
+  const close = "closeSheet('actions');";
+  const list = lines.length ? `<div class="menu-caption">This will affect</div><div class="impact-list">${lines.map(([name, kind, what, cls]) =>
+    `<div class="impact-row ${cls}"><div class="impact-name">${esc(name)}${kind ? `<span class="conn-tag">${kind}</span>` : ''}</div><div class="impact-what">${what}</div></div>`).join('')}</div>`
+    : '<div class="menu-note">Not used in any profile or chain.</div>';
+  return `<div class="menu-note">${note}</div>${list}`
+    + menuRow(ICON.trash, label, close + doIt, 'danger')
+    + menuRow(ICON.close, 'Cancel', close);
+}
+
+function confirmDeleteSource(sid) {
+  const s = sourcesData[sid];
+  if (!s) return;
+  const n = s.nodes.length, g = (s.gone || []).length;
+  const note = (s.kind === 'sub' ? `The subscription and its ${n} server${n === 1 ? '' : 's'}` : `The group and its ${n} server${n === 1 ? '' : 's'}`)
+    + ' are removed' + (g ? `, with ${g} unavailable one${g === 1 ? '' : 's'} kept for their settings` : '') + '. This can’t be undone.';
+  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, deleteImpact(r => r.sid === sid, sid), `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));
+}
+
+function confirmDeleteNode(sid, nid) {
+  const s = sourcesData[sid], n = s && s.nodes.find(x => x.id === nid);
+  if (!n) return;
+  openActions('Delete ' + n.name + '?', confirmDeleteHtml(`${n.flag} ${esc(n.name)} is removed from ${esc(s.name)}, with its place in every profile and chain. This can’t be undone.`,
+    deleteImpact(r => r.sid === sid && r.node.id === nid), `deleteNode('${sid}','${nid}')`, 'Delete server'));
+}
 
 function deleteSource(id) {
   if (!id || !sourcesData[id]) return;
@@ -2152,6 +2363,7 @@ function deleteSource(id) {
     p.sources = p.sources.filter(x => x !== id);
     p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
   });
+  Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !k.startsWith(id + '::')); }));
   dropConnectEntry(id);
   renderAll();
 }
@@ -2161,10 +2373,9 @@ function deleteNode(sid, nid) {
   if (!s) return;
   s.nodes = s.nodes.filter(n => n.id !== nid);
   s.count = s.nodes.length;
-  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => k !== sid + '::' + nid); });
+  purgeNodeSettings(sid, new Set([nid]));
   renderAll();
 }
-
 /* ── Subscription / group form ── */
 
 let editingSourceId = null;
@@ -2197,7 +2408,9 @@ function openSrcForm(id, prefillUrl) {
   document.getElementById('sf-url').value = prefillUrl || (id && !isGroup ? s.url : '');
   document.getElementById('sf-name').value = id ? s.name : '';
   if (!isGroup) {
-    document.getElementById('sf-interval').value = s.updateInterval;
+    // Empty = 'auto': follows the global period from the Auto mode sheet.
+    document.getElementById('sf-interval').value = s.updateInterval === 'auto' ? '' : s.updateInterval;
+    document.getElementById('sf-interval').placeholder = 'auto · ' + subsEveryText(autoCfg.subsEvery);
     document.getElementById('sf-reload').classList.toggle('on', !!s.reloadAfterUpdate);
     document.getElementById('sf-testafter').classList.toggle('on', !!s.testAfterUpdate);
     document.getElementById('sf-hwid').classList.toggle('on', !!s.hwid);
@@ -2216,7 +2429,7 @@ function saveSrcForm() {
   const name = document.getElementById('sf-name').value.trim();
   const fields = {
     url: document.getElementById('sf-url').value.trim(),
-    updateInterval: parseInt(document.getElementById('sf-interval').value, 10) || 12,
+    updateInterval: document.getElementById('sf-interval').value.trim() === '' ? 'auto' : Math.max(0, parseInt(document.getElementById('sf-interval').value, 10) || 0),
     reloadAfterUpdate: document.getElementById('sf-reload').classList.contains('on'),
     testAfterUpdate: document.getElementById('sf-testafter').classList.contains('on'),
     hwid: document.getElementById('sf-hwid').classList.contains('on'),
@@ -2418,6 +2631,128 @@ function setSegment(group, value, index) {
 setSegment('mode', 'tun', 0);
 setSegment('route', 'rules', 1);
 
+/* ══════════════════════ AUTO MODE (Home card + sheet) ══════════════════════
+   Everything about how Auto picks and keeps a connection, in one place:
+   - threshold: a server takes over from the current one only if it is this much faster
+     (hysteresis, so Auto does not hop between servers with close pings);
+   - checkEvery: how often the current route is re-pinged;
+   - failAfter: timeouts in a row before Auto leaves the current server;
+   - standby: how many next entries by priority are pinged together with the current
+     one ("kept warm"), so a failover goes straight to a server known to work;
+   - pauseScreenOff: no checks while the screen is off (mobile battery);
+   - subsEvery: the global subscription update period; a subscription's own period
+     (Nodes → Edit subscription) wins, its default 'auto' follows this one.
+   Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
+
+const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, standby: 2, pauseScreenOff: true, subsEvery: 12 };
+let autoLastCheck = Date.now() - 40e3;
+
+const fmtEvery = s => s < 60 ? s + ' s' : s < 3600 ? s / 60 + ' min' : s / 3600 + ' h';
+const subsEveryText = h => h ? h + ' h' : 'off';
+
+// The servers an entry connects through right now (a chain: entry + exit), and their ping.
+function routeNodes(id) {
+  if (chainsData[id]) { const c = chainsData[id]; return [chainEntryNode(c), chainExitNode(c)]; }
+  return [unitNode(id)];
+}
+function routeMs(id) {
+  const ns = routeNodes(id);
+  return ns.every(n => n && isAlive(n)) ? ns.reduce((sum, n) => sum + ping(n), 0) : null;
+}
+// Next entries Auto would fall back to (in priority order), kept warm by the checks.
+function standbyIds() {
+  const cur = effectiveConnectId();
+  return visibleOrder().filter(id => id !== cur && connectEntry(id).inAuto).slice(0, autoCfg.standby);
+}
+
+function autoCheckNow() {
+  const ids = [effectiveConnectId()].concat(autoConnect ? standbyIds() : []);
+  autoLastCheck = Date.now();
+  pingNodes(ids.flatMap(routeNodes).filter(Boolean));
+}
+
+function renderAutoCard() {
+  const id = effectiveConnectId(), ms = routeMs(id);
+  document.getElementById('autoCardToggle').classList.toggle('on', autoConnect);
+  document.getElementById('autoCardSub').textContent = autoConnect
+    ? `First working in ${simpleMode() ? 'Servers' : 'Profiles'} order`
+    : `Manual — pinned to ${connectEntry(id) ? connectEntry(id).name : '—'}`;
+  const stat = (label, val, cls = '') => `<div class="auto-stat"><div class="auto-stat-val ${cls}">${val}</div><div class="auto-stat-label">${label}</div></div>`;
+  document.getElementById('autoCardStats').innerHTML =
+    stat('now', ms == null ? '—' : ms + ' ms', ms == null ? 'bad' : ms < 150 ? 'good' : ms < 400 ? 'mid' : 'bad')
+    + stat('switch at', '−' + autoCfg.threshold + ' ms')
+    + stat('check', fmtEvery(autoCfg.checkEvery))
+    + stat('subs', subsEveryText(autoCfg.subsEvery));
+}
+
+function openAutoMode() {
+  renderAutoMode();
+  openSheet('automode');
+}
+
+function setAutoCfg(key, val) {
+  autoCfg[key] = val;
+  renderAutoMode();
+  renderAutoCard();
+}
+
+function renderAutoMode() {
+  const el = document.getElementById('automode-body');
+  const id = effectiveConnectId(), e = connectEntry(id);
+  const chips = (key, opts, fmt) => `<div class="chip-row">${opts.map(v =>
+    `<div class="chip ${autoCfg[key] === v ? 'active' : ''}" onclick="setAutoCfg('${key}',${JSON.stringify(v)})">${fmt(v)}</div>`).join('')}</div>`;
+  const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
+  const route = rid => routeNodes(rid).map(n => n ? `<span class="dock-node">${n.flag} ${esc(n.name)}</span>` : '<span class="dock-node none">no working node</span>')
+    .join('<span class="dock-arrow">→</span>');
+  const standby = standbyIds();
+  const own = sourceOrder.filter(sid => sourcesData[sid].kind === 'sub' && sourcesData[sid].updateInterval !== 'auto');
+
+  el.innerHTML = `
+    <div class="am-now">
+      <div class="am-now-main">
+        <div class="card-label" style="margin-bottom:2px">${autoConnect ? 'Now · auto' : 'Now · manual'}</div>
+        <div class="am-now-name">${e ? esc(e.name) : '—'}</div>
+        <div class="dock-route">${e ? route(id) : ''}</div>
+      </div>
+      <div class="am-now-ms">${latMsHtml(routeMs(id))}<div class="am-checked">checked ${timeAgo(autoLastCheck)}</div></div>
+    </div>
+    <div class="am-actions">
+      <button class="btn-secondary" onclick="autoCheckNow()">${ICON.bolt}Check now</button>
+      <button class="btn-secondary" onclick="openProfiles()">Priority list</button>
+    </div>
+
+    <div class="form-label" style="padding:10px 18px 0">Standby · next by priority</div>
+    <div class="am-standby">${!autoConnect ? '<div class="route-empty">Manual — no failover, standby is idle</div>'
+      : !autoCfg.standby ? '<div class="route-empty">Off — only the current server is checked</div>'
+      : standby.map((sid, i) => `<div class="am-sb-row"><span class="cc-rank">${i + 1}</span><div class="am-sb-main"><div class="am-sb-name">${esc(connectEntry(sid).name)}${chainsData[sid] ? '<span class="conn-tag">chain</span>' : ''}</div><div class="dock-route">${route(sid)}</div></div>${latMsHtml(routeMs(sid))}</div>`).join('')
+        || '<div class="route-empty">Nothing else in Auto</div>'}</div>
+
+    <div class="set-group">
+      <div class="set-row"><div class="set-label">Auto mode<div class="set-hint">Off = Manual: stays on the entry you tapped</div></div>${toggle(autoConnect, 'setAutoConnect(!autoConnect);renderAutoMode()')}</div>
+      <div class="set-row stack"><div><div class="set-label">Switch to a faster server</div><div class="set-hint">Only if it is faster than the current one by at least this</div></div>
+        ${chips('threshold', [20, 50, 100, 200], v => v + ' ms')}</div>
+      <div class="set-row stack"><div><div class="set-label">Check the connection every</div><div class="set-hint">Pings the current route${autoCfg.standby ? ` and ${autoCfg.standby} standby` : ''}</div></div>
+        ${chips('checkEvery', [30, 60, 300], fmtEvery)}</div>
+      <div class="set-row stack"><div><div class="set-label">Keep warm</div><div class="set-hint">Next entries by priority pinged with the current one — failover goes straight to a working one</div></div>
+        ${chips('standby', [0, 1, 2, 3], v => v ? 'next ' + v : 'off')}</div>
+      <div class="set-row stack"><div><div class="set-label">Leave a server after</div><div class="set-hint">Timeouts in a row before Auto moves on</div></div>
+        ${chips('failAfter', [1, 2, 3], v => v + ' timeout' + (v > 1 ? 's' : ''))}</div>
+      <div class="set-row"><div class="set-label">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
+    </div>
+
+    <div class="form-label" style="padding:4px 18px 0">Subscriptions</div>
+    <div class="set-group">
+      <div class="set-row stack"><div><div class="set-label">Update all subscriptions every</div><div class="set-hint">${own.length
+        ? `${own.map(sid => esc(sourcesData[sid].name)).join(', ')} ${own.length > 1 ? 'use their own periods' : 'uses its own period'} (Nodes → Edit)`
+        : 'Each subscription follows this unless given its own period in Nodes'}</div></div>
+        ${chips('subsEvery', [6, 12, 24, 0], v => v ? v + ' h' : 'Off')}</div>
+    </div>`;
+}
+
+sourceViewHooks.push(() => {
+  renderAutoCard();
+  if (document.getElementById('sh-automode').classList.contains('open')) renderAutoMode();
+});
 /* ══════════════════════ SHEETS (open/close + tabs) ══════════════════════ */
 
 function openSheet(name) {
@@ -2457,7 +2792,7 @@ let editingProfileId = null;
 
 function cpSourceState(id) {
   if (createProfileSelected.has(id)) return 'all';
-  return sourcesData[id].nodes.some(n => cpNodes.has(id + '::' + n.id)) ? 'some' : 'none';
+  return liveNodes(sourcesData[id]).some(n => cpNodes.has(id + '::' + n.id)) ? 'some' : 'none';
 }
 
 function openCreateProfile(editId) {
@@ -2496,16 +2831,17 @@ const cpOpen = new Set();
 // those show greyed ("off in Nodes") so the user sees why, picks kept for when it's back.
 const cpSourceIds = () => sourceOrder.filter(id => sourcesData[id].enabled || cpSourceState(id) !== 'none');
 const cpOffPicked = () => sourceOrder.filter(id => !sourcesData[id].enabled && cpSourceState(id) !== 'none');
-// Servers the draft would use now: must be at least one to save.
-const cpPickedCount = () => cpSourceIds().filter(id => sourcesData[id].enabled).reduce((sum, id) => sum + (createProfileSelected.has(id) ? sourcesData[id].nodes.length
-  : sourcesData[id].nodes.filter(n => cpNodes.has(id + '::' + n.id)).length), 0);
+// Servers the draft would use now: must be at least one to save. Servers switched off in
+// Nodes are hidden here (picks kept) — cpDraftRefs(true) counts them to explain an empty draft.
+const cpDraftRefs = withOff => profileNodeRefs({ sources: [...createProfileSelected], nodes: [...cpNodes] }, withOff);
+const cpPickedCount = () => cpDraftRefs().length;
 
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
-  const none = !cpPickedCount(), offs = cpOffPicked().map(id => sourcesData[id].name);
+  const none = !cpPickedCount(), offs = offReasons(cpDraftRefs(true));
   const warn = document.getElementById('cp-warn');
   warn.hidden = !none;
-  warn.textContent = offs.length ? `${offs.join(', ')} ${offs.length > 1 ? 'are' : 'is'} off in Nodes — switch it on there or tick another server`
+  warn.textContent = offs.length ? `${reasonsText(offs)} — switch ${offs.length > 1 ? 'one' : 'it'} on there or tick another server`
     : 'Tick at least 1 server — a profile with none can’t connect';
   document.getElementById('cpSaveBtn').disabled = none;
   el.innerHTML = cpSourceIds().map(id => {
@@ -2517,13 +2853,13 @@ function renderCreateProfileSources() {
         <div class="ps-main"><div class="ps-name">${esc(s.name)}</div><div class="src-meta"><span class="off-meta">off in Nodes</span><span class="dot">·</span>untick to drop it</div></div>
       </div>
     </div>`;
-    const open = cpOpen.has(id);
-    const alive = s.nodes.filter(isAlive).length;
-    const picked = state === 'all' ? s.nodes.length : s.nodes.filter(n => cpNodes.has(id + '::' + n.id)).length;
+    const open = cpOpen.has(id), live = liveNodes(s);
+    const alive = live.filter(isAlive).length;
+    const picked = state === 'all' ? live.length : live.filter(n => cpNodes.has(id + '::' + n.id)).length;
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
-                  state === 'some' ? `${picked} of ${s.nodes.length} nodes` : `${s.nodes.length} nodes`, `${alive} alive`]
+                  state === 'some' ? `${picked} of ${live.length} nodes` : `${live.length} nodes`, `${alive} alive`]
       .concat((s.gone || []).length ? [`<span class="gone-meta">${s.gone.length} unavailable</span>`] : []).join('<span class="dot">·</span>');
-    const rows = open ? sortedNodes(s.nodes).map(n => {
+    const rows = open ? sortedNodes(live).map(n => {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
       return `<div class="node-row ps-node ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
@@ -2587,7 +2923,7 @@ function toggleCpNode(sid, nid) {
   } else if (cpNodes.has(key)) cpNodes.delete(key);
   else {
     cpNodes.add(key);
-    if (s.nodes.every(n => cpNodes.has(sid + '::' + n.id))) { cpDropNodes(sid); createProfileSelected.add(sid); }
+    if (s.nodes.every(n => cpNodes.has(sid + '::' + n.id))) { cpDropNodes(sid); createProfileSelected.add(sid); }   // disabled ones count: a pick is kept as a pick
   }
   renderCreateProfileSources();
 }
@@ -2743,9 +3079,9 @@ function renderChainPicker(elId, side) {
 
 // Each end needs at least one ticked server, and nothing it stands on switched off in Nodes.
 function chainProblems(d = chainDraft) {
-  return [['entry', chainEntryRefs(d), d.inId], ['exit', chainExitRefs(d), d.outId]].map(([name, refs, uid]) =>
-    isBroken(uid) ? `The ${name} needs ${brokenBy(uid).join(', ')}, off in Nodes — switch it on there or pick another`
-    : !refs.length && unitRefs(uid).length ? `Tick at least 1 server of the ${name}` : '').filter(Boolean);
+  return [['entry', chainEntryRefs(d), chainEntryRefs(d, true), d.inId], ['exit', chainExitRefs(d), chainExitRefs(d, true), d.outId]].map(([name, refs, all, uid]) =>
+    refs.length ? '' : offReasons(all).length ? `The ${name}: ${reasonsText(offReasons(all))} — switch it on there or tick another server`
+    : unitRefs(uid).length ? `Tick at least 1 server of the ${name}` : '').filter(Boolean);
 }
 function renderChainWarn() {
   const problems = chainProblems();
@@ -2954,6 +3290,7 @@ function deleteEditingChain() {
    The simple-mode counterpart of the profile editor: which of the source's servers this
    entry may use (tick / untick, all / none), Auto participation, ping and update.
    Changes apply at once. Unticked servers are s.offNodes; new ones after an update are on.
+   Servers switched off in Nodes (s.disabledNodes) are not listed; their ticks are kept.
    At least one server must stay ticked: with none, a warning shows and closing the sheet
    puts the selection back to what it was when opened. */
 
@@ -2970,19 +3307,19 @@ function openSourceEntry(sid) {
 function renderSourceEntry() {
   const s = sourcesData[seId];
   if (!s) return;
-  const on = s.nodes.length - offCount(s);
+  const live = liveNodes(s), on = live.length - offCount(s), hidden = s.nodes.length - live.length;
   document.getElementById('seTitle').textContent = s.name;
   document.getElementById('se-inauto').classList.toggle('on', s.inAuto);
-  document.getElementById('se-count').textContent = `${on} of ${s.nodes.length} on`;
-  const none = !on && s.nodes.length > 0;
+  document.getElementById('se-count').innerHTML = `${on} of ${live.length} on` + (hidden ? ` <span class="dis-meta">· ${hidden} off in Nodes</span>` : '');
+  const none = !on && live.length > 0;
   document.getElementById('se-warn').hidden = !none;
   document.getElementById('se-done').disabled = none;
   const upd = document.getElementById('se-update');
   upd.style.display = s.kind === 'sub' ? '' : 'none';
   upd.innerHTML = `<span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span>`;
   upd.nextElementSibling.innerHTML = ICON.bolt;
-  document.getElementById('se-all').textContent = on === s.nodes.length ? 'None' : 'All';
-  document.getElementById('se-nodes').innerHTML = sortedNodes(s.nodes).map(n => {
+  document.getElementById('se-all').textContent = on === live.length ? 'None' : 'All';
+  document.getElementById('se-nodes').innerHTML = sortedNodes(live).map(n => {
     const off = isNodeOff(s, n.id);
     return `<div class="node-row ps-node ${off ? '' : 'on'}" onclick="toggleSourceEntryNode('${n.id}')">
       <div class="sub-checkbox ${off ? '' : 'checked'}"></div>
@@ -3010,7 +3347,7 @@ function toggleSourceEntryNode(nid) {
 
 function setSourceEntryAll() {
   const s = sourcesData[seId];
-  const ids = s.nodes.map(n => n.id), kept = (s.offNodes || []).filter(id => !ids.includes(id));   // dropped servers keep theirs
+  const ids = liveNodes(s).map(n => n.id), kept = (s.offNodes || []).filter(id => !ids.includes(id));   // dropped / disabled servers keep theirs
   s.offNodes = offCount(s) ? kept : kept.concat(ids);
   sourceEntryChanged();
 }
@@ -3022,7 +3359,7 @@ function toggleSourceEntryAuto() {
 
 sheetCloseHooks.sourceentry = () => {
   const s = sourcesData[seId];
-  if (s && s.nodes.length && !(s.nodes.length - offCount(s))) {
+  if (s && liveNodes(s).length && !(liveNodes(s).length - offCount(s))) {
     s.offNodes = seSnapshot;
     toast('At least 1 server is needed — previous selection kept');
     renderConnects();
@@ -3219,6 +3556,7 @@ function renderThemeList() {
 /* ══════════════════════ INITIAL RENDER ══════════════════════ */
 
 applyTheme(currentTheme);
+purgeExpiredGone();
 
 renderConnects();
 renderNodes();

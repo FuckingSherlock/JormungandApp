@@ -8,7 +8,8 @@ start it until the mockup is finished. The user talks Russian; reply in Russian.
 
 - `docs/` — product logic for the real app (Russian): `subscription-parsing.md`
   (formats, UA strategy, dedup, latency URL, region rules), `connect-model.md` (sources,
-  profiles, chains, modes, Auto, node identity and dropped nodes, validation, ping, dock).
+  profiles, chains, modes, Auto settings, node identity and dropped nodes, servers off in
+  Nodes, delete impact, validation, ping, dock).
   Keep them in step with the mockup: when a change adds or alters behaviour the Flutter
   app must implement, update the doc in the same commit.
 - `design/main_screen.html` — **generated** mockup, the file the user opens.
@@ -44,7 +45,7 @@ npm run shot -- settings --theme github --scale 2
 Presets: home, nodes, nodes-open, settings, dock, dock-chain, dock-profile, dock-off, profiles, broken, profiles-full,
 profiles-menu, source-entry, gone, nothing-ticked, simple-chain, chain-priority, profile-edit,
 chain-edit, chain-groups, drag-mid, addmenu,
-srcform, nodeform, actions, more. Add a preset in `check.mjs` rather than writing
+srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm. Add a preset in `check.mjs` rather than writing
 one-off Playwright scripts; add a check there for each new interaction.
 
 Commit both `design/src` changes and the rebuilt `design/main_screen.html` and push

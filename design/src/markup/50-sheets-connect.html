@@ -22,6 +22,17 @@
     </div>
   </div>
 
+  <!-- ══════════ AUTO MODE SHEET (settings of Auto + current / standby servers) ══════════ -->
+  <div class="overlay" id="ov-automode" onclick="closeSheet('automode')"></div>
+  <div class="sheet" id="sh-automode">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Auto mode</span>
+      <button class="sheet-close" onclick="closeSheet('automode')">×</button>
+    </div>
+    <div class="sheet-body" id="automode-body"></div>
+  </div>
+
   <!-- ══════════ LIVE CONNECTIONS SHEET ══════════ -->
   <div class="overlay" id="ov-connections" onclick="closeSheet('connections')"></div>
   <div class="sheet" id="sh-connections">

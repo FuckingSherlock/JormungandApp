@@ -13,6 +13,7 @@ const ICON = {
   web:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>',
   trash:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>',
   power:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>',
+  close:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>',
   plus:    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
   collapse:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>',
   expand:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>',
@@ -60,16 +61,22 @@ function sortedNodes(list, nodeOf = x => x) {
 /* ── Servers the provider dropped (s.gone) ──
    One collapsible "Unavailable · N" block, used by Nodes and by every node picker. The
    rows are read-only; `extra(ref)` draws the kept setting (tick, priority) before the
-   flag. `ctx` names the block so each view remembers its own open state. */
+   flag; `rowClick(ref)` (Nodes only) opens the server's own menu. `ctx` names the block
+   so each view remembers its own open state.
+   Each dropped server is kept GONE_KEEP_DAYS from its own goneAt, then forgotten with
+   its settings (purgeExpiredGone: on start and after every update). The list lives in
+   the source, so deleting the source deletes it too. */
+const GONE_KEEP_DAYS = 15;
+const goneLeftDays = n => Math.ceil((n.goneAt + GONE_KEEP_DAYS * 864e5 - Date.now()) / 864e5);
 const goneOpen = new Set();
-function goneBlockHtml(ctx, refs, extra = () => '', action = '') {
+function goneBlockHtml(ctx, refs, extra = () => '', action = '', rowClick = null) {
   if (!refs.length) return '';
   const open = goneOpen.has(ctx);
-  const rows = open ? refs.map(r => `<div class="node-row gone">${extra(r)}
+  const rows = open ? refs.map(r => `<div class="node-row gone ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>${extra(r)}
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
       <span class="node-proto">${r.node.protocol}</span>
-      <span class="lat none">${timeAgo(r.node.goneAt)}</span>
+      <span class="lat none gone-left ${goneLeftDays(r.node) <= 3 ? 'soon' : ''}" title="Removed ${timeAgo(r.node.goneAt)}">${goneLeftDays(r.node)} d left</span>
     </div>`).join('') : '';
   return `<div class="gone-block ${open ? 'open' : ''}">
     <div class="gone-head" onclick="event.stopPropagation();toggleGone('${ctx}')">
@@ -85,16 +92,36 @@ function toggleGone(ctx) {
 }
 const goneRefs = sid => (sourcesData[sid].gone || []).map(node => ({ sid, node }));
 
-// Forget dropped servers: they and every setting naming them are gone for good.
-function forgetGone(sid) {
-  const s = sourcesData[sid];
-  const ids = new Set((s.gone || []).map(n => n.id)), keys = new Set([...ids].map(nid => sid + '::' + nid));
-  s.gone = [];
+// Every setting that names these servers of a source, gone for good.
+function purgeNodeSettings(sid, ids) {
+  const s = sourcesData[sid], keys = new Set([...ids].map(nid => sid + '::' + nid));
   s.offNodes = (s.offNodes || []).filter(nid => !ids.has(nid));
+  s.disabledNodes = (s.disabledNodes || []).filter(nid => !ids.has(nid));
   Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => !keys.has(k)); });
   Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !keys.has(k)); }));
+}
+// Forget dropped servers (all of a source, or the given ids) with their settings.
+function forgetGone(sid, only) {
+  const s = sourcesData[sid];
+  const ids = new Set((s.gone || []).map(n => n.id).filter(nid => !only || only.includes(nid)));
+  s.gone = (s.gone || []).filter(n => !ids.has(n.id));
+  purgeNodeSettings(sid, ids);
   toast(`Forgot ${ids.size} unavailable server${ids.size === 1 ? '' : 's'}`);
   refreshSourceViews();
+}
+function purgeExpiredGone() {
+  sourceOrder.forEach(sid => {
+    const s = sourcesData[sid], ids = new Set((s.gone || []).filter(n => goneLeftDays(n) <= 0).map(n => n.id));
+    if (!ids.size) return;
+    s.gone = s.gone.filter(n => !ids.has(n.id));
+    purgeNodeSettings(sid, ids);
+  });
+}
+function openGoneActions(sid, nid) {
+  const n = sourcesData[sid].gone.find(x => x.id === nid), days = goneLeftDays(n);
+  openActions(n.flag + '  ' + n.name,
+    `<div class="menu-note">Removed by the provider ${timeAgo(n.goneAt)}. If a subscription update brings it back within <b>${days} day${days === 1 ? '' : 's'}</b>, its settings in profiles and chains come back with it; after that it is forgotten.</div>`
+    + menuRow(ICON.trash, 'Forget now<div class="menu-sub">Drops it and its settings everywhere</div>', `closeSheet('actions');forgetGone('${sid}',['${nid}'])`, 'danger'));
 }
 
 function srcMetaHtml(s) {
@@ -102,11 +129,13 @@ function srcMetaHtml(s) {
   if (s.kind === 'sub') {
     parts.push(`<span class="fmt-tag">${s.format}</span>`);
     parts.push(`${s.nodes.length} nodes`);
+    if ((s.disabledNodes || []).length) parts.push(`<span class="dis-meta">${s.nodes.length - liveNodes(s).length} off</span>`);
     if ((s.gone || []).length) parts.push(`<span class="gone-meta">${s.gone.length} unavailable</span>`);
     parts.push(timeAgo(s.updatedAt));
   } else {
     parts.push(`<span class="fmt-tag">manual</span>`);
     parts.push(`${s.nodes.length} server${s.nodes.length === 1 ? '' : 's'}`);
+    if ((s.disabledNodes || []).length) parts.push(`<span class="dis-meta">${s.nodes.length - liveNodes(s).length} off</span>`);
   }
   return parts.join('<span class="dot">·</span>');
 }
@@ -130,12 +159,14 @@ function renderSourceCard(id, q) {
     if (s.name.toLowerCase().includes(q) && !nodes.length) nodes = s.nodes;
   }
   const isOpen = q ? true : !!expandState[id];
-  const nodeRows = sortedNodes(nodes).map(n => `<div class="node-row" onclick="openNodeActions('${id}','${n.id}')">
+  // Each server has its own switch: off = hidden from every list and picker, settings kept.
+  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row ${on ? '' : 'disabled'}" data-nid="${n.id}" onclick="openNodeActions('${id}','${n.id}')">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
       <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
-    </div>`).join('');
+      <div class="mini-toggle sm ${on ? 'on' : ''}" title="Use this server" onclick="event.stopPropagation();toggleNodeEnabled('${id}','${n.id}')"><div class="mini-toggle-thumb"></div></div>
+    </div>`; }).join('');
   const addRow = s.kind === 'node'
     ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
 
@@ -165,7 +196,7 @@ function renderSourceCard(id, q) {
     </div>
     </div>
     <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), undefined,
-      `<div class="chip gone-forget" onclick="event.stopPropagation();forgetGone('${id}')">Forget</div>`)}</div>
+      `<div class="chip gone-forget" onclick="event.stopPropagation();forgetGone('${id}')">Forget all</div>`, r => `openGoneActions('${id}','${r.node.id}')`)}</div>
   </div>`;
 }
 
@@ -211,6 +242,11 @@ function toggleSourceEnabled(id) {
   sourcesData[id].enabled = !sourcesData[id].enabled;
   renderAll();
 }
+function toggleNodeEnabled(sid, nid) {
+  const s = sourcesData[sid];
+  s.disabledNodes = isNodeDisabled(s, nid) ? s.disabledNodes.filter(x => x !== nid) : (s.disabledNodes || []).concat(nid);
+  refreshSourceViews();
+}
 
 // Other screens that show node latency / update state (the profile editor) register
 // a re-render here, so ping and update results reach every open view.
@@ -236,12 +272,12 @@ function testLatency(pairs) {
 function testSourceLatency(sid) {
   const s = sourcesData[sid];
   expandState[sid] = true;
-  return testLatency(s.nodes.map(n => [sid, n.id]));
+  return testLatency(liveNodes(s).map(n => [sid, n.id]));
 }
 function testAllLatency() {
   const pairs = [];
   sourceOrder.forEach(sid => {
-    if (sourcesData[sid].enabled) sourcesData[sid].nodes.forEach(n => pairs.push([sid, n.id]));
+    if (sourcesData[sid].enabled) liveNodes(sourcesData[sid]).forEach(n => pairs.push([sid, n.id]));
   });
   testLatency(pairs);
   closeSheet('nodesmore');
@@ -258,6 +294,7 @@ function updateSource(sid) {
     s.updating = false;
     s.updatedAt = Date.now();
     if (s.demoChurn) demoProviderChurn(s);
+    purgeExpiredGone();
     refreshSourceViews();
     if (s.testAfterUpdate) testSourceLatency(sid);
   }, 900 + Math.random() * 600);
@@ -325,7 +362,7 @@ function openSourceActions(sid) {
     rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
     if (s.website) rows += menuRow(ICON.web, 'Open website', close + `toast('Opens ${esc(s.website)}')`);
   }
-  rows += menuRow(ICON.trash, 'Delete', close + `deleteSource('${sid}')`, 'danger');
+  rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteSource('${sid}')`, 'danger');
   openActions(s.name, rows);
 }
 
@@ -333,16 +370,77 @@ function openNodeActions(sid, nid) {
   const s = sourcesData[sid];
   const n = s.nodes.find(x => x.id === nid);
   const close = "closeSheet('actions');";
-  let rows = menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
+  const on = !isNodeDisabled(s, nid);
+  let rows = menuRow(ICON.power, on ? 'Switch off<div class="menu-sub">Hidden everywhere, its settings kept</div>' : 'Switch on', close + `toggleNodeEnabled('${sid}','${nid}')`);
+  rows += menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
   rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
   if (s.kind === 'node') {
     rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
-    rows += menuRow(ICON.trash, 'Delete', close + `deleteNode('${sid}','${nid}')`, 'danger');
+    rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteNode('${sid}','${nid}')`, 'danger');
   }
   openActions(n.flag + '  ' + n.name, rows);
 }
 
-/* ── Delete ── */
+/* ── Delete ──
+   Always asks first. The confirmation lists what the deletion does to everything that
+   uses the source / server, found by previewing the lists without it (simExclude):
+   chains ending on a deleted source are deleted; an entry, profile or chain end left
+   with no server won't connect; others lose servers (a priority exit drops them from
+   its order). Settings naming the deleted servers are removed for good. */
+
+function deleteImpact(excl, sid) {
+  const lines = [];
+  const both = f => { simExclude = null; const a = f(); simExclude = excl; const b = f(); simExclude = null; return [a, b]; };
+  const srv = k => k + ' server' + (k === 1 ? '' : 's');
+  // The connection right now.
+  const id0 = effectiveConnectId(), c0 = chainsData[id0];
+  const using = (c0 ? [chainEntryRefs(c0).find(r => r.node === chainEntryNode(c0)), chainExitRefs(c0).find(r => r.node === chainExitNode(c0))]
+    : [unitRefs(id0).find(r => r.node === unitNode(id0))]).filter(Boolean);
+  if (using.some(excl)) lines.push(['Current connection', '', 'goes through it — will reconnect through the next working server', 'warn']);
+  ['simple', 'profiles'].forEach(mode => modeOrder(mode).forEach(id => {
+    const e = connectEntry(id);
+    if (!e || id === sid) return;
+    if (chainsData[id]) {
+      const c = chainsData[id];
+      if (sid && (c.inId === sid || c.outId === sid)) { lines.push([e.name, 'chain', 'is deleted with it', 'bad']); return; }
+      const [ei, eo] = both(() => chainEntryRefs(c).length), [xi, xo] = both(() => chainExitRefs(c).length);
+      if ((ei && !eo) || (xi && !xo)) lines.push([e.name, 'chain', `its ${ei && !eo ? 'entry' : 'exit'} is left with no servers — won't connect until you tick another`, 'bad']);
+      else if (eo < ei || xo < xi) lines.push([e.name, 'chain', [eo < ei ? `entry loses ${srv(ei - eo)}` : '',
+        xo < xi ? `exit loses ${srv(xi - xo)}${c.exitMode === 'priority' ? ' (out of its priority order)' : ''}` : ''].filter(Boolean).join(', '), 'warn']);
+      return;
+    }
+    const [a, b] = both(() => unitRefs(id).length), kind = profilesData[id] ? 'profile' : 'entry';
+    if (a && !b) lines.push([e.name, kind, "is left with no servers — won't connect until you tick another", 'bad']);
+    else if (b < a && profilesData[id]) lines.push([e.name, kind, `loses ${srv(a - b)} of ${a}`, 'warn']);
+  }));
+  return lines;
+}
+
+function confirmDeleteHtml(note, lines, doIt, label) {
+  const close = "closeSheet('actions');";
+  const list = lines.length ? `<div class="menu-caption">This will affect</div><div class="impact-list">${lines.map(([name, kind, what, cls]) =>
+    `<div class="impact-row ${cls}"><div class="impact-name">${esc(name)}${kind ? `<span class="conn-tag">${kind}</span>` : ''}</div><div class="impact-what">${what}</div></div>`).join('')}</div>`
+    : '<div class="menu-note">Not used in any profile or chain.</div>';
+  return `<div class="menu-note">${note}</div>${list}`
+    + menuRow(ICON.trash, label, close + doIt, 'danger')
+    + menuRow(ICON.close, 'Cancel', close);
+}
+
+function confirmDeleteSource(sid) {
+  const s = sourcesData[sid];
+  if (!s) return;
+  const n = s.nodes.length, g = (s.gone || []).length;
+  const note = (s.kind === 'sub' ? `The subscription and its ${n} server${n === 1 ? '' : 's'}` : `The group and its ${n} server${n === 1 ? '' : 's'}`)
+    + ' are removed' + (g ? `, with ${g} unavailable one${g === 1 ? '' : 's'} kept for their settings` : '') + '. This can’t be undone.';
+  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, deleteImpact(r => r.sid === sid, sid), `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));
+}
+
+function confirmDeleteNode(sid, nid) {
+  const s = sourcesData[sid], n = s && s.nodes.find(x => x.id === nid);
+  if (!n) return;
+  openActions('Delete ' + n.name + '?', confirmDeleteHtml(`${n.flag} ${esc(n.name)} is removed from ${esc(s.name)}, with its place in every profile and chain. This can’t be undone.`,
+    deleteImpact(r => r.sid === sid && r.node.id === nid), `deleteNode('${sid}','${nid}')`, 'Delete server'));
+}
 
 function deleteSource(id) {
   if (!id || !sourcesData[id]) return;
@@ -352,6 +450,7 @@ function deleteSource(id) {
     p.sources = p.sources.filter(x => x !== id);
     p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
   });
+  Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !k.startsWith(id + '::')); }));
   dropConnectEntry(id);
   renderAll();
 }
@@ -361,7 +460,6 @@ function deleteNode(sid, nid) {
   if (!s) return;
   s.nodes = s.nodes.filter(n => n.id !== nid);
   s.count = s.nodes.length;
-  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => k !== sid + '::' + nid); });
+  purgeNodeSettings(sid, new Set([nid]));
   renderAll();
 }
-

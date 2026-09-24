@@ -247,3 +247,22 @@
 .ps-card.off{border-color:rgba(var(--muted-rgb),.55)}
 .ps-card.off .ps-main{opacity:.6}
 .cc-prof.off .pick-row-name{color:var(--t3)}
+
+/* Server switched off in Nodes: the row stays in Nodes (dimmed), hidden everywhere else */
+.mini-toggle.sm{width:28px;height:17px}
+.mini-toggle.sm .mini-toggle-thumb{width:13px;height:13px}
+.mini-toggle.sm.on .mini-toggle-thumb{left:13px}
+.node-row.disabled > :not(.mini-toggle){opacity:.4}
+.node-row.disabled .node-name{text-decoration:line-through;text-decoration-color:var(--t3)}
+.dis-meta{color:var(--t3)}
+.node-row.gone.tap{cursor:pointer}
+.gone-left.soon{color:var(--warn)}
+
+/* Delete confirmation: what the deletion does to each user of the source / server */
+.impact-list{margin:0 20px 10px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.impact-row{padding:9px 12px;border-left:3px solid var(--warn)}
+.impact-row.bad{border-left-color:var(--muted)}
+.impact-row + .impact-row{border-top:1px solid var(--border)}
+.impact-name{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
+.impact-what{font-size:12.5px;color:var(--t2);margin-top:2px;line-height:1.35}
+.impact-row.bad .impact-what{color:var(--muted)}

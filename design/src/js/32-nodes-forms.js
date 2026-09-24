@@ -30,7 +30,9 @@ function openSrcForm(id, prefillUrl) {
   document.getElementById('sf-url').value = prefillUrl || (id && !isGroup ? s.url : '');
   document.getElementById('sf-name').value = id ? s.name : '';
   if (!isGroup) {
-    document.getElementById('sf-interval').value = s.updateInterval;
+    // Empty = 'auto': follows the global period from the Auto mode sheet.
+    document.getElementById('sf-interval').value = s.updateInterval === 'auto' ? '' : s.updateInterval;
+    document.getElementById('sf-interval').placeholder = 'auto · ' + subsEveryText(autoCfg.subsEvery);
     document.getElementById('sf-reload').classList.toggle('on', !!s.reloadAfterUpdate);
     document.getElementById('sf-testafter').classList.toggle('on', !!s.testAfterUpdate);
     document.getElementById('sf-hwid').classList.toggle('on', !!s.hwid);
@@ -49,7 +51,7 @@ function saveSrcForm() {
   const name = document.getElementById('sf-name').value.trim();
   const fields = {
     url: document.getElementById('sf-url').value.trim(),
-    updateInterval: parseInt(document.getElementById('sf-interval').value, 10) || 12,
+    updateInterval: document.getElementById('sf-interval').value.trim() === '' ? 'auto' : Math.max(0, parseInt(document.getElementById('sf-interval').value, 10) || 0),
     reloadAfterUpdate: document.getElementById('sf-reload').classList.contains('on'),
     testAfterUpdate: document.getElementById('sf-testafter').classList.contains('on'),
     hwid: document.getElementById('sf-hwid').classList.contains('on'),

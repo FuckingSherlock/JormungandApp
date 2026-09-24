@@ -33,20 +33,20 @@ function genNodes(count, kind) {
 
 function mkSub(id, name, count, extra) {
   return Object.assign({
-    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], gone:[], nodes:genNodes(count,'sub'),
+    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], disabledNodes:[], gone:[], nodes:genNodes(count,'sub'),
     url:'https://sub.example.net/api/sub/' + id + 'Xk7PCg04NKVzp', format:'sing-box',
     updatedAt: Date.now() - 2*3600e3, usage:{ used:0, total:0 }, expire:null,
-    updateInterval:12, reloadAfterUpdate:true, testAfterUpdate:true,
+    updateInterval:'auto', reloadAfterUpdate:true, testAfterUpdate:true,
     userAgent:'Auto', channel:'Direct first', hwid:false, keepRules:false, filter:'', password:'', website:'',
   }, extra);
 }
 
 let sourcesData = {
   src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, offNodes:['n5','n11','n19'], website:'https://jormungand.example',
-    gone: genNodes(20, 'sub').slice(18).map(n => Object.assign(n, { goneAt: Date.now() - 30*3600e3 })), demoChurn: true }),
-  src2: mkSub('src2', 'Work Servers', 9, { format:'clash', updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
-  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], nodes:genNodes(2,'node') },
-  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
+    gone: genNodes(20, 'sub').slice(18).map((n, i) => Object.assign(n, { goneAt: Date.now() - (i ? 13*24 : 30) * 3600e3 })), demoChurn: true }),
+  src2: mkSub('src2', 'Work Servers', 9, { format:'clash', disabledNodes:['n8'], updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
+  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], disabledNodes:[], nodes:genNodes(2,'node') },
+  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updateInterval:6, updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
 };
 Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
 let sourceOrder = ['src1','src2','src3','src4'];
@@ -64,7 +64,9 @@ let sourceSeq = 5;
    profile picks, chain inOff/outOff/exitOrder) survives a reshuffled subscription.
    s.gone = servers the provider dropped in an update (with goneAt): settings naming them
    are kept, so when a server comes back it returns ticked/unticked and in its old
-   priority place. The UI lists them under "Unavailable"; Forget purges them for good. */
+   priority place. The UI lists them under "Unavailable"; Forget purges them for good.
+   s.disabledNodes = servers switched off one by one in Nodes: hidden everywhere, settings
+   naming them kept (see liveNodes). */
 let connectMode = 'simple';
 /* connectOrder is the priority list of the active mode (entries and chains together):
    with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
