@@ -53,7 +53,7 @@ config in `wrangler.jsonc`). Every push touching `design/` deploys it via
 The workflow needs repo secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare
 Workers") and `CLOUDFLARE_ACCOUNT_ID`. Manual deploy: `npm run deploy` (runs
 wrangler 4 via npx; log in once with `npx wrangler login` or set the same env vars).
-URL: `https://jormungand-design.<account-subdomain>.workers.dev`.
+URL: https://jormungand-design.slackerwarlock.workers.dev
 
 ## Design rules
 
