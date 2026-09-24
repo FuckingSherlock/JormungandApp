@@ -28,10 +28,20 @@ function profileNode(p) {
   return best;
 }
 
+// A chain's exit server: its own fixed exit if set, else what the exit profile picks.
+function chainExitNode(c) {
+  if (c.exitNodeId) {
+    const r = profileNodeRefs(profilesData[c.outId]).find(r => r.sid + '::' + r.node.id === c.exitNodeId);
+    return r ? r.node : null;
+  }
+  return profileNode(profilesData[c.outId]);
+}
+
 function isUsable(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    return isUsable(c.inId) && isUsable(c.outId);
+    const exit = chainExitNode(c);
+    return isUsable(c.inId) && !!exit && isAlive(exit);
   }
   const n = profileNode(profilesData[id]);
   return !!n && isAlive(n);
@@ -52,8 +62,9 @@ function nodeSummaryHtml(n, fixed) {
 function entrySummaryHtml(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    const end = pid => { const p = profilesData[pid], n = profileNode(p); return (n ? n.flag + ' ' : '') + esc(p ? p.name : '—'); };
-    return `<span>${end(c.inId)}</span><span class="conn-arrow">→</span><span>${end(c.outId)}</span>`;
+    const end = (pid, n) => { const p = profilesData[pid]; return (n ? n.flag + ' ' : '') + esc(p ? p.name : '—'); };
+    return `<span>${end(c.inId, profileNode(profilesData[c.inId]))}</span><span class="conn-arrow">→</span>`
+      + (c.exitNodeId ? '<span class="conn-tag warn">fixed</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
   const p = profilesData[id];
   return (p.autoSelect ? '' : '<span class="conn-tag warn">fixed</span>') + nodeSummaryHtml(profileNode(p), !p.autoSelect);
@@ -73,7 +84,7 @@ function renderConnectRow(id) {
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'pinned'}</span>` : ''}
+    ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
     <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : 'openEditProfile'}('${id}')" title="Edit">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
     </button>
@@ -81,7 +92,9 @@ function renderConnectRow(id) {
 }
 
 function renderConnects() {
-  document.getElementById('autoBadge').classList.toggle('off', !autoConnect);
+  const badge = document.getElementById('autoBadge');
+  badge.classList.toggle('off', !autoConnect);
+  badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
   document.getElementById('connects-list').innerHTML = connectOrder.map(renderConnectRow).join('');
 }
 
@@ -117,29 +130,6 @@ function openCreateMenu() {
       close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
 }
 
-/* ── Node picker (fixed node for a profile being edited) ── */
-
-let pickCtx = null;   // { sources, current, onPick }
-function openPickNode(ctx) {
-  pickCtx = ctx;
-  const refs = profileNodeRefs({ sources: ctx.sources });
-  const el = document.getElementById('pickmanualnode-list');
-  el.innerHTML = refs.length ? sortedNodes(refs, r => r.node).map(({ sid, node }) => {
-    const key = sid + '::' + node.id;
-    return `<div class="pick-row" onclick="chooseManualNode('${key}')">
-      <div class="profile-radio ${ctx.current === key ? 'active' : ''}"></div>
-      <span class="node-flag">${node.flag}</span>
-      <span class="pick-row-name">${esc(node.name)}<div class="pick-row-sub" style="font-family:inherit">${esc(sourcesData[sid].name)}</div></span>
-      ${latHtml(node)}
-    </div>`;
-  }).join('') : `<div class="form-group"><div style="font-size:14px;color:var(--t2)">Pick at least one enabled subscription or server first.</div></div>`;
-  openSheet('pickmanualnode');
-}
-function chooseManualNode(key) {
-  if (pickCtx) pickCtx.onPick(key);
-  closeSheet('pickmanualnode');
-}
-
 function toggleRuleEnabled(id) {
   rulesData[id].enabled = !rulesData[id].enabled;
   renderRules();
@@ -153,7 +143,7 @@ function updateMainConnectCard() {
   const badge = document.getElementById('profModeBadge');
   const detail = document.getElementById('profModeDetail');
   document.getElementById('profCardName').textContent = e ? e.name : '—';
-  badge.textContent = autoConnect ? 'AUTO' : 'PINNED';
+  badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 

@@ -36,7 +36,7 @@
   color:var(--t3);cursor:grab;touch-action:none;flex-shrink:0;
 }
 .drag-handle:active{cursor:grabbing;color:var(--t1)}
-.dragging-row{opacity:.45;background:rgba(255,255,255,.05);border-radius:8px}
+.dragging-row{background:var(--card-hi);border-radius:var(--r);box-shadow:0 10px 28px rgba(0,0,0,.45);cursor:grabbing}
 
 /* Sub items (checkbox rows inside expanded profile) */
 .sub-item{display:flex;align-items:center;gap:10px;padding:8px 18px 8px 46px;cursor:pointer}
@@ -193,3 +193,18 @@
 .route-pair .conn-arrow{flex-shrink:0}
 .route-pair .lat{min-width:0;padding-left:6px}
 .route-more{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent);cursor:pointer}
+.cc-prof{position:relative}
+.cc-prof .pick-row{padding-right:48px}
+.cc-prof.disabled .pick-row{opacity:.35;cursor:default}
+.cc-expand{position:absolute;right:8px;top:4px}
+.cc-prof.open .cc-expand .src-chevron{transform:rotate(180deg)}
+.cc-nodes{margin:0 14px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.route-empty{padding:10px 14px;font-size:13px;color:var(--t3)}
+.route-views{padding:10px 14px 0}
+.route-count{color:var(--t2);font-size:14px}
+.route-group{cursor:pointer}
+.route-group.open .src-chevron{transform:rotate(180deg)}
+.route-min{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px}
+.route-sub{background:rgba(var(--accent-rgb),.04);border-top:1px solid var(--border)}
+.route-sub .route-pair{padding-left:26px}
+.route-end.route-count{flex:0 0 auto;margin-right:auto}

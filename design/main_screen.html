@@ -261,7 +261,7 @@ body {
   color:var(--t3);cursor:grab;touch-action:none;flex-shrink:0;
 }
 .drag-handle:active{cursor:grabbing;color:var(--t1)}
-.dragging-row{opacity:.45;background:rgba(255,255,255,.05);border-radius:8px}
+.dragging-row{background:var(--card-hi);border-radius:var(--r);box-shadow:0 10px 28px rgba(0,0,0,.45);cursor:grabbing}
 
 /* Sub items (checkbox rows inside expanded profile) */
 .sub-item{display:flex;align-items:center;gap:10px;padding:8px 18px 8px 46px;cursor:pointer}
@@ -418,6 +418,21 @@ body {
 .route-pair .conn-arrow{flex-shrink:0}
 .route-pair .lat{min-width:0;padding-left:6px}
 .route-more{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent);cursor:pointer}
+.cc-prof{position:relative}
+.cc-prof .pick-row{padding-right:48px}
+.cc-prof.disabled .pick-row{opacity:.35;cursor:default}
+.cc-expand{position:absolute;right:8px;top:4px}
+.cc-prof.open .cc-expand .src-chevron{transform:rotate(180deg)}
+.cc-nodes{margin:0 14px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.route-empty{padding:10px 14px;font-size:13px;color:var(--t3)}
+.route-views{padding:10px 14px 0}
+.route-count{color:var(--t2);font-size:14px}
+.route-group{cursor:pointer}
+.route-group.open .src-chevron{transform:rotate(180deg)}
+.route-min{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px}
+.route-sub{background:rgba(var(--accent-rgb),.04);border-top:1px solid var(--border)}
+.route-sub .route-pair{padding-left:26px}
+.route-end.route-count{flex:0 0 auto;margin-right:auto}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -839,13 +854,13 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="sheet-handle"></div>
     <div class="sheet-head">
       <span class="sheet-title">Profiles</span>
-      <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order">
+      <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order · Manual: the entry you tapped">
         <div class="conn-dot"></div><span>Auto</span>
       </div>
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="sheet-body">
-      <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap to pin / unpin</span></div>
+      <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap for Manual</span></div>
       <div id="connects-list"></div>
       <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -915,23 +930,10 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
       <div class="form-group" style="padding-bottom:0">
         <div class="form-label">Subscriptions &amp; servers</div>
+        <div class="set-hint" style="margin-top:4px">Uses the fastest node. Tap a node to fix it, tap again to go back to fastest.</div>
       </div>
       <div id="cp-source-list"></div>
 
-      <div class="form-label" style="padding:14px 18px 0">Node</div>
-      <div class="set-group">
-        <div class="set-row stack">
-          <div class="chip-row" id="cp-mode">
-            <div class="chip" onclick="setCpMode(true)">Best available</div>
-            <div class="chip" onclick="setCpMode(false)">Fixed node</div>
-          </div>
-        </div>
-        <div class="set-row" id="cp-fixed-row" style="cursor:pointer" onclick="pickCpNode()">
-          <div class="set-label">Node</div>
-          <span class="settings-value" id="cp-fixed-label"></span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-      </div>
       <div class="set-group">
         <div class="set-row">
           <div style="flex:1"><div class="set-label">Use in Auto</div><div class="set-hint">Auto may connect this profile, in list order</div></div>
@@ -964,6 +966,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <div id="cc-in-list"></div>
       <div class="form-group" style="padding-bottom:4px;padding-top:6px">
         <div class="form-label">Exit — where traffic leaves</div>
+        <div class="set-hint" style="margin-top:4px" id="cc-out-hint"></div>
       </div>
       <div id="cc-out-list"></div>
       <div class="form-group" style="padding-bottom:4px;padding-top:6px">
@@ -980,19 +983,6 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="sheet-footer">
       <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
       <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
-    </div>
-  </div>
-
-  <!-- ══════════ NESTED: PICK MANUAL NODE ══════════ -->
-  <div class="overlay overlay-l2" id="ov-pickmanualnode" onclick="closeSheet('pickmanualnode')"></div>
-  <div class="sheet sheet-l2" id="sh-pickmanualnode">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">Choose node</span>
-      <button class="sheet-close" onclick="closeSheet('pickmanualnode')">×</button>
-    </div>
-    <div class="sheet-body">
-      <div id="pickmanualnode-list"></div>
     </div>
   </div>
 
@@ -1439,10 +1429,20 @@ function profileNode(p) {
   return best;
 }
 
+// A chain's exit server: its own fixed exit if set, else what the exit profile picks.
+function chainExitNode(c) {
+  if (c.exitNodeId) {
+    const r = profileNodeRefs(profilesData[c.outId]).find(r => r.sid + '::' + r.node.id === c.exitNodeId);
+    return r ? r.node : null;
+  }
+  return profileNode(profilesData[c.outId]);
+}
+
 function isUsable(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    return isUsable(c.inId) && isUsable(c.outId);
+    const exit = chainExitNode(c);
+    return isUsable(c.inId) && !!exit && isAlive(exit);
   }
   const n = profileNode(profilesData[id]);
   return !!n && isAlive(n);
@@ -1463,8 +1463,9 @@ function nodeSummaryHtml(n, fixed) {
 function entrySummaryHtml(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    const end = pid => { const p = profilesData[pid], n = profileNode(p); return (n ? n.flag + ' ' : '') + esc(p ? p.name : '—'); };
-    return `<span>${end(c.inId)}</span><span class="conn-arrow">→</span><span>${end(c.outId)}</span>`;
+    const end = (pid, n) => { const p = profilesData[pid]; return (n ? n.flag + ' ' : '') + esc(p ? p.name : '—'); };
+    return `<span>${end(c.inId, profileNode(profilesData[c.inId]))}</span><span class="conn-arrow">→</span>`
+      + (c.exitNodeId ? '<span class="conn-tag warn">fixed</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
   const p = profilesData[id];
   return (p.autoSelect ? '' : '<span class="conn-tag warn">fixed</span>') + nodeSummaryHtml(profileNode(p), !p.autoSelect);
@@ -1484,7 +1485,7 @@ function renderConnectRow(id) {
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'pinned'}</span>` : ''}
+    ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
     <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : 'openEditProfile'}('${id}')" title="Edit">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
     </button>
@@ -1492,7 +1493,9 @@ function renderConnectRow(id) {
 }
 
 function renderConnects() {
-  document.getElementById('autoBadge').classList.toggle('off', !autoConnect);
+  const badge = document.getElementById('autoBadge');
+  badge.classList.toggle('off', !autoConnect);
+  badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
   document.getElementById('connects-list').innerHTML = connectOrder.map(renderConnectRow).join('');
 }
 
@@ -1528,29 +1531,6 @@ function openCreateMenu() {
       close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
 }
 
-/* ── Node picker (fixed node for a profile being edited) ── */
-
-let pickCtx = null;   // { sources, current, onPick }
-function openPickNode(ctx) {
-  pickCtx = ctx;
-  const refs = profileNodeRefs({ sources: ctx.sources });
-  const el = document.getElementById('pickmanualnode-list');
-  el.innerHTML = refs.length ? sortedNodes(refs, r => r.node).map(({ sid, node }) => {
-    const key = sid + '::' + node.id;
-    return `<div class="pick-row" onclick="chooseManualNode('${key}')">
-      <div class="profile-radio ${ctx.current === key ? 'active' : ''}"></div>
-      <span class="node-flag">${node.flag}</span>
-      <span class="pick-row-name">${esc(node.name)}<div class="pick-row-sub" style="font-family:inherit">${esc(sourcesData[sid].name)}</div></span>
-      ${latHtml(node)}
-    </div>`;
-  }).join('') : `<div class="form-group"><div style="font-size:14px;color:var(--t2)">Pick at least one enabled subscription or server first.</div></div>`;
-  openSheet('pickmanualnode');
-}
-function chooseManualNode(key) {
-  if (pickCtx) pickCtx.onPick(key);
-  closeSheet('pickmanualnode');
-}
-
 function toggleRuleEnabled(id) {
   rulesData[id].enabled = !rulesData[id].enabled;
   renderRules();
@@ -1564,7 +1544,7 @@ function updateMainConnectCard() {
   const badge = document.getElementById('profModeBadge');
   const detail = document.getElementById('profModeDetail');
   document.getElementById('profCardName').textContent = e ? e.name : '—';
-  badge.textContent = autoConnect ? 'AUTO' : 'PINNED';
+  badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
@@ -2169,20 +2149,11 @@ let createProfileSelected = new Set();
 let editingProfileId = null;
 let cpDraft = { autoSelect: true, manualNodeId: null };
 
-function setCpMode(auto) {
-  cpDraft.autoSelect = auto;
-  renderCpNode();
+// Fixed node: tap a node of a ticked source to fix it, tap it again to go back to fastest.
+function toggleCpFixed(key) {
+  const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
+  cpDraft = fixed ? { autoSelect: true, manualNodeId: null } : { autoSelect: false, manualNodeId: key };
   renderCreateProfileSources();
-}
-function renderCpNode() {
-  document.querySelectorAll('#cp-mode .chip').forEach((c, i) => c.classList.toggle('active', i === (cpDraft.autoSelect ? 0 : 1)));
-  document.getElementById('cp-fixed-row').style.display = cpDraft.autoSelect ? 'none' : '';
-  const ref = profileNodeRefs({ sources: [...createProfileSelected] }).find(r => r.sid + '::' + r.node.id === cpDraft.manualNodeId);
-  document.getElementById('cp-fixed-label').textContent = ref ? ref.node.flag + ' ' + ref.node.name : 'Choose…';
-}
-function pickCpNode() {
-  openPickNode({ sources: [...createProfileSelected], current: cpDraft.manualNodeId,
-    onPick: key => { cpDraft.manualNodeId = key; renderCpNode(); renderCreateProfileSources(); } });
 }
 
 function openCreateProfile(editId) {
@@ -2207,15 +2178,13 @@ function openCreateProfile(editId) {
   }
   cpOpen.clear();
   renderCreateProfileSources();
-  renderCpNode();
   openSheet('createprofile');
 }
 
 function openEditProfile(id) { openCreateProfile(id); }
 
 // Each source is a collapsible card: tick = use it in the profile; tap the name to see
-// its nodes; update / ping act on the whole source. In "Fixed node" mode, tapping a
-// node of a ticked source makes it the fixed node.
+// its nodes; update / ping act on the whole source; tap a node to fix / unfix it.
 const cpOpen = new Set();
 
 function renderCreateProfileSources() {
@@ -2227,11 +2196,11 @@ function renderCreateProfileSources() {
     const alive = s.nodes.filter(isAlive).length;
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual', `${s.nodes.length} nodes`, `${alive} alive`]
       .concat(s.enabled ? [] : ['disabled']).join('<span class="dot">·</span>');
-    const pickable = checked && !cpDraft.autoSelect && s.enabled;
+    const pickable = checked && s.enabled;
     const rows = open ? sortedNodes(s.nodes).map(n => {
       const key = id + '::' + n.id;
       const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
-      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="cpDraft.manualNodeId='${key}';renderCpNode();renderCreateProfileSources()"` : ''}>
+      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleCpFixed('${key}')"` : ''}>
         <span class="node-flag">${n.flag}</span>
         <span class="node-name">${esc(n.name)}</span>
         ${fixed ? '<span class="conn-tag warn">fixed</span>' : ''}
@@ -2262,13 +2231,13 @@ function toggleCpOpen(id) {
 sourceViewHooks.push(() => {
   if (!document.getElementById('sh-createprofile').classList.contains('open')) return;
   renderCreateProfileSources();
-  renderCpNode();
 });
 
 function toggleCreateProfileSource(id) {
   if (createProfileSelected.has(id)) createProfileSelected.delete(id); else createProfileSelected.add(id);
+  if (!cpDraft.autoSelect && !createProfileSelected.has(cpDraft.manualNodeId.split('::')[0]))
+    cpDraft = { autoSelect: true, manualNodeId: null };   // the fixed node's source was unticked
   renderCreateProfileSources();
-  renderCpNode();
 }
 
 function saveCreateProfile() {
@@ -2314,11 +2283,14 @@ function deleteEditingProfile() {
 }
 
 /* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
-   Entry and exit must be different profiles. "Check route" is informational only (it
+   Entry and exit must be different profiles. Each profile expands to its nodes; on the
+   exit side a tap fixes the chain's exit server (overrides the profile's own choice),
+   a second tap goes back to the profile's choice. "Check route" is informational only (it
    does not change the chain or Auto): it tells the user whether the chain can work
    and which entry -> exit pairs are fastest. See testChainRoute for the procedure. */
 
-let chainDraft = { inId: null, outId: null };
+let chainDraft = { inId: null, outId: null, exitNodeId: null };
+const ccOpen = new Set();   // expanded profiles in the editor, 'in:<id>' / 'out:<id>'
 let chainTest = null;   // { running, stage, done, total, pairs: [{entry, exit, ms}], showAll }
 let editingChainId = null;
 
@@ -2332,17 +2304,18 @@ function openCreateChain(editId) {
     document.getElementById('ccSaveBtn').textContent = 'Save changes';
     document.getElementById('ccDeleteBtn').style.display = '';
     document.getElementById('cc-name').value = c.name;
-    chainDraft = { inId: c.inId, outId: c.outId };
+    chainDraft = { inId: c.inId, outId: c.outId, exitNodeId: c.exitNodeId || null };
     document.getElementById('cc-inauto').classList.toggle('on', c.inAuto);
   } else {
     document.getElementById('ccTitle').textContent = 'Create chain';
     document.getElementById('ccSaveBtn').textContent = 'Create chain';
     document.getElementById('ccDeleteBtn').style.display = 'none';
     document.getElementById('cc-name').value = '';
-    chainDraft = { inId: ids[0], outId: ids[1] };
+    chainDraft = { inId: ids[0], outId: ids[1], exitNodeId: null };
     document.getElementById('cc-inauto').classList.add('on');
   }
   chainTest = null;
+  ccOpen.clear();
   renderChainEditor();
   openSheet('createchain');
 }
@@ -2362,20 +2335,65 @@ function renderChainPicker(elId, side) {
   el.innerHTML = getProfileIds().map(id => {
     const p = profilesData[id];
     const taken = id === other;
-    const n = profileNode(p);
-    return `<div class="pick-row ${taken ? 'disabled' : ''}" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
-      <div class="profile-radio ${id===current?'active':''}"></div>
-      <span class="pick-row-name">${esc(p.name)}</span>
-      <span class="pick-row-sub">${taken ? (side === 'in' ? 'exit' : 'entry') : (n ? n.flag + ' ' : '') + profileNodeCount(p) + ' nodes'}</span>
+    const open = ccOpen.has(side + ':' + id);
+    const active = id === current;
+    const n = side === 'out' && active ? chainExitNode(chainDraft) : profileNode(p);
+    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry') : (n ? n.flag + ' ' : '') + profileNodeCount(p) + ' nodes';
+    const fixedHere = side === 'out' && active && chainDraft.exitNodeId;
+    const nodes = open ? sortedNodes(profileNodeRefs(p), r => r.node).map(({ sid, node }) => {
+      const key = sid + '::' + node.id;
+      const pickable = side === 'out' && active;
+      const fixed = pickable ? chainDraft.exitNodeId === key : (!p.autoSelect && p.manualNodeId === key);
+      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleChainExitNode('${key}')"` : ''}>
+        <span class="node-flag">${node.flag}</span>
+        <span class="node-name">${esc(node.name)}</span>
+        ${fixed ? '<span class="conn-tag warn">fixed</span>' : ''}
+        <span class="node-proto">${node.protocol}</span>
+        <span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>
+      </div>`;
+    }).join('') : '';
+    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}">
+      <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
+        <div class="profile-radio ${active ? 'active' : ''}"></div>
+        <span class="pick-row-name">${esc(p.name)}${fixedHere ? ' <span class="conn-tag warn">fixed exit</span>' : ''}</span>
+        <span class="pick-row-sub">${sub}</span>
+      </div>
+      <button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">
+        <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      ${open ? `<div class="cc-nodes">${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
+  if (side === 'out') {
+    const hint = document.getElementById('cc-out-hint');
+    if (hint) hint.textContent = 'Expand the exit profile and tap a server to fix it — for a stable exit IP.';
+  }
+}
+
+function toggleCcOpen(side, id) {
+  const k = side + ':' + id;
+  if (ccOpen.has(k)) ccOpen.delete(k); else ccOpen.add(k);
+  renderChainPicker(side === 'in' ? 'cc-in-list' : 'cc-out-list', side);
+}
+
+function toggleChainExitNode(key) {
+  chainDraft.exitNodeId = chainDraft.exitNodeId === key ? null : key;
+  chainTest = null;
+  renderChainEditor();
 }
 
 function pickChainSide(side, id) {
-  if (side === 'in') chainDraft.inId = id; else chainDraft.outId = id;
+  if (side === 'in') chainDraft.inId = id;
+  else { if (chainDraft.outId !== id) chainDraft.exitNodeId = null; chainDraft.outId = id; }
   chainTest = null;   // ends changed: the old check no longer applies (a running one stops)
   renderChainEditor();
 }
+
+sourceViewHooks.push(() => {
+  if (!document.getElementById('sh-createchain').classList.contains('open')) return;
+  renderChainPicker('cc-in-list', 'in');
+  renderChainPicker('cc-out-list', 'out');
+});
 
 const ROUTE_TOP = 4;   // working pairs shown before "show all"
 
@@ -2397,14 +2415,40 @@ function renderChainTest() {
 
   let list = '';
   if (t && t.pairs.length) {
-    const shown = t.showAll ? t.pairs : t.pairs.slice(0, ROUTE_TOP);
-    list = `<div class="route-list">${shown.map(({ entry, exit, ms }) => `<div class="route-pair">
-        <span class="route-end"><span class="node-flag">${entry.flag}</span><span class="node-name">${esc(entry.name)}</span></span>
-        <span class="conn-arrow">→</span>
-        <span class="route-end"><span class="node-flag">${exit.flag}</span><span class="node-name">${esc(exit.name)}</span></span>
-        ${latMsHtml(ms)}
-      </div>`).join('')}
-      ${t.pairs.length > ROUTE_TOP ? `<div class="route-more" onclick="chainTest.showAll=!chainTest.showAll;renderChainTest()">${t.showAll ? 'Show top ' + ROUTE_TOP : 'Show all ' + t.pairs.length}
+    const views = [['pairs', 'Pairs'], ['entry', 'By entry'], ['exit', 'By exit']];
+    const chips = `<div class="chip-row route-views">${views.map(([k, l]) =>
+      `<div class="chip ${t.view === k ? 'active' : ''}" onclick="chainTest.view='${k}';chainTest.showAll=false;renderChainTest()">${l}</div>`).join('')}</div>`;
+    const end = n => `<span class="route-end"><span class="node-flag">${n.flag}</span><span class="node-name">${esc(n.name)}</span></span>`;
+    const many = (k, word) => `<span class="route-end route-count">${k} ${word}</span>`;
+    const arrow = '<span class="conn-arrow">→</span>';
+    let rows;
+    if (t.view === 'pairs') {
+      rows = t.pairs.map(({ entry, exit, ms }) => `<div class="route-pair">${end(entry)}${arrow}${end(exit)}${latMsHtml(ms)}</div>`);
+    } else {
+      // Group by one end; each group shows its best total and expands to its pairs.
+      const byEntry = t.view === 'entry';
+      const groups = new Map();
+      t.pairs.forEach(pr => {
+        const n = byEntry ? pr.entry : pr.exit, k = serverKey(n);
+        if (!groups.has(k)) groups.set(k, { key: k, node: n, pairs: [] });
+        groups.get(k).pairs.push(pr);
+      });
+      rows = [...groups.values()].sort((a, b) => a.pairs[0].ms - b.pairs[0].ms).map(g => {
+        const open = t.open.has(g.key);
+        const cnt = many(g.pairs.length, g.pairs.length === 1 ? 'node' : 'nodes');
+        const head = `<div class="route-pair route-group ${open ? 'open' : ''}" onclick="toggleRouteGroup('${g.key}')">
+          ${byEntry ? end(g.node) + arrow + cnt : cnt + arrow + end(g.node)}
+          <span class="route-min">min</span>${latMsHtml(g.pairs[0].ms)}
+          <svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>`;
+        const sub = open ? `<div class="route-sub">${g.pairs.map(({ entry, exit, ms }) =>
+          `<div class="route-pair">${byEntry ? arrow + end(exit) : end(entry) + arrow}${latMsHtml(ms)}</div>`).join('')}</div>` : '';
+        return head + sub;
+      });
+    }
+    const shown = t.showAll ? rows : rows.slice(0, ROUTE_TOP);
+    list = `${chips}<div class="route-list">${shown.join('')}
+      ${rows.length > ROUTE_TOP ? `<div class="route-more" onclick="chainTest.showAll=!chainTest.showAll;renderChainTest()">${t.showAll ? 'Show top ' + ROUTE_TOP : 'Show all ' + rows.length}
         <svg class="src-chevron" style="${t.showAll ? 'transform:rotate(180deg)' : ''}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>` : ''}
     </div>`;
   }
@@ -2421,8 +2465,9 @@ function renderChainTest() {
    Results: working pairs sorted by total latency. */
 async function testChainRoute() {
   const entries = profileNodeRefs(profilesData[chainDraft.inId]).map(r => r.node);
-  const exits = profileNodeRefs(profilesData[chainDraft.outId]).map(r => r.node);
-  const t = chainTest = { running: true, stage: '', done: 0, total: 0, pairs: [], showAll: false };
+  const fixedExit = chainDraft.exitNodeId && chainExitNode(chainDraft);
+  const exits = fixedExit ? [fixedExit] : profileNodeRefs(profilesData[chainDraft.outId]).map(r => r.node);
+  const t = chainTest = { running: true, stage: '', done: 0, total: 0, pairs: [], showAll: false, view: chainTest ? chainTest.view : 'pairs', open: new Set() };
   const live = () => chainTest === t && !t.stopped;
   const step = stage => { t.stage = stage; renderChainTest(); };
 
@@ -2453,6 +2498,11 @@ async function testChainRoute() {
   renderChainTest();
 }
 
+function toggleRouteGroup(key) {
+  if (chainTest.open.has(key)) chainTest.open.delete(key); else chainTest.open.add(key);
+  renderChainTest();
+}
+
 function stopChainRoute() {
   if (!chainTest) return;
   chainTest.stopped = true;
@@ -2463,7 +2513,7 @@ function stopChainRoute() {
 function saveCreateChain() {
   if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different profiles'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
-  const fields = { inId: chainDraft.inId, outId: chainDraft.outId,
+  const fields = { inId: chainDraft.inId, outId: chainDraft.outId, exitNodeId: chainDraft.exitNodeId,
                    inAuto: document.getElementById('cc-inauto').classList.contains('on') };
   if (editingChainId) {
     Object.assign(chainsData[editingChainId], { name }, fields);
@@ -2519,18 +2569,24 @@ function saveAddRule() {
 ──────────────────────────────────────────────────────────────────────────── */
 
 let dragCtx = null;
+const DRAG_ANIM_MS = 180;
 
+/* Sortable-list feel: the grabbed row follows the pointer (lifted), the rows it passes
+   slide out of the way, and on drop it glides into its slot; only then the data is
+   reordered and the list re-rendered. */
 function startRowDrag(e, rowEl, itemSelector, order, render) {
   e.preventDefault();
   e.stopPropagation();
-  if (!rowEl) return;
+  if (!rowEl || dragCtx) return;
   const items = Array.from(rowEl.parentElement.querySelectorAll(':scope > ' + itemSelector));
   const rects = items.map(el => el.getBoundingClientRect());
+  const origIndex = items.indexOf(rowEl);
+  const gap = rects.length > 1 ? rects[1].top - rects[0].bottom : 0;
   dragCtx = {
-    id: rowEl.dataset.id, rowEl, items, rects, order, render,
-    startY: e.clientY,
-    origIndex: items.indexOf(rowEl),
+    id: rowEl.dataset.id, rowEl, items, rects, order, render, origIndex,
+    startY: e.clientY, target: origIndex, step: rects[origIndex].height + gap,
   };
+  items.forEach(el => { if (el !== rowEl) el.style.transition = `transform ${DRAG_ANIM_MS}ms ease`; });
   rowEl.classList.add('dragging-row');
   rowEl.style.position = 'relative';
   rowEl.style.zIndex = '5';
@@ -2546,45 +2602,56 @@ function startSourceDrag(e, id) {
   startRowDrag(e, rowEl, '.src-card', () => sourceOrder, () => { renderNodes(); renderConnects(); });
 }
 
-function onRowDragMove(e) {
-  if (!dragCtx) return;
-  const dy = e.clientY - dragCtx.startY;
-  dragCtx.rowEl.style.transform = 'translateY(' + dy + 'px)';
+// Slot the dragged row's centre is over: count the other rows whose centre it passed.
+function dragTargetIndex(dy) {
+  const { rects, origIndex } = dragCtx;
+  const o = rects[origIndex];
+  const centre = o.top + o.height / 2 + dy;
+  let t = 0;
+  rects.forEach((r, i) => { if (i !== origIndex && r.top + r.height / 2 < centre) t++; });
+  return t;
 }
 
-function onRowDragEnd(e) {
-  if (!dragCtx) return;
-  const dy = e.clientY - dragCtx.startY;
-  const origRect = dragCtx.rects[dragCtx.origIndex];
-  const draggedCenter = origRect.top + origRect.height / 2 + dy;
-
-  let targetIndex = 0;
-  dragCtx.items.forEach((el, i) => {
-    if (i === dragCtx.origIndex) return;
-    const r = dragCtx.rects[i];
-    const c = r.top + r.height / 2;
-    if (c < draggedCenter) targetIndex++;
+function onRowDragMove(e) {
+  if (!dragCtx || dragCtx.dropping) return;
+  const c = dragCtx;
+  const first = c.rects[0], last = c.rects[c.rects.length - 1], o = c.rects[c.origIndex];
+  const dy = Math.max(first.top - o.top - 8, Math.min(last.bottom - o.bottom + 8, e.clientY - c.startY));
+  c.dy = dy;
+  c.rowEl.style.transform = `translateY(${dy}px) scale(1.02)`;
+  const t = dragTargetIndex(dy);
+  if (t === c.target) return;
+  c.target = t;
+  c.items.forEach((el, i) => {
+    if (i === c.origIndex) return;
+    const shift = (c.origIndex < i && i <= t) ? -c.step : (t <= i && i < c.origIndex) ? c.step : 0;
+    el.style.transform = shift ? `translateY(${shift}px)` : '';
   });
+}
 
-  dragCtx.rowEl.style.transform = '';
-  dragCtx.rowEl.style.position = '';
-  dragCtx.rowEl.style.zIndex = '';
-  dragCtx.rowEl.classList.remove('dragging-row');
-
-  const order = dragCtx.order();
-  const curIndex = order.indexOf(dragCtx.id);
-  if (targetIndex !== curIndex) {
-    order.splice(curIndex, 1);
-    order.splice(targetIndex, 0, dragCtx.id);
-  }
-  const render = dragCtx.render;
-  dragCtx = null;
-  render();
+function onRowDragEnd() {
+  if (!dragCtx || dragCtx.dropping) return;
+  const c = dragCtx;
+  c.dropping = true;
+  const { rects, origIndex: o, target: t } = c;
+  const slot = t > o ? rects[t].bottom - rects[o].bottom : t < o ? rects[t].top - rects[o].top : 0;
+  c.rowEl.style.transition = `transform ${DRAG_ANIM_MS}ms ease`;
+  c.rowEl.style.transform = `translateY(${slot}px)`;
+  setTimeout(() => {
+    c.items.forEach(el => { el.style.transform = ''; el.style.transition = ''; });
+    c.rowEl.style.position = '';
+    c.rowEl.style.zIndex = '';
+    c.rowEl.classList.remove('dragging-row');
+    const order = c.order();
+    const cur = order.indexOf(c.id);
+    if (t !== cur) { order.splice(cur, 1); order.splice(t, 0, c.id); }
+    dragCtx = null;
+    c.render();
+  }, (c.dy || 0) === slot ? 0 : DRAG_ANIM_MS);
 }
 window.addEventListener('pointermove', onRowDragMove);
 window.addEventListener('pointerup', onRowDragEnd);
 window.addEventListener('pointercancel', onRowDragEnd);
-
 /* ══════════════════════ SWIPE-DOWN-TO-DISMISS (all sheets) ══════════════════════ */
 
 function makeDraggable(name) {
@@ -2615,7 +2682,7 @@ function makeDraggable(name) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
 }
-['profiles','connections','rules','createprofile','createchain','addrule','pickmanualnode','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
+['profiles','connections','rules','createprofile','createchain','addrule','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
 
 /* ══════════════════════ THEMES ══════════════════════ */
 

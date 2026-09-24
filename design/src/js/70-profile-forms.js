@@ -4,20 +4,11 @@ let createProfileSelected = new Set();
 let editingProfileId = null;
 let cpDraft = { autoSelect: true, manualNodeId: null };
 
-function setCpMode(auto) {
-  cpDraft.autoSelect = auto;
-  renderCpNode();
+// Fixed node: tap a node of a ticked source to fix it, tap it again to go back to fastest.
+function toggleCpFixed(key) {
+  const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
+  cpDraft = fixed ? { autoSelect: true, manualNodeId: null } : { autoSelect: false, manualNodeId: key };
   renderCreateProfileSources();
-}
-function renderCpNode() {
-  document.querySelectorAll('#cp-mode .chip').forEach((c, i) => c.classList.toggle('active', i === (cpDraft.autoSelect ? 0 : 1)));
-  document.getElementById('cp-fixed-row').style.display = cpDraft.autoSelect ? 'none' : '';
-  const ref = profileNodeRefs({ sources: [...createProfileSelected] }).find(r => r.sid + '::' + r.node.id === cpDraft.manualNodeId);
-  document.getElementById('cp-fixed-label').textContent = ref ? ref.node.flag + ' ' + ref.node.name : 'Choose…';
-}
-function pickCpNode() {
-  openPickNode({ sources: [...createProfileSelected], current: cpDraft.manualNodeId,
-    onPick: key => { cpDraft.manualNodeId = key; renderCpNode(); renderCreateProfileSources(); } });
 }
 
 function openCreateProfile(editId) {
@@ -42,15 +33,13 @@ function openCreateProfile(editId) {
   }
   cpOpen.clear();
   renderCreateProfileSources();
-  renderCpNode();
   openSheet('createprofile');
 }
 
 function openEditProfile(id) { openCreateProfile(id); }
 
 // Each source is a collapsible card: tick = use it in the profile; tap the name to see
-// its nodes; update / ping act on the whole source. In "Fixed node" mode, tapping a
-// node of a ticked source makes it the fixed node.
+// its nodes; update / ping act on the whole source; tap a node to fix / unfix it.
 const cpOpen = new Set();
 
 function renderCreateProfileSources() {
@@ -62,11 +51,11 @@ function renderCreateProfileSources() {
     const alive = s.nodes.filter(isAlive).length;
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual', `${s.nodes.length} nodes`, `${alive} alive`]
       .concat(s.enabled ? [] : ['disabled']).join('<span class="dot">·</span>');
-    const pickable = checked && !cpDraft.autoSelect && s.enabled;
+    const pickable = checked && s.enabled;
     const rows = open ? sortedNodes(s.nodes).map(n => {
       const key = id + '::' + n.id;
       const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
-      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="cpDraft.manualNodeId='${key}';renderCpNode();renderCreateProfileSources()"` : ''}>
+      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleCpFixed('${key}')"` : ''}>
         <span class="node-flag">${n.flag}</span>
         <span class="node-name">${esc(n.name)}</span>
         ${fixed ? '<span class="conn-tag warn">fixed</span>' : ''}
@@ -97,13 +86,13 @@ function toggleCpOpen(id) {
 sourceViewHooks.push(() => {
   if (!document.getElementById('sh-createprofile').classList.contains('open')) return;
   renderCreateProfileSources();
-  renderCpNode();
 });
 
 function toggleCreateProfileSource(id) {
   if (createProfileSelected.has(id)) createProfileSelected.delete(id); else createProfileSelected.add(id);
+  if (!cpDraft.autoSelect && !createProfileSelected.has(cpDraft.manualNodeId.split('::')[0]))
+    cpDraft = { autoSelect: true, manualNodeId: null };   // the fixed node's source was unticked
   renderCreateProfileSources();
-  renderCpNode();
 }
 
 function saveCreateProfile() {
@@ -149,11 +138,14 @@ function deleteEditingProfile() {
 }
 
 /* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
-   Entry and exit must be different profiles. "Check route" is informational only (it
+   Entry and exit must be different profiles. Each profile expands to its nodes; on the
+   exit side a tap fixes the chain's exit server (overrides the profile's own choice),
+   a second tap goes back to the profile's choice. "Check route" is informational only (it
    does not change the chain or Auto): it tells the user whether the chain can work
    and which entry -> exit pairs are fastest. See testChainRoute for the procedure. */
 
-let chainDraft = { inId: null, outId: null };
+let chainDraft = { inId: null, outId: null, exitNodeId: null };
+const ccOpen = new Set();   // expanded profiles in the editor, 'in:<id>' / 'out:<id>'
 let chainTest = null;   // { running, stage, done, total, pairs: [{entry, exit, ms}], showAll }
 let editingChainId = null;
 
@@ -167,17 +159,18 @@ function openCreateChain(editId) {
     document.getElementById('ccSaveBtn').textContent = 'Save changes';
     document.getElementById('ccDeleteBtn').style.display = '';
     document.getElementById('cc-name').value = c.name;
-    chainDraft = { inId: c.inId, outId: c.outId };
+    chainDraft = { inId: c.inId, outId: c.outId, exitNodeId: c.exitNodeId || null };
     document.getElementById('cc-inauto').classList.toggle('on', c.inAuto);
   } else {
     document.getElementById('ccTitle').textContent = 'Create chain';
     document.getElementById('ccSaveBtn').textContent = 'Create chain';
     document.getElementById('ccDeleteBtn').style.display = 'none';
     document.getElementById('cc-name').value = '';
-    chainDraft = { inId: ids[0], outId: ids[1] };
+    chainDraft = { inId: ids[0], outId: ids[1], exitNodeId: null };
     document.getElementById('cc-inauto').classList.add('on');
   }
   chainTest = null;
+  ccOpen.clear();
   renderChainEditor();
   openSheet('createchain');
 }
@@ -197,20 +190,65 @@ function renderChainPicker(elId, side) {
   el.innerHTML = getProfileIds().map(id => {
     const p = profilesData[id];
     const taken = id === other;
-    const n = profileNode(p);
-    return `<div class="pick-row ${taken ? 'disabled' : ''}" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
-      <div class="profile-radio ${id===current?'active':''}"></div>
-      <span class="pick-row-name">${esc(p.name)}</span>
-      <span class="pick-row-sub">${taken ? (side === 'in' ? 'exit' : 'entry') : (n ? n.flag + ' ' : '') + profileNodeCount(p) + ' nodes'}</span>
+    const open = ccOpen.has(side + ':' + id);
+    const active = id === current;
+    const n = side === 'out' && active ? chainExitNode(chainDraft) : profileNode(p);
+    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry') : (n ? n.flag + ' ' : '') + profileNodeCount(p) + ' nodes';
+    const fixedHere = side === 'out' && active && chainDraft.exitNodeId;
+    const nodes = open ? sortedNodes(profileNodeRefs(p), r => r.node).map(({ sid, node }) => {
+      const key = sid + '::' + node.id;
+      const pickable = side === 'out' && active;
+      const fixed = pickable ? chainDraft.exitNodeId === key : (!p.autoSelect && p.manualNodeId === key);
+      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleChainExitNode('${key}')"` : ''}>
+        <span class="node-flag">${node.flag}</span>
+        <span class="node-name">${esc(node.name)}</span>
+        ${fixed ? '<span class="conn-tag warn">fixed</span>' : ''}
+        <span class="node-proto">${node.protocol}</span>
+        <span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>
+      </div>`;
+    }).join('') : '';
+    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}">
+      <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
+        <div class="profile-radio ${active ? 'active' : ''}"></div>
+        <span class="pick-row-name">${esc(p.name)}${fixedHere ? ' <span class="conn-tag warn">fixed exit</span>' : ''}</span>
+        <span class="pick-row-sub">${sub}</span>
+      </div>
+      <button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">
+        <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      ${open ? `<div class="cc-nodes">${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
+  if (side === 'out') {
+    const hint = document.getElementById('cc-out-hint');
+    if (hint) hint.textContent = 'Expand the exit profile and tap a server to fix it — for a stable exit IP.';
+  }
+}
+
+function toggleCcOpen(side, id) {
+  const k = side + ':' + id;
+  if (ccOpen.has(k)) ccOpen.delete(k); else ccOpen.add(k);
+  renderChainPicker(side === 'in' ? 'cc-in-list' : 'cc-out-list', side);
+}
+
+function toggleChainExitNode(key) {
+  chainDraft.exitNodeId = chainDraft.exitNodeId === key ? null : key;
+  chainTest = null;
+  renderChainEditor();
 }
 
 function pickChainSide(side, id) {
-  if (side === 'in') chainDraft.inId = id; else chainDraft.outId = id;
+  if (side === 'in') chainDraft.inId = id;
+  else { if (chainDraft.outId !== id) chainDraft.exitNodeId = null; chainDraft.outId = id; }
   chainTest = null;   // ends changed: the old check no longer applies (a running one stops)
   renderChainEditor();
 }
+
+sourceViewHooks.push(() => {
+  if (!document.getElementById('sh-createchain').classList.contains('open')) return;
+  renderChainPicker('cc-in-list', 'in');
+  renderChainPicker('cc-out-list', 'out');
+});
 
 const ROUTE_TOP = 4;   // working pairs shown before "show all"
 
@@ -232,14 +270,40 @@ function renderChainTest() {
 
   let list = '';
   if (t && t.pairs.length) {
-    const shown = t.showAll ? t.pairs : t.pairs.slice(0, ROUTE_TOP);
-    list = `<div class="route-list">${shown.map(({ entry, exit, ms }) => `<div class="route-pair">
-        <span class="route-end"><span class="node-flag">${entry.flag}</span><span class="node-name">${esc(entry.name)}</span></span>
-        <span class="conn-arrow">→</span>
-        <span class="route-end"><span class="node-flag">${exit.flag}</span><span class="node-name">${esc(exit.name)}</span></span>
-        ${latMsHtml(ms)}
-      </div>`).join('')}
-      ${t.pairs.length > ROUTE_TOP ? `<div class="route-more" onclick="chainTest.showAll=!chainTest.showAll;renderChainTest()">${t.showAll ? 'Show top ' + ROUTE_TOP : 'Show all ' + t.pairs.length}
+    const views = [['pairs', 'Pairs'], ['entry', 'By entry'], ['exit', 'By exit']];
+    const chips = `<div class="chip-row route-views">${views.map(([k, l]) =>
+      `<div class="chip ${t.view === k ? 'active' : ''}" onclick="chainTest.view='${k}';chainTest.showAll=false;renderChainTest()">${l}</div>`).join('')}</div>`;
+    const end = n => `<span class="route-end"><span class="node-flag">${n.flag}</span><span class="node-name">${esc(n.name)}</span></span>`;
+    const many = (k, word) => `<span class="route-end route-count">${k} ${word}</span>`;
+    const arrow = '<span class="conn-arrow">→</span>';
+    let rows;
+    if (t.view === 'pairs') {
+      rows = t.pairs.map(({ entry, exit, ms }) => `<div class="route-pair">${end(entry)}${arrow}${end(exit)}${latMsHtml(ms)}</div>`);
+    } else {
+      // Group by one end; each group shows its best total and expands to its pairs.
+      const byEntry = t.view === 'entry';
+      const groups = new Map();
+      t.pairs.forEach(pr => {
+        const n = byEntry ? pr.entry : pr.exit, k = serverKey(n);
+        if (!groups.has(k)) groups.set(k, { key: k, node: n, pairs: [] });
+        groups.get(k).pairs.push(pr);
+      });
+      rows = [...groups.values()].sort((a, b) => a.pairs[0].ms - b.pairs[0].ms).map(g => {
+        const open = t.open.has(g.key);
+        const cnt = many(g.pairs.length, g.pairs.length === 1 ? 'node' : 'nodes');
+        const head = `<div class="route-pair route-group ${open ? 'open' : ''}" onclick="toggleRouteGroup('${g.key}')">
+          ${byEntry ? end(g.node) + arrow + cnt : cnt + arrow + end(g.node)}
+          <span class="route-min">min</span>${latMsHtml(g.pairs[0].ms)}
+          <svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>`;
+        const sub = open ? `<div class="route-sub">${g.pairs.map(({ entry, exit, ms }) =>
+          `<div class="route-pair">${byEntry ? arrow + end(exit) : end(entry) + arrow}${latMsHtml(ms)}</div>`).join('')}</div>` : '';
+        return head + sub;
+      });
+    }
+    const shown = t.showAll ? rows : rows.slice(0, ROUTE_TOP);
+    list = `${chips}<div class="route-list">${shown.join('')}
+      ${rows.length > ROUTE_TOP ? `<div class="route-more" onclick="chainTest.showAll=!chainTest.showAll;renderChainTest()">${t.showAll ? 'Show top ' + ROUTE_TOP : 'Show all ' + rows.length}
         <svg class="src-chevron" style="${t.showAll ? 'transform:rotate(180deg)' : ''}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>` : ''}
     </div>`;
   }
@@ -256,8 +320,9 @@ function renderChainTest() {
    Results: working pairs sorted by total latency. */
 async function testChainRoute() {
   const entries = profileNodeRefs(profilesData[chainDraft.inId]).map(r => r.node);
-  const exits = profileNodeRefs(profilesData[chainDraft.outId]).map(r => r.node);
-  const t = chainTest = { running: true, stage: '', done: 0, total: 0, pairs: [], showAll: false };
+  const fixedExit = chainDraft.exitNodeId && chainExitNode(chainDraft);
+  const exits = fixedExit ? [fixedExit] : profileNodeRefs(profilesData[chainDraft.outId]).map(r => r.node);
+  const t = chainTest = { running: true, stage: '', done: 0, total: 0, pairs: [], showAll: false, view: chainTest ? chainTest.view : 'pairs', open: new Set() };
   const live = () => chainTest === t && !t.stopped;
   const step = stage => { t.stage = stage; renderChainTest(); };
 
@@ -288,6 +353,11 @@ async function testChainRoute() {
   renderChainTest();
 }
 
+function toggleRouteGroup(key) {
+  if (chainTest.open.has(key)) chainTest.open.delete(key); else chainTest.open.add(key);
+  renderChainTest();
+}
+
 function stopChainRoute() {
   if (!chainTest) return;
   chainTest.stopped = true;
@@ -298,7 +368,7 @@ function stopChainRoute() {
 function saveCreateChain() {
   if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different profiles'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
-  const fields = { inId: chainDraft.inId, outId: chainDraft.outId,
+  const fields = { inId: chainDraft.inId, outId: chainDraft.outId, exitNodeId: chainDraft.exitNodeId,
                    inAuto: document.getElementById('cc-inauto').classList.contains('on') };
   if (editingChainId) {
     Object.assign(chainsData[editingChainId], { name }, fields);

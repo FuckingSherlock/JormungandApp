@@ -51,6 +51,13 @@ const SHOTS = {
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { openProfiles(); openEditProfile('gaming'); toggleCpOpen('src4'); }); await settle(p); },
+  'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
+    const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
+    const r = await p.locator('.conn-row >> nth=2').boundingBox();
+    await p.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await p.mouse.down();
+    await p.mouse.move(g.x + g.width / 2, r.y + r.height * .7, { steps: 10 }); await p.waitForTimeout(300); },
+  'chain-groups': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); toggleCcOpen('out', chainDraft.outId); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 });
+    await p.evaluate(() => { chainTest.view = 'entry'; const g = chainTest.pairs[0]; if (g) chainTest.open.add(serverKey(g.entry)); renderChainTest(); document.querySelector('#sh-createchain .sheet-body').scrollTop = 9999; }); await settle(p); },
   'chain-edit': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 }); await settle(p); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
@@ -171,7 +178,7 @@ async function runChecks() {
     await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
     await page.mouse.down();
     await page.mouse.move(g.x + g.width / 2, first.y - 20, { steps: 8 });
-    await page.mouse.up();
+    await page.mouse.up(); await settle(page);
     expect(await page.evaluate(() => sourceOrder[0]) === last, 'order: ' + await page.evaluate(() => sourceOrder.join()));
   });
 
@@ -233,15 +240,16 @@ async function runChecks() {
     const g = await page.locator(`.conn-row[data-id=${target}] .drag-handle`).boundingBox();
     const top = await page.locator('.conn-row').first().boundingBox();
     await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
-    await page.mouse.move(g.x + g.width / 2, top.y - 10, { steps: 8 }); await page.mouse.up();
+    await page.mouse.move(g.x + g.width / 2, top.y - 10, { steps: 8 }); await page.mouse.up(); await settle(page);
     expect(await page.evaluate(() => effectiveConnectId()) === target, 'auto pick did not follow the new order');
   });
 
-  await check('profiles: tap pins (sheet stays), second tap / Auto badge unpins', async () => {
+  await check('profiles: tap sets Manual (sheet stays), second tap / badge back to Auto', async () => {
     expect(await page.evaluate(() => autoConnect), 'auto is not the default');
     await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
     expect(await page.evaluate(() => !autoConnect && effectiveConnectId() === 'work'), 'not pinned');
-    expect(/PINNED/.test(await page.textContent('#profModeBadge')), 'dock badge not PINNED');
+    expect(/MANUAL/.test(await page.textContent('#profModeBadge')), 'dock badge not MANUAL');
+    expect(/Manual/.test(await page.textContent('#autoBadge')), 'sheet badge not Manual');
     expect(await page.evaluate(() => document.getElementById('sh-profiles').classList.contains('open')), 'sheet closed on pin');
     await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
     expect(await page.evaluate(() => autoConnect), 'second tap did not re-enable auto');
@@ -253,9 +261,8 @@ async function runChecks() {
 
   await check('profiles: editor sets a fixed node and Auto participation', async () => {
     await page.evaluate(() => { openProfiles(); openEditProfile('work'); }); await settle(page);
-    await page.click('#cp-mode .chip >> nth=1');
-    await page.click('#cp-fixed-row'); await settle(page);
-    await page.click('#pickmanualnode-list .pick-row >> nth=2'); await settle(page);
+    await page.click('.ps-card[data-id=src2] .ps-main');
+    await page.click('.ps-card[data-id=src2] .node-row >> nth=2');
     await page.click('#cp-inauto');
     await page.click('#cpSaveBtn');
     const p = await page.evaluate(() => profilesData.work);
@@ -271,9 +278,10 @@ async function runChecks() {
     await page.click('.ps-card[data-id=src1] button[title="Ping all"]');
     expect(await page.$$eval('.ps-card[data-id=src1] .lat.testing', r => r.length) > 0, 'ping did not start');
     await page.waitForFunction(() => !document.querySelector('.ps-card[data-id=src1] .lat.testing'));
-    await page.click('#cp-mode .chip >> nth=1');
     await page.click('.ps-card[data-id=src1] .node-row >> nth=1');
-    expect(await page.evaluate(() => cpDraft.manualNodeId === 'src1::' + sourcesData.src1.nodes[1].id), 'tap did not fix the node');
+    expect(await page.evaluate(() => !cpDraft.autoSelect && cpDraft.manualNodeId === 'src1::' + sourcesData.src1.nodes[1].id), 'tap did not fix the node');
+    await page.click('.ps-card[data-id=src1] .node-row >> nth=1');
+    expect(await page.evaluate(() => cpDraft.autoSelect && !cpDraft.manualNodeId), 'second tap did not go back to fastest');
     await page.evaluate(() => { closeSheet('createprofile'); closeSheet('profiles'); });
   });
 
@@ -287,6 +295,25 @@ async function runChecks() {
     const r = await page.evaluate(() => ({ n: chainTest.pairs.length, sorted: chainTest.pairs.every((p, i, a) => !i || a[i-1].ms <= p.ms), rows: document.querySelectorAll('#cc-test .route-pair').length }));
     expect(r.sorted, 'pairs not sorted by latency');
     expect(r.rows === Math.min(4, r.n), `shows ${r.rows} rows for ${r.n} pairs`);
+    if (r.n) {
+      await page.click('#cc-test .route-views .chip >> nth=1');
+      await page.click('#cc-test .route-group >> nth=0');
+      const g = await page.evaluate(() => ({ groups: document.querySelectorAll('#cc-test .route-group').length, sub: document.querySelectorAll('#cc-test .route-sub .route-pair').length }));
+      expect(g.groups > 0 && g.sub > 0, 'by-entry view: ' + JSON.stringify(g));
+    }
+    await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
+  });
+
+  await check('chain editor: expand exit profile, tap a server to fix the exit', async () => {
+    await page.evaluate(() => { openProfiles(); openEditChain('cpdefault'); }); await settle(page);
+    const outIdx = await page.evaluate(() => getProfileIds().indexOf(chainDraft.outId));
+    await page.click(`#cc-out-list .cc-expand >> nth=${outIdx}`);
+    await page.click('#cc-out-list .cc-nodes .node-row >> nth=0');
+    expect(await page.evaluate(() => !!chainDraft.exitNodeId), 'exit not fixed');
+    await page.click('#cc-out-list .cc-nodes .node-row >> nth=0');
+    expect(await page.evaluate(() => !chainDraft.exitNodeId), 'second tap did not unfix');
+    await page.click('#cc-in-list .cc-expand >> nth=0');
+    expect(await page.$$eval('#cc-in-list .cc-nodes .node-row', r => r.length) > 0, 'entry nodes not shown');
     await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
   });
 
