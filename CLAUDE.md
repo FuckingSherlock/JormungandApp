@@ -42,10 +42,12 @@ chain-edit, addmenu,
 srcform, nodeform, actions, more. Add a preset in `check.mjs` rather than writing
 one-off Playwright scripts; add a check there for each new interaction.
 
-Commit both `design/src` changes and the rebuilt `design/main_screen.html` and push:
-the push redeploys the site (see Deploy), which is how the user views the mockup.
-Check the "Deploy mockup" workflow run succeeded, then tell the user it is live.
-Do not send `main_screen.html` as a file unless asked.
+Commit both `design/src` changes and the rebuilt `design/main_screen.html` and push
+(the push redeploys the Cloudflare site, see Deploy). The user views the mockup as a
+claude.ai Artifact, which live-updates in their app: after each change run
+`node design/tools/stage.mjs` and republish `design/.artifact/jormungand.html` with the
+Artifact tool to https://claude.ai/artifact/Lu4gwFjCVtcv8BogsvqbhS (pass it as `url`
+from a new session). Do not send `main_screen.html` as a file unless asked.
 
 ## Deploy (Cloudflare Worker)
 
