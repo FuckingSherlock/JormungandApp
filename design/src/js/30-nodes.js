@@ -137,7 +137,6 @@ function renderNodes() {
   const total = sourceOrder.reduce((sum, id) => sum + sourcesData[id].nodes.length, 0);
   const summary = sourceOrder.length + ' source' + (sourceOrder.length === 1 ? '' : 's') + ' · ' + total + ' nodes';
   document.getElementById('nodesSummary').textContent = summary;
-  document.getElementById('configsCardSub').textContent = summary;
 }
 
 function toggleNodeSearch(force) {
@@ -288,7 +287,7 @@ function deleteSource(id) {
   delete sourcesData[id];
   Object.values(profilesData).forEach(p => {
     p.sources = p.sources.filter(x => x !== id);
-    if (p.manualNodeId && p.manualNodeId.startsWith(id + '::')) p.manualNodeId = null;
+    p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
   });
   renderAll();
 }
@@ -298,7 +297,7 @@ function deleteNode(sid, nid) {
   if (!s) return;
   s.nodes = s.nodes.filter(n => n.id !== nid);
   s.count = s.nodes.length;
-  Object.values(profilesData).forEach(p => { if (p.manualNodeId === sid + '::' + nid) p.manualNodeId = null; });
+  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => k !== sid + '::' + nid); });
   renderAll();
 }
 

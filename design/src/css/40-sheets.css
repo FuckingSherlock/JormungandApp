@@ -44,6 +44,8 @@
 .sub-checkbox{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border-hi);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,border-color .15s}
 .sub-checkbox.checked{background:var(--accent);border-color:var(--accent)}
 .sub-checkbox.checked::after{content:'✓';color:#fff;font-size:12px;font-weight:700}
+.sub-checkbox.partial{border-color:var(--accent);background:rgba(var(--accent-rgb),.18)}
+.sub-checkbox.partial::after{content:'';width:8px;height:2px;border-radius:1px;background:var(--accent)}
 .sub-icon{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .sub-icon.sub{background:rgba(var(--accent-rgb),.12)}
 .sub-icon.set{background:rgba(var(--active-rgb),.10)}
@@ -170,6 +172,8 @@
 .ps-body{display:none;border-top:1px solid var(--border)}
 .ps-card.open .ps-body{display:block}
 .node-row.static{cursor:default}
+.node-row.ps-node{gap:10px}
+.node-row.ps-node:not(.on) .node-name{color:var(--t2)}
 .node-row.fixed{background:rgba(var(--warn-rgb),.08)}
 .pick-row.disabled{opacity:.35;cursor:default}
 .conn-tag.bad{background:rgba(var(--muted-rgb),.15);color:var(--muted)}

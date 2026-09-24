@@ -1,14 +1,14 @@
 /* ══════════════════════ CREATE / EDIT PROFILE ══════════════════════ */
 
+// Draft selection: whole sources + single nodes ('sid::nid'). Ticking a source takes all
+// its nodes (and future ones after an update); ticking nodes picks just those servers.
 let createProfileSelected = new Set();
+let cpNodes = new Set();
 let editingProfileId = null;
-let cpDraft = { autoSelect: true, manualNodeId: null };
 
-// Fixed node: tap a node of a ticked source to fix it, tap it again to go back to fastest.
-function toggleCpFixed(key) {
-  const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
-  cpDraft = fixed ? { autoSelect: true, manualNodeId: null } : { autoSelect: false, manualNodeId: key };
-  renderCreateProfileSources();
+function cpSourceState(id) {
+  if (createProfileSelected.has(id)) return 'all';
+  return sourcesData[id].nodes.some(n => cpNodes.has(id + '::' + n.id)) ? 'some' : 'none';
 }
 
 function openCreateProfile(editId) {
@@ -20,7 +20,7 @@ function openCreateProfile(editId) {
     document.getElementById('cpDeleteBtn').style.display = '';
     document.getElementById('cp-name').value = p.name;
     createProfileSelected = new Set(p.sources);
-    cpDraft = { autoSelect: p.autoSelect, manualNodeId: p.manualNodeId };
+    cpNodes = new Set(p.nodes);
     document.getElementById('cp-inauto').classList.toggle('on', p.inAuto);
   } else {
     document.getElementById('cpTitle').textContent = 'Create profile';
@@ -28,44 +28,48 @@ function openCreateProfile(editId) {
     document.getElementById('cpDeleteBtn').style.display = 'none';
     document.getElementById('cp-name').value = '';
     createProfileSelected = new Set();
-    cpDraft = { autoSelect: true, manualNodeId: null };
+    cpNodes = new Set();
     document.getElementById('cp-inauto').classList.add('on');
   }
   cpOpen.clear();
+  const partial = sourceOrder.find(id => cpSourceState(id) === 'some');
+  if (partial) cpOpen.add(partial);   // show where the single picks are
   renderCreateProfileSources();
   openSheet('createprofile');
 }
 
 function openEditProfile(id) { openCreateProfile(id); }
 
-// Each source is a collapsible card: tick = use it in the profile; tap the name to see
-// its nodes; update / ping act on the whole source; tap a node to fix / unfix it.
+// Each source is a collapsible card: tick = whole source; tap the name to see its nodes
+// and tick single ones; update / ping act on the whole source.
 const cpOpen = new Set();
 
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
   el.innerHTML = sourceOrder.map(id => {
     const s = sourcesData[id];
-    const checked = createProfileSelected.has(id);
+    const state = cpSourceState(id);
     const open = cpOpen.has(id);
     const alive = s.nodes.filter(isAlive).length;
-    const meta = [s.kind === 'sub' ? 'subscription' : 'manual', `${s.nodes.length} nodes`, `${alive} alive`]
+    const picked = state === 'all' ? s.nodes.length : s.nodes.filter(n => cpNodes.has(id + '::' + n.id)).length;
+    const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
+                  state === 'some' ? `${picked} of ${s.nodes.length} nodes` : `${s.nodes.length} nodes`, `${alive} alive`]
       .concat(s.enabled ? [] : ['disabled']).join('<span class="dot">·</span>');
-    const pickable = checked && s.enabled;
     const rows = open ? sortedNodes(s.nodes).map(n => {
       const key = id + '::' + n.id;
-      const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
-      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleCpFixed('${key}')"` : ''}>
+      const on = state === 'all' || cpNodes.has(key);
+      return `<div class="node-row ps-node ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
+        <div class="sub-checkbox ${on ? 'checked' : ''}"></div>
         <span class="node-flag">${n.flag}</span>
         <span class="node-name">${esc(n.name)}</span>
-        ${fixed ? '<span class="conn-tag warn">fixed</span>' : ''}
         <span class="node-proto">${n.protocol}</span>
         <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
     }).join('') : '';
-    return `<div class="ps-card ${open ? 'open' : ''} ${checked ? 'sel' : ''}" data-id="${id}">
+    const box = state === 'all' ? 'checked' : state === 'some' ? 'partial' : '';
+    return `<div class="ps-card ${open ? 'open' : ''} ${state !== 'none' ? 'sel' : ''}" data-id="${id}">
       <div class="ps-head">
-        <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${checked ? 'checked' : ''}"></div></div>
+        <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${box}"></div></div>
         <div class="ps-main" onclick="toggleCpOpen('${id}')">
           <div class="ps-name">${esc(s.name)}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
           <div class="src-meta">${meta}</div>
@@ -88,25 +92,42 @@ sourceViewHooks.push(() => {
   renderCreateProfileSources();
 });
 
+const cpDropNodes = id => sourcesData[id].nodes.forEach(n => cpNodes.delete(id + '::' + n.id));
+
+// Source tick: none/some → whole source, whole → none.
 function toggleCreateProfileSource(id) {
-  if (createProfileSelected.has(id)) createProfileSelected.delete(id); else createProfileSelected.add(id);
-  if (!cpDraft.autoSelect && !createProfileSelected.has(cpDraft.manualNodeId.split('::')[0]))
-    cpDraft = { autoSelect: true, manualNodeId: null };   // the fixed node's source was unticked
+  const all = cpSourceState(id) === 'all';
+  cpDropNodes(id);
+  if (all) createProfileSelected.delete(id); else createProfileSelected.add(id);
+  renderCreateProfileSources();
+}
+
+// Node tick. Unticking one node of a whole source turns it into "all but this one";
+// ticking the last missing node turns the picks back into the whole source.
+function toggleCpNode(sid, nid) {
+  const s = sourcesData[sid], key = sid + '::' + nid;
+  if (createProfileSelected.has(sid)) {
+    createProfileSelected.delete(sid);
+    s.nodes.forEach(n => { if (n.id !== nid) cpNodes.add(sid + '::' + n.id); });
+  } else if (cpNodes.has(key)) cpNodes.delete(key);
+  else {
+    cpNodes.add(key);
+    if (s.nodes.every(n => cpNodes.has(sid + '::' + n.id))) { cpDropNodes(sid); createProfileSelected.add(sid); }
+  }
   renderCreateProfileSources();
 }
 
 function saveCreateProfile() {
   const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
-  const fields = { autoSelect: cpDraft.autoSelect, manualNodeId: cpDraft.manualNodeId,
+  const fields = { sources: Array.from(createProfileSelected), nodes: Array.from(cpNodes),
                    inAuto: document.getElementById('cp-inauto').classList.contains('on') };
   if (editingProfileId) {
     const p = profilesData[editingProfileId];
     p.name = name;
-    p.sources = Array.from(createProfileSelected);
     Object.assign(p, fields);
   } else {
     const id = 'profile' + Date.now();
-    profilesData[id] = Object.assign({ id, name, sources: Array.from(createProfileSelected) }, fields);
+    profilesData[id] = Object.assign({ id, name }, fields);
     connectOrder.push(id);
   }
   editingProfileId = null;
@@ -198,7 +219,7 @@ function renderChainPicker(elId, side) {
     const nodes = open ? sortedNodes(profileNodeRefs(p), r => r.node).map(({ sid, node }) => {
       const key = sid + '::' + node.id;
       const pickable = side === 'out' && active;
-      const fixed = pickable ? chainDraft.exitNodeId === key : (!p.autoSelect && p.manualNodeId === key);
+      const fixed = pickable && chainDraft.exitNodeId === key;
       return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleChainExitNode('${key}')"` : ''}>
         <span class="node-flag">${node.flag}</span>
         <span class="node-name">${esc(node.name)}</span>

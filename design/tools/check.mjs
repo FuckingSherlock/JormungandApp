@@ -50,7 +50,7 @@ const SHOTS = {
   dock:       async p => ({ clip: await clipOf(p, '.dock', 60) }),
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
-  'profile-edit': async p => { await p.evaluate(() => { openProfiles(); openEditProfile('gaming'); toggleCpOpen('src4'); }); await settle(p); },
+  'profile-edit': async p => { await p.evaluate(() => { openProfiles(); openEditProfile('gaming'); }); await settle(p); },
   'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
     const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
     const r = await p.locator('.conn-row >> nth=2').boundingBox();
@@ -109,6 +109,15 @@ async function runChecks() {
       await tab(page, t);
       expect(await page.isVisible(`#view-${t}`), `#view-${t} not visible`);
     }
+  });
+
+  await check('home cards keep their height on a short screen', async () => {
+    const vp = page.viewportSize();
+    await tab(page, 'home');
+    await page.setViewportSize({ width: 360, height: 480 });
+    const h = await page.$eval('.segments-card', el => el.getBoundingClientRect().height);
+    await page.setViewportSize(vp);
+    expect(h >= 90, 'mode switch card squashed to ' + h + 'px');
   });
 
   await check('header and bottom nav stay fixed while content scrolls', async () => {
@@ -259,19 +268,22 @@ async function runChecks() {
     await page.evaluate(() => closeSheet('profiles'));
   });
 
-  await check('profiles: editor sets a fixed node and Auto participation', async () => {
+  await check('profiles: editor picks single nodes and Auto participation', async () => {
     await page.evaluate(() => { openProfiles(); openEditProfile('work'); }); await settle(page);
-    await page.click('.ps-card[data-id=src2] .ps-main');
-    await page.click('.ps-card[data-id=src2] .node-row >> nth=2');
+    await page.click('.ps-card[data-id=src2] .ps-check');           // whole src2 -> off
+    await page.click('.ps-card[data-id=src1] .ps-main');
+    await page.click('.ps-card[data-id=src1] .node-row >> nth=2');  // one single server
+    expect(await page.$eval('.ps-card[data-id=src1] .ps-check .sub-checkbox', el => el.classList.contains('partial')), 'source not partial');
     await page.click('#cp-inauto');
     await page.click('#cpSaveBtn');
     const p = await page.evaluate(() => profilesData.work);
-    expect(!p.autoSelect && p.manualNodeId && !p.inAuto, JSON.stringify(p));
-    expect(await page.$eval('.conn-row[data-id=work]', el => /fixed/i.test(el.textContent) && /not in auto/i.test(el.textContent)), 'row does not show fixed / not in Auto');
+    expect(p.sources.length === 0 && p.nodes.length === 1 && p.nodes[0].startsWith('src1::') && !p.inAuto, JSON.stringify(p));
+    expect(await page.evaluate(() => profileNodeCount(profilesData.work)) === 1, 'node count is not 1');
+    expect(await page.$eval('.conn-row[data-id=work]', el => /not in auto/i.test(el.textContent) && !/fixed/i.test(el.textContent)), 'row state wrong');
     await page.evaluate(() => closeSheet('profiles'));
   });
 
-  await check('profile editor: expand a source, ping it, pick a fixed node from its list', async () => {
+  await check('profile editor: expand, ping, untick a node of a whole source, re-tick it', async () => {
     await page.evaluate(() => { openProfiles(); openEditProfile('default'); }); await settle(page);
     await page.click('.ps-card[data-id=src1] .ps-main');
     expect(await page.$$eval('.ps-card[data-id=src1] .node-row', r => r.length) > 0, 'nodes not shown');
@@ -279,9 +291,9 @@ async function runChecks() {
     expect(await page.$$eval('.ps-card[data-id=src1] .lat.testing', r => r.length) > 0, 'ping did not start');
     await page.waitForFunction(() => !document.querySelector('.ps-card[data-id=src1] .lat.testing'));
     await page.click('.ps-card[data-id=src1] .node-row >> nth=1');
-    expect(await page.evaluate(() => !cpDraft.autoSelect && cpDraft.manualNodeId === 'src1::' + sourcesData.src1.nodes[1].id), 'tap did not fix the node');
+    expect(await page.evaluate(() => cpSourceState('src1') === 'some' && cpNodes.size === sourcesData.src1.nodes.length - 1), 'untick did not make the source partial');
     await page.click('.ps-card[data-id=src1] .node-row >> nth=1');
-    expect(await page.evaluate(() => cpDraft.autoSelect && !cpDraft.manualNodeId), 'second tap did not go back to fastest');
+    expect(await page.evaluate(() => cpSourceState('src1') === 'all' && cpNodes.size === 0), 're-tick did not restore the whole source');
     await page.evaluate(() => { closeSheet('createprofile'); closeSheet('profiles'); });
   });
 

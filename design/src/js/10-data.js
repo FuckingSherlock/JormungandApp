@@ -60,9 +60,9 @@ let activeConnectId = 'default';
 let autoConnect = true;
 
 let profilesData = {
-  default: { id:'default', name:'default', sources:['src1','src2','src3'], autoSelect:true,  manualNodeId:null, inAuto:true },
-  work:    { id:'work',    name:'Work',    sources:['src2'],               autoSelect:true,  manualNodeId:null, inAuto:true },
-  gaming:  { id:'gaming',  name:'Gaming',  sources:['src4'],               autoSelect:false, manualNodeId:'src4::n0', inAuto:false },
+  default: { id:'default', name:'default', sources:['src1','src2','src3'], nodes:[], inAuto:true },
+  work:    { id:'work',    name:'Work',    sources:['src2'],               nodes:[], inAuto:true },
+  gaming:  { id:'gaming',  name:'Gaming',  sources:[],                     nodes:['src4::n0','src4::n1'], inAuto:false },
 };
 let profileSeq = 1;
 
@@ -99,11 +99,5 @@ function subIcon(kind) {
   return {cls:'node', color:'var(--purple)', svg:'<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/>'};
 }
 
-function profileNodeCount(p) {
-  return p.sources.reduce((sum, sid) => {
-    const s = sourcesData[sid];
-    if (!s || !s.enabled) return sum;
-    return sum + s.nodes.length;
-  }, 0);
-}
+function profileNodeCount(p) { return profileNodeRefs(p).length; }
 

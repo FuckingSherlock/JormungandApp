@@ -124,8 +124,11 @@ body {
   padding:0 14px 24px;
   display:flex;flex-direction:column;gap:10px;
 }
+.scroll > *{flex-shrink:0}   /* short screens scroll instead of squashing cards */
 
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.row3 .nav-sub{font-size:12px}
 .row1{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .row1-right{display:flex;flex-direction:column;gap:10px}
 
@@ -269,6 +272,8 @@ body {
 .sub-checkbox{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border-hi);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,border-color .15s}
 .sub-checkbox.checked{background:var(--accent);border-color:var(--accent)}
 .sub-checkbox.checked::after{content:'✓';color:#fff;font-size:12px;font-weight:700}
+.sub-checkbox.partial{border-color:var(--accent);background:rgba(var(--accent-rgb),.18)}
+.sub-checkbox.partial::after{content:'';width:8px;height:2px;border-radius:1px;background:var(--accent)}
 .sub-icon{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .sub-icon.sub{background:rgba(var(--accent-rgb),.12)}
 .sub-icon.set{background:rgba(var(--active-rgb),.10)}
@@ -395,6 +400,8 @@ body {
 .ps-body{display:none;border-top:1px solid var(--border)}
 .ps-card.open .ps-body{display:block}
 .node-row.static{cursor:default}
+.node-row.ps-node{gap:10px}
+.node-row.ps-node:not(.on) .node-name{color:var(--t2)}
 .node-row.fixed{background:rgba(var(--warn-rgb),.08)}
 .pick-row.disabled{opacity:.35;cursor:default}
 .conn-tag.bad{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
@@ -671,17 +678,8 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
     </div>
 
-    <!-- ROW 4: All configs + Rules -->
-    <div class="row2">
-      <div class="card" style="padding:14px" onclick="switchTab('nodes')">
-        <div class="nav-icon slate">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2" stroke-linecap="round">
-            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
-          </svg>
-        </div>
-        <div class="nav-title">Nodes</div>
-        <div class="nav-sub" id="configsCardSub">4 sources · 70 nodes</div>
-      </div>
+    <!-- ROW 4: Rules · DNS · Speed Test -->
+    <div class="row3">
       <div class="card" style="padding:14px" onclick="openSheet('rules')">
         <div class="nav-icon amber">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linecap="round">
@@ -691,10 +689,6 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="nav-title">Rules</div>
         <div class="nav-sub" id="rulesCardSub">3 rules · RU region</div>
       </div>
-    </div>
-
-    <!-- ROW 5: DNS + Speed Test -->
-    <div class="row2">
       <div class="card" style="padding:14px">
         <div class="nav-icon teal">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round">
@@ -930,7 +924,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
       <div class="form-group" style="padding-bottom:0">
         <div class="form-label">Subscriptions &amp; servers</div>
-        <div class="set-hint" style="margin-top:4px">Uses the fastest node. Tap a node to fix it, tap again to go back to fastest.</div>
+        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tick single servers. The profile uses the fastest of them.</div>
       </div>
       <div id="cp-source-list"></div>
 
@@ -1294,9 +1288,9 @@ let activeConnectId = 'default';
 let autoConnect = true;
 
 let profilesData = {
-  default: { id:'default', name:'default', sources:['src1','src2','src3'], autoSelect:true,  manualNodeId:null, inAuto:true },
-  work:    { id:'work',    name:'Work',    sources:['src2'],               autoSelect:true,  manualNodeId:null, inAuto:true },
-  gaming:  { id:'gaming',  name:'Gaming',  sources:['src4'],               autoSelect:false, manualNodeId:'src4::n0', inAuto:false },
+  default: { id:'default', name:'default', sources:['src1','src2','src3'], nodes:[], inAuto:true },
+  work:    { id:'work',    name:'Work',    sources:['src2'],               nodes:[], inAuto:true },
+  gaming:  { id:'gaming',  name:'Gaming',  sources:[],                     nodes:['src4::n0','src4::n1'], inAuto:false },
 };
 let profileSeq = 1;
 
@@ -1333,13 +1327,7 @@ function subIcon(kind) {
   return {cls:'node', color:'var(--purple)', svg:'<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/>'};
 }
 
-function profileNodeCount(p) {
-  return p.sources.reduce((sum, sid) => {
-    const s = sourcesData[sid];
-    if (!s || !s.enabled) return sum;
-    return sum + s.nodes.length;
-  }, 0);
-}
+function profileNodeCount(p) { return profileNodeRefs(p).length; }
 
 /* ══════════════════════ PING CACHE ══════════════════════
    One latency store for every screen. Keyed by server (protocol://address:port), so a
@@ -1402,28 +1390,28 @@ Object.values(sourcesData).forEach(s => s.nodes.forEach(n => {
 /* ══════════════════════ PROFILES SHEET (profiles + chains in one priority list) ══════════════════════
    connectOrder is the Auto priority: with Auto on, the first usable entry that has
    inAuto wins. Tapping an entry pins it (Auto off). Everything else about an entry —
-   sources, best/fixed node, chain ends, "use in Auto" — lives in its editor (⋯). */
+   sources and picked nodes, chain ends, "use in Auto" — lives in its editor (⋯). */
 
 const connectEntry = id => profilesData[id] || chainsData[id];
 
 // Nodes a profile can use right now (enabled sources only), as {sid, node}.
+// p.sources = whole sources (every node, including ones a subscription update adds later);
+// p.nodes = individually picked nodes as 'sid::nid' (kept only while the server exists).
 function profileNodeRefs(p) {
   const refs = [];
-  p.sources.forEach(sid => {
+  sourceOrder.forEach(sid => {
     const s = sourcesData[sid];
-    if (s && s.enabled) s.nodes.forEach(n => refs.push({ sid, node: n }));
+    if (!s || !s.enabled) return;
+    const whole = p.sources.includes(sid);
+    s.nodes.forEach(n => { if (whole || p.nodes.includes(sid + '::' + n.id)) refs.push({ sid, node: n }); });
   });
   return refs;
 }
 
-// The node a profile would connect through: best alive node, or its fixed node.
+// The node a profile would connect through: the best alive one.
 function profileNode(p) {
   if (!p) return null;
   const refs = profileNodeRefs(p);
-  if (!p.autoSelect) {
-    const r = refs.find(r => r.sid + '::' + r.node.id === p.manualNodeId);
-    return r ? r.node : null;
-  }
   let best = null;
   refs.forEach(({ node }) => { if (isAlive(node) && (!best || ping(node) < ping(best))) best = node; });
   return best;
@@ -1468,7 +1456,7 @@ function entrySummaryHtml(id) {
       + (c.exitNodeId ? '<span class="conn-tag warn">fixed</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
   const p = profilesData[id];
-  return (p.autoSelect ? '' : '<span class="conn-tag warn">fixed</span>') + nodeSummaryHtml(profileNode(p), !p.autoSelect);
+  return nodeSummaryHtml(profileNode(p), false);
 }
 
 const GRIP_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>';
@@ -1525,7 +1513,7 @@ function selectConnect(id) {
 function openCreateMenu() {
   const close = "closeSheet('actions');";
   openActions('Create',
-    menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Nodes from chosen subscriptions — best or fixed</div>', close + 'openCreateProfile()') +
+    menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Chosen subscriptions or single servers — uses the fastest</div>', close + 'openCreateProfile()') +
     menuRow('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
       'Chain<div class="menu-sub">' + (getProfileIds().length < 2 ? 'Needs at least two profiles' : 'Enter through one profile, exit through another') + '</div>',
       close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
@@ -1701,7 +1689,6 @@ function renderNodes() {
   const total = sourceOrder.reduce((sum, id) => sum + sourcesData[id].nodes.length, 0);
   const summary = sourceOrder.length + ' source' + (sourceOrder.length === 1 ? '' : 's') + ' · ' + total + ' nodes';
   document.getElementById('nodesSummary').textContent = summary;
-  document.getElementById('configsCardSub').textContent = summary;
 }
 
 function toggleNodeSearch(force) {
@@ -1852,7 +1839,7 @@ function deleteSource(id) {
   delete sourcesData[id];
   Object.values(profilesData).forEach(p => {
     p.sources = p.sources.filter(x => x !== id);
-    if (p.manualNodeId && p.manualNodeId.startsWith(id + '::')) p.manualNodeId = null;
+    p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
   });
   renderAll();
 }
@@ -1862,7 +1849,7 @@ function deleteNode(sid, nid) {
   if (!s) return;
   s.nodes = s.nodes.filter(n => n.id !== nid);
   s.count = s.nodes.length;
-  Object.values(profilesData).forEach(p => { if (p.manualNodeId === sid + '::' + nid) p.manualNodeId = null; });
+  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => k !== sid + '::' + nid); });
   renderAll();
 }
 
@@ -2145,15 +2132,15 @@ function pickActionChip(el, value) {
 
 /* ══════════════════════ CREATE / EDIT PROFILE ══════════════════════ */
 
+// Draft selection: whole sources + single nodes ('sid::nid'). Ticking a source takes all
+// its nodes (and future ones after an update); ticking nodes picks just those servers.
 let createProfileSelected = new Set();
+let cpNodes = new Set();
 let editingProfileId = null;
-let cpDraft = { autoSelect: true, manualNodeId: null };
 
-// Fixed node: tap a node of a ticked source to fix it, tap it again to go back to fastest.
-function toggleCpFixed(key) {
-  const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
-  cpDraft = fixed ? { autoSelect: true, manualNodeId: null } : { autoSelect: false, manualNodeId: key };
-  renderCreateProfileSources();
+function cpSourceState(id) {
+  if (createProfileSelected.has(id)) return 'all';
+  return sourcesData[id].nodes.some(n => cpNodes.has(id + '::' + n.id)) ? 'some' : 'none';
 }
 
 function openCreateProfile(editId) {
@@ -2165,7 +2152,7 @@ function openCreateProfile(editId) {
     document.getElementById('cpDeleteBtn').style.display = '';
     document.getElementById('cp-name').value = p.name;
     createProfileSelected = new Set(p.sources);
-    cpDraft = { autoSelect: p.autoSelect, manualNodeId: p.manualNodeId };
+    cpNodes = new Set(p.nodes);
     document.getElementById('cp-inauto').classList.toggle('on', p.inAuto);
   } else {
     document.getElementById('cpTitle').textContent = 'Create profile';
@@ -2173,44 +2160,48 @@ function openCreateProfile(editId) {
     document.getElementById('cpDeleteBtn').style.display = 'none';
     document.getElementById('cp-name').value = '';
     createProfileSelected = new Set();
-    cpDraft = { autoSelect: true, manualNodeId: null };
+    cpNodes = new Set();
     document.getElementById('cp-inauto').classList.add('on');
   }
   cpOpen.clear();
+  const partial = sourceOrder.find(id => cpSourceState(id) === 'some');
+  if (partial) cpOpen.add(partial);   // show where the single picks are
   renderCreateProfileSources();
   openSheet('createprofile');
 }
 
 function openEditProfile(id) { openCreateProfile(id); }
 
-// Each source is a collapsible card: tick = use it in the profile; tap the name to see
-// its nodes; update / ping act on the whole source; tap a node to fix / unfix it.
+// Each source is a collapsible card: tick = whole source; tap the name to see its nodes
+// and tick single ones; update / ping act on the whole source.
 const cpOpen = new Set();
 
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
   el.innerHTML = sourceOrder.map(id => {
     const s = sourcesData[id];
-    const checked = createProfileSelected.has(id);
+    const state = cpSourceState(id);
     const open = cpOpen.has(id);
     const alive = s.nodes.filter(isAlive).length;
-    const meta = [s.kind === 'sub' ? 'subscription' : 'manual', `${s.nodes.length} nodes`, `${alive} alive`]
+    const picked = state === 'all' ? s.nodes.length : s.nodes.filter(n => cpNodes.has(id + '::' + n.id)).length;
+    const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
+                  state === 'some' ? `${picked} of ${s.nodes.length} nodes` : `${s.nodes.length} nodes`, `${alive} alive`]
       .concat(s.enabled ? [] : ['disabled']).join('<span class="dot">·</span>');
-    const pickable = checked && s.enabled;
     const rows = open ? sortedNodes(s.nodes).map(n => {
       const key = id + '::' + n.id;
-      const fixed = !cpDraft.autoSelect && cpDraft.manualNodeId === key;
-      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleCpFixed('${key}')"` : ''}>
+      const on = state === 'all' || cpNodes.has(key);
+      return `<div class="node-row ps-node ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
+        <div class="sub-checkbox ${on ? 'checked' : ''}"></div>
         <span class="node-flag">${n.flag}</span>
         <span class="node-name">${esc(n.name)}</span>
-        ${fixed ? '<span class="conn-tag warn">fixed</span>' : ''}
         <span class="node-proto">${n.protocol}</span>
         <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
     }).join('') : '';
-    return `<div class="ps-card ${open ? 'open' : ''} ${checked ? 'sel' : ''}" data-id="${id}">
+    const box = state === 'all' ? 'checked' : state === 'some' ? 'partial' : '';
+    return `<div class="ps-card ${open ? 'open' : ''} ${state !== 'none' ? 'sel' : ''}" data-id="${id}">
       <div class="ps-head">
-        <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${checked ? 'checked' : ''}"></div></div>
+        <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${box}"></div></div>
         <div class="ps-main" onclick="toggleCpOpen('${id}')">
           <div class="ps-name">${esc(s.name)}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
           <div class="src-meta">${meta}</div>
@@ -2233,25 +2224,42 @@ sourceViewHooks.push(() => {
   renderCreateProfileSources();
 });
 
+const cpDropNodes = id => sourcesData[id].nodes.forEach(n => cpNodes.delete(id + '::' + n.id));
+
+// Source tick: none/some → whole source, whole → none.
 function toggleCreateProfileSource(id) {
-  if (createProfileSelected.has(id)) createProfileSelected.delete(id); else createProfileSelected.add(id);
-  if (!cpDraft.autoSelect && !createProfileSelected.has(cpDraft.manualNodeId.split('::')[0]))
-    cpDraft = { autoSelect: true, manualNodeId: null };   // the fixed node's source was unticked
+  const all = cpSourceState(id) === 'all';
+  cpDropNodes(id);
+  if (all) createProfileSelected.delete(id); else createProfileSelected.add(id);
+  renderCreateProfileSources();
+}
+
+// Node tick. Unticking one node of a whole source turns it into "all but this one";
+// ticking the last missing node turns the picks back into the whole source.
+function toggleCpNode(sid, nid) {
+  const s = sourcesData[sid], key = sid + '::' + nid;
+  if (createProfileSelected.has(sid)) {
+    createProfileSelected.delete(sid);
+    s.nodes.forEach(n => { if (n.id !== nid) cpNodes.add(sid + '::' + n.id); });
+  } else if (cpNodes.has(key)) cpNodes.delete(key);
+  else {
+    cpNodes.add(key);
+    if (s.nodes.every(n => cpNodes.has(sid + '::' + n.id))) { cpDropNodes(sid); createProfileSelected.add(sid); }
+  }
   renderCreateProfileSources();
 }
 
 function saveCreateProfile() {
   const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
-  const fields = { autoSelect: cpDraft.autoSelect, manualNodeId: cpDraft.manualNodeId,
+  const fields = { sources: Array.from(createProfileSelected), nodes: Array.from(cpNodes),
                    inAuto: document.getElementById('cp-inauto').classList.contains('on') };
   if (editingProfileId) {
     const p = profilesData[editingProfileId];
     p.name = name;
-    p.sources = Array.from(createProfileSelected);
     Object.assign(p, fields);
   } else {
     const id = 'profile' + Date.now();
-    profilesData[id] = Object.assign({ id, name, sources: Array.from(createProfileSelected) }, fields);
+    profilesData[id] = Object.assign({ id, name }, fields);
     connectOrder.push(id);
   }
   editingProfileId = null;
@@ -2343,7 +2351,7 @@ function renderChainPicker(elId, side) {
     const nodes = open ? sortedNodes(profileNodeRefs(p), r => r.node).map(({ sid, node }) => {
       const key = sid + '::' + node.id;
       const pickable = side === 'out' && active;
-      const fixed = pickable ? chainDraft.exitNodeId === key : (!p.autoSelect && p.manualNodeId === key);
+      const fixed = pickable && chainDraft.exitNodeId === key;
       return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleChainExitNode('${key}')"` : ''}>
         <span class="node-flag">${node.flag}</span>
         <span class="node-name">${esc(node.name)}</span>

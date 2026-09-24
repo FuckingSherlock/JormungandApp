@@ -29,8 +29,11 @@
   padding:0 14px 24px;
   display:flex;flex-direction:column;gap:10px;
 }
+.scroll > *{flex-shrink:0}   /* short screens scroll instead of squashing cards */
 
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.row3 .nav-sub{font-size:12px}
 .row1{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .row1-right{display:flex;flex-direction:column;gap:10px}
 

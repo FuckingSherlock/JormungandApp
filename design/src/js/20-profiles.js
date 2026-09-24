@@ -1,28 +1,28 @@
 /* ══════════════════════ PROFILES SHEET (profiles + chains in one priority list) ══════════════════════
    connectOrder is the Auto priority: with Auto on, the first usable entry that has
    inAuto wins. Tapping an entry pins it (Auto off). Everything else about an entry —
-   sources, best/fixed node, chain ends, "use in Auto" — lives in its editor (⋯). */
+   sources and picked nodes, chain ends, "use in Auto" — lives in its editor (⋯). */
 
 const connectEntry = id => profilesData[id] || chainsData[id];
 
 // Nodes a profile can use right now (enabled sources only), as {sid, node}.
+// p.sources = whole sources (every node, including ones a subscription update adds later);
+// p.nodes = individually picked nodes as 'sid::nid' (kept only while the server exists).
 function profileNodeRefs(p) {
   const refs = [];
-  p.sources.forEach(sid => {
+  sourceOrder.forEach(sid => {
     const s = sourcesData[sid];
-    if (s && s.enabled) s.nodes.forEach(n => refs.push({ sid, node: n }));
+    if (!s || !s.enabled) return;
+    const whole = p.sources.includes(sid);
+    s.nodes.forEach(n => { if (whole || p.nodes.includes(sid + '::' + n.id)) refs.push({ sid, node: n }); });
   });
   return refs;
 }
 
-// The node a profile would connect through: best alive node, or its fixed node.
+// The node a profile would connect through: the best alive one.
 function profileNode(p) {
   if (!p) return null;
   const refs = profileNodeRefs(p);
-  if (!p.autoSelect) {
-    const r = refs.find(r => r.sid + '::' + r.node.id === p.manualNodeId);
-    return r ? r.node : null;
-  }
   let best = null;
   refs.forEach(({ node }) => { if (isAlive(node) && (!best || ping(node) < ping(best))) best = node; });
   return best;
@@ -67,7 +67,7 @@ function entrySummaryHtml(id) {
       + (c.exitNodeId ? '<span class="conn-tag warn">fixed</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
   const p = profilesData[id];
-  return (p.autoSelect ? '' : '<span class="conn-tag warn">fixed</span>') + nodeSummaryHtml(profileNode(p), !p.autoSelect);
+  return nodeSummaryHtml(profileNode(p), false);
 }
 
 const GRIP_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>';
@@ -124,7 +124,7 @@ function selectConnect(id) {
 function openCreateMenu() {
   const close = "closeSheet('actions');";
   openActions('Create',
-    menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Nodes from chosen subscriptions — best or fixed</div>', close + 'openCreateProfile()') +
+    menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Chosen subscriptions or single servers — uses the fastest</div>', close + 'openCreateProfile()') +
     menuRow('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
       'Chain<div class="menu-sub">' + (getProfileIds().length < 2 ? 'Needs at least two profiles' : 'Enter through one profile, exit through another') + '</div>',
       close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
