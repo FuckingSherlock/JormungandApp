@@ -236,3 +236,14 @@
 .node-row.gone{cursor:default;opacity:.55}
 .node-row.gone .node-name{text-decoration:line-through;text-decoration-color:var(--t3)}
 .gone-meta{color:var(--warn)}
+
+/* Entry that can't work: a source it needs is off in Nodes (kept, shown below the list) */
+.conn-broken-list{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
+.conn-row.broken{border-color:rgba(var(--muted-rgb),.55);cursor:pointer;min-height:52px}
+.conn-row.broken + .conn-row.broken{margin-top:4px}
+.conn-row.broken .conn-main{opacity:.5;cursor:pointer}
+.conn-tag.off{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
+.off-meta{color:var(--muted)}
+.ps-card.off{border-color:rgba(var(--muted-rgb),.55)}
+.ps-card.off .ps-main{opacity:.6}
+.cc-prof.off .pick-row-name{color:var(--t3)}

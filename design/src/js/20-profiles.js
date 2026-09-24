@@ -46,14 +46,30 @@ function unitGoneRefs(id) {
   return refs;
 }
 
-// An entry is listed only while what it stands on is usable in Nodes: a source switched
-// off there disappears from the simple list together with the chains through it.
-function entryVisible(id) {
-  if (chainsData[id]) return entryVisible(chainsData[id].inId) && entryVisible(chainsData[id].outId);
-  if (sourcesData[id]) return sourcesData[id].enabled;
-  return !!profilesData[id];
+/* Switching a source off in Nodes never edits what uses it: switched back on, it is back
+   in its profiles and chains with the same ticks and priority.
+   - simple mode: the source's own entry is hidden while off;
+   - a profile / chain that has nothing left without it is "broken": greyed with a red
+     edge, shown below the list (its priority slot is kept), skipped by Auto; tapping it
+     says which required source is off. brokenBy(id) = names of those sources, or []. */
+function profileOffSources(p) {
+  return sourceOrder.filter(sid => !sourcesData[sid].enabled
+    && (p.sources.includes(sid) || p.nodes.some(k => k.startsWith(sid + '::'))));
 }
-const visibleOrder = () => connectOrder.filter(entryVisible);
+function brokenBy(id) {
+  if (chainsData[id]) {
+    const c = chainsData[id];
+    return [...new Set(brokenBy(c.inId).concat(brokenBy(c.outId)))];
+  }
+  if (sourcesData[id]) return sourcesData[id].enabled ? [] : [sourcesData[id].name];
+  const p = profilesData[id];
+  return p && !profileNodeRefs(p).length ? profileOffSources(p).map(sid => sourcesData[sid].name) : [];
+}
+const isBroken = id => brokenBy(id).length > 0;
+const entryVisible = id => !(sourcesData[id] && !sourcesData[id].enabled);
+// The list as shown: working entries in priority order (draggable), broken ones below.
+const visibleOrder = () => connectOrder.filter(id => entryVisible(id) && !isBroken(id));
+const brokenOrder = () => connectOrder.filter(id => entryVisible(id) && isBroken(id));
 
 const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u ? u.name : '—'; };
 
@@ -98,7 +114,7 @@ function isUsable(id) {
 
 // What is actually connected: the pinned entry, or Auto's pick.
 function effectiveConnectId() {
-  if (!autoConnect && entryVisible(activeConnectId)) return activeConnectId;
+  if (!autoConnect && entryVisible(activeConnectId) && !isBroken(activeConnectId)) return activeConnectId;
   const order = visibleOrder();
   return order.find(id => connectEntry(id).inAuto && isUsable(id))
       || order.find(id => connectEntry(id).inAuto) || order[0];
@@ -146,8 +162,36 @@ function renderConnects() {
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
   document.getElementById('profilesTitle').textContent = simpleMode() ? 'Servers' : 'Profiles';
   document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Create chain' : 'Create profile or chain';
-  document.getElementById('connects-list').innerHTML = visibleOrder().map(renderConnectRow).join('')
-    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No profiles yet'}</div>`;
+  const broken = brokenOrder();
+  document.getElementById('connects-list').innerHTML = (visibleOrder().map(renderConnectRow).join('')
+    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No working profiles'}</div>`)
+    + (broken.length ? `<div class="conn-broken-list">${broken.map(renderBrokenRow).join('')}</div>` : '');
+}
+
+// Outside #connects-list's direct children, so the drag never counts these rows.
+function renderBrokenRow(id) {
+  const e = connectEntry(id);
+  return `<div class="conn-row broken" data-id="${id}" onclick="explainBroken('${id}')">
+    <div class="drag-handle"></div>
+    <div class="conn-main">
+      <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
+      <div class="conn-sub"><span>${esc(brokenBy(id).join(', '))} ${brokenBy(id).length > 1 ? 'are' : 'is'} off in Nodes</span></div>
+    </div>
+  </div>`;
+}
+
+function explainBroken(id) {
+  const names = brokenBy(id), kind = chainsData[id] ? 'chain' : 'profile';
+  const offIds = sourceOrder.filter(sid => !sourcesData[sid].enabled && names.includes(sourcesData[sid].name));
+  const close = "closeSheet('actions');";
+  openActions(connectEntry(id).name,
+    `<div class="menu-note">This ${kind} needs <b>${esc(names.join(', '))}</b>, switched off in Nodes. Switch it on, or pick another ${chainsData[id] ? unitWord() : 'subscription or server'} for the ${kind}. Its settings are kept either way.</div>`
+    + offIds.map(sid => menuRow(ICON.power, 'Switch on ' + esc(sourcesData[sid].name), close + `enableSource('${sid}')`)).join('')
+    + menuRow(ICON.edit, 'Edit ' + kind, close + `${chainsData[id] ? 'openEditChain' : 'openEditProfile'}('${id}')`));
+}
+function enableSource(sid) {
+  sourcesData[sid].enabled = true;
+  renderAll();
 }
 
 function openProfiles() {
@@ -254,7 +298,7 @@ function updateMainConnectCard() {
   const ms = n => n && isAlive(n) ? ping(n) : null;
   document.getElementById('profCardName').textContent = e ? e.name : '—';
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
-    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Subscription' : 'Servers') : simpleMode() ? 'Servers' : 'Profiles';
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Servers' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';

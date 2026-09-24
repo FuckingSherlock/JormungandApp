@@ -166,12 +166,7 @@ body {
 
 .conn-num{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--t1);line-height:1}
 
-/* ── Profiles card (full width, row 2) ── */
-.profiles-icon{
-  width:38px;height:38px;border-radius:10px;flex-shrink:0;
-  background:rgba(var(--active-rgb),.13);
-  display:flex;align-items:center;justify-content:center;
-}
+/* ── Connect dock row ── */
 .profiles-main{flex:1;min-width:0}
 .profiles-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .profiles-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -469,6 +464,17 @@ body {
 .node-row.gone{cursor:default;opacity:.55}
 .node-row.gone .node-name{text-decoration:line-through;text-decoration-color:var(--t3)}
 .gone-meta{color:var(--warn)}
+
+/* Entry that can't work: a source it needs is off in Nodes (kept, shown below the list) */
+.conn-broken-list{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
+.conn-row.broken{border-color:rgba(var(--muted-rgb),.55);cursor:pointer;min-height:52px}
+.conn-row.broken + .conn-row.broken{margin-top:4px}
+.conn-row.broken .conn-main{opacity:.5;cursor:pointer}
+.conn-tag.off{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
+.off-meta{color:var(--muted)}
+.ps-card.off{border-color:rgba(var(--muted-rgb),.55)}
+.ps-card.off .ps-main{opacity:.6}
+.cc-prof.off .pick-row-name{color:var(--t3)}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -598,6 +604,8 @@ body {
 .section-toggle.open svg{transform:rotate(90deg)}
 textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-height:1.45}
 
+.menu-note{padding:4px 20px 12px;font-size:13px;line-height:1.45;color:var(--t2)}
+.menu-note b{color:var(--t1)}
 /* ── Toast ── */
 .toast{
   position:fixed;left:50%;bottom:92px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
@@ -755,11 +763,6 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <svg class="power-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
     </button>
     <div class="dock-profile" onclick="openProfiles()">
-      <div class="profiles-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2">
-          <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
-        </svg>
-      </div>
       <div class="profiles-main">
         <div class="profiles-top">
           <span class="card-label" style="margin-bottom:0" id="profCardLabel">Servers</span>
@@ -1524,14 +1527,30 @@ function unitGoneRefs(id) {
   return refs;
 }
 
-// An entry is listed only while what it stands on is usable in Nodes: a source switched
-// off there disappears from the simple list together with the chains through it.
-function entryVisible(id) {
-  if (chainsData[id]) return entryVisible(chainsData[id].inId) && entryVisible(chainsData[id].outId);
-  if (sourcesData[id]) return sourcesData[id].enabled;
-  return !!profilesData[id];
+/* Switching a source off in Nodes never edits what uses it: switched back on, it is back
+   in its profiles and chains with the same ticks and priority.
+   - simple mode: the source's own entry is hidden while off;
+   - a profile / chain that has nothing left without it is "broken": greyed with a red
+     edge, shown below the list (its priority slot is kept), skipped by Auto; tapping it
+     says which required source is off. brokenBy(id) = names of those sources, or []. */
+function profileOffSources(p) {
+  return sourceOrder.filter(sid => !sourcesData[sid].enabled
+    && (p.sources.includes(sid) || p.nodes.some(k => k.startsWith(sid + '::'))));
 }
-const visibleOrder = () => connectOrder.filter(entryVisible);
+function brokenBy(id) {
+  if (chainsData[id]) {
+    const c = chainsData[id];
+    return [...new Set(brokenBy(c.inId).concat(brokenBy(c.outId)))];
+  }
+  if (sourcesData[id]) return sourcesData[id].enabled ? [] : [sourcesData[id].name];
+  const p = profilesData[id];
+  return p && !profileNodeRefs(p).length ? profileOffSources(p).map(sid => sourcesData[sid].name) : [];
+}
+const isBroken = id => brokenBy(id).length > 0;
+const entryVisible = id => !(sourcesData[id] && !sourcesData[id].enabled);
+// The list as shown: working entries in priority order (draggable), broken ones below.
+const visibleOrder = () => connectOrder.filter(id => entryVisible(id) && !isBroken(id));
+const brokenOrder = () => connectOrder.filter(id => entryVisible(id) && isBroken(id));
 
 const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u ? u.name : '—'; };
 
@@ -1576,7 +1595,7 @@ function isUsable(id) {
 
 // What is actually connected: the pinned entry, or Auto's pick.
 function effectiveConnectId() {
-  if (!autoConnect && entryVisible(activeConnectId)) return activeConnectId;
+  if (!autoConnect && entryVisible(activeConnectId) && !isBroken(activeConnectId)) return activeConnectId;
   const order = visibleOrder();
   return order.find(id => connectEntry(id).inAuto && isUsable(id))
       || order.find(id => connectEntry(id).inAuto) || order[0];
@@ -1624,8 +1643,36 @@ function renderConnects() {
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
   document.getElementById('profilesTitle').textContent = simpleMode() ? 'Servers' : 'Profiles';
   document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Create chain' : 'Create profile or chain';
-  document.getElementById('connects-list').innerHTML = visibleOrder().map(renderConnectRow).join('')
-    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No profiles yet'}</div>`;
+  const broken = brokenOrder();
+  document.getElementById('connects-list').innerHTML = (visibleOrder().map(renderConnectRow).join('')
+    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No working profiles'}</div>`)
+    + (broken.length ? `<div class="conn-broken-list">${broken.map(renderBrokenRow).join('')}</div>` : '');
+}
+
+// Outside #connects-list's direct children, so the drag never counts these rows.
+function renderBrokenRow(id) {
+  const e = connectEntry(id);
+  return `<div class="conn-row broken" data-id="${id}" onclick="explainBroken('${id}')">
+    <div class="drag-handle"></div>
+    <div class="conn-main">
+      <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
+      <div class="conn-sub"><span>${esc(brokenBy(id).join(', '))} ${brokenBy(id).length > 1 ? 'are' : 'is'} off in Nodes</span></div>
+    </div>
+  </div>`;
+}
+
+function explainBroken(id) {
+  const names = brokenBy(id), kind = chainsData[id] ? 'chain' : 'profile';
+  const offIds = sourceOrder.filter(sid => !sourcesData[sid].enabled && names.includes(sourcesData[sid].name));
+  const close = "closeSheet('actions');";
+  openActions(connectEntry(id).name,
+    `<div class="menu-note">This ${kind} needs <b>${esc(names.join(', '))}</b>, switched off in Nodes. Switch it on, or pick another ${chainsData[id] ? unitWord() : 'subscription or server'} for the ${kind}. Its settings are kept either way.</div>`
+    + offIds.map(sid => menuRow(ICON.power, 'Switch on ' + esc(sourcesData[sid].name), close + `enableSource('${sid}')`)).join('')
+    + menuRow(ICON.edit, 'Edit ' + kind, close + `${chainsData[id] ? 'openEditChain' : 'openEditProfile'}('${id}')`));
+}
+function enableSource(sid) {
+  sourcesData[sid].enabled = true;
+  renderAll();
 }
 
 function openProfiles() {
@@ -1732,7 +1779,7 @@ function updateMainConnectCard() {
   const ms = n => n && isAlive(n) ? ping(n) : null;
   document.getElementById('profCardName').textContent = e ? e.name : '—';
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
-    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Subscription' : 'Servers') : simpleMode() ? 'Servers' : 'Profiles';
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Servers' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
@@ -1765,6 +1812,7 @@ const ICON = {
   qr:      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>',
   web:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>',
   trash:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>',
+  power:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>',
   plus:    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
   collapse:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>',
   expand:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>',
@@ -2444,20 +2492,31 @@ function openEditProfile(id) { openCreateProfile(id); }
 // Each source is a collapsible card: tick = whole source; tap the name to see its nodes
 // and tick single ones; update / ping act on the whole source.
 const cpOpen = new Set();
-// Sources switched off in Nodes are not offered (their picks stay in the profile).
-const cpSourceIds = () => sourceOrder.filter(id => sourcesData[id].enabled);
+// Sources switched off in Nodes are not offered, except ones this profile already uses:
+// those show greyed ("off in Nodes") so the user sees why, picks kept for when it's back.
+const cpSourceIds = () => sourceOrder.filter(id => sourcesData[id].enabled || cpSourceState(id) !== 'none');
+const cpOffPicked = () => sourceOrder.filter(id => !sourcesData[id].enabled && cpSourceState(id) !== 'none');
 // Servers the draft would use now: must be at least one to save.
-const cpPickedCount = () => cpSourceIds().reduce((sum, id) => sum + (createProfileSelected.has(id) ? sourcesData[id].nodes.length
+const cpPickedCount = () => cpSourceIds().filter(id => sourcesData[id].enabled).reduce((sum, id) => sum + (createProfileSelected.has(id) ? sourcesData[id].nodes.length
   : sourcesData[id].nodes.filter(n => cpNodes.has(id + '::' + n.id)).length), 0);
 
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
-  const none = !cpPickedCount();
-  document.getElementById('cp-warn').hidden = !none;
+  const none = !cpPickedCount(), offs = cpOffPicked().map(id => sourcesData[id].name);
+  const warn = document.getElementById('cp-warn');
+  warn.hidden = !none;
+  warn.textContent = offs.length ? `${offs.join(', ')} ${offs.length > 1 ? 'are' : 'is'} off in Nodes — switch it on there or tick another server`
+    : 'Tick at least 1 server — a profile with none can’t connect';
   document.getElementById('cpSaveBtn').disabled = none;
   el.innerHTML = cpSourceIds().map(id => {
     const s = sourcesData[id];
     const state = cpSourceState(id);
+    if (!s.enabled) return `<div class="ps-card off" data-id="${id}">
+      <div class="ps-head">
+        <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${state === 'all' ? 'checked' : 'partial'}"></div></div>
+        <div class="ps-main"><div class="ps-name">${esc(s.name)}</div><div class="src-meta"><span class="off-meta">off in Nodes</span><span class="dot">·</span>untick to drop it</div></div>
+      </div>
+    </div>`;
     const open = cpOpen.has(id);
     const alive = s.nodes.filter(isAlive).length;
     const picked = state === 'all' ? s.nodes.length : s.nodes.filter(n => cpNodes.has(id + '::' + n.id)).length;
@@ -2506,6 +2565,12 @@ const cpDropNodes = id => sourcesData[id].nodes.forEach(n => cpNodes.delete(id +
 
 // Source tick: none/some → whole source, whole → none.
 function toggleCreateProfileSource(id) {
+  if (!sourcesData[id].enabled) {   // off in Nodes: the tick only removes it
+    createProfileSelected.delete(id);
+    [...cpNodes].forEach(k => { if (k.startsWith(id + '::')) cpNodes.delete(k); });
+    renderCreateProfileSources();
+    return;
+  }
   const all = cpSourceState(id) === 'all';
   cpDropNodes(id);
   if (all) createProfileSelected.delete(id); else createProfileSelected.add(id);
@@ -2627,14 +2692,17 @@ function renderChainPicker(elId, side) {
   const other = side === 'in' ? d.outId : d.inId;
   const off = side === 'in' ? d.inOff : d.outOff;
   const priority = side === 'out' && d.exitMode === 'priority';
-  el.innerHTML = getUnitIds().map(id => {
+  const ids = getUnitIds();
+  if (current && !ids.includes(current) && (sourcesData[current] || profilesData[current])) ids.push(current);   // an end switched off in Nodes
+  el.innerHTML = ids.map(id => {
     const taken = id === other;
     const open = ccOpen.has(side + ':' + id);
     const active = id === current;
     const all = unitRefs(id);
     const nOn = active ? all.filter(r => !off.includes(refKey(r))).length : all.length;
     const n = active ? (side === 'in' ? chainEntryNode(d) : chainExitNode(d)) : unitNode(id);
-    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry')
+    const broken = isBroken(id);
+    const sub = broken ? '<span class="off-meta">off in Nodes</span>' : taken ? (side === 'in' ? 'used as exit' : 'used as entry')
       : (n ? n.flag + ' ' : '') + (nOn < all.length ? `${nOn} of ${all.length}` : all.length) + ' nodes';
     let rank = 0;
     const list = active && priority ? chainExitOrder(d) : sortedNodes(all, r => r.node);
@@ -2653,7 +2721,7 @@ function renderChainPicker(elId, side) {
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
       r => `<div class="sub-checkbox ${off.includes(refKey(r)) ? '' : 'checked'}"></div>`) : '') : '';
-    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}" data-id="${id}">
+    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''} ${broken ? 'off' : ''}" data-id="${id}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
         <span class="pick-row-name">${esc(unitName(id))}</span>
@@ -2673,17 +2741,18 @@ function renderChainPicker(elId, side) {
   }
 }
 
-// Each end needs at least one ticked server; the warning names the empty end(s).
-function chainEmptyEnds(d = chainDraft) {
-  return [['entry', chainEntryRefs(d), d.inId], ['exit', chainExitRefs(d), d.outId]]
-    .filter(([, refs, uid]) => !refs.length && unitRefs(uid).length).map(([name]) => name);
+// Each end needs at least one ticked server, and nothing it stands on switched off in Nodes.
+function chainProblems(d = chainDraft) {
+  return [['entry', chainEntryRefs(d), d.inId], ['exit', chainExitRefs(d), d.outId]].map(([name, refs, uid]) =>
+    isBroken(uid) ? `The ${name} needs ${brokenBy(uid).join(', ')}, off in Nodes — switch it on there or pick another`
+    : !refs.length && unitRefs(uid).length ? `Tick at least 1 server of the ${name}` : '').filter(Boolean);
 }
 function renderChainWarn() {
-  const empty = chainEmptyEnds();
+  const problems = chainProblems();
   const w = document.getElementById('cc-warn');
-  w.hidden = !empty.length;
-  w.textContent = `Tick at least 1 server of the ${empty.join(' and the ')}`;
-  document.getElementById('ccSaveBtn').disabled = empty.length > 0;
+  w.hidden = !problems.length;
+  w.textContent = problems.join('. ');
+  document.getElementById('ccSaveBtn').disabled = problems.length > 0;
 }
 
 function toggleCcOpen(side, id) {
@@ -2851,7 +2920,7 @@ function stopChainRoute() {
 }
 
 function saveCreateChain() {
-  if (chainEmptyEnds().length) return;
+  if (chainProblems().length) return;
   if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
   const { inId, outId, inOff, outOff, exitMode, exitOrder } = chainDraft;

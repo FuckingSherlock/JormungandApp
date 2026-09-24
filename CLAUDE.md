@@ -41,7 +41,7 @@ npm run shot -- dock nodes            # -> design/.shots/*.png
 npm run shot -- settings --theme github --scale 2
 ```
 
-Presets: home, nodes, nodes-open, settings, dock, dock-chain, dock-profile, dock-off, profiles, profiles-full,
+Presets: home, nodes, nodes-open, settings, dock, dock-chain, dock-profile, dock-off, profiles, broken, profiles-full,
 profiles-menu, source-entry, gone, nothing-ticked, simple-chain, chain-priority, profile-edit,
 chain-edit, chain-groups, drag-mid, addmenu,
 srcform, nodeform, actions, more. Add a preset in `check.mjs` rather than writing

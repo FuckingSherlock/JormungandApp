@@ -43,20 +43,31 @@ function openEditProfile(id) { openCreateProfile(id); }
 // Each source is a collapsible card: tick = whole source; tap the name to see its nodes
 // and tick single ones; update / ping act on the whole source.
 const cpOpen = new Set();
-// Sources switched off in Nodes are not offered (their picks stay in the profile).
-const cpSourceIds = () => sourceOrder.filter(id => sourcesData[id].enabled);
+// Sources switched off in Nodes are not offered, except ones this profile already uses:
+// those show greyed ("off in Nodes") so the user sees why, picks kept for when it's back.
+const cpSourceIds = () => sourceOrder.filter(id => sourcesData[id].enabled || cpSourceState(id) !== 'none');
+const cpOffPicked = () => sourceOrder.filter(id => !sourcesData[id].enabled && cpSourceState(id) !== 'none');
 // Servers the draft would use now: must be at least one to save.
-const cpPickedCount = () => cpSourceIds().reduce((sum, id) => sum + (createProfileSelected.has(id) ? sourcesData[id].nodes.length
+const cpPickedCount = () => cpSourceIds().filter(id => sourcesData[id].enabled).reduce((sum, id) => sum + (createProfileSelected.has(id) ? sourcesData[id].nodes.length
   : sourcesData[id].nodes.filter(n => cpNodes.has(id + '::' + n.id)).length), 0);
 
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
-  const none = !cpPickedCount();
-  document.getElementById('cp-warn').hidden = !none;
+  const none = !cpPickedCount(), offs = cpOffPicked().map(id => sourcesData[id].name);
+  const warn = document.getElementById('cp-warn');
+  warn.hidden = !none;
+  warn.textContent = offs.length ? `${offs.join(', ')} ${offs.length > 1 ? 'are' : 'is'} off in Nodes — switch it on there or tick another server`
+    : 'Tick at least 1 server — a profile with none can’t connect';
   document.getElementById('cpSaveBtn').disabled = none;
   el.innerHTML = cpSourceIds().map(id => {
     const s = sourcesData[id];
     const state = cpSourceState(id);
+    if (!s.enabled) return `<div class="ps-card off" data-id="${id}">
+      <div class="ps-head">
+        <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${state === 'all' ? 'checked' : 'partial'}"></div></div>
+        <div class="ps-main"><div class="ps-name">${esc(s.name)}</div><div class="src-meta"><span class="off-meta">off in Nodes</span><span class="dot">·</span>untick to drop it</div></div>
+      </div>
+    </div>`;
     const open = cpOpen.has(id);
     const alive = s.nodes.filter(isAlive).length;
     const picked = state === 'all' ? s.nodes.length : s.nodes.filter(n => cpNodes.has(id + '::' + n.id)).length;
@@ -105,6 +116,12 @@ const cpDropNodes = id => sourcesData[id].nodes.forEach(n => cpNodes.delete(id +
 
 // Source tick: none/some → whole source, whole → none.
 function toggleCreateProfileSource(id) {
+  if (!sourcesData[id].enabled) {   // off in Nodes: the tick only removes it
+    createProfileSelected.delete(id);
+    [...cpNodes].forEach(k => { if (k.startsWith(id + '::')) cpNodes.delete(k); });
+    renderCreateProfileSources();
+    return;
+  }
   const all = cpSourceState(id) === 'all';
   cpDropNodes(id);
   if (all) createProfileSelected.delete(id); else createProfileSelected.add(id);
@@ -226,14 +243,17 @@ function renderChainPicker(elId, side) {
   const other = side === 'in' ? d.outId : d.inId;
   const off = side === 'in' ? d.inOff : d.outOff;
   const priority = side === 'out' && d.exitMode === 'priority';
-  el.innerHTML = getUnitIds().map(id => {
+  const ids = getUnitIds();
+  if (current && !ids.includes(current) && (sourcesData[current] || profilesData[current])) ids.push(current);   // an end switched off in Nodes
+  el.innerHTML = ids.map(id => {
     const taken = id === other;
     const open = ccOpen.has(side + ':' + id);
     const active = id === current;
     const all = unitRefs(id);
     const nOn = active ? all.filter(r => !off.includes(refKey(r))).length : all.length;
     const n = active ? (side === 'in' ? chainEntryNode(d) : chainExitNode(d)) : unitNode(id);
-    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry')
+    const broken = isBroken(id);
+    const sub = broken ? '<span class="off-meta">off in Nodes</span>' : taken ? (side === 'in' ? 'used as exit' : 'used as entry')
       : (n ? n.flag + ' ' : '') + (nOn < all.length ? `${nOn} of ${all.length}` : all.length) + ' nodes';
     let rank = 0;
     const list = active && priority ? chainExitOrder(d) : sortedNodes(all, r => r.node);
@@ -252,7 +272,7 @@ function renderChainPicker(elId, side) {
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
       r => `<div class="sub-checkbox ${off.includes(refKey(r)) ? '' : 'checked'}"></div>`) : '') : '';
-    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}" data-id="${id}">
+    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''} ${broken ? 'off' : ''}" data-id="${id}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
         <span class="pick-row-name">${esc(unitName(id))}</span>
@@ -272,17 +292,18 @@ function renderChainPicker(elId, side) {
   }
 }
 
-// Each end needs at least one ticked server; the warning names the empty end(s).
-function chainEmptyEnds(d = chainDraft) {
-  return [['entry', chainEntryRefs(d), d.inId], ['exit', chainExitRefs(d), d.outId]]
-    .filter(([, refs, uid]) => !refs.length && unitRefs(uid).length).map(([name]) => name);
+// Each end needs at least one ticked server, and nothing it stands on switched off in Nodes.
+function chainProblems(d = chainDraft) {
+  return [['entry', chainEntryRefs(d), d.inId], ['exit', chainExitRefs(d), d.outId]].map(([name, refs, uid]) =>
+    isBroken(uid) ? `The ${name} needs ${brokenBy(uid).join(', ')}, off in Nodes — switch it on there or pick another`
+    : !refs.length && unitRefs(uid).length ? `Tick at least 1 server of the ${name}` : '').filter(Boolean);
 }
 function renderChainWarn() {
-  const empty = chainEmptyEnds();
+  const problems = chainProblems();
   const w = document.getElementById('cc-warn');
-  w.hidden = !empty.length;
-  w.textContent = `Tick at least 1 server of the ${empty.join(' and the ')}`;
-  document.getElementById('ccSaveBtn').disabled = empty.length > 0;
+  w.hidden = !problems.length;
+  w.textContent = problems.join('. ');
+  document.getElementById('ccSaveBtn').disabled = problems.length > 0;
 }
 
 function toggleCcOpen(side, id) {
@@ -450,7 +471,7 @@ function stopChainRoute() {
 }
 
 function saveCreateChain() {
-  if (chainEmptyEnds().length) return;
+  if (chainProblems().length) return;
   if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
   const { inId, outId, inOff, outOff, exitMode, exitOrder } = chainDraft;

@@ -25,3 +25,5 @@
 .section-toggle.open svg{transform:rotate(90deg)}
 textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-height:1.45}
 
+.menu-note{padding:4px 20px 12px;font-size:13px;line-height:1.45;color:var(--t2)}
+.menu-note b{color:var(--t1)}

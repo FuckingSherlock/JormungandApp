@@ -48,6 +48,7 @@ const SHOTS = {
   'nodes-open': async p => { await tab(p, 'nodes'); await p.evaluate(() => { expandState[sourceOrder[0]] = true; goneOpen.add('nodes:' + sourceOrder[0]); renderNodes(); document.querySelector('#view-nodes .scroll').scrollTop = 520; }); },
   settings:   async p => { await tab(p, 'settings'); },
   dock:       async p => ({ clip: await clipOf(p, '.dock', 60) }),
+  'broken': async p => { await p.evaluate(() => { sourcesData.src4.enabled = false; renderAll(); openProfiles(); }); await settle(p); },
   'dock-chain': async p => { await p.evaluate(() => { selectConnect('sc1'); }); return { clip: await clipOf(p, '.dock', 60) }; },
   'dock-profile': async p => { await p.evaluate(() => { setConnectMode('profiles'); selectConnect('default'); }); return { clip: await clipOf(p, '.dock', 60) }; },
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
@@ -499,19 +500,32 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
-  await check('source switched off in Nodes: hidden from lists, pickers and its chains', async () => {
+  await check('source off in Nodes: own entry hidden, users marked off below, settings back when on', async () => {
     const r = await page.evaluate(() => {
       setConnectMode('simple'); const out = {};
-      sourcesData.src2.enabled = false;
-      chainsData.tc2 = { id:'tc2', name:'t2', inId:'src2', outId:'src3', inAuto:true, inOff:[], outOff:[], exitMode:'fastest', exitOrder:[] };
-      connectOrder.push('tc2');
-      openProfiles();
-      const ids = [...document.querySelectorAll('#connects-list .conn-row')].map(e => e.dataset.id);
-      out.list = !ids.includes('src2') && !ids.includes('tc2') && ids.includes('src1');
-      openCreateChain(); out.chain = !document.querySelector('#cc-in-list .cc-prof[data-id=src2]'); closeSheet('createchain');
-      setConnectMode('profiles'); openCreateProfile(); out.profile = !document.querySelector('#cp-source-list .ps-card[data-id=src2]'); closeSheet('createprofile');
+      const s2 = sourcesData.src2; s2.offNodes = ['n2'];
+      chainsData.tc2 = { id:'tc2', name:'t2', inId:'src2', outId:'src3', inAuto:true, inOff:['src2::n4'], outOff:[], exitMode:'fastest', exitOrder:[] };
+      connectOrder.unshift('tc2');
+      s2.enabled = false; openProfiles();
+      const top = [...document.querySelectorAll('#connects-list > .conn-row')].map(e => e.dataset.id);
+      const broken = [...document.querySelectorAll('#connects-list .conn-broken-list .conn-row.broken')].map(e => e.dataset.id);
+      out.list = !top.includes('src2') && !top.includes('tc2') && broken[0] === 'tc2' && connectOrder[0] === 'tc2';
+      out.auto = effectiveConnectId() !== 'tc2';
+      document.querySelector('.conn-row.broken').click();
+      out.explain = /Work Servers/.test(document.getElementById('actions-body').textContent) && /Switch on/.test(document.getElementById('actions-body').textContent);
+      closeSheet('actions');
+      openCreateChain(); out.picker = !document.querySelector('#cc-in-list .cc-prof[data-id=src2]'); closeSheet('createchain');
+      openEditChain('tc2'); out.chainWarn = !document.getElementById('cc-warn').hidden && /off in Nodes/.test(document.getElementById('cc-warn').textContent); closeSheet('createchain');
+      setConnectMode('profiles');
+      profilesData.tp = { id:'tp', name:'tp', sources:['src2'], nodes:[], inAuto:true }; connectOrder.push('tp');
+      renderConnects();
+      out.profile = !!document.querySelector('.conn-broken-list .conn-row[data-id=tp]') && !document.querySelector('#connects-list > .conn-row[data-id=tp]');
+      openEditProfile('tp'); out.cpOff = !!document.querySelector('#cp-source-list .ps-card.off[data-id=src2]') && /off in Nodes/.test(document.getElementById('cp-warn').textContent); closeSheet('createprofile');
+      delete profilesData.tp; connectOrder = connectOrder.filter(x => x !== 'tp');
       setConnectMode('simple');
-      sourcesData.src2.enabled = true; delete chainsData.tc2; connectOrder = connectOrder.filter(x => x !== 'tc2');
+      enableSource('src2');
+      out.back = isNodeOff(s2, 'n2') && chainsData.tc2.inOff[0] === 'src2::n4' && !!document.querySelector('#connects-list > .conn-row[data-id=tc2]');
+      delete chainsData.tc2; connectOrder = connectOrder.filter(x => x !== 'tc2'); s2.offNodes = [];
       closeSheet('profiles'); renderAll();
       return out;
     });
@@ -522,7 +536,7 @@ async function runChecks() {
     const r = await page.evaluate(() => {
       const out = {}, was = autoConnect, det = () => document.getElementById('profModeDetail');
       setConnectMode('simple'); autoConnect = false; activeConnectId = 'src1'; updateMainConnectCard();
-      out.src = document.getElementById('profCardLabel').textContent === 'Subscription' && !!det().querySelector('.dock-node') && !det().querySelector('.dock-src');
+      out.src = document.getElementById('profCardLabel').textContent === 'Sub' && !!det().querySelector('.dock-node') && !det().querySelector('.dock-src');
       chainsData.tc3 = { id:'tc3', name:'t3', inId:'src2', outId:'src1', inAuto:true, inOff:[], outOff:[], exitMode:'fastest', exitOrder:[] };
       connectOrder.push('tc3'); activeConnectId = 'tc3'; updateMainConnectCard();
       out.chain = document.getElementById('profCardLabel').textContent === 'Chain' && det().querySelectorAll('.dock-node').length === 2 && !!det().querySelector('.dock-arrow');
