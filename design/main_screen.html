@@ -733,7 +733,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
       <div class="profiles-main">
         <div class="profiles-top">
-          <span class="card-label" style="margin-bottom:0">Profiles</span>
+          <span class="card-label" style="margin-bottom:0" id="profCardLabel">Servers</span>
           <span class="profiles-name" id="profCardName">default</span>
         </div>
         <div class="profiles-sub">
@@ -847,10 +847,13 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="sheet" id="sh-profiles">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title">Profiles</span>
+      <span class="sheet-title" id="profilesTitle">Servers</span>
       <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order · Manual: the entry you tapped">
         <div class="conn-dot"></div><span>Auto</span>
       </div>
+      <button class="icon-btn ghost" onclick="openProfilesMenu()" title="More">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+      </button>
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="sheet-body">
@@ -858,7 +861,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <div id="connects-list"></div>
       <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Create profile or chain
+        <span id="createEntryLabel">Create chain</span>
       </div>
     </div>
   </div>
@@ -1261,7 +1264,7 @@ function genNodes(count, kind) {
 
 function mkSub(id, name, count, extra) {
   return Object.assign({
-    id, kind:'sub', name, enabled:true, nodes:genNodes(count,'sub'),
+    id, kind:'sub', name, enabled:true, inAuto:true, nodes:genNodes(count,'sub'),
     url:'https://sub.example.net/api/sub/' + id + 'Xk7PCg04NKVzp', format:'sing-box',
     updatedAt: Date.now() - 2*3600e3, usage:{ used:0, total:0 }, expire:null,
     updateInterval:12, reloadAfterUpdate:true, testAfterUpdate:true,
@@ -1272,20 +1275,27 @@ function mkSub(id, name, count, extra) {
 let sourcesData = {
   src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, website:'https://jormungand.example' }),
   src2: mkSub('src2', 'Work Servers', 9, { format:'clash', updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
-  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, nodes:genNodes(2,'node') },
+  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, nodes:genNodes(2,'node') },
   src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
 };
 Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
 let sourceOrder = ['src1','src2','src3','src4'];
 let sourceSeq = 5;
 
-/* connectOrder is the SINGLE priority list shared by profiles and chains —
-   they live in one merged menu, so auto-selection isn't scoped to one type. */
-let connectOrder = ['default','work','gaming','cpdefault','cpgaming','cpwork'];
-let activeConnectId = 'default';
-/* Auto: connect the first usable profile/chain in connectOrder that has inAuto.
-   Tapping a profile turns Auto off and pins that profile (manual). */
+/* Connect mode. 'simple' (default): the Profiles sheet lists sources themselves —
+   subscriptions, server groups — plus chains of two sources. 'profiles': it lists profiles
+   (hand-picked nodes from sources) plus chains of two profiles. Each mode keeps its own
+   priority list, pinned entry and Auto flag; the active mode's live in the globals below,
+   the other mode's wait in modeState. */
+let connectMode = 'simple';
+/* connectOrder is the priority list of the active mode (entries and chains together):
+   with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
+let connectOrder = ['src1','src2','src3','src4','sc1'];
+let activeConnectId = 'src1';
 let autoConnect = true;
+const modeState = {
+  profiles: { order: ['default','work','gaming','cpdefault','cpgaming','cpwork'], active: 'default', auto: true },
+};
 
 let profilesData = {
   default: { id:'default', name:'default', sources:['src1','src2','src3'], nodes:[], inAuto:true },
@@ -1298,10 +1308,14 @@ let chainsData = {
   cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    inAuto:true },
   cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', inAuto:true },
   cpwork:    { id:'cpwork',    name:'Work via Gaming', inId:'gaming',  outId:'work',    inAuto:false },
+  // simple mode: chain ends are sources
+  sc1:       { id:'sc1',       name:'Remnawave via Gaming', inId:'src4', outId:'src1', inAuto:true },
 };
 let chainSeq = 1;
 
 function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
+// Chain-able entries of the active mode: sources in simple mode, profiles otherwise.
+function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] : profilesData[id]); }
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 
@@ -1387,12 +1401,15 @@ Object.values(sourcesData).forEach(s => s.nodes.forEach(n => {
   const t = truthOf(n);
   pingCache.set(serverKey(n), { ms: t < 0 ? -1 : t, at: Date.now() - Math.random() * 9 * 60e3 });
 }));
-/* ══════════════════════ PROFILES SHEET (profiles + chains in one priority list) ══════════════════════
+/* ══════════════════════ PROFILES SHEET (entries + chains in one priority list) ══════════════════════
+   Entries are sources in simple mode, profiles in profiles mode (see connectMode).
    connectOrder is the Auto priority: with Auto on, the first usable entry that has
    inAuto wins. Tapping an entry pins it (Auto off). Everything else about an entry —
    sources and picked nodes, chain ends, "use in Auto" — lives in its editor (⋯). */
 
-const connectEntry = id => profilesData[id] || chainsData[id];
+const connectEntry = id => profilesData[id] || chainsData[id] || sourcesData[id];
+const simpleMode = () => connectMode === 'simple';
+const unitWord = () => simpleMode() ? 'source' : 'profile';
 
 // Nodes a profile can use right now (enabled sources only), as {sid, node}.
 // p.sources = whole sources (every node, including ones a subscription update adds later);
@@ -1408,22 +1425,29 @@ function profileNodeRefs(p) {
   return refs;
 }
 
-// The node a profile would connect through: the best alive one.
-function profileNode(p) {
-  if (!p) return null;
-  const refs = profileNodeRefs(p);
+// A "unit" is what a list entry / chain end stands for: a profile, or (simple mode) a source.
+function unitRefs(id) {
+  if (profilesData[id]) return profileNodeRefs(profilesData[id]);
+  const s = sourcesData[id];
+  return s && s.enabled ? s.nodes.map(node => ({ sid: id, node })) : [];
+}
+const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u ? u.name : '—'; };
+
+// The node a unit would connect through: the best alive one.
+function unitNode(id) {
   let best = null;
-  refs.forEach(({ node }) => { if (isAlive(node) && (!best || ping(node) < ping(best))) best = node; });
+  unitRefs(id).forEach(({ node }) => { if (isAlive(node) && (!best || ping(node) < ping(best))) best = node; });
   return best;
 }
+const profileNode = p => p ? unitNode(p.id) : null;
 
-// A chain's exit server: its own fixed exit if set, else what the exit profile picks.
+// A chain's exit server: its own fixed exit if set, else the exit unit's best node.
 function chainExitNode(c) {
   if (c.exitNodeId) {
-    const r = profileNodeRefs(profilesData[c.outId]).find(r => r.sid + '::' + r.node.id === c.exitNodeId);
+    const r = unitRefs(c.outId).find(r => r.sid + '::' + r.node.id === c.exitNodeId);
     return r ? r.node : null;
   }
-  return profileNode(profilesData[c.outId]);
+  return unitNode(c.outId);
 }
 
 function isUsable(id) {
@@ -1432,7 +1456,7 @@ function isUsable(id) {
     const exit = chainExitNode(c);
     return isUsable(c.inId) && !!exit && isAlive(exit);
   }
-  const n = profileNode(profilesData[id]);
+  const n = unitNode(id);
   return !!n && isAlive(n);
 }
 
@@ -1451,12 +1475,12 @@ function nodeSummaryHtml(n, fixed) {
 function entrySummaryHtml(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    const end = (pid, n) => { const p = profilesData[pid]; return (n ? n.flag + ' ' : '') + esc(p ? p.name : '—'); };
-    return `<span>${end(c.inId, profileNode(profilesData[c.inId]))}</span><span class="conn-arrow">→</span>`
+    const end = (uid, n) => (n ? n.flag + ' ' : '') + esc(unitName(uid));
+    return `<span>${end(c.inId, unitNode(c.inId))}</span><span class="conn-arrow">→</span>`
       + (c.exitNodeId ? '<span class="conn-tag warn">fixed</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
-  const p = profilesData[id];
-  return nodeSummaryHtml(profileNode(p), false);
+  if (sourcesData[id] && !sourcesData[id].enabled) return '<span>Disabled in Nodes</span>';
+  return nodeSummaryHtml(unitNode(id), false);
 }
 
 const GRIP_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>';
@@ -1474,7 +1498,7 @@ function renderConnectRow(id) {
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
     ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
-    <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : 'openEditProfile'}('${id}')" title="Edit">
+    <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : profilesData[id] ? 'openEditProfile' : 'openConnectSourceActions'}('${id}')" title="Edit">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
     </button>
   </div>`;
@@ -1484,6 +1508,8 @@ function renderConnects() {
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
+  document.getElementById('profilesTitle').textContent = simpleMode() ? 'Servers' : 'Profiles';
+  document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Create chain' : 'Create profile or chain';
   document.getElementById('connects-list').innerHTML = connectOrder.map(renderConnectRow).join('');
 }
 
@@ -1510,13 +1536,80 @@ function selectConnect(id) {
   updateMainConnectCard();
 }
 
+const CHAIN_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
+
 function openCreateMenu() {
+  if (simpleMode()) { openCreateChain(); return; }   // sources are added in Nodes
   const close = "closeSheet('actions');";
   openActions('Create',
     menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Chosen subscriptions or single servers — uses the fastest</div>', close + 'openCreateProfile()') +
-    menuRow('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
+    menuRow(CHAIN_ICON,
       'Chain<div class="menu-sub">' + (getProfileIds().length < 2 ? 'Needs at least two profiles' : 'Enter through one profile, exit through another') + '</div>',
       close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
+}
+
+/* ── Mode: simple (sources) / profiles ── */
+
+function openProfilesMenu() {
+  const radio = on => `<div class="profile-radio ${on ? 'active' : ''}"></div>`;
+  openActions('Mode',
+    menuRow(radio(simpleMode()), 'Simple<div class="menu-sub">Subscriptions and servers directly, plus chains of them</div>', "setConnectMode('simple')") +
+    menuRow(radio(!simpleMode()), 'Profiles<div class="menu-sub">Group servers into profiles, plus chains of profiles</div>', "setConnectMode('profiles')"));
+}
+
+function setConnectMode(mode) {
+  closeSheet('actions');
+  if (mode === connectMode) return;
+  modeState[connectMode] = { order: connectOrder, active: activeConnectId, auto: autoConnect };
+  ({ order: connectOrder, active: activeConnectId, auto: autoConnect } = modeState[mode]);
+  connectMode = mode;
+  renderConnects();
+  updateMainConnectCard();
+}
+
+// Priority list of either mode (the active one lives in the globals).
+function modeOrder(mode) { return mode === connectMode ? connectOrder : modeState[mode].order; }
+function setModeOrder(mode, order) { if (mode === connectMode) connectOrder = order; else modeState[mode].order = order; }
+
+// A new source joins the end of the simple-mode list.
+function sourceAdded(id) {
+  if (sourcesData[id].inAuto === undefined) sourcesData[id].inAuto = true;
+  setModeOrder('simple', modeOrder('simple').concat(id));
+  if (document.getElementById('sh-profiles').classList.contains('open')) renderConnects();
+}
+
+// Remove a unit and every chain that uses it from both modes' lists.
+function dropConnectEntry(id) {
+  const gone = new Set([id]);
+  Object.values(chainsData).forEach(c => { if (c.inId === id || c.outId === id) { gone.add(c.id); delete chainsData[c.id]; } });
+  ['simple', 'profiles'].forEach(mode => {
+    const order = modeOrder(mode).filter(x => !gone.has(x));
+    setModeOrder(mode, order);
+    const st = mode === connectMode ? null : modeState[mode];
+    if (st ? gone.has(st.active) : gone.has(activeConnectId)) {
+      if (st) st.active = order[0]; else activeConnectId = order[0];
+    }
+  });
+  renderConnects();
+  updateMainConnectCard();
+}
+
+// Simple mode ⋯ on a source row: Auto participation plus the source's own actions.
+function openConnectSourceActions(sid) {
+  const s = sourcesData[sid];
+  const close = "closeSheet('actions');";
+  let rows = `<div class="menu-row" onclick="toggleSourceInAuto('${sid}')"><div class="menu-label">Use in Auto<div class="menu-sub">Auto may connect this ${s.kind === 'sub' ? 'subscription' : 'group'}, in list order</div></div>${miniToggleHtml(sid, 'toggleSourceInAuto', s.inAuto)}</div>`;
+  rows += menuRow(ICON.bolt, 'Ping all nodes', close + `testSourceLatency('${sid}')`);
+  if (s.kind === 'sub') rows += menuRow(ICON.refresh, 'Update subscription', close + `updateSource('${sid}')`);
+  rows += menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`);
+  openActions(s.name, rows);
+}
+
+function toggleSourceInAuto(sid) {
+  sourcesData[sid].inAuto = !sourcesData[sid].inAuto;
+  renderConnects();
+  updateMainConnectCard();
+  openConnectSourceActions(sid);
 }
 
 function toggleRuleEnabled(id) {
@@ -1532,23 +1625,23 @@ function updateMainConnectCard() {
   const badge = document.getElementById('profModeBadge');
   const detail = document.getElementById('profModeDetail');
   document.getElementById('profCardName').textContent = e ? e.name : '—';
+  document.getElementById('profCardLabel').textContent = simpleMode() ? 'Servers' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
   if (chainsData[id]) {
     const c = chainsData[id];
-    const nm = pid => profilesData[pid] ? profilesData[pid].name : '—';
-    detail.textContent = nm(c.inId) + ' → ' + nm(c.outId);
+    detail.textContent = unitName(c.inId) + ' → ' + unitName(c.outId);
     document.getElementById('profMetaCount').textContent = '';
     document.getElementById('profMetaSrc').textContent = 'chain';
     return;
   }
-  const p = profilesData[id];
-  const n = profileNode(p);
+  const n = unitNode(id);
   detail.textContent = n ? n.flag + ' ' + n.name + (isAlive(n) ? ' · ' + ping(n) + ' ms' : '') : 'no working nodes';
-  document.getElementById('profMetaCount').textContent = profileNodeCount(p);
-  document.getElementById('profMetaSrc').textContent = 'nodes · ' + p.sources.length + ' src';
+  document.getElementById('profMetaCount').textContent = unitRefs(id).length;
+  document.getElementById('profMetaSrc').textContent = profilesData[id] ? 'nodes · ' + profilesData[id].sources.length + ' src'
+    : sourcesData[id] && sourcesData[id].kind === 'sub' ? 'nodes · sub' : 'servers';
 }
 /* ══════════════════════ NODES SCREEN (subscriptions + manual servers) ══════════════════════
    Replaces the old "All configs" sheet. A source is either a subscription (kind 'sub')
@@ -1841,6 +1934,7 @@ function deleteSource(id) {
     p.sources = p.sources.filter(x => x !== id);
     p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
   });
+  dropConnectEntry(id);
   renderAll();
 }
 
@@ -1931,6 +2025,7 @@ function saveSrcForm() {
     s.updatedAt = Date.now();
     sourcesData[id] = s;
     sourceOrder.push(id);
+    sourceAdded(id);
     expandState[id] = true;
     // Simulate the first fetch: nodes appear after the discovery request.
     s.updating = true;
@@ -2010,8 +2105,9 @@ function saveNodeForm() {
     let gid = chip ? chip.dataset.gid : '__new';
     if (gid === '__new') {
       gid = 'src' + (sourceSeq++);
-      sourcesData[gid] = { id:gid, kind:'node', name:'Manual ' + (manualGroups().length + 1), enabled:true, nodes:[] };
+      sourcesData[gid] = { id:gid, kind:'node', name:'Manual ' + (manualGroups().length + 1), enabled:true, inAuto:true, nodes:[] };
       sourceOrder.push(gid);
+      sourceAdded(gid);
     }
     const g = sourcesData[gid];
     g.nodes.push({ id:'n' + Date.now(), flag:'🌐', name, protocol, address, port, secret });
@@ -2291,7 +2387,8 @@ function deleteEditingProfile() {
 }
 
 /* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
-   Entry and exit must be different profiles. Each profile expands to its nodes; on the
+   Ends are profiles (profiles mode) or sources (simple mode) — "units", see unitRefs.
+   Entry and exit must be different units. Each unit expands to its nodes; on the
    exit side a tap fixes the chain's exit server (overrides the profile's own choice),
    a second tap goes back to the profile's choice. "Check route" is informational only (it
    does not change the chain or Auto): it tells the user whether the chain can work
@@ -2304,8 +2401,8 @@ let editingChainId = null;
 
 function openCreateChain(editId) {
   editingChainId = editId || null;
-  const ids = getProfileIds();
-  if (!editingChainId && ids.length < 2) { toast('A chain needs two profiles — create another profile first'); return; }
+  const ids = getUnitIds();
+  if (!editingChainId && ids.length < 2) { toast(simpleMode() ? 'A chain needs two subscriptions or server groups — add one in Nodes' : 'A chain needs two profiles — create another profile first'); return; }
   if (editingChainId) {
     const c = chainsData[editingChainId];
     document.getElementById('ccTitle').textContent = 'Edit chain';
@@ -2340,15 +2437,14 @@ function renderChainPicker(elId, side) {
   const el = document.getElementById(elId);
   const current = side === 'in' ? chainDraft.inId : chainDraft.outId;
   const other = side === 'in' ? chainDraft.outId : chainDraft.inId;
-  el.innerHTML = getProfileIds().map(id => {
-    const p = profilesData[id];
+  el.innerHTML = getUnitIds().map(id => {
     const taken = id === other;
     const open = ccOpen.has(side + ':' + id);
     const active = id === current;
-    const n = side === 'out' && active ? chainExitNode(chainDraft) : profileNode(p);
-    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry') : (n ? n.flag + ' ' : '') + profileNodeCount(p) + ' nodes';
+    const n = side === 'out' && active ? chainExitNode(chainDraft) : unitNode(id);
+    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry') : (n ? n.flag + ' ' : '') + unitRefs(id).length + ' nodes';
     const fixedHere = side === 'out' && active && chainDraft.exitNodeId;
-    const nodes = open ? sortedNodes(profileNodeRefs(p), r => r.node).map(({ sid, node }) => {
+    const nodes = open ? sortedNodes(unitRefs(id), r => r.node).map(({ sid, node }) => {
       const key = sid + '::' + node.id;
       const pickable = side === 'out' && active;
       const fixed = pickable && chainDraft.exitNodeId === key;
@@ -2363,7 +2459,7 @@ function renderChainPicker(elId, side) {
     return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
-        <span class="pick-row-name">${esc(p.name)}${fixedHere ? ' <span class="conn-tag warn">fixed exit</span>' : ''}</span>
+        <span class="pick-row-name">${esc(unitName(id))}${fixedHere ? ' <span class="conn-tag warn">fixed exit</span>' : ''}</span>
         <span class="pick-row-sub">${sub}</span>
       </div>
       <button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">
@@ -2374,7 +2470,7 @@ function renderChainPicker(elId, side) {
   }).join('');
   if (side === 'out') {
     const hint = document.getElementById('cc-out-hint');
-    if (hint) hint.textContent = 'Expand the exit profile and tap a server to fix it — for a stable exit IP.';
+    if (hint) hint.textContent = 'Expand the exit ' + unitWord() + ' and tap a server to fix it — for a stable exit IP.';
   }
 }
 
@@ -2409,13 +2505,13 @@ function renderChainTest() {
   const el = document.getElementById('cc-test');
   if (!el) return;
   const t = chainTest;
-  const nEntry = profileNodeRefs(profilesData[chainDraft.inId]).length;
-  const nExit = profileNodeRefs(profilesData[chainDraft.outId]).length;
+  const nEntry = unitRefs(chainDraft.inId).length;
+  const nExit = unitRefs(chainDraft.outId).length;
   const btn = t && t.running
     ? `<button class="btn-secondary" onclick="stopChainRoute()">Stop</button>`
     : `<button class="btn-secondary" onclick="testChainRoute()" ${nEntry && nExit ? '' : 'disabled'}>${ICON.bolt}${t ? 'Check again' : 'Check route'}</button>`;
   let sum;
-  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} profile has no enabled nodes.</div>`;
+  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} ${unitWord()} has no enabled nodes.</div>`;
   else if (!t) sum = `<div class="route-sum">Tries every exit node through the entry nodes, fastest entries first.</div>`;
   else if (t.running) sum = `<div class="route-sum">${t.stage}<div class="route-progress"><div style="width:${t.total ? t.done / t.total * 100 : 0}%"></div></div></div>`;
   else if (t.pairs.length) sum = `<div class="route-sum good">${t.pairs.length} working pair${t.pairs.length === 1 ? '' : 's'}${t.stopped ? ' (stopped early)' : ''} · best ${t.pairs[0].ms} ms</div>`;
@@ -2472,9 +2568,9 @@ function renderChainTest() {
    A server never pairs with itself (both profiles may share a subscription).
    Results: working pairs sorted by total latency. */
 async function testChainRoute() {
-  const entries = profileNodeRefs(profilesData[chainDraft.inId]).map(r => r.node);
+  const entries = unitRefs(chainDraft.inId).map(r => r.node);
   const fixedExit = chainDraft.exitNodeId && chainExitNode(chainDraft);
-  const exits = fixedExit ? [fixedExit] : profileNodeRefs(profilesData[chainDraft.outId]).map(r => r.node);
+  const exits = fixedExit ? [fixedExit] : unitRefs(chainDraft.outId).map(r => r.node);
   const t = chainTest = { running: true, stage: '', done: 0, total: 0, pairs: [], showAll: false, view: chainTest ? chainTest.view : 'pairs', open: new Set() };
   const live = () => chainTest === t && !t.stopped;
   const step = stage => { t.stage = stage; renderChainTest(); };
@@ -2519,7 +2615,7 @@ function stopChainRoute() {
 }
 
 function saveCreateChain() {
-  if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different profiles'); return; }
+  if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
   const fields = { inId: chainDraft.inId, outId: chainDraft.outId, exitNodeId: chainDraft.exitNodeId,
                    inAuto: document.getElementById('cc-inauto').classList.contains('on') };
@@ -2541,7 +2637,7 @@ function deleteEditingChain() {
   if (!editingChainId) return;
   connectOrder = connectOrder.filter(x => x !== editingChainId);
   delete chainsData[editingChainId];
-  if (activeConnectId === editingChainId) activeConnectId = getProfileIds()[0];
+  if (activeConnectId === editingChainId) activeConnectId = getUnitIds()[0];
   editingChainId = null;
   renderConnects();
   updateMainConnectCard();

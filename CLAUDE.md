@@ -37,7 +37,8 @@ npm run shot -- dock nodes            # -> design/.shots/*.png
 npm run shot -- settings --theme github --scale 2
 ```
 
-Presets: home, nodes, nodes-open, settings, dock, dock-off, profiles, profile-edit,
+Presets: home, nodes, nodes-open, settings, dock, dock-off, profiles, profiles-full,
+profiles-menu, simple-chain, profile-edit,
 chain-edit, chain-groups, drag-mid, addmenu,
 srcform, nodeform, actions, more. Add a preset in `check.mjs` rather than writing
 one-off Playwright scripts; add a check there for each new interaction.

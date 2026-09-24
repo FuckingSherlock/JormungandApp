@@ -159,7 +159,8 @@ function deleteEditingProfile() {
 }
 
 /* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
-   Entry and exit must be different profiles. Each profile expands to its nodes; on the
+   Ends are profiles (profiles mode) or sources (simple mode) — "units", see unitRefs.
+   Entry and exit must be different units. Each unit expands to its nodes; on the
    exit side a tap fixes the chain's exit server (overrides the profile's own choice),
    a second tap goes back to the profile's choice. "Check route" is informational only (it
    does not change the chain or Auto): it tells the user whether the chain can work
@@ -172,8 +173,8 @@ let editingChainId = null;
 
 function openCreateChain(editId) {
   editingChainId = editId || null;
-  const ids = getProfileIds();
-  if (!editingChainId && ids.length < 2) { toast('A chain needs two profiles — create another profile first'); return; }
+  const ids = getUnitIds();
+  if (!editingChainId && ids.length < 2) { toast(simpleMode() ? 'A chain needs two subscriptions or server groups — add one in Nodes' : 'A chain needs two profiles — create another profile first'); return; }
   if (editingChainId) {
     const c = chainsData[editingChainId];
     document.getElementById('ccTitle').textContent = 'Edit chain';
@@ -208,15 +209,14 @@ function renderChainPicker(elId, side) {
   const el = document.getElementById(elId);
   const current = side === 'in' ? chainDraft.inId : chainDraft.outId;
   const other = side === 'in' ? chainDraft.outId : chainDraft.inId;
-  el.innerHTML = getProfileIds().map(id => {
-    const p = profilesData[id];
+  el.innerHTML = getUnitIds().map(id => {
     const taken = id === other;
     const open = ccOpen.has(side + ':' + id);
     const active = id === current;
-    const n = side === 'out' && active ? chainExitNode(chainDraft) : profileNode(p);
-    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry') : (n ? n.flag + ' ' : '') + profileNodeCount(p) + ' nodes';
+    const n = side === 'out' && active ? chainExitNode(chainDraft) : unitNode(id);
+    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry') : (n ? n.flag + ' ' : '') + unitRefs(id).length + ' nodes';
     const fixedHere = side === 'out' && active && chainDraft.exitNodeId;
-    const nodes = open ? sortedNodes(profileNodeRefs(p), r => r.node).map(({ sid, node }) => {
+    const nodes = open ? sortedNodes(unitRefs(id), r => r.node).map(({ sid, node }) => {
       const key = sid + '::' + node.id;
       const pickable = side === 'out' && active;
       const fixed = pickable && chainDraft.exitNodeId === key;
@@ -231,7 +231,7 @@ function renderChainPicker(elId, side) {
     return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
-        <span class="pick-row-name">${esc(p.name)}${fixedHere ? ' <span class="conn-tag warn">fixed exit</span>' : ''}</span>
+        <span class="pick-row-name">${esc(unitName(id))}${fixedHere ? ' <span class="conn-tag warn">fixed exit</span>' : ''}</span>
         <span class="pick-row-sub">${sub}</span>
       </div>
       <button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">
@@ -242,7 +242,7 @@ function renderChainPicker(elId, side) {
   }).join('');
   if (side === 'out') {
     const hint = document.getElementById('cc-out-hint');
-    if (hint) hint.textContent = 'Expand the exit profile and tap a server to fix it — for a stable exit IP.';
+    if (hint) hint.textContent = 'Expand the exit ' + unitWord() + ' and tap a server to fix it — for a stable exit IP.';
   }
 }
 
@@ -277,13 +277,13 @@ function renderChainTest() {
   const el = document.getElementById('cc-test');
   if (!el) return;
   const t = chainTest;
-  const nEntry = profileNodeRefs(profilesData[chainDraft.inId]).length;
-  const nExit = profileNodeRefs(profilesData[chainDraft.outId]).length;
+  const nEntry = unitRefs(chainDraft.inId).length;
+  const nExit = unitRefs(chainDraft.outId).length;
   const btn = t && t.running
     ? `<button class="btn-secondary" onclick="stopChainRoute()">Stop</button>`
     : `<button class="btn-secondary" onclick="testChainRoute()" ${nEntry && nExit ? '' : 'disabled'}>${ICON.bolt}${t ? 'Check again' : 'Check route'}</button>`;
   let sum;
-  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} profile has no enabled nodes.</div>`;
+  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} ${unitWord()} has no enabled nodes.</div>`;
   else if (!t) sum = `<div class="route-sum">Tries every exit node through the entry nodes, fastest entries first.</div>`;
   else if (t.running) sum = `<div class="route-sum">${t.stage}<div class="route-progress"><div style="width:${t.total ? t.done / t.total * 100 : 0}%"></div></div></div>`;
   else if (t.pairs.length) sum = `<div class="route-sum good">${t.pairs.length} working pair${t.pairs.length === 1 ? '' : 's'}${t.stopped ? ' (stopped early)' : ''} · best ${t.pairs[0].ms} ms</div>`;
@@ -340,9 +340,9 @@ function renderChainTest() {
    A server never pairs with itself (both profiles may share a subscription).
    Results: working pairs sorted by total latency. */
 async function testChainRoute() {
-  const entries = profileNodeRefs(profilesData[chainDraft.inId]).map(r => r.node);
+  const entries = unitRefs(chainDraft.inId).map(r => r.node);
   const fixedExit = chainDraft.exitNodeId && chainExitNode(chainDraft);
-  const exits = fixedExit ? [fixedExit] : profileNodeRefs(profilesData[chainDraft.outId]).map(r => r.node);
+  const exits = fixedExit ? [fixedExit] : unitRefs(chainDraft.outId).map(r => r.node);
   const t = chainTest = { running: true, stage: '', done: 0, total: 0, pairs: [], showAll: false, view: chainTest ? chainTest.view : 'pairs', open: new Set() };
   const live = () => chainTest === t && !t.stopped;
   const step = stage => { t.stage = stage; renderChainTest(); };
@@ -387,7 +387,7 @@ function stopChainRoute() {
 }
 
 function saveCreateChain() {
-  if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different profiles'); return; }
+  if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
   const fields = { inId: chainDraft.inId, outId: chainDraft.outId, exitNodeId: chainDraft.exitNodeId,
                    inAuto: document.getElementById('cc-inauto').classList.contains('on') };
@@ -409,7 +409,7 @@ function deleteEditingChain() {
   if (!editingChainId) return;
   connectOrder = connectOrder.filter(x => x !== editingChainId);
   delete chainsData[editingChainId];
-  if (activeConnectId === editingChainId) activeConnectId = getProfileIds()[0];
+  if (activeConnectId === editingChainId) activeConnectId = getUnitIds()[0];
   editingChainId = null;
   renderConnects();
   updateMainConnectCard();

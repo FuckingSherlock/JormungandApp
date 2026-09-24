@@ -50,15 +50,18 @@ const SHOTS = {
   dock:       async p => ({ clip: await clipOf(p, '.dock', 60) }),
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
-  'profile-edit': async p => { await p.evaluate(() => { openProfiles(); openEditProfile('gaming'); }); await settle(p); },
+  'profiles-full': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); }); await settle(p); },
+  'profiles-menu': async p => { await p.evaluate(() => { openProfiles(); openProfilesMenu(); }); await settle(p); },
+  'simple-chain': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
+  'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
   'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
     const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
     const r = await p.locator('.conn-row >> nth=2').boundingBox();
     await p.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await p.mouse.down();
     await p.mouse.move(g.x + g.width / 2, r.y + r.height * .7, { steps: 10 }); await p.waitForTimeout(300); },
-  'chain-groups': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); toggleCcOpen('out', chainDraft.outId); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 });
+  'chain-groups': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); toggleCcOpen('out', chainDraft.outId); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 });
     await p.evaluate(() => { chainTest.view = 'entry'; const g = chainTest.pairs[0]; if (g) chainTest.open.add(serverKey(g.entry)); renderChainTest(); document.querySelector('#sh-createchain .sheet-body').scrollTop = 9999; }); await settle(p); },
-  'chain-edit': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 }); await settle(p); },
+  'chain-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); testChainRoute(); }); await p.waitForFunction(() => !chainTest.running, null, { timeout: 30000 }); await settle(p); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
   nodeform:   async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodeForm()); await settle(p); },
@@ -253,6 +256,50 @@ async function runChecks() {
     expect(await page.evaluate(() => effectiveConnectId()) === target, 'auto pick did not follow the new order');
   });
 
+  await check('simple mode is the default: sources and source chains in the list', async () => {
+    expect(await page.evaluate(() => connectMode === 'simple'), 'not simple by default');
+    const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
+    expect(ids.includes('src1') && ids.includes('sc1') && !ids.includes('default'), ids.join());
+    expect(/Servers/.test(await page.textContent('#profilesTitle')), 'title');
+  });
+
+  await check('simple mode: tap a source for Manual, ⋯ toggles its Auto participation', async () => {
+    await page.click('.conn-row[data-id=src2] .conn-main'); await settle(page);
+    expect(await page.evaluate(() => !autoConnect && effectiveConnectId() === 'src2'), 'source not pinned');
+    await page.click('.conn-row[data-id=src2] .conn-main'); await settle(page);
+    expect(await page.evaluate(() => autoConnect), 'second tap did not re-enable auto');
+    await page.click('.conn-row[data-id=src3] .icon-btn'); await settle(page);
+    await page.click('#actions-body .menu-row >> nth=0');
+    expect(await page.evaluate(() => !sourcesData.src3.inAuto), 'inAuto not toggled');
+    expect(await page.$eval('.conn-row[data-id=src3]', el => /not in auto/i.test(el.textContent)), 'row not marked');
+    await page.click('#actions-body .menu-row >> nth=0');
+    await page.evaluate(() => closeSheet('actions')); await settle(page);
+  });
+
+  await check('simple mode: chain of two sources, route check works', async () => {
+    await page.click('#sh-profiles .sheet-action'); await settle(page);
+    expect(await page.evaluate(() => document.getElementById('sh-createchain').classList.contains('open') && !!sourcesData[chainDraft.inId] && !!sourcesData[chainDraft.outId]), 'chain ends are not sources');
+    await page.evaluate(() => testChainRoute());
+    await page.waitForFunction(() => !chainTest.running, null, { timeout: 30000 });
+    expect(await page.evaluate(() => chainTest.pairs.length > 0), 'no pairs');
+    await page.click('#ccSaveBtn'); await settle(page);
+    const n = await page.evaluate(() => connectOrder.filter(id => chainsData[id]).length);
+    expect(n === 2, 'chain not added: ' + n);
+  });
+
+  await check('deleting a source drops it and its chains from the list', async () => {
+    await page.evaluate(() => deleteSource('src4')); await settle(page);
+    expect(await page.evaluate(() => !connectOrder.includes('src4') && !chainsData.sc1 && !modeState.profiles.order.includes('src4')), 'leftovers');
+  });
+
+  await check('⋯ menu switches to profiles mode, each mode keeps its own list', async () => {
+    await page.click('#sh-profiles .sheet-head .icon-btn'); await settle(page);
+    await page.click('#actions-body .menu-row >> nth=1'); await settle(page);
+    const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
+    expect(ids.includes('default') && ids.includes('cpdefault') && !ids.includes('src1'), ids.join());
+    expect(/Profiles/.test(await page.textContent('#profilesTitle')) && /Profiles/.test(await page.textContent('#profCardLabel')), 'titles');
+  });
+
   await check('profiles: tap sets Manual (sheet stays), second tap / badge back to Auto', async () => {
     expect(await page.evaluate(() => autoConnect), 'auto is not the default');
     await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
@@ -298,7 +345,7 @@ async function runChecks() {
   });
 
   await check('chain editor: same entry/exit blocked, route check lists working pairs', async () => {
-    await page.evaluate(() => { openProfiles(); openEditChain('cpdefault'); }); await settle(page);
+    await page.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); }); await settle(page);
     const idx = await page.evaluate(() => getProfileIds().indexOf(chainDraft.inId));
     await page.click(`#cc-out-list .pick-row >> nth=${idx}`, { force: true });
     expect(await page.evaluate(() => chainDraft.inId !== chainDraft.outId), 'exit could be set to the entry');
@@ -317,7 +364,7 @@ async function runChecks() {
   });
 
   await check('chain editor: expand exit profile, tap a server to fix the exit', async () => {
-    await page.evaluate(() => { openProfiles(); openEditChain('cpdefault'); }); await settle(page);
+    await page.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); }); await settle(page);
     const outIdx = await page.evaluate(() => getProfileIds().indexOf(chainDraft.outId));
     await page.click(`#cc-out-list .cc-expand >> nth=${outIdx}`);
     await page.click('#cc-out-list .cc-nodes .node-row >> nth=0');

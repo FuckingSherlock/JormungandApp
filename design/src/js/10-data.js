@@ -33,7 +33,7 @@ function genNodes(count, kind) {
 
 function mkSub(id, name, count, extra) {
   return Object.assign({
-    id, kind:'sub', name, enabled:true, nodes:genNodes(count,'sub'),
+    id, kind:'sub', name, enabled:true, inAuto:true, nodes:genNodes(count,'sub'),
     url:'https://sub.example.net/api/sub/' + id + 'Xk7PCg04NKVzp', format:'sing-box',
     updatedAt: Date.now() - 2*3600e3, usage:{ used:0, total:0 }, expire:null,
     updateInterval:12, reloadAfterUpdate:true, testAfterUpdate:true,
@@ -44,20 +44,27 @@ function mkSub(id, name, count, extra) {
 let sourcesData = {
   src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, website:'https://jormungand.example' }),
   src2: mkSub('src2', 'Work Servers', 9, { format:'clash', updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
-  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, nodes:genNodes(2,'node') },
+  src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, nodes:genNodes(2,'node') },
   src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
 };
 Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
 let sourceOrder = ['src1','src2','src3','src4'];
 let sourceSeq = 5;
 
-/* connectOrder is the SINGLE priority list shared by profiles and chains —
-   they live in one merged menu, so auto-selection isn't scoped to one type. */
-let connectOrder = ['default','work','gaming','cpdefault','cpgaming','cpwork'];
-let activeConnectId = 'default';
-/* Auto: connect the first usable profile/chain in connectOrder that has inAuto.
-   Tapping a profile turns Auto off and pins that profile (manual). */
+/* Connect mode. 'simple' (default): the Profiles sheet lists sources themselves —
+   subscriptions, server groups — plus chains of two sources. 'profiles': it lists profiles
+   (hand-picked nodes from sources) plus chains of two profiles. Each mode keeps its own
+   priority list, pinned entry and Auto flag; the active mode's live in the globals below,
+   the other mode's wait in modeState. */
+let connectMode = 'simple';
+/* connectOrder is the priority list of the active mode (entries and chains together):
+   with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
+let connectOrder = ['src1','src2','src3','src4','sc1'];
+let activeConnectId = 'src1';
 let autoConnect = true;
+const modeState = {
+  profiles: { order: ['default','work','gaming','cpdefault','cpgaming','cpwork'], active: 'default', auto: true },
+};
 
 let profilesData = {
   default: { id:'default', name:'default', sources:['src1','src2','src3'], nodes:[], inAuto:true },
@@ -70,10 +77,14 @@ let chainsData = {
   cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    inAuto:true },
   cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', inAuto:true },
   cpwork:    { id:'cpwork',    name:'Work via Gaming', inId:'gaming',  outId:'work',    inAuto:false },
+  // simple mode: chain ends are sources
+  sc1:       { id:'sc1',       name:'Remnawave via Gaming', inId:'src4', outId:'src1', inAuto:true },
 };
 let chainSeq = 1;
 
 function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
+// Chain-able entries of the active mode: sources in simple mode, profiles otherwise.
+function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] : profilesData[id]); }
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 

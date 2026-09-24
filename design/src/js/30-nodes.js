@@ -289,6 +289,7 @@ function deleteSource(id) {
     p.sources = p.sources.filter(x => x !== id);
     p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
   });
+  dropConnectEntry(id);
   renderAll();
 }
 

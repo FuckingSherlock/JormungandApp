@@ -76,6 +76,7 @@ function saveSrcForm() {
     s.updatedAt = Date.now();
     sourcesData[id] = s;
     sourceOrder.push(id);
+    sourceAdded(id);
     expandState[id] = true;
     // Simulate the first fetch: nodes appear after the discovery request.
     s.updating = true;
@@ -155,8 +156,9 @@ function saveNodeForm() {
     let gid = chip ? chip.dataset.gid : '__new';
     if (gid === '__new') {
       gid = 'src' + (sourceSeq++);
-      sourcesData[gid] = { id:gid, kind:'node', name:'Manual ' + (manualGroups().length + 1), enabled:true, nodes:[] };
+      sourcesData[gid] = { id:gid, kind:'node', name:'Manual ' + (manualGroups().length + 1), enabled:true, inAuto:true, nodes:[] };
       sourceOrder.push(gid);
+      sourceAdded(gid);
     }
     const g = sourcesData[gid];
     g.nodes.push({ id:'n' + Date.now(), flag:'🌐', name, protocol, address, port, secret });
