@@ -52,6 +52,7 @@ const SHOTS = {
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
   'profiles-full': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); }); await settle(p); },
   'profiles-menu': async p => { await p.evaluate(() => { openProfiles(); openProfilesMenu(); }); await settle(p); },
+  'addserver': async p => { await p.evaluate(() => { openProfiles(); openCreateMenu(); openPickNodeEntry(); }); await settle(p); },
   'simple-chain': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
   'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
@@ -259,7 +260,7 @@ async function runChecks() {
   await check('simple mode is the default: sources and source chains in the list', async () => {
     expect(await page.evaluate(() => connectMode === 'simple'), 'not simple by default');
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
-    expect(ids.includes('src1') && ids.includes('sc1') && !ids.includes('default'), ids.join());
+    expect(ids.includes('src1') && ids.includes('sc1') && ids.includes('nd_src1_n2') && !ids.includes('default') && !ids.includes('cpdefault'), ids.join());
     expect(/Servers/.test(await page.textContent('#profilesTitle')), 'title');
   });
 
@@ -276,8 +277,21 @@ async function runChecks() {
     await page.evaluate(() => closeSheet('actions')); await settle(page);
   });
 
+  await check('simple mode: add a single server as its own entry', async () => {
+    await page.click('#sh-profiles .sheet-action'); await settle(page);
+    await page.click('#actions-body .menu-row >> nth=1'); await settle(page);
+    await page.click('#actions-body .node-row:not(.static) >> nth=0'); await settle(page);
+    const added = await page.evaluate(() => connectOrder[connectOrder.length - 1]);
+    expect(added.startsWith('nd_') && await page.$(`.conn-row[data-id=${added}]`), 'server entry not added: ' + added);
+    await page.click(`.conn-row[data-id=${added}] .conn-main`);
+    expect(await page.evaluate(id => effectiveConnectId() === id, added), 'server entry not pinned');
+    await page.evaluate(id => { removeNodeEntry(id); setAutoConnect(true); }, added);
+    expect(await page.evaluate(id => !connectOrder.includes(id), added), 'not removed');
+  });
+
   await check('simple mode: chain of two sources, route check works', async () => {
     await page.click('#sh-profiles .sheet-action'); await settle(page);
+    await page.click('#actions-body .menu-row >> nth=0'); await settle(page);
     expect(await page.evaluate(() => document.getElementById('sh-createchain').classList.contains('open') && !!sourcesData[chainDraft.inId] && !!sourcesData[chainDraft.outId]), 'chain ends are not sources');
     await page.evaluate(() => testChainRoute());
     await page.waitForFunction(() => !chainTest.running, null, { timeout: 30000 });

@@ -55,11 +55,12 @@ let sourceSeq = 5;
    subscriptions, server groups — plus chains of two sources. 'profiles': it lists profiles
    (hand-picked nodes from sources) plus chains of two profiles. Each mode keeps its own
    priority list, pinned entry and Auto flag; the active mode's live in the globals below,
-   the other mode's wait in modeState. */
+   the other mode's wait in modeState. Simple mode also lists single servers picked from
+   any source (nodeEntries, id 'nd_<sid>_<nid>'). */
 let connectMode = 'simple';
 /* connectOrder is the priority list of the active mode (entries and chains together):
    with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
-let connectOrder = ['src1','src2','src3','src4','sc1'];
+let connectOrder = ['src1','src2','src3','nd_src1_n2','src4','sc1'];
 let activeConnectId = 'src1';
 let autoConnect = true;
 const modeState = {
@@ -82,9 +83,18 @@ let chainsData = {
 };
 let chainSeq = 1;
 
+// Simple mode: a single server as its own list entry. The name follows the server.
+function mkNodeEntry(sid, nid, inAuto = true) {
+  const id = 'nd_' + sid + '_' + nid;
+  return { id, sid, nid, inAuto, get node() { const s = sourcesData[sid]; return s && s.nodes.find(n => n.id === nid); },
+           get name() { const n = this.node; return n ? n.name : '—'; } };
+}
+let nodeEntries = {};
+[mkNodeEntry('src1', 'n2')].forEach(e => nodeEntries[e.id] = e);
+
 function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
 // Chain-able entries of the active mode: sources in simple mode, profiles otherwise.
-function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] : profilesData[id]); }
+function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] || nodeEntries[id] : profilesData[id]); }
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 
