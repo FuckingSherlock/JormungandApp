@@ -13,6 +13,9 @@ start it until the mockup is finished. The user talks Russian; reply in Russian.
 - `design/src/css/`, `markup/`, `js/` — the mockup split by area; files are
   concatenated in name order (numeric prefix = order, keep it when adding files).
   All JS shares one global scope, so later files may use earlier ones.
+- `design/src/assets/` — binary files inlined by the build as base64 via
+  `{{asset:assets/name}}` (e.g. the Twemoji flag font; Windows has no flag emoji).
+  Never link fonts/images by outside URL: the app viewer blocks them.
 - `design/tools/geometry.mjs` — SVG paths for the Home connect dock (trapezoid tab,
   hexagon power button, corner wedges). Change shapes here, not in markup; markup
   uses `{{geo.name}}` placeholders.

@@ -3,9 +3,10 @@
    karing   = refreshed Karing (neutral greys, blue accent);
    github   = GitHub Dark palette. */
 /* Flag emoji: Windows has none and shows "US"/"DE" as letters. This font covers
-   only regional-indicator / tag code points, so everything else still uses Inter. */
+   only regional-indicator / tag code points, so everything else still uses Inter.
+   Twemoji flags (CC-BY 4.0) via country-flag-emoji-polyfill, inlined by build. */
 @font-face{font-family:'Flags';font-display:swap;
-  src:url(https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1.10/dist/TwemojiCountryFlags.woff2) format('woff2');
+  src:url({{asset:assets/TwemojiCountryFlags.woff2}}) format('woff2');
   unicode-range:U+1F1E6-1F1FF,U+1F3F4,U+E0062-E007F}
 
 :root, :root[data-theme="original"] {

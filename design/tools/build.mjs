@@ -6,7 +6,8 @@
 //   /* @include css/ */   or   <!-- @include markup/10-home.html -->
 // is replaced by that file, or by every file in that folder in name order
 // (the numeric prefixes set the order). {{geo.name}} is replaced with an SVG
-// path from tools/geometry.mjs.
+// path from tools/geometry.mjs. {{asset:assets/x.woff2}} becomes a base64 data: URI,
+// so the page works offline and in sandboxed viewers that block outside URLs.
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +33,10 @@ html = html.replace(/\{\{geo\.(\w+)\}\}/g, (_, k) => {
   if (!(k in geo)) throw new Error('unknown geometry key: ' + k);
   return geo[k];
 });
+
+const MIME = { woff2: 'font/woff2', png: 'image/png', svg: 'image/svg+xml' };
+html = html.replace(/\{\{asset:([\w./-]+)\}\}/g, (_, rel) =>
+  'data:' + (MIME[rel.split('.').pop()] || 'application/octet-stream') + ';base64,' + readFileSync(join(src, rel)).toString('base64'));
 
 if (process.argv.includes('--check')) {
   const cur = existsSync(out) ? readFileSync(out, 'utf8') : '';
