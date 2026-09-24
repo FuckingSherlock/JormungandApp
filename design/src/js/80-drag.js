@@ -26,8 +26,8 @@ function startRowDrag(e, rowEl, itemSelector, order, render) {
 }
 
 function startConnectDrag(e, id) {
-  const rowEl = document.querySelector('#connects-list .profile-item[data-id="'+id+'"]');
-  startRowDrag(e, rowEl, '.profile-item', () => connectOrder, renderConnects);
+  const rowEl = document.querySelector('#connects-list .conn-row[data-id="'+id+'"]');
+  startRowDrag(e, rowEl, '.conn-row', () => connectOrder, () => { renderConnects(); updateMainConnectCard(); });
 }
 
 function startSourceDrag(e, id) {

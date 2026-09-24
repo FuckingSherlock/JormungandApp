@@ -28,5 +28,5 @@ function makeDraggable(name) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
 }
-['profiles','connections','rules','createprofile','createchain','copyprofile','addrule','pickmanualnode','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
+['profiles','connections','rules','createprofile','createchain','addrule','pickmanualnode','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
 

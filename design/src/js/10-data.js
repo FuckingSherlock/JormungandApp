@@ -56,18 +56,21 @@ let sourceSeq = 5;
    they live in one merged menu, so auto-selection isn't scoped to one type. */
 let connectOrder = ['default','work','gaming','cpdefault','cpgaming','cpwork'];
 let activeConnectId = 'default';
+/* Auto: connect the first usable profile/chain in connectOrder that has inAuto.
+   Tapping a profile turns Auto off and pins that profile (manual). */
+let autoConnect = true;
 
 let profilesData = {
-  default: { id:'default', name:'default', sources:['src1','src2','src3'], autoSelect:true,  manualNodeId:null },
-  work:    { id:'work',    name:'Work',    sources:['src2'],               autoSelect:true,  manualNodeId:null },
-  gaming:  { id:'gaming',  name:'Gaming',  sources:['src4'],               autoSelect:false, manualNodeId:'src4::n0' },
+  default: { id:'default', name:'default', sources:['src1','src2','src3'], autoSelect:true,  manualNodeId:null, inAuto:true },
+  work:    { id:'work',    name:'Work',    sources:['src2'],               autoSelect:true,  manualNodeId:null, inAuto:true },
+  gaming:  { id:'gaming',  name:'Gaming',  sources:['src4'],               autoSelect:false, manualNodeId:'src4::n0', inAuto:false },
 };
 let profileSeq = 1;
 
 let chainsData = {
-  cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    enabled:true },
-  cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', enabled:true },
-  cpwork:    { id:'cpwork',    name:'Work Only',      inId:'work',    outId:'work',    enabled:true },
+  cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    inAuto:true },
+  cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', inAuto:true },
+  cpwork:    { id:'cpwork',    name:'Work Only',      inId:'work',    outId:'work',    inAuto:false },
 };
 let chainSeq = 1;
 
@@ -103,21 +106,5 @@ function profileNodeCount(p) {
     if (!s || !s.enabled) return sum;
     return sum + s.nodes.length;
   }, 0);
-}
-
-function getProfileNodes(p) {
-  const nodes = [];
-  p.sources.forEach(sid => {
-    const s = sourcesData[sid];
-    if (!s || !s.enabled) return;
-    s.nodes.forEach(n => nodes.push({ id: sid + '::' + n.id, label: s.name + ' · ' + n.name }));
-  });
-  return nodes;
-}
-
-function manualNodeLabel(p) {
-  if (!p.manualNodeId) return 'Not set — tap to choose';
-  const found = getProfileNodes(p).find(n => n.id === p.manualNodeId);
-  return found ? found.label : 'Not set — tap to choose';
 }
 

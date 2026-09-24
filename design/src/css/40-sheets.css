@@ -26,19 +26,9 @@
 .sheet-tab.active{background:var(--accent);color:#fff}
 
 /* Profile / chain list items */
-.profile-item{padding:10px 18px;transition:background .12s;display:flex;gap:8px}
-.profile-item:hover{background:rgba(255,255,255,.03)}
-.profile-item-body{flex:1;min-width:0;cursor:pointer}
-.profile-item-head{display:flex;align-items:center;gap:10px}
 .profile-radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--border-hi);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s}
 .profile-radio.active{border-color:var(--accent)}
 .profile-radio.active::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--accent)}
-.profile-item-name{font-size:15px;font-weight:600;color:var(--t1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.profile-item-count{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
-.profile-expand-btn{width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;transition:transform .2s,background .15s;flex-shrink:0}
-.profile-expand-btn.open{transform:rotate(90deg);background:rgba(var(--accent-rgb),.15)}
-.profile-subs{max-height:0;overflow:hidden;transition:max-height .25s ease}
-.profile-subs.open{max-height:400px}
 
 /* Priority: drag handle (reorder by dragging the left grip) */
 .drag-handle{
@@ -67,12 +57,6 @@
 .sheet-action.dim{color:var(--t2)}
 .sheet-action.dim:hover{background:rgba(255,255,255,.03)}
 
-/* Chain rows */
-.chain-inout{display:flex;align-items:center;gap:5px;margin-top:6px;padding-left:46px;flex-wrap:wrap}
-.chain-badge{padding:3px 8px;border-radius:6px;font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;white-space:nowrap;cursor:pointer;transition:filter .12s}
-.chain-badge:hover{filter:brightness(1.25)}
-.chain-badge.in{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
-.chain-badge.out{background:rgba(var(--active-rgb),.12);color:var(--active)}
 
 /* All-configs / rule rows */
 .config-row{display:flex;align-items:center;gap:12px;padding:11px 18px;transition:background .12s}
@@ -151,3 +135,27 @@
 .mini-toggle.on .mini-toggle-thumb{left:15px}
 .dimmed{opacity:.45}
 
+
+/* ── Profiles sheet: Auto row + priority list ── */
+.auto-row{display:flex;align-items:center;gap:12px;margin:4px 14px 6px;padding:12px 14px;border-radius:var(--r);background:var(--card);border:1px solid var(--border);cursor:pointer;transition:background .2s,border-color .2s}
+.auto-row.on{background:rgba(var(--accent-rgb),.08);border-color:rgba(var(--accent-rgb),.45)}
+.auto-icon{width:34px;height:34px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.05);color:var(--t2);transition:background .2s,color .2s}
+.auto-row.on .auto-icon{background:rgba(var(--accent-rgb),.16);color:var(--accent)}
+.list-caption{display:flex;justify-content:space-between;gap:8px;padding:12px 20px 6px;font-size:12px;color:var(--t3)}
+.list-caption span:first-child{font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+.conn-row{display:flex;align-items:center;gap:4px;margin:0 10px;padding:0 4px 0 0;border-radius:12px;border:1px solid transparent;transition:background .2s,border-color .2s}
+.conn-row + .conn-row{margin-top:2px}
+.conn-row.current{background:rgba(var(--active-rgb),.07);border-color:rgba(var(--active-rgb),.35)}
+.conn-row .drag-handle{width:26px}
+.conn-main{flex:1;min-width:0;padding:10px 0;cursor:pointer}
+.conn-name{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--t1);min-width:0}
+.conn-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conn-sub{display:flex;align-items:center;gap:6px;margin-top:3px;font-size:13px;color:var(--t2);white-space:nowrap;overflow:hidden}
+.conn-sub .lat{min-width:0;padding:0;cursor:default}
+.conn-node{overflow:hidden;text-overflow:ellipsis}
+.conn-arrow{color:var(--t3)}
+.conn-tag{flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:4px;background:rgba(var(--accent-rgb),.15);color:var(--accent)}
+.conn-tag.muted{background:rgba(255,255,255,.06);color:var(--t3)}
+.conn-tag.warn{background:rgba(var(--warn-rgb),.15);color:var(--warn)}
+.conn-row.skip .conn-main{opacity:.5}
+.conn-state{flex-shrink:0;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--active)}

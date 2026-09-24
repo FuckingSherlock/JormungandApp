@@ -24,7 +24,7 @@ After any change under `design/src/` or `design/tools/`:
 
 ```sh
 npm run build          # regenerate design/main_screen.html
-npm run check          # freshness check + 17 smoke tests, prints only failures
+npm run check          # freshness check + smoke tests, prints only failures
 ```
 
 Screenshots only when the visual result matters, cropped and at 1x:
@@ -34,7 +34,8 @@ npm run shot -- dock nodes            # -> design/.shots/*.png
 npm run shot -- settings --theme github --scale 2
 ```
 
-Presets: home, nodes, nodes-open, settings, dock, dock-off, profiles, addmenu,
+Presets: home, nodes, nodes-open, settings, dock, dock-off, profiles, profile-edit,
+chain-edit, addmenu,
 srcform, nodeform, actions, more. Add a preset in `check.mjs` rather than writing
 one-off Playwright scripts; add a check there for each new interaction.
 

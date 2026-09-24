@@ -2,6 +2,22 @@
 
 let createProfileSelected = new Set();
 let editingProfileId = null;
+let cpDraft = { autoSelect: true, manualNodeId: null };
+
+function setCpMode(auto) {
+  cpDraft.autoSelect = auto;
+  renderCpNode();
+}
+function renderCpNode() {
+  document.querySelectorAll('#cp-mode .chip').forEach((c, i) => c.classList.toggle('active', i === (cpDraft.autoSelect ? 0 : 1)));
+  document.getElementById('cp-fixed-row').style.display = cpDraft.autoSelect ? 'none' : '';
+  const ref = profileNodeRefs({ sources: [...createProfileSelected] }).find(r => r.sid + '::' + r.node.id === cpDraft.manualNodeId);
+  document.getElementById('cp-fixed-label').textContent = ref ? ref.node.flag + ' ' + ref.node.name : 'Choose…';
+}
+function pickCpNode() {
+  openPickNode({ sources: [...createProfileSelected], current: cpDraft.manualNodeId,
+    onPick: key => { cpDraft.manualNodeId = key; renderCpNode(); } });
+}
 
 function openCreateProfile(editId) {
   editingProfileId = editId || null;
@@ -12,14 +28,19 @@ function openCreateProfile(editId) {
     document.getElementById('cpDeleteBtn').style.display = '';
     document.getElementById('cp-name').value = p.name;
     createProfileSelected = new Set(p.sources);
+    cpDraft = { autoSelect: p.autoSelect, manualNodeId: p.manualNodeId };
+    document.getElementById('cp-inauto').classList.toggle('on', p.inAuto);
   } else {
     document.getElementById('cpTitle').textContent = 'Create profile';
     document.getElementById('cpSaveBtn').textContent = 'Create profile';
     document.getElementById('cpDeleteBtn').style.display = 'none';
     document.getElementById('cp-name').value = '';
     createProfileSelected = new Set();
+    cpDraft = { autoSelect: true, manualNodeId: null };
+    document.getElementById('cp-inauto').classList.add('on');
   }
   renderCreateProfileSources();
+  renderCpNode();
   openSheet('createprofile');
 }
 
@@ -43,17 +64,21 @@ function renderCreateProfileSources() {
 function toggleCreateProfileSource(id) {
   if (createProfileSelected.has(id)) createProfileSelected.delete(id); else createProfileSelected.add(id);
   renderCreateProfileSources();
+  renderCpNode();
 }
 
 function saveCreateProfile() {
   const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
+  const fields = { autoSelect: cpDraft.autoSelect, manualNodeId: cpDraft.manualNodeId,
+                   inAuto: document.getElementById('cp-inauto').classList.contains('on') };
   if (editingProfileId) {
     const p = profilesData[editingProfileId];
     p.name = name;
     p.sources = Array.from(createProfileSelected);
+    Object.assign(p, fields);
   } else {
     const id = 'profile' + Date.now();
-    profilesData[id] = { id, name, sources: Array.from(createProfileSelected), autoSelect:true, manualNodeId:null };
+    profilesData[id] = Object.assign({ id, name, sources: Array.from(createProfileSelected) }, fields);
     connectOrder.push(id);
   }
   editingProfileId = null;
@@ -93,6 +118,7 @@ function openCreateChain(editId) {
     document.getElementById('ccDeleteBtn').style.display = '';
     document.getElementById('cc-name').value = c.name;
     chainDraft = { inId: c.inId, outId: c.outId };
+    document.getElementById('cc-inauto').classList.toggle('on', c.inAuto);
   } else {
     document.getElementById('ccTitle').textContent = 'Create chain';
     document.getElementById('ccSaveBtn').textContent = 'Create chain';
@@ -100,6 +126,7 @@ function openCreateChain(editId) {
     document.getElementById('cc-name').value = '';
     const ids = getProfileIds();
     chainDraft = { inId: ids[0], outId: ids[0] };
+    document.getElementById('cc-inauto').classList.add('on');
   }
   renderChainPicker('cc-in-list', 'in');
   renderChainPicker('cc-out-list', 'out');
@@ -135,9 +162,11 @@ function saveCreateChain() {
     c.name = name;
     c.inId = chainDraft.inId;
     c.outId = chainDraft.outId;
+    c.inAuto = document.getElementById('cc-inauto').classList.contains('on');
   } else {
     const id = 'chain' + Date.now();
-    chainsData[id] = { id, name, inId: chainDraft.inId, outId: chainDraft.outId, enabled:true };
+    chainsData[id] = { id, name, inId: chainDraft.inId, outId: chainDraft.outId,
+                     inAuto: document.getElementById('cc-inauto').classList.contains('on') };
     connectOrder.push(id);
   }
   editingChainId = null;
@@ -155,28 +184,5 @@ function deleteEditingChain() {
   renderConnects();
   updateMainConnectCard();
   closeSheet('createchain');
-}
-
-/* ══════════════════════ COPY FROM CONNECTION PROFILE ══════════════════════ */
-
-function openCopyFromProfile() {
-  const el = document.getElementById('copy-source-list');
-  el.innerHTML = getProfileIds().map(id => {
-    const p = profilesData[id];
-    return `<div class="pick-row" onclick="createChainFromProfile('${id}')">
-      <span class="pick-row-name">${p.name}</span>
-      <span class="pick-row-sub">${profileNodeCount(p)} nodes</span>
-    </div>`;
-  }).join('');
-  openSheet('copyprofile');
-}
-
-function createChainFromProfile(profileId) {
-  const p = profilesData[profileId];
-  const id = 'chain' + Date.now();
-  chainsData[id] = { id, name: p.name + ' Chain', inId: profileId, outId: profileId, enabled:true };
-  connectOrder.push(id);
-  renderConnects();
-  closeSheet('copyprofile');
 }
 

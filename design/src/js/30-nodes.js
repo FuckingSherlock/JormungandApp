@@ -187,6 +187,7 @@ function testLatency(pairs) {
       if (!n) return;
       n.latency = randLatency();
       renderNodes();
+      updateMainConnectCard();
     }, 300 + Math.random() * 1400);
   });
 }

@@ -50,7 +50,8 @@ const SHOTS = {
   dock:       async p => ({ clip: await clipOf(p, '.dock', 60) }),
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
-  'profiles-open': async p => { await p.evaluate(() => { expandState.default = true; expandState.gaming = true; expandState.cpdefault = true; renderConnects(); }); await p.click('.dock-profile'); await settle(p); },
+  'profile-edit': async p => { await p.evaluate(() => { openProfiles(); openEditProfile('gaming'); }); await settle(p); },
+  'chain-edit': async p => { await p.evaluate(() => { openProfiles(); openEditChain('cpdefault'); }); await settle(p); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
   nodeform:   async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodeForm()); await settle(p); },
@@ -216,6 +217,46 @@ async function runChecks() {
   await check('home: dock opens profiles', async () => {
     await page.click('.dock-profile'); await settle(page);
     expect(await page.evaluate(() => document.getElementById('sh-profiles').classList.contains('open')), 'profiles sheet closed');
+    await page.evaluate(() => closeSheet('profiles'));
+  });
+
+  await check('profiles: Auto picks first usable entry in priority order', async () => {
+    await page.click('.dock-profile'); await settle(page);
+    const first = await page.evaluate(() => connectOrder.find(id => connectEntry(id).inAuto && isUsable(id)));
+    expect(await page.evaluate(() => autoConnect && effectiveConnectId()) === first, 'auto pick mismatch');
+    expect(await page.$eval('.conn-row.current', el => el.dataset.id) === first, 'highlighted row is not the auto pick');
+    expect(/AUTO/.test(await page.textContent('#profModeBadge')), 'dock badge not AUTO');
+  });
+
+  await check('profiles: dragging changes the Auto pick', async () => {
+    const target = await page.evaluate(() => connectOrder.filter(id => connectEntry(id).inAuto && isUsable(id))[1]);
+    const g = await page.locator(`.conn-row[data-id=${target}] .drag-handle`).boundingBox();
+    const top = await page.locator('.conn-row').first().boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, top.y - 10, { steps: 8 }); await page.mouse.up();
+    expect(await page.evaluate(() => effectiveConnectId()) === target, 'auto pick did not follow the new order');
+  });
+
+  await check('profiles: tap pins an entry, Auto row turns it back', async () => {
+    await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
+    expect(await page.evaluate(() => !autoConnect && effectiveConnectId() === 'work'), 'not pinned');
+    expect(/PINNED/.test(await page.textContent('#profModeBadge')), 'dock badge not PINNED');
+    await page.evaluate(() => openProfiles()); await settle(page);
+    await page.click('#auto-row');
+    expect(await page.evaluate(() => autoConnect), 'auto not re-enabled');
+    await page.evaluate(() => closeSheet('profiles'));
+  });
+
+  await check('profiles: editor sets a fixed node and Auto participation', async () => {
+    await page.evaluate(() => { openProfiles(); openEditProfile('work'); }); await settle(page);
+    await page.click('#cp-mode .chip >> nth=1');
+    await page.click('#cp-fixed-row'); await settle(page);
+    await page.click('#pickmanualnode-list .pick-row >> nth=2'); await settle(page);
+    await page.click('#cp-inauto');
+    await page.click('#cpSaveBtn');
+    const p = await page.evaluate(() => profilesData.work);
+    expect(!p.autoSelect && p.manualNodeId && !p.inAuto, JSON.stringify(p));
+    expect(await page.$eval('.conn-row[data-id=work]', el => /fixed/i.test(el.textContent) && /not in auto/i.test(el.textContent)), 'row does not show fixed / not in Auto');
     await page.evaluate(() => closeSheet('profiles'));
   });
 

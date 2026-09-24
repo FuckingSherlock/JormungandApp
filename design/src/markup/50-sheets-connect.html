@@ -7,19 +7,21 @@
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="sheet-body">
+      <div class="auto-row" id="auto-row" onclick="setAutoConnect(!autoConnect)">
+        <div class="auto-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div class="conn-name">Auto</div>
+          <div class="conn-sub" id="autoRowSub"></div>
+        </div>
+        <div class="mini-toggle" id="autoToggle"><div class="mini-toggle-thumb"></div></div>
+      </div>
+      <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap to pin</span></div>
       <div id="connects-list"></div>
-      <div class="sheet-divider"></div>
-      <div class="sheet-action" onclick="openCreateProfile()">
+      <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Create new profile
-      </div>
-      <div class="sheet-action" onclick="openCreateChain()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Create new chain
-      </div>
-      <div class="sheet-action dim" onclick="openCopyFromProfile()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-        Copy from connection profile
+        Create profile or chain
       </div>
     </div>
   </div>
@@ -87,6 +89,27 @@
         <div class="form-label">Select subscriptions &amp; servers</div>
       </div>
       <div id="cp-source-list"></div>
+
+      <div class="form-label" style="padding:14px 18px 0">Node</div>
+      <div class="set-group">
+        <div class="set-row stack">
+          <div class="chip-row" id="cp-mode">
+            <div class="chip" onclick="setCpMode(true)">Best available</div>
+            <div class="chip" onclick="setCpMode(false)">Fixed node</div>
+          </div>
+        </div>
+        <div class="set-row" id="cp-fixed-row" style="cursor:pointer" onclick="pickCpNode()">
+          <div class="set-label">Node</div>
+          <span class="settings-value" id="cp-fixed-label"></span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+      <div class="set-group">
+        <div class="set-row">
+          <div style="flex:1"><div class="set-label">Use in Auto</div><div class="set-hint">Auto may connect this profile, in list order</div></div>
+          <div class="mini-toggle" id="cp-inauto" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+        </div>
+      </div>
     </div>
     <div class="sheet-footer">
       <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
@@ -108,33 +131,23 @@
         <input class="form-input" id="cc-name" placeholder="New chain">
       </div>
       <div class="form-group" style="padding-bottom:4px">
-        <div class="form-label">Inbound profile</div>
+        <div class="form-label">Entry — first hop</div>
       </div>
       <div id="cc-in-list"></div>
       <div class="form-group" style="padding-bottom:4px;padding-top:6px">
-        <div class="form-label">Outbound profile</div>
+        <div class="form-label">Exit — where traffic leaves</div>
       </div>
       <div id="cc-out-list"></div>
+      <div class="set-group" style="margin-top:14px">
+        <div class="set-row">
+          <div style="flex:1"><div class="set-label">Use in Auto</div><div class="set-hint">Auto may connect this chain, in list order</div></div>
+          <div class="mini-toggle" id="cc-inauto" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+        </div>
+      </div>
     </div>
     <div class="sheet-footer">
       <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
       <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
-    </div>
-  </div>
-
-  <!-- ══════════ NESTED: COPY FROM CONNECTION PROFILE ══════════ -->
-  <div class="overlay overlay-l2" id="ov-copyprofile" onclick="closeSheet('copyprofile')"></div>
-  <div class="sheet sheet-l2" id="sh-copyprofile">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">Copy from profile</span>
-      <button class="sheet-close" onclick="closeSheet('copyprofile')">×</button>
-    </div>
-    <div class="sheet-body">
-      <div class="form-group" style="padding-bottom:4px">
-        <div class="form-label">Tap a profile to copy it into a new chain (same profile used as both in &amp; out)</div>
-      </div>
-      <div id="copy-source-list"></div>
     </div>
   </div>
 

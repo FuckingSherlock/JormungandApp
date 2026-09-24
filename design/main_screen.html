@@ -243,19 +243,9 @@ body {
 .sheet-tab.active{background:var(--accent);color:#fff}
 
 /* Profile / chain list items */
-.profile-item{padding:10px 18px;transition:background .12s;display:flex;gap:8px}
-.profile-item:hover{background:rgba(255,255,255,.03)}
-.profile-item-body{flex:1;min-width:0;cursor:pointer}
-.profile-item-head{display:flex;align-items:center;gap:10px}
 .profile-radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--border-hi);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s}
 .profile-radio.active{border-color:var(--accent)}
 .profile-radio.active::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--accent)}
-.profile-item-name{font-size:15px;font-weight:600;color:var(--t1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.profile-item-count{font-size:13px;color:var(--t2);font-family:'JetBrains Mono',monospace}
-.profile-expand-btn{width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;transition:transform .2s,background .15s;flex-shrink:0}
-.profile-expand-btn.open{transform:rotate(90deg);background:rgba(var(--accent-rgb),.15)}
-.profile-subs{max-height:0;overflow:hidden;transition:max-height .25s ease}
-.profile-subs.open{max-height:400px}
 
 /* Priority: drag handle (reorder by dragging the left grip) */
 .drag-handle{
@@ -284,12 +274,6 @@ body {
 .sheet-action.dim{color:var(--t2)}
 .sheet-action.dim:hover{background:rgba(255,255,255,.03)}
 
-/* Chain rows */
-.chain-inout{display:flex;align-items:center;gap:5px;margin-top:6px;padding-left:46px;flex-wrap:wrap}
-.chain-badge{padding:3px 8px;border-radius:6px;font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;white-space:nowrap;cursor:pointer;transition:filter .12s}
-.chain-badge:hover{filter:brightness(1.25)}
-.chain-badge.in{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
-.chain-badge.out{background:rgba(var(--active-rgb),.12);color:var(--active)}
 
 /* All-configs / rule rows */
 .config-row{display:flex;align-items:center;gap:12px;padding:11px 18px;transition:background .12s}
@@ -368,6 +352,30 @@ body {
 .mini-toggle.on .mini-toggle-thumb{left:15px}
 .dimmed{opacity:.45}
 
+
+/* ── Profiles sheet: Auto row + priority list ── */
+.auto-row{display:flex;align-items:center;gap:12px;margin:4px 14px 6px;padding:12px 14px;border-radius:var(--r);background:var(--card);border:1px solid var(--border);cursor:pointer;transition:background .2s,border-color .2s}
+.auto-row.on{background:rgba(var(--accent-rgb),.08);border-color:rgba(var(--accent-rgb),.45)}
+.auto-icon{width:34px;height:34px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.05);color:var(--t2);transition:background .2s,color .2s}
+.auto-row.on .auto-icon{background:rgba(var(--accent-rgb),.16);color:var(--accent)}
+.list-caption{display:flex;justify-content:space-between;gap:8px;padding:12px 20px 6px;font-size:12px;color:var(--t3)}
+.list-caption span:first-child{font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+.conn-row{display:flex;align-items:center;gap:4px;margin:0 10px;padding:0 4px 0 0;border-radius:12px;border:1px solid transparent;transition:background .2s,border-color .2s}
+.conn-row + .conn-row{margin-top:2px}
+.conn-row.current{background:rgba(var(--active-rgb),.07);border-color:rgba(var(--active-rgb),.35)}
+.conn-row .drag-handle{width:26px}
+.conn-main{flex:1;min-width:0;padding:10px 0;cursor:pointer}
+.conn-name{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--t1);min-width:0}
+.conn-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conn-sub{display:flex;align-items:center;gap:6px;margin-top:3px;font-size:13px;color:var(--t2);white-space:nowrap;overflow:hidden}
+.conn-sub .lat{min-width:0;padding:0;cursor:default}
+.conn-node{overflow:hidden;text-overflow:ellipsis}
+.conn-arrow{color:var(--t3)}
+.conn-tag{flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:4px;background:rgba(var(--accent-rgb),.15);color:var(--accent)}
+.conn-tag.muted{background:rgba(255,255,255,.06);color:var(--t3)}
+.conn-tag.warn{background:rgba(var(--warn-rgb),.15);color:var(--warn)}
+.conn-row.skip .conn-main{opacity:.5}
+.conn-state{flex-shrink:0;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--active)}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -666,7 +674,7 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
       </svg>
       <svg class="power-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
     </button>
-    <div class="dock-profile" onclick="openSheet('profiles')">
+    <div class="dock-profile" onclick="openProfiles()">
       <div class="profiles-icon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2">
           <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
@@ -792,19 +800,21 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="sheet-body">
+      <div class="auto-row" id="auto-row" onclick="setAutoConnect(!autoConnect)">
+        <div class="auto-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div class="conn-name">Auto</div>
+          <div class="conn-sub" id="autoRowSub"></div>
+        </div>
+        <div class="mini-toggle" id="autoToggle"><div class="mini-toggle-thumb"></div></div>
+      </div>
+      <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap to pin</span></div>
       <div id="connects-list"></div>
-      <div class="sheet-divider"></div>
-      <div class="sheet-action" onclick="openCreateProfile()">
+      <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Create new profile
-      </div>
-      <div class="sheet-action" onclick="openCreateChain()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Create new chain
-      </div>
-      <div class="sheet-action dim" onclick="openCopyFromProfile()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-        Copy from connection profile
+        Create profile or chain
       </div>
     </div>
   </div>
@@ -872,6 +882,27 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
         <div class="form-label">Select subscriptions &amp; servers</div>
       </div>
       <div id="cp-source-list"></div>
+
+      <div class="form-label" style="padding:14px 18px 0">Node</div>
+      <div class="set-group">
+        <div class="set-row stack">
+          <div class="chip-row" id="cp-mode">
+            <div class="chip" onclick="setCpMode(true)">Best available</div>
+            <div class="chip" onclick="setCpMode(false)">Fixed node</div>
+          </div>
+        </div>
+        <div class="set-row" id="cp-fixed-row" style="cursor:pointer" onclick="pickCpNode()">
+          <div class="set-label">Node</div>
+          <span class="settings-value" id="cp-fixed-label"></span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+      <div class="set-group">
+        <div class="set-row">
+          <div style="flex:1"><div class="set-label">Use in Auto</div><div class="set-hint">Auto may connect this profile, in list order</div></div>
+          <div class="mini-toggle" id="cp-inauto" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+        </div>
+      </div>
     </div>
     <div class="sheet-footer">
       <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
@@ -893,33 +924,23 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
         <input class="form-input" id="cc-name" placeholder="New chain">
       </div>
       <div class="form-group" style="padding-bottom:4px">
-        <div class="form-label">Inbound profile</div>
+        <div class="form-label">Entry — first hop</div>
       </div>
       <div id="cc-in-list"></div>
       <div class="form-group" style="padding-bottom:4px;padding-top:6px">
-        <div class="form-label">Outbound profile</div>
+        <div class="form-label">Exit — where traffic leaves</div>
       </div>
       <div id="cc-out-list"></div>
+      <div class="set-group" style="margin-top:14px">
+        <div class="set-row">
+          <div style="flex:1"><div class="set-label">Use in Auto</div><div class="set-hint">Auto may connect this chain, in list order</div></div>
+          <div class="mini-toggle" id="cc-inauto" onclick="this.classList.toggle('on')"><div class="mini-toggle-thumb"></div></div>
+        </div>
+      </div>
     </div>
     <div class="sheet-footer">
       <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
       <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
-    </div>
-  </div>
-
-  <!-- ══════════ NESTED: COPY FROM CONNECTION PROFILE ══════════ -->
-  <div class="overlay overlay-l2" id="ov-copyprofile" onclick="closeSheet('copyprofile')"></div>
-  <div class="sheet sheet-l2" id="sh-copyprofile">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">Copy from profile</span>
-      <button class="sheet-close" onclick="closeSheet('copyprofile')">×</button>
-    </div>
-    <div class="sheet-body">
-      <div class="form-group" style="padding-bottom:4px">
-        <div class="form-label">Tap a profile to copy it into a new chain (same profile used as both in &amp; out)</div>
-      </div>
-      <div id="copy-source-list"></div>
     </div>
   </div>
 
@@ -1240,18 +1261,21 @@ let sourceSeq = 5;
    they live in one merged menu, so auto-selection isn't scoped to one type. */
 let connectOrder = ['default','work','gaming','cpdefault','cpgaming','cpwork'];
 let activeConnectId = 'default';
+/* Auto: connect the first usable profile/chain in connectOrder that has inAuto.
+   Tapping a profile turns Auto off and pins that profile (manual). */
+let autoConnect = true;
 
 let profilesData = {
-  default: { id:'default', name:'default', sources:['src1','src2','src3'], autoSelect:true,  manualNodeId:null },
-  work:    { id:'work',    name:'Work',    sources:['src2'],               autoSelect:true,  manualNodeId:null },
-  gaming:  { id:'gaming',  name:'Gaming',  sources:['src4'],               autoSelect:false, manualNodeId:'src4::n0' },
+  default: { id:'default', name:'default', sources:['src1','src2','src3'], autoSelect:true,  manualNodeId:null, inAuto:true },
+  work:    { id:'work',    name:'Work',    sources:['src2'],               autoSelect:true,  manualNodeId:null, inAuto:true },
+  gaming:  { id:'gaming',  name:'Gaming',  sources:['src4'],               autoSelect:false, manualNodeId:'src4::n0', inAuto:false },
 };
 let profileSeq = 1;
 
 let chainsData = {
-  cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    enabled:true },
-  cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', enabled:true },
-  cpwork:    { id:'cpwork',    name:'Work Only',      inId:'work',    outId:'work',    enabled:true },
+  cpdefault: { id:'cpdefault', name:'Default Chain', inId:'default', outId:'work',    inAuto:true },
+  cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', inAuto:true },
+  cpwork:    { id:'cpwork',    name:'Work Only',      inId:'work',    outId:'work',    inAuto:false },
 };
 let chainSeq = 1;
 
@@ -1289,172 +1313,149 @@ function profileNodeCount(p) {
   }, 0);
 }
 
-function getProfileNodes(p) {
-  const nodes = [];
+/* ══════════════════════ PROFILES SHEET (profiles + chains in one priority list) ══════════════════════
+   connectOrder is the Auto priority: with Auto on, the first usable entry that has
+   inAuto wins. Tapping an entry pins it (Auto off). Everything else about an entry —
+   sources, best/fixed node, chain ends, "use in Auto" — lives in its editor (⋯). */
+
+const connectEntry = id => profilesData[id] || chainsData[id];
+
+// Nodes a profile can use right now (enabled sources only), as {sid, node}.
+function profileNodeRefs(p) {
+  const refs = [];
   p.sources.forEach(sid => {
     const s = sourcesData[sid];
-    if (!s || !s.enabled) return;
-    s.nodes.forEach(n => nodes.push({ id: sid + '::' + n.id, label: s.name + ' · ' + n.name }));
+    if (s && s.enabled) s.nodes.forEach(n => refs.push({ sid, node: n }));
   });
-  return nodes;
+  return refs;
+}
+const isAlive = n => typeof n.latency === 'number' && n.latency >= 0;
+
+// The node a profile would connect through: best alive node, or its fixed node.
+function profileNode(p) {
+  if (!p) return null;
+  const refs = profileNodeRefs(p);
+  if (!p.autoSelect) {
+    const r = refs.find(r => r.sid + '::' + r.node.id === p.manualNodeId);
+    return r ? r.node : null;
+  }
+  let best = null;
+  refs.forEach(({ node }) => { if (isAlive(node) && (!best || node.latency < best.latency)) best = node; });
+  return best;
 }
 
-function manualNodeLabel(p) {
-  if (!p.manualNodeId) return 'Not set — tap to choose';
-  const found = getProfileNodes(p).find(n => n.id === p.manualNodeId);
-  return found ? found.label : 'Not set — tap to choose';
+function isUsable(id) {
+  if (chainsData[id]) { const c = chainsData[id]; return isUsable(c.inId) && isUsable(c.outId); }
+  const n = profileNode(profilesData[id]);
+  return !!n && isAlive(n);
 }
 
-/* ══════════════════════ RENDER: UNIFIED PROFILES + CHAINS LIST ══════════════════════
-   Profiles and chains are peers in the SAME list: one shared drag-priority order
-   (connectOrder) and one shared "active" radio, so auto-selection can span both
-   types instead of being scoped to just profiles or just chains. */
+// What is actually connected: the pinned entry, or Auto's pick.
+function effectiveConnectId() {
+  if (!autoConnect) return activeConnectId;
+  return connectOrder.find(id => connectEntry(id).inAuto && isUsable(id))
+      || connectOrder.find(id => connectEntry(id).inAuto) || connectOrder[0];
+}
 
-function renderProfileRow(id, i) {
+function nodeSummaryHtml(n, fixed) {
+  if (!n) return `<span>${fixed ? 'Fixed node not set' : 'No working nodes'}</span>`;
+  return `<span>${n.flag}</span><span class="conn-node">${esc(n.name)}</span>${latHtml(n)}`;
+}
+
+function entrySummaryHtml(id) {
+  if (chainsData[id]) {
+    const c = chainsData[id];
+    const end = pid => { const p = profilesData[pid], n = profileNode(p); return (n ? n.flag + ' ' : '') + esc(p ? p.name : '—'); };
+    return `<span>${end(c.inId)}</span><span class="conn-arrow">→</span><span>${end(c.outId)}</span>`;
+  }
   const p = profilesData[id];
-  const isOpen = !!expandState[id];
-  const manualRow = !p.autoSelect ? `<div class="sub-item" style="padding-left:18px" onclick="event.stopPropagation();openPickManualNode('${id}')">
-      <div style="flex:1">
-        <div style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Manual node</div>
-        <div style="font-size:14px;color:var(--t1);font-weight:600">${manualNodeLabel(p)}</div>
-      </div>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-    </div><div class="sheet-divider" style="margin:4px 18px"></div>` : '';
-  const subsHtml = manualRow + sourceOrder.map(sid => {
-    const s = sourcesData[sid];
-    const icon = subIcon(s.kind);
-    const checked = p.sources.includes(sid);
-    return `<div class="sub-item">
-      <div class="sub-checkbox ${checked ? 'checked' : ''}" onclick="event.stopPropagation();toggleProfileSource('${id}','${sid}')"></div>
-      <div class="sub-icon ${icon.cls}" onclick="event.stopPropagation();toggleProfileSource('${id}','${sid}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${icon.color}" stroke-width="2.5" stroke-linecap="round">${icon.svg}</svg></div>
-      <span class="sub-name" onclick="event.stopPropagation();toggleProfileSource('${id}','${sid}')">${s.name}</span>
-      <span class="sub-count">${s.count} nodes</span>
-    </div>`;
-  }).join('') + `<div class="sub-item" style="padding-left:46px;padding-top:4px;padding-bottom:4px" onclick="event.stopPropagation();openSheet('addmenu')">
-      <div style="font-size:13px;color:var(--accent);cursor:pointer">+ Add subscription or server</div>
-    </div>`;
-
-  return `<div class="profile-item" data-id="${id}">
-    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to reorder">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
-    </div>
-    <div class="profile-item-body">
-      <div class="profile-item-head" onclick="selectConnect('${id}')">
-        <div class="profile-radio ${id===activeConnectId?'active':''}"></div>
-        <span class="profile-item-name">${p.name}</span>
-        ${!p.autoSelect ? '<span style="font-size:11px;color:var(--warn);font-weight:700">MANUAL</span>' : ''}
-        <span class="profile-item-count">${profileNodeCount(p)} nodes</span>
-        <div class="profile-expand-btn" onclick="event.stopPropagation();openEditProfile('${id}')" title="Edit">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        </div>
-        <div title="Auto-select best node">${miniToggleHtml(id, 'toggleProfileAuto', p.autoSelect)}</div>
-        <div class="profile-expand-btn ${isOpen?'open':''}" onclick="event.stopPropagation();toggleExpand('${id}')">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-      </div>
-      <div class="profile-subs ${isOpen?'open':''}" id="subs-${id}">${subsHtml}</div>
-    </div>
-  </div>` + (i < connectOrder.length-1 ? '<div class="sheet-divider"></div>' : '');
+  return (p.autoSelect ? '' : '<span class="conn-tag warn">fixed</span>') + nodeSummaryHtml(profileNode(p), !p.autoSelect);
 }
 
-function renderChainRow(id, i) {
-  const c = chainsData[id];
-  const isOpen = !!expandState[id];
-  const inName = profilesData[c.inId] ? profilesData[c.inId].name : '—';
-  const outName = profilesData[c.outId] ? profilesData[c.outId].name : '—';
-  return `<div class="profile-item" data-id="${id}">
-    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to reorder">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
+const GRIP_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>';
+
+function renderConnectRow(id) {
+  const e = connectEntry(id);
+  const chain = !!chainsData[id];
+  const current = id === effectiveConnectId();
+  const tags = (chain ? '<span class="conn-tag">chain</span>' : '')
+    + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
+  return `<div class="conn-row ${current ? 'current' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
+    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
+    <div class="conn-main" onclick="selectConnect('${id}')">
+      <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
+      <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    <div class="profile-item-body">
-      <div class="profile-item-head" onclick="selectConnect('${id}')">
-        <div class="profile-radio ${id===activeConnectId?'active':''}"></div>
-        <span class="profile-item-name ${!c.enabled?'dimmed':''}">${c.name}</span>
-        <span style="font-size:11px;color:var(--accent);font-weight:700;background:rgba(var(--accent-rgb),.15);padding:1px 5px;border-radius:4px">CHAIN</span>
-        <div class="profile-expand-btn" onclick="event.stopPropagation();openEditChain('${id}')" title="Edit">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        </div>
-        <div title="Eligible for auto-select">${miniToggleHtml(id, 'toggleChainEnabled', c.enabled)}</div>
-        <div class="profile-expand-btn ${isOpen?'open':''}" onclick="event.stopPropagation();toggleExpand('${id}')">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-      </div>
-      <div class="profile-subs ${isOpen?'open':''}">
-        <div class="chain-inout">
-          <span style="font-size:12px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">IN</span>
-          <span class="chain-badge in" onclick="event.stopPropagation();cycleChainSide('${id}','in')">${inName}</span>
-          <span style="color:var(--t3);font-size:14px">→</span>
-          <span style="font-size:12px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">OUT</span>
-          <span class="chain-badge out" onclick="event.stopPropagation();cycleChainSide('${id}','out')">${outName}</span>
-        </div>
-        <div class="sub-item" style="padding-left:46px;padding-top:6px;padding-bottom:4px">
-          <div style="font-size:13px;color:var(--t2)">Tap badges to cycle profiles</div>
-        </div>
-      </div>
-    </div>
-  </div>` + (i < connectOrder.length-1 ? '<div class="sheet-divider"></div>' : '');
+    ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'pinned'}</span>` : ''}
+    <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : 'openEditProfile'}('${id}')" title="Edit">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+    </button>
+  </div>`;
 }
 
 function renderConnects() {
-  const el = document.getElementById('connects-list');
-  el.innerHTML = connectOrder.map((id, i) => isChain(id) ? renderChainRow(id, i) : renderProfileRow(id, i)).join('');
+  const pick = connectEntry(effectiveConnectId());
+  document.getElementById('auto-row').className = 'auto-row' + (autoConnect ? ' on' : '');
+  document.getElementById('autoRowSub').textContent = autoConnect
+    ? 'Now: ' + (pick ? pick.name : '—') + ' — first working below'
+    : 'Off — a pinned profile is used';
+  document.getElementById('autoToggle').classList.toggle('on', autoConnect);
+  document.getElementById('connects-list').innerHTML = connectOrder.map(renderConnectRow).join('');
 }
 
-function toggleExpand(id) {
-  expandState[id] = !expandState[id];
+function openProfiles() {
   renderConnects();
+  openSheet('profiles');
 }
 
-function toggleProfileSource(pid, sid) {
-  const p = profilesData[pid];
-  const idx = p.sources.indexOf(sid);
-  if (idx === -1) p.sources.push(sid); else p.sources.splice(idx, 1);
-  expandState[pid] = true;
+function setAutoConnect(on) {
+  autoConnect = on;
+  if (!on) activeConnectId = effectiveConnectIdWhenAuto();
   renderConnects();
-  if (pid === activeConnectId) updateMainConnectCard();
+  updateMainConnectCard();
+}
+function effectiveConnectIdWhenAuto() {
+  const was = autoConnect; autoConnect = true;
+  const id = effectiveConnectId(); autoConnect = was; return id;
 }
 
 function selectConnect(id) {
+  autoConnect = false;
   activeConnectId = id;
-  updateMainConnectCard();
   renderConnects();
+  updateMainConnectCard();
   closeSheet('profiles');
 }
 
-function toggleProfileAuto(id) {
-  const p = profilesData[id];
-  p.autoSelect = !p.autoSelect;
-  if (!p.autoSelect && !p.manualNodeId) {
-    const nodes = getProfileNodes(p);
-    p.manualNodeId = nodes.length ? nodes[0].id : null;
-  }
-  renderConnects();
-  if (id === activeConnectId) updateMainConnectCard();
+function openCreateMenu() {
+  const close = "closeSheet('actions');";
+  openActions('Create',
+    menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Nodes from chosen subscriptions — best or fixed</div>', close + 'openCreateProfile()') +
+    menuRow('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
+      'Chain<div class="menu-sub">Enter through one profile, exit through another</div>', close + 'openCreateChain()'));
 }
 
-let pickManualProfileId = null;
-function openPickManualNode(pid) {
-  pickManualProfileId = pid;
-  const p = profilesData[pid];
-  const nodes = getProfileNodes(p);
+/* ── Node picker (fixed node for a profile being edited) ── */
+
+let pickCtx = null;   // { sources, current, onPick }
+function openPickNode(ctx) {
+  pickCtx = ctx;
+  const refs = profileNodeRefs({ sources: ctx.sources });
   const el = document.getElementById('pickmanualnode-list');
-  el.innerHTML = nodes.length ? nodes.map(n => `<div class="pick-row" onclick="chooseManualNode('${n.id}')">
-      <div class="profile-radio ${p.manualNodeId===n.id?'active':''}"></div>
-      <span class="pick-row-name">${n.label}</span>
-    </div>`).join('') : `<div class="form-group"><div style="font-size:14px;color:var(--t2)">No enabled subscriptions or servers in this profile yet.</div></div>`;
+  el.innerHTML = refs.length ? refs.map(({ sid, node }) => {
+    const key = sid + '::' + node.id;
+    return `<div class="pick-row" onclick="chooseManualNode('${key}')">
+      <div class="profile-radio ${ctx.current === key ? 'active' : ''}"></div>
+      <span class="node-flag">${node.flag}</span>
+      <span class="pick-row-name">${esc(node.name)}<div class="pick-row-sub" style="font-family:inherit">${esc(sourcesData[sid].name)}</div></span>
+      ${latHtml(node)}
+    </div>`;
+  }).join('') : `<div class="form-group"><div style="font-size:14px;color:var(--t2)">Pick at least one enabled subscription or server first.</div></div>`;
   openSheet('pickmanualnode');
 }
-function chooseManualNode(nodeId) {
-  if (!pickManualProfileId) return;
-  profilesData[pickManualProfileId].manualNodeId = nodeId;
-  renderConnects();
-  if (pickManualProfileId === activeConnectId) updateMainConnectCard();
+function chooseManualNode(key) {
+  if (pickCtx) pickCtx.onPick(key);
   closeSheet('pickmanualnode');
-}
-
-function toggleChainEnabled(id) {
-  chainsData[id].enabled = !chainsData[id].enabled;
-  renderConnects();
 }
 
 function toggleRuleEnabled(id) {
@@ -1462,51 +1463,32 @@ function toggleRuleEnabled(id) {
   renderRules();
 }
 
+/* ── Home dock ── */
+
 function updateMainConnectCard() {
+  const id = effectiveConnectId();
+  const e = connectEntry(id);
   const badge = document.getElementById('profModeBadge');
   const detail = document.getElementById('profModeDetail');
+  document.getElementById('profCardName').textContent = e ? e.name : '—';
+  badge.textContent = autoConnect ? 'AUTO' : 'PINNED';
+  badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
+  badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
-  if (isChain(activeConnectId)) {
-    const c = chainsData[activeConnectId];
-    const inName = profilesData[c.inId] ? profilesData[c.inId].name : '—';
-    const outName = profilesData[c.outId] ? profilesData[c.outId].name : '—';
-    document.getElementById('profCardName').textContent = c.name;
+  if (chainsData[id]) {
+    const c = chainsData[id];
+    const nm = pid => profilesData[pid] ? profilesData[pid].name : '—';
+    detail.textContent = nm(c.inId) + ' → ' + nm(c.outId);
     document.getElementById('profMetaCount').textContent = '';
     document.getElementById('profMetaSrc').textContent = 'chain';
-    badge.textContent = 'CHAIN';
-    badge.style.color = 'var(--accent)';
-    badge.style.background = 'rgba(var(--accent-rgb),.15)';
-    detail.textContent = inName + ' → ' + outName;
     return;
   }
-
-  const p = profilesData[activeConnectId];
-  document.getElementById('profCardName').textContent = p.name;
+  const p = profilesData[id];
+  const n = profileNode(p);
+  detail.textContent = n ? n.flag + ' ' + n.name + (isAlive(n) ? ' · ' + n.latency + ' ms' : '') : 'no working nodes';
   document.getElementById('profMetaCount').textContent = profileNodeCount(p);
   document.getElementById('profMetaSrc').textContent = 'nodes · ' + p.sources.length + ' src';
-  if (p.autoSelect) {
-    badge.textContent = 'AUTO';
-    badge.style.color = 'var(--active)';
-    badge.style.background = 'rgba(var(--active-rgb),.15)';
-    detail.textContent = 'best latency · 38ms';
-  } else {
-    badge.textContent = 'MANUAL';
-    badge.style.color = 'var(--warn)';
-    badge.style.background = 'rgba(var(--warn-rgb),.15)';
-    detail.textContent = manualNodeLabel(p);
-  }
 }
-
-function cycleChainSide(chainId, side) {
-  const c = chainsData[chainId];
-  const key = side === 'in' ? 'inId' : 'outId';
-  const ids = getProfileIds();
-  const idx = ids.indexOf(c[key]);
-  c[key] = ids[(idx + 1) % ids.length];
-  renderConnects();
-  if (chainId === activeConnectId) updateMainConnectCard();
-}
-
 /* ══════════════════════ NODES SCREEN (subscriptions + manual servers) ══════════════════════
    Replaces the old "All configs" sheet. A source is either a subscription (kind 'sub')
    or a group of manual servers (kind 'node'); both render as one collapsible group. */
@@ -1696,6 +1678,7 @@ function testLatency(pairs) {
       if (!n) return;
       n.latency = randLatency();
       renderNodes();
+      updateMainConnectCard();
     }, 300 + Math.random() * 1400);
   });
 }
@@ -2091,6 +2074,22 @@ function pickActionChip(el, value) {
 
 let createProfileSelected = new Set();
 let editingProfileId = null;
+let cpDraft = { autoSelect: true, manualNodeId: null };
+
+function setCpMode(auto) {
+  cpDraft.autoSelect = auto;
+  renderCpNode();
+}
+function renderCpNode() {
+  document.querySelectorAll('#cp-mode .chip').forEach((c, i) => c.classList.toggle('active', i === (cpDraft.autoSelect ? 0 : 1)));
+  document.getElementById('cp-fixed-row').style.display = cpDraft.autoSelect ? 'none' : '';
+  const ref = profileNodeRefs({ sources: [...createProfileSelected] }).find(r => r.sid + '::' + r.node.id === cpDraft.manualNodeId);
+  document.getElementById('cp-fixed-label').textContent = ref ? ref.node.flag + ' ' + ref.node.name : 'Choose…';
+}
+function pickCpNode() {
+  openPickNode({ sources: [...createProfileSelected], current: cpDraft.manualNodeId,
+    onPick: key => { cpDraft.manualNodeId = key; renderCpNode(); } });
+}
 
 function openCreateProfile(editId) {
   editingProfileId = editId || null;
@@ -2101,14 +2100,19 @@ function openCreateProfile(editId) {
     document.getElementById('cpDeleteBtn').style.display = '';
     document.getElementById('cp-name').value = p.name;
     createProfileSelected = new Set(p.sources);
+    cpDraft = { autoSelect: p.autoSelect, manualNodeId: p.manualNodeId };
+    document.getElementById('cp-inauto').classList.toggle('on', p.inAuto);
   } else {
     document.getElementById('cpTitle').textContent = 'Create profile';
     document.getElementById('cpSaveBtn').textContent = 'Create profile';
     document.getElementById('cpDeleteBtn').style.display = 'none';
     document.getElementById('cp-name').value = '';
     createProfileSelected = new Set();
+    cpDraft = { autoSelect: true, manualNodeId: null };
+    document.getElementById('cp-inauto').classList.add('on');
   }
   renderCreateProfileSources();
+  renderCpNode();
   openSheet('createprofile');
 }
 
@@ -2132,17 +2136,21 @@ function renderCreateProfileSources() {
 function toggleCreateProfileSource(id) {
   if (createProfileSelected.has(id)) createProfileSelected.delete(id); else createProfileSelected.add(id);
   renderCreateProfileSources();
+  renderCpNode();
 }
 
 function saveCreateProfile() {
   const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
+  const fields = { autoSelect: cpDraft.autoSelect, manualNodeId: cpDraft.manualNodeId,
+                   inAuto: document.getElementById('cp-inauto').classList.contains('on') };
   if (editingProfileId) {
     const p = profilesData[editingProfileId];
     p.name = name;
     p.sources = Array.from(createProfileSelected);
+    Object.assign(p, fields);
   } else {
     const id = 'profile' + Date.now();
-    profilesData[id] = { id, name, sources: Array.from(createProfileSelected), autoSelect:true, manualNodeId:null };
+    profilesData[id] = Object.assign({ id, name, sources: Array.from(createProfileSelected) }, fields);
     connectOrder.push(id);
   }
   editingProfileId = null;
@@ -2182,6 +2190,7 @@ function openCreateChain(editId) {
     document.getElementById('ccDeleteBtn').style.display = '';
     document.getElementById('cc-name').value = c.name;
     chainDraft = { inId: c.inId, outId: c.outId };
+    document.getElementById('cc-inauto').classList.toggle('on', c.inAuto);
   } else {
     document.getElementById('ccTitle').textContent = 'Create chain';
     document.getElementById('ccSaveBtn').textContent = 'Create chain';
@@ -2189,6 +2198,7 @@ function openCreateChain(editId) {
     document.getElementById('cc-name').value = '';
     const ids = getProfileIds();
     chainDraft = { inId: ids[0], outId: ids[0] };
+    document.getElementById('cc-inauto').classList.add('on');
   }
   renderChainPicker('cc-in-list', 'in');
   renderChainPicker('cc-out-list', 'out');
@@ -2224,9 +2234,11 @@ function saveCreateChain() {
     c.name = name;
     c.inId = chainDraft.inId;
     c.outId = chainDraft.outId;
+    c.inAuto = document.getElementById('cc-inauto').classList.contains('on');
   } else {
     const id = 'chain' + Date.now();
-    chainsData[id] = { id, name, inId: chainDraft.inId, outId: chainDraft.outId, enabled:true };
+    chainsData[id] = { id, name, inId: chainDraft.inId, outId: chainDraft.outId,
+                     inAuto: document.getElementById('cc-inauto').classList.contains('on') };
     connectOrder.push(id);
   }
   editingChainId = null;
@@ -2244,29 +2256,6 @@ function deleteEditingChain() {
   renderConnects();
   updateMainConnectCard();
   closeSheet('createchain');
-}
-
-/* ══════════════════════ COPY FROM CONNECTION PROFILE ══════════════════════ */
-
-function openCopyFromProfile() {
-  const el = document.getElementById('copy-source-list');
-  el.innerHTML = getProfileIds().map(id => {
-    const p = profilesData[id];
-    return `<div class="pick-row" onclick="createChainFromProfile('${id}')">
-      <span class="pick-row-name">${p.name}</span>
-      <span class="pick-row-sub">${profileNodeCount(p)} nodes</span>
-    </div>`;
-  }).join('');
-  openSheet('copyprofile');
-}
-
-function createChainFromProfile(profileId) {
-  const p = profilesData[profileId];
-  const id = 'chain' + Date.now();
-  chainsData[id] = { id, name: p.name + ' Chain', inId: profileId, outId: profileId, enabled:true };
-  connectOrder.push(id);
-  renderConnects();
-  closeSheet('copyprofile');
 }
 
 /* ══════════════════════ ADD RULE ══════════════════════ */
@@ -2317,8 +2306,8 @@ function startRowDrag(e, rowEl, itemSelector, order, render) {
 }
 
 function startConnectDrag(e, id) {
-  const rowEl = document.querySelector('#connects-list .profile-item[data-id="'+id+'"]');
-  startRowDrag(e, rowEl, '.profile-item', () => connectOrder, renderConnects);
+  const rowEl = document.querySelector('#connects-list .conn-row[data-id="'+id+'"]');
+  startRowDrag(e, rowEl, '.conn-row', () => connectOrder, () => { renderConnects(); updateMainConnectCard(); });
 }
 
 function startSourceDrag(e, id) {
@@ -2395,7 +2384,7 @@ function makeDraggable(name) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
 }
-['profiles','connections','rules','createprofile','createchain','copyprofile','addrule','pickmanualnode','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
+['profiles','connections','rules','createprofile','createchain','addrule','pickmanualnode','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
 
 /* ══════════════════════ THEMES ══════════════════════ */
 
