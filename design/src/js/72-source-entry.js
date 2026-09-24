@@ -33,8 +33,7 @@ function renderSourceEntry() {
   document.getElementById('se-all').textContent = on === live.length ? 'None' : 'All';
   document.getElementById('se-nodes').innerHTML = sortedNodes(live).map(n => {
     const off = isNodeOff(s, n.id);
-    return `<div class="node-row ps-node ${off ? '' : 'on'}" onclick="toggleSourceEntryNode('${n.id}')">
-      <div class="sub-checkbox ${off ? '' : 'checked'}"></div>
+    return `<div class="node-row ps-node pick ${off ? '' : 'on'}" onclick="toggleSourceEntryNode('${n.id}')">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
@@ -42,7 +41,7 @@ function renderSourceEntry() {
     </div>`;
   }).join('') || '<div class="route-empty">No servers yet</div>';
   document.getElementById('se-nodes').insertAdjacentHTML('beforeend', goneBlockHtml('se:' + seId, goneRefs(seId),
-    r => `<div class="sub-checkbox ${isNodeOff(s, r.node.id) ? '' : 'checked'}"></div>`));
+    r => !isNodeOff(s, r.node.id)));
 }
 
 function sourceEntryChanged() {

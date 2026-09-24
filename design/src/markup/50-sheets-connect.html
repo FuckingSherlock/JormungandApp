@@ -22,17 +22,6 @@
     </div>
   </div>
 
-  <!-- ══════════ AUTO MODE SHEET (settings of Auto + current / standby servers) ══════════ -->
-  <div class="overlay" id="ov-automode" onclick="closeSheet('automode')"></div>
-  <div class="sheet" id="sh-automode">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">Auto mode</span>
-      <button class="sheet-close" onclick="closeSheet('automode')">×</button>
-    </div>
-    <div class="sheet-body" id="automode-body"></div>
-  </div>
-
   <!-- ══════════ LIVE CONNECTIONS SHEET ══════════ -->
   <div class="overlay" id="ov-connections" onclick="closeSheet('connections')"></div>
   <div class="sheet" id="sh-connections">
@@ -94,7 +83,7 @@
       </div>
       <div class="form-group" style="padding-bottom:0">
         <div class="form-label">Subscriptions &amp; servers</div>
-        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tick single servers. The profile uses the fastest of them.</div>
+        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tap single servers — framed ones are used. The profile uses the fastest of them.</div>
       </div>
       <div id="cp-source-list"></div>
 
@@ -129,7 +118,7 @@
       </div>
       <div class="form-group" style="padding-bottom:4px">
         <div class="form-label">Servers</div>
-        <div class="set-hint" style="margin-top:4px">Untick servers this entry should not use. It connects through the fastest ticked one; servers added by an update start ticked.</div>
+        <div class="set-hint" style="margin-top:4px">Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.</div>
       </div>
       <div class="se-bar">
         <span class="se-count" id="se-count"></span>
@@ -140,7 +129,7 @@
       <div class="se-nodes" id="se-nodes"></div>
     </div>
     <div class="sheet-footer">
-      <div class="warn-note" id="se-warn" hidden>Tick at least 1 server — otherwise the previous selection is kept</div>
+      <div class="warn-note" id="se-warn" hidden>Select at least 1 server — otherwise the previous selection is kept</div>
       <button class="btn-primary" id="se-done" onclick="closeSheet('sourceentry')">Done</button>
     </div>
   </div>

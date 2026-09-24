@@ -248,11 +248,8 @@
 .ps-card.off .ps-main{opacity:.6}
 .cc-prof.off .pick-row-name{color:var(--t3)}
 
-/* Server switched off in Nodes: the row stays in Nodes (dimmed), hidden everywhere else */
-.mini-toggle.sm{width:28px;height:17px}
-.mini-toggle.sm .mini-toggle-thumb{width:13px;height:13px}
-.mini-toggle.sm.on .mini-toggle-thumb{left:13px}
-.node-row.disabled > :not(.mini-toggle){opacity:.4}
+/* Server switched off in Nodes: the row stays in Nodes (dimmed, no frame), hidden everywhere else */
+.node-row.disabled > *{opacity:.45}
 .node-row.disabled .node-name{text-decoration:line-through;text-decoration-color:var(--t3)}
 .dis-meta{color:var(--t3)}
 .node-row.gone.tap{cursor:pointer}
@@ -266,3 +263,11 @@
 .impact-name{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
 .impact-what{font-size:12.5px;color:var(--t2);margin-top:2px;line-height:1.35}
 .impact-row.bad .impact-what{color:var(--muted)}
+
+/* Picking servers: no checkboxes or switches — a picked / in-use server is framed.
+   Tap toggles it. Used by Nodes, the source entry, the profile and chain editors. */
+.node-row.pick{margin:3px 8px;padding:8px 10px;border:1px solid transparent;border-radius:9px;transition:border-color .12s,background .12s}
+.node-row.pick + .node-row.pick{border-top-color:transparent}
+.node-row.pick.on,.node-row.pick + .node-row.pick.on{border-color:rgba(var(--accent-rgb),.5);background:rgba(var(--accent-rgb),.07)}
+.node-row.pick:not(.on) .node-name{color:var(--t2)}
+.node-row.gone.pick.on{background:none;border-style:dashed}

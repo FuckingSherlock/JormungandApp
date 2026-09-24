@@ -566,7 +566,7 @@ async function runChecks() {
     });
     await tab(page, 'nodes');
     await page.evaluate(() => { expandState.src2 = true; renderNodes(); });
-    await page.click('.src-card[data-id=src2] .node-row[data-nid=n0] .mini-toggle');
+    await page.click('.src-card[data-id=src2] .node-row[data-nid=n0] .node-name');
     const r2 = await page.evaluate(() => {
       const out = {}, s2 = sourcesData.src2;
       out.toggled = isNodeDisabled(s2, 'n0') && !!document.querySelector('.src-card[data-id=src2] .node-row.disabled[data-nid=n0]');
@@ -645,19 +645,19 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
-  await check('Auto mode card opens its sheet; settings apply; subscriptions default to auto', async () => {
+  await check('Auto mode card opens Settings → Auto mode; settings apply; subscriptions default to auto', async () => {
     await page.click('#autoCard'); await settle(page);
     const r = await page.evaluate(() => {
       const out = {};
-      out.open = document.getElementById('sh-automode').classList.contains('open');
-      [...document.querySelectorAll('#automode-body .chip')].find(e => e.textContent === '100 ms').click();
+      out.open = document.getElementById('view-settings').classList.contains('active') && !!document.querySelector('#auto-settings .set-group');
+      [...document.querySelectorAll('#auto-settings .chip')].find(e => e.textContent === '100 ms').click();
       out.threshold = autoCfg.threshold === 100 && /−100 ms/.test(document.getElementById('autoCardStats').textContent);
-      out.standby = document.querySelectorAll('#automode-body .am-sb-row').length === Math.min(autoCfg.standby, visibleOrder().filter(id => id !== effectiveConnectId() && connectEntry(id).inAuto).length);
+      out.standby = document.querySelectorAll('#auto-settings .am-sb-row').length === Math.min(autoCfg.standby, visibleOrder().filter(id => id !== effectiveConnectId() && connectEntry(id).inAuto).length);
       document.getElementById('autoCardToggle').click();
-      out.manual = !autoConnect && /Manual/.test(document.getElementById('autoCardSub').textContent) && /no failover/.test(document.getElementById('automode-body').textContent);
+      out.manual = !autoConnect && /Manual/.test(document.getElementById('autoCardSub').textContent) && /no failover/.test(document.getElementById('auto-settings').textContent);
       document.getElementById('autoCardToggle').click();
       setAutoCfg('threshold', 50);
-      closeSheet('automode');
+      switchTab('home');
       openSrcForm('src1');
       out.auto = document.getElementById('sf-interval').value === '' && /auto · 12 h/.test(document.getElementById('sf-interval').placeholder);
       document.getElementById('sf-interval').value = '8'; saveSrcForm();

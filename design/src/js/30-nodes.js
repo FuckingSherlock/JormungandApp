@@ -60,8 +60,8 @@ function sortedNodes(list, nodeOf = x => x) {
 
 /* ── Servers the provider dropped (s.gone) ──
    One collapsible "Unavailable · N" block, used by Nodes and by every node picker. The
-   rows are read-only; `extra(ref)` draws the kept setting (tick, priority) before the
-   flag; `rowClick(ref)` (Nodes only) opens the server's own menu. `ctx` names the block
+   rows are read-only; `isOn(ref)` = the kept selection (framed like a picked row);
+   `rowClick(ref)` (Nodes only) opens the server's own menu. `ctx` names the block
    so each view remembers its own open state.
    Each dropped server is kept GONE_KEEP_DAYS from its own goneAt, then forgotten with
    its settings (purgeExpiredGone: on start and after every update). The list lives in
@@ -69,10 +69,10 @@ function sortedNodes(list, nodeOf = x => x) {
 const GONE_KEEP_DAYS = 15;
 const goneLeftDays = n => Math.ceil((n.goneAt + GONE_KEEP_DAYS * 864e5 - Date.now()) / 864e5);
 const goneOpen = new Set();
-function goneBlockHtml(ctx, refs, extra = () => '', action = '', rowClick = null) {
+function goneBlockHtml(ctx, refs, isOn = null, action = '', rowClick = null) {
   if (!refs.length) return '';
   const open = goneOpen.has(ctx);
-  const rows = open ? refs.map(r => `<div class="node-row gone ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>${extra(r)}
+  const rows = open ? refs.map(r => `<div class="node-row gone ${isOn ? 'pick' : ''} ${isOn && isOn(r) ? 'on' : ''} ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
       <span class="node-proto">${r.node.protocol}</span>
@@ -159,13 +159,15 @@ function renderSourceCard(id, q) {
     if (s.name.toLowerCase().includes(q) && !nodes.length) nodes = s.nodes;
   }
   const isOpen = q ? true : !!expandState[id];
-  // Each server has its own switch: off = hidden from every list and picker, settings kept.
-  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row ${on ? '' : 'disabled'}" data-nid="${n.id}" onclick="openNodeActions('${id}','${n.id}')">
+  // Framed = in use. Tap switches a server off / on (off = hidden from every list and
+  // picker, settings kept); hold (right click) opens its menu.
+  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-nid="${n.id}"
+      onclick="if (!longPressed()) toggleNodeEnabled('${id}','${n.id}')" onpointerdown="longPress(event, () => openNodeActions('${id}','${n.id}'))"
+      oncontextmenu="event.preventDefault();openNodeActions('${id}','${n.id}')" title="Tap: on / off · hold: menu">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
       <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
-      <div class="mini-toggle sm ${on ? 'on' : ''}" title="Use this server" onclick="event.stopPropagation();toggleNodeEnabled('${id}','${n.id}')"><div class="mini-toggle-thumb"></div></div>
     </div>`; }).join('');
   const addRow = s.kind === 'node'
     ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
@@ -195,7 +197,7 @@ function renderSourceCard(id, q) {
     ${usageHtml(s)}
     </div>
     </div>
-    <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), undefined,
+    <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), null,
       `<div class="chip gone-forget" onclick="event.stopPropagation();forgetGone('${id}')">Forget all</div>`, r => `openGoneActions('${id}','${r.node.id}')`)}</div>
   </div>`;
 }
@@ -404,13 +406,13 @@ function deleteImpact(excl, sid) {
       const c = chainsData[id];
       if (sid && (c.inId === sid || c.outId === sid)) { lines.push([e.name, 'chain', 'is deleted with it', 'bad']); return; }
       const [ei, eo] = both(() => chainEntryRefs(c).length), [xi, xo] = both(() => chainExitRefs(c).length);
-      if ((ei && !eo) || (xi && !xo)) lines.push([e.name, 'chain', `its ${ei && !eo ? 'entry' : 'exit'} is left with no servers — won't connect until you tick another`, 'bad']);
+      if ((ei && !eo) || (xi && !xo)) lines.push([e.name, 'chain', `its ${ei && !eo ? 'entry' : 'exit'} is left with no servers — won't connect until you select another`, 'bad']);
       else if (eo < ei || xo < xi) lines.push([e.name, 'chain', [eo < ei ? `entry loses ${srv(ei - eo)}` : '',
         xo < xi ? `exit loses ${srv(xi - xo)}${c.exitMode === 'priority' ? ' (out of its priority order)' : ''}` : ''].filter(Boolean).join(', '), 'warn']);
       return;
     }
     const [a, b] = both(() => unitRefs(id).length), kind = profilesData[id] ? 'profile' : 'entry';
-    if (a && !b) lines.push([e.name, kind, "is left with no servers — won't connect until you tick another", 'bad']);
+    if (a && !b) lines.push([e.name, kind, "is left with no servers — won't connect until you select another", 'bad']);
     else if (b < a && profilesData[id]) lines.push([e.name, kind, `loses ${srv(a - b)} of ${a}`, 'warn']);
   }));
   return lines;

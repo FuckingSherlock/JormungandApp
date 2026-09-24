@@ -476,11 +476,8 @@ body {
 .ps-card.off .ps-main{opacity:.6}
 .cc-prof.off .pick-row-name{color:var(--t3)}
 
-/* Server switched off in Nodes: the row stays in Nodes (dimmed), hidden everywhere else */
-.mini-toggle.sm{width:28px;height:17px}
-.mini-toggle.sm .mini-toggle-thumb{width:13px;height:13px}
-.mini-toggle.sm.on .mini-toggle-thumb{left:13px}
-.node-row.disabled > :not(.mini-toggle){opacity:.4}
+/* Server switched off in Nodes: the row stays in Nodes (dimmed, no frame), hidden everywhere else */
+.node-row.disabled > *{opacity:.45}
 .node-row.disabled .node-name{text-decoration:line-through;text-decoration-color:var(--t3)}
 .dis-meta{color:var(--t3)}
 .node-row.gone.tap{cursor:pointer}
@@ -494,6 +491,14 @@ body {
 .impact-name{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
 .impact-what{font-size:12.5px;color:var(--t2);margin-top:2px;line-height:1.35}
 .impact-row.bad .impact-what{color:var(--muted)}
+
+/* Picking servers: no checkboxes or switches — a picked / in-use server is framed.
+   Tap toggles it. Used by Nodes, the source entry, the profile and chain editors. */
+.node-row.pick{margin:3px 8px;padding:8px 10px;border:1px solid transparent;border-radius:9px;transition:border-color .12s,background .12s}
+.node-row.pick + .node-row.pick{border-top-color:transparent}
+.node-row.pick.on,.node-row.pick + .node-row.pick.on{border-color:rgba(var(--accent-rgb),.5);background:rgba(var(--accent-rgb),.07)}
+.node-row.pick:not(.on) .node-name{color:var(--t2)}
+.node-row.gone.pick.on{background:none;border-style:dashed}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -532,15 +537,17 @@ body {
 .auto-stat-val.bad{color:var(--muted)}
 .auto-stat-label{font-size:11px;color:var(--t3);margin-top:1px}
 
-/* ── Auto mode sheet ── */
-.am-now{display:flex;align-items:center;gap:12px;margin:4px 18px 8px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:rgba(var(--accent-rgb),.06)}
+/* ── Settings → Auto mode (#auto-settings, inside the settings scroll) ── */
+#auto-settings .set-group{margin:6px 0 4px;background:var(--card)}
+.am-label{font-size:12px;color:var(--t3);padding:8px 6px 0}
+.am-now{display:flex;align-items:center;gap:12px;margin:0 0 8px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:rgba(var(--accent-rgb),.06)}
 .am-now-main{flex:1;min-width:0}
 .am-now-name{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:2px}
 .am-now-ms{text-align:right;flex-shrink:0}
 .am-now-ms .lat{font-size:15px;min-width:0;cursor:default;padding:0}
 .am-checked{font-size:11px;color:var(--t3);margin-top:2px}
-.am-actions{display:flex;gap:8px;padding:0 18px 6px}
-.am-standby{margin:6px 18px 12px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.am-actions{display:flex;gap:8px;padding:0 0 2px}
+.am-standby{margin:6px 0 4px;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
 .am-standby .route-empty{padding:12px 14px}
 .am-sb-row{display:flex;align-items:center;gap:10px;padding:9px 12px}
 .am-sb-row + .am-sb-row{border-top:1px solid var(--border)}
@@ -880,6 +887,10 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="view" id="view-settings">
     <div class="topbar"><div class="app-name">Settings</div></div>
     <div class="scroll" style="gap:0">
+      <!-- Auto mode: the Home AutoCard opens this section -->
+      <div class="settings-caption" id="auto-caption">Auto mode</div>
+      <div id="auto-settings"></div>
+
       <div class="settings-caption">Appearance</div>
       <div class="settings-group" id="theme-list"></div>
 
@@ -960,17 +971,6 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     </div>
   </div>
 
-  <!-- ══════════ AUTO MODE SHEET (settings of Auto + current / standby servers) ══════════ -->
-  <div class="overlay" id="ov-automode" onclick="closeSheet('automode')"></div>
-  <div class="sheet" id="sh-automode">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">Auto mode</span>
-      <button class="sheet-close" onclick="closeSheet('automode')">×</button>
-    </div>
-    <div class="sheet-body" id="automode-body"></div>
-  </div>
-
   <!-- ══════════ LIVE CONNECTIONS SHEET ══════════ -->
   <div class="overlay" id="ov-connections" onclick="closeSheet('connections')"></div>
   <div class="sheet" id="sh-connections">
@@ -1032,7 +1032,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
       <div class="form-group" style="padding-bottom:0">
         <div class="form-label">Subscriptions &amp; servers</div>
-        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tick single servers. The profile uses the fastest of them.</div>
+        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tap single servers — framed ones are used. The profile uses the fastest of them.</div>
       </div>
       <div id="cp-source-list"></div>
 
@@ -1067,7 +1067,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
       <div class="form-group" style="padding-bottom:4px">
         <div class="form-label">Servers</div>
-        <div class="set-hint" style="margin-top:4px">Untick servers this entry should not use. It connects through the fastest ticked one; servers added by an update start ticked.</div>
+        <div class="set-hint" style="margin-top:4px">Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.</div>
       </div>
       <div class="se-bar">
         <span class="se-count" id="se-count"></span>
@@ -1078,7 +1078,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <div class="se-nodes" id="se-nodes"></div>
     </div>
     <div class="sheet-footer">
-      <div class="warn-note" id="se-warn" hidden>Tick at least 1 server — otherwise the previous selection is kept</div>
+      <div class="warn-note" id="se-warn" hidden>Select at least 1 server — otherwise the previous selection is kept</div>
       <button class="btn-primary" id="se-done" onclick="closeSheet('sourceentry')">Done</button>
     </div>
   </div>
@@ -1771,7 +1771,7 @@ function explainBroken(id) {
     : rs.length > 1 ? 'servers' : 'server';
   const edit = chainsData[id] ? `openEditChain('${id}')` : profilesData[id] ? `openEditProfile('${id}')` : `openSourceEntry('${id}')`;
   openActions(connectEntry(id).name,
-    `<div class="menu-note">This ${kind} has nothing to connect through: the ${what} it uses ${rs.length > 1 ? 'are' : 'is'} switched off in Nodes. Switch ${rs.length > 1 ? 'one' : 'it'} on, or tick another server in the ${kind}. Its settings are kept either way.</div>`
+    `<div class="menu-note">This ${kind} has nothing to connect through: the ${what} it uses ${rs.length > 1 ? 'are' : 'is'} switched off in Nodes. Switch ${rs.length > 1 ? 'one' : 'it'} on, or select another server in the ${kind}. Its settings are kept either way.</div>`
     + rs.map(r => menuRow(ICON.power, 'Switch on ' + esc(reasonLabel(r)) + (r.nid ? `<div class="menu-sub">${esc(sourcesData[r.sid].name)}</div>` : ''),
         close + (r.nid ? `enableNode('${r.sid}','${r.nid}')` : `enableSource('${r.sid}')`))).join('')
     + menuRow(ICON.edit, 'Edit ' + kind, close + edit));
@@ -1909,7 +1909,7 @@ function updateMainConnectCard() {
   document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;
   document.getElementById('profMetaSrc').textContent = 'ms';
   renderAutoCard();
-  if (document.getElementById('sh-automode').classList.contains('open')) renderAutoMode();
+  renderAutoMode();
 }
 /* ══════════════════════ NODES SCREEN (subscriptions + manual servers) ══════════════════════
    Replaces the old "All configs" sheet. A source is either a subscription (kind 'sub')
@@ -1973,8 +1973,8 @@ function sortedNodes(list, nodeOf = x => x) {
 
 /* ── Servers the provider dropped (s.gone) ──
    One collapsible "Unavailable · N" block, used by Nodes and by every node picker. The
-   rows are read-only; `extra(ref)` draws the kept setting (tick, priority) before the
-   flag; `rowClick(ref)` (Nodes only) opens the server's own menu. `ctx` names the block
+   rows are read-only; `isOn(ref)` = the kept selection (framed like a picked row);
+   `rowClick(ref)` (Nodes only) opens the server's own menu. `ctx` names the block
    so each view remembers its own open state.
    Each dropped server is kept GONE_KEEP_DAYS from its own goneAt, then forgotten with
    its settings (purgeExpiredGone: on start and after every update). The list lives in
@@ -1982,10 +1982,10 @@ function sortedNodes(list, nodeOf = x => x) {
 const GONE_KEEP_DAYS = 15;
 const goneLeftDays = n => Math.ceil((n.goneAt + GONE_KEEP_DAYS * 864e5 - Date.now()) / 864e5);
 const goneOpen = new Set();
-function goneBlockHtml(ctx, refs, extra = () => '', action = '', rowClick = null) {
+function goneBlockHtml(ctx, refs, isOn = null, action = '', rowClick = null) {
   if (!refs.length) return '';
   const open = goneOpen.has(ctx);
-  const rows = open ? refs.map(r => `<div class="node-row gone ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>${extra(r)}
+  const rows = open ? refs.map(r => `<div class="node-row gone ${isOn ? 'pick' : ''} ${isOn && isOn(r) ? 'on' : ''} ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
       <span class="node-proto">${r.node.protocol}</span>
@@ -2072,13 +2072,15 @@ function renderSourceCard(id, q) {
     if (s.name.toLowerCase().includes(q) && !nodes.length) nodes = s.nodes;
   }
   const isOpen = q ? true : !!expandState[id];
-  // Each server has its own switch: off = hidden from every list and picker, settings kept.
-  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row ${on ? '' : 'disabled'}" data-nid="${n.id}" onclick="openNodeActions('${id}','${n.id}')">
+  // Framed = in use. Tap switches a server off / on (off = hidden from every list and
+  // picker, settings kept); hold (right click) opens its menu.
+  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-nid="${n.id}"
+      onclick="if (!longPressed()) toggleNodeEnabled('${id}','${n.id}')" onpointerdown="longPress(event, () => openNodeActions('${id}','${n.id}'))"
+      oncontextmenu="event.preventDefault();openNodeActions('${id}','${n.id}')" title="Tap: on / off · hold: menu">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
       <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
-      <div class="mini-toggle sm ${on ? 'on' : ''}" title="Use this server" onclick="event.stopPropagation();toggleNodeEnabled('${id}','${n.id}')"><div class="mini-toggle-thumb"></div></div>
     </div>`; }).join('');
   const addRow = s.kind === 'node'
     ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
@@ -2108,7 +2110,7 @@ function renderSourceCard(id, q) {
     ${usageHtml(s)}
     </div>
     </div>
-    <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), undefined,
+    <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), null,
       `<div class="chip gone-forget" onclick="event.stopPropagation();forgetGone('${id}')">Forget all</div>`, r => `openGoneActions('${id}','${r.node.id}')`)}</div>
   </div>`;
 }
@@ -2317,13 +2319,13 @@ function deleteImpact(excl, sid) {
       const c = chainsData[id];
       if (sid && (c.inId === sid || c.outId === sid)) { lines.push([e.name, 'chain', 'is deleted with it', 'bad']); return; }
       const [ei, eo] = both(() => chainEntryRefs(c).length), [xi, xo] = both(() => chainExitRefs(c).length);
-      if ((ei && !eo) || (xi && !xo)) lines.push([e.name, 'chain', `its ${ei && !eo ? 'entry' : 'exit'} is left with no servers — won't connect until you tick another`, 'bad']);
+      if ((ei && !eo) || (xi && !xo)) lines.push([e.name, 'chain', `its ${ei && !eo ? 'entry' : 'exit'} is left with no servers — won't connect until you select another`, 'bad']);
       else if (eo < ei || xo < xi) lines.push([e.name, 'chain', [eo < ei ? `entry loses ${srv(ei - eo)}` : '',
         xo < xi ? `exit loses ${srv(xi - xo)}${c.exitMode === 'priority' ? ' (out of its priority order)' : ''}` : ''].filter(Boolean).join(', '), 'warn']);
       return;
     }
     const [a, b] = both(() => unitRefs(id).length), kind = profilesData[id] ? 'profile' : 'entry';
-    if (a && !b) lines.push([e.name, kind, "is left with no servers — won't connect until you tick another", 'bad']);
+    if (a && !b) lines.push([e.name, kind, "is left with no servers — won't connect until you select another", 'bad']);
     else if (b < a && profilesData[id]) lines.push([e.name, kind, `loses ${srv(a - b)} of ${a}`, 'warn']);
   }));
   return lines;
@@ -2560,6 +2562,22 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
 }
 
+/* ── Long press (hold ~0.5 s) — a row's secondary action, e.g. a server's menu ──
+   The click that follows the hold is swallowed: onclick checks longPressed(). */
+let lpTimer = null, lpFired = false;
+function longPress(e, fn) {
+  lpFired = false;
+  clearTimeout(lpTimer);
+  const x = e.clientX, y = e.clientY, el = e.currentTarget;
+  const stop = () => { clearTimeout(lpTimer); el.removeEventListener('pointermove', move); };
+  const move = ev => { if (Math.abs(ev.clientX - x) + Math.abs(ev.clientY - y) > 8) stop(); };
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup', stop, { once: true });
+  el.addEventListener('pointerleave', stop, { once: true });
+  lpTimer = setTimeout(() => { lpFired = true; stop(); fn(); }, 500);
+}
+function longPressed() { const f = lpFired; lpFired = false; return f; }
+
 /* ── Tabs ── */
 
 function switchTab(name) {
@@ -2631,7 +2649,7 @@ function setSegment(group, value, index) {
 setSegment('mode', 'tun', 0);
 setSegment('route', 'rules', 1);
 
-/* ══════════════════════ AUTO MODE (Home card + sheet) ══════════════════════
+/* ══════════════════════ AUTO MODE (Home card + Settings → Auto mode) ══════════════════════
    Everything about how Auto picks and keeps a connection, in one place:
    - threshold: a server takes over from the current one only if it is this much faster
      (hysteresis, so Auto does not hop between servers with close pings);
@@ -2685,9 +2703,12 @@ function renderAutoCard() {
     + stat('subs', subsEveryText(autoCfg.subsEvery));
 }
 
+// The Home card is a shortcut: it opens Settings at the Auto mode section.
 function openAutoMode() {
   renderAutoMode();
-  openSheet('automode');
+  switchTab('settings');
+  const sc = document.querySelector('#view-settings > .scroll');
+  sc.scrollTop += document.getElementById('auto-caption').getBoundingClientRect().top - sc.getBoundingClientRect().top;
 }
 
 function setAutoCfg(key, val) {
@@ -2697,7 +2718,7 @@ function setAutoCfg(key, val) {
 }
 
 function renderAutoMode() {
-  const el = document.getElementById('automode-body');
+  const el = document.getElementById('auto-settings');
   const id = effectiveConnectId(), e = connectEntry(id);
   const chips = (key, opts, fmt) => `<div class="chip-row">${opts.map(v =>
     `<div class="chip ${autoCfg[key] === v ? 'active' : ''}" onclick="setAutoCfg('${key}',${JSON.stringify(v)})">${fmt(v)}</div>`).join('')}</div>`;
@@ -2721,7 +2742,7 @@ function renderAutoMode() {
       <button class="btn-secondary" onclick="openProfiles()">Priority list</button>
     </div>
 
-    <div class="form-label" style="padding:10px 18px 0">Standby · next by priority</div>
+    <div class="am-label">Standby · next by priority</div>
     <div class="am-standby">${!autoConnect ? '<div class="route-empty">Manual — no failover, standby is idle</div>'
       : !autoCfg.standby ? '<div class="route-empty">Off — only the current server is checked</div>'
       : standby.map((sid, i) => `<div class="am-sb-row"><span class="cc-rank">${i + 1}</span><div class="am-sb-main"><div class="am-sb-name">${esc(connectEntry(sid).name)}${chainsData[sid] ? '<span class="conn-tag">chain</span>' : ''}</div><div class="dock-route">${route(sid)}</div></div>${latMsHtml(routeMs(sid))}</div>`).join('')
@@ -2740,7 +2761,7 @@ function renderAutoMode() {
       <div class="set-row"><div class="set-label">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
     </div>
 
-    <div class="form-label" style="padding:4px 18px 0">Subscriptions</div>
+    <div class="am-label">Subscriptions</div>
     <div class="set-group">
       <div class="set-row stack"><div><div class="set-label">Update all subscriptions every</div><div class="set-hint">${own.length
         ? `${own.map(sid => esc(sourcesData[sid].name)).join(', ')} ${own.length > 1 ? 'use their own periods' : 'uses its own period'} (Nodes → Edit)`
@@ -2751,7 +2772,7 @@ function renderAutoMode() {
 
 sourceViewHooks.push(() => {
   renderAutoCard();
-  if (document.getElementById('sh-automode').classList.contains('open')) renderAutoMode();
+  renderAutoMode();
 });
 /* ══════════════════════ SHEETS (open/close + tabs) ══════════════════════ */
 
@@ -2841,8 +2862,8 @@ function renderCreateProfileSources() {
   const none = !cpPickedCount(), offs = offReasons(cpDraftRefs(true));
   const warn = document.getElementById('cp-warn');
   warn.hidden = !none;
-  warn.textContent = offs.length ? `${reasonsText(offs)} — switch ${offs.length > 1 ? 'one' : 'it'} on there or tick another server`
-    : 'Tick at least 1 server — a profile with none can’t connect';
+  warn.textContent = offs.length ? `${reasonsText(offs)} — switch ${offs.length > 1 ? 'one' : 'it'} on there or select another server`
+    : 'Select at least 1 server — a profile with none can’t connect';
   document.getElementById('cpSaveBtn').disabled = none;
   el.innerHTML = cpSourceIds().map(id => {
     const s = sourcesData[id];
@@ -2850,7 +2871,7 @@ function renderCreateProfileSources() {
     if (!s.enabled) return `<div class="ps-card off" data-id="${id}">
       <div class="ps-head">
         <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${state === 'all' ? 'checked' : 'partial'}"></div></div>
-        <div class="ps-main"><div class="ps-name">${esc(s.name)}</div><div class="src-meta"><span class="off-meta">off in Nodes</span><span class="dot">·</span>untick to drop it</div></div>
+        <div class="ps-main"><div class="ps-name">${esc(s.name)}</div><div class="src-meta"><span class="off-meta">off in Nodes</span><span class="dot">·</span>tap the box to drop it</div></div>
       </div>
     </div>`;
     const open = cpOpen.has(id), live = liveNodes(s);
@@ -2862,15 +2883,14 @@ function renderCreateProfileSources() {
     const rows = open ? sortedNodes(live).map(n => {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
-      return `<div class="node-row ps-node ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
-        <div class="sub-checkbox ${on ? 'checked' : ''}"></div>
+      return `<div class="node-row ps-node pick ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
         <span class="node-flag">${n.flag}</span>
         <span class="node-name">${esc(n.name)}</span>
         <span class="node-proto">${n.protocol}</span>
         <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
     }).join('') + goneBlockHtml('cp:' + id, goneRefs(id),
-      r => `<div class="sub-checkbox ${state === 'all' || cpNodes.has(id + '::' + r.node.id) ? 'checked' : ''}"></div>`) : '';
+      r => state === 'all' || cpNodes.has(id + '::' + r.node.id)) : '';
     const box = state === 'all' ? 'checked' : state === 'some' ? 'partial' : '';
     return `<div class="ps-card ${open ? 'open' : ''} ${state !== 'none' ? 'sel' : ''}" data-id="${id}">
       <div class="ps-head">
@@ -2973,7 +2993,7 @@ function deleteEditingProfile() {
 /* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
    Ends are profiles (profiles mode) or sources (simple mode) — "units", see unitRefs.
    Entry and exit must be different units. The chosen unit on each side expands to its
-   servers with ticks: untick a server to keep this chain off it. The exit side picks its
+   servers, framed when used: tap a server to keep this chain off it. The exit side picks its
    server by Fastest or by Priority (drag ⋮⋮ to order; the first working one is used).
    "Check route" is informational only (it does not change the chain or Auto): it tells
    the user whether the chain can work and which entry -> exit pairs are fastest. */
@@ -3049,14 +3069,14 @@ function renderChainPicker(elId, side) {
       const isOn = !off.includes(key);
       const grip = priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startExitDrag(event,'${key}')">${GRIP_SVG}</div>` : '';
       const num = priority && isOn ? `<span class="cc-rank">${++rank}</span>` : priority ? '<span class="cc-rank"></span>' : '';
-      return `<div class="node-row ps-node ${isOn ? 'on' : ''}" data-id="${key}" onclick="toggleChainNode('${side}','${key}')">
-        ${grip}<div class="sub-checkbox ${isOn ? 'checked' : ''}"></div>${num}
+      return `<div class="node-row ps-node pick ${isOn ? 'on' : ''}" data-id="${key}" onclick="toggleChainNode('${side}','${key}')">
+        ${grip}${num}
         <span class="node-flag">${node.flag}</span>
         <span class="node-name">${esc(node.name)}</span>
         <span class="node-proto">${node.protocol}</span>${lat}
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
-      r => `<div class="sub-checkbox ${off.includes(refKey(r)) ? '' : 'checked'}"></div>`) : '') : '';
+      r => !off.includes(refKey(r))) : '') : '';
     return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''} ${broken ? 'off' : ''}" data-id="${id}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
@@ -3064,7 +3084,7 @@ function renderChainPicker(elId, side) {
         <span class="pick-row-sub">${sub}</span>
       </div>
       ${all.length > 1 ? `<button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">${CHEVRON}</button>` : '<span class="cc-expand"></span>'}
-      ${open ? `<div class="cc-nodes">${active && all.length ? `<div class="se-bar cc-bar"><span class="se-count">${nOn} of ${all.length} ticked</span><div class="chip" onclick="setChainNodesAll('${side}')">${nOn === all.length ? 'None' : 'All'}</div></div>` : ''}${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
+      ${open ? `<div class="cc-nodes">${active && all.length ? `<div class="se-bar cc-bar"><span class="se-count">${nOn} of ${all.length} selected</span><div class="chip" onclick="setChainNodesAll('${side}')">${nOn === all.length ? 'None' : 'All'}</div></div>` : ''}${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
   renderChainWarn();
@@ -3072,16 +3092,16 @@ function renderChainPicker(elId, side) {
     const hint = document.getElementById('cc-out-hint');
     const chip = (m, l) => `<div class="chip ${d.exitMode === m ? 'active' : ''}" onclick="setChainExitMode('${m}')">${l}</div>`;
     if (hint) hint.innerHTML = `<div class="chip-row" style="margin:2px 0 6px">${chip('fastest', 'Fastest')}${chip('priority', 'Priority')}</div>`
-      + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, untick to skip.'
-                  : 'The fastest ticked server of the exit is used. Expand to untick servers.');
+      + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, tap a server to skip it.'
+                  : 'The fastest selected server of the exit is used. Expand and tap servers to leave them out.');
   }
 }
 
 // Each end needs at least one ticked server, and nothing it stands on switched off in Nodes.
 function chainProblems(d = chainDraft) {
   return [['entry', chainEntryRefs(d), chainEntryRefs(d, true), d.inId], ['exit', chainExitRefs(d), chainExitRefs(d, true), d.outId]].map(([name, refs, all, uid]) =>
-    refs.length ? '' : offReasons(all).length ? `The ${name}: ${reasonsText(offReasons(all))} — switch it on there or tick another server`
-    : unitRefs(uid).length ? `Tick at least 1 server of the ${name}` : '').filter(Boolean);
+    refs.length ? '' : offReasons(all).length ? `The ${name}: ${reasonsText(offReasons(all))} — switch it on there or select another server`
+    : unitRefs(uid).length ? `Select at least 1 server of the ${name}` : '').filter(Boolean);
 }
 function renderChainWarn() {
   const problems = chainProblems();
@@ -3153,7 +3173,7 @@ function renderChainTest() {
     ? `<button class="btn-secondary" onclick="stopChainRoute()">Stop</button>`
     : `<button class="btn-secondary" onclick="testChainRoute()" ${nEntry && nExit ? '' : 'disabled'}>${ICON.bolt}${t ? 'Check again' : 'Check route'}</button>`;
   let sum;
-  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} has no ticked working nodes.</div>`;
+  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} has no selected working nodes.</div>`;
   else if (!t) sum = `<div class="route-sum">Tries every exit node through the entry nodes, fastest entries first.</div>`;
   else if (t.running) sum = `<div class="route-sum">${t.stage}<div class="route-progress"><div style="width:${t.total ? t.done / t.total * 100 : 0}%"></div></div></div>`;
   else if (t.pairs.length) sum = `<div class="route-sum good">${t.pairs.length} working pair${t.pairs.length === 1 ? '' : 's'}${t.stopped ? ' (stopped early)' : ''} · best ${t.pairs[0].ms} ms</div>`;
@@ -3321,8 +3341,7 @@ function renderSourceEntry() {
   document.getElementById('se-all').textContent = on === live.length ? 'None' : 'All';
   document.getElementById('se-nodes').innerHTML = sortedNodes(live).map(n => {
     const off = isNodeOff(s, n.id);
-    return `<div class="node-row ps-node ${off ? '' : 'on'}" onclick="toggleSourceEntryNode('${n.id}')">
-      <div class="sub-checkbox ${off ? '' : 'checked'}"></div>
+    return `<div class="node-row ps-node pick ${off ? '' : 'on'}" onclick="toggleSourceEntryNode('${n.id}')">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
@@ -3330,7 +3349,7 @@ function renderSourceEntry() {
     </div>`;
   }).join('') || '<div class="route-empty">No servers yet</div>';
   document.getElementById('se-nodes').insertAdjacentHTML('beforeend', goneBlockHtml('se:' + seId, goneRefs(seId),
-    r => `<div class="sub-checkbox ${isNodeOff(s, r.node.id) ? '' : 'checked'}"></div>`));
+    r => !isNodeOff(s, r.node.id)));
 }
 
 function sourceEntryChanged() {

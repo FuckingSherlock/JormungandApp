@@ -57,8 +57,8 @@ function renderCreateProfileSources() {
   const none = !cpPickedCount(), offs = offReasons(cpDraftRefs(true));
   const warn = document.getElementById('cp-warn');
   warn.hidden = !none;
-  warn.textContent = offs.length ? `${reasonsText(offs)} — switch ${offs.length > 1 ? 'one' : 'it'} on there or tick another server`
-    : 'Tick at least 1 server — a profile with none can’t connect';
+  warn.textContent = offs.length ? `${reasonsText(offs)} — switch ${offs.length > 1 ? 'one' : 'it'} on there or select another server`
+    : 'Select at least 1 server — a profile with none can’t connect';
   document.getElementById('cpSaveBtn').disabled = none;
   el.innerHTML = cpSourceIds().map(id => {
     const s = sourcesData[id];
@@ -66,7 +66,7 @@ function renderCreateProfileSources() {
     if (!s.enabled) return `<div class="ps-card off" data-id="${id}">
       <div class="ps-head">
         <div class="ps-check" onclick="toggleCreateProfileSource('${id}')"><div class="sub-checkbox ${state === 'all' ? 'checked' : 'partial'}"></div></div>
-        <div class="ps-main"><div class="ps-name">${esc(s.name)}</div><div class="src-meta"><span class="off-meta">off in Nodes</span><span class="dot">·</span>untick to drop it</div></div>
+        <div class="ps-main"><div class="ps-name">${esc(s.name)}</div><div class="src-meta"><span class="off-meta">off in Nodes</span><span class="dot">·</span>tap the box to drop it</div></div>
       </div>
     </div>`;
     const open = cpOpen.has(id), live = liveNodes(s);
@@ -78,15 +78,14 @@ function renderCreateProfileSources() {
     const rows = open ? sortedNodes(live).map(n => {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
-      return `<div class="node-row ps-node ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
-        <div class="sub-checkbox ${on ? 'checked' : ''}"></div>
+      return `<div class="node-row ps-node pick ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
         <span class="node-flag">${n.flag}</span>
         <span class="node-name">${esc(n.name)}</span>
         <span class="node-proto">${n.protocol}</span>
         <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
     }).join('') + goneBlockHtml('cp:' + id, goneRefs(id),
-      r => `<div class="sub-checkbox ${state === 'all' || cpNodes.has(id + '::' + r.node.id) ? 'checked' : ''}"></div>`) : '';
+      r => state === 'all' || cpNodes.has(id + '::' + r.node.id)) : '';
     const box = state === 'all' ? 'checked' : state === 'some' ? 'partial' : '';
     return `<div class="ps-card ${open ? 'open' : ''} ${state !== 'none' ? 'sel' : ''}" data-id="${id}">
       <div class="ps-head">
@@ -189,7 +188,7 @@ function deleteEditingProfile() {
 /* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
    Ends are profiles (profiles mode) or sources (simple mode) — "units", see unitRefs.
    Entry and exit must be different units. The chosen unit on each side expands to its
-   servers with ticks: untick a server to keep this chain off it. The exit side picks its
+   servers, framed when used: tap a server to keep this chain off it. The exit side picks its
    server by Fastest or by Priority (drag ⋮⋮ to order; the first working one is used).
    "Check route" is informational only (it does not change the chain or Auto): it tells
    the user whether the chain can work and which entry -> exit pairs are fastest. */
@@ -265,14 +264,14 @@ function renderChainPicker(elId, side) {
       const isOn = !off.includes(key);
       const grip = priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startExitDrag(event,'${key}')">${GRIP_SVG}</div>` : '';
       const num = priority && isOn ? `<span class="cc-rank">${++rank}</span>` : priority ? '<span class="cc-rank"></span>' : '';
-      return `<div class="node-row ps-node ${isOn ? 'on' : ''}" data-id="${key}" onclick="toggleChainNode('${side}','${key}')">
-        ${grip}<div class="sub-checkbox ${isOn ? 'checked' : ''}"></div>${num}
+      return `<div class="node-row ps-node pick ${isOn ? 'on' : ''}" data-id="${key}" onclick="toggleChainNode('${side}','${key}')">
+        ${grip}${num}
         <span class="node-flag">${node.flag}</span>
         <span class="node-name">${esc(node.name)}</span>
         <span class="node-proto">${node.protocol}</span>${lat}
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
-      r => `<div class="sub-checkbox ${off.includes(refKey(r)) ? '' : 'checked'}"></div>`) : '') : '';
+      r => !off.includes(refKey(r))) : '') : '';
     return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''} ${broken ? 'off' : ''}" data-id="${id}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
@@ -280,7 +279,7 @@ function renderChainPicker(elId, side) {
         <span class="pick-row-sub">${sub}</span>
       </div>
       ${all.length > 1 ? `<button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">${CHEVRON}</button>` : '<span class="cc-expand"></span>'}
-      ${open ? `<div class="cc-nodes">${active && all.length ? `<div class="se-bar cc-bar"><span class="se-count">${nOn} of ${all.length} ticked</span><div class="chip" onclick="setChainNodesAll('${side}')">${nOn === all.length ? 'None' : 'All'}</div></div>` : ''}${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
+      ${open ? `<div class="cc-nodes">${active && all.length ? `<div class="se-bar cc-bar"><span class="se-count">${nOn} of ${all.length} selected</span><div class="chip" onclick="setChainNodesAll('${side}')">${nOn === all.length ? 'None' : 'All'}</div></div>` : ''}${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
   renderChainWarn();
@@ -288,16 +287,16 @@ function renderChainPicker(elId, side) {
     const hint = document.getElementById('cc-out-hint');
     const chip = (m, l) => `<div class="chip ${d.exitMode === m ? 'active' : ''}" onclick="setChainExitMode('${m}')">${l}</div>`;
     if (hint) hint.innerHTML = `<div class="chip-row" style="margin:2px 0 6px">${chip('fastest', 'Fastest')}${chip('priority', 'Priority')}</div>`
-      + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, untick to skip.'
-                  : 'The fastest ticked server of the exit is used. Expand to untick servers.');
+      + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, tap a server to skip it.'
+                  : 'The fastest selected server of the exit is used. Expand and tap servers to leave them out.');
   }
 }
 
 // Each end needs at least one ticked server, and nothing it stands on switched off in Nodes.
 function chainProblems(d = chainDraft) {
   return [['entry', chainEntryRefs(d), chainEntryRefs(d, true), d.inId], ['exit', chainExitRefs(d), chainExitRefs(d, true), d.outId]].map(([name, refs, all, uid]) =>
-    refs.length ? '' : offReasons(all).length ? `The ${name}: ${reasonsText(offReasons(all))} — switch it on there or tick another server`
-    : unitRefs(uid).length ? `Tick at least 1 server of the ${name}` : '').filter(Boolean);
+    refs.length ? '' : offReasons(all).length ? `The ${name}: ${reasonsText(offReasons(all))} — switch it on there or select another server`
+    : unitRefs(uid).length ? `Select at least 1 server of the ${name}` : '').filter(Boolean);
 }
 function renderChainWarn() {
   const problems = chainProblems();
@@ -369,7 +368,7 @@ function renderChainTest() {
     ? `<button class="btn-secondary" onclick="stopChainRoute()">Stop</button>`
     : `<button class="btn-secondary" onclick="testChainRoute()" ${nEntry && nExit ? '' : 'disabled'}>${ICON.bolt}${t ? 'Check again' : 'Check route'}</button>`;
   let sum;
-  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} has no ticked working nodes.</div>`;
+  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} has no selected working nodes.</div>`;
   else if (!t) sum = `<div class="route-sum">Tries every exit node through the entry nodes, fastest entries first.</div>`;
   else if (t.running) sum = `<div class="route-sum">${t.stage}<div class="route-progress"><div style="width:${t.total ? t.done / t.total * 100 : 0}%"></div></div></div>`;
   else if (t.pairs.length) sum = `<div class="route-sum good">${t.pairs.length} working pair${t.pairs.length === 1 ? '' : 's'}${t.stopped ? ' (stopped early)' : ''} · best ${t.pairs[0].ms} ms</div>`;

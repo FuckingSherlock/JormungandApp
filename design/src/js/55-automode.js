@@ -1,4 +1,4 @@
-/* ══════════════════════ AUTO MODE (Home card + sheet) ══════════════════════
+/* ══════════════════════ AUTO MODE (Home card + Settings → Auto mode) ══════════════════════
    Everything about how Auto picks and keeps a connection, in one place:
    - threshold: a server takes over from the current one only if it is this much faster
      (hysteresis, so Auto does not hop between servers with close pings);
@@ -52,9 +52,12 @@ function renderAutoCard() {
     + stat('subs', subsEveryText(autoCfg.subsEvery));
 }
 
+// The Home card is a shortcut: it opens Settings at the Auto mode section.
 function openAutoMode() {
   renderAutoMode();
-  openSheet('automode');
+  switchTab('settings');
+  const sc = document.querySelector('#view-settings > .scroll');
+  sc.scrollTop += document.getElementById('auto-caption').getBoundingClientRect().top - sc.getBoundingClientRect().top;
 }
 
 function setAutoCfg(key, val) {
@@ -64,7 +67,7 @@ function setAutoCfg(key, val) {
 }
 
 function renderAutoMode() {
-  const el = document.getElementById('automode-body');
+  const el = document.getElementById('auto-settings');
   const id = effectiveConnectId(), e = connectEntry(id);
   const chips = (key, opts, fmt) => `<div class="chip-row">${opts.map(v =>
     `<div class="chip ${autoCfg[key] === v ? 'active' : ''}" onclick="setAutoCfg('${key}',${JSON.stringify(v)})">${fmt(v)}</div>`).join('')}</div>`;
@@ -88,7 +91,7 @@ function renderAutoMode() {
       <button class="btn-secondary" onclick="openProfiles()">Priority list</button>
     </div>
 
-    <div class="form-label" style="padding:10px 18px 0">Standby · next by priority</div>
+    <div class="am-label">Standby · next by priority</div>
     <div class="am-standby">${!autoConnect ? '<div class="route-empty">Manual — no failover, standby is idle</div>'
       : !autoCfg.standby ? '<div class="route-empty">Off — only the current server is checked</div>'
       : standby.map((sid, i) => `<div class="am-sb-row"><span class="cc-rank">${i + 1}</span><div class="am-sb-main"><div class="am-sb-name">${esc(connectEntry(sid).name)}${chainsData[sid] ? '<span class="conn-tag">chain</span>' : ''}</div><div class="dock-route">${route(sid)}</div></div>${latMsHtml(routeMs(sid))}</div>`).join('')
@@ -107,7 +110,7 @@ function renderAutoMode() {
       <div class="set-row"><div class="set-label">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
     </div>
 
-    <div class="form-label" style="padding:4px 18px 0">Subscriptions</div>
+    <div class="am-label">Subscriptions</div>
     <div class="set-group">
       <div class="set-row stack"><div><div class="set-label">Update all subscriptions every</div><div class="set-hint">${own.length
         ? `${own.map(sid => esc(sourcesData[sid].name)).join(', ')} ${own.length > 1 ? 'use their own periods' : 'uses its own period'} (Nodes → Edit)`
@@ -118,5 +121,5 @@ function renderAutoMode() {
 
 sourceViewHooks.push(() => {
   renderAutoCard();
-  if (document.getElementById('sh-automode').classList.contains('open')) renderAutoMode();
+  renderAutoMode();
 });
