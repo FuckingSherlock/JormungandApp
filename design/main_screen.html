@@ -369,23 +369,27 @@ body {
 .dimmed{opacity:.45}
 
 /* ── Connect dock (home) ── */
-#view-home > .scroll{padding-bottom:34px}
+#view-home > .scroll{padding-bottom:52px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
-.dock-tab{position:absolute;left:50%;top:-27px;width:168px;height:28px;transform:translateX(-50%);overflow:visible}
-.dock-tab-fill{fill:var(--surface)}
-.dock-tab-line{fill:none;stroke:var(--border);stroke-width:1;vector-effect:non-scaling-stroke}
-.power-btn{
-  position:absolute;left:50%;top:-22px;transform:translateX(-50%);
-  width:54px;height:54px;border-radius:17px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  background:var(--card);border:1.5px solid var(--border-hi);color:var(--t2);
-  transition:background .25s,border-color .25s,color .25s,box-shadow .25s;
+.power-tab{
+  position:absolute;left:50%;top:-41px;transform:translateX(-50%);
+  width:168px;height:43px;padding:0;border:none;background:none;cursor:pointer;
+  color:var(--t2);transition:color .25s,filter .25s;
 }
-.power-btn:active{transform:translateX(-50%) scale(.94)}
-.power-btn.on{background:rgba(var(--active-rgb),.14);border-color:var(--active);color:var(--active);box-shadow:0 0 22px rgba(var(--active-rgb),.35)}
-.power-btn.busy{border-color:var(--accent);color:var(--accent);animation:power-pulse 1s ease-in-out infinite}
-@keyframes power-pulse{50%{box-shadow:0 0 0 7px rgba(var(--accent-rgb),.12)}}
-.dock-profile{display:flex;align-items:center;gap:12px;padding:40px 14px 12px;cursor:pointer}
+.power-shape{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.power-base{fill:var(--surface)}
+.power-tint{fill:transparent;transition:fill .25s}
+.power-line{fill:none;stroke:var(--border);stroke-width:1.5;vector-effect:non-scaling-stroke;transition:stroke .25s}
+.power-icon{position:absolute;left:50%;top:10px;transform:translateX(-50%);transition:transform .15s}
+.power-tab:active .power-icon{transform:translateX(-50%) scale(.88)}
+.power-tab.on{color:var(--active);filter:drop-shadow(0 -3px 10px rgba(var(--active-rgb),.3))}
+.power-tab.on .power-tint{fill:rgba(var(--active-rgb),.12)}
+.power-tab.on .power-line{stroke:var(--active)}
+.power-tab.busy{color:var(--accent);animation:power-pulse 1s ease-in-out infinite}
+.power-tab.busy .power-tint{fill:rgba(var(--accent-rgb),.10)}
+.power-tab.busy .power-line{stroke:var(--accent)}
+@keyframes power-pulse{50%{filter:drop-shadow(0 -3px 10px rgba(var(--accent-rgb),.45))}}
+.dock-profile{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer}
 .dock-profile:active{background:rgba(255,255,255,.02)}
 .dock-chevron{color:var(--t3);flex-shrink:0}
 
@@ -650,12 +654,13 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
 
   <!-- Connect dock: power button in a trapezoid tab + active profile -->
   <div class="dock">
-    <svg class="dock-tab" viewBox="0 0 168 28" preserveAspectRatio="none" aria-hidden="true">
-      <path class="dock-tab-fill" d="M0,26 C10,26 14,24 18,20 L34,4 C36,1.5 39,0 43,0 L125,0 C129,0 132,1.5 134,4 L150,20 C154,24 158,26 168,26 L168,28 L0,28 Z"/>
-      <path class="dock-tab-line" d="M0,26.5 C10,26.5 14,24 18,20 L34,4 C36,1.5 39,0 43,0 L125,0 C129,0 132,1.5 134,4 L150,20 C154,24 158,26.5 168,26.5"/>
-    </svg>
-    <button class="power-btn on" id="powerBtn" onclick="toggleMain()" aria-label="Connect / disconnect">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+    <button class="power-tab on" id="powerBtn" onclick="toggleMain()" aria-label="Connect / disconnect">
+      <svg class="power-shape" viewBox="0 0 168 43" preserveAspectRatio="none" aria-hidden="true">
+        <path class="power-base" d="M0,41 C10,41 16,39 20,35 L40,5 C42,2 45,0 50,0 L118,0 C123,0 126,2 128,5 L148,35 C152,39 158,41 168,41 L168,43 L0,43 Z"/>
+        <path class="power-tint" d="M0,41 C10,41 16,39 20,35 L40,5 C42,2 45,0 50,0 L118,0 C123,0 126,2 128,5 L148,35 C152,39 158,41 168,41 L168,43 L0,43 Z"/>
+        <path class="power-line" d="M0,41.5 C10,41.5 16,39 20,35 L40,5 C42,2 45,0.5 50,0.5 L118,0.5 C123,0.5 126,2 128,5 L148,35 C152,39 158,41.5 168,41.5"/>
+      </svg>
+      <svg class="power-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
     </button>
     <div class="dock-profile" onclick="openSheet('profiles')">
       <div class="profiles-icon">
