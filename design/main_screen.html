@@ -369,26 +369,24 @@ body {
 .dimmed{opacity:.45}
 
 /* ── Connect dock (home) ── */
-#view-home > .scroll{padding-bottom:52px}
+#view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
 .power-tab{
-  position:absolute;left:50%;top:-41px;transform:translateX(-50%);
-  width:168px;height:43px;padding:0;border:none;background:none;cursor:pointer;
+  position:absolute;left:50%;top:-50px;transform:translateX(-50%);
+  width:200px;height:52px;padding:0;border:none;background:none;cursor:pointer;
   color:var(--t2);transition:color .25s,filter .25s;
 }
 .power-shape{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
-.power-base{fill:var(--surface)}
-.power-tint{fill:transparent;transition:fill .25s}
-.power-line{fill:none;stroke:var(--border);stroke-width:1.5;vector-effect:non-scaling-stroke;transition:stroke .25s}
-.power-icon{position:absolute;left:50%;top:10px;transform:translateX(-50%);transition:transform .15s}
+.frame-fill{fill:var(--surface)}
+.frame-line{fill:none;stroke:var(--border);stroke-width:1;vector-effect:non-scaling-stroke}
+.power-body{fill:var(--card);stroke:var(--border-hi);stroke-width:1.5;vector-effect:non-scaling-stroke;transition:fill .25s,stroke .25s}
+.power-icon{position:absolute;left:50%;top:14px;transform:translateX(-50%);transition:transform .15s}
 .power-tab:active .power-icon{transform:translateX(-50%) scale(.88)}
-.power-tab.on{color:var(--active);filter:drop-shadow(0 -3px 10px rgba(var(--active-rgb),.3))}
-.power-tab.on .power-tint{fill:rgba(var(--active-rgb),.12)}
-.power-tab.on .power-line{stroke:var(--active)}
+.power-tab.on{color:var(--active);filter:drop-shadow(0 0 8px rgba(var(--active-rgb),.28))}
+.power-tab.on .power-body{fill:rgba(var(--active-rgb),.14);stroke:var(--active)}
 .power-tab.busy{color:var(--accent);animation:power-pulse 1s ease-in-out infinite}
-.power-tab.busy .power-tint{fill:rgba(var(--accent-rgb),.10)}
-.power-tab.busy .power-line{stroke:var(--accent)}
-@keyframes power-pulse{50%{filter:drop-shadow(0 -3px 10px rgba(var(--accent-rgb),.45))}}
+.power-tab.busy .power-body{fill:rgba(var(--accent-rgb),.12);stroke:var(--accent)}
+@keyframes power-pulse{50%{filter:drop-shadow(0 0 10px rgba(var(--accent-rgb),.45))}}
 .dock-profile{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer}
 .dock-profile:active{background:rgba(255,255,255,.02)}
 .dock-chevron{color:var(--t3);flex-shrink:0}
@@ -655,10 +653,12 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
   <!-- Connect dock: power button in a trapezoid tab + active profile -->
   <div class="dock">
     <button class="power-tab on" id="powerBtn" onclick="toggleMain()" aria-label="Connect / disconnect">
-      <svg class="power-shape" viewBox="0 0 168 43" preserveAspectRatio="none" aria-hidden="true">
-        <path class="power-base" d="M0,41 C10,41 16,39 20,35 L40,5 C42,2 45,0 50,0 L118,0 C123,0 126,2 128,5 L148,35 C152,39 158,41 168,41 L168,43 L0,43 Z"/>
-        <path class="power-tint" d="M0,41 C10,41 16,39 20,35 L40,5 C42,2 45,0 50,0 L118,0 C123,0 126,2 128,5 L148,35 C152,39 158,41 168,41 L168,43 L0,43 Z"/>
-        <path class="power-line" d="M0,41.5 C10,41.5 16,39 20,35 L40,5 C42,2 45,0.5 50,0.5 L118,0.5 C123,0.5 126,2 128,5 L148,35 C152,39 158,41.5 168,41.5"/>
+      <svg class="power-shape" viewBox="0 0 200 52" preserveAspectRatio="none" aria-hidden="true">
+        <!-- shared frame: dock edge rising into the tab (all tab corners rounded alike) -->
+        <path class="frame-fill" d="M0,50 L5,50 Q12,50 16.31,44.48 L46.69,5.52 Q51,0 58,0 L142,0 Q149,0 153.31,5.52 L183.69,44.48 Q188,50 195,50 L200,50 L200,52 L0,52 Z"/>
+        <path class="frame-line" d="M0,50 L5,50 Q12,50 16.31,44.48 L46.69,5.52 Q51,0 58,0 L142,0 Q149,0 153.31,5.52 L183.69,44.48 Q188,50 195,50 L200,50"/>
+        <!-- the button: its own closed trapezoid inside the tab -->
+        <path class="power-body" d="M27.2,40.27 L50.24,10.73 Q53.93,6 59.93,6 L140.07,6 Q146.07,6 149.76,10.73 L172.8,40.27 Q176.49,45 170.49,45 L29.51,45 Q23.51,45 27.2,40.27 Z"/>
       </svg>
       <svg class="power-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
     </button>
