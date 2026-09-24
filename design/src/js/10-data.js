@@ -33,7 +33,7 @@ function genNodes(count, kind) {
 
 function mkSub(id, name, count, extra) {
   return Object.assign({
-    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], nodes:genNodes(count,'sub'),
+    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], gone:[], nodes:genNodes(count,'sub'),
     url:'https://sub.example.net/api/sub/' + id + 'Xk7PCg04NKVzp', format:'sing-box',
     updatedAt: Date.now() - 2*3600e3, usage:{ used:0, total:0 }, expire:null,
     updateInterval:12, reloadAfterUpdate:true, testAfterUpdate:true,
@@ -42,7 +42,8 @@ function mkSub(id, name, count, extra) {
 }
 
 let sourcesData = {
-  src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, offNodes:['n5','n11'], website:'https://jormungand.example' }),
+  src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, offNodes:['n5','n11','n19'], website:'https://jormungand.example',
+    gone: genNodes(20, 'sub').slice(18).map(n => Object.assign(n, { goneAt: Date.now() - 30*3600e3 })), demoChurn: true }),
   src2: mkSub('src2', 'Work Servers', 9, { format:'clash', updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
   src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], nodes:genNodes(2,'node') },
   src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
@@ -56,7 +57,14 @@ let sourceSeq = 5;
    (hand-picked nodes from sources) plus chains of two profiles. Each mode keeps its own
    priority list, pinned entry and Auto flag; the active mode's live in the globals below,
    the other mode's wait in modeState. In simple mode a source's offNodes (node ids) are
-   the servers the user switched off for it; servers a later update adds start on. */
+   the servers the user switched off for it; servers a later update adds start on.
+
+   Node identity: a node id stands for the server itself (protocol + address + port +
+   credentials), not its place in the list, so every setting that names nodes (offNodes,
+   profile picks, chain inOff/outOff/exitOrder) survives a reshuffled subscription.
+   s.gone = servers the provider dropped in an update (with goneAt): settings naming them
+   are kept, so when a server comes back it returns ticked/unticked and in its old
+   priority place. The UI lists them under "Unavailable"; Forget purges them for good. */
 let connectMode = 'simple';
 /* connectOrder is the priority list of the active mode (entries and chains together):
    with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
@@ -80,14 +88,14 @@ let chainsData = {
   cpwork:    { id:'cpwork',    name:'Work via Gaming', inId:'gaming',  outId:'work',    inAuto:false },
   // simple mode: chain ends are sources
   sc1:       { id:'sc1',       name:'Remnawave via Gaming', inId:'src4', outId:'src1', inAuto:true,
-               exitMode:'priority', exitOrder:['src1::n6','src1::n2','src1::n9'] },
+               exitMode:'priority', exitOrder:['src1::n6','src1::n18','src1::n2','src1::n9'] },
 };
 let chainSeq = 1;
 
 
 function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
 // Chain-able entries of the active mode: sources in simple mode, profiles otherwise.
-function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] : profilesData[id]); }
+function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] && sourcesData[id].enabled : profilesData[id]); }
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 

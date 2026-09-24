@@ -56,11 +56,52 @@ function sortedNodes(list, nodeOf = x => x) {
   return list;
 }
 
+/* ── Servers the provider dropped (s.gone) ──
+   One collapsible "Unavailable · N" block, used by Nodes and by every node picker. The
+   rows are read-only; `extra(ref)` draws the kept setting (tick, priority) before the
+   flag. `ctx` names the block so each view remembers its own open state. */
+const goneOpen = new Set();
+function goneBlockHtml(ctx, refs, extra = () => '', action = '') {
+  if (!refs.length) return '';
+  const open = goneOpen.has(ctx);
+  const rows = open ? refs.map(r => `<div class="node-row gone">${extra(r)}
+      <span class="node-flag">${r.node.flag}</span>
+      <span class="node-name">${esc(r.node.name)}</span>
+      <span class="node-proto">${r.node.protocol}</span>
+      <span class="lat none">${timeAgo(r.node.goneAt)}</span>
+    </div>`).join('') : '';
+  return `<div class="gone-block ${open ? 'open' : ''}">
+    <div class="gone-head" onclick="event.stopPropagation();toggleGone('${ctx}')">
+      <svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+      <span class="gone-title">Unavailable · ${refs.length}</span>
+      <span class="gone-hint">removed by the provider, settings kept</span>${action}
+    </div>${rows}
+  </div>`;
+}
+function toggleGone(ctx) {
+  if (goneOpen.has(ctx)) goneOpen.delete(ctx); else goneOpen.add(ctx);
+  refreshSourceViews();
+}
+const goneRefs = sid => (sourcesData[sid].gone || []).map(node => ({ sid, node }));
+
+// Forget dropped servers: they and every setting naming them are gone for good.
+function forgetGone(sid) {
+  const s = sourcesData[sid];
+  const ids = new Set((s.gone || []).map(n => n.id)), keys = new Set([...ids].map(nid => sid + '::' + nid));
+  s.gone = [];
+  s.offNodes = (s.offNodes || []).filter(nid => !ids.has(nid));
+  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => !keys.has(k)); });
+  Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !keys.has(k)); }));
+  toast(`Forgot ${ids.size} unavailable server${ids.size === 1 ? '' : 's'}`);
+  refreshSourceViews();
+}
+
 function srcMetaHtml(s) {
   const parts = [];
   if (s.kind === 'sub') {
     parts.push(`<span class="fmt-tag">${s.format}</span>`);
     parts.push(`${s.nodes.length} nodes`);
+    if ((s.gone || []).length) parts.push(`<span class="gone-meta">${s.gone.length} unavailable</span>`);
     parts.push(timeAgo(s.updatedAt));
   } else {
     parts.push(`<span class="fmt-tag">manual</span>`);
@@ -122,7 +163,8 @@ function renderSourceCard(id, q) {
     ${usageHtml(s)}
     </div>
     </div>
-    <div class="src-body">${nodeRows}${addRow}</div>
+    <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), undefined,
+      `<div class="chip gone-forget" onclick="event.stopPropagation();forgetGone('${id}')">Forget</div>`)}</div>
   </div>`;
 }
 
@@ -214,10 +256,30 @@ function updateSource(sid) {
   setTimeout(() => {
     s.updating = false;
     s.updatedAt = Date.now();
+    if (s.demoChurn) demoProviderChurn(s);
     refreshSourceViews();
     if (s.testAfterUpdate) testSourceLatency(sid);
   }, 900 + Math.random() * 600);
 }
+// Mockup only: an update of a demo subscription alternates between the provider dropping
+// two servers and bringing the dropped ones back (with their old settings).
+function demoProviderChurn(s) {
+  if ((s.gone || []).length) {
+    const back = s.gone;
+    s.nodes = s.nodes.concat(back.map(n => { const m = Object.assign({}, n); delete m.goneAt; return m; }))
+      .sort((a, b) => +a.id.slice(1) - +b.id.slice(1));
+    s.gone = [];
+    back.forEach(n => { if (!pingCache.has(serverKey(n))) setPing(n, truthOf(n)); });
+    toast(`${back.length} server${back.length === 1 ? ' is' : 's are'} back — previous settings restored`);
+  } else {
+    const drop = s.nodes.filter((n, i) => i === 1 || i === 3);
+    s.nodes = s.nodes.filter(n => !drop.includes(n));
+    s.gone = drop.map(n => Object.assign({}, n, { goneAt: Date.now() }));
+    toast(`The provider removed ${drop.length} servers — see Unavailable, settings kept`);
+  }
+  s.count = s.nodes.length;
+}
+
 function updateAllSources() {
   sourceOrder.forEach(sid => { if (sourcesData[sid].enabled) updateSource(sid); });
   closeSheet('nodesmore');

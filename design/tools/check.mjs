@@ -45,9 +45,11 @@ const tab = (page, name) => page.click(`.nav-btn[data-tab=${name}]`);
 const SHOTS = {
   home:       async p => {},
   nodes:      async p => { await tab(p, 'nodes'); },
-  'nodes-open': async p => { await tab(p, 'nodes'); await p.evaluate(() => { expandState[sourceOrder[0]] = true; renderNodes(); }); },
+  'nodes-open': async p => { await tab(p, 'nodes'); await p.evaluate(() => { expandState[sourceOrder[0]] = true; goneOpen.add('nodes:' + sourceOrder[0]); renderNodes(); document.querySelector('#view-nodes .scroll').scrollTop = 520; }); },
   settings:   async p => { await tab(p, 'settings'); },
   dock:       async p => ({ clip: await clipOf(p, '.dock', 60) }),
+  'dock-chain': async p => { await p.evaluate(() => { selectConnect('sc1'); }); return { clip: await clipOf(p, '.dock', 60) }; },
+  'dock-profile': async p => { await p.evaluate(() => { setConnectMode('profiles'); selectConnect('default'); }); return { clip: await clipOf(p, '.dock', 60) }; },
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
   'profiles-full': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); }); await settle(p); },
@@ -55,6 +57,8 @@ const SHOTS = {
   'source-entry': async p => { await p.evaluate(() => { openProfiles(); openSourceEntry('src1'); }); await settle(p); },
   'simple-chain': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
   'chain-priority': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
+  'gone': async p => { await p.evaluate(() => { openProfiles(); goneOpen.add('se:src1'); openSourceEntry('src1'); document.querySelector('#sh-sourceentry .sheet-body').scrollTop = 9999; }); await settle(p); },
+  'nothing-ticked': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('in', 'src4'); setChainNodesAll('in'); }); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
   'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
     const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
@@ -329,7 +333,7 @@ async function runChecks() {
     await page.click('#actions-body .menu-row >> nth=1'); await settle(page);
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
     expect(ids.includes('default') && ids.includes('cpdefault') && !ids.includes('src1'), ids.join());
-    expect(/Profiles/.test(await page.textContent('#profilesTitle')) && /Profiles/.test(await page.textContent('#profCardLabel')), 'titles');
+    expect(/Profiles/.test(await page.textContent('#profilesTitle')) && /Profile|Chain/.test(await page.textContent('#profCardLabel')), 'titles');
   });
 
   await check('profiles: tap sets Manual (sheet stays), second tap / badge back to Auto', async () => {
@@ -440,6 +444,95 @@ async function runChecks() {
     const first = before.split(',')[0];
     await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
     expect(after[after.length - 1] === first, 'order after drag: ' + after.join());
+  });
+
+  await check('provider drops servers: settings kept, back with them, Forget purges', async () => {
+    const r = await page.evaluate(() => {
+      setConnectMode('simple');
+      const s = sourcesData.src1, out = {};
+      if (s.gone.length) demoProviderChurn(s);
+      s.offNodes = ['n1'];
+      chainsData.tc = { id:'tc', name:'t', inId:'src2', outId:'src1', inAuto:true, inOff:[], outOff:['src1::n3'], exitMode:'priority', exitOrder:['src1::n3','src1::n0'] };
+      demoProviderChurn(s);
+      out.dropped = s.gone.map(n => n.id).join() === 'n1,n3' && !unitRefs('src1').some(r => ['n1','n3'].includes(r.node.id));
+      out.orderSkips = refKey(chainExitOrder(chainsData.tc)[0]) === 'src1::n0';
+      s.offNodes.push('n0');
+      openSourceEntry('src1'); setSourceEntryAll();   // one live server off -> "All" ticks the live ones only
+      out.allKeepsGone = isNodeOff(s, 'n1') && offCount(s) === 0;
+      return out;
+    });
+    await page.click('#se-nodes .gone-head'); await settle(page);
+    const rows = await page.$$eval('#se-nodes .node-row.gone', r => r.length);
+    const r2 = await page.evaluate(() => {
+      closeSheet('sourceentry');
+      const s = sourcesData.src1, out = {};
+      demoProviderChurn(s);
+      out.back = isNodeOff(s, 'n1') && refKey(chainExitOrder(chainsData.tc)[0]) === 'src1::n3' && !chainExitRefs(chainsData.tc).some(r => r.node.id === 'n3');
+      demoProviderChurn(s); forgetGone('src1');
+      out.forgot = !s.gone.length && !s.offNodes.includes('n1') && !chainsData.tc.exitOrder.includes('src1::n3') && !chainsData.tc.outOff.length;
+      delete chainsData.tc;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && rows === 2 && Object.values(r2).every(Boolean), JSON.stringify({ r, rows, r2 }));
+  });
+
+  await check('nothing ticked: warning, save blocked, source entry reverts on close', async () => {
+    const r = await page.evaluate(() => {
+      setConnectMode('simple'); const out = {};
+      const s = sourcesData.src2; s.offNodes = [];
+      openSourceEntry('src2'); setSourceEntryAll();
+      out.seWarn = !document.getElementById('se-warn').hidden && document.getElementById('se-done').disabled;
+      closeSheet('sourceentry');
+      out.seReverted = offCount(s) === 0;
+      openCreateChain(); pickChainSide('in', 'src2'); pickChainSide('out', 'src3'); setChainNodesAll('in');
+      out.ccWarn = !document.getElementById('cc-warn').hidden && document.getElementById('ccSaveBtn').disabled && /entry/.test(document.getElementById('cc-warn').textContent);
+      const n = Object.keys(chainsData).length; saveCreateChain();
+      out.ccBlocked = Object.keys(chainsData).length === n;
+      closeSheet('createchain');
+      setConnectMode('profiles'); openCreateProfile();
+      out.cpWarn = !document.getElementById('cp-warn').hidden && document.getElementById('cpSaveBtn').disabled;
+      toggleCreateProfileSource('src2');
+      out.cpOk = document.getElementById('cp-warn').hidden;
+      closeSheet('createprofile'); setConnectMode('simple');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('source switched off in Nodes: hidden from lists, pickers and its chains', async () => {
+    const r = await page.evaluate(() => {
+      setConnectMode('simple'); const out = {};
+      sourcesData.src2.enabled = false;
+      chainsData.tc2 = { id:'tc2', name:'t2', inId:'src2', outId:'src3', inAuto:true, inOff:[], outOff:[], exitMode:'fastest', exitOrder:[] };
+      connectOrder.push('tc2');
+      openProfiles();
+      const ids = [...document.querySelectorAll('#connects-list .conn-row')].map(e => e.dataset.id);
+      out.list = !ids.includes('src2') && !ids.includes('tc2') && ids.includes('src1');
+      openCreateChain(); out.chain = !document.querySelector('#cc-in-list .cc-prof[data-id=src2]'); closeSheet('createchain');
+      setConnectMode('profiles'); openCreateProfile(); out.profile = !document.querySelector('#cp-source-list .ps-card[data-id=src2]'); closeSheet('createprofile');
+      setConnectMode('simple');
+      sourcesData.src2.enabled = true; delete chainsData.tc2; connectOrder = connectOrder.filter(x => x !== 'tc2');
+      closeSheet('profiles'); renderAll();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('dock shows the route: source + node, profile + source + node, chain entry → exit', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, was = autoConnect, det = () => document.getElementById('profModeDetail');
+      setConnectMode('simple'); autoConnect = false; activeConnectId = 'src1'; updateMainConnectCard();
+      out.src = document.getElementById('profCardLabel').textContent === 'Subscription' && !!det().querySelector('.dock-node') && !det().querySelector('.dock-src');
+      chainsData.tc3 = { id:'tc3', name:'t3', inId:'src2', outId:'src1', inAuto:true, inOff:[], outOff:[], exitMode:'fastest', exitOrder:[] };
+      connectOrder.push('tc3'); activeConnectId = 'tc3'; updateMainConnectCard();
+      out.chain = document.getElementById('profCardLabel').textContent === 'Chain' && det().querySelectorAll('.dock-node').length === 2 && !!det().querySelector('.dock-arrow');
+      delete chainsData.tc3; connectOrder = connectOrder.filter(x => x !== 'tc3'); activeConnectId = 'src1'; autoConnect = was;
+      setConnectMode('profiles'); const pw = autoConnect; autoConnect = false; activeConnectId = 'default'; updateMainConnectCard();
+      out.profile = document.getElementById('profCardLabel').textContent === 'Profile' && !!det().querySelector('.dock-src');
+      autoConnect = pw; setConnectMode('simple'); updateMainConnectCard();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
   await check('ping cache: one result per server, shared by every view', async () => {

@@ -175,7 +175,12 @@ body {
 .profiles-main{flex:1;min-width:0}
 .profiles-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .profiles-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.profiles-sub{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.profiles-sub{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;min-width:0}
+.dock-route{flex:1;min-width:0;display:flex;align-items:center;gap:5px;overflow:hidden;white-space:nowrap;color:var(--t2)}
+.dock-node{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.dock-node.none{color:var(--t3)}
+.dock-src{flex-shrink:2;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--t3)}
+.dock-arrow,.dock-sep{flex-shrink:0;color:var(--t3)}
 .profiles-meta{text-align:right;flex-shrink:0;font-family:var(--mono)}
 .profiles-meta .count{font-size:15px;font-weight:600;color:var(--t1)}
 .profiles-meta .src{font-size:12px;color:var(--t2)}
@@ -448,6 +453,22 @@ body {
 .se-nodes{margin:0 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .cc-grip{margin:-10px -4px -10px -8px;padding:10px 4px 10px 8px;touch-action:none;cursor:grab;color:var(--t3)}
 .cc-rank{width:14px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0}
+
+/* Warning above a sheet's save button (nothing ticked) */
+.warn-note{margin:0 0 10px;padding:9px 12px;border-radius:var(--r);font-size:13px;line-height:1.35;color:var(--warn);background:rgba(var(--warn-rgb),.12);border:1px solid rgba(var(--warn-rgb),.3)}
+.warn-note[hidden]{display:none}
+.btn-primary:disabled{opacity:.4;pointer-events:none}
+
+/* Servers the provider dropped: collapsible, read-only, settings kept */
+.gone-head{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--t2);border-top:1px solid var(--border)}
+.gone-head .src-chevron{color:var(--t3);transition:transform .2s;transform:rotate(-90deg);flex-shrink:0}
+.gone-block.open .gone-head .src-chevron{transform:none}
+.gone-title{font-weight:600;flex-shrink:0}
+.gone-hint{flex:1;min-width:0;color:var(--t3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gone-head .chip{padding:3px 10px;font-size:12px}
+.node-row.gone{cursor:default;opacity:.55}
+.node-row.gone .node-name{text-decoration:line-through;text-decoration-color:var(--t3)}
+.gone-meta{color:var(--warn)}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -469,7 +490,7 @@ body {
 .power-tab.busy .power-body{fill:rgba(var(--accent-rgb),.12);stroke:var(--accent);transition-duration:.35s}
 .power-tab.busy .power-icon{animation:power-pulse 1s ease-in-out infinite}
 @keyframes power-pulse{50%{opacity:.4}}
-.dock-profile{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer}
+.dock-profile{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;cursor:pointer}
 .dock-profile:active{background:rgba(255,255,255,.02)}
 .dock-chevron{color:var(--t3);flex-shrink:0}
 
@@ -746,7 +767,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         </div>
         <div class="profiles-sub">
           <span class="proto-badge" id="profModeBadge">AUTO</span>
-          <span style="color:var(--t3)" id="profModeDetail">best latency · 38ms</span>
+          <span class="dock-route" id="profModeDetail"></span>
         </div>
       </div>
       <div class="profiles-meta">
@@ -947,6 +968,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
     </div>
     <div class="sheet-footer">
+      <div class="warn-note" id="cp-warn" hidden>Tick at least 1 server — a profile with none can’t connect</div>
       <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
       <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="deleteEditingProfile()">Delete profile</button>
     </div>
@@ -980,7 +1002,8 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <div class="se-nodes" id="se-nodes"></div>
     </div>
     <div class="sheet-footer">
-      <button class="btn-primary" onclick="closeSheet('sourceentry')">Done</button>
+      <div class="warn-note" id="se-warn" hidden>Tick at least 1 server — otherwise the previous selection is kept</div>
+      <button class="btn-primary" id="se-done" onclick="closeSheet('sourceentry')">Done</button>
     </div>
   </div>
 
@@ -1018,6 +1041,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
     </div>
     <div class="sheet-footer">
+      <div class="warn-note" id="cc-warn" hidden></div>
       <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
       <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
     </div>
@@ -1304,7 +1328,7 @@ function genNodes(count, kind) {
 
 function mkSub(id, name, count, extra) {
   return Object.assign({
-    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], nodes:genNodes(count,'sub'),
+    id, kind:'sub', name, enabled:true, inAuto:true, offNodes:[], gone:[], nodes:genNodes(count,'sub'),
     url:'https://sub.example.net/api/sub/' + id + 'Xk7PCg04NKVzp', format:'sing-box',
     updatedAt: Date.now() - 2*3600e3, usage:{ used:0, total:0 }, expire:null,
     updateInterval:12, reloadAfterUpdate:true, testAfterUpdate:true,
@@ -1313,7 +1337,8 @@ function mkSub(id, name, count, extra) {
 }
 
 let sourcesData = {
-  src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, offNodes:['n5','n11'], website:'https://jormungand.example' }),
+  src1: mkSub('src1', 'Remnawave', 18, { usage:{ used:111.4, total:0 }, offNodes:['n5','n11','n19'], website:'https://jormungand.example',
+    gone: genNodes(20, 'sub').slice(18).map(n => Object.assign(n, { goneAt: Date.now() - 30*3600e3 })), demoChurn: true }),
   src2: mkSub('src2', 'Work Servers', 9, { format:'clash', updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
   src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], nodes:genNodes(2,'node') },
   src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
@@ -1327,7 +1352,14 @@ let sourceSeq = 5;
    (hand-picked nodes from sources) plus chains of two profiles. Each mode keeps its own
    priority list, pinned entry and Auto flag; the active mode's live in the globals below,
    the other mode's wait in modeState. In simple mode a source's offNodes (node ids) are
-   the servers the user switched off for it; servers a later update adds start on. */
+   the servers the user switched off for it; servers a later update adds start on.
+
+   Node identity: a node id stands for the server itself (protocol + address + port +
+   credentials), not its place in the list, so every setting that names nodes (offNodes,
+   profile picks, chain inOff/outOff/exitOrder) survives a reshuffled subscription.
+   s.gone = servers the provider dropped in an update (with goneAt): settings naming them
+   are kept, so when a server comes back it returns ticked/unticked and in its old
+   priority place. The UI lists them under "Unavailable"; Forget purges them for good. */
 let connectMode = 'simple';
 /* connectOrder is the priority list of the active mode (entries and chains together):
    with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
@@ -1351,14 +1383,14 @@ let chainsData = {
   cpwork:    { id:'cpwork',    name:'Work via Gaming', inId:'gaming',  outId:'work',    inAuto:false },
   // simple mode: chain ends are sources
   sc1:       { id:'sc1',       name:'Remnawave via Gaming', inId:'src4', outId:'src1', inAuto:true,
-               exitMode:'priority', exitOrder:['src1::n6','src1::n2','src1::n9'] },
+               exitMode:'priority', exitOrder:['src1::n6','src1::n18','src1::n2','src1::n9'] },
 };
 let chainSeq = 1;
 
 
 function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
 // Chain-able entries of the active mode: sources in simple mode, profiles otherwise.
-function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] : profilesData[id]); }
+function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] && sourcesData[id].enabled : profilesData[id]); }
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 
@@ -1456,7 +1488,8 @@ const unitWord = () => simpleMode() ? 'source' : 'profile';
 
 // Nodes a profile can use right now (enabled sources only), as {sid, node}.
 // p.sources = whole sources (every node, including ones a subscription update adds later);
-// p.nodes = individually picked nodes as 'sid::nid' (kept only while the server exists).
+// p.nodes = individually picked nodes as 'sid::nid' (kept while the provider has dropped
+// the server too — see s.gone — so the pick is back when the server is).
 function profileNodeRefs(p) {
   const refs = [];
   sourceOrder.forEach(sid => {
@@ -1477,6 +1510,29 @@ function unitRefs(id) {
   const s = sourcesData[id];
   return s && s.enabled ? s.nodes.filter(n => !isNodeOff(s, n.id)).map(node => ({ sid: id, node })) : [];
 }
+// Servers of a unit the provider dropped (s.gone), shown under "Unavailable" with their
+// kept settings. Disabled sources show nothing, like their live nodes.
+function unitGoneRefs(id) {
+  const p = profilesData[id];
+  const sids = p ? sourceOrder : [id];
+  const refs = [];
+  sids.forEach(sid => {
+    const s = sourcesData[sid];
+    if (!s || !s.enabled) return;
+    (s.gone || []).forEach(node => { if (!p || p.sources.includes(sid) || p.nodes.includes(sid + '::' + node.id)) refs.push({ sid, node }); });
+  });
+  return refs;
+}
+
+// An entry is listed only while what it stands on is usable in Nodes: a source switched
+// off there disappears from the simple list together with the chains through it.
+function entryVisible(id) {
+  if (chainsData[id]) return entryVisible(chainsData[id].inId) && entryVisible(chainsData[id].outId);
+  if (sourcesData[id]) return sourcesData[id].enabled;
+  return !!profilesData[id];
+}
+const visibleOrder = () => connectOrder.filter(entryVisible);
+
 const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u ? u.name : '—'; };
 
 // The node a unit would connect through: the best alive one.
@@ -1520,9 +1576,10 @@ function isUsable(id) {
 
 // What is actually connected: the pinned entry, or Auto's pick.
 function effectiveConnectId() {
-  if (!autoConnect) return activeConnectId;
-  return connectOrder.find(id => connectEntry(id).inAuto && isUsable(id))
-      || connectOrder.find(id => connectEntry(id).inAuto) || connectOrder[0];
+  if (!autoConnect && entryVisible(activeConnectId)) return activeConnectId;
+  const order = visibleOrder();
+  return order.find(id => connectEntry(id).inAuto && isUsable(id))
+      || order.find(id => connectEntry(id).inAuto) || order[0];
 }
 
 function nodeSummaryHtml(n, fixed) {
@@ -1537,7 +1594,6 @@ function entrySummaryHtml(id) {
     return `<span>${end(c.inId, chainEntryNode(c))}</span><span class="conn-arrow">→</span>`
       + (c.exitMode === 'priority' ? '<span class="conn-tag muted">priority</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
-  if (sourcesData[id] && !sourcesData[id].enabled) return '<span>Disabled in Nodes</span>';
   return nodeSummaryHtml(unitNode(id), false);
 }
 
@@ -1568,7 +1624,8 @@ function renderConnects() {
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
   document.getElementById('profilesTitle').textContent = simpleMode() ? 'Servers' : 'Profiles';
   document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Create chain' : 'Create profile or chain';
-  document.getElementById('connects-list').innerHTML = connectOrder.map(renderConnectRow).join('');
+  document.getElementById('connects-list').innerHTML = visibleOrder().map(renderConnectRow).join('')
+    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No profiles yet'}</div>`;
 }
 
 function openProfiles() {
@@ -1661,29 +1718,38 @@ function toggleRuleEnabled(id) {
 
 /* ── Home dock ── */
 
+/* What is connected right now, the whole route:
+   simple mode   — subscription / server set + node;
+   profiles mode — profile + the node's subscription + node;
+   chain         — chain + entry node → exit node (their sources in the sheet).
+   The right column is the latency (a chain: the two hops added up). */
 function updateMainConnectCard() {
   const id = effectiveConnectId();
   const e = connectEntry(id);
   const badge = document.getElementById('profModeBadge');
   const detail = document.getElementById('profModeDetail');
+  const nodeHtml = n => n ? `<span class="dock-node">${n.flag} ${esc(n.name)}</span>` : '<span class="dock-node none">no working node</span>';
+  const ms = n => n && isAlive(n) ? ping(n) : null;
   document.getElementById('profCardName').textContent = e ? e.name : '—';
-  document.getElementById('profCardLabel').textContent = simpleMode() ? 'Servers' : 'Profiles';
+  document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Subscription' : 'Servers') : simpleMode() ? 'Servers' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
-  if (chainsData[id]) {
-    const c = chainsData[id];
-    detail.textContent = unitName(c.inId) + ' → ' + unitName(c.outId);
-    document.getElementById('profMetaCount').textContent = '';
-    document.getElementById('profMetaSrc').textContent = 'chain';
-    return;
+  let lat = null;
+  if (!e) detail.innerHTML = '';
+  else if (chainsData[id]) {
+    const c = chainsData[id], a = chainEntryNode(c), b = chainExitNode(c);
+    detail.innerHTML = nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);
+    if (ms(a) != null && ms(b) != null) lat = ms(a) + ms(b);
+  } else {
+    const n = unitNode(id), ref = unitRefs(id).find(r => r.node === n);
+    detail.innerHTML = (profilesData[id] && ref ? `<span class="dock-src">${esc(sourcesData[ref.sid].name)}</span><span class="dock-sep">›</span>` : '') + nodeHtml(n);
+    lat = ms(n);
   }
-  const n = unitNode(id);
-  detail.textContent = n ? n.flag + ' ' + n.name + (isAlive(n) ? ' · ' + ping(n) + ' ms' : '') : 'no working nodes';
-  document.getElementById('profMetaCount').textContent = unitRefs(id).length;
-  document.getElementById('profMetaSrc').textContent = profilesData[id] ? 'nodes · ' + profilesData[id].sources.length + ' src'
-    : sourcesData[id] && sourcesData[id].kind === 'sub' ? 'nodes · sub' : 'servers';
+  document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;
+  document.getElementById('profMetaSrc').textContent = 'ms';
 }
 /* ══════════════════════ NODES SCREEN (subscriptions + manual servers) ══════════════════════
    Replaces the old "All configs" sheet. A source is either a subscription (kind 'sub')
@@ -1743,11 +1809,52 @@ function sortedNodes(list, nodeOf = x => x) {
   return list;
 }
 
+/* ── Servers the provider dropped (s.gone) ──
+   One collapsible "Unavailable · N" block, used by Nodes and by every node picker. The
+   rows are read-only; `extra(ref)` draws the kept setting (tick, priority) before the
+   flag. `ctx` names the block so each view remembers its own open state. */
+const goneOpen = new Set();
+function goneBlockHtml(ctx, refs, extra = () => '', action = '') {
+  if (!refs.length) return '';
+  const open = goneOpen.has(ctx);
+  const rows = open ? refs.map(r => `<div class="node-row gone">${extra(r)}
+      <span class="node-flag">${r.node.flag}</span>
+      <span class="node-name">${esc(r.node.name)}</span>
+      <span class="node-proto">${r.node.protocol}</span>
+      <span class="lat none">${timeAgo(r.node.goneAt)}</span>
+    </div>`).join('') : '';
+  return `<div class="gone-block ${open ? 'open' : ''}">
+    <div class="gone-head" onclick="event.stopPropagation();toggleGone('${ctx}')">
+      <svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+      <span class="gone-title">Unavailable · ${refs.length}</span>
+      <span class="gone-hint">removed by the provider, settings kept</span>${action}
+    </div>${rows}
+  </div>`;
+}
+function toggleGone(ctx) {
+  if (goneOpen.has(ctx)) goneOpen.delete(ctx); else goneOpen.add(ctx);
+  refreshSourceViews();
+}
+const goneRefs = sid => (sourcesData[sid].gone || []).map(node => ({ sid, node }));
+
+// Forget dropped servers: they and every setting naming them are gone for good.
+function forgetGone(sid) {
+  const s = sourcesData[sid];
+  const ids = new Set((s.gone || []).map(n => n.id)), keys = new Set([...ids].map(nid => sid + '::' + nid));
+  s.gone = [];
+  s.offNodes = (s.offNodes || []).filter(nid => !ids.has(nid));
+  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => !keys.has(k)); });
+  Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !keys.has(k)); }));
+  toast(`Forgot ${ids.size} unavailable server${ids.size === 1 ? '' : 's'}`);
+  refreshSourceViews();
+}
+
 function srcMetaHtml(s) {
   const parts = [];
   if (s.kind === 'sub') {
     parts.push(`<span class="fmt-tag">${s.format}</span>`);
     parts.push(`${s.nodes.length} nodes`);
+    if ((s.gone || []).length) parts.push(`<span class="gone-meta">${s.gone.length} unavailable</span>`);
     parts.push(timeAgo(s.updatedAt));
   } else {
     parts.push(`<span class="fmt-tag">manual</span>`);
@@ -1809,7 +1916,8 @@ function renderSourceCard(id, q) {
     ${usageHtml(s)}
     </div>
     </div>
-    <div class="src-body">${nodeRows}${addRow}</div>
+    <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), undefined,
+      `<div class="chip gone-forget" onclick="event.stopPropagation();forgetGone('${id}')">Forget</div>`)}</div>
   </div>`;
 }
 
@@ -1901,10 +2009,30 @@ function updateSource(sid) {
   setTimeout(() => {
     s.updating = false;
     s.updatedAt = Date.now();
+    if (s.demoChurn) demoProviderChurn(s);
     refreshSourceViews();
     if (s.testAfterUpdate) testSourceLatency(sid);
   }, 900 + Math.random() * 600);
 }
+// Mockup only: an update of a demo subscription alternates between the provider dropping
+// two servers and bringing the dropped ones back (with their old settings).
+function demoProviderChurn(s) {
+  if ((s.gone || []).length) {
+    const back = s.gone;
+    s.nodes = s.nodes.concat(back.map(n => { const m = Object.assign({}, n); delete m.goneAt; return m; }))
+      .sort((a, b) => +a.id.slice(1) - +b.id.slice(1));
+    s.gone = [];
+    back.forEach(n => { if (!pingCache.has(serverKey(n))) setPing(n, truthOf(n)); });
+    toast(`${back.length} server${back.length === 1 ? ' is' : 's are'} back — previous settings restored`);
+  } else {
+    const drop = s.nodes.filter((n, i) => i === 1 || i === 3);
+    s.nodes = s.nodes.filter(n => !drop.includes(n));
+    s.gone = drop.map(n => Object.assign({}, n, { goneAt: Date.now() }));
+    toast(`The provider removed ${drop.length} servers — see Unavailable, settings kept`);
+  }
+  s.count = s.nodes.length;
+}
+
 function updateAllSources() {
   sourceOrder.forEach(sid => { if (sourcesData[sid].enabled) updateSource(sid); });
   closeSheet('nodesmore');
@@ -2248,7 +2376,10 @@ function openSheet(name) {
   document.getElementById('ov-'+name).classList.add('open');
   document.getElementById('sh-'+name).classList.add('open');
 }
+// A sheet may veto or clean up on close (any way: ×, overlay, swipe, Done).
+const sheetCloseHooks = {};
 function closeSheet(name) {
+  if (sheetCloseHooks[name]) sheetCloseHooks[name]();
   document.getElementById('ov-'+name).classList.remove('open');
   document.getElementById('sh-'+name).classList.remove('open');
 }
@@ -2302,7 +2433,7 @@ function openCreateProfile(editId) {
     document.getElementById('cp-inauto').classList.add('on');
   }
   cpOpen.clear();
-  const partial = sourceOrder.find(id => cpSourceState(id) === 'some');
+  const partial = cpSourceIds().find(id => cpSourceState(id) === 'some');
   if (partial) cpOpen.add(partial);   // show where the single picks are
   renderCreateProfileSources();
   openSheet('createprofile');
@@ -2313,10 +2444,18 @@ function openEditProfile(id) { openCreateProfile(id); }
 // Each source is a collapsible card: tick = whole source; tap the name to see its nodes
 // and tick single ones; update / ping act on the whole source.
 const cpOpen = new Set();
+// Sources switched off in Nodes are not offered (their picks stay in the profile).
+const cpSourceIds = () => sourceOrder.filter(id => sourcesData[id].enabled);
+// Servers the draft would use now: must be at least one to save.
+const cpPickedCount = () => cpSourceIds().reduce((sum, id) => sum + (createProfileSelected.has(id) ? sourcesData[id].nodes.length
+  : sourcesData[id].nodes.filter(n => cpNodes.has(id + '::' + n.id)).length), 0);
 
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
-  el.innerHTML = sourceOrder.map(id => {
+  const none = !cpPickedCount();
+  document.getElementById('cp-warn').hidden = !none;
+  document.getElementById('cpSaveBtn').disabled = none;
+  el.innerHTML = cpSourceIds().map(id => {
     const s = sourcesData[id];
     const state = cpSourceState(id);
     const open = cpOpen.has(id);
@@ -2324,7 +2463,7 @@ function renderCreateProfileSources() {
     const picked = state === 'all' ? s.nodes.length : s.nodes.filter(n => cpNodes.has(id + '::' + n.id)).length;
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
                   state === 'some' ? `${picked} of ${s.nodes.length} nodes` : `${s.nodes.length} nodes`, `${alive} alive`]
-      .concat(s.enabled ? [] : ['disabled']).join('<span class="dot">·</span>');
+      .concat((s.gone || []).length ? [`<span class="gone-meta">${s.gone.length} unavailable</span>`] : []).join('<span class="dot">·</span>');
     const rows = open ? sortedNodes(s.nodes).map(n => {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
@@ -2335,7 +2474,8 @@ function renderCreateProfileSources() {
         <span class="node-proto">${n.protocol}</span>
         <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
-    }).join('') : '';
+    }).join('') + goneBlockHtml('cp:' + id, goneRefs(id),
+      r => `<div class="sub-checkbox ${state === 'all' || cpNodes.has(id + '::' + r.node.id) ? 'checked' : ''}"></div>`) : '';
     const box = state === 'all' ? 'checked' : state === 'some' ? 'partial' : '';
     return `<div class="ps-card ${open ? 'open' : ''} ${state !== 'none' ? 'sel' : ''}" data-id="${id}">
       <div class="ps-head">
@@ -2378,7 +2518,7 @@ function toggleCpNode(sid, nid) {
   const s = sourcesData[sid], key = sid + '::' + nid;
   if (createProfileSelected.has(sid)) {
     createProfileSelected.delete(sid);
-    s.nodes.forEach(n => { if (n.id !== nid) cpNodes.add(sid + '::' + n.id); });
+    s.nodes.concat(s.gone || []).forEach(n => { if (n.id !== nid) cpNodes.add(sid + '::' + n.id); });
   } else if (cpNodes.has(key)) cpNodes.delete(key);
   else {
     cpNodes.add(key);
@@ -2388,6 +2528,7 @@ function toggleCpNode(sid, nid) {
 }
 
 function saveCreateProfile() {
+  if (!cpPickedCount()) return;
   const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
   const fields = { sources: Array.from(createProfileSelected), nodes: Array.from(cpNodes),
                    inAuto: document.getElementById('cp-inauto').classList.contains('on') };
@@ -2510,7 +2651,8 @@ function renderChainPicker(elId, side) {
         <span class="node-name">${esc(node.name)}</span>
         <span class="node-proto">${node.protocol}</span>${lat}
       </div>`;
-    }).join('') : '';
+    }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
+      r => `<div class="sub-checkbox ${off.includes(refKey(r)) ? '' : 'checked'}"></div>`) : '') : '';
     return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}" data-id="${id}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
@@ -2521,6 +2663,7 @@ function renderChainPicker(elId, side) {
       ${open ? `<div class="cc-nodes">${active && all.length ? `<div class="se-bar cc-bar"><span class="se-count">${nOn} of ${all.length} ticked</span><div class="chip" onclick="setChainNodesAll('${side}')">${nOn === all.length ? 'None' : 'All'}</div></div>` : ''}${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
+  renderChainWarn();
   if (side === 'out') {
     const hint = document.getElementById('cc-out-hint');
     const chip = (m, l) => `<div class="chip ${d.exitMode === m ? 'active' : ''}" onclick="setChainExitMode('${m}')">${l}</div>`;
@@ -2528,6 +2671,19 @@ function renderChainPicker(elId, side) {
       + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, untick to skip.'
                   : 'The fastest ticked server of the exit is used. Expand to untick servers.');
   }
+}
+
+// Each end needs at least one ticked server; the warning names the empty end(s).
+function chainEmptyEnds(d = chainDraft) {
+  return [['entry', chainEntryRefs(d), d.inId], ['exit', chainExitRefs(d), d.outId]]
+    .filter(([, refs, uid]) => !refs.length && unitRefs(uid).length).map(([name]) => name);
+}
+function renderChainWarn() {
+  const empty = chainEmptyEnds();
+  const w = document.getElementById('cc-warn');
+  w.hidden = !empty.length;
+  w.textContent = `Tick at least 1 server of the ${empty.join(' and the ')}`;
+  document.getElementById('ccSaveBtn').disabled = empty.length > 0;
 }
 
 function toggleCcOpen(side, id) {
@@ -2545,7 +2701,9 @@ function toggleChainNode(side, key) {
 
 function setChainNodesAll(side) {
   const k = side === 'in' ? 'inOff' : 'outOff';
-  chainDraft[k] = chainDraft[k].length ? [] : unitRefs(side === 'in' ? chainDraft.inId : chainDraft.outId).map(refKey);
+  const keys = unitRefs(side === 'in' ? chainDraft.inId : chainDraft.outId).map(refKey);
+  const kept = chainDraft[k].filter(x => !keys.includes(x));   // dropped servers keep their tick
+  chainDraft[k] = chainDraft[k].some(x => keys.includes(x)) ? kept : kept.concat(keys);
   chainTest = null;
   renderChainEditor();
 }
@@ -2556,10 +2714,13 @@ function setChainExitMode(mode) {
   renderChainEditor();
 }
 
+// Full order = saved order (dropped servers keep their places) + servers not ordered yet.
 function startExitDrag(e, key) {
-  chainDraft.exitOrder = chainExitOrder(chainDraft).map(refKey);   // the full order, so the drop can splice it
+  const shown = chainExitOrder(chainDraft).map(refKey);
+  const full = chainDraft.exitOrder.concat(shown.filter(k => !chainDraft.exitOrder.includes(k)));
+  const [order, done] = dragShown(full, shown, o => { chainDraft.exitOrder = o; });
   const rowEl = document.querySelector(`#cc-out-list .cc-nodes .node-row[data-id="${key}"]`);
-  startRowDrag(e, rowEl, '.node-row', () => chainDraft.exitOrder, renderChainEditor);
+  startRowDrag(e, rowEl, '.node-row', order, () => { done(); renderChainEditor(); });
 }
 
 function pickChainSide(side, id) {
@@ -2690,6 +2851,7 @@ function stopChainRoute() {
 }
 
 function saveCreateChain() {
+  if (chainEmptyEnds().length) return;
   if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
   const { inId, outId, inOff, outOff, exitMode, exitOrder } = chainDraft;
@@ -2722,12 +2884,16 @@ function deleteEditingChain() {
 /* ══════════════════════ SOURCE ENTRY (simple mode ⋯ on a source row) ══════════════════════
    The simple-mode counterpart of the profile editor: which of the source's servers this
    entry may use (tick / untick, all / none), Auto participation, ping and update.
-   Changes apply at once. Unticked servers are s.offNodes; new ones after an update are on. */
+   Changes apply at once. Unticked servers are s.offNodes; new ones after an update are on.
+   At least one server must stay ticked: with none, a warning shows and closing the sheet
+   puts the selection back to what it was when opened. */
 
 let seId = null;
+let seSnapshot = null;
 
 function openSourceEntry(sid) {
   seId = sid;
+  seSnapshot = (sourcesData[sid].offNodes || []).slice();
   renderSourceEntry();
   openSheet('sourceentry');
 }
@@ -2738,7 +2904,10 @@ function renderSourceEntry() {
   const on = s.nodes.length - offCount(s);
   document.getElementById('seTitle').textContent = s.name;
   document.getElementById('se-inauto').classList.toggle('on', s.inAuto);
-  document.getElementById('se-count').textContent = `${on} of ${s.nodes.length} on` + (s.enabled ? '' : ' · source disabled in Nodes');
+  document.getElementById('se-count').textContent = `${on} of ${s.nodes.length} on`;
+  const none = !on && s.nodes.length > 0;
+  document.getElementById('se-warn').hidden = !none;
+  document.getElementById('se-done').disabled = none;
   const upd = document.getElementById('se-update');
   upd.style.display = s.kind === 'sub' ? '' : 'none';
   upd.innerHTML = `<span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span>`;
@@ -2754,6 +2923,8 @@ function renderSourceEntry() {
       <span onclick="event.stopPropagation();testLatency([['${seId}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`;
   }).join('') || '<div class="route-empty">No servers yet</div>';
+  document.getElementById('se-nodes').insertAdjacentHTML('beforeend', goneBlockHtml('se:' + seId, goneRefs(seId),
+    r => `<div class="sub-checkbox ${isNodeOff(s, r.node.id) ? '' : 'checked'}"></div>`));
 }
 
 function sourceEntryChanged() {
@@ -2770,7 +2941,8 @@ function toggleSourceEntryNode(nid) {
 
 function setSourceEntryAll() {
   const s = sourcesData[seId];
-  s.offNodes = offCount(s) ? [] : s.nodes.map(n => n.id);
+  const ids = s.nodes.map(n => n.id), kept = (s.offNodes || []).filter(id => !ids.includes(id));   // dropped servers keep theirs
+  s.offNodes = offCount(s) ? kept : kept.concat(ids);
   sourceEntryChanged();
 }
 
@@ -2778,6 +2950,16 @@ function toggleSourceEntryAuto() {
   sourcesData[seId].inAuto = !sourcesData[seId].inAuto;
   sourceEntryChanged();
 }
+
+sheetCloseHooks.sourceentry = () => {
+  const s = sourcesData[seId];
+  if (s && s.nodes.length && !(s.nodes.length - offCount(s))) {
+    s.offNodes = seSnapshot;
+    toast('At least 1 server is needed — previous selection kept');
+    renderConnects();
+    updateMainConnectCard();
+  }
+};
 
 sourceViewHooks.push(() => {
   if (document.getElementById('sh-sourceentry').classList.contains('open')) renderSourceEntry();
@@ -2835,9 +3017,18 @@ function startRowDrag(e, rowEl, itemSelector, order, render) {
   rowEl.style.zIndex = '5';
 }
 
+// Reorder the shown part of a longer list: hidden items (a source switched off in Nodes,
+// a server the provider dropped) keep their slots. Returns the order getter for
+// startRowDrag and a finisher that writes the merged full list back.
+function dragShown(full, shown, commit) {
+  const list = shown.slice(), set = new Set(shown);
+  return [() => list, () => { let i = 0; commit(full.map(x => set.has(x) ? list[i++] : x)); }];
+}
+
 function startConnectDrag(e, id) {
   const rowEl = document.querySelector('#connects-list .conn-row[data-id="'+id+'"]');
-  startRowDrag(e, rowEl, '.conn-row', () => connectOrder, () => { renderConnects(); updateMainConnectCard(); });
+  const [order, done] = dragShown(connectOrder, visibleOrder(), o => { connectOrder = o; });
+  startRowDrag(e, rowEl, '.conn-row', order, () => { done(); renderConnects(); updateMainConnectCard(); });
 }
 
 function startSourceDrag(e, id) {

@@ -31,9 +31,18 @@ function startRowDrag(e, rowEl, itemSelector, order, render) {
   rowEl.style.zIndex = '5';
 }
 
+// Reorder the shown part of a longer list: hidden items (a source switched off in Nodes,
+// a server the provider dropped) keep their slots. Returns the order getter for
+// startRowDrag and a finisher that writes the merged full list back.
+function dragShown(full, shown, commit) {
+  const list = shown.slice(), set = new Set(shown);
+  return [() => list, () => { let i = 0; commit(full.map(x => set.has(x) ? list[i++] : x)); }];
+}
+
 function startConnectDrag(e, id) {
   const rowEl = document.querySelector('#connects-list .conn-row[data-id="'+id+'"]');
-  startRowDrag(e, rowEl, '.conn-row', () => connectOrder, () => { renderConnects(); updateMainConnectCard(); });
+  const [order, done] = dragShown(connectOrder, visibleOrder(), o => { connectOrder = o; });
+  startRowDrag(e, rowEl, '.conn-row', order, () => { done(); renderConnects(); updateMainConnectCard(); });
 }
 
 function startSourceDrag(e, id) {

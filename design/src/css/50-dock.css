@@ -19,7 +19,7 @@
 .power-tab.busy .power-body{fill:rgba(var(--accent-rgb),.12);stroke:var(--accent);transition-duration:.35s}
 .power-tab.busy .power-icon{animation:power-pulse 1s ease-in-out infinite}
 @keyframes power-pulse{50%{opacity:.4}}
-.dock-profile{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer}
+.dock-profile{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;cursor:pointer}
 .dock-profile:active{background:rgba(255,255,255,.02)}
 .dock-chevron{color:var(--t3);flex-shrink:0}
 

@@ -10,7 +10,8 @@ const unitWord = () => simpleMode() ? 'source' : 'profile';
 
 // Nodes a profile can use right now (enabled sources only), as {sid, node}.
 // p.sources = whole sources (every node, including ones a subscription update adds later);
-// p.nodes = individually picked nodes as 'sid::nid' (kept only while the server exists).
+// p.nodes = individually picked nodes as 'sid::nid' (kept while the provider has dropped
+// the server too — see s.gone — so the pick is back when the server is).
 function profileNodeRefs(p) {
   const refs = [];
   sourceOrder.forEach(sid => {
@@ -31,6 +32,29 @@ function unitRefs(id) {
   const s = sourcesData[id];
   return s && s.enabled ? s.nodes.filter(n => !isNodeOff(s, n.id)).map(node => ({ sid: id, node })) : [];
 }
+// Servers of a unit the provider dropped (s.gone), shown under "Unavailable" with their
+// kept settings. Disabled sources show nothing, like their live nodes.
+function unitGoneRefs(id) {
+  const p = profilesData[id];
+  const sids = p ? sourceOrder : [id];
+  const refs = [];
+  sids.forEach(sid => {
+    const s = sourcesData[sid];
+    if (!s || !s.enabled) return;
+    (s.gone || []).forEach(node => { if (!p || p.sources.includes(sid) || p.nodes.includes(sid + '::' + node.id)) refs.push({ sid, node }); });
+  });
+  return refs;
+}
+
+// An entry is listed only while what it stands on is usable in Nodes: a source switched
+// off there disappears from the simple list together with the chains through it.
+function entryVisible(id) {
+  if (chainsData[id]) return entryVisible(chainsData[id].inId) && entryVisible(chainsData[id].outId);
+  if (sourcesData[id]) return sourcesData[id].enabled;
+  return !!profilesData[id];
+}
+const visibleOrder = () => connectOrder.filter(entryVisible);
+
 const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u ? u.name : '—'; };
 
 // The node a unit would connect through: the best alive one.
@@ -74,9 +98,10 @@ function isUsable(id) {
 
 // What is actually connected: the pinned entry, or Auto's pick.
 function effectiveConnectId() {
-  if (!autoConnect) return activeConnectId;
-  return connectOrder.find(id => connectEntry(id).inAuto && isUsable(id))
-      || connectOrder.find(id => connectEntry(id).inAuto) || connectOrder[0];
+  if (!autoConnect && entryVisible(activeConnectId)) return activeConnectId;
+  const order = visibleOrder();
+  return order.find(id => connectEntry(id).inAuto && isUsable(id))
+      || order.find(id => connectEntry(id).inAuto) || order[0];
 }
 
 function nodeSummaryHtml(n, fixed) {
@@ -91,7 +116,6 @@ function entrySummaryHtml(id) {
     return `<span>${end(c.inId, chainEntryNode(c))}</span><span class="conn-arrow">→</span>`
       + (c.exitMode === 'priority' ? '<span class="conn-tag muted">priority</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
-  if (sourcesData[id] && !sourcesData[id].enabled) return '<span>Disabled in Nodes</span>';
   return nodeSummaryHtml(unitNode(id), false);
 }
 
@@ -122,7 +146,8 @@ function renderConnects() {
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
   document.getElementById('profilesTitle').textContent = simpleMode() ? 'Servers' : 'Profiles';
   document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Create chain' : 'Create profile or chain';
-  document.getElementById('connects-list').innerHTML = connectOrder.map(renderConnectRow).join('');
+  document.getElementById('connects-list').innerHTML = visibleOrder().map(renderConnectRow).join('')
+    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No profiles yet'}</div>`;
 }
 
 function openProfiles() {
@@ -215,27 +240,36 @@ function toggleRuleEnabled(id) {
 
 /* ── Home dock ── */
 
+/* What is connected right now, the whole route:
+   simple mode   — subscription / server set + node;
+   profiles mode — profile + the node's subscription + node;
+   chain         — chain + entry node → exit node (their sources in the sheet).
+   The right column is the latency (a chain: the two hops added up). */
 function updateMainConnectCard() {
   const id = effectiveConnectId();
   const e = connectEntry(id);
   const badge = document.getElementById('profModeBadge');
   const detail = document.getElementById('profModeDetail');
+  const nodeHtml = n => n ? `<span class="dock-node">${n.flag} ${esc(n.name)}</span>` : '<span class="dock-node none">no working node</span>';
+  const ms = n => n && isAlive(n) ? ping(n) : null;
   document.getElementById('profCardName').textContent = e ? e.name : '—';
-  document.getElementById('profCardLabel').textContent = simpleMode() ? 'Servers' : 'Profiles';
+  document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Subscription' : 'Servers') : simpleMode() ? 'Servers' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
-  if (chainsData[id]) {
-    const c = chainsData[id];
-    detail.textContent = unitName(c.inId) + ' → ' + unitName(c.outId);
-    document.getElementById('profMetaCount').textContent = '';
-    document.getElementById('profMetaSrc').textContent = 'chain';
-    return;
+  let lat = null;
+  if (!e) detail.innerHTML = '';
+  else if (chainsData[id]) {
+    const c = chainsData[id], a = chainEntryNode(c), b = chainExitNode(c);
+    detail.innerHTML = nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);
+    if (ms(a) != null && ms(b) != null) lat = ms(a) + ms(b);
+  } else {
+    const n = unitNode(id), ref = unitRefs(id).find(r => r.node === n);
+    detail.innerHTML = (profilesData[id] && ref ? `<span class="dock-src">${esc(sourcesData[ref.sid].name)}</span><span class="dock-sep">›</span>` : '') + nodeHtml(n);
+    lat = ms(n);
   }
-  const n = unitNode(id);
-  detail.textContent = n ? n.flag + ' ' + n.name + (isAlive(n) ? ' · ' + ping(n) + ' ms' : '') : 'no working nodes';
-  document.getElementById('profMetaCount').textContent = unitRefs(id).length;
-  document.getElementById('profMetaSrc').textContent = profilesData[id] ? 'nodes · ' + profilesData[id].sources.length + ' src'
-    : sourcesData[id] && sourcesData[id].kind === 'sub' ? 'nodes · sub' : 'servers';
+  document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;
+  document.getElementById('profMetaSrc').textContent = 'ms';
 }

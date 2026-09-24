@@ -32,7 +32,7 @@ function openCreateProfile(editId) {
     document.getElementById('cp-inauto').classList.add('on');
   }
   cpOpen.clear();
-  const partial = sourceOrder.find(id => cpSourceState(id) === 'some');
+  const partial = cpSourceIds().find(id => cpSourceState(id) === 'some');
   if (partial) cpOpen.add(partial);   // show where the single picks are
   renderCreateProfileSources();
   openSheet('createprofile');
@@ -43,10 +43,18 @@ function openEditProfile(id) { openCreateProfile(id); }
 // Each source is a collapsible card: tick = whole source; tap the name to see its nodes
 // and tick single ones; update / ping act on the whole source.
 const cpOpen = new Set();
+// Sources switched off in Nodes are not offered (their picks stay in the profile).
+const cpSourceIds = () => sourceOrder.filter(id => sourcesData[id].enabled);
+// Servers the draft would use now: must be at least one to save.
+const cpPickedCount = () => cpSourceIds().reduce((sum, id) => sum + (createProfileSelected.has(id) ? sourcesData[id].nodes.length
+  : sourcesData[id].nodes.filter(n => cpNodes.has(id + '::' + n.id)).length), 0);
 
 function renderCreateProfileSources() {
   const el = document.getElementById('cp-source-list');
-  el.innerHTML = sourceOrder.map(id => {
+  const none = !cpPickedCount();
+  document.getElementById('cp-warn').hidden = !none;
+  document.getElementById('cpSaveBtn').disabled = none;
+  el.innerHTML = cpSourceIds().map(id => {
     const s = sourcesData[id];
     const state = cpSourceState(id);
     const open = cpOpen.has(id);
@@ -54,7 +62,7 @@ function renderCreateProfileSources() {
     const picked = state === 'all' ? s.nodes.length : s.nodes.filter(n => cpNodes.has(id + '::' + n.id)).length;
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
                   state === 'some' ? `${picked} of ${s.nodes.length} nodes` : `${s.nodes.length} nodes`, `${alive} alive`]
-      .concat(s.enabled ? [] : ['disabled']).join('<span class="dot">·</span>');
+      .concat((s.gone || []).length ? [`<span class="gone-meta">${s.gone.length} unavailable</span>`] : []).join('<span class="dot">·</span>');
     const rows = open ? sortedNodes(s.nodes).map(n => {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
@@ -65,7 +73,8 @@ function renderCreateProfileSources() {
         <span class="node-proto">${n.protocol}</span>
         <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
-    }).join('') : '';
+    }).join('') + goneBlockHtml('cp:' + id, goneRefs(id),
+      r => `<div class="sub-checkbox ${state === 'all' || cpNodes.has(id + '::' + r.node.id) ? 'checked' : ''}"></div>`) : '';
     const box = state === 'all' ? 'checked' : state === 'some' ? 'partial' : '';
     return `<div class="ps-card ${open ? 'open' : ''} ${state !== 'none' ? 'sel' : ''}" data-id="${id}">
       <div class="ps-head">
@@ -108,7 +117,7 @@ function toggleCpNode(sid, nid) {
   const s = sourcesData[sid], key = sid + '::' + nid;
   if (createProfileSelected.has(sid)) {
     createProfileSelected.delete(sid);
-    s.nodes.forEach(n => { if (n.id !== nid) cpNodes.add(sid + '::' + n.id); });
+    s.nodes.concat(s.gone || []).forEach(n => { if (n.id !== nid) cpNodes.add(sid + '::' + n.id); });
   } else if (cpNodes.has(key)) cpNodes.delete(key);
   else {
     cpNodes.add(key);
@@ -118,6 +127,7 @@ function toggleCpNode(sid, nid) {
 }
 
 function saveCreateProfile() {
+  if (!cpPickedCount()) return;
   const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
   const fields = { sources: Array.from(createProfileSelected), nodes: Array.from(cpNodes),
                    inAuto: document.getElementById('cp-inauto').classList.contains('on') };
@@ -240,7 +250,8 @@ function renderChainPicker(elId, side) {
         <span class="node-name">${esc(node.name)}</span>
         <span class="node-proto">${node.protocol}</span>${lat}
       </div>`;
-    }).join('') : '';
+    }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
+      r => `<div class="sub-checkbox ${off.includes(refKey(r)) ? '' : 'checked'}"></div>`) : '') : '';
     return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}" data-id="${id}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
@@ -251,6 +262,7 @@ function renderChainPicker(elId, side) {
       ${open ? `<div class="cc-nodes">${active && all.length ? `<div class="se-bar cc-bar"><span class="se-count">${nOn} of ${all.length} ticked</span><div class="chip" onclick="setChainNodesAll('${side}')">${nOn === all.length ? 'None' : 'All'}</div></div>` : ''}${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
+  renderChainWarn();
   if (side === 'out') {
     const hint = document.getElementById('cc-out-hint');
     const chip = (m, l) => `<div class="chip ${d.exitMode === m ? 'active' : ''}" onclick="setChainExitMode('${m}')">${l}</div>`;
@@ -258,6 +270,19 @@ function renderChainPicker(elId, side) {
       + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, untick to skip.'
                   : 'The fastest ticked server of the exit is used. Expand to untick servers.');
   }
+}
+
+// Each end needs at least one ticked server; the warning names the empty end(s).
+function chainEmptyEnds(d = chainDraft) {
+  return [['entry', chainEntryRefs(d), d.inId], ['exit', chainExitRefs(d), d.outId]]
+    .filter(([, refs, uid]) => !refs.length && unitRefs(uid).length).map(([name]) => name);
+}
+function renderChainWarn() {
+  const empty = chainEmptyEnds();
+  const w = document.getElementById('cc-warn');
+  w.hidden = !empty.length;
+  w.textContent = `Tick at least 1 server of the ${empty.join(' and the ')}`;
+  document.getElementById('ccSaveBtn').disabled = empty.length > 0;
 }
 
 function toggleCcOpen(side, id) {
@@ -275,7 +300,9 @@ function toggleChainNode(side, key) {
 
 function setChainNodesAll(side) {
   const k = side === 'in' ? 'inOff' : 'outOff';
-  chainDraft[k] = chainDraft[k].length ? [] : unitRefs(side === 'in' ? chainDraft.inId : chainDraft.outId).map(refKey);
+  const keys = unitRefs(side === 'in' ? chainDraft.inId : chainDraft.outId).map(refKey);
+  const kept = chainDraft[k].filter(x => !keys.includes(x));   // dropped servers keep their tick
+  chainDraft[k] = chainDraft[k].some(x => keys.includes(x)) ? kept : kept.concat(keys);
   chainTest = null;
   renderChainEditor();
 }
@@ -286,10 +313,13 @@ function setChainExitMode(mode) {
   renderChainEditor();
 }
 
+// Full order = saved order (dropped servers keep their places) + servers not ordered yet.
 function startExitDrag(e, key) {
-  chainDraft.exitOrder = chainExitOrder(chainDraft).map(refKey);   // the full order, so the drop can splice it
+  const shown = chainExitOrder(chainDraft).map(refKey);
+  const full = chainDraft.exitOrder.concat(shown.filter(k => !chainDraft.exitOrder.includes(k)));
+  const [order, done] = dragShown(full, shown, o => { chainDraft.exitOrder = o; });
   const rowEl = document.querySelector(`#cc-out-list .cc-nodes .node-row[data-id="${key}"]`);
-  startRowDrag(e, rowEl, '.node-row', () => chainDraft.exitOrder, renderChainEditor);
+  startRowDrag(e, rowEl, '.node-row', order, () => { done(); renderChainEditor(); });
 }
 
 function pickChainSide(side, id) {
@@ -420,6 +450,7 @@ function stopChainRoute() {
 }
 
 function saveCreateChain() {
+  if (chainEmptyEnds().length) return;
   if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
   const { inId, outId, inOff, outOff, exitMode, exitOrder } = chainDraft;

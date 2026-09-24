@@ -95,6 +95,7 @@
       </div>
     </div>
     <div class="sheet-footer">
+      <div class="warn-note" id="cp-warn" hidden>Tick at least 1 server — a profile with none can’t connect</div>
       <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
       <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="deleteEditingProfile()">Delete profile</button>
     </div>
@@ -128,7 +129,8 @@
       <div class="se-nodes" id="se-nodes"></div>
     </div>
     <div class="sheet-footer">
-      <button class="btn-primary" onclick="closeSheet('sourceentry')">Done</button>
+      <div class="warn-note" id="se-warn" hidden>Tick at least 1 server — otherwise the previous selection is kept</div>
+      <button class="btn-primary" id="se-done" onclick="closeSheet('sourceentry')">Done</button>
     </div>
   </div>
 
@@ -166,6 +168,7 @@
       </div>
     </div>
     <div class="sheet-footer">
+      <div class="warn-note" id="cc-warn" hidden></div>
       <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
       <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
     </div>

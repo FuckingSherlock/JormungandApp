@@ -1,12 +1,16 @@
 /* ══════════════════════ SOURCE ENTRY (simple mode ⋯ on a source row) ══════════════════════
    The simple-mode counterpart of the profile editor: which of the source's servers this
    entry may use (tick / untick, all / none), Auto participation, ping and update.
-   Changes apply at once. Unticked servers are s.offNodes; new ones after an update are on. */
+   Changes apply at once. Unticked servers are s.offNodes; new ones after an update are on.
+   At least one server must stay ticked: with none, a warning shows and closing the sheet
+   puts the selection back to what it was when opened. */
 
 let seId = null;
+let seSnapshot = null;
 
 function openSourceEntry(sid) {
   seId = sid;
+  seSnapshot = (sourcesData[sid].offNodes || []).slice();
   renderSourceEntry();
   openSheet('sourceentry');
 }
@@ -17,7 +21,10 @@ function renderSourceEntry() {
   const on = s.nodes.length - offCount(s);
   document.getElementById('seTitle').textContent = s.name;
   document.getElementById('se-inauto').classList.toggle('on', s.inAuto);
-  document.getElementById('se-count').textContent = `${on} of ${s.nodes.length} on` + (s.enabled ? '' : ' · source disabled in Nodes');
+  document.getElementById('se-count').textContent = `${on} of ${s.nodes.length} on`;
+  const none = !on && s.nodes.length > 0;
+  document.getElementById('se-warn').hidden = !none;
+  document.getElementById('se-done').disabled = none;
   const upd = document.getElementById('se-update');
   upd.style.display = s.kind === 'sub' ? '' : 'none';
   upd.innerHTML = `<span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span>`;
@@ -33,6 +40,8 @@ function renderSourceEntry() {
       <span onclick="event.stopPropagation();testLatency([['${seId}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`;
   }).join('') || '<div class="route-empty">No servers yet</div>';
+  document.getElementById('se-nodes').insertAdjacentHTML('beforeend', goneBlockHtml('se:' + seId, goneRefs(seId),
+    r => `<div class="sub-checkbox ${isNodeOff(s, r.node.id) ? '' : 'checked'}"></div>`));
 }
 
 function sourceEntryChanged() {
@@ -49,7 +58,8 @@ function toggleSourceEntryNode(nid) {
 
 function setSourceEntryAll() {
   const s = sourcesData[seId];
-  s.offNodes = offCount(s) ? [] : s.nodes.map(n => n.id);
+  const ids = s.nodes.map(n => n.id), kept = (s.offNodes || []).filter(id => !ids.includes(id));   // dropped servers keep theirs
+  s.offNodes = offCount(s) ? kept : kept.concat(ids);
   sourceEntryChanged();
 }
 
@@ -57,6 +67,16 @@ function toggleSourceEntryAuto() {
   sourcesData[seId].inAuto = !sourcesData[seId].inAuto;
   sourceEntryChanged();
 }
+
+sheetCloseHooks.sourceentry = () => {
+  const s = sourcesData[seId];
+  if (s && s.nodes.length && !(s.nodes.length - offCount(s))) {
+    s.offNodes = seSnapshot;
+    toast('At least 1 server is needed — previous selection kept');
+    renderConnects();
+    updateMainConnectCard();
+  }
+};
 
 sourceViewHooks.push(() => {
   if (document.getElementById('sh-sourceentry').classList.contains('open')) renderSourceEntry();
