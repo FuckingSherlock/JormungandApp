@@ -810,7 +810,7 @@ textarea.form-input{resize:none;font-family:'JetBrains Mono',monospace;font-size
         </div>
         <div class="mini-toggle" id="autoToggle"><div class="mini-toggle-thumb"></div></div>
       </div>
-      <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap to pin</span></div>
+      <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap to pin / unpin</span></div>
       <div id="connects-list"></div>
       <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1420,11 +1420,10 @@ function effectiveConnectIdWhenAuto() {
 }
 
 function selectConnect(id) {
-  autoConnect = false;
-  activeConnectId = id;
+  if (!autoConnect && activeConnectId === id) autoConnect = true;   // second tap on the pinned entry → back to Auto
+  else { autoConnect = false; activeConnectId = id; }
   renderConnects();
   updateMainConnectCard();
-  closeSheet('profiles');
 }
 
 function openCreateMenu() {

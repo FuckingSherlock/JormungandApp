@@ -105,11 +105,10 @@ function effectiveConnectIdWhenAuto() {
 }
 
 function selectConnect(id) {
-  autoConnect = false;
-  activeConnectId = id;
+  if (!autoConnect && activeConnectId === id) autoConnect = true;   // second tap on the pinned entry → back to Auto
+  else { autoConnect = false; activeConnectId = id; }
   renderConnects();
   updateMainConnectCard();
-  closeSheet('profiles');
 }
 
 function openCreateMenu() {

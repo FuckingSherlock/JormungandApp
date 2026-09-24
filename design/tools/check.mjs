@@ -237,11 +237,15 @@ async function runChecks() {
     expect(await page.evaluate(() => effectiveConnectId()) === target, 'auto pick did not follow the new order');
   });
 
-  await check('profiles: tap pins an entry, Auto row turns it back', async () => {
+  await check('profiles: tap pins (sheet stays), second tap / Auto row unpins', async () => {
+    expect(await page.evaluate(() => autoConnect), 'auto is not the default');
     await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
     expect(await page.evaluate(() => !autoConnect && effectiveConnectId() === 'work'), 'not pinned');
     expect(/PINNED/.test(await page.textContent('#profModeBadge')), 'dock badge not PINNED');
-    await page.evaluate(() => openProfiles()); await settle(page);
+    expect(await page.evaluate(() => document.getElementById('sh-profiles').classList.contains('open')), 'sheet closed on pin');
+    await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
+    expect(await page.evaluate(() => autoConnect), 'second tap did not re-enable auto');
+    await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
     await page.click('#auto-row');
     expect(await page.evaluate(() => autoConnect), 'auto not re-enabled');
     await page.evaluate(() => closeSheet('profiles'));
