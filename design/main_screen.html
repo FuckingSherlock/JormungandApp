@@ -210,8 +210,8 @@ body {
 .nav-sub{font-size:13px;color:var(--t2)}
 
 /* ── Bottom nav ── */
-.bottomnav{display:flex;justify-content:space-around;align-items:center;padding:10px 0 20px;border-top:1px solid var(--border);background:var(--surface)}
-.nav-btn{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 16px;cursor:pointer;opacity:.45}
+.bottomnav{display:flex;justify-content:space-around;align-items:center;padding:4px 0 max(6px, env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--surface)}
+.nav-btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 16px;cursor:pointer;opacity:.45}
 .nav-btn.active{opacity:1}
 .nav-btn span{font-size:12px;font-weight:600;letter-spacing:.4px;color:var(--t2)}
 .nav-btn.active span{color:var(--accent)}
@@ -370,10 +370,14 @@ body {
 .dimmed{opacity:.45}
 
 /* ── Views (bottom-nav tabs) ── */
-.phone{display:flex;flex-direction:column}
-.view{display:none;flex:1}
-.view.active{display:block}
-.bottomnav{position:sticky;bottom:0;z-index:5}
+/* App frame is exactly one screen tall: status bar, section header and bottom nav
+   stay put; only each view's .scroll area scrolls. */
+.phone{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:0;overflow:hidden}
+.statusbar,.bottomnav{flex-shrink:0}
+.view{display:none;flex:1;min-height:0;flex-direction:column}
+.view.active{display:flex}
+.view > .topbar,.view > .search{flex-shrink:0}
+.view > .scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-top:2px}
 .nav-btn svg{stroke:var(--t3)}
 .nav-btn.active svg{stroke:var(--accent)}
 
@@ -1933,7 +1937,7 @@ function toast(msg) {
 function switchTab(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
   document.querySelectorAll('.nav-btn[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  window.scrollTo(0, 0);
+  document.querySelectorAll('#view-' + name + ' > .scroll').forEach(el => el.scrollTop = 0);
 }
 
 /* ══════════════════════ RENDER: RULES ══════════════════════ */
