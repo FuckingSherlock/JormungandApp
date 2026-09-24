@@ -35,26 +35,38 @@ const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u
 
 // The node a unit would connect through: the best alive one.
 function unitNode(id) {
-  let best = null;
-  unitRefs(id).forEach(({ node }) => { if (isAlive(node) && (!best || ping(node) < ping(best))) best = node; });
-  return best;
+  return bestAlive(unitRefs(id).map(r => r.node));
 }
 const profileNode = p => p ? unitNode(p.id) : null;
 
-// A chain's exit server: its own fixed exit if set, else the exit unit's best node.
+/* Chains keep their own node choice on each end: inOff / outOff = 'sid::nid' keys switched
+   off for this chain. The exit is picked by exitMode: 'fastest' (best alive) or 'priority'
+   (first alive in exitOrder; servers missing from exitOrder follow in source order). */
+const refKey = r => r.sid + '::' + r.node.id;
+function bestAlive(nodes) {
+  let best = null;
+  nodes.forEach(n => { if (isAlive(n) && (!best || ping(n) < ping(best))) best = n; });
+  return best;
+}
+function chainEntryRefs(c) { return unitRefs(c.inId).filter(r => !(c.inOff || []).includes(refKey(r))); }
+// Every exit server in priority order, switched-off ones included.
+function chainExitOrder(c) {
+  const order = c.exitOrder || [];
+  const pos = k => { const i = order.indexOf(k); return i < 0 ? Infinity : i; };
+  return unitRefs(c.outId).map((r, i) => ({ r, i }))
+    .sort((a, b) => (pos(refKey(a.r)) - pos(refKey(b.r))) || a.i - b.i).map(x => x.r);
+}
+function chainExitRefs(c) { return chainExitOrder(c).filter(r => !(c.outOff || []).includes(refKey(r))); }
+const chainEntryNode = c => bestAlive(chainEntryRefs(c).map(r => r.node));
 function chainExitNode(c) {
-  if (c.exitNodeId) {
-    const r = unitRefs(c.outId).find(r => r.sid + '::' + r.node.id === c.exitNodeId);
-    return r ? r.node : null;
-  }
-  return unitNode(c.outId);
+  const exits = chainExitRefs(c).map(r => r.node);
+  return c.exitMode === 'priority' ? exits.find(isAlive) || null : bestAlive(exits);
 }
 
 function isUsable(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    const exit = chainExitNode(c);
-    return isUsable(c.inId) && !!exit && isAlive(exit);
+    return !!chainEntryNode(c) && !!chainExitNode(c);
   }
   const n = unitNode(id);
   return !!n && isAlive(n);
@@ -76,8 +88,8 @@ function entrySummaryHtml(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
     const end = (uid, n) => (n ? n.flag + ' ' : '') + esc(unitName(uid));
-    return `<span>${end(c.inId, unitNode(c.inId))}</span><span class="conn-arrow">→</span>`
-      + (c.exitNodeId ? '<span class="conn-tag warn">fixed</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
+    return `<span>${end(c.inId, chainEntryNode(c))}</span><span class="conn-arrow">→</span>`
+      + (c.exitMode === 'priority' ? '<span class="conn-tag muted">priority</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
   if (sourcesData[id] && !sourcesData[id].enabled) return '<span>Disabled in Nodes</span>';
   return nodeSummaryHtml(unitNode(id), false);

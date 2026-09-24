@@ -54,6 +54,7 @@ const SHOTS = {
   'profiles-menu': async p => { await p.evaluate(() => { openProfiles(); openProfilesMenu(); }); await settle(p); },
   'source-entry': async p => { await p.evaluate(() => { openProfiles(); openSourceEntry('src1'); }); await settle(p); },
   'simple-chain': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
+  'chain-priority': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); }); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
   'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
     const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
@@ -193,6 +194,18 @@ async function runChecks() {
     await page.mouse.move(g.x + g.width / 2, first.y - 20, { steps: 8 });
     await page.mouse.up(); await settle(page);
     expect(await page.evaluate(() => sourceOrder[0]) === last, 'order: ' + await page.evaluate(() => sourceOrder.join()));
+  });
+
+  await check('nodes: drag first source to the last place', async () => {
+    await page.evaluate(() => { sourceOrder.forEach(id => expandState[id] = false); renderNodes(); });
+    const first = await page.evaluate(() => sourceOrder[0]);
+    const g = await page.locator('.src-card').first().locator('.drag-handle').boundingBox();
+    const last = await page.locator('.src-card').last().boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, last.y + last.height + 10, { steps: 10 });
+    await page.mouse.up(); await settle(page);
+    expect(await page.evaluate(() => sourceOrder[sourceOrder.length - 1]) === first, 'order: ' + await page.evaluate(() => sourceOrder.join()));
   });
 
   await check('nodes: grip centred on subscription block', async () => {
@@ -382,17 +395,37 @@ async function runChecks() {
     await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
   });
 
-  await check('chain editor: expand exit profile, tap a server to fix the exit', async () => {
-    await page.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); pickChainSide('in', 'work'); pickChainSide('out', 'default'); }); await settle(page);
+  await check('chain editor: untick servers on both ends', async () => {
+    await page.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault'); pickChainSide('in', 'default'); pickChainSide('out', 'default'); }); await settle(page);
     const outId = await page.evaluate(() => chainDraft.outId);
     await page.click(`#cc-out-list .cc-prof[data-id=${outId}] button.cc-expand`);
     await page.click('#cc-out-list .cc-nodes .node-row >> nth=0');
-    expect(await page.evaluate(() => !!chainDraft.exitNodeId), 'exit not fixed');
+    expect(await page.evaluate(() => chainDraft.outOff.length === 1), 'exit untick: ' + await page.evaluate(() => JSON.stringify(chainDraft.outOff)));
     await page.click('#cc-out-list .cc-nodes .node-row >> nth=0');
-    expect(await page.evaluate(() => !chainDraft.exitNodeId), 'second tap did not unfix');
-    await page.click('#cc-in-list button.cc-expand >> nth=0');
-    expect(await page.$$eval('#cc-in-list .cc-nodes .node-row', r => r.length) > 0, 'entry nodes not shown');
+    expect(await page.evaluate(() => chainDraft.outOff.length === 0), 'second tap did not re-tick');
+    await page.click('#cc-in-list .cc-prof[data-id=default] button.cc-expand');
+    await page.click('#cc-in-list .cc-nodes .node-row >> nth=1');
+    expect(await page.evaluate(() => chainDraft.inOff.length === 1), 'entry untick');
     await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
+  });
+
+  await check('chain editor: priority exit uses the top working server, drag reorders', async () => {
+    await page.evaluate(() => { setConnectMode('simple'); openProfiles(); openCreateChain(); pickChainSide('in', 'src2'); pickChainSide('out', 'src1'); setChainExitMode('fastest'); }); await settle(page);
+    await page.click('#cc-out-hint .chip >> nth=1'); await settle(page);
+    const r = await page.evaluate(() => { const refs = chainExitRefs(chainDraft), n = chainExitNode(chainDraft);
+      return { mode: chainDraft.exitMode, ok: n === (refs.map(x => x.node).find(isAlive) || null), grips: document.querySelectorAll('#cc-out-list .cc-grip').length }; });
+    expect(r.mode === 'priority' && r.ok && r.grips > 1, JSON.stringify(r));
+    const before = await page.evaluate(() => chainExitOrder(chainDraft).map(refKey).join());
+    const g = await page.locator('#cc-out-list .cc-grip').first().boundingBox();
+    const rows = page.locator('#cc-out-list .cc-nodes .node-row');
+    const last = await rows.last().boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, last.y + last.height + 20, { steps: 10 });
+    await page.mouse.up(); await settle(page);
+    const after = await page.evaluate(() => chainExitOrder(chainDraft).map(refKey));
+    const first = before.split(',')[0];
+    await page.evaluate(() => { closeSheet('createchain'); closeSheet('profiles'); });
+    expect(after[after.length - 1] === first, 'order after drag: ' + after.join());
   });
 
   await check('ping cache: one result per server, shared by every view', async () => {

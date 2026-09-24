@@ -41,13 +41,17 @@ function startSourceDrag(e, id) {
   startRowDrag(e, rowEl, '.src-card', () => sourceOrder, () => { renderNodes(); renderConnects(); });
 }
 
-// Slot the dragged row's centre is over: count the other rows whose centre it passed.
+// Target slot: a row below is passed once the dragged row's bottom edge crosses its centre,
+// a row above once the top edge does. (Comparing centres fails for rows of different
+// heights: a tall row could never pass a short last one within the drag bounds.)
 function dragTargetIndex(dy) {
   const { rects, origIndex } = dragCtx;
   const o = rects[origIndex];
-  const centre = o.top + o.height / 2 + dy;
   let t = 0;
-  rects.forEach((r, i) => { if (i !== origIndex && r.top + r.height / 2 < centre) t++; });
+  rects.forEach((r, i) => {
+    const mid = r.top + r.height / 2;
+    if (i < origIndex ? o.top + dy >= mid : i > origIndex && o.bottom + dy > mid) t++;
+  });
   return t;
 }
 

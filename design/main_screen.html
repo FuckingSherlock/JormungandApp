@@ -402,7 +402,6 @@ body {
 .node-row.static{cursor:default}
 .node-row.ps-node{gap:10px}
 .node-row.ps-node:not(.on) .node-name{color:var(--t2)}
-.node-row.fixed{background:rgba(var(--warn-rgb),.08)}
 .pick-row.disabled{opacity:.35;cursor:default}
 .conn-tag.bad{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
 .menu-row.disabled{opacity:.45}
@@ -446,6 +445,8 @@ body {
 .se-count{flex:1;font-size:13px;color:var(--t2)}
 .se-bar .chip{padding:4px 12px}
 .se-nodes{margin:0 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.cc-grip{margin:-10px -4px -10px -8px;padding:10px 4px 10px 8px;touch-action:none;cursor:grab;color:var(--t3)}
+.cc-rank{width:14px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -1348,7 +1349,8 @@ let chainsData = {
   cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', inAuto:true },
   cpwork:    { id:'cpwork',    name:'Work via Gaming', inId:'gaming',  outId:'work',    inAuto:false },
   // simple mode: chain ends are sources
-  sc1:       { id:'sc1',       name:'Remnawave via Gaming', inId:'src4', outId:'src1', inAuto:true },
+  sc1:       { id:'sc1',       name:'Remnawave via Gaming', inId:'src4', outId:'src1', inAuto:true,
+               exitMode:'priority', exitOrder:['src1::n6','src1::n2','src1::n9'] },
 };
 let chainSeq = 1;
 
@@ -1478,26 +1480,38 @@ const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u
 
 // The node a unit would connect through: the best alive one.
 function unitNode(id) {
-  let best = null;
-  unitRefs(id).forEach(({ node }) => { if (isAlive(node) && (!best || ping(node) < ping(best))) best = node; });
-  return best;
+  return bestAlive(unitRefs(id).map(r => r.node));
 }
 const profileNode = p => p ? unitNode(p.id) : null;
 
-// A chain's exit server: its own fixed exit if set, else the exit unit's best node.
+/* Chains keep their own node choice on each end: inOff / outOff = 'sid::nid' keys switched
+   off for this chain. The exit is picked by exitMode: 'fastest' (best alive) or 'priority'
+   (first alive in exitOrder; servers missing from exitOrder follow in source order). */
+const refKey = r => r.sid + '::' + r.node.id;
+function bestAlive(nodes) {
+  let best = null;
+  nodes.forEach(n => { if (isAlive(n) && (!best || ping(n) < ping(best))) best = n; });
+  return best;
+}
+function chainEntryRefs(c) { return unitRefs(c.inId).filter(r => !(c.inOff || []).includes(refKey(r))); }
+// Every exit server in priority order, switched-off ones included.
+function chainExitOrder(c) {
+  const order = c.exitOrder || [];
+  const pos = k => { const i = order.indexOf(k); return i < 0 ? Infinity : i; };
+  return unitRefs(c.outId).map((r, i) => ({ r, i }))
+    .sort((a, b) => (pos(refKey(a.r)) - pos(refKey(b.r))) || a.i - b.i).map(x => x.r);
+}
+function chainExitRefs(c) { return chainExitOrder(c).filter(r => !(c.outOff || []).includes(refKey(r))); }
+const chainEntryNode = c => bestAlive(chainEntryRefs(c).map(r => r.node));
 function chainExitNode(c) {
-  if (c.exitNodeId) {
-    const r = unitRefs(c.outId).find(r => r.sid + '::' + r.node.id === c.exitNodeId);
-    return r ? r.node : null;
-  }
-  return unitNode(c.outId);
+  const exits = chainExitRefs(c).map(r => r.node);
+  return c.exitMode === 'priority' ? exits.find(isAlive) || null : bestAlive(exits);
 }
 
 function isUsable(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    const exit = chainExitNode(c);
-    return isUsable(c.inId) && !!exit && isAlive(exit);
+    return !!chainEntryNode(c) && !!chainExitNode(c);
   }
   const n = unitNode(id);
   return !!n && isAlive(n);
@@ -1519,8 +1533,8 @@ function entrySummaryHtml(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
     const end = (uid, n) => (n ? n.flag + ' ' : '') + esc(unitName(uid));
-    return `<span>${end(c.inId, unitNode(c.inId))}</span><span class="conn-arrow">→</span>`
-      + (c.exitNodeId ? '<span class="conn-tag warn">fixed</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
+    return `<span>${end(c.inId, chainEntryNode(c))}</span><span class="conn-arrow">→</span>`
+      + (c.exitMode === 'priority' ? '<span class="conn-tag muted">priority</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
   if (sourcesData[id] && !sourcesData[id].enabled) return '<span>Disabled in Nodes</span>';
   return nodeSummaryHtml(unitNode(id), false);
@@ -2415,14 +2429,15 @@ function deleteEditingProfile() {
 
 /* ══════════════════════ CREATE / EDIT CHAIN ══════════════════════
    Ends are profiles (profiles mode) or sources (simple mode) — "units", see unitRefs.
-   Entry and exit must be different units. Each unit expands to its nodes; on the
-   exit side a tap fixes the chain's exit server (overrides the profile's own choice),
-   a second tap goes back to the profile's choice. "Check route" is informational only (it
-   does not change the chain or Auto): it tells the user whether the chain can work
-   and which entry -> exit pairs are fastest. See testChainRoute for the procedure. */
+   Entry and exit must be different units. The chosen unit on each side expands to its
+   servers with ticks: untick a server to keep this chain off it. The exit side picks its
+   server by Fastest or by Priority (drag ⋮⋮ to order; the first working one is used).
+   "Check route" is informational only (it does not change the chain or Auto): it tells
+   the user whether the chain can work and which entry -> exit pairs are fastest. */
 
-let chainDraft = { inId: null, outId: null, exitNodeId: null };
-const ccOpen = new Set();   // expanded profiles in the editor, 'in:<id>' / 'out:<id>'
+const newChainDraft = (inId, outId) => ({ inId, outId, inOff: [], outOff: [], exitMode: 'fastest', exitOrder: [] });
+let chainDraft = newChainDraft(null, null);
+const ccOpen = new Set();   // expanded units in the editor, 'in:<id>' / 'out:<id>'
 let chainTest = null;   // { running, stage, done, total, pairs: [{entry, exit, ms}], showAll }
 let editingChainId = null;
 
@@ -2436,18 +2451,20 @@ function openCreateChain(editId) {
     document.getElementById('ccSaveBtn').textContent = 'Save changes';
     document.getElementById('ccDeleteBtn').style.display = '';
     document.getElementById('cc-name').value = c.name;
-    chainDraft = { inId: c.inId, outId: c.outId, exitNodeId: c.exitNodeId || null };
+    chainDraft = Object.assign(newChainDraft(c.inId, c.outId), { inOff: [...(c.inOff || [])], outOff: [...(c.outOff || [])],
+      exitMode: c.exitMode || 'fastest', exitOrder: [...(c.exitOrder || [])] });
     document.getElementById('cc-inauto').classList.toggle('on', c.inAuto);
   } else {
     document.getElementById('ccTitle').textContent = 'Create chain';
     document.getElementById('ccSaveBtn').textContent = 'Create chain';
     document.getElementById('ccDeleteBtn').style.display = 'none';
     document.getElementById('cc-name').value = '';
-    chainDraft = { inId: ids[0], outId: ids[1], exitNodeId: null };
+    chainDraft = newChainDraft(ids[0], ids[1]);
     document.getElementById('cc-inauto').classList.add('on');
   }
   chainTest = null;
   ccOpen.clear();
+  if (chainDraft.exitMode === 'priority') ccOpen.add('out:' + chainDraft.outId);
   renderChainEditor();
   openSheet('createchain');
 }
@@ -2460,44 +2477,56 @@ function renderChainEditor() {
   renderChainTest();
 }
 
+const CHEVRON = '<svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>';
+
 function renderChainPicker(elId, side) {
   const el = document.getElementById(elId);
-  const current = side === 'in' ? chainDraft.inId : chainDraft.outId;
-  const other = side === 'in' ? chainDraft.outId : chainDraft.inId;
+  const d = chainDraft;
+  const current = side === 'in' ? d.inId : d.outId;
+  const other = side === 'in' ? d.outId : d.inId;
+  const off = side === 'in' ? d.inOff : d.outOff;
+  const priority = side === 'out' && d.exitMode === 'priority';
   el.innerHTML = getUnitIds().map(id => {
     const taken = id === other;
     const open = ccOpen.has(side + ':' + id);
     const active = id === current;
-    const n = side === 'out' && active ? chainExitNode(chainDraft) : unitNode(id);
-    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry') : (n ? n.flag + ' ' : '') + unitRefs(id).length + ' nodes';
-    const fixedHere = side === 'out' && active && chainDraft.exitNodeId;
-    const nodes = open ? sortedNodes(unitRefs(id), r => r.node).map(({ sid, node }) => {
-      const key = sid + '::' + node.id;
-      const pickable = side === 'out' && active;
-      const fixed = pickable && chainDraft.exitNodeId === key;
-      return `<div class="node-row ${fixed ? 'fixed' : ''} ${pickable ? '' : 'static'}" ${pickable ? `onclick="toggleChainExitNode('${key}')"` : ''}>
+    const all = unitRefs(id);
+    const nOn = active ? all.filter(r => !off.includes(refKey(r))).length : all.length;
+    const n = active ? (side === 'in' ? chainEntryNode(d) : chainExitNode(d)) : unitNode(id);
+    const sub = taken ? (side === 'in' ? 'used as exit' : 'used as entry')
+      : (n ? n.flag + ' ' : '') + (nOn < all.length ? `${nOn} of ${all.length}` : all.length) + ' nodes';
+    let rank = 0;
+    const list = active && priority ? chainExitOrder(d) : sortedNodes(all, r => r.node);
+    const nodes = open ? list.map(r => {
+      const { sid, node } = r, key = refKey(r);
+      const lat = `<span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>`;
+      if (!active) return `<div class="node-row static"><span class="node-flag">${node.flag}</span><span class="node-name">${esc(node.name)}</span><span class="node-proto">${node.protocol}</span>${lat}</div>`;
+      const isOn = !off.includes(key);
+      const grip = priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startExitDrag(event,'${key}')">${GRIP_SVG}</div>` : '';
+      const num = priority && isOn ? `<span class="cc-rank">${++rank}</span>` : priority ? '<span class="cc-rank"></span>' : '';
+      return `<div class="node-row ps-node ${isOn ? 'on' : ''}" data-id="${key}" onclick="toggleChainNode('${side}','${key}')">
+        ${grip}<div class="sub-checkbox ${isOn ? 'checked' : ''}"></div>${num}
         <span class="node-flag">${node.flag}</span>
         <span class="node-name">${esc(node.name)}</span>
-        ${fixed ? '<span class="conn-tag warn">fixed</span>' : ''}
-        <span class="node-proto">${node.protocol}</span>
-        <span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>
+        <span class="node-proto">${node.protocol}</span>${lat}
       </div>`;
     }).join('') : '';
     return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''}" data-id="${id}">
       <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
         <div class="profile-radio ${active ? 'active' : ''}"></div>
-        <span class="pick-row-name">${esc(unitName(id))}${fixedHere ? ' <span class="conn-tag warn">fixed exit</span>' : ''}</span>
+        <span class="pick-row-name">${esc(unitName(id))}</span>
         <span class="pick-row-sub">${sub}</span>
       </div>
-      ${unitRefs(id).length > 1 ? `<button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">
-        <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>` : '<span class="cc-expand"></span>'}
+      ${all.length > 1 ? `<button class="icon-btn ghost cc-expand" onclick="toggleCcOpen('${side}','${id}')" title="Show nodes">${CHEVRON}</button>` : '<span class="cc-expand"></span>'}
       ${open ? `<div class="cc-nodes">${nodes || '<div class="route-empty">No enabled nodes</div>'}</div>` : ''}
     </div>`;
   }).join('');
   if (side === 'out') {
     const hint = document.getElementById('cc-out-hint');
-    if (hint) hint.textContent = 'Expand the exit ' + unitWord() + ' and tap a server to fix it — for a stable exit IP.';
+    const chip = (m, l) => `<div class="chip ${d.exitMode === m ? 'active' : ''}" onclick="setChainExitMode('${m}')">${l}</div>`;
+    if (hint) hint.innerHTML = `<div class="chip-row" style="margin:2px 0 6px">${chip('fastest', 'Fastest')}${chip('priority', 'Priority')}</div>`
+      + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, untick to skip.'
+                  : 'The fastest ticked server of the exit is used. Expand to untick servers.');
   }
 }
 
@@ -2507,15 +2536,28 @@ function toggleCcOpen(side, id) {
   renderChainPicker(side === 'in' ? 'cc-in-list' : 'cc-out-list', side);
 }
 
-function toggleChainExitNode(key) {
-  chainDraft.exitNodeId = chainDraft.exitNodeId === key ? null : key;
+function toggleChainNode(side, key) {
+  const k = side === 'in' ? 'inOff' : 'outOff';
+  chainDraft[k] = chainDraft[k].includes(key) ? chainDraft[k].filter(x => x !== key) : chainDraft[k].concat(key);
   chainTest = null;
   renderChainEditor();
 }
 
+function setChainExitMode(mode) {
+  chainDraft.exitMode = mode;
+  if (mode === 'priority') ccOpen.add('out:' + chainDraft.outId);
+  renderChainEditor();
+}
+
+function startExitDrag(e, key) {
+  chainDraft.exitOrder = chainExitOrder(chainDraft).map(refKey);   // the full order, so the drop can splice it
+  const rowEl = document.querySelector(`#cc-out-list .cc-nodes .node-row[data-id="${key}"]`);
+  startRowDrag(e, rowEl, '.node-row', () => chainDraft.exitOrder, renderChainEditor);
+}
+
 function pickChainSide(side, id) {
-  if (side === 'in') chainDraft.inId = id;
-  else { if (chainDraft.outId !== id) chainDraft.exitNodeId = null; chainDraft.outId = id; }
+  if (side === 'in') { if (chainDraft.inId !== id) chainDraft.inOff = []; chainDraft.inId = id; }
+  else { if (chainDraft.outId !== id) Object.assign(chainDraft, { outOff: [], exitOrder: [] }); chainDraft.outId = id; }
   chainTest = null;   // ends changed: the old check no longer applies (a running one stops)
   renderChainEditor();
 }
@@ -2532,13 +2574,13 @@ function renderChainTest() {
   const el = document.getElementById('cc-test');
   if (!el) return;
   const t = chainTest;
-  const nEntry = unitRefs(chainDraft.inId).length;
-  const nExit = unitRefs(chainDraft.outId).length;
+  const nEntry = chainEntryRefs(chainDraft).length;
+  const nExit = chainExitRefs(chainDraft).length;
   const btn = t && t.running
     ? `<button class="btn-secondary" onclick="stopChainRoute()">Stop</button>`
     : `<button class="btn-secondary" onclick="testChainRoute()" ${nEntry && nExit ? '' : 'disabled'}>${ICON.bolt}${t ? 'Check again' : 'Check route'}</button>`;
   let sum;
-  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} ${unitWord()} has no enabled nodes.</div>`;
+  if (!nEntry || !nExit) sum = `<div class="route-sum warn">${!nEntry ? 'Entry' : 'Exit'} has no ticked working nodes.</div>`;
   else if (!t) sum = `<div class="route-sum">Tries every exit node through the entry nodes, fastest entries first.</div>`;
   else if (t.running) sum = `<div class="route-sum">${t.stage}<div class="route-progress"><div style="width:${t.total ? t.done / t.total * 100 : 0}%"></div></div></div>`;
   else if (t.pairs.length) sum = `<div class="route-sum good">${t.pairs.length} working pair${t.pairs.length === 1 ? '' : 's'}${t.stopped ? ' (stopped early)' : ''} · best ${t.pairs[0].ms} ms</div>`;
@@ -2595,9 +2637,8 @@ function renderChainTest() {
    A server never pairs with itself (both profiles may share a subscription).
    Results: working pairs sorted by total latency. */
 async function testChainRoute() {
-  const entries = unitRefs(chainDraft.inId).map(r => r.node);
-  const fixedExit = chainDraft.exitNodeId && chainExitNode(chainDraft);
-  const exits = fixedExit ? [fixedExit] : unitRefs(chainDraft.outId).map(r => r.node);
+  const entries = chainEntryRefs(chainDraft).map(r => r.node);
+  const exits = chainExitRefs(chainDraft).map(r => r.node);
   const t = chainTest = { running: true, stage: '', done: 0, total: 0, pairs: [], showAll: false, view: chainTest ? chainTest.view : 'pairs', open: new Set() };
   const live = () => chainTest === t && !t.stopped;
   const step = stage => { t.stage = stage; renderChainTest(); };
@@ -2644,7 +2685,8 @@ function stopChainRoute() {
 function saveCreateChain() {
   if (chainDraft.inId === chainDraft.outId) { toast('Entry and exit must be different'); return; }
   const name = document.getElementById('cc-name').value.trim() || ('Chain ' + (++chainSeq));
-  const fields = { inId: chainDraft.inId, outId: chainDraft.outId, exitNodeId: chainDraft.exitNodeId,
+  const { inId, outId, inOff, outOff, exitMode, exitOrder } = chainDraft;
+  const fields = { inId, outId, inOff, outOff, exitMode, exitOrder,
                    inAuto: document.getElementById('cc-inauto').classList.contains('on') };
   if (editingChainId) {
     Object.assign(chainsData[editingChainId], { name }, fields);
@@ -2796,13 +2838,17 @@ function startSourceDrag(e, id) {
   startRowDrag(e, rowEl, '.src-card', () => sourceOrder, () => { renderNodes(); renderConnects(); });
 }
 
-// Slot the dragged row's centre is over: count the other rows whose centre it passed.
+// Target slot: a row below is passed once the dragged row's bottom edge crosses its centre,
+// a row above once the top edge does. (Comparing centres fails for rows of different
+// heights: a tall row could never pass a short last one within the drag bounds.)
 function dragTargetIndex(dy) {
   const { rects, origIndex } = dragCtx;
   const o = rects[origIndex];
-  const centre = o.top + o.height / 2 + dy;
   let t = 0;
-  rects.forEach((r, i) => { if (i !== origIndex && r.top + r.height / 2 < centre) t++; });
+  rects.forEach((r, i) => {
+    const mid = r.top + r.height / 2;
+    if (i < origIndex ? o.top + dy >= mid : i > origIndex && o.bottom + dy > mid) t++;
+  });
   return t;
 }
 

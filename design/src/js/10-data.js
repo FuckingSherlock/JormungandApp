@@ -79,7 +79,8 @@ let chainsData = {
   cpgaming:  { id:'cpgaming',  name:'Gaming Chain',   inId:'gaming',  outId:'default', inAuto:true },
   cpwork:    { id:'cpwork',    name:'Work via Gaming', inId:'gaming',  outId:'work',    inAuto:false },
   // simple mode: chain ends are sources
-  sc1:       { id:'sc1',       name:'Remnawave via Gaming', inId:'src4', outId:'src1', inAuto:true },
+  sc1:       { id:'sc1',       name:'Remnawave via Gaming', inId:'src4', outId:'src1', inAuto:true,
+               exitMode:'priority', exitOrder:['src1::n6','src1::n2','src1::n9'] },
 };
 let chainSeq = 1;
 
