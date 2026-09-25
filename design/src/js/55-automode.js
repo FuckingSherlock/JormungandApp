@@ -25,8 +25,8 @@ const subsEveryText = h => !h ? 'off' : h % 24 ? h + ' h' : h / 24 + ' d';
 /* ── Interval dialog: number + unit (Check the connection every, Update all subscriptions every) ──
    Stored in the base unit (units[0]); opens in the largest unit that divides the value. */
 const INTERVALS = {
-  checkEvery: { title: 'Check the connection every', units: [['s', 1], ['min', 60]], min: 10, max: 3600, hint: 'From 10 s to 60 min' },
-  subsEvery:  { title: 'Update all subscriptions every', units: [['h', 1], ['d', 24]], min: 0, max: 720, hint: '0 = off (only when you tap Update) · up to 30 days' },
+  checkEvery: { title: 'Check the connection every', units: [['seconds', 1], ['minutes', 60]], min: 10, max: 3600, hint: 'From 10 s to 60 min' },
+  subsEvery:  { title: 'Update all subscriptions every', units: [['hours', 1], ['days', 24]], min: 0, max: 720, hint: '0 = off (only when you tap Update) · up to 30 days' },
 };
 let ivKey = null;
 function openIntervalDialog(key) {

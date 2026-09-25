@@ -737,7 +737,7 @@ async function runChecks() {
       out.badInput = autoCfg.threshold === 100 && document.getElementById('am-threshold').value === '100';
       const dlg = (btn, val, unit) => { document.getElementById(btn).click(); document.getElementById('iv-value').value = val; document.getElementById('iv-unit').value = unit; saveIntervalDialog(); };
       document.getElementById('am-every').click();
-      out.dlgOpen = document.getElementById('sh-interval').classList.contains('open') && document.getElementById('iv-value').value === '1' && document.getElementById('iv-unit').selectedOptions[0].textContent === 'min';
+      out.dlgOpen = document.getElementById('sh-interval').classList.contains('open') && document.getElementById('iv-value').value === '1' && document.getElementById('iv-unit').selectedOptions[0].textContent === 'minutes';
       dlg('am-every', '5', '60');
       out.every = autoCfg.checkEvery === 300 && /5 min/.test(document.getElementById('am-every').textContent) && !document.getElementById('sh-interval').classList.contains('open');
       dlg('am-every', '2', '1');   // 2 s: below the minimum — refused, dialog stays

@@ -562,8 +562,8 @@ body {
 .dialog.open{opacity:1;visibility:visible;pointer-events:all;transform:translateY(-50%);transition:opacity .18s,transform .18s}
 .dialog-title{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:12px}
 .iv-row{display:flex;gap:8px;margin-bottom:8px}
-.iv-row .form-input{flex:1;min-width:0;font-family:var(--mono)}
-.iv-row .set-select{padding:0 10px}
+.iv-row .form-input{width:88px;flex:none;text-align:center;font-family:var(--mono)}
+.iv-row .set-select{flex:1;min-width:0;padding:0 10px}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .btn-secondary.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .am-head{display:flex;align-items:center;gap:12px}
@@ -2743,8 +2743,8 @@ const subsEveryText = h => !h ? 'off' : h % 24 ? h + ' h' : h / 24 + ' d';
 /* ── Interval dialog: number + unit (Check the connection every, Update all subscriptions every) ──
    Stored in the base unit (units[0]); opens in the largest unit that divides the value. */
 const INTERVALS = {
-  checkEvery: { title: 'Check the connection every', units: [['s', 1], ['min', 60]], min: 10, max: 3600, hint: 'From 10 s to 60 min' },
-  subsEvery:  { title: 'Update all subscriptions every', units: [['h', 1], ['d', 24]], min: 0, max: 720, hint: '0 = off (only when you tap Update) · up to 30 days' },
+  checkEvery: { title: 'Check the connection every', units: [['seconds', 1], ['minutes', 60]], min: 10, max: 3600, hint: 'From 10 s to 60 min' },
+  subsEvery:  { title: 'Update all subscriptions every', units: [['hours', 1], ['days', 24]], min: 0, max: 720, hint: '0 = off (only when you tap Update) · up to 30 days' },
 };
 let ivKey = null;
 function openIntervalDialog(key) {
