@@ -67,6 +67,16 @@ first publish is refused and the live copy is saved locally: it is the previous 
 wrapped by the host, so read only its first lines to confirm, then publish again.
 Do not send `main_screen.html` as a file unless asked.
 
+## End of session
+
+Each session works on its own `claude/...` branch, so the repo default must follow the
+latest work. Before finishing a session: make sure everything is committed and pushed,
+then make the current working branch the default branch of
+`FuckingSherlock/JormungandApp` (GitHub → Settings → General → Default branch, or any
+available GitHub tool/API). If no tool can change it, tell the user the branch name and
+ask them to switch it. A new session starts from the default branch, so this is how it
+picks up the latest state.
+
 ## Token economy
 
 Every tool call re-reads the whole conversation, so the number of calls and the context
