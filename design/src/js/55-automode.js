@@ -13,7 +13,7 @@
    - subsEvery: the global subscription update period; a subscription's own period
      (Nodes → Edit subscription) wins, its default 'auto' follows this one (seconds, 0 = off).
    The two periods are edited in a small dialog: a number + a unit.
-   Auto itself is switched on / off by the Auto badge of the Servers / Profiles list.
+   Auto itself is switched on / off by the Auto badge of the Simple / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
 const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };

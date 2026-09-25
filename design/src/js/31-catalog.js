@@ -1,4 +1,4 @@
-/* ══════════════════════ NODES TABS: Servers / Profiles ══════════════════════
+/* ══════════════════════ NODES TABS: Simple / Profiles ══════════════════════
    The two tabs are the catalog of the two connect modes (catalogOrder): Servers = sources
    and chains of sources, Profiles = profiles and chains of profiles. Everything is created,
    edited and deleted here; the Route sheet only picks Auto / Manual and may override the
@@ -125,6 +125,25 @@ function entryNodeRowsHtml(refs, now) {
     || '<div class="entry-empty">No working servers</div>';
 }
 
+// Edit mode on a chain card: every server of each end, framed = used by this chain,
+// tap = on / off for this chain only (inOff / outOff, same as the ticks in the chain editor).
+function chainEditRowsHtml(id, side) {
+  const c = chainsData[id], off = (side === 'in' ? c.inOff : c.outOff) || [];
+  const refs = side === 'in' ? unitRefs(c.inId) : chainExitOrder(c);
+  return refs.map(r => { const k = refKey(r), on = !off.includes(k);
+    return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-key="${k}" onclick="toggleChainNodeIn('${id}','${side}','${k}')" title="Tap: on / off in this chain">
+      <span class="node-flag">${r.node.flag}</span>
+      <span class="node-name">${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      <span class="node-proto">${r.node.protocol}</span>${latHtml(r.node)}</div>`; }).join('')
+    || '<div class="entry-empty">No working servers</div>';
+}
+function toggleChainNodeIn(id, side, key) {
+  const c = chainsData[id], f = side === 'in' ? 'inOff' : 'outOff', off = c[f] || [];
+  c[f] = off.includes(key) ? off.filter(x => x !== key) : off.concat(key);
+  renderNodes();
+  if (document.getElementById('sh-profiles').classList.contains('open')) renderConnects();
+}
+
 function renderEntryCard(id, q) {
   const e = connectEntry(id);
   if (!e) return '';
@@ -133,9 +152,11 @@ function renderEntryCard(id, q) {
   const open = !!expandState[id], broken = isBroken(id);
   const grip = !nodesEdit ? '' : q ? '<div class="drag-handle" style="visibility:hidden"></div>'
     : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">${GRIP_SVG}</div>`;
+  const side = (s, label) => `<div class="entry-side">${label} · ${esc(unitName(s === 'in' ? chain.inId : chain.outId))}</div>`
+    + (nodesEdit ? chainEditRowsHtml(id, s) : s === 'in' ? entryNodeRowsHtml(chainEntryRefs(chain), chainEntryNode(chain))
+      : entryNodeRowsHtml(chainExitRefs(chain), chainExitNode(chain)));
   const body = chain
-    ? `<div class="entry-side">Entry · ${esc(unitName(chain.inId))}</div>${entryNodeRowsHtml(chainEntryRefs(chain), chainEntryNode(chain))}
-       <div class="entry-side">Exit · ${esc(unitName(chain.outId))}</div>${entryNodeRowsHtml(chainExitRefs(chain), chainExitNode(chain))}`
+    ? side('in', 'Entry') + side('out', 'Exit')
     : entryNodeRowsHtml(unitPickRefs(id), unitNode(id));
   return `<div class="src-card entry-card ${open ? 'open' : ''} ${broken ? 'broken' : ''}" data-id="${id}">
     <div class="src-top">

@@ -313,7 +313,7 @@ function selectConnect(id) {
 
 const CHAIN_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
 
-// "+" on the Profiles tab of Nodes (the Servers tab has its Add sheet with a Chain row).
+// "+" on the Profiles tab of Nodes (the Simple tab has its Add sheet with a Chain row).
 function openCreateMenu() {
   const close = "closeSheet('actions');";
   openActions('Create',
@@ -344,7 +344,7 @@ function setConnectMode(mode) {
 function modeOrder(mode) { return mode === connectMode ? connectOrder : modeState[mode].order; }
 function setModeOrder(mode, order) { if (mode === connectMode) connectOrder = order; else modeState[mode].order = order; }
 
-// A new source joins the end of the Servers tab (and so of the simple-mode route).
+// A new source joins the end of the Simple tab (and so of the simple-mode route).
 function sourceAdded(id) {
   if (sourcesData[id].inAuto === undefined) sourcesData[id].inAuto = true;
   if (!sourcesData[id].offNodes) sourcesData[id].offNodes = [];
@@ -393,7 +393,7 @@ function updateMainConnectCard() {
   const ms = n => n && isAlive(n) ? ping(n) : null;
   document.getElementById('profCardName').textContent = e ? e.name : '—';
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
-    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Servers' : 'Profiles';
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Simple' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';

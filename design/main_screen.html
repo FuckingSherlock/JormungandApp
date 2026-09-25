@@ -1024,7 +1024,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="dock-profile" onclick="openProfiles()">
       <div class="profiles-main">
         <div class="profiles-top">
-          <span class="card-label" style="margin-bottom:0" id="profCardLabel">Servers</span>
+          <span class="card-label" style="margin-bottom:0" id="profCardLabel">Simple</span>
           <span class="profiles-name" id="profCardName">default</span>
         </div>
         <div class="profiles-sub">
@@ -1041,7 +1041,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   </div>
   </div><!-- /view-home -->
 
-  <!-- ══════════ VIEW: NODES (catalog: Servers tab = sources + their chains, Profiles tab = profiles + their chains) ══════════ -->
+  <!-- ══════════ VIEW: NODES (catalog: Simple tab = sources + their chains, Profiles tab = profiles + their chains) ══════════ -->
   <div class="view" id="view-nodes">
     <div class="topbar">
       <div>
@@ -1075,7 +1075,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       </button>
       <div class="nodes-tabs" id="nodesTabs">
-        <button class="nodes-tab" data-tab="simple" onclick="setNodesTab('simple')">Servers<span class="tab-dot" title="The route uses this tab now"></span></button>
+        <button class="nodes-tab" data-tab="simple" onclick="setNodesTab('simple')">Simple<span class="tab-dot" title="The route uses this tab now"></span></button>
         <button class="nodes-tab" data-tab="profiles" onclick="setNodesTab('profiles')">Profiles<span class="tab-dot" title="The route uses this tab now"></span></button>
         <div class="nodes-tab-ink" id="nodesTabInk"></div>
       </div>
@@ -1265,7 +1265,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       </button>
       <div class="route-modes" id="routeModes" title="Which tab of Nodes the route uses">
-        <span class="route-ink"></span><button data-mode="simple" onclick="setConnectMode('simple')">Servers</button><button data-mode="profiles" onclick="setConnectMode('profiles')">Profiles</button>
+        <span class="route-ink"></span><button data-mode="simple" onclick="setConnectMode('simple')">Simple</button><button data-mode="profiles" onclick="setConnectMode('profiles')">Profiles</button>
       </div>
     </div>
     <div class="sheet-body">
@@ -2324,7 +2324,7 @@ function selectConnect(id) {
 
 const CHAIN_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
 
-// "+" on the Profiles tab of Nodes (the Servers tab has its Add sheet with a Chain row).
+// "+" on the Profiles tab of Nodes (the Simple tab has its Add sheet with a Chain row).
 function openCreateMenu() {
   const close = "closeSheet('actions');";
   openActions('Create',
@@ -2355,7 +2355,7 @@ function setConnectMode(mode) {
 function modeOrder(mode) { return mode === connectMode ? connectOrder : modeState[mode].order; }
 function setModeOrder(mode, order) { if (mode === connectMode) connectOrder = order; else modeState[mode].order = order; }
 
-// A new source joins the end of the Servers tab (and so of the simple-mode route).
+// A new source joins the end of the Simple tab (and so of the simple-mode route).
 function sourceAdded(id) {
   if (sourcesData[id].inAuto === undefined) sourcesData[id].inAuto = true;
   if (!sourcesData[id].offNodes) sourcesData[id].offNodes = [];
@@ -2404,7 +2404,7 @@ function updateMainConnectCard() {
   const ms = n => n && isAlive(n) ? ping(n) : null;
   document.getElementById('profCardName').textContent = e ? e.name : '—';
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
-    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Servers' : 'Profiles';
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Simple' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
@@ -2912,7 +2912,7 @@ function deleteNode(sid, nid) {
   purgeNodeSettings(sid, new Set([nid]));
   renderAll();
 }
-/* ══════════════════════ NODES TABS: Servers / Profiles ══════════════════════
+/* ══════════════════════ NODES TABS: Simple / Profiles ══════════════════════
    The two tabs are the catalog of the two connect modes (catalogOrder): Servers = sources
    and chains of sources, Profiles = profiles and chains of profiles. Everything is created,
    edited and deleted here; the Route sheet only picks Auto / Manual and may override the
@@ -3039,6 +3039,25 @@ function entryNodeRowsHtml(refs, now) {
     || '<div class="entry-empty">No working servers</div>';
 }
 
+// Edit mode on a chain card: every server of each end, framed = used by this chain,
+// tap = on / off for this chain only (inOff / outOff, same as the ticks in the chain editor).
+function chainEditRowsHtml(id, side) {
+  const c = chainsData[id], off = (side === 'in' ? c.inOff : c.outOff) || [];
+  const refs = side === 'in' ? unitRefs(c.inId) : chainExitOrder(c);
+  return refs.map(r => { const k = refKey(r), on = !off.includes(k);
+    return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-key="${k}" onclick="toggleChainNodeIn('${id}','${side}','${k}')" title="Tap: on / off in this chain">
+      <span class="node-flag">${r.node.flag}</span>
+      <span class="node-name">${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      <span class="node-proto">${r.node.protocol}</span>${latHtml(r.node)}</div>`; }).join('')
+    || '<div class="entry-empty">No working servers</div>';
+}
+function toggleChainNodeIn(id, side, key) {
+  const c = chainsData[id], f = side === 'in' ? 'inOff' : 'outOff', off = c[f] || [];
+  c[f] = off.includes(key) ? off.filter(x => x !== key) : off.concat(key);
+  renderNodes();
+  if (document.getElementById('sh-profiles').classList.contains('open')) renderConnects();
+}
+
 function renderEntryCard(id, q) {
   const e = connectEntry(id);
   if (!e) return '';
@@ -3047,9 +3066,11 @@ function renderEntryCard(id, q) {
   const open = !!expandState[id], broken = isBroken(id);
   const grip = !nodesEdit ? '' : q ? '<div class="drag-handle" style="visibility:hidden"></div>'
     : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">${GRIP_SVG}</div>`;
+  const side = (s, label) => `<div class="entry-side">${label} · ${esc(unitName(s === 'in' ? chain.inId : chain.outId))}</div>`
+    + (nodesEdit ? chainEditRowsHtml(id, s) : s === 'in' ? entryNodeRowsHtml(chainEntryRefs(chain), chainEntryNode(chain))
+      : entryNodeRowsHtml(chainExitRefs(chain), chainExitNode(chain)));
   const body = chain
-    ? `<div class="entry-side">Entry · ${esc(unitName(chain.inId))}</div>${entryNodeRowsHtml(chainEntryRefs(chain), chainEntryNode(chain))}
-       <div class="entry-side">Exit · ${esc(unitName(chain.outId))}</div>${entryNodeRowsHtml(chainExitRefs(chain), chainExitNode(chain))}`
+    ? side('in', 'Entry') + side('out', 'Exit')
     : entryNodeRowsHtml(unitPickRefs(id), unitNode(id));
   return `<div class="src-card entry-card ${open ? 'open' : ''} ${broken ? 'broken' : ''}" data-id="${id}">
     <div class="src-top">
@@ -4015,7 +4036,7 @@ function setSysProxy(on) {
    - subsEvery: the global subscription update period; a subscription's own period
      (Nodes → Edit subscription) wins, its default 'auto' follows this one (seconds, 0 = off).
    The two periods are edited in a small dialog: a number + a unit.
-   Auto itself is switched on / off by the Auto badge of the Servers / Profiles list.
+   Auto itself is switched on / off by the Auto badge of the Simple / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
 const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
@@ -4298,7 +4319,7 @@ function renderConnSettings() {
 
 const HELP = {
   entries: { title: 'Route', items: [
-    ['Servers / Profiles', 'which tab of Nodes the route uses. Everything is created and edited in Nodes.'],
+    ['Simple / Profiles', 'which tab of Nodes the route uses. Everything is created and edited in Nodes.'],
     ['Auto', 'connects the first working entry from the top. If it fails, Auto moves to the next one.'],
     ['Manual', 'tap an entry to use only it. Tap the Auto badge to go back.'],
     ['✎ Edit', 'drag ⋮⋮ to change the order Auto tries entries in; the switch lets Auto pick it or not.'],
@@ -4336,7 +4357,7 @@ const HELP = {
     ['Check the connection every', 'pings the current server on a timer. If requests start failing, it is pinged right away, without waiting.'],
     ['Speed test on failures', 'after failed requests, also checks how fast the server is.'],
     ['Leave a server after', 'how many missed checks in a row count as “down”.'],
-    ['On / off', 'the Auto badge in the Servers / Profiles list. Off = Manual: stays on the entry you tapped.'],
+    ['On / off', 'the Auto badge in the Simple / Profiles list. Off = Manual: stays on the entry you tapped.'],
     ['Priority', 'the order Auto tries entries in — change it with ✎ in that list.'],
   ] },
   subsupdate: { title: 'Subscription updates', items: [
@@ -4354,7 +4375,7 @@ const HELP = {
   ] },
   nodes: { title: 'Nodes', items: [
     ['Nodes', 'everything traffic can go through. Create, edit and delete it here.'],
-    ['Servers / Profiles', 'two tabs, swipe between them: subscriptions and servers with their chains, or profiles with theirs.'],
+    ['Simple / Profiles', 'two tabs, swipe between them: subscriptions and servers with their chains, or profiles with theirs.'],
     ['Order', 'the order here is the route’s priority, unless the Route sheet has its own.'],
     ['Tap a server', 'its menu: ping, copy, switch off, delete. Tap the ms to ping it.'],
     ['✎ Edit', 'drag ⋮⋮ to reorder, switch subscriptions on / off, tap servers to switch them off.'],

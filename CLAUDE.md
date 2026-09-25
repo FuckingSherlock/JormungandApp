@@ -7,15 +7,15 @@ start it until the mockup is finished. The user talks Russian; reply in Russian.
 ## Status
 
 In the mockup: Home (modes incl. system proxy, connect dock), Nodes (the catalog: tabs
-Servers / Profiles, swipeable — sources, profiles, chains are created and edited only here),
-Route (main flow only: ✎ + animated Servers / Profiles switch, Auto / Manual, Use in Auto on
+Simple / Profiles, swipeable — sources, profiles, chains are created and edited only here),
+Route (main flow only: ✎ + animated Simple / Profiles switch, Auto / Manual, Use in Auto on
 every row, own priority over the Nodes order), Settings (Auto mode, Appearance with themes and
 text size 90–120%, Connection, DNS), Rules (apps, own rules with form + JSON, target picker
 over the whole catalog, "If unavailable" + global default, quick rules, services dropdown
 linked to per-app routing, final order, address test, import/export, rule sets). All sheets
 open to the top of the screen and close by swiping the header down.
 
-Nodes edit mode: ✎ sits left of the Servers / Profiles tabs (as in Route), ✓ while editing;
+Nodes edit mode: ✎ sits left of the Simple / Profiles tabs (as in Route), ✓ while editing;
 the header never changes (search, ⚡, ⋮, + stay available in edit mode).
 
 ## Layout
@@ -59,7 +59,7 @@ target-picker, rule-fallback, settings, dock, dock-chain, dock-profile, dock-off
 profiles, broken, profiles-full, source-entry, gone, nothing-ticked,
 simple-chain, chain-priority, profile-edit, chain-edit, chain-groups, drag-mid, addmenu,
 srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm,
-nodes-edit, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
+nodes-edit, nodes-edit-chain, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
 rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
 rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, text-large, text-large-rule.
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check

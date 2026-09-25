@@ -72,6 +72,7 @@ const SHOTS = {
   'node-off': async p => { await tab(p, 'nodes'); await p.evaluate(() => { sourcesData.src2.disabledNodes.push('n2'); expandState.src2 = true; renderNodes(); document.querySelector('#view-nodes .scroll').scrollTop = 150; }); },
   'broken-node': async p => { await p.evaluate(() => { sourcesData.src4.disabledNodes = ['n0', 'n1']; setConnectMode('profiles'); openProfiles(); }); await settle(p); },
   'nodes-edit': async p => { await tab(p, 'nodes'); await p.evaluate(() => { expandState.src2 = true; setNodesEdit(true); }); },
+  'nodes-edit-chain': async p => { await tab(p, 'nodes'); await p.evaluate(() => { expandState.sc1 = true; setNodesEdit(true); document.querySelector('#nodes-list .entry-card[data-id=sc1]').scrollIntoView(); }); },
   'entry-priority': async p => { await p.evaluate(() => { openProfiles(); sourcesData.src3.pickMode = 'priority'; openSourceEntry('src3'); }); await settle(p); },
   'profile-priority': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); document.querySelector('#sh-createprofile .sheet-body').scrollTop = 9999; }); await settle(p); },
   interval: async p => { await p.evaluate(() => { openAutoMode(); openIntervalDialog('subsEvery'); }); await settle(p); },
@@ -389,7 +390,7 @@ async function runChecks() {
     expect(await page.evaluate(() => connectMode === 'simple'), 'not simple by default');
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
     expect(ids.includes('src1') && ids.includes('sc1') && !ids.includes('default') && !ids.includes('cpdefault'), ids.join());
-    expect(/Servers/.test(await page.textContent('#routeModes .on')), 'mode switch');
+    expect(/Simple/.test(await page.textContent('#routeModes .on')), 'mode switch');
   });
 
   await check('simple mode: tap a source for Manual, second tap back to Auto', async () => {
@@ -766,6 +767,15 @@ async function runChecks() {
       out.tapMenu = q('#sh-actions').classList.contains('open') && !isNodeDisabled(sourcesData.src2, 'n0'); closeSheet('actions');
       setNodesEdit(true);
       out.edit = !!q('#nodes-list .drag-handle') && !!q('#nodes-list .mini-toggle') && !!q('#nodes-list .node-row.pick') && q('#nodesEditBtn').classList.contains('on') && [...document.querySelectorAll('#view-nodes .head-actions .icon-btn')].every(b => b.offsetWidth > 0);
+      const cid = catalogOrder.simple.find(x => chainsData[x]), ch = chainsData[cid];
+      const card = () => q(`#nodes-list .entry-card[data-id=${cid}]`);
+      out.chainGrip = !!card().querySelector('.drag-handle') && card().querySelectorAll('.node-row.pick').length > 0;
+      const offs = () => (ch.inOff || []).concat(ch.outOff || []);
+      const row = card().querySelector('.node-row.pick.on'), key = row.dataset.key, before = offs().length;
+      row.click();
+      out.chainOff = offs().includes(key) && card().querySelector(`.node-row[data-key="${key}"]`).classList.contains('disabled');
+      card().querySelector(`.node-row[data-key="${key}"]`).click();
+      out.chainBack = offs().length === before;
       setNodesEdit(false); switchTab('home');
       openProfiles(); const was = autoConnect;
       out.listView = !q('#connects-list .drag-handle');
