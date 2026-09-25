@@ -71,6 +71,13 @@ function sortedNodes(list, nodeOf = x => x) {
   return list;
 }
 
+// Fastest lists (profile / chain / route entry in Fastest mode) always read by ping: quickest
+// on top, dead ones last — the top row is the one that connects.
+function byPing(list, nodeOf = x => x) {
+  const key = x => isAlive(nodeOf(x)) ? ping(nodeOf(x)) : 1e9;
+  return list.slice().sort((a, b) => key(a) - key(b));
+}
+
 /* ── Servers the provider dropped (s.gone) ──
    One collapsible "Unavailable · N" block, used by Nodes and by every node picker. The
    rows are read-only; `isOn(ref)` = the kept selection (framed like a picked row);

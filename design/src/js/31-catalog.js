@@ -129,7 +129,7 @@ function entryNodeRowsHtml(refs, now) {
 // tap = on / off for this chain only (inOff / outOff, same as the ticks in the chain editor).
 function chainEditRowsHtml(id, side) {
   const c = chainsData[id], off = (side === 'in' ? c.inOff : c.outOff) || [];
-  const refs = side === 'in' ? unitRefs(c.inId) : chainExitOrder(c);
+  const refs = side === 'in' || c.exitMode !== 'priority' ? byPing(side === 'in' ? unitRefs(c.inId) : chainExitOrder(c), r => r.node) : chainExitOrder(c);
   return refs.map(r => { const k = refKey(r), on = !off.includes(k);
     return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-key="${k}" onclick="toggleChainNodeIn('${id}','${side}','${k}')" title="Tap: on / off in this chain">
       <span class="node-flag">${r.node.flag}</span>
@@ -153,11 +153,11 @@ function renderEntryCard(id, q) {
   const grip = !nodesEdit ? '' : q ? '<div class="drag-handle" style="visibility:hidden"></div>'
     : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">${GRIP_SVG}</div>`;
   const side = (s, label) => `<div class="entry-side">${label} · ${esc(unitName(s === 'in' ? chain.inId : chain.outId))}</div>`
-    + (nodesEdit ? chainEditRowsHtml(id, s) : s === 'in' ? entryNodeRowsHtml(chainEntryRefs(chain), chainEntryNode(chain))
-      : entryNodeRowsHtml(chainExitRefs(chain), chainExitNode(chain)));
+    + (nodesEdit ? chainEditRowsHtml(id, s) : s === 'in' ? entryNodeRowsHtml(byPing(chainEntryRefs(chain), r => r.node), chainEntryNode(chain))
+      : entryNodeRowsHtml(chain.exitMode === 'priority' ? chainExitRefs(chain) : byPing(chainExitRefs(chain), r => r.node), chainExitNode(chain)));
   const body = chain
     ? side('in', 'Entry') + side('out', 'Exit')
-    : entryNodeRowsHtml(unitPickRefs(id), unitNode(id));
+    : entryNodeRowsHtml(unitPriority(id) ? unitPickRefs(id) : byPing(unitPickRefs(id), r => r.node), unitNode(id));
   return `<div class="src-card entry-card ${open ? 'open' : ''} ${broken ? 'broken' : ''}" data-id="${id}">
     <div class="src-top">
     ${grip}

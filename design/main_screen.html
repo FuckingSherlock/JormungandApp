@@ -2505,6 +2505,13 @@ function sortedNodes(list, nodeOf = x => x) {
   return list;
 }
 
+// Fastest lists (profile / chain / route entry in Fastest mode) always read by ping: quickest
+// on top, dead ones last — the top row is the one that connects.
+function byPing(list, nodeOf = x => x) {
+  const key = x => isAlive(nodeOf(x)) ? ping(nodeOf(x)) : 1e9;
+  return list.slice().sort((a, b) => key(a) - key(b));
+}
+
 /* ── Servers the provider dropped (s.gone) ──
    One collapsible "Unavailable · N" block, used by Nodes and by every node picker. The
    rows are read-only; `isOn(ref)` = the kept selection (framed like a picked row);
@@ -3052,7 +3059,7 @@ function entryNodeRowsHtml(refs, now) {
 // tap = on / off for this chain only (inOff / outOff, same as the ticks in the chain editor).
 function chainEditRowsHtml(id, side) {
   const c = chainsData[id], off = (side === 'in' ? c.inOff : c.outOff) || [];
-  const refs = side === 'in' ? unitRefs(c.inId) : chainExitOrder(c);
+  const refs = side === 'in' || c.exitMode !== 'priority' ? byPing(side === 'in' ? unitRefs(c.inId) : chainExitOrder(c), r => r.node) : chainExitOrder(c);
   return refs.map(r => { const k = refKey(r), on = !off.includes(k);
     return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-key="${k}" onclick="toggleChainNodeIn('${id}','${side}','${k}')" title="Tap: on / off in this chain">
       <span class="node-flag">${r.node.flag}</span>
@@ -3076,11 +3083,11 @@ function renderEntryCard(id, q) {
   const grip = !nodesEdit ? '' : q ? '<div class="drag-handle" style="visibility:hidden"></div>'
     : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">${GRIP_SVG}</div>`;
   const side = (s, label) => `<div class="entry-side">${label} · ${esc(unitName(s === 'in' ? chain.inId : chain.outId))}</div>`
-    + (nodesEdit ? chainEditRowsHtml(id, s) : s === 'in' ? entryNodeRowsHtml(chainEntryRefs(chain), chainEntryNode(chain))
-      : entryNodeRowsHtml(chainExitRefs(chain), chainExitNode(chain)));
+    + (nodesEdit ? chainEditRowsHtml(id, s) : s === 'in' ? entryNodeRowsHtml(byPing(chainEntryRefs(chain), r => r.node), chainEntryNode(chain))
+      : entryNodeRowsHtml(chain.exitMode === 'priority' ? chainExitRefs(chain) : byPing(chainExitRefs(chain), r => r.node), chainExitNode(chain)));
   const body = chain
     ? side('in', 'Entry') + side('out', 'Exit')
-    : entryNodeRowsHtml(unitPickRefs(id), unitNode(id));
+    : entryNodeRowsHtml(unitPriority(id) ? unitPickRefs(id) : byPing(unitPickRefs(id), r => r.node), unitNode(id));
   return `<div class="src-card entry-card ${open ? 'open' : ''} ${broken ? 'broken' : ''}" data-id="${id}">
     <div class="src-top">
     ${grip}
@@ -4522,7 +4529,7 @@ function renderCreateProfileSources() {
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
                   state === 'some' ? `${picked} of ${live.length} nodes` : `${live.length} nodes`, `${alive} alive`]
       .concat((s.gone || []).length ? [`<span class="gone-meta">${s.gone.length} unavailable</span>`] : []).join('<span class="dot">·</span>');
-    const rows = open ? sortedNodes(live).map(n => {
+    const rows = open ? (cpPickMode === 'priority' ? sortedNodes(live) : byPing(live)).map(n => {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
       return `<div class="node-row ps-node pick ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
@@ -4731,7 +4738,7 @@ function renderChainPicker(elId, side) {
     const sub = broken ? '<span class="off-meta">off in Nodes</span>' : taken ? (side === 'in' ? 'used as exit' : 'used as entry')
       : (n ? n.flag + ' ' : '') + (nOn < all.length ? `${nOn} of ${all.length}` : all.length) + ' nodes';
     let rank = 0;
-    const list = active && priority ? chainExitOrder(d) : sortedNodes(all, r => r.node);
+    const list = active && priority ? chainExitOrder(d) : byPing(all, r => r.node);
     const nodes = open ? list.map(r => {
       const { sid, node } = r, key = refKey(r);
       const lat = `<span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>`;
@@ -5010,7 +5017,7 @@ function renderSourceEntry() {
   document.getElementById('se-mode').innerHTML = pickModeSwitch('se:' + seId, priority, 'setSourceEntryMode');
   document.getElementById('se-hint').textContent = pickModeHint(priority);
   let rank = 0;
-  const list = priority ? seOrderRefs().map(r => r.node) : sortedNodes(live);
+  const list = priority ? seOrderRefs().map(r => r.node) : byPing(live);
   document.getElementById('se-nodes').innerHTML = list.map(n => {
     const off = isNodeOff(s, n.id);
     return `<div class="node-row ps-node pick ${off ? '' : 'on'}" data-id="${seId}::${n.id}" onclick="toggleSourceEntryNode('${n.id}')">

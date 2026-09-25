@@ -840,6 +840,20 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
+  await check('Fastest lists are sorted by ping, the quickest on top', async () => {
+    const r = await page.evaluate(() => {
+      const ms = sel => [...document.querySelectorAll(sel)].map(row => { const n = row.querySelector('.lat'); const v = parseInt(n ? n.textContent : ''); return isNaN(v) ? 1e9 : v; });
+      const sorted = a => a.length > 1 && a.every((v, i) => !i || a[i - 1] <= v);
+      switchTab('nodes'); setNodesTab('profiles'); profilesData.default.pickMode = 'fastest'; expandState.default = true; renderNodes();
+      const out = { card: sorted(ms('#nodes-profiles .entry-card[data-id=default] .src-body .node-row')) };
+      openSourceEntry('src1'); sourcesData.src1.pickMode = 'fastest'; renderSourceEntry();
+      out.entry = sorted(ms('#se-nodes .node-row')); closeSheet('sourceentry');
+      expandState.default = false; setNodesTab('simple'); switchTab('home'); renderAll();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
   await check('[?] opens a tip sheet above nested sheets', async () => {
     await page.evaluate(() => {
       openProfiles(); openSourceEntry('src1');

@@ -81,7 +81,7 @@ function renderCreateProfileSources() {
     const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
                   state === 'some' ? `${picked} of ${live.length} nodes` : `${live.length} nodes`, `${alive} alive`]
       .concat((s.gone || []).length ? [`<span class="gone-meta">${s.gone.length} unavailable</span>`] : []).join('<span class="dot">·</span>');
-    const rows = open ? sortedNodes(live).map(n => {
+    const rows = open ? (cpPickMode === 'priority' ? sortedNodes(live) : byPing(live)).map(n => {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
       return `<div class="node-row ps-node pick ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
@@ -290,7 +290,7 @@ function renderChainPicker(elId, side) {
     const sub = broken ? '<span class="off-meta">off in Nodes</span>' : taken ? (side === 'in' ? 'used as exit' : 'used as entry')
       : (n ? n.flag + ' ' : '') + (nOn < all.length ? `${nOn} of ${all.length}` : all.length) + ' nodes';
     let rank = 0;
-    const list = active && priority ? chainExitOrder(d) : sortedNodes(all, r => r.node);
+    const list = active && priority ? chainExitOrder(d) : byPing(all, r => r.node);
     const nodes = open ? list.map(r => {
       const { sid, node } = r, key = refKey(r);
       const lat = `<span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>`;

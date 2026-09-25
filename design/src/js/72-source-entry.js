@@ -36,7 +36,7 @@ function renderSourceEntry() {
   document.getElementById('se-mode').innerHTML = pickModeSwitch('se:' + seId, priority, 'setSourceEntryMode');
   document.getElementById('se-hint').textContent = pickModeHint(priority);
   let rank = 0;
-  const list = priority ? seOrderRefs().map(r => r.node) : sortedNodes(live);
+  const list = priority ? seOrderRefs().map(r => r.node) : byPing(live);
   document.getElementById('se-nodes').innerHTML = list.map(n => {
     const off = isNodeOff(s, n.id);
     return `<div class="node-row ps-node pick ${off ? '' : 'on'}" data-id="${seId}::${n.id}" onclick="toggleSourceEntryNode('${n.id}')">
