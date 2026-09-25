@@ -26,7 +26,8 @@
 .src-card{flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .src-top{display:flex;align-items:stretch}
 .src-top > .drag-handle{width:26px;margin-left:4px}
-.src-top-main{flex:1;min-width:0}
+.src-top-main{flex:1;min-width:0;padding-left:14px}
+.src-top > .drag-handle + .src-top-main{padding-left:0}
 .src-head{display:flex;align-items:center;gap:4px;padding:10px 6px 10px 0;cursor:pointer}
 .src-head .src-main{margin-right:4px}
 .src-head .mini-toggle{margin:0 4px}
