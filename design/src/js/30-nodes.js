@@ -138,17 +138,16 @@ function openGoneActions(sid, nid) {
     + menuRow(ICON.trash, 'Forget now<div class="menu-sub">Drops it and its settings everywhere</div>', `closeSheet('actions');forgetGone('${sid}',['${nid}'])`, 'danger'));
 }
 
-// Kept short so the line rarely wraps: "sing-box · 16/18 on · 2 gone · 1d"; when it does wrap,
-// it breaks between items, never inside one.
+// Kept short so the line rarely wraps: "sing-box · 16/18 nodes · 1d" (working / all, where
+// not working = switched off or gone from the subscription); when it wraps, it breaks between items.
 function srcMetaHtml(s) {
-  const parts = [], live = liveNodes(s).length, total = s.nodes.length;
+  const parts = [], live = liveNodes(s).length, off = s.nodes.length - live, gone = (s.gone || []).length;
+  const total = s.nodes.length + gone, word = s.kind === 'sub' ? 'node' : 'server';
+  const why = [off && off + ' off', gone && gone + ' gone from the subscription'].filter(Boolean).join(', ');
   parts.push(`<span class="fmt-tag">${s.kind === 'sub' ? s.format : 'manual'}</span>`);
-  parts.push(live < total ? `<span class="dis-meta" title="${total - live} off">${live}/${total} on</span>`
-    : `${total} ${s.kind === 'sub' ? 'node' : 'server'}${total === 1 ? '' : 's'}`);
-  if (s.kind === 'sub') {
-    if ((s.gone || []).length) parts.push(`<span class="gone-meta" title="Removed by the provider, kept for a while">${s.gone.length} gone</span>`);
-    parts.push(`<span title="Updated ${timeAgo(s.updatedAt)}">${shortAgo(s.updatedAt)}</span>`);
-  }
+  parts.push(live < total ? `<span class="${gone ? 'gone-meta' : 'dis-meta'}" title="${why}">${live}/${total} ${word}s</span>`
+    : `${total} ${word}${total === 1 ? '' : 's'}`);
+  if (s.kind === 'sub') parts.push(`<span title="Updated ${timeAgo(s.updatedAt)}">${shortAgo(s.updatedAt)}</span>`);
   return parts.map((p, i) => `<span class="meta-part">${p}${i < parts.length - 1 ? '<span class="dot">·</span>' : ''}</span>`).join('');
 }
 function shortAgo(ts) {
