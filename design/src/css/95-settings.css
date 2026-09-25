@@ -1,5 +1,4 @@
 /* ── Settings screen ── */
-.settings-caption{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;padding:14px 6px 6px}
 .settings-group{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .settings-row{display:flex;align-items:center;gap:12px;padding:13px 14px;cursor:pointer;transition:background .12s}
 .settings-row + .settings-row{border-top:1px solid var(--border)}
@@ -12,3 +11,8 @@
 .soon-tag{font-size:11px;font-weight:600;color:var(--t3);border:1px solid var(--border-hi);border-radius:4px;padding:1px 5px}
 .theme-swatch{display:flex;width:44px;height:30px;border-radius:7px;overflow:hidden;border:1px solid var(--border-hi);flex-shrink:0}
 .theme-swatch span{flex:1}
+.settings-menu{margin-top:6px}
+.settings-menu .settings-row{padding:11px 14px}
+.set-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.settings-chev{color:var(--t3);flex-shrink:0}
+.set-sheet .sheet-body{padding:12px 14px 20px}

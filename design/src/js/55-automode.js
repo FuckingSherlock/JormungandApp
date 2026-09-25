@@ -1,4 +1,4 @@
-/* ══════════════════════ AUTO MODE (Settings → Auto mode; Home card = a link to it) ══════════════════════
+/* ══════════════════════ AUTO MODE (Settings → Auto mode sheet; Home card = a link to it) ══════════════════════
    How Auto picks and keeps a connection, in one place:
    - threshold: a server takes over from the current one only if it is this much faster
      (hysteresis, so Auto does not hop between servers with close pings); typed in ms;
@@ -11,30 +11,33 @@
    - failAfter: timeouts in a row (1–4) before Auto leaves the current server;
    - pauseScreenOff: no checks while the screen is off (mobile battery);
    - subsEvery: the global subscription update period; a subscription's own period
-     (Nodes → Edit subscription) wins, its default 'auto' follows this one (hours, 0 = off).
+     (Nodes → Edit subscription) wins, its default 'auto' follows this one (seconds, 0 = off).
    The two periods are edited in a small dialog: a number + a unit.
    Auto itself is switched on / off by the Auto badge of the Servers / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
-const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 };
+const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
 const AUTO_THRESHOLD_MAX = 1000;
 const AUTO_FAIL_AFTER = [1, 4];
 const CHEVRON_R = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
-const fmtEvery = s => s % 60 ? s + ' s' : s / 60 + ' min';
-const subsEveryText = h => !h ? 'off' : h % 24 ? h + ' h' : h / 24 + ' d';
+// A period in seconds, in the largest unit that divides it: 90 s, 5 min, 12 h, 2 d.
+const DUR_UNITS = [['d', 86400], ['h', 3600], ['min', 60], ['s', 1]];
+const fmtEvery = s => { const [l, m] = DUR_UNITS.find(([, m]) => s % m === 0); return s / m + ' ' + l; };
+const subsEveryText = s => s ? fmtEvery(s) : 'off';
 
 /* ── Interval dialog: number + unit (Check the connection every, Update all subscriptions every) ──
    Stored in the base unit (units[0]); opens in the largest unit that divides the value. */
 const INTERVALS = {
   checkEvery: { title: 'Check the connection every', units: [['seconds', 1], ['minutes', 60]], min: 10, max: 3600, hint: 'From 10 s to 60 min' },
-  subsEvery:  { title: 'Update all subscriptions every', units: [['hours', 1], ['days', 24]], min: 0, max: 720, hint: '0 = off (only when you tap Update) · up to 30 days' },
+  subsEvery:  { title: 'Update all subscriptions every', units: [['seconds', 1], ['minutes', 60], ['hours', 3600], ['days', 86400]], min: 10, max: 30 * 86400, off: true,
+                hint: '0 = off (only when you tap Update) · from 10 seconds to 30 days' },
 };
 let ivKey = null;
 function openIntervalDialog(key) {
   ivKey = key;
   const c = INTERVALS[key], v = autoCfg[key];
-  const [, mul] = [...c.units].reverse().find(([, m]) => v > 0 && v % m === 0) || c.units[0];
+  const [, mul] = [...c.units].reverse().find(([, m]) => v > 0 && v % m === 0) || c.units.find(([, m]) => m === 3600) || c.units[0];   // off opens in hours
   document.getElementById('ivTitle').textContent = c.title;
   document.getElementById('iv-hint').textContent = c.hint;
   document.getElementById('iv-unit').innerHTML = c.units.map(([l, m]) => `<option value="${m}" ${m === mul ? 'selected' : ''}>${l}</option>`).join('');
@@ -46,7 +49,7 @@ function openIntervalDialog(key) {
 function saveIntervalDialog() {
   const c = INTERVALS[ivKey], raw = document.getElementById('iv-value').value.trim();
   const v = Number(raw) * Number(document.getElementById('iv-unit').value);
-  if (raw === '' || !Number.isInteger(v) || v < c.min || v > c.max) { toast(c.hint); return; }
+  if (raw === '' || !Number.isInteger(v) || !(v === 0 && c.off) && (v < c.min || v > c.max)) { toast(c.hint); return; }
   setAutoCfg(ivKey, v);
   closeSheet('interval');
 }
@@ -64,11 +67,10 @@ function setAutoThreshold(input) {
 }
 const stepAutoFailAfter = d => setAutoCfg('failAfter', Math.min(AUTO_FAIL_AFTER[1], Math.max(AUTO_FAIL_AFTER[0], autoCfg.failAfter + d)));
 
-// The Home card is a link: it opens Settings at the Auto mode section.
+// The Home card is a link: it opens Settings with the Auto mode section on top.
 function openAutoMode() {
   switchTab('settings');
-  const sc = document.querySelector('#view-settings > .scroll');
-  sc.scrollTop += document.getElementById('auto-caption').getBoundingClientRect().top - sc.getBoundingClientRect().top;
+  openSheet('setauto');
 }
 
 function renderAutoMode() {

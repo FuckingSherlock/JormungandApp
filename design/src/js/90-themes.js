@@ -16,6 +16,7 @@ function applyTheme(id) {
 }
 
 function renderThemeList() {
+  document.getElementById('setLookSub').textContent = THEMES.find(t => t.id === currentTheme).name;
   document.getElementById('theme-list').innerHTML = THEMES.map(t => `<div class="settings-row" onclick="applyTheme('${t.id}')">
       <div class="theme-swatch">${t.swatch.map(c => `<span style="background:${c}"></span>`).join('')}</div>
       <div style="flex:1"><div class="settings-label">${t.name}</div><div class="settings-sub">${t.sub}</div></div>

@@ -684,7 +684,6 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 }
 .toast.show{opacity:1;transform:translate(-50%,0)}
 /* ── Settings screen ── */
-.settings-caption{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;padding:14px 6px 6px}
 .settings-group{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .settings-row{display:flex;align-items:center;gap:12px;padding:13px 14px;cursor:pointer;transition:background .12s}
 .settings-row + .settings-row{border-top:1px solid var(--border)}
@@ -697,6 +696,11 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 .soon-tag{font-size:11px;font-weight:600;color:var(--t3);border:1px solid var(--border-hi);border-radius:4px;padding:1px 5px}
 .theme-swatch{display:flex;width:44px;height:30px;border-radius:7px;overflow:hidden;border:1px solid var(--border-hi);flex-shrink:0}
 .theme-swatch span{flex:1}
+.settings-menu{margin-top:6px}
+.settings-menu .settings-row{padding:11px 14px}
+.set-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.settings-chev{color:var(--t3);flex-shrink:0}
+.set-sheet .sheet-body{padding:12px 14px 20px}
 </style>
 
 <div class="phone">
@@ -895,39 +899,87 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="scroll" id="nodes-list"></div>
   </div><!-- /view-nodes -->
 
-  <!-- ══════════ VIEW: SETTINGS (only Appearance works for now) ══════════ -->
+  <!-- ══════════ VIEW: SETTINGS — a list of sections, each opens its own sheet ══════════ -->
   <div class="view" id="view-settings">
     <div class="topbar"><div class="app-name">Settings</div></div>
     <div class="scroll" style="gap:0">
-      <!-- Auto mode: the Home AutoCard opens this section -->
-      <div class="settings-caption" id="auto-caption">Auto mode<button class="help-btn" onclick="event.stopPropagation();openHelp('automode')" title="What is this?">?</button></div>
+      <div class="settings-group settings-menu">
+        <div class="settings-row" data-sheet="setauto" onclick="openSheet('setauto')"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg></div><div style="flex:1"><div class="settings-label">Auto mode</div><div class="settings-sub">Failover, checks, subscription updates</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setlook" onclick="openSheet('setlook')"><div class="set-ico" style="color:var(--accent);background:rgba(var(--accent-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18z" fill="currentColor"/></svg></div><div style="flex:1"><div class="settings-label">Appearance</div><div class="settings-sub" id="setLookSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setgeneral" onclick="openSheet('setgeneral')"><div class="set-ico" style="color:var(--t2);background:rgba(var(--t2-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></div><div style="flex:1"><div class="settings-label">General</div><div class="settings-sub">Language, startup</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setconn" onclick="openSheet('setconn')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><div style="flex:1"><div class="settings-label">Connection</div><div class="settings-sub">TUN, DNS, latency test</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setdata" onclick="openSheet('setdata')"><div class="set-ico" style="color:var(--purple);background:rgba(var(--purple-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div style="flex:1"><div class="settings-label">Data</div><div class="settings-sub">Backup, about</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+    </div>
+  </div><!-- /view-settings -->
+
+  <!-- ══════════ SETTINGS SECTIONS (level 1 sheets) ══════════ -->
+  <div class="overlay" id="ov-setauto" onclick="closeSheet('setauto')"></div>
+  <div class="sheet set-sheet" id="sh-setauto">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Auto mode<button class="help-btn" onclick="event.stopPropagation();openHelp('automode')" title="What is this?">?</button></span>
+      <button class="sheet-close" onclick="closeSheet('setauto')">×</button>
+    </div>
+    <div class="sheet-body">
       <div id="auto-settings"></div>
-
-      <div class="settings-caption">Appearance</div>
+    </div>
+  </div>
+  <div class="overlay" id="ov-setlook" onclick="closeSheet('setlook')"></div>
+  <div class="sheet set-sheet" id="sh-setlook">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Appearance</span>
+      <button class="sheet-close" onclick="closeSheet('setlook')">×</button>
+    </div>
+    <div class="sheet-body">
       <div class="settings-group" id="theme-list"></div>
-
-      <div class="settings-caption">General</div>
+    </div>
+  </div>
+  <div class="overlay" id="ov-setgeneral" onclick="closeSheet('setgeneral')"></div>
+  <div class="sheet set-sheet" id="sh-setgeneral">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">General</span>
+      <button class="sheet-close" onclick="closeSheet('setgeneral')">×</button>
+    </div>
+    <div class="sheet-body">
       <div class="settings-group">
         <div class="settings-row soon"><div class="settings-label">Language</div><span class="settings-value">English</span><span class="soon-tag">soon</span></div>
         <div class="settings-row soon"><div class="settings-label">Launch at startup</div><span class="soon-tag">soon</span></div>
         <div class="settings-row soon"><div class="settings-label">Auto-connect</div><span class="soon-tag">soon</span></div>
       </div>
-
-      <div class="settings-caption">Connection</div>
+    </div>
+  </div>
+  <div class="overlay" id="ov-setconn" onclick="closeSheet('setconn')"></div>
+  <div class="sheet set-sheet" id="sh-setconn">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Connection</span>
+      <button class="sheet-close" onclick="closeSheet('setconn')">×</button>
+    </div>
+    <div class="sheet-body">
       <div class="settings-group">
         <div class="settings-row soon"><div class="settings-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
         <div class="settings-row soon"><div class="settings-label">Latency test URL</div><span class="settings-value">auto</span><span class="soon-tag">soon</span></div>
         <div class="settings-row soon"><div class="settings-label">DNS</div><span class="settings-value">1.1.1.1 · DoH</span><span class="soon-tag">soon</span></div>
       </div>
-
-      <div class="settings-caption">Data</div>
+    </div>
+  </div>
+  <div class="overlay" id="ov-setdata" onclick="closeSheet('setdata')"></div>
+  <div class="sheet set-sheet" id="sh-setdata">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Data</span>
+      <button class="sheet-close" onclick="closeSheet('setdata')">×</button>
+    </div>
+    <div class="sheet-body">
       <div class="settings-group">
         <div class="settings-row soon"><div class="settings-label">Backup &amp; restore</div><span class="soon-tag">soon</span></div>
         <div class="settings-row soon"><div class="settings-label">About</div><span class="settings-value">v0.1 mockup</span></div>
       </div>
     </div>
-  </div><!-- /view-settings -->
-
+  </div>
   <!-- Bottom nav -->
   <div class="bottomnav">
     <div class="nav-btn active" data-tab="home" onclick="switchTab('home')">
@@ -2716,7 +2768,7 @@ function setSegment(group, value, index) {
 setSegment('mode', 'tun', 0);
 setSegment('route', 'rules', 1);
 
-/* ══════════════════════ AUTO MODE (Settings → Auto mode; Home card = a link to it) ══════════════════════
+/* ══════════════════════ AUTO MODE (Settings → Auto mode sheet; Home card = a link to it) ══════════════════════
    How Auto picks and keeps a connection, in one place:
    - threshold: a server takes over from the current one only if it is this much faster
      (hysteresis, so Auto does not hop between servers with close pings); typed in ms;
@@ -2729,30 +2781,33 @@ setSegment('route', 'rules', 1);
    - failAfter: timeouts in a row (1–4) before Auto leaves the current server;
    - pauseScreenOff: no checks while the screen is off (mobile battery);
    - subsEvery: the global subscription update period; a subscription's own period
-     (Nodes → Edit subscription) wins, its default 'auto' follows this one (hours, 0 = off).
+     (Nodes → Edit subscription) wins, its default 'auto' follows this one (seconds, 0 = off).
    The two periods are edited in a small dialog: a number + a unit.
    Auto itself is switched on / off by the Auto badge of the Servers / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
-const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 };
+const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
 const AUTO_THRESHOLD_MAX = 1000;
 const AUTO_FAIL_AFTER = [1, 4];
 const CHEVRON_R = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
-const fmtEvery = s => s % 60 ? s + ' s' : s / 60 + ' min';
-const subsEveryText = h => !h ? 'off' : h % 24 ? h + ' h' : h / 24 + ' d';
+// A period in seconds, in the largest unit that divides it: 90 s, 5 min, 12 h, 2 d.
+const DUR_UNITS = [['d', 86400], ['h', 3600], ['min', 60], ['s', 1]];
+const fmtEvery = s => { const [l, m] = DUR_UNITS.find(([, m]) => s % m === 0); return s / m + ' ' + l; };
+const subsEveryText = s => s ? fmtEvery(s) : 'off';
 
 /* ── Interval dialog: number + unit (Check the connection every, Update all subscriptions every) ──
    Stored in the base unit (units[0]); opens in the largest unit that divides the value. */
 const INTERVALS = {
   checkEvery: { title: 'Check the connection every', units: [['seconds', 1], ['minutes', 60]], min: 10, max: 3600, hint: 'From 10 s to 60 min' },
-  subsEvery:  { title: 'Update all subscriptions every', units: [['hours', 1], ['days', 24]], min: 0, max: 720, hint: '0 = off (only when you tap Update) · up to 30 days' },
+  subsEvery:  { title: 'Update all subscriptions every', units: [['seconds', 1], ['minutes', 60], ['hours', 3600], ['days', 86400]], min: 10, max: 30 * 86400, off: true,
+                hint: '0 = off (only when you tap Update) · from 10 seconds to 30 days' },
 };
 let ivKey = null;
 function openIntervalDialog(key) {
   ivKey = key;
   const c = INTERVALS[key], v = autoCfg[key];
-  const [, mul] = [...c.units].reverse().find(([, m]) => v > 0 && v % m === 0) || c.units[0];
+  const [, mul] = [...c.units].reverse().find(([, m]) => v > 0 && v % m === 0) || c.units.find(([, m]) => m === 3600) || c.units[0];   // off opens in hours
   document.getElementById('ivTitle').textContent = c.title;
   document.getElementById('iv-hint').textContent = c.hint;
   document.getElementById('iv-unit').innerHTML = c.units.map(([l, m]) => `<option value="${m}" ${m === mul ? 'selected' : ''}>${l}</option>`).join('');
@@ -2764,7 +2819,7 @@ function openIntervalDialog(key) {
 function saveIntervalDialog() {
   const c = INTERVALS[ivKey], raw = document.getElementById('iv-value').value.trim();
   const v = Number(raw) * Number(document.getElementById('iv-unit').value);
-  if (raw === '' || !Number.isInteger(v) || v < c.min || v > c.max) { toast(c.hint); return; }
+  if (raw === '' || !Number.isInteger(v) || !(v === 0 && c.off) && (v < c.min || v > c.max)) { toast(c.hint); return; }
   setAutoCfg(ivKey, v);
   closeSheet('interval');
 }
@@ -2782,11 +2837,10 @@ function setAutoThreshold(input) {
 }
 const stepAutoFailAfter = d => setAutoCfg('failAfter', Math.min(AUTO_FAIL_AFTER[1], Math.max(AUTO_FAIL_AFTER[0], autoCfg.failAfter + d)));
 
-// The Home card is a link: it opens Settings at the Auto mode section.
+// The Home card is a link: it opens Settings with the Auto mode section on top.
 function openAutoMode() {
   switchTab('settings');
-  const sc = document.querySelector('#view-settings > .scroll');
-  sc.scrollTop += document.getElementById('auto-caption').getBoundingClientRect().top - sc.getBoundingClientRect().top;
+  openSheet('setauto');
 }
 
 function renderAutoMode() {
@@ -3759,6 +3813,7 @@ function applyTheme(id) {
 }
 
 function renderThemeList() {
+  document.getElementById('setLookSub').textContent = THEMES.find(t => t.id === currentTheme).name;
   document.getElementById('theme-list').innerHTML = THEMES.map(t => `<div class="settings-row" onclick="applyTheme('${t.id}')">
       <div class="theme-swatch">${t.swatch.map(c => `<span style="background:${c}"></span>`).join('')}</div>
       <div style="flex:1"><div class="settings-label">${t.name}</div><div class="settings-sub">${t.sub}</div></div>

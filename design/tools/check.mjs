@@ -76,6 +76,8 @@ const SHOTS = {
   'entry-priority': async p => { await p.evaluate(() => { openProfiles(); sourcesData.src3.pickMode = 'priority'; openSourceEntry('src3'); }); await settle(p); },
   'profile-priority': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); document.querySelector('#sh-createprofile .sheet-body').scrollTop = 9999; }); await settle(p); },
   interval: async p => { await p.evaluate(() => { openAutoMode(); openIntervalDialog('subsEvery'); }); await settle(p); },
+  'settings-auto': async p => { await p.evaluate(() => openAutoMode()); await settle(p); },
+  'settings-look': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setlook'); }); await settle(p); },
   help: async p => { await p.evaluate(() => { openProfiles(); openSourceEntry('src1'); openHelp('sourceentry'); }); await settle(p); },
   'delete-confirm': async p => { await tab(p, 'nodes'); await p.evaluate(() => confirmDeleteSource('src2')); await settle(p); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
@@ -730,7 +732,7 @@ async function runChecks() {
     await page.click('#autoCard'); await settle(page);
     const r = await page.evaluate(() => {
       const out = {};
-      out.open = document.getElementById('view-settings').classList.contains('active') && !!document.querySelector('#auto-settings .set-group');
+      out.open = document.getElementById('view-settings').classList.contains('active') && document.getElementById('sh-setauto').classList.contains('open') && !!document.querySelector('#auto-settings .set-group');
       const th = document.getElementById('am-threshold'); th.value = '100'; th.dispatchEvent(new Event('change'));
       out.threshold = autoCfg.threshold === 100;
       const th2 = document.getElementById('am-threshold'); th2.value = 'abc'; th2.dispatchEvent(new Event('change'));
@@ -742,10 +744,16 @@ async function runChecks() {
       out.every = autoCfg.checkEvery === 300 && /5 min/.test(document.getElementById('am-every').textContent) && !document.getElementById('sh-interval').classList.contains('open');
       dlg('am-every', '2', '1');   // 2 s: below the minimum — refused, dialog stays
       out.everyMin = autoCfg.checkEvery === 300 && document.getElementById('sh-interval').classList.contains('open'); closeSheet('interval');
-      dlg('am-subs', '2', '24');
-      out.subs = autoCfg.subsEvery === 48 && /2 d/.test(document.getElementById('am-subs').textContent);
-      dlg('am-subs', '12', '1');
-      out.subsBack = autoCfg.subsEvery === 12;
+      dlg('am-subs', '2', '86400');
+      out.subs = autoCfg.subsEvery === 172800 && /2 d/.test(document.getElementById('am-subs').textContent);
+      dlg('am-subs', '30', '60');
+      out.subsMin = autoCfg.subsEvery === 1800 && /30 min/.test(document.getElementById('am-subs').textContent);
+      dlg('am-subs', '0', '3600');
+      out.subsOff = autoCfg.subsEvery === 0 && /off/.test(document.getElementById('am-subs').textContent);
+      dlg('am-subs', '5', '1');   // 5 s: below the minimum — refused
+      out.subsTooShort = autoCfg.subsEvery === 0; closeSheet('interval');
+      dlg('am-subs', '12', '3600');
+      out.subsBack = autoCfg.subsEvery === 43200;
       const warmChips = () => [...document.querySelectorAll('#auto-settings .chip')].filter(e => /^next/.test(e.textContent)).length;
       setAutoCfg('keepWarm', false);
       out.warmOff = warmChips() === 0 && autoCfg.standby === 2;
@@ -760,7 +768,7 @@ async function runChecks() {
       out.stepMin = autoCfg.failAfter === 1;
       setAutoCfg('failAfter', 2); setAutoCfg('checkEvery', 60);
       setAutoCfg('threshold', 50);
-      switchTab('home');
+      closeSheet('setauto'); switchTab('home');
       openSrcForm('src1');
       out.auto = document.getElementById('sf-interval').value === '' && /auto · 12 h/.test(document.getElementById('sf-interval').placeholder);
       document.getElementById('sf-interval').value = '8'; saveSrcForm();
