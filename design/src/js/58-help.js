@@ -39,6 +39,8 @@ const HELP = {
     ['Auto mode', 'keeps you connected: when the server stops answering, it moves to the next working entry in the list.'],
     ['Switch to a faster server', 'moves only when the gain is worth it, so it doesn’t jump back and forth.'],
     ['Keep warm', 'the next entries are pinged too, so a switch lands on one that is known to work. Off = fewer pings, slower failover.'],
+    ['Check the connection every', 'pings the current server on a timer. If requests start failing, it is pinged right away, without waiting.'],
+    ['Speed test on failures', 'after failed requests, also checks how fast the server is.'],
     ['Leave a server after', 'how many missed checks in a row count as “down”.'],
     ['On / off', 'the Auto badge in the Servers / Profiles list. Off = Manual: stays on the entry you tapped.'],
     ['Priority', 'the order Auto tries entries in — change it with ✎ in that list.'],

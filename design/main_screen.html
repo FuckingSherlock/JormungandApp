@@ -2720,7 +2720,9 @@ setSegment('route', 'rules', 1);
    How Auto picks and keeps a connection, in one place:
    - threshold: a server takes over from the current one only if it is this much faster
      (hysteresis, so Auto does not hop between servers with close pings); typed in ms;
-   - checkEvery: how often the current route is re-pinged (seconds);
+   - checkEvery: how often the current route is re-pinged (seconds). Besides the timer,
+     failed requests through the current server trigger a ping at once (always on);
+   - speedOnFail: after such a failure, also run a speed test of the current server;
    - standby: how many next entries by priority are pinged together with the current
      one ("kept warm", 1–3), so a failover goes straight to a server known to work;
      keepWarm switches it off without losing the count;
@@ -2732,7 +2734,7 @@ setSegment('route', 'rules', 1);
    Auto itself is switched on / off by the Auto badge of the Servers / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
-const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, subsEvery: 12 };
+const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 };
 const AUTO_THRESHOLD_MAX = 1000;
 const AUTO_FAIL_AFTER = [1, 4];
 const CHEVRON_R = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
@@ -2799,7 +2801,7 @@ function renderAutoMode() {
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">Switch to a faster server<div class="set-hint">Only if it is faster than the current one by at least this</div></div>
         <input class="set-input am-num" id="am-threshold" inputmode="numeric" value="${autoCfg.threshold}" onchange="setAutoThreshold(this)"><span class="am-unit">ms</span></div>
-      <div class="set-row"><div class="set-label" style="flex:1">Check the connection every<div class="set-hint">Pings the current server${autoCfg.keepWarm ? ' and the kept-warm ones' : ''}</div></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Check the connection every<div class="set-hint">Pings the current server${autoCfg.keepWarm ? ' and the kept-warm ones' : ''}. Failed requests trigger a check at once</div></div>
         ${valueBtn('am-every', 'checkEvery', fmtEvery(autoCfg.checkEvery))}</div>
       <div class="set-row stack"><div class="am-head"><div class="set-label" style="flex:1">Keep warm<div class="set-hint">Next entries by priority pinged with the current one — failover goes straight to a working one</div></div>
         ${toggle(autoCfg.keepWarm, "setAutoCfg('keepWarm',!autoCfg.keepWarm)")}</div>
@@ -2810,6 +2812,7 @@ function renderAutoMode() {
           <span class="stepper-val">${fa}</span>
           <button class="stepper-btn" onclick="stepAutoFailAfter(1)" ${fa >= hi ? 'disabled' : ''}>›</button>
         </div></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Speed test on failures<div class="set-hint">When requests fail, also measure the server’s speed</div></div>${toggle(autoCfg.speedOnFail, "setAutoCfg('speedOnFail',!autoCfg.speedOnFail)")}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
     </div>
 
@@ -2860,6 +2863,8 @@ const HELP = {
     ['Auto mode', 'keeps you connected: when the server stops answering, it moves to the next working entry in the list.'],
     ['Switch to a faster server', 'moves only when the gain is worth it, so it doesn’t jump back and forth.'],
     ['Keep warm', 'the next entries are pinged too, so a switch lands on one that is known to work. Off = fewer pings, slower failover.'],
+    ['Check the connection every', 'pings the current server on a timer. If requests start failing, it is pinged right away, without waiting.'],
+    ['Speed test on failures', 'after failed requests, also checks how fast the server is.'],
     ['Leave a server after', 'how many missed checks in a row count as “down”.'],
     ['On / off', 'the Auto badge in the Servers / Profiles list. Off = Manual: stays on the entry you tapped.'],
     ['Priority', 'the order Auto tries entries in — change it with ✎ in that list.'],

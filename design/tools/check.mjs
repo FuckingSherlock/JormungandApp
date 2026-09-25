@@ -751,6 +751,9 @@ async function runChecks() {
       out.warmOff = warmChips() === 0 && autoCfg.standby === 2;
       setAutoCfg('keepWarm', true);
       out.warmOn = warmChips() === 3;
+      const sp = [...document.querySelectorAll('#auto-settings .set-row')].find(r => /Speed test on failures/.test(r.textContent));
+      sp.querySelector('.mini-toggle').click();
+      out.speed = autoCfg.speedOnFail === true; setAutoCfg('speedOnFail', false);
       for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn:last-child').click();
       out.stepMax = autoCfg.failAfter === 4 && document.querySelector('#am-failafter .stepper-btn:last-child').disabled;
       for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn').click();
