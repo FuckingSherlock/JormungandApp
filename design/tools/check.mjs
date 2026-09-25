@@ -54,7 +54,6 @@ const SHOTS = {
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
   profiles:   async p => { await p.click('.dock-profile'); await settle(p); },
   'profiles-full': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); }); await settle(p); },
-  'profiles-menu': async p => { await p.evaluate(() => { openProfiles(); openProfilesMenu(); }); await settle(p); },
   'source-entry': async p => { await p.evaluate(() => { openProfiles(); openSourceEntry('src1'); }); await settle(p); },
   'simple-chain': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
   'chain-priority': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('out', chainDraft.outId); }); await settle(p); },
@@ -104,6 +103,7 @@ const SHOTS = {
   'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); confirmDeleteEntry('work'); }); await settle(p); },
   'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.add('src2'); renderTargetPicker(); }); await settle(p); },
   'rule-fallback': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
+  'rules-services': async p => { await p.evaluate(() => { openRules(); svcOpen = true; svcAddOpen = true; renderRules(); document.querySelector('.svc-group').scrollIntoView(); }); await settle(p); },
   more:       async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodesMore()); await settle(p); },
 };
 
@@ -342,7 +342,7 @@ async function runChecks() {
     expect(await page.evaluate(() => connectMode === 'simple'), 'not simple by default');
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
     expect(ids.includes('src1') && ids.includes('sc1') && !ids.includes('default') && !ids.includes('cpdefault'), ids.join());
-    expect(/Servers/.test(await page.textContent('#profilesTitle')), 'title');
+    expect(/Servers/.test(await page.textContent('#routeModes .on')), 'mode switch');
   });
 
   await check('simple mode: tap a source for Manual, second tap back to Auto', async () => {
@@ -395,12 +395,11 @@ async function runChecks() {
     expect(await page.evaluate(() => !connectOrder.includes('src4') && !chainsData.sc1 && !modeState.profiles.order.includes('src4')), 'leftovers');
   });
 
-  await check('⋯ menu switches to profiles mode, each mode keeps its own list', async () => {
-    await page.click('#sh-profiles .sheet-head .icon-btn[title=More]'); await settle(page);
-    await page.click('#actions-body .menu-row >> nth=1'); await settle(page);
+  await check('mode switch under the header goes to profiles mode, each mode keeps its own list', async () => {
+    await page.click('#routeModes button[data-mode=profiles]'); await settle(page);
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
     expect(ids.includes('default') && ids.includes('cpdefault') && !ids.includes('src1'), ids.join());
-    expect(/Profiles/.test(await page.textContent('#profilesTitle')) && /Profile|Chain/.test(await page.textContent('#profCardLabel')), 'titles');
+    expect(/Profiles/.test(await page.textContent('#routeModes .on')) && /Profile|Chain/.test(await page.textContent('#profCardLabel')), 'titles');
   });
 
   await check('profiles: tap sets Manual (sheet stays), second tap / badge back to Auto', async () => {
@@ -1042,6 +1041,27 @@ async function runChecks() {
       out.down = /down → Block/.test(document.querySelector('.rule-row[data-id=r2]').textContent);
       sourcesData.src2.enabled = true; r2.target = keep; r2.fallback = keepFb; quickCfg.fallback = 'main'; renderRules(); renderAll();
       closeSheet('rules');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('rules: services are a dropdown — add from the built-in list, switch VPN / Direct, remove', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, rows = () => [...document.querySelectorAll('.svc-row')].map(e => e.dataset.svc);
+      openRules(); svcOpen = false; renderRules();
+      out.closed = !rows().length && /added/.test(document.querySelector('.svc-head').textContent);
+      document.querySelector('.svc-head').click();
+      out.onlyAdded = rows().length && rows().every(k => quickCfg.services[k] !== 'default');
+      document.querySelector('.svc-add-btn').click();
+      const k = SERVICES.find(([key]) => quickCfg.services[key] === 'default')[0];
+      [...document.querySelectorAll('.svc-add .chip')].find(c => c.textContent === SERVICES.find(s => s[0] === k)[1]).click();
+      out.added = quickCfg.services[k] === 'vpn' && rows().includes(k);
+      [...document.querySelectorAll(`.svc-row[data-svc=${k}] .seg3 button`)].find(b => b.textContent === 'Direct').click();
+      out.direct = quickCfg.services[k] === 'direct';
+      document.querySelector(`.svc-row[data-svc=${k}] .svc-del`).click();
+      out.removed = quickCfg.services[k] === 'default' && !rows().includes(k);
+      svcOpen = false; closeSheet('rules');
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));

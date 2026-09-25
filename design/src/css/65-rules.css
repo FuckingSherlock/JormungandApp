@@ -31,6 +31,11 @@
 .seg3 button.on.block{background:var(--muted)}
 .seg3.wide{flex:1}
 .seg3.wide button{flex:1;padding:8px 6px;font-size:14px}
+.svc-head{cursor:pointer}
+.svc-head .src-chevron{color:var(--t3);flex-shrink:0;transition:transform .2s}
+.svc-head .set-hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.svc-del{width:28px;height:28px;color:var(--t3)}
+.svc-add{padding:10px 14px}
 .svc-row .set-label{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* Target row (stub picker until the targets rework) */

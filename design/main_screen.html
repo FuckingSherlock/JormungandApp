@@ -383,10 +383,10 @@ body {
 .auto-badge .conn-dot{background:var(--accent);transition:background .2s}
 .list-caption{display:flex;justify-content:space-between;gap:8px;padding:12px 20px 6px;font-size:12px;color:var(--t3)}
 .list-caption span:first-child{font-weight:600;text-transform:uppercase;letter-spacing:.6px}
-.conn-row{display:flex;align-items:center;gap:4px;margin:0 10px;padding:0 4px 0 0;border-radius:12px;border:1px solid transparent;transition:background .2s,border-color .2s}
+.conn-row{display:flex;align-items:center;gap:4px;margin:0 10px;padding:0 12px 0 12px;border-radius:12px;border:1px solid transparent;transition:background .2s,border-color .2s}
 .conn-row + .conn-row{margin-top:2px}
 .conn-row.current{background:rgba(var(--active-rgb),.07);border-color:rgba(var(--active-rgb),.35)}
-.conn-row .drag-handle{width:26px}
+.conn-row .drag-handle{width:26px;margin-left:-8px}
 .conn-main{flex:1;min-width:0;padding:10px 0;cursor:pointer}
 .conn-name{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--t1);min-width:0}
 .conn-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -613,6 +613,11 @@ body {
 .seg3 button.on.block{background:var(--muted)}
 .seg3.wide{flex:1}
 .seg3.wide button{flex:1;padding:8px 6px;font-size:14px}
+.svc-head{cursor:pointer}
+.svc-head .src-chevron{color:var(--t3);flex-shrink:0;transition:transform .2s}
+.svc-head .set-hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.svc-del{width:28px;height:28px;color:var(--t3)}
+.svc-add{padding:10px 14px}
 .svc-row .set-label{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* Target row (stub picker until the targets rework) */
@@ -791,7 +796,11 @@ body {
 .tp-nodes .node-row.picked{background:rgba(var(--accent-rgb),.10)}
 
 /* ── Route sheet ── */
-.route-mode{margin-left:8px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(var(--accent-rgb),.12);border-radius:10px;padding:2px 8px;cursor:pointer}
+.route-bar{display:flex;align-items:center;gap:10px;padding:10px 18px 0;flex-shrink:0}
+.route-modes{flex:1}
+.route-modes button{flex:1;padding:8px 6px;font-size:14px}
+.route-modes button.on{background:var(--accent)}
+#connectEditBtn.on{color:var(--active);border-color:var(--active)}
 .route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
 .route-auto{flex-shrink:0;padding:0 4px}
 /* ── Compact action sheets (menus) ── */
@@ -1249,13 +1258,15 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order · Manual: the entry you tapped">
         <div class="conn-dot"></div><span>Auto</span>
       </div>
-      <button class="icon-btn ghost" id="connectEditBtn" onclick="setConnectEdit(!connectEdit)" title="Edit the Auto priority">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      </button>
-      <button class="icon-btn ghost" onclick="openProfilesMenu()" title="More">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
-      </button>
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
+    </div>
+    <div class="route-bar">
+      <div class="seg3 route-modes" id="routeModes" title="Which tab of Nodes the route uses">
+        <button data-mode="simple" onclick="setConnectMode('simple')">Servers</button><button data-mode="profiles" onclick="setConnectMode('profiles')">Profiles</button>
+      </div>
+      <button class="icon-btn" id="connectEditBtn" onclick="setConnectEdit(!connectEdit)" title="Edit the Auto priority">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </button>
     </div>
     <div class="sheet-body">
       <div class="list-caption"><span>Priority</span><span id="connectsCaption"></span></div>
@@ -2190,28 +2201,29 @@ function renderConnectRow(id) {
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
     ${current && !connectEdit ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
-    ${connectEdit ? `<div class="route-auto" title="Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>` : ''}
+    <div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>
   </div>`;
 }
 
-// Edit mode of the list: ⋮⋮ grips for the Auto priority and the "in Auto" switches;
-// taps no longer switch to Manual. Everything else about an entry is edited in Nodes.
+// Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
+// The switch on each row (Use in Auto) works in both modes. Everything else: Nodes.
 let connectEdit = false;
 function setConnectEdit(on) {
   connectEdit = on;
   const b = document.getElementById('connectEditBtn');
-  b.classList.toggle('done', on);
-  b.innerHTML = on ? 'Done' : ICON.edit;
+  b.classList.toggle('on', on);
+  b.title = on ? 'Done' : 'Edit the Auto priority';
+  b.innerHTML = on ? ICON.check : ICON.edit;
   renderConnects();
 }
 
 function renderConnects() {
   syncCatalog();
-  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ · switch = in Auto' : 'tap to use it (Manual)';
+  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ to set the order' : 'tap = Manual · switch = in Auto';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
-  document.getElementById('profilesTitle').innerHTML = `Route<span class="route-mode" onclick="event.stopPropagation();openProfilesMenu()">${simpleMode() ? 'Servers' : 'Profiles'}</span>`;
+  document.querySelectorAll('#routeModes button').forEach(b => b.classList.toggle('on', b.dataset.mode === connectMode));
   document.getElementById('routeOrderNote').innerHTML = routeCustom[connectMode]
     ? `Own priority order<button class="am-link" onclick="resetRouteOrder()">Follow Nodes order</button>`
     : 'Priority follows the order in Nodes · drag here to override it';
@@ -2321,15 +2333,7 @@ function openCreateMenu() {
       close + "openCreateChain(null,'profiles')", getProfileIds().length < 2 ? 'disabled' : ''));
 }
 
-/* ── Mode: simple (sources) / profiles ── */
-
-function openProfilesMenu() {
-  const radio = on => `<div class="profile-radio ${on ? 'active' : ''}"></div>`;
-  openActions('Mode',
-    menuRow(radio(simpleMode()), 'Simple<div class="menu-sub">Subscriptions and server sets from Nodes, plus chains of them</div>', "setConnectMode('simple')") +
-    menuRow(radio(!simpleMode()), 'Profiles<div class="menu-sub">Group servers into profiles, plus chains of profiles</div>', "setConnectMode('profiles')")
-    + (routeCustom[connectMode] ? menuRow(ICON.refresh, 'Follow Nodes order<div class="menu-sub">Drop this route’s own priority order</div>', 'resetRouteOrder()') : ''));
-}
+/* ── Mode: simple (sources) / profiles — the switch under the Route header ── */
 
 function setConnectMode(mode) {
   closeSheet('actions');
@@ -2433,6 +2437,7 @@ function setNodesEdit(on) {
 
 const ICON = {
   refresh: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',
+  check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
   bolt:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>',
   edit:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
   copy:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>',
@@ -3506,9 +3511,22 @@ function renderRules() {
     </div>`;
   }).join('');
 
-  const shownSvc = SERVICES.filter(([, name]) => hit(name));
-  const svcRows = shownSvc.map(([key, name]) => `<div class="set-row svc-row"><div class="set-label">${name}</div>
-    <div class="seg3">${SVC_STATES.map(([v, l]) => `<button class="${quickCfg.services[key] === v ? 'on ' + v : ''}" onclick="setService('${key}','${v}')">${l}</button>`).join('')}</div></div>`).join('');
+  /* Services: a dropdown of the ones the user added (VPN / Direct each, × removes = back to
+     the rules); "+ Add service" offers the rest of the built-in list. Search opens it. */
+  const added = SERVICES.filter(([k]) => quickCfg.services[k] !== 'default');
+  const shownSvc = added.filter(([, name]) => hit(name));
+  const svcOpenNow = svcOpen || !!q;
+  const svcRows = shownSvc.map(([key, name]) => `<div class="set-row svc-row" data-svc="${key}"><div class="set-label">${name}</div>
+    <div class="seg3">${SVC_STATES.filter(([v]) => v !== 'default').map(([v, l]) => `<button class="${quickCfg.services[key] === v ? 'on ' + v : ''}" onclick="setService('${key}','${v}')">${l}</button>`).join('')}</div>
+    <button class="icon-btn ghost svc-del" onclick="setService('${key}','default')" title="Remove">${ICON.close}</button></div>`).join('');
+  const rest = SERVICES.filter(([k, name]) => quickCfg.services[k] === 'default' && hit(name));
+  const svcAdd = q ? '' : svcAddOpen
+    ? `<div class="chip-row svc-add">${rest.map(([k, name]) => `<div class="chip" onclick="setService('${k}','vpn')">${name}</div>`).join('') || '<span class="set-hint">All services added</span>'}</div>`
+    : `<div class="node-add svc-add-btn" onclick="svcAddOpen=true;renderRules()">+ Add service</div>`;
+  const svcBlock = q && !shownSvc.length ? '' : `<div class="rules-label">Services</div><div class="set-group svc-group">
+    <div class="set-row svc-head" onclick="svcOpen=!svcOpen;svcAddOpen=false;renderRules()"><div class="set-label">${added.length ? added.length + ' added' : 'None added'}<div class="set-hint">${added.map(s => s[1]).join(', ') || 'Route a known app or site by name'}</div></div>
+      <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${svcOpenNow ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg></div>
+    ${svcOpenNow ? svcRows + svcAdd : ''}</div>`;
 
   const appsSet = Object.keys(appRules).length;
   const regionSel = `<select class="set-select" id="qr-region" onchange="quickCfg.region=this.value;renderRules()">${REGIONS.map(([c, l]) => `<option value="${c}" ${c === quickCfg.region ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
@@ -3526,7 +3544,7 @@ function renderRules() {
       ${hit('ads block') ? `<div class="set-row"><div class="set-label">Block ads<div class="set-hint">Known ad and tracker domains</div></div>${toggle(quickCfg.ads, 'quickCfg.ads=!quickCfg.ads;renderRules()')}</div>` : ''}
       ${hit('region direct') ? `<div class="set-row"><div class="set-label">My region direct<div class="set-hint">Its sites and IPs skip the VPN</div></div>${quickCfg.regionOn ? regionSel : ''}${toggle(quickCfg.regionOn, 'quickCfg.regionOn=!quickCfg.regionOn;renderRules()')}</div>` : ''}
     </div>
-    ${svcRows ? `<div class="rules-label">Services</div><div class="set-group">${svcRows}</div>` : ''}
+    ${svcBlock}
 
     <div class="rules-label">Everything else</div>
     <div class="set-group"><div class="set-row"><div class="seg3 wide">${[['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']].map(([v, l]) =>
@@ -3548,7 +3566,8 @@ function renderRules() {
 }
 
 function toggleRuleEnabled(id) { rulesData[id].enabled = !rulesData[id].enabled; renderRules(); }
-function setService(key, v) { quickCfg.services[key] = v; renderRules(); }
+let svcOpen = false, svcAddOpen = false;
+function setService(key, v) { quickCfg.services[key] = v; if (v !== 'default') svcAddOpen = false; renderRules(); }
 function startRuleDrag(e, id) {
   const rowEl = document.querySelector('#rules-list .rule-row[data-id="' + id + '"]');
   startRowDrag(e, rowEl, '.rule-row', () => ruleOrder, renderRules);

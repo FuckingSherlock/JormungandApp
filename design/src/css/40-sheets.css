@@ -155,10 +155,10 @@
 .auto-badge .conn-dot{background:var(--accent);transition:background .2s}
 .list-caption{display:flex;justify-content:space-between;gap:8px;padding:12px 20px 6px;font-size:12px;color:var(--t3)}
 .list-caption span:first-child{font-weight:600;text-transform:uppercase;letter-spacing:.6px}
-.conn-row{display:flex;align-items:center;gap:4px;margin:0 10px;padding:0 4px 0 0;border-radius:12px;border:1px solid transparent;transition:background .2s,border-color .2s}
+.conn-row{display:flex;align-items:center;gap:4px;margin:0 10px;padding:0 12px 0 12px;border-radius:12px;border:1px solid transparent;transition:background .2s,border-color .2s}
 .conn-row + .conn-row{margin-top:2px}
 .conn-row.current{background:rgba(var(--active-rgb),.07);border-color:rgba(var(--active-rgb),.35)}
-.conn-row .drag-handle{width:26px}
+.conn-row .drag-handle{width:26px;margin-left:-8px}
 .conn-main{flex:1;min-width:0;padding:10px 0;cursor:pointer}
 .conn-name{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--t1);min-width:0}
 .conn-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

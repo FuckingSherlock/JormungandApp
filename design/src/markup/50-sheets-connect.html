@@ -7,13 +7,15 @@
       <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order · Manual: the entry you tapped">
         <div class="conn-dot"></div><span>Auto</span>
       </div>
-      <button class="icon-btn ghost" id="connectEditBtn" onclick="setConnectEdit(!connectEdit)" title="Edit the Auto priority">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      </button>
-      <button class="icon-btn ghost" onclick="openProfilesMenu()" title="More">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
-      </button>
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
+    </div>
+    <div class="route-bar">
+      <div class="seg3 route-modes" id="routeModes" title="Which tab of Nodes the route uses">
+        <button data-mode="simple" onclick="setConnectMode('simple')">Servers</button><button data-mode="profiles" onclick="setConnectMode('profiles')">Profiles</button>
+      </div>
+      <button class="icon-btn" id="connectEditBtn" onclick="setConnectEdit(!connectEdit)" title="Edit the Auto priority">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </button>
     </div>
     <div class="sheet-body">
       <div class="list-caption"><span>Priority</span><span id="connectsCaption"></span></div>

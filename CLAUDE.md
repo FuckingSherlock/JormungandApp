@@ -51,11 +51,11 @@ builds and checks. Separate steps still exist: `npm run build`, `npm run check`,
 
 Presets: home, nodes, nodes-open, nodes-profiles, nodes-swipe, route, entry-delete,
 target-picker, rule-fallback, settings, dock, dock-chain, dock-profile, dock-off,
-profiles, broken, profiles-full, profiles-menu, source-entry, gone, nothing-ticked,
+profiles, broken, profiles-full, source-entry, gone, nothing-ticked,
 simple-chain, chain-priority, profile-edit, chain-edit, chain-groups, drag-mid, addmenu,
 srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm,
 nodes-edit, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
-rules, rules-more, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
+rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
 rule-sets, apps, app-act, settings-dns, dns-form, settings-conn.
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
 there for each new interaction.

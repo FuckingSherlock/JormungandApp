@@ -212,9 +212,22 @@ function renderRules() {
     </div>`;
   }).join('');
 
-  const shownSvc = SERVICES.filter(([, name]) => hit(name));
-  const svcRows = shownSvc.map(([key, name]) => `<div class="set-row svc-row"><div class="set-label">${name}</div>
-    <div class="seg3">${SVC_STATES.map(([v, l]) => `<button class="${quickCfg.services[key] === v ? 'on ' + v : ''}" onclick="setService('${key}','${v}')">${l}</button>`).join('')}</div></div>`).join('');
+  /* Services: a dropdown of the ones the user added (VPN / Direct each, × removes = back to
+     the rules); "+ Add service" offers the rest of the built-in list. Search opens it. */
+  const added = SERVICES.filter(([k]) => quickCfg.services[k] !== 'default');
+  const shownSvc = added.filter(([, name]) => hit(name));
+  const svcOpenNow = svcOpen || !!q;
+  const svcRows = shownSvc.map(([key, name]) => `<div class="set-row svc-row" data-svc="${key}"><div class="set-label">${name}</div>
+    <div class="seg3">${SVC_STATES.filter(([v]) => v !== 'default').map(([v, l]) => `<button class="${quickCfg.services[key] === v ? 'on ' + v : ''}" onclick="setService('${key}','${v}')">${l}</button>`).join('')}</div>
+    <button class="icon-btn ghost svc-del" onclick="setService('${key}','default')" title="Remove">${ICON.close}</button></div>`).join('');
+  const rest = SERVICES.filter(([k, name]) => quickCfg.services[k] === 'default' && hit(name));
+  const svcAdd = q ? '' : svcAddOpen
+    ? `<div class="chip-row svc-add">${rest.map(([k, name]) => `<div class="chip" onclick="setService('${k}','vpn')">${name}</div>`).join('') || '<span class="set-hint">All services added</span>'}</div>`
+    : `<div class="node-add svc-add-btn" onclick="svcAddOpen=true;renderRules()">+ Add service</div>`;
+  const svcBlock = q && !shownSvc.length ? '' : `<div class="rules-label">Services</div><div class="set-group svc-group">
+    <div class="set-row svc-head" onclick="svcOpen=!svcOpen;svcAddOpen=false;renderRules()"><div class="set-label">${added.length ? added.length + ' added' : 'None added'}<div class="set-hint">${added.map(s => s[1]).join(', ') || 'Route a known app or site by name'}</div></div>
+      <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${svcOpenNow ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg></div>
+    ${svcOpenNow ? svcRows + svcAdd : ''}</div>`;
 
   const appsSet = Object.keys(appRules).length;
   const regionSel = `<select class="set-select" id="qr-region" onchange="quickCfg.region=this.value;renderRules()">${REGIONS.map(([c, l]) => `<option value="${c}" ${c === quickCfg.region ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
@@ -232,7 +245,7 @@ function renderRules() {
       ${hit('ads block') ? `<div class="set-row"><div class="set-label">Block ads<div class="set-hint">Known ad and tracker domains</div></div>${toggle(quickCfg.ads, 'quickCfg.ads=!quickCfg.ads;renderRules()')}</div>` : ''}
       ${hit('region direct') ? `<div class="set-row"><div class="set-label">My region direct<div class="set-hint">Its sites and IPs skip the VPN</div></div>${quickCfg.regionOn ? regionSel : ''}${toggle(quickCfg.regionOn, 'quickCfg.regionOn=!quickCfg.regionOn;renderRules()')}</div>` : ''}
     </div>
-    ${svcRows ? `<div class="rules-label">Services</div><div class="set-group">${svcRows}</div>` : ''}
+    ${svcBlock}
 
     <div class="rules-label">Everything else</div>
     <div class="set-group"><div class="set-row"><div class="seg3 wide">${[['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']].map(([v, l]) =>
@@ -254,7 +267,8 @@ function renderRules() {
 }
 
 function toggleRuleEnabled(id) { rulesData[id].enabled = !rulesData[id].enabled; renderRules(); }
-function setService(key, v) { quickCfg.services[key] = v; renderRules(); }
+let svcOpen = false, svcAddOpen = false;
+function setService(key, v) { quickCfg.services[key] = v; if (v !== 'default') svcAddOpen = false; renderRules(); }
 function startRuleDrag(e, id) {
   const rowEl = document.querySelector('#rules-list .rule-row[data-id="' + id + '"]');
   startRowDrag(e, rowEl, '.rule-row', () => ruleOrder, renderRules);

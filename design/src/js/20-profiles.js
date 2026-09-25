@@ -190,28 +190,29 @@ function renderConnectRow(id) {
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
     ${current && !connectEdit ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
-    ${connectEdit ? `<div class="route-auto" title="Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>` : ''}
+    <div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>
   </div>`;
 }
 
-// Edit mode of the list: ⋮⋮ grips for the Auto priority and the "in Auto" switches;
-// taps no longer switch to Manual. Everything else about an entry is edited in Nodes.
+// Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
+// The switch on each row (Use in Auto) works in both modes. Everything else: Nodes.
 let connectEdit = false;
 function setConnectEdit(on) {
   connectEdit = on;
   const b = document.getElementById('connectEditBtn');
-  b.classList.toggle('done', on);
-  b.innerHTML = on ? 'Done' : ICON.edit;
+  b.classList.toggle('on', on);
+  b.title = on ? 'Done' : 'Edit the Auto priority';
+  b.innerHTML = on ? ICON.check : ICON.edit;
   renderConnects();
 }
 
 function renderConnects() {
   syncCatalog();
-  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ · switch = in Auto' : 'tap to use it (Manual)';
+  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ to set the order' : 'tap = Manual · switch = in Auto';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
-  document.getElementById('profilesTitle').innerHTML = `Route<span class="route-mode" onclick="event.stopPropagation();openProfilesMenu()">${simpleMode() ? 'Servers' : 'Profiles'}</span>`;
+  document.querySelectorAll('#routeModes button').forEach(b => b.classList.toggle('on', b.dataset.mode === connectMode));
   document.getElementById('routeOrderNote').innerHTML = routeCustom[connectMode]
     ? `Own priority order<button class="am-link" onclick="resetRouteOrder()">Follow Nodes order</button>`
     : 'Priority follows the order in Nodes · drag here to override it';
@@ -321,15 +322,7 @@ function openCreateMenu() {
       close + "openCreateChain(null,'profiles')", getProfileIds().length < 2 ? 'disabled' : ''));
 }
 
-/* ── Mode: simple (sources) / profiles ── */
-
-function openProfilesMenu() {
-  const radio = on => `<div class="profile-radio ${on ? 'active' : ''}"></div>`;
-  openActions('Mode',
-    menuRow(radio(simpleMode()), 'Simple<div class="menu-sub">Subscriptions and server sets from Nodes, plus chains of them</div>', "setConnectMode('simple')") +
-    menuRow(radio(!simpleMode()), 'Profiles<div class="menu-sub">Group servers into profiles, plus chains of profiles</div>', "setConnectMode('profiles')")
-    + (routeCustom[connectMode] ? menuRow(ICON.refresh, 'Follow Nodes order<div class="menu-sub">Drop this route’s own priority order</div>', 'resetRouteOrder()') : ''));
-}
+/* ── Mode: simple (sources) / profiles — the switch under the Route header ── */
 
 function setConnectMode(mode) {
   closeSheet('actions');

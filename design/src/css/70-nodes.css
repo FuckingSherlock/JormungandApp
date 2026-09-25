@@ -108,6 +108,10 @@
 .tp-nodes .node-row.picked{background:rgba(var(--accent-rgb),.10)}
 
 /* ── Route sheet ── */
-.route-mode{margin-left:8px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(var(--accent-rgb),.12);border-radius:10px;padding:2px 8px;cursor:pointer}
+.route-bar{display:flex;align-items:center;gap:10px;padding:10px 18px 0;flex-shrink:0}
+.route-modes{flex:1}
+.route-modes button{flex:1;padding:8px 6px;font-size:14px}
+.route-modes button.on{background:var(--accent)}
+#connectEditBtn.on{color:var(--active);border-color:var(--active)}
 .route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
 .route-auto{flex-shrink:0;padding:0 4px}
