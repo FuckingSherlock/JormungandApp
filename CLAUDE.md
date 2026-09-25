@@ -10,7 +10,7 @@ In the mockup: Home (modes incl. system proxy, connect dock), Nodes (the catalog
 Simple / Profiles, swipeable — sources, profiles, chains are created and edited only here),
 Route (main flow only: ✎ + animated Simple / Profiles switch, Auto / Manual, Use in Auto on
 every row, own priority over the Nodes order), Settings (Auto mode, Appearance with themes and
-text size 90–120%, Connection, DNS), Rules (apps, own rules with form + JSON, target picker
+text size 90–120%, General with startup / notifications and the launch ping, Connection, DNS), Rules (apps, own rules with form + JSON, target picker
 over the whole catalog, "If unavailable" + global default, quick rules, services dropdown
 linked to per-app routing, final order, address test, import/export, rule sets). All sheets
 open to the top of the screen and close by swiping the header down.

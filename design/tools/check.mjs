@@ -72,6 +72,7 @@ const SHOTS = {
   'node-off': async p => { await tab(p, 'nodes'); await p.evaluate(() => { sourcesData.src2.disabledNodes.push('n2'); expandState.src2 = true; renderNodes(); document.querySelector('#view-nodes .scroll').scrollTop = 150; }); },
   'broken-node': async p => { await p.evaluate(() => { sourcesData.src4.disabledNodes = ['n0', 'n1']; setConnectMode('profiles'); openProfiles(); }); await settle(p); },
   'nodes-edit': async p => { await tab(p, 'nodes'); await p.evaluate(() => { expandState.src2 = true; setNodesEdit(true); }); },
+  'settings-general': async p => { await tab(p, 'settings'); await p.evaluate(() => openSheet('setgeneral')); await settle(p); },
   'nodes-edit-chain': async p => { await tab(p, 'nodes'); await p.evaluate(() => { expandState.sc1 = true; setNodesEdit(true); document.querySelector('#nodes-list .entry-card[data-id=sc1]').scrollIntoView(); }); },
   'entry-priority': async p => { await p.evaluate(() => { openProfiles(); sourcesData.src3.pickMode = 'priority'; openSourceEntry('src3'); }); await settle(p); },
   'profile-priority': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); document.querySelector('#sh-createprofile .sheet-body').scrollTop = 9999; }); await settle(p); },
@@ -849,6 +850,28 @@ async function runChecks() {
       openSourceEntry('src1'); sourcesData.src1.pickMode = 'fastest'; renderSourceEntry();
       out.entry = sorted(ms('#se-nodes .node-row')); closeSheet('sourceentry');
       expandState.default = false; setNodesTab('simple'); switchTab('home'); renderAll();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('launch: pings the current entry and the next ones by priority; General settings', async () => {
+    const r = await page.evaluate(async () => {
+      const out = {}, ids = launchPingEntries(), order = visibleOrder();
+      out.first = ids[0] === effectiveConnectId() && ids.length <= autoCfg.standby + 1 && ids.length > 1;
+      out.byOrder = ids.slice(1).every((id, i, a) => connectEntry(id).inAuto && (!i || order.indexOf(a[i - 1]) < order.indexOf(id)));
+      const keys = new Set(ids.flatMap(id => entryRefs(id).map(r => serverKey(r.node))));
+      const p = pingOnLaunch();
+      const testing = [...pingCache.entries()].filter(([, v]) => v.ms === 'testing').map(([k]) => k);
+      out.onlyThose = testing.length > 0 && testing.every(k => keys.has(k));
+      await p;
+      switchTab('settings'); openSheet('setgeneral');
+      out.rows = document.querySelectorAll('#general-settings .set-row').length >= 9;
+      document.querySelector('#general-settings [data-key=connectOnLaunch] .mini-toggle').click();
+      out.toggled = genCfg.connectOnLaunch && /connects on launch/.test(document.getElementById('setGeneralSub').textContent);
+      document.querySelector('#general-settings [data-key=connectOnLaunch] .mini-toggle').click();
+      setAutoCfg('standby', 3); out.hint = /next 3 by priority/.test(document.getElementById('general-settings').textContent); setAutoCfg('standby', 2);
+      closeSheet('setgeneral'); switchTab('home');
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));

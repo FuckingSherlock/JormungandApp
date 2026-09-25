@@ -60,6 +60,7 @@ function saveIntervalDialog() {
 function setAutoCfg(key, val) {
   autoCfg[key] = val;
   renderAutoMode();
+  if (key === 'standby') renderGeneral();   // its launch check uses the same count
 }
 // The ms field: whole numbers 0…1000; anything else puts the old value back.
 function setAutoThreshold(input) {

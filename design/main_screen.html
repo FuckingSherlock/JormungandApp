@@ -901,6 +901,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 .scale-row{display:flex;align-items:center;gap:10px;margin-top:8px}
 .scale-row input{flex:1;min-width:0;accent-color:var(--accent)}
 .scale-a{color:var(--t2);font-weight:600;line-height:1;width:18px;text-align:center}
+.set-caption{padding:14px 18px 6px;font-size:12px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--t3)}
 </style>
 
 <div class="phone">
@@ -1104,7 +1105,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <div class="settings-group settings-menu">
         <div class="settings-row" data-sheet="setauto" onclick="openSheet('setauto')"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg></div><div style="flex:1"><div class="settings-label">Auto mode</div><div class="settings-sub">Failover, checks, subscription updates</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setlook" onclick="openSheet('setlook')"><div class="set-ico" style="color:var(--accent);background:rgba(var(--accent-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18z" fill="currentColor"/></svg></div><div style="flex:1"><div class="settings-label">Appearance</div><div class="settings-sub" id="setLookSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
-        <div class="settings-row" data-sheet="setgeneral" onclick="openSheet('setgeneral')"><div class="set-ico" style="color:var(--t2);background:rgba(var(--t2-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></div><div style="flex:1"><div class="settings-label">General</div><div class="settings-sub">Language, startup</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setgeneral" onclick="openSheet('setgeneral')"><div class="set-ico" style="color:var(--t2);background:rgba(var(--t2-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></div><div style="flex:1"><div class="settings-label">General</div><div class="settings-sub" id="setGeneralSub">Language, startup</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setconn" onclick="openSheet('setconn')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><div style="flex:1"><div class="settings-label">Connection</div><div class="settings-sub">System proxy, kill switch, TUN</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setdns" onclick="openDnsSettings()"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><div style="flex:1"><div class="settings-label">DNS</div><div class="settings-sub" id="setDnsSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setdata" onclick="openSheet('setdata')"><div class="set-ico" style="color:var(--purple);background:rgba(var(--purple-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div style="flex:1"><div class="settings-label">Data</div><div class="settings-sub">Backup, about</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
@@ -1150,11 +1151,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <button class="sheet-close" onclick="closeSheet('setgeneral')">×</button>
     </div>
     <div class="sheet-body">
-      <div class="settings-group">
-        <div class="settings-row soon"><div class="settings-label">Language</div><span class="settings-value">English</span><span class="soon-tag">soon</span></div>
-        <div class="settings-row soon"><div class="settings-label">Launch at startup</div><span class="soon-tag">soon</span></div>
-        <div class="settings-row soon"><div class="settings-label">Auto-connect</div><span class="soon-tag">soon</span></div>
-      </div>
+      <div id="general-settings"></div>
     </div>
   </div>
   <div class="overlay" id="ov-setconn" onclick="closeSheet('setconn')"></div>
@@ -4090,6 +4087,7 @@ function saveIntervalDialog() {
 function setAutoCfg(key, val) {
   autoCfg[key] = val;
   renderAutoMode();
+  if (key === 'standby') renderGeneral();   // its launch check uses the same count
 }
 // The ms field: whole numbers 0…1000; anything else puts the old value back.
 function setAutoThreshold(input) {
@@ -4318,6 +4316,74 @@ function renderConnSettings() {
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
       <div class="set-row soon"><div class="set-label">Latency test URL</div><span class="settings-value">auto</span><span class="soon-tag">soon</span></div>
     </div>`;
+}
+/* ══════════════════════ SETTINGS → GENERAL ══════════════════════
+   Language, startup, notifications, clipboard, updates. genCfg is what the Flutter app
+   keeps in its settings store. */
+const genCfg = {
+  lang: 'en',             // 'en' | 'ru' (mockup text stays English)
+  launchAtStartup: false, // start with the OS (Android: after boot; desktop: login item)
+  startMinimized: true,   // desktop: start in the tray
+  connectOnLaunch: false, // connect as soon as the app opens
+  pingOnLaunch: true,     // ping the current entry and the next ones by priority on open
+  statusNotif: true,      // Android: ongoing notification with the entry and speed
+  switchNotif: true,      // notify when Auto moves to another entry
+  clipboard: true,        // offer to import a subscription / server link found in the clipboard
+  updates: true,          // check for app updates
+};
+const LANGS = { en: 'English', ru: 'Русский' };
+
+function renderGeneral() {
+  const toggle = (key, fn) => `<div class="mini-toggle ${genCfg[key] ? 'on' : ''}" onclick="${fn || `setGenCfg('${key}',!genCfg.${key})`}"><div class="mini-toggle-thumb"></div></div>`;
+  const row = (key, label, hint) => `<div class="set-row" data-key="${key}"><div class="set-label" style="flex:1">${label}<div class="set-hint">${hint}</div></div>${toggle(key)}</div>`;
+  const n = autoCfg.standby;
+  document.getElementById('general-settings').innerHTML = `
+    <div class="set-group">
+      <div class="set-row"><div class="set-label" style="flex:1">Language</div>
+        <button class="set-value" id="gen-lang" onclick="openLangPicker()">${LANGS[genCfg.lang]}${CHEVRON_R}</button></div>
+    </div>
+    <div class="set-caption">Startup</div>
+    <div class="set-group">
+      ${row('launchAtStartup', 'Launch at startup', 'Start with the system (Android: after reboot)')}
+      ${row('startMinimized', 'Start minimized', 'Desktop: open in the tray, not as a window')}
+      ${row('connectOnLaunch', 'Connect on launch', 'Turn the VPN on as soon as the app opens')}
+      ${row('pingOnLaunch', 'Check servers on launch', `Pings the current entry and the next ${n} by priority (the Keep warm count in Auto mode)`)}
+    </div>
+    <div class="set-caption">Notifications</div>
+    <div class="set-group">
+      ${row('statusNotif', 'Status notification', 'Android: shows the entry, server and speed while connected')}
+      ${row('switchNotif', 'When Auto switches', 'Tell me when Auto moves to another entry or server')}
+    </div>
+    <div class="set-caption">Other</div>
+    <div class="set-group">
+      ${row('clipboard', 'Links in the clipboard', 'On open, offer to add a subscription or server link you copied')}
+      ${row('updates', 'Check for app updates', 'Once a day; nothing is installed without asking')}
+    </div>`;
+  const sub = document.getElementById('setGeneralSub');
+  if (sub) sub.textContent = LANGS[genCfg.lang] + (genCfg.connectOnLaunch ? ' · connects on launch' : '');
+}
+function setGenCfg(key, v) { genCfg[key] = v; renderGeneral(); }
+
+function openLangPicker() {
+  openActions('Language', Object.entries(LANGS).map(([k, name]) =>
+    menuRow(genCfg.lang === k ? ICON.check : '', name, `closeSheet('actions');setGenCfg('lang','${k}')`)).join(''));
+}
+
+/* On open: ping the entry the app would connect through now and the next `autoCfg.standby`
+   usable entries of the Route priority (Auto-eligible, not broken). Every server of those
+   entries is pinged, so Fastest picks and failover start from fresh numbers. */
+function launchPingEntries() {
+  const cur = effectiveConnectId(), order = visibleOrder();
+  const next = order.slice(order.indexOf(cur) + 1).filter(id => connectEntry(id).inAuto).slice(0, autoCfg.standby);
+  return [cur].concat(next).filter(Boolean);
+}
+function pingOnLaunch() {
+  const seen = new Set(), nodes = [];
+  launchPingEntries().forEach(id => entryRefs(id).forEach(r => {
+    const k = serverKey(r.node);
+    if (!seen.has(k)) { seen.add(k); nodes.push(r.node); }
+  }));
+  return nodes.length ? pingNodes(nodes) : Promise.resolve();
 }
 /* ══════════════════════ [?] HELP — short tips for the complex screens ══════════════════════
    A <button class="help-btn" onclick="openHelp('key')">?</button> next to a title opens a
@@ -5580,6 +5646,7 @@ purgeExpiredGone();
 renderAutoMode();
 renderConnSettings();
 renderDns();
+renderGeneral();
 ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
 
 renderConnects();
@@ -5587,6 +5654,7 @@ initNodesPager();
 renderNodes();
 renderRules();
 updateMainConnectCard();
+if (genCfg.pingOnLaunch) pingOnLaunch();
 </script>
 </body>
 </html>
