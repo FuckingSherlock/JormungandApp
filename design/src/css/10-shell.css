@@ -5,13 +5,7 @@
   min-height:100vh;
 }
 
-.statusbar {
-  display:flex;justify-content:space-between;align-items:center;
-  padding:14px 28px 8px;font-size:14px;font-weight:600;color:var(--t2);
-}
-.statusbar .time{color:var(--t1);font-size:15px}
-
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:4px 20px 12px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 12px}
 .app-name{font-size:22px;font-weight:600;color:var(--t1);letter-spacing:-.3px}
 
 .conn-badge {

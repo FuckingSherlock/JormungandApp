@@ -1,6 +1,7 @@
 /* ══════════════════════ INITIAL RENDER ══════════════════════ */
 
 applyTheme(currentTheme);
+applyScale(uiScale);
 purgeExpiredGone();
 renderAutoMode();
 renderConnSettings();

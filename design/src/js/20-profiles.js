@@ -212,6 +212,7 @@ function renderConnects() {
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
+  document.getElementById('routeModes').dataset.mode = connectMode;
   document.querySelectorAll('#routeModes button').forEach(b => b.classList.toggle('on', b.dataset.mode === connectMode));
   document.getElementById('routeOrderNote').innerHTML = routeCustom[connectMode]
     ? `Own priority order<button class="am-link" onclick="resetRouteOrder()">Follow Nodes order</button>`
@@ -331,6 +332,10 @@ function setConnectMode(mode) {
   ({ order: connectOrder, active: activeConnectId, auto: autoConnect } = modeState[mode]);
   connectMode = mode;
   renderConnects();
+  // The list slides in from the side the switch moved to.
+  const list = document.getElementById('connects-list');
+  list.style.setProperty('--swap-from', mode === 'profiles' ? '16px' : '-16px');
+  list.classList.remove('swap'); void list.offsetWidth; list.classList.add('swap');
   updateMainConnectCard();
   if (typeof renderNodesTabs === 'function') renderNodesTabs();
 }

@@ -104,6 +104,8 @@ const SHOTS = {
   'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.add('src2'); renderTargetPicker(); }); await settle(p); },
   'rule-fallback': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
   'rules-services': async p => { await p.evaluate(() => { openRules(); svcOpen = true; svcAddOpen = true; renderRules(); document.querySelector('.svc-group').scrollIntoView(); }); await settle(p); },
+  'text-large': async p => { await p.evaluate(() => { applyScale(UI_SCALE_MAX); openProfiles(); }); await settle(p); },
+  'text-large-rule': async p => { await p.evaluate(() => { applyScale(UI_SCALE_MAX); openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
   more:       async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodesMore()); await settle(p); },
 };
 
@@ -193,6 +195,46 @@ async function runChecks() {
       expect(w <= 360, `${t}: scrollWidth ${w}`);
     }
     await narrow.close();
+  });
+
+  await check('text size: 120% on a 320px phone — nothing sticks out, titles keep their size', async () => {
+    const narrow = await openPage(browser, { width: 320 });
+    const title0 = await narrow.evaluate(() => getComputedStyle(document.querySelector('.app-name')).fontSize);
+    await narrow.evaluate(() => applyScale(UI_SCALE_MAX));
+    const over = () => narrow.evaluate(() => {
+      const bad = [];
+      document.querySelectorAll('.view.active .scroll, .view.active .nodes-page, .sheet.open .sheet-body').forEach(el => {
+        if (el.closest('.nodes-pager') && !el.getBoundingClientRect().width) return;
+        if (el.scrollWidth > el.clientWidth + 1) bad.push((el.id || el.className) + ' ' + el.scrollWidth + '>' + el.clientWidth);
+      });
+      return bad;
+    });
+    const bad = [];
+    for (const t of ['home', 'nodes', 'settings']) { await tab(narrow, t); bad.push(...await over()); }
+    const sheets = [
+      () => { switchTab('nodes'); setNodesTab('profiles'); },
+      () => { setNodesTab('simple'); openProfiles(); setConnectEdit(true); },
+      () => { setConnectEdit(false); closeSheet('profiles'); openRules(); svcOpen = true; renderRules(); },
+      () => openRuleForm('r2'),
+      () => openTargetPicker('chain:sc1', () => {}),
+      () => { closeSheet('target'); closeSheet('ruleform'); openApps(); },
+      () => { closeSheet('apps'); closeSheet('rules'); openEditChain('sc1'); },
+      () => { closeSheet('createchain'); openSheet('setlook'); },
+    ];
+    for (const f of sheets) { await narrow.evaluate(f); await settle(narrow); bad.push(...await over()); }
+    const title1 = await narrow.evaluate(() => getComputedStyle(document.querySelector('.app-name')).fontSize);
+    expect(!bad.length, bad.join(' | '));
+    expect(title0 === title1, `title ${title0} -> ${title1}`);
+    await narrow.close();
+  });
+
+  await check('settings sections close by swiping the header down', async () => {
+    await tab(page, 'settings');
+    await page.evaluate(() => openSheet('setlook')); await settle(page);
+    const h = await page.locator('#sh-setlook .sheet-head').boundingBox();
+    await page.mouse.move(h.x + 60, h.y + h.height / 2); await page.mouse.down();
+    await page.mouse.move(h.x + 60, h.y + 260, { steps: 8 }); await page.mouse.up(); await settle(page);
+    expect(await page.evaluate(() => !document.getElementById('sh-setlook').classList.contains('open')), 'still open');
   });
 
   await check('nodes: search opens, filters, closes', async () => {
@@ -1062,6 +1104,23 @@ async function runChecks() {
       document.querySelector(`.svc-row[data-svc=${k}] .svc-del`).click();
       out.removed = quickCfg.services[k] === 'default' && !rows().includes(k);
       svcOpen = false; closeSheet('rules');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('services and per-app routing know about each other', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, keepT = quickCfg.services.telegram, keepA = appRules['org.telegram.messenger'];
+      quickCfg.services.telegram = 'vpn'; appRules['org.telegram.messenger'] = { act: 'direct', target: '', split: false, udpTarget: '' };
+      openRules(); svcOpen = true; renderRules();
+      out.svcHint = /App: Direct/.test(document.querySelector('.svc-row[data-svc=telegram]').textContent);
+      delete appRules['org.telegram.messenger']; openApps(); appFilter = 'user'; renderApps();
+      out.appRow = /VPN · service/.test(document.querySelector('.app-row[data-pkg="org.telegram.messenger"] .app-state').textContent);
+      openAppAct('org.telegram.messenger');
+      out.dialog = /Telegram service: VPN/.test(document.getElementById('aa-body').textContent);
+      closeSheet('appact'); closeSheet('apps'); closeSheet('rules'); svcOpen = false;
+      quickCfg.services.telegram = keepT; if (keepA) appRules['org.telegram.messenger'] = keepA; renderRules();
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));

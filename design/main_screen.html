@@ -100,13 +100,7 @@ body {
   min-height:100vh;
 }
 
-.statusbar {
-  display:flex;justify-content:space-between;align-items:center;
-  padding:14px 28px 8px;font-size:14px;font-weight:600;color:var(--t2);
-}
-.statusbar .time{color:var(--t1);font-size:15px}
-
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:4px 20px 12px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 12px}
 .app-name{font-size:22px;font-weight:600;color:var(--t1);letter-spacing:-.3px}
 
 .conn-badge {
@@ -229,12 +223,12 @@ body {
 /* ── Sheets (level 1) ── */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .25s;z-index:10}
 .overlay.open{opacity:1;pointer-events:all}
-.sheet{position:fixed;top:30px;left:0;right:0;bottom:0;background:var(--sheet);border-radius:20px 20px 0 0;border-top:1px solid var(--border-hi);transform:translateY(100%);transition:transform .32s cubic-bezier(.32,1,.4,1);z-index:11;display:flex;flex-direction:column}
+.sheet{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--sheet);border-radius:20px 20px 0 0;border-top:1px solid var(--border-hi);transform:translateY(100%);transition:transform .32s cubic-bezier(.32,1,.4,1);z-index:11;display:flex;flex-direction:column}
 .sheet:not(.open){visibility:hidden;transition:transform .32s cubic-bezier(.32,1,.4,1),visibility 0s .32s}
 .sheet.open{transform:translateY(0)}
 .sheet.dragging{transition:none}
-.sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--border-hi);margin:10px auto 0;flex-shrink:0;touch-action:none;cursor:grab}
-.sheet-head{touch-action:none;display:flex;align-items:center;justify-content:space-between;padding:12px 18px 10px;flex-shrink:0;border-bottom:1px solid var(--border)}
+.sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--border-hi);margin:6px auto 0;flex-shrink:0;touch-action:none;cursor:grab}
+.sheet-head{touch-action:none;display:flex;align-items:center;justify-content:space-between;padding:4px 18px 8px;flex-shrink:0;border-bottom:1px solid var(--border)}
 .sheet-title{display:flex;align-items:center;min-width:0;font-size:17px;font-weight:600;color:var(--t1)}
 .sheet-close{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.06);border:none;color:var(--t2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .sheet-body{overflow-y:auto;padding:12px 0;scrollbar-width:none;flex:1}
@@ -569,10 +563,10 @@ body {
 .btn-secondary.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .am-head{display:flex;align-items:center;gap:12px}
 /* ── Views (bottom-nav tabs) ── */
-/* App frame is exactly one screen tall: status bar, section header and bottom nav
+/* App frame is exactly one screen tall: section header and bottom nav
    stay put; only each view's .scroll area scrolls. */
 .phone{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:0;overflow:hidden}
-.statusbar,.bottomnav{flex-shrink:0}
+.bottomnav{flex-shrink:0}
 .view{display:none;flex:1;min-height:0;flex-direction:column}
 .view.active{display:flex}
 .view > .topbar,.view > .search{flex-shrink:0}
@@ -686,6 +680,9 @@ body {
 .rf-more button{background:none;border:none;padding:2px 0;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .tgt-row .set-label{white-space:nowrap}
 .rs-row .conn-tag{margin-left:8px;vertical-align:1px}
+.svc-app{color:var(--warn);cursor:pointer}
+.app-state.svc{opacity:.75}
+.aa-svc{margin-top:8px}
 /* ── Nodes screen ── */
 .nodes-summary{font-size:13px;color:var(--t2);margin-top:2px}
 .head-actions{display:flex;gap:8px}
@@ -797,9 +794,13 @@ body {
 
 /* ── Route sheet ── */
 .route-bar{display:flex;align-items:center;gap:10px;padding:10px 18px 0;flex-shrink:0}
-.route-modes{flex:1}
-.route-modes button{flex:1;padding:8px 6px;font-size:14px}
-.route-modes button.on{background:var(--accent)}
+.route-modes{flex:1;position:relative;display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.route-modes button{flex:1;position:relative;z-index:1;background:none;border:none;font:inherit;font-size:14px;font-weight:600;color:var(--t2);padding:8px 6px;cursor:pointer;transition:color .25s}
+.route-modes button.on{color:#fff}
+.route-ink{position:absolute;top:0;bottom:0;left:0;width:50%;background:var(--accent);transition:transform .28s cubic-bezier(.32,1,.4,1)}
+.route-modes[data-mode=profiles] .route-ink{transform:translateX(100%)}
+#connects-list.swap{animation:route-swap .28s ease}
+@keyframes route-swap{from{opacity:0;transform:translateX(var(--swap-from,16px))}to{opacity:1;transform:none}}
 #connectEditBtn.on{color:var(--active);border-color:var(--active)}
 .route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
 .route-auto{flex-shrink:0;padding:0 4px}
@@ -881,29 +882,17 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 .form-input.mono{font-family:var(--mono);font-size:14px}
 .df-ping-row{display:flex;align-items:center;gap:12px}
 .df-ping-row .lat{min-width:0;text-align:left}
+
+/* Text size (Appearance) — zoom of everything below the titles */
+:root{--ui-zoom:1}
+.view > .scroll,.nodes-page,.sheet-body,.dialog .dialog-body{zoom:var(--ui-zoom)}
+.scale-val{margin-left:8px;font-family:var(--mono);font-size:13px;color:var(--accent)}
+.scale-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+.scale-row input{flex:1;min-width:0;accent-color:var(--accent)}
+.scale-a{color:var(--t2);font-weight:600;line-height:1;width:18px;text-align:center}
 </style>
 
 <div class="phone">
-
-  <!-- Status bar -->
-  <div class="statusbar">
-    <span class="time">01:07</span>
-    <div style="display:flex;gap:6px;align-items:center">
-      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-        <rect x="0" y="4" width="3" height="8" rx="1" fill="var(--t2)"/>
-        <rect x="4.5" y="2.5" width="3" height="9.5" rx="1" fill="var(--t2)"/>
-        <rect x="9" y="0" width="3" height="12" rx="1" fill="var(--t2)"/>
-        <rect x="13.5" y="0" width="2.5" height="12" rx="1" fill="var(--t1)"/>
-      </svg>
-      <svg width="16" height="12" viewBox="0 0 24 24" fill="none">
-        <path d="M1 6s4.5-4 11-4 11 4 11 4" stroke="var(--t2)" stroke-width="2" stroke-linecap="round"/>
-        <path d="M5 10s2.5-2.5 7-2.5S19 10 19 10" stroke="var(--t2)" stroke-width="2" stroke-linecap="round"/>
-        <path d="M9 14s1-1 3-1 3 1 3 1" stroke="var(--t1)" stroke-width="2" stroke-linecap="round"/>
-        <circle cx="12" cy="18" r="1.5" fill="var(--t1)"/>
-      </svg>
-      <span style="font-family:monospace;font-size:13px;color:var(--t1)">100%</span>
-    </div>
-  </div>
 
   <!-- ══════════ VIEW: HOME ══════════ -->
   <div class="view active" id="view-home">
@@ -1130,6 +1119,13 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <button class="sheet-close" onclick="closeSheet('setlook')">×</button>
     </div>
     <div class="sheet-body">
+      <div class="settings-group"><div class="settings-row scale-row-wrap">
+        <div style="flex:1;min-width:0"><div class="settings-label">Text size<span class="scale-val" id="scaleVal">100%</span></div>
+          <div class="scale-row"><span class="scale-a" style="font-size:12px">A</span>
+            <input type="range" id="uiScale" min="0.9" max="1.2" step="0.05" value="1" oninput="previewScale(this.value)" onchange="applyScale(this.value)">
+            <span class="scale-a" style="font-size:19px">A</span></div>
+          <div class="settings-sub">Lists and menus; titles keep their size</div></div>
+      </div></div>
       <div class="settings-group" id="theme-list"></div>
     </div>
   </div>
@@ -1261,12 +1257,12 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="route-bar">
-      <div class="seg3 route-modes" id="routeModes" title="Which tab of Nodes the route uses">
-        <button data-mode="simple" onclick="setConnectMode('simple')">Servers</button><button data-mode="profiles" onclick="setConnectMode('profiles')">Profiles</button>
-      </div>
       <button class="icon-btn" id="connectEditBtn" onclick="setConnectEdit(!connectEdit)" title="Edit the Auto priority">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       </button>
+      <div class="route-modes" id="routeModes" title="Which tab of Nodes the route uses">
+        <span class="route-ink"></span><button data-mode="simple" onclick="setConnectMode('simple')">Servers</button><button data-mode="profiles" onclick="setConnectMode('profiles')">Profiles</button>
+      </div>
     </div>
     <div class="sheet-body">
       <div class="list-caption"><span>Priority</span><span id="connectsCaption"></span></div>
@@ -2223,6 +2219,7 @@ function renderConnects() {
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
+  document.getElementById('routeModes').dataset.mode = connectMode;
   document.querySelectorAll('#routeModes button').forEach(b => b.classList.toggle('on', b.dataset.mode === connectMode));
   document.getElementById('routeOrderNote').innerHTML = routeCustom[connectMode]
     ? `Own priority order<button class="am-link" onclick="resetRouteOrder()">Follow Nodes order</button>`
@@ -2342,6 +2339,10 @@ function setConnectMode(mode) {
   ({ order: connectOrder, active: activeConnectId, auto: autoConnect } = modeState[mode]);
   connectMode = mode;
   renderConnects();
+  // The list slides in from the side the switch moved to.
+  const list = document.getElementById('connects-list');
+  list.style.setProperty('--swap-from', mode === 'profiles' ? '16px' : '-16px');
+  list.classList.remove('swap'); void list.offsetWidth; list.classList.add('swap');
   updateMainConnectCard();
   if (typeof renderNodesTabs === 'function') renderNodesTabs();
 }
@@ -3440,16 +3441,22 @@ let rulesData = {
 let ruleOrder = ['r1', 'r2', 'r3', 'r4'];
 let ruleSeq = 5;
 
+// [key, name, domains, app packages]. The service catches its sites from any app (browser too);
+// its own app is matched earlier by Apps, so an app rule wins for that app's traffic.
 const SERVICES = [
-  ['telegram', 'Telegram', ['telegram.org', 't.me', 'telegram.me']],
-  ['youtube', 'YouTube', ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be']],
-  ['discord', 'Discord', ['discord.com', 'discord.gg', 'discordapp.com']],
-  ['netflix', 'Netflix', ['netflix.com', 'nflxvideo.net']],
-  ['spotify', 'Spotify', ['spotify.com', 'scdn.co']],
-  ['chatgpt', 'ChatGPT', ['openai.com', 'chatgpt.com']],
-  ['instagram', 'Instagram', ['instagram.com', 'cdninstagram.com']],
-  ['x', 'X / Twitter', ['x.com', 'twitter.com', 'twimg.com']],
+  ['telegram', 'Telegram', ['telegram.org', 't.me', 'telegram.me'], ['org.telegram.messenger']],
+  ['youtube', 'YouTube', ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be'], ['com.google.android.youtube']],
+  ['discord', 'Discord', ['discord.com', 'discord.gg', 'discordapp.com'], ['com.discord']],
+  ['netflix', 'Netflix', ['netflix.com', 'nflxvideo.net'], ['com.netflix.mediaclient']],
+  ['spotify', 'Spotify', ['spotify.com', 'scdn.co'], ['com.spotify.music']],
+  ['chatgpt', 'ChatGPT', ['openai.com', 'chatgpt.com'], ['com.openai.chatgpt']],
+  ['instagram', 'Instagram', ['instagram.com', 'cdninstagram.com'], ['com.instagram.android']],
+  ['x', 'X / Twitter', ['x.com', 'twitter.com', 'twimg.com'], ['com.twitter.android']],
 ];
+const svcState = v => v === 'vpn' ? 'VPN' : v === 'direct' ? 'Direct' : '';
+const serviceOfApp = pkg => SERVICES.find(s => s[3].includes(pkg));
+// The app rule that overrides a service for its own app, if any.
+const appOfService = key => { const s = SERVICES.find(x => x[0] === key); const pkg = s && s[3].find(p => appRules[p]); return pkg ? { pkg, name: (APPS.find(a => a.pkg === pkg) || { name: pkg }).name, text: appActText(appRules[pkg]) } : null; };
 const REGIONS = [['RU', '🇷🇺 Russia', ['ru', 'рф', 'su']], ['BY', '🇧🇾 Belarus', ['by']], ['KZ', '🇰🇿 Kazakhstan', ['kz']],
   ['UA', '🇺🇦 Ukraine', ['ua']], ['CN', '🇨🇳 China', ['cn']], ['IR', '🇮🇷 Iran', ['ir']]];
 const ADS = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
@@ -3516,9 +3523,10 @@ function renderRules() {
   const added = SERVICES.filter(([k]) => quickCfg.services[k] !== 'default');
   const shownSvc = added.filter(([, name]) => hit(name));
   const svcOpenNow = svcOpen || !!q;
-  const svcRows = shownSvc.map(([key, name]) => `<div class="set-row svc-row" data-svc="${key}"><div class="set-label">${name}</div>
+  const svcRows = shownSvc.map(([key, name]) => { const app = appOfService(key); return `<div class="set-row svc-row" data-svc="${key}"><div class="set-label">${name}${app
+      ? `<div class="set-hint svc-app" onclick="openApps();openAppAct('${app.pkg}')">App: ${esc(app.text)} — its own route wins in the app</div>` : ''}</div>
     <div class="seg3">${SVC_STATES.filter(([v]) => v !== 'default').map(([v, l]) => `<button class="${quickCfg.services[key] === v ? 'on ' + v : ''}" onclick="setService('${key}','${v}')">${l}</button>`).join('')}</div>
-    <button class="icon-btn ghost svc-del" onclick="setService('${key}','default')" title="Remove">${ICON.close}</button></div>`).join('');
+    <button class="icon-btn ghost svc-del" onclick="setService('${key}','default')" title="Remove">${ICON.close}</button></div>`; }).join('');
   const rest = SERVICES.filter(([k, name]) => quickCfg.services[k] === 'default' && hit(name));
   const svcAdd = q ? '' : svcAddOpen
     ? `<div class="chip-row svc-add">${rest.map(([k, name]) => `<div class="chip" onclick="setService('${k}','vpn')">${name}</div>`).join('') || '<span class="set-hint">All services added</span>'}</div>`
@@ -3803,8 +3811,16 @@ function renderApps() {
     return `<div class="set-row app-row" data-pkg="${a.pkg}" onclick="openAppAct('${a.pkg}')">
       <div class="app-ico" style="--h:${hash(a.pkg) % 360}">${esc(a.name[0])}</div>
       <div class="set-label">${esc(a.name)}<div class="app-pkg">${esc(a.pkg)}</div></div>
-      <span class="app-state ${r ? r.act : ''}">${r ? esc(appActText(r)) : '—'}</span></div>`;
+      ${appStateHtml(a.pkg)}</div>`;
   }).join('') || '<div class="rules-empty">No apps</div>';
+}
+
+// Right column: the app's own route; otherwise a service that covers it ("via service"), or —.
+function appStateHtml(pkg) {
+  const r = appRules[pkg], svc = serviceOfApp(pkg), sv = svc && quickCfg.services[svc[0]];
+  if (r) return `<span class="app-state ${r.act}">${esc(appActText(r))}</span>`;
+  if (sv && sv !== 'default') return `<span class="app-state svc ${sv === 'vpn' ? 'proxy' : 'direct'}" title="Set by the ${esc(svc[1])} service">${svcState(sv)} · service</span>`;
+  return '<span class="app-state">—</span>';
 }
 
 /* ── One app's action (small dialog) ── */
@@ -3825,8 +3841,19 @@ function renderAppAct() {
       ${d.split ? targetRowHtml('UDP via', d.udpTarget, 't => { appDraft.udpTarget = t; renderAppAct(); }') : ''}
       <div class="set-row"><div class="set-label">Split TCP / UDP<div class="set-hint">Different routes, e.g. voice (UDP) apart from chat</div></div>
         <div class="mini-toggle ${d.split ? 'on' : ''}" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div>
-    </div>` : `<div class="set-hint aa-hint">${{ default: 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN', block: 'No network at all while connected' }[d.act]}</div>`}`;
+    </div>` : `<div class="set-hint aa-hint">${{ default: 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN', block: 'No network at all while connected' }[d.act]}</div>`}
+    ${appSvcNote(appEditing, d.act)}`;
 }
+// The service with the same app: what it does, and who wins.
+function appSvcNote(pkg, act) {
+  const svc = serviceOfApp(pkg), sv = svc && quickCfg.services[svc[0]];
+  if (!svc) return '';
+  const state = sv && sv !== 'default' ? `${svc[1]} service: ${svcState(sv)}` : `${svc[1]} service: not added`;
+  const who = act === 'default' ? (sv && sv !== 'default' ? 'so this app goes ' + svcState(sv) + ' by the service' : 'add it in Rules → Services to route its sites from any app')
+    : 'this app’s own route wins for the app; the service still covers its sites in other apps';
+  return `<div class="set-hint aa-hint aa-svc">${state} — ${who}</div>`;
+}
+
 function saveAppAct() {
   if (appDraft.act === 'default') delete appRules[appEditing];
   else appRules[appEditing] = appDraft;
@@ -5435,7 +5462,8 @@ function makeDraggable(name) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
 }
-['profiles','connections','rules','createprofile','createchain','sourceentry','ruleform','apps','ruleorder','ruleio','rulesets','rsform','dnsform','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
+// Every sheet, found in the markup — a hand-kept list missed the Settings sections.
+document.querySelectorAll('.sheet[id^="sh-"]').forEach(el => makeDraggable(el.id.slice(3)));
 
 /* ══════════════════════ THEMES ══════════════════════ */
 
@@ -5454,6 +5482,26 @@ function applyTheme(id) {
   renderThemeList();
 }
 
+/* Text size: scales everything below the titles — lists, cards, sheet bodies — as one
+   (CSS zoom via --ui-zoom, so rows keep their proportions and wrap instead of overflowing).
+   Titles, tabs, bottom nav keep their size. Range 90–120%: at 120% on a 320px-wide phone the
+   narrowest rows (4-way segments, route rows with a switch) still fit — checked by check.mjs.
+   Flutter: MediaQuery textScaler clamped to the same range, titles with noScaling. */
+const UI_SCALE_MIN = 0.9, UI_SCALE_MAX = 1.2;
+let uiScale = 1;
+try { uiScale = +localStorage.getItem('jmg-scale') || 1; } catch (e) {}
+function applyScale(v) {
+  uiScale = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, Math.round(+v * 20) / 20 || 1));
+  document.documentElement.style.setProperty('--ui-zoom', uiScale);
+  try { localStorage.setItem('jmg-scale', uiScale); } catch (e) {}
+  previewScale(uiScale);
+}
+// While dragging only the label moves; the zoom applies on release, so the slider stays under the finger.
+function previewScale(v) {
+  document.getElementById('uiScale').value = v;
+  document.getElementById('scaleVal').textContent = Math.round(v * 100) + '%';
+}
+
 function renderThemeList() {
   document.getElementById('setLookSub').textContent = THEMES.find(t => t.id === currentTheme).name;
   document.getElementById('theme-list').innerHTML = THEMES.map(t => `<div class="settings-row" onclick="applyTheme('${t.id}')">
@@ -5466,6 +5514,7 @@ function renderThemeList() {
 /* ══════════════════════ INITIAL RENDER ══════════════════════ */
 
 applyTheme(currentTheme);
+applyScale(uiScale);
 purgeExpiredGone();
 renderAutoMode();
 renderConnSettings();

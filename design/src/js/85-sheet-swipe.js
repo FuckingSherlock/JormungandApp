@@ -28,5 +28,6 @@ function makeDraggable(name) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
 }
-['profiles','connections','rules','createprofile','createchain','sourceentry','ruleform','apps','ruleorder','ruleio','rulesets','rsform','dnsform','addmenu','nodesmore','actions','srcform','nodeform'].forEach(makeDraggable);
+// Every sheet, found in the markup — a hand-kept list missed the Settings sections.
+document.querySelectorAll('.sheet[id^="sh-"]').forEach(el => makeDraggable(el.id.slice(3)));
 

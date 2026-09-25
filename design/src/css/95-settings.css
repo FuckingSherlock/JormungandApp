@@ -39,3 +39,11 @@
 .form-input.mono{font-family:var(--mono);font-size:14px}
 .df-ping-row{display:flex;align-items:center;gap:12px}
 .df-ping-row .lat{min-width:0;text-align:left}
+
+/* Text size (Appearance) — zoom of everything below the titles */
+:root{--ui-zoom:1}
+.view > .scroll,.nodes-page,.sheet-body,.dialog .dialog-body{zoom:var(--ui-zoom)}
+.scale-val{margin-left:8px;font-family:var(--mono);font-size:13px;color:var(--accent)}
+.scale-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+.scale-row input{flex:1;min-width:0;accent-color:var(--accent)}
+.scale-a{color:var(--t2);font-weight:600;line-height:1;width:18px;text-align:center}

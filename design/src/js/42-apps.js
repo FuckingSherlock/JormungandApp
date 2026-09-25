@@ -45,8 +45,16 @@ function renderApps() {
     return `<div class="set-row app-row" data-pkg="${a.pkg}" onclick="openAppAct('${a.pkg}')">
       <div class="app-ico" style="--h:${hash(a.pkg) % 360}">${esc(a.name[0])}</div>
       <div class="set-label">${esc(a.name)}<div class="app-pkg">${esc(a.pkg)}</div></div>
-      <span class="app-state ${r ? r.act : ''}">${r ? esc(appActText(r)) : '—'}</span></div>`;
+      ${appStateHtml(a.pkg)}</div>`;
   }).join('') || '<div class="rules-empty">No apps</div>';
+}
+
+// Right column: the app's own route; otherwise a service that covers it ("via service"), or —.
+function appStateHtml(pkg) {
+  const r = appRules[pkg], svc = serviceOfApp(pkg), sv = svc && quickCfg.services[svc[0]];
+  if (r) return `<span class="app-state ${r.act}">${esc(appActText(r))}</span>`;
+  if (sv && sv !== 'default') return `<span class="app-state svc ${sv === 'vpn' ? 'proxy' : 'direct'}" title="Set by the ${esc(svc[1])} service">${svcState(sv)} · service</span>`;
+  return '<span class="app-state">—</span>';
 }
 
 /* ── One app's action (small dialog) ── */
@@ -67,8 +75,19 @@ function renderAppAct() {
       ${d.split ? targetRowHtml('UDP via', d.udpTarget, 't => { appDraft.udpTarget = t; renderAppAct(); }') : ''}
       <div class="set-row"><div class="set-label">Split TCP / UDP<div class="set-hint">Different routes, e.g. voice (UDP) apart from chat</div></div>
         <div class="mini-toggle ${d.split ? 'on' : ''}" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div>
-    </div>` : `<div class="set-hint aa-hint">${{ default: 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN', block: 'No network at all while connected' }[d.act]}</div>`}`;
+    </div>` : `<div class="set-hint aa-hint">${{ default: 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN', block: 'No network at all while connected' }[d.act]}</div>`}
+    ${appSvcNote(appEditing, d.act)}`;
 }
+// The service with the same app: what it does, and who wins.
+function appSvcNote(pkg, act) {
+  const svc = serviceOfApp(pkg), sv = svc && quickCfg.services[svc[0]];
+  if (!svc) return '';
+  const state = sv && sv !== 'default' ? `${svc[1]} service: ${svcState(sv)}` : `${svc[1]} service: not added`;
+  const who = act === 'default' ? (sv && sv !== 'default' ? 'so this app goes ' + svcState(sv) + ' by the service' : 'add it in Rules → Services to route its sites from any app')
+    : 'this app’s own route wins for the app; the service still covers its sites in other apps';
+  return `<div class="set-hint aa-hint aa-svc">${state} — ${who}</div>`;
+}
+
 function saveAppAct() {
   if (appDraft.act === 'default') delete appRules[appEditing];
   else appRules[appEditing] = appDraft;

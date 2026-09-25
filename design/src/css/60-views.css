@@ -1,8 +1,8 @@
 /* ── Views (bottom-nav tabs) ── */
-/* App frame is exactly one screen tall: status bar, section header and bottom nav
+/* App frame is exactly one screen tall: section header and bottom nav
    stay put; only each view's .scroll area scrolls. */
 .phone{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:0;overflow:hidden}
-.statusbar,.bottomnav{flex-shrink:0}
+.bottomnav{flex-shrink:0}
 .view{display:none;flex:1;min-height:0;flex-direction:column}
 .view.active{display:flex}
 .view > .topbar,.view > .search{flex-shrink:0}

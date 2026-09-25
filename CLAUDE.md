@@ -56,7 +56,7 @@ simple-chain, chain-priority, profile-edit, chain-edit, chain-groups, drag-mid, 
 srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm,
 nodes-edit, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
 rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
-rule-sets, apps, app-act, settings-dns, dns-form, settings-conn.
+rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, text-large, text-large-rule.
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
 there for each new interaction.
 
@@ -103,7 +103,10 @@ URL: https://jormungand-design.slackerwarlock.workers.dev
   (original = default navy, karing, github) switched in Settings → Appearance.
   For tinted colours use `rgba(var(--accent-rgb), .15)`, never a hex literal.
 - Themes must not change layout (same font everywhere) — `check` verifies it.
-- Scrollbars are hidden globally; the app frame is one viewport tall: status bar,
+- Scrollbars are hidden globally; the app frame is one viewport tall (no fake status bar):
   view header and bottom nav are fixed, only `.view > .scroll` scrolls.
+- Text size (Settings → Appearance, 90–120%) zooms `.view > .scroll`, `.nodes-page` and
+  `.sheet-body` via `--ui-zoom`; titles and headers stay fixed. New rows must fit at 120% on
+  a 320px screen (a check verifies it).
 - Name things after future Flutter widgets (SourceCard, NodeRow, ConnectDock,
   PowerTab) so the port is a straight mapping.

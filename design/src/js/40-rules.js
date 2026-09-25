@@ -141,16 +141,22 @@ let rulesData = {
 let ruleOrder = ['r1', 'r2', 'r3', 'r4'];
 let ruleSeq = 5;
 
+// [key, name, domains, app packages]. The service catches its sites from any app (browser too);
+// its own app is matched earlier by Apps, so an app rule wins for that app's traffic.
 const SERVICES = [
-  ['telegram', 'Telegram', ['telegram.org', 't.me', 'telegram.me']],
-  ['youtube', 'YouTube', ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be']],
-  ['discord', 'Discord', ['discord.com', 'discord.gg', 'discordapp.com']],
-  ['netflix', 'Netflix', ['netflix.com', 'nflxvideo.net']],
-  ['spotify', 'Spotify', ['spotify.com', 'scdn.co']],
-  ['chatgpt', 'ChatGPT', ['openai.com', 'chatgpt.com']],
-  ['instagram', 'Instagram', ['instagram.com', 'cdninstagram.com']],
-  ['x', 'X / Twitter', ['x.com', 'twitter.com', 'twimg.com']],
+  ['telegram', 'Telegram', ['telegram.org', 't.me', 'telegram.me'], ['org.telegram.messenger']],
+  ['youtube', 'YouTube', ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be'], ['com.google.android.youtube']],
+  ['discord', 'Discord', ['discord.com', 'discord.gg', 'discordapp.com'], ['com.discord']],
+  ['netflix', 'Netflix', ['netflix.com', 'nflxvideo.net'], ['com.netflix.mediaclient']],
+  ['spotify', 'Spotify', ['spotify.com', 'scdn.co'], ['com.spotify.music']],
+  ['chatgpt', 'ChatGPT', ['openai.com', 'chatgpt.com'], ['com.openai.chatgpt']],
+  ['instagram', 'Instagram', ['instagram.com', 'cdninstagram.com'], ['com.instagram.android']],
+  ['x', 'X / Twitter', ['x.com', 'twitter.com', 'twimg.com'], ['com.twitter.android']],
 ];
+const svcState = v => v === 'vpn' ? 'VPN' : v === 'direct' ? 'Direct' : '';
+const serviceOfApp = pkg => SERVICES.find(s => s[3].includes(pkg));
+// The app rule that overrides a service for its own app, if any.
+const appOfService = key => { const s = SERVICES.find(x => x[0] === key); const pkg = s && s[3].find(p => appRules[p]); return pkg ? { pkg, name: (APPS.find(a => a.pkg === pkg) || { name: pkg }).name, text: appActText(appRules[pkg]) } : null; };
 const REGIONS = [['RU', '🇷🇺 Russia', ['ru', 'рф', 'su']], ['BY', '🇧🇾 Belarus', ['by']], ['KZ', '🇰🇿 Kazakhstan', ['kz']],
   ['UA', '🇺🇦 Ukraine', ['ua']], ['CN', '🇨🇳 China', ['cn']], ['IR', '🇮🇷 Iran', ['ir']]];
 const ADS = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
@@ -217,9 +223,10 @@ function renderRules() {
   const added = SERVICES.filter(([k]) => quickCfg.services[k] !== 'default');
   const shownSvc = added.filter(([, name]) => hit(name));
   const svcOpenNow = svcOpen || !!q;
-  const svcRows = shownSvc.map(([key, name]) => `<div class="set-row svc-row" data-svc="${key}"><div class="set-label">${name}</div>
+  const svcRows = shownSvc.map(([key, name]) => { const app = appOfService(key); return `<div class="set-row svc-row" data-svc="${key}"><div class="set-label">${name}${app
+      ? `<div class="set-hint svc-app" onclick="openApps();openAppAct('${app.pkg}')">App: ${esc(app.text)} — its own route wins in the app</div>` : ''}</div>
     <div class="seg3">${SVC_STATES.filter(([v]) => v !== 'default').map(([v, l]) => `<button class="${quickCfg.services[key] === v ? 'on ' + v : ''}" onclick="setService('${key}','${v}')">${l}</button>`).join('')}</div>
-    <button class="icon-btn ghost svc-del" onclick="setService('${key}','default')" title="Remove">${ICON.close}</button></div>`).join('');
+    <button class="icon-btn ghost svc-del" onclick="setService('${key}','default')" title="Remove">${ICON.close}</button></div>`; }).join('');
   const rest = SERVICES.filter(([k, name]) => quickCfg.services[k] === 'default' && hit(name));
   const svcAdd = q ? '' : svcAddOpen
     ? `<div class="chip-row svc-add">${rest.map(([k, name]) => `<div class="chip" onclick="setService('${k}','vpn')">${name}</div>`).join('') || '<span class="set-hint">All services added</span>'}</div>`

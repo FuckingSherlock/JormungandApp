@@ -33,6 +33,13 @@
       <button class="sheet-close" onclick="closeSheet('setlook')">×</button>
     </div>
     <div class="sheet-body">
+      <div class="settings-group"><div class="settings-row scale-row-wrap">
+        <div style="flex:1;min-width:0"><div class="settings-label">Text size<span class="scale-val" id="scaleVal">100%</span></div>
+          <div class="scale-row"><span class="scale-a" style="font-size:12px">A</span>
+            <input type="range" id="uiScale" min="0.9" max="1.2" step="0.05" value="1" oninput="previewScale(this.value)" onchange="applyScale(this.value)">
+            <span class="scale-a" style="font-size:19px">A</span></div>
+          <div class="settings-sub">Lists and menus; titles keep their size</div></div>
+      </div></div>
       <div class="settings-group" id="theme-list"></div>
     </div>
   </div>
