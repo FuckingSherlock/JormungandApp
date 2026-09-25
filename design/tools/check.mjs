@@ -101,7 +101,7 @@ const SHOTS = {
   'nodes-profiles': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); expandState.default = true; renderNodes(); }); await settle(p); },
   'nodes-swipe': async p => { await tab(p, 'nodes'); await p.evaluate(() => { document.getElementById('view-nodes').classList.add('swiping'); renderNodesTabs(-170); }); },
   'route': async p => { await p.evaluate(() => { openProfiles(); setConnectEdit(true); }); await settle(p); },
-  'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); confirmDeleteEntry('work'); }); await settle(p); },
+  'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); openEditProfile('work'); confirmDeleteEntry('work'); }); await settle(p); },
   'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.add('src2'); renderTargetPicker(); }); await settle(p); },
   'rule-fallback': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
   'rules-services': async p => { await p.evaluate(() => { openRules(); svcOpen = true; svcAddOpen = true; renderRules(); document.querySelector('.svc-group').scrollIntoView(); }); await settle(p); },
@@ -1065,11 +1065,11 @@ async function runChecks() {
       const id = catalogOrder.profiles.find(x => profilesData[x] && profilesData[x].name === 'Tmp prof');
       out.added = !!id && !!document.querySelector(`#nodes-profiles .entry-card[data-id=${id}]`) && modeOrder('profiles').includes(id);
       const r1 = rulesData.r1; r1.action = 'proxy'; r1.target = 'profile:' + id;
-      openEntryActions(id);
-      [...document.querySelectorAll('#actions-body .menu-row')].find(e => /Delete/.test(e.textContent)).click();
+      out.card = !!document.querySelector(`#nodes-profiles .entry-card[data-id=${id}] .icon-btn[title="Edit profile"]`);
+      openEditProfile(id); document.getElementById('cpDeleteBtn').click();
       out.impact = /Work network.*rule #\d.*loses its target/.test(body());
       document.querySelector('#actions-body .menu-row.danger').click();
-      out.gone = !profilesData[id] && !catalogOrder.profiles.includes(id) && !modeOrder('profiles').includes(id);
+      out.gone = !profilesData[id] && !catalogOrder.profiles.includes(id) && !modeOrder('profiles').includes(id) && !document.getElementById('sh-createprofile').classList.contains('open');
       r1.action = 'direct'; r1.target = '';
       setNodesTab('simple'); switchTab('home'); renderAll(); renderRules();
       return out;

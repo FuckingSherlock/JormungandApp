@@ -168,9 +168,7 @@ function renderEntryCard(id, q) {
         <div class="src-meta">${entryMetaHtml(id)}</div>
       </div>
       ${nodesEdit ? '' : `<button class="icon-btn ghost" onclick="event.stopPropagation();testEntryLatency('${id}')" title="Test latency">${ICON.bolt}</button>`}
-      <button class="icon-btn ghost" onclick="event.stopPropagation();openEntryActions('${id}')" title="More">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
-      </button>
+      <button class="icon-btn ghost" onclick="event.stopPropagation();${chain ? 'openEditChain' : 'openEditProfile'}('${id}')" title="Edit ${chain ? 'chain' : 'profile'}">${ICON.edit}</button>
     </div>
     ${entryNowHtml(id)}
     </div>
@@ -185,15 +183,8 @@ function entryRefs(id) {
 }
 function testEntryLatency(id) { testLatency(entryRefs(id).map(r => [r.sid, r.node.id])); }
 
-function openEntryActions(id) {
-  const close = "closeSheet('actions');", chain = !!chainsData[id];
-  openActions(connectEntry(id).name,
-    menuRow(ICON.edit, chain ? 'Edit chain' : 'Edit profile', close + (chain ? `openEditChain('${id}')` : `openEditProfile('${id}')`))
-    + menuRow(ICON.bolt, 'Test latency', close + `testEntryLatency('${id}')`)
-    + menuRow(ICON.trash, 'Delete', close + `confirmDeleteEntry('${id}')`, 'danger'));
-}
-
-/* Deleting a profile moves the chains that use it to the first other profile (a chain left
+/* Delete sits inside the profile / chain editor (the card has only ⚡ and ✎).
+   Deleting a profile moves the chains that use it to the first other profile (a chain left
    with the same profile on both ends is deleted). Rules and apps that target the deleted
    profile / chain keep pointing at it and do what their "If unavailable" says. */
 function confirmDeleteEntry(id) {

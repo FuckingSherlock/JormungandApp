@@ -87,7 +87,7 @@
     <div class="sheet-footer">
       <div class="warn-note" id="cp-warn" hidden>Tick at least 1 server — a profile with none can’t connect</div>
       <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
-      <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="deleteEditingProfile()">Delete profile</button>
+      <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="confirmDeleteEntry(editingProfileId)">Delete profile</button>
     </div>
   </div>
 
@@ -161,7 +161,7 @@
     <div class="sheet-footer">
       <div class="warn-note" id="cc-warn" hidden></div>
       <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
-      <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
+      <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="confirmDeleteEntry(editingChainId)">Delete chain</button>
     </div>
   </div>
 

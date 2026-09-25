@@ -1338,7 +1338,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="sheet-footer">
       <div class="warn-note" id="cp-warn" hidden>Tick at least 1 server — a profile with none can’t connect</div>
       <button class="btn-primary" id="cpSaveBtn" onclick="saveCreateProfile()">Create profile</button>
-      <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="deleteEditingProfile()">Delete profile</button>
+      <button class="btn-danger-text" id="cpDeleteBtn" style="display:none" onclick="confirmDeleteEntry(editingProfileId)">Delete profile</button>
     </div>
   </div>
 
@@ -1412,7 +1412,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="sheet-footer">
       <div class="warn-note" id="cc-warn" hidden></div>
       <button class="btn-primary" id="ccSaveBtn" onclick="saveCreateChain()">Create chain</button>
-      <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="deleteEditingChain()">Delete chain</button>
+      <button class="btn-danger-text" id="ccDeleteBtn" style="display:none" onclick="confirmDeleteEntry(editingChainId)">Delete chain</button>
     </div>
   </div>
 
@@ -3082,9 +3082,7 @@ function renderEntryCard(id, q) {
         <div class="src-meta">${entryMetaHtml(id)}</div>
       </div>
       ${nodesEdit ? '' : `<button class="icon-btn ghost" onclick="event.stopPropagation();testEntryLatency('${id}')" title="Test latency">${ICON.bolt}</button>`}
-      <button class="icon-btn ghost" onclick="event.stopPropagation();openEntryActions('${id}')" title="More">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
-      </button>
+      <button class="icon-btn ghost" onclick="event.stopPropagation();${chain ? 'openEditChain' : 'openEditProfile'}('${id}')" title="Edit ${chain ? 'chain' : 'profile'}">${ICON.edit}</button>
     </div>
     ${entryNowHtml(id)}
     </div>
@@ -3099,15 +3097,8 @@ function entryRefs(id) {
 }
 function testEntryLatency(id) { testLatency(entryRefs(id).map(r => [r.sid, r.node.id])); }
 
-function openEntryActions(id) {
-  const close = "closeSheet('actions');", chain = !!chainsData[id];
-  openActions(connectEntry(id).name,
-    menuRow(ICON.edit, chain ? 'Edit chain' : 'Edit profile', close + (chain ? `openEditChain('${id}')` : `openEditProfile('${id}')`))
-    + menuRow(ICON.bolt, 'Test latency', close + `testEntryLatency('${id}')`)
-    + menuRow(ICON.trash, 'Delete', close + `confirmDeleteEntry('${id}')`, 'danger'));
-}
-
-/* Deleting a profile moves the chains that use it to the first other profile (a chain left
+/* Delete sits inside the profile / chain editor (the card has only ⚡ and ✎).
+   Deleting a profile moves the chains that use it to the first other profile (a chain left
    with the same profile on both ends is deleted). Rules and apps that target the deleted
    profile / chain keep pointing at it and do what their "If unavailable" says. */
 function confirmDeleteEntry(id) {
