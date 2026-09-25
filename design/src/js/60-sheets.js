@@ -6,6 +6,7 @@ function openSheet(name) {
 }
 // A sheet may veto or clean up on close (any way: ×, overlay, swipe, Done).
 const sheetCloseHooks = {};
+sheetCloseHooks.profiles = () => { if (connectEdit) setConnectEdit(false); };   // the list reopens in view mode
 function closeSheet(name) {
   if (sheetCloseHooks[name]) sheetCloseHooks[name]();
   document.getElementById('ov-'+name).classList.remove('open');

@@ -235,7 +235,7 @@ body {
 .sheet.dragging{transition:none}
 .sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--border-hi);margin:10px auto 0;flex-shrink:0;touch-action:none;cursor:grab}
 .sheet-head{touch-action:none;display:flex;align-items:center;justify-content:space-between;padding:12px 18px 10px;flex-shrink:0;border-bottom:1px solid var(--border)}
-.sheet-title{font-size:17px;font-weight:600;color:var(--t1)}
+.sheet-title{display:flex;align-items:center;min-width:0;font-size:17px;font-weight:600;color:var(--t1)}
 .sheet-close{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.06);border:none;color:var(--t2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .sheet-body{overflow-y:auto;padding:12px 0;scrollbar-width:none;flex:1}
 .sheet-body::-webkit-scrollbar{display:none}
@@ -243,6 +243,17 @@ body {
 /* ── Sheets (level 2 — nested modals for add/create flows) ── */
 .overlay-l2{z-index:20}
 .sheet-l2{z-index:21}
+.overlay-l3{z-index:30}
+.sheet-l3{z-index:31}
+
+/* [?] help: a small round button next to a title, and its tips sheet */
+.help-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:7px;padding:0;border-radius:50%;
+  border:1px solid var(--border-hi);background:none;color:var(--t3);font:inherit;font-size:11px;font-weight:700;line-height:1;
+  text-transform:none;letter-spacing:0;vertical-align:middle;cursor:pointer;flex-shrink:0}
+.help-btn:active{color:var(--accent);border-color:var(--accent)}
+.sheet.compact .help-body{padding:10px 18px 20px}
+.help-item{font-size:14px;line-height:1.45;color:var(--t2);padding:5px 0}
+.help-item b{color:var(--t1);font-weight:600}
 
 /* Sheet tab switcher (Connections / Chains, Subscription / Manual) */
 .sheet-tabs{display:flex;gap:6px;padding:10px 18px 4px;flex-shrink:0}
@@ -499,6 +510,7 @@ body {
 .node-row.pick.on,.node-row.pick + .node-row.pick.on{border-color:rgba(var(--accent-rgb),.5);background:rgba(var(--accent-rgb),.07)}
 .node-row.pick:not(.on) .node-name{color:var(--t2)}
 .node-row.gone.pick.on{background:none;border-style:dashed}
+.conn-row > .conn-main:first-child{padding-left:12px}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -524,36 +536,23 @@ body {
 .dock-profile:active{background:rgba(255,255,255,.02)}
 .dock-chevron{color:var(--t3);flex-shrink:0}
 
-/* ── AutoCard (Home) ── */
-.auto-card{padding:12px 14px}
-.auto-card-top{display:flex;align-items:center;gap:12px}
-.auto-card-main{flex:1;min-width:0}
-.auto-card-main .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.auto-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
-.auto-stat{background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:8px;padding:6px 4px;text-align:center}
-.auto-stat-val{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap}
-.auto-stat-val.good{color:var(--active)}
-.auto-stat-val.mid{color:var(--warn)}
-.auto-stat-val.bad{color:var(--muted)}
-.auto-stat-label{font-size:11px;color:var(--t3);margin-top:1px}
+/* ── AutoCard (Home): just a link to Settings → Auto mode ── */
+.auto-card{display:flex;align-items:center;gap:12px;padding:10px 14px}
+.auto-card .nav-title{flex:1;margin-bottom:0}
+.auto-card-chev{color:var(--t3);flex-shrink:0}
 
 /* ── Settings → Auto mode (#auto-settings, inside the settings scroll) ── */
 #auto-settings .set-group{margin:6px 0 4px;background:var(--card)}
-.am-label{font-size:12px;color:var(--t3);padding:8px 6px 0}
-.am-now{display:flex;align-items:center;gap:12px;margin:0 0 8px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:rgba(var(--accent-rgb),.06)}
-.am-now-main{flex:1;min-width:0}
-.am-now-name{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:2px}
-.am-now-ms{text-align:right;flex-shrink:0}
-.am-now-ms .lat{font-size:15px;min-width:0;cursor:default;padding:0}
-.am-checked{font-size:11px;color:var(--t3);margin-top:2px}
-.am-actions{display:flex;gap:8px;padding:0 0 2px}
-.am-standby{margin:6px 0 4px;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.am-standby .route-empty{padding:12px 14px}
-.am-sb-row{display:flex;align-items:center;gap:10px;padding:9px 12px}
-.am-sb-row + .am-sb-row{border-top:1px solid var(--border)}
-.am-sb-main{flex:1;min-width:0}
-.am-sb-name{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
-.am-sb-row .lat{min-width:0;cursor:default}
+.am-label{display:flex;align-items:center;font-size:12px;color:var(--t3);padding:8px 6px 0}
+.set-input.am-num{width:56px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:rgba(255,255,255,.035);font-family:var(--mono)}
+.am-num:focus{outline:none;border-color:var(--accent)}
+.am-unit{color:var(--t2);font-size:15px;margin-left:-6px}
+.set-select{flex-shrink:0;background:var(--card-hi);color:var(--t1);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font:inherit;font-size:15px}
+.set-select:focus{outline:none;border-color:var(--accent)}
+.stepper{display:flex;align-items:center;flex-shrink:0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.stepper-btn{width:32px;height:32px;background:none;border:none;color:var(--accent);font:inherit;font-size:18px;font-weight:600;cursor:pointer}
+.stepper-btn:disabled{color:var(--t3);opacity:.5;cursor:default}
+.stepper-val{min-width:26px;text-align:center;font-family:var(--mono);font-size:15px;font-weight:600;color:var(--t1)}
 /* ── Views (bottom-nav tabs) ── */
 /* App frame is exactly one screen tall: status bar, section header and bottom nav
    stay put; only each view's .scroll area scrolls. */
@@ -576,6 +575,8 @@ body {
 }
 .icon-btn:active{background:var(--card-hi)}
 .icon-btn.on{color:var(--accent);border-color:var(--accent)}
+.icon-btn.done{width:auto;padding:0 12px;font:inherit;font-size:14px;font-weight:600;color:var(--accent);border-color:var(--accent)}
+#view-nodes.editing .no-edit{display:none}
 .icon-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .icon-btn.ghost{background:transparent;border-color:transparent;width:30px;height:30px}
 .icon-btn.ghost:active{background:rgba(255,255,255,.06)}
@@ -770,18 +771,12 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     </div>
 
     <!-- AutoCard: how Auto picks and keeps the connection (opens the Auto mode sheet) -->
-    <div class="card auto-card" id="autoCard" onclick="openAutoMode()">
-      <div class="auto-card-top">
-        <div class="nav-icon teal" style="margin-bottom:0">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg>
-        </div>
-        <div class="auto-card-main">
-          <div class="nav-title" style="margin-bottom:0">Auto mode</div>
-          <div class="nav-sub" id="autoCardSub"></div>
-        </div>
-        <div class="mini-toggle" id="autoCardToggle" onclick="event.stopPropagation();setAutoConnect(!autoConnect)"><div class="mini-toggle-thumb"></div></div>
+    <div class="card auto-card" id="autoCard" onclick="openAutoMode()" title="Settings → Auto mode">
+      <div class="nav-icon teal" style="margin-bottom:0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg>
       </div>
-      <div class="auto-stats" id="autoCardStats"></div>
+      <div class="nav-title">Auto mode</div>
+      <svg class="auto-card-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
     </div>
 
     <!-- ROW 4: Rules · DNS · Speed Test -->
@@ -855,20 +850,23 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="view" id="view-nodes">
     <div class="topbar">
       <div>
-        <div class="app-name">Nodes</div>
+        <div class="app-name">Nodes<button class="help-btn" onclick="event.stopPropagation();openHelp('nodes')" title="What is this?">?</button></div>
         <div class="nodes-summary" id="nodesSummary"></div>
       </div>
       <div class="head-actions">
         <button class="icon-btn" id="nodeSearchBtn" onclick="toggleNodeSearch()" title="Search">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </button>
-        <button class="icon-btn" onclick="testAllLatency()" title="Test latency">
+        <button class="icon-btn no-edit" onclick="testAllLatency()" title="Test latency">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </button>
+        <button class="icon-btn" id="nodesEditBtn" onclick="setNodesEdit(!nodesEdit)" title="Edit: reorder, switch sources and servers on / off">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         </button>
         <button class="icon-btn" onclick="openNodesMore()" title="More">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
         </button>
-        <button class="icon-btn primary" onclick="openSheet('addmenu')" title="Add">
+        <button class="icon-btn primary no-edit" onclick="openSheet('addmenu')" title="Add">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
       </div>
@@ -888,7 +886,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="topbar"><div class="app-name">Settings</div></div>
     <div class="scroll" style="gap:0">
       <!-- Auto mode: the Home AutoCard opens this section -->
-      <div class="settings-caption" id="auto-caption">Auto mode</div>
+      <div class="settings-caption" id="auto-caption">Auto mode<button class="help-btn" onclick="event.stopPropagation();openHelp('automode')" title="What is this?">?</button></div>
       <div id="auto-settings"></div>
 
       <div class="settings-caption">Appearance</div>
@@ -952,17 +950,20 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="sheet" id="sh-profiles">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title" id="profilesTitle">Servers</span>
+      <span class="sheet-title"><span id="profilesTitle">Servers</span><button class="help-btn" onclick="event.stopPropagation();openHelp('entries')" title="What is this?">?</button></span>
       <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order · Manual: the entry you tapped">
         <div class="conn-dot"></div><span>Auto</span>
       </div>
+      <button class="icon-btn ghost" id="connectEditBtn" onclick="setConnectEdit(!connectEdit)" title="Edit the Auto priority">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </button>
       <button class="icon-btn ghost" onclick="openProfilesMenu()" title="More">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
       </button>
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="sheet-body">
-      <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap for Manual</span></div>
+      <div class="list-caption"><span>Priority</span><span id="connectsCaption"></span></div>
       <div id="connects-list"></div>
       <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1022,7 +1023,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="sheet sheet-l2" id="sh-createprofile">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title" id="cpTitle">Create profile</span>
+      <span class="sheet-title"><span id="cpTitle">Create profile</span><button class="help-btn" onclick="event.stopPropagation();openHelp('profile')" title="What is this?">?</button></span>
       <button class="sheet-close" onclick="closeSheet('createprofile')">×</button>
     </div>
     <div class="sheet-body">
@@ -1032,9 +1033,15 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
       <div class="form-group" style="padding-bottom:0">
         <div class="form-label">Subscriptions &amp; servers</div>
-        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tap single servers — framed ones are used. The profile uses the fastest of them.</div>
+        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tap single servers — framed ones are used.</div>
       </div>
       <div id="cp-source-list"></div>
+      <div class="form-group" style="padding-bottom:4px">
+        <div class="form-label">Connect through</div>
+        <div class="chip-row" id="cp-mode" style="margin:6px 0 4px;padding:0"></div>
+        <div class="set-hint" id="cp-mode-hint"></div>
+      </div>
+      <div class="se-nodes" id="cp-order"></div>
 
       <div class="set-group">
         <div class="set-row">
@@ -1055,7 +1062,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="sheet sheet-l2" id="sh-sourceentry">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title" id="seTitle">Source</span>
+      <span class="sheet-title"><span id="seTitle">Source</span><button class="help-btn" onclick="event.stopPropagation();openHelp('sourceentry')" title="What is this?">?</button></span>
       <button class="sheet-close" onclick="closeSheet('sourceentry')">×</button>
     </div>
     <div class="sheet-body">
@@ -1067,7 +1074,8 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
       <div class="form-group" style="padding-bottom:4px">
         <div class="form-label">Servers</div>
-        <div class="set-hint" style="margin-top:4px">Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.</div>
+        <div class="chip-row" id="se-mode" style="margin:6px 0 4px;padding:0"></div>
+        <div class="set-hint" id="se-hint"></div>
       </div>
       <div class="se-bar">
         <span class="se-count" id="se-count"></span>
@@ -1088,7 +1096,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="sheet sheet-l2" id="sh-createchain">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title" id="ccTitle">Create chain</span>
+      <span class="sheet-title"><span id="ccTitle">Create chain</span><button class="help-btn" onclick="event.stopPropagation();openHelp('chain')" title="What is this?">?</button></span>
       <button class="sheet-close" onclick="closeSheet('createchain')">×</button>
     </div>
     <div class="sheet-body">
@@ -1252,7 +1260,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 
         <div class="section-toggle" id="sf-adv-toggle" onclick="toggleSrcAdvanced()">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-          Advanced
+          Advanced<button class="help-btn" onclick="event.stopPropagation();openHelp('srcadvanced')" title="What is this?">?</button>
         </div>
         <div id="sf-adv" style="display:none">
           <div class="set-group">
@@ -1364,6 +1372,17 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     </div>
   </div>
 
+  <!-- ══════════ [?] HELP (level 3: opens above any sheet) ══════════ -->
+  <div class="overlay overlay-l3" id="ov-help" onclick="closeSheet('help')"></div>
+  <div class="sheet sheet-l3 compact" id="sh-help">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="helpTitle"></span>
+      <button class="sheet-close" onclick="closeSheet('help')">×</button>
+    </div>
+    <div class="sheet-body help-body" id="help-body"></div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
 </div><!-- /phone -->
@@ -1437,7 +1456,9 @@ let sourceSeq = 5;
    are kept, so when a server comes back it returns ticked/unticked and in its old
    priority place. The UI lists them under "Unavailable"; Forget purges them for good.
    s.disabledNodes = servers switched off one by one in Nodes: hidden everywhere, settings
-   naming them kept (see liveNodes). */
+   naming them kept (see liveNodes).
+   pickMode / pickOrder (on a profile, or on a source for its simple-mode entry): which
+   server the entry connects through — 'fastest' (default) or 'priority' (see unitNode). */
 let connectMode = 'simple';
 /* connectOrder is the priority list of the active mode (entries and chains together):
    with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
@@ -1451,7 +1472,8 @@ const modeState = {
 let profilesData = {
   default: { id:'default', name:'default', sources:['src1','src2','src3'], nodes:[], inAuto:true },
   work:    { id:'work',    name:'Work',    sources:['src2'],               nodes:[], inAuto:true },
-  gaming:  { id:'gaming',  name:'Gaming',  sources:[],                     nodes:['src4::n0','src4::n1'], inAuto:false },
+  gaming:  { id:'gaming',  name:'Gaming',  sources:[],                     nodes:['src4::n0','src4::n1'], inAuto:false,
+             pickMode:'priority', pickOrder:['src4::n1','src4::n0'] },
 };
 let profileSeq = 1;
 
@@ -1657,9 +1679,19 @@ const brokenOrder = () => connectOrder.filter(id => entryVisible(id) && isBroken
 
 const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u ? u.name : '—'; };
 
-// The node a unit would connect through: the best alive one.
+/* Which server a unit connects through: pickMode 'fastest' (default — the best alive one)
+   or 'priority' (the first alive one in pickOrder, 'sid::nid' keys; servers missing from
+   it follow in source order). A setting of the list entry — a profile, or in simple mode
+   the source's entry — not of the subscription; Nodes has no order. */
+const unitOwner = id => profilesData[id] || sourcesData[id];
+const unitPriority = id => { const u = unitOwner(id); return !!u && u.pickMode === 'priority'; };
+function unitPickRefs(id, withOff) {
+  const refs = unitRefs(id, withOff);
+  return unitPriority(id) ? orderRefs(refs, unitOwner(id).pickOrder) : refs;
+}
 function unitNode(id) {
-  return bestAlive(unitRefs(id).map(r => r.node));
+  const nodes = unitPickRefs(id).map(r => r.node);
+  return unitPriority(id) ? nodes.find(isAlive) || null : bestAlive(nodes);
 }
 const profileNode = p => p ? unitNode(p.id) : null;
 
@@ -1673,13 +1705,15 @@ function bestAlive(nodes) {
   return best;
 }
 function chainEntryRefs(c, withOff) { return unitRefs(c.inId, withOff).filter(r => !(c.inOff || []).includes(refKey(r))); }
-// Every exit server in priority order, unticked ones included.
-function chainExitOrder(c, withOff) {
-  const order = c.exitOrder || [];
+// Refs sorted by a list of 'sid::nid' keys; ones missing from it follow in their own order.
+function orderRefs(refs, order) {
+  order = order || [];
   const pos = k => { const i = order.indexOf(k); return i < 0 ? Infinity : i; };
-  return unitRefs(c.outId, withOff).map((r, i) => ({ r, i }))
+  return refs.map((r, i) => ({ r, i }))
     .sort((a, b) => (pos(refKey(a.r)) - pos(refKey(b.r))) || a.i - b.i).map(x => x.r);
 }
+// Every exit server in priority order, unticked ones included.
+function chainExitOrder(c, withOff) { return orderRefs(unitRefs(c.outId, withOff), c.exitOrder); }
 function chainExitRefs(c, withOff) { return chainExitOrder(c, withOff).filter(r => !(c.outOff || []).includes(refKey(r))); }
 const chainEntryNode = c => bestAlive(chainEntryRefs(c).map(r => r.node));
 function chainExitNode(c) {
@@ -1716,7 +1750,7 @@ function entrySummaryHtml(id) {
     return `<span>${end(c.inId, chainEntryNode(c))}</span><span class="conn-arrow">→</span>`
       + (c.exitMode === 'priority' ? '<span class="conn-tag muted">priority</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
-  return nodeSummaryHtml(unitNode(id), false);
+  return (unitPriority(id) ? '<span class="conn-tag muted">priority</span>' : '') + nodeSummaryHtml(unitNode(id), false);
 }
 
 const GRIP_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>';
@@ -1728,8 +1762,8 @@ function renderConnectRow(id) {
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
-    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
-    <div class="conn-main" onclick="selectConnect('${id}')">
+    ${connectEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
+    <div class="conn-main" ${connectEdit ? '' : `onclick="selectConnect('${id}')"`}>
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
@@ -1740,7 +1774,18 @@ function renderConnectRow(id) {
   </div>`;
 }
 
+// Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
+let connectEdit = false;
+function setConnectEdit(on) {
+  connectEdit = on;
+  const b = document.getElementById('connectEditBtn');
+  b.classList.toggle('done', on);
+  b.innerHTML = on ? 'Done' : ICON.edit;
+  renderConnects();
+}
+
 function renderConnects() {
+  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ to set Auto priority' : 'tap to use it (Manual)';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
@@ -1756,7 +1801,7 @@ function renderConnects() {
 function renderBrokenRow(id) {
   const e = connectEntry(id);
   return `<div class="conn-row broken" data-id="${id}" onclick="explainBroken('${id}')">
-    <div class="drag-handle"></div>
+    ${connectEdit ? '<div class="drag-handle"></div>' : ''}
     <div class="conn-main">
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
       <div class="conn-sub"><span>${esc(reasonsText(brokenBy(id)))}</span></div>
@@ -1908,14 +1953,23 @@ function updateMainConnectCard() {
   }
   document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;
   document.getElementById('profMetaSrc').textContent = 'ms';
-  renderAutoCard();
-  renderAutoMode();
 }
 /* ══════════════════════ NODES SCREEN (subscriptions + manual servers) ══════════════════════
    Replaces the old "All configs" sheet. A source is either a subscription (kind 'sub')
    or a group of manual servers (kind 'node'); both render as one collapsible group. */
 
 let nodeSort = 'order';   // 'order' | 'latency' | 'name'
+// Edit mode: ⋮⋮ grips, source switches and framed servers (tap = on/off) appear only here,
+// so the everyday view has nothing to knock by accident (tap a server = its menu).
+let nodesEdit = false;
+function setNodesEdit(on) {
+  nodesEdit = on;
+  document.getElementById('view-nodes').classList.toggle('editing', on);
+  const b = document.getElementById('nodesEditBtn');
+  b.classList.toggle('done', on);
+  b.innerHTML = on ? 'Done' : ICON.edit;
+  renderNodes();
+}
 
 const ICON = {
   refresh: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',
@@ -2010,7 +2064,8 @@ function purgeNodeSettings(sid, ids) {
   const s = sourcesData[sid], keys = new Set([...ids].map(nid => sid + '::' + nid));
   s.offNodes = (s.offNodes || []).filter(nid => !ids.has(nid));
   s.disabledNodes = (s.disabledNodes || []).filter(nid => !ids.has(nid));
-  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => !keys.has(k)); });
+  s.pickOrder = (s.pickOrder || []).filter(k => !keys.has(k));
+  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => !keys.has(k)); p.pickOrder = (p.pickOrder || []).filter(k => !keys.has(k)); });
   Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !keys.has(k)); }));
 }
 // Forget dropped servers (all of a source, or the given ids) with their settings.
@@ -2072,11 +2127,9 @@ function renderSourceCard(id, q) {
     if (s.name.toLowerCase().includes(q) && !nodes.length) nodes = s.nodes;
   }
   const isOpen = q ? true : !!expandState[id];
-  // Framed = in use. Tap switches a server off / on (off = hidden from every list and
-  // picker, settings kept); hold (right click) opens its menu.
-  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-nid="${n.id}"
-      onclick="if (!longPressed()) toggleNodeEnabled('${id}','${n.id}')" onpointerdown="longPress(event, () => openNodeActions('${id}','${n.id}'))"
-      oncontextmenu="event.preventDefault();openNodeActions('${id}','${n.id}')" title="Tap: on / off · hold: menu">
+  // View: tap a server = its menu, off ones dimmed. Edit: framed = in use, tap = on / off.
+  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row ${nodesEdit ? 'pick ' + (on ? 'on' : 'disabled') : on ? 'tap' : 'disabled tap'}" data-nid="${n.id}"
+      onclick="${nodesEdit ? 'toggleNodeEnabled' : 'openNodeActions'}('${id}','${n.id}')" title="${nodesEdit ? 'Tap: on / off' : 'Tap: menu'}">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
@@ -2085,10 +2138,10 @@ function renderSourceCard(id, q) {
   const addRow = s.kind === 'node'
     ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
 
-  const grip = q ? '<div class="drag-handle" style="visibility:hidden"></div>' : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">
+  const grip = !nodesEdit ? '' : q ? '<div class="drag-handle" style="visibility:hidden"></div>' : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
       </div>`;
-  const updateBtn = s.kind === 'sub'
+  const updateBtn = s.kind === 'sub' && !nodesEdit
     ? `<button class="icon-btn ghost" onclick="event.stopPropagation();updateSource('${id}')" title="Update"><span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : '';
 
   return `<div class="src-card ${isOpen ? 'open' : ''} ${s.enabled ? '' : 'off'}" data-id="${id}">
@@ -2097,12 +2150,12 @@ function renderSourceCard(id, q) {
     <div class="src-top-main">
     <div class="src-head" onclick="toggleSourceOpen('${id}')">
       <div class="src-main">
-        <div class="src-name">${esc(s.name)}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+        <div class="src-name">${esc(s.name)}${s.enabled || nodesEdit ? '' : '<span class="conn-tag off">off</span>'}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
         <div class="src-meta">${srcMetaHtml(s)}</div>
       </div>
       ${updateBtn}
-      <button class="icon-btn ghost" onclick="event.stopPropagation();testSourceLatency('${id}')" title="Test latency">${ICON.bolt}</button>
-      <div title="Use this source">${miniToggleHtml(id, 'toggleSourceEnabled', s.enabled)}</div>
+      ${nodesEdit ? `<div title="Use this source">${miniToggleHtml(id, 'toggleSourceEnabled', s.enabled)}</div>`
+        : `<button class="icon-btn ghost" onclick="event.stopPropagation();testSourceLatency('${id}')" title="Test latency">${ICON.bolt}</button>`}
       <button class="icon-btn ghost" onclick="event.stopPropagation();openSourceActions('${id}')" title="More">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
@@ -2364,6 +2417,7 @@ function deleteSource(id) {
   Object.values(profilesData).forEach(p => {
     p.sources = p.sources.filter(x => x !== id);
     p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
+    p.pickOrder = (p.pickOrder || []).filter(k => !k.startsWith(id + '::'));
   });
   Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !k.startsWith(id + '::')); }));
   dropConnectEntry(id);
@@ -2562,22 +2616,6 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
 }
 
-/* ── Long press (hold ~0.5 s) — a row's secondary action, e.g. a server's menu ──
-   The click that follows the hold is swallowed: onclick checks longPressed(). */
-let lpTimer = null, lpFired = false;
-function longPress(e, fn) {
-  lpFired = false;
-  clearTimeout(lpTimer);
-  const x = e.clientX, y = e.clientY, el = e.currentTarget;
-  const stop = () => { clearTimeout(lpTimer); el.removeEventListener('pointermove', move); };
-  const move = ev => { if (Math.abs(ev.clientX - x) + Math.abs(ev.clientY - y) > 8) stop(); };
-  el.addEventListener('pointermove', move);
-  el.addEventListener('pointerup', stop, { once: true });
-  el.addEventListener('pointerleave', stop, { once: true });
-  lpTimer = setTimeout(() => { lpFired = true; stop(); fn(); }, 500);
-}
-function longPressed() { const f = lpFired; lpFired = false; return f; }
-
 /* ── Tabs ── */
 
 function switchTab(name) {
@@ -2649,131 +2687,154 @@ function setSegment(group, value, index) {
 setSegment('mode', 'tun', 0);
 setSegment('route', 'rules', 1);
 
-/* ══════════════════════ AUTO MODE (Home card + Settings → Auto mode) ══════════════════════
-   Everything about how Auto picks and keeps a connection, in one place:
+/* ══════════════════════ AUTO MODE (Settings → Auto mode; Home card = a link to it) ══════════════════════
+   How Auto picks and keeps a connection, in one place:
    - threshold: a server takes over from the current one only if it is this much faster
-     (hysteresis, so Auto does not hop between servers with close pings);
+     (hysteresis, so Auto does not hop between servers with close pings); typed in ms;
    - checkEvery: how often the current route is re-pinged;
-   - failAfter: timeouts in a row before Auto leaves the current server;
    - standby: how many next entries by priority are pinged together with the current
-     one ("kept warm"), so a failover goes straight to a server known to work;
+     one ("kept warm", 1–3), so a failover goes straight to a server known to work;
+   - failAfter: timeouts in a row (1–4) before Auto leaves the current server;
    - pauseScreenOff: no checks while the screen is off (mobile battery);
    - subsEvery: the global subscription update period; a subscription's own period
      (Nodes → Edit subscription) wins, its default 'auto' follows this one.
+   Auto itself is switched on / off by the Auto badge of the Servers / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
 const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, standby: 2, pauseScreenOff: true, subsEvery: 12 };
-let autoLastCheck = Date.now() - 40e3;
+const AUTO_CHECK_EVERY = [30, 60, 120, 300, 600];
+const AUTO_THRESHOLD_MAX = 1000;
+const AUTO_FAIL_AFTER = [1, 4];
 
 const fmtEvery = s => s < 60 ? s + ' s' : s < 3600 ? s / 60 + ' min' : s / 3600 + ' h';
 const subsEveryText = h => h ? h + ' h' : 'off';
 
-// The servers an entry connects through right now (a chain: entry + exit), and their ping.
-function routeNodes(id) {
-  if (chainsData[id]) { const c = chainsData[id]; return [chainEntryNode(c), chainExitNode(c)]; }
-  return [unitNode(id)];
-}
-function routeMs(id) {
-  const ns = routeNodes(id);
-  return ns.every(n => n && isAlive(n)) ? ns.reduce((sum, n) => sum + ping(n), 0) : null;
-}
-// Next entries Auto would fall back to (in priority order), kept warm by the checks.
-function standbyIds() {
-  const cur = effectiveConnectId();
-  return visibleOrder().filter(id => id !== cur && connectEntry(id).inAuto).slice(0, autoCfg.standby);
-}
-
-function autoCheckNow() {
-  const ids = [effectiveConnectId()].concat(autoConnect ? standbyIds() : []);
-  autoLastCheck = Date.now();
-  pingNodes(ids.flatMap(routeNodes).filter(Boolean));
-}
-
-function renderAutoCard() {
-  const id = effectiveConnectId(), ms = routeMs(id);
-  document.getElementById('autoCardToggle').classList.toggle('on', autoConnect);
-  document.getElementById('autoCardSub').textContent = autoConnect
-    ? `First working in ${simpleMode() ? 'Servers' : 'Profiles'} order`
-    : `Manual — pinned to ${connectEntry(id) ? connectEntry(id).name : '—'}`;
-  const stat = (label, val, cls = '') => `<div class="auto-stat"><div class="auto-stat-val ${cls}">${val}</div><div class="auto-stat-label">${label}</div></div>`;
-  document.getElementById('autoCardStats').innerHTML =
-    stat('now', ms == null ? '—' : ms + ' ms', ms == null ? 'bad' : ms < 150 ? 'good' : ms < 400 ? 'mid' : 'bad')
-    + stat('switch at', '−' + autoCfg.threshold + ' ms')
-    + stat('check', fmtEvery(autoCfg.checkEvery))
-    + stat('subs', subsEveryText(autoCfg.subsEvery));
-}
-
-// The Home card is a shortcut: it opens Settings at the Auto mode section.
-function openAutoMode() {
+function setAutoCfg(key, val) {
+  autoCfg[key] = val;
   renderAutoMode();
+}
+// The ms field: whole numbers 0…1000; anything else puts the old value back.
+function setAutoThreshold(input) {
+  const v = Number(input.value.trim());
+  if (input.value.trim() !== '' && Number.isInteger(v) && v >= 0 && v <= AUTO_THRESHOLD_MAX) autoCfg.threshold = v;
+  else toast('Enter 0–' + AUTO_THRESHOLD_MAX + ' ms');
+  renderAutoMode();
+}
+const stepAutoFailAfter = d => setAutoCfg('failAfter', Math.min(AUTO_FAIL_AFTER[1], Math.max(AUTO_FAIL_AFTER[0], autoCfg.failAfter + d)));
+
+// The Home card is a link: it opens Settings at the Auto mode section.
+function openAutoMode() {
   switchTab('settings');
   const sc = document.querySelector('#view-settings > .scroll');
   sc.scrollTop += document.getElementById('auto-caption').getBoundingClientRect().top - sc.getBoundingClientRect().top;
 }
 
-function setAutoCfg(key, val) {
-  autoCfg[key] = val;
-  renderAutoMode();
-  renderAutoCard();
-}
-
 function renderAutoMode() {
   const el = document.getElementById('auto-settings');
-  const id = effectiveConnectId(), e = connectEntry(id);
   const chips = (key, opts, fmt) => `<div class="chip-row">${opts.map(v =>
     `<div class="chip ${autoCfg[key] === v ? 'active' : ''}" onclick="setAutoCfg('${key}',${JSON.stringify(v)})">${fmt(v)}</div>`).join('')}</div>`;
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
-  const route = rid => routeNodes(rid).map(n => n ? `<span class="dock-node">${n.flag} ${esc(n.name)}</span>` : '<span class="dock-node none">no working node</span>')
-    .join('<span class="dock-arrow">→</span>');
-  const standby = standbyIds();
-  const own = sourceOrder.filter(sid => sourcesData[sid].kind === 'sub' && sourcesData[sid].updateInterval !== 'auto');
+  const [lo, hi] = AUTO_FAIL_AFTER, fa = autoCfg.failAfter;
 
   el.innerHTML = `
-    <div class="am-now">
-      <div class="am-now-main">
-        <div class="card-label" style="margin-bottom:2px">${autoConnect ? 'Now · auto' : 'Now · manual'}</div>
-        <div class="am-now-name">${e ? esc(e.name) : '—'}</div>
-        <div class="dock-route">${e ? route(id) : ''}</div>
-      </div>
-      <div class="am-now-ms">${latMsHtml(routeMs(id))}<div class="am-checked">checked ${timeAgo(autoLastCheck)}</div></div>
-    </div>
-    <div class="am-actions">
-      <button class="btn-secondary" onclick="autoCheckNow()">${ICON.bolt}Check now</button>
-      <button class="btn-secondary" onclick="openProfiles()">Priority list</button>
-    </div>
-
-    <div class="am-label">Standby · next by priority</div>
-    <div class="am-standby">${!autoConnect ? '<div class="route-empty">Manual — no failover, standby is idle</div>'
-      : !autoCfg.standby ? '<div class="route-empty">Off — only the current server is checked</div>'
-      : standby.map((sid, i) => `<div class="am-sb-row"><span class="cc-rank">${i + 1}</span><div class="am-sb-main"><div class="am-sb-name">${esc(connectEntry(sid).name)}${chainsData[sid] ? '<span class="conn-tag">chain</span>' : ''}</div><div class="dock-route">${route(sid)}</div></div>${latMsHtml(routeMs(sid))}</div>`).join('')
-        || '<div class="route-empty">Nothing else in Auto</div>'}</div>
-
     <div class="set-group">
-      <div class="set-row"><div class="set-label">Auto mode<div class="set-hint">Off = Manual: stays on the entry you tapped</div></div>${toggle(autoConnect, 'setAutoConnect(!autoConnect);renderAutoMode()')}</div>
-      <div class="set-row stack"><div><div class="set-label">Switch to a faster server</div><div class="set-hint">Only if it is faster than the current one by at least this</div></div>
-        ${chips('threshold', [20, 50, 100, 200], v => v + ' ms')}</div>
-      <div class="set-row stack"><div><div class="set-label">Check the connection every</div><div class="set-hint">Pings the current route${autoCfg.standby ? ` and ${autoCfg.standby} standby` : ''}</div></div>
-        ${chips('checkEvery', [30, 60, 300], fmtEvery)}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">Switch to a faster server<div class="set-hint">Only if it is faster than the current one by at least this</div></div>
+        <input class="set-input am-num" id="am-threshold" inputmode="numeric" value="${autoCfg.threshold}" onchange="setAutoThreshold(this)"><span class="am-unit">ms</span></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Check the connection every<div class="set-hint">Pings the current server and the kept-warm ones</div></div>
+        <select class="set-select" id="am-every" onchange="setAutoCfg('checkEvery',Number(this.value))">${AUTO_CHECK_EVERY.map(v =>
+          `<option value="${v}" ${autoCfg.checkEvery === v ? 'selected' : ''}>${fmtEvery(v)}</option>`).join('')}</select></div>
       <div class="set-row stack"><div><div class="set-label">Keep warm</div><div class="set-hint">Next entries by priority pinged with the current one — failover goes straight to a working one</div></div>
-        ${chips('standby', [0, 1, 2, 3], v => v ? 'next ' + v : 'off')}</div>
-      <div class="set-row stack"><div><div class="set-label">Leave a server after</div><div class="set-hint">Timeouts in a row before Auto moves on</div></div>
-        ${chips('failAfter', [1, 2, 3], v => v + ' timeout' + (v > 1 ? 's' : ''))}</div>
-      <div class="set-row"><div class="set-label">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
+        ${chips('standby', [1, 2, 3], v => 'next ' + v)}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">Leave a server after<div class="set-hint">Timeouts in a row before Auto moves on</div></div>
+        <div class="stepper" id="am-failafter">
+          <button class="stepper-btn" onclick="stepAutoFailAfter(-1)" ${fa <= lo ? 'disabled' : ''}>‹</button>
+          <span class="stepper-val">${fa}</span>
+          <button class="stepper-btn" onclick="stepAutoFailAfter(1)" ${fa >= hi ? 'disabled' : ''}>›</button>
+        </div></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
     </div>
 
-    <div class="am-label">Subscriptions</div>
+    <div class="am-label">Subscriptions<button class="help-btn" onclick="openHelp('subsupdate')" title="What is this?">?</button></div>
     <div class="set-group">
-      <div class="set-row stack"><div><div class="set-label">Update all subscriptions every</div><div class="set-hint">${own.length
-        ? `${own.map(sid => esc(sourcesData[sid].name)).join(', ')} ${own.length > 1 ? 'use their own periods' : 'uses its own period'} (Nodes → Edit)`
-        : 'Each subscription follows this unless given its own period in Nodes'}</div></div>
+      <div class="set-row stack"><div class="set-label">Update all subscriptions every</div>
         ${chips('subsEvery', [6, 12, 24, 0], v => v ? v + ' h' : 'Off')}</div>
     </div>`;
 }
+/* ══════════════════════ [?] HELP — short tips for the complex screens ══════════════════════
+   A <button class="help-btn" onclick="openHelp('key')">?</button> next to a title opens a
+   compact sheet above everything (level 3) with a few "term — what it does" lines.
+   Plain words, no jargon: these are for people who never read a manual. */
 
-sourceViewHooks.push(() => {
-  renderAutoCard();
-  renderAutoMode();
-});
+const HELP = {
+  entries: { title: 'Servers & profiles', items: [
+    ['Auto', 'connects the first working entry from the top. If it fails, Auto moves to the next one.'],
+    ['Manual', 'tap an entry to use only it. Tap the Auto badge to go back.'],
+    ['✎ Edit', 'drag ⋮⋮ to change the order Auto tries entries in. Tap Done when finished.'],
+    ['⋮', 'the entry’s settings: which servers it uses, Fastest or Priority, Use in Auto.'],
+    ['Chain', 'traffic goes through two servers: the entry, then the exit.'],
+    ['Greyed out below', 'something it needs is switched off in Nodes. Tap it to see what.'],
+  ] },
+  sourceentry: { title: 'Servers of this entry', items: [
+    ['Framed', 'servers this entry may use. Tap one to leave it out; at least one must stay.'],
+    ['Fastest', 'connects through the quickest working server.'],
+    ['Priority', 'the first working server from the top. Drag ⋮⋮ to set the order.'],
+    ['Use in Auto', 'Auto may pick this entry. Off = only when you tap it.'],
+    ['Off in Nodes', 'not listed here; your choices for them are kept.'],
+    ['Unavailable', 'removed by the provider. Kept 15 days in case they come back.'],
+  ] },
+  profile: { title: 'Profiles', items: [
+    ['Profile', 'your own set of servers, from any subscriptions.'],
+    ['Tick a subscription', 'take all its servers, new ones too after an update.'],
+    ['Open it, tap servers', 'take only those (framed).'],
+    ['Fastest', 'connects through the quickest working server.'],
+    ['Priority', 'the first working server from the top. Drag ⋮⋮ to set the order.'],
+    ['Use in Auto', 'Auto may pick this profile. Off = only when you tap it.'],
+  ] },
+  chain: { title: 'Chains', items: [
+    ['Chain', 'your traffic goes to the entry server first, then out through the exit. Sites see the exit’s address.'],
+    ['Entry', 'always its fastest selected server.'],
+    ['Exit', 'Fastest, or Priority — the first working server from the top (drag ⋮⋮).'],
+    ['Framed', 'servers the chain may use. Tap one to keep the chain off it.'],
+    ['Check route', 'tests which pairs work and how fast. It changes nothing.'],
+  ] },
+  automode: { title: 'Auto mode', items: [
+    ['Auto mode', 'keeps you connected: when the server stops answering, it moves to the next working entry in the list.'],
+    ['Switch to a faster server', 'moves only when the gain is worth it, so it doesn’t jump back and forth.'],
+    ['Keep warm', 'the next entries are pinged too, so a switch lands on one that is known to work.'],
+    ['Leave a server after', 'how many missed checks in a row count as “down”.'],
+    ['On / off', 'the Auto badge in the Servers / Profiles list. Off = Manual: stays on the entry you tapped.'],
+    ['Priority', 'the order Auto tries entries in — change it with ✎ in that list.'],
+  ] },
+  subsupdate: { title: 'Subscription updates', items: [
+    ['Update every', 'how often the server lists are downloaded again from the providers.'],
+    ['Own period', 'a subscription can have its own (Nodes → ⋮ → Edit → Update every). Then this setting doesn’t apply to it.'],
+    ['Off', 'lists are updated only when you tap Update.'],
+  ] },
+  srcadvanced: { title: 'Advanced', items: [
+    ['User-Agent', 'how the app introduces itself to the provider; the server list may depend on it. Auto is best.'],
+    ['Download via', 'fetch the subscription directly or through the VPN (if the provider’s site is blocked).'],
+    ['Send X-HWID', 'sends a device ID. Some providers limit devices by it.'],
+    ['Keep provider rules', 'use the routing rules that come with the subscription.'],
+    ['Filter', 'keep only servers whose name matches, e.g. DE|NL.'],
+    ['Decrypt password', 'only for subscriptions the provider encrypted.'],
+  ] },
+  nodes: { title: 'Nodes', items: [
+    ['Nodes', 'all your subscriptions and single servers.'],
+    ['Tap a server', 'its menu: ping, copy, switch off, delete. Tap the ms to ping it.'],
+    ['✎ Edit', 'drag ⋮⋮ to reorder, switch subscriptions on / off, tap servers to switch them off.'],
+    ['Off', 'hidden everywhere, settings kept — switch it back on and it is where it was.'],
+    ['Unavailable', 'removed by the provider. Settings kept 15 days per server, then forgotten.'],
+  ] },
+};
+
+function openHelp(key) {
+  const h = HELP[key];
+  if (!h) return;
+  document.getElementById('helpTitle').textContent = h.title;
+  document.getElementById('help-body').innerHTML = h.items.map(([term, text]) =>
+    `<div class="help-item"><b>${esc(term)}</b> — ${esc(text)}</div>`).join('');
+  openSheet('help');
+}
 /* ══════════════════════ SHEETS (open/close + tabs) ══════════════════════ */
 
 function openSheet(name) {
@@ -2782,6 +2843,7 @@ function openSheet(name) {
 }
 // A sheet may veto or clean up on close (any way: ×, overlay, swipe, Done).
 const sheetCloseHooks = {};
+sheetCloseHooks.profiles = () => { if (connectEdit) setConnectEdit(false); };   // the list reopens in view mode
 function closeSheet(name) {
   if (sheetCloseHooks[name]) sheetCloseHooks[name]();
   document.getElementById('ov-'+name).classList.remove('open');
@@ -2810,6 +2872,7 @@ function pickActionChip(el, value) {
 let createProfileSelected = new Set();
 let cpNodes = new Set();
 let editingProfileId = null;
+let cpPickMode = 'fastest', cpPickOrder = [];   // Fastest / Priority of the draft (p.pickMode, p.pickOrder)
 
 function cpSourceState(id) {
   if (createProfileSelected.has(id)) return 'all';
@@ -2826,6 +2889,8 @@ function openCreateProfile(editId) {
     document.getElementById('cp-name').value = p.name;
     createProfileSelected = new Set(p.sources);
     cpNodes = new Set(p.nodes);
+    cpPickMode = p.pickMode || 'fastest';
+    cpPickOrder = [...(p.pickOrder || [])];
     document.getElementById('cp-inauto').classList.toggle('on', p.inAuto);
   } else {
     document.getElementById('cpTitle').textContent = 'Create profile';
@@ -2834,6 +2899,8 @@ function openCreateProfile(editId) {
     document.getElementById('cp-name').value = '';
     createProfileSelected = new Set();
     cpNodes = new Set();
+    cpPickMode = 'fastest';
+    cpPickOrder = [];
     document.getElementById('cp-inauto').classList.add('on');
   }
   cpOpen.clear();
@@ -2865,6 +2932,7 @@ function renderCreateProfileSources() {
   warn.textContent = offs.length ? `${reasonsText(offs)} — switch ${offs.length > 1 ? 'one' : 'it'} on there or select another server`
     : 'Select at least 1 server — a profile with none can’t connect';
   document.getElementById('cpSaveBtn').disabled = none;
+  renderCpOrder();
   el.innerHTML = cpSourceIds().map(id => {
     const s = sourcesData[id];
     const state = cpSourceState(id);
@@ -2905,6 +2973,34 @@ function renderCreateProfileSources() {
       <div class="ps-body">${rows}</div>
     </div>`;
   }).join('');
+}
+
+// Fastest / Priority: in Priority, every server the draft uses, in order, draggable.
+function renderCpOrder() {
+  const priority = cpPickMode === 'priority';
+  document.getElementById('cp-mode').innerHTML = pickModeChips(priority, 'setCpPickMode');
+  document.getElementById('cp-mode-hint').textContent = priority
+    ? 'The first working server from the top is used. Drag ⋮⋮ to order; pick servers above.'
+    : 'The profile connects through the fastest of its servers.';
+  document.getElementById('cp-order').innerHTML = !priority ? '' : orderRefs(cpDraftRefs(), cpPickOrder).map((r, i) => `<div class="node-row ps-node static" data-id="${refKey(r)}">
+      <div class="drag-handle cc-grip" onpointerdown="startCpOrderDrag(event,'${refKey(r)}')">${GRIP_SVG}</div><span class="cc-rank">${i + 1}</span>
+      <span class="node-flag">${r.node.flag}</span>
+      <span class="node-name">${esc(r.node.name)}</span>
+      <span class="node-proto">${esc(sourcesData[r.sid].name)}</span>
+      <span onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
+    </div>`).join('') || '<div class="route-empty">Pick servers above</div>';
+}
+function setCpPickMode(mode) {
+  cpPickMode = mode;
+  renderCpOrder();
+}
+// Servers not shown now (off in Nodes, dropped, source switched off) keep their slots.
+function startCpOrderDrag(e, key) {
+  const shown = orderRefs(cpDraftRefs(), cpPickOrder).map(refKey);
+  const full = cpPickOrder.concat(shown.filter(k => !cpPickOrder.includes(k)));
+  const [order, done] = dragShown(full, shown, o => { cpPickOrder = o; });
+  const rowEl = document.querySelector(`#cp-order .node-row[data-id="${key}"]`);
+  startRowDrag(e, rowEl, '.node-row', order, () => { done(); renderCpOrder(); });
 }
 
 function toggleCpOpen(id) {
@@ -2952,7 +3048,8 @@ function saveCreateProfile() {
   if (!cpPickedCount()) return;
   const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
   const fields = { sources: Array.from(createProfileSelected), nodes: Array.from(cpNodes),
-                   inAuto: document.getElementById('cp-inauto').classList.contains('on') };
+                   inAuto: document.getElementById('cp-inauto').classList.contains('on'),
+                   pickMode: cpPickMode, pickOrder: cpPickOrder.slice() };
   if (editingProfileId) {
     const p = profilesData[editingProfileId];
     p.name = name;
@@ -3312,7 +3409,8 @@ function deleteEditingChain() {
    Changes apply at once. Unticked servers are s.offNodes; new ones after an update are on.
    Servers switched off in Nodes (s.disabledNodes) are not listed; their ticks are kept.
    At least one server must stay ticked: with none, a warning shows and closing the sheet
-   puts the selection back to what it was when opened. */
+   puts the selection back to what it was when opened.
+   Fastest / Priority (s.pickMode, s.pickOrder): which selected server it connects through. */
 
 let seId = null;
 let seSnapshot = null;
@@ -3339,9 +3437,15 @@ function renderSourceEntry() {
   upd.innerHTML = `<span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span>`;
   upd.nextElementSibling.innerHTML = ICON.bolt;
   document.getElementById('se-all').textContent = on === live.length ? 'None' : 'All';
-  document.getElementById('se-nodes').innerHTML = sortedNodes(live).map(n => {
+  const priority = s.pickMode === 'priority';
+  document.getElementById('se-mode').innerHTML = pickModeChips(priority, 'setSourceEntryMode');
+  document.getElementById('se-hint').textContent = pickModeHint(priority);
+  let rank = 0;
+  const list = priority ? seOrderRefs().map(r => r.node) : sortedNodes(live);
+  document.getElementById('se-nodes').innerHTML = list.map(n => {
     const off = isNodeOff(s, n.id);
-    return `<div class="node-row ps-node pick ${off ? '' : 'on'}" onclick="toggleSourceEntryNode('${n.id}')">
+    return `<div class="node-row ps-node pick ${off ? '' : 'on'}" data-id="${seId}::${n.id}" onclick="toggleSourceEntryNode('${n.id}')">
+      ${priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startSourceEntryDrag(event,'${seId}::${n.id}')">${GRIP_SVG}</div><span class="cc-rank">${off ? '' : ++rank}</span>` : ''}
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
@@ -3350,6 +3454,32 @@ function renderSourceEntry() {
   }).join('') || '<div class="route-empty">No servers yet</div>';
   document.getElementById('se-nodes').insertAdjacentHTML('beforeend', goneBlockHtml('se:' + seId, goneRefs(seId),
     r => !isNodeOff(s, r.node.id)));
+}
+
+// Shared with the profile editor: the Fastest / Priority switch and its hint.
+function pickModeChips(priority, fn) {
+  const chip = (m, l, on) => `<div class="chip ${on ? 'active' : ''}" onclick="${fn}('${m}')">${l}</div>`;
+  return chip('fastest', 'Fastest', !priority) + chip('priority', 'Priority', priority);
+}
+const pickModeHint = priority => priority
+  ? 'Framed servers are used, the first working one from the top. Drag ⋮⋮ to order, tap a server to leave it out.'
+  : 'Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.';
+
+function setSourceEntryMode(mode) {
+  sourcesData[seId].pickMode = mode;
+  sourceEntryChanged();
+}
+
+// Every listed server in priority order, left-out ones included (like a chain's exit).
+const seOrderRefs = () => orderRefs(liveNodes(sourcesData[seId]).map(node => ({ sid: seId, node })), sourcesData[seId].pickOrder);
+// Servers off in Nodes or dropped by the provider keep their slots.
+function startSourceEntryDrag(e, key) {
+  const s = sourcesData[seId];
+  const shown = seOrderRefs().map(refKey), cur = s.pickOrder || [];
+  const full = cur.concat(shown.filter(k => !cur.includes(k)));
+  const [order, done] = dragShown(full, shown, o => { s.pickOrder = o; });
+  const rowEl = document.querySelector(`#se-nodes .node-row[data-id="${key}"]`);
+  startRowDrag(e, rowEl, '.node-row', order, () => { done(); sourceEntryChanged(); });
 }
 
 function sourceEntryChanged() {
@@ -3576,6 +3706,7 @@ function renderThemeList() {
 
 applyTheme(currentTheme);
 purgeExpiredGone();
+renderAutoMode();
 
 renderConnects();
 renderNodes();

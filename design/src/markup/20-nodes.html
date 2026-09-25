@@ -2,20 +2,23 @@
   <div class="view" id="view-nodes">
     <div class="topbar">
       <div>
-        <div class="app-name">Nodes</div>
+        <div class="app-name">Nodes<button class="help-btn" onclick="event.stopPropagation();openHelp('nodes')" title="What is this?">?</button></div>
         <div class="nodes-summary" id="nodesSummary"></div>
       </div>
       <div class="head-actions">
         <button class="icon-btn" id="nodeSearchBtn" onclick="toggleNodeSearch()" title="Search">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </button>
-        <button class="icon-btn" onclick="testAllLatency()" title="Test latency">
+        <button class="icon-btn no-edit" onclick="testAllLatency()" title="Test latency">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </button>
+        <button class="icon-btn" id="nodesEditBtn" onclick="setNodesEdit(!nodesEdit)" title="Edit: reorder, switch sources and servers on / off">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         </button>
         <button class="icon-btn" onclick="openNodesMore()" title="More">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
         </button>
-        <button class="icon-btn primary" onclick="openSheet('addmenu')" title="Add">
+        <button class="icon-btn primary no-edit" onclick="openSheet('addmenu')" title="Add">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
       </div>

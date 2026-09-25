@@ -8,6 +8,8 @@
 }
 .icon-btn:active{background:var(--card-hi)}
 .icon-btn.on{color:var(--accent);border-color:var(--accent)}
+.icon-btn.done{width:auto;padding:0 12px;font:inherit;font-size:14px;font-weight:600;color:var(--accent);border-color:var(--accent)}
+#view-nodes.editing .no-edit{display:none}
 .icon-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .icon-btn.ghost{background:transparent;border-color:transparent;width:30px;height:30px}
 .icon-btn.ghost:active{background:rgba(255,255,255,.06)}

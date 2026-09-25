@@ -3,17 +3,20 @@
   <div class="sheet" id="sh-profiles">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title" id="profilesTitle">Servers</span>
+      <span class="sheet-title"><span id="profilesTitle">Servers</span><button class="help-btn" onclick="event.stopPropagation();openHelp('entries')" title="What is this?">?</button></span>
       <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order · Manual: the entry you tapped">
         <div class="conn-dot"></div><span>Auto</span>
       </div>
+      <button class="icon-btn ghost" id="connectEditBtn" onclick="setConnectEdit(!connectEdit)" title="Edit the Auto priority">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </button>
       <button class="icon-btn ghost" onclick="openProfilesMenu()" title="More">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
       </button>
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="sheet-body">
-      <div class="list-caption"><span>Priority</span><span>drag ⋮⋮ to reorder · tap for Manual</span></div>
+      <div class="list-caption"><span>Priority</span><span id="connectsCaption"></span></div>
       <div id="connects-list"></div>
       <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -73,7 +76,7 @@
   <div class="sheet sheet-l2" id="sh-createprofile">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title" id="cpTitle">Create profile</span>
+      <span class="sheet-title"><span id="cpTitle">Create profile</span><button class="help-btn" onclick="event.stopPropagation();openHelp('profile')" title="What is this?">?</button></span>
       <button class="sheet-close" onclick="closeSheet('createprofile')">×</button>
     </div>
     <div class="sheet-body">
@@ -83,9 +86,15 @@
       </div>
       <div class="form-group" style="padding-bottom:0">
         <div class="form-label">Subscriptions &amp; servers</div>
-        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tap single servers — framed ones are used. The profile uses the fastest of them.</div>
+        <div class="set-hint" style="margin-top:4px">Tick a subscription to take all its nodes (new ones too after an update), or open it and tap single servers — framed ones are used.</div>
       </div>
       <div id="cp-source-list"></div>
+      <div class="form-group" style="padding-bottom:4px">
+        <div class="form-label">Connect through</div>
+        <div class="chip-row" id="cp-mode" style="margin:6px 0 4px;padding:0"></div>
+        <div class="set-hint" id="cp-mode-hint"></div>
+      </div>
+      <div class="se-nodes" id="cp-order"></div>
 
       <div class="set-group">
         <div class="set-row">
@@ -106,7 +115,7 @@
   <div class="sheet sheet-l2" id="sh-sourceentry">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title" id="seTitle">Source</span>
+      <span class="sheet-title"><span id="seTitle">Source</span><button class="help-btn" onclick="event.stopPropagation();openHelp('sourceentry')" title="What is this?">?</button></span>
       <button class="sheet-close" onclick="closeSheet('sourceentry')">×</button>
     </div>
     <div class="sheet-body">
@@ -118,7 +127,8 @@
       </div>
       <div class="form-group" style="padding-bottom:4px">
         <div class="form-label">Servers</div>
-        <div class="set-hint" style="margin-top:4px">Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.</div>
+        <div class="chip-row" id="se-mode" style="margin:6px 0 4px;padding:0"></div>
+        <div class="set-hint" id="se-hint"></div>
       </div>
       <div class="se-bar">
         <span class="se-count" id="se-count"></span>
@@ -139,7 +149,7 @@
   <div class="sheet sheet-l2" id="sh-createchain">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title" id="ccTitle">Create chain</span>
+      <span class="sheet-title"><span id="ccTitle">Create chain</span><button class="help-btn" onclick="event.stopPropagation();openHelp('chain')" title="What is this?">?</button></span>
       <button class="sheet-close" onclick="closeSheet('createchain')">×</button>
     </div>
     <div class="sheet-body">

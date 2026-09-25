@@ -66,7 +66,9 @@ let sourceSeq = 5;
    are kept, so when a server comes back it returns ticked/unticked and in its old
    priority place. The UI lists them under "Unavailable"; Forget purges them for good.
    s.disabledNodes = servers switched off one by one in Nodes: hidden everywhere, settings
-   naming them kept (see liveNodes). */
+   naming them kept (see liveNodes).
+   pickMode / pickOrder (on a profile, or on a source for its simple-mode entry): which
+   server the entry connects through — 'fastest' (default) or 'priority' (see unitNode). */
 let connectMode = 'simple';
 /* connectOrder is the priority list of the active mode (entries and chains together):
    with Auto on, the first usable entry with inAuto wins. Tapping one pins it (Manual). */
@@ -80,7 +82,8 @@ const modeState = {
 let profilesData = {
   default: { id:'default', name:'default', sources:['src1','src2','src3'], nodes:[], inAuto:true },
   work:    { id:'work',    name:'Work',    sources:['src2'],               nodes:[], inAuto:true },
-  gaming:  { id:'gaming',  name:'Gaming',  sources:[],                     nodes:['src4::n0','src4::n1'], inAuto:false },
+  gaming:  { id:'gaming',  name:'Gaming',  sources:[],                     nodes:['src4::n0','src4::n1'], inAuto:false,
+             pickMode:'priority', pickOrder:['src4::n1','src4::n0'] },
 };
 let profileSeq = 1;
 

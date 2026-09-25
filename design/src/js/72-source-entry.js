@@ -4,7 +4,8 @@
    Changes apply at once. Unticked servers are s.offNodes; new ones after an update are on.
    Servers switched off in Nodes (s.disabledNodes) are not listed; their ticks are kept.
    At least one server must stay ticked: with none, a warning shows and closing the sheet
-   puts the selection back to what it was when opened. */
+   puts the selection back to what it was when opened.
+   Fastest / Priority (s.pickMode, s.pickOrder): which selected server it connects through. */
 
 let seId = null;
 let seSnapshot = null;
@@ -31,9 +32,15 @@ function renderSourceEntry() {
   upd.innerHTML = `<span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span>`;
   upd.nextElementSibling.innerHTML = ICON.bolt;
   document.getElementById('se-all').textContent = on === live.length ? 'None' : 'All';
-  document.getElementById('se-nodes').innerHTML = sortedNodes(live).map(n => {
+  const priority = s.pickMode === 'priority';
+  document.getElementById('se-mode').innerHTML = pickModeChips(priority, 'setSourceEntryMode');
+  document.getElementById('se-hint').textContent = pickModeHint(priority);
+  let rank = 0;
+  const list = priority ? seOrderRefs().map(r => r.node) : sortedNodes(live);
+  document.getElementById('se-nodes').innerHTML = list.map(n => {
     const off = isNodeOff(s, n.id);
-    return `<div class="node-row ps-node pick ${off ? '' : 'on'}" onclick="toggleSourceEntryNode('${n.id}')">
+    return `<div class="node-row ps-node pick ${off ? '' : 'on'}" data-id="${seId}::${n.id}" onclick="toggleSourceEntryNode('${n.id}')">
+      ${priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startSourceEntryDrag(event,'${seId}::${n.id}')">${GRIP_SVG}</div><span class="cc-rank">${off ? '' : ++rank}</span>` : ''}
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
@@ -42,6 +49,32 @@ function renderSourceEntry() {
   }).join('') || '<div class="route-empty">No servers yet</div>';
   document.getElementById('se-nodes').insertAdjacentHTML('beforeend', goneBlockHtml('se:' + seId, goneRefs(seId),
     r => !isNodeOff(s, r.node.id)));
+}
+
+// Shared with the profile editor: the Fastest / Priority switch and its hint.
+function pickModeChips(priority, fn) {
+  const chip = (m, l, on) => `<div class="chip ${on ? 'active' : ''}" onclick="${fn}('${m}')">${l}</div>`;
+  return chip('fastest', 'Fastest', !priority) + chip('priority', 'Priority', priority);
+}
+const pickModeHint = priority => priority
+  ? 'Framed servers are used, the first working one from the top. Drag ⋮⋮ to order, tap a server to leave it out.'
+  : 'Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.';
+
+function setSourceEntryMode(mode) {
+  sourcesData[seId].pickMode = mode;
+  sourceEntryChanged();
+}
+
+// Every listed server in priority order, left-out ones included (like a chain's exit).
+const seOrderRefs = () => orderRefs(liveNodes(sourcesData[seId]).map(node => ({ sid: seId, node })), sourcesData[seId].pickOrder);
+// Servers off in Nodes or dropped by the provider keep their slots.
+function startSourceEntryDrag(e, key) {
+  const s = sourcesData[seId];
+  const shown = seOrderRefs().map(refKey), cur = s.pickOrder || [];
+  const full = cur.concat(shown.filter(k => !cur.includes(k)));
+  const [order, done] = dragShown(full, shown, o => { s.pickOrder = o; });
+  const rowEl = document.querySelector(`#se-nodes .node-row[data-id="${key}"]`);
+  startRowDrag(e, rowEl, '.node-row', order, () => { done(); sourceEntryChanged(); });
 }
 
 function sourceEntryChanged() {

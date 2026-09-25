@@ -45,7 +45,7 @@ npm run shot -- settings --theme github --scale 2
 Presets: home, nodes, nodes-open, settings, dock, dock-chain, dock-profile, dock-off, profiles, broken, profiles-full,
 profiles-menu, source-entry, gone, nothing-ticked, simple-chain, chain-priority, profile-edit,
 chain-edit, chain-groups, drag-mid, addmenu,
-srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm. Add a preset in `check.mjs` rather than writing
+srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm, nodes-edit, entry-priority, profile-priority, help. Add a preset in `check.mjs` rather than writing
 one-off Playwright scripts; add a check there for each new interaction.
 
 Commit both `design/src` changes and the rebuilt `design/main_screen.html` and push

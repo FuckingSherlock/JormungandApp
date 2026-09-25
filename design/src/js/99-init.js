@@ -2,6 +2,7 @@
 
 applyTheme(currentTheme);
 purgeExpiredGone();
+renderAutoMode();
 
 renderConnects();
 renderNodes();

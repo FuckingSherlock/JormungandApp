@@ -101,9 +101,19 @@ const brokenOrder = () => connectOrder.filter(id => entryVisible(id) && isBroken
 
 const unitName = id => { const u = profilesData[id] || sourcesData[id]; return u ? u.name : '—'; };
 
-// The node a unit would connect through: the best alive one.
+/* Which server a unit connects through: pickMode 'fastest' (default — the best alive one)
+   or 'priority' (the first alive one in pickOrder, 'sid::nid' keys; servers missing from
+   it follow in source order). A setting of the list entry — a profile, or in simple mode
+   the source's entry — not of the subscription; Nodes has no order. */
+const unitOwner = id => profilesData[id] || sourcesData[id];
+const unitPriority = id => { const u = unitOwner(id); return !!u && u.pickMode === 'priority'; };
+function unitPickRefs(id, withOff) {
+  const refs = unitRefs(id, withOff);
+  return unitPriority(id) ? orderRefs(refs, unitOwner(id).pickOrder) : refs;
+}
 function unitNode(id) {
-  return bestAlive(unitRefs(id).map(r => r.node));
+  const nodes = unitPickRefs(id).map(r => r.node);
+  return unitPriority(id) ? nodes.find(isAlive) || null : bestAlive(nodes);
 }
 const profileNode = p => p ? unitNode(p.id) : null;
 
@@ -117,13 +127,15 @@ function bestAlive(nodes) {
   return best;
 }
 function chainEntryRefs(c, withOff) { return unitRefs(c.inId, withOff).filter(r => !(c.inOff || []).includes(refKey(r))); }
-// Every exit server in priority order, unticked ones included.
-function chainExitOrder(c, withOff) {
-  const order = c.exitOrder || [];
+// Refs sorted by a list of 'sid::nid' keys; ones missing from it follow in their own order.
+function orderRefs(refs, order) {
+  order = order || [];
   const pos = k => { const i = order.indexOf(k); return i < 0 ? Infinity : i; };
-  return unitRefs(c.outId, withOff).map((r, i) => ({ r, i }))
+  return refs.map((r, i) => ({ r, i }))
     .sort((a, b) => (pos(refKey(a.r)) - pos(refKey(b.r))) || a.i - b.i).map(x => x.r);
 }
+// Every exit server in priority order, unticked ones included.
+function chainExitOrder(c, withOff) { return orderRefs(unitRefs(c.outId, withOff), c.exitOrder); }
 function chainExitRefs(c, withOff) { return chainExitOrder(c, withOff).filter(r => !(c.outOff || []).includes(refKey(r))); }
 const chainEntryNode = c => bestAlive(chainEntryRefs(c).map(r => r.node));
 function chainExitNode(c) {
@@ -160,7 +172,7 @@ function entrySummaryHtml(id) {
     return `<span>${end(c.inId, chainEntryNode(c))}</span><span class="conn-arrow">→</span>`
       + (c.exitMode === 'priority' ? '<span class="conn-tag muted">priority</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
-  return nodeSummaryHtml(unitNode(id), false);
+  return (unitPriority(id) ? '<span class="conn-tag muted">priority</span>' : '') + nodeSummaryHtml(unitNode(id), false);
 }
 
 const GRIP_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>';
@@ -172,8 +184,8 @@ function renderConnectRow(id) {
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
-    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
-    <div class="conn-main" onclick="selectConnect('${id}')">
+    ${connectEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
+    <div class="conn-main" ${connectEdit ? '' : `onclick="selectConnect('${id}')"`}>
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
@@ -184,7 +196,18 @@ function renderConnectRow(id) {
   </div>`;
 }
 
+// Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
+let connectEdit = false;
+function setConnectEdit(on) {
+  connectEdit = on;
+  const b = document.getElementById('connectEditBtn');
+  b.classList.toggle('done', on);
+  b.innerHTML = on ? 'Done' : ICON.edit;
+  renderConnects();
+}
+
 function renderConnects() {
+  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ to set Auto priority' : 'tap to use it (Manual)';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
@@ -200,7 +223,7 @@ function renderConnects() {
 function renderBrokenRow(id) {
   const e = connectEntry(id);
   return `<div class="conn-row broken" data-id="${id}" onclick="explainBroken('${id}')">
-    <div class="drag-handle"></div>
+    ${connectEdit ? '<div class="drag-handle"></div>' : ''}
     <div class="conn-main">
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
       <div class="conn-sub"><span>${esc(reasonsText(brokenBy(id)))}</span></div>
@@ -352,6 +375,4 @@ function updateMainConnectCard() {
   }
   document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;
   document.getElementById('profMetaSrc').textContent = 'ms';
-  renderAutoCard();
-  renderAutoMode();
 }

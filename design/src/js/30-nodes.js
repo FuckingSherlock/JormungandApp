@@ -3,6 +3,17 @@
    or a group of manual servers (kind 'node'); both render as one collapsible group. */
 
 let nodeSort = 'order';   // 'order' | 'latency' | 'name'
+// Edit mode: ⋮⋮ grips, source switches and framed servers (tap = on/off) appear only here,
+// so the everyday view has nothing to knock by accident (tap a server = its menu).
+let nodesEdit = false;
+function setNodesEdit(on) {
+  nodesEdit = on;
+  document.getElementById('view-nodes').classList.toggle('editing', on);
+  const b = document.getElementById('nodesEditBtn');
+  b.classList.toggle('done', on);
+  b.innerHTML = on ? 'Done' : ICON.edit;
+  renderNodes();
+}
 
 const ICON = {
   refresh: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',
@@ -97,7 +108,8 @@ function purgeNodeSettings(sid, ids) {
   const s = sourcesData[sid], keys = new Set([...ids].map(nid => sid + '::' + nid));
   s.offNodes = (s.offNodes || []).filter(nid => !ids.has(nid));
   s.disabledNodes = (s.disabledNodes || []).filter(nid => !ids.has(nid));
-  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => !keys.has(k)); });
+  s.pickOrder = (s.pickOrder || []).filter(k => !keys.has(k));
+  Object.values(profilesData).forEach(p => { p.nodes = p.nodes.filter(k => !keys.has(k)); p.pickOrder = (p.pickOrder || []).filter(k => !keys.has(k)); });
   Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !keys.has(k)); }));
 }
 // Forget dropped servers (all of a source, or the given ids) with their settings.
@@ -159,11 +171,9 @@ function renderSourceCard(id, q) {
     if (s.name.toLowerCase().includes(q) && !nodes.length) nodes = s.nodes;
   }
   const isOpen = q ? true : !!expandState[id];
-  // Framed = in use. Tap switches a server off / on (off = hidden from every list and
-  // picker, settings kept); hold (right click) opens its menu.
-  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-nid="${n.id}"
-      onclick="if (!longPressed()) toggleNodeEnabled('${id}','${n.id}')" onpointerdown="longPress(event, () => openNodeActions('${id}','${n.id}'))"
-      oncontextmenu="event.preventDefault();openNodeActions('${id}','${n.id}')" title="Tap: on / off · hold: menu">
+  // View: tap a server = its menu, off ones dimmed. Edit: framed = in use, tap = on / off.
+  const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row ${nodesEdit ? 'pick ' + (on ? 'on' : 'disabled') : on ? 'tap' : 'disabled tap'}" data-nid="${n.id}"
+      onclick="${nodesEdit ? 'toggleNodeEnabled' : 'openNodeActions'}('${id}','${n.id}')" title="${nodesEdit ? 'Tap: on / off' : 'Tap: menu'}">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${n.protocol}</span>
@@ -172,10 +182,10 @@ function renderSourceCard(id, q) {
   const addRow = s.kind === 'node'
     ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
 
-  const grip = q ? '<div class="drag-handle" style="visibility:hidden"></div>' : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">
+  const grip = !nodesEdit ? '' : q ? '<div class="drag-handle" style="visibility:hidden"></div>' : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
       </div>`;
-  const updateBtn = s.kind === 'sub'
+  const updateBtn = s.kind === 'sub' && !nodesEdit
     ? `<button class="icon-btn ghost" onclick="event.stopPropagation();updateSource('${id}')" title="Update"><span class="${s.updating ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : '';
 
   return `<div class="src-card ${isOpen ? 'open' : ''} ${s.enabled ? '' : 'off'}" data-id="${id}">
@@ -184,12 +194,12 @@ function renderSourceCard(id, q) {
     <div class="src-top-main">
     <div class="src-head" onclick="toggleSourceOpen('${id}')">
       <div class="src-main">
-        <div class="src-name">${esc(s.name)}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+        <div class="src-name">${esc(s.name)}${s.enabled || nodesEdit ? '' : '<span class="conn-tag off">off</span>'}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
         <div class="src-meta">${srcMetaHtml(s)}</div>
       </div>
       ${updateBtn}
-      <button class="icon-btn ghost" onclick="event.stopPropagation();testSourceLatency('${id}')" title="Test latency">${ICON.bolt}</button>
-      <div title="Use this source">${miniToggleHtml(id, 'toggleSourceEnabled', s.enabled)}</div>
+      ${nodesEdit ? `<div title="Use this source">${miniToggleHtml(id, 'toggleSourceEnabled', s.enabled)}</div>`
+        : `<button class="icon-btn ghost" onclick="event.stopPropagation();testSourceLatency('${id}')" title="Test latency">${ICON.bolt}</button>`}
       <button class="icon-btn ghost" onclick="event.stopPropagation();openSourceActions('${id}')" title="More">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
@@ -451,6 +461,7 @@ function deleteSource(id) {
   Object.values(profilesData).forEach(p => {
     p.sources = p.sources.filter(x => x !== id);
     p.nodes = p.nodes.filter(k => !k.startsWith(id + '::'));
+    p.pickOrder = (p.pickOrder || []).filter(k => !k.startsWith(id + '::'));
   });
   Object.values(chainsData).forEach(c => ['inOff', 'outOff', 'exitOrder'].forEach(f => { if (c[f]) c[f] = c[f].filter(k => !k.startsWith(id + '::')); }));
   dropConnectEntry(id);

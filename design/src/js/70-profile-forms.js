@@ -5,6 +5,7 @@
 let createProfileSelected = new Set();
 let cpNodes = new Set();
 let editingProfileId = null;
+let cpPickMode = 'fastest', cpPickOrder = [];   // Fastest / Priority of the draft (p.pickMode, p.pickOrder)
 
 function cpSourceState(id) {
   if (createProfileSelected.has(id)) return 'all';
@@ -21,6 +22,8 @@ function openCreateProfile(editId) {
     document.getElementById('cp-name').value = p.name;
     createProfileSelected = new Set(p.sources);
     cpNodes = new Set(p.nodes);
+    cpPickMode = p.pickMode || 'fastest';
+    cpPickOrder = [...(p.pickOrder || [])];
     document.getElementById('cp-inauto').classList.toggle('on', p.inAuto);
   } else {
     document.getElementById('cpTitle').textContent = 'Create profile';
@@ -29,6 +32,8 @@ function openCreateProfile(editId) {
     document.getElementById('cp-name').value = '';
     createProfileSelected = new Set();
     cpNodes = new Set();
+    cpPickMode = 'fastest';
+    cpPickOrder = [];
     document.getElementById('cp-inauto').classList.add('on');
   }
   cpOpen.clear();
@@ -60,6 +65,7 @@ function renderCreateProfileSources() {
   warn.textContent = offs.length ? `${reasonsText(offs)} — switch ${offs.length > 1 ? 'one' : 'it'} on there or select another server`
     : 'Select at least 1 server — a profile with none can’t connect';
   document.getElementById('cpSaveBtn').disabled = none;
+  renderCpOrder();
   el.innerHTML = cpSourceIds().map(id => {
     const s = sourcesData[id];
     const state = cpSourceState(id);
@@ -100,6 +106,34 @@ function renderCreateProfileSources() {
       <div class="ps-body">${rows}</div>
     </div>`;
   }).join('');
+}
+
+// Fastest / Priority: in Priority, every server the draft uses, in order, draggable.
+function renderCpOrder() {
+  const priority = cpPickMode === 'priority';
+  document.getElementById('cp-mode').innerHTML = pickModeChips(priority, 'setCpPickMode');
+  document.getElementById('cp-mode-hint').textContent = priority
+    ? 'The first working server from the top is used. Drag ⋮⋮ to order; pick servers above.'
+    : 'The profile connects through the fastest of its servers.';
+  document.getElementById('cp-order').innerHTML = !priority ? '' : orderRefs(cpDraftRefs(), cpPickOrder).map((r, i) => `<div class="node-row ps-node static" data-id="${refKey(r)}">
+      <div class="drag-handle cc-grip" onpointerdown="startCpOrderDrag(event,'${refKey(r)}')">${GRIP_SVG}</div><span class="cc-rank">${i + 1}</span>
+      <span class="node-flag">${r.node.flag}</span>
+      <span class="node-name">${esc(r.node.name)}</span>
+      <span class="node-proto">${esc(sourcesData[r.sid].name)}</span>
+      <span onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
+    </div>`).join('') || '<div class="route-empty">Pick servers above</div>';
+}
+function setCpPickMode(mode) {
+  cpPickMode = mode;
+  renderCpOrder();
+}
+// Servers not shown now (off in Nodes, dropped, source switched off) keep their slots.
+function startCpOrderDrag(e, key) {
+  const shown = orderRefs(cpDraftRefs(), cpPickOrder).map(refKey);
+  const full = cpPickOrder.concat(shown.filter(k => !cpPickOrder.includes(k)));
+  const [order, done] = dragShown(full, shown, o => { cpPickOrder = o; });
+  const rowEl = document.querySelector(`#cp-order .node-row[data-id="${key}"]`);
+  startRowDrag(e, rowEl, '.node-row', order, () => { done(); renderCpOrder(); });
 }
 
 function toggleCpOpen(id) {
@@ -147,7 +181,8 @@ function saveCreateProfile() {
   if (!cpPickedCount()) return;
   const name = document.getElementById('cp-name').value.trim() || ('Profile ' + (++profileSeq));
   const fields = { sources: Array.from(createProfileSelected), nodes: Array.from(cpNodes),
-                   inAuto: document.getElementById('cp-inauto').classList.contains('on') };
+                   inAuto: document.getElementById('cp-inauto').classList.contains('on'),
+                   pickMode: cpPickMode, pickOrder: cpPickOrder.slice() };
   if (editingProfileId) {
     const p = profilesData[editingProfileId];
     p.name = name;

@@ -61,7 +61,7 @@ const SHOTS = {
   'gone': async p => { await p.evaluate(() => { openProfiles(); goneOpen.add('se:src1'); openSourceEntry('src1'); document.querySelector('#sh-sourceentry .sheet-body').scrollTop = 9999; }); await settle(p); },
   'nothing-ticked': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('in', 'src4'); setChainNodesAll('in'); }); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
-  'drag-mid': async p => { await p.evaluate(() => openProfiles()); await settle(p);
+  'drag-mid': async p => { await p.evaluate(() => { openProfiles(); setConnectEdit(true); }); await settle(p);
     const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
     const r = await p.locator('.conn-row >> nth=2').boundingBox();
     await p.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await p.mouse.down();
@@ -72,6 +72,10 @@ const SHOTS = {
   automode:   async p => { await p.click('#autoCard'); await settle(p); },
   'node-off': async p => { await tab(p, 'nodes'); await p.evaluate(() => { sourcesData.src2.disabledNodes.push('n2'); expandState.src2 = true; renderNodes(); document.querySelector('#view-nodes .scroll').scrollTop = 150; }); },
   'broken-node': async p => { await p.evaluate(() => { sourcesData.src4.disabledNodes = ['n0', 'n1']; setConnectMode('profiles'); openProfiles(); }); await settle(p); },
+  'nodes-edit': async p => { await tab(p, 'nodes'); await p.evaluate(() => { expandState.src2 = true; setNodesEdit(true); }); },
+  'entry-priority': async p => { await p.evaluate(() => { openProfiles(); sourcesData.src3.pickMode = 'priority'; openSourceEntry('src3'); }); await settle(p); },
+  'profile-priority': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); document.querySelector('#sh-createprofile .sheet-body').scrollTop = 9999; }); await settle(p); },
+  help: async p => { await p.evaluate(() => { openProfiles(); openSourceEntry('src1'); openHelp('sourceentry'); }); await settle(p); },
   'delete-confirm': async p => { await tab(p, 'nodes'); await p.evaluate(() => confirmDeleteSource('src2')); await settle(p); },
   addmenu:    async p => { await tab(p, 'nodes'); await p.click('.icon-btn.primary'); await settle(p); },
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
@@ -194,7 +198,7 @@ async function runChecks() {
   });
 
   await check('nodes: drag reorders sources', async () => {
-    await page.evaluate(() => { sourceOrder.forEach(id => expandState[id] = false); renderNodes(); });
+    await page.evaluate(() => { sourceOrder.forEach(id => expandState[id] = false); setNodesEdit(true); });
     const last = await page.evaluate(() => sourceOrder[sourceOrder.length - 1]);
     const g = await page.locator('.src-card').last().locator('.drag-handle').boundingBox();
     const first = await page.locator('.src-card').first().boundingBox();
@@ -223,6 +227,7 @@ async function runChecks() {
       return Math.abs((t.top + t.height / 2) - (g.top + g.height / 2));
     }));
     expect(off.every(d => d < 1.5), 'offsets ' + off.join());
+    await page.evaluate(() => setNodesEdit(false));
   });
 
   await check('nodes: add subscription', async () => {
@@ -271,12 +276,13 @@ async function runChecks() {
   });
 
   await check('profiles: dragging changes the Auto pick', async () => {
-    const target = await page.evaluate(() => connectOrder.filter(id => connectEntry(id).inAuto && isUsable(id))[1]);
+    const target = await page.evaluate(() => { setConnectEdit(true); return connectOrder.filter(id => connectEntry(id).inAuto && isUsable(id))[1]; });
     const g = await page.locator(`.conn-row[data-id=${target}] .drag-handle`).boundingBox();
     const top = await page.locator('.conn-row').first().boundingBox();
     await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
     await page.mouse.move(g.x + g.width / 2, top.y - 10, { steps: 8 }); await page.mouse.up(); await settle(page);
     expect(await page.evaluate(() => effectiveConnectId()) === target, 'auto pick did not follow the new order');
+    await page.evaluate(() => setConnectEdit(false));
   });
 
   await check('simple mode is the default: sources and source chains in the list', async () => {
@@ -334,7 +340,7 @@ async function runChecks() {
   });
 
   await check('⋯ menu switches to profiles mode, each mode keeps its own list', async () => {
-    await page.click('#sh-profiles .sheet-head .icon-btn'); await settle(page);
+    await page.click('#sh-profiles .sheet-head .icon-btn[title=More]'); await settle(page);
     await page.click('#actions-body .menu-row >> nth=1'); await settle(page);
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
     expect(ids.includes('default') && ids.includes('cpdefault') && !ids.includes('src1'), ids.join());
@@ -565,8 +571,9 @@ async function runChecks() {
       return out;
     });
     await tab(page, 'nodes');
-    await page.evaluate(() => { expandState.src2 = true; renderNodes(); });
-    await page.click('.src-card[data-id=src2] .node-row[data-nid=n0] .node-name');
+    await page.evaluate(() => { expandState.src2 = true; setNodesEdit(true); });
+    await page.click('.src-card[data-id=src2] .node-row[data-nid=n0] .node-name');   // edit mode: tap = on / off
+    await page.evaluate(() => setNodesEdit(false));
     const r2 = await page.evaluate(() => {
       const out = {}, s2 = sourcesData.src2;
       out.toggled = isNodeDisabled(s2, 'n0') && !!document.querySelector('.src-card[data-id=src2] .node-row.disabled[data-nid=n0]');
@@ -645,17 +652,96 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
+  await check('edit modes: Nodes and the list show grips / switches only while editing', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}; switchTab('nodes'); expandState.src2 = true; renderNodes();
+      const q = s => document.querySelector(s);
+      out.viewClean = !q('#nodes-list .drag-handle') && !q('#nodes-list .mini-toggle') && !q('#nodes-list .node-row.pick');
+      q('.src-card[data-id=src2] .node-row[data-nid=n0]').click();
+      out.tapMenu = q('#sh-actions').classList.contains('open') && !isNodeDisabled(sourcesData.src2, 'n0'); closeSheet('actions');
+      setNodesEdit(true);
+      out.edit = !!q('#nodes-list .drag-handle') && !!q('#nodes-list .mini-toggle') && !!q('#nodes-list .node-row.pick') && q('#nodesEditBtn').textContent === 'Done';
+      setNodesEdit(false); switchTab('home');
+      openProfiles(); const was = autoConnect;
+      out.listView = !q('#connects-list .drag-handle');
+      setConnectEdit(true);
+      out.listEdit = !!q('#connects-list .drag-handle');
+      q('#connects-list .conn-row .conn-main').click();
+      out.noPin = autoConnect === was;
+      closeSheet('profiles');
+      out.reset = !connectEdit;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('Priority on entries: first working server by order; drag reorders', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, s = sourcesData.src2, live = liveNodes(s).filter(isAlive);
+      openProfiles(); openSourceEntry('src2');
+      out.fastest = unitNode('src2') === bestAlive(live);
+      document.querySelectorAll('#se-mode .chip')[1].click();
+      s.pickOrder = [live[live.length - 1], live[0]].map(n => 'src2::' + n.id); renderSourceEntry();
+      out.priority = s.pickMode === 'priority' && unitNode('src2') === live[live.length - 1];
+      out.tag = /priority/.test(document.querySelector('.conn-row[data-id=src2]').textContent);
+      out.grips = document.querySelectorAll('#se-nodes > .node-row .cc-grip').length === liveNodes(s).length;
+      return out;
+    });
+    await settle(page);
+    const rows = page.locator('#se-nodes > .node-row');
+    const g = await rows.nth(1).locator('.cc-grip').boundingBox(), top = await rows.first().boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, top.y - 10, { steps: 8 }); await page.mouse.up(); await settle(page);
+    const r2 = await page.evaluate(() => {
+      const out = {}, s = sourcesData.src2, live = liveNodes(s).filter(isAlive);
+      out.dragged = unitNode('src2') === live[0];
+      s.pickMode = 'fastest'; s.pickOrder = []; closeSheet('sourceentry'); closeSheet('profiles');
+      setConnectMode('profiles'); openProfiles(); openEditProfile('default');
+      out.cpFastest = !document.querySelector('#cp-order .node-row');
+      document.querySelectorAll('#cp-mode .chip')[1].click();
+      out.cpOrder = document.querySelectorAll('#cp-order .node-row').length === cpDraftRefs().length;
+      document.getElementById('cpSaveBtn').click();
+      out.saved = profilesData.default.pickMode === 'priority' && unitNode('default') === unitPickRefs('default').map(r => r.node).find(isAlive);
+      profilesData.default.pickMode = 'fastest';
+      closeSheet('profiles'); setConnectMode('simple'); renderAll();
+      return out;
+    });
+    expect(Object.values(r).concat(Object.values(r2)).every(Boolean), JSON.stringify([r, r2]));
+  });
+
+  await check('[?] opens a tip sheet above nested sheets', async () => {
+    await page.evaluate(() => {
+      openProfiles(); openSourceEntry('src1');
+      document.querySelector('#sh-sourceentry .help-btn').click();
+    });
+    await settle(page);
+    const r = await page.evaluate(() => {
+      const h = document.getElementById('sh-help'), top = document.elementFromPoint(200, h.getBoundingClientRect().top + 40);
+      const out = { open: h.classList.contains('open') && document.querySelectorAll('#help-body .help-item').length > 2,
+        above: h.contains(top), all: [...document.querySelectorAll('.help-btn')].every(b => HELP[b.getAttribute('onclick').match(/'(\w+)'/)[1]]) };
+      closeSheet('help'); closeSheet('sourceentry'); closeSheet('profiles');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
   await check('Auto mode card opens Settings → Auto mode; settings apply; subscriptions default to auto', async () => {
     await page.click('#autoCard'); await settle(page);
     const r = await page.evaluate(() => {
       const out = {};
       out.open = document.getElementById('view-settings').classList.contains('active') && !!document.querySelector('#auto-settings .set-group');
-      [...document.querySelectorAll('#auto-settings .chip')].find(e => e.textContent === '100 ms').click();
-      out.threshold = autoCfg.threshold === 100 && /−100 ms/.test(document.getElementById('autoCardStats').textContent);
-      out.standby = document.querySelectorAll('#auto-settings .am-sb-row').length === Math.min(autoCfg.standby, visibleOrder().filter(id => id !== effectiveConnectId() && connectEntry(id).inAuto).length);
-      document.getElementById('autoCardToggle').click();
-      out.manual = !autoConnect && /Manual/.test(document.getElementById('autoCardSub').textContent) && /no failover/.test(document.getElementById('auto-settings').textContent);
-      document.getElementById('autoCardToggle').click();
+      const th = document.getElementById('am-threshold'); th.value = '100'; th.dispatchEvent(new Event('change'));
+      out.threshold = autoCfg.threshold === 100;
+      const th2 = document.getElementById('am-threshold'); th2.value = 'abc'; th2.dispatchEvent(new Event('change'));
+      out.badInput = autoCfg.threshold === 100 && document.getElementById('am-threshold').value === '100';
+      const ev = document.getElementById('am-every'); ev.value = '300'; ev.dispatchEvent(new Event('change'));
+      out.every = autoCfg.checkEvery === 300;
+      out.noOff = ![...document.querySelectorAll('#auto-settings .chip')].some(e => e.textContent === 'off');
+      for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn:last-child').click();
+      out.stepMax = autoCfg.failAfter === 4 && document.querySelector('#am-failafter .stepper-btn:last-child').disabled;
+      for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn').click();
+      out.stepMin = autoCfg.failAfter === 1;
+      setAutoCfg('failAfter', 2); setAutoCfg('checkEvery', 60);
       setAutoCfg('threshold', 50);
       switchTab('home');
       openSrcForm('src1');

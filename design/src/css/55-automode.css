@@ -1,30 +1,17 @@
-/* ── AutoCard (Home) ── */
-.auto-card{padding:12px 14px}
-.auto-card-top{display:flex;align-items:center;gap:12px}
-.auto-card-main{flex:1;min-width:0}
-.auto-card-main .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.auto-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
-.auto-stat{background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:8px;padding:6px 4px;text-align:center}
-.auto-stat-val{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap}
-.auto-stat-val.good{color:var(--active)}
-.auto-stat-val.mid{color:var(--warn)}
-.auto-stat-val.bad{color:var(--muted)}
-.auto-stat-label{font-size:11px;color:var(--t3);margin-top:1px}
+/* ── AutoCard (Home): just a link to Settings → Auto mode ── */
+.auto-card{display:flex;align-items:center;gap:12px;padding:10px 14px}
+.auto-card .nav-title{flex:1;margin-bottom:0}
+.auto-card-chev{color:var(--t3);flex-shrink:0}
 
 /* ── Settings → Auto mode (#auto-settings, inside the settings scroll) ── */
 #auto-settings .set-group{margin:6px 0 4px;background:var(--card)}
-.am-label{font-size:12px;color:var(--t3);padding:8px 6px 0}
-.am-now{display:flex;align-items:center;gap:12px;margin:0 0 8px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:rgba(var(--accent-rgb),.06)}
-.am-now-main{flex:1;min-width:0}
-.am-now-name{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:2px}
-.am-now-ms{text-align:right;flex-shrink:0}
-.am-now-ms .lat{font-size:15px;min-width:0;cursor:default;padding:0}
-.am-checked{font-size:11px;color:var(--t3);margin-top:2px}
-.am-actions{display:flex;gap:8px;padding:0 0 2px}
-.am-standby{margin:6px 0 4px;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.am-standby .route-empty{padding:12px 14px}
-.am-sb-row{display:flex;align-items:center;gap:10px;padding:9px 12px}
-.am-sb-row + .am-sb-row{border-top:1px solid var(--border)}
-.am-sb-main{flex:1;min-width:0}
-.am-sb-name{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
-.am-sb-row .lat{min-width:0;cursor:default}
+.am-label{display:flex;align-items:center;font-size:12px;color:var(--t3);padding:8px 6px 0}
+.set-input.am-num{width:56px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:rgba(255,255,255,.035);font-family:var(--mono)}
+.am-num:focus{outline:none;border-color:var(--accent)}
+.am-unit{color:var(--t2);font-size:15px;margin-left:-6px}
+.set-select{flex-shrink:0;background:var(--card-hi);color:var(--t1);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font:inherit;font-size:15px}
+.set-select:focus{outline:none;border-color:var(--accent)}
+.stepper{display:flex;align-items:center;flex-shrink:0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.stepper-btn{width:32px;height:32px;background:none;border:none;color:var(--accent);font:inherit;font-size:18px;font-weight:600;cursor:pointer}
+.stepper-btn:disabled{color:var(--t3);opacity:.5;cursor:default}
+.stepper-val{min-width:26px;text-align:center;font-family:var(--mono);font-size:15px;font-weight:600;color:var(--t1)}

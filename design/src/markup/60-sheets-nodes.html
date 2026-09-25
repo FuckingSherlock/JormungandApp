@@ -91,7 +91,7 @@
 
         <div class="section-toggle" id="sf-adv-toggle" onclick="toggleSrcAdvanced()">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-          Advanced
+          Advanced<button class="help-btn" onclick="event.stopPropagation();openHelp('srcadvanced')" title="What is this?">?</button>
         </div>
         <div id="sf-adv" style="display:none">
           <div class="set-group">
@@ -201,6 +201,17 @@
       <button class="btn-primary" id="nfSaveBtn" onclick="saveNodeForm()">Add server</button>
       <button class="btn-danger-text" id="nfDeleteBtn" style="display:none" onclick="deleteNode(editingNode.sid, editingNode.nid);closeSheet('nodeform')">Delete</button>
     </div>
+  </div>
+
+  <!-- ══════════ [?] HELP (level 3: opens above any sheet) ══════════ -->
+  <div class="overlay overlay-l3" id="ov-help" onclick="closeSheet('help')"></div>
+  <div class="sheet sheet-l3 compact" id="sh-help">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="helpTitle"></span>
+      <button class="sheet-close" onclick="closeSheet('help')">×</button>
+    </div>
+    <div class="sheet-body help-body" id="help-body"></div>
   </div>
 
   <div class="toast" id="toast"></div>
