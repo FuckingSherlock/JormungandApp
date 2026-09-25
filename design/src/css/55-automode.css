@@ -15,3 +15,16 @@
 .stepper-btn{width:32px;height:32px;background:none;border:none;color:var(--accent);font:inherit;font-size:18px;font-weight:600;cursor:pointer}
 .stepper-btn:disabled{color:var(--t3);opacity:.5;cursor:default}
 .stepper-val{min-width:26px;text-align:center;font-family:var(--mono);font-size:15px;font-weight:600;color:var(--t1)}
+.set-value{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;background:none;border:none;color:var(--accent);font:inherit;font-size:15px;font-weight:600;cursor:pointer;padding:4px 0}
+.set-value svg{color:var(--t3)}
+
+/* ── Small centred dialog (level 3), opened / closed like a sheet: #ov-name + #sh-name ── */
+.dialog{position:fixed;left:24px;right:24px;top:50%;z-index:31;background:var(--sheet);border:1px solid var(--border-hi);border-radius:16px;padding:18px;
+  opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-50%) scale(.96);transition:opacity .18s,transform .18s,visibility 0s .18s}
+.dialog.open{opacity:1;visibility:visible;pointer-events:all;transform:translateY(-50%);transition:opacity .18s,transform .18s}
+.dialog-title{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:12px}
+.iv-row{display:flex;gap:8px;margin-bottom:8px}
+.iv-row .form-input{flex:1;min-width:0;font-family:var(--mono)}
+.iv-row .set-select{padding:0 10px}
+.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.btn-secondary.primary{background:var(--accent);border-color:var(--accent);color:#fff}

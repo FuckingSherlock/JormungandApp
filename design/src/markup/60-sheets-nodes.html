@@ -214,5 +214,20 @@
     <div class="sheet-body help-body" id="help-body"></div>
   </div>
 
+  <!-- ══════════ INTERVAL DIALOG: number + unit (Settings → Auto mode) ══════════ -->
+  <div class="overlay overlay-l3" id="ov-interval" onclick="closeSheet('interval')"></div>
+  <div class="dialog" id="sh-interval">
+    <div class="dialog-title" id="ivTitle"></div>
+    <div class="iv-row">
+      <input class="form-input" id="iv-value" inputmode="numeric" onkeydown="if (event.key === 'Enter') saveIntervalDialog()">
+      <select class="set-select" id="iv-unit"></select>
+    </div>
+    <div class="set-hint" id="iv-hint"></div>
+    <div class="dialog-actions">
+      <button class="btn-secondary" onclick="closeSheet('interval')">Cancel</button>
+      <button class="btn-secondary primary" onclick="saveIntervalDialog()">Save</button>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 

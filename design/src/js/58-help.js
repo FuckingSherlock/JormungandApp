@@ -46,7 +46,7 @@ const HELP = {
   subsupdate: { title: 'Subscription updates', items: [
     ['Update every', 'how often the server lists are downloaded again from the providers.'],
     ['Own period', 'a subscription can have its own (Nodes → ⋮ → Edit → Update every). Then this setting doesn’t apply to it.'],
-    ['Off', 'lists are updated only when you tap Update.'],
+    ['0 = off', 'lists are updated only when you tap Update.'],
   ] },
   srcadvanced: { title: 'Advanced', items: [
     ['User-Agent', 'how the app introduces itself to the provider; the server list may depend on it. Auto is best.'],
