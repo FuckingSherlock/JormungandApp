@@ -4,6 +4,14 @@ VPN/proxy client (sing-box core), a reworked clone of Karing. Current stage: an
 interactive HTML mockup of the UI. The real app will be Flutter (Dart) — do not
 start it until the mockup is finished. The user talks Russian; reply in Russian.
 
+## Status
+
+In the mockup: Home (modes incl. system proxy, connect dock), Nodes, Connect (sources,
+profiles, chains, Auto), Settings (Auto mode, Appearance, Connection, DNS), Rules (apps,
+own rules with form + JSON, quick rules, services, final order, address test,
+import/export, rule sets). Next in the backlog: the shared target architecture
+(`docs/rules.md` §0) — until then rule / app targets are a stub picker.
+
 ## Layout
 
 - `docs/` — product logic for the real app (Russian): `subscription-parsing.md`
@@ -29,32 +37,45 @@ start it until the mockup is finished. The user talks Russian; reply in Russian.
 
 ## Workflow
 
-After any change under `design/src/` or `design/tools/`:
+After any change under `design/src/` or `design/tools/`, one command:
 
 ```sh
-npm run build          # regenerate design/main_screen.html (+ stage deploy/artifact copies)
-npm run check          # freshness check + smoke tests, prints only failures
+npm run verify -- rules dns-form      # build + freshness + smoke tests, then one grid
+                                      # of the given presets -> design/.shots/grid.png
 ```
 
-Screenshots only when the visual result matters, cropped and at 1x:
+It prints only failures, the pass count and the grid path. Without presets it just
+builds and checks. Separate steps still exist: `npm run build`, `npm run check`,
+`npm run shot -- <presets> [--grid] [--theme github] [--scale 2]` (-> `design/.shots/*.png`).
 
-```sh
-npm run shot -- dock nodes            # -> design/.shots/*.png
-npm run shot -- settings --theme github --scale 2
-```
+Presets: home, nodes, nodes-open, settings, dock, dock-chain, dock-profile, dock-off,
+profiles, broken, profiles-full, profiles-menu, source-entry, gone, nothing-ticked,
+simple-chain, chain-priority, profile-edit, chain-edit, chain-groups, drag-mid, addmenu,
+srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm,
+nodes-edit, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
+rules, rules-more, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
+rule-sets, apps, app-act, settings-dns, dns-form, settings-conn.
+Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
+there for each new interaction.
 
-Presets: home, nodes, nodes-open, settings, dock, dock-chain, dock-profile, dock-off, profiles, broken, profiles-full,
-profiles-menu, source-entry, gone, nothing-ticked, simple-chain, chain-priority, profile-edit,
-chain-edit, chain-groups, drag-mid, addmenu,
-srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm, nodes-edit, entry-priority, profile-priority, help, interval, settings-auto, settings-look, rules, rules-more, rule-form, rule-new, rule-json, rule-test,
-rule-order, rule-io, rule-sets, apps, app-act, settings-dns, dns-form, settings-conn. Add a preset in `check.mjs` rather than writing
-one-off Playwright scripts; add a check there for each new interaction.
+Commit `design/src`, `design/tools`, the rebuilt `design/main_screen.html`, `docs/` and
+push (the push redeploys the Cloudflare site, see Deploy). The user views the mockup as a
+claude.ai Artifact, which live-updates in their app: the build stages it, so after each
+change republish `design/.artifact/jormungand.html` with the Artifact tool to
+https://claude.ai/artifact/Lu4gwFjCVtcv8BogsvqbhS (pass it as `url`). In a new session the
+first publish is refused and the live copy is saved locally: it is the previous build
+wrapped by the host, so read only its first lines to confirm, then publish again.
+Do not send `main_screen.html` as a file unless asked.
 
-Commit both `design/src` changes and the rebuilt `design/main_screen.html` and push
-(the push redeploys the Cloudflare site, see Deploy). The user views the mockup as a
-claude.ai Artifact, which live-updates in their app: `npm run build` also stages it, so after each change just republish `design/.artifact/jormungand.html` with the
-Artifact tool to https://claude.ai/artifact/Lu4gwFjCVtcv8BogsvqbhS (pass it as `url`
-from a new session). Do not send `main_screen.html` as a file unless asked.
+## Token economy
+
+Every tool call re-reads the whole conversation, so the number of calls and the context
+size are what cost, not the code written.
+- Batch: make all edits for a step, then one `npm run verify -- <presets>`; look at the
+  grid, not separate screenshots.
+- Read only what is needed: `grep -n` for the function, then `sed -n 'a,bp'` / Read with
+  offset+limit. Never read `main_screen.html`; the JS files in `design/src/js` are big.
+- Plan and discuss in one session, implement in a fresh one pointed at `docs/`.
 
 ## Deploy (Cloudflare Worker)
 

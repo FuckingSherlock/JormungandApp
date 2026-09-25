@@ -106,10 +106,13 @@ async function clipOf(page, sel, extraTop = 0) {
   return { x: 0, y: Math.max(0, r.y - extraTop), width: page.viewportSize().width, height: r.height + extraTop };
 }
 
-async function shots(names) {
+// --grid (or verify) glues the presets into one labelled .shots/grid.png, 4 per row:
+// one image to look at instead of several.
+async function shots(names, grid = args.includes('--grid')) {
   const browser = await playwright.chromium.launch();
   const dir = join(root, '.shots');
   mkdirSync(dir, { recursive: true });
+  const cells = [];
   for (const name of names) {
     if (!SHOTS[name]) { console.log(`unknown preset "${name}". presets: ${Object.keys(SHOTS).join(', ')}`); continue; }
     const page = await openPage(browser, {
@@ -117,9 +120,18 @@ async function shots(names) {
     });
     const extra = (await SHOTS[name](page)) || {};
     const file = join(dir, name + (opt('theme') ? '-' + opt('theme') : '') + '.png');
-    await page.screenshot({ path: file, ...extra });
-    console.log(file + (page.errors.length ? '   ERRORS: ' + page.errors.join(' | ') : ''));
+    const buf = await page.screenshot({ path: grid ? undefined : file, ...extra });
+    if (grid) cells.push([name, buf.toString('base64')]);
+    if (!grid || page.errors.length) console.log((grid ? name : file) + (page.errors.length ? '   ERRORS: ' + page.errors.join(' | ') : ''));
     await page.close();
+  }
+  if (grid && cells.length) {
+    const page = await browser.newPage({ viewport: { width: 400 * Math.min(4, cells.length) + 8, height: 100 } });
+    await page.setContent(`<body style="margin:0;background:#000;display:flex;flex-wrap:wrap;gap:4px;padding:4px;width:${400 * 4 + 12}px;font:600 13px sans-serif;color:#fff">${
+      cells.map(([n, b]) => `<div style="width:400px"><div style="padding:2px 4px">${n}</div><img style="display:block;width:400px" src="data:image/png;base64,${b}"></div>`).join('')}</body>`);
+    const file = join(dir, 'grid.png');
+    await page.screenshot({ path: file, fullPage: true });
+    console.log(file);
   }
   await browser.close();
 }
@@ -960,8 +972,13 @@ async function runChecks() {
   const failed = results.filter(r => r[1]);
   for (const [name, err] of failed) console.log(`FAIL  ${name}: ${err}`);
   console.log(`${results.length - failed.length}/${results.length} checks passed`);
-  process.exit(failed.length ? 1 : 0);
+  return failed.length;
 }
 
+// shot <presets> — screenshots; verify [presets] — checks, then one grid of the presets.
 if (positional[0] === 'shot') await shots(positional.slice(1).length ? positional.slice(1) : ['home']);
-else await runChecks();
+else {
+  const failed = await runChecks();
+  if (positional[0] === 'verify' && positional.length > 1) await shots(positional.slice(1), true);
+  process.exit(failed ? 1 : 0);
+}

@@ -6,6 +6,7 @@
     "build": "node design/tools/build.mjs && node design/tools/stage.mjs",
     "check": "node design/tools/build.mjs --check && node design/tools/check.mjs",
     "shot": "node design/tools/check.mjs shot",
+    "verify": "npm run -s build && node design/tools/build.mjs --check && node design/tools/check.mjs verify",
     "geometry": "node design/tools/geometry.mjs",
     "stage": "npm run -s build",
     "deploy": "npm run -s build && npx -y wrangler@4 deploy"
