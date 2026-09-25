@@ -4,11 +4,12 @@
    Plain words, no jargon: these are for people who never read a manual. */
 
 const HELP = {
-  entries: { title: 'Servers & profiles', items: [
+  entries: { title: 'Route', items: [
+    ['Servers / Profiles', 'which tab of Nodes the route uses. Everything is created and edited in Nodes.'],
     ['Auto', 'connects the first working entry from the top. If it fails, Auto moves to the next one.'],
     ['Manual', 'tap an entry to use only it. Tap the Auto badge to go back.'],
-    ['✎ Edit', 'drag ⋮⋮ to change the order Auto tries entries in. Tap Done when finished.'],
-    ['⋮', 'the entry’s settings: which servers it uses, Fastest or Priority, Use in Auto.'],
+    ['✎ Edit', 'drag ⋮⋮ to change the order Auto tries entries in; the switch lets Auto pick it or not.'],
+    ['Own order', 'by default the order is the one in Nodes. Drag here and the route keeps its own — “Follow Nodes order” goes back.'],
     ['Chain', 'traffic goes through two servers: the entry, then the exit.'],
     ['Greyed out below', 'something it needs is switched off in Nodes. Tap it to see what.'],
   ] },
@@ -59,7 +60,9 @@ const HELP = {
     ['Decrypt password', 'only for subscriptions the provider encrypted.'],
   ] },
   nodes: { title: 'Nodes', items: [
-    ['Nodes', 'all your subscriptions and single servers.'],
+    ['Nodes', 'everything traffic can go through. Create, edit and delete it here.'],
+    ['Servers / Profiles', 'two tabs, swipe between them: subscriptions and servers with their chains, or profiles with theirs.'],
+    ['Order', 'the order here is the route’s priority, unless the Route sheet has its own.'],
     ['Tap a server', 'its menu: ping, copy, switch off, delete. Tap the ms to ping it.'],
     ['✎ Edit', 'drag ⋮⋮ to reorder, switch subscriptions on / off, tap servers to switch them off.'],
     ['Off', 'hidden everywhere, settings kept — switch it back on and it is where it was.'],

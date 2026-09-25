@@ -190,19 +190,17 @@ function saveCreateProfile() {
   } else {
     const id = 'profile' + Date.now();
     profilesData[id] = Object.assign({ id, name }, fields);
-    connectOrder.push(id);
+    catalogOrder.profiles.push(id);
   }
   editingProfileId = null;
-  renderConnects();
-  updateMainConnectCard();
+  renderAll();
   closeSheet('createprofile');
 }
 
 function deleteEditingProfile() {
   if (!editingProfileId) return;
   if (getProfileIds().length <= 1) { editingProfileId = null; closeSheet('createprofile'); return; }
-  connectOrder = connectOrder.filter(x => x !== editingProfileId);
-  delete profilesData[editingProfileId];
+  delete profilesData[editingProfileId];   // the catalog and both route lists drop it (syncCatalog)
   const fallback = getProfileIds()[0];
   if (activeConnectId === editingProfileId) activeConnectId = fallback;
   Object.values(chainsData).forEach(c => {
@@ -210,13 +208,11 @@ function deleteEditingProfile() {
     if (c.outId === editingProfileId) c.outId = fallback;
     if (c.inId === c.outId) {   // a chain through one profile is pointless: drop it
       delete chainsData[c.id];
-      connectOrder = connectOrder.filter(x => x !== c.id);
       if (activeConnectId === c.id) activeConnectId = fallback;
     }
   });
   editingProfileId = null;
-  renderConnects();
-  updateMainConnectCard();
+  renderAll();
   closeSheet('createprofile');
 }
 
@@ -233,11 +229,13 @@ let chainDraft = newChainDraft(null, null);
 const ccOpen = new Set();   // expanded units in the editor, 'in:<id>' / 'out:<id>'
 let chainTest = null;   // { running, stage, done, total, pairs: [{entry, exit, ms}], showAll }
 let editingChainId = null;
+let chainMode = 'simple';   // the Nodes tab the chain lives on: its ends are sources or profiles
 
-function openCreateChain(editId) {
+function openCreateChain(editId, mode) {
   editingChainId = editId || null;
-  const ids = getUnitIds();
-  if (!editingChainId && ids.length < 2) { toast(simpleMode() ? 'A chain needs two subscriptions or server groups — add one in Nodes' : 'A chain needs two profiles — create another profile first'); return; }
+  chainMode = (editId && modeOf(editId)) || mode || connectMode;
+  const ids = unitIdsOf(chainMode);
+  if (!editingChainId && ids.length < 2) { toast(chainMode === 'simple' ? 'A chain needs two subscriptions or server groups — add one in Nodes' : 'A chain needs two profiles — create another profile first'); return; }
   if (editingChainId) {
     const c = chainsData[editingChainId];
     document.getElementById('ccTitle').textContent = 'Edit chain';
@@ -278,7 +276,7 @@ function renderChainPicker(elId, side) {
   const other = side === 'in' ? d.outId : d.inId;
   const off = side === 'in' ? d.inOff : d.outOff;
   const priority = side === 'out' && d.exitMode === 'priority';
-  const ids = getUnitIds();
+  const ids = unitIdsOf(chainMode);
   if (current && !ids.includes(current) && (sourcesData[current] || profilesData[current])) ids.push(current);   // an end switched off in Nodes
   el.innerHTML = ids.map(id => {
     const taken = id === other;
@@ -517,22 +515,18 @@ function saveCreateChain() {
   } else {
     const id = 'chain' + Date.now();
     chainsData[id] = Object.assign({ id, name }, fields);
-    connectOrder.push(id);
+    catalogOrder[chainMode].push(id);
   }
   editingChainId = null;
   chainTest = null;
-  renderConnects();
-  updateMainConnectCard();
+  renderAll();
   closeSheet('createchain');
 }
 
 function deleteEditingChain() {
   if (!editingChainId) return;
-  connectOrder = connectOrder.filter(x => x !== editingChainId);
-  delete chainsData[editingChainId];
-  if (activeConnectId === editingChainId) activeConnectId = getUnitIds()[0];
+  delete chainsData[editingChainId];   // syncCatalog drops it from the catalog and the routes
   editingChainId = null;
-  renderConnects();
-  updateMainConnectCard();
+  renderAll();
   closeSheet('createchain');
 }

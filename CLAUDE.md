@@ -6,11 +6,12 @@ start it until the mockup is finished. The user talks Russian; reply in Russian.
 
 ## Status
 
-In the mockup: Home (modes incl. system proxy, connect dock), Nodes, Connect (sources,
-profiles, chains, Auto), Settings (Auto mode, Appearance, Connection, DNS), Rules (apps,
-own rules with form + JSON, quick rules, services, final order, address test,
-import/export, rule sets). Next in the backlog: the shared target architecture
-(`docs/rules.md` §0) — until then rule / app targets are a stub picker.
+In the mockup: Home (modes incl. system proxy, connect dock), Nodes (the catalog: tabs
+Servers / Profiles, swipeable — sources, profiles, chains are created and edited only here),
+Route (main flow only: mode, Auto / Manual, own priority over the Nodes order), Settings
+(Auto mode, Appearance, Connection, DNS), Rules (apps, own rules with form + JSON, target
+picker over the whole catalog, "If unavailable", quick rules, services, final order, address
+test, import/export, rule sets).
 
 ## Layout
 
@@ -18,7 +19,7 @@ import/export, rule sets). Next in the backlog: the shared target architecture
   (formats, UA strategy, dedup, latency URL, region rules), `connect-model.md` (sources,
   profiles, chains, modes, Auto settings, node identity and dropped nodes, servers off in
   Nodes, delete impact, validation, ping, dock), `rules.md` (routing rules, apps,
-  DNS, system proxy, kill switch; the target picker is still a stub).
+  DNS, system proxy, kill switch; rule targets and "If unavailable" in §0).
   Keep them in step with the mockup: when a change adds or alters behaviour the Flutter
   app must implement, update the doc in the same commit.
 - `design/main_screen.html` — **generated** mockup, the file the user opens.
@@ -48,7 +49,8 @@ It prints only failures, the pass count and the grid path. Without presets it ju
 builds and checks. Separate steps still exist: `npm run build`, `npm run check`,
 `npm run shot -- <presets> [--grid] [--theme github] [--scale 2]` (-> `design/.shots/*.png`).
 
-Presets: home, nodes, nodes-open, settings, dock, dock-chain, dock-profile, dock-off,
+Presets: home, nodes, nodes-open, nodes-profiles, nodes-swipe, route, entry-delete,
+target-picker, rule-fallback, settings, dock, dock-chain, dock-profile, dock-off,
 profiles, broken, profiles-full, profiles-menu, source-entry, gone, nothing-ticked,
 simple-chain, chain-priority, profile-edit, chain-edit, chain-groups, drag-mid, addmenu,
 srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm,

@@ -212,17 +212,19 @@ function renderSourceCard(id, q) {
   </div>`;
 }
 
+// Both tabs render at once (the pager slides between them, see 31-catalog.js).
 function renderNodes() {
+  syncCatalog();
   const input = document.getElementById('nodeSearch');
   const q = input.value.trim().toLowerCase();
-  const html = sourceOrder.map(id => renderSourceCard(id, q)).join('');
+  const none = `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`;
+  const html = catalogOrder.simple.map(id => sourcesData[id] ? renderSourceCard(id, q) : renderEntryCard(id, q)).join('');
   document.getElementById('nodes-list').innerHTML = html ||
-    (q ? `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`
-       : `<div class="nodes-empty">No subscriptions or servers yet.<br>Tap <b>+</b> to add one.</div>`);
-
-  const total = sourceOrder.reduce((sum, id) => sum + sourcesData[id].nodes.length, 0);
-  const summary = sourceOrder.length + ' source' + (sourceOrder.length === 1 ? '' : 's') + ' · ' + total + ' nodes';
-  document.getElementById('nodesSummary').textContent = summary;
+    (q ? none : `<div class="nodes-empty">No subscriptions or servers yet.<br>Tap <b>+</b> to add one.</div>`);
+  document.getElementById('nodes-profiles').innerHTML = catalogOrder.profiles.map(id => renderEntryCard(id, q)).join('') ||
+    (q ? none : `<div class="nodes-empty">No profiles yet.<br>Tap <b>+</b> to group servers into one.</div>`);
+  renderNodesSummary();
+  renderNodesTabs();
 }
 
 function toggleNodeSearch(force) {
@@ -245,7 +247,7 @@ function toggleSourceOpen(id) {
 }
 
 function setAllOpen(open) {
-  sourceOrder.forEach(id => expandState[id] = open);
+  catalogOrder[nodesTab].forEach(id => expandState[id] = open);
   renderNodes();
   closeSheet('nodesmore');
 }
@@ -343,7 +345,7 @@ function menuRow(icon, label, onclick, extraCls) {
 
 function openNodesMore() {
   const sortChip = (key, label) => `<div class="chip ${nodeSort === key ? 'active' : ''}" onclick="setNodeSort('${key}')">${label}</div>`;
-  const anyOpen = sourceOrder.some(id => expandState[id]);
+  const anyOpen = catalogOrder[nodesTab].some(id => expandState[id]);
   document.getElementById('nodesmore-body').innerHTML =
     menuRow(ICON.refresh, 'Update all subscriptions', 'updateAllSources()') +
     (anyOpen ? menuRow(ICON.collapse, 'Collapse all', 'setAllOpen(false)')
@@ -368,7 +370,8 @@ function openActions(title, rowsHtml) {
 function openSourceActions(sid) {
   const s = sourcesData[sid];
   const close = "closeSheet('actions');";
-  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`);
+  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`)
+    + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
     rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
     rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
@@ -409,7 +412,7 @@ function deleteImpact(excl, sid) {
   const using = (c0 ? [chainEntryRefs(c0).find(r => r.node === chainEntryNode(c0)), chainExitRefs(c0).find(r => r.node === chainExitNode(c0))]
     : [unitRefs(id0).find(r => r.node === unitNode(id0))]).filter(Boolean);
   if (using.some(excl)) lines.push(['Current connection', '', 'goes through it — will reconnect through the next working server', 'warn']);
-  ['simple', 'profiles'].forEach(mode => modeOrder(mode).forEach(id => {
+  ['simple', 'profiles'].forEach(mode => catalogOrder[mode].forEach(id => {
     const e = connectEntry(id);
     if (!e || id === sid) return;
     if (chainsData[id]) {
@@ -432,7 +435,7 @@ function confirmDeleteHtml(note, lines, doIt, label) {
   const close = "closeSheet('actions');";
   const list = lines.length ? `<div class="menu-caption">This will affect</div><div class="impact-list">${lines.map(([name, kind, what, cls]) =>
     `<div class="impact-row ${cls}"><div class="impact-name">${esc(name)}${kind ? `<span class="conn-tag">${kind}</span>` : ''}</div><div class="impact-what">${what}</div></div>`).join('')}</div>`
-    : '<div class="menu-note">Not used in any profile or chain.</div>';
+    : '<div class="menu-note">Not used in any profile, chain, rule or app.</div>';
   return `<div class="menu-note">${note}</div>${list}`
     + menuRow(ICON.trash, label, close + doIt, 'danger')
     + menuRow(ICON.close, 'Cancel', close);
@@ -444,14 +447,16 @@ function confirmDeleteSource(sid) {
   const n = s.nodes.length, g = (s.gone || []).length;
   const note = (s.kind === 'sub' ? `The subscription and its ${n} server${n === 1 ? '' : 's'}` : `The group and its ${n} server${n === 1 ? '' : 's'}`)
     + ' are removed' + (g ? `, with ${g} unavailable one${g === 1 ? '' : 's'} kept for their settings` : '') + '. This can’t be undone.';
-  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, deleteImpact(r => r.sid === sid, sid), `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));
+  const dead = new Set(Object.values(chainsData).filter(c => c.inId === sid || c.outId === sid).map(c => 'chain:' + c.id));
+  const impact = deleteImpact(r => r.sid === sid, sid).concat(targetImpact(t => t === 'src:' + sid || t.startsWith('node:' + sid + '::') || dead.has(t)));
+  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, impact, `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));
 }
 
 function confirmDeleteNode(sid, nid) {
   const s = sourcesData[sid], n = s && s.nodes.find(x => x.id === nid);
   if (!n) return;
   openActions('Delete ' + n.name + '?', confirmDeleteHtml(`${n.flag} ${esc(n.name)} is removed from ${esc(s.name)}, with its place in every profile and chain. This can’t be undone.`,
-    deleteImpact(r => r.sid === sid && r.node.id === nid), `deleteNode('${sid}','${nid}')`, 'Delete server'));
+    deleteImpact(r => r.sid === sid && r.node.id === nid).concat(targetImpact(t => t === 'node:' + sid + '::' + nid)), `deleteNode('${sid}','${nid}')`, 'Delete server'));
 }
 
 function deleteSource(id) {

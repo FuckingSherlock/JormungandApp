@@ -37,7 +37,7 @@ function renderRuleForm() {
   if (rfTab === 'json') {
     el.innerHTML = `<div class="form-group"><textarea class="form-input code-area tall" id="rf-json" spellcheck="false" oninput="rfCheckJson()">${esc(JSON.stringify(ruleJson(ruleDraft), null, 2))}</textarea>
       <div class="set-hint warn" id="rf-json-err"></div>
-      <div class="set-hint">The sing-box route rule. Name, Strict and DNS live in the form.</div></div>`;
+      <div class="set-hint">The sing-box route rule. Name, If unavailable and DNS live in the form.</div></div>`;
     return;
   }
   const d = ruleDraft;
@@ -59,9 +59,11 @@ function renderRuleForm() {
     <div class="rf-then">
       <div class="seg3 wide">${acts.map(([v, l]) => `<button class="${d.action === v ? 'on ' + v : ''}" onclick="ruleDraft.action='${v}';renderRuleForm()">${l}</button>`).join('')}</div>
       <div class="set-group">
-        ${d.action === 'proxy' ? targetRowHtml('Via', d.target, 'ruleDraft.target=nextTarget(ruleDraft.target);renderRuleForm()') : ''}
-        ${d.action === 'proxy' && d.target ? `<div class="set-row"><div class="set-label">Strict<div class="set-hint">${d.strict ? 'Target down → this traffic is blocked' : 'Target down → goes through the main flow'}</div></div>
-          <div class="mini-toggle ${d.strict ? 'on' : ''}" onclick="ruleDraft.strict=!ruleDraft.strict;renderRuleForm()"><div class="mini-toggle-thumb"></div></div></div>` : ''}
+        ${d.action === 'proxy' ? targetRowHtml('Via', d.target, 't => { ruleDraft.target = t; renderRuleForm(); }') : ''}
+        ${d.action === 'proxy' && d.target ? `<div class="set-row rf-fallback"><div class="set-label">If unavailable<div class="set-hint">${d.fallback === 'default'
+            ? 'Default: ' + fallbackName(quickCfg.fallback) + ' (Rules → Target unavailable)' : 'Off in Nodes, no working server or deleted'}</div></div></div>
+          <div class="set-row"><div class="seg3 wide" id="rf-fallback">${[['default', 'Default'], ['main', 'Main'], ['block', 'Block'], ['direct', 'Direct']].map(([v, l]) =>
+            `<button class="${d.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" onclick="ruleDraft.fallback='${v}';renderRuleForm()">${l}</button>`).join('')}</div></div>` : ''}
         ${d.action === 'block' ? `<div class="set-row"><div class="set-label">How</div><div class="chip-row">${[['drop', 'Drop silently'], ['reject', 'Reject']].map(([v, l]) =>
           `<div class="chip ${d.block === v ? 'active' : ''}" onclick="ruleDraft.block='${v}';renderRuleForm()">${l}</div>`).join('')}</div></div>` : ''}
         ${d.action !== 'block' ? `<div class="set-row"><div class="set-label">DNS</div><select class="set-select" id="rf-dns" onchange="ruleDraft.dns=this.value">${dnsOpts.map(([v, l]) =>
@@ -197,7 +199,7 @@ function ruleFromJson(o) {
   if (action === 'reject') { r.action = 'block'; r.block = method === 'drop' ? 'drop' : 'reject'; }
   else if (action === 'route') {
     if (outbound === 'direct') r.action = 'direct';
-    else { r.action = 'proxy'; r.target = Math.max(0, STUB_TARGETS.findIndex((t, i) => targetTag(i) === outbound)); }
+    else { r.action = 'proxy'; r.target = allTargets().find(t => targetTag(t) === outbound) || ''; }
   } else rest.action = action;
   const extra = {};
   if (rest.type === 'logical') {
@@ -229,12 +231,12 @@ function rfCheckJson() {
   document.getElementById('rf-json-err').textContent = msg;
   return !msg;
 }
-// JSON tab → draft (keeps name, strict, DNS, enabled). false if the JSON is invalid.
+// JSON tab → draft (keeps name, If unavailable, DNS, enabled). false if the JSON is invalid.
 function rfApplyJson() {
   if (rfTab !== 'json') return true;
   if (!rfCheckJson()) { toast('Fix the JSON first'); return false; }
   const r = ruleFromJson(JSON.parse(document.getElementById('rf-json').value));
-  ['id', 'name', 'enabled', 'strict', 'dns'].forEach(k => r[k] = ruleDraft[k]);
+  ['id', 'name', 'enabled', 'fallback', 'dns'].forEach(k => r[k] = ruleDraft[k]);
   ruleDraft = r;
   return true;
 }
@@ -250,7 +252,7 @@ function saveRuleForm() {
     Object.keys(d.groups).forEach(k => { const g = d.groups[k]; if (!Object.keys(g.v).length && !g.flag) delete d.groups[k]; });
     if (!Object.keys(d.groups).length) { toast('Add at least one condition'); renderRuleForm(); return; }
   }
-  if (!(d.action === 'proxy' && d.target)) d.strict = false;
+  if (!(d.action === 'proxy' && d.target)) d.fallback = 'default';
   if (ruleEditing) rulesData[ruleEditing] = Object.assign(d, { id: ruleEditing });
   else { d.id = 'r' + (ruleSeq++); rulesData[d.id] = d; ruleOrder.push(d.id); }
   closeSheet('ruleform');

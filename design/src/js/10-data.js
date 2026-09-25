@@ -97,10 +97,25 @@ let chainsData = {
 };
 let chainSeq = 1;
 
+/* Catalog: what each Nodes tab lists (Servers = sources + chains of sources, Profiles =
+   profiles + chains of profiles), in the order the user drags there. Nodes is the only place
+   they are created, edited and deleted. The catalog order is also the default priority of
+   the Route sheet: until the user drags the Route list, the route follows it; after that the
+   route keeps its own order (routeCustom) — new entries join its end — until "Follow Nodes
+   order". sourceOrder mirrors the sources of catalogOrder.simple. */
+const catalogOrder = {
+  simple:   ['src1','src2','src3','src4','sc1'],
+  profiles: ['default','work','gaming','cpdefault','cpgaming','cpwork'],
+};
+const routeCustom = { simple: false, profiles: false };
 
-function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
-// Chain-able entries of the active mode: sources in simple mode, profiles otherwise.
-function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] && sourcesData[id].enabled : profilesData[id]); }
+
+function getProfileIds() { return catalogOrder.profiles.filter(id => profilesData[id]); }
+// Chain-able entries of a mode: sources in simple mode, profiles otherwise (catalog order).
+function unitIdsOf(mode) { return catalogOrder[mode].filter(id => mode === 'simple' ? sourcesData[id] && sourcesData[id].enabled : profilesData[id]); }
+function getUnitIds()    { return unitIdsOf(connectMode); }
+// Which Nodes tab (= connect mode) an entry belongs to.
+const modeOf = id => catalogOrder.simple.includes(id) ? 'simple' : catalogOrder.profiles.includes(id) ? 'profiles' : null;
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 

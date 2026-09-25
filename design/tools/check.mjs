@@ -98,6 +98,12 @@ const SHOTS = {
   'settings-dns': async p => { await p.evaluate(() => openDnsSettings()); await settle(p); },
   'dns-form': async p => { await p.evaluate(() => { openDnsSettings(); openDnsForm(); }); await settle(p); },
   'settings-conn': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setconn'); }); await settle(p); },
+  'nodes-profiles': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); expandState.default = true; renderNodes(); }); await settle(p); },
+  'nodes-swipe': async p => { await tab(p, 'nodes'); await p.evaluate(() => { document.getElementById('view-nodes').classList.add('swiping'); renderNodesTabs(-170); }); },
+  'route': async p => { await p.evaluate(() => { openProfiles(); setConnectEdit(true); }); await settle(p); },
+  'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); confirmDeleteEntry('work'); }); await settle(p); },
+  'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.add('src2'); renderTargetPicker(); }); await settle(p); },
+  'rule-fallback': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
   more:       async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodesMore()); await settle(p); },
 };
 
@@ -172,7 +178,7 @@ async function runChecks() {
     await page.evaluate(() => { sourceOrder.forEach(id => expandState[id] = true); renderNodes(); });
     const pos = () => page.evaluate(() => ['#view-nodes .topbar', '.bottomnav'].map(s => Math.round(document.querySelector(s).getBoundingClientRect().top)).join());
     const before = await pos();
-    const scrolled = await page.evaluate(() => { const el = document.querySelector('#view-nodes > .scroll'); el.scrollTop = 1e5; return el.scrollTop; });
+    const scrolled = await page.evaluate(() => { const el = document.querySelector('#nodes-list'); el.scrollTop = 1e5; return el.scrollTop; });
     expect(scrolled > 0, 'nodes list did not scroll');
     expect(before === await pos(), 'header/nav moved');
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight), 'page itself scrolls');
@@ -229,7 +235,7 @@ async function runChecks() {
   await check('nodes: drag reorders sources', async () => {
     await page.evaluate(() => { sourceOrder.forEach(id => expandState[id] = false); setNodesEdit(true); });
     const last = await page.evaluate(() => sourceOrder[sourceOrder.length - 1]);
-    const g = await page.locator('.src-card').last().locator('.drag-handle').boundingBox();
+    const g = await page.locator(`#nodes-list .src-card[data-id=${last}]`).locator('.drag-handle').boundingBox();
     const first = await page.locator('.src-card').first().boundingBox();
     await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
     await page.mouse.down();
@@ -314,6 +320,24 @@ async function runChecks() {
     await page.evaluate(() => setConnectEdit(false));
   });
 
+  await check('route: own order after a drag, Nodes order stays, "Follow Nodes order" resets', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, m = connectMode;
+      out.custom = routeCustom[m] && /Own priority order/.test(document.getElementById('routeOrderNote').textContent);
+      out.nodesKept = connectOrder.join() !== catalogOrder[m].join();
+      document.querySelector('#routeOrderNote .am-link').click();
+      out.reset = !routeCustom[m] && connectOrder.join() === catalogOrder[m].join();
+      out.noEdit = !document.querySelector('#connects-list .conn-row .icon-btn') && !document.querySelector('#sh-profiles .sheet-action');
+      setConnectEdit(true);
+      const id = connectOrder.find(x => !isBroken(x)), was = connectEntry(id).inAuto;
+      document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .mini-toggle`).click();
+      out.autoToggle = connectEntry(id).inAuto === !was;
+      toggleEntryAuto(id); setConnectEdit(false);
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
   await check('simple mode is the default: sources and source chains in the list', async () => {
     expect(await page.evaluate(() => connectMode === 'simple'), 'not simple by default');
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
@@ -329,7 +353,8 @@ async function runChecks() {
   });
 
   await check('simple mode: ⋯ opens the source entry — servers on/off, all/none, Auto', async () => {
-    await page.click('.conn-row[data-id=src2] .icon-btn'); await settle(page);
+    await page.evaluate(() => openSourceActions('src2')); await settle(page);
+    await page.click('#actions-body .menu-row >> text=Route settings'); await settle(page);
     const total = await page.evaluate(() => liveNodes(sourcesData.src2).length);
     await page.click('#se-nodes .node-row >> nth=0');
     expect(await page.evaluate(n => unitRefs('src2').length === n - 1, total), 'node not switched off');
@@ -353,7 +378,8 @@ async function runChecks() {
   });
 
   await check('simple mode: chain of two sources, route check works', async () => {
-    await page.click('#sh-profiles .sheet-action'); await settle(page);
+    await page.evaluate(() => { closeSheet('profiles'); switchTab('nodes'); setNodesTab('simple'); openNodesAdd(); }); await settle(page);
+    await page.click('#addChainRow'); await settle(page);
     expect(await page.evaluate(() => document.getElementById('sh-createchain').classList.contains('open') && !!sourcesData[chainDraft.inId] && !!sourcesData[chainDraft.outId]), 'chain ends are not sources');
     await page.evaluate(() => testChainRoute());
     await page.waitForFunction(() => !chainTest.running, null, { timeout: 30000 });
@@ -361,6 +387,7 @@ async function runChecks() {
     await page.click('#ccSaveBtn'); await settle(page);
     const n = await page.evaluate(() => connectOrder.filter(id => chainsData[id]).length);
     expect(n === 2, 'chain not added: ' + n);
+    await page.evaluate(() => { switchTab('home'); openProfiles(); }); await settle(page);
   });
 
   await check('deleting a source drops it and its chains from the list', async () => {
@@ -544,7 +571,7 @@ async function runChecks() {
       setConnectMode('simple'); const out = {};
       const s2 = sourcesData.src2; s2.offNodes = ['n2'];
       chainsData.tc2 = { id:'tc2', name:'t2', inId:'src2', outId:'src3', inAuto:true, inOff:['src2::n4'], outOff:[], exitMode:'fastest', exitOrder:[] };
-      connectOrder.unshift('tc2');
+      catalogOrder.simple.unshift('tc2');
       s2.enabled = false; openProfiles();
       const top = [...document.querySelectorAll('#connects-list > .conn-row')].map(e => e.dataset.id);
       const broken = [...document.querySelectorAll('#connects-list .conn-broken-list .conn-row.broken')].map(e => e.dataset.id);
@@ -556,7 +583,7 @@ async function runChecks() {
       openCreateChain(); out.picker = !document.querySelector('#cc-in-list .cc-prof[data-id=src2]'); closeSheet('createchain');
       openEditChain('tc2'); out.chainWarn = !document.getElementById('cc-warn').hidden && /off in Nodes/.test(document.getElementById('cc-warn').textContent); closeSheet('createchain');
       setConnectMode('profiles');
-      profilesData.tp = { id:'tp', name:'tp', sources:['src2'], nodes:[], inAuto:true }; connectOrder.push('tp');
+      profilesData.tp = { id:'tp', name:'tp', sources:['src2'], nodes:[], inAuto:true }; catalogOrder.profiles.push('tp');
       renderConnects();
       out.profile = !!document.querySelector('.conn-broken-list .conn-row[data-id=tp]') && !document.querySelector('#connects-list > .conn-row[data-id=tp]');
       openEditProfile('tp'); out.cpOff = !!document.querySelector('#cp-source-list .ps-card.off[data-id=src2]') && /off in Nodes/.test(document.getElementById('cp-warn').textContent); closeSheet('createprofile');
@@ -577,7 +604,7 @@ async function runChecks() {
       setConnectMode('simple'); autoConnect = false; activeConnectId = 'src1'; updateMainConnectCard();
       out.src = document.getElementById('profCardLabel').textContent === 'Sub' && !!det().querySelector('.dock-node') && !det().querySelector('.dock-src');
       chainsData.tc3 = { id:'tc3', name:'t3', inId:'src2', outId:'src1', inAuto:true, inOff:[], outOff:[], exitMode:'fastest', exitOrder:[] };
-      connectOrder.push('tc3'); activeConnectId = 'tc3'; updateMainConnectCard();
+      catalogOrder.simple.push('tc3'); syncCatalog(); activeConnectId = 'tc3'; updateMainConnectCard();
       out.chain = document.getElementById('profCardLabel').textContent === 'Chain' && det().querySelectorAll('.dock-node').length === 2 && !!det().querySelector('.dock-arrow');
       delete chainsData.tc3; connectOrder = connectOrder.filter(x => x !== 'tc3'); activeConnectId = 'src1'; autoConnect = was;
       setConnectMode('profiles'); const pw = autoConnect; autoConnect = false; activeConnectId = 'default'; updateMainConnectCard();
@@ -596,7 +623,7 @@ async function runChecks() {
       openSourceEntry('src2'); out.se = document.querySelectorAll('#se-nodes > .node-row').length === s2.nodes.length - 1; closeSheet('sourceentry');
       // a chain whose entry uses only n0 of src2
       chainsData.tc4 = { id:'tc4', name:'t4', inId:'src2', outId:'src3', inAuto:true, inOff: s2.nodes.filter(n => n.id !== 'n0').map(n => 'src2::' + n.id), outOff:[], exitMode:'fastest', exitOrder:[] };
-      connectOrder.unshift('tc4');
+      catalogOrder.simple.unshift('tc4');
       return out;
     });
     await tab(page, 'nodes');
@@ -619,7 +646,7 @@ async function runChecks() {
       toggleNodeEnabled('src2', 'n1'); s2.offNodes = [];
       // profiles: a profile of one picked server that is switched off
       setConnectMode('profiles');
-      profilesData.tp3 = { id:'tp3', name:'tp3', sources:[], nodes:['src2::n8'], inAuto:true }; connectOrder.push('tp3'); renderConnects();
+      profilesData.tp3 = { id:'tp3', name:'tp3', sources:[], nodes:['src2::n8'], inAuto:true }; catalogOrder.profiles.push('tp3'); renderConnects();
       out.profile = !!document.querySelector('.conn-broken-list .conn-row[data-id=tp3]');
       openEditProfile('tp3'); out.cpWarn = /off in Nodes/.test(document.getElementById('cp-warn').textContent) && document.getElementById('cpSaveBtn').disabled; closeSheet('createprofile');
       delete profilesData.tp3; connectOrder = connectOrder.filter(x => x !== 'tp3');
@@ -638,14 +665,15 @@ async function runChecks() {
       sourcesData.tmp = { id:'tmp', kind:'node', name:'Tmp', enabled:true, inAuto:true, offNodes:[], disabledNodes:[], nodes: genNodes(3, 'node') };
       sourceOrder.push('tmp'); sourceAdded('tmp');
       chainsData.tc5 = { id:'tc5', name:'Tmp chain', inId:'src2', outId:'tmp', inAuto:true, inOff:[], outOff:[], exitMode:'fastest', exitOrder:[] };
-      connectOrder.push('tc5');
-      modeState.profiles.order.push('tp4');
+      catalogOrder.simple.push('tc5');
+      catalogOrder.profiles.push('tp4');
+      const keep = rulesData.r2.target; rulesData.r2.target = 'chain:tc5';
       profilesData.tp4 = { id:'tp4', name:'Only tmp', sources:[], nodes:['tmp::n0'], inAuto:true };
       openSourceActions('tmp');
       [...document.querySelectorAll('#actions-body .menu-row')].find(e => /Delete/.test(e.textContent)).click();
       const body = () => document.getElementById('actions-body').textContent;
       out.asks = !!sourcesData.tmp && /Delete Tmp\?/.test(document.getElementById('actionsTitle').textContent);
-      out.impact = /Tmp chain.*deleted with it/.test(body()) && /Only tmp.*no servers/.test(body());
+      out.impact = /Tmp chain.*deleted with it/.test(body()) && /Only tmp.*no servers/.test(body()) && /Discord voice.*rule #2.*loses its target/.test(body());
       [...document.querySelectorAll('#actions-body .menu-row')].find(e => /Cancel/.test(e.textContent)).click();
       out.cancel = !!sourcesData.tmp && !!chainsData.tc5;
       confirmDeleteNode('tmp', 'n0');
@@ -655,6 +683,8 @@ async function runChecks() {
       confirmDeleteSource('tmp');
       document.querySelector('#actions-body .menu-row.danger').click();
       out.gone = !sourcesData.tmp && !chainsData.tc5 && !connectOrder.includes('tc5');
+      out.ruleKept = rulesData.r2.target === 'chain:tc5' && /deleted chain/.test(targetName(rulesData.r2.target)) && !targetInfo(rulesData.r2.target).ok;
+      rulesData.r2.target = keep;
       delete profilesData.tp4; modeState.profiles.order = modeState.profiles.order.filter(x => x !== 'tp4');
       renderAll();
       return out;
@@ -934,7 +964,7 @@ async function runChecks() {
       out.every = rsDraft.every === 7200 && /2 h/.test(document.getElementById('rs-every').textContent);
       closeSheet('rsform'); closeSheet('rulesets');
       openApps(); openAppAct('com.whatsapp');
-      appDraft.act = 'proxy'; appDraft.split = true; appDraft.udpTarget = 1; renderAppAct();
+      appDraft.act = 'proxy'; appDraft.split = true; appDraft.udpTarget = 'profile:work'; renderAppAct();
       out.twoTargets = document.querySelectorAll('#aa-body .tgt-row').length === 2;
       saveAppAct();
       out.saved = appRules['com.whatsapp'].split && /UDP/.test(document.querySelector('.app-row[data-pkg="com.whatsapp"] .app-state').textContent);
@@ -950,6 +980,71 @@ async function runChecks() {
     const ids = await page.$$eval('.sheet', els => els.map(e => e.id.slice(3)));
     for (const id of ids) await page.evaluate(id => { openSheet(id); closeSheet(id); }, id);
     expect(!page.errors.length, page.errors.join(' | '));
+  });
+
+  await check('nodes tabs: tap and swipe switch the list, never the route mode', async () => {
+    await tab(page, 'nodes');
+    await page.evaluate(() => { setNodesTab('simple'); renderNodes(); });
+    const mode0 = await page.evaluate(() => connectMode);
+    const box = await page.locator('#nodesPager').boundingBox(), y = box.y + 100;
+    await page.mouse.move(box.x + box.width - 60, y); await page.mouse.down();
+    await page.mouse.move(box.x + 60, y, { steps: 10 }); await page.mouse.up(); await settle(page);
+    const r = await page.evaluate(m => ({ tab: nodesTab === 'profiles', mode: connectMode === m, noTap: !document.querySelector('#sh-actions.open'),
+      cards: document.querySelectorAll('#nodes-profiles .entry-card').length === catalogOrder.profiles.length,
+      dot: document.querySelector(`.nodes-tab[data-tab=${m}]`).classList.contains('used') }), mode0);
+    await page.mouse.move(box.x + 150, y); await page.mouse.down();
+    await page.mouse.move(box.x + 140, y + 120, { steps: 6 }); await page.mouse.up(); await settle(page);
+    r.vertical = await page.evaluate(() => nodesTab === 'profiles');
+    await page.click('.nodes-tab[data-tab=simple]'); await settle(page);
+    r.tap = await page.evaluate(() => nodesTab === 'simple' && /sources/.test(document.getElementById('nodesSummary').textContent));
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('nodes profiles tab: + creates a profile there, ⋮ Delete lists the rules that lose it', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, body = () => document.getElementById('actions-body').textContent;
+      switchTab('nodes'); setNodesTab('profiles');
+      openNodesAdd(); out.menu = /Profile/.test(body()) && /Chain/.test(body()); closeSheet('actions');
+      openCreateProfile(); toggleCreateProfileSource('src1'); document.getElementById('cp-name').value = 'Tmp prof'; saveCreateProfile();
+      const id = catalogOrder.profiles.find(x => profilesData[x] && profilesData[x].name === 'Tmp prof');
+      out.added = !!id && !!document.querySelector(`#nodes-profiles .entry-card[data-id=${id}]`) && modeOrder('profiles').includes(id);
+      const r1 = rulesData.r1; r1.action = 'proxy'; r1.target = 'profile:' + id;
+      openEntryActions(id);
+      [...document.querySelectorAll('#actions-body .menu-row')].find(e => /Delete/.test(e.textContent)).click();
+      out.impact = /Work network.*rule #\d.*loses its target/.test(body());
+      document.querySelector('#actions-body .menu-row.danger').click();
+      out.gone = !profilesData[id] && !catalogOrder.profiles.includes(id) && !modeOrder('profiles').includes(id);
+      r1.action = 'direct'; r1.target = '';
+      setNodesTab('simple'); switchTab('home'); renderAll(); renderRules();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('rules: target picker offers the whole catalog; If unavailable per rule and global', async () => {
+    const r = await page.evaluate(() => {
+      const out = {};
+      openRules(); openRuleForm('r1'); ruleDraft.action = 'proxy'; renderRuleForm();
+      document.querySelector('#rf-body .tgt-row').click();
+      out.open = document.getElementById('sh-target').classList.contains('open');
+      const ts = [...document.querySelectorAll('#tp-body .tp-card')].map(e => e.dataset.t);
+      out.all = ts.includes('') && ts.some(t => t.startsWith('src:')) && ts.some(t => t.startsWith('profile:')) && ts.some(t => t.startsWith('chain:'));
+      tpToggle(sourceOrder[0]);
+      document.querySelector('#tp-body .tp-nodes .node-row').click();
+      out.node = ruleDraft.target.startsWith('node:') && !document.getElementById('sh-target').classList.contains('open');
+      out.row = /node/.test(document.querySelector('#rf-body .tgt-row').textContent);
+      out.fbDefault = /Default: Main flow/.test(document.getElementById('rf-body').textContent);
+      [...document.querySelectorAll('#rf-fallback button')].find(b => b.textContent === 'Direct').click();
+      out.fb = ruleDraft.fallback === 'direct';
+      closeSheet('ruleform');
+      const r2 = rulesData.r2, keep = r2.target, keepFb = r2.fallback;
+      r2.target = 'src:src2'; r2.fallback = 'default'; sourcesData.src2.enabled = false; quickCfg.fallback = 'block'; renderRules();
+      out.down = /down → Block/.test(document.querySelector('.rule-row[data-id=r2]').textContent);
+      sourcesData.src2.enabled = true; r2.target = keep; r2.fallback = keepFb; quickCfg.fallback = 'main'; renderRules(); renderAll();
+      closeSheet('rules');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
   await check('themes change colours only, not layout', async () => {

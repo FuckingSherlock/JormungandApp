@@ -41,13 +41,16 @@ function dragShown(full, shown, commit) {
 
 function startConnectDrag(e, id) {
   const rowEl = document.querySelector('#connects-list .conn-row[data-id="'+id+'"]');
-  const [order, done] = dragShown(connectOrder, visibleOrder(), o => { connectOrder = o; });
+  // Dragging here gives the route its own order, apart from Nodes (until "Follow Nodes order").
+  const [order, done] = dragShown(connectOrder, visibleOrder(), o => { if (o.join() !== connectOrder.join()) routeCustom[connectMode] = true; connectOrder = o; });
   startRowDrag(e, rowEl, '.conn-row', order, () => { done(); renderConnects(); updateMainConnectCard(); });
 }
 
+// Nodes: sources, profiles and chains of the tab share one list (catalogOrder[tab]).
 function startSourceDrag(e, id) {
-  const rowEl = document.querySelector('#nodes-list .src-card[data-id="'+id+'"]');
-  startRowDrag(e, rowEl, '.src-card', () => sourceOrder, () => { renderNodes(); renderConnects(); });
+  const tab = modeOf(id) || 'simple';
+  const rowEl = document.querySelector(`#${tab === 'simple' ? 'nodes-list' : 'nodes-profiles'} .src-card[data-id="${id}"]`);
+  startRowDrag(e, rowEl, '.src-card', () => catalogOrder[tab], () => { syncCatalog(); renderAll(); });
 }
 
 // Target slot: a row below is passed once the dragged row's bottom edge crosses its centre,

@@ -749,6 +749,51 @@ body {
 .node-add{display:flex;align-items:center;gap:8px;padding:11px 14px;font-size:14px;font-weight:600;color:var(--accent);cursor:pointer;border-top:1px solid rgba(255,255,255,.035)}
 .nodes-empty{text-align:center;padding:40px 20px;color:var(--t2);font-size:14px;line-height:1.5}
 
+
+/* ── Nodes tabs: Servers / Profiles, swipeable pager ── */
+.nodes-tabs{position:relative;display:flex;margin:0 14px 10px;border-bottom:1px solid var(--border);flex-shrink:0}
+.nodes-tab{flex:1;background:none;border:none;font:inherit;font-size:14px;font-weight:600;color:var(--t3);padding:8px 0 10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+.nodes-tab.active{color:var(--t1)}
+.nodes-tab .tab-dot{width:6px;height:6px;border-radius:50%;background:var(--active);visibility:hidden}
+.nodes-tab.used .tab-dot{visibility:visible}
+.nodes-tab-ink{position:absolute;left:0;bottom:-1px;width:50%;height:2px;border-radius:1px;background:var(--accent);transition:transform .25s ease;pointer-events:none}
+.nodes-pager{flex:1;min-height:0;overflow:hidden;position:relative}
+.nodes-track{display:flex;width:200%;height:100%;transition:transform .25s ease}
+#view-nodes.swiping .nodes-track,#view-nodes.swiping .nodes-tab-ink{transition:none}
+.nodes-page{width:50%;height:100%;overflow-y:auto;overscroll-behavior:contain;padding-top:2px;touch-action:pan-y}
+
+/* ── Profile / chain cards (Nodes, target picker) ── */
+.entry-now{display:flex;align-items:center;gap:6px;padding:0 14px 12px 0;font-size:13px;color:var(--t2);white-space:nowrap;overflow:hidden}
+.entry-now.bad{color:var(--muted)}
+.entry-now .lat{min-width:0;padding:0;cursor:default}
+.entry-total{margin-left:auto;display:flex;align-items:center;gap:4px;color:var(--t3);flex-shrink:0}
+.entry-ends{overflow:hidden;text-overflow:ellipsis}
+.entry-card.broken{border-color:rgba(var(--muted-rgb),.55)}
+.entry-card.broken .src-main{opacity:.6}
+.entry-side{padding:8px 14px 4px;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--t3)}
+.entry-empty{padding:8px 14px 10px;font-size:13px;color:var(--t3)}
+.node-row.now .node-name{color:var(--active)}
+.node-src{margin-left:6px;font-size:11px;color:var(--t3)}
+
+/* ── Target picker ── */
+.overlay-l5{z-index:50}
+.sheet-l5{z-index:51}
+.tp-search{margin:10px 14px 0}
+.tp-body{display:flex;flex-direction:column;gap:8px;padding:10px 14px 24px}
+.tp-body > *{flex-shrink:0}
+.tp-label{padding:8px 4px 0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--t3)}
+.tp-card .src-head{padding-left:14px;cursor:pointer}
+.tp-card .src-usage,.tp-card .entry-now{padding-left:14px}
+.tp-card.picked{border-color:var(--accent);background:rgba(var(--accent-rgb),.07)}
+.tp-card.down .src-main{opacity:.6}
+.tp-check{color:var(--accent);flex-shrink:0;margin:0 4px}
+.tp-nodes{display:block}
+.tp-nodes .node-row.picked{background:rgba(var(--accent-rgb),.10)}
+
+/* ── Route sheet ── */
+.route-mode{margin-left:8px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(var(--accent-rgb),.12);border-radius:10px;padding:2px 8px;cursor:pointer}
+.route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
+.route-auto{flex-shrink:0;padding:0 4px}
 /* ── Compact action sheets (menus) ── */
 .sheet.compact{top:auto;max-height:85vh}
 .sheet.compact .sheet-body{padding:6px 0 18px}
@@ -996,7 +1041,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   </div>
   </div><!-- /view-home -->
 
-  <!-- ══════════ VIEW: NODES (subscriptions + manual servers) ══════════ -->
+  <!-- ══════════ VIEW: NODES (catalog: Servers tab = sources + their chains, Profiles tab = profiles + their chains) ══════════ -->
   <div class="view" id="view-nodes">
     <div class="topbar">
       <div>
@@ -1016,7 +1061,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <button class="icon-btn" onclick="openNodesMore()" title="More">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
         </button>
-        <button class="icon-btn primary no-edit" onclick="openSheet('addmenu')" title="Add">
+        <button class="icon-btn primary no-edit" onclick="openNodesAdd()" title="Add">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
       </div>
@@ -1028,7 +1073,17 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-    <div class="scroll" id="nodes-list"></div>
+    <div class="nodes-tabs" id="nodesTabs">
+      <button class="nodes-tab" data-tab="simple" onclick="setNodesTab('simple')">Servers<span class="tab-dot" title="The route uses this tab now"></span></button>
+      <button class="nodes-tab" data-tab="profiles" onclick="setNodesTab('profiles')">Profiles<span class="tab-dot" title="The route uses this tab now"></span></button>
+      <div class="nodes-tab-ink" id="nodesTabInk"></div>
+    </div>
+    <div class="nodes-pager" id="nodesPager">
+      <div class="nodes-track" id="nodesTrack">
+        <div class="scroll nodes-page" id="nodes-list"></div>
+        <div class="scroll nodes-page" id="nodes-profiles"></div>
+      </div>
+    </div>
   </div><!-- /view-nodes -->
 
   <!-- ══════════ VIEW: SETTINGS — a list of sections, each opens its own sheet ══════════ -->
@@ -1190,7 +1245,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="sheet" id="sh-profiles">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title"><span id="profilesTitle">Servers</span><button class="help-btn" onclick="event.stopPropagation();openHelp('entries')" title="What is this?">?</button></span>
+      <span class="sheet-title"><span id="profilesTitle">Route</span><button class="help-btn" onclick="event.stopPropagation();openHelp('entries')" title="What is this?">?</button></span>
       <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order · Manual: the entry you tapped">
         <div class="conn-dot"></div><span>Auto</span>
       </div>
@@ -1205,10 +1260,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="sheet-body">
       <div class="list-caption"><span>Priority</span><span id="connectsCaption"></span></div>
       <div id="connects-list"></div>
-      <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span id="createEntryLabel">Create chain</span>
-      </div>
+      <div class="route-note" id="routeOrderNote"></div>
     </div>
   </div>
 
@@ -1496,6 +1548,21 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <button class="btn-danger-text" id="rs-delete" onclick="deleteRuleSet()">Delete rule set</button>
     </div>
   </div>
+
+  <!-- ══════════ TARGET PICKER (rules, apps): above every other sheet and dialog ══════════ -->
+  <div class="overlay overlay-l5" id="ov-target" onclick="closeSheet('target')"></div>
+  <div class="sheet sheet-l5" id="sh-target">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Send through</span>
+      <button class="sheet-close" onclick="closeSheet('target')">×</button>
+    </div>
+    <div class="search tp-search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="tp-search" placeholder="Search profiles, chains, servers" oninput="renderTargetPicker()">
+    </div>
+    <div class="sheet-body tp-body" id="tp-body"></div>
+  </div>
   <!-- ══════════ NODES: ADD MENU ══════════ -->
   <div class="overlay overlay-l2" id="ov-addmenu" onclick="closeSheet('addmenu')"></div>
   <div class="sheet sheet-l2 compact" id="sh-addmenu">
@@ -1516,6 +1583,10 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <div class="menu-row" onclick="closeSheet('addmenu');openNodeForm()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/></svg>
         <div class="menu-label">Manual server<div class="menu-sub">Fill in address, port and key</div></div>
+      </div>
+      <div class="menu-row" id="addChainRow" onclick="closeSheet('addmenu');openCreateChain(null,'simple')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="3"/><circle cx="19" cy="12" r="3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <div class="menu-label">Chain<div class="menu-sub">Enter through one subscription or group, exit through another</div></div>
       </div>
       <div class="menu-row" onclick="closeSheet('addmenu');toast('Camera is not available in the mockup')">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>
@@ -1831,10 +1902,25 @@ let chainsData = {
 };
 let chainSeq = 1;
 
+/* Catalog: what each Nodes tab lists (Servers = sources + chains of sources, Profiles =
+   profiles + chains of profiles), in the order the user drags there. Nodes is the only place
+   they are created, edited and deleted. The catalog order is also the default priority of
+   the Route sheet: until the user drags the Route list, the route follows it; after that the
+   route keeps its own order (routeCustom) — new entries join its end — until "Follow Nodes
+   order". sourceOrder mirrors the sources of catalogOrder.simple. */
+const catalogOrder = {
+  simple:   ['src1','src2','src3','src4','sc1'],
+  profiles: ['default','work','gaming','cpdefault','cpgaming','cpwork'],
+};
+const routeCustom = { simple: false, profiles: false };
 
-function getProfileIds() { return connectOrder.filter(id => profilesData[id]); }
-// Chain-able entries of the active mode: sources in simple mode, profiles otherwise.
-function getUnitIds()    { return connectOrder.filter(id => connectMode === 'simple' ? sourcesData[id] && sourcesData[id].enabled : profilesData[id]); }
+
+function getProfileIds() { return catalogOrder.profiles.filter(id => profilesData[id]); }
+// Chain-able entries of a mode: sources in simple mode, profiles otherwise (catalog order).
+function unitIdsOf(mode) { return catalogOrder[mode].filter(id => mode === 'simple' ? sourcesData[id] && sourcesData[id].enabled : profilesData[id]); }
+function getUnitIds()    { return unitIdsOf(connectMode); }
+// Which Nodes tab (= connect mode) an entry belongs to.
+const modeOf = id => catalogOrder.simple.includes(id) ? 'simple' : catalogOrder.profiles.includes(id) ? 'profiles' : null;
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 
@@ -2103,14 +2189,13 @@ function renderConnectRow(id) {
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
-    <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : profilesData[id] ? 'openEditProfile' : 'openSourceEntry'}('${id}')" title="Edit">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
-    </button>
+    ${current && !connectEdit ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
+    ${connectEdit ? `<div class="route-auto" title="Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>` : ''}
   </div>`;
 }
 
-// Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
+// Edit mode of the list: ⋮⋮ grips for the Auto priority and the "in Auto" switches;
+// taps no longer switch to Manual. Everything else about an entry is edited in Nodes.
 let connectEdit = false;
 function setConnectEdit(on) {
   connectEdit = on;
@@ -2121,15 +2206,18 @@ function setConnectEdit(on) {
 }
 
 function renderConnects() {
-  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ to set Auto priority' : 'tap to use it (Manual)';
+  syncCatalog();
+  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ · switch = in Auto' : 'tap to use it (Manual)';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
-  document.getElementById('profilesTitle').textContent = simpleMode() ? 'Servers' : 'Profiles';
-  document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Create chain' : 'Create profile or chain';
+  document.getElementById('profilesTitle').innerHTML = `Route<span class="route-mode" onclick="event.stopPropagation();openProfilesMenu()">${simpleMode() ? 'Servers' : 'Profiles'}</span>`;
+  document.getElementById('routeOrderNote').innerHTML = routeCustom[connectMode]
+    ? `Own priority order<button class="am-link" onclick="resetRouteOrder()">Follow Nodes order</button>`
+    : 'Priority follows the order in Nodes · drag here to override it';
   const broken = brokenOrder();
   document.getElementById('connects-list').innerHTML = (visibleOrder().map(renderConnectRow).join('')
-    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No working profiles'}</div>`)
+    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No working profiles — create one in Nodes → Profiles'}</div>`)
     + (broken.length ? `<div class="conn-broken-list">${broken.map(renderBrokenRow).join('')}</div>` : '');
 }
 
@@ -2172,6 +2260,37 @@ function openProfiles() {
   openSheet('profiles');
 }
 
+/* Keeps the catalog, sourceOrder and both route lists in step after anything was added
+   or deleted: entries that no longer exist drop out; a route that follows Nodes copies
+   the catalog, a route with its own order keeps it and appends new entries. */
+function syncCatalog() {
+  const exists = id => sourcesData[id] || profilesData[id] || chainsData[id];
+  catalogOrder.simple = catalogOrder.simple.filter(exists);
+  sourceOrder.forEach(id => { if (!catalogOrder.simple.includes(id)) catalogOrder.simple.push(id); });
+  catalogOrder.profiles = catalogOrder.profiles.filter(exists);
+  sourceOrder = catalogOrder.simple.filter(id => sourcesData[id]);
+  ['simple', 'profiles'].forEach(m => {
+    const cat = catalogOrder[m], cur = modeOrder(m);
+    const next = routeCustom[m] ? cur.filter(id => cat.includes(id)).concat(cat.filter(id => !cur.includes(id))) : cat.slice();
+    setModeOrder(m, next);
+    if (m === connectMode) { if (!next.includes(activeConnectId)) activeConnectId = next[0]; }
+    else if (!next.includes(modeState[m].active)) modeState[m].active = next[0];
+  });
+}
+
+function resetRouteOrder() {
+  routeCustom[connectMode] = false;
+  closeSheet('actions');
+  renderConnects();
+  updateMainConnectCard();
+}
+function toggleEntryAuto(id) {
+  const e = connectEntry(id);
+  e.inAuto = !e.inAuto;
+  renderConnects();
+  updateMainConnectCard();
+}
+
 function setAutoConnect(on) {
   autoConnect = on;
   if (!on) activeConnectId = effectiveConnectIdWhenAuto();
@@ -2192,14 +2311,14 @@ function selectConnect(id) {
 
 const CHAIN_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
 
+// "+" on the Profiles tab of Nodes (the Servers tab has its Add sheet with a Chain row).
 function openCreateMenu() {
   const close = "closeSheet('actions');";
-  if (simpleMode()) { openCreateChain(); return; }   // entries themselves come from Nodes
   openActions('Create',
     menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Chosen subscriptions or single servers — uses the fastest</div>', close + 'openCreateProfile()') +
     menuRow(CHAIN_ICON,
       'Chain<div class="menu-sub">' + (getProfileIds().length < 2 ? 'Needs at least two profiles' : 'Enter through one profile, exit through another') + '</div>',
-      close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
+      close + "openCreateChain(null,'profiles')", getProfileIds().length < 2 ? 'disabled' : ''));
 }
 
 /* ── Mode: simple (sources) / profiles ── */
@@ -2208,7 +2327,8 @@ function openProfilesMenu() {
   const radio = on => `<div class="profile-radio ${on ? 'active' : ''}"></div>`;
   openActions('Mode',
     menuRow(radio(simpleMode()), 'Simple<div class="menu-sub">Subscriptions and server sets from Nodes, plus chains of them</div>', "setConnectMode('simple')") +
-    menuRow(radio(!simpleMode()), 'Profiles<div class="menu-sub">Group servers into profiles, plus chains of profiles</div>', "setConnectMode('profiles')"));
+    menuRow(radio(!simpleMode()), 'Profiles<div class="menu-sub">Group servers into profiles, plus chains of profiles</div>', "setConnectMode('profiles')")
+    + (routeCustom[connectMode] ? menuRow(ICON.refresh, 'Follow Nodes order<div class="menu-sub">Drop this route’s own priority order</div>', 'resetRouteOrder()') : ''));
 }
 
 function setConnectMode(mode) {
@@ -2219,17 +2339,19 @@ function setConnectMode(mode) {
   connectMode = mode;
   renderConnects();
   updateMainConnectCard();
+  if (typeof renderNodesTabs === 'function') renderNodesTabs();
 }
 
 // Priority list of either mode (the active one lives in the globals).
 function modeOrder(mode) { return mode === connectMode ? connectOrder : modeState[mode].order; }
 function setModeOrder(mode, order) { if (mode === connectMode) connectOrder = order; else modeState[mode].order = order; }
 
-// A new source joins the end of the simple-mode list.
+// A new source joins the end of the Servers tab (and so of the simple-mode route).
 function sourceAdded(id) {
   if (sourcesData[id].inAuto === undefined) sourcesData[id].inAuto = true;
   if (!sourcesData[id].offNodes) sourcesData[id].offNodes = [];
-  setModeOrder('simple', modeOrder('simple').concat(id));
+  if (!catalogOrder.simple.includes(id)) catalogOrder.simple.push(id);
+  syncCatalog();
   if (document.getElementById('sh-profiles').classList.contains('open')) renderConnects();
 }
 
@@ -2238,6 +2360,7 @@ function dropConnectEntry(id) {
   const gone = new Set([id]);
   Object.values(chainsData).forEach(c => { if (c.inId === id || c.outId === id) { gone.add(c.id); delete chainsData[c.id]; } });
   ['simple', 'profiles'].forEach(mode => {
+    catalogOrder[mode] = catalogOrder[mode].filter(x => !gone.has(x));
     const order = modeOrder(mode).filter(x => !gone.has(x));
     setModeOrder(mode, order);
     const st = mode === connectMode ? null : modeState[mode];
@@ -2263,6 +2386,7 @@ function toggleRuleEnabled(id) {
    chain         — chain + entry node → exit node (their sources in the sheet).
    The right column is the latency (a chain: the two hops added up). */
 function updateMainConnectCard() {
+  syncCatalog();
   const id = effectiveConnectId();
   const e = connectEntry(id);
   const badge = document.getElementById('profModeBadge');
@@ -2504,17 +2628,19 @@ function renderSourceCard(id, q) {
   </div>`;
 }
 
+// Both tabs render at once (the pager slides between them, see 31-catalog.js).
 function renderNodes() {
+  syncCatalog();
   const input = document.getElementById('nodeSearch');
   const q = input.value.trim().toLowerCase();
-  const html = sourceOrder.map(id => renderSourceCard(id, q)).join('');
+  const none = `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`;
+  const html = catalogOrder.simple.map(id => sourcesData[id] ? renderSourceCard(id, q) : renderEntryCard(id, q)).join('');
   document.getElementById('nodes-list').innerHTML = html ||
-    (q ? `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`
-       : `<div class="nodes-empty">No subscriptions or servers yet.<br>Tap <b>+</b> to add one.</div>`);
-
-  const total = sourceOrder.reduce((sum, id) => sum + sourcesData[id].nodes.length, 0);
-  const summary = sourceOrder.length + ' source' + (sourceOrder.length === 1 ? '' : 's') + ' · ' + total + ' nodes';
-  document.getElementById('nodesSummary').textContent = summary;
+    (q ? none : `<div class="nodes-empty">No subscriptions or servers yet.<br>Tap <b>+</b> to add one.</div>`);
+  document.getElementById('nodes-profiles').innerHTML = catalogOrder.profiles.map(id => renderEntryCard(id, q)).join('') ||
+    (q ? none : `<div class="nodes-empty">No profiles yet.<br>Tap <b>+</b> to group servers into one.</div>`);
+  renderNodesSummary();
+  renderNodesTabs();
 }
 
 function toggleNodeSearch(force) {
@@ -2537,7 +2663,7 @@ function toggleSourceOpen(id) {
 }
 
 function setAllOpen(open) {
-  sourceOrder.forEach(id => expandState[id] = open);
+  catalogOrder[nodesTab].forEach(id => expandState[id] = open);
   renderNodes();
   closeSheet('nodesmore');
 }
@@ -2635,7 +2761,7 @@ function menuRow(icon, label, onclick, extraCls) {
 
 function openNodesMore() {
   const sortChip = (key, label) => `<div class="chip ${nodeSort === key ? 'active' : ''}" onclick="setNodeSort('${key}')">${label}</div>`;
-  const anyOpen = sourceOrder.some(id => expandState[id]);
+  const anyOpen = catalogOrder[nodesTab].some(id => expandState[id]);
   document.getElementById('nodesmore-body').innerHTML =
     menuRow(ICON.refresh, 'Update all subscriptions', 'updateAllSources()') +
     (anyOpen ? menuRow(ICON.collapse, 'Collapse all', 'setAllOpen(false)')
@@ -2660,7 +2786,8 @@ function openActions(title, rowsHtml) {
 function openSourceActions(sid) {
   const s = sourcesData[sid];
   const close = "closeSheet('actions');";
-  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`);
+  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`)
+    + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
     rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
     rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
@@ -2701,7 +2828,7 @@ function deleteImpact(excl, sid) {
   const using = (c0 ? [chainEntryRefs(c0).find(r => r.node === chainEntryNode(c0)), chainExitRefs(c0).find(r => r.node === chainExitNode(c0))]
     : [unitRefs(id0).find(r => r.node === unitNode(id0))]).filter(Boolean);
   if (using.some(excl)) lines.push(['Current connection', '', 'goes through it — will reconnect through the next working server', 'warn']);
-  ['simple', 'profiles'].forEach(mode => modeOrder(mode).forEach(id => {
+  ['simple', 'profiles'].forEach(mode => catalogOrder[mode].forEach(id => {
     const e = connectEntry(id);
     if (!e || id === sid) return;
     if (chainsData[id]) {
@@ -2724,7 +2851,7 @@ function confirmDeleteHtml(note, lines, doIt, label) {
   const close = "closeSheet('actions');";
   const list = lines.length ? `<div class="menu-caption">This will affect</div><div class="impact-list">${lines.map(([name, kind, what, cls]) =>
     `<div class="impact-row ${cls}"><div class="impact-name">${esc(name)}${kind ? `<span class="conn-tag">${kind}</span>` : ''}</div><div class="impact-what">${what}</div></div>`).join('')}</div>`
-    : '<div class="menu-note">Not used in any profile or chain.</div>';
+    : '<div class="menu-note">Not used in any profile, chain, rule or app.</div>';
   return `<div class="menu-note">${note}</div>${list}`
     + menuRow(ICON.trash, label, close + doIt, 'danger')
     + menuRow(ICON.close, 'Cancel', close);
@@ -2736,14 +2863,16 @@ function confirmDeleteSource(sid) {
   const n = s.nodes.length, g = (s.gone || []).length;
   const note = (s.kind === 'sub' ? `The subscription and its ${n} server${n === 1 ? '' : 's'}` : `The group and its ${n} server${n === 1 ? '' : 's'}`)
     + ' are removed' + (g ? `, with ${g} unavailable one${g === 1 ? '' : 's'} kept for their settings` : '') + '. This can’t be undone.';
-  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, deleteImpact(r => r.sid === sid, sid), `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));
+  const dead = new Set(Object.values(chainsData).filter(c => c.inId === sid || c.outId === sid).map(c => 'chain:' + c.id));
+  const impact = deleteImpact(r => r.sid === sid, sid).concat(targetImpact(t => t === 'src:' + sid || t.startsWith('node:' + sid + '::') || dead.has(t)));
+  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, impact, `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));
 }
 
 function confirmDeleteNode(sid, nid) {
   const s = sourcesData[sid], n = s && s.nodes.find(x => x.id === nid);
   if (!n) return;
   openActions('Delete ' + n.name + '?', confirmDeleteHtml(`${n.flag} ${esc(n.name)} is removed from ${esc(s.name)}, with its place in every profile and chain. This can’t be undone.`,
-    deleteImpact(r => r.sid === sid && r.node.id === nid), `deleteNode('${sid}','${nid}')`, 'Delete server'));
+    deleteImpact(r => r.sid === sid && r.node.id === nid).concat(targetImpact(t => t === 'node:' + sid + '::' + nid)), `deleteNode('${sid}','${nid}')`, 'Delete server'));
 }
 
 function deleteSource(id) {
@@ -2767,6 +2896,209 @@ function deleteNode(sid, nid) {
   s.count = s.nodes.length;
   purgeNodeSettings(sid, new Set([nid]));
   renderAll();
+}
+/* ══════════════════════ NODES TABS: Servers / Profiles ══════════════════════
+   The two tabs are the catalog of the two connect modes (catalogOrder): Servers = sources
+   and chains of sources, Profiles = profiles and chains of profiles. Everything is created,
+   edited and deleted here; the Route sheet only picks Auto / Manual and may override the
+   priority. Which tab the route uses is its mode (chosen in Route); a dot marks that tab.
+   Tapping or swiping a tab only changes what is shown — never the route.
+
+   Swipe: the whole list follows a horizontal finger; past ~20% of the width it snaps to the
+   other tab. It starts only on a clearly horizontal move (vertical scroll and ⋮⋮ drags win)
+   and never within 24px of the screen edge, where Android has its back gesture. */
+
+const NODES_TABS = ['simple', 'profiles'];
+let nodesTab = 'simple';
+let pagerSwipe = null, pagerSwallowClick = false;
+
+function setNodesTab(tab) {
+  if (tab === nodesTab) return;
+  nodesTab = tab;
+  renderNodesTabs();
+  renderNodesSummary();
+}
+
+function renderNodesTabs(dx = 0) {
+  const i = NODES_TABS.indexOf(nodesTab);
+  document.getElementById('nodesTrack').style.transform = `translateX(calc(${-i * 50}% + ${dx}px))`;
+  document.getElementById('nodesTabInk').style.transform = `translateX(calc(${i * 100}% - ${dx / 2}px))`;
+  document.querySelectorAll('#nodesTabs .nodes-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === nodesTab);
+    b.classList.toggle('used', b.dataset.tab === connectMode);
+  });
+}
+
+function initNodesPager() {
+  const pager = document.getElementById('nodesPager');
+  pager.addEventListener('pointerdown', e => {
+    if (dragCtx || e.button > 0 || e.target.closest('.drag-handle, input, select, textarea')) return;
+    const r = pager.getBoundingClientRect();
+    if (e.pointerType !== 'mouse' && (e.clientX - r.left < 24 || r.right - e.clientX < 24)) return;
+    pagerSwipe = { x: e.clientX, y: e.clientY, dir: null, w: r.width, dx: 0 };
+  });
+  window.addEventListener('pointermove', e => {
+    const s = pagerSwipe;
+    if (!s || dragCtx) return;
+    const dx = e.clientX - s.x, dy = e.clientY - s.y;
+    if (!s.dir) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5) { s.dir = 'h'; document.getElementById('view-nodes').classList.add('swiping'); }
+      else if (Math.abs(dy) > 10) { pagerSwipe = null; return; }
+      else return;
+    }
+    const i = NODES_TABS.indexOf(nodesTab);
+    s.dx = (i === 0 && dx > 0) || (i === NODES_TABS.length - 1 && dx < 0) ? dx / 4 : dx;   // rubber band at the ends
+    renderNodesTabs(s.dx);
+  });
+  const end = () => {
+    const s = pagerSwipe;
+    pagerSwipe = null;
+    if (!s || s.dir !== 'h') return;
+    document.getElementById('view-nodes').classList.remove('swiping');
+    pagerSwallowClick = true;
+    setTimeout(() => { pagerSwallowClick = false; }, 0);
+    const i = NODES_TABS.indexOf(nodesTab), step = Math.abs(s.dx) > s.w * 0.2 ? (s.dx < 0 ? 1 : -1) : 0;
+    const next = NODES_TABS[Math.max(0, Math.min(NODES_TABS.length - 1, i + step))];
+    if (next !== nodesTab) setNodesTab(next); else renderNodesTabs();
+  };
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+  // The pointerup of a swipe must not also tap the card under the finger.
+  pager.addEventListener('click', e => { if (pagerSwallowClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+  renderNodesTabs();
+}
+
+function renderNodesSummary() {
+  let text;
+  if (nodesTab === 'simple') {
+    const total = sourceOrder.reduce((sum, id) => sum + sourcesData[id].nodes.length, 0);
+    text = sourceOrder.length + ' source' + (sourceOrder.length === 1 ? '' : 's') + ' · ' + total + ' nodes';
+  } else {
+    const p = getProfileIds().length, c = catalogOrder.profiles.filter(id => chainsData[id]).length;
+    text = p + ' profile' + (p === 1 ? '' : 's') + ' · ' + c + ' chain' + (c === 1 ? '' : 's');
+  }
+  document.getElementById('nodesSummary').textContent = text;
+}
+
+function openNodesAdd() {
+  if (nodesTab === 'profiles') { openCreateMenu(); return; }
+  document.getElementById('addChainRow').classList.toggle('disabled', unitIdsOf('simple').length < 2);
+  openSheet('addmenu');
+}
+
+/* ── Profile / chain cards (a tab's list, next to source cards) ──
+   Head: name, what it is made of, Fastest / Priority. Line below: the server it would use
+   now with its ping (a chain: entry → exit and the two hops added up), or what is off in
+   Nodes. Expanded: its servers — tap one to ping it. ⋮ = Edit / Test / Delete. */
+
+function entryMetaHtml(id) {
+  const dot = '<span class="dot">·</span>';
+  if (chainsData[id]) {
+    const c = chainsData[id];
+    return `<span class="fmt-tag">chain</span>${dot}<span class="entry-ends">${esc(unitName(c.inId))} → ${esc(unitName(c.outId))}</span>`
+      + (c.exitMode === 'priority' ? `${dot}<span>exit by priority</span>` : '');
+  }
+  const p = profilesData[id], n = unitRefs(id).length;
+  const made = [p.sources.length ? p.sources.length + ' source' + (p.sources.length === 1 ? '' : 's') : '',
+    p.nodes.length ? p.nodes.length + ' picked' : ''].filter(Boolean).join(' + ');
+  return `<span class="fmt-tag">profile</span>${dot}<span>${n} server${n === 1 ? '' : 's'}</span>`
+    + (made ? `${dot}<span>${made}</span>` : '');   // Priority shows as a tag on the line below
+}
+
+function entryNowHtml(id) {
+  if (isBroken(id)) return `<div class="entry-now bad">${esc(reasonsText(brokenBy(id)))}</div>`;
+  if (chainsData[id]) {   // the ends' names are in the meta line: here the two servers and the hops added up
+    const c = chainsData[id], a = chainEntryNode(c), b = chainExitNode(c);
+    const node = n => n ? `<span class="conn-node">${n.flag} ${esc(n.name)}</span>` : '<span class="conn-node">no working server</span>';
+    const total = a && b && isAlive(a) && isAlive(b) ? `<span class="entry-total">${latMsHtml(ping(a) + ping(b))}</span>` : '';
+    return `<div class="entry-now">${node(a)}<span class="conn-arrow">→</span>${node(b)}${total}</div>`;
+  }
+  return `<div class="entry-now">${entrySummaryHtml(id)}</div>`;
+}
+
+function entryNodeRowsHtml(refs, now) {
+  return refs.map(r => `<div class="node-row tap ${r.node === now ? 'now' : ''}" onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">
+      <span class="node-flag">${r.node.flag}</span>
+      <span class="node-name">${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      <span class="node-proto">${r.node.protocol}</span>${latHtml(r.node)}</div>`).join('')
+    || '<div class="entry-empty">No working servers</div>';
+}
+
+function renderEntryCard(id, q) {
+  const e = connectEntry(id);
+  if (!e) return '';
+  if (q && !e.name.toLowerCase().includes(q)) return '';
+  const chain = chainsData[id];
+  const open = !!expandState[id], broken = isBroken(id);
+  const grip = !nodesEdit ? '' : q ? '<div class="drag-handle" style="visibility:hidden"></div>'
+    : `<div class="drag-handle" onpointerdown="startSourceDrag(event,'${id}')" onclick="event.stopPropagation()" title="Drag to reorder">${GRIP_SVG}</div>`;
+  const body = chain
+    ? `<div class="entry-side">Entry · ${esc(unitName(chain.inId))}</div>${entryNodeRowsHtml(chainEntryRefs(chain), chainEntryNode(chain))}
+       <div class="entry-side">Exit · ${esc(unitName(chain.outId))}</div>${entryNodeRowsHtml(chainExitRefs(chain), chainExitNode(chain))}`
+    : entryNodeRowsHtml(unitPickRefs(id), unitNode(id));
+  return `<div class="src-card entry-card ${open ? 'open' : ''} ${broken ? 'broken' : ''}" data-id="${id}">
+    <div class="src-top">
+    ${grip}
+    <div class="src-top-main">
+    <div class="src-head" onclick="toggleSourceOpen('${id}')">
+      <div class="src-main">
+        <div class="src-name">${esc(e.name)}${broken ? '<span class="conn-tag off">off</span>' : ''}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+        <div class="src-meta">${entryMetaHtml(id)}</div>
+      </div>
+      ${nodesEdit ? '' : `<button class="icon-btn ghost" onclick="event.stopPropagation();testEntryLatency('${id}')" title="Test latency">${ICON.bolt}</button>`}
+      <button class="icon-btn ghost" onclick="event.stopPropagation();openEntryActions('${id}')" title="More">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button>
+    </div>
+    ${entryNowHtml(id)}
+    </div>
+    </div>
+    <div class="src-body">${body}</div>
+  </div>`;
+}
+
+function entryRefs(id) {
+  const c = chainsData[id];
+  return c ? chainEntryRefs(c).concat(chainExitRefs(c)) : unitRefs(id);
+}
+function testEntryLatency(id) { testLatency(entryRefs(id).map(r => [r.sid, r.node.id])); }
+
+function openEntryActions(id) {
+  const close = "closeSheet('actions');", chain = !!chainsData[id];
+  openActions(connectEntry(id).name,
+    menuRow(ICON.edit, chain ? 'Edit chain' : 'Edit profile', close + (chain ? `openEditChain('${id}')` : `openEditProfile('${id}')`))
+    + menuRow(ICON.bolt, 'Test latency', close + `testEntryLatency('${id}')`)
+    + menuRow(ICON.trash, 'Delete', close + `confirmDeleteEntry('${id}')`, 'danger'));
+}
+
+/* Deleting a profile moves the chains that use it to the first other profile (a chain left
+   with the same profile on both ends is deleted). Rules and apps that target the deleted
+   profile / chain keep pointing at it and do what their "If unavailable" says. */
+function confirmDeleteEntry(id) {
+  const e = connectEntry(id);
+  if (!e) return;
+  const lines = [];
+  const dead = new Set(['chain:' + id, 'profile:' + id]);
+  if (profilesData[id]) {
+    const others = getProfileIds().filter(x => x !== id);
+    if (!others.length) { toast('Keep at least one profile'); return; }
+    const fb = others[0];
+    Object.values(chainsData).forEach(c => {
+      if (c.inId !== id && c.outId !== id) return;
+      const inId = c.inId === id ? fb : c.inId, outId = c.outId === id ? fb : c.outId;
+      if (inId === outId) { lines.push([c.name, 'chain', 'is deleted with it', 'bad']); dead.add('chain:' + c.id); }
+      else lines.push([c.name, 'chain', `its ${c.inId === id ? 'entry' : 'exit'} moves to ${esc(profilesData[fb].name)}`, 'warn']);
+    });
+  }
+  if (effectiveConnectId() === id) lines.unshift(['Current connection', '', 'goes through it — will reconnect through the next entry', 'warn']);
+  const kind = chainsData[id] ? 'chain' : 'profile';
+  openActions('Delete ' + e.name + '?', confirmDeleteHtml(`The ${kind} is removed from Nodes and from the route. This can’t be undone.`,
+    lines.concat(targetImpact(t => dead.has(t))), `deleteEntry('${id}')`, 'Delete ' + kind));
+}
+
+function deleteEntry(id) {
+  if (profilesData[id]) { editingProfileId = id; deleteEditingProfile(); }
+  else if (chainsData[id]) { editingChainId = id; deleteEditingChain(); }
 }
 /* ── Subscription / group form ── */
 
@@ -2966,18 +3298,65 @@ function switchTab(name) {
      2. My rules   — full form (75-rule-form.js), drag to reorder;
      3. Quick      — local networks, ads, services, "my region direct";
      4. Everything else — one final action.
-   The engine checks them top-down, first match wins; "Final order" shows it read-only.
-   Targets (profile / chain / subscription / node) wait for the targets rework: until then
-   the picker is a stub that cycles through sample targets. */
+   The engine checks them top-down, first match wins; "Final order" shows it read-only. */
 
-// index 0 = the main flow (what Home connects through); the rest are stub samples.
-const STUB_TARGETS = [['Main flow', 'proxy'], ['Europe', 'profile'], ['DE → NL', 'chain'], ['Remnawave', 'subscription'], ['Frankfurt 01', 'node']];
-const targetTag = i => i ? STUB_TARGETS[i][1] + ':' + STUB_TARGETS[i][0] : 'proxy';
-const targetName = i => STUB_TARGETS[i][0];
-const nextTarget = i => (i + 1) % STUB_TARGETS.length;
-function targetRowHtml(label, i, click) {
-  return `<div class="set-row tgt-row" onclick="${click}"><div class="set-label">${label}</div>
-    <span class="tgt-val">${esc(targetName(i))}${i ? `<span class="tgt-kind">${STUB_TARGETS[i][1]}</span>` : ''}</span><span class="soon-tag">stub</span>${CHEVRON_R}</div>`;
+/* ── Targets ──
+   What a rule / app sends traffic through: '' = the main flow (what Home connects through),
+   or any catalog item from Nodes, whatever mode the route is in —
+     'src:<id>'          a subscription / server group: all its servers, fastest;
+     'node:<sid>::<nid>' one server;
+     'profile:<id>', 'chain:<id>'.
+   Picked in the target picker (44-target-picker.js). A target is unavailable when it is
+   switched off in Nodes, has no server left, or was deleted (the reference is kept, so the
+   rule shows it); the traffic then goes by the rule's "If unavailable": Default (the global
+   setting in Rules), Main flow, Block or Direct. Apps always use the global setting. */
+function targetInfo(t) {
+  if (!t) return { kind: 'main', name: 'Main flow', ok: true };
+  const at = t.indexOf(':'), kind = t.slice(0, at), ref = t.slice(at + 1);
+  if (kind === 'src') {
+    const s = sourcesData[ref];
+    return { kind: s && s.kind === 'node' ? 'servers' : 'subscription', name: s ? s.name : '', gone: !s, ok: !!s && s.enabled && liveNodes(s).length > 0 };
+  }
+  if (kind === 'node') {
+    const [sid, nid] = ref.split('::'), s = sourcesData[sid], n = s && s.nodes.find(x => x.id === nid);
+    return { kind: 'node', name: n ? n.name : '', flag: n ? n.flag : '', gone: !n, ok: !!n && s.enabled && !isNodeDisabled(s, nid) };
+  }
+  const e = kind === 'profile' ? profilesData[ref] : chainsData[ref];
+  const ok = !!e && (kind === 'profile' ? unitRefs(ref).length > 0 : chainEntryRefs(e).length > 0 && chainExitRefs(e).length > 0);
+  return { kind, name: e ? e.name : '', gone: !e, ok };
+}
+const targetName = t => { const i = targetInfo(t); return i.gone ? 'deleted ' + i.kind : i.name; };
+const targetTag = t => t ? targetInfo(t).kind + ':' + targetName(t) : 'proxy';
+// Every target the picker offers, in its order (for JSON import: outbound tag -> target).
+function allTargets() {
+  return [''].concat(sourceOrder.flatMap(sid => ['src:' + sid].concat(sourcesData[sid].nodes.map(n => 'node:' + sid + '::' + n.id))),
+    getProfileIds().map(id => 'profile:' + id), Object.keys(chainsData).map(id => 'chain:' + id));
+}
+// apply: JS source of a function taking the picked target, e.g. 't => { ruleDraft.target = t; renderRuleForm(); }'.
+function targetRowHtml(label, t, apply) {
+  const i = targetInfo(t);
+  return `<div class="set-row tgt-row" onclick="openTargetPicker('${t}', ${apply})"><div class="set-label">${label}</div>
+    <span class="tgt-val">${i.flag ? i.flag + ' ' : ''}${esc(targetName(t))}${t ? `<span class="tgt-kind">${i.kind}</span>` : ''}${i.ok ? '' : '<span class="conn-tag warn">unavailable</span>'}</span>${CHEVRON_R}</div>`;
+}
+
+const FALLBACKS = [['main', 'Main flow'], ['block', 'Block'], ['direct', 'Direct']];
+const fallbackName = v => (FALLBACKS.find(f => f[0] === v) || [, ''])[1];
+const ruleFallback = r => r.fallback && r.fallback !== 'default' ? r.fallback : quickCfg.fallback;
+const fallbackText = v => ({ main: 'through the main flow', block: 'nowhere (blocked)', direct: 'direct' })[v];
+
+// Rules and apps whose target a deletion removes (gone: target -> bool), for the delete dialog.
+function targetImpact(gone) {
+  const lines = [];
+  ruleOrder.forEach((id, i) => {
+    const r = rulesData[id];
+    if (r.action === 'proxy' && r.target && gone(r.target))
+      lines.push([ruleTitle(r), 'rule #' + (i + 1), 'loses its target — traffic goes ' + fallbackText(ruleFallback(r)), 'warn']);
+  });
+  Object.entries(appRules).forEach(([pkg, a]) => {
+    if (a.act === 'proxy' && [a.target, a.split ? a.udpTarget : ''].some(t => t && gone(t)))
+      lines.push([APPS.find(x => x.pkg === pkg).name, 'app', 'loses its target — traffic goes ' + fallbackText(quickCfg.fallback), 'warn']);
+  });
+  return lines;
 }
 
 /* Condition groups of a rule. Inside a field values are OR, between groups AND; each group
@@ -3044,13 +3423,13 @@ function rangeToCidrs(a, b) {
 
 /* ── Data ── */
 let rulesData = {
-  r1: { id: 'r1', name: 'Work network', enabled: true, action: 'direct', target: 0, block: 'drop', strict: false, dns: 'auto',
+  r1: { id: 'r1', name: 'Work network', enabled: true, action: 'direct', target: '', block: 'drop', fallback: 'default', dns: 'auto',
         groups: { domain: { not: false, v: { domain_suffix: ['corp.local', 'intra.example.com'] } } } },
-  r2: { id: 'r2', name: 'Discord voice', enabled: true, action: 'proxy', target: 2, block: 'drop', strict: true, dns: 'auto',
+  r2: { id: 'r2', name: 'Discord voice', enabled: true, action: 'proxy', target: 'chain:sc1', block: 'drop', fallback: 'block', dns: 'auto',
         groups: { domain: { not: false, v: { domain_suffix: ['discord.gg', 'discord.media'] } }, network: { not: false, v: { network: ['udp'] } } } },
-  r3: { id: 'r3', name: '', enabled: true, action: 'direct', target: 0, block: 'drop', strict: false, dns: 'auto',
+  r3: { id: 'r3', name: '', enabled: true, action: 'direct', target: '', block: 'drop', fallback: 'default', dns: 'auto',
         groups: { network: { not: false, v: { protocol: ['bittorrent'] } }, port: { not: false, v: { port: ['6881-6889'] } } } },
-  r4: { id: 'r4', name: 'Trackers', enabled: false, action: 'block', target: 0, block: 'drop', strict: false, dns: 'auto', groups: {},
+  r4: { id: 'r4', name: 'Trackers', enabled: false, action: 'block', target: '', block: 'drop', fallback: 'default', dns: 'auto', groups: {},
         composite: { type: 'logical', mode: 'or', rules: [{ domain_keyword: ['tracker'] }, { port: [6969] }], action: 'reject', method: 'drop' } },
 };
 let ruleOrder = ['r1', 'r2', 'r3', 'r4'];
@@ -3071,6 +3450,7 @@ const REGIONS = [['RU', '🇷🇺 Russia', ['ru', 'рф', 'su']], ['BY', '🇧�
 const ADS = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
 const quickCfg = {
   regionOn: true, region: 'RU', lan: true, ads: false, final: 'proxy',
+  fallback: 'main',   // a rule's target is unavailable and the rule says Default; apps always
   services: { telegram: 'vpn', youtube: 'vpn', discord: 'default', netflix: 'default', spotify: 'default', chatgpt: 'vpn', instagram: 'vpn', x: 'default' },
 };
 const SVC_STATES = [['default', 'Default'], ['vpn', 'VPN'], ['direct', 'Direct']];
@@ -3119,7 +3499,7 @@ function renderRules() {
     return `<div class="rule-row ${r.enabled ? '' : 'dimmed'}" data-id="${id}" onclick="openRuleForm('${id}')">
       ${q ? '<span class="cc-rank"></span>' : `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startRuleDrag(event,'${id}')">${GRIP_SVG}</div>`}
       <span class="cc-rank">${i}</span>
-      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.strict && r.action === 'proxy' && r.target ? '<span class="conn-tag warn">strict</span>' : ''}</div>
+      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.action === 'proxy' && r.target && !targetInfo(r.target).ok ? `<span class="conn-tag warn">down → ${fallbackName(ruleFallback(r))}</span>` : ''}</div>
         ${r.name ? `<div class="rule-sub">${esc(ruleSummary(r))}</div>` : ''}</div>
       <span class="rule-action-badge ${cls}">${esc(ruleTargetText(r))}</span>
       ${toggle(r.enabled, `toggleRuleEnabled('${id}')`)}
@@ -3151,6 +3531,11 @@ function renderRules() {
     <div class="rules-label">Everything else</div>
     <div class="set-group"><div class="set-row"><div class="seg3 wide">${[['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']].map(([v, l]) =>
       `<button class="${quickCfg.final === v ? 'on ' + v : ''}" onclick="quickCfg.final='${v}';renderRules()">${l}</button>`).join('')}</div></div></div>
+
+    <div class="rules-label">Target unavailable<span class="rules-note">rules on Default, and apps</span></div>
+    <div class="set-group"><div class="set-row"><div class="seg3 wide" id="rules-fallback">${FALLBACKS.map(([v, l]) =>
+      `<button class="${quickCfg.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" onclick="quickCfg.fallback='${v}';renderRules()">${l}</button>`).join('')}</div></div>
+      <div class="set-row"><div class="set-hint">When a rule’s profile, chain, subscription or server is off in Nodes, has no working server or was deleted</div></div></div>
 
     <div class="set-group rules-more">
       <div class="set-row" onclick="openRuleOrder()"><div class="set-label">Final order<div class="set-hint">The list exactly as the engine checks it</div></div>${CHEVRON_R}</div>
@@ -3304,7 +3689,7 @@ function parseClash(text) {
     return newRule({ groups: { [g.key]: { not: false, v: { [f]: [value] } } }, action: P === 'DIRECT' ? 'direct' : P === 'REJECT' ? 'block' : 'proxy' });
   });
 }
-const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: 0, block: 'drop', strict: false, dns: 'auto', groups: {} }, o);
+const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: '', block: 'drop', fallback: 'default', dns: 'auto', groups: {} }, o);
 
 /* ── Rule sets: built-in geo lists + remote ones ── */
 function openRuleSets() { renderRuleSets(); openSheet('rulesets'); }
@@ -3354,7 +3739,7 @@ function deleteRuleSet() {
 }
 /* ══════════════════════ APPS (Rules → Per-app routing) ══════════════════════
    Each app gets its own action — no global switch on top: Default (goes by the rules),
-   Direct, Proxy (through a target; stub picker for now) or Block. "Split TCP / UDP" gives
+   Direct, Proxy (through a target from the target picker) or Block. "Split TCP / UDP" gives
    the app two targets, e.g. Discord chat via one server and voice (UDP to bare IPs, which
    domain rules cannot catch) via another. Apps come first in the engine's order.
    Android: package names; desktop: running processes + "add by path" (same screen).
@@ -3373,9 +3758,9 @@ const APPS = [
 ];
 // pkg -> { act: 'direct' | 'proxy' | 'block', target, split, udpTarget }
 let appRules = {
-  'org.telegram.messenger': { act: 'proxy', target: 0, split: false, udpTarget: 0 },
-  'com.discord': { act: 'proxy', target: 0, split: true, udpTarget: 2 },
-  'ru.sberbankmobile': { act: 'direct', target: 0, split: false, udpTarget: 0 },
+  'org.telegram.messenger': { act: 'proxy', target: '', split: false, udpTarget: '' },
+  'com.discord': { act: 'proxy', target: '', split: true, udpTarget: 'chain:sc1' },
+  'ru.sberbankmobile': { act: 'direct', target: '', split: false, udpTarget: '' },
 };
 const APP_ACTS = [['default', 'Default'], ['direct', 'Direct'], ['proxy', 'Proxy'], ['block', 'Block']];
 
@@ -3407,7 +3792,7 @@ function renderApps() {
 let appEditing = null, appDraft = null;
 function openAppAct(pkg) {
   appEditing = pkg;
-  appDraft = Object.assign({ act: 'default', target: 0, split: false, udpTarget: 0 }, appRules[pkg] || {});
+  appDraft = Object.assign({ act: 'default', target: '', split: false, udpTarget: '' }, appRules[pkg] || {});
   document.getElementById('aaTitle').textContent = APPS.find(a => a.pkg === pkg).name;
   renderAppAct();
   openSheet('appact');
@@ -3417,8 +3802,8 @@ function renderAppAct() {
   document.getElementById('aa-body').innerHTML = `
     <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${d.act === v ? 'on ' + v : ''}" onclick="appDraft.act='${v}';renderAppAct()">${l}</button>`).join('')}</div>
     ${d.act === 'proxy' ? `<div class="set-group aa-group">
-      ${targetRowHtml(d.split ? 'TCP via' : 'Via', d.target, 'appDraft.target=nextTarget(appDraft.target);renderAppAct()')}
-      ${d.split ? targetRowHtml('UDP via', d.udpTarget, 'appDraft.udpTarget=nextTarget(appDraft.udpTarget);renderAppAct()') : ''}
+      ${targetRowHtml(d.split ? 'TCP via' : 'Via', d.target, 't => { appDraft.target = t; renderAppAct(); }')}
+      ${d.split ? targetRowHtml('UDP via', d.udpTarget, 't => { appDraft.udpTarget = t; renderAppAct(); }') : ''}
       <div class="set-row"><div class="set-label">Split TCP / UDP<div class="set-hint">Different routes, e.g. voice (UDP) apart from chat</div></div>
         <div class="mini-toggle ${d.split ? 'on' : ''}" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div>
     </div>` : `<div class="set-hint aa-hint">${{ default: 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN', block: 'No network at all while connected' }[d.act]}</div>`}`;
@@ -3428,6 +3813,91 @@ function saveAppAct() {
   else appRules[appEditing] = appDraft;
   closeSheet('appact');
   renderApps(); renderRules();
+}
+/* ══════════════════════ TARGET PICKER (rules, apps) ══════════════════════
+   One sheet above everything that lists what traffic can go through: Main flow, then the
+   whole Nodes catalog whatever the route's mode — subscriptions / server groups (tap the
+   card = all its servers, ⌄ opens its servers to pick one), profiles, chains. Cards carry
+   the same details as in Nodes: what it is made of, traffic / expiry, the server it would
+   use now with its ping. Off / empty ones stay pickable, marked unavailable (the rule then
+   follows its "If unavailable"). */
+
+let tpCurrent = '', tpApply = null;
+const tpOpen = new Set();
+
+function openTargetPicker(t, apply) {
+  tpCurrent = t || '';
+  tpApply = apply;
+  tpOpen.clear();
+  if (tpCurrent.startsWith('node:')) tpOpen.add(tpCurrent.slice(5).split('::')[0]);
+  document.getElementById('tp-search').value = '';
+  renderTargetPicker();
+  openSheet('target');
+}
+
+function pickTarget(t) {
+  closeSheet('target');
+  if (tpApply) tpApply(t);
+}
+
+function tpToggle(sid) {
+  if (tpOpen.has(sid)) tpOpen.delete(sid); else tpOpen.add(sid);
+  renderTargetPicker();
+}
+
+const TP_CHECK = '<svg class="tp-check" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+function tpCardHtml(t, name, meta, below, extra = '', body = '') {
+  const i = targetInfo(t), picked = t === tpCurrent;
+  return `<div class="src-card tp-card ${picked ? 'picked' : ''} ${i.ok ? '' : 'down'}" data-t="${t}">
+    <div class="src-head" onclick="pickTarget('${t}')">
+      <div class="src-main">
+        <div class="src-name">${name}${i.ok ? '' : '<span class="conn-tag off">off</span>'}</div>
+        <div class="src-meta">${meta}</div>
+      </div>
+      ${picked ? TP_CHECK : ''}${extra}
+    </div>
+    ${below}${body}
+  </div>`;
+}
+
+function renderTargetPicker() {
+  const q = document.getElementById('tp-search').value.trim().toLowerCase();
+  const hit = s => !q || s.toLowerCase().includes(q);
+  const label = (text, n) => n ? `<div class="tp-label">${text}</div>` : '';
+
+  const cur = effectiveConnectId(), ce = connectEntry(cur);
+  const main = hit('main flow') ? tpCardHtml('', 'Main flow', '<span>What Home connects through · follows Route</span>',
+    `<div class="entry-now"><span class="conn-tag muted">now</span><span class="conn-node">${ce ? esc(ce.name) : '—'}</span></div>`) : '';
+
+  const srcs = sourceOrder.map(sid => {
+    const s = sourcesData[sid];
+    const nodes = s.nodes.filter(n => hit(n.name + ' ' + n.protocol));
+    if (!hit(s.name) && !nodes.length) return '';
+    const open = tpOpen.has(sid) || (q && !hit(s.name));
+    const rows = open ? (hit(s.name) ? s.nodes : nodes).map(n => {
+      const t = 'node:' + sid + '::' + n.id, off = isNodeDisabled(s, n.id);
+      return `<div class="node-row tap ${t === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" onclick="pickTarget('${t}')">
+        <span class="node-flag">${n.flag}</span><span class="node-name">${esc(n.name)}</span><span class="node-proto">${n.protocol}</span>${latHtml(n)}${t === tpCurrent ? TP_CHECK : ''}</div>`;
+    }).join('') : '';
+    const chevron = `<button class="icon-btn ghost" onclick="event.stopPropagation();tpToggle('${sid}')" title="Pick one server">
+      <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${open ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg></button>`;
+    const best = bestAlive(liveNodes(s));
+    return tpCardHtml('src:' + sid, esc(s.name), srcMetaHtml(s),
+      usageHtml(s) + `<div class="entry-now"><span class="conn-tag muted">fastest</span>${nodeSummaryHtml(best, false)}</div>`,
+      chevron, open ? `<div class="src-body tp-nodes">${rows}</div>` : '');
+  }).join('');
+
+  const profs = getProfileIds().filter(id => hit(profilesData[id].name))
+    .map(id => tpCardHtml('profile:' + id, esc(profilesData[id].name), entryMetaHtml(id), entryNowHtml(id))).join('');
+  const chains = catalogOrder.simple.concat(catalogOrder.profiles).filter(id => chainsData[id] && hit(chainsData[id].name))
+    .map(id => tpCardHtml('chain:' + id, esc(chainsData[id].name), entryMetaHtml(id), entryNowHtml(id))).join('');
+
+  document.getElementById('tp-body').innerHTML = main
+    + label('Subscriptions & servers', srcs) + srcs
+    + label('Profiles', profs) + profs
+    + label('Chains', chains) + chains
+    || `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`;
 }
 /* ══════════════════════ MAIN TOGGLE ══════════════════════ */
 
@@ -3772,11 +4242,12 @@ function renderConnSettings() {
    Plain words, no jargon: these are for people who never read a manual. */
 
 const HELP = {
-  entries: { title: 'Servers & profiles', items: [
+  entries: { title: 'Route', items: [
+    ['Servers / Profiles', 'which tab of Nodes the route uses. Everything is created and edited in Nodes.'],
     ['Auto', 'connects the first working entry from the top. If it fails, Auto moves to the next one.'],
     ['Manual', 'tap an entry to use only it. Tap the Auto badge to go back.'],
-    ['✎ Edit', 'drag ⋮⋮ to change the order Auto tries entries in. Tap Done when finished.'],
-    ['⋮', 'the entry’s settings: which servers it uses, Fastest or Priority, Use in Auto.'],
+    ['✎ Edit', 'drag ⋮⋮ to change the order Auto tries entries in; the switch lets Auto pick it or not.'],
+    ['Own order', 'by default the order is the one in Nodes. Drag here and the route keeps its own — “Follow Nodes order” goes back.'],
     ['Chain', 'traffic goes through two servers: the entry, then the exit.'],
     ['Greyed out below', 'something it needs is switched off in Nodes. Tap it to see what.'],
   ] },
@@ -3827,7 +4298,9 @@ const HELP = {
     ['Decrypt password', 'only for subscriptions the provider encrypted.'],
   ] },
   nodes: { title: 'Nodes', items: [
-    ['Nodes', 'all your subscriptions and single servers.'],
+    ['Nodes', 'everything traffic can go through. Create, edit and delete it here.'],
+    ['Servers / Profiles', 'two tabs, swipe between them: subscriptions and servers with their chains, or profiles with theirs.'],
+    ['Order', 'the order here is the route’s priority, unless the Route sheet has its own.'],
     ['Tap a server', 'its menu: ping, copy, switch off, delete. Tap the ms to ping it.'],
     ['✎ Edit', 'drag ⋮⋮ to reorder, switch subscriptions on / off, tap servers to switch them off.'],
     ['Off', 'hidden everywhere, settings kept — switch it back on and it is where it was.'],
@@ -4082,19 +4555,17 @@ function saveCreateProfile() {
   } else {
     const id = 'profile' + Date.now();
     profilesData[id] = Object.assign({ id, name }, fields);
-    connectOrder.push(id);
+    catalogOrder.profiles.push(id);
   }
   editingProfileId = null;
-  renderConnects();
-  updateMainConnectCard();
+  renderAll();
   closeSheet('createprofile');
 }
 
 function deleteEditingProfile() {
   if (!editingProfileId) return;
   if (getProfileIds().length <= 1) { editingProfileId = null; closeSheet('createprofile'); return; }
-  connectOrder = connectOrder.filter(x => x !== editingProfileId);
-  delete profilesData[editingProfileId];
+  delete profilesData[editingProfileId];   // the catalog and both route lists drop it (syncCatalog)
   const fallback = getProfileIds()[0];
   if (activeConnectId === editingProfileId) activeConnectId = fallback;
   Object.values(chainsData).forEach(c => {
@@ -4102,13 +4573,11 @@ function deleteEditingProfile() {
     if (c.outId === editingProfileId) c.outId = fallback;
     if (c.inId === c.outId) {   // a chain through one profile is pointless: drop it
       delete chainsData[c.id];
-      connectOrder = connectOrder.filter(x => x !== c.id);
       if (activeConnectId === c.id) activeConnectId = fallback;
     }
   });
   editingProfileId = null;
-  renderConnects();
-  updateMainConnectCard();
+  renderAll();
   closeSheet('createprofile');
 }
 
@@ -4125,11 +4594,13 @@ let chainDraft = newChainDraft(null, null);
 const ccOpen = new Set();   // expanded units in the editor, 'in:<id>' / 'out:<id>'
 let chainTest = null;   // { running, stage, done, total, pairs: [{entry, exit, ms}], showAll }
 let editingChainId = null;
+let chainMode = 'simple';   // the Nodes tab the chain lives on: its ends are sources or profiles
 
-function openCreateChain(editId) {
+function openCreateChain(editId, mode) {
   editingChainId = editId || null;
-  const ids = getUnitIds();
-  if (!editingChainId && ids.length < 2) { toast(simpleMode() ? 'A chain needs two subscriptions or server groups — add one in Nodes' : 'A chain needs two profiles — create another profile first'); return; }
+  chainMode = (editId && modeOf(editId)) || mode || connectMode;
+  const ids = unitIdsOf(chainMode);
+  if (!editingChainId && ids.length < 2) { toast(chainMode === 'simple' ? 'A chain needs two subscriptions or server groups — add one in Nodes' : 'A chain needs two profiles — create another profile first'); return; }
   if (editingChainId) {
     const c = chainsData[editingChainId];
     document.getElementById('ccTitle').textContent = 'Edit chain';
@@ -4170,7 +4641,7 @@ function renderChainPicker(elId, side) {
   const other = side === 'in' ? d.outId : d.inId;
   const off = side === 'in' ? d.inOff : d.outOff;
   const priority = side === 'out' && d.exitMode === 'priority';
-  const ids = getUnitIds();
+  const ids = unitIdsOf(chainMode);
   if (current && !ids.includes(current) && (sourcesData[current] || profilesData[current])) ids.push(current);   // an end switched off in Nodes
   el.innerHTML = ids.map(id => {
     const taken = id === other;
@@ -4409,23 +4880,19 @@ function saveCreateChain() {
   } else {
     const id = 'chain' + Date.now();
     chainsData[id] = Object.assign({ id, name }, fields);
-    connectOrder.push(id);
+    catalogOrder[chainMode].push(id);
   }
   editingChainId = null;
   chainTest = null;
-  renderConnects();
-  updateMainConnectCard();
+  renderAll();
   closeSheet('createchain');
 }
 
 function deleteEditingChain() {
   if (!editingChainId) return;
-  connectOrder = connectOrder.filter(x => x !== editingChainId);
-  delete chainsData[editingChainId];
-  if (activeConnectId === editingChainId) activeConnectId = getUnitIds()[0];
+  delete chainsData[editingChainId];   // syncCatalog drops it from the catalog and the routes
   editingChainId = null;
-  renderConnects();
-  updateMainConnectCard();
+  renderAll();
   closeSheet('createchain');
 }
 /* ══════════════════════ SOURCE ENTRY (simple mode ⋯ on a source row) ══════════════════════
@@ -4583,7 +5050,7 @@ function renderRuleForm() {
   if (rfTab === 'json') {
     el.innerHTML = `<div class="form-group"><textarea class="form-input code-area tall" id="rf-json" spellcheck="false" oninput="rfCheckJson()">${esc(JSON.stringify(ruleJson(ruleDraft), null, 2))}</textarea>
       <div class="set-hint warn" id="rf-json-err"></div>
-      <div class="set-hint">The sing-box route rule. Name, Strict and DNS live in the form.</div></div>`;
+      <div class="set-hint">The sing-box route rule. Name, If unavailable and DNS live in the form.</div></div>`;
     return;
   }
   const d = ruleDraft;
@@ -4605,9 +5072,11 @@ function renderRuleForm() {
     <div class="rf-then">
       <div class="seg3 wide">${acts.map(([v, l]) => `<button class="${d.action === v ? 'on ' + v : ''}" onclick="ruleDraft.action='${v}';renderRuleForm()">${l}</button>`).join('')}</div>
       <div class="set-group">
-        ${d.action === 'proxy' ? targetRowHtml('Via', d.target, 'ruleDraft.target=nextTarget(ruleDraft.target);renderRuleForm()') : ''}
-        ${d.action === 'proxy' && d.target ? `<div class="set-row"><div class="set-label">Strict<div class="set-hint">${d.strict ? 'Target down → this traffic is blocked' : 'Target down → goes through the main flow'}</div></div>
-          <div class="mini-toggle ${d.strict ? 'on' : ''}" onclick="ruleDraft.strict=!ruleDraft.strict;renderRuleForm()"><div class="mini-toggle-thumb"></div></div></div>` : ''}
+        ${d.action === 'proxy' ? targetRowHtml('Via', d.target, 't => { ruleDraft.target = t; renderRuleForm(); }') : ''}
+        ${d.action === 'proxy' && d.target ? `<div class="set-row rf-fallback"><div class="set-label">If unavailable<div class="set-hint">${d.fallback === 'default'
+            ? 'Default: ' + fallbackName(quickCfg.fallback) + ' (Rules → Target unavailable)' : 'Off in Nodes, no working server or deleted'}</div></div></div>
+          <div class="set-row"><div class="seg3 wide" id="rf-fallback">${[['default', 'Default'], ['main', 'Main'], ['block', 'Block'], ['direct', 'Direct']].map(([v, l]) =>
+            `<button class="${d.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" onclick="ruleDraft.fallback='${v}';renderRuleForm()">${l}</button>`).join('')}</div></div>` : ''}
         ${d.action === 'block' ? `<div class="set-row"><div class="set-label">How</div><div class="chip-row">${[['drop', 'Drop silently'], ['reject', 'Reject']].map(([v, l]) =>
           `<div class="chip ${d.block === v ? 'active' : ''}" onclick="ruleDraft.block='${v}';renderRuleForm()">${l}</div>`).join('')}</div></div>` : ''}
         ${d.action !== 'block' ? `<div class="set-row"><div class="set-label">DNS</div><select class="set-select" id="rf-dns" onchange="ruleDraft.dns=this.value">${dnsOpts.map(([v, l]) =>
@@ -4743,7 +5212,7 @@ function ruleFromJson(o) {
   if (action === 'reject') { r.action = 'block'; r.block = method === 'drop' ? 'drop' : 'reject'; }
   else if (action === 'route') {
     if (outbound === 'direct') r.action = 'direct';
-    else { r.action = 'proxy'; r.target = Math.max(0, STUB_TARGETS.findIndex((t, i) => targetTag(i) === outbound)); }
+    else { r.action = 'proxy'; r.target = allTargets().find(t => targetTag(t) === outbound) || ''; }
   } else rest.action = action;
   const extra = {};
   if (rest.type === 'logical') {
@@ -4775,12 +5244,12 @@ function rfCheckJson() {
   document.getElementById('rf-json-err').textContent = msg;
   return !msg;
 }
-// JSON tab → draft (keeps name, strict, DNS, enabled). false if the JSON is invalid.
+// JSON tab → draft (keeps name, If unavailable, DNS, enabled). false if the JSON is invalid.
 function rfApplyJson() {
   if (rfTab !== 'json') return true;
   if (!rfCheckJson()) { toast('Fix the JSON first'); return false; }
   const r = ruleFromJson(JSON.parse(document.getElementById('rf-json').value));
-  ['id', 'name', 'enabled', 'strict', 'dns'].forEach(k => r[k] = ruleDraft[k]);
+  ['id', 'name', 'enabled', 'fallback', 'dns'].forEach(k => r[k] = ruleDraft[k]);
   ruleDraft = r;
   return true;
 }
@@ -4796,7 +5265,7 @@ function saveRuleForm() {
     Object.keys(d.groups).forEach(k => { const g = d.groups[k]; if (!Object.keys(g.v).length && !g.flag) delete d.groups[k]; });
     if (!Object.keys(d.groups).length) { toast('Add at least one condition'); renderRuleForm(); return; }
   }
-  if (!(d.action === 'proxy' && d.target)) d.strict = false;
+  if (!(d.action === 'proxy' && d.target)) d.fallback = 'default';
   if (ruleEditing) rulesData[ruleEditing] = Object.assign(d, { id: ruleEditing });
   else { d.id = 'r' + (ruleSeq++); rulesData[d.id] = d; ruleOrder.push(d.id); }
   closeSheet('ruleform');
@@ -4851,13 +5320,16 @@ function dragShown(full, shown, commit) {
 
 function startConnectDrag(e, id) {
   const rowEl = document.querySelector('#connects-list .conn-row[data-id="'+id+'"]');
-  const [order, done] = dragShown(connectOrder, visibleOrder(), o => { connectOrder = o; });
+  // Dragging here gives the route its own order, apart from Nodes (until "Follow Nodes order").
+  const [order, done] = dragShown(connectOrder, visibleOrder(), o => { if (o.join() !== connectOrder.join()) routeCustom[connectMode] = true; connectOrder = o; });
   startRowDrag(e, rowEl, '.conn-row', order, () => { done(); renderConnects(); updateMainConnectCard(); });
 }
 
+// Nodes: sources, profiles and chains of the tab share one list (catalogOrder[tab]).
 function startSourceDrag(e, id) {
-  const rowEl = document.querySelector('#nodes-list .src-card[data-id="'+id+'"]');
-  startRowDrag(e, rowEl, '.src-card', () => sourceOrder, () => { renderNodes(); renderConnects(); });
+  const tab = modeOf(id) || 'simple';
+  const rowEl = document.querySelector(`#${tab === 'simple' ? 'nodes-list' : 'nodes-profiles'} .src-card[data-id="${id}"]`);
+  startRowDrag(e, rowEl, '.src-card', () => catalogOrder[tab], () => { syncCatalog(); renderAll(); });
 }
 
 // Target slot: a row below is passed once the dragged row's bottom edge crosses its centre,
@@ -4982,6 +5454,7 @@ renderDns();
 ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
 
 renderConnects();
+initNodesPager();
 renderNodes();
 renderRules();
 updateMainConnectCard();

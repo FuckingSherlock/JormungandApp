@@ -4,18 +4,65 @@
      2. My rules   — full form (75-rule-form.js), drag to reorder;
      3. Quick      — local networks, ads, services, "my region direct";
      4. Everything else — one final action.
-   The engine checks them top-down, first match wins; "Final order" shows it read-only.
-   Targets (profile / chain / subscription / node) wait for the targets rework: until then
-   the picker is a stub that cycles through sample targets. */
+   The engine checks them top-down, first match wins; "Final order" shows it read-only. */
 
-// index 0 = the main flow (what Home connects through); the rest are stub samples.
-const STUB_TARGETS = [['Main flow', 'proxy'], ['Europe', 'profile'], ['DE → NL', 'chain'], ['Remnawave', 'subscription'], ['Frankfurt 01', 'node']];
-const targetTag = i => i ? STUB_TARGETS[i][1] + ':' + STUB_TARGETS[i][0] : 'proxy';
-const targetName = i => STUB_TARGETS[i][0];
-const nextTarget = i => (i + 1) % STUB_TARGETS.length;
-function targetRowHtml(label, i, click) {
-  return `<div class="set-row tgt-row" onclick="${click}"><div class="set-label">${label}</div>
-    <span class="tgt-val">${esc(targetName(i))}${i ? `<span class="tgt-kind">${STUB_TARGETS[i][1]}</span>` : ''}</span><span class="soon-tag">stub</span>${CHEVRON_R}</div>`;
+/* ── Targets ──
+   What a rule / app sends traffic through: '' = the main flow (what Home connects through),
+   or any catalog item from Nodes, whatever mode the route is in —
+     'src:<id>'          a subscription / server group: all its servers, fastest;
+     'node:<sid>::<nid>' one server;
+     'profile:<id>', 'chain:<id>'.
+   Picked in the target picker (44-target-picker.js). A target is unavailable when it is
+   switched off in Nodes, has no server left, or was deleted (the reference is kept, so the
+   rule shows it); the traffic then goes by the rule's "If unavailable": Default (the global
+   setting in Rules), Main flow, Block or Direct. Apps always use the global setting. */
+function targetInfo(t) {
+  if (!t) return { kind: 'main', name: 'Main flow', ok: true };
+  const at = t.indexOf(':'), kind = t.slice(0, at), ref = t.slice(at + 1);
+  if (kind === 'src') {
+    const s = sourcesData[ref];
+    return { kind: s && s.kind === 'node' ? 'servers' : 'subscription', name: s ? s.name : '', gone: !s, ok: !!s && s.enabled && liveNodes(s).length > 0 };
+  }
+  if (kind === 'node') {
+    const [sid, nid] = ref.split('::'), s = sourcesData[sid], n = s && s.nodes.find(x => x.id === nid);
+    return { kind: 'node', name: n ? n.name : '', flag: n ? n.flag : '', gone: !n, ok: !!n && s.enabled && !isNodeDisabled(s, nid) };
+  }
+  const e = kind === 'profile' ? profilesData[ref] : chainsData[ref];
+  const ok = !!e && (kind === 'profile' ? unitRefs(ref).length > 0 : chainEntryRefs(e).length > 0 && chainExitRefs(e).length > 0);
+  return { kind, name: e ? e.name : '', gone: !e, ok };
+}
+const targetName = t => { const i = targetInfo(t); return i.gone ? 'deleted ' + i.kind : i.name; };
+const targetTag = t => t ? targetInfo(t).kind + ':' + targetName(t) : 'proxy';
+// Every target the picker offers, in its order (for JSON import: outbound tag -> target).
+function allTargets() {
+  return [''].concat(sourceOrder.flatMap(sid => ['src:' + sid].concat(sourcesData[sid].nodes.map(n => 'node:' + sid + '::' + n.id))),
+    getProfileIds().map(id => 'profile:' + id), Object.keys(chainsData).map(id => 'chain:' + id));
+}
+// apply: JS source of a function taking the picked target, e.g. 't => { ruleDraft.target = t; renderRuleForm(); }'.
+function targetRowHtml(label, t, apply) {
+  const i = targetInfo(t);
+  return `<div class="set-row tgt-row" onclick="openTargetPicker('${t}', ${apply})"><div class="set-label">${label}</div>
+    <span class="tgt-val">${i.flag ? i.flag + ' ' : ''}${esc(targetName(t))}${t ? `<span class="tgt-kind">${i.kind}</span>` : ''}${i.ok ? '' : '<span class="conn-tag warn">unavailable</span>'}</span>${CHEVRON_R}</div>`;
+}
+
+const FALLBACKS = [['main', 'Main flow'], ['block', 'Block'], ['direct', 'Direct']];
+const fallbackName = v => (FALLBACKS.find(f => f[0] === v) || [, ''])[1];
+const ruleFallback = r => r.fallback && r.fallback !== 'default' ? r.fallback : quickCfg.fallback;
+const fallbackText = v => ({ main: 'through the main flow', block: 'nowhere (blocked)', direct: 'direct' })[v];
+
+// Rules and apps whose target a deletion removes (gone: target -> bool), for the delete dialog.
+function targetImpact(gone) {
+  const lines = [];
+  ruleOrder.forEach((id, i) => {
+    const r = rulesData[id];
+    if (r.action === 'proxy' && r.target && gone(r.target))
+      lines.push([ruleTitle(r), 'rule #' + (i + 1), 'loses its target — traffic goes ' + fallbackText(ruleFallback(r)), 'warn']);
+  });
+  Object.entries(appRules).forEach(([pkg, a]) => {
+    if (a.act === 'proxy' && [a.target, a.split ? a.udpTarget : ''].some(t => t && gone(t)))
+      lines.push([APPS.find(x => x.pkg === pkg).name, 'app', 'loses its target — traffic goes ' + fallbackText(quickCfg.fallback), 'warn']);
+  });
+  return lines;
 }
 
 /* Condition groups of a rule. Inside a field values are OR, between groups AND; each group
@@ -82,13 +129,13 @@ function rangeToCidrs(a, b) {
 
 /* ── Data ── */
 let rulesData = {
-  r1: { id: 'r1', name: 'Work network', enabled: true, action: 'direct', target: 0, block: 'drop', strict: false, dns: 'auto',
+  r1: { id: 'r1', name: 'Work network', enabled: true, action: 'direct', target: '', block: 'drop', fallback: 'default', dns: 'auto',
         groups: { domain: { not: false, v: { domain_suffix: ['corp.local', 'intra.example.com'] } } } },
-  r2: { id: 'r2', name: 'Discord voice', enabled: true, action: 'proxy', target: 2, block: 'drop', strict: true, dns: 'auto',
+  r2: { id: 'r2', name: 'Discord voice', enabled: true, action: 'proxy', target: 'chain:sc1', block: 'drop', fallback: 'block', dns: 'auto',
         groups: { domain: { not: false, v: { domain_suffix: ['discord.gg', 'discord.media'] } }, network: { not: false, v: { network: ['udp'] } } } },
-  r3: { id: 'r3', name: '', enabled: true, action: 'direct', target: 0, block: 'drop', strict: false, dns: 'auto',
+  r3: { id: 'r3', name: '', enabled: true, action: 'direct', target: '', block: 'drop', fallback: 'default', dns: 'auto',
         groups: { network: { not: false, v: { protocol: ['bittorrent'] } }, port: { not: false, v: { port: ['6881-6889'] } } } },
-  r4: { id: 'r4', name: 'Trackers', enabled: false, action: 'block', target: 0, block: 'drop', strict: false, dns: 'auto', groups: {},
+  r4: { id: 'r4', name: 'Trackers', enabled: false, action: 'block', target: '', block: 'drop', fallback: 'default', dns: 'auto', groups: {},
         composite: { type: 'logical', mode: 'or', rules: [{ domain_keyword: ['tracker'] }, { port: [6969] }], action: 'reject', method: 'drop' } },
 };
 let ruleOrder = ['r1', 'r2', 'r3', 'r4'];
@@ -109,6 +156,7 @@ const REGIONS = [['RU', '🇷🇺 Russia', ['ru', 'рф', 'su']], ['BY', '🇧�
 const ADS = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
 const quickCfg = {
   regionOn: true, region: 'RU', lan: true, ads: false, final: 'proxy',
+  fallback: 'main',   // a rule's target is unavailable and the rule says Default; apps always
   services: { telegram: 'vpn', youtube: 'vpn', discord: 'default', netflix: 'default', spotify: 'default', chatgpt: 'vpn', instagram: 'vpn', x: 'default' },
 };
 const SVC_STATES = [['default', 'Default'], ['vpn', 'VPN'], ['direct', 'Direct']];
@@ -157,7 +205,7 @@ function renderRules() {
     return `<div class="rule-row ${r.enabled ? '' : 'dimmed'}" data-id="${id}" onclick="openRuleForm('${id}')">
       ${q ? '<span class="cc-rank"></span>' : `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startRuleDrag(event,'${id}')">${GRIP_SVG}</div>`}
       <span class="cc-rank">${i}</span>
-      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.strict && r.action === 'proxy' && r.target ? '<span class="conn-tag warn">strict</span>' : ''}</div>
+      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.action === 'proxy' && r.target && !targetInfo(r.target).ok ? `<span class="conn-tag warn">down → ${fallbackName(ruleFallback(r))}</span>` : ''}</div>
         ${r.name ? `<div class="rule-sub">${esc(ruleSummary(r))}</div>` : ''}</div>
       <span class="rule-action-badge ${cls}">${esc(ruleTargetText(r))}</span>
       ${toggle(r.enabled, `toggleRuleEnabled('${id}')`)}
@@ -189,6 +237,11 @@ function renderRules() {
     <div class="rules-label">Everything else</div>
     <div class="set-group"><div class="set-row"><div class="seg3 wide">${[['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']].map(([v, l]) =>
       `<button class="${quickCfg.final === v ? 'on ' + v : ''}" onclick="quickCfg.final='${v}';renderRules()">${l}</button>`).join('')}</div></div></div>
+
+    <div class="rules-label">Target unavailable<span class="rules-note">rules on Default, and apps</span></div>
+    <div class="set-group"><div class="set-row"><div class="seg3 wide" id="rules-fallback">${FALLBACKS.map(([v, l]) =>
+      `<button class="${quickCfg.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" onclick="quickCfg.fallback='${v}';renderRules()">${l}</button>`).join('')}</div></div>
+      <div class="set-row"><div class="set-hint">When a rule’s profile, chain, subscription or server is off in Nodes, has no working server or was deleted</div></div></div>
 
     <div class="set-group rules-more">
       <div class="set-row" onclick="openRuleOrder()"><div class="set-label">Final order<div class="set-hint">The list exactly as the engine checks it</div></div>${CHEVRON_R}</div>
@@ -342,7 +395,7 @@ function parseClash(text) {
     return newRule({ groups: { [g.key]: { not: false, v: { [f]: [value] } } }, action: P === 'DIRECT' ? 'direct' : P === 'REJECT' ? 'block' : 'proxy' });
   });
 }
-const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: 0, block: 'drop', strict: false, dns: 'auto', groups: {} }, o);
+const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: '', block: 'drop', fallback: 'default', dns: 'auto', groups: {} }, o);
 
 /* ── Rule sets: built-in geo lists + remote ones ── */
 function openRuleSets() { renderRuleSets(); openSheet('rulesets'); }

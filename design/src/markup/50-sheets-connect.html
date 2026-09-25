@@ -3,7 +3,7 @@
   <div class="sheet" id="sh-profiles">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <span class="sheet-title"><span id="profilesTitle">Servers</span><button class="help-btn" onclick="event.stopPropagation();openHelp('entries')" title="What is this?">?</button></span>
+      <span class="sheet-title"><span id="profilesTitle">Route</span><button class="help-btn" onclick="event.stopPropagation();openHelp('entries')" title="What is this?">?</button></span>
       <div class="conn-badge auto-badge" id="autoBadge" onclick="setAutoConnect(!autoConnect)" title="Auto: first working entry in list order · Manual: the entry you tapped">
         <div class="conn-dot"></div><span>Auto</span>
       </div>
@@ -18,10 +18,7 @@
     <div class="sheet-body">
       <div class="list-caption"><span>Priority</span><span id="connectsCaption"></span></div>
       <div id="connects-list"></div>
-      <div class="sheet-action" style="margin-top:6px" onclick="openCreateMenu()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span id="createEntryLabel">Create chain</span>
-      </div>
+      <div class="route-note" id="routeOrderNote"></div>
     </div>
   </div>
 

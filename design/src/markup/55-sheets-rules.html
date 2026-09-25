@@ -140,3 +140,18 @@
       <button class="btn-danger-text" id="rs-delete" onclick="deleteRuleSet()">Delete rule set</button>
     </div>
   </div>
+
+  <!-- ══════════ TARGET PICKER (rules, apps): above every other sheet and dialog ══════════ -->
+  <div class="overlay overlay-l5" id="ov-target" onclick="closeSheet('target')"></div>
+  <div class="sheet sheet-l5" id="sh-target">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Send through</span>
+      <button class="sheet-close" onclick="closeSheet('target')">×</button>
+    </div>
+    <div class="search tp-search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="tp-search" placeholder="Search profiles, chains, servers" oninput="renderTargetPicker()">
+    </div>
+    <div class="sheet-body tp-body" id="tp-body"></div>
+  </div>

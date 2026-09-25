@@ -1,6 +1,6 @@
 /* ══════════════════════ APPS (Rules → Per-app routing) ══════════════════════
    Each app gets its own action — no global switch on top: Default (goes by the rules),
-   Direct, Proxy (through a target; stub picker for now) or Block. "Split TCP / UDP" gives
+   Direct, Proxy (through a target from the target picker) or Block. "Split TCP / UDP" gives
    the app two targets, e.g. Discord chat via one server and voice (UDP to bare IPs, which
    domain rules cannot catch) via another. Apps come first in the engine's order.
    Android: package names; desktop: running processes + "add by path" (same screen).
@@ -19,9 +19,9 @@ const APPS = [
 ];
 // pkg -> { act: 'direct' | 'proxy' | 'block', target, split, udpTarget }
 let appRules = {
-  'org.telegram.messenger': { act: 'proxy', target: 0, split: false, udpTarget: 0 },
-  'com.discord': { act: 'proxy', target: 0, split: true, udpTarget: 2 },
-  'ru.sberbankmobile': { act: 'direct', target: 0, split: false, udpTarget: 0 },
+  'org.telegram.messenger': { act: 'proxy', target: '', split: false, udpTarget: '' },
+  'com.discord': { act: 'proxy', target: '', split: true, udpTarget: 'chain:sc1' },
+  'ru.sberbankmobile': { act: 'direct', target: '', split: false, udpTarget: '' },
 };
 const APP_ACTS = [['default', 'Default'], ['direct', 'Direct'], ['proxy', 'Proxy'], ['block', 'Block']];
 
@@ -53,7 +53,7 @@ function renderApps() {
 let appEditing = null, appDraft = null;
 function openAppAct(pkg) {
   appEditing = pkg;
-  appDraft = Object.assign({ act: 'default', target: 0, split: false, udpTarget: 0 }, appRules[pkg] || {});
+  appDraft = Object.assign({ act: 'default', target: '', split: false, udpTarget: '' }, appRules[pkg] || {});
   document.getElementById('aaTitle').textContent = APPS.find(a => a.pkg === pkg).name;
   renderAppAct();
   openSheet('appact');
@@ -63,8 +63,8 @@ function renderAppAct() {
   document.getElementById('aa-body').innerHTML = `
     <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${d.act === v ? 'on ' + v : ''}" onclick="appDraft.act='${v}';renderAppAct()">${l}</button>`).join('')}</div>
     ${d.act === 'proxy' ? `<div class="set-group aa-group">
-      ${targetRowHtml(d.split ? 'TCP via' : 'Via', d.target, 'appDraft.target=nextTarget(appDraft.target);renderAppAct()')}
-      ${d.split ? targetRowHtml('UDP via', d.udpTarget, 'appDraft.udpTarget=nextTarget(appDraft.udpTarget);renderAppAct()') : ''}
+      ${targetRowHtml(d.split ? 'TCP via' : 'Via', d.target, 't => { appDraft.target = t; renderAppAct(); }')}
+      ${d.split ? targetRowHtml('UDP via', d.udpTarget, 't => { appDraft.udpTarget = t; renderAppAct(); }') : ''}
       <div class="set-row"><div class="set-label">Split TCP / UDP<div class="set-hint">Different routes, e.g. voice (UDP) apart from chat</div></div>
         <div class="mini-toggle ${d.split ? 'on' : ''}" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div>
     </div>` : `<div class="set-hint aa-hint">${{ default: 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN', block: 'No network at all while connected' }[d.act]}</div>`}`;

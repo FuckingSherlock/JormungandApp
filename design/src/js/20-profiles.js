@@ -189,14 +189,13 @@ function renderConnectRow(id) {
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    ${current ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
-    <button class="icon-btn ghost" onclick="${chain ? 'openEditChain' : profilesData[id] ? 'openEditProfile' : 'openSourceEntry'}('${id}')" title="Edit">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
-    </button>
+    ${current && !connectEdit ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
+    ${connectEdit ? `<div class="route-auto" title="Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>` : ''}
   </div>`;
 }
 
-// Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
+// Edit mode of the list: ⋮⋮ grips for the Auto priority and the "in Auto" switches;
+// taps no longer switch to Manual. Everything else about an entry is edited in Nodes.
 let connectEdit = false;
 function setConnectEdit(on) {
   connectEdit = on;
@@ -207,15 +206,18 @@ function setConnectEdit(on) {
 }
 
 function renderConnects() {
-  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ to set Auto priority' : 'tap to use it (Manual)';
+  syncCatalog();
+  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ · switch = in Auto' : 'tap to use it (Manual)';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
-  document.getElementById('profilesTitle').textContent = simpleMode() ? 'Servers' : 'Profiles';
-  document.getElementById('createEntryLabel').textContent = simpleMode() ? 'Create chain' : 'Create profile or chain';
+  document.getElementById('profilesTitle').innerHTML = `Route<span class="route-mode" onclick="event.stopPropagation();openProfilesMenu()">${simpleMode() ? 'Servers' : 'Profiles'}</span>`;
+  document.getElementById('routeOrderNote').innerHTML = routeCustom[connectMode]
+    ? `Own priority order<button class="am-link" onclick="resetRouteOrder()">Follow Nodes order</button>`
+    : 'Priority follows the order in Nodes · drag here to override it';
   const broken = brokenOrder();
   document.getElementById('connects-list').innerHTML = (visibleOrder().map(renderConnectRow).join('')
-    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No working profiles'}</div>`)
+    || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No working profiles — create one in Nodes → Profiles'}</div>`)
     + (broken.length ? `<div class="conn-broken-list">${broken.map(renderBrokenRow).join('')}</div>` : '');
 }
 
@@ -258,6 +260,37 @@ function openProfiles() {
   openSheet('profiles');
 }
 
+/* Keeps the catalog, sourceOrder and both route lists in step after anything was added
+   or deleted: entries that no longer exist drop out; a route that follows Nodes copies
+   the catalog, a route with its own order keeps it and appends new entries. */
+function syncCatalog() {
+  const exists = id => sourcesData[id] || profilesData[id] || chainsData[id];
+  catalogOrder.simple = catalogOrder.simple.filter(exists);
+  sourceOrder.forEach(id => { if (!catalogOrder.simple.includes(id)) catalogOrder.simple.push(id); });
+  catalogOrder.profiles = catalogOrder.profiles.filter(exists);
+  sourceOrder = catalogOrder.simple.filter(id => sourcesData[id]);
+  ['simple', 'profiles'].forEach(m => {
+    const cat = catalogOrder[m], cur = modeOrder(m);
+    const next = routeCustom[m] ? cur.filter(id => cat.includes(id)).concat(cat.filter(id => !cur.includes(id))) : cat.slice();
+    setModeOrder(m, next);
+    if (m === connectMode) { if (!next.includes(activeConnectId)) activeConnectId = next[0]; }
+    else if (!next.includes(modeState[m].active)) modeState[m].active = next[0];
+  });
+}
+
+function resetRouteOrder() {
+  routeCustom[connectMode] = false;
+  closeSheet('actions');
+  renderConnects();
+  updateMainConnectCard();
+}
+function toggleEntryAuto(id) {
+  const e = connectEntry(id);
+  e.inAuto = !e.inAuto;
+  renderConnects();
+  updateMainConnectCard();
+}
+
 function setAutoConnect(on) {
   autoConnect = on;
   if (!on) activeConnectId = effectiveConnectIdWhenAuto();
@@ -278,14 +311,14 @@ function selectConnect(id) {
 
 const CHAIN_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
 
+// "+" on the Profiles tab of Nodes (the Servers tab has its Add sheet with a Chain row).
 function openCreateMenu() {
   const close = "closeSheet('actions');";
-  if (simpleMode()) { openCreateChain(); return; }   // entries themselves come from Nodes
   openActions('Create',
     menuRow(ICON.plus.replace(/16/g, '18'), 'Profile<div class="menu-sub">Chosen subscriptions or single servers — uses the fastest</div>', close + 'openCreateProfile()') +
     menuRow(CHAIN_ICON,
       'Chain<div class="menu-sub">' + (getProfileIds().length < 2 ? 'Needs at least two profiles' : 'Enter through one profile, exit through another') + '</div>',
-      close + 'openCreateChain()', getProfileIds().length < 2 ? 'disabled' : ''));
+      close + "openCreateChain(null,'profiles')", getProfileIds().length < 2 ? 'disabled' : ''));
 }
 
 /* ── Mode: simple (sources) / profiles ── */
@@ -294,7 +327,8 @@ function openProfilesMenu() {
   const radio = on => `<div class="profile-radio ${on ? 'active' : ''}"></div>`;
   openActions('Mode',
     menuRow(radio(simpleMode()), 'Simple<div class="menu-sub">Subscriptions and server sets from Nodes, plus chains of them</div>', "setConnectMode('simple')") +
-    menuRow(radio(!simpleMode()), 'Profiles<div class="menu-sub">Group servers into profiles, plus chains of profiles</div>', "setConnectMode('profiles')"));
+    menuRow(radio(!simpleMode()), 'Profiles<div class="menu-sub">Group servers into profiles, plus chains of profiles</div>', "setConnectMode('profiles')")
+    + (routeCustom[connectMode] ? menuRow(ICON.refresh, 'Follow Nodes order<div class="menu-sub">Drop this route’s own priority order</div>', 'resetRouteOrder()') : ''));
 }
 
 function setConnectMode(mode) {
@@ -305,17 +339,19 @@ function setConnectMode(mode) {
   connectMode = mode;
   renderConnects();
   updateMainConnectCard();
+  if (typeof renderNodesTabs === 'function') renderNodesTabs();
 }
 
 // Priority list of either mode (the active one lives in the globals).
 function modeOrder(mode) { return mode === connectMode ? connectOrder : modeState[mode].order; }
 function setModeOrder(mode, order) { if (mode === connectMode) connectOrder = order; else modeState[mode].order = order; }
 
-// A new source joins the end of the simple-mode list.
+// A new source joins the end of the Servers tab (and so of the simple-mode route).
 function sourceAdded(id) {
   if (sourcesData[id].inAuto === undefined) sourcesData[id].inAuto = true;
   if (!sourcesData[id].offNodes) sourcesData[id].offNodes = [];
-  setModeOrder('simple', modeOrder('simple').concat(id));
+  if (!catalogOrder.simple.includes(id)) catalogOrder.simple.push(id);
+  syncCatalog();
   if (document.getElementById('sh-profiles').classList.contains('open')) renderConnects();
 }
 
@@ -324,6 +360,7 @@ function dropConnectEntry(id) {
   const gone = new Set([id]);
   Object.values(chainsData).forEach(c => { if (c.inId === id || c.outId === id) { gone.add(c.id); delete chainsData[c.id]; } });
   ['simple', 'profiles'].forEach(mode => {
+    catalogOrder[mode] = catalogOrder[mode].filter(x => !gone.has(x));
     const order = modeOrder(mode).filter(x => !gone.has(x));
     setModeOrder(mode, order);
     const st = mode === connectMode ? null : modeState[mode];
@@ -349,6 +386,7 @@ function toggleRuleEnabled(id) {
    chain         — chain + entry node → exit node (their sources in the sheet).
    The right column is the latency (a chain: the two hops added up). */
 function updateMainConnectCard() {
+  syncCatalog();
   const id = effectiveConnectId();
   const e = connectEntry(id);
   const badge = document.getElementById('profModeBadge');

@@ -66,3 +66,48 @@
 .node-add{display:flex;align-items:center;gap:8px;padding:11px 14px;font-size:14px;font-weight:600;color:var(--accent);cursor:pointer;border-top:1px solid rgba(255,255,255,.035)}
 .nodes-empty{text-align:center;padding:40px 20px;color:var(--t2);font-size:14px;line-height:1.5}
 
+
+/* ── Nodes tabs: Servers / Profiles, swipeable pager ── */
+.nodes-tabs{position:relative;display:flex;margin:0 14px 10px;border-bottom:1px solid var(--border);flex-shrink:0}
+.nodes-tab{flex:1;background:none;border:none;font:inherit;font-size:14px;font-weight:600;color:var(--t3);padding:8px 0 10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+.nodes-tab.active{color:var(--t1)}
+.nodes-tab .tab-dot{width:6px;height:6px;border-radius:50%;background:var(--active);visibility:hidden}
+.nodes-tab.used .tab-dot{visibility:visible}
+.nodes-tab-ink{position:absolute;left:0;bottom:-1px;width:50%;height:2px;border-radius:1px;background:var(--accent);transition:transform .25s ease;pointer-events:none}
+.nodes-pager{flex:1;min-height:0;overflow:hidden;position:relative}
+.nodes-track{display:flex;width:200%;height:100%;transition:transform .25s ease}
+#view-nodes.swiping .nodes-track,#view-nodes.swiping .nodes-tab-ink{transition:none}
+.nodes-page{width:50%;height:100%;overflow-y:auto;overscroll-behavior:contain;padding-top:2px;touch-action:pan-y}
+
+/* ── Profile / chain cards (Nodes, target picker) ── */
+.entry-now{display:flex;align-items:center;gap:6px;padding:0 14px 12px 0;font-size:13px;color:var(--t2);white-space:nowrap;overflow:hidden}
+.entry-now.bad{color:var(--muted)}
+.entry-now .lat{min-width:0;padding:0;cursor:default}
+.entry-total{margin-left:auto;display:flex;align-items:center;gap:4px;color:var(--t3);flex-shrink:0}
+.entry-ends{overflow:hidden;text-overflow:ellipsis}
+.entry-card.broken{border-color:rgba(var(--muted-rgb),.55)}
+.entry-card.broken .src-main{opacity:.6}
+.entry-side{padding:8px 14px 4px;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--t3)}
+.entry-empty{padding:8px 14px 10px;font-size:13px;color:var(--t3)}
+.node-row.now .node-name{color:var(--active)}
+.node-src{margin-left:6px;font-size:11px;color:var(--t3)}
+
+/* ── Target picker ── */
+.overlay-l5{z-index:50}
+.sheet-l5{z-index:51}
+.tp-search{margin:10px 14px 0}
+.tp-body{display:flex;flex-direction:column;gap:8px;padding:10px 14px 24px}
+.tp-body > *{flex-shrink:0}
+.tp-label{padding:8px 4px 0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--t3)}
+.tp-card .src-head{padding-left:14px;cursor:pointer}
+.tp-card .src-usage,.tp-card .entry-now{padding-left:14px}
+.tp-card.picked{border-color:var(--accent);background:rgba(var(--accent-rgb),.07)}
+.tp-card.down .src-main{opacity:.6}
+.tp-check{color:var(--accent);flex-shrink:0;margin:0 4px}
+.tp-nodes{display:block}
+.tp-nodes .node-row.picked{background:rgba(var(--accent-rgb),.10)}
+
+/* ── Route sheet ── */
+.route-mode{margin-left:8px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(var(--accent-rgb),.12);border-radius:10px;padding:2px 8px;cursor:pointer}
+.route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
+.route-auto{flex-shrink:0;padding:0 4px}
