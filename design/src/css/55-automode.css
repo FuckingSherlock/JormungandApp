@@ -19,7 +19,7 @@
 .set-value svg{color:var(--t3)}
 
 /* ── Small centred dialog (level 3), opened / closed like a sheet: #ov-name + #sh-name ── */
-.dialog{position:fixed;left:24px;right:24px;top:50%;z-index:31;background:var(--sheet);border:1px solid var(--border-hi);border-radius:16px;padding:18px;
+.dialog{position:fixed;left:24px;right:24px;top:50%;z-index:41;background:var(--sheet);border:1px solid var(--border-hi);border-radius:16px;padding:18px;
   opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-50%) scale(.96);transition:opacity .18s,transform .18s,visibility 0s .18s}
 .dialog.open{opacity:1;visibility:visible;pointer-events:all;transform:translateY(-50%);transition:opacity .18s,transform .18s}
 .dialog-title{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:12px}

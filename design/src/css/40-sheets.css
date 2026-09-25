@@ -16,6 +16,7 @@
 .overlay-l2{z-index:20}
 .sheet-l2{z-index:21}
 .overlay-l3{z-index:30}
+.overlay-l4{z-index:40}
 .sheet-l3{z-index:31}
 
 /* [?] help: a small round button next to a title, and its tips sheet */

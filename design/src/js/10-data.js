@@ -104,14 +104,6 @@ function getUnitIds()    { return connectOrder.filter(id => connectMode === 'sim
 function getChainIds()   { return connectOrder.filter(id => chainsData[id]); }
 function isChain(id)     { return !!chainsData[id]; }
 
-let rulesData = {
-  r1: { id:'r1', type:'Geosite', value:'cn + geoip:cn', action:'direct', enabled:true },
-  r2: { id:'r2', type:'Domain',  value:'*.corp.local',  action:'direct', enabled:true },
-  r3: { id:'r3', type:'Process', value:'steam.exe',     action:'proxy',  enabled:true },
-};
-let ruleOrder = ['r1','r2','r3'];
-let ruleSeq = 4;
-
 function miniToggleHtml(id, onFnName, isOn) {
   return `<div class="mini-toggle ${isOn?'on':''}" onclick="event.stopPropagation();${onFnName}('${id}')">
     <div class="mini-toggle-thumb"></div>

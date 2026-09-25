@@ -1,28 +1,392 @@
-/* ══════════════════════ RENDER: RULES ══════════════════════ */
+/* ══════════════════════ RULES (Home → Rules card) ══════════════════════
+   One ordered list of sing-box route rules, shown in layers (docs/rules.md):
+     1. Apps       — per-app action (42-apps.js);
+     2. My rules   — full form (75-rule-form.js), drag to reorder;
+     3. Quick      — local networks, ads, services, "my region direct";
+     4. Everything else — one final action.
+   The engine checks them top-down, first match wins; "Final order" shows it read-only.
+   Targets (profile / chain / subscription / node) wait for the targets rework: until then
+   the picker is a stub that cycles through sample targets. */
+
+// index 0 = the main flow (what Home connects through); the rest are stub samples.
+const STUB_TARGETS = [['Main flow', 'proxy'], ['Europe', 'profile'], ['DE → NL', 'chain'], ['Remnawave', 'subscription'], ['Frankfurt 01', 'node']];
+const targetTag = i => i ? STUB_TARGETS[i][1] + ':' + STUB_TARGETS[i][0] : 'proxy';
+const targetName = i => STUB_TARGETS[i][0];
+const nextTarget = i => (i + 1) % STUB_TARGETS.length;
+function targetRowHtml(label, i, click) {
+  return `<div class="set-row tgt-row" onclick="${click}"><div class="set-label">${label}</div>
+    <span class="tgt-val">${esc(targetName(i))}${i ? `<span class="tgt-kind">${STUB_TARGETS[i][1]}</span>` : ''}</span><span class="soon-tag">stub</span>${CHEVRON_R}</div>`;
+}
+
+/* Condition groups of a rule. Inside a field values are OR, between groups AND; each group
+   may be negated ("except"). kinds drive validation (validVal). */
+const RULE_GROUPS = [
+  { key: 'domain', title: 'Domains', fields: [
+    ['domain_suffix', 'Suffix', 'google.com', 'suffix'], ['domain', 'Exact domain', 'example.com', 'domain'],
+    ['domain_keyword', 'Keyword', 'google', 'text'], ['domain_regex', 'Regex', '^.+\\.ru$', 'regex'],
+    ['geosite', 'Geosite', 'youtube', 'name'], ['rule_set', 'Rule set', 'ru-blocked', 'ruleset']] },
+  { key: 'ip', title: 'IP', fields: [['ip_cidr', 'IP / CIDR / range', '10.0.0.0/8, 1.1.1.1-1.1.1.9', 'ip'], ['geoip', 'GeoIP', 'ru', 'name']],
+    flag: ['ip_is_private', 'Local networks'] },
+  { key: 'port', title: 'Ports', fields: [['port', 'Ports and ranges', '443, 8000-9000', 'port']] },
+  { key: 'source', title: 'Source', fields: [['source_ip_cidr', 'Source IP / CIDR', '192.168.1.0/24', 'ip'], ['source_port', 'Source ports', '5000-6000', 'port']] },
+  { key: 'network', title: 'Network', choices: [['network', 'Network', ['tcp', 'udp']], ['protocol', 'Protocol (sniffed)', ['tls', 'http', 'quic', 'bittorrent', 'stun', 'dns']]] },
+  { key: 'process', title: 'Process', desktop: true, fields: [['process', 'Name or path', 'chrome.exe, /usr/bin/*', 'text']] },
+];
+const GROUP = Object.fromEntries(RULE_GROUPS.map(g => [g.key, g]));
+
+/* ── Validation ── */
+const ip2n = s => s.split('.').reduce((a, o) => a * 256 + +o, 0);
+const n2ip = n => [24, 16, 8, 0].map(b => Math.floor(n / 2 ** b) % 256).join('.');
+const isIp4 = s => /^\d{1,3}(\.\d{1,3}){3}$/.test(s) && s.split('.').every(o => +o <= 255);
+function isIpVal(v) {
+  if (v.includes(':')) return /^[0-9a-f:]+(\/\d{1,3})?$/i.test(v) && !(+v.split('/')[1] > 128);
+  const r = v.split('-');
+  if (r.length === 2) return isIp4(r[0]) && isIp4(r[1]) && ip2n(r[0]) <= ip2n(r[1]);
+  const [a, p] = v.split('/');
+  return isIp4(a) && (p === undefined || /^\d{1,2}$/.test(p) && +p <= 32);
+}
+function isPortVal(v) {
+  const m = /^(\d+)(?:-(\d+))?$/.exec(v);
+  if (!m) return false;
+  const a = +m[1], b = m[2] === undefined ? a : +m[2];
+  return a >= 1 && b <= 65535 && a <= b;
+}
+const VALIDATORS = {
+  domain: v => /^(\*\.)?([a-z0-9-]+\.)+[a-z0-9-]{2,}$/i.test(v),
+  suffix: v => /^\.?([a-z0-9-]+\.)*[a-z0-9-]+$/i.test(v),
+  text: v => !/\s/.test(v),
+  regex: v => { try { new RegExp(v); return true; } catch { return false; } },
+  name: v => /^[a-z0-9@!_-]+$/i.test(v),
+  ruleset: v => ruleSets.some(s => s.name === v),
+  ip: isIpVal, port: isPortVal,
+};
+const VAL_HINT = {
+  domain: 'a domain, e.g. example.com or *.example.com', suffix: 'a domain suffix, e.g. google.com', text: 'no spaces',
+  regex: 'not a valid regular expression', name: 'letters, digits, - and _', ruleset: 'no rule set with this name (Rule sets)',
+  ip: 'an IP, CIDR (10.0.0.0/8) or range (1.1.1.1-1.1.1.9)', port: '1–65535 or a range like 8000-9000',
+};
+const validVal = (kind, v) => VALIDATORS[kind](v);
+
+// 1.1.1.1-1.1.1.9 → the CIDR blocks sing-box needs (ip_cidr has no ranges).
+function rangeToCidrs(a, b) {
+  const out = [];
+  let s = ip2n(a); const e = ip2n(b);
+  while (s <= e) {
+    let size = 32;
+    while (size > 0) { const block = 2 ** (32 - size + 1); if (s % block || s + block - 1 > e) break; size--; }
+    out.push(n2ip(s) + '/' + size);
+    s += 2 ** (32 - size);
+  }
+  return out;
+}
+
+/* ── Data ── */
+let rulesData = {
+  r1: { id: 'r1', name: 'Work network', enabled: true, action: 'direct', target: 0, block: 'drop', strict: false, dns: 'auto',
+        groups: { domain: { not: false, v: { domain_suffix: ['corp.local', 'intra.example.com'] } } } },
+  r2: { id: 'r2', name: 'Discord voice', enabled: true, action: 'proxy', target: 2, block: 'drop', strict: true, dns: 'auto',
+        groups: { domain: { not: false, v: { domain_suffix: ['discord.gg', 'discord.media'] } }, network: { not: false, v: { network: ['udp'] } } } },
+  r3: { id: 'r3', name: '', enabled: true, action: 'direct', target: 0, block: 'drop', strict: false, dns: 'auto',
+        groups: { network: { not: false, v: { protocol: ['bittorrent'] } }, port: { not: false, v: { port: ['6881-6889'] } } } },
+  r4: { id: 'r4', name: 'Trackers', enabled: false, action: 'block', target: 0, block: 'drop', strict: false, dns: 'auto', groups: {},
+        composite: { type: 'logical', mode: 'or', rules: [{ domain_keyword: ['tracker'] }, { port: [6969] }], action: 'reject', method: 'drop' } },
+};
+let ruleOrder = ['r1', 'r2', 'r3', 'r4'];
+let ruleSeq = 5;
+
+const SERVICES = [
+  ['telegram', 'Telegram', ['telegram.org', 't.me', 'telegram.me']],
+  ['youtube', 'YouTube', ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be']],
+  ['discord', 'Discord', ['discord.com', 'discord.gg', 'discordapp.com']],
+  ['netflix', 'Netflix', ['netflix.com', 'nflxvideo.net']],
+  ['spotify', 'Spotify', ['spotify.com', 'scdn.co']],
+  ['chatgpt', 'ChatGPT', ['openai.com', 'chatgpt.com']],
+  ['instagram', 'Instagram', ['instagram.com', 'cdninstagram.com']],
+  ['x', 'X / Twitter', ['x.com', 'twitter.com', 'twimg.com']],
+];
+const REGIONS = [['RU', '🇷🇺 Russia', ['ru', 'рф', 'su']], ['BY', '🇧🇾 Belarus', ['by']], ['KZ', '🇰🇿 Kazakhstan', ['kz']],
+  ['UA', '🇺🇦 Ukraine', ['ua']], ['CN', '🇨🇳 China', ['cn']], ['IR', '🇮🇷 Iran', ['ir']]];
+const ADS = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
+const quickCfg = {
+  regionOn: true, region: 'RU', lan: true, ads: false, final: 'proxy',
+  services: { telegram: 'vpn', youtube: 'vpn', discord: 'default', netflix: 'default', spotify: 'default', chatgpt: 'vpn', instagram: 'vpn', x: 'default' },
+};
+const SVC_STATES = [['default', 'Default'], ['vpn', 'VPN'], ['direct', 'Direct']];
+
+let ruleSets = [
+  { id: 'geosite', name: 'geosite', builtin: true, url: 'built-in', format: 'srs', via: 'vpn', every: 7 * 86400, updated: '2 d ago' },
+  { id: 'geoip', name: 'geoip', builtin: true, url: 'built-in', format: 'srs', via: 'vpn', every: 7 * 86400, updated: '2 d ago' },
+  { id: 'rs1', name: 'ru-blocked', url: 'https://example.org/lists/ru-blocked.srs', format: 'srs', via: 'vpn', every: 86400, updated: '5 h ago' },
+];
+let rsSeq = 2;
+
+/* ── Labels ── */
+function ruleTargetText(r) {
+  if (r.action === 'direct') return 'Direct';
+  if (r.action === 'block') return 'Block';
+  return r.target ? '→ ' + targetName(r.target) : 'Proxy';
+}
+function ruleSummary(r) {
+  if (r.composite) return 'composite rule';
+  const parts = RULE_GROUPS.filter(g => r.groups[g.key]).map(g => {
+    const d = r.groups[g.key];
+    // The prefix goes on a field's first value only: "port 443, 8000-9000".
+    const vals = Object.entries(d.v).flatMap(([f, list]) => list.map((v, i) =>
+      (i ? '' : { domain_keyword: 'kw ', domain_regex: 're ', geosite: 'geosite:', rule_set: 'set:', geoip: 'geoip:', port: 'port ', source_ip_cidr: 'from ', source_port: 'from port ' }[f] || '') + v));
+    if (d.flag) vals.unshift('local networks');
+    const shown = vals.slice(0, 2).join(', ') + (vals.length > 2 ? ' +' + (vals.length - 2) : '');
+    return (d.not ? 'not ' : '') + (shown || '—');
+  });
+  return parts.join(' · ') || 'no conditions';
+}
+const ruleTitle = r => r.name || ruleSummary(r);
+
+/* ── Rules sheet ── */
+let ruleQuery = '';
+function openRules() { ruleQuery = ''; document.getElementById('rules-search').value = ''; renderRules(); openSheet('rules'); }
+function setRuleQuery(q) { ruleQuery = q.trim().toLowerCase(); renderRules(); }
 
 function renderRules() {
-  const el = document.getElementById('rules-list');
-  el.innerHTML = ruleOrder.map(id => {
-    const r = rulesData[id];
-    return `<div class="config-row ${!r.enabled?'dimmed':''}">
-      <div style="flex:1;min-width:0">
-        <div class="config-name">${r.type}</div>
-        <div class="config-sub" style="font-family:var(--mono)">${r.value}</div>
-      </div>
-      <span class="rule-action-badge ${r.action}">${r.action}</span>
-      ${miniToggleHtml(id, 'toggleRuleEnabled', r.enabled)}
-      <div class="row-del" onclick="removeRule('${id}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </div>
+  const q = ruleQuery, hit = s => !q || s.toLowerCase().includes(q);
+  const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="event.stopPropagation();${click}"><div class="mini-toggle-thumb"></div></div>`;
+
+  const shownRules = ruleOrder.filter(id => { const r = rulesData[id]; return hit(r.name + ' ' + ruleSummary(r) + ' ' + ruleTargetText(r)); });
+  const ruleRows = shownRules.map(id => {
+    const r = rulesData[id], i = ruleOrder.indexOf(id) + 1;
+    const cls = r.action === 'proxy' ? 'proxy' : r.action;
+    return `<div class="rule-row ${r.enabled ? '' : 'dimmed'}" data-id="${id}" onclick="openRuleForm('${id}')">
+      ${q ? '<span class="cc-rank"></span>' : `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startRuleDrag(event,'${id}')">${GRIP_SVG}</div>`}
+      <span class="cc-rank">${i}</span>
+      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.strict && r.action === 'proxy' && r.target ? '<span class="conn-tag warn">strict</span>' : ''}</div>
+        ${r.name ? `<div class="rule-sub">${esc(ruleSummary(r))}</div>` : ''}</div>
+      <span class="rule-action-badge ${cls}">${esc(ruleTargetText(r))}</span>
+      ${toggle(r.enabled, `toggleRuleEnabled('${id}')`)}
     </div>`;
   }).join('');
-  const activeRules = ruleOrder.filter(id => rulesData[id].enabled).length;
-  document.getElementById('rulesCardSub').textContent = activeRules + ' active · ' + ruleOrder.length + ' total';
+
+  const shownSvc = SERVICES.filter(([, name]) => hit(name));
+  const svcRows = shownSvc.map(([key, name]) => `<div class="set-row svc-row"><div class="set-label">${name}</div>
+    <div class="seg3">${SVC_STATES.map(([v, l]) => `<button class="${quickCfg.services[key] === v ? 'on ' + v : ''}" onclick="setService('${key}','${v}')">${l}</button>`).join('')}</div></div>`).join('');
+
+  const appsSet = Object.keys(appRules).length;
+  const regionSel = `<select class="set-select" id="qr-region" onchange="quickCfg.region=this.value;renderRules()">${REGIONS.map(([c, l]) => `<option value="${c}" ${c === quickCfg.region ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+
+  document.getElementById('rules-body').innerHTML = `
+    <div class="rules-label">Apps</div>
+    <div class="set-group"><div class="set-row" style="cursor:pointer" onclick="openApps()"><div class="set-label">Per-app routing<div class="set-hint">${appsSet ? appsSet + ' apps with their own route' : 'No apps set'}</div></div>${CHEVRON_R}</div></div>
+
+    <div class="rules-label">My rules<span class="rules-note">first match wins</span><button class="am-link" onclick="openRuleForm()">+ Add</button></div>
+    <div class="set-group" id="rules-list">${ruleRows || `<div class="rules-empty">${q ? 'No rules match' : 'No rules yet'}</div>`}</div>
+
+    <div class="rules-label">Quick rules</div>
+    <div class="set-group">
+      ${hit('local networks') ? `<div class="set-row"><div class="set-label">Local networks direct<div class="set-hint">192.168.x.x, 10.x.x.x, printers, NAS</div></div>${toggle(quickCfg.lan, 'quickCfg.lan=!quickCfg.lan;renderRules()')}</div>` : ''}
+      ${hit('ads block') ? `<div class="set-row"><div class="set-label">Block ads<div class="set-hint">Known ad and tracker domains</div></div>${toggle(quickCfg.ads, 'quickCfg.ads=!quickCfg.ads;renderRules()')}</div>` : ''}
+      ${hit('region direct') ? `<div class="set-row"><div class="set-label">My region direct<div class="set-hint">Its sites and IPs skip the VPN</div></div>${quickCfg.regionOn ? regionSel : ''}${toggle(quickCfg.regionOn, 'quickCfg.regionOn=!quickCfg.regionOn;renderRules()')}</div>` : ''}
+    </div>
+    ${svcRows ? `<div class="rules-label">Services</div><div class="set-group">${svcRows}</div>` : ''}
+
+    <div class="rules-label">Everything else</div>
+    <div class="set-group"><div class="set-row"><div class="seg3 wide">${[['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']].map(([v, l]) =>
+      `<button class="${quickCfg.final === v ? 'on ' + v : ''}" onclick="quickCfg.final='${v}';renderRules()">${l}</button>`).join('')}</div></div></div>
+
+    <div class="set-group rules-more">
+      <div class="set-row" onclick="openRuleOrder()"><div class="set-label">Final order<div class="set-hint">The list exactly as the engine checks it</div></div>${CHEVRON_R}</div>
+      <div class="set-row" onclick="openRuleSets()"><div class="set-label">Rule sets<div class="set-hint">${ruleSets.length} lists · geosite, geoip, your own</div></div>${CHEVRON_R}</div>
+      <div class="set-row" onclick="openRuleIO()"><div class="set-label">Import / export<div class="set-hint">sing-box JSON, Clash rules</div></div>${CHEVRON_R}</div>
+    </div>`;
+
+  const active = ruleOrder.filter(id => rulesData[id].enabled).length;
+  document.getElementById('rulesCardSub').textContent = active + ' rules' + (quickCfg.regionOn ? ' · ' + quickCfg.region + ' direct' : '');
 }
 
-function removeRule(id) {
-  ruleOrder = ruleOrder.filter(x => x !== id);
-  delete rulesData[id];
+function toggleRuleEnabled(id) { rulesData[id].enabled = !rulesData[id].enabled; renderRules(); }
+function setService(key, v) { quickCfg.services[key] = v; renderRules(); }
+function startRuleDrag(e, id) {
+  const rowEl = document.querySelector('#rules-list .rule-row[data-id="' + id + '"]');
+  startRowDrag(e, rowEl, '.rule-row', () => ruleOrder, renderRules);
+}
+
+/* ── Final order: the whole list as the engine sees it ── */
+function effectiveRules() {
+  const out = [];
+  const apps = Object.keys(appRules).length;
+  if (apps) out.push(['Apps', apps + ' apps with their own route', 'mixed']);
+  ruleOrder.filter(id => rulesData[id].enabled).forEach(id => { const r = rulesData[id]; out.push([ruleTitle(r), r.name ? ruleSummary(r) : '', ruleTargetText(r)]); });
+  if (quickCfg.lan) out.push(['Local networks', 'quick rule', 'Direct']);
+  if (quickCfg.ads) out.push(['Ads', 'quick rule', 'Block']);
+  SERVICES.filter(([k]) => quickCfg.services[k] !== 'default').forEach(([k, n]) => out.push([n, 'service', quickCfg.services[k] === 'vpn' ? 'Proxy' : 'Direct']));
+  if (quickCfg.regionOn) out.push(['Region ' + quickCfg.region, 'geosite + geoip', 'Direct']);
+  out.push(['Everything else', '', { proxy: 'Proxy', direct: 'Direct', block: 'Block' }[quickCfg.final]]);
+  return out;
+}
+function openRuleOrder() {
+  document.getElementById('ruleorder-list').innerHTML = effectiveRules().map(([t, s, a], i) =>
+    `<div class="set-row order-row"><span class="cc-rank">${i + 1}</span><div class="set-label">${esc(t)}${s ? `<div class="set-hint">${esc(s)}</div>` : ''}</div><span class="order-act">${esc(a)}</span></div>`).join('');
+  openSheet('ruleorder');
+}
+
+/* ── Test an address: which rule catches it and where it goes ── */
+const PRIVATE_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', '169.254.0.0/16'];
+function inCidr(ip, c) {
+  if (c.includes('-')) { const [a, b] = c.split('-'); return ip2n(ip) >= ip2n(a) && ip2n(ip) <= ip2n(b); }
+  const [a, p = 32] = c.split('/');
+  const size = 2 ** (32 - p);
+  return Math.floor(ip2n(ip) / size) === Math.floor(ip2n(a) / size);
+}
+const onDomain = (host, d) => host === d || host.endsWith('.' + d);
+const hostOfService = key => (SERVICES.find(s => s[0] === key) || [, , []])[2];
+function groupMatches(key, d, t) {
+  const v = d.v;
+  const any = (f, fn) => (v[f] || []).some(fn);
+  let m = false;
+  if (key === 'domain' && !t.ip) m = any('domain', x => x.startsWith('*.') ? onDomain(t.host, x.slice(2)) : t.host === x)
+    || any('domain_suffix', x => onDomain(t.host, x.replace(/^\./, ''))) || any('domain_keyword', x => t.host.includes(x))
+    || any('domain_regex', x => new RegExp(x).test(t.host)) || any('geosite', x => hostOfService(x).some(h => onDomain(t.host, h)));
+  if (key === 'ip' && t.ip) m = any('ip_cidr', x => !x.includes(':') && inCidr(t.host, x)) || (d.flag && PRIVATE_NETS.some(c => inCidr(t.host, c)));
+  if (key === 'port') m = any('port', x => { const [a, b = a] = x.split('-'); return t.port >= +a && t.port <= +b; });
+  if (key === 'network') m = (!v.network || !v.network.length || v.network.includes('tcp')) && (!v.protocol || !v.protocol.length || v.protocol.includes(t.port === 443 ? 'tls' : 'http'));
+  return d.not ? !m : m;
+}
+function testAddress(raw) {
+  const s = raw.trim().toLowerCase().replace(/^\w+:\/\//, '').split('/')[0];
+  if (!s) return null;
+  const app = APPS.find(a => a.name.toLowerCase() === s || a.pkg === s);
+  if (app) {
+    const a = appRules[app.pkg];
+    return a ? { rule: 'Apps → ' + app.name, to: appActText(a) } : { rule: 'No app rule for ' + app.name, to: 'goes by the rules below' };
+  }
+  const [host, port = '443'] = s.split(':');
+  const t = { host, port: +port, ip: isIp4(host) };
+  for (const id of ruleOrder) {
+    const r = rulesData[id];
+    if (!r.enabled) continue;
+    if (r.composite) continue;
+    const gs = Object.entries(r.groups);
+    if (gs.length && gs.every(([k, d]) => groupMatches(k, d, t))) return { rule: '#' + (ruleOrder.indexOf(id) + 1) + ' ' + ruleTitle(r), to: ruleTargetText(r).replace('→ ', '') };
+  }
+  if (quickCfg.lan && (t.ip ? PRIVATE_NETS.some(c => inCidr(host, c)) : host.endsWith('.local'))) return { rule: 'Local networks', to: 'Direct' };
+  if (quickCfg.ads && ADS.some(d => onDomain(host, d))) return { rule: 'Block ads', to: 'Block' };
+  const svc = SERVICES.find(([k, , ds]) => quickCfg.services[k] !== 'default' && ds.some(d => onDomain(host, d)));
+  if (svc) return { rule: 'Service ' + svc[1], to: quickCfg.services[svc[0]] === 'vpn' ? 'Proxy' : 'Direct' };
+  const reg = REGIONS.find(([c]) => c === quickCfg.region);
+  if (quickCfg.regionOn && !t.ip && reg[2].some(tld => host.endsWith('.' + tld))) return { rule: 'My region direct (' + reg[0] + ')', to: 'Direct' };
+  return { rule: 'Everything else', to: { proxy: 'Proxy', direct: 'Direct', block: 'Block' }[quickCfg.final] };
+}
+function openRuleTest() {
+  document.getElementById('rt-result').innerHTML = '';
+  openSheet('ruletest');
+  const i = document.getElementById('rt-input'); i.value = ''; i.focus();
+}
+function runRuleTest() {
+  const res = testAddress(document.getElementById('rt-input').value);
+  document.getElementById('rt-result').innerHTML = !res ? '' :
+    `<div class="rt-rule">${esc(res.rule)}</div><div class="rt-to">→ ${esc(res.to)}</div>`;
+}
+
+/* ── Import / export ── */
+let ioTab = 'export', ioFormat = 'json';
+function openRuleIO() { ioTab = 'export'; ioFormat = 'json'; renderRuleIO(); openSheet('ruleio'); }
+function setRuleIO(tab, fmt) { if (tab && tab !== ioTab) { ioTab = tab; document.getElementById('io-text').value = ''; } if (fmt) ioFormat = fmt; renderRuleIO(); }
+const CLASH_OUT = r => r.action === 'direct' ? 'DIRECT' : r.action === 'block' ? 'REJECT' : r.target ? targetName(r.target) : 'PROXY';
+const CLASH_TYPES = { domain: 'DOMAIN', domain_suffix: 'DOMAIN-SUFFIX', domain_keyword: 'DOMAIN-KEYWORD', domain_regex: 'DOMAIN-REGEX', geosite: 'GEOSITE', ip_cidr: 'IP-CIDR', geoip: 'GEOIP', port: 'DST-PORT', source_ip_cidr: 'SRC-IP-CIDR', source_port: 'SRC-PORT', process: 'PROCESS-NAME' };
+function exportClash() {
+  return ruleOrder.map(id => {
+    const r = rulesData[id], gs = Object.entries(r.groups);
+    const vals = gs.length === 1 && !gs[0][1].not && !gs[0][1].flag ? Object.entries(gs[0][1].v).filter(([f]) => CLASH_TYPES[f]) : null;
+    if (r.composite || !vals || vals.length !== Object.keys(gs[0][1].v).length) return '# skipped (only sing-box JSON can hold it): ' + ruleTitle(r);
+    return vals.flatMap(([f, list]) => list.map(v => CLASH_TYPES[f] + ',' + v + ',' + CLASH_OUT(r))).join('\n');
+  }).join('\n');
+}
+function renderRuleIO() {
+  const kept = ioTab === 'import' && document.getElementById('io-text') ? document.getElementById('io-text').value : '';
+  document.querySelectorAll('#sh-ruleio .sheet-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === ioTab));
+  const text = ioTab === 'export' ? (ioFormat === 'json' ? JSON.stringify(ruleOrder.map(id => ruleJson(rulesData[id])), null, 2) : exportClash()) : kept;
+  document.getElementById('ruleio-body').innerHTML = `
+    <div class="form-group"><div class="chip-row" style="padding:0">${[['json', 'sing-box JSON'], ['clash', 'Clash rules']].map(([v, l]) => `<div class="chip ${ioFormat === v ? 'active' : ''}" onclick="setRuleIO(null,'${v}')">${l}</div>`).join('')}</div></div>
+    <div class="form-group"><textarea class="form-input code-area" id="io-text" ${ioTab === 'export' ? 'readonly' : ''} placeholder="${ioFormat === 'json' ? '[{ &quot;domain_suffix&quot;: [&quot;example.com&quot;], &quot;outbound&quot;: &quot;direct&quot; }]' : 'DOMAIN-SUFFIX,example.com,DIRECT'}">${esc(text)}</textarea>
+      <div class="set-hint warn" id="io-err"></div></div>
+    ${ioTab === 'import' ? `<div class="set-group"><div class="set-row" onclick="toast('Picks a subscription with Clash rules — coming with the targets rework')"><div class="set-label">From a subscription<div class="set-hint">Rules shipped in a Clash YAML subscription</div></div><span class="soon-tag">stub</span>${CHEVRON_R}</div></div>` : ''}`;
+  document.getElementById('io-action').textContent = ioTab === 'export' ? 'Copy' : 'Import';
+}
+function ruleIOAction() {
+  const text = document.getElementById('io-text').value;
+  if (ioTab === 'export') { navigator.clipboard && navigator.clipboard.writeText(text).catch(() => {}); toast('Copied'); return; }
+  const err = document.getElementById('io-err');
+  let rules;
+  try { rules = ioFormat === 'json' ? parseJsonRules(text) : parseClash(text); }
+  catch (e) { err.textContent = e.message; return; }
+  if (!rules.length) { err.textContent = 'Nothing to import'; return; }
+  rules.forEach(r => { r.id = 'r' + (ruleSeq++); rulesData[r.id] = r; ruleOrder.push(r.id); });
+  closeSheet('ruleio');
   renderRules();
+  toast('Imported ' + rules.length + ' rule' + (rules.length > 1 ? 's' : ''));
 }
+function parseJsonRules(text) {
+  let o;
+  try { o = JSON.parse(text); } catch (e) { throw new Error(jsonErrorText(text, e)); }
+  return (Array.isArray(o) ? o : [o]).map(ruleFromJson);
+}
+function parseClash(text) {
+  const byType = Object.fromEntries(Object.entries(CLASH_TYPES).map(([f, t]) => [t, f]));
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  // MATCH,POLICY is Clash's catch-all: it becomes Everything else, not a rule.
+  const match = lines.find(l => /^MATCH,/i.test(l));
+  if (match) { const P = match.split(',')[1].trim().toUpperCase(); quickCfg.final = P === 'DIRECT' ? 'direct' : P === 'REJECT' ? 'block' : 'proxy'; }
+  return lines.filter(l => l !== match).map((l, i) => {
+    const [type, value, pol] = l.split(',').map(s => s && s.trim());
+    const f = byType[(type || '').toUpperCase()] || (type === 'IP-CIDR6' ? 'ip_cidr' : null);
+    if (!f || !value || !pol) throw new Error('Line ' + (i + 1) + ': expected TYPE,value,POLICY');
+    const g = RULE_GROUPS.find(g => (g.fields || []).some(x => x[0] === f));
+    const P = pol.toUpperCase();
+    return newRule({ groups: { [g.key]: { not: false, v: { [f]: [value] } } }, action: P === 'DIRECT' ? 'direct' : P === 'REJECT' ? 'block' : 'proxy' });
+  });
+}
+const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: 0, block: 'drop', strict: false, dns: 'auto', groups: {} }, o);
 
+/* ── Rule sets: built-in geo lists + remote ones ── */
+function openRuleSets() { renderRuleSets(); openSheet('rulesets'); }
+function renderRuleSets() {
+  document.getElementById('rulesets-list').innerHTML = ruleSets.map(s => `<div class="set-row rs-row" onclick="openRsForm('${s.id}')">
+    <div class="set-label"><span class="mono">${esc(s.name)}</span>${s.builtin ? '<span class="conn-tag muted">built-in</span>' : ''}
+      <div class="set-hint">${s.builtin ? '' : s.format.toUpperCase() + ' · '}every ${fmtEvery(s.every)} · via ${s.via === 'vpn' ? 'VPN' : 'direct'} · ${s.updated}</div></div>${CHEVRON_R}</div>`).join('');
+}
+let rsEditing = null, rsDraft = null;
+function openRsForm(id) {
+  rsEditing = id || null;
+  rsDraft = Object.assign({ name: '', url: '', format: 'srs', via: 'vpn', every: 86400 }, id ? ruleSets.find(s => s.id === id) : {});
+  document.getElementById('rsTitle').textContent = id ? 'Rule set' : 'Add rule set';
+  document.getElementById('rs-name').value = rsDraft.name;
+  document.getElementById('rs-url').value = rsDraft.url;
+  document.getElementById('rs-name').disabled = document.getElementById('rs-url').disabled = !!rsDraft.builtin;
+  document.getElementById('rs-delete').style.display = id && !rsDraft.builtin ? '' : 'none';
+  renderRsForm();
+  openSheet('rsform');
+}
+function renderRsForm() {
+  const chips = (key, opts) => opts.map(([v, l]) => `<div class="chip ${rsDraft[key] === v ? 'active' : ''}" onclick="rsDraft.${key}='${v}';renderRsForm()">${l}</div>`).join('');
+  document.getElementById('rs-format').innerHTML = rsDraft.builtin ? '<span class="set-hint">SRS (binary)</span>' : chips('format', [['srs', 'SRS (binary)'], ['json', 'JSON (source)']]);
+  document.getElementById('rs-via').innerHTML = chips('via', [['vpn', 'VPN'], ['direct', 'Direct']]);
+  document.getElementById('rs-every').innerHTML = fmtEvery(rsDraft.every) + CHEVRON_R;
+}
+function saveRsForm() {
+  const name = document.getElementById('rs-name').value.trim(), url = document.getElementById('rs-url').value.trim();
+  if (!rsDraft.builtin) {
+    if (!/^[a-z0-9_-]+$/i.test(name)) { toast('Name: letters, digits, - and _'); return; }
+    if (ruleSets.some(s => s.name === name && s.id !== rsEditing)) { toast('A rule set with this name exists'); return; }
+    if (!/^https?:\/\/\S+$/.test(url)) { toast('URL: https://…'); return; }
+  }
+  Object.assign(rsDraft, rsDraft.builtin ? {} : { name, url });
+  if (rsEditing) Object.assign(ruleSets.find(s => s.id === rsEditing), rsDraft);
+  else ruleSets.push(Object.assign(rsDraft, { id: 'rs' + (rsSeq++), updated: 'never' }));
+  closeSheet('rsform');
+  renderRuleSets(); renderRules();
+}
+function deleteRuleSet() {
+  const s = ruleSets.find(x => x.id === rsEditing);
+  const users = ruleOrder.filter(id => ((rulesData[id].groups.domain || { v: {} }).v.rule_set || []).includes(s.name));
+  if (users.length) { toast('Used in rule ' + users.map(id => '#' + (ruleOrder.indexOf(id) + 1)).join(', ') + ' — remove it there first'); return; }
+  ruleSets = ruleSets.filter(x => x !== s);
+  closeSheet('rsform');
+  renderRuleSets(); renderRules();
+}

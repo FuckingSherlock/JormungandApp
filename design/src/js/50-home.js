@@ -23,13 +23,24 @@ function toggleMain() {
 
 /* ══════════════════════ SEGMENTED CONTROLS ══════════════════════ */
 
-const segState = { mode: 'tun', route: 'rules' };
-function setSegment(group, value, index) {
+const segState = { mode: 'tun', route: 'rules', sys: 'off' };
+const SEG_OPTS = { mode: ['tun', 'proxy'], route: ['global', 'rules'], sys: ['on', 'off'] };
+function setSegment(group, value) {
   segState[group] = value;
-  const opts = group === 'mode' ? ['tun','proxy'] : ['global','rules'];
-  opts.forEach(o => document.getElementById('seg-'+group+'-'+o).classList.toggle('active', o === value));
+  const index = SEG_OPTS[group].indexOf(value);
+  SEG_OPTS[group].forEach(o => document.getElementById('seg-'+group+'-'+o).classList.toggle('active', o === value));
   document.getElementById('pill-'+group).style.transform = index === 1 ? 'translateY(100%)' : 'translateY(0)';
+  document.getElementById('seg-sys').classList.toggle('sys-on', segState.sys === 'on');
+  if (group === 'sys' && connCfg.sysProxy !== (value === 'on')) { connCfg.sysProxy = value === 'on'; renderConnSettings(); }
+  if (group === 'mode') renderDns();   // the Hijack DNS note depends on TUN
 }
-setSegment('mode', 'tun', 0);
-setSegment('route', 'rules', 1);
+
+/* Connection switches (Settings → Connection). System proxy is also the third switch on
+   Home; on mobile it will leave Home (Android apps mostly ignore the system proxy). */
+const connCfg = { sysProxy: false, killSwitch: false };
+function setSysProxy(on) {
+  connCfg.sysProxy = on;
+  setSegment('sys', on ? 'on' : 'off');
+  renderConnSettings();
+}
 

@@ -84,6 +84,20 @@ const SHOTS = {
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
   nodeform:   async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodeForm()); await settle(p); },
   actions:    async p => { await tab(p, 'nodes'); await p.click('.src-card >> nth=0 >> button[title=More]'); await settle(p); },
+  rules:      async p => { await p.evaluate(() => openRules()); await settle(p); },
+  'rules-more': async p => { await p.evaluate(() => { openRules(); document.getElementById('rules-body').scrollTop = 9999; }); await settle(p); },
+  'rule-form': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); }); await settle(p); },
+  'rule-new':  async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddGroup('ip'); rfAddValues('domain', 'domain_suffix', 'youtube.com, bad domain', false); }); await settle(p); },
+  'rule-json': async p => { await p.evaluate(() => { openRules(); openRuleForm('r4'); setRfTab('json'); }); await settle(p); },
+  'rule-test': async p => { await p.evaluate(() => { openRules(); openRuleTest(); document.getElementById('rt-input').value = 'discord.com'; runRuleTest(); }); await settle(p); },
+  'rule-order': async p => { await p.evaluate(() => { openRules(); openRuleOrder(); }); await settle(p); },
+  'rule-io':   async p => { await p.evaluate(() => { openRules(); openRuleIO(); setRuleIO('export', 'clash'); }); await settle(p); },
+  'rule-sets': async p => { await p.evaluate(() => { openRules(); openRuleSets(); }); await settle(p); },
+  apps:       async p => { await p.evaluate(() => { openRules(); openApps(); }); await settle(p); },
+  'app-act':  async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('com.discord'); }); await settle(p); },
+  'settings-dns': async p => { await p.evaluate(() => openDnsSettings()); await settle(p); },
+  'dns-form': async p => { await p.evaluate(() => { openDnsSettings(); openDnsForm(); }); await settle(p); },
+  'settings-conn': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setconn'); }); await settle(p); },
   more:       async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodesMore()); await settle(p); },
 };
 
@@ -787,6 +801,137 @@ async function runChecks() {
       return ping(n) === pingCache.get(serverKey(n)).ms && pingAge(n) < 5000;
     });
     expect(ok, 'cache not updated by pingNodes');
+  });
+
+  await check('system proxy: Home switch and Settings → Connection stay in sync', async () => {
+    const r = await page.evaluate(() => {
+      const out = {};
+      document.getElementById('seg-sys-on').click();
+      out.home = connCfg.sysProxy === true && document.getElementById('seg-sys').classList.contains('sys-on');
+      out.settings = document.querySelector('#conn-settings .mini-toggle').classList.contains('on');
+      document.querySelector('#conn-settings .mini-toggle').click();
+      out.off = connCfg.sysProxy === false && segState.sys === 'off' && document.getElementById('seg-sys-off').classList.contains('active');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('DNS: card opens Settings → DNS, pings, keeps one server, form validates, hijack note', async () => {
+    await page.click('#dnsCard'); await settle(page);
+    const r = await page.evaluate(async () => {
+      const out = {};
+      out.open = document.getElementById('view-settings').classList.contains('active') && document.getElementById('sh-setdns').classList.contains('open');
+      out.pinging = dnsPing.remote !== undefined;
+      toggleDnsOn('remote'); toggleDnsOn('local');
+      out.keepsOne = dnsActive().length === 1; toggleDnsOn('remote');
+      out.sub = /Cloudflare/.test(document.getElementById('dnsCardSub').textContent);
+      openDnsForm();
+      document.getElementById('df-addr').value = 'not a dns'; saveDnsForm();
+      out.bad = dnsOrder.length === 3 && document.getElementById('sh-dnsform').classList.contains('open');
+      document.getElementById('df-addr').value = 'tls://9.9.9.9'; setDnsDraftVia('direct');
+      await pingDnsDraft();
+      out.draftPing = /ms/.test(document.getElementById('df-ping').textContent);
+      saveDnsForm();
+      const id = dnsOrder[3];
+      out.added = dnsOrder.length === 4 && dnsServers[id].via === 'direct' && document.querySelectorAll('#dns-settings .dns-row').length === 4;
+      openDnsForm(id); deleteDnsServer();
+      out.deleted = dnsOrder.length === 3;
+      setSegment('mode', 'proxy');
+      out.note = !!document.querySelector('#dns-settings .set-hint.warn');
+      setSegment('mode', 'tun');
+      out.noteGone = !document.querySelector('#dns-settings .set-hint.warn');
+      closeSheet('setdns'); switchTab('home');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('rules: chips, paste, validation, save / delete, JSON round-trip, composite', async () => {
+    const r = await page.evaluate(() => {
+      const out = {};
+      openRules(); openRuleForm();
+      const inp = () => document.querySelector('#rf-body input[data-g="domain"][data-f="domain_suffix"]');
+      inp().value = 'example.com'; inp().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      rfAddValues('domain', 'domain_suffix', 'a.org\nb.org; bad value');
+      out.chips = document.querySelectorAll('#rf-body .vchip').length === 4 && document.querySelectorAll('#rf-body .vchip.bad').length === 1;
+      const n = ruleOrder.length; saveRuleForm();
+      out.refused = ruleOrder.length === n;
+      rfRemoveVal('domain', 'domain_suffix', 3);
+      rfOpenField('domain', 'domain_keyword');
+      out.fold = !!document.querySelector('#rf-body input[data-f="domain_keyword"]');
+      rfAddGroup('port'); rfAddValues('port', 'port', '443, 8000-9000', false);
+      ruleDraft.action = 'direct';
+      setRfTab('json');
+      const j = JSON.parse(document.getElementById('rf-json').value);
+      out.json = j.port[0] === 443 && j.port_range[0] === '8000:9000' && j.outbound === 'direct' && j.domain_suffix.length === 3;
+      j.domain_suffix.push('c.org'); j.ip_version = 4;
+      document.getElementById('rf-json').value = JSON.stringify(j); rfCheckJson();
+      setRfTab('form');
+      out.back = ruleDraft.groups.domain.v.domain_suffix.includes('c.org') && !!document.querySelector('#rf-body .rf-plaque');
+      saveRuleForm();
+      const id = ruleOrder[ruleOrder.length - 1];
+      out.saved = ruleOrder.length === n + 1 && rulesData[id].action === 'direct' && !document.getElementById('sh-ruleform').classList.contains('open');
+      out.test = testAddress('x.b.org:8080').rule.startsWith('#' + ruleOrder.length) && testAddress('b.org:22').rule === 'Everything else';
+      openRuleForm(id); deleteRule();
+      out.deleted = ruleOrder.length === n && !rulesData[id];
+      openRuleForm('r4');
+      out.composite = !!document.querySelector('#rf-body .rf-plaque') && !document.querySelector('#rf-body .rf-group');
+      closeSheet('ruleform');
+      out.apps = testAddress('Telegram').rule === 'Apps → Telegram';
+      out.lan = testAddress('192.168.1.5').to === 'Direct';
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('rules: drag reorders my rules; search hides grips', async () => {
+    await page.evaluate(() => openRules()); await settle(page);
+    const before = await page.evaluate(() => ruleOrder.join());
+    const g = await page.locator('#rules-list .rule-row >> nth=0 >> .drag-handle').boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, g.y + 120, { steps: 8 }); await page.mouse.up(); await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ruleOrder.join());
+    const grips = await page.evaluate(() => { setRuleQuery('discord'); const n = document.querySelectorAll('#rules-list .drag-handle').length + '/' + document.querySelectorAll('#rules-list .rule-row').length; setRuleQuery(''); return n; });
+    expect(before !== after && after.split(',')[0] === before.split(',')[1], before + ' → ' + after);
+    expect(grips === '0/1', 'search: ' + grips);
+  });
+
+  await check('rules: Clash / JSON import and export, rule-set delete guard, apps split', async () => {
+    const r = await page.evaluate(() => {
+      const out = {};
+      openRuleIO(); setRuleIO('export', 'clash');
+      out.export = /DOMAIN-SUFFIX,corp\.local,DIRECT/.test(document.getElementById('io-text').value);
+      setRuleIO('import', 'clash');
+      const n = ruleOrder.length;
+      document.getElementById('io-text').value = 'DOMAIN-SUFFIX,ya.ru,DIRECT\nIP-CIDR,10.0.0.0/8,REJECT\nMATCH,PROXY';
+      ruleIOAction();
+      out.clash = ruleOrder.length === n + 2 && rulesData[ruleOrder[n + 1]].action === 'block' && quickCfg.final === 'proxy';
+      openRuleIO(); setRuleIO('import', 'json');
+      document.getElementById('io-text').value = '[{"domain":["x.io"],"outbound":"direct"}]'; ruleIOAction();
+      out.json = ruleOrder.length === n + 3;
+      openRuleIO(); setRuleIO('import', 'json');
+      document.getElementById('io-text').value = '[{oops'; ruleIOAction();
+      out.err = !!document.getElementById('io-err').textContent; closeSheet('ruleio');
+      ruleOrder.slice(n).forEach(id => delete rulesData[id]); ruleOrder.splice(n);
+      openRuleSets(); openRsForm('rs1');
+      rulesData.r1.groups.domain.v.rule_set = ['ru-blocked'];
+      deleteRuleSet();
+      out.guard = ruleSets.some(s => s.id === 'rs1');
+      delete rulesData.r1.groups.domain.v.rule_set;
+      openIntervalDialog('rsEvery'); document.getElementById('iv-value').value = '2'; document.getElementById('iv-unit').value = '3600'; saveIntervalDialog();
+      out.every = rsDraft.every === 7200 && /2 h/.test(document.getElementById('rs-every').textContent);
+      closeSheet('rsform'); closeSheet('rulesets');
+      openApps(); openAppAct('com.whatsapp');
+      appDraft.act = 'proxy'; appDraft.split = true; appDraft.udpTarget = 1; renderAppAct();
+      out.twoTargets = document.querySelectorAll('#aa-body .tgt-row').length === 2;
+      saveAppAct();
+      out.saved = appRules['com.whatsapp'].split && /UDP/.test(document.querySelector('.app-row[data-pkg="com.whatsapp"] .app-state').textContent);
+      openAppAct('com.whatsapp'); appDraft.act = 'default'; saveAppAct();
+      out.reset = !appRules['com.whatsapp'];
+      closeSheet('apps'); closeSheet('rules');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
   await check('every sheet opens and closes', async () => {

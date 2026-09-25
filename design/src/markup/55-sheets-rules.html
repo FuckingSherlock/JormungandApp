@@ -1,0 +1,142 @@
+  <!-- ══════════ RULES (level 1): apps · my rules · quick rules · everything else ══════════ -->
+  <div class="overlay" id="ov-rules" onclick="closeSheet('rules')"></div>
+  <div class="sheet" id="sh-rules">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Rules<button class="help-btn" onclick="event.stopPropagation();openHelp('rules')" title="What is this?">?</button></span>
+      <button class="sheet-close" onclick="closeSheet('rules')">×</button>
+    </div>
+    <div class="rules-tools">
+      <input class="form-input" id="rules-search" placeholder="Search rules and services" oninput="setRuleQuery(this.value)">
+      <button class="btn-secondary" onclick="openRuleTest()" title="Which rule catches an address">Test</button>
+    </div>
+    <div class="sheet-body rules-body" id="rules-body"></div>
+  </div>
+
+  <!-- Rule form (level 2): Form | JSON -->
+  <div class="overlay overlay-l2" id="ov-ruleform" onclick="closeSheet('ruleform')"></div>
+  <div class="sheet sheet-l2" id="sh-ruleform">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title"><span id="rfTitle">New rule</span><button class="help-btn" onclick="event.stopPropagation();openHelp('ruleform')" title="What is this?">?</button></span>
+      <button class="sheet-close" onclick="closeSheet('ruleform')">×</button>
+    </div>
+    <div class="sheet-tabs">
+      <div class="sheet-tab active" data-tab="form" onclick="setRfTab('form')">Form</div>
+      <div class="sheet-tab" data-tab="json" onclick="setRfTab('json')">JSON</div>
+    </div>
+    <div class="sheet-body" id="rf-body"></div>
+    <div class="sheet-footer">
+      <button class="btn-primary" onclick="saveRuleForm()">Save</button>
+      <button class="btn-danger-text" id="rf-delete" onclick="deleteRule()">Delete rule</button>
+    </div>
+  </div>
+
+  <!-- Per-app routing (level 2) -->
+  <div class="overlay overlay-l2" id="ov-apps" onclick="closeSheet('apps')"></div>
+  <div class="sheet sheet-l2" id="sh-apps">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Per-app routing<button class="help-btn" onclick="event.stopPropagation();openHelp('apps')" title="What is this?">?</button></span>
+      <button class="sheet-close" onclick="closeSheet('apps')">×</button>
+    </div>
+    <div class="rules-tools">
+      <input class="form-input" id="apps-search" placeholder="Search apps" oninput="appQuery=this.value.trim();renderApps()">
+    </div>
+    <div class="chip-row" id="apps-filter">
+      <div class="chip active" data-f="user" onclick="setAppFilter('user')">User</div>
+      <div class="chip" data-f="sys" onclick="setAppFilter('sys')">System</div>
+      <div class="chip" data-f="set" onclick="setAppFilter('set')">Configured</div>
+    </div>
+    <div class="sheet-body"><div class="set-group apps-list" id="apps-list"></div></div>
+  </div>
+
+  <!-- One app's action (dialog) -->
+  <div class="overlay overlay-l4" id="ov-appact" onclick="closeSheet('appact')"></div>
+  <div class="dialog" id="sh-appact">
+    <div class="dialog-title" id="aaTitle"></div>
+    <div id="aa-body"></div>
+    <div class="dialog-actions">
+      <button class="btn-secondary" onclick="closeSheet('appact')">Cancel</button>
+      <button class="btn-secondary primary" onclick="saveAppAct()">Save</button>
+    </div>
+  </div>
+
+  <!-- Test an address (dialog) -->
+  <div class="overlay overlay-l4" id="ov-ruletest" onclick="closeSheet('ruletest')"></div>
+  <div class="dialog" id="sh-ruletest">
+    <div class="dialog-title">Where does it go?</div>
+    <div class="iv-row">
+      <input class="form-input mono" id="rt-input" style="flex:1;width:auto;text-align:left" placeholder="youtube.com, 1.2.3.4:443, Telegram" onkeydown="if (event.key === 'Enter') runRuleTest()">
+      <button class="btn-secondary primary" onclick="runRuleTest()">Test</button>
+    </div>
+    <div class="set-hint">A domain, an IP (with :port) or an app name</div>
+    <div id="rt-result"></div>
+    <div class="dialog-actions"><button class="btn-secondary" onclick="closeSheet('ruletest')">Close</button></div>
+  </div>
+
+  <!-- Final order (level 2, read-only) -->
+  <div class="overlay overlay-l2" id="ov-ruleorder" onclick="closeSheet('ruleorder')"></div>
+  <div class="sheet sheet-l2" id="sh-ruleorder">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Final order</span>
+      <button class="sheet-close" onclick="closeSheet('ruleorder')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="set-hint" style="padding:0 18px 6px">Checked top to bottom; the first match wins. Change it in the Rules screen.</div>
+      <div class="set-group" id="ruleorder-list"></div>
+    </div>
+  </div>
+
+  <!-- Import / export (level 2) -->
+  <div class="overlay overlay-l2" id="ov-ruleio" onclick="closeSheet('ruleio')"></div>
+  <div class="sheet sheet-l2" id="sh-ruleio">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Import / export</span>
+      <button class="sheet-close" onclick="closeSheet('ruleio')">×</button>
+    </div>
+    <div class="sheet-tabs">
+      <div class="sheet-tab active" data-tab="export" onclick="setRuleIO('export')">Export</div>
+      <div class="sheet-tab" data-tab="import" onclick="setRuleIO('import')">Import</div>
+    </div>
+    <div class="sheet-body" id="ruleio-body"></div>
+    <div class="sheet-footer"><button class="btn-primary" id="io-action" onclick="ruleIOAction()">Copy</button></div>
+  </div>
+
+  <!-- Rule sets (level 2) + one set (level 3) -->
+  <div class="overlay overlay-l2" id="ov-rulesets" onclick="closeSheet('rulesets')"></div>
+  <div class="sheet sheet-l2" id="sh-rulesets">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Rule sets</span>
+      <button class="sheet-close" onclick="closeSheet('rulesets')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="set-group" id="rulesets-list"></div>
+      <div class="sheet-action" onclick="openRsForm()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add rule set
+      </div>
+    </div>
+  </div>
+  <div class="overlay overlay-l3" id="ov-rsform" onclick="closeSheet('rsform')"></div>
+  <div class="sheet sheet-l3" id="sh-rsform">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="rsTitle">Rule set</span>
+      <button class="sheet-close" onclick="closeSheet('rsform')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group"><div class="form-label">Name</div><input class="form-input mono" id="rs-name" placeholder="ru-blocked"><div class="set-hint" style="margin-top:6px">Used in rules: Domains → Rule set</div></div>
+      <div class="form-group"><div class="form-label">URL</div><input class="form-input mono" id="rs-url" placeholder="https://…/list.srs"></div>
+      <div class="form-group"><div class="form-label">Format</div><div class="chip-row" style="padding:0" id="rs-format"></div></div>
+      <div class="form-group"><div class="form-label">Download via</div><div class="chip-row" style="padding:0" id="rs-via"></div></div>
+      <div class="set-group"><div class="set-row"><div class="set-label">Update every</div><button class="set-value" id="rs-every" onclick="openIntervalDialog('rsEvery')"></button></div></div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" onclick="saveRsForm()">Save</button>
+      <button class="btn-danger-text" id="rs-delete" onclick="deleteRuleSet()">Delete rule set</button>
+    </div>
+  </div>

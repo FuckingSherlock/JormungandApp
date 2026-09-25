@@ -53,24 +53,6 @@
     </div>
   </div>
 
-  <!-- ══════════ RULES SHEET ══════════ -->
-  <div class="overlay" id="ov-rules" onclick="closeSheet('rules')"></div>
-  <div class="sheet" id="sh-rules">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">Rules</span>
-      <button class="sheet-close" onclick="closeSheet('rules')">×</button>
-    </div>
-    <div class="sheet-body">
-      <div id="rules-list"></div>
-      <div class="sheet-divider"></div>
-      <div class="sheet-action" onclick="openAddRule()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Add rule
-      </div>
-    </div>
-  </div>
-
   <!-- ══════════ NESTED: CREATE / EDIT PROFILE ══════════ -->
   <div class="overlay overlay-l2" id="ov-createprofile" onclick="closeSheet('createprofile')"></div>
   <div class="sheet sheet-l2" id="sh-createprofile">
@@ -184,39 +166,4 @@
     </div>
   </div>
 
-  <!-- ══════════ NESTED: ADD RULE ══════════ -->
-  <div class="overlay overlay-l2" id="ov-addrule" onclick="closeSheet('addrule')"></div>
-  <div class="sheet sheet-l2" id="sh-addrule">
-    <div class="sheet-handle"></div>
-    <div class="sheet-head">
-      <span class="sheet-title">Add rule</span>
-      <button class="sheet-close" onclick="closeSheet('addrule')">×</button>
-    </div>
-    <div class="sheet-body">
-      <div class="form-group">
-        <div class="form-label">Match</div>
-        <div class="chip-row" id="ar-type">
-          <div class="chip active" onclick="pickChip(this,'ar-type')">Domain</div>
-          <div class="chip" onclick="pickChip(this,'ar-type')">IP / CIDR</div>
-          <div class="chip" onclick="pickChip(this,'ar-type')">Geosite</div>
-          <div class="chip" onclick="pickChip(this,'ar-type')">Process</div>
-        </div>
-      </div>
-      <div class="form-group">
-        <div class="form-label">Value</div>
-        <input class="form-input" id="ar-value" placeholder="*.example.com">
-      </div>
-      <div class="form-group">
-        <div class="form-label">Action</div>
-        <div class="chip-row" id="ar-action">
-          <div class="chip active" onclick="pickActionChip(this,'proxy')">Proxy</div>
-          <div class="chip" onclick="pickActionChip(this,'direct')">Direct</div>
-          <div class="chip" onclick="pickActionChip(this,'block')">Block</div>
-        </div>
-      </div>
-    </div>
-    <div class="sheet-footer">
-      <button class="btn-primary" onclick="saveAddRule()">Add rule</button>
-    </div>
-  </div>
 

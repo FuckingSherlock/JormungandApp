@@ -65,6 +65,34 @@ const HELP = {
     ['Off', 'hidden everywhere, settings kept — switch it back on and it is where it was.'],
     ['Unavailable', 'removed by the provider. Settings kept 15 days per server, then forgotten.'],
   ] },
+  rules: { title: 'Rules', items: [
+    ['Order', 'checked top to bottom: apps, your rules, quick rules, then Everything else. The first match wins.'],
+    ['My rules', 'drag ⋮⋮ to reorder, tap one to edit, the switch turns it off without deleting.'],
+    ['Quick rules', 'ready-made: local network, ads, your region, popular services.'],
+    ['Test', 'type a site, an IP or an app and see which rule catches it.'],
+    ['Final order', 'the whole list as the engine sees it.'],
+  ] },
+  ruleform: { title: 'Rule', items: [
+    ['Conditions', 'a rule matches when every block matches; inside a block any value is enough.'],
+    ['Values', 'type and press Enter or comma; paste a list to add many. Red = wrong format.'],
+    ['Except', 'turns a block around: everything but these values.'],
+    ['Via', 'where matching traffic goes: the main flow or a chosen profile, chain, subscription or node.'],
+    ['Strict', 'if that target is down, the traffic is dropped instead of taking the main flow.'],
+    ['Block', 'Drop is silent; Reject answers at once, so apps do not wait.'],
+    ['JSON', 'the same rule in sing-box format, for anything the form cannot show.'],
+  ] },
+  apps: { title: 'Per-app routing', items: [
+    ['Default', 'the app goes by the rules like everything else.'],
+    ['Direct / Proxy / Block', 'the app always goes this way, before any other rule.'],
+    ['Split TCP / UDP', 'two routes for one app, e.g. Discord voice apart from chat.'],
+  ] },
+  dns: { title: 'DNS', items: [
+    ['Servers', 'the first ticked server from the top answers; if it fails, the next one does. Drag ⋮⋮ to reorder.'],
+    ['Via', 'the query goes through the VPN or directly. Rules with DNS Auto pick by this.'],
+    ['ms', 'how fast the server answers. Tap it to check again.'],
+    ['Hijack DNS', 'catches apps that ask their own DNS servers. Works in TUN mode only.'],
+    ['FakeIP', 'answers at once with a stand-in address; faster, but some apps dislike it.'],
+  ] },
 };
 
 function openHelp(key) {

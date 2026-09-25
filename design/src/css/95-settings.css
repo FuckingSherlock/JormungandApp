@@ -16,3 +16,26 @@
 .set-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .settings-chev{color:var(--t3);flex-shrink:0}
 .set-sheet .sheet-body{padding:12px 14px 20px}
+
+/* ── Home: System proxy switch (third column of the segments card) ── */
+#seg-sys .segment-pill{background:rgba(var(--t2-rgb),.22)}
+#seg-sys.sys-on .segment-pill{background:var(--purple)}
+#seg-sys .segment{font-size:13px}
+
+/* ── Settings → DNS / Connection (rendered into #dns-settings, #conn-settings) ── */
+#dns-settings .set-group,#conn-settings .set-group{margin:6px 0 10px;background:var(--card)}
+.set-row.soon{opacity:.5}
+.set-hint.warn{color:var(--warn)}
+.am-link{margin-left:auto;background:none;border:none;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:0}
+.dns-row{gap:8px;padding:8px 10px 8px 12px}
+.dns-row.off .dns-main{opacity:.5}
+.dns-main{flex:1;min-width:0;cursor:pointer}
+.dns-name{display:flex;align-items:center;gap:6px;font-size:15px;color:var(--t1)}
+.dns-addr{font-family:var(--mono);font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.via-tag{font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:4px;padding:1px 5px}
+.via-tag.vpn{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
+.via-tag.direct{background:rgba(var(--active-rgb),.13);color:var(--active)}
+.dns-row .lat{min-width:52px}
+.form-input.mono{font-family:var(--mono);font-size:14px}
+.df-ping-row{display:flex;align-items:center;gap:12px}
+.df-ping-row .lat{min-width:0;text-align:left}

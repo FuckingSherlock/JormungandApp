@@ -32,11 +32,14 @@ const INTERVALS = {
   checkEvery: { title: 'Check the connection every', units: [['seconds', 1], ['minutes', 60]], min: 10, max: 3600, hint: 'From 10 s to 60 min' },
   subsEvery:  { title: 'Update all subscriptions every', units: [['seconds', 1], ['minutes', 60], ['hours', 3600], ['days', 86400]], min: 10, max: 30 * 86400, off: true,
                 hint: '0 = off (only when you tap Update) · from 10 seconds to 30 days' },
+  // Rules → Rule sets → one set; get / set point the dialog at a value outside autoCfg.
+  rsEvery:    { title: 'Update the rule set every', units: [['minutes', 60], ['hours', 3600], ['days', 86400]], min: 600, max: 30 * 86400,
+                hint: 'From 10 minutes to 30 days', get: () => rsDraft.every, set: v => { rsDraft.every = v; renderRsForm(); } },
 };
 let ivKey = null;
 function openIntervalDialog(key) {
   ivKey = key;
-  const c = INTERVALS[key], v = autoCfg[key];
+  const c = INTERVALS[key], v = c.get ? c.get() : autoCfg[key];
   const [, mul] = [...c.units].reverse().find(([, m]) => v > 0 && v % m === 0) || c.units.find(([, m]) => m === 3600) || c.units[0];   // off opens in hours
   document.getElementById('ivTitle').textContent = c.title;
   document.getElementById('iv-hint').textContent = c.hint;
@@ -50,7 +53,7 @@ function saveIntervalDialog() {
   const c = INTERVALS[ivKey], raw = document.getElementById('iv-value').value.trim();
   const v = Number(raw) * Number(document.getElementById('iv-unit').value);
   if (raw === '' || !Number.isInteger(v) || !(v === 0 && c.off) && (v < c.min || v > c.max)) { toast(c.hint); return; }
-  setAutoCfg(ivKey, v);
+  if (c.set) c.set(v); else setAutoCfg(ivKey, v);
   closeSheet('interval');
 }
 

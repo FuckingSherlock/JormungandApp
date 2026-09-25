@@ -6,7 +6,8 @@
         <div class="settings-row" data-sheet="setauto" onclick="openSheet('setauto')"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg></div><div style="flex:1"><div class="settings-label">Auto mode</div><div class="settings-sub">Failover, checks, subscription updates</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setlook" onclick="openSheet('setlook')"><div class="set-ico" style="color:var(--accent);background:rgba(var(--accent-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18z" fill="currentColor"/></svg></div><div style="flex:1"><div class="settings-label">Appearance</div><div class="settings-sub" id="setLookSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setgeneral" onclick="openSheet('setgeneral')"><div class="set-ico" style="color:var(--t2);background:rgba(var(--t2-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></div><div style="flex:1"><div class="settings-label">General</div><div class="settings-sub">Language, startup</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
-        <div class="settings-row" data-sheet="setconn" onclick="openSheet('setconn')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><div style="flex:1"><div class="settings-label">Connection</div><div class="settings-sub">TUN, DNS, latency test</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setconn" onclick="openSheet('setconn')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><div style="flex:1"><div class="settings-label">Connection</div><div class="settings-sub">System proxy, kill switch, TUN</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setdns" onclick="openDnsSettings()"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><div style="flex:1"><div class="settings-label">DNS</div><div class="settings-sub" id="setDnsSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setdata" onclick="openSheet('setdata')"><div class="set-ico" style="color:var(--purple);background:rgba(var(--purple-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div style="flex:1"><div class="settings-label">Data</div><div class="settings-sub">Backup, about</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
       </div>
     </div>
@@ -58,11 +59,52 @@
       <button class="sheet-close" onclick="closeSheet('setconn')">×</button>
     </div>
     <div class="sheet-body">
-      <div class="settings-group">
-        <div class="settings-row soon"><div class="settings-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
-        <div class="settings-row soon"><div class="settings-label">Latency test URL</div><span class="settings-value">auto</span><span class="soon-tag">soon</span></div>
-        <div class="settings-row soon"><div class="settings-label">DNS</div><span class="settings-value">1.1.1.1 · DoH</span><span class="soon-tag">soon</span></div>
+      <div id="conn-settings"></div>
+    </div>
+  </div>
+  <div class="overlay" id="ov-setdns" onclick="closeSheet('setdns')"></div>
+  <div class="sheet set-sheet" id="sh-setdns">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">DNS<button class="help-btn" onclick="event.stopPropagation();openHelp('dns')" title="What is this?">?</button></span>
+      <button class="sheet-close" onclick="closeSheet('setdns')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="dns-settings"></div>
+    </div>
+  </div>
+  <!-- Add / edit a DNS server (level 2) -->
+  <div class="overlay overlay-l2" id="ov-dnsform" onclick="closeSheet('dnsform')"></div>
+  <div class="sheet sheet-l2" id="sh-dnsform">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title" id="dfTitle">Add DNS server</span>
+      <button class="sheet-close" onclick="closeSheet('dnsform')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group">
+        <div class="form-label">Name</div>
+        <input class="form-input" id="df-name" placeholder="optional">
       </div>
+      <div class="form-group">
+        <div class="form-label">Address</div>
+        <input class="form-input mono" id="df-addr" placeholder="https://1.1.1.1/dns-query">
+        <div class="set-hint" style="margin-top:6px">https:// (DoH) · tls:// (DoT) · quic:// (DoQ) · udp:// or an IP · system</div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Via</div>
+        <div class="chip-row" id="df-via" style="padding:0">
+          <div class="chip" data-v="vpn" onclick="setDnsDraftVia('vpn')">VPN</div>
+          <div class="chip" data-v="direct" onclick="setDnsDraftVia('direct')">Direct</div>
+        </div>
+      </div>
+      <div class="form-group df-ping-row">
+        <button class="btn-secondary" onclick="pingDnsDraft()">Ping</button><span id="df-ping"></span>
+      </div>
+    </div>
+    <div class="sheet-footer">
+      <button class="btn-primary" onclick="saveDnsForm()">Save</button>
+      <button class="btn-danger-text" id="df-delete" onclick="deleteDnsServer()">Delete server</button>
     </div>
   </div>
   <div class="overlay" id="ov-setdata" onclick="closeSheet('setdata')"></div>

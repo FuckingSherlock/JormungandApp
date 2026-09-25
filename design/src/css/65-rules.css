@@ -1,0 +1,101 @@
+/* ── Rules sheet (RulesScreen): Apps · My rules · Quick rules · Services · Everything else ── */
+.rules-tools{display:flex;gap:8px;padding:4px 18px 8px;flex-shrink:0}
+.rules-tools .form-input{flex:1;min-width:0;padding:9px 12px}
+.rules-body{padding-bottom:20px}
+.rules-label{display:flex;align-items:baseline;gap:8px;padding:12px 24px 0;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px}
+.rules-note{font-size:11px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--t3);opacity:.8}
+.rules-label .am-link{text-transform:none;letter-spacing:0}
+.rules-empty{padding:14px;font-size:14px;color:var(--t3);text-align:center}
+.rules-more{margin-top:18px}
+.rules-more .set-row,.rs-row,.tgt-row{cursor:pointer}
+.rules-more .set-row svg,.rs-row svg,.tgt-row svg{color:var(--t3);flex-shrink:0}
+
+/* RuleRow: grip · rank · name / summary · badge · toggle */
+.rule-row{display:flex;align-items:center;gap:8px;padding:9px 12px 9px 6px;min-height:50px;cursor:pointer;background:var(--card)}
+.rule-row + .rule-row{border-top:1px solid var(--border)}
+.rule-row.dimmed{opacity:1}
+.rule-row.dimmed .rule-main,.rule-row.dimmed .rule-action-badge,.rule-row.dimmed .cc-rank{opacity:.45}
+.rule-row .drag-handle{width:22px}
+.rule-main{flex:1;min-width:0}
+.rule-name{display:flex;align-items:center;gap:6px;font-size:15px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rule-sub{font-size:12px;color:var(--t2);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.rule-row .rule-action-badge{max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:0}
+
+/* Seg3: a small segmented switch (service state, action, Everything else) */
+.seg3{display:flex;flex-shrink:0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.seg3 button{background:none;border:none;color:var(--t2);font:inherit;font-size:12px;font-weight:600;padding:6px 9px;cursor:pointer}
+.seg3 button + button{border-left:1px solid var(--border)}
+.seg3 button.on{color:#fff;background:var(--t3)}
+.seg3 button.on.proxy,.seg3 button.on.vpn{background:var(--accent)}
+.seg3 button.on.direct{background:var(--active)}
+.seg3 button.on.block{background:var(--muted)}
+.seg3.wide{flex:1}
+.seg3.wide button{flex:1;padding:8px 6px;font-size:14px}
+.svc-row .set-label{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Target row (stub picker until the targets rework) */
+.tgt-val{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--accent);min-width:0;white-space:nowrap}
+.tgt-kind{font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--t3)}
+
+/* Final order + address test */
+.order-row{gap:8px}
+.order-act{font-size:12px;font-weight:600;color:var(--t2);white-space:nowrap}
+#rt-result{margin-top:8px}
+.rt-rule{font-size:14px;color:var(--t1);margin-top:6px}
+.rt-to{font-size:15px;font-weight:700;color:var(--accent);margin-top:2px}
+
+/* Code areas (JSON / Clash) */
+.code-area{height:220px;font-size:12px}
+.code-area.tall{height:360px}
+
+/* ── Rule form (RuleForm): condition groups with value chips ── */
+.rf-label{display:flex;align-items:baseline;gap:8px;padding:10px 24px 4px;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px}
+.rf-plaque{margin:4px 18px 8px;padding:10px 12px;border-radius:10px;background:rgba(var(--warn-rgb),.1);color:var(--warn);font-size:13px}
+.rf-group{margin:6px 18px 10px;padding:8px 12px 10px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.035)}
+.rf-group.not{border-color:rgba(var(--warn-rgb),.45)}
+.rf-ghead{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.rf-gtitle{flex:1;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--t1)}
+.rf-group.not .rf-gtitle{color:var(--warn)}
+.rf-not{background:none;border:1px solid var(--border-hi);border-radius:6px;color:var(--t2);font:inherit;font-size:12px;font-weight:600;padding:3px 8px;cursor:pointer}
+.rf-not.on{background:rgba(var(--warn-rgb),.15);border-color:var(--warn);color:var(--warn)}
+.rf-x{background:none;border:none;color:var(--t3);font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
+.rf-field{margin-top:8px}
+.rf-flabel{font-size:12px;color:var(--t2);margin-bottom:5px}
+.rf-flag{display:flex;align-items:center}
+.rf-flag .rf-flabel{margin:0}
+.rf-add{padding:4px 18px 8px}
+.rf-add .chip{padding:5px 10px;font-size:13px}
+.rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}
+.rf-then .seg3{margin:4px 18px 8px}
+.rf-then .set-group{margin-top:0}
+
+/* ChipInput: values as chips + a free input; red = invalid */
+.chip-input{display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:40px;padding:5px 6px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.05);cursor:text}
+.chip-input:focus-within{border-color:var(--accent)}
+.chip-input input{flex:1;min-width:90px;background:none;border:none;outline:none;color:var(--t1);font-family:var(--mono);font-size:13px;padding:4px}
+.chip-input input::placeholder{color:var(--t3);font-family:inherit}
+.vchip{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 8px;border-radius:6px;background:rgba(var(--accent-rgb),.14);color:var(--t1);font-family:var(--mono);font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.vchip b{font-weight:400;color:var(--t3);cursor:pointer;padding:0 3px;font-size:14px;line-height:1}
+.vchip.bad{background:rgba(var(--muted-rgb),.15);color:var(--muted);box-shadow:inset 0 0 0 1px rgba(var(--muted-rgb),.5)}
+
+/* ── Per-app routing (AppsScreen) ── */
+#apps-filter{padding:0 18px 6px;flex-shrink:0}
+.apps-list{margin-top:6px}
+.app-row{cursor:pointer;gap:10px}
+.app-row .set-label{min-width:0}
+.app-ico{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700;font-size:15px;
+  color:hsl(var(--h) 70% 72%);background:hsla(var(--h),60%,55%,.18)}
+.app-pkg{font-size:11px;color:var(--t3);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-state{font-size:12px;font-weight:600;color:var(--t3);white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis}
+.app-state.proxy{color:var(--accent)}
+.app-state.direct{color:var(--active)}
+.app-state.block{color:var(--muted)}
+#aa-body .seg3{margin-bottom:10px}
+.aa-group{margin:0}
+.aa-hint{padding:4px 2px}
+
+.mono{font-family:var(--mono)}
+.rf-more{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px}
+.rf-more button{background:none;border:none;padding:2px 0;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.tgt-row .set-label{white-space:nowrap}
+.rs-row .conn-tag{margin-left:8px;vertical-align:1px}
