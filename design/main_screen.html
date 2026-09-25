@@ -835,6 +835,15 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 
 .menu-note{padding:4px 20px 12px;font-size:13px;line-height:1.45;color:var(--t2)}
 .menu-note b{color:var(--t1)}
+
+/* ── PickModeSwitch: Fastest / Priority (home segment look, laid out horizontally) ── */
+.seg-row{display:flex;align-items:center;gap:10px;margin:6px 0 6px}
+.seg-switch{position:relative;display:flex;flex:1;max-width:260px;background:rgba(255,255,255,.04);border-radius:10px;padding:3px;touch-action:pan-y}
+.seg-switch button{flex:1;position:relative;z-index:1;background:none;border:none;font:inherit;font-size:14px;font-weight:600;color:var(--t2);padding:7px 6px;cursor:pointer;transition:color .2s}
+.seg-ink{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:8px;background:var(--accent);transition:transform .28s cubic-bezier(.65,0,.35,1)}
+.seg-switch[data-mode=priority] .seg-ink{transform:translateX(100%)}
+.seg-switch[data-mode=fastest] button[data-m=fastest],.seg-switch[data-mode=priority] button[data-m=priority]{color:#fff}
+.seg-ping{margin-left:auto}
 /* ── Toast ── */
 .toast{
   position:fixed;left:50%;bottom:92px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
@@ -1323,7 +1332,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <div id="cp-source-list"></div>
       <div class="form-group" style="padding-bottom:4px">
         <div class="form-label">Connect through</div>
-        <div class="chip-row" id="cp-mode" style="margin:6px 0 4px;padding:0"></div>
+        <div class="seg-row" id="cp-mode"></div>
         <div class="set-hint" id="cp-mode-hint"></div>
       </div>
       <div class="se-nodes" id="cp-order"></div>
@@ -1359,7 +1368,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
       <div class="form-group" style="padding-bottom:4px">
         <div class="form-label">Servers</div>
-        <div class="chip-row" id="se-mode" style="margin:6px 0 4px;padding:0"></div>
+        <div class="seg-row" id="se-mode"></div>
         <div class="set-hint" id="se-hint"></div>
       </div>
       <div class="se-bar">
@@ -4543,7 +4552,8 @@ function renderCreateProfileSources() {
 // Fastest / Priority: in Priority, every server the draft uses, in order, draggable.
 function renderCpOrder() {
   const priority = cpPickMode === 'priority';
-  document.getElementById('cp-mode').innerHTML = pickModeChips(priority, 'setCpPickMode');
+  document.getElementById('cp-mode').innerHTML = pickModeSwitch('cp:' + (editingProfileId || 'new'), priority, 'setCpPickMode')
+    + pingAllBtn('testLatency(cpDraftRefs().map(r => [r.sid, r.node.id]))', 'Test latency of all its servers');
   document.getElementById('cp-mode-hint').textContent = priority
     ? 'The first working server from the top is used. Drag ⋮⋮ to order; pick servers above.'
     : 'The profile connects through the fastest of its servers.';
@@ -4750,8 +4760,8 @@ function renderChainPicker(elId, side) {
   renderChainWarn();
   if (side === 'out') {
     const hint = document.getElementById('cc-out-hint');
-    const chip = (m, l) => `<div class="chip ${d.exitMode === m ? 'active' : ''}" onclick="setChainExitMode('${m}')">${l}</div>`;
-    if (hint) hint.innerHTML = `<div class="chip-row" style="margin:2px 0 6px">${chip('fastest', 'Fastest')}${chip('priority', 'Priority')}</div>`
+    if (hint) hint.innerHTML = `<div class="seg-row">${pickModeSwitch('cc:' + (editingChainId || 'new'), priority, 'setChainExitMode')}`
+      + `${pingAllBtn('testLatency(chainExitRefs(chainDraft).map(r => [r.sid, r.node.id]))', 'Test latency of the exit servers')}</div>`
       + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, tap a server to skip it.'
                   : 'The fastest selected server of the exit is used. Expand and tap servers to leave them out.');
   }
@@ -4997,7 +5007,7 @@ function renderSourceEntry() {
   upd.nextElementSibling.innerHTML = ICON.bolt;
   document.getElementById('se-all').textContent = on === live.length ? 'None' : 'All';
   const priority = s.pickMode === 'priority';
-  document.getElementById('se-mode').innerHTML = pickModeChips(priority, 'setSourceEntryMode');
+  document.getElementById('se-mode').innerHTML = pickModeSwitch('se:' + seId, priority, 'setSourceEntryMode');
   document.getElementById('se-hint').textContent = pickModeHint(priority);
   let rank = 0;
   const list = priority ? seOrderRefs().map(r => r.node) : sortedNodes(live);
@@ -5015,11 +5025,34 @@ function renderSourceEntry() {
     r => !isNodeOff(s, r.node.id)));
 }
 
-// Shared with the profile editor: the Fastest / Priority switch and its hint.
-function pickModeChips(priority, fn) {
-  const chip = (m, l, on) => `<div class="chip ${on ? 'active' : ''}" onclick="${fn}('${m}')">${l}</div>`;
-  return chip('fastest', 'Fastest', !priority) + chip('priority', 'Priority', priority);
+// PickModeSwitch — the Fastest / Priority switch of the source entry, profile and chain exit
+// editors. Like the Simple / Profiles switch in Route: tap or swipe it, the pill slides across.
+// `key` names the thing being edited, so a re-render after a change slides from the old side.
+const pickSwitchWas = {};
+function pickModeSwitch(key, priority, fn) {
+  const to = priority ? 'priority' : 'fastest', from = pickSwitchWas[key] || to;
+  pickSwitchWas[key] = to;
+  if (from !== to) requestAnimationFrame(() => requestAnimationFrame(() =>
+    document.querySelectorAll(`.seg-switch[data-key="${key}"]`).forEach(el => { el.dataset.mode = to; })));
+  return `<div class="seg-switch" data-key="${key}" data-mode="${from}" onpointerdown="segSwipeStart(event,'${fn}')">`
+    + `<span class="seg-ink"></span><button data-m="fastest" onclick="${fn}('fastest')">Fastest</button>`
+    + `<button data-m="priority" onclick="${fn}('priority')">Priority</button></div>`;
 }
+// A horizontal swipe over the switch flips it (and swallows the click it would end with).
+function segSwipeStart(e, fn) {
+  const x0 = e.clientX;
+  const up = ev => {
+    window.removeEventListener('pointerup', up);
+    const dx = ev.clientX - x0;
+    if (Math.abs(dx) < 24) return;
+    const stop = c => { c.stopPropagation(); c.preventDefault(); };
+    window.addEventListener('click', stop, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', stop, true), 0);
+    window[fn](dx > 0 ? 'priority' : 'fastest');
+  };
+  window.addEventListener('pointerup', up);
+}
+const pingAllBtn = (onclick, title) => `<button class="icon-btn ghost seg-ping" onclick="${onclick}" title="${title}">${ICON.bolt}</button>`;
 const pickModeHint = priority => priority
   ? 'Framed servers are used, the first working one from the top. Drag ⋮⋮ to order, tap a server to leave it out.'
   : 'Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.';

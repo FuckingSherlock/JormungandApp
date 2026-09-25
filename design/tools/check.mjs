@@ -543,7 +543,7 @@ async function runChecks() {
 
   await check('chain editor: priority exit uses the top working server, drag reorders', async () => {
     await page.evaluate(() => { setConnectMode('simple'); openProfiles(); openCreateChain(); pickChainSide('in', 'src2'); pickChainSide('out', 'src1'); setChainExitMode('fastest'); }); await settle(page);
-    await page.click('#cc-out-hint .chip >> nth=1'); await settle(page);
+    await page.click('#cc-out-hint .seg-switch button >> nth=1'); await settle(page);
     const r = await page.evaluate(() => { const refs = chainExitRefs(chainDraft), n = chainExitNode(chainDraft);
       return { mode: chainDraft.exitMode, ok: n === (refs.map(x => x.node).find(isAlive) || null), grips: document.querySelectorAll('#cc-out-list .cc-grip').length }; });
     expect(r.mode === 'priority' && r.ok && r.grips > 1, JSON.stringify(r));
@@ -795,7 +795,7 @@ async function runChecks() {
       const out = {}, s = sourcesData.src2, live = liveNodes(s).filter(isAlive);
       openProfiles(); openSourceEntry('src2');
       out.fastest = unitNode('src2') === bestAlive(live);
-      document.querySelectorAll('#se-mode .chip')[1].click();
+      document.querySelectorAll('#se-mode .seg-switch button')[1].click();
       s.pickOrder = [live[live.length - 1], live[0]].map(n => 'src2::' + n.id); renderSourceEntry();
       out.priority = s.pickMode === 'priority' && unitNode('src2') === live[live.length - 1];
       out.tag = /priority/.test(document.querySelector('.conn-row[data-id=src2]').textContent);
@@ -813,7 +813,7 @@ async function runChecks() {
       s.pickMode = 'fastest'; s.pickOrder = []; closeSheet('sourceentry'); closeSheet('profiles');
       setConnectMode('profiles'); openProfiles(); openEditProfile('default');
       out.cpFastest = !document.querySelector('#cp-order .node-row');
-      document.querySelectorAll('#cp-mode .chip')[1].click();
+      document.querySelectorAll('#cp-mode .seg-switch button')[1].click();
       out.cpOrder = document.querySelectorAll('#cp-order .node-row').length === cpDraftRefs().length;
       document.getElementById('cpSaveBtn').click();
       out.saved = profilesData.default.pickMode === 'priority' && unitNode('default') === unitPickRefs('default').map(r => r.node).find(isAlive);
@@ -822,6 +822,22 @@ async function runChecks() {
       return out;
     });
     expect(Object.values(r).concat(Object.values(r2)).every(Boolean), JSON.stringify([r, r2]));
+  });
+
+  await check('Fastest / Priority is a swipeable switch: the pill slides, ping all sits beside it', async () => {
+    await page.evaluate(() => { switchTab('nodes'); setNodesTab('profiles'); openEditProfile('default'); cpPickMode = 'fastest'; renderCpOrder(); });
+    await settle(page);
+    const sw = await page.locator('#cp-mode .seg-switch').boundingBox();
+    await page.mouse.move(sw.x + 30, sw.y + sw.height / 2); await page.mouse.down();
+    await page.mouse.move(sw.x + sw.width - 20, sw.y + sw.height / 2, { steps: 6 }); await page.mouse.up(); await settle(page);
+    const r = await page.evaluate(() => {
+      const el = document.querySelector('#cp-mode .seg-switch'), ping = document.querySelector('#cp-mode .seg-ping');
+      const out = { swiped: cpPickMode === 'priority', pill: el.dataset.mode === 'priority', ping: !!ping && ping.getBoundingClientRect().left > el.getBoundingClientRect().right };
+      ping.click(); out.pinging = cpDraftRefs().some(r => (pingCache.get(serverKey(r.node)) || {}).ms === 'testing');
+      closeSheet('createprofile'); setNodesTab('simple'); switchTab('home');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
   await check('[?] opens a tip sheet above nested sheets', async () => {

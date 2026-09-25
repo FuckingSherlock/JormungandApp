@@ -33,7 +33,7 @@ function renderSourceEntry() {
   upd.nextElementSibling.innerHTML = ICON.bolt;
   document.getElementById('se-all').textContent = on === live.length ? 'None' : 'All';
   const priority = s.pickMode === 'priority';
-  document.getElementById('se-mode').innerHTML = pickModeChips(priority, 'setSourceEntryMode');
+  document.getElementById('se-mode').innerHTML = pickModeSwitch('se:' + seId, priority, 'setSourceEntryMode');
   document.getElementById('se-hint').textContent = pickModeHint(priority);
   let rank = 0;
   const list = priority ? seOrderRefs().map(r => r.node) : sortedNodes(live);
@@ -51,11 +51,34 @@ function renderSourceEntry() {
     r => !isNodeOff(s, r.node.id)));
 }
 
-// Shared with the profile editor: the Fastest / Priority switch and its hint.
-function pickModeChips(priority, fn) {
-  const chip = (m, l, on) => `<div class="chip ${on ? 'active' : ''}" onclick="${fn}('${m}')">${l}</div>`;
-  return chip('fastest', 'Fastest', !priority) + chip('priority', 'Priority', priority);
+// PickModeSwitch — the Fastest / Priority switch of the source entry, profile and chain exit
+// editors. Like the Simple / Profiles switch in Route: tap or swipe it, the pill slides across.
+// `key` names the thing being edited, so a re-render after a change slides from the old side.
+const pickSwitchWas = {};
+function pickModeSwitch(key, priority, fn) {
+  const to = priority ? 'priority' : 'fastest', from = pickSwitchWas[key] || to;
+  pickSwitchWas[key] = to;
+  if (from !== to) requestAnimationFrame(() => requestAnimationFrame(() =>
+    document.querySelectorAll(`.seg-switch[data-key="${key}"]`).forEach(el => { el.dataset.mode = to; })));
+  return `<div class="seg-switch" data-key="${key}" data-mode="${from}" onpointerdown="segSwipeStart(event,'${fn}')">`
+    + `<span class="seg-ink"></span><button data-m="fastest" onclick="${fn}('fastest')">Fastest</button>`
+    + `<button data-m="priority" onclick="${fn}('priority')">Priority</button></div>`;
 }
+// A horizontal swipe over the switch flips it (and swallows the click it would end with).
+function segSwipeStart(e, fn) {
+  const x0 = e.clientX;
+  const up = ev => {
+    window.removeEventListener('pointerup', up);
+    const dx = ev.clientX - x0;
+    if (Math.abs(dx) < 24) return;
+    const stop = c => { c.stopPropagation(); c.preventDefault(); };
+    window.addEventListener('click', stop, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', stop, true), 0);
+    window[fn](dx > 0 ? 'priority' : 'fastest');
+  };
+  window.addEventListener('pointerup', up);
+}
+const pingAllBtn = (onclick, title) => `<button class="icon-btn ghost seg-ping" onclick="${onclick}" title="${title}">${ICON.bolt}</button>`;
 const pickModeHint = priority => priority
   ? 'Framed servers are used, the first working one from the top. Drag ⋮⋮ to order, tap a server to leave it out.'
   : 'Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.';

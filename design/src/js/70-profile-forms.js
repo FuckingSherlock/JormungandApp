@@ -111,7 +111,8 @@ function renderCreateProfileSources() {
 // Fastest / Priority: in Priority, every server the draft uses, in order, draggable.
 function renderCpOrder() {
   const priority = cpPickMode === 'priority';
-  document.getElementById('cp-mode').innerHTML = pickModeChips(priority, 'setCpPickMode');
+  document.getElementById('cp-mode').innerHTML = pickModeSwitch('cp:' + (editingProfileId || 'new'), priority, 'setCpPickMode')
+    + pingAllBtn('testLatency(cpDraftRefs().map(r => [r.sid, r.node.id]))', 'Test latency of all its servers');
   document.getElementById('cp-mode-hint').textContent = priority
     ? 'The first working server from the top is used. Drag ⋮⋮ to order; pick servers above.'
     : 'The profile connects through the fastest of its servers.';
@@ -318,8 +319,8 @@ function renderChainPicker(elId, side) {
   renderChainWarn();
   if (side === 'out') {
     const hint = document.getElementById('cc-out-hint');
-    const chip = (m, l) => `<div class="chip ${d.exitMode === m ? 'active' : ''}" onclick="setChainExitMode('${m}')">${l}</div>`;
-    if (hint) hint.innerHTML = `<div class="chip-row" style="margin:2px 0 6px">${chip('fastest', 'Fastest')}${chip('priority', 'Priority')}</div>`
+    if (hint) hint.innerHTML = `<div class="seg-row">${pickModeSwitch('cc:' + (editingChainId || 'new'), priority, 'setChainExitMode')}`
+      + `${pingAllBtn('testLatency(chainExitRefs(chainDraft).map(r => [r.sid, r.node.id]))', 'Test latency of the exit servers')}</div>`
       + (priority ? 'The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, tap a server to skip it.'
                   : 'The fastest selected server of the exit is used. Expand and tap servers to leave them out.');
   }

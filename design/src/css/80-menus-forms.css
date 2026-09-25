@@ -27,3 +27,12 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 
 .menu-note{padding:4px 20px 12px;font-size:13px;line-height:1.45;color:var(--t2)}
 .menu-note b{color:var(--t1)}
+
+/* ── PickModeSwitch: Fastest / Priority (home segment look, laid out horizontally) ── */
+.seg-row{display:flex;align-items:center;gap:10px;margin:6px 0 6px}
+.seg-switch{position:relative;display:flex;flex:1;max-width:260px;background:rgba(255,255,255,.04);border-radius:10px;padding:3px;touch-action:pan-y}
+.seg-switch button{flex:1;position:relative;z-index:1;background:none;border:none;font:inherit;font-size:14px;font-weight:600;color:var(--t2);padding:7px 6px;cursor:pointer;transition:color .2s}
+.seg-ink{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:8px;background:var(--accent);transition:transform .28s cubic-bezier(.65,0,.35,1)}
+.seg-switch[data-mode=priority] .seg-ink{transform:translateX(100%)}
+.seg-switch[data-mode=fastest] button[data-m=fastest],.seg-switch[data-mode=priority] button[data-m=priority]{color:#fff}
+.seg-ping{margin-left:auto}
