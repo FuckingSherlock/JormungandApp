@@ -9,16 +9,13 @@
         <button class="icon-btn" id="nodeSearchBtn" onclick="toggleNodeSearch()" title="Search">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </button>
-        <button class="icon-btn no-edit" onclick="testAllLatency()" title="Test latency">
+        <button class="icon-btn" onclick="testAllLatency()" title="Test latency">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        </button>
-        <button class="icon-btn" id="nodesEditBtn" onclick="setNodesEdit(!nodesEdit)" title="Edit: reorder, switch sources and servers on / off">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         </button>
         <button class="icon-btn" onclick="openNodesMore()" title="More">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
         </button>
-        <button class="icon-btn primary no-edit" onclick="openNodesAdd()" title="Add">
+        <button class="icon-btn primary" onclick="openNodesAdd()" title="Add">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
       </div>
@@ -30,10 +27,15 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-    <div class="nodes-tabs" id="nodesTabs">
-      <button class="nodes-tab" data-tab="simple" onclick="setNodesTab('simple')">Servers<span class="tab-dot" title="The route uses this tab now"></span></button>
-      <button class="nodes-tab" data-tab="profiles" onclick="setNodesTab('profiles')">Profiles<span class="tab-dot" title="The route uses this tab now"></span></button>
-      <div class="nodes-tab-ink" id="nodesTabInk"></div>
+    <div class="nodes-bar">
+      <button class="icon-btn" id="nodesEditBtn" onclick="setNodesEdit(!nodesEdit)" title="Edit: reorder, switch sources and servers on / off">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </button>
+      <div class="nodes-tabs" id="nodesTabs">
+        <button class="nodes-tab" data-tab="simple" onclick="setNodesTab('simple')">Servers<span class="tab-dot" title="The route uses this tab now"></span></button>
+        <button class="nodes-tab" data-tab="profiles" onclick="setNodesTab('profiles')">Profiles<span class="tab-dot" title="The route uses this tab now"></span></button>
+        <div class="nodes-tab-ink" id="nodesTabInk"></div>
+      </div>
     </div>
     <div class="nodes-pager" id="nodesPager">
       <div class="nodes-track" id="nodesTrack">

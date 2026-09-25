@@ -760,7 +760,7 @@ async function runChecks() {
       q('.src-card[data-id=src2] .node-row[data-nid=n0]').click();
       out.tapMenu = q('#sh-actions').classList.contains('open') && !isNodeDisabled(sourcesData.src2, 'n0'); closeSheet('actions');
       setNodesEdit(true);
-      out.edit = !!q('#nodes-list .drag-handle') && !!q('#nodes-list .mini-toggle') && !!q('#nodes-list .node-row.pick') && q('#nodesEditBtn').textContent === 'Done';
+      out.edit = !!q('#nodes-list .drag-handle') && !!q('#nodes-list .mini-toggle') && !!q('#nodes-list .node-row.pick') && q('#nodesEditBtn').classList.contains('on') && [...document.querySelectorAll('#view-nodes .head-actions .icon-btn')].every(b => b.offsetWidth > 0);
       setNodesEdit(false); switchTab('home');
       openProfiles(); const was = autoConnect;
       out.listView = !q('#connects-list .drag-handle');

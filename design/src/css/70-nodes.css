@@ -8,8 +8,6 @@
 }
 .icon-btn:active{background:var(--card-hi)}
 .icon-btn.on{color:var(--accent);border-color:var(--accent)}
-.icon-btn.done{width:auto;padding:0 12px;font:inherit;font-size:14px;font-weight:600;color:var(--accent);border-color:var(--accent)}
-#view-nodes.editing .no-edit{display:none}
 .icon-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .icon-btn.ghost{background:transparent;border-color:transparent;width:30px;height:30px}
 .icon-btn.ghost:active{background:rgba(255,255,255,.06)}
@@ -68,7 +66,8 @@
 
 
 /* ── Nodes tabs: Servers / Profiles, swipeable pager ── */
-.nodes-tabs{position:relative;display:flex;margin:0 14px 10px;border-bottom:1px solid var(--border);flex-shrink:0}
+.nodes-bar{display:flex;align-items:center;gap:10px;margin:0 14px 10px;flex-shrink:0}
+.nodes-tabs{flex:1;position:relative;display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
 .nodes-tab{flex:1;background:none;border:none;font:inherit;font-size:14px;font-weight:600;color:var(--t3);padding:8px 0 10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
 .nodes-tab.active{color:var(--t1)}
 .nodes-tab .tab-dot{width:6px;height:6px;border-radius:50%;background:var(--active);visibility:hidden}
@@ -116,6 +115,6 @@
 .route-modes[data-mode=profiles] .route-ink{transform:translateX(100%)}
 #connects-list.swap{animation:route-swap .28s ease}
 @keyframes route-swap{from{opacity:0;transform:translateX(var(--swap-from,16px))}to{opacity:1;transform:none}}
-#connectEditBtn.on{color:var(--active);border-color:var(--active)}
+#connectEditBtn.on,#nodesEditBtn.on{color:var(--active);border-color:var(--active)}
 .route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
 .route-auto{flex-shrink:0;padding:0 4px}

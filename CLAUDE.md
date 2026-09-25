@@ -15,11 +15,8 @@ over the whole catalog, "If unavailable" + global default, quick rules, services
 linked to per-app routing, final order, address test, import/export, rule sets). All sheets
 open to the top of the screen and close by swiping the header down.
 
-Open decisions (ask the user before building):
-- Nodes edit mode changes the header (⚡ and + vanish, ✎ becomes a wide Done). Options
-  discussed: 1) keep every button in place, ✎ → ✓, ⚡ / + disabled; 2) the same plus a thin
-  "Editing" strip under the tabs with edit-only actions (recommended); 3) Android action-mode
-  header; 4) no edit mode, grips always shown.
+Nodes edit mode: ✎ sits left of the Servers / Profiles tabs (as in Route), ✓ while editing;
+the header never changes (search, ⚡, ⋮, + stay available in edit mode).
 
 ## Layout
 

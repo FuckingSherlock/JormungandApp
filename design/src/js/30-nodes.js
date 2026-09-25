@@ -10,8 +10,9 @@ function setNodesEdit(on) {
   nodesEdit = on;
   document.getElementById('view-nodes').classList.toggle('editing', on);
   const b = document.getElementById('nodesEditBtn');
-  b.classList.toggle('done', on);
-  b.innerHTML = on ? 'Done' : ICON.edit;
+  b.classList.toggle('on', on);
+  b.title = on ? 'Done' : 'Edit: reorder, switch sources and servers on / off';
+  b.innerHTML = on ? ICON.check : ICON.edit;
   renderNodes();
 }
 
