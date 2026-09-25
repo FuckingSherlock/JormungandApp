@@ -746,7 +746,11 @@ async function runChecks() {
       out.subs = autoCfg.subsEvery === 48 && /2 d/.test(document.getElementById('am-subs').textContent);
       dlg('am-subs', '12', '1');
       out.subsBack = autoCfg.subsEvery === 12;
-      out.noOff = ![...document.querySelectorAll('#auto-settings .chip')].some(e => e.textContent === 'off');
+      const warmChips = () => [...document.querySelectorAll('#auto-settings .chip')].filter(e => /^next/.test(e.textContent)).length;
+      setAutoCfg('keepWarm', false);
+      out.warmOff = warmChips() === 0 && autoCfg.standby === 2;
+      setAutoCfg('keepWarm', true);
+      out.warmOn = warmChips() === 3;
       for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn:last-child').click();
       out.stepMax = autoCfg.failAfter === 4 && document.querySelector('#am-failafter .stepper-btn:last-child').disabled;
       for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn').click();

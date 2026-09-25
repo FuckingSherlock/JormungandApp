@@ -5,6 +5,7 @@
    - checkEvery: how often the current route is re-pinged (seconds);
    - standby: how many next entries by priority are pinged together with the current
      one ("kept warm", 1–3), so a failover goes straight to a server known to work;
+     keepWarm switches it off without losing the count;
    - failAfter: timeouts in a row (1–4) before Auto leaves the current server;
    - pauseScreenOff: no checks while the screen is off (mobile battery);
    - subsEvery: the global subscription update period; a subscription's own period
@@ -13,7 +14,7 @@
    Auto itself is switched on / off by the Auto badge of the Servers / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
-const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, standby: 2, pauseScreenOff: true, subsEvery: 12 };
+const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, subsEvery: 12 };
 const AUTO_THRESHOLD_MAX = 1000;
 const AUTO_FAIL_AFTER = [1, 4];
 const CHEVRON_R = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
@@ -80,10 +81,11 @@ function renderAutoMode() {
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">Switch to a faster server<div class="set-hint">Only if it is faster than the current one by at least this</div></div>
         <input class="set-input am-num" id="am-threshold" inputmode="numeric" value="${autoCfg.threshold}" onchange="setAutoThreshold(this)"><span class="am-unit">ms</span></div>
-      <div class="set-row"><div class="set-label" style="flex:1">Check the connection every<div class="set-hint">Pings the current server and the kept-warm ones</div></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Check the connection every<div class="set-hint">Pings the current server${autoCfg.keepWarm ? ' and the kept-warm ones' : ''}</div></div>
         ${valueBtn('am-every', 'checkEvery', fmtEvery(autoCfg.checkEvery))}</div>
-      <div class="set-row stack"><div><div class="set-label">Keep warm</div><div class="set-hint">Next entries by priority pinged with the current one — failover goes straight to a working one</div></div>
-        ${chips('standby', [1, 2, 3], v => 'next ' + v)}</div>
+      <div class="set-row stack"><div class="am-head"><div class="set-label" style="flex:1">Keep warm<div class="set-hint">Next entries by priority pinged with the current one — failover goes straight to a working one</div></div>
+        ${toggle(autoCfg.keepWarm, "setAutoCfg('keepWarm',!autoCfg.keepWarm)")}</div>
+        ${autoCfg.keepWarm ? chips('standby', [1, 2, 3], v => 'next ' + v) : ''}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Leave a server after<div class="set-hint">Timeouts in a row before Auto moves on</div></div>
         <div class="stepper" id="am-failafter">
           <button class="stepper-btn" onclick="stepAutoFailAfter(-1)" ${fa <= lo ? 'disabled' : ''}>‹</button>

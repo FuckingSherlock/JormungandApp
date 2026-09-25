@@ -28,3 +28,4 @@
 .iv-row .set-select{padding:0 10px}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .btn-secondary.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.am-head{display:flex;align-items:center;gap:12px}
