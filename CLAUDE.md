@@ -69,13 +69,11 @@ Do not send `main_screen.html` as a file unless asked.
 
 ## End of session
 
-Each session works on its own `claude/...` branch, so the repo default must follow the
-latest work. Before finishing a session: make sure everything is committed and pushed,
-then make the current working branch the default branch of
-`FuckingSherlock/JormungandApp` (GitHub → Settings → General → Default branch, or any
-available GitHub tool/API). If no tool can change it, tell the user the branch name and
-ask them to switch it. A new session starts from the default branch, so this is how it
-picks up the latest state.
+Each session works on its own `claude/...` branch, so the default branch must receive
+the latest work. Before finishing a session: commit and push everything, then merge the
+working branch into the repo default branch (`git ls-remote --symref origin HEAD` shows
+it) and push it. A new session starts from the default branch, so this is how it picks
+up the latest state.
 
 ## Token economy
 
