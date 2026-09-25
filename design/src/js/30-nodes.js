@@ -138,20 +138,25 @@ function openGoneActions(sid, nid) {
     + menuRow(ICON.trash, 'Forget now<div class="menu-sub">Drops it and its settings everywhere</div>', `closeSheet('actions');forgetGone('${sid}',['${nid}'])`, 'danger'));
 }
 
+// Kept short so the line rarely wraps: "sing-box · 16/18 on · 2 gone · 1d"; when it does wrap,
+// it breaks between items, never inside one.
 function srcMetaHtml(s) {
-  const parts = [];
+  const parts = [], live = liveNodes(s).length, total = s.nodes.length;
+  parts.push(`<span class="fmt-tag">${s.kind === 'sub' ? s.format : 'manual'}</span>`);
+  parts.push(live < total ? `<span class="dis-meta" title="${total - live} off">${live}/${total} on</span>`
+    : `${total} ${s.kind === 'sub' ? 'node' : 'server'}${total === 1 ? '' : 's'}`);
   if (s.kind === 'sub') {
-    parts.push(`<span class="fmt-tag">${s.format}</span>`);
-    parts.push(`${s.nodes.length} nodes`);
-    if ((s.disabledNodes || []).length) parts.push(`<span class="dis-meta">${s.nodes.length - liveNodes(s).length} off</span>`);
-    if ((s.gone || []).length) parts.push(`<span class="gone-meta">${s.gone.length} unavailable</span>`);
-    parts.push(timeAgo(s.updatedAt));
-  } else {
-    parts.push(`<span class="fmt-tag">manual</span>`);
-    parts.push(`${s.nodes.length} server${s.nodes.length === 1 ? '' : 's'}`);
-    if ((s.disabledNodes || []).length) parts.push(`<span class="dis-meta">${s.nodes.length - liveNodes(s).length} off</span>`);
+    if ((s.gone || []).length) parts.push(`<span class="gone-meta" title="Removed by the provider, kept for a while">${s.gone.length} gone</span>`);
+    parts.push(`<span title="Updated ${timeAgo(s.updatedAt)}">${shortAgo(s.updatedAt)}</span>`);
   }
-  return parts.join('<span class="dot">·</span>');
+  return parts.map((p, i) => `<span class="meta-part">${p}${i < parts.length - 1 ? '<span class="dot">·</span>' : ''}</span>`).join('');
+}
+function shortAgo(ts) {
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return 'now';
+  if (m < 60) return m + 'm';
+  const h = Math.round(m / 60);
+  return h < 24 ? h + 'h' : Math.round(h / 24) + 'd';
 }
 
 function usageHtml(s) {
@@ -197,7 +202,7 @@ function renderSourceCard(id, q) {
     <div class="src-head" onclick="toggleSourceOpen('${id}')">
       <div class="src-main">
         <div class="src-name">${esc(s.name)}${s.enabled || nodesEdit ? '' : '<span class="conn-tag off">off</span>'}<svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></div>
-        <div class="src-meta">${srcMetaHtml(s)}</div>
+        <div class="src-meta wrap">${srcMetaHtml(s)}</div>
       </div>
       ${updateBtn}
       ${nodesEdit ? `<div title="Use this source">${miniToggleHtml(id, 'toggleSourceEnabled', s.enabled)}</div>`

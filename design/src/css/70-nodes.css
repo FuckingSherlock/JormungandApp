@@ -33,6 +33,9 @@
 .src-name{font-size:16px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
 .src-meta{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:6px;margin-top:3px;white-space:nowrap;overflow:hidden}
 .src-meta .dot{color:var(--t3)}
+.src-meta.wrap{flex-wrap:wrap;white-space:normal;row-gap:2px;column-gap:0}
+.meta-part{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.src-meta.wrap .meta-part .dot{margin-right:6px}
 .fmt-tag{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.06);color:var(--t2)}
 .src-chevron{transition:transform .2s;color:var(--t3)}
 .src-card.open .src-chevron{transform:rotate(180deg)}

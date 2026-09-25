@@ -207,6 +207,11 @@ async function runChecks() {
         if (el.closest('.nodes-pager') && !el.getBoundingClientRect().width) return;
         if (el.scrollWidth > el.clientWidth + 1) bad.push((el.id || el.className) + ' ' + el.scrollWidth + '>' + el.clientWidth);
       });
+      // the source meta line wraps between items instead of being clipped
+      document.querySelectorAll('.view.active .src-meta.wrap').forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (r.width && [...el.children].some(c => c.getBoundingClientRect().right > r.right + 1)) bad.push('src-meta clipped: ' + el.textContent);
+      });
       return bad;
     });
     const bad = [];
