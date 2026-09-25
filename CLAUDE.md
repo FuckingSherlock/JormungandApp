@@ -9,7 +9,8 @@ start it until the mockup is finished. The user talks Russian; reply in Russian.
 - `docs/` — product logic for the real app (Russian): `subscription-parsing.md`
   (formats, UA strategy, dedup, latency URL, region rules), `connect-model.md` (sources,
   profiles, chains, modes, Auto settings, node identity and dropped nodes, servers off in
-  Nodes, delete impact, validation, ping, dock).
+  Nodes, delete impact, validation, ping, dock), `rules.md` (agreed plan for routing
+  rules, apps, DNS, system proxy, kill switch — not in the mockup yet).
   Keep them in step with the mockup: when a change adds or alters behaviour the Flutter
   app must implement, update the doc in the same commit.
 - `design/main_screen.html` — **generated** mockup, the file the user opens.
