@@ -1072,7 +1072,7 @@ async function runChecks() {
     const r = await page.evaluate(() => {
       const h = document.getElementById('sh-help'), top = document.elementFromPoint(200, h.getBoundingClientRect().top + 40);
       const out = { open: h.classList.contains('open') && document.querySelectorAll('#help-body .help-item').length > 2,
-        above: h.contains(top), all: [...document.querySelectorAll('.help-btn')].every(b => HELP[b.getAttribute('onclick').match(/'(\w+)'/)[1]]) };
+        above: h.contains(top), padded: (() => { const b = document.getElementById('help-body').getBoundingClientRect(), i = document.querySelector('#help-body .help-item').getBoundingClientRect(); return i.left - b.left >= 14 && b.right - i.right >= 14; })(), all: [...document.querySelectorAll('.help-btn')].every(b => HELP[b.getAttribute('onclick').match(/'(\w+)'/)[1]]) };
       closeSheet('help'); closeSheet('sourceentry'); closeSheet('profiles');
       return out;
     });
