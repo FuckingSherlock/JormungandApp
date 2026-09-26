@@ -284,3 +284,12 @@
 .node-row.pick:not(.on) .node-name{color:var(--t2)}
 .node-row.gone.pick.on{background:none;border-style:dashed}
 .conn-row > .conn-main:first-child{padding-left:12px}
+
+/* Route row unfolded: its servers, Fastest / Priority and the priority order */
+.conn-row.open{flex-wrap:wrap}
+.conn-expand{display:flex;align-items:center;align-self:stretch;padding:0 8px;cursor:pointer}
+.conn-row.open .conn-expand .src-chevron{transform:rotate(180deg)}
+.conn-body{flex-basis:100%;padding:0 0 10px}
+.conn-body .seg-row{margin:0 0 4px}
+.conn-hint{margin-bottom:8px}
+.conn-body .se-nodes{margin:0}

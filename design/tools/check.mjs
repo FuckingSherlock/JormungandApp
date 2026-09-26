@@ -118,6 +118,7 @@ const SHOTS = {
   'settings-conn': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setconn'); }); await settle(p); },
   'nodes-profiles': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); expandState.default = true; renderNodes(); }); await settle(p); },
   'nodes-swipe': async p => { await tab(p, 'nodes'); await p.evaluate(() => { document.getElementById('view-nodes').classList.add('swiping'); renderNodesTabs(-170); }); },
+  'route-open': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); }); await settle(p); },
   'route': async p => { await p.evaluate(() => { openProfiles(); setConnectEdit(true); }); await settle(p); },
   'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); openEditProfile('work'); confirmDeleteEntry('work'); }); await settle(p); },
   'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.add('src2'); renderTargetPicker(); }); await settle(p); },
@@ -399,6 +400,26 @@ async function runChecks() {
       document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .mini-toggle`).click();
       out.autoToggle = connectEntry(id).inAuto === !was;
       toggleEntryAuto(id); setConnectEdit(false);
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('route: a source row unfolds to its servers, Fastest / Priority, order by grips', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, id = visibleOrder().find(x => sourcesData[x]), s = sourcesData[id], was = s.pickMode;
+      out.noChainExpand = [...document.querySelectorAll('#connects-list .conn-row')].every(el => !chainsData[el.dataset.id] || !el.querySelector('.conn-expand'));
+      document.querySelector(`#connects-list .conn-row[data-id=${id}] .conn-expand`).click();
+      const body = () => document.querySelector(`#connects-list .conn-row[data-id=${id}] .conn-body`);
+      out.open = !!body() && body().querySelectorAll('.node-row').length === unitRefs(id).length;
+      setRouteRowMode('priority');
+      out.priority = s.pickMode === 'priority' && body().querySelectorAll('.cc-grip').length === unitRefs(id).length;
+      out.order = [...body().querySelectorAll('.node-row')].map(el => el.dataset.id).join() === unitPickRefs(id).map(refKey).join();
+      setRouteRowMode('fastest');
+      out.fastest = s.pickMode === 'fastest' && !body().querySelector('.cc-grip');
+      s.pickMode = was;
+      toggleRouteRow(id);
+      out.closed = !body();
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));

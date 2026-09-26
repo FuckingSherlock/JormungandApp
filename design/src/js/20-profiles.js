@@ -183,15 +183,55 @@ function renderConnectRow(id) {
   const current = id === effectiveConnectId();
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
-  return `<div class="conn-row ${current ? 'current' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
+  return `<div class="conn-row ${current ? 'current' : ''} ${routeOpenId === id ? 'open' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
     ${connectEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
     <div class="conn-main" ${connectEdit ? '' : `onclick="selectConnect('${id}')"`}>
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
     ${current && !connectEdit ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
+    ${chain ? '' : `<span class="conn-expand" onclick="toggleRouteRow('${id}')" title="Servers and their priority"><svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>`}
     <div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>
+    ${!chain && routeOpenId === id ? routeRowBodyHtml(id) : ''}
   </div>`;
+}
+
+/* A source or profile row unfolds to its servers: Fastest / Priority and, in Priority, the
+   order by drag — the same pickMode / pickOrder as the entry editors (Nodes → Route
+   settings, the profile form), just at hand. Leaving servers out stays in those editors. */
+let routeOpenId = null;
+function toggleRouteRow(id) {
+  routeOpenId = routeOpenId === id ? null : id;
+  renderConnects();
+}
+function routeRowBodyHtml(id) {
+  const priority = unitPriority(id);
+  const refs = priority ? unitPickRefs(id) : byPing(unitRefs(id), r => r.node);
+  let rank = 0;
+  const rows = refs.map(r => `<div class="node-row ps-node on static" data-id="${refKey(r)}">
+      ${priority ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div><span class="cc-rank">${++rank}</span>` : ''}
+      <span class="node-flag">${r.node.flag}</span>
+      <span class="node-name">${esc(r.node.name)}</span>
+      <span class="node-proto">${r.node.protocol}</span>
+      <span onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
+    </div>`).join('');
+  return `<div class="conn-body"><div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}</div>
+    <div class="set-hint conn-hint">${priority ? 'The first working one from the top. Drag ⋮⋮ to order.' : 'Connects through the fastest of them.'}</div>
+    <div class="se-nodes">${rows || '<div class="route-empty">No servers</div>'}</div></div>`;
+}
+function routeRowChanged() {
+  renderConnects();
+  updateMainConnectCard();
+}
+function setRouteRowMode(mode) {
+  unitOwner(routeOpenId).pickMode = mode;
+  routeRowChanged();
+}
+function startRouteNodeDrag(e, key) {
+  const u = unitOwner(routeOpenId), shown = unitPickRefs(routeOpenId).map(refKey), cur = u.pickOrder || [];
+  const [order, done] = dragShown(cur.concat(shown.filter(k => !cur.includes(k))), shown, o => { u.pickOrder = o; });
+  const rowEl = document.querySelector(`#connects-list .conn-body .node-row[data-id="${key}"]`);
+  startRowDrag(e, rowEl, '.node-row', order, () => { done(); routeRowChanged(); });
 }
 
 // Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
