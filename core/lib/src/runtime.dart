@@ -24,10 +24,14 @@ class SingBoxProcess {
   Process? _proc;
   int? clashPort;
 
+  /// Every line sing-box writes, as it comes (jormd's Logs tab).
+  void Function(String line)? onLog;
+
   bool get running => _proc != null;
 
   void _log(String line) {
     logs.add(line);
+    onLog?.call(line);
     while (logs.length > 500) {
       logs.removeFirst();
     }

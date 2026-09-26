@@ -6,9 +6,13 @@ import 'package:path/path.dart' as p;
 import 'config.dart';
 import 'exitip.dart';
 import 'fetch.dart';
+import 'logbook.dart';
+import 'manual.dart';
 import 'merge.dart';
+import 'node.dart';
 import 'parse/links.dart';
 import 'runtime.dart';
+import 'share.dart';
 import 'sysproxy.dart';
 import 'traffic.dart';
 
@@ -23,7 +27,9 @@ import 'traffic.dart';
 class Daemon {
   Daemon({required this.singBox, required this.dataDir, required this.uiFile, this.lanHosts = const {}})
       : main = SingBoxProcess(singBox, p.join(dataDir, 'run', 'main')),
-        sysProxy = SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json')));
+        sysProxy = SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))) {
+    main.onLog = log.singBox;
+  }
 
   final String singBox;
   final String dataDir;
@@ -32,6 +38,9 @@ class Daemon {
   final SingBoxProcess main;
   final SystemProxy sysProxy;
   static const clashPort = 9090;
+
+  /// sing-box output and the core's own notes (the Logs tab).
+  final log = LogBook();
 
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
   String? _error;
@@ -67,12 +76,22 @@ class Daemon {
           ? (jsonDecode(await utf8.decodeStream(req)) as Map).cast<String, dynamic>()
           : const <String, dynamic>{};
       if (req.method == 'POST' && path == '/api/ping') return await _ping(body, res);
+      if (req.method == 'DELETE' && (path == '/api/connections' || path.startsWith('/api/connections/'))) {
+        return await _send(res, 200, await _closeConnections(path.length > 17 ? Uri.decodeComponent(path.substring(17)) : null));
+      }
       final out = await switch ('${req.method} $path') {
         'GET /api/state' => _state(),
         'PUT /api/state' => _saveState(body),
         'GET /api/status' => _status(),
         'GET /api/traffic' => _traffic(),
-        'GET /api/log' => Future.value({'lines': main.logs.toList()}),
+        'GET /api/log' => Future.value(log.since(int.tryParse(req.uri.queryParameters['since'] ?? ''))),
+        'DELETE /api/log' => Future(() {
+            log.clear();
+            return {'ok': true};
+          }),
+        'GET /api/version' => _version(),
+        'POST /api/node' => Future(() => {'node': _manualNode(body).toJson()}),
+        'POST /api/share' => Future.value({'link': _share(body)}),
         'POST /api/sources/fetch' => _fetch(body),
         'POST /api/parse' => Future.value(_parse(body)),
         'POST /api/connect' => _connect(body),
@@ -85,7 +104,10 @@ class Daemon {
       };
       if (out == null) return await _send(res, 404, {'error': 'no route ${req.method} $path'});
       return await _send(res, 200, out);
+    } on FormatException catch (e) {
+      return await _send(res, 400, {'error': e.message}); // a message for the user (manual server form)
     } catch (e, st) {
+      log.note('error', '${req.method} ${req.uri.path}: $e');
       stderr.writeln('[jormd] ${req.method} ${req.uri.path}: $e\n$st');
       return await _send(res, 500, {'error': '$e'});
     }
@@ -207,8 +229,11 @@ class Daemon {
       } else {
         await sysProxy.restore();
       }
+      log.note('info', 'Connected: ${plan['kind']}, proxy on 127.0.0.1:$_mixedPort${body['systemProxy'] == true ? ', system proxy on' : ''}');
+      if (_warning != null) log.note('warn', _warning!);
     } catch (e) {
       _error = '$e';
+      log.note('error', 'Connect failed: $e');
       await sysProxy.restore();
       rethrow;
     }
@@ -217,11 +242,57 @@ class Daemon {
 
   Future<Map<String, dynamic>> _disconnect() async {
     await main.stop();
+    log.note('info', 'Disconnected');
     await sysProxy.restore();
     _recheckExit(); // now the direct IP
     _error = null;
     _warning = null;
     return _status();
+  }
+
+  String? _singBoxVer;
+  Future<Map<String, dynamic>> _version() async => {
+        'core': coreVersion,
+        'singBox': _singBoxVer ??= await singBoxVersion(singBox),
+        'dataDir': dataDir,
+        'dart': Platform.version.split(' ').first,
+        'os': Platform.operatingSystem,
+      };
+
+  /// body: {protocol, address, port, secret, name, outbound?, unsupported?} — see manual.dart.
+  Node _manualNode(Map<String, dynamic> body) => manualNode(
+        protocol: '${body['protocol'] ?? ''}',
+        address: '${body['address'] ?? ''}',
+        port: int.tryParse('${body['port'] ?? ''}') ?? 0,
+        secret: '${body['secret'] ?? ''}',
+        name: '${body['name'] ?? ''}',
+        outbound: (body['outbound'] as Map?)?.cast<String, dynamic>(),
+        unsupported: body['unsupported'] as String?,
+      );
+
+  /// body: {outbound, name, flag, unsupported?} → the share link, or null (see share.dart).
+  String? _share(Map<String, dynamic> body) => shareLink(
+        ((body['outbound'] as Map?) ?? const {}).cast<String, dynamic>(),
+        name: '${body['name'] ?? ''}',
+        flag: '${body['flag'] ?? ''}',
+        unsupported: body['unsupported'] as String?,
+      );
+
+  /// Closes one open connection ([id] from /api/traffic) or all of them, through sing-box's
+  /// clash API. Not connected: nothing to close.
+  Future<Map<String, dynamic>> _closeConnections(String? id) async {
+    if (!main.running) return {'ok': false};
+    final c = HttpClient()..findProxy = (_) => 'DIRECT';
+    try {
+      final path = id == null ? '/connections' : '/connections/${Uri.encodeComponent(id)}';
+      final req = await c.deleteUrl(Uri.parse('http://127.0.0.1:$clashPort$path')).timeout(const Duration(seconds: 2));
+      final res = await req.close().timeout(const Duration(seconds: 2));
+      await res.drain<void>();
+      log.note('info', id == null ? 'Closed all connections' : 'Closed connection $id');
+      return {'ok': res.statusCode < 300};
+    } finally {
+      c.close(force: true);
+    }
   }
 
   /// body: {nodes: [{key, outbound}], pairs: [{key, entry: {outbound}, exit: {outbound}}], url?}
