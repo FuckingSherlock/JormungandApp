@@ -1,0 +1,14 @@
+name: jormungand_core
+description: Jormungand core - subscriptions, sing-box config, runtime, dev daemon (jormd).
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.9.0
+dependencies:
+  crypto: ^3.0.7
+  path: ^1.9.1
+  yaml: ^3.1.4
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.32.0

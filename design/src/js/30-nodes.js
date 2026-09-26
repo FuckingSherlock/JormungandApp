@@ -317,14 +317,16 @@ function updateSource(sid) {
   if (s.kind !== 'sub' || s.updating) return;
   s.updating = true;
   refreshSourceViews();
-  setTimeout(() => {
-    s.updating = false;
+  backend.updateSource(s).then(() => {
     s.updatedAt = Date.now();
-    if (s.demoChurn) demoProviderChurn(s);
+    s.count = s.nodes.length;
+    return true;
+  }, e => { toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
+    s.updating = false;
     purgeExpiredGone();
     refreshSourceViews();
-    if (s.testAfterUpdate) testSourceLatency(sid);
-  }, 900 + Math.random() * 600);
+    if (ok && s.testAfterUpdate) testSourceLatency(sid);
+  });
 }
 // Mockup only: an update of a demo subscription alternates between the provider dropping
 // two servers and bringing the dropped ones back (with their old settings).

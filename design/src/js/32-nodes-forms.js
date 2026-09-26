@@ -80,15 +80,13 @@ function saveSrcForm() {
     sourceOrder.push(id);
     sourceAdded(id);
     expandState[id] = true;
-    // Simulate the first fetch: nodes appear after the discovery request.
+    // The first fetch: nodes appear after the discovery request.
     s.updating = true;
-    setTimeout(() => {
-      s.nodes = genNodes(8 + Math.floor(Math.random() * 20), 'sub');
+    backend.fetchSource(s).catch(e => toast('Could not load ' + s.name + ': ' + e.message)).then(() => {
       s.count = s.nodes.length;
-      s.usage = { used: 0, total: 0 };
       s.updating = false;
       renderAll();
-    }, 1200);
+    });
   }
   editingSourceId = null;
   closeSheet('srcform');
@@ -149,13 +147,20 @@ function saveNodeForm() {
   const secret = document.getElementById('nf-secret').value.trim();
   const name = document.getElementById('nf-name').value.trim() || address || 'Server';
 
+  const link = document.getElementById('nf-link').value.trim();
+
   if (editingNode.nid) {
     const n = sourcesData[editingNode.sid].nodes.find(x => x.id === editingNode.nid);
     Object.assign(n, { name, protocol, address, port, secret });
-  } else {
-    if (!address) { toast('Address is required'); return; }
-    const chip = document.querySelector('#nf-group .chip.active');
-    let gid = chip ? chip.dataset.gid : '__new';
+    closeSheet('nodeform');
+    renderAll();
+    return;
+  }
+  if (!address) { toast('Address is required'); return; }
+  const chip = document.querySelector('#nf-group .chip.active');
+  const pick = chip ? chip.dataset.gid : '__new';
+  backend.manualNode({ name, protocol, address, port, secret, link }).then(node => {
+    let gid = pick;
     if (gid === '__new') {
       gid = 'src' + (sourceSeq++);
       sourcesData[gid] = { id:gid, kind:'node', name:'Manual ' + (manualGroups().length + 1), enabled:true, inAuto:true, offNodes:[], nodes:[] };
@@ -163,11 +168,11 @@ function saveNodeForm() {
       sourceAdded(gid);
     }
     const g = sourcesData[gid];
-    g.nodes.push({ id:'n' + Date.now(), flag:'🌐', name, protocol, address, port, secret });
+    g.nodes.push(node);
     g.count = g.nodes.length;
     expandState[gid] = true;
-  }
-  closeSheet('nodeform');
-  renderAll();
+    closeSheet('nodeform');
+    renderAll();
+  }, e => toast(e.message));
 }
 

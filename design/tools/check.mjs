@@ -23,6 +23,22 @@ const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf('--' + name); return i >= 0 ? args[i + 1] : def; };
 const positional = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--')));
 
+// Deterministic runs: the mock (genNodes, mockPing, backend timings) draws on Math.random.
+// Seeding it (env CHECK_SEED, default fixed) makes a failure reproducible instead of a
+// 1-in-N flake — replay the same seed to get the same dead servers / delays / churn every time.
+const CHECK_SEED = Number(process.env.CHECK_SEED) || 1;
+function seedScript(seed) {
+  return `(() => {
+    let s = ${seed} >>> 0 || 1;
+    Math.random = function () {
+      s |= 0; s = (s + 0x6D2B79F5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  })();`;
+}
+
 async function openPage(browser, { width = 400, height = 800, scale = 1, theme } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
   page.setDefaultTimeout(5000);
@@ -30,6 +46,7 @@ async function openPage(browser, { width = 400, height = 800, scale = 1, theme }
   page.on('pageerror', e => page.errors.push(e.message));
   // Fonts come from Google; offline they only slow the load down.
   await page.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+  await page.addInitScript(seedScript(CHECK_SEED));
   await page.goto(PAGE);
   await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
   if (theme) await page.evaluate(t => applyTheme(t), theme);
@@ -861,8 +878,11 @@ async function runChecks() {
       out.first = ids[0] === effectiveConnectId() && ids.length <= autoCfg.standby + 1 && ids.length > 1;
       out.byOrder = ids.slice(1).every((id, i, a) => connectEntry(id).inAuto && (!i || order.indexOf(a[i - 1]) < order.indexOf(id)));
       const keys = new Set(ids.flatMap(id => entryRefs(id).map(r => serverKey(r.node))));
+      // Pings of earlier checks may still be in flight: forget them, count only this call's.
+      const inFlight = () => [...pingCache.entries()].filter(([, v]) => v.ms === 'testing').map(([k]) => k);
+      inFlight().forEach(k => pingCache.delete(k));
       const p = pingOnLaunch();
-      const testing = [...pingCache.entries()].filter(([, v]) => v.ms === 'testing').map(([k]) => k);
+      const testing = inFlight();
       out.onlyThose = testing.length > 0 && testing.every(k => keys.has(k));
       await p;
       switchTab('settings'); openSheet('setgeneral');
@@ -1209,11 +1229,29 @@ async function runChecks() {
   });
 
   await check('no errors during the run', async () => expect(!page.errors.length, page.errors.join(' | ')));
+
+  // Live mode (the page served by core/bin/jormd.dart) starts from an empty state: every
+  // screen must render with nothing added. No core here, so /api calls only toast.
+  await check('live mode: mock off the file page; an empty state renders everywhere', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      const out = { mockHere: backend.live === false };
+      window.JORMD = true; liveInit();
+      out.empty = !sourceOrder.length && !connectOrder.length && !connected;
+      renderAll(); openProfiles(); closeSheet('profiles');
+      switchTab('nodes'); setNodesTab('profiles'); setNodesTab('simple'); switchTab('settings'); switchTab('rules'); switchTab('home');
+      await wait(300);
+      try { livePlan(); out.plan = false; } catch (e) { out.plan = /Nothing to connect/.test(e.message); }
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
   await browser.close();
 
   const failed = results.filter(r => r[1]);
   for (const [name, err] of failed) console.log(`FAIL  ${name}: ${err}`);
-  console.log(`${results.length - failed.length}/${results.length} checks passed`);
+  console.log(`${results.length - failed.length}/${results.length} checks passed (seed ${CHECK_SEED})`);
   return failed.length;
 }
 

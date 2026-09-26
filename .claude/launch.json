@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "jormd",
+      "runtimeExecutable": "dart",
+      "runtimeArgs": ["run", "core/bin/jormd.dart", "--data", "core/.data-dev"],
+      "port": 7788
+    }
+  ]
+}

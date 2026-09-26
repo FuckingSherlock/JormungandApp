@@ -1,8 +1,10 @@
 # Jormungand
 
 VPN/proxy client (sing-box core), a reworked clone of Karing. Current stage: an
-interactive HTML mockup of the UI. The real app will be Flutter (Dart) — do not
-start it until the mockup is finished. The user talks Russian; reply in Russian.
+interactive HTML mockup of the UI plus the pure-Dart core (`core/`, MVP) that the mockup
+drives as a web UI through the local daemon `jormd` (see `docs/core.md`). The real app
+will be Flutter over the same core — do not start the Flutter UI until the mockup is
+finished. The user talks Russian; reply in Russian.
 
 ## Status
 
@@ -40,6 +42,13 @@ the header never changes (search, ⚡, ⋮, + stay available in edit mode).
   hexagon power button, corner wedges). Change shapes here, not in markup; markup
   uses `{{geo.name}}` placeholders.
 - `design/tools/check.mjs` — headless smoke tests and screenshot presets.
+- `design/src/js/12-backend.js` — the seam: every async ask of the core (fetch / update a
+  subscription, ping, connect) goes through `backend`; mocked there, swapped for the real
+  core by `95-live.js` when jormd serves the page (`window.JORMD`). New core calls go
+  through the seam, never straight to `fetch`.
+- `core/` — Dart package `jormungand_core` (parsers, sing-box config, runtime, `bin/jormd.dart`,
+  `tool/fake_sub.dart` = loopback test subscription). sing-box binary in `core/tool/bin/`
+  (not in git). Design and API: `docs/core.md`.
 
 ## Workflow
 
@@ -65,7 +74,11 @@ rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, text-large, tex
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
 there for each new interaction.
 
-Commit `design/src`, `design/tools`, the rebuilt `design/main_screen.html`, `docs/` and
+Core: in `core/`, `dart analyze` + `dart test` (the sing-box tests run on loopback only).
+Live UI: `dart run bin/jormd.dart` → http://127.0.0.1:7788 (launch config `jormd`).
+Running, fixing and extending tests is the `tests` subagent's job (`.claude/agents/tests.md`).
+
+Commit `design/src`, `design/tools`, the rebuilt `design/main_screen.html`, `core/`, `docs/` and
 push (the push redeploys the Cloudflare site, see Deploy). The user views the mockup as a
 claude.ai Artifact, which live-updates in their app: the build stages it, so after each
 change republish `design/.artifact/jormungand.html` with the Artifact tool to

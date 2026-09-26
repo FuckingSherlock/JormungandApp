@@ -304,5 +304,6 @@ Auto mode и Subscriptions, Advanced в форме подписки. Текст�
 
 ## Открытые вопросы для бэка
 
-- Сопоставить `autoCfg` с sing-box: `urltest.interval` = `checkEvery`,
-  `urltest.tolerance` = `threshold`; `failAfter` и standby — в AutoService (Dart).
+- ~~Сопоставить `autoCfg` с sing-box~~ — сделано в ядре (`docs/core.md` → «План подключения»):
+  Fastest = `urltest` с `interval` = `checkEvery`, `tolerance` = `threshold`; Priority = `selector`.
+  `failAfter` и standby — в AutoService приложения.

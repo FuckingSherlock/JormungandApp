@@ -34,22 +34,18 @@ function mockPairPing(entry, exit) {
   if (a < 0 || b < 0 || hash(serverKey(entry) + '>' + serverKey(exit)) % 4 === 0) return -1;
   return Math.round((a + b) * (.95 + Math.random() * .15) + 8);
 }
-const wait = ms => new Promise(r => setTimeout(r, ms));
-
 // Pings nodes in parallel; resolves when all are done. Views refresh as results land.
 function pingNodes(nodes) {
   nodes.forEach(n => pingCache.set(serverKey(n), { ms: 'testing', at: Date.now() }));
   refreshSourceViews();
-  return Promise.all(nodes.map(n => wait(300 + Math.random() * 1400).then(() => {
-    setPing(n, mockPing(n));
+  return backend.ping(nodes, (n, ms) => {
+    setPing(n, ms);
     refreshSourceViews();
-  })));
+  });
 }
 
-// Ping one exit through one entry (sing-box: the exit outbound detoured via the entry).
-function pingPair(entry, exit) {
-  return wait(250 + Math.random() * 700).then(() => mockPairPing(entry, exit));
-}
+// Ping one exit through one entry.
+function pingPair(entry, exit) { return backend.pingPair(entry, exit); }
 
 // Seed: results from earlier sessions, some older than PING_FRESH_MS.
 Object.values(sourcesData).forEach(s => s.nodes.forEach(n => {

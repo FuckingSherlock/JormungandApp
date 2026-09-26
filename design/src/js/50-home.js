@@ -14,11 +14,13 @@ function toggleMain() {
   if (connected) {
     connected = false;
     renderConnState();
+    backend.disconnect().catch(e => toast(e.message));
     return;
   }
   connecting = true;
   renderConnState();
-  setTimeout(() => { connecting = false; connected = true; renderConnState(); }, 1100);
+  backend.connect().then(() => { connected = true; }, e => toast(e.message))
+    .then(() => { connecting = false; renderConnState(); });
 }
 
 /* ══════════════════════ SEGMENTED CONTROLS ══════════════════════ */
