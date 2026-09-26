@@ -1806,6 +1806,77 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
     await p.close();
   });
+
+  // Rules, apps, quick rules and DNS reach the core as plan.routing (93-routing-plan.js).
+  await check('routing plan: enabled rules, apps, targets as groups (null = unavailable), quick rules, DNS', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      // mock servers carry no sing-box outbound (a target of those alone is unusable = null)
+      const out0 = routingPlan().targets['chain:sc1'] === null;
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = { type: 'socks', server: '127.0.0.1', server_port: 1 }; }));
+      const out = { noOutbound: out0 }, plan = routingPlan();
+      out.json = JSON.parse(JSON.stringify(plan)).rules.length === plan.rules.length;
+      out.enabledOnly = plan.rules.every(x => rulesData[x.id].enabled) && plan.rules.length === ruleOrder.filter(id => rulesData[id].enabled).length;
+      const chain = plan.targets['chain:sc1'];
+      out.chainTarget = targetInfo('chain:sc1').ok ? chain.kind === 'chain' && chain.entry.nodes.length > 0 && chain.main.nodes.length > 0 : chain === null;
+      out.appSplit = plan.apps.some(a => a.id === 'com.discord' && a.split && a.udpTarget === 'chain:sc1' && a.kind === 'package');
+      out.services = Object.keys(plan.quick.services).every(k => quickCfg.services[k] !== 'default') && Object.keys(plan.quick.services).length > 0;
+      out.region = plan.quick.region === (quickCfg.regionOn ? quickCfg.region : null);
+      out.dns = plan.dns.servers.map(s => s.id).join() === dnsOrder.join() && plan.geo.geosite.via === 'vpn';
+      // a composite rule goes without its action (the rule's own action applies)
+      rulesData.r4.enabled = true;
+      out.composite = routingPlan().rules.some(x => x.composite && !('action' in x.composite) && x.composite.type === 'logical');
+      // a target switched off in Nodes: null (the rule takes its If unavailable)
+      appRules['org.telegram.messenger'] = { act: 'proxy', target: 'src:src1', split: false, udpTarget: '' };
+      out.srcOk = routingPlan().targets['src:src1'].main.pick === 'fastest';
+      sourcesData.src1.enabled = false;
+      out.srcOff = routingPlan().targets['src:src1'] === null;
+      sourcesData.src1.enabled = true;
+      // the reconnect check: a ping reordering a target's servers is no change, a rule edit is
+      const base = { kind: 'unit', main: null, routing: routingPlan() };
+      const moved = JSON.parse(JSON.stringify(base));
+      moved.routing.targets['src:src1'].main.nodes.reverse();
+      out.sigPing = planSigOf(base) === planSigOf(moved);
+      rulesData.r1.enabled = false;
+      out.sigRule = planSigOf(base) !== planSigOf({ kind: 'unit', main: null, routing: routingPlan() });
+      // Domains + IP in one rule: logical AND in the rule's JSON too, and back
+      const both = newRule({ action: 'direct', groups: { domain: { not: false, v: { domain_suffix: ['a.com'] } }, ip: { not: false, v: { ip_cidr: ['1.1.1.1'] } } } });
+      const j = ruleJson(both), back = ruleFromJson(j);
+      out.andJson = j.type === 'logical' && j.mode === 'and' && !!back.groups.domain && !!back.groups.ip && !back.composite;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('live mode: rules / apps / DNS start clean, persist in the snapshot, edits save', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      window.JORMD = true; liveInit();
+      const out = {};
+      out.clean = !ruleOrder.length && !Object.keys(rulesData).length && !Object.keys(appRules).length
+        && ruleSets.every(s => s.builtin) && Object.values(quickCfg.services).every(v => v === 'default');
+      out.dnsKept = dnsOrder.length === 3;
+      const snap = liveSnapshot();
+      out.inSnapshot = ['rulesData', 'ruleOrder', 'ruleSeq', 'quickCfg', 'appRules', 'ruleSets', 'rsSeq', 'dnsServers', 'dnsOrder', 'dnsSeq', 'dnsCfg'].every(k => k in snap);
+      snap.rulesData = { r7: newRule({ id: 'r7', action: 'direct', groups: { domain: { not: false, v: { domain_suffix: ['x.com'] } } } }) };
+      snap.ruleOrder = ['r7']; snap.ruleSeq = 8;
+      snap.quickCfg = Object.assign({}, snap.quickCfg, { services: { telegram: 'vpn' }, ads: true });
+      snap.dnsOrder = ['local', 'remote']; delete snap.dnsServers.google; snap.dnsOrder = snap.dnsOrder.filter(id => snap.dnsServers[id]);
+      liveApply(JSON.parse(JSON.stringify(snap)));
+      out.applied = ruleOrder[0] === 'r7' && quickCfg.ads && quickCfg.services.telegram === 'vpn' && quickCfg.services.youtube === 'default'
+        && dnsOrder.join() === 'local,remote' && !dnsServers.google;
+      renderRules(); renderDns();
+      // a rules edit saves once the stored state is in
+      live.ready = true;
+      toggleRuleEnabled('r7');
+      out.saves = !!live.saveTimer;
+      clearTimeout(live.saveTimer); live.ready = false;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
   await browser.close();
 
   const failed = results.filter(r => r[1]);

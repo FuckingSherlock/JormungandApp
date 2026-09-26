@@ -5661,11 +5661,14 @@ sourceViewHooks.push(() => {
    Form: condition groups added with "+ Condition" (RULE_GROUPS); each field takes values as
    chips (Enter, comma or a pasted column); a bad value turns red and blocks Save.
    Action: Proxy (main flow or a target — stub picker), Direct, Block (drop / reject).
-   Strict: when the target is down, block instead of falling back to the main flow.
+   If unavailable (with a target): Default / Main / Block / Direct when the target is off,
+   empty or deleted (docs/rules.md §0).
    DNS: Auto (first ticked server with the matching route) or a server from Settings → DNS.
-   JSON: the sing-box route rule. Groups map to one flat rule; a negated group turns it into
-   {type: logical, mode: and}. Keys the form does not know are kept ("extra") and shown as
-   a plaque; any other logical rule is "composite" — edited in JSON only. */
+   JSON: the sing-box route rule. Groups map to one flat rule; a negated group, or Domains
+   together with IP (sing-box ORs those in one rule), turns it into {type: logical, mode: and}.
+   geosite / geoip stay names here: the core swaps them for its downloaded rule sets. Keys the
+   form does not know are kept ("extra") and shown as a plaque; any other logical rule is
+   "composite" — edited in JSON only. */
 
 let ruleEditing = null, ruleDraft = null, rfTab = 'form', rfAddOpen = false;
 // Empty fields stay folded as "+ Keyword" chips; a group with no values shows its first field.
@@ -5830,7 +5833,8 @@ function actionJson(r) {
 function ruleJson(r) {
   if (r.composite) return clone(r.composite);
   const gs = RULE_GROUPS.filter(g => r.groups[g.key]).map(g => [g.key, r.groups[g.key]]);
-  const body = gs.some(([, d]) => d.not)
+  // sing-box ORs domain and IP fields inside one rule: the form's AND needs logical then
+  const body = gs.some(([, d]) => d.not) || (r.groups.domain && r.groups.ip)
     ? { type: 'logical', mode: 'and', rules: gs.map(([k, d]) => Object.assign(groupJson(k, d), d.not ? { invert: true } : {})) }
     : Object.assign({}, ...gs.map(([k, d]) => groupJson(k, d)));
   return Object.assign(body, actionJson(r), r.extra || {});
@@ -6110,6 +6114,62 @@ function renderThemeList() {
     </div>`).join('');
 }
 
+/* ══════════════════════ ROUTING PLAN (rules → the core) ══════════════════════
+   The Rules screen, apps and Settings → DNS as the model the core turns into sing-box route
+   rules and DNS (core/lib/src/routing.dart; contract in docs/core.md). The UI sends its own
+   model — condition groups, targets, "If unavailable" — not sing-box JSON, so the Flutter
+   app reuses the Dart builder. The one thing resolved here is each target: the catalog lives
+   in the UI, so every target a rule or app names goes along as its server group(s), or null
+   while it is unavailable (off in Nodes, no server the core can use, deleted). */
+
+// A rule / app target as groups (same shape as the main flow's), or null = unavailable.
+function routingTarget(t) {
+  if (!targetInfo(t).ok) return null;
+  const at = t.indexOf(':'), kind = t.slice(0, at), ref = t.slice(at + 1);
+  try {
+    if (kind === 'src') return { kind: 'unit', main: planGroup(liveNodes(sourcesData[ref]).map(node => ({ sid: ref, node })), 'fastest') };
+    if (kind === 'node') {
+      const [sid, nid] = ref.split('::'), r = { sid, node: sourcesData[sid].nodes.find(n => n.id === nid) };
+      return { kind: 'unit', main: planGroup([r], 'priority', r) };
+    }
+    if (kind === 'profile') {
+      const refs = unitPickRefs(ref), n = unitNode(ref);
+      return { kind: 'unit', main: planGroup(refs, unitPriority(ref) ? 'priority' : 'fastest', refs.find(r => r.node === n)) };
+    }
+    const c = chainsData[ref], exits = chainExitRefs(c), exitNode = chainExitNode(c);
+    return { kind: 'chain', entry: planGroup(chainEntryRefs(c), 'fastest'),
+      main: planGroup(exits, c.exitMode === 'priority' ? 'priority' : 'fastest', exits.find(r => r.node === exitNode)) };
+  } catch (e) { return null; }   // nothing here sing-box can use (XHTTP only)
+}
+
+function routingPlan() {
+  const rules = ruleOrder.map(id => rulesData[id]).filter(r => r.enabled).map(r => {
+    const o = { id: r.id, name: r.name, action: r.action, target: r.target || '', fallback: r.fallback || 'default',
+      block: r.block, dns: r.dns || 'auto', groups: r.groups };
+    if (r.composite) {
+      const { action, outbound, method, ...match } = r.composite;
+      o.composite = match;
+    }
+    if (r.extra && Object.keys(r.extra).length) o.extra = r.extra;
+    return o;
+  });
+  const apps = Object.entries(appRules).map(([pkg, a]) => ({ id: pkg, kind: (APPS.find(x => x.pkg === pkg) || {}).kind || 'package',
+    act: a.act, target: a.target || '', split: !!a.split, udpTarget: a.udpTarget || '' }));
+  const named = new Set();
+  rules.forEach(r => { if (r.action === 'proxy' && r.target) named.add(r.target); });
+  apps.forEach(a => { if (a.act === 'proxy') [a.target, a.split ? a.udpTarget : ''].forEach(t => t && named.add(t)); });
+  const geo = id => { const s = ruleSets.find(x => x.id === id) || {}; return { via: s.via || 'vpn', every: s.every || 7 * 86400 }; };
+  return {
+    apps, rules,
+    quick: { lan: quickCfg.lan, ads: quickCfg.ads, region: quickCfg.regionOn ? quickCfg.region : null, final: quickCfg.final,
+      services: Object.fromEntries(SERVICES.filter(([k]) => quickCfg.services[k] && quickCfg.services[k] !== 'default').map(([k]) => [k, quickCfg.services[k]])) },
+    fallback: quickCfg.fallback,
+    targets: Object.fromEntries([...named].map(t => [t, routingTarget(t)])),
+    ruleSets: ruleSets.filter(s => !s.builtin).map(s => ({ name: s.name, url: s.url, format: s.format, via: s.via, every: s.every })),
+    geo: { geosite: geo('geosite'), geoip: geo('geoip') },
+    dns: { servers: dnsOrder.map(id => dnsServers[id]).map(s => ({ id: s.id, addr: s.addr, via: s.via, on: s.on })) },
+  };
+}
 /* ══════════════════════ LIVE MODE (Dart core) ══════════════════════
    When the Dart core serves the page (core/bin/jormd.dart sets window.JORMD), `backend`
    talks to it over /api and the mock data gives way to the state the core keeps: the
@@ -6162,6 +6222,8 @@ function apiPing(body, onLine) {
 function liveSnapshot() {
   return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
     modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg,
+    // Rules, apps, rule sets, DNS (sent to the core as plan.routing, see 93-routing-plan.js)
+    rulesData, ruleOrder, ruleSeq, quickCfg, appRules, ruleSets, rsSeq, dnsServers, dnsOrder, dnsSeq, dnsCfg,
     // measured pings survive a restart, so Auto starts from what it knew
     pings: [...pingCache].filter(([, e]) => typeof e.ms === 'number') };
 }
@@ -6187,6 +6249,17 @@ function liveApply(s) {
   if (s.segState) Object.assign(segState, s.segState);
   if (s.connCfg) Object.assign(connCfg, s.connCfg);
   if (s.autoCfg) Object.assign(autoCfg, s.autoCfg);
+  // no demo rules or apps: a first run starts with the defaults of a fresh install
+  rulesData = s.rulesData || {};
+  ruleOrder = s.ruleOrder || [];
+  ruleSeq = s.ruleSeq || 1;
+  appRules = s.appRules || {};
+  replaceObj(quickCfg, Object.assign({ regionOn: true, region: 'RU', lan: true, ads: false, final: 'proxy', fallback: 'main', services: {} }, s.quickCfg));
+  SERVICES.forEach(([k]) => { quickCfg.services[k] = quickCfg.services[k] || 'default'; });
+  ruleSets = s.ruleSets || ['geosite', 'geoip'].map(id => ({ id, name: id, builtin: true, url: 'built-in', format: 'srs', via: 'vpn', every: 7 * 86400, updated: 'with the first connect' }));
+  rsSeq = s.rsSeq || 1;
+  if (s.dnsServers) { replaceObj(dnsServers, s.dnsServers); dnsOrder = s.dnsOrder; dnsSeq = s.dnsSeq || 1; }
+  if (s.dnsCfg) Object.assign(dnsCfg, s.dnsCfg);
   pingCache.clear();
   (s.pings || []).forEach(([k, e]) => pingCache.set(k, e));
 }
@@ -6211,7 +6284,7 @@ function livePlan() {
   const id = effectiveConnectId();
   if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
   const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
-    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold } };
+    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold }, routing: routingPlan() };
   if (chainsData[id]) {
     const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
     return Object.assign(base, { kind: 'chain',
@@ -6228,7 +6301,9 @@ function livePlan() {
    in it: switched while connected, the core gets it with the reconnect. */
 function planSigOf(plan) {
   const g = x => x && Object.assign({}, x, { nodes: x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key) });
-  return JSON.stringify(Object.assign({}, plan, { main: g(plan.main), entry: g(plan.entry), systemProxy: segState.sys === 'on' }));
+  const t = x => x && Object.assign({}, x, { main: g(x.main), entry: g(x.entry) });   // rule targets alike
+  const routing = plan.routing && Object.assign({}, plan.routing, { targets: Object.fromEntries(Object.entries(plan.routing.targets).map(([k, x]) => [k, t(x)])) });
+  return JSON.stringify(Object.assign({}, plan, { main: g(plan.main), entry: g(plan.entry), routing, systemProxy: segState.sys === 'on' }));
 }
 const planSig = () => { try { return planSigOf(livePlan()); } catch (e) { return null; } };
 const pingsRunning = () => [...pingCache.values()].some(v => v.ms === 'testing');
@@ -6375,7 +6450,8 @@ function liveInit() {
   pingCache.clear();
 
   // Everything that re-renders after a change also saves and re-checks the connection.
-  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'setSegment', 'updateMainConnectCard'].forEach(name => {
+  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'setSegment', 'updateMainConnectCard',
+    'renderRules', 'renderApps', 'renderRuleSets', 'renderDns'].forEach(name => {
     const orig = window[name];
     window[name] = function () { const r = orig.apply(this, arguments); liveSave(); liveMaybeReconnect(); return r; };
   });
