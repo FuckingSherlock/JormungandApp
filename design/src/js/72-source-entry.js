@@ -44,7 +44,7 @@ function renderSourceEntry() {
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${protoLabel(n)}</span>
-      <span onclick="event.stopPropagation();testLatency([['${seId}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
+      <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${seId}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`;
   }).join('') || '<div class="route-empty">No servers yet</div>';
   document.getElementById('se-nodes').insertAdjacentHTML('beforeend', goneBlockHtml('se:' + seId, goneRefs(seId),

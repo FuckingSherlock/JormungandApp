@@ -110,7 +110,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
   List<Map> pairs = const [],
   String url = defaultTestUrl,
   int timeoutMs = 5000,
-  int parallel = 16,
+  int parallel = 32,
   void Function(String kind, String key, int ms)? onResult,
 }) async {
   final port = await freePort();

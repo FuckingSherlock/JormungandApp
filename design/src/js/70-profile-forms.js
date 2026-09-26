@@ -88,7 +88,7 @@ function renderCreateProfileSources() {
         <span class="node-flag">${n.flag}</span>
         <span class="node-name">${esc(n.name)}</span>
         <span class="node-proto">${protoLabel(n)}</span>
-        <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
+        <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
     }).join('') + goneBlockHtml('cp:' + id, goneRefs(id),
       r => state === 'all' || cpNodes.has(id + '::' + r.node.id)) : '';
@@ -121,7 +121,7 @@ function renderCpOrder() {
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
       <span class="node-proto">${esc(sourcesData[r.sid].name)}</span>
-      <span onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
+      <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('') || '<div class="route-empty">Pick servers above</div>';
 }
 function setCpPickMode(mode) {

@@ -382,6 +382,30 @@ async function runChecks() {
     await p.close();
   });
 
+  await check('route: title and ⚡ sit at the same inset; a tap just above the ms pings, never pins', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      openProfiles(); setRouteEdit(false);
+      const id = visibleOrder().find(x => sourcesData[x] && unitRefs(x).length > 1);
+      await new Promise(r => setTimeout(r, 600));   // the sheet slides in
+      const row = document.querySelector(`#connects-list .conn-row[data-id="${id}"]`), box = row.getBoundingClientRect();
+      const title = row.querySelector('.conn-title').getBoundingClientRect(), bolt = row.querySelector('.route-auto svg').getBoundingClientRect();
+      const inset = Math.abs((title.left - box.left) - (box.right - bolt.right)) <= 3;
+      toggleRouteRow(id);
+      const nr0 = document.querySelector(`#connects-list .conn-row[data-id="${id}"] .conn-body .node-row`); nr0.scrollIntoView({ block: 'center' });
+      const nr = document.querySelector(`#connects-list .conn-row[data-id="${id}"] .conn-body .node-row`), nb = nr.getBoundingClientRect();
+      const lat = nr.querySelector('.lat').getBoundingClientRect();
+      const hit = document.elementFromPoint(lat.left + lat.width / 2, nb.top + 2);
+      const pinnedBefore = pinnedNode;
+      hit.click();
+      const out = { inset, hit: !!hit.closest('.lat-hit'), noPin: pinnedNode === pinnedBefore };
+      toggleRouteRow(id); closeSheet('profiles');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
   await check('live traffic: cards and Live connections follow backend.traffic, zero when off', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(async () => {

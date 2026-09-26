@@ -160,7 +160,7 @@
 .auto-badge .conn-dot{background:var(--accent);transition:background .2s}
 .list-caption{display:flex;justify-content:space-between;gap:8px;padding:12px 20px 6px;font-size:12px;color:var(--t3)}
 .list-caption span:first-child{font-weight:600;text-transform:uppercase;letter-spacing:.6px}
-.conn-row{display:flex;align-items:center;gap:4px;margin:0 10px;padding:0 12px 0 12px;border-radius:12px;border:1px solid transparent;transition:background .2s,border-color .2s}
+.conn-row{display:flex;align-items:center;gap:4px;margin:0 10px;padding:0 8px 0 12px;border-radius:12px;border:1px solid transparent;transition:background .2s,border-color .2s}
 .conn-row + .conn-row{margin-top:2px}
 .conn-row.current{background:rgba(var(--active-rgb),.07);border-color:rgba(var(--active-rgb),.35)}
 .conn-row .drag-handle{width:26px;margin-left:-8px}
@@ -291,7 +291,7 @@
 .node-row.pick.on,.node-row.pick + .node-row.pick.on{border-color:rgba(var(--accent-rgb),.5);background:rgba(var(--accent-rgb),.07)}
 .node-row.pick:not(.on) .node-name{color:var(--t2)}
 .node-row.gone.pick.on{background:none;border-style:dashed}
-.conn-row > .conn-main:first-child{padding-left:12px}
+.conn-row > .conn-main:first-child{padding-left:2px}
 
 /* Route row unfolded: its servers, Fastest / Priority and the priority order */
 .conn-row.open{flex-wrap:wrap}

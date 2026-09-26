@@ -237,7 +237,7 @@ function routeRowBodyHtml(id) {
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>
-      <span onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
+      <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');
   const acts = `<div class="conn-acts">${routeUpdateBtn(id)}</div>`;   // ⚡ sits on the row itself
   const hint = pin ? 'Manual: only the highlighted server.'

@@ -189,7 +189,7 @@ function renderSourceCard(id, q) {
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
       <span class="node-proto">${protoLabel(n)}</span>
-      <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
+      <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`; }).join('');
   const addRow = s.kind === 'node'
     ? `<div class="node-add" onclick="openNodeForm('${id}')">${ICON.plus}Add server</div>` : '';
@@ -300,11 +300,12 @@ function testSourceLatency(sid) {
   expandState[sid] = true;
   return testLatency(liveNodes(s).map(n => [sid, n.id]));
 }
+// Every source at once: servers taken in turn from each source (1st of each, 2nd of each…),
+// so all sets fill in together instead of one after another (the core runs 32 in parallel).
 function testAllLatency() {
+  const lists = sourceOrder.filter(sid => sourcesData[sid].enabled).map(sid => liveNodes(sourcesData[sid]).map(n => [sid, n.id]));
   const pairs = [];
-  sourceOrder.forEach(sid => {
-    if (sourcesData[sid].enabled) liveNodes(sourcesData[sid]).forEach(n => pairs.push([sid, n.id]));
-  });
+  for (let i = 0; lists.some(l => i < l.length); i++) lists.forEach(l => { if (i < l.length) pairs.push(l[i]); });
   testLatency(pairs);
   closeSheet('nodesmore');
 }

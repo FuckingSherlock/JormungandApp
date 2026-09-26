@@ -89,10 +89,10 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 | `POST /api/disconnect`, `GET /api/status`, `GET /api/log` | status: `{connected, systemProxy, error, warning, exit}` |
 | `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
-| `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (16 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
+| `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
 
 Пинг: временный sing-box без inbound'ов, задержка через clash API
-`/proxies/{tag}/delay` (16 параллельно, таймаут 5 с). Пары entry→exit — копия выхода с
+`/proxies/{tag}/delay` (32 параллельно, таймаут 5 с). Пары entry→exit — копия выхода с
 detour на копию входа.
 
 Exit IP (`exitip.dart`): после каждого (пере)подключения и по запросу ядро спрашивает
