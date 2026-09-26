@@ -3,3 +3,5 @@ node_modules/
 design/.deploy/
 .wrangler/
 design/.artifact/
+
+.claude/worktrees/
