@@ -55,20 +55,21 @@ final List<ExitProbe> exitProbes = [
 
 /// Where traffic leaves the tunnel: asked through the running proxy itself (the mixed
 /// inbound on [proxyPort]), so it is the exit of whatever node sing-box uses right now.
+/// [proxyPort] null = asked directly: the machine's own public IP (not connected).
 /// All [probes] go at once. The first answer with IP, country and city wins right away;
 /// with only an IP so far it waits [grace] for a service that knows the place, then
 /// takes what it has. Answers about the same IP fill each other's gaps.
 /// Returns {ip, country? (ISO code), city?, org?, source}; throws when no service answers
 /// within [timeout].
 Future<Map<String, dynamic>> checkExitIp(
-  int proxyPort, {
+  int? proxyPort, {
   List<ExitProbe>? probes,
   Duration timeout = const Duration(seconds: 7),
   Duration grace = const Duration(milliseconds: 1500),
 }) async {
   probes ??= exitProbes;
   final client = HttpClient()
-    ..findProxy = ((_) => 'PROXY 127.0.0.1:$proxyPort')
+    ..findProxy = ((_) => proxyPort == null ? 'DIRECT' : 'PROXY 127.0.0.1:$proxyPort')
     ..connectionTimeout = timeout;
   final done = Completer<Map<String, dynamic>>();
   final errors = <String>[];

@@ -85,6 +85,22 @@ void main() {
       return s;
     }
 
+    test('no proxy port: asks the services directly', () async {
+      // the "service" answers any path, so reaching it without a proxy is the point
+      proxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      proxy.listen((req) async {
+        req.response.write('198.51.100.7|RU|Moscow|');
+        await req.response.close();
+      });
+      final r = await checkExitIp(
+        null,
+        probes: [(name: 'direct', url: 'http://127.0.0.1:${proxy.port}/ip', read: readCsv)],
+        timeout: const Duration(seconds: 3),
+      );
+      expect(r['ip'], '198.51.100.7');
+      expect(r['city'], 'Moscow');
+    });
+
     test('a rich answer wins right away, without waiting for a slow probe', () async {
       proxy = await serve({
         '/fast': (delay: const Duration(milliseconds: 20), status: 200, body: '203.0.113.1|DE|Berlin|'),

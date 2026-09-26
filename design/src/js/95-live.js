@@ -199,6 +199,7 @@ const liveBackend = {
     live.planSig = null;
     return api('/api/disconnect', {});
   },
+  // Connected: the tunnel's exit; not connected: the direct IP (the core knows which).
   exitIp() {
     return api('/api/exit', {}).then(() => liveWatchExit());
   },
@@ -214,7 +215,7 @@ function liveWatchExit() {
     let tries = 0;
     const poll = () => api('/api/status').then(st => {
       if (seq !== live.exitSeq) return;
-      if (st.exit || !st.connected || ++tries > 20) {
+      if (st.exit || ++tries > 20) {
         exitInfo = st.exit || { error: 'no answer' };
         renderExitIp();
         resolve(exitInfo);
@@ -255,7 +256,7 @@ function liveInit() {
     if (st.snapshot) liveApply(st.snapshot);
     connected = !!st.status.connected;
     exitInfo = st.status.exit || null;
-    if (connected && !exitInfo) liveWatchExit();
+    if (!exitInfo) liveWatchExit();   // still checking (the direct one runs from the core's start)
     renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
     renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();

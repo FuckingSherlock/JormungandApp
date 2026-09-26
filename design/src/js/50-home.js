@@ -11,15 +11,16 @@ function renderConnState() {
   renderExitIp();
 }
 
-/* ExitIpCard: where traffic leaves the tunnel, checked by the core through the tunnel
-   after every (re)connect; a tap checks again. exitInfo: null = checking,
-   {ip, country, city?} or {error}. The mock keeps a fixed answer. */
+/* ExitIpCard: where traffic leaves. Connected: the tunnel's exit, checked by the core
+   through the tunnel after every (re)connect. Not connected: the device's own IP (label
+   "Direct IP"), checked directly at launch and after a disconnect. A tap checks again.
+   exitInfo: null = checking, {ip, country, city?} or {error}. The mock keeps fixed answers. */
 let exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' };
 const flagOf = cc => /^[A-Z]{2}$/i.test(cc || '') ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : '🌐';
 function renderExitIp() {
-  const e = connected && !connecting ? exitInfo : undefined;
-  const [flag, ip, loc] = e === undefined ? ['🌐', '—', 'Not connected']
-    : e === null ? ['🌐', '…', 'Checking…']
+  const e = connecting ? null : exitInfo;
+  document.getElementById('exitLabel').textContent = connected && !connecting ? 'Exit IP' : 'Direct IP';
+  const [flag, ip, loc] = e === null ? ['🌐', '…', 'Checking…']
     : e.error ? ['🌐', 'No answer', 'Tap to retry']
     : [flagOf(e.country), e.ip, [e.city, e.country].filter(Boolean).join(', ') || 'Location unknown'];
   document.getElementById('exitFlag').textContent = flag;
@@ -27,7 +28,7 @@ function renderExitIp() {
   document.getElementById('exitLoc').textContent = loc;
 }
 function refreshExitIp() {
-  if (!connected || connecting) return;
+  if (connecting) return;
   exitInfo = null;
   renderExitIp();
   backend.exitIp().then(e => { exitInfo = e; renderExitIp(); });
@@ -36,14 +37,15 @@ function toggleMain() {
   if (connecting) return;
   if (connected) {
     connected = false;
+    exitInfo = null;
     renderConnState();
-    backend.disconnect().catch(e => toast(e.message));
+    backend.disconnect().then(refreshExitIp, e => toast(e.message));
     return;
   }
   connecting = true;
   renderConnState();
   backend.connect().then(() => { connected = true; }, e => toast(e.message))
-    .then(() => { connecting = false; renderConnState(); });
+    .then(() => { connecting = false; renderConnState(); if (!connected) refreshExitIp(); });
 }
 
 /* ══════════════════════ SEGMENTED CONTROLS ══════════════════════ */

@@ -434,11 +434,16 @@ async function runChecks() {
     expect((await page.textContent('#exitIp')).trim() !== '—', 'exitIp: ' + await page.textContent('#exitIp'));
   });
 
-  await check('home: Exit IP card says Not connected once disconnected', async () => {
+  await check('home: disconnected, the card turns to Direct IP and shows the own IP; connected again, the exit', async () => {
     await page.evaluate(() => toggleMain());
-    expect(await page.textContent('#exitLoc') === 'Not connected', 'exitLoc: ' + await page.textContent('#exitLoc'));
+    const at = async () => [await page.textContent('#exitLabel'), await page.textContent('#exitLoc')].join(' / ');
+    expect(/^Direct IP \/ Checking…$/.test(await at()), 'right after disconnect: ' + await at());
+    await page.waitForTimeout(700);
+    expect(/^Direct IP \/ .*RU$/.test(await at()), 'direct IP: ' + await at());
     await page.evaluate(() => toggleMain());
+    expect(/Checking…$/.test(await at()), 'while connecting: ' + await at());
     await page.waitForTimeout(1300);   // back to connected for the checks that follow
+    expect(/^Exit IP \/ .*DE$/.test(await at()), 'exit after connect: ' + await at());
   });
 
   await check('home: tapping the card checks again — Checking… at once, the IP after ~600ms', async () => {

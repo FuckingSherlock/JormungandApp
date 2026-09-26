@@ -31,7 +31,8 @@ let backend = {
   pingPair(entry, exit) {
     return wait(250 + Math.random() * 700).then(() => mockPairPing(entry, exit));
   },
-  connect()    { return wait(1100); },
+  // like the core: the exit is checked again after every connect
+  connect()    { exitInfo = null; return wait(1100).then(() => { exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' }; }); },
   disconnect() { return Promise.resolve(); },
-  exitIp() { return wait(600).then(() => ({ ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' })); },
+  exitIp() { return wait(600).then(() => connected ? { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' } : { ip: '178.66.12.201', country: 'RU', city: 'Moscow' }); },
 };

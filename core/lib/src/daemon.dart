@@ -37,13 +37,15 @@ class Daemon {
   String? _warning;
   int _pingSeq = 0;
   int _mixedPort = 2080;
-  // Exit of the tunnel: null while checking (or disconnected), {ip, country…} or {error}.
+  // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
+  // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
   Map<String, dynamic>? _exit;
   int _exitSeq = 0;
 
   Future<void> init() async {
     await Directory(dataDir).create(recursive: true);
     await sysProxy.restore(); // left set by a crash
+    _recheckExit(); // the direct IP, shown on Home before any connect
   }
 
   Future<void> shutdown() async {
@@ -125,29 +127,30 @@ class Daemon {
         'exit': _exit,
       };
 
-  /// Asks where traffic leaves the tunnel, after every (re)connect and on demand. A check
-  /// that finishes after a newer one started (or after a disconnect) is dropped.
+  /// Asks where traffic leaves: through the tunnel after every (re)connect, directly at
+  /// start and after a disconnect, and on demand. A check that finishes after a newer one
+  /// started is dropped.
   /// Every service failing at once, fast, means the tunnel itself is not carrying yet (a
   /// urltest group still on an untested dead server right after connect): ask again in a
   /// couple of seconds, for up to 15 s, before reporting the error.
   void _recheckExit() {
     final seq = ++_exitSeq;
     _exit = null;
-    if (!main.running) return;
+    final direct = !main.running;
     final since = Stopwatch()..start();
     Future<void> attempt() async {
       final sw = Stopwatch()..start();
       try {
-        final e = await checkExitIp(_mixedPort);
-        if (seq == _exitSeq) _exit = {...e, 'at': DateTime.now().millisecondsSinceEpoch};
+        final e = await checkExitIp(direct ? null : _mixedPort);
+        if (seq == _exitSeq) _exit = {...e, 'direct': direct, 'at': DateTime.now().millisecondsSinceEpoch};
       } catch (e) {
         if (seq != _exitSeq) return;
-        if (sw.elapsed < const Duration(seconds: 3) && since.elapsed < const Duration(seconds: 15) && main.running) {
+        if (!direct && sw.elapsed < const Duration(seconds: 3) && since.elapsed < const Duration(seconds: 15) && main.running) {
           await Future<void>.delayed(const Duration(seconds: 2));
           if (seq == _exitSeq) return attempt();
           return;
         }
-        _exit = {'error': '$e'};
+        _exit = {'error': '$e', 'direct': direct};
       }
     }
 
@@ -198,8 +201,8 @@ class Daemon {
 
   Future<Map<String, dynamic>> _disconnect() async {
     await main.stop();
-    _recheckExit(); // clears it
     await sysProxy.restore();
+    _recheckExit(); // now the direct IP
     _error = null;
     _warning = null;
     return _status();
