@@ -13,11 +13,14 @@ let backend = {
     return wait(1200).then(() => {
       s.nodes = genNodes(8 + Math.floor(Math.random() * 20), 'sub');
       s.usage = { used: 0, total: 0 };
+      s.updatedAt = Date.now();
     });
   },
-  // Update: new s.nodes, dropped servers into s.gone (see connect-model.md → gone).
-  updateSource(s) {
-    return wait(900 + Math.random() * 600).then(() => { if (s.demoChurn) demoProviderChurn(s); });
+  // Update: new s.nodes, dropped servers into s.gone (see connect-model.md → gone), the
+  // provider's headers (usage, expire, format, announce…), s.updatedAt. opts.rediscover:
+  // ask with every User-Agent again (the core; the mock just updates).
+  updateSource(s, opts) {
+    return wait(900 + Math.random() * 600).then(() => { if (s.demoChurn) demoProviderChurn(s); s.updatedAt = Date.now(); });
   },
   // A server added by hand. Resolves to the node, or rejects with a message.
   manualNode(f) {

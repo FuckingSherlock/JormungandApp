@@ -49,7 +49,8 @@ let sourcesData = {
     gone: genNodes(20, 'sub').slice(18).map((n, i) => Object.assign(n, { goneAt: Date.now() - (i ? 13*24 : 30) * 3600e3 })), demoChurn: true }),
   src2: mkSub('src2', 'Work Servers', 9, { format:'clash', disabledNodes:['n8'], updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
   src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], disabledNodes:[], nodes:genNodes(2,'node') },
-  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updateInterval:6, updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
+  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updateInterval:6, updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo',
+    announce:'Maintenance on Oct 3, 02:00–04:00 UTC: servers may drop for a few minutes.', supportUrl:'https://t.me/example_support' }),
 };
 Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
 let sourceOrder = ['src1','src2','src3','src4'];

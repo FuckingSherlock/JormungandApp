@@ -47,9 +47,14 @@ Windows Firewall должен пропускать входящие для `dart
 ## Нода
 
 `{id, name, flag, protocol, address, port, outbound, unsupported?}`. `id` =
-`n` + 12 hex от sha256(`protocol|address|port|identity`) — одинаков для одного сервера в
-любом формате подписки (см. subscription-parsing.md → Дедупликация). `outbound` — готовый
-sing-box outbound без тега. Флаг вынимается из имени (первая пара regional indicators).
+`n` + 12 hex от sha256(`protocol|address|port|identity|variant`), где `variant` — поля
+outbound, меняющие способ подключения (TLS / SNI / ALPN / uTLS / Reality, транспорт с
+host / path, obfs…; см. `variantOf` в `node.dart`), прочитанные одинаково из любого формата.
+Поэтому id одинаков для одного сервера в любом формате подписки (см. subscription-parsing.md →
+Дедупликация), а два варианта одного адреса — разные ноды. `base` — тот же хеш без `variant`.
+`outbound` — готовый sing-box outbound без тега. Флаг вынимается из имени (первая пара
+regional indicators). `unsupported` — причина, по которой ноду нельзя отдать sing-box (схема
+или тип, которых он не знает): нода видна в списке, но в конфиг не идёт.
 
 ## План подключения
 
@@ -85,10 +90,10 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 |---|---|
 | `GET /` | мокап, с `window.JORMD = true` → live-режим (`95-live.js`) |
 | `GET/PUT /api/state` | снимок состояния UI / статус |
-| `POST /api/sources/fetch` | `{url, userAgent, strategy, discoveredAt, prev:{nodes, gone}}` → ноды, gone, strategy, usage, expire, title |
+| `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
 | `POST /api/connect` | `{plan, systemProxy}` |
-| `POST /api/disconnect`, `GET /api/status`, `GET /api/log` | status: `{connected, systemProxy, error, warning, exit}` |
+| `POST /api/disconnect`, `GET /api/status`, `GET /api/log` | status: `{connected, systemProxy, error, warning, exit, sourcesRev}`; `sourcesRev` растёт, когда ядро само обновило подписку в снимке |
 | `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
@@ -132,9 +137,12 @@ Connections и лист Live connections (новые сверху: хост:по
 типично для корпоративной сети) Windows спрашивает раньше ручного прокси — ядро
 предупреждает.
 
+Подписки (`fetch.dart`, `updater.dart`, `state.dart`): загрузка с UA-стратегией, фильтром,
+HWID (`device.dart`) и каналом Direct / Proxy; автообновление по таймеру ядра прямо в снимке
+`ui-state.json` (доступ к снимку — через `SnapshotStore`, одна очередь на чтение и запись).
+Правила и конфликты с UI — subscription-parsing.md → «Автообновление».
+
 ## Не сделано в MVP
 
-TUN и kill switch; правила, DNS и rule-sets из `rules.md` в конфиге; каналы загрузки
-подписки (Direct first и т.п. — сейчас всегда напрямую, с учётом `HTTP(S)_PROXY`);
-фильтр подписки, HWID; автообновление подписок по таймеру; пинг выбирает URL автоматически
-(сейчас всегда gstatic).
+TUN и kill switch; правила, DNS и rule-sets из `rules.md` в конфиге; Decrypt password
+подписки (нет спецификации); пинг выбирает URL автоматически (сейчас всегда gstatic).

@@ -216,7 +216,7 @@ function renderSourceCard(id, q) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
     </div>
-    ${usageHtml(s)}
+    ${usageHtml(s)}${s.announce ? `<div class="src-announce" title="${esc(s.announce)}">${esc(s.announce)}</div>` : ''}
     </div>
     </div>
     <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), null,
@@ -312,13 +312,14 @@ function testAllLatency() {
 
 /* ── Update subscriptions ── */
 
-function updateSource(sid) {
+// opts.rediscover: ask the provider with every User-Agent again (⋮ → Update with all user
+// agents). The backend sets s.updatedAt (the core's clock in live mode).
+function updateSource(sid, opts) {
   const s = sourcesData[sid];
   if (s.kind !== 'sub' || s.updating) return;
   s.updating = true;
   refreshSourceViews();
-  backend.updateSource(s).then(() => {
-    s.updatedAt = Date.now();
+  backend.updateSource(s, opts && typeof opts === 'object' ? opts : {}).then(() => {
     s.count = s.nodes.length;
     return true;
   }, e => { toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
@@ -388,9 +389,15 @@ function openSourceActions(sid) {
   let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`)
     + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
+    if ((s.userAgent || 'Auto') === 'Auto') rows += menuRow(ICON.refresh, 'Update with all user agents<div class="menu-sub">Asks as sing-box, mihomo and Clash again and merges what each gives</div>', close + `updateSource('${sid}',{rediscover:true})`);
     rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
     rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
-    if (s.website) rows += menuRow(ICON.web, 'Open website', close + `toast('Opens ${esc(s.website)}')`);
+    // the user's own website first, else the page the provider sends (profile-web-page-url)
+    const site = s.website || s.webPage;
+    // links from the provider go into onclick as a JSON string, never raw
+    const opens = u => close + `toast(${esc(JSON.stringify('Opens ' + u))})`;
+    if (site) rows += menuRow(ICON.web, 'Open website', opens(site));
+    if (s.supportUrl) rows += menuRow(ICON.web, 'Support', opens(s.supportUrl));
   }
   rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteSource('${sid}')`, 'danger');
   openActions(s.name, rows);

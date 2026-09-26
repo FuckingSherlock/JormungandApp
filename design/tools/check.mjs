@@ -1451,6 +1451,43 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
+  await check('subscription: announce on the card, rediscover in ⋮, URL edit resets the UA strategy, bad filter refused', async () => {
+    const r = await page.evaluate(async () => {
+      const out = {}, calls = [], orig = backend.updateSource;
+      backend.updateSource = (s, opts) => { calls.push([s.id, opts]); return Promise.resolve(); };
+      // any two subscriptions: A gets a provider announce, support link and a fixed UA; B stays Auto
+      const [ia, ib] = sourceOrder.filter(id => sourcesData[id].kind === 'sub'), A = sourcesData[ia], keepA = { ...A };
+      Object.assign(A, { announce: 'Maintenance tonight', supportUrl: 'https://t.me/x', userAgent: 'mihomo' });
+      switchTab('nodes'); renderNodes();
+      const ann = document.querySelector(`.src-card[data-id=${ia}] .src-announce`);
+      out.announce = !!ann && /Maintenance/.test(ann.textContent);
+      openSourceActions(ia);   // a fixed UA: no rediscover; the provider's support link is there
+      out.noRediscover = !/all user agents/.test(document.getElementById('actions-body').textContent);
+      out.support = /Support/.test(document.getElementById('actions-body').textContent);
+      closeSheet('actions');
+      Object.keys(A).forEach(k => { if (!(k in keepA)) delete A[k]; }); Object.assign(A, keepA);
+      openSourceActions(ib);
+      [...document.querySelectorAll('#actions-body .menu-row')].find(x => /all user agents/.test(x.textContent)).click();
+      out.rediscover = calls.length === 1 && calls[0][0] === ib && calls[0][1].rediscover === true;
+      await new Promise(res => setTimeout(res, 50));
+      const s = sourcesData[ib], url = s.url;
+      s.uaStrategy = [{ ua: 'mihomo', unique: 3 }]; s.discoveredAt = 1;
+      openSrcForm(ib); document.getElementById('sf-filter').value = '(';
+      saveSrcForm();
+      out.badFilter = s.filter === '' && sheetStack.some(x => x.name === 'srcform');
+      document.getElementById('sf-filter').value = ''; document.getElementById('sf-url').value = url + 'x';
+      saveSrcForm();
+      await new Promise(res => setTimeout(res, 50));
+      out.reset = s.url === url + 'x' && s.uaStrategy.length === 0 && s.discoveredAt === 0
+        && calls.length === 2 && calls[1][1].rediscover === true;
+      openSrcForm(ib); document.getElementById('sf-url').value = url; saveSrcForm();
+      await new Promise(res => setTimeout(res, 50));
+      backend.updateSource = orig; switchTab('home');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
   await check('ping cache: one result per server, shared by every view', async () => {
     const ok = await page.evaluate(async () => {
       const n = sourcesData.src1.nodes[0];
