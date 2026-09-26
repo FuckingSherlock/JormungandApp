@@ -8,6 +8,14 @@
    it switched (→ a toast, General → When Auto switches).
    (Flutter: the same AutoService in-process; this is its view model.) */
 
+// f() on the UI's own picks: coreRoute off meanwhile (a plan is the UI's guess; the core
+// then moves inside it by itself).
+function withoutCore(f) {
+  const c = coreRoute;
+  coreRoute = null;
+  try { return f(); } finally { coreRoute = c; }
+}
+
 // One Route entry as a route of the plan (config.dart turns it into sing-box groups).
 function planRoute(id) {
   if (chainsData[id]) {

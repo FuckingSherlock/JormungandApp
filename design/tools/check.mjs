@@ -3,13 +3,15 @@
 //   node design/tools/check.mjs                 run all checks, print one line per failure
 //   node design/tools/check.mjs shot home dock  screenshots into design/.shots/
 //        options: --theme original|karing|github  --scale 1  --width 400 --height 800
+//                 --out <dir> (instead of design/.shots)  --files (with --grid: keep the single shots too)
+//                 --grid-name <name> (grid file name, default grid); preset "all" = every preset
 //        presets: see SHOTS below
 //
 // Playwright is resolved from the global npm root (pre-installed in the cloud env).
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -150,8 +152,10 @@ async function clipOf(page, sel, extraTop = 0) {
 // --grid (or verify) glues the presets into one labelled .shots/grid.png, 4 per row:
 // one image to look at instead of several.
 async function shots(names, grid = args.includes('--grid')) {
+  if (names.length === 1 && names[0] === 'all') names = Object.keys(SHOTS);   // every preset
   const browser = await playwright.chromium.launch();
-  const dir = join(root, '.shots');
+  const dir = opt('out') ? resolve(opt('out')) : join(root, '.shots');
+  const files = !grid || args.includes('--files');
   mkdirSync(dir, { recursive: true });
   const cells = [];
   for (const name of names) {
@@ -161,16 +165,17 @@ async function shots(names, grid = args.includes('--grid')) {
     });
     const extra = (await SHOTS[name](page)) || {};
     const file = join(dir, name + (opt('theme') ? '-' + opt('theme') : '') + '.png');
-    const buf = await page.screenshot({ path: grid ? undefined : file, ...extra });
+    const buf = await page.screenshot({ path: files ? file : undefined, ...extra });
     if (grid) cells.push([name, buf.toString('base64')]);
     if (!grid || page.errors.length) console.log((grid ? name : file) + (page.errors.length ? '   ERRORS: ' + page.errors.join(' | ') : ''));
     await page.close();
   }
   if (grid && cells.length) {
-    const page = await browser.newPage({ viewport: { width: 400 * Math.min(4, cells.length) + 8, height: 100 } });
+    // the grid keeps the shots' own resolution (--scale), not a 1x downscale
+    const page = await browser.newPage({ viewport: { width: 400 * Math.min(4, cells.length) + 8, height: 100 }, deviceScaleFactor: +opt('scale', 1) });
     await page.setContent(`<body style="margin:0;background:#000;display:flex;flex-wrap:wrap;gap:4px;padding:4px;width:${400 * 4 + 12}px;font:600 13px sans-serif;color:#fff">${
       cells.map(([n, b]) => `<div style="width:400px"><div style="padding:2px 4px">${n}</div><img style="display:block;width:400px" src="data:image/png;base64,${b}"></div>`).join('')}</body>`);
-    const file = join(dir, 'grid.png');
+    const file = join(dir, opt('grid-name', 'grid') + '.png');
     await page.screenshot({ path: file, fullPage: true });
     console.log(file);
   }
@@ -1453,6 +1458,43 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
+  await check('subscription: announce on the card, rediscover in ⋮, URL edit resets the UA strategy, bad filter refused', async () => {
+    const r = await page.evaluate(async () => {
+      const out = {}, calls = [], orig = backend.updateSource;
+      backend.updateSource = (s, opts) => { calls.push([s.id, opts]); return Promise.resolve(); };
+      // any two subscriptions: A gets a provider announce, support link and a fixed UA; B stays Auto
+      const [ia, ib] = sourceOrder.filter(id => sourcesData[id].kind === 'sub'), A = sourcesData[ia], keepA = { ...A };
+      Object.assign(A, { announce: 'Maintenance tonight', supportUrl: 'https://t.me/x', userAgent: 'mihomo' });
+      switchTab('nodes'); renderNodes();
+      const ann = document.querySelector(`.src-card[data-id=${ia}] .src-announce`);
+      out.announce = !!ann && /Maintenance/.test(ann.textContent);
+      openSourceActions(ia);   // a fixed UA: no rediscover; the provider's support link is there
+      out.noRediscover = !/all user agents/.test(document.getElementById('actions-body').textContent);
+      out.support = /Support/.test(document.getElementById('actions-body').textContent);
+      closeSheet('actions');
+      Object.keys(A).forEach(k => { if (!(k in keepA)) delete A[k]; }); Object.assign(A, keepA);
+      openSourceActions(ib);
+      [...document.querySelectorAll('#actions-body .menu-row')].find(x => /all user agents/.test(x.textContent)).click();
+      out.rediscover = calls.length === 1 && calls[0][0] === ib && calls[0][1].rediscover === true;
+      await new Promise(res => setTimeout(res, 50));
+      const s = sourcesData[ib], url = s.url;
+      s.uaStrategy = [{ ua: 'mihomo', unique: 3 }]; s.discoveredAt = 1;
+      openSrcForm(ib); document.getElementById('sf-filter').value = '(';
+      saveSrcForm();
+      out.badFilter = s.filter === '' && sheetStack.some(x => x.name === 'srcform');
+      document.getElementById('sf-filter').value = ''; document.getElementById('sf-url').value = url + 'x';
+      saveSrcForm();
+      await new Promise(res => setTimeout(res, 50));
+      out.reset = s.url === url + 'x' && s.uaStrategy.length === 0 && s.discoveredAt === 0
+        && calls.length === 2 && calls[1][1].rediscover === true;
+      openSrcForm(ib); document.getElementById('sf-url').value = url; saveSrcForm();
+      await new Promise(res => setTimeout(res, 50));
+      backend.updateSource = orig; switchTab('home');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
   await check('ping cache: one result per server, shared by every view', async () => {
     const ok = await page.evaluate(async () => {
       const n = sourcesData.src1.nodes[0];
@@ -1890,6 +1932,100 @@ async function runChecks() {
       liveAutoStatus(null);
       out.cleared = coreRoute === null;
       window.toast = t0; connected = false;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('live plan + rules: one plan carries the Auto routes and plan.routing; the core moving a group or a rule target\'s ping order is no reconnect, a rule edit is', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      setAutoConnect(true);
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = { type: 'socks', server: '127.0.0.1', server_port: 1 }; n.unsupported = false; }));
+      const order = autoOrder(), id = order.find(x => !chainsData[x] && unitPickRefs(x).length > 1);
+      live.anchor = effectiveConnectId(true);
+      const plan = livePlan(), out = { both: plan.routes.length > 0 && !!plan.routing && !!plan.auto && plan.routes[plan.current].id === live.anchor };
+      const sig = planSig();
+      // the core moved to another entry and server; a rule target's servers re-sorted by a ping
+      coreRoute = { id, server: refKey(unitPickRefs(id).slice(-1)[0]), entryServer: null };
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => setPing(n, Math.round(Math.random() * 300))));
+      out.stable = planSig() === sig;
+      out.ownPicks =livePlan().routes.every(x => x.id !== id || x.main.chosen !== coreRoute.server || unitPriority(id));
+      rulesData[ruleOrder[0]].enabled = !rulesData[ruleOrder[0]].enabled;
+      out.ruleEdit = planSig() !== sig;
+      coreRoute = null;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  // Rules, apps, quick rules and DNS reach the core as plan.routing (93-routing-plan.js).
+  await check('routing plan: enabled rules, apps, targets as groups (null = unavailable), quick rules, DNS', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      // mock servers carry no sing-box outbound (a target of those alone is unusable = null)
+      const out0 = routingPlan().targets['chain:sc1'] === null;
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = { type: 'socks', server: '127.0.0.1', server_port: 1 }; }));
+      const out = { noOutbound: out0 }, plan = routingPlan();
+      out.json = JSON.parse(JSON.stringify(plan)).rules.length === plan.rules.length;
+      out.enabledOnly = plan.rules.every(x => rulesData[x.id].enabled) && plan.rules.length === ruleOrder.filter(id => rulesData[id].enabled).length;
+      const chain = plan.targets['chain:sc1'];
+      out.chainTarget = targetInfo('chain:sc1').ok ? chain.kind === 'chain' && chain.entry.nodes.length > 0 && chain.main.nodes.length > 0 : chain === null;
+      out.appSplit = plan.apps.some(a => a.id === 'com.discord' && a.split && a.udpTarget === 'chain:sc1' && a.kind === 'package');
+      out.services = Object.keys(plan.quick.services).every(k => quickCfg.services[k] !== 'default') && Object.keys(plan.quick.services).length > 0;
+      out.region = plan.quick.region === (quickCfg.regionOn ? quickCfg.region : null);
+      out.dns = plan.dns.servers.map(s => s.id).join() === dnsOrder.join() && plan.geo.geosite.via === 'vpn';
+      // a composite rule goes without its action (the rule's own action applies)
+      rulesData.r4.enabled = true;
+      out.composite = routingPlan().rules.some(x => x.composite && !('action' in x.composite) && x.composite.type === 'logical');
+      // a target switched off in Nodes: null (the rule takes its If unavailable)
+      appRules['org.telegram.messenger'] = { act: 'proxy', target: 'src:src1', split: false, udpTarget: '' };
+      out.srcOk = routingPlan().targets['src:src1'].main.pick === 'fastest';
+      sourcesData.src1.enabled = false;
+      out.srcOff = routingPlan().targets['src:src1'] === null;
+      sourcesData.src1.enabled = true;
+      // the reconnect check: a ping reordering a target's servers is no change, a rule edit is
+      const base = { kind: 'unit', main: null, routing: routingPlan() };
+      const moved = JSON.parse(JSON.stringify(base));
+      moved.routing.targets['src:src1'].main.nodes.reverse();
+      out.sigPing = planSigOf(base) === planSigOf(moved);
+      rulesData.r1.enabled = false;
+      out.sigRule = planSigOf(base) !== planSigOf({ kind: 'unit', main: null, routing: routingPlan() });
+      // Domains + IP in one rule: logical AND in the rule's JSON too, and back
+      const both = newRule({ action: 'direct', groups: { domain: { not: false, v: { domain_suffix: ['a.com'] } }, ip: { not: false, v: { ip_cidr: ['1.1.1.1'] } } } });
+      const j = ruleJson(both), back = ruleFromJson(j);
+      out.andJson = j.type === 'logical' && j.mode === 'and' && !!back.groups.domain && !!back.groups.ip && !back.composite;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('live mode: rules / apps / DNS start clean, persist in the snapshot, edits save', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      window.JORMD = true; liveInit();
+      const out = {};
+      out.clean = !ruleOrder.length && !Object.keys(rulesData).length && !Object.keys(appRules).length
+        && ruleSets.every(s => s.builtin) && Object.values(quickCfg.services).every(v => v === 'default');
+      out.dnsKept = dnsOrder.length === 3;
+      const snap = liveSnapshot();
+      out.inSnapshot = ['rulesData', 'ruleOrder', 'ruleSeq', 'quickCfg', 'appRules', 'ruleSets', 'rsSeq', 'dnsServers', 'dnsOrder', 'dnsSeq', 'dnsCfg'].every(k => k in snap);
+      snap.rulesData = { r7: newRule({ id: 'r7', action: 'direct', groups: { domain: { not: false, v: { domain_suffix: ['x.com'] } } } }) };
+      snap.ruleOrder = ['r7']; snap.ruleSeq = 8;
+      snap.quickCfg = Object.assign({}, snap.quickCfg, { services: { telegram: 'vpn' }, ads: true });
+      snap.dnsOrder = ['local', 'remote']; delete snap.dnsServers.google; snap.dnsOrder = snap.dnsOrder.filter(id => snap.dnsServers[id]);
+      liveApply(JSON.parse(JSON.stringify(snap)));
+      out.applied = ruleOrder[0] === 'r7' && quickCfg.ads && quickCfg.services.telegram === 'vpn' && quickCfg.services.youtube === 'default'
+        && dnsOrder.join() === 'local,remote' && !dnsServers.google;
+      renderRules(); renderDns();
+      // a rules edit saves once the stored state is in
+      live.ready = true;
+      toggleRuleEnabled('r7');
+      out.saves = !!live.saveTimer;
+      clearTimeout(live.saveTimer); live.ready = false;
       return out;
     });
     expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));

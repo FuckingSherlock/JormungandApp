@@ -5,30 +5,53 @@ import 'build.dart';
 import 'clash.dart';
 import 'links.dart';
 
-enum SubFormat { singbox, clash, uriList, unknown }
+/// [base64] = a link list sent base64-encoded, [uriList] = plain links.
+enum SubFormat {
+  singbox('sing-box'),
+  clash('clash'),
+  base64('base64'),
+  uriList('links'),
+  unknown('unknown');
 
-/// Detects the format by the body, never by the User-Agent that was sent
-/// (docs/subscription-parsing.md → Детектирование формата), and parses it.
-(SubFormat, List<Node>) parseSubscription(String body) {
+  const SubFormat(this.label);
+
+  /// What the source card's format chip says.
+  final String label;
+}
+
+/// Detects the format by the body and the `Content-Type`, never by the User-Agent that
+/// was sent (docs/subscription-parsing.md → Детектирование формата), and parses it. A
+/// base64 body is decoded and detected again: providers encode sing-box JSON and Clash
+/// YAML too, not only link lists.
+(SubFormat, List<Node>) parseSubscription(String body, {String? contentType}) {
   final t = body.trim();
-  if (t.startsWith('{')) {
+  final plain = _detect(t, (contentType ?? '').toLowerCase());
+  if (plain != null) return plain;
+  final decoded = tryBase64(t);
+  if (decoded != null) {
+    final inner = _detect(decoded.trim(), '');
+    if (inner != null) return (inner.$1 == SubFormat.uriList ? SubFormat.base64 : inner.$1, inner.$2);
+  }
+  return (SubFormat.unknown, const []);
+}
+
+(SubFormat, List<Node>)? _detect(String t, String contentType) {
+  if (t.isEmpty) return null;
+  if (t.startsWith('{') || contentType.contains('json')) {
     try {
       final j = jsonDecode(t);
       if (j is Map && j['outbounds'] is List) return (SubFormat.singbox, parseSingboxJson(j));
     } catch (_) {}
-    return (SubFormat.unknown, const []);
+    if (t.startsWith('{') && !contentType.contains('yaml')) return (SubFormat.unknown, const []); // JSON, not a sing-box config
   }
-  if (RegExp(r'^proxies:', multiLine: true).hasMatch(t)) {
+  if (contentType.contains('yaml') || RegExp(r'^proxies:', multiLine: true).hasMatch(t)) {
     try {
-      return (SubFormat.clash, parseClash(t));
-    } catch (_) {
-      return (SubFormat.unknown, const []);
-    }
+      final nodes = parseClash(t);
+      if (nodes.isNotEmpty || RegExp(r'^proxies:', multiLine: true).hasMatch(t)) return (SubFormat.clash, nodes);
+    } catch (_) {}
   }
-  final decoded = tryBase64(t);
-  final text = decoded != null && decoded.contains('://') ? decoded : t;
-  final nodes = parseLinks(text);
-  return (nodes.isEmpty ? SubFormat.unknown : SubFormat.uriList, nodes);
+  final nodes = parseLinks(t);
+  return nodes.isEmpty ? null : (SubFormat.uriList, nodes);
 }
 
 const _protoOf = {
@@ -42,6 +65,7 @@ const _protoOf = {
   'anytls': 'anytls',
   'socks': 'socks',
   'http': 'http',
+  'ssh': 'ssh',
 };
 
 /// Server outbounds of a sing-box config, copied as they are. Groups, direct/block and
@@ -56,6 +80,9 @@ List<Node> parseSingboxJson(Map j) {
       ..remove('detour');
     final identity = switch (proto) {
       'ss' => '${o['method']}:${o['password']}',
+      // same identities as the link / Clash builders, so one server stays one node
+      'socks' || 'http' => '${o['username'] ?? ''}:${o['password'] ?? ''}',
+      'hy' => '${o['auth_str'] ?? ''}',
       _ => '${o['uuid'] ?? o['password'] ?? ''}',
     };
     out.add(Node.make(

@@ -58,11 +58,15 @@ Node? clashProxy(Map<String, dynamic> p) {
     case 'ws':
       final ws = m('ws-opts');
       var path = '${ws['path'] ?? '/'}';
+      // mihomo's ws-opts.v2ray-http-upgrade: an HTTP upgrade, not a WebSocket
+      final upgrade = ws['v2ray-http-upgrade'] == true;
+      if (upgrade) q['type'] = 'httpupgrade';
       final ed = ws['max-early-data'];
-      if (ed != null) path += '${path.contains('?') ? '&' : '?'}ed=$ed';
+      if (ed != null && !upgrade) path += '${path.contains('?') ? '&' : '?'}ed=$ed';
       q['path'] = path;
       final hs = (ws['headers'] as Map?) ?? const {};
-      if (hs['Host'] != null) q['host'] = '${hs['Host']}';
+      final h = hs['Host'] ?? hs['host'];
+      if (h != null) q['host'] = '$h';
     case 'grpc':
       q['serviceName'] = '${m('grpc-opts')['grpc-service-name'] ?? ''}';
     case 'h2' || 'http':
@@ -77,6 +81,7 @@ Node? clashProxy(Map<String, dynamic> p) {
   switch (type) {
     case 'vless':
       if (s('flow').isNotEmpty) q['flow'] = s('flow');
+      if (s('encryption').isNotEmpty) q['encryption'] = s('encryption');
       return buildVless(name: name, host: host, port: port, uuid: s('uuid'), q: q);
     case 'vmess':
       return buildVmess(
@@ -120,6 +125,46 @@ Node? clashProxy(Map<String, dynamic> p) {
       return buildTuic(name: name, host: host, port: port, uuid: s('uuid'), password: s('password'), q: q);
     case 'anytls':
       return buildAnytls(name: name, host: host, port: port, password: s('password'), q: q);
+    case 'hysteria':
+      final hq = {...q}..remove('type');
+      if (s('auth-str').isEmpty && s('auth_str').isEmpty && s('auth').isNotEmpty) hq['auth'] = s('auth');
+      if (s('obfs').isNotEmpty) hq['obfs'] = s('obfs');
+      if (s('protocol').isNotEmpty) hq['protocol'] = s('protocol');
+      if (s('up').isNotEmpty) hq['up'] = s('up');
+      if (s('down').isNotEmpty) hq['down'] = s('down');
+      final auth = s('auth-str').isNotEmpty ? s('auth-str') : s('auth_str');
+      return buildHysteria(name: name, host: host, port: port, auth: auth.isNotEmpty ? auth : (hq['auth'] ?? ''), q: hq);
+    case 'socks5':
+      return buildSocks(name: name, host: host, port: port, user: s('username'), password: s('password'), tls: b('tls'));
+    case 'http':
+      final hq = {...q}..remove('type');
+      if (!b('tls')) hq.remove('security');
+      return buildHttp(name: name, host: host, port: port, user: s('username'), password: s('password'), q: hq);
+    case 'ssh':
+      List<String> list(String k) => p[k] is List ? [for (final x in p[k] as List) '$x'] : [if (s(k).isNotEmpty) s(k)];
+      return buildSsh(
+        name: name,
+        host: host,
+        port: int.tryParse(s('port')) ?? 22,
+        user: s('username'),
+        password: s('password'),
+        privateKey: s('private-key'),
+        passphrase: s('private-key-passphrase'),
+        hostKeys: list('host-key'),
+        hostKeyAlgorithms: list('host-key-algorithms'),
+      );
+    // Not proxies (mihomo lets these sit in proxies:), nothing to show.
+    case 'direct' || 'reject' || 'dns' || 'pass' || 'compatible' || 'selector' || 'url-test':
+      return null;
   }
-  return null;
+  // A proxy sing-box cannot run (wireguard is an endpoint there, ssr is gone, snell, mieru…):
+  // listed as unsupported so the user sees it came.
+  if (type.isEmpty || host.isEmpty) return null;
+  return unsupportedNode(
+    name: name,
+    protocol: type == 'wireguard' || type == 'wg' ? 'wireguard' : type,
+    host: host,
+    port: port,
+    identity: '${p['password'] ?? p['private-key'] ?? p['uuid'] ?? ''}',
+  );
 }

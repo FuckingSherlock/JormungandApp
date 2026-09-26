@@ -52,24 +52,104 @@ void main() {
 
     test('every sample parses, unknown schemes do not', () {
       expect(allLinks.map(parseLink).whereType<Node>(), hasLength(allLinks.length));
-      expect(parseLink('socks://x@y:1'), isNull);
+      expect(parseLink('foo://x@y:1'), isNull);
+      expect(parseLink('https://t.me/provider'), isNull);
       expect(parseLink('not a link'), isNull);
+    });
+
+    test('vmess URI form: transport, TLS and cipher from the query', () {
+      final n = parseLink(vmessUri)!;
+      expect([n.protocol, n.address, n.port], ['vmess', 'tr2.example', 443]);
+      expect(n.outbound['security'], 'aes-128-gcm');
+      expect(n.outbound['transport'], {'type': 'grpc', 'service_name': 'vm'});
+      expect(n.outbound['tls']['server_name'], 'tr2.example');
+    });
+
+    test('socks: v2rayN base64 userinfo and plain socks5', () {
+      final a = parseLink(socksB64)!, b = parseLink(socks5Plain)!;
+      expect(a.outbound, containsPair('username', 'user'));
+      expect(a.outbound, containsPair('password', 'pass'));
+      expect([b.protocol, b.outbound['username'], b.outbound['version']], ['socks', 'u2', '5']);
+    });
+
+    test('hysteria v1: auth, obfs, bandwidth, peer as SNI', () {
+      final n = parseLink(hysteria1)!;
+      expect(n.protocol, 'hy');
+      expect(n.outbound, containsPair('auth_str', 'hy1-pass'));
+      expect(n.outbound, containsPair('obfs', 'hide'));
+      expect([n.outbound['up_mbps'], n.outbound['down_mbps']], [20, 100]);
+      expect(n.outbound['tls']['server_name'], 'hk1.example');
+      expect(n.unsupported, isNull);
+    });
+
+    test('quic transport goes to sing-box; without TLS it cannot', () {
+      expect(parseLink(vlessQuic)!.outbound['transport'], {'type': 'quic'});
+      expect(parseLink(vlessQuic)!.unsupported, isNull);
+      expect(parseLink(vlessQuic.replaceFirst('security=tls', 'security=none'))!.unsupported, 'quic without tls');
+    });
+
+    test('wireguard, ssr and VLESS encryption are listed as unsupported', () {
+      final ns = unsupportedLinks.map(parseLink).toList();
+      expect(ns.map((n) => n!.unsupported), ['wireguard', 'ssr', 'vless encryption']);
+      expect([ns[0]!.name, ns[0]!.address, ns[0]!.port], ['WG Home', '203.0.113.5', 51820]);
+      expect([ns[1]!.name, ns[1]!.address, ns[1]!.port], ['Old', '203.0.113.6', 8388]);
     });
   });
 
   group('subscriptions', () {
     test('base64 list', () {
       final (f, nodes) = parseSubscription(base64.encode(utf8.encode(allLinks.join('\n'))));
-      expect(f, SubFormat.uriList);
+      expect(f, SubFormat.base64);
       expect(nodes, hasLength(allLinks.length));
+      expect(parseSubscription(allLinks.join('\n')).$1, SubFormat.uriList);
     });
 
-    test('clash yaml: known types only', () {
+    test('clash yaml: unknown types listed as unsupported', () {
       final (f, nodes) = parseSubscription(clashYaml);
       expect(f, SubFormat.clash);
-      expect(nodes.map((n) => n.protocol), ['vless', 'hy2', 'ss']);
+      expect(nodes.map((n) => n.protocol), ['vless', 'hy2', 'ss', 'snell']);
       expect(nodes[1].outbound['server_ports'], ['20000:21000']);
       expect(nodes[2].outbound['plugin_opts'], 'obfs=http;obfs-host=bing.com');
+      expect(nodes[3].unsupported, 'snell');
+    });
+
+    test('clash: vmess / trojan / tuic / anytls, ws / grpc / h2 / httpupgrade, socks / http / ssh / hysteria', () {
+      final ns = {for (final n in parseClash(clashMore)) n.name: n};
+      expect(ns.keys, ['VM WS', 'TJ gRPC', 'VL H2', 'VL Upgrade', 'TUIC', 'AnyTLS', 'Hy1', 'Socks', 'HTTP TLS', 'SSH', 'WG', 'VL PQ']);
+      Map t(String k) => ns[k]!.outbound['transport'] as Map;
+      expect(t('VM WS'), {
+        'type': 'ws',
+        'max_early_data': 2048,
+        'early_data_header_name': 'Sec-WebSocket-Protocol',
+        'path': '/vmws',
+        'headers': {'Host': 'cdn.vm1.example'},
+      });
+      expect(ns['VM WS']!.outbound['tls']['server_name'], 'vm1.example');
+      expect(t('TJ gRPC'), {'type': 'grpc', 'service_name': 'tjsvc'});
+      expect(t('VL H2'), {'type': 'http', 'host': ['vl1.example'], 'path': '/h2'});
+      expect(t('VL Upgrade'), {'type': 'httpupgrade', 'host': 'vl2.example', 'path': '/up'});
+      expect(ns['TUIC']!.outbound, containsPair('congestion_control', 'cubic'));
+      expect(ns['TUIC']!.outbound, containsPair('udp_relay_mode', 'native'));
+      expect(ns['AnyTLS']!.outbound['tls']['utls'], {'enabled': true, 'fingerprint': 'chrome'});
+      expect([ns['Hy1']!.outbound['up_mbps'], ns['Hy1']!.outbound['down_mbps'], ns['Hy1']!.outbound['obfs']], [30, 200, 'hide']);
+      expect(ns['Socks']!.outbound, containsPair('type', 'socks'));
+      expect(ns['HTTP TLS']!.outbound['tls']['server_name'], 'hp1.example');
+      expect(ns['SSH']!.outbound, containsPair('user', 'root'));
+      expect([ns['WG']!.unsupported, ns['VL PQ']!.unsupported], ['wireguard', 'vless encryption']);
+      expect(ns.values.where((n) => n.unsupported == null), hasLength(10));
+    });
+
+    test('format by Content-Type and inside base64', () {
+      String b64(String s) => base64.encode(utf8.encode(s));
+      expect(parseSubscription(b64(clashYaml)).$1, SubFormat.clash);
+      expect(parseSubscription(b64(singboxJson)).$1, SubFormat.singbox);
+      expect(parseSubscription(b64(singboxJson)).$2.map((n) => n.name), ['Frankfurt 01']);
+      // YAML whose proxies: key is not at a line start, told by its Content-Type
+      expect(parseSubscription('{proxies: [{name: A, type: ss, server: 192.0.2.1, port: 1, cipher: aes-128-gcm, password: p}]}',
+              contentType: 'text/yaml; charset=utf-8')
+          .$1, SubFormat.clash);
+      expect(SubFormat.base64.label, 'base64');
+      expect(SubFormat.singbox.label, 'sing-box');
     });
 
     test('sing-box json: servers only, no groups or detoured outbounds', () {

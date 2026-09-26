@@ -169,13 +169,29 @@ class SingBoxProcess implements ClashApi {
   }
 }
 
-/// A free loopback port (for a clash API that must not clash with another instance).
+/// A free loopback port (for a clash API that must not clash with another instance), free
+/// for UDP and TCP both: an inbound listens on both. A random port below the dynamic range,
+/// not a port 0: Windows hands those out one after another, straight into its reserved
+/// ranges (Hyper-V / WinNAT, blocks of hundreds, TCP and UDP apart). UDP is bound without
+/// SO_REUSEADDR, as sing-box does, so a port another process holds on 0.0.0.0 counts as taken.
 Future<int> freePort() async {
-  final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-  final port = s.port;
-  await s.close();
-  return port;
+  for (var i = 0;; i++) {
+    final port = 20000 + _ports.nextInt(29000);
+    RawDatagramSocket? u;
+    try {
+      u = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, port, reuseAddress: false);
+      final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+      await s.close();
+      return port;
+    } on SocketException {
+      if (i >= 200) rethrow;
+    } finally {
+      u?.close();
+    }
+  }
 }
+
+final _ports = Random();
 
 /// Measures latency through each node (and each entry → exit pair) with a throwaway
 /// sing-box and its clash API `/proxies/{tag}/delay`. Results: ms, or -1 = no answer.

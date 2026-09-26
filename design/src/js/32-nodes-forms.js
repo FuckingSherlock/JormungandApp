@@ -32,7 +32,9 @@ function openSrcForm(id, prefillUrl) {
   if (!isGroup) {
     // Empty = 'auto': follows the global period from the Auto mode sheet.
     document.getElementById('sf-interval').value = s.updateInterval === 'auto' ? '' : s.updateInterval;
-    document.getElementById('sf-interval').placeholder = 'auto · ' + subsEveryText(autoCfg.subsEvery);
+    // auto = the provider's period (profile-update-interval) if it sent one, else the global one
+    const autoSecs = autoCfg.subsEvery && s.providerInterval ? Math.max(1, s.providerInterval) * 3600 : autoCfg.subsEvery;
+    document.getElementById('sf-interval').placeholder = 'auto · ' + subsEveryText(autoSecs);
     document.getElementById('sf-reload').classList.toggle('on', !!s.reloadAfterUpdate);
     document.getElementById('sf-testafter').classList.toggle('on', !!s.testAfterUpdate);
     document.getElementById('sf-hwid').classList.toggle('on', !!s.hwid);
@@ -63,10 +65,24 @@ function saveSrcForm() {
     channel: chipValue('sf-channel', 'Direct first'),
   };
 
+  // The core applies the filter to server names (flag included); JS and Dart agree on plain regexes.
+  if (fields.filter) {
+    try { new RegExp(fields.filter, 'u'); } catch (e) { toast('Filter is not a valid regular expression'); return; }
+  }
   if (editingSourceId) {
     const s = sourcesData[editingSourceId];
     if (name) s.name = name;
-    if (s.kind === 'sub') Object.assign(s, fields);
+    if (s.kind === 'sub') {
+      if (!fields.url) { toast('The subscription URL is empty'); return; }
+      // Another address, User-Agent or HWID can mean another server list: forget the UA
+      // strategy and its ETags, ask again with every UA. A new filter needs a full read
+      // (the core sends no ETag for it). Either way the list is fetched now.
+      const rediscover = s.url !== fields.url || s.userAgent !== fields.userAgent || !!s.hwid !== fields.hwid;
+      const refetch = rediscover || (s.filter || '') !== fields.filter;
+      Object.assign(s, fields);
+      if (rediscover) { s.uaStrategy = []; s.discoveredAt = 0; }
+      if (refetch) setTimeout(() => updateSource(s.id, { rediscover }), 0);
+    }
   } else {
     if (!fields.url) { toast('Paste a subscription URL first'); return; }
     const id = 'src' + (sourceSeq++);

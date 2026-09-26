@@ -793,7 +793,7 @@ body {
 .fmt-tag{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.06);color:var(--t2)}
 .src-chevron{transition:transform .2s;color:var(--t3)}
 .src-card.open .src-chevron{transform:rotate(180deg)}
-.src-card.off .src-main,.src-card.off .src-usage,.src-card.off .src-body{opacity:.45}
+.src-card.off .src-main,.src-card.off .src-usage,.src-card.off .src-announce,.src-card.off .src-body{opacity:.45}
 .spin{animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -802,6 +802,8 @@ body {
 .usage-fill{height:100%;background:var(--accent);border-radius:2px}
 .usage-fill.hi{background:var(--warn)}
 .usage-text{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--t2);font-family:var(--mono);margin-top:6px}
+/* The provider's announce header (SourceCard): up to 3 lines, the rest on hover. */
+.src-announce{margin:0 14px 12px 0;padding:6px 10px;border-radius:8px;background:rgba(var(--accent-rgb),.1);color:var(--t2);font-size:12px;line-height:1.35;white-space:pre-line;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 
 .src-body{border-top:1px solid var(--border);display:none}
 .src-card.open .src-body{display:block}
@@ -810,12 +812,12 @@ body {
 .node-row + .node-row{border-top:1px solid rgba(255,255,255,.035)}
 /* the ping tap covers the row's whole height and its right edge, so a tap just above or
    below the ms never lands on the row (which would pick the server) */
-.lat-hit{align-self:stretch;display:flex;align-items:center;justify-content:flex-end;margin:-10px -14px -10px -4px;padding:10px 14px 10px 4px;cursor:pointer;flex-shrink:0}
+.lat-hit{align-self:stretch;display:flex;align-items:center;justify-content:flex-end;margin:-10px -14px -10px -8px;padding:10px 14px 10px 4px;cursor:pointer;flex-shrink:0}
 /* the flag is the name's first character: a long name wraps under it, not beside it */
 .node-flag{font-size:16px;line-height:1;margin-right:7px}
 .node-name{flex:1;min-width:0;font-size:14px;color:var(--t1);overflow-wrap:anywhere;line-height:1.3}
 .node-proto{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
-.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:60px;text-align:right;flex-shrink:0}
+.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:52px;text-align:right;flex-shrink:0}   /* fits "1234 ms" and "testing"; any wider only pushes the ms off the badge */
 .lat.good{color:var(--active)}
 .lat.mid{color:var(--warn)}
 .lat.bad{color:var(--muted)}
@@ -1712,7 +1714,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="form-label" style="padding:8px 18px 0">Updates</div>
         <div class="set-group">
           <div class="set-row">
-            <div class="set-label">Update every<div class="set-hint">Empty = auto, the period set in Auto mode · 0 = never</div></div>
+            <div class="set-label">Update every<div class="set-hint">Empty = auto: the provider’s period, else the one in Auto mode · 0 = never</div></div>
             <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="auto"><span style="color:var(--t2);font-size:15px">h</span>
           </div>
           <div class="set-row">
@@ -1921,7 +1923,8 @@ let sourcesData = {
     gone: genNodes(20, 'sub').slice(18).map((n, i) => Object.assign(n, { goneAt: Date.now() - (i ? 13*24 : 30) * 3600e3 })), demoChurn: true }),
   src2: mkSub('src2', 'Work Servers', 9, { format:'clash', disabledNodes:['n8'], updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
   src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], disabledNodes:[], nodes:genNodes(2,'node') },
-  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updateInterval:6, updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo' }),
+  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updateInterval:6, updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo',
+    announce:'Maintenance on Oct 3, 02:00–04:00 UTC: servers may drop for a few minutes.', supportUrl:'https://t.me/example_support' }),
 };
 Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
 let sourceOrder = ['src1','src2','src3','src4'];
@@ -2027,11 +2030,14 @@ let backend = {
     return wait(1200).then(() => {
       s.nodes = genNodes(8 + Math.floor(Math.random() * 20), 'sub');
       s.usage = { used: 0, total: 0 };
+      s.updatedAt = Date.now();
     });
   },
-  // Update: new s.nodes, dropped servers into s.gone (see connect-model.md → gone).
-  updateSource(s) {
-    return wait(900 + Math.random() * 600).then(() => { if (s.demoChurn) demoProviderChurn(s); });
+  // Update: new s.nodes, dropped servers into s.gone (see connect-model.md → gone), the
+  // provider's headers (usage, expire, format, announce…), s.updatedAt. opts.rediscover:
+  // ask with every User-Agent again (the core; the mock just updates).
+  updateSource(s, opts) {
+    return wait(900 + Math.random() * 600).then(() => { if (s.demoChurn) demoProviderChurn(s); s.updatedAt = Date.now(); });
   },
   // A server added by hand. Resolves to the node, or rejects with a message.
   manualNode(f) {
@@ -2922,7 +2928,7 @@ function renderSourceCard(id, q) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
     </div>
-    ${usageHtml(s)}
+    ${usageHtml(s)}${s.announce ? `<div class="src-announce" title="${esc(s.announce)}">${esc(s.announce)}</div>` : ''}
     </div>
     </div>
     <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), null,
@@ -3018,13 +3024,14 @@ function testAllLatency() {
 
 /* ── Update subscriptions ── */
 
-function updateSource(sid) {
+// opts.rediscover: ask the provider with every User-Agent again (⋮ → Update with all user
+// agents). The backend sets s.updatedAt (the core's clock in live mode).
+function updateSource(sid, opts) {
   const s = sourcesData[sid];
   if (s.kind !== 'sub' || s.updating) return;
   s.updating = true;
   refreshSourceViews();
-  backend.updateSource(s).then(() => {
-    s.updatedAt = Date.now();
+  backend.updateSource(s, opts && typeof opts === 'object' ? opts : {}).then(() => {
     s.count = s.nodes.length;
     return true;
   }, e => { toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
@@ -3094,9 +3101,15 @@ function openSourceActions(sid) {
   let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`)
     + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
+    if ((s.userAgent || 'Auto') === 'Auto') rows += menuRow(ICON.refresh, 'Update with all user agents<div class="menu-sub">Asks as sing-box, mihomo and Clash again and merges what each gives</div>', close + `updateSource('${sid}',{rediscover:true})`);
     rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
     rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
-    if (s.website) rows += menuRow(ICON.web, 'Open website', close + `toast('Opens ${esc(s.website)}')`);
+    // the user's own website first, else the page the provider sends (profile-web-page-url)
+    const site = s.website || s.webPage;
+    // links from the provider go into onclick as a JSON string, never raw
+    const opens = u => close + `toast(${esc(JSON.stringify('Opens ' + u))})`;
+    if (site) rows += menuRow(ICON.web, 'Open website', opens(site));
+    if (s.supportUrl) rows += menuRow(ICON.web, 'Support', opens(s.supportUrl));
   }
   rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteSource('${sid}')`, 'danger');
   openActions(s.name, rows);
@@ -3451,7 +3464,9 @@ function openSrcForm(id, prefillUrl) {
   if (!isGroup) {
     // Empty = 'auto': follows the global period from the Auto mode sheet.
     document.getElementById('sf-interval').value = s.updateInterval === 'auto' ? '' : s.updateInterval;
-    document.getElementById('sf-interval').placeholder = 'auto · ' + subsEveryText(autoCfg.subsEvery);
+    // auto = the provider's period (profile-update-interval) if it sent one, else the global one
+    const autoSecs = autoCfg.subsEvery && s.providerInterval ? Math.max(1, s.providerInterval) * 3600 : autoCfg.subsEvery;
+    document.getElementById('sf-interval').placeholder = 'auto · ' + subsEveryText(autoSecs);
     document.getElementById('sf-reload').classList.toggle('on', !!s.reloadAfterUpdate);
     document.getElementById('sf-testafter').classList.toggle('on', !!s.testAfterUpdate);
     document.getElementById('sf-hwid').classList.toggle('on', !!s.hwid);
@@ -3482,10 +3497,24 @@ function saveSrcForm() {
     channel: chipValue('sf-channel', 'Direct first'),
   };
 
+  // The core applies the filter to server names (flag included); JS and Dart agree on plain regexes.
+  if (fields.filter) {
+    try { new RegExp(fields.filter, 'u'); } catch (e) { toast('Filter is not a valid regular expression'); return; }
+  }
   if (editingSourceId) {
     const s = sourcesData[editingSourceId];
     if (name) s.name = name;
-    if (s.kind === 'sub') Object.assign(s, fields);
+    if (s.kind === 'sub') {
+      if (!fields.url) { toast('The subscription URL is empty'); return; }
+      // Another address, User-Agent or HWID can mean another server list: forget the UA
+      // strategy and its ETags, ask again with every UA. A new filter needs a full read
+      // (the core sends no ETag for it). Either way the list is fetched now.
+      const rediscover = s.url !== fields.url || s.userAgent !== fields.userAgent || !!s.hwid !== fields.hwid;
+      const refetch = rediscover || (s.filter || '') !== fields.filter;
+      Object.assign(s, fields);
+      if (rediscover) { s.uaStrategy = []; s.discoveredAt = 0; }
+      if (refetch) setTimeout(() => updateSource(s.id, { rediscover }), 0);
+    }
   } else {
     if (!fields.url) { toast('Paste a subscription URL first'); return; }
     const id = 'src' + (sourceSeq++);
@@ -4882,14 +4911,15 @@ const HELP = {
   subsupdate: { title: 'Subscription updates', items: [
     ['Update every', 'how often the server lists are downloaded again from the providers.'],
     ['Own period', 'a subscription can have its own (Nodes → ⋮ → Edit → Update every). Then this setting doesn’t apply to it.'],
+    ['Provider’s period', 'a subscription left on auto follows the period its provider sends, if it sends one.'],
     ['0 = off', 'lists are updated only when you tap Update.'],
   ] },
   srcadvanced: { title: 'Advanced', items: [
     ['User-Agent', 'how the app introduces itself to the provider; the server list may depend on it. Auto is best.'],
-    ['Download via', 'fetch the subscription directly or through the VPN (if the provider’s site is blocked).'],
-    ['Send X-HWID', 'sends a device ID. Some providers limit devices by it.'],
+    ['Download via', 'fetch the subscription directly or through the VPN (if the provider’s site is blocked). “… first” tries the other way when it fails; with the VPN off it is always direct.'],
+    ['Send X-HWID', 'sends a device ID (random, made once) with the device model and OS. Some providers limit devices by it.'],
     ['Keep provider rules', 'use the routing rules that come with the subscription.'],
-    ['Filter', 'keep only servers whose name matches, e.g. DE|NL.'],
+    ['Filter', 'keep only servers whose name matches this regular expression, e.g. DE|NL or 🇩🇪.'],
     ['Decrypt password', 'only for subscriptions the provider encrypted.'],
   ] },
   nodes: { title: 'Nodes', items: [
@@ -5711,11 +5741,14 @@ sourceViewHooks.push(() => {
    Form: condition groups added with "+ Condition" (RULE_GROUPS); each field takes values as
    chips (Enter, comma or a pasted column); a bad value turns red and blocks Save.
    Action: Proxy (main flow or a target — stub picker), Direct, Block (drop / reject).
-   Strict: when the target is down, block instead of falling back to the main flow.
+   If unavailable (with a target): Default / Main / Block / Direct when the target is off,
+   empty or deleted (docs/rules.md §0).
    DNS: Auto (first ticked server with the matching route) or a server from Settings → DNS.
-   JSON: the sing-box route rule. Groups map to one flat rule; a negated group turns it into
-   {type: logical, mode: and}. Keys the form does not know are kept ("extra") and shown as
-   a plaque; any other logical rule is "composite" — edited in JSON only. */
+   JSON: the sing-box route rule. Groups map to one flat rule; a negated group, or Domains
+   together with IP (sing-box ORs those in one rule), turns it into {type: logical, mode: and}.
+   geosite / geoip stay names here: the core swaps them for its downloaded rule sets. Keys the
+   form does not know are kept ("extra") and shown as a plaque; any other logical rule is
+   "composite" — edited in JSON only. */
 
 let ruleEditing = null, ruleDraft = null, rfTab = 'form', rfAddOpen = false;
 // Empty fields stay folded as "+ Keyword" chips; a group with no values shows its first field.
@@ -5880,7 +5913,8 @@ function actionJson(r) {
 function ruleJson(r) {
   if (r.composite) return clone(r.composite);
   const gs = RULE_GROUPS.filter(g => r.groups[g.key]).map(g => [g.key, r.groups[g.key]]);
-  const body = gs.some(([, d]) => d.not)
+  // sing-box ORs domain and IP fields inside one rule: the form's AND needs logical then
+  const body = gs.some(([, d]) => d.not) || (r.groups.domain && r.groups.ip)
     ? { type: 'logical', mode: 'and', rules: gs.map(([k, d]) => Object.assign(groupJson(k, d), d.not ? { invert: true } : {})) }
     : Object.assign({}, ...gs.map(([k, d]) => groupJson(k, d)));
   return Object.assign(body, actionJson(r), r.extra || {});
@@ -6160,6 +6194,62 @@ function renderThemeList() {
     </div>`).join('');
 }
 
+/* ══════════════════════ ROUTING PLAN (rules → the core) ══════════════════════
+   The Rules screen, apps and Settings → DNS as the model the core turns into sing-box route
+   rules and DNS (core/lib/src/routing.dart; contract in docs/core.md). The UI sends its own
+   model — condition groups, targets, "If unavailable" — not sing-box JSON, so the Flutter
+   app reuses the Dart builder. The one thing resolved here is each target: the catalog lives
+   in the UI, so every target a rule or app names goes along as its server group(s), or null
+   while it is unavailable (off in Nodes, no server the core can use, deleted). */
+
+// A rule / app target as groups (same shape as the main flow's), or null = unavailable.
+function routingTarget(t) {
+  if (!targetInfo(t).ok) return null;
+  const at = t.indexOf(':'), kind = t.slice(0, at), ref = t.slice(at + 1);
+  try {
+    if (kind === 'src') return { kind: 'unit', main: planGroup(liveNodes(sourcesData[ref]).map(node => ({ sid: ref, node })), 'fastest') };
+    if (kind === 'node') {
+      const [sid, nid] = ref.split('::'), r = { sid, node: sourcesData[sid].nodes.find(n => n.id === nid) };
+      return { kind: 'unit', main: planGroup([r], 'priority', r) };
+    }
+    if (kind === 'profile') {
+      const refs = unitPickRefs(ref), n = unitNode(ref);
+      return { kind: 'unit', main: planGroup(refs, unitPriority(ref) ? 'priority' : 'fastest', refs.find(r => r.node === n)) };
+    }
+    const c = chainsData[ref], exits = chainExitRefs(c), exitNode = chainExitNode(c);
+    return { kind: 'chain', entry: planGroup(chainEntryRefs(c), 'fastest'),
+      main: planGroup(exits, c.exitMode === 'priority' ? 'priority' : 'fastest', exits.find(r => r.node === exitNode)) };
+  } catch (e) { return null; }   // nothing here sing-box can use (XHTTP only)
+}
+
+function routingPlan() {
+  const rules = ruleOrder.map(id => rulesData[id]).filter(r => r.enabled).map(r => {
+    const o = { id: r.id, name: r.name, action: r.action, target: r.target || '', fallback: r.fallback || 'default',
+      block: r.block, dns: r.dns || 'auto', groups: r.groups };
+    if (r.composite) {
+      const { action, outbound, method, ...match } = r.composite;
+      o.composite = match;
+    }
+    if (r.extra && Object.keys(r.extra).length) o.extra = r.extra;
+    return o;
+  });
+  const apps = Object.entries(appRules).map(([pkg, a]) => ({ id: pkg, kind: (APPS.find(x => x.pkg === pkg) || {}).kind || 'package',
+    act: a.act, target: a.target || '', split: !!a.split, udpTarget: a.udpTarget || '' }));
+  const named = new Set();
+  rules.forEach(r => { if (r.action === 'proxy' && r.target) named.add(r.target); });
+  apps.forEach(a => { if (a.act === 'proxy') [a.target, a.split ? a.udpTarget : ''].forEach(t => t && named.add(t)); });
+  const geo = id => { const s = ruleSets.find(x => x.id === id) || {}; return { via: s.via || 'vpn', every: s.every || 7 * 86400 }; };
+  return {
+    apps, rules,
+    quick: { lan: quickCfg.lan, ads: quickCfg.ads, region: quickCfg.regionOn ? quickCfg.region : null, final: quickCfg.final,
+      services: Object.fromEntries(SERVICES.filter(([k]) => quickCfg.services[k] && quickCfg.services[k] !== 'default').map(([k]) => [k, quickCfg.services[k]])) },
+    fallback: quickCfg.fallback,
+    targets: Object.fromEntries([...named].map(t => [t, routingTarget(t)])),
+    ruleSets: ruleSets.filter(s => !s.builtin).map(s => ({ name: s.name, url: s.url, format: s.format, via: s.via, every: s.every })),
+    geo: { geosite: geo('geosite'), geoip: geo('geoip') },
+    dns: { servers: dnsOrder.map(id => dnsServers[id]).map(s => ({ id: s.id, addr: s.addr, via: s.via, on: s.on })) },
+  };
+}
 /* ══════════════════════ AUTO IN THE CORE (live) ══════════════════════
    With jormd, Auto runs in the core while connected (core/lib/src/auto.dart, see
    connect-model.md → Auto): the plan carries the entry to connect plus the Auto entries
@@ -6169,6 +6259,14 @@ function renderThemeList() {
    dock, Route), what it measured (→ the ping cache, so knownDead agrees with it) and when
    it switched (→ a toast, General → When Auto switches).
    (Flutter: the same AutoService in-process; this is its view model.) */
+
+// f() on the UI's own picks: coreRoute off meanwhile (a plan is the UI's guess; the core
+// then moves inside it by itself).
+function withoutCore(f) {
+  const c = coreRoute;
+  coreRoute = null;
+  try { return f(); } finally { coreRoute = c; }
+}
 
 // One Route entry as a route of the plan (config.dart turns it into sing-box groups).
 function planRoute(id) {
@@ -6318,7 +6416,9 @@ function apiPing(body, onLine) {
 
 function liveSnapshot() {
   return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
-    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg,
+    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg,
+    // Rules, apps, rule sets, DNS (sent to the core as plan.routing, see 93-routing-plan.js)
+    rulesData, ruleOrder, ruleSeq, quickCfg, appRules, ruleSets, rsSeq, dnsServers, dnsOrder, dnsSeq, dnsCfg,
     // measured pings survive a restart, so Auto starts from what it knew
     pings: [...pingCache].filter(([, e]) => typeof e.ms === 'number') };
 }
@@ -6344,7 +6444,21 @@ function liveApply(s) {
   if (s.segState) Object.assign(segState, s.segState);
   if (s.connCfg) Object.assign(connCfg, s.connCfg);
   if (s.autoCfg) Object.assign(autoCfg, s.autoCfg);
+  if (s.genCfg) Object.assign(genCfg, s.genCfg);
+  // no demo rules or apps: a first run starts with the defaults of a fresh install
+  rulesData = s.rulesData || {};
+  ruleOrder = s.ruleOrder || [];
+  ruleSeq = s.ruleSeq || 1;
+  appRules = s.appRules || {};
+  replaceObj(quickCfg, Object.assign({ regionOn: true, region: 'RU', lan: true, ads: false, final: 'proxy', fallback: 'main', services: {} }, s.quickCfg));
+  SERVICES.forEach(([k]) => { quickCfg.services[k] = quickCfg.services[k] || 'default'; });
+  ruleSets = s.ruleSets || ['geosite', 'geoip'].map(id => ({ id, name: id, builtin: true, url: 'built-in', format: 'srs', via: 'vpn', every: 7 * 86400, updated: 'with the first connect' }));
+  rsSeq = s.rsSeq || 1;
+  if (s.dnsServers) { replaceObj(dnsServers, s.dnsServers); dnsOrder = s.dnsOrder; dnsSeq = s.dnsSeq || 1; }
+  if (s.dnsCfg) Object.assign(dnsCfg, s.dnsCfg);
   restorePings(s.pings);   // 15-ping.js: older states keyed a server, not its variant
+  // a page closed mid-update saved the spinner: it would block every later update
+  Object.values(sourcesData).forEach(x => { delete x.updating; });
 }
 function liveSave() {
   if (!live.ready) return;          // never overwrite the stored state before it is loaded
@@ -6357,30 +6471,42 @@ function liveSave() {
 const usableRef = r => r.node.outbound && !r.node.unsupported;
 function planGroup(refs, pick, chosenRef) {
   const ok = refs.filter(usableRef);
-  if (!ok.length) throw new Error('No server here the core can use' + (refs.some(r => r.node.unsupported) ? ' (XHTTP is not in sing-box)' : ''));
+  const bad = refs.find(r => r.node.unsupported);
+  if (!ok.length) throw new Error('No server here the core can use' + (bad ? ` (${bad.node.unsupported} is not in sing-box)` : ''));
   // sing-box's urltest uses its first server until its own first round of tests is done
   // (a minute with a hundred servers): put the known fastest first, the dead ones last
   const nodes = pick === 'fastest' ? ok.slice().sort((a, b) => pingRank(a.node) - pingRank(b.node)) : ok;
   return { pick, chosen: pick === 'priority' && chosenRef ? refKey(chosenRef) : null, nodes: nodes.map(r => ({ key: refKey(r), outbound: r.node.outbound })) };
 }
-// The plan around one entry (anchor; default: the UI's own pick) — routes: 94-live-auto.js.
+// The plan around one entry (anchor; default: the UI's own pick) — main-flow routes:
+// 94-live-auto.js, rules / apps / DNS: 93-routing-plan.js. Built on the UI's own picks, not
+// the core's (withoutCore), so the core moving a Priority group is no new plan.
 function livePlan(anchor) {
-  const id = anchor || effectiveConnectId(true);
-  if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
-  const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
-    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold }, auto: planAuto() };
-  return Object.assign(base, planRoutes(id));
+  return withoutCore(() => {
+    const id = anchor || effectiveConnectId(true);
+    if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
+    const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
+      urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold }, auto: planAuto(), routing: routingPlan() };
+    return Object.assign(base, planRoutes(id));
+  });
 }
-/* What a reconnect is worth: the routes and the servers in each group, not their ping
-   order nor the server a group is on (the core moves those itself; only a Manual pin
-   counts). A ping reorders Fastest and flips servers to 'testing' — neither may restart
-   sing-box and drop every connection. The system proxy is in it: switched while
-   connected, the core gets it with the reconnect. */
+/* What a reconnect is worth: the routes, rules and the servers in each group — not their
+   ping order (a ping reorders Fastest, in routes and in rule targets alike, and flips
+   servers to 'testing': neither may restart sing-box and drop every connection), nor the
+   server a main-flow group is on (the core moves those itself; only a Manual pin counts).
+   A rule target's Priority pick does count: nothing but a new plan moves it. The system
+   proxy is in it: switched while connected, the core gets it with the reconnect. */
 function planSigOf(plan) {
-  const g = x => x && Object.assign({}, x, { chosen: x.pinned ? x.chosen : null,
-    nodes: x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key) });
-  return JSON.stringify(Object.assign({}, plan, { current: null, systemProxy: segState.sys === 'on',
-    routes: plan.routes.map(r => Object.assign({}, r, { main: g(r.main), entry: g(r.entry) })) }));
+  const keys = x => x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key);
+  // a Priority group with no pick (nothing measured yet) starts on its first server: the same
+  const pick = x => x.pick === 'priority' ? x.chosen || (x.nodes[0] && x.nodes[0].key) || null : null;
+  const g = x => x && Object.assign({}, x, { chosen: x.pinned ? x.chosen : null, nodes: keys(x) });
+  const gt = x => x && Object.assign({}, x, { chosen: pick(x), nodes: keys(x) });
+  const r = (x, f) => x && Object.assign({}, x, { main: f(x.main), entry: f(x.entry) });
+  const routing = plan.routing && Object.assign({}, plan.routing,
+    { targets: Object.fromEntries(Object.entries(plan.routing.targets || {}).map(([k, x]) => [k, r(x, gt)])) });
+  return JSON.stringify(Object.assign({}, plan, { current: null, routing, systemProxy: segState.sys === 'on',
+    routes: (plan.routes || []).map(x => r(x, g)) }));
 }
 const planSig = () => { try { return planSigOf(livePlan(liveSigAnchor())); } catch (e) { return null; } };
 const pingsRunning = () => [...pingCache.values()].some(v => v.ms === 'testing');
@@ -6399,22 +6525,56 @@ function liveMaybeReconnect() {
 
 /* ── The real backend ── */
 
-function liveFetch(s) {
-  return api('/api/sources/fetch', {
-    url: s.url, userAgent: s.userAgent, strategy: s.uaStrategy || [], discoveredAt: s.discoveredAt || 0,
-    prev: { nodes: s.nodes || [], gone: s.gone || [] },
-  }).then(r => {
-    if (r.notModified) return;
-    s.nodes = r.nodes;
-    s.gone = r.gone;
-    s.uaStrategy = r.strategy;
-    s.discoveredAt = r.discoveredAt;
-    if (r.usage) s.usage = r.usage;
-    if (r.expire) s.expire = r.expire;
+/* Subscriptions: the core fetches with the source's own settings (UA, HWID, filter,
+   Download via) and answers with a patch of the fields it owns — the same list as
+   sourceServerFields in core/lib/src/state.dart. The user's fields are never in it. */
+const SERVER_FIELDS = ['nodes', 'gone', 'count', 'uaStrategy', 'discoveredAt', 'usage', 'expire', 'format',
+  'providerInterval', 'webPage', 'supportUrl', 'announce', 'updatedAt'];
+function liveFetch(s, opts) {
+  const source = {};
+  ['url', 'userAgent', 'uaStrategy', 'discoveredAt', 'nodes', 'gone', 'hwid', 'filter', 'channel'].forEach(k => { source[k] = s[k]; });
+  return api('/api/sources/fetch', { sid: s.id, source, rediscover: !!(opts && opts.rediscover) }).then(r => {
+    Object.assign(s, r.patch);
     let host = '';
     try { host = new URL(s.url).hostname; } catch (e) {}
     if (r.title && s.name === host) s.name = r.title;
+    if (!r.notModified) liveKeepRunning([s]);
   });
+}
+
+/* "Reconnect after update" off: new servers from an update must not restart sing-box. The
+   plan they make is taken as the running one, so the next reconnect for another reason
+   (another entry, a server switched off…) brings them in. */
+function liveKeepRunning(updated) {
+  if (!connected || !live.planSig || updated.some(s => s.reloadAfterUpdate)) return;
+  const sig = planSig();
+  if (sig) live.planSig = sig;
+}
+
+/* The core also updates subscriptions on its own timer (core/lib/src/updater.dart), with
+   this page closed too. /api/status carries sourcesRev, which moves with each such update:
+   then the sources the core updated after us (newer updatedAt, same URL) take its server
+   fields; everything the user set stays as it is here. */
+function liveSyncSources() {
+  if (!live.ready || document.hidden) return;
+  api('/api/status').then(st => {
+    if (st.sourcesRev === undefined || st.sourcesRev === live.sourcesRev) return;
+    return api('/api/state').then(r => {
+      live.sourcesRev = r.status.sourcesRev;
+      const theirs = (r.snapshot && r.snapshot.sourcesData) || {}, updated = [];
+      Object.keys(theirs).forEach(sid => {
+        const s = sourcesData[sid], t = theirs[sid];
+        if (!s || s.kind !== 'sub' || s.updating || s.url !== t.url || !((t.updatedAt || 0) > (s.updatedAt || 0))) return;
+        SERVER_FIELDS.forEach(k => { if (k in t) s[k] = t[k]; else delete s[k]; });
+        updated.push(s);
+      });
+      if (!updated.length) return;
+      liveKeepRunning(updated);
+      purgeExpiredGone();
+      refreshSourceViews();
+      updated.filter(s => s.testAfterUpdate).forEach(s => testLatency(liveNodes(s).map(n => [s.id, n.id])));
+    });
+  }).catch(() => {});
 }
 
 function flushPairs() {
@@ -6531,13 +6691,15 @@ function liveInit() {
   pingCache.clear();
 
   // Everything that re-renders after a change also saves and re-checks the connection.
-  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'setSegment', 'updateMainConnectCard'].forEach(name => {
+  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'renderGeneral', 'setSegment', 'updateMainConnectCard',
+    'renderRules', 'renderApps', 'renderRuleSets', 'renderDns'].forEach(name => {
     const orig = window[name];
     window[name] = function () { const r = orig.apply(this, arguments); liveSave(); liveMaybeReconnect(); return r; };
   });
 
   api('/api/state').then(st => {
     if (st.snapshot) liveApply(st.snapshot);
+    purgeExpiredGone();   // the start-up purge in 99-init ran on the empty pre-load state; only 15-day-old ones go
     connected = !!st.status.connected;
     exitInfo = st.status.exit || null;
     if (!exitInfo) liveWatchExit();   // still checking (the direct one runs from the core's start)
@@ -6549,10 +6711,15 @@ function liveInit() {
       live.anchor = liveFindAnchor(live.routes || []);
       live.planSig = planSig();
     }
+    live.sourcesRev = st.status.sourcesRev;
     live.ready = true;
     toast(st.snapshot ? 'Core connected' : 'Core connected — add a subscription in Nodes');
     if (genCfg.pingOnLaunch) pingOnLaunch();
+    // not when the core is already up (a page reload, another window): only a fresh start connects
+    if (genCfg.connectOnLaunch && !connected && !st.status.error) toggleMain();
   }, e => toast('Core not reachable: ' + e.message));
+
+  setInterval(liveSyncSources, 5000);
 
   // sing-box can stop on its own (bad server, crash): the dock must say so.
   setInterval(() => {

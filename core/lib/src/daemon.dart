@@ -5,13 +5,15 @@ import 'package:path/path.dart' as p;
 
 import 'auto.dart';
 import 'config.dart';
+import 'device.dart';
 import 'exitip.dart';
-import 'fetch.dart';
-import 'merge.dart';
 import 'parse/links.dart';
+import 'rulesets.dart';
 import 'runtime.dart';
+import 'state.dart';
 import 'sysproxy.dart';
 import 'traffic.dart';
+import 'updater.dart';
 
 /// jormd: the core behind a local HTTP API, so the HTML mockup can drive it as the
 /// app's UI while there is no Flutter app. The mockup keeps its own state (sources,
@@ -34,7 +36,8 @@ class Daemon {
     SystemProxy? sysProxy,
   })
       : main = SingBoxProcess(singBox, p.join(dataDir, 'run', 'main')),
-        sysProxy = sysProxy ?? SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))) {
+        sysProxy = sysProxy ?? SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))),
+        ruleSets = RuleSetCache(p.join(dataDir, 'rulesets')) {
     main.onExit = _crashed;
   }
 
@@ -44,14 +47,21 @@ class Daemon {
   final Set<String> lanHosts;
   final SingBoxProcess main;
   final SystemProxy sysProxy;
+  final RuleSetCache ruleSets;
   final int clashPort;
   final Future<Map<String, dynamic>> Function(int? proxyPort) exitCheck;
 
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
+  late final store = SnapshotStore(_snapshot);
+  // Subscriptions update themselves on their periods, also with the UI closed.
+  late final updater = SubscriptionUpdater(store: store, hwid: () => _hwid, proxyPort: () => main.running ? _mixedPort : null);
+  late final Future<Map<String, String>> _hwid = deviceHeaders(dataDir);
   String? _error;
   String? _warning;
   int _pingSeq = 0;
   int _mixedPort = 2080;
+  int? _tunnelPort; // tunnel-in: always through the tunnel (exit check, lists via VPN)
+  int _connectSeq = 0;
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
   Map<String, dynamic>? _exit;
@@ -64,7 +74,7 @@ class Daemon {
   AutoService? _auto;
   // sing-box stopped on its own: {attempt, of, code, next} while restarting it
   Map<String, dynamic>? _recovering;
-  int _restarts = 0, _attempt = 0, _runSeq = 0;
+  int _restarts = 0, _attempt = 0;
   DateTime _upSince = DateTime.now();
   static const _backoff = [Duration(seconds: 1), Duration(seconds: 4), Duration(seconds: 15)];
   // starts and stops of sing-box one at a time (a user's connect vs a crash restart)
@@ -80,11 +90,13 @@ class Daemon {
     await Directory(dataDir).create(recursive: true);
     await sysProxy.restore(); // left set by a crash
     _recheckExit(); // the direct IP, shown on Home before any connect
+    updater.start();
   }
 
   Future<void> shutdown() async {
-    _runSeq++;
+    _connectSeq++;
     _stopAuto();
+    updater.stop();
     await main.stop();
     await sysProxy.restore();
   }
@@ -113,7 +125,7 @@ class Daemon {
   void _crashed(int code) {
     final plan = _plan;
     if (plan == null) return;
-    final seq = _runSeq, at = _auto?.index;
+    final seq = _connectSeq, at = _auto?.index;
     _stopAuto();
     main.note('sing-box stopped on its own (exit code $code)');
     if (DateTime.now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
@@ -127,10 +139,11 @@ class Daemon {
     } catch (e) {
       main.note('system proxy not restored: $e');
     }
-    while (seq == _runSeq) {
+    while (seq == _connectSeq) {
       if (_attempt >= _backoff.length) {
         _recovering = null;
         _plan = null;
+        _tunnelPort = null;
         _error = 'sing-box stopped (exit code $code) and did not start again after ${_backoff.length} tries';
         _recheckExit(); // traffic goes direct now
         return;
@@ -139,9 +152,13 @@ class Daemon {
       _recovering = {'attempt': _attempt, 'of': _backoff.length, 'code': code, 'next': DateTime.now().add(wait).millisecondsSinceEpoch};
       await Future<void>.delayed(wait);
       final ok = await _locked(() async {
-        if (seq != _runSeq) return true; // connected or disconnected meanwhile
+        if (seq != _connectSeq) return true; // connected or disconnected meanwhile
+        final RuleSetFetch lists;
+        final warnings = ['sing-box stopped (exit code $code) and was started again'];
         try {
-          await main.start(buildConfig(plan, clashPort: clashPort), clashPort: clashPort);
+          final (l, w) = await _startSingBox(plan); // the same path as a connect
+          lists = l;
+          warnings.addAll(w);
         } catch (e) {
           main.note('restart $_attempt of ${_backoff.length} failed: $e');
           return false;
@@ -150,16 +167,17 @@ class Daemon {
         _upSince = DateTime.now();
         _recovering = null;
         _restarts++;
-        _warning = 'sing-box stopped (exit code $code) and was started again';
         if (_sysWanted) {
           try {
-            _warning = await sysProxy.enable(_mixedPort) ?? _warning;
+            warnings.add(await sysProxy.enable(_mixedPort) ?? '');
           } catch (e) {
-            _warning = 'System proxy not set again: $e';
+            warnings.add('System proxy not set again: $e');
           }
         }
+        _warning = joinWarnings(warnings);
         _startAuto(plan);
         _recheckExit();
+        _refreshLists(seq, plan, lists);
         return true;
       });
       if (ok) return;
@@ -222,14 +240,14 @@ class Daemon {
   }
 
   Future<Map<String, dynamic>> _state() async => {
-        'snapshot': _snapshot.existsSync() ? jsonDecode(await _snapshot.readAsString()) : null,
+        'snapshot': await store.read(),
         'status': await _status(),
       };
 
+  // A source the timer updated after the UI last looked keeps the core's server fields
+  // (state.dart).
   Future<Map<String, dynamic>> _saveState(Map<String, dynamic> body) async {
-    final tmp = File('${_snapshot.path}.tmp');
-    await tmp.writeAsString(jsonEncode(body['snapshot']));
-    await tmp.rename(_snapshot.path);
+    await store.save((body['snapshot'] as Map?)?.cast<String, dynamic>());
     return {'ok': true};
   }
 
@@ -258,6 +276,7 @@ class Daemon {
         'recovering': _recovering,
         'restarts': _restarts,
         'auto': await _autoState(),
+        'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
       };
 
   Future<Map<String, dynamic>?> _autoState() async {
@@ -282,7 +301,7 @@ class Daemon {
     Future<void> attempt() async {
       final sw = Stopwatch()..start();
       try {
-        final e = await exitCheck(direct ? null : _mixedPort);
+        final e = await exitCheck(direct ? null : _tunnelPort ?? _mixedPort);
         if (seq == _exitSeq) _exit = {...e, 'direct': direct, 'at': DateTime.now().millisecondsSinceEpoch};
       } catch (e) {
         if (seq != _exitSeq) return;
@@ -298,51 +317,76 @@ class Daemon {
     attempt();
   }
 
-  /// body: {url, userAgent, strategy, discoveredAt, prev: {nodes, gone}}
+  /// body: {sid, source: {url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid,
+  /// filter, channel}, rediscover} → {patch, title, notModified, via} (updater.dart).
   Future<Map<String, dynamic>> _fetch(Map<String, dynamic> body) async {
-    final prev = (body['prev'] as Map?) ?? const {};
-    List<Map<String, dynamic>> maps(Object? l) => [for (final x in (l as List? ?? const [])) (x as Map).cast<String, dynamic>()];
-    final prevNodes = maps(prev['nodes']);
-    final r = await fetchSubscription(
-      body['url'] as String,
-      userAgent: (body['userAgent'] as String?) ?? 'Auto',
-      strategy: maps(body['strategy']),
-      discoveredAt: (body['discoveredAt'] as num?)?.toInt() ?? 0,
-      prevCount: prevNodes.length,
+    final s = ((body['source'] as Map?) ?? const {}).cast<String, dynamic>();
+    return updater.guard(
+      body['sid'] as String?,
+      () async => updateSubscription(
+        s,
+        hwid: s['hwid'] == true ? await _hwid : null,
+        proxyPort: main.running ? _mixedPort : null,
+        rediscover: body['rediscover'] == true,
+      ),
     );
-    if (r.notModified) return r.toJson();
-    final m = mergeUpdate(prevNodes, maps(prev['gone']), r.nodes);
-    return {...r.toJson(), 'nodes': m.nodes, 'gone': m.gone};
   }
 
   Map<String, dynamic> _parse(Map<String, dynamic> body) =>
       {'nodes': [for (final n in parseLinks('${body['text'] ?? ''}')) n.toJson()]};
 
+  /// The one way sing-box is started, by a connect and by a restart after a crash: the
+  /// rule lists on disk first (ones via VPN that are missing wait for the tunnel — the
+  /// old one, if it still runs), a fresh tunnel-in port, the config. The lists used and
+  /// the config's warnings.
+  Future<(RuleSetFetch, List<String>)> _startSingBox(Map<String, dynamic> plan) async {
+    final lists = await ruleSets.ensureFor(plan, proxyPort: main.running ? _tunnelPort : null);
+    final warnings = <String>[];
+    final tunnelPort = await freePort();
+    await main.start(buildConfig(plan, clashPort: clashPort, tunnelPort: tunnelPort, ruleSetFiles: lists.files, warnings: warnings),
+        clashPort: clashPort);
+    _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
+    _tunnelPort = tunnelPort;
+    return (lists, warnings);
+  }
+
+  /// Through the tunnel now: missing lists (then a restart picks them up, on the route
+  /// Auto is on), stale ones (replaced in place, sing-box reloads a local rule set itself).
+  void _refreshLists(int seq, Map<String, dynamic> plan, RuleSetFetch lists) {
+    ruleSets.ensureFor(plan, proxyPort: _tunnelPort, refresh: true).then((now) {
+      if (seq == _connectSeq && main.running && now.files.keys.any((t) => !lists.files.containsKey(t))) {
+        final at = _auto?.index;
+        _connect({'plan': at == null ? plan : {...plan, 'current': at}, 'systemProxy': _sysWanted}).then((_) {}, onError: (_) {});
+      }
+    }, onError: (_) {});
+  }
+
   /// body: {plan (see config.dart), systemProxy: bool}
   Future<Map<String, dynamic>> _connect(Map<String, dynamic> body) async {
     final plan = (body['plan'] as Map).cast<String, dynamic>();
-    final seq = ++_runSeq;
+    final seq = ++_connectSeq;
     _recovering = null;
     _stopAuto();
     _error = null;
     _warning = null;
     await _locked(() async {
-      if (seq != _runSeq) return; // a newer connect / disconnect came in
+      if (seq != _connectSeq) return; // a newer connect / disconnect came in
       try {
         _plan = null;
-        await main.start(buildConfig(plan, clashPort: clashPort), clashPort: clashPort);
+        final (lists, warnings) = await _startSingBox(plan);
         _plan = plan;
         _sysWanted = body['systemProxy'] == true;
         _upSince = DateTime.now();
         _attempt = 0;
-        _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
         _startAuto(plan);
         _recheckExit();
         if (_sysWanted) {
-          _warning = await sysProxy.enable(_mixedPort);
+          warnings.add(await sysProxy.enable(_mixedPort) ?? '');
         } else {
           await sysProxy.restore();
         }
+        _warning = joinWarnings(warnings);
+        _refreshLists(seq, plan, lists);
       } catch (e) {
         _error = '$e';
         await sysProxy.restore();
@@ -353,13 +397,14 @@ class Daemon {
   }
 
   Future<Map<String, dynamic>> _disconnect() async {
-    final seq = ++_runSeq;
+    final seq = ++_connectSeq;
     _plan = null;
     _recovering = null;
     _stopAuto();
     await _locked(() async {
-      if (seq == _runSeq) await main.stop();
+      if (seq == _connectSeq) await main.stop();
     });
+    _tunnelPort = null;
     await sysProxy.restore();
     _recheckExit(); // now the direct IP
     _error = null;

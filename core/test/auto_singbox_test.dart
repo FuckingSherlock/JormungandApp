@@ -151,6 +151,73 @@ void main() {
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
 
+  test('routes + rules + tunnel-in: sing-box check passes; the main flow, final and tunnel-in follow the Auto selector, a rule target does not', () async {
+    final loop = _Loop();
+    await loop.up(['a', 'b']);
+    final side = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    side.listen((r) => r.response
+      ..write('side')
+      ..close());
+    final clash = await freePort(), mixed = await freePort(), tunnel = await freePort();
+    final client = SingBoxProcess(_bin, p.join(loop.tmp.path, 'client'));
+    Future<String?> tryGet(int port, String url) => _get(port, url).then<String?>((b) => b, onError: (_) => null);
+    try {
+      final plan = {
+        'routes': [
+          {'id': 'A', 'kind': 'unit', 'main': {'pick': 'fastest', 'nodes': [_node('s::a', loop.port('a'))]}},
+          {'id': 'B', 'kind': 'unit', 'main': {'pick': 'priority', 'chosen': 's::b', 'nodes': [_node('s::b', loop.port('b'))]}},
+        ],
+        'current': 0,
+        'mixedPort': mixed,
+        'urlTest': {'url': loop.url},
+        'routing': {
+          'targets': {
+            'src:x': {
+              'kind': 'unit',
+              'main': {'pick': 'fastest', 'nodes': [{'key': 'x::0', 'outbound': {'type': 'direct'}}]},
+            },
+          },
+          'rules': [
+            {
+              'id': 'r1', 'name': '', 'action': 'proxy', 'target': 'src:x', 'fallback': 'default', 'block': 'drop', 'dns': 'auto',
+              'groups': {'port': {'not': false, 'v': {'port': ['${side.port}']}}},
+            },
+          ],
+          'quick': {'lan': false, 'final': 'proxy'},
+        },
+      };
+      final config = buildConfig(plan, clashPort: clash, tunnelPort: tunnel);
+      final f = File(p.join(loop.tmp.path, 'routes-rules.json'))..writeAsStringSync(jsonEncode(config));
+      final r = await Process.run(_bin, ['check', '-c', f.path, '--disable-color']);
+      expect(r.exitCode, 0, reason: '${r.stderr}${r.stdout}');
+      final route = config['route'] as Map, outs = (config['outbounds'] as List).cast<Map>();
+      expect(route['final'], topTag);
+      expect(route['rules'], contains(equals({'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag})));
+      expect((route['rules'] as List).cast<Map>().any((x) => x['outbound'] == 'src:x'), isTrue);
+      expect(outs.firstWhere((o) => o['tag'] == topTag)['outbounds'], ['route0', 'route1']);
+
+      await client.start(config, clashPort: clash);
+      expect(await _get(mixed, loop.url), 'hello from target');
+      expect(await _get(mixed, 'http://127.0.0.1:${side.port}/'), 'side');
+
+      await loop.stop('a'); // route A down: the main flow and tunnel-in with it, the rule target not
+      expect(await tryGet(mixed, loop.url), isNot('hello from target'));
+      expect(await tryGet(tunnel, loop.url), isNot('hello from target'));
+      expect(await _get(mixed, 'http://127.0.0.1:${side.port}/'), 'side');
+
+      final auto = AutoService(client, plan, settings: AutoSettings(failAfter: 1, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
+      await auto.check();
+      expect(auto.toJson()['now'], 'B');
+      expect(await _get(mixed, loop.url), 'hello from target');
+      expect(await _get(tunnel, loop.url), 'hello from target');
+      auto.stop();
+    } finally {
+      await client.stop();
+      await side.close(force: true);
+      await loop.down();
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+
   test('routes with a chain and a Priority exit: sing-box takes the config, the chain enters through its own entry', () async {
     final loop = _Loop();
     await loop.up(['a', 'b']);

@@ -35,6 +35,7 @@ void main() {
   final supported = [
     ...allLinks.map(parseLink).whereType<Node>(),
     ...parseSubscription(clashYaml).$2,
+    ...parseClash(clashMore),
   ].where((n) => n.unsupported == null).toList();
 
   test('every parsed server makes a config sing-box accepts', () async {
