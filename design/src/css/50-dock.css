@@ -2,7 +2,7 @@
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
 /* Route open on Home: the dock (power tab included) and the nav above the sheet and its overlay */
-.phone.route-docked .dock,.phone.route-docked .bottomnav{position:relative;z-index:12}
+.phone.route-docked .dock{position:relative;z-index:12}
 .phone.route-docked #sh-profiles .sheet-body{padding-bottom:62px}
 .power-tab{
   position:absolute;left:50%;top:-50px;transform:translateX(-50%);

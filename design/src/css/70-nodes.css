@@ -125,4 +125,5 @@
 @keyframes route-swap{from{opacity:0;transform:translateX(var(--swap-from,16px))}to{opacity:1;transform:none}}
 #nodesEditBtn.on,#routeEditBtn.on{color:var(--active);border-color:var(--active)}
 .route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
-.route-auto{flex-shrink:0;min-width:34px;display:flex;justify-content:flex-end}
+.route-auto{flex-shrink:0;display:flex}
+.route-ping{flex-shrink:0;min-width:34px;display:flex;justify-content:flex-end}

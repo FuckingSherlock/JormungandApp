@@ -16,7 +16,8 @@ Fastest / Priority, ⚡ and its servers), Settings (Auto mode, Appearance with t
 text size 90–120%, General with startup / notifications and the launch ping, Connection, DNS), Rules (apps, own rules with form + JSON, target picker
 over the whole catalog, "If unavailable" + global default, quick rules, services dropdown
 linked to per-app routing, final order, address test, import/export, rule sets). All sheets
-open to the top of the screen and close by swiping the header down. Back (phone / browser / Esc)
+open to the top of the screen, end above the bottom nav (always visible; a tab tap closes them)
+and close by swiping the header down. Back (phone / browser / Esc)
 closes the top sheet and reopens the one it replaced (Add → Subscription), then goes Home.
 
 Nodes edit mode: ✎ sits left of the Simple / Profiles tabs, ✓ while editing;

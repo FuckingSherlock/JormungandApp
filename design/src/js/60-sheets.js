@@ -6,6 +6,13 @@ function showSheet(name, on) {
   document.getElementById('ov-'+name).classList.toggle('open', on);
   document.getElementById('sh-'+name).classList.toggle('open', on);
 }
+// The bottom nav's height: sheets and overlays end at its top edge (--nav-h).
+function syncNavH() {
+  const nav = document.querySelector('.bottomnav');
+  if (nav) document.documentElement.style.setProperty('--nav-h', nav.offsetHeight + 'px');
+}
+syncNavH();
+addEventListener('resize', syncNavH);
 function openSheet(name) {
   if (!sheetStack.some(s => s.name === name))
     sheetStack.push({ name, prev: justClosed.splice(0) });

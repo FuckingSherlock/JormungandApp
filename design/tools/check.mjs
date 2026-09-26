@@ -389,7 +389,7 @@ async function runChecks() {
       const id = visibleOrder().find(x => sourcesData[x] && unitRefs(x).length > 1);
       await new Promise(r => setTimeout(r, 600));   // the sheet slides in
       const row = document.querySelector(`#connects-list .conn-row[data-id="${id}"]`), box = row.getBoundingClientRect();
-      const title = row.querySelector('.conn-title').getBoundingClientRect(), bolt = row.querySelector('.route-auto svg').getBoundingClientRect();
+      const title = row.querySelector('.conn-state').getBoundingClientRect(), bolt = row.querySelector('.route-ping svg').getBoundingClientRect();
       const inset = Math.abs((title.left - box.left) - (box.right - bolt.right)) <= 3;
       toggleRouteRow(id);
       const nr0 = document.querySelector(`#connects-list .conn-row[data-id="${id}"] .conn-body .node-row`); nr0.scrollIntoView({ block: 'center' });
@@ -406,9 +406,27 @@ async function runChecks() {
     await p.close();
   });
 
+  await check('bottom nav: visible over every sheet; a tab tap closes the sheets', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      openSheet('connections'); openAutoMode();
+      await new Promise(r => setTimeout(r, 500));
+      const nav = document.querySelector('.bottomnav').getBoundingClientRect();
+      const top = document.elementFromPoint(nav.left + nav.width / 2, nav.top + nav.height / 2);
+      const sheetsEnd = [...document.querySelectorAll('.sheet.open')].every(el => el.getBoundingClientRect().bottom <= nav.top + 1);
+      document.querySelector('.nav-btn[data-tab=nodes]').click();
+      return { onTop: !!top.closest('.bottomnav'), sheetsEnd, closed: !document.querySelector('.sheet.open'),
+        tab: document.getElementById('view-nodes').classList.contains('active') };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
   await check('live traffic: cards and Live connections follow backend.traffic, zero when off', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(async () => {
+      // the launch ping may still be measuring: wait until Auto has a server to go through
+      for (let i = 0; i < 50 && !unitNode(effectiveConnectId()); i++) await new Promise(r => setTimeout(r, 100));
       traffic = await backend.traffic(); renderTraffic(); openSheet('connections');
       const rows = [...document.querySelectorAll('#liveConnList .live-conn-row')];
       const node = unitNode(effectiveConnectId());
@@ -758,10 +776,14 @@ async function runChecks() {
       out.reset = !routeCustom[m] && connectOrder.join() === catalogOrder[m].join();
       const id = connectOrder.find(x => !isBroken(x)), was = connectEntry(id).inAuto;
       const ed = routeEdit; setRouteEdit(false);
-      out.pingNotToggle = !document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .mini-toggle`)
-        && !!document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .seg-ping`);
+      const row = () => document.querySelector(`#connects-list .conn-row[data-id=${id}]`);
+      out.pingNotToggle = !row().querySelector('.mini-toggle') && !!row().querySelector('.route-ping .seg-ping')
+        && !!row().querySelector('.conn-name > .conn-state:first-child');
       setRouteEdit(true);
-      document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .mini-toggle`).click();
+      out.editBoth = !!row().querySelector('.conn-name .route-auto .mini-toggle') && !!row().querySelector('.route-ping .seg-ping');
+      const open = routeOpen.has(id);
+      row().querySelector('.conn-name .mini-toggle').click();
+      out.noUnfold = routeOpen.has(id) === open;
       out.autoToggle = connectEntry(id).inAuto === !was;
       toggleEntryAuto(id); setRouteEdit(ed);
       return out;
@@ -772,10 +794,12 @@ async function runChecks() {
   await check('route: a source row unfolds to its servers, Fastest / Priority, order by grips', async () => {
     const r = await page.evaluate(() => {
       const out = {}, id = visibleOrder().find(x => sourcesData[x]), s = sourcesData[id], was = s.pickMode;
-      out.noChainExpand = [...document.querySelectorAll('#connects-list .conn-row')].every(el => !chainsData[el.dataset.id] || !el.querySelector('.conn-expand'));
+      out.noChainExpand = [...document.querySelectorAll('#connects-list .conn-row')].every(el => !chainsData[el.dataset.id] || !el.querySelector('.conn-main').hasAttribute('onclick'));
+      const states = [...document.querySelectorAll('#connects-list .conn-state')].map(el => Math.round(el.getBoundingClientRect().width));
+      out.sameWidth = states.length > 1 && new Set(states).size === 1 && !document.querySelector('#connects-list .conn-expand');
       const n0 = unitRefs(id)[0].node, name0 = n0.name;
       n0.name = 'A very long server name that would push the row wider than the screen';
-      document.querySelector(`#connects-list .conn-row[data-id=${id}] .conn-expand`).click();
+      document.querySelector(`#connects-list .conn-row[data-id=${id}] .conn-main`).click();
       const body = () => document.querySelector(`#connects-list .conn-row[data-id=${id}] .conn-body`);
       out.open = !!body() && body().querySelectorAll('.node-row').length === unitRefs(id).length;
       const row = document.querySelector(`#connects-list .conn-row[data-id=${id}]`);

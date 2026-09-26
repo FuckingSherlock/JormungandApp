@@ -257,16 +257,17 @@ body {
 .nav-card .nav-title,.nav-card .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ── Bottom nav ── */
-.bottomnav{display:flex;justify-content:space-around;align-items:center;padding:4px 0 max(6px, env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--surface)}
+.bottomnav{position:relative;z-index:60;display:flex;justify-content:space-around;align-items:center;padding:4px 0 max(6px, env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--surface)}
 .nav-btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 16px;cursor:pointer;opacity:.45}
 .nav-btn.active{opacity:1}
 .nav-btn span{font-size:12px;font-weight:600;letter-spacing:.4px;color:var(--t2)}
 .nav-btn.active span{color:var(--accent)}
 
 /* ── Sheets (level 1) ── */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .25s;z-index:10}
+/* sheets and their dimming stop above the bottom nav: it stays visible and usable everywhere */
+.overlay{position:fixed;inset:0 0 var(--nav-h,0px) 0;background:rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .25s;z-index:10}
 .overlay.open{opacity:1;pointer-events:all}
-.sheet{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--sheet);border-radius:20px 20px 0 0;border-top:1px solid var(--border-hi);transform:translateY(100%);transition:transform .32s cubic-bezier(.32,1,.4,1);z-index:11;display:flex;flex-direction:column}
+.sheet{position:fixed;top:0;left:0;right:0;bottom:var(--nav-h,0px);background:var(--sheet);border-radius:20px 20px 0 0;border-top:1px solid var(--border-hi);transform:translateY(100%);transition:transform .32s cubic-bezier(.32,1,.4,1);z-index:11;display:flex;flex-direction:column}
 .sheet:not(.open){visibility:hidden;transition:transform .32s cubic-bezier(.32,1,.4,1),visibility 0s .32s}
 .sheet.open{transform:translateY(0)}
 .sheet.dragging{transition:none}
@@ -442,7 +443,8 @@ body {
 .conn-tag.muted{background:rgba(255,255,255,.06);color:var(--t3)}
 .conn-tag.warn{background:rgba(var(--warn-rgb),.15);color:var(--warn)}
 .conn-row.skip .conn-main{opacity:.5}
-.conn-state{flex-shrink:0;padding:3px 6px;border-radius:6px;border:1px solid var(--border);background:none;font:inherit;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--t3);cursor:pointer}
+/* AUTO / MANUAL opens the title line: the same place on every row, the name gets the rest */
+.conn-state{flex-shrink:0;width:54px;text-align:center;padding:2px 0;border-radius:6px;border:1px solid var(--border);background:none;font:inherit;font-size:9.5px;line-height:13px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--t3);cursor:pointer}
 .conn-state.on{border-color:rgba(var(--active-rgb),.45);background:rgba(var(--active-rgb),.12);color:var(--active)}
 
 /* Profile editor: source cards (tick to use, tap name to see nodes, update / ping) */
@@ -560,8 +562,6 @@ body {
 
 /* Route row unfolded: its servers, Fastest / Priority and the priority order */
 .conn-row.open{flex-wrap:wrap}
-.conn-expand{display:flex;align-items:center;align-self:stretch;padding:0 5px;cursor:pointer}
-.conn-row.open .conn-expand .src-chevron{transform:rotate(180deg)}
 .conn-body{flex-basis:100%;min-width:0;padding:0 0 10px}
 .conn-body .seg-row{margin:0 0 4px}
 /* the switch in a Route row is a quarter lower than in the editors */
@@ -579,7 +579,7 @@ body {
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
 /* Route open on Home: the dock (power tab included) and the nav above the sheet and its overlay */
-.phone.route-docked .dock,.phone.route-docked .bottomnav{position:relative;z-index:12}
+.phone.route-docked .dock{position:relative;z-index:12}
 .phone.route-docked #sh-profiles .sheet-body{padding-bottom:62px}
 .power-tab{
   position:absolute;left:50%;top:-50px;transform:translateX(-50%);
@@ -879,7 +879,8 @@ body {
 @keyframes route-swap{from{opacity:0;transform:translateX(var(--swap-from,16px))}to{opacity:1;transform:none}}
 #nodesEditBtn.on,#routeEditBtn.on{color:var(--active);border-color:var(--active)}
 .route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
-.route-auto{flex-shrink:0;min-width:34px;display:flex;justify-content:flex-end}
+.route-auto{flex-shrink:0;display:flex}
+.route-ping{flex-shrink:0;min-width:34px;display:flex;justify-content:flex-end}
 /* ── Compact action sheets (menus) ── */
 .sheet.compact{top:auto;max-height:85vh}
 .sheet.compact .sheet-body{padding:6px 0 18px}
@@ -2326,17 +2327,14 @@ function renderConnectRow(id) {
   const chain = !!chainsData[id];
   const current = id === effectiveConnectId();
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
-    + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
+    + (autoConnect && !e.inAuto && !routeEdit ? '<span class="conn-tag muted">not in Auto</span>' : '');   // in edit its toggle says it
   return `<div class="conn-row ${current ? 'current' : ''} ${routeOpen.has(id) ? 'open' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
     ${routeEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
     <div class="conn-main" ${chain ? '' : `onclick="toggleRouteRow('${id}')"`}>
-      <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
+      <div class="conn-name"><button class="conn-state ${current ? 'on' : ''}" onclick="event.stopPropagation();selectConnect('${id}')" title="${current && !autoConnect ? 'Back to Auto' : 'Use only this one (Manual)'}">${current && autoConnect ? 'auto' : 'manual'}</button>${routeEdit ? `<span class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</span>` : ''}<span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    <button class="conn-state ${current ? 'on' : ''}" onclick="selectConnect('${id}')" title="${current && !autoConnect ? 'Back to Auto' : 'Use only this one (Manual)'}">${current && autoConnect ? 'auto' : 'manual'}</button>
-    ${chain ? '' : `<span class="conn-expand" onclick="toggleRouteRow('${id}')" title="Servers and their priority"><svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>`}
-    ${routeEdit ? `<div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>`
-      : `<div class="route-auto">${pingAllBtn(`testEntryLatency('${id}')`, 'Ping its servers')}</div>`}
+    <div class="route-ping">${pingAllBtn(`testEntryLatency('${id}')`, 'Ping its servers')}</div>
     ${!chain && routeOpen.has(id) ? routeRowBodyHtml(id) : ''}
   </div>`;
 }
@@ -3548,8 +3546,10 @@ function toast(msg) {
 
 /* ── Tabs ── */
 
+// The nav is always visible, so a tab tap also closes whatever sheets are open over the view.
 function switchTab(name) {
-  if (document.querySelector('.phone.route-docked #sh-profiles.open')) closeSheet('profiles');   // Route belongs to Home
+  document.querySelectorAll('.sheet.open').forEach(el => closeSheet(el.id.slice(3)));
+  justClosed = [];
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
   document.querySelectorAll('.nav-btn[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('#view-' + name + ' > .scroll').forEach(el => el.scrollTop = 0);
@@ -4883,6 +4883,13 @@ function showSheet(name, on) {
   document.getElementById('ov-'+name).classList.toggle('open', on);
   document.getElementById('sh-'+name).classList.toggle('open', on);
 }
+// The bottom nav's height: sheets and overlays end at its top edge (--nav-h).
+function syncNavH() {
+  const nav = document.querySelector('.bottomnav');
+  if (nav) document.documentElement.style.setProperty('--nav-h', nav.offsetHeight + 'px');
+}
+syncNavH();
+addEventListener('resize', syncNavH);
 function openSheet(name) {
   if (!sheetStack.some(s => s.name === name))
     sheetStack.push({ name, prev: justClosed.splice(0) });

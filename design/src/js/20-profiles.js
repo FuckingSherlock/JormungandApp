@@ -201,17 +201,14 @@ function renderConnectRow(id) {
   const chain = !!chainsData[id];
   const current = id === effectiveConnectId();
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
-    + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
+    + (autoConnect && !e.inAuto && !routeEdit ? '<span class="conn-tag muted">not in Auto</span>' : '');   // in edit its toggle says it
   return `<div class="conn-row ${current ? 'current' : ''} ${routeOpen.has(id) ? 'open' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
     ${routeEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
     <div class="conn-main" ${chain ? '' : `onclick="toggleRouteRow('${id}')"`}>
-      <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
+      <div class="conn-name"><button class="conn-state ${current ? 'on' : ''}" onclick="event.stopPropagation();selectConnect('${id}')" title="${current && !autoConnect ? 'Back to Auto' : 'Use only this one (Manual)'}">${current && autoConnect ? 'auto' : 'manual'}</button>${routeEdit ? `<span class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</span>` : ''}<span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    <button class="conn-state ${current ? 'on' : ''}" onclick="selectConnect('${id}')" title="${current && !autoConnect ? 'Back to Auto' : 'Use only this one (Manual)'}">${current && autoConnect ? 'auto' : 'manual'}</button>
-    ${chain ? '' : `<span class="conn-expand" onclick="toggleRouteRow('${id}')" title="Servers and their priority"><svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>`}
-    ${routeEdit ? `<div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>`
-      : `<div class="route-auto">${pingAllBtn(`testEntryLatency('${id}')`, 'Ping its servers')}</div>`}
+    <div class="route-ping">${pingAllBtn(`testEntryLatency('${id}')`, 'Ping its servers')}</div>
     ${!chain && routeOpen.has(id) ? routeRowBodyHtml(id) : ''}
   </div>`;
 }
