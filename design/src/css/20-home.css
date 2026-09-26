@@ -97,6 +97,10 @@
   transition:color .2s;
 }
 .segment.active{color:#fff}
+/* SplitSegment (Sys proxy): its name on the top half, On | Off side by side on the bottom */
+.seg-split .seg-title{flex:1;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--t2);white-space:nowrap}
+.seg-halves{flex:1;position:relative;display:flex}
+.seg-split .segment-pill{top:0;left:0;width:50%;height:100%}
 
 /* ── Nav cards ── */
 .nav-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:10px}

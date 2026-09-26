@@ -56,7 +56,8 @@ function setSegment(group, value) {
   segState[group] = value;
   const index = SEG_OPTS[group].indexOf(value);
   SEG_OPTS[group].forEach(o => document.getElementById('seg-'+group+'-'+o).classList.toggle('active', o === value));
-  document.getElementById('pill-'+group).style.transform = index === 1 ? 'translateY(100%)' : 'translateY(0)';
+  // the Sys proxy pill moves sideways (On | Off under its name), the others up and down
+  document.getElementById('pill-'+group).style.transform = (group === 'sys' ? 'translateX(' : 'translateY(') + (index === 1 ? '100%)' : '0)');
   document.getElementById('seg-sys').classList.toggle('sys-on', segState.sys === 'on');
   if (group === 'sys' && connCfg.sysProxy !== (value === 'on')) { connCfg.sysProxy = value === 'on'; renderConnSettings(); }
   if (group === 'mode') renderDns();   // the Hijack DNS note depends on TUN

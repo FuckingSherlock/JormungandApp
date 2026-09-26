@@ -65,10 +65,14 @@
         <div class="segment active" id="seg-route-rules" onclick="setSegment('route','rules')">Rules</div>
       </div>
       <!-- System proxy: test switch; also in Settings → Connection, will leave Home on mobile -->
-      <div class="segment-control" id="seg-sys">
-        <div class="segment-pill" id="pill-sys"></div>
-        <div class="segment" id="seg-sys-on" onclick="setSysProxy(true)">Sys proxy</div>
-        <div class="segment active" id="seg-sys-off" onclick="setSysProxy(false)">Off</div>
+      <!-- the name on top, On | Off side by side below it -->
+      <div class="segment-control seg-split" id="seg-sys">
+        <div class="seg-title">Sys proxy</div>
+        <div class="seg-halves">
+          <div class="segment-pill" id="pill-sys"></div>
+          <div class="segment" id="seg-sys-on" onclick="setSysProxy(true)">On</div>
+          <div class="segment active" id="seg-sys-off" onclick="setSysProxy(false)">Off</div>
+        </div>
       </div>
     </div>
 
