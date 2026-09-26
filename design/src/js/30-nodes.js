@@ -337,7 +337,7 @@ function demoProviderChurn(s) {
     s.nodes = s.nodes.concat(back.map(n => { const m = Object.assign({}, n); delete m.goneAt; return m; }))
       .sort((a, b) => +a.id.slice(1) - +b.id.slice(1));
     s.gone = [];
-    back.forEach(n => { if (!pingCache.has(serverKey(n))) setPing(n, truthOf(n)); });
+    back.forEach(n => { if (!pingCache.has(pingKey(n))) setPing(n, truthOf(n)); });
     toast(`${back.length} server${back.length === 1 ? ' is' : 's are'} back — previous settings restored`);
   } else {
     const drop = s.nodes.filter((n, i) => i === 1 || i === 3);

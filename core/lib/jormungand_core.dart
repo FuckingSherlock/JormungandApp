@@ -2,6 +2,7 @@
 /// Pure Dart, so the Flutter app can depend on it as it is.
 library;
 
+export 'src/auto.dart';
 export 'src/config.dart';
 export 'src/daemon.dart';
 export 'src/device.dart';
@@ -13,6 +14,7 @@ export 'src/parse/build.dart' show tryBase64, unsupportedNode;
 export 'src/parse/clash.dart';
 export 'src/parse/links.dart';
 export 'src/parse/subscription.dart';
+export 'src/plan.dart';
 export 'src/routing.dart';
 export 'src/rulesets.dart';
 export 'src/runtime.dart';

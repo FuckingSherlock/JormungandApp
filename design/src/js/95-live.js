@@ -89,8 +89,7 @@ function liveApply(s) {
   rsSeq = s.rsSeq || 1;
   if (s.dnsServers) { replaceObj(dnsServers, s.dnsServers); dnsOrder = s.dnsOrder; dnsSeq = s.dnsSeq || 1; }
   if (s.dnsCfg) Object.assign(dnsCfg, s.dnsCfg);
-  pingCache.clear();
-  (s.pings || []).forEach(([k, e]) => pingCache.set(k, e));
+  restorePings(s.pings);   // 15-ping.js: older states keyed a server, not its variant
   // a page closed mid-update saved the spinner: it would block every later update
   Object.values(sourcesData).forEach(x => { delete x.updating; });
 }
@@ -112,32 +111,37 @@ function planGroup(refs, pick, chosenRef) {
   const nodes = pick === 'fastest' ? ok.slice().sort((a, b) => pingRank(a.node) - pingRank(b.node)) : ok;
   return { pick, chosen: pick === 'priority' && chosenRef ? refKey(chosenRef) : null, nodes: nodes.map(r => ({ key: refKey(r), outbound: r.node.outbound })) };
 }
-function livePlan() {
-  const id = effectiveConnectId();
-  if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
-  const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
-    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold }, routing: routingPlan() };
-  if (chainsData[id]) {
-    const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
-    return Object.assign(base, { kind: 'chain',
-      entry: planGroup(chainEntryRefs(c), 'fastest'),
-      main: planGroup(exits, c.exitMode === 'priority' ? 'priority' : 'fastest', exits.find(r => r.node === exitNode)) });
-  }
-  const refs = unitPickRefs(id), n = unitNode(id), pin = pinnedRef(id);
-  // a pinned server: a selector held on it (no failover, it is Manual)
-  return Object.assign(base, { kind: 'unit', main: planGroup(refs, pin || unitPriority(id) ? 'priority' : 'fastest', pin || refs.find(r => r.node === n)) });
+// The plan around one entry (anchor; default: the UI's own pick) — main-flow routes:
+// 94-live-auto.js, rules / apps / DNS: 93-routing-plan.js. Built on the UI's own picks, not
+// the core's (withoutCore), so the core moving a Priority group is no new plan.
+function livePlan(anchor) {
+  return withoutCore(() => {
+    const id = anchor || effectiveConnectId(true);
+    if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
+    const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
+      urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold }, auto: planAuto(), routing: routingPlan() };
+    return Object.assign(base, planRoutes(id));
+  });
 }
-/* What a reconnect is worth: the servers in each group and the pick, not their ping order.
-   A ping reorders Fastest (the urltest measures on its own anyway) and flips servers to
-   'testing' — neither may restart sing-box and drop every connection. The system proxy is
-   in it: switched while connected, the core gets it with the reconnect. */
+/* What a reconnect is worth: the routes, rules and the servers in each group — not their
+   ping order (a ping reorders Fastest, in routes and in rule targets alike, and flips
+   servers to 'testing': neither may restart sing-box and drop every connection), nor the
+   server a main-flow group is on (the core moves those itself; only a Manual pin counts).
+   A rule target's Priority pick does count: nothing but a new plan moves it. The system
+   proxy is in it: switched while connected, the core gets it with the reconnect. */
 function planSigOf(plan) {
-  const g = x => x && Object.assign({}, x, { nodes: x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key) });
-  const t = x => x && Object.assign({}, x, { main: g(x.main), entry: g(x.entry) });   // rule targets alike
-  const routing = plan.routing && Object.assign({}, plan.routing, { targets: Object.fromEntries(Object.entries(plan.routing.targets).map(([k, x]) => [k, t(x)])) });
-  return JSON.stringify(Object.assign({}, plan, { main: g(plan.main), entry: g(plan.entry), routing, systemProxy: segState.sys === 'on' }));
+  const keys = x => x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key);
+  // a Priority group with no pick (nothing measured yet) starts on its first server: the same
+  const pick = x => x.pick === 'priority' ? x.chosen || (x.nodes[0] && x.nodes[0].key) || null : null;
+  const g = x => x && Object.assign({}, x, { chosen: x.pinned ? x.chosen : null, nodes: keys(x) });
+  const gt = x => x && Object.assign({}, x, { chosen: pick(x), nodes: keys(x) });
+  const r = (x, f) => x && Object.assign({}, x, { main: f(x.main), entry: f(x.entry) });
+  const routing = plan.routing && Object.assign({}, plan.routing,
+    { targets: Object.fromEntries(Object.entries(plan.routing.targets || {}).map(([k, x]) => [k, r(x, gt)])) });
+  return JSON.stringify(Object.assign({}, plan, { current: null, routing, systemProxy: segState.sys === 'on',
+    routes: (plan.routes || []).map(x => r(x, g)) }));
 }
-const planSig = () => { try { return planSigOf(livePlan()); } catch (e) { return null; } };
+const planSig = () => { try { return planSigOf(livePlan(liveSigAnchor())); } catch (e) { return null; } };
 const pingsRunning = () => [...pingCache.values()].some(v => v.ms === 'testing');
 
 // Connected and the plan changed (another entry, a server switched off, Global/Rules…):
@@ -252,12 +256,15 @@ const liveBackend = {
       live.pairQueue.push({ entry, exit, resolve });
     });
   },
-  connect() {
+  connect(anchor) {
     return Promise.resolve().then(() => {
-      const plan = livePlan();
+      const plan = livePlan(anchor);
       if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
       return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
+        live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
+        live.switches = live.restarts = null;   // a new AutoService counts from 0
+        liveAutoStatus(st);
         if (st.warning) toast(st.warning);
         liveWatchExit();   // the core checks the exit after every (re)connect
       });
@@ -265,6 +272,7 @@ const liveBackend = {
   },
   disconnect() {
     live.planSig = null;
+    liveAutoStatus(null);
     return api('/api/disconnect', {});
   },
   // Connected: the tunnel's exit; not connected: the direct IP (the core knows which).
@@ -331,7 +339,11 @@ function liveInit() {
     renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
     renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
-    if (connected) live.planSig = planSig();
+    if (connected) {
+      liveAutoStatus(st.status);
+      live.anchor = liveFindAnchor(live.routes || []);
+      live.planSig = planSig();
+    }
     live.sourcesRev = st.status.sourcesRev;
     live.ready = true;
     toast(st.snapshot ? 'Core connected' : 'Core connected — add a subscription in Nodes');
@@ -346,6 +358,7 @@ function liveInit() {
   setInterval(() => {
     if (!live.ready || !connected || connecting) return;
     api('/api/status').then(st => {
+      liveAutoStatus(st);   // where the core's Auto is, what it measured (94-live-auto.js)
       if (st.connected) {
         // a check the core finished on its own (e.g. after liveMaybeReconnect)
         if (st.exit && JSON.stringify(st.exit) !== JSON.stringify(exitInfo)) { exitInfo = st.exit; renderExitIp(); }

@@ -25,6 +25,8 @@ library;
 
 import 'dart:io';
 
+import 'plan.dart';
+
 /// Adds a server group as [tag] (see buildConfig): its members are `tag/<key>`.
 typedef GroupEmitter = void Function(String tag, Map g, {String? detour});
 
@@ -153,7 +155,7 @@ class Routing {
   /// Outbounds besides the target groups (added through the emitter): direct ones with
   /// their own DNS server.
   final outbounds = <Map<String, dynamic>>[];
-  String finalOutbound = 'proxy';
+  String finalOutbound = topTag;
   final dnsServers = <Map<String, dynamic>>[];
   final dnsRules = <Map<String, dynamic>>[];
   String dnsFinal = 'local';
@@ -191,7 +193,7 @@ class _Builder {
     _dns();
     if (plan['global'] == true) {
       // Global: everything through the main flow, rules included (docs/rules.md).
-      out.finalOutbound = 'proxy';
+      out.finalOutbound = topTag;
       return out;
     }
     _apps();
@@ -232,7 +234,7 @@ class _Builder {
     final tag = _dnsTag(s);
     if (!_dnsAdded.add(tag)) return;
     final j = dnsServerJson(tag, '${s['addr']}')!;
-    if (_viaVpn(s)) j['detour'] = 'proxy';
+    if (_viaVpn(s)) j['detour'] = topTag;
     if (j['server'] is String && InternetAddress.tryParse(j['server'] as String) == null) j['domain_resolver'] = _boot;
     out.dnsServers.add(j);
   }
@@ -272,7 +274,7 @@ class _Builder {
 
   /// The outbound tag of a target, adding its groups once; null = unavailable now.
   String? _target(String t) {
-    if (t.isEmpty) return 'proxy';
+    if (t.isEmpty) return topTag;
     return _targetTags.putIfAbsent(t, () {
       final spec = ((r['targets'] as Map?) ?? const {})[t] as Map?;
       bool usable(Object? g) => g is Map && (g['nodes'] as List? ?? const []).isNotEmpty;
@@ -298,7 +300,7 @@ class _Builder {
     return switch (fallback) {
       'block' => (action: _reject(), direct: false),
       'direct' => (action: _route(_directVia(_dnsFor(dns, direct: true))), direct: true),
-      _ => (action: _route('proxy'), direct: false),
+      _ => (action: _route(topTag), direct: false),
     };
   }
 
@@ -550,7 +552,7 @@ class _Builder {
       ];
       final ips = s.geoip.map((n) => _set(geoipTag(n))).nonNulls.toList();
       final alts = [...domains, if (ips.isNotEmpty) {'rule_set': ips}];
-      out.rules.add({...(alts.length == 1 ? alts.first : {'type': 'logical', 'mode': 'or', 'rules': alts}), ..._route(direct ? 'direct' : 'proxy')});
+      out.rules.add({...(alts.length == 1 ? alts.first : {'type': 'logical', 'mode': 'or', 'rules': alts}), ..._route(direct ? 'direct' : topTag)});
       _dnsRule(domains, _dnsFor('auto', direct: direct));
     }
     final reg = regions[q['region']];
@@ -574,7 +576,7 @@ class _Builder {
       case 'block':
         out.rules.add(_reject());
       default:
-        out.finalOutbound = 'proxy';
+        out.finalOutbound = topTag;
     }
   }
 }

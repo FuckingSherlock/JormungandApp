@@ -77,7 +77,7 @@ function ruleTargets() {
     .concat(Object.values(appRules).filter(a => a.act === 'proxy').flatMap(a => [a.target, a.split ? a.udpTarget : '']));
   return [...new Set(ts.filter(Boolean))];
 }
-const uniqNodes = refs => { const seen = new Set(); return refs.map(r => r.node).filter(n => !seen.has(serverKey(n)) && seen.add(serverKey(n))); };
+const uniqNodes = refs => { const seen = new Set(); return refs.map(r => r.node).filter(n => !seen.has(pingKey(n)) && seen.add(pingKey(n))); };
 function pingOnLaunch() {
   const nodes = uniqNodes(launchPingEntries().flatMap(entryRefs).concat(ruleTargets().flatMap(targetRefs)));
   return nodes.length ? pingNodes(nodes) : Promise.resolve();
@@ -109,8 +109,8 @@ function dockPingBatches() {
     if (c) return chainEntryRefs(c).concat(chainExitRefs(c));
     return unitPriority(id) ? unitPickRefs(id) : unitPickRefs(id).slice().sort((a, b) => pingRank(a.node) - pingRank(b.node));
   };
-  const first = uniqNodes(dockTopRefs()), had = new Set(first.map(serverKey));
-  const rest = uniqNodes(ids.flatMap(own)).filter(n => !had.has(serverKey(n))), out = first.length ? [first] : [];
+  const first = uniqNodes(dockTopRefs()), had = new Set(first.map(pingKey));
+  const rest = uniqNodes(ids.flatMap(own)).filter(n => !had.has(pingKey(n))), out = first.length ? [first] : [];
   for (let i = 0; i < rest.length; i += DOCK_PING_BATCH) out.push(rest.slice(i, i + DOCK_PING_BATCH));
   return out;
 }

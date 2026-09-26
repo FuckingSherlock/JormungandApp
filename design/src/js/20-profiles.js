@@ -116,9 +116,21 @@ function pinnedRef(id) {
   if (autoConnect || id !== activeConnectId || !pinnedNode) return null;
   return unitRefs(id).find(r => refKey(r) === pinnedNode) || null;
 }
+/* Live and connected, the core's Auto says where traffic really goes (95-live.js, from
+   /api/status → auto): {id: the Route entry it is on, server: the unit's or the chain
+   exit's server, entryServer: the chain entry's server} ('sid::nid' keys). The dock and
+   Route show that instead of their own guess. Always null in the mockup. */
+let coreRoute = null;
+function coreNode(id, which, refs) {
+  if (!coreRoute || coreRoute.id !== id || !coreRoute[which]) return null;
+  const r = refs.find(r => refKey(r) === coreRoute[which]);
+  return r ? r.node : null;
+}
 function unitNode(id) {
   const pin = pinnedRef(id);
   if (pin) return pin.node;   // Manual on a server: that one, answering or not
+  const core = coreNode(id, 'server', unitPickRefs(id));
+  if (core) return core;
   const nodes = unitPickRefs(id).map(r => r.node);
   return unitPriority(id) ? nodes.find(isAlive) || null : bestAlive(nodes);
 }
@@ -144,8 +156,10 @@ function orderRefs(refs, order) {
 // Every exit server in priority order, unticked ones included.
 function chainExitOrder(c, withOff) { return orderRefs(unitRefs(c.outId, withOff), c.exitOrder); }
 function chainExitRefs(c, withOff) { return chainExitOrder(c, withOff).filter(r => !(c.outOff || []).includes(refKey(r))); }
-const chainEntryNode = c => bestAlive(chainEntryRefs(c).map(r => r.node));
+const chainEntryNode = c => coreNode(c.id, 'entryServer', chainEntryRefs(c)) || bestAlive(chainEntryRefs(c).map(r => r.node));
 function chainExitNode(c) {
+  const core = coreNode(c.id, 'server', chainExitRefs(c));
+  if (core) return core;
   const exits = chainExitRefs(c).map(r => r.node);
   return c.exitMode === 'priority' ? exits.find(isAlive) || null : bestAlive(exits);
 }
@@ -160,9 +174,14 @@ function isUsable(id) {
 }
 
 /* Auto passes over an entry only when it is known not to work: every server it would use
-   measured and silent. Servers not measured yet (a fresh start before the launch ping, a
-   new subscription) still count, so a restart never hands the top spot to the next entry. */
-const knownDead = n => ping(n) === -1;
+   silent failAfter times in a row, the last time within PING_FRESH_MS (a result being
+   re-measured keeps counting until the new one is in). Servers not measured yet (a fresh
+   start before the launch ping, a new subscription) or measured long ago still count, so
+   a restart never hands the top spot to the next entry over one lost ping. */
+const knownDead = n => {
+  const e = pingEntry(n);
+  return !!e && e.ms !== null && !(e.ms >= 0) && (e.fails || 0) >= autoCfg.failAfter && Date.now() - e.at < PING_FRESH_MS;
+};
 function mayWork(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
@@ -171,10 +190,12 @@ function mayWork(id) {
   return unitPickRefs(id).some(r => !knownDead(r.node));
 }
 
-// What is actually connected: the pinned entry, or Auto's pick.
-function effectiveConnectId() {
+// What is actually connected: the pinned entry, or Auto's pick — live and connected, the
+// entry the core's Auto is really on; ownGuess = the UI's pick regardless (a new plan).
+function effectiveConnectId(ownGuess) {
   if (!autoConnect && entryVisible(activeConnectId) && !isBroken(activeConnectId)) return activeConnectId;
   const order = visibleOrder();
+  if (!ownGuess && coreRoute && order.includes(coreRoute.id) && connectEntry(coreRoute.id).inAuto) return coreRoute.id;
   return order.find(id => connectEntry(id).inAuto && mayWork(id))
       || order.find(id => connectEntry(id).inAuto) || null;   // every entry off Auto: Auto picks nothing
 }

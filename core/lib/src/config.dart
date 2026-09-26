@@ -2,31 +2,37 @@
 ///
 /// A connect plan (JSON from the UI):
 /// ```
-/// { kind: 'unit' | 'chain',
-///   main:  Group,          // the unit, or the chain's exit
-///   entry: Group,          // chain only: the exit dials through it
+/// { routes: [Route…], current: 0,  // Auto entries by priority (plan.dart); Manual: one
 ///   mixedPort: 2080, global: false,
-///   urlTest: { url, interval /*s*/, tolerance /*ms*/ } }
-/// Group = { pick: 'fastest' | 'priority', chosen: key?, nodes: [{ key, outbound }] }
+///   urlTest: { url, interval /*s*/, tolerance /*ms*/ },
+///   auto: { failAfter, threshold, checkEvery, keepWarm, standby } }   // auto.dart
+/// Route = { id, kind: 'unit' | 'chain',
+///   main:  Group,          // the unit, or the chain's exit
+///   entry: Group }         // chain only: the exit dials through it
+/// Group = { pick: 'fastest' | 'priority', chosen: key?, pinned?: bool, nodes: [{ key, outbound }] }
 /// ```
 /// `fastest` becomes a urltest group (interval = Auto mode's checkEvery, tolerance =
 /// threshold — docs/connect-model.md → «Открытые вопросы для бэка»); `priority` a
-/// selector set to the server the UI picked. Failover beyond that (failAfter,
-/// standby) is the app's AutoService, not the core's.
+/// selector set to the server the UI picked. The routes sit under the selector `proxy`
+/// (the main flow: what rules send "through the VPN", and `final`); moving between routes
+/// and between Priority servers (failAfter, standby) is the AutoService (auto.dart),
+/// through the Clash API, with no restart.
 ///
 /// `routing` (rules, apps, quick rules, DNS — routing.dart) adds route rules, the rule
 /// targets' groups, DNS servers and rule sets; [ruleSetFiles] = the lists on disk,
 /// [warnings] collects what the rules could not use.
 ///
 /// [tunnelPort]: a second loopback mixed inbound (`tunnel-in`) whose traffic always goes
-/// through the tunnel, past every rule — the exit-IP check and lists downloaded "via VPN"
-/// use it (a Russian probe or GitHub must not go direct because a rule says so).
+/// through the tunnel (`proxy`: the route Auto is on), past every rule — the exit-IP check
+/// and lists downloaded "via VPN" use it (a Russian probe or GitHub must not go direct
+/// because a rule says so).
 library;
 
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import 'plan.dart';
 import 'routing.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
@@ -35,7 +41,6 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     {int clashPort = 9090, int? tunnelPort, Map<String, String> ruleSetFiles = const {}, List<String>? warnings}) {
   final outs = <Map<String, dynamic>>[];
   final test = (plan['urlTest'] as Map?) ?? const {};
-  final chain = plan['kind'] == 'chain';
 
   void group(String tag, Map g, {String? detour}) {
     final members = <String>[];
@@ -68,12 +73,25 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     }
   }
 
-  if (chain) {
-    group('entry', plan['entry'] as Map);
-    group('proxy', plan['main'] as Map, detour: 'entry');
-  } else {
-    group('proxy', plan['main'] as Map);
+  final routes = planRoutes(plan), tags = <String>[];
+  for (var i = 0; i < routes.length; i++) {
+    final r = routes[i];
+    if (r['kind'] == 'chain') {
+      group(routeEntryTag(i), r['entry'] as Map);
+      group(routeTag(i), r['main'] as Map, detour: routeEntryTag(i));
+    } else {
+      group(routeTag(i), r['main'] as Map);
+    }
+    tags.add(routeTag(i));
   }
+  // Auto moves between the routes by switching this selector (auto.dart), no restart
+  outs.add({
+    'type': 'selector',
+    'tag': topTag,
+    'outbounds': tags,
+    'default': tags[planCurrent(plan, tags.length)],
+    'interrupt_exist_connections': true,
+  });
   outs.add({'type': 'direct', 'tag': 'direct'});
   final routing = buildRouting(plan, group, ruleSetFiles: ruleSetFiles);
   outs.addAll(routing.outbounds);
@@ -97,11 +115,11 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     'route': {
       'rules': [
         {'action': 'sniff'},
-        if (tunnelPort != null) {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': 'proxy'},
+        if (tunnelPort != null) {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag},
         ...routing.rules,
       ],
       if (routing.ruleSets.isNotEmpty) 'rule_set': routing.ruleSets,
-      'final': routing.finalOutbound,
+      'final': routing.finalOutbound, // topTag (the main flow), or direct by a quick rule
       'auto_detect_interface': true,
       'default_domain_resolver': routing.domainResolver,
       // which app opened a connection: shown in Live connections
