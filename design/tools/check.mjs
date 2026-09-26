@@ -56,6 +56,13 @@ async function openPage(browser, { width = 400, height = 800, scale = 1, theme }
 
 const settle = page => page.waitForTimeout(400);
 const tab = (page, name) => page.click(`.nav-btn[data-tab=${name}]`);
+// Back button (60-sheets.js): syncBackHistory runs in setTimeout 0, so give it a moment
+// to land before history.back(), and a moment after for goBack()'s re-render + any
+// corrective pushState to settle before the next assertion or back() call.
+const preBack = p => p.waitForTimeout(100);
+// 400ms, not just past the popstate: a closed sheet keeps `visibility` for its .32s slide-down
+// transition (css/40-sheets.css .sheet:not(.open)), so isVisible() still sees it briefly.
+async function backAndSettle(p) { await preBack(p); await p.goBack(); await p.waitForTimeout(400); }
 
 /* ═══════════════ SCREENSHOT PRESETS ═══════════════ */
 
@@ -361,6 +368,25 @@ async function runChecks() {
     expect(/busy/.test(await state()), 'busy: ' + await state());
     await page.waitForTimeout(1300);
     expect(/\bon\b.*Connected/.test(await state()), 'on: ' + await state());
+  });
+
+  await check('home: Exit IP card shows the mock IP while connected', async () => {
+    expect(/DE/.test(await page.textContent('#exitLoc')), 'exitLoc: ' + await page.textContent('#exitLoc'));
+    expect((await page.textContent('#exitIp')).trim() !== '—', 'exitIp: ' + await page.textContent('#exitIp'));
+  });
+
+  await check('home: Exit IP card says Not connected once disconnected', async () => {
+    await page.evaluate(() => toggleMain());
+    expect(await page.textContent('#exitLoc') === 'Not connected', 'exitLoc: ' + await page.textContent('#exitLoc'));
+    await page.evaluate(() => toggleMain());
+    await page.waitForTimeout(1300);   // back to connected for the checks that follow
+  });
+
+  await check('home: tapping the card checks again — Checking… at once, the IP after ~600ms', async () => {
+    await page.click('#exitIp');
+    expect(await page.textContent('#exitLoc') === 'Checking…', 'not "Checking…" right after the tap');
+    await page.waitForTimeout(700);
+    expect(/DE/.test(await page.textContent('#exitLoc')), 'IP did not come back: ' + await page.textContent('#exitLoc'));
   });
 
   await check('home: dock opens profiles', async () => {
@@ -1273,6 +1299,84 @@ async function runChecks() {
   });
 
   await check('no errors during the run', async () => expect(!page.errors.length, page.errors.join(' | ')));
+
+  /* ── Back button (phone/browser/Esc): 60-sheets.js — sheetStack, justClosed,
+     syncBackHistory, goBack, popstate, Esc. Each case gets its own fresh page so the
+     history depth starts clean. */
+
+  await check('back: Nodes → Add → Subscription unwinds one level at a time', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'nodes');
+    await p.evaluate(() => openNodesAdd());
+    await p.click('#sh-addmenu .menu-row >> nth=0');   // Subscription: closeSheet('addmenu');openSrcForm()
+    expect(await p.isVisible('#sh-srcform'), 'srcform did not open');
+
+    await backAndSettle(p);
+    expect(await p.isVisible('#sh-addmenu') && !(await p.isVisible('#sh-srcform')), 'back #1: addmenu should reopen, srcform should close');
+
+    await backAndSettle(p);
+    expect(!(await p.isVisible('#sh-addmenu')) && await p.evaluate(() => activeTab()) === 'nodes', 'back #2: sheet should close, tab stays on nodes');
+
+    await backAndSettle(p);
+    expect(await p.evaluate(() => activeTab()) === 'home', 'back #3: should land on Home');
+    await p.close();
+  });
+
+  await check('back: a sheet nested on top of Rules closes alone, Rules stays open', async () => {
+    const p = await openPage(browser);
+    await p.evaluate(() => { openRules(); openRuleForm('r2'); });
+    await preBack(p);
+    expect(await p.isVisible('#sh-ruleform') && await p.isVisible('#sh-rules'), 'both sheets should be open first');
+
+    await backAndSettle(p);
+    expect(!(await p.isVisible('#sh-ruleform')) && await p.isVisible('#sh-rules'), 'back should close only ruleform and keep rules open');
+    await p.close();
+  });
+
+  await check('back: a replaced actions sheet is restored with its own title and rows', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'nodes');
+    const nid = await p.evaluate(() => sourcesData.src3.nodes[0].id);
+    await p.evaluate(nid => openNodeActions('src3', nid), nid);
+    const title0 = await p.textContent('#actionsTitle');
+    await p.click('#actions-body .menu-row.danger');   // Delete server -> confirmDeleteNode -> openActions() again, same sheet
+    const title1 = await p.textContent('#actionsTitle');
+    expect(title1 !== title0, 'the delete confirm did not replace the actions body');
+
+    await backAndSettle(p);
+    expect(await p.isVisible('#sh-actions'), 'actions sheet did not reopen on back');
+    expect(await p.textContent('#actionsTitle') === title0, `title not restored: got "${await p.textContent('#actionsTitle')}", expected "${title0}"`);
+    await p.close();
+  });
+
+  await check('back: closing a sheet with × does not leave an extra history level', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'nodes');
+    await p.evaluate(() => openNodesAdd());
+    await preBack(p);
+    const before = await p.evaluate(() => histDepth);
+    await p.click('#sh-addmenu .sheet-close');
+    await preBack(p);
+    const after = await p.evaluate(() => ({ depth: histDepth, want: backDepth(), open: sheetStack.length, tab: activeTab() }));
+    expect(after.open === 0 && after.tab === 'nodes', '×-close did not clean up the sheet stack: ' + JSON.stringify(after));
+    expect(after.depth === after.want, `histDepth ${after.depth} out of sync with backDepth() ${after.want} after ×-close`);
+    expect(after.depth === before - 1, `expected histDepth to drop by exactly 1 (${before} -> ${after.depth})`);
+
+    await backAndSettle(p);   // the one back a ×-close owes should not be swallowed
+    expect(await p.evaluate(() => activeTab()) === 'home', 'the back after a ×-close was swallowed');
+    await p.close();
+  });
+
+  await check('back: Esc closes the top sheet', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'nodes');
+    await p.evaluate(() => openNodesAdd());
+    await preBack(p);
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(400);
+    expect(!(await p.isVisible('#sh-addmenu')), 'Esc did not close the sheet');
+    await p.close();
+  });
 
   // Live mode (the page served by core/bin/jormd.dart) starts from an empty state: every
   // screen must render with nothing added. No core here, so /api calls only toast.
