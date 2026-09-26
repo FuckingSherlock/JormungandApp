@@ -289,7 +289,7 @@
 .conn-row.open{flex-wrap:wrap}
 .conn-expand{display:flex;align-items:center;align-self:stretch;padding:0 8px;cursor:pointer}
 .conn-row.open .conn-expand .src-chevron{transform:rotate(180deg)}
-.conn-body{flex-basis:100%;padding:0 0 10px}
+.conn-body{flex-basis:100%;min-width:0;padding:0 0 10px}
 .conn-body .seg-row{margin:0 0 4px}
 .conn-hint{margin-bottom:8px}
 .conn-body .se-nodes{margin:0}

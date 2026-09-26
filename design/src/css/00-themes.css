@@ -76,11 +76,13 @@
 input, textarea{user-select:text;-webkit-user-select:text}
 html, body, *{scrollbar-width:none;-ms-overflow-style:none}
 *::-webkit-scrollbar{display:none;width:0;height:0}
-html, body{overflow-x:hidden}
+/* One viewport, no page scroll: a mobile browser's collapsing toolbar would otherwise let the
+   whole app scroll (100vh is the viewport without the toolbar). Views scroll inside. */
+html, body{overflow:hidden;overscroll-behavior:none}
 
 body {
   background:var(--bg);
   font-family:var(--font);
-  min-height:100vh;color:var(--t1);
+  min-height:100vh;min-height:100dvh;color:var(--t1);
 }
 

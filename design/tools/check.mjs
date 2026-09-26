@@ -409,9 +409,14 @@ async function runChecks() {
     const r = await page.evaluate(() => {
       const out = {}, id = visibleOrder().find(x => sourcesData[x]), s = sourcesData[id], was = s.pickMode;
       out.noChainExpand = [...document.querySelectorAll('#connects-list .conn-row')].every(el => !chainsData[el.dataset.id] || !el.querySelector('.conn-expand'));
+      const n0 = unitRefs(id)[0].node, name0 = n0.name;
+      n0.name = 'A very long server name that would push the row wider than the screen';
       document.querySelector(`#connects-list .conn-row[data-id=${id}] .conn-expand`).click();
       const body = () => document.querySelector(`#connects-list .conn-row[data-id=${id}] .conn-body`);
       out.open = !!body() && body().querySelectorAll('.node-row').length === unitRefs(id).length;
+      const row = document.querySelector(`#connects-list .conn-row[data-id=${id}]`);
+      out.fits = row.scrollWidth <= row.clientWidth;
+      n0.name = name0;
       setRouteRowMode('priority');
       out.priority = s.pickMode === 'priority' && body().querySelectorAll('.cc-grip').length === unitRefs(id).length;
       out.order = [...body().querySelectorAll('.node-row')].map(el => el.dataset.id).join() === unitPickRefs(id).map(refKey).join();

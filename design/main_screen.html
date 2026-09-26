@@ -85,12 +85,14 @@
 input, textarea{user-select:text;-webkit-user-select:text}
 html, body, *{scrollbar-width:none;-ms-overflow-style:none}
 *::-webkit-scrollbar{display:none;width:0;height:0}
-html, body{overflow-x:hidden}
+/* One viewport, no page scroll: a mobile browser's collapsing toolbar would otherwise let the
+   whole app scroll (100vh is the viewport without the toolbar). Views scroll inside. */
+html, body{overflow:hidden;overscroll-behavior:none}
 
 body {
   background:var(--bg);
   font-family:var(--font);
-  min-height:100vh;color:var(--t1);
+  min-height:100vh;min-height:100dvh;color:var(--t1);
 }
 
 /* ── App shell (no phone-frame chrome) ── */
@@ -511,7 +513,7 @@ body {
 .conn-row.open{flex-wrap:wrap}
 .conn-expand{display:flex;align-items:center;align-self:stretch;padding:0 8px;cursor:pointer}
 .conn-row.open .conn-expand .src-chevron{transform:rotate(180deg)}
-.conn-body{flex-basis:100%;padding:0 0 10px}
+.conn-body{flex-basis:100%;min-width:0;padding:0 0 10px}
 .conn-body .seg-row{margin:0 0 4px}
 .conn-hint{margin-bottom:8px}
 .conn-body .se-nodes{margin:0}
