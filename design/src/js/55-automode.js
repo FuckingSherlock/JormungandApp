@@ -84,6 +84,7 @@ function renderAutoMode() {
   const valueBtn = (id, key, text) => `<button class="set-value" id="${id}" onclick="openIntervalDialog('${key}')">${text}${CHEVRON_R}</button>`;
   const [lo, hi] = AUTO_FAIL_AFTER, fa = autoCfg.failAfter;
 
+  document.getElementById('autoCardSub').textContent = 'Check every ' + fmtEvery(autoCfg.checkEvery);
   el.innerHTML = `
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">Switch to a faster server<div class="set-hint">Only if it is faster than the current one by at least this</div></div>

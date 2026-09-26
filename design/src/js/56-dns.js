@@ -168,6 +168,8 @@ function renderConnSettings() {
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">System proxy<div class="set-hint">Apps that follow the OS proxy setting go through the core. Also on Home</div></div>
         ${toggle(connCfg.sysProxy, 'setSysProxy(!connCfg.sysProxy)')}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — the system proxy points here; set it by hand in other apps</div></div>
+        <input class="set-input am-num port-num" id="conn-port" inputmode="numeric" value="${connCfg.port}" onchange="setProxyPort(this)"></div>
       <div class="set-row"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">While the VPN is down or reconnecting, block all traffic — nothing leaks out directly</div></div>
         ${toggle(connCfg.killSwitch, 'connCfg.killSwitch=!connCfg.killSwitch;renderConnSettings()')}</div>
     </div>

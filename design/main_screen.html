@@ -123,8 +123,6 @@ body {
 .scroll > *{flex-shrink:0}   /* short screens scroll instead of squashing cards */
 
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.row3 .nav-sub{font-size:12px}
 .row1{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .row1-right{display:flex;flex-direction:column;gap:10px}
 
@@ -241,6 +239,15 @@ body {
 .nav-icon.slate{background:rgba(var(--t2-rgb),.13)}
 .nav-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:2px}
 .nav-sub{font-size:13px;color:var(--t2)}
+/* NavCards on Home: 2 per row, small icon beside one-line title and summary */
+.row-nav{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.nav-card{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.nav-card .nav-icon{width:28px;height:28px;border-radius:7px;margin-bottom:0;flex-shrink:0}
+.nav-card .nav-icon svg{width:15px;height:15px}
+.nav-text{flex:1;min-width:0}
+.nav-card .nav-title{font-size:14px;line-height:18px;margin-bottom:0}
+.nav-card .nav-sub{font-size:12px;line-height:16px}
+.nav-card .nav-title,.nav-card .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ── Bottom nav ── */
 .bottomnav{display:flex;justify-content:space-around;align-items:center;padding:4px 0 max(6px, env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--surface)}
@@ -583,15 +590,13 @@ body {
 .dock-chevron{color:var(--t3);flex-shrink:0}
 
 /* ── AutoCard (Home): just a link to Settings → Auto mode ── */
-.auto-card{display:flex;align-items:center;gap:12px;padding:10px 14px}
-.auto-card .nav-title{flex:1;margin-bottom:0}
-.auto-card-chev{color:var(--t3);flex-shrink:0}
 
 /* ── Settings → Auto mode (#auto-settings, inside the settings scroll) ── */
 #auto-settings .set-group{margin:6px 0 4px;background:var(--card)}
 .am-label{display:flex;align-items:center;font-size:12px;color:var(--t3);padding:8px 6px 0}
 .set-input.am-num{width:56px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:rgba(255,255,255,.035);font-family:var(--mono)}
 .am-num:focus{outline:none;border-color:var(--accent)}
+.set-input.port-num{width:68px}
 .am-unit{color:var(--t2);font-size:15px;margin-left:-6px}
 .set-select{flex-shrink:0;background:var(--card-hi);color:var(--t1);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font:inherit;font-size:15px}
 .set-select:focus{outline:none;border-color:var(--accent)}
@@ -1036,43 +1041,24 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
     </div>
 
-    <!-- AutoCard: how Auto picks and keeps the connection (opens the Auto mode sheet) -->
-    <div class="card auto-card" id="autoCard" onclick="openAutoMode()">
-      <div class="nav-icon teal" style="margin-bottom:0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg>
+    <!-- NavCards, two per row: a small icon beside the title and a one-line summary.
+         Auto mode, DNS open their sheets over Home; Rules its screen. -->
+    <div class="row-nav">
+      <div class="card nav-card" id="autoCard" onclick="openAutoMode()">
+        <div class="nav-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg></div>
+        <div class="nav-text"><div class="nav-title">Auto mode</div><div class="nav-sub" id="autoCardSub"></div></div>
       </div>
-      <div class="nav-title">Auto mode</div>
-      <svg class="auto-card-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-    </div>
-
-    <!-- ROW 4: Rules · DNS · Speed Test -->
-    <div class="row3">
-      <div class="card" style="padding:14px" id="rulesCard" onclick="openRules()">
-        <div class="nav-icon amber">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linecap="round">
-            <path d="M4 6h16M4 12h16M4 18h10"/>
-          </svg>
-        </div>
-        <div class="nav-title">Rules</div>
-        <div class="nav-sub" id="rulesCardSub">3 rules · RU region</div>
+      <div class="card nav-card" id="rulesCard" onclick="openRules()">
+        <div class="nav-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
+        <div class="nav-text"><div class="nav-title">Rules</div><div class="nav-sub" id="rulesCardSub">3 rules · RU region</div></div>
       </div>
-      <div class="card" style="padding:14px" id="dnsCard" onclick="openDnsSettings()">
-        <div class="nav-icon teal">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-          </svg>
-        </div>
-        <div class="nav-title">DNS</div>
-        <div class="nav-sub" id="dnsCardSub"></div>
+      <div class="card nav-card" id="dnsCard" onclick="openDnsSettings()">
+        <div class="nav-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></div>
+        <div class="nav-text"><div class="nav-title">DNS</div><div class="nav-sub" id="dnsCardSub"></div></div>
       </div>
-      <div class="card" style="padding:14px">
-        <div class="nav-icon purple">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-          </svg>
-        </div>
-        <div class="nav-title">Speed Test</div>
-        <div class="nav-sub">Last: 312 Mbps</div>
+      <div class="card nav-card">
+        <div class="nav-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg></div>
+        <div class="nav-text"><div class="nav-title">Speed Test</div><div class="nav-sub">Last: 312 Mbps</div></div>
       </div>
     </div>
 
@@ -4250,7 +4236,15 @@ function setSegment(group, value) {
 
 /* Connection switches (Settings → Connection). System proxy is also the third switch on
    Home; on mobile it will leave Home (Android apps mostly ignore the system proxy). */
-const connCfg = { sysProxy: false, killSwitch: false };
+// port: the core's local HTTP + SOCKS5 proxy (127.0.0.1), where the system proxy points.
+const connCfg = { sysProxy: false, killSwitch: false, port: 2080 };
+const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
+function setProxyPort(input) {
+  const v = Number(input.value.trim());
+  if (/^\d+$/.test(input.value.trim()) && v >= 1024 && v <= 65535 && !PORT_RESERVED.includes(v)) connCfg.port = v;
+  else toast(PORT_RESERVED.includes(v) ? 'Port ' + v + ' is taken by the app' : 'Enter a port 1024–65535');
+  renderConnSettings();
+}
 function setSysProxy(on) {
   connCfg.sysProxy = on;
   setSegment('sys', on ? 'on' : 'off');
@@ -4343,6 +4337,7 @@ function renderAutoMode() {
   const valueBtn = (id, key, text) => `<button class="set-value" id="${id}" onclick="openIntervalDialog('${key}')">${text}${CHEVRON_R}</button>`;
   const [lo, hi] = AUTO_FAIL_AFTER, fa = autoCfg.failAfter;
 
+  document.getElementById('autoCardSub').textContent = 'Check every ' + fmtEvery(autoCfg.checkEvery);
   el.innerHTML = `
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">Switch to a faster server<div class="set-hint">Only if it is faster than the current one by at least this</div></div>
@@ -4538,6 +4533,8 @@ function renderConnSettings() {
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">System proxy<div class="set-hint">Apps that follow the OS proxy setting go through the core. Also on Home</div></div>
         ${toggle(connCfg.sysProxy, 'setSysProxy(!connCfg.sysProxy)')}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — the system proxy points here; set it by hand in other apps</div></div>
+        <input class="set-input am-num port-num" id="conn-port" inputmode="numeric" value="${connCfg.port}" onchange="setProxyPort(this)"></div>
       <div class="set-row"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">While the VPN is down or reconnecting, block all traffic — nothing leaks out directly</div></div>
         ${toggle(connCfg.killSwitch, 'connCfg.killSwitch=!connCfg.killSwitch;renderConnSettings()')}</div>
     </div>
@@ -6033,7 +6030,7 @@ function planGroup(refs, pick, chosenRef) {
 function livePlan() {
   const id = effectiveConnectId();
   if (!id || !connectEntry(id)) throw new Error('Nothing to connect — add a subscription in Nodes');
-  const base = { mixedPort: 2080, global: segState.route === 'global',
+  const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
     urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold } };
   if (chainsData[id]) {
     const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
@@ -6126,7 +6123,7 @@ const liveBackend = {
   connect() {
     return Promise.resolve().then(() => {
       const plan = livePlan();
-      if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:2080');
+      if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
       return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
         live.planSig = JSON.stringify(plan);
         if (st.warning) toast(st.warning);

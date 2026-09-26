@@ -1,13 +1,11 @@
 /* ── AutoCard (Home): just a link to Settings → Auto mode ── */
-.auto-card{display:flex;align-items:center;gap:12px;padding:10px 14px}
-.auto-card .nav-title{flex:1;margin-bottom:0}
-.auto-card-chev{color:var(--t3);flex-shrink:0}
 
 /* ── Settings → Auto mode (#auto-settings, inside the settings scroll) ── */
 #auto-settings .set-group{margin:6px 0 4px;background:var(--card)}
 .am-label{display:flex;align-items:center;font-size:12px;color:var(--t3);padding:8px 6px 0}
 .set-input.am-num{width:56px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:rgba(255,255,255,.035);font-family:var(--mono)}
 .am-num:focus{outline:none;border-color:var(--accent)}
+.set-input.port-num{width:68px}
 .am-unit{color:var(--t2);font-size:15px;margin-left:-6px}
 .set-select{flex-shrink:0;background:var(--card-hi);color:var(--t1);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font:inherit;font-size:15px}
 .set-select:focus{outline:none;border-color:var(--accent)}

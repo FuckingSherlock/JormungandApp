@@ -94,7 +94,7 @@ function planGroup(refs, pick, chosenRef) {
 function livePlan() {
   const id = effectiveConnectId();
   if (!id || !connectEntry(id)) throw new Error('Nothing to connect — add a subscription in Nodes');
-  const base = { mixedPort: 2080, global: segState.route === 'global',
+  const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
     urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold } };
   if (chainsData[id]) {
     const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
@@ -187,7 +187,7 @@ const liveBackend = {
   connect() {
     return Promise.resolve().then(() => {
       const plan = livePlan();
-      if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:2080');
+      if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
       return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
         live.planSig = JSON.stringify(plan);
         if (st.warning) toast(st.warning);

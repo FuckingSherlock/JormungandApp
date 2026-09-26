@@ -65,7 +65,15 @@ function setSegment(group, value) {
 
 /* Connection switches (Settings → Connection). System proxy is also the third switch on
    Home; on mobile it will leave Home (Android apps mostly ignore the system proxy). */
-const connCfg = { sysProxy: false, killSwitch: false };
+// port: the core's local HTTP + SOCKS5 proxy (127.0.0.1), where the system proxy points.
+const connCfg = { sysProxy: false, killSwitch: false, port: 2080 };
+const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
+function setProxyPort(input) {
+  const v = Number(input.value.trim());
+  if (/^\d+$/.test(input.value.trim()) && v >= 1024 && v <= 65535 && !PORT_RESERVED.includes(v)) connCfg.port = v;
+  else toast(PORT_RESERVED.includes(v) ? 'Port ' + v + ' is taken by the app' : 'Enter a port 1024–65535');
+  renderConnSettings();
+}
 function setSysProxy(on) {
   connCfg.sysProxy = on;
   setSegment('sys', on ? 'on' : 'off');

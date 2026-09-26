@@ -246,6 +246,29 @@ async function runChecks() {
     await p.close();
   });
 
+  await check('home nav cards: two per row, one line each, all four the same height', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      const cards = [...document.querySelectorAll('#view-home .row-nav .nav-card')].map(c => c.getBoundingClientRect());
+      return { four: cards.length === 4, pairs: cards[0].top === cards[1].top && cards[2].top === cards[3].top && cards[2].top > cards[1].bottom,
+        sameH: new Set(cards.map(c => Math.round(c.height))).size === 1, low: cards[0].height <= 56,
+        autoSub: /^Check every /.test(document.getElementById('autoCardSub').textContent) };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('settings: the proxy port is editable, bad or taken ports are refused', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      const set = v => { const i = document.getElementById('conn-port'); i.value = v; i.dispatchEvent(new Event('change')); return connCfg.port; };
+      return { ok: set('10808') === 10808, low: set('80') === 10808, taken: set('9090') === 10808, junk: set('12a') === 10808,
+        shown: document.getElementById('conn-port').value === '10808' };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
   await check('home stat cards: labels at one offset, live values never move or resize anything', async () => {
     const bad = [];
     for (const [width, big] of [[400, false], [320, true]]) {

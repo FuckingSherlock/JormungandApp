@@ -111,4 +111,13 @@
 .nav-icon.slate{background:rgba(var(--t2-rgb),.13)}
 .nav-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:2px}
 .nav-sub{font-size:13px;color:var(--t2)}
+/* NavCards on Home: 2 per row, small icon beside one-line title and summary */
+.row-nav{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.nav-card{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.nav-card .nav-icon{width:28px;height:28px;border-radius:7px;margin-bottom:0;flex-shrink:0}
+.nav-card .nav-icon svg{width:15px;height:15px}
+.nav-text{flex:1;min-width:0}
+.nav-card .nav-title{font-size:14px;line-height:18px;margin-bottom:0}
+.nav-card .nav-sub{font-size:12px;line-height:16px}
+.nav-card .nav-title,.nav-card .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
