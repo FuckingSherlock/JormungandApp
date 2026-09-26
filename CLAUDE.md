@@ -74,7 +74,7 @@ srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confir
 nodes-edit, nodes-edit-chain, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
 rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
 rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, text-large, text-large-rule,
-connections, route-pin, sys-on, sys-off.
+connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock.
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
 there for each new interaction.
 

@@ -129,6 +129,8 @@ const SHOTS = {
   'nodes-profiles': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); expandState.default = true; renderNodes(); }); await settle(p); },
   'nodes-swipe': async p => { await tab(p, 'nodes'); await p.evaluate(() => { document.getElementById('view-nodes').classList.add('swiping'); renderNodesTabs(-170); }); },
   'route-open': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); }); await settle(p); },
+  'no-auto': async p => { await p.evaluate(() => { visibleOrder().forEach(id => { connectEntry(id).inAuto = false; }); connected = false; renderConnState(); updateMainConnectCard(); toggleMain(); }); await settle(p); },
+  'no-auto-dock': async p => { await p.evaluate(() => { visibleOrder().forEach(id => { connectEntry(id).inAuto = false; }); connected = false; renderConnState(); updateMainConnectCard(); }); await settle(p); },
   'route': async p => { await p.evaluate(() => { openProfiles(); }); await settle(p); },
   'route-pin': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x] && unitRefs(x).length > 1); toggleRouteRow(id); pinRouteNode(id, refKey(unitRefs(id)[1])); }); await settle(p); },
   'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); openEditProfile('work'); confirmDeleteEntry('work'); }); await settle(p); },
@@ -422,6 +424,28 @@ async function runChecks() {
       hit.click();
       const out = { inset, hit: !!hit.closest('.lat-hit'), noPin: pinnedNode === pinnedBefore };
       toggleRouteRow(id); closeSheet('profiles');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('every entry off Auto: Auto picks nothing, the dock says so, power alerts instead of connecting', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      const ids = visibleOrder(), was = ids.map(id => connectEntry(id).inAuto);
+      ids.forEach(id => { connectEntry(id).inAuto = false; }); updateMainConnectCard();
+      const out = { none: effectiveConnectId() === null, dock: /Nothing in Auto/.test(document.getElementById('profCardName').textContent) };
+      connected = false; renderConnState(); toggleMain();   // the mockup starts connected
+      out.notConnecting = !connecting && !connected;
+      out.alert = document.getElementById('sh-actions').classList.contains('open') && /Nothing in Auto/.test(document.getElementById('actionsTitle').textContent);
+      [...document.querySelectorAll('#actions-body .menu-row')].find(el => /Open Route/.test(el.textContent)).click();
+      await new Promise(r => setTimeout(r, 400));
+      out.route = document.getElementById('sh-profiles').classList.contains('open') && routeEdit;
+      toggleEntryAuto(ids[1]);
+      out.back = effectiveConnectId() === ids[1] && !nothingInAuto();
+      out.manual = (() => { selectConnect(ids[2]); const ok = effectiveConnectId() === ids[2] && !nothingInAuto(); autoConnect = true; return ok; })();
+      ids.forEach((id, i) => { connectEntry(id).inAuto = was[i]; }); setRouteEdit(false); closeSheet('profiles'); connected = true; renderConnState(); updateMainConnectCard();
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));

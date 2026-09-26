@@ -176,7 +176,16 @@ function effectiveConnectId() {
   if (!autoConnect && entryVisible(activeConnectId) && !isBroken(activeConnectId)) return activeConnectId;
   const order = visibleOrder();
   return order.find(id => connectEntry(id).inAuto && mayWork(id))
-      || order.find(id => connectEntry(id).inAuto) || order[0];
+      || order.find(id => connectEntry(id).inAuto) || null;   // every entry off Auto: Auto picks nothing
+}
+// Auto with every Route entry switched off Auto: nothing to connect through.
+const nothingInAuto = () => autoConnect && visibleOrder().length > 0 && !visibleOrder().some(id => connectEntry(id).inAuto);
+// The alert on power / connect: says why and leads to the switches (Route in edit mode).
+function alertNothingInAuto() {
+  const close = "closeSheet('actions');";
+  openActions('Nothing in Auto', `<div class="menu-note">Every entry in Route is switched off Auto, so Auto has nothing to connect through. Turn <b>Use in Auto</b> on for at least one entry, or pick one yourself with MANUAL.</div>`
+    + menuRow(ICON.bolt, 'Open Route', close + 'openProfiles();setRouteEdit(true)')
+    + menuRow(ICON.close, 'Cancel', close));
 }
 
 function nodeSummaryHtml(n, fixed) {
@@ -393,6 +402,8 @@ function toggleEntryAuto(id) {
   e.inAuto = !e.inAuto;
   renderConnects();
   updateMainConnectCard();
+  // the tunnel is not dropped under the user: it stays on its server until they disconnect
+  if (connected && nothingInAuto()) toast('Nothing left in Auto — the connection stays until you disconnect');
 }
 
 function setAutoConnect(on) {
@@ -495,7 +506,8 @@ function updateMainConnectCard() {
   const detail = document.getElementById('profModeDetail');
   const nodeHtml = n => n ? `<span class="dock-node">${n.flag} ${esc(n.name)}</span>` : '<span class="dock-node none">no working node</span>';
   const ms = n => n && isAlive(n) ? ping(n) : null;
-  document.getElementById('profCardName').textContent = e ? e.name : '—';
+  const none = !e && nothingInAuto();
+  document.getElementById('profCardName').textContent = e ? e.name : none ? 'Nothing in Auto' : '—';
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
     : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Simple' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
@@ -503,7 +515,7 @@ function updateMainConnectCard() {
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
   let lat = null;
-  if (!e) detail.innerHTML = '';
+  if (!e) detail.innerHTML = none ? '<span class="dock-node none">turn on Use in Auto in Route</span>' : '';
   else if (chainsData[id]) {
     const c = chainsData[id], a = chainEntryNode(c), b = chainExitNode(c);
     detail.innerHTML = nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);

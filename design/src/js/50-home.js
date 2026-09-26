@@ -43,6 +43,7 @@ function toggleMain() {
     backend.disconnect().then(refreshExitIp, e => toast(e.message));
     return;
   }
+  if (nothingInAuto()) { alertNothingInAuto(); return; }
   connecting = true;
   renderConnState();
   backend.connect().then(() => { connected = true; }, e => toast(e.message))

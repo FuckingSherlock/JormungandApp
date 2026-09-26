@@ -38,7 +38,7 @@ let backend = {
   // out = where each connection really goes, exit first (the core gives 'proxy/<sid::nid>' tags).
   traffic() {
     const id = effectiveConnectId(), c = chainsData[id];
-    const out = c ? [chainExitNode(c), chainEntryNode(c)].filter(Boolean) : [unitNode(id)].filter(Boolean);
+    const out = c ? [chainExitNode(c), chainEntryNode(c)].filter(Boolean) : id ? [unitNode(id)].filter(Boolean) : [];
     const MB = 1048576, ago = s => new Date(Date.now() - s * 1000).toISOString();
     const conn = (host, port, net, via, process, downRate, down, s) =>
       ({ id: host, host, port, net, rule: via === out ? 'final' : 'ip_is_private=true => route(direct)', out: via.length ? via : ['direct'], process, down, up: down / 20 | 0, downRate, upRate: downRate / 30 | 0, start: ago(s) });

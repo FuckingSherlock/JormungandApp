@@ -97,7 +97,7 @@ function planGroup(refs, pick, chosenRef) {
 }
 function livePlan() {
   const id = effectiveConnectId();
-  if (!id || !connectEntry(id)) throw new Error('Nothing to connect — add a subscription in Nodes');
+  if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
   const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
     urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold } };
   if (chainsData[id]) {
