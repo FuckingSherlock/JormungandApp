@@ -433,10 +433,10 @@ body {
 .conn-main{flex:1;min-width:0;padding:10px 0;cursor:pointer}
 .conn-name{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--t1);min-width:0}
 .conn-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.conn-sub{display:flex;align-items:center;gap:4px;margin-top:3px;font-size:13px;color:var(--t2);white-space:nowrap;overflow:hidden}
+.conn-sub{display:flex;align-items:baseline;gap:4px;margin-top:3px;font-size:13px;color:var(--t2);white-space:nowrap;overflow:hidden}
 .conn-sub .lat{min-width:0;padding:0;cursor:default}
 .conn-node{min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.3}
-.conn-flag{font-size:11px;flex-shrink:0}
+.conn-flag{font-size:11px;flex-shrink:0;margin-right:4px}
 .cap-ico svg{width:11px;height:11px;vertical-align:-1px}
 .conn-arrow{color:var(--t3)}
 .conn-tag{flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:4px;background:rgba(var(--accent-rgb),.15);color:var(--accent)}
@@ -811,7 +811,8 @@ body {
 /* the ping tap covers the row's whole height and its right edge, so a tap just above or
    below the ms never lands on the row (which would pick the server) */
 .lat-hit{align-self:stretch;display:flex;align-items:center;justify-content:flex-end;margin:-10px -14px -10px -4px;padding:10px 14px 10px 4px;cursor:pointer;flex-shrink:0}
-.node-flag{font-size:16px;width:20px;text-align:center;flex-shrink:0}
+/* the flag is the name's first character: a long name wraps under it, not beside it */
+.node-flag{font-size:16px;line-height:1;margin-right:7px}
 .node-name{flex:1;min-width:0;font-size:14px;color:var(--t1);overflow-wrap:anywhere;line-height:1.3}
 .node-proto{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
 .lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:60px;text-align:right;flex-shrink:0}
@@ -2307,7 +2308,7 @@ function effectiveConnectId() {
 
 function nodeSummaryHtml(n, fixed) {
   if (!n) return `<span>${fixed ? 'Fixed node not set' : 'No working nodes'}</span>`;
-  return `<span class="conn-flag">${n.flag}</span><span class="conn-node">${esc(n.name)}</span>${latHtml(n)}`;
+  return `<span class="conn-node"><span class="conn-flag">${n.flag}</span>${esc(n.name)}</span>${latHtml(n)}`;
 }
 
 function entrySummaryHtml(id) {
@@ -2357,8 +2358,8 @@ function routeRowBodyHtml(id) {
   const pin = pinnedRef(id);
   const rows = refs.map(r => `<div class="node-row ps-node on ${pin && refKey(pin) === refKey(r) ? 'pinned' : ''}" data-id="${refKey(r)}" onclick="pinRouteNode('${id}','${refKey(r)}',event)" title="Use only this server (Manual)">
       ${priority && routeEdit ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div>` : ''}${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>
       <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');
@@ -2736,8 +2737,8 @@ function goneBlockHtml(ctx, refs, isOn = null, action = '', rowClick = null) {
   if (!refs.length) return '';
   const open = goneOpen.has(ctx);
   const rows = open ? refs.map(r => `<div class="node-row gone ${isOn ? 'pick' : ''} ${isOn && isOn(r) ? 'on' : ''} ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>
       <span class="lat none gone-left ${goneLeftDays(r.node) <= 3 ? 'soon' : ''}" title="Removed ${timeAgo(r.node.goneAt)}">${goneLeftDays(r.node)} d left</span>
     </div>`).join('') : '';
@@ -2830,8 +2831,8 @@ function renderSourceCard(id, q) {
   // View: tap a server = its menu, off ones dimmed. Edit: framed = in use, tap = on / off.
   const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row ${nodesEdit ? 'pick ' + (on ? 'on' : 'disabled') : on ? 'tap' : 'disabled tap'}" data-nid="${n.id}"
       onclick="${nodesEdit ? 'toggleNodeEnabled' : 'openNodeActions'}('${id}','${n.id}')" title="${nodesEdit ? 'Tap: on / off' : 'Tap: menu'}">
-      <span class="node-flag">${n.flag}</span>
-      <span class="node-name">${esc(n.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span>
       <span class="node-proto">${protoLabel(n)}</span>
       <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`; }).join('');
@@ -3261,8 +3262,8 @@ function entryNowHtml(id) {
 
 function entryNodeRowsHtml(refs, now) {
   return refs.map(r => `<div class="node-row tap ${r.node === now ? 'now' : ''}" onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
       <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`).join('')
     || '<div class="entry-empty">No working servers</div>';
 }
@@ -3274,8 +3275,8 @@ function chainEditRowsHtml(id, side) {
   const refs = side === 'in' || c.exitMode !== 'priority' ? byPing(side === 'in' ? unitRefs(c.inId) : chainExitOrder(c), r => r.node) : chainExitOrder(c);
   return refs.map(r => { const k = refKey(r), on = !off.includes(k);
     return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-key="${k}" onclick="toggleChainNodeIn('${id}','${side}','${k}')" title="Tap: on / off in this chain">
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
       <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`; }).join('')
     || '<div class="entry-empty">No working servers</div>';
 }
@@ -4182,7 +4183,7 @@ function renderTargetPicker() {
     const rows = open ? (hit(s.name) ? s.nodes : nodes).map(n => {
       const t = 'node:' + sid + '::' + n.id, off = isNodeDisabled(s, n.id);
       return `<div class="node-row tap ${t === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" onclick="pickTarget('${t}')">
-        <span class="node-flag">${n.flag}</span><span class="node-name">${esc(n.name)}</span><span class="node-proto">${protoLabel(n)}</span>${latHtml(n)}${t === tpCurrent ? TP_CHECK : ''}</div>`;
+        <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span><span class="node-proto">${protoLabel(n)}</span>${latHtml(n)}${t === tpCurrent ? TP_CHECK : ''}</div>`;
     }).join('') : '';
     const chevron = `<button class="icon-btn ghost" onclick="event.stopPropagation();tpToggle('${sid}')" title="Pick one server">
       <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${open ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg></button>`;
@@ -5057,8 +5058,8 @@ function renderCreateProfileSources() {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
       return `<div class="node-row ps-node pick ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
-        <span class="node-flag">${n.flag}</span>
-        <span class="node-name">${esc(n.name)}</span>
+        
+        <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span>
         <span class="node-proto">${protoLabel(n)}</span>
         <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
@@ -5090,8 +5091,8 @@ function renderCpOrder() {
     : 'The profile connects through the fastest of its servers.';
   document.getElementById('cp-order').innerHTML = !priority ? '' : orderRefs(cpDraftRefs(), cpPickOrder).map((r, i) => `<div class="node-row ps-node static" data-id="${refKey(r)}">
       <div class="drag-handle cc-grip" onpointerdown="startCpOrderDrag(event,'${refKey(r)}')">${GRIP_SVG}</div><span class="cc-rank">${i + 1}</span>
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
       <span class="node-proto">${esc(sourcesData[r.sid].name)}</span>
       <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('') || '<div class="route-empty">Pick servers above</div>';
@@ -5266,14 +5267,14 @@ function renderChainPicker(elId, side) {
     const nodes = open ? list.map(r => {
       const { sid, node } = r, key = refKey(r);
       const lat = `<span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>`;
-      if (!active) return `<div class="node-row static"><span class="node-flag">${node.flag}</span><span class="node-name">${esc(node.name)}</span><span class="node-proto">${protoLabel(node)}</span>${lat}</div>`;
+      if (!active) return `<div class="node-row static"><span class="node-name"><span class="node-flag">${node.flag}</span>${esc(node.name)}</span><span class="node-proto">${protoLabel(node)}</span>${lat}</div>`;
       const isOn = !off.includes(key);
       const grip = priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startExitDrag(event,'${key}')">${GRIP_SVG}</div>` : '';
       const num = priority && isOn ? `<span class="cc-rank">${++rank}</span>` : priority ? '<span class="cc-rank"></span>' : '';
       return `<div class="node-row ps-node pick ${isOn ? 'on' : ''}" data-id="${key}" onclick="toggleChainNode('${side}','${key}')">
         ${grip}${num}
-        <span class="node-flag">${node.flag}</span>
-        <span class="node-name">${esc(node.name)}</span>
+        
+        <span class="node-name"><span class="node-flag">${node.flag}</span>${esc(node.name)}</span>
         <span class="node-proto">${protoLabel(node)}</span>${lat}
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
@@ -5385,7 +5386,7 @@ function renderChainTest() {
     const views = [['pairs', 'Pairs'], ['entry', 'By entry'], ['exit', 'By exit']];
     const chips = `<div class="chip-row route-views">${views.map(([k, l]) =>
       `<div class="chip ${t.view === k ? 'active' : ''}" onclick="chainTest.view='${k}';chainTest.showAll=false;renderChainTest()">${l}</div>`).join('')}</div>`;
-    const end = n => `<span class="route-end"><span class="node-flag">${n.flag}</span><span class="node-name">${esc(n.name)}</span></span>`;
+    const end = n => `<span class="route-end"><span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span></span>`;
     const many = (k, word) => `<span class="route-end route-count">${k} ${word}</span>`;
     const arrow = '<span class="conn-arrow">→</span>';
     let rows;
@@ -5546,8 +5547,8 @@ function renderSourceEntry() {
     const off = isNodeOff(s, n.id);
     return `<div class="node-row ps-node pick ${off ? '' : 'on'}" data-id="${seId}::${n.id}" onclick="toggleSourceEntryNode('${n.id}')">
       ${priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startSourceEntryDrag(event,'${seId}::${n.id}')">${GRIP_SVG}</div><span class="cc-rank">${off ? '' : ++rank}</span>` : ''}
-      <span class="node-flag">${n.flag}</span>
-      <span class="node-name">${esc(n.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span>
       <span class="node-proto">${protoLabel(n)}</span>
       <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${seId}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`;

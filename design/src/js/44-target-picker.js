@@ -62,7 +62,7 @@ function renderTargetPicker() {
     const rows = open ? (hit(s.name) ? s.nodes : nodes).map(n => {
       const t = 'node:' + sid + '::' + n.id, off = isNodeDisabled(s, n.id);
       return `<div class="node-row tap ${t === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" onclick="pickTarget('${t}')">
-        <span class="node-flag">${n.flag}</span><span class="node-name">${esc(n.name)}</span><span class="node-proto">${protoLabel(n)}</span>${latHtml(n)}${t === tpCurrent ? TP_CHECK : ''}</div>`;
+        <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span><span class="node-proto">${protoLabel(n)}</span>${latHtml(n)}${t === tpCurrent ? TP_CHECK : ''}</div>`;
     }).join('') : '';
     const chevron = `<button class="icon-btn ghost" onclick="event.stopPropagation();tpToggle('${sid}')" title="Pick one server">
       <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${open ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg></button>`;

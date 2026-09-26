@@ -92,8 +92,8 @@ function goneBlockHtml(ctx, refs, isOn = null, action = '', rowClick = null) {
   if (!refs.length) return '';
   const open = goneOpen.has(ctx);
   const rows = open ? refs.map(r => `<div class="node-row gone ${isOn ? 'pick' : ''} ${isOn && isOn(r) ? 'on' : ''} ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>
       <span class="lat none gone-left ${goneLeftDays(r.node) <= 3 ? 'soon' : ''}" title="Removed ${timeAgo(r.node.goneAt)}">${goneLeftDays(r.node)} d left</span>
     </div>`).join('') : '';
@@ -186,8 +186,8 @@ function renderSourceCard(id, q) {
   // View: tap a server = its menu, off ones dimmed. Edit: framed = in use, tap = on / off.
   const nodeRows = sortedNodes(nodes).map(n => { const on = !isNodeDisabled(s, n.id); return `<div class="node-row ${nodesEdit ? 'pick ' + (on ? 'on' : 'disabled') : on ? 'tap' : 'disabled tap'}" data-nid="${n.id}"
       onclick="${nodesEdit ? 'toggleNodeEnabled' : 'openNodeActions'}('${id}','${n.id}')" title="${nodesEdit ? 'Tap: on / off' : 'Tap: menu'}">
-      <span class="node-flag">${n.flag}</span>
-      <span class="node-name">${esc(n.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span>
       <span class="node-proto">${protoLabel(n)}</span>
       <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`; }).join('');

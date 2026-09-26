@@ -119,8 +119,8 @@ function entryNowHtml(id) {
 
 function entryNodeRowsHtml(refs, now) {
   return refs.map(r => `<div class="node-row tap ${r.node === now ? 'now' : ''}" onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
       <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`).join('')
     || '<div class="entry-empty">No working servers</div>';
 }
@@ -132,8 +132,8 @@ function chainEditRowsHtml(id, side) {
   const refs = side === 'in' || c.exitMode !== 'priority' ? byPing(side === 'in' ? unitRefs(c.inId) : chainExitOrder(c), r => r.node) : chainExitOrder(c);
   return refs.map(r => { const k = refKey(r), on = !off.includes(k);
     return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-key="${k}" onclick="toggleChainNodeIn('${id}','${side}','${k}')" title="Tap: on / off in this chain">
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
       <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`; }).join('')
     || '<div class="entry-empty">No working servers</div>';
 }

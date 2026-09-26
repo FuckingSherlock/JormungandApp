@@ -181,7 +181,7 @@ function effectiveConnectId() {
 
 function nodeSummaryHtml(n, fixed) {
   if (!n) return `<span>${fixed ? 'Fixed node not set' : 'No working nodes'}</span>`;
-  return `<span class="conn-flag">${n.flag}</span><span class="conn-node">${esc(n.name)}</span>${latHtml(n)}`;
+  return `<span class="conn-node"><span class="conn-flag">${n.flag}</span>${esc(n.name)}</span>${latHtml(n)}`;
 }
 
 function entrySummaryHtml(id) {
@@ -231,8 +231,8 @@ function routeRowBodyHtml(id) {
   const pin = pinnedRef(id);
   const rows = refs.map(r => `<div class="node-row ps-node on ${pin && refKey(pin) === refKey(r) ? 'pinned' : ''}" data-id="${refKey(r)}" onclick="pinRouteNode('${id}','${refKey(r)}',event)" title="Use only this server (Manual)">
       ${priority && routeEdit ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div>` : ''}${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>
       <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');

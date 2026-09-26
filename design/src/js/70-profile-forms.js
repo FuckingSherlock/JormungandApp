@@ -85,8 +85,8 @@ function renderCreateProfileSources() {
       const key = id + '::' + n.id;
       const on = state === 'all' || cpNodes.has(key);
       return `<div class="node-row ps-node pick ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
-        <span class="node-flag">${n.flag}</span>
-        <span class="node-name">${esc(n.name)}</span>
+        
+        <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span>
         <span class="node-proto">${protoLabel(n)}</span>
         <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
@@ -118,8 +118,8 @@ function renderCpOrder() {
     : 'The profile connects through the fastest of its servers.';
   document.getElementById('cp-order').innerHTML = !priority ? '' : orderRefs(cpDraftRefs(), cpPickOrder).map((r, i) => `<div class="node-row ps-node static" data-id="${refKey(r)}">
       <div class="drag-handle cc-grip" onpointerdown="startCpOrderDrag(event,'${refKey(r)}')">${GRIP_SVG}</div><span class="cc-rank">${i + 1}</span>
-      <span class="node-flag">${r.node.flag}</span>
-      <span class="node-name">${esc(r.node.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
       <span class="node-proto">${esc(sourcesData[r.sid].name)}</span>
       <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('') || '<div class="route-empty">Pick servers above</div>';
@@ -294,14 +294,14 @@ function renderChainPicker(elId, side) {
     const nodes = open ? list.map(r => {
       const { sid, node } = r, key = refKey(r);
       const lat = `<span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>`;
-      if (!active) return `<div class="node-row static"><span class="node-flag">${node.flag}</span><span class="node-name">${esc(node.name)}</span><span class="node-proto">${protoLabel(node)}</span>${lat}</div>`;
+      if (!active) return `<div class="node-row static"><span class="node-name"><span class="node-flag">${node.flag}</span>${esc(node.name)}</span><span class="node-proto">${protoLabel(node)}</span>${lat}</div>`;
       const isOn = !off.includes(key);
       const grip = priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startExitDrag(event,'${key}')">${GRIP_SVG}</div>` : '';
       const num = priority && isOn ? `<span class="cc-rank">${++rank}</span>` : priority ? '<span class="cc-rank"></span>' : '';
       return `<div class="node-row ps-node pick ${isOn ? 'on' : ''}" data-id="${key}" onclick="toggleChainNode('${side}','${key}')">
         ${grip}${num}
-        <span class="node-flag">${node.flag}</span>
-        <span class="node-name">${esc(node.name)}</span>
+        
+        <span class="node-name"><span class="node-flag">${node.flag}</span>${esc(node.name)}</span>
         <span class="node-proto">${protoLabel(node)}</span>${lat}
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
@@ -413,7 +413,7 @@ function renderChainTest() {
     const views = [['pairs', 'Pairs'], ['entry', 'By entry'], ['exit', 'By exit']];
     const chips = `<div class="chip-row route-views">${views.map(([k, l]) =>
       `<div class="chip ${t.view === k ? 'active' : ''}" onclick="chainTest.view='${k}';chainTest.showAll=false;renderChainTest()">${l}</div>`).join('')}</div>`;
-    const end = n => `<span class="route-end"><span class="node-flag">${n.flag}</span><span class="node-name">${esc(n.name)}</span></span>`;
+    const end = n => `<span class="route-end"><span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span></span>`;
     const many = (k, word) => `<span class="route-end route-count">${k} ${word}</span>`;
     const arrow = '<span class="conn-arrow">→</span>';
     let rows;

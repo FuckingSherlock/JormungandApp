@@ -374,8 +374,30 @@ async function runChecks() {
       const name = row.querySelector('.node-name'), lat = row.querySelector('.lat');
       const out = { sign: !!lat.querySelector('svg') && !/timeout/.test(lat.textContent) && lat.classList.contains('bad'),
         wraps: name.getClientRects().length && name.offsetHeight > parseFloat(getComputedStyle(name).lineHeight) * 1.5 && name.scrollWidth <= name.clientWidth,
-        fits: row.scrollWidth <= row.clientWidth };
+        fits: row.scrollWidth <= row.clientWidth,
+        flagInName: !!name.querySelector('.node-flag') && name.firstElementChild.classList.contains('node-flag') };
       n.name = was; renderNodes();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('route: a long node name wraps under its flag, the header ms stays on its first line', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      openProfiles(); setRouteEdit(false);
+      const id = visibleOrder().find(x => sourcesData[x] && unitNode(x)), n = unitNode(id), was = n.name;
+      n.name = 'RU-SPB ➡️ Нидерланды ➡️ WARP and a long tail that wraps twice';
+      renderConnects(); toggleRouteRow(id);
+      await new Promise(r => setTimeout(r, 600));
+      const row = document.querySelector(`#connects-list .conn-row[data-id="${id}"]`);
+      const node = row.querySelector('.conn-sub .conn-node'), lat = row.querySelector('.conn-sub .lat').getBoundingClientRect();
+      const lines = node.getClientRects(), first = lines[0];
+      const nr = [...row.querySelectorAll('.conn-body .node-name')].find(el => el.textContent.includes('long tail'));
+      const out = { wraps: node.offsetHeight > 30, flagInName: !!node.querySelector('.conn-flag') && !!nr && nr.firstElementChild.classList.contains('node-flag'),
+        msFirstLine: lat.top >= first.top - 3 && lat.bottom <= first.bottom + 3 };
+      n.name = was; toggleRouteRow(id);
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
@@ -545,7 +567,7 @@ async function runChecks() {
     expect(!(await page.isVisible('#nodeSearchBar')), 'search bar visible before opening');
     await page.click('#nodeSearchBtn');
     await page.keyboard.type('tokyo');
-    const rows = await page.$$eval('.node-row .node-name', els => els.map(e => e.textContent));
+    const rows = await page.$$eval('.node-row .node-name', els => els.map(e => e.lastChild.textContent));
     expect(rows.length && rows.every(r => /tokyo/i.test(r)), 'filter: ' + rows.join(','));
     await page.click('#nodeSearchBar button');
     expect(!(await page.isVisible('#nodeSearchBar')) && (await page.inputValue('#nodeSearch')) === '', 'not cleared/closed');

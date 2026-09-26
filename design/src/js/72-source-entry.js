@@ -41,8 +41,8 @@ function renderSourceEntry() {
     const off = isNodeOff(s, n.id);
     return `<div class="node-row ps-node pick ${off ? '' : 'on'}" data-id="${seId}::${n.id}" onclick="toggleSourceEntryNode('${n.id}')">
       ${priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startSourceEntryDrag(event,'${seId}::${n.id}')">${GRIP_SVG}</div><span class="cc-rank">${off ? '' : ++rank}</span>` : ''}
-      <span class="node-flag">${n.flag}</span>
-      <span class="node-name">${esc(n.name)}</span>
+      
+      <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span>
       <span class="node-proto">${protoLabel(n)}</span>
       <span class="lat-hit" onclick="event.stopPropagation();testLatency([['${seId}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`;
