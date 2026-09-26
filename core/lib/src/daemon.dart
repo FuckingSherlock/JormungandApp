@@ -4,17 +4,19 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'config.dart';
+import 'device.dart';
 import 'exitip.dart';
-import 'fetch.dart';
 import 'logbook.dart';
 import 'manual.dart';
-import 'merge.dart';
 import 'node.dart';
 import 'parse/links.dart';
+import 'rulesets.dart';
 import 'runtime.dart';
 import 'share.dart';
+import 'state.dart';
 import 'sysproxy.dart';
 import 'traffic.dart';
+import 'updater.dart';
 
 /// jormd: the core behind a local HTTP API, so the HTML mockup can drive it as the
 /// app's UI while there is no Flutter app. The mockup keeps its own state (sources,
@@ -27,7 +29,8 @@ import 'traffic.dart';
 class Daemon {
   Daemon({required this.singBox, required this.dataDir, required this.uiFile, this.lanHosts = const {}})
       : main = SingBoxProcess(singBox, p.join(dataDir, 'run', 'main')),
-        sysProxy = SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))) {
+        sysProxy = SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))),
+        ruleSets = RuleSetCache(p.join(dataDir, 'rulesets')) {
     main.onLog = log.singBox;
   }
 
@@ -37,16 +40,23 @@ class Daemon {
   final Set<String> lanHosts;
   final SingBoxProcess main;
   final SystemProxy sysProxy;
+  final RuleSetCache ruleSets;
   static const clashPort = 9090;
 
   /// sing-box output and the core's own notes (the Logs tab).
   final log = LogBook();
 
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
+  late final store = SnapshotStore(_snapshot);
+  // Subscriptions update themselves on their periods, also with the UI closed.
+  late final updater = SubscriptionUpdater(store: store, hwid: () => _hwid, proxyPort: () => main.running ? _mixedPort : null);
+  late final Future<Map<String, String>> _hwid = deviceHeaders(dataDir);
   String? _error;
   String? _warning;
   int _pingSeq = 0;
   int _mixedPort = 2080;
+  int? _tunnelPort; // tunnel-in: always through the tunnel (exit check, lists via VPN)
+  int _connectSeq = 0;
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
   Map<String, dynamic>? _exit;
@@ -56,9 +66,11 @@ class Daemon {
     await Directory(dataDir).create(recursive: true);
     await sysProxy.restore(); // left set by a crash
     _recheckExit(); // the direct IP, shown on Home before any connect
+    updater.start();
   }
 
   Future<void> shutdown() async {
+    updater.stop();
     await main.stop();
     await sysProxy.restore();
   }
@@ -132,14 +144,14 @@ class Daemon {
   }
 
   Future<Map<String, dynamic>> _state() async => {
-        'snapshot': _snapshot.existsSync() ? jsonDecode(await _snapshot.readAsString()) : null,
+        'snapshot': await store.read(),
         'status': await _status(),
       };
 
+  // A source the timer updated after the UI last looked keeps the core's server fields
+  // (state.dart).
   Future<Map<String, dynamic>> _saveState(Map<String, dynamic> body) async {
-    final tmp = File('${_snapshot.path}.tmp');
-    await tmp.writeAsString(jsonEncode(body['snapshot']));
-    await tmp.rename(_snapshot.path);
+    await store.save((body['snapshot'] as Map?)?.cast<String, dynamic>());
     return {'ok': true};
   }
 
@@ -163,6 +175,7 @@ class Daemon {
         'error': _error,
         'warning': _warning,
         'exit': _exit,
+        'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
       };
 
   /// Asks where traffic leaves: through the tunnel after every (re)connect, directly at
@@ -179,7 +192,7 @@ class Daemon {
     Future<void> attempt() async {
       final sw = Stopwatch()..start();
       try {
-        final e = await checkExitIp(direct ? null : _mixedPort);
+        final e = await checkExitIp(direct ? null : _tunnelPort ?? _mixedPort);
         if (seq == _exitSeq) _exit = {...e, 'direct': direct, 'at': DateTime.now().millisecondsSinceEpoch};
       } catch (e) {
         if (seq != _exitSeq) return;
@@ -195,21 +208,19 @@ class Daemon {
     attempt();
   }
 
-  /// body: {url, userAgent, strategy, discoveredAt, prev: {nodes, gone}}
+  /// body: {sid, source: {url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid,
+  /// filter, channel}, rediscover} → {patch, title, notModified, via} (updater.dart).
   Future<Map<String, dynamic>> _fetch(Map<String, dynamic> body) async {
-    final prev = (body['prev'] as Map?) ?? const {};
-    List<Map<String, dynamic>> maps(Object? l) => [for (final x in (l as List? ?? const [])) (x as Map).cast<String, dynamic>()];
-    final prevNodes = maps(prev['nodes']);
-    final r = await fetchSubscription(
-      body['url'] as String,
-      userAgent: (body['userAgent'] as String?) ?? 'Auto',
-      strategy: maps(body['strategy']),
-      discoveredAt: (body['discoveredAt'] as num?)?.toInt() ?? 0,
-      prevCount: prevNodes.length,
+    final s = ((body['source'] as Map?) ?? const {}).cast<String, dynamic>();
+    return updater.guard(
+      body['sid'] as String?,
+      () async => updateSubscription(
+        s,
+        hwid: s['hwid'] == true ? await _hwid : null,
+        proxyPort: main.running ? _mixedPort : null,
+        rediscover: body['rediscover'] == true,
+      ),
     );
-    if (r.notModified) return r.toJson();
-    final m = mergeUpdate(prevNodes, maps(prev['gone']), r.nodes);
-    return {...r.toJson(), 'nodes': m.nodes, 'gone': m.gone};
   }
 
   Map<String, dynamic> _parse(Map<String, dynamic> body) =>
@@ -220,17 +231,32 @@ class Daemon {
     final plan = (body['plan'] as Map).cast<String, dynamic>();
     _error = null;
     _warning = null;
+    final seq = ++_connectSeq;
     try {
-      await main.start(buildConfig(plan, clashPort: clashPort), clashPort: clashPort);
+      // rule lists on disk first; ones via VPN that are missing wait for this tunnel
+      final lists = await ruleSets.ensureFor(plan, proxyPort: main.running ? _tunnelPort : null);
+      final warnings = <String>[];
+      final tunnelPort = await freePort();
+      await main.start(buildConfig(plan, clashPort: clashPort, tunnelPort: tunnelPort, ruleSetFiles: lists.files, warnings: warnings),
+          clashPort: clashPort);
       _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
+      _tunnelPort = tunnelPort;
       _recheckExit();
       if (body['systemProxy'] == true) {
-        _warning = await sysProxy.enable((plan['mixedPort'] as num?)?.toInt() ?? 2080);
+        warnings.add(await sysProxy.enable((plan['mixedPort'] as num?)?.toInt() ?? 2080) ?? '');
       } else {
         await sysProxy.restore();
       }
+      _warning = joinWarnings(warnings);
       log.note('info', 'Connected: ${plan['kind']}, proxy on 127.0.0.1:$_mixedPort${body['systemProxy'] == true ? ', system proxy on' : ''}');
       if (_warning != null) log.note('warn', _warning!);
+      // through the tunnel now: missing lists (then a reconnect picks them up), stale ones
+      // (replaced in place, sing-box reloads a local rule set itself)
+      ruleSets.ensureFor(plan, proxyPort: _tunnelPort, refresh: true).then((now) {
+        if (seq == _connectSeq && main.running && now.files.keys.any((t) => !lists.files.containsKey(t))) {
+          _connect(body).then((_) {}, onError: (_) {});
+        }
+      });
     } catch (e) {
       _error = '$e';
       log.note('error', 'Connect failed: $e');
@@ -241,6 +267,8 @@ class Daemon {
   }
 
   Future<Map<String, dynamic>> _disconnect() async {
+    _connectSeq++;
+    _tunnelPort = null;
     await main.stop();
     log.note('info', 'Disconnected');
     await sysProxy.restore();

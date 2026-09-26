@@ -13,11 +13,15 @@
 | Формат | Детект | Типичный UA |
 |--------|--------|-------------|
 | sing-box JSON | `Content-Type: application/json` или тело начинается с `{` + есть `"outbounds"` | `sing-box/1.x.x` |
-| Clash/Meta YAML | `Content-Type: text/yaml` или тело начинается с `proxies:` | `mihomo/1.x.x`, `clash-verge` |
-| Base64 URI-list | тело — валидный base64, после decode строки `vmess://`/`vless://`/`trojan://`/`ss://` | `v2ray`, `NekoBox` |
+| Clash/Meta YAML | `Content-Type: text/yaml` или строка `proxies:` в начале строки | `mihomo/1.x.x`, `clash-verge` |
+| Base64 URI-list | тело — валидный base64, после decode строки `vmess://`/`vless://`/`trojan://`/`ss://` | `v2rayN`, `NekoBox` |
 | URI-list (plain) | строки начинаются с известных схем без base64 | любой |
 
-Формат определяется **по телу ответа**, не по UA — это позволяет слать один запрос и знать что получили.
+Формат определяется **по телу ответа** (с подсказкой `Content-Type`), не по UA — это позволяет
+слать один запрос и знать что получили. Base64, внутри которого sing-box JSON или Clash YAML,
+уходит в нужный парсер. Определённый формат приходит в UI для чипа на карточке
+(`source.format`: `sing-box` / `clash` / `base64` / `links`; при нескольких UA — формат первого
+UA, давшего ноды).
 
 ---
 
@@ -26,7 +30,7 @@
 ### Первое добавление подписки
 
 1. Слать **параллельно** запросы с тремя UA:
-   - `sing-box/1.13.0` — нативный формат, часто содержит Reality/Hysteria2
+   - `sing-box/1.14.2` — нативный формат, часто содержит Reality/Hysteria2
    - `mihomo/1.19.28` — Clash.meta YAML, широко поддерживается
    - `ClashMeta` — запасной вариант clash
 2. Для каждого ответа: детектировать формат → парсить → получить список нод
@@ -34,7 +38,7 @@
 4. Записать в кеш подписки:
    ```
    subscription.ua_strategy = [
-     { ua: "sing-box/1.13.0", unique_node_count: 47, etag: "abc123" },
+     { ua: "sing-box/1.14.2", unique_node_count: 47, etag: "abc123" },
      { ua: "mihomo/1.19.28",  unique_node_count: 12, etag: "def456" },  // 12 нод которых нет в sing-box ответе
    ]
    ```
@@ -53,38 +57,122 @@
    удаляются, а уходят в `source.gone[]` вместе с выбором пользователя; вернувшиеся —
    обратно в список с прежними настройками. Подробно — `connect-model.md` → «Пропавшие ноды».
    Пропавшие старше 15 дней (у каждой свой `goneAt`) вычищаются вместе с настройками.
-6. Период обновления: `source.updateInterval` — `'auto'` (по умолчанию, берётся глобальный
-   из Auto mode, 12 ч) или своё число часов (0 = вручную).
+6. Период обновления: `source.updateInterval` — `'auto'` (по умолчанию) или своё число часов
+   (0 = вручную). `'auto'` = период провайдера из `profile-update-interval` (не чаще раза в
+   час), если он его прислал, иначе глобальный из Auto mode (12 ч). Глобальный 0 выключает
+   автообновление всех подписок, в том числе `'auto'` с периодом провайдера.
+
+ETag / Last-Modified шлются, только если запись стратегии сделана этой же версией парсера
+(`parser`, сейчас 3) и с тем же фильтром (`filter`): иначе 304 оставил бы список, собранный
+по старым правилам. На 304 `subscription-userinfo` всё равно читается. Смешанный ответ (одни
+UA — 304, другие — новый список) переспрашивает UA с 304 без условных заголовков, чтобы
+собрать список целиком.
 
 ### Пересмотр стратегии
 
 Пересматривать стратегию (заново делать discovery) при:
-- Ручном запросе пользователя ("обновить со всеми UA")
-- Количество нод в ответе упало >20% от предыдущего — возможно сервер сменил поведение
+- Ручном запросе пользователя: ⋮ подписки → «Update with all user agents» (есть только при UA `Auto`)
+- Смене URL, User-Agent или HWID в форме подписки: UI сбрасывает `uaStrategy` (с ETag) и
+  `discoveredAt` и сразу запрашивает заново. Новый фильтр — просто полный запрос
+- Количество нод в ответе (до фильтра) упало >20% от предыдущего — возможно сервер сменил поведение
 - Прошло >7 дней с последнего discovery
+
+### Автообновление (ядро)
+
+Подписки обновляет ядро, по своему таймеру (`core/lib/src/updater.dart`), и при закрытом UI:
+раз в минуту (первый раз — через 20 с после старта) смотрит снимок `ui-state.json` и берёт
+включённые подписки с URL, у которых `updatedAt + период` прошёл. Обновление то же, что
+ручное (fetch + merge с `gone`), по одной подписке за раз. Неудача — следующая попытка через
+30 мин, ошибка в лог и в `lastError` подписки (`{msg, at}`, `updatedAt` не меняется; карточка
+показывает её с Retry, connect-model.md → «Подписка не загрузилась»); удачное обновление
+`lastError` снимает.
+
+Конфликты с правками в UI:
+- ядро пишет в снимок только **серверные поля** источника: `nodes`, `gone`, `count`,
+  `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`,
+  `supportUrl`, `announce`, `updatedAt`, `lastError`. Поля пользователя (имя, URL, UA, фильтр, off-списки,
+  переключатели) — никогда;
+- результат отбрасывается, если за время запроса в UI поменяли URL / UA / фильтр / HWID,
+  обновили или удалили подписку (`url`, `userAgent`, `filter`, `hwid`, `gone`, `updatedAt`
+  сверяются с тем, что было в начале);
+- подписку, которую сейчас обновляет UI, таймер пропускает;
+- `updatedAt` — время ядра и версия серверных полей. Сохранение из UI со старой копией
+  подписки (тот же URL, `updatedAt` старше) оставляет серверные поля ядра, остальное берёт из
+  UI; более новая копия из UI побеждает целиком;
+- `/api/status` отдаёт `sourcesRev`, он растёт с каждым обновлением по таймеру. UI (раз в 5 с)
+  видит новый `sourcesRev`, забирает снимок и копирует серверные поля подписок, которые ядро
+  обновило позже него, а при том же `updatedAt` — более новый `lastError` (неудача таймера).
+  Дальше — как после ручного обновления: чистка `gone` старше 15 дней,
+  пинг, если включён «Test latency after update» (он идёт, только пока UI открыт).
+
+«Reconnect after update» (`source.reloadAfterUpdate`): выключен — обновление не перезапускает
+sing-box, новые серверы попадут в конфиг при следующем переподключении по другой причине
+(сменили точку входа, выключили сервер…). Включён — если обновление меняет план подключения,
+UI переподключается сразу.
+
+### Заголовки ответа
+
+| Заголовок | Куда |
+|-----------|------|
+| `subscription-userinfo` (`upload=; download=; total=; expire=`) | `usage` (ГБ) и `expire`; числа бывают дробными и в e-нотации; `expire` > 1e11 — в мс; читается и на 304 |
+| `profile-title` (можно `base64:…`) | имя новой подписки, если пользователь его не задал |
+| `content-disposition` (`filename*=` / `filename=`) | запасное имя (без `.yaml` / `.json` / `.txt` / `.conf`) |
+| `profile-update-interval` (часы) | `providerInterval` → период для `'auto'` |
+| `profile-web-page-url` | `webPage` → «Open website» в ⋮, если пользователь не задал свой сайт |
+| `support-url` | `supportUrl` → пункт «Support» в ⋮ |
+| `announce` (можно `base64:…`) | `announce` — плашка на карточке подписки (до 3 строк; хранится не больше 500 символов) |
+
+Ссылки принимаются только `http(s)://` и `tg://` без пробелов и кавычек; текст — UTF-8 (dart:io
+читает заголовки как Latin-1, ядро перекодирует). На 304 провайдерские поля только
+дополняются тем, что пришло; полный ответ заменяет их (чего нет — стирается).
+
+### Настройки подписки, которые исполняет ядро
+
+- **User-Agent**: `Auto` — стратегия выше; чипы `sing-box` / `mihomo` / `v2ray` шлют
+  `sing-box/1.14.2` / `mihomo/1.19.28` / `v2rayN/7.0` — один запрос без discovery (ETag хранится
+  для этого UA).
+- **Send X-HWID** (по умолчанию выключен): `x-hwid` (случайный 32-hex id устройства, создаётся
+  один раз в `device.json` каталога данных), `x-device-os` (`Windows` / `macOS` / `Linux`…),
+  `x-ver-os` (например `10.0.26200`), `x-device-model` (из BIOS / DMI, иначе `PC`). Только ASCII.
+- **Filter**: регулярное выражение (с учётом регистра) по имени сервера; проверяются имя и
+  «флаг + имя», так что работает и `🇩🇪`. Применяется в ядре после парсинга, до слияния UA;
+  проверка сжатия (>20%) считает серверы до фильтра. Ничего не подошло или выражение неверное —
+  ошибка обновления, список не трогается (неверное выражение не пропускает уже форма).
+- **Download via**: `Direct first` (по умолчанию) / `Proxy first` / `Direct` / `Proxy`. Proxy —
+  через mixed-порт работающего туннеля; «… first» при ошибке пробует другой путь. Туннель не
+  поднят — всегда напрямую.
+- **Decrypt password**: хранится, но не применяется — зашифрованных подписок с паролем в
+  спецификации пока нет.
+
+Ограничения: тело не больше 16 МБ, весь запрос (с медленным телом) не дольше 40 с.
 
 ---
 
 ## Детектирование формата
 
 ```
-detect_format(body, content_type):
+detect(body, content_type):
   if content_type contains "json" OR body.trimmed starts with "{":
-    if body contains "\"outbounds\"":  → FORMAT_SINGBOX
-    else:                              → FORMAT_UNKNOWN_JSON
-  
-  if content_type contains "yaml" OR body starts with "proxies:":
-    → FORMAT_CLASH_YAML
-  
-  decoded = try base64_decode(body.trim())
-  if decoded is valid AND decoded contains "://":
-    → FORMAT_URI_LIST (работать с decoded)
-  
-  if body contains "vmess://" OR "vless://" OR "trojan://" OR "ss://":
-    → FORMAT_URI_LIST (plain)
-  
-  → FORMAT_UNKNOWN
+    if body contains "\"outbounds\"":   → sing-box
+    if content_type не yaml:            → unknown   (YAML flow-map тоже начинается с "{")
+  if content_type contains "yaml" OR есть строка "^proxies:":
+    → clash
+  → links (plain URI-list), если в нём есть ноды
+
+parse(body, content_type):
+  r = detect(body)
+  if ничего не нашли:
+    r = detect(base64_decode(body.trim()))   // sing-box JSON / Clash YAML в base64 — в свой парсер
+    URI-list из base64 помечается base64
 ```
+
+Неизвестные схемы ссылок и типы Clash не выбрасываются: они приходят нодой с `unsupported`
+(причина в имени) и видны в списке, но в конфиг не идут. Сейчас это WireGuard (в sing-box он
+только endpoint), SSR, juicity / mieru / naive / brook / snell, VLESS с `encryption` ≠ `none`,
+socks поверх TLS, hysteria v1 не по UDP, QUIC-транспорт с шифрованием, XHTTP. Поддерживаются:
+vless, vmess (base64-JSON и URI-форма), trojan, ss, hysteria2, hysteria (v1), tuic, anytls,
+socks (`socks://` в стиле v2rayN с base64 и `socks5://user:pass@`), http, ssh (Clash);
+транспорты ws / grpc / h2 / httpupgrade (в т.ч. Clash `ws-opts.v2ray-http-upgrade`) / quic.
 
 ---
 
@@ -195,10 +283,12 @@ DNS по региону работает аналогично (`getResolverDns`,
 
 ## Что хранится на диске
 
+В каталоге данных ядра (`--data`, по умолчанию `%APPDATA%\Jormungand`):
+
 ```
-subscriptions/
-  <id>.json          — метаданные подписки + закешированные ноды + gone[] (пропавшие, с goneAt)
-  <id>.strategy.json — ua_strategy + etag + последний discovery
+ui-state.json  — снимок UI: sourcesData (подписки с nodes, gone[] с goneAt, uaStrategy с ETag,
+                 discoveredAt, usage, announce…), профили, цепочки, настройки
+device.json    — id устройства для X-HWID
 ```
 
 Ноды кешируются локально — приложение работает без интернета с последним известным списком.

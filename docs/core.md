@@ -50,9 +50,14 @@ Windows Firewall должен пропускать входящие для `dart
 ## Нода
 
 `{id, name, flag, protocol, address, port, outbound, unsupported?}`. `id` =
-`n` + 12 hex от sha256(`protocol|address|port|identity`) — одинаков для одного сервера в
-любом формате подписки (см. subscription-parsing.md → Дедупликация). `outbound` — готовый
-sing-box outbound без тега. Флаг вынимается из имени (первая пара regional indicators).
+`n` + 12 hex от sha256(`protocol|address|port|identity|variant`), где `variant` — поля
+outbound, меняющие способ подключения (TLS / SNI / ALPN / uTLS / Reality, транспорт с
+host / path, obfs…; см. `variantOf` в `node.dart`), прочитанные одинаково из любого формата.
+Поэтому id одинаков для одного сервера в любом формате подписки (см. subscription-parsing.md →
+Дедупликация), а два варианта одного адреса — разные ноды. `base` — тот же хеш без `variant`.
+`outbound` — готовый sing-box outbound без тега. Флаг вынимается из имени (первая пара
+regional indicators). `unsupported` — причина, по которой ноду нельзя отдать sing-box (схема
+или тип, которых он не знает): нода видна в списке, но в конфиг не идёт.
 
 ## План подключения
 
@@ -64,7 +69,8 @@ UI собирает из `effectiveConnectId()`:
   entry: Group,            // только цепочка: выход идёт через неё (detour)
   mixedPort: 2080, global: bool,
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
-             url: connCfg.testUrl /* нет — gstatic */ } }
+             url: connCfg.testUrl /* нет — gstatic */ },
+  routing: Routing }       // правила, приложения, быстрые правила, DNS — ниже
 Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key: 'sid::nid', outbound }] }
 ```
 
@@ -73,12 +79,45 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 - `urltest` до конца своего первого круга замеров (со сотней серверов — около минуты) шлёт
   всё через первый сервер списка. Поэтому для `fastest` UI передаёт ноды по известному пингу:
   живые по возрастанию, потом неизмеренные, мёртвые в конце.
-- Режим Rules в MVP: только приватные адреса напрямую, всё остальное — в прокси.
-  Global — всё в прокси. Экран Rules пока в конфиг не попадает.
+- Режим Rules: правила из `routing` (ниже). Global — всё в прокси, правила не применяются.
 - Подключено и план изменился (другой entry, сервер выключен, Global/Rules, системный
   прокси) — UI сам переподключает. Сравнивается состав групп и выбор, а не порядок: пинг
   переставляет Fastest и помечает серверы «testing» — это не повод рвать соединения; пока
   идёт пинг, проверка ждёт его конца.
+
+## Правила в конфиге
+
+`routing` (`js/93-routing-plan.js` → `core/lib/src/routing.dart`; логика — `rules.md`):
+
+```
+{ apps:  [{ id, kind: 'package'|'process'|'path', act, target, split, udpTarget }],
+  rules: [{ id, name, action, target, fallback, block, dns, groups, composite?, extra? }],
+  quick: { lan, ads, region: 'RU'|…|null, services: { telegram: 'vpn'|'direct', … }, final },
+  fallback: 'main'|'block'|'direct',            // Rules → Target unavailable
+  targets: { '<цель>': { kind: 'unit'|'chain', main: Group, entry?: Group } | null },
+  ruleSets: [{ name, url, format, via, every }],
+  geo: { geosite: { via, every }, geoip: { via, every } },
+  dns: { servers: [{ id, addr, via, on }] } }
+```
+
+- UI шлёт свою модель: группы условий формы, `composite` (составное правило из JSON, без
+  action), цели. Каталог живёт в UI, поэтому каждую названную цель UI сам разворачивает в
+  группы (как `main`), `null` — цель недоступна (тогда её «If unavailable»). Всё остальное —
+  AND/OR, CIDR, порты, DNS-серверы, списки — строит ядро.
+- Порядок route: `sniff` → `tunnel-in` → приложения → свои правила (перед первым с IP —
+  `resolve`) → быстрые → `final`. Группы целей — теги целей (`src:…`, `chain:…` + `chain:…>entry`).
+- `tunnel-in` — второй mixed-вход на свободном порту loopback, всегда в `proxy` мимо правил:
+  через него проверка выходного IP (российский сервис проверки иначе ушёл бы напрямую по
+  правилу региона) и списки «через VPN».
+- Списки: `RuleSetCache` (`rulesets.dart`) перед стартом кладёт нужные на диск
+  (`<dataDir>/rulesets`), в конфиг — `type: local`. После подключения в фоне: устаревшие
+  обновляет, недостающие качает через туннель — и тогда переподключает.
+- Предупреждения сборки (правило без списка, пропущенное правило) приходят в `warning`
+  ответа на connect (тост в UI).
+- `cache_file` включён; `cache_id` = хэш выбранных `default` у selector-ов: выбор через
+  Clash API переживает перезапуск, новый выбор из UI — нет.
+- Сравнение планов для переподключения нормализует и цели правил (порядок Fastest после
+  пинга — не изменение).
 
 ## API (`jormd`)
 
@@ -89,10 +128,10 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 |---|---|
 | `GET /` | мокап, с `window.JORMD = true` → live-режим (`95-live.js`) |
 | `GET/PUT /api/state` | снимок состояния UI / статус |
-| `POST /api/sources/fetch` | `{url, userAgent, strategy, discoveredAt, prev:{nodes, gone}}` → ноды, gone, strategy, usage, expire, title |
+| `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
 | `POST /api/connect` | `{plan, systemProxy}` |
-| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit}` |
+| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, sourcesRev}`; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
 | `POST /api/node` | `{protocol, address, port, secret, name, outbound?, unsupported?}` → `{node}`; ошибка формы — 400 `{error}` с текстом для пользователя |
@@ -147,7 +186,9 @@ Connections и лист Live connections (новые сверху: хост:по
 vless/trojan/hy2/tuic/anytls-URL, vmess — JSON v2rayN (URL-вид, если JSON не умеет: Reality,
 insecure), ss — SIP002 (у шифров 2022 userinfo без base64). Имя во фрагменте, флаг впереди.
 Разобранная обратно ссылка даёт тот же `key` и тот же outbound (тест `share_test.dart`).
-Нет ссылки у socks/http/wireguard из подписок и у `unsupported`-нод (их outbound без
+socks — `socks5://user:pass@host:port` (`socks4://` для v4), Hysteria v1 — `hysteria://host:port?auth=…`.
+Нет ссылки у http/wireguard
+из подписок и у `unsupported`-нод (их outbound без
 xhttp — ссылка назвала бы другой сервер).
 
 Сервер вручную (`manual.dart`): протокол, адрес, порт, секрет формы (UUID / пароль;
@@ -163,9 +204,14 @@ Trojan/HY2/TUIC/AnyTLS с TLS по адресу). Правка того же п�
 типично для корпоративной сети) Windows спрашивает раньше ручного прокси — ядро
 предупреждает.
 
+Подписки (`fetch.dart`, `updater.dart`, `state.dart`): загрузка с UA-стратегией, фильтром,
+HWID (`device.dart`) и каналом Direct / Proxy; автообновление по таймеру ядра прямо в снимке
+`ui-state.json` (доступ к снимку — через `SnapshotStore`, одна очередь на чтение и запись).
+Правила и конфликты с UI — subscription-parsing.md → «Автообновление».
+
 ## Не сделано в MVP
 
-TUN и kill switch; правила, DNS и rule-sets из `rules.md` в конфиге; каналы загрузки
-подписки (Direct first и т.п. — сейчас всегда напрямую, с учётом `HTTP(S)_PROXY`);
-фильтр подписки, HWID; автообновление подписок по таймеру; автовыбор URL пинга (сейчас —
-выбор в Settings → Connection, по умолчанию gstatic).
+TUN и kill switch; Hijack DNS / FakeIP; «If unavailable» на лету и автопереключение DNS
+(сейчас — при сборке конфига / переподключении); обновление гео-списков по таймеру; Decrypt
+password подписки (нет спецификации); автовыбор URL пинга (сейчас — выбор в Settings →
+Connection, по умолчанию gstatic).

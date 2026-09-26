@@ -25,7 +25,7 @@ function renderDataSettings(v) {
   document.getElementById('data-settings').innerHTML = `
     <div class="set-caption">Backup</div>
     <div class="set-group">
-      <div class="set-row tap" id="data-export" onclick="exportBackup()"><div class="set-label" style="flex:1">Export backup<div class="set-hint">Sources with their servers, profiles, chains, Route order and settings — one JSON file</div></div>${CLOUD_ICON.down}</div>
+      <div class="set-row tap" id="data-export" onclick="exportBackup()"><div class="set-label" style="flex:1">Export backup<div class="set-hint">Sources with their servers, profiles, chains, Route order, rules, DNS and settings — one JSON file</div></div>${CLOUD_ICON.down}</div>
       <div class="set-row tap" id="data-restore" onclick="document.getElementById('restoreFile').click()"><div class="set-label" style="flex:1">Restore from file<div class="set-hint">Replaces everything here with the backup; asks first</div></div>${CLOUD_ICON.up}</div>
     </div>
     <div class="set-caption">About</div>
@@ -72,7 +72,8 @@ function confirmRestore(snap, at, fileName) {
   const count = o => Object.keys(o || {}).length;
   const servers = Object.values(snap.sourcesData).reduce((n, s) => n + (s.nodes || []).length, 0);
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
-  const what = [plural(count(snap.sourcesData), 'source'), plural(servers, 'server'), plural(count(snap.profilesData), 'profile'), plural(count(snap.chainsData), 'chain')].join(' · ');
+  const what = [plural(count(snap.sourcesData), 'source'), plural(servers, 'server'), plural(count(snap.profilesData), 'profile'), plural(count(snap.chainsData), 'chain'),
+    plural(count(snap.rulesData), 'rule')].join(' · ');
   openActions('Restore backup?',
     `<div class="restore-card">
        <div class="restore-file">${esc(fileName)}${at ? ' · ' + esc(new Date(at).toLocaleString()) : ''}</div>

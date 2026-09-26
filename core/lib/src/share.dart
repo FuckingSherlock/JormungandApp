@@ -6,10 +6,12 @@ import 'node.dart';
 /// of parse/links.dart, so pasting the link into another client — or back into this one —
 /// gives the same server (same outbound, same [Node.key]). vless, trojan, hy2, tuic and
 /// anytls as URLs, vmess as v2rayN JSON (URL style when the JSON cannot say it: Reality,
-/// insecure), ss as SIP002. The name goes into the #fragment with its flag in front.
+/// insecure), ss as SIP002, socks as socks5:// / socks4://, Hysteria v1 as hysteria://.
+/// The name goes into the
+/// #fragment with its flag in front.
 ///
 /// Null when there is no link form: protocols only a sing-box / Clash subscription
-/// carries (socks, http, wireguard…) and servers marked [Node.unsupported] — their
+/// carries (http, wireguard…) and servers marked [Node.unsupported] — their
 /// outbound lacks what sing-box could not take (e.g. the xhttp transport), so a link
 /// built from it would name a different server.
 String? shareLink(Map<String, dynamic> outbound, {String name = '', String flag = '', String? unsupported}) {
@@ -57,6 +59,13 @@ String? shareLink(Map<String, dynamic> outbound, {String name = '', String flag 
     case 'trojan':
       return 'trojan://${_enc(s('password'))}@$host:$port'
           '${_query({..._tlsParams(tls, insecureKey: 'allowInsecure'), ..._transportParams(tr)})}${_frag(label)}';
+    case 'socks':
+      // socks5://user:pass@host:port (the parser also takes v2rayN's base64 userinfo); a
+      // user without a password keeps its ':' so it is never read as base64
+      final user = s('username'), pw = s('password');
+      final cred = user.isEmpty && pw.isEmpty ? '' : '${_enc(user)}:${_enc(pw)}@';
+      final v = s('version');
+      return 'socks${v.startsWith('4') ? v : '5'}://$cred$host:$port${_frag(label)}';
     case 'shadowsocks':
       final method = s('method'), pw = s('password');
       // SIP002: base64url userinfo, except the 2022 ciphers (their key is base64 already).
@@ -84,6 +93,15 @@ String? shareLink(Map<String, dynamic> outbound, {String name = '', String flag 
             'mport': hop.join(','),
             'upmbps': outbound['up_mbps'],
             'downmbps': outbound['down_mbps'],
+          })}${_frag(label)}';
+    case 'hysteria': // v1: hysteria://host:port?auth=…&upmbps=…&downmbps=…&obfsParam=…
+      return 'hysteria://$host:$port'
+          '${_query({
+            'auth': outbound['auth_str'],
+            'upmbps': outbound['up_mbps'],
+            'downmbps': outbound['down_mbps'],
+            'obfsParam': outbound['obfs'],
+            ..._tlsParams(tls, insecureKey: 'insecure')..remove('security'),
           })}${_frag(label)}';
     case 'tuic':
       return 'tuic://${_enc(s('uuid'))}:${_enc(s('password'))}@$host:$port'

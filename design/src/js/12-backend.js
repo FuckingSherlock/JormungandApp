@@ -15,11 +15,14 @@ let backend = {
       mockFetchFails(s);
       s.nodes = genNodes(8 + Math.floor(Math.random() * 20), 'sub');
       s.usage = { used: 0, total: 0 };
+      s.updatedAt = Date.now();
     });
   },
-  // Update: new s.nodes, dropped servers into s.gone (see connect-model.md → gone).
-  updateSource(s) {
-    return wait(900 + Math.random() * 600).then(() => { mockFetchFails(s); if (s.demoChurn) demoProviderChurn(s); });
+  // Update: new s.nodes, dropped servers into s.gone (see connect-model.md → gone), the
+  // provider's headers (usage, expire, format, announce…), s.updatedAt. opts.rediscover:
+  // ask with every User-Agent again (the core; the mock just updates).
+  updateSource(s, opts) {
+    return wait(900 + Math.random() * 600).then(() => { mockFetchFails(s); if (s.demoChurn) demoProviderChurn(s); s.updatedAt = Date.now(); });
   },
   // Servers added by hand (32-nodes-forms.js): every link in f.link (one per line), else one
   // from the fields; f.edit = the server being edited (it keeps its id). Resolves to the
@@ -99,7 +102,7 @@ function mockNodeId(p) {
   return 'm' + h.toString(36);
 }
 function mockShareLink(n) {
-  if (n.unsupported || n.protocol === 'socks') return null;
+  if (n.unsupported) return null;
   const host = /:/.test(n.address) ? '[' + n.address + ']' : n.address;
   const name = '#' + encodeURIComponent((n.flag && n.flag !== '🌐' ? n.flag + ' ' : '') + n.name);
   const uuid = n.secret || '8c1f3a52-7d0e-4e2b-9d71-5b2e0c6f91d4', pw = encodeURIComponent(n.secret || 'tJ3vQx9pLm2');
@@ -113,6 +116,10 @@ function mockShareLink(n) {
     case 'ss': return `ss://${btoa('chacha20-ietf-poly1305:' + (n.secret || 'tJ3vQx9pLm2')).replace(/=+$/, '')}@${host}:${n.port}${name}`;
     case 'hy2': return `hysteria2://${pw}@${host}:${n.port}?${sni}&obfs=salamander&obfs-password=k8Qw2${name}`;
     case 'tuic': return `tuic://${uuid}:${pw}@${host}:${n.port}?congestion_control=bbr&alpn=h3&${sni}${name}`;
+    case 'socks': {
+      const [u = '', p = ''] = (n.secret || '').split(/:(.*)/);
+      return `socks5://${u || p ? encodeURIComponent(u) + ':' + encodeURIComponent(p) + '@' : ''}${host}:${n.port}${name}`;
+    }
     default: return `${n.protocol}://${pw}@${host}:${n.port}?${sni}${name}`;   // trojan, anytls
   }
 }

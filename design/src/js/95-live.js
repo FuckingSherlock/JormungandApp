@@ -49,7 +49,9 @@ function apiPing(body, onLine) {
 
 function liveSnapshot() {
   return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
-    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg,
+    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg,
+    // Rules, apps, rule sets, DNS (sent to the core as plan.routing, see 93-routing-plan.js)
+    rulesData, ruleOrder, ruleSeq, quickCfg, appRules, ruleSets, rsSeq, dnsServers, dnsOrder, dnsSeq, dnsCfg,
     // measured pings survive a restart, so Auto starts from what it knew
     pings: [...pingCache].filter(([, e]) => typeof e.ms === 'number') };
 }
@@ -75,8 +77,22 @@ function liveApply(s) {
   if (s.segState) Object.assign(segState, s.segState);
   if (s.connCfg) Object.assign(connCfg, s.connCfg);
   if (s.autoCfg) Object.assign(autoCfg, s.autoCfg);
+  if (s.genCfg) Object.assign(genCfg, s.genCfg);
+  // no demo rules or apps: a first run starts with the defaults of a fresh install
+  rulesData = s.rulesData || {};
+  ruleOrder = s.ruleOrder || [];
+  ruleSeq = s.ruleSeq || 1;
+  appRules = s.appRules || {};
+  replaceObj(quickCfg, Object.assign({ regionOn: true, region: 'RU', lan: true, ads: false, final: 'proxy', fallback: 'main', services: {} }, s.quickCfg));
+  SERVICES.forEach(([k]) => { quickCfg.services[k] = quickCfg.services[k] || 'default'; });
+  ruleSets = s.ruleSets || ['geosite', 'geoip'].map(id => ({ id, name: id, builtin: true, url: 'built-in', format: 'srs', via: 'vpn', every: 7 * 86400, updated: 'with the first connect' }));
+  rsSeq = s.rsSeq || 1;
+  if (s.dnsServers) { replaceObj(dnsServers, s.dnsServers); dnsOrder = s.dnsOrder; dnsSeq = s.dnsSeq || 1; }
+  if (s.dnsCfg) Object.assign(dnsCfg, s.dnsCfg);
   pingCache.clear();
   (s.pings || []).forEach(([k, e]) => pingCache.set(k, e));
+  // a page closed mid-update saved the spinner: it would block every later update
+  Object.values(sourcesData).forEach(x => { delete x.updating; });
 }
 function liveSave() {
   if (!live.ready) return;          // never overwrite the stored state before it is loaded
@@ -89,7 +105,8 @@ function liveSave() {
 const usableRef = r => r.node.outbound && !r.node.unsupported;
 function planGroup(refs, pick, chosenRef) {
   const ok = refs.filter(usableRef);
-  if (!ok.length) throw new Error('No server here the core can use' + (refs.some(r => r.node.unsupported) ? ' (XHTTP is not in sing-box)' : ''));
+  const bad = refs.find(r => r.node.unsupported);
+  if (!ok.length) throw new Error('No server here the core can use' + (bad ? ` (${bad.node.unsupported} is not in sing-box)` : ''));
   // sing-box's urltest uses its first server until its own first round of tests is done
   // (a minute with a hundred servers): put the known fastest first, the dead ones last
   const nodes = pick === 'fastest' ? ok.slice().sort((a, b) => pingRank(a.node) - pingRank(b.node)) : ok;
@@ -99,7 +116,7 @@ function livePlan() {
   const id = effectiveConnectId();
   if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
   const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
-    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined } };
+    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined }, routing: routingPlan() };
   if (chainsData[id]) {
     const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
     return Object.assign(base, { kind: 'chain',
@@ -116,7 +133,9 @@ function livePlan() {
    in it: switched while connected, the core gets it with the reconnect. */
 function planSigOf(plan) {
   const g = x => x && Object.assign({}, x, { nodes: x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key) });
-  return JSON.stringify(Object.assign({}, plan, { main: g(plan.main), entry: g(plan.entry), systemProxy: segState.sys === 'on' }));
+  const t = x => x && Object.assign({}, x, { main: g(x.main), entry: g(x.entry) });   // rule targets alike
+  const routing = plan.routing && Object.assign({}, plan.routing, { targets: Object.fromEntries(Object.entries(plan.routing.targets).map(([k, x]) => [k, t(x)])) });
+  return JSON.stringify(Object.assign({}, plan, { main: g(plan.main), entry: g(plan.entry), routing, systemProxy: segState.sys === 'on' }));
 }
 const planSig = () => { try { return planSigOf(livePlan()); } catch (e) { return null; } };
 const pingsRunning = () => [...pingCache.values()].some(v => v.ms === 'testing');
@@ -135,22 +154,64 @@ function liveMaybeReconnect() {
 
 /* ── The real backend ── */
 
-function liveFetch(s) {
-  return api('/api/sources/fetch', {
-    url: s.url, userAgent: s.userAgent, strategy: s.uaStrategy || [], discoveredAt: s.discoveredAt || 0,
-    prev: { nodes: s.nodes || [], gone: s.gone || [] },
-  }).then(r => {
-    if (r.notModified) return;
-    s.nodes = r.nodes;
-    s.gone = r.gone;
-    s.uaStrategy = r.strategy;
-    s.discoveredAt = r.discoveredAt;
-    if (r.usage) s.usage = r.usage;
-    if (r.expire) s.expire = r.expire;
+/* Subscriptions: the core fetches with the source's own settings (UA, HWID, filter,
+   Download via) and answers with a patch of the fields it owns — the same list as
+   sourceServerFields in core/lib/src/state.dart. The user's fields are never in it. */
+const SERVER_FIELDS = ['nodes', 'gone', 'count', 'uaStrategy', 'discoveredAt', 'usage', 'expire', 'format',
+  'providerInterval', 'webPage', 'supportUrl', 'announce', 'updatedAt', 'lastError'];
+function liveFetch(s, opts) {
+  const source = {};
+  ['url', 'userAgent', 'uaStrategy', 'discoveredAt', 'nodes', 'gone', 'hwid', 'filter', 'channel'].forEach(k => { source[k] = s[k]; });
+  return api('/api/sources/fetch', { sid: s.id, source, rediscover: !!(opts && opts.rediscover) }).then(r => {
+    Object.assign(s, r.patch);
     let host = '';
     try { host = new URL(s.url).hostname; } catch (e) {}
     if (r.title && s.name === host) s.name = r.title;
+    if (!r.notModified) liveKeepRunning([s]);
   });
+}
+
+/* "Reconnect after update" off: new servers from an update must not restart sing-box. The
+   plan they make is taken as the running one, so the next reconnect for another reason
+   (another entry, a server switched off…) brings them in. */
+function liveKeepRunning(updated) {
+  if (!connected || !live.planSig || updated.some(s => s.reloadAfterUpdate)) return;
+  const sig = planSig();
+  if (sig) live.planSig = sig;
+}
+
+/* The core also updates subscriptions on its own timer (core/lib/src/updater.dart), with
+   this page closed too. /api/status carries sourcesRev, which moves with each such update:
+   then the sources the core updated after us (newer updatedAt, same URL) take its server
+   fields; everything the user set stays as it is here. */
+function liveSyncSources() {
+  if (!live.ready || document.hidden) return;
+  api('/api/status').then(st => {
+    if (st.sourcesRev === undefined || st.sourcesRev === live.sourcesRev) return;
+    return api('/api/state').then(r => {
+      live.sourcesRev = r.status.sourcesRev;
+      const theirs = (r.snapshot && r.snapshot.sourcesData) || {}, updated = [];
+      let failed = false;
+      Object.keys(theirs).forEach(sid => {
+        const s = sourcesData[sid], t = theirs[sid];
+        if (!s || s.kind !== 'sub' || s.updating || s.url !== t.url) return;
+        // a timer update that failed: only its lastError (the card's error strip with Retry)
+        if (t.lastError && (t.updatedAt || 0) === (s.updatedAt || 0) && t.lastError.at > ((s.lastError && s.lastError.at) || 0)) {
+          s.lastError = t.lastError;
+          failed = true;
+        }
+        if (!((t.updatedAt || 0) > (s.updatedAt || 0))) return;
+        SERVER_FIELDS.forEach(k => { if (k in t) s[k] = t[k]; else delete s[k]; });
+        updated.push(s);
+      });
+      if (failed && !updated.length) refreshSourceViews();
+      if (!updated.length) return;
+      liveKeepRunning(updated);
+      purgeExpiredGone();
+      refreshSourceViews();
+      updated.filter(s => s.testAfterUpdate).forEach(s => testLatency(liveNodes(s).map(n => [s.id, n.id])));
+    });
+  }).catch(() => {});
 }
 
 function flushPairs() {
@@ -281,13 +342,15 @@ function liveInit() {
   pingCache.clear();
 
   // Everything that re-renders after a change also saves and re-checks the connection.
-  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'setSegment', 'updateMainConnectCard'].forEach(name => {
+  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'renderGeneral', 'setSegment', 'updateMainConnectCard',
+    'renderRules', 'renderApps', 'renderRuleSets', 'renderDns'].forEach(name => {
     const orig = window[name];
     window[name] = function () { const r = orig.apply(this, arguments); liveSave(); liveMaybeReconnect(); return r; };
   });
 
   api('/api/state').then(st => {
     if (st.snapshot) liveApply(st.snapshot);
+    purgeExpiredGone();   // the start-up purge in 99-init ran on the empty pre-load state; only 15-day-old ones go
     connected = !!st.status.connected;
     exitInfo = st.status.exit || null;
     if (!exitInfo) liveWatchExit();   // still checking (the direct one runs from the core's start)
@@ -295,10 +358,15 @@ function liveInit() {
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
     renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
     if (connected) live.planSig = planSig();
+    live.sourcesRev = st.status.sourcesRev;
     live.ready = true;
     toast(st.snapshot ? 'Core connected' : 'Core connected — add a subscription in Nodes');
     if (genCfg.pingOnLaunch) pingOnLaunch();
+    // not when the core is already up (a page reload, another window): only a fresh start connects
+    if (genCfg.connectOnLaunch && !connected && !st.status.error) toggleMain();
   }, e => toast('Core not reachable: ' + e.message));
+
+  setInterval(liveSyncSources, 5000);
 
   // sing-box can stop on its own (bad server, crash): the dock must say so.
   setInterval(() => {

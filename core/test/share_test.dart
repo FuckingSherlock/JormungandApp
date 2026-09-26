@@ -65,8 +65,11 @@ void main() {
       }
     });
 
-    test('no link form: socks', () {
-      expect(shareLink({'type': 'socks', 'server': 'x.example', 'server_port': 1080}), isNull);
+    test('no link form: http; socks round-trips with and without a login', () {
+      expect(shareLink({'type': 'http', 'server': 'x.example', 'server_port': 8080}), isNull);
+      for (final raw in ['socks5://u%40x:p%3Aw@192.0.2.9:1080#S', 'socks5://192.0.2.9:1080#S', 'socks4://u:@192.0.2.9:1080#S']) {
+        _roundTrip(parseLink(raw)!);
+      }
     });
   });
 
@@ -182,11 +185,11 @@ void main() {
       expect([bad, e['error']], [400, 'Password is required']);
     });
 
-    test('share: the link of a node; none for socks', () async {
+    test('share: the link of a node; none for http', () async {
       final n = parseLink(anytls)!;
       final (_, j) = await call('POST', '/api/share', {'outbound': n.outbound, 'name': n.name, 'flag': n.flag});
       expect(parseLink(j['link'] as String)!.key, n.key);
-      expect((await call('POST', '/api/share', {'outbound': {'type': 'socks', 'server': 'a', 'server_port': 1}})).$2['link'], isNull);
+      expect((await call('POST', '/api/share', {'outbound': {'type': 'http', 'server': 'a', 'server_port': 1}})).$2['link'], isNull);
     });
 
     test('version and connections without a tunnel', () async {

@@ -4,7 +4,8 @@ import '../node.dart';
 import 'build.dart';
 
 /// Parses one share link (vless://, vmess://, trojan://, ss://, hy2:// / hysteria2://,
-/// tuic://, anytls://). Null for unknown schemes and malformed links.
+/// tuic://, anytls://, socks://, hysteria://). Proxy schemes sing-box cannot run (ssr://,
+/// wireguard://…) come back as unsupported nodes. Null for other schemes and malformed links.
 Node? parseLink(String raw) {
   raw = raw.trim();
   final m = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.-]*)://').firstMatch(raw);
@@ -45,11 +46,69 @@ Node? parseLink(String raw) {
       case 'anytls':
         final l = _Link.parse(raw);
         return buildAnytls(name: l.name, host: l.host, port: l.port, password: l.user, q: l.query);
+      case 'socks' || 'socks5' || 'socks5h' || 'socks4' || 'socks4a':
+        final l = _Link.parse(raw);
+        var cred = l.user;
+        // v2rayN: socks://base64(user:pass)@host:port
+        if (cred.isNotEmpty && !cred.contains(':')) {
+          final b = tryBase64(cred);
+          if (b != null && b.contains(':')) cred = b;
+        }
+        final i = cred.indexOf(':');
+        final scheme = m[1]!.toLowerCase();
+        return buildSocks(
+          name: l.name,
+          host: l.host,
+          port: l.port,
+          user: i < 0 ? cred : cred.substring(0, i),
+          password: i < 0 ? '' : cred.substring(i + 1),
+          version: scheme.startsWith('socks4') ? scheme.substring(5) : '5',
+        );
+      case 'hysteria':
+        final l = _Link.parse(raw);
+        final q = {...l.query};
+        // hysteria://host:port?auth=…&peer=sni&obfs=xplus&obfsParam=secret
+        q.remove('obfs');
+        final obfs = q['obfsParam'] ?? q['obfs-password'];
+        if (obfs != null && obfs.isNotEmpty) q['obfs'] = obfs;
+        return buildHysteria(name: l.name, host: l.host, port: l.port, auth: l.user.isNotEmpty ? l.user : (l.query['auth'] ?? ''), q: q);
+      case 'ssr':
+        return _ssr(raw);
+      case final s when _unsupportedSchemes.contains(s):
+        final l = _Link.parse(raw);
+        final proto = s == 'wg' ? 'wireguard' : s;
+        return unsupportedNode(name: l.name, protocol: proto, host: l.host, port: l.port, identity: '${l.user}|${l.query['publickey'] ?? ''}');
     }
   } catch (_) {
     return null;
   }
   return null;
+}
+
+/// Proxy links sing-box cannot run as an outbound: listed as unsupported, so the user sees
+/// the provider gave them (any other scheme — a web link in the list — is not a server).
+const _unsupportedSchemes = {'wireguard', 'wg', 'juicity', 'mieru', 'naive+https', 'naive+quic', 'brook', 'snell'};
+
+/// ssr://base64(host:port:protocol:method:obfs:base64(password)/?remarks=base64(name)&…)
+Node? _ssr(String raw) {
+  final txt = tryBase64(raw.substring(raw.indexOf('://') + 3).split('#').first);
+  if (txt == null) return null;
+  final q = txt.indexOf('/?');
+  final main = q < 0 ? txt : txt.substring(0, q);
+  final params = q < 0 ? const <String, String>{} : _query(txt.substring(q + 2));
+  final parts = main.split(':');
+  if (parts.length < 6) return null;
+  // host may be IPv6 (colons): the last five fields are fixed
+  final host = parts.sublist(0, parts.length - 5).join(':');
+  final port = int.tryParse(parts[parts.length - 5]) ?? 0;
+  final remarks = params['remarks'];
+  return unsupportedNode(
+    name: remarks == null ? '' : (tryBase64(remarks) ?? ''),
+    protocol: 'ssr',
+    host: host,
+    port: port,
+    identity: parts.last,
+  );
 }
 
 /// Every link found in a block of text, one per line; unknown lines are skipped.

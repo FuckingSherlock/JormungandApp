@@ -69,6 +69,8 @@ npm run verify -- rules dns-form      # build + freshness + smoke tests, then on
 It prints only failures, the pass count and the grid path. Without presets it just
 builds and checks. Separate steps still exist: `npm run build`, `npm run check`,
 `npm run shot -- <presets> [--grid] [--theme github] [--scale 2]` (-> `design/.shots/*.png`).
+Hi-res set of every preset for the user: `npm run shot -- all --scale 2 --out design/.shots/<name> --files`,
+then `node design/tools/grid.mjs design/.shots/<name> 8` (-> `<name>/grids/grid-NN.png`).
 
 Presets: home, nodes, nodes-open, nodes-profiles, nodes-swipe, route, entry-delete,
 target-picker, rule-fallback, settings, dock, dock-chain, dock-profile, dock-off,
