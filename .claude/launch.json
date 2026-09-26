@@ -4,7 +4,7 @@
     {
       "name": "jormd",
       "runtimeExecutable": "dart",
-      "runtimeArgs": ["run", "core/bin/jormd.dart", "--data", "core/.data-dev"],
+      "runtimeArgs": ["run", "core/bin/jormd.dart", "--data", "core/.data-dev", "--lan"],
       "port": 7788
     }
   ]
