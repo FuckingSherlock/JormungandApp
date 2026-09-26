@@ -10,14 +10,15 @@ finished. The user talks Russian; reply in Russian.
 
 In the mockup: Home (modes incl. system proxy, connect dock), Nodes (the catalog: tabs
 Simple / Profiles, swipeable — sources, profiles, chains are created and edited only here),
-Route (main flow only: ✎ + animated Simple / Profiles switch, Auto / Manual, Use in Auto on
-every row, own priority over the Nodes order), Settings (Auto mode, Appearance with themes and
+Route (main flow only: animated Simple / Profiles switch, Auto / Manual, always-on ⋮⋮ own
+priority over the Nodes order, AUTO / MANUAL button + Use in Auto on every row, a row unfolds to
+Fastest / Priority, ⚡ and its servers), Settings (Auto mode, Appearance with themes and
 text size 90–120%, General with startup / notifications and the launch ping, Connection, DNS), Rules (apps, own rules with form + JSON, target picker
 over the whole catalog, "If unavailable" + global default, quick rules, services dropdown
 linked to per-app routing, final order, address test, import/export, rule sets). All sheets
 open to the top of the screen and close by swiping the header down.
 
-Nodes edit mode: ✎ sits left of the Simple / Profiles tabs (as in Route), ✓ while editing;
+Nodes edit mode: ✎ sits left of the Simple / Profiles tabs, ✓ while editing;
 the header never changes (search, ⚡, ⋮, + stay available in edit mode).
 
 ## Layout

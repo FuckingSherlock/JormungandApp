@@ -83,12 +83,20 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 | `POST /api/sources/fetch` | `{url, userAgent, strategy, discoveredAt, prev:{nodes, gone}}` → ноды, gone, strategy, usage, expire, title |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
 | `POST /api/connect` | `{plan, systemProxy}` |
-| `POST /api/disconnect`, `GET /api/status`, `GET /api/log` | |
-| `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → мс, -1 = нет ответа |
+| `POST /api/disconnect`, `GET /api/status`, `GET /api/log` | status: `{connected, systemProxy, error, warning, exit}` |
+| `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
+| `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}` |
 
 Пинг: временный sing-box без inbound'ов, задержка через clash API
 `/proxies/{tag}/delay` (16 параллельно, таймаут 5 с). Пары entry→exit — копия выхода с
 detour на копию входа.
+
+Exit IP (`exitip.dart`): после каждого (пере)подключения и по запросу ядро спрашивает
+через свой mixed-порт `ipwho.is` (ip, страна, город, провайдер), при ошибке —
+`cloudflare.com/cdn-cgi/trace` (ip, страна). Пока идёт проверка, `status.exit = null`;
+затем `{ip, country, city?, org?, source, at}` или `{error}`. Результат устаревшей
+проверки (после нового подключения или отключения) отбрасывается. UI опрашивает status,
+пока ответа нет; тап по карточке Exit IP — `POST /api/exit`.
 
 Системный прокси ставит ядро через реестр (HKCU Internet Settings), не sing-box: при
 убитом процессе sing-box не вернул бы настройки. Прежние значения сохраняются и

@@ -4,6 +4,7 @@ library;
 
 export 'src/config.dart';
 export 'src/daemon.dart';
+export 'src/exitip.dart';
 export 'src/fetch.dart';
 export 'src/merge.dart';
 export 'src/node.dart';

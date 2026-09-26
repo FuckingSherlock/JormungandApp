@@ -111,6 +111,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
   String url = defaultTestUrl,
   int timeoutMs = 5000,
   int parallel = 16,
+  void Function(String kind, String key, int ms)? onResult,
 }) async {
   final port = await freePort();
   final sb = SingBoxProcess(binary, workDir);
@@ -130,6 +131,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
             timeout: Duration(milliseconds: timeoutMs + 2000));
         final ms = r != null && r['_status'] == 200 && r['delay'] is int ? r['delay'] as int : -1;
         (kind == 'n' ? res.nodes : res.pairs)[key] = ms;
+        onResult?.call(kind, key, ms);
       }
     }
 

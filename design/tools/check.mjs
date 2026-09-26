@@ -77,7 +77,7 @@ const SHOTS = {
   'gone': async p => { await p.evaluate(() => { openProfiles(); goneOpen.add('se:src1'); openSourceEntry('src1'); document.querySelector('#sh-sourceentry .sheet-body').scrollTop = 9999; }); await settle(p); },
   'nothing-ticked': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('in', 'src4'); setChainNodesAll('in'); }); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
-  'drag-mid': async p => { await p.evaluate(() => { openProfiles(); setConnectEdit(true); }); await settle(p);
+  'drag-mid': async p => { await p.evaluate(() => { openProfiles(); }); await settle(p);
     const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
     const r = await p.locator('.conn-row >> nth=2').boundingBox();
     await p.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await p.mouse.down();
@@ -119,7 +119,7 @@ const SHOTS = {
   'nodes-profiles': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); expandState.default = true; renderNodes(); }); await settle(p); },
   'nodes-swipe': async p => { await tab(p, 'nodes'); await p.evaluate(() => { document.getElementById('view-nodes').classList.add('swiping'); renderNodesTabs(-170); }); },
   'route-open': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); }); await settle(p); },
-  'route': async p => { await p.evaluate(() => { openProfiles(); setConnectEdit(true); }); await settle(p); },
+  'route': async p => { await p.evaluate(() => { openProfiles(); }); await settle(p); },
   'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); openEditProfile('work'); confirmDeleteEntry('work'); }); await settle(p); },
   'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.add('src2'); renderTargetPicker(); }); await settle(p); },
   'rule-fallback': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
@@ -238,8 +238,8 @@ async function runChecks() {
     for (const t of ['home', 'nodes', 'settings']) { await tab(narrow, t); bad.push(...await over()); }
     const sheets = [
       () => { switchTab('nodes'); setNodesTab('profiles'); },
-      () => { setNodesTab('simple'); openProfiles(); setConnectEdit(true); },
-      () => { setConnectEdit(false); closeSheet('profiles'); openRules(); svcOpen = true; renderRules(); },
+      () => { setNodesTab('simple'); openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); },
+      () => { closeSheet('profiles'); openRules(); svcOpen = true; renderRules(); },
       () => openRuleForm('r2'),
       () => openTargetPicker('chain:sc1', () => {}),
       () => { closeSheet('target'); closeSheet('ruleform'); openApps(); },
@@ -378,13 +378,12 @@ async function runChecks() {
   });
 
   await check('profiles: dragging changes the Auto pick', async () => {
-    const target = await page.evaluate(() => { setConnectEdit(true); return connectOrder.filter(id => connectEntry(id).inAuto && isUsable(id))[1]; });
+    const target = await page.evaluate(() => connectOrder.filter(id => connectEntry(id).inAuto && isUsable(id))[1]);
     const g = await page.locator(`.conn-row[data-id=${target}] .drag-handle`).boundingBox();
     const top = await page.locator('.conn-row').first().boundingBox();
     await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
     await page.mouse.move(g.x + g.width / 2, top.y - 10, { steps: 8 }); await page.mouse.up(); await settle(page);
     expect(await page.evaluate(() => effectiveConnectId()) === target, 'auto pick did not follow the new order');
-    await page.evaluate(() => setConnectEdit(false));
   });
 
   await check('route: own order after a drag, Nodes order stays, "Follow Nodes order" resets', async () => {
@@ -394,12 +393,10 @@ async function runChecks() {
       out.nodesKept = connectOrder.join() !== catalogOrder[m].join();
       document.querySelector('#routeOrderNote .am-link').click();
       out.reset = !routeCustom[m] && connectOrder.join() === catalogOrder[m].join();
-      out.noEdit = !document.querySelector('#connects-list .conn-row .icon-btn') && !document.querySelector('#sh-profiles .sheet-action');
-      setConnectEdit(true);
       const id = connectOrder.find(x => !isBroken(x)), was = connectEntry(id).inAuto;
       document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .mini-toggle`).click();
       out.autoToggle = connectEntry(id).inAuto === !was;
-      toggleEntryAuto(id); setConnectEdit(false);
+      toggleEntryAuto(id);
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
@@ -437,10 +434,10 @@ async function runChecks() {
     expect(/Simple/.test(await page.textContent('#routeModes .on')), 'mode switch');
   });
 
-  await check('simple mode: tap a source for Manual, second tap back to Auto', async () => {
-    await page.click('.conn-row[data-id=src2] .conn-main'); await settle(page);
+  await check('simple mode: conn-state sets Manual, second tap back to Auto', async () => {
+    await page.click('.conn-row[data-id=src2] .conn-state'); await settle(page);
     expect(await page.evaluate(() => !autoConnect && effectiveConnectId() === 'src2'), 'source not pinned');
-    await page.click('.conn-row[data-id=src2] .conn-main'); await settle(page);
+    await page.click('.conn-row[data-id=src2] .conn-state'); await settle(page);
     expect(await page.evaluate(() => autoConnect), 'second tap did not re-enable auto');
   });
 
@@ -494,19 +491,48 @@ async function runChecks() {
     expect(/Profiles/.test(await page.textContent('#routeModes .on')) && /Profile|Chain/.test(await page.textContent('#profCardLabel')), 'titles');
   });
 
-  await check('profiles: tap sets Manual (sheet stays), second tap / badge back to Auto', async () => {
+  await check('profiles: conn-state sets Manual (sheet stays), second tap / badge back to Auto', async () => {
     expect(await page.evaluate(() => autoConnect), 'auto is not the default');
-    await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
+    await page.click('.conn-row[data-id=work] .conn-state'); await settle(page);
     expect(await page.evaluate(() => !autoConnect && effectiveConnectId() === 'work'), 'not pinned');
     expect(/MANUAL/.test(await page.textContent('#profModeBadge')), 'dock badge not MANUAL');
     expect(/Manual/.test(await page.textContent('#autoBadge')), 'sheet badge not Manual');
     expect(await page.evaluate(() => document.getElementById('sh-profiles').classList.contains('open')), 'sheet closed on pin');
-    await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
+    await page.click('.conn-row[data-id=work] .conn-state'); await settle(page);
     expect(await page.evaluate(() => autoConnect), 'second tap did not re-enable auto');
-    await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
+    await page.click('.conn-row[data-id=work] .conn-state'); await settle(page);
     await page.click('#autoBadge');
     expect(await page.evaluate(() => autoConnect), 'auto not re-enabled');
     await page.evaluate(() => closeSheet('profiles'));
+  });
+
+  await check('profiles: tapping the card only unfolds the row, it never pins', async () => {
+    await page.evaluate(() => openProfiles()); await settle(page);
+    const before = await page.evaluate(() => JSON.stringify([autoConnect, activeConnectId]));
+    await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
+    const after = await page.evaluate(() => JSON.stringify([autoConnect, activeConnectId]));
+    expect(before === after, `pin changed on card tap: ${before} -> ${after}`);
+    expect(await page.evaluate(() => routeOpenId) === 'work', 'card tap did not unfold the row');
+    await page.click('.conn-row[data-id=work] .conn-main'); await settle(page); // fold back
+    await page.evaluate(() => closeSheet('profiles'));
+  });
+
+  await check('route: the unfolded row updates its subscription(s) and ⚡ pings only its own servers', async () => {
+    // src2, not src1: src1 is the demo-churn source (see demoProviderChurn) — updating it
+    // a second time here would race the node-count assumptions of later checks.
+    await page.evaluate(() => { setConnectMode('simple'); openProfiles(); toggleRouteRow('src2'); }); await settle(page);
+    await page.click('.conn-row[data-id=src2] .conn-acts .icon-btn[title=Update]');
+    expect(await page.evaluate(() => sourcesData.src2.updating), 'Update did not mark the subscription updating');
+    await page.evaluate(() => { toggleRouteRow('src2'); toggleRouteRow('src3'); }); await settle(page);
+    expect(await page.evaluate(() => !document.querySelector('.conn-row[data-id=src3] .conn-acts .icon-btn[title=Update]')), 'manual-only row shows an Update button');
+    await page.click('.conn-row[data-id=src3] .seg-ping');
+    const [pinged, leaked] = await page.evaluate(() => [
+      unitRefs('src3').every(r => ping(r.node) === 'testing'),
+      sourceOrder.filter(s => s !== 'src3').some(s => sourcesData[s].nodes.some(n => ping(n) === 'testing')),
+    ]);
+    expect(pinged, 'not every server of the row was pinged');
+    expect(!leaked, 'ping leaked to servers outside the unfolded row');
+    await page.evaluate(() => { toggleRouteRow('src3'); closeSheet('profiles'); setConnectMode('profiles'); });
   });
 
   await check('profiles: editor picks single nodes and Auto participation', async () => {
@@ -802,7 +828,7 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
-  await check('edit modes: Nodes and the list show grips / switches only while editing', async () => {
+  await check('edit modes: Nodes shows grips / switches only while editing', async () => {
     const r = await page.evaluate(() => {
       const out = {}; switchTab('nodes'); expandState.src2 = true; renderNodes();
       const q = s => document.querySelector(s);
@@ -821,14 +847,6 @@ async function runChecks() {
       card().querySelector(`.node-row[data-key="${key}"]`).click();
       out.chainBack = offs().length === before;
       setNodesEdit(false); switchTab('home');
-      openProfiles(); const was = autoConnect;
-      out.listView = !q('#connects-list .drag-handle');
-      setConnectEdit(true);
-      out.listEdit = !!q('#connects-list .drag-handle');
-      q('#connects-list .conn-row .conn-main').click();
-      out.noPin = autoConnect === was;
-      closeSheet('profiles');
-      out.reset = !connectEdit;
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));

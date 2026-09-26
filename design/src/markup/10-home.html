@@ -26,13 +26,13 @@
       </div>
 
       <div class="row1-right">
-        <div class="card stat-card-half">
+        <div class="card stat-card-half" onclick="refreshExitIp()" title="Tap to check again">
           <div class="card-label">Exit IP</div>
           <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:18px">🇩🇪</span>
+            <span style="font-size:18px" id="exitFlag">🇩🇪</span>
             <div>
-              <div class="ip-addr" style="font-size:14px">91.108.4.12</div>
-              <div class="ip-loc" style="margin-top:1px">Frankfurt, DE</div>
+              <div class="ip-addr" style="font-size:14px" id="exitIp">91.108.4.12</div>
+              <div class="ip-loc" style="margin-top:1px" id="exitLoc">Frankfurt, DE</div>
             </div>
           </div>
         </div>

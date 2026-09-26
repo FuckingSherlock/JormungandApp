@@ -7,8 +7,8 @@ const HELP = {
   entries: { title: 'Route', items: [
     ['Simple / Profiles', 'which tab of Nodes the route uses. Everything is created and edited in Nodes.'],
     ['Auto', 'connects the first working entry from the top. If it fails, Auto moves to the next one.'],
-    ['Manual', 'tap an entry to use only it. Tap the Auto badge to go back.'],
-    ['✎ Edit', 'drag ⋮⋮ to change the order Auto tries entries in; the switch lets Auto pick it or not.'],
+    ['Manual', 'tap MANUAL on an entry to use only it; tap it again (or the Auto badge) to go back.'],
+    ['⋮⋮ and switch', 'drag ⋮⋮ to change the order Auto tries entries in; the switch lets Auto pick it or not. Tap an entry to see its servers.'],
     ['Own order', 'by default the order is the one in Nodes. Drag here and the route keeps its own — “Follow Nodes order” goes back.'],
     ['Chain', 'traffic goes through two servers: the entry, then the exit.'],
     ['Greyed out below', 'something it needs is switched off in Nodes. Tap it to see what.'],
@@ -44,7 +44,7 @@ const HELP = {
     ['Speed test on failures', 'after failed requests, also checks how fast the server is.'],
     ['Leave a server after', 'how many missed checks in a row count as “down”.'],
     ['On / off', 'the Auto badge in the Simple / Profiles list. Off = Manual: stays on the entry you tapped.'],
-    ['Priority', 'the order Auto tries entries in — change it with ✎ in that list.'],
+    ['Priority', 'the order Auto tries entries in — drag ⋮⋮ in that list.'],
   ] },
   subsupdate: { title: 'Subscription updates', items: [
     ['Update every', 'how often the server lists are downloaded again from the providers.'],

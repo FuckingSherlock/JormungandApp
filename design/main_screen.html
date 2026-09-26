@@ -394,7 +394,8 @@ body {
 .conn-tag.muted{background:rgba(255,255,255,.06);color:var(--t3)}
 .conn-tag.warn{background:rgba(var(--warn-rgb),.15);color:var(--warn)}
 .conn-row.skip .conn-main{opacity:.5}
-.conn-state{flex-shrink:0;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--active)}
+.conn-state{flex-shrink:0;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:none;font:inherit;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--t3);cursor:pointer}
+.conn-state.on{border-color:rgba(var(--active-rgb),.45);background:rgba(var(--active-rgb),.12);color:var(--active)}
 
 /* Profile editor: source cards (tick to use, tap name to see nodes, update / ping) */
 .ps-card{margin:0 14px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;transition:border-color .2s}
@@ -517,6 +518,7 @@ body {
 .conn-body .seg-row{margin:0 0 4px}
 .conn-hint{margin-bottom:8px}
 .conn-body .se-nodes{margin:0}
+.conn-acts{margin-left:auto;display:flex;align-items:center}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
@@ -814,7 +816,7 @@ body {
 .route-modes[data-mode=profiles] .route-ink{transform:translateX(100%)}
 #connects-list.swap{animation:route-swap .28s ease}
 @keyframes route-swap{from{opacity:0;transform:translateX(var(--swap-from,16px))}to{opacity:1;transform:none}}
-#connectEditBtn.on,#nodesEditBtn.on{color:var(--active);border-color:var(--active)}
+#nodesEditBtn.on{color:var(--active);border-color:var(--active)}
 .route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
 .route-auto{flex-shrink:0;padding:0 4px}
 /* ── Compact action sheets (menus) ── */
@@ -945,13 +947,13 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </div>
 
       <div class="row1-right">
-        <div class="card stat-card-half">
+        <div class="card stat-card-half" onclick="refreshExitIp()" title="Tap to check again">
           <div class="card-label">Exit IP</div>
           <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:18px">🇩🇪</span>
+            <span style="font-size:18px" id="exitFlag">🇩🇪</span>
             <div>
-              <div class="ip-addr" style="font-size:14px">91.108.4.12</div>
-              <div class="ip-loc" style="margin-top:1px">Frankfurt, DE</div>
+              <div class="ip-addr" style="font-size:14px" id="exitIp">91.108.4.12</div>
+              <div class="ip-loc" style="margin-top:1px" id="exitLoc">Frankfurt, DE</div>
             </div>
           </div>
         </div>
@@ -1278,9 +1280,6 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <button class="sheet-close" onclick="closeSheet('profiles')">×</button>
     </div>
     <div class="route-bar">
-      <button class="icon-btn" id="connectEditBtn" onclick="setConnectEdit(!connectEdit)" title="Edit the Auto priority">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      </button>
       <div class="route-modes" id="routeModes" title="Which tab of Nodes the route uses">
         <span class="route-ink"></span><button data-mode="simple" onclick="setConnectMode('simple')">Simple</button><button data-mode="profiles" onclick="setConnectMode('profiles')">Profiles</button>
       </div>
@@ -2003,6 +2002,7 @@ let backend = {
   },
   connect()    { return wait(1100); },
   disconnect() { return Promise.resolve(); },
+  exitIp() { return wait(600).then(() => ({ ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' })); },
 };
 /* ══════════════════════ PING CACHE ══════════════════════
    One latency store for every screen. Keyed by server (protocol://address:port), so a
@@ -2244,12 +2244,12 @@ function renderConnectRow(id) {
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${routeOpenId === id ? 'open' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
-    ${connectEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
-    <div class="conn-main" ${connectEdit ? '' : `onclick="selectConnect('${id}')"`}>
+    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
+    <div class="conn-main" ${chain ? '' : `onclick="toggleRouteRow('${id}')"`}>
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    ${current && !connectEdit ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
+    <button class="conn-state ${current ? 'on' : ''}" onclick="selectConnect('${id}')" title="${current && !autoConnect ? 'Back to Auto' : 'Use only this one (Manual)'}">${current && autoConnect ? 'auto' : 'manual'}</button>
     ${chain ? '' : `<span class="conn-expand" onclick="toggleRouteRow('${id}')" title="Servers and their priority"><svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>`}
     <div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>
     ${!chain && routeOpenId === id ? routeRowBodyHtml(id) : ''}
@@ -2275,10 +2275,15 @@ function routeRowBodyHtml(id) {
       <span class="node-proto">${r.node.protocol}</span>
       <span onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');
-  return `<div class="conn-body"><div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}</div>
+  return `<div class="conn-body"><div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}<div class="conn-acts">${routeUpdateBtn(id)}${pingAllBtn(`pingRouteRow('${id}')`, 'Ping all servers')}</div></div>
     <div class="set-hint conn-hint">${priority ? 'The first working one from the top. Drag ⋮⋮ to order.' : 'Connects through the fastest of them.'}</div>
     <div class="se-nodes">${rows || '<div class="route-empty">No servers</div>'}</div></div>`;
 }
+// Update: the row's subscription, or every subscription a profile takes servers from.
+const routeSubs = id => [...new Set(unitRefs(id, true).map(r => r.sid))].filter(sid => sourcesData[sid] && sourcesData[sid].kind === 'sub');
+const routeUpdateBtn = id => { const subs = routeSubs(id); return subs.length ? `<button class="icon-btn ghost" onclick="updateRouteRow('${id}')" title="Update"><span class="${subs.some(sid => sourcesData[sid].updating) ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : ''; };
+const updateRouteRow = id => routeSubs(id).forEach(updateSource);
+const pingRouteRow = id => testLatency(unitRefs(id).map(r => [r.sid, r.node.id]));
 function routeRowChanged() {
   renderConnects();
   updateMainConnectCard();
@@ -2294,21 +2299,13 @@ function startRouteNodeDrag(e, key) {
   startRowDrag(e, rowEl, '.node-row', order, () => { done(); routeRowChanged(); });
 }
 
-// Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
-// The switch on each row (Use in Auto) works in both modes. Everything else: Nodes.
-let connectEdit = false;
-function setConnectEdit(on) {
-  connectEdit = on;
-  const b = document.getElementById('connectEditBtn');
-  b.classList.toggle('on', on);
-  b.title = on ? 'Done' : 'Edit the Auto priority';
-  b.innerHTML = on ? ICON.check : ICON.edit;
-  renderConnects();
-}
+/* A row: ⋮⋮ grip (Auto priority, always there), tap the card = unfold its servers, the
+   AUTO / MANUAL button = the only way to pick: on another row it pins that one (Manual),
+   on the pinned row it goes back to Auto. The switch = Use in Auto. Everything else: Nodes. */
 
 function renderConnects() {
   syncCatalog();
-  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ to set the order' : 'tap = Manual · switch = in Auto';
+  document.getElementById('connectsCaption').textContent = '⋮⋮ = order · switch = in Auto';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
@@ -2327,7 +2324,7 @@ function renderConnects() {
 function renderBrokenRow(id) {
   const e = connectEntry(id);
   return `<div class="conn-row broken" data-id="${id}" onclick="explainBroken('${id}')">
-    ${connectEdit ? '<div class="drag-handle"></div>' : ''}
+    <div class="drag-handle"></div>
     <div class="conn-main">
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
       <div class="conn-sub"><span>${esc(reasonsText(brokenBy(id)))}</span></div>
@@ -4079,6 +4076,29 @@ function renderConnState() {
   btn.classList.toggle('busy', connecting);
   document.getElementById('mainToggle').classList.toggle('off', !connected || connecting);
   document.getElementById('connLabel').textContent = connecting ? 'Connecting…' : connected ? 'Connected' : 'Tap to connect';
+  renderExitIp();
+}
+
+/* ExitIpCard: where traffic leaves the tunnel, checked by the core through the tunnel
+   after every (re)connect; a tap checks again. exitInfo: null = checking,
+   {ip, country, city?} or {error}. The mock keeps a fixed answer. */
+let exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' };
+const flagOf = cc => /^[A-Z]{2}$/i.test(cc || '') ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : '🌐';
+function renderExitIp() {
+  const e = connected && !connecting ? exitInfo : undefined;
+  const [flag, ip, loc] = e === undefined ? ['🌐', '—', 'Not connected']
+    : e === null ? ['🌐', '…', 'Checking…']
+    : e.error ? ['🌐', '—', 'No answer · tap to retry']
+    : [flagOf(e.country), e.ip, [e.city, e.country].filter(Boolean).join(', ')];
+  document.getElementById('exitFlag').textContent = flag;
+  document.getElementById('exitIp').textContent = ip;
+  document.getElementById('exitLoc').textContent = loc;
+}
+function refreshExitIp() {
+  if (!connected || connecting) return;
+  exitInfo = null;
+  renderExitIp();
+  backend.exitIp().then(e => { exitInfo = e; renderExitIp(); });
 }
 function toggleMain() {
   if (connecting) return;
@@ -4486,8 +4506,8 @@ const HELP = {
   entries: { title: 'Route', items: [
     ['Simple / Profiles', 'which tab of Nodes the route uses. Everything is created and edited in Nodes.'],
     ['Auto', 'connects the first working entry from the top. If it fails, Auto moves to the next one.'],
-    ['Manual', 'tap an entry to use only it. Tap the Auto badge to go back.'],
-    ['✎ Edit', 'drag ⋮⋮ to change the order Auto tries entries in; the switch lets Auto pick it or not.'],
+    ['Manual', 'tap MANUAL on an entry to use only it; tap it again (or the Auto badge) to go back.'],
+    ['⋮⋮ and switch', 'drag ⋮⋮ to change the order Auto tries entries in; the switch lets Auto pick it or not. Tap an entry to see its servers.'],
     ['Own order', 'by default the order is the one in Nodes. Drag here and the route keeps its own — “Follow Nodes order” goes back.'],
     ['Chain', 'traffic goes through two servers: the entry, then the exit.'],
     ['Greyed out below', 'something it needs is switched off in Nodes. Tap it to see what.'],
@@ -4523,7 +4543,7 @@ const HELP = {
     ['Speed test on failures', 'after failed requests, also checks how fast the server is.'],
     ['Leave a server after', 'how many missed checks in a row count as “down”.'],
     ['On / off', 'the Auto badge in the Simple / Profiles list. Off = Manual: stays on the entry you tapped.'],
-    ['Priority', 'the order Auto tries entries in — change it with ✎ in that list.'],
+    ['Priority', 'the order Auto tries entries in — drag ⋮⋮ in that list.'],
   ] },
   subsupdate: { title: 'Subscription updates', items: [
     ['Update every', 'how often the server lists are downloaded again from the providers.'],
@@ -4593,7 +4613,6 @@ function openSheet(name) {
 }
 // A sheet may veto or clean up on close (any way: ×, overlay, swipe, Done).
 const sheetCloseHooks = {};
-sheetCloseHooks.profiles = () => { if (connectEdit) setConnectEdit(false); };   // the list reopens in view mode
 function closeSheet(name) {
   if (sheetCloseHooks[name]) sheetCloseHooks[name]();
   document.getElementById('ov-'+name).classList.remove('open');
@@ -5751,6 +5770,32 @@ function api(path, body, method) {
   }));
 }
 
+// /api/ping streams one JSON line per result as soon as it is measured; each goes to
+// onLine at once. Resolves when the stream ends; rejects on a failed request.
+function apiPing(body, onLine) {
+  return fetch('/api/ping', {
+    method: 'POST',
+    headers: { 'X-Jorm': '1', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(async r => {
+    if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      buf += dec.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      lines.filter(Boolean).forEach(l => {
+        const j = JSON.parse(l);
+        if (j.error) throw new Error(j.error);
+        onLine(j);
+      });
+      if (done) break;
+    }
+  });
+}
+
 /* ── State kept by the core ── */
 
 function liveSnapshot() {
@@ -5845,8 +5890,10 @@ function flushPairs() {
   live.pairQueue = null;
   if (!q.length) return;
   q.forEach(x => { x.key = x.entry.id + '>' + x.exit.id; });
-  api('/api/ping', { pairs: q.map(x => ({ key: x.key, entry: { outbound: x.entry.outbound }, exit: { outbound: x.exit.outbound } })) })
-    .then(r => q.forEach(x => x.resolve(r.pairs[x.key] ?? -1)), () => q.forEach(x => x.resolve(-1)));
+  // resolve() twice is a no-op, so the final sweep only answers the ones never reported.
+  apiPing({ pairs: q.map(x => ({ key: x.key, entry: { outbound: x.entry.outbound }, exit: { outbound: x.exit.outbound } })) },
+    l => { if (l.kind === 'p') q.filter(x => x.key === l.key).forEach(x => x.resolve(l.ms)); })
+    .catch(() => {}).then(() => q.forEach(x => x.resolve(-1)));
 }
 
 const liveBackend = {
@@ -5869,10 +5916,12 @@ const liveBackend = {
     const ok = nodes.filter(n => n.outbound && !n.unsupported);
     nodes.filter(n => !ok.includes(n)).forEach(n => onResult(n, -1));
     if (!ok.length) return Promise.resolve();
-    const uniq = new Map(ok.map(n => [n.id, n]));
-    return api('/api/ping', { nodes: [...uniq.values()].map(n => ({ key: n.id, outbound: n.outbound })) })
-      .then(r => ok.forEach(n => onResult(n, r.nodes[n.id] ?? -1)),
-            e => { toast('Ping failed: ' + e.message); ok.forEach(n => onResult(n, -1)); });
+    const uniq = new Map(ok.map(n => [n.id, n])), left = new Set(ok);
+    const report = (n, ms) => { if (left.delete(n)) onResult(n, ms); };
+    return apiPing({ nodes: [...uniq.values()].map(n => ({ key: n.id, outbound: n.outbound })) },
+      l => { if (l.kind === 'n') ok.filter(n => n.id === l.key).forEach(n => report(n, l.ms)); })
+      .catch(e => toast('Ping failed: ' + e.message))
+      .then(() => [...left].forEach(n => report(n, -1)));
   },
   // Pairs asked in the same moment (a chain check) go to the core as one batch.
   pingPair(entry, exit) {
@@ -5888,6 +5937,7 @@ const liveBackend = {
       return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
         live.planSig = JSON.stringify(plan);
         if (st.warning) toast(st.warning);
+        liveWatchExit();   // the core checks the exit after every (re)connect
       });
     });
   },
@@ -5895,7 +5945,30 @@ const liveBackend = {
     live.planSig = null;
     return api('/api/disconnect', {});
   },
+  exitIp() {
+    return api('/api/exit', {}).then(() => liveWatchExit());
+  },
 };
+
+// The core's exit check takes a second or two: poll its status until the answer is in
+// (a newer watch replaces an older one). Resolves with {ip, country, city?} or {error}.
+function liveWatchExit() {
+  const seq = live.exitSeq = (live.exitSeq || 0) + 1;
+  exitInfo = null;
+  renderExitIp();
+  return new Promise(resolve => {
+    let tries = 0;
+    const poll = () => api('/api/status').then(st => {
+      if (seq !== live.exitSeq) return;
+      if (st.exit || !st.connected || ++tries > 20) {
+        exitInfo = st.exit || { error: 'no answer' };
+        renderExitIp();
+        resolve(exitInfo);
+      } else setTimeout(poll, 1000);
+    }, () => setTimeout(poll, 1000));
+    setTimeout(poll, 700);
+  });
+}
 
 function livePaste() {
   (navigator.clipboard ? navigator.clipboard.readText() : Promise.reject(new Error('no clipboard'))).then(text => {
@@ -5927,6 +6000,8 @@ function liveInit() {
   api('/api/state').then(st => {
     if (st.snapshot) liveApply(st.snapshot);
     connected = !!st.status.connected;
+    exitInfo = st.status.exit || null;
+    if (connected && !exitInfo) liveWatchExit();
     renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
     renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
@@ -5940,7 +6015,11 @@ function liveInit() {
   setInterval(() => {
     if (!live.ready || !connected || connecting) return;
     api('/api/status').then(st => {
-      if (st.connected) return;
+      if (st.connected) {
+        // a check the core finished on its own (e.g. after liveMaybeReconnect)
+        if (st.exit && JSON.stringify(st.exit) !== JSON.stringify(exitInfo)) { exitInfo = st.exit; renderExitIp(); }
+        return;
+      }
       connected = false;
       live.planSig = null;
       renderConnState();

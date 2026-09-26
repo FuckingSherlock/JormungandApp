@@ -8,6 +8,29 @@ function renderConnState() {
   btn.classList.toggle('busy', connecting);
   document.getElementById('mainToggle').classList.toggle('off', !connected || connecting);
   document.getElementById('connLabel').textContent = connecting ? 'Connecting…' : connected ? 'Connected' : 'Tap to connect';
+  renderExitIp();
+}
+
+/* ExitIpCard: where traffic leaves the tunnel, checked by the core through the tunnel
+   after every (re)connect; a tap checks again. exitInfo: null = checking,
+   {ip, country, city?} or {error}. The mock keeps a fixed answer. */
+let exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' };
+const flagOf = cc => /^[A-Z]{2}$/i.test(cc || '') ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : '🌐';
+function renderExitIp() {
+  const e = connected && !connecting ? exitInfo : undefined;
+  const [flag, ip, loc] = e === undefined ? ['🌐', '—', 'Not connected']
+    : e === null ? ['🌐', '…', 'Checking…']
+    : e.error ? ['🌐', '—', 'No answer · tap to retry']
+    : [flagOf(e.country), e.ip, [e.city, e.country].filter(Boolean).join(', ')];
+  document.getElementById('exitFlag').textContent = flag;
+  document.getElementById('exitIp').textContent = ip;
+  document.getElementById('exitLoc').textContent = loc;
+}
+function refreshExitIp() {
+  if (!connected || connecting) return;
+  exitInfo = null;
+  renderExitIp();
+  backend.exitIp().then(e => { exitInfo = e; renderExitIp(); });
 }
 function toggleMain() {
   if (connecting) return;

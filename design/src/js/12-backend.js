@@ -33,4 +33,5 @@ let backend = {
   },
   connect()    { return wait(1100); },
   disconnect() { return Promise.resolve(); },
+  exitIp() { return wait(600).then(() => ({ ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' })); },
 };

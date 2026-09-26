@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'config.dart';
+import 'exitip.dart';
 import 'fetch.dart';
 import 'merge.dart';
 import 'parse/links.dart';
@@ -35,6 +36,10 @@ class Daemon {
   String? _error;
   String? _warning;
   int _pingSeq = 0;
+  int _mixedPort = 2080;
+  // Exit of the tunnel: null while checking (or disconnected), {ip, country…} or {error}.
+  Map<String, dynamic>? _exit;
+  int _exitSeq = 0;
 
   Future<void> init() async {
     await Directory(dataDir).create(recursive: true);
@@ -58,6 +63,7 @@ class Daemon {
       final body = req.method == 'POST' || req.method == 'PUT'
           ? (jsonDecode(await utf8.decodeStream(req)) as Map).cast<String, dynamic>()
           : const <String, dynamic>{};
+      if (req.method == 'POST' && path == '/api/ping') return await _ping(body, res);
       final out = await switch ('${req.method} $path') {
         'GET /api/state' => _state(),
         'PUT /api/state' => _saveState(body),
@@ -67,7 +73,10 @@ class Daemon {
         'POST /api/parse' => Future.value(_parse(body)),
         'POST /api/connect' => _connect(body),
         'POST /api/disconnect' => _disconnect(),
-        'POST /api/ping' => _ping(body),
+        'POST /api/exit' => Future(() {
+            _recheckExit();
+            return _status();
+          }),
         _ => null,
       };
       if (out == null) return await _send(res, 404, {'error': 'no route ${req.method} $path'});
@@ -113,7 +122,24 @@ class Daemon {
         'systemProxy': sysProxy.isSet,
         'error': _error,
         'warning': _warning,
+        'exit': _exit,
       };
+
+  /// Asks where traffic leaves the tunnel, after every (re)connect and on demand. A check
+  /// that finishes after a newer one started (or after a disconnect) is dropped.
+  void _recheckExit() {
+    final seq = ++_exitSeq;
+    _exit = null;
+    if (!main.running) return;
+    checkExitIp(_mixedPort).then(
+      (e) {
+        if (seq == _exitSeq) _exit = {...e, 'at': DateTime.now().millisecondsSinceEpoch};
+      },
+      onError: (Object e) {
+        if (seq == _exitSeq) _exit = {'error': '$e'};
+      },
+    );
+  }
 
   /// body: {url, userAgent, strategy, discoveredAt, prev: {nodes, gone}}
   Future<Map<String, dynamic>> _fetch(Map<String, dynamic> body) async {
@@ -142,6 +168,8 @@ class Daemon {
     _warning = null;
     try {
       await main.start(buildConfig(plan, clashPort: clashPort), clashPort: clashPort);
+      _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
+      _recheckExit();
       if (body['systemProxy'] == true) {
         _warning = await sysProxy.enable((plan['mixedPort'] as num?)?.toInt() ?? 2080);
       } else {
@@ -157,6 +185,7 @@ class Daemon {
 
   Future<Map<String, dynamic>> _disconnect() async {
     await main.stop();
+    _recheckExit(); // clears it
     await sysProxy.restore();
     _error = null;
     _warning = null;
@@ -164,17 +193,32 @@ class Daemon {
   }
 
   /// body: {nodes: [{key, outbound}], pairs: [{key, entry: {outbound}, exit: {outbound}}], url?}
-  Future<Map<String, dynamic>> _ping(Map<String, dynamic> body) async {
+  /// Streams one NDJSON line per result as soon as it is measured —
+  /// `{"kind":"n"|"p","key":…,"ms":…}` (-1 = no answer) — then `{"done":true}`,
+  /// or `{"error":…}` if the tester could not start.
+  Future<void> _ping(Map<String, dynamic> body, HttpResponse res) async {
     final nodes = (body['nodes'] as List? ?? const []).cast<Map>();
     final pairs = (body['pairs'] as List? ?? const []).cast<Map>();
-    if (nodes.isEmpty && pairs.isEmpty) return {'nodes': {}, 'pairs': {}};
-    final r = await measureLatency(
-      binary: singBox,
-      workDir: p.join(dataDir, 'run', 'ping-${_pingSeq++ % 8}'),
-      nodes: nodes,
-      pairs: pairs,
-      url: (body['url'] as String?) ?? defaultTestUrl,
-    );
-    return {'nodes': r.nodes, 'pairs': r.pairs};
+    res.headers.contentType = ContentType('application', 'x-ndjson', charset: 'utf-8');
+    res.headers.set('Cache-Control', 'no-store');
+    res.bufferOutput = false;
+    void line(Object o) => res.write('${jsonEncode(o)}\n');
+    try {
+      if (nodes.isNotEmpty || pairs.isNotEmpty) {
+        await measureLatency(
+          binary: singBox,
+          workDir: p.join(dataDir, 'run', 'ping-${_pingSeq++ % 8}'),
+          nodes: nodes,
+          pairs: pairs,
+          url: (body['url'] as String?) ?? defaultTestUrl,
+          // bufferOutput is off: every line leaves at once.
+          onResult: (kind, key, ms) => line({'kind': kind, 'key': key, 'ms': ms}),
+        );
+      }
+      line({'done': true});
+    } catch (e) {
+      line({'error': '$e'});
+    }
+    await res.close();
   }
 }

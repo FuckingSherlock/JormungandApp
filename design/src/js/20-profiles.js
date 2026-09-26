@@ -184,12 +184,12 @@ function renderConnectRow(id) {
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${routeOpenId === id ? 'open' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
-    ${connectEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
-    <div class="conn-main" ${connectEdit ? '' : `onclick="selectConnect('${id}')"`}>
+    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
+    <div class="conn-main" ${chain ? '' : `onclick="toggleRouteRow('${id}')"`}>
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
     </div>
-    ${current && !connectEdit ? `<span class="conn-state">${autoConnect ? 'auto' : 'manual'}</span>` : ''}
+    <button class="conn-state ${current ? 'on' : ''}" onclick="selectConnect('${id}')" title="${current && !autoConnect ? 'Back to Auto' : 'Use only this one (Manual)'}">${current && autoConnect ? 'auto' : 'manual'}</button>
     ${chain ? '' : `<span class="conn-expand" onclick="toggleRouteRow('${id}')" title="Servers and their priority"><svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>`}
     <div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>
     ${!chain && routeOpenId === id ? routeRowBodyHtml(id) : ''}
@@ -215,10 +215,15 @@ function routeRowBodyHtml(id) {
       <span class="node-proto">${r.node.protocol}</span>
       <span onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');
-  return `<div class="conn-body"><div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}</div>
+  return `<div class="conn-body"><div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}<div class="conn-acts">${routeUpdateBtn(id)}${pingAllBtn(`pingRouteRow('${id}')`, 'Ping all servers')}</div></div>
     <div class="set-hint conn-hint">${priority ? 'The first working one from the top. Drag ⋮⋮ to order.' : 'Connects through the fastest of them.'}</div>
     <div class="se-nodes">${rows || '<div class="route-empty">No servers</div>'}</div></div>`;
 }
+// Update: the row's subscription, or every subscription a profile takes servers from.
+const routeSubs = id => [...new Set(unitRefs(id, true).map(r => r.sid))].filter(sid => sourcesData[sid] && sourcesData[sid].kind === 'sub');
+const routeUpdateBtn = id => { const subs = routeSubs(id); return subs.length ? `<button class="icon-btn ghost" onclick="updateRouteRow('${id}')" title="Update"><span class="${subs.some(sid => sourcesData[sid].updating) ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : ''; };
+const updateRouteRow = id => routeSubs(id).forEach(updateSource);
+const pingRouteRow = id => testLatency(unitRefs(id).map(r => [r.sid, r.node.id]));
 function routeRowChanged() {
   renderConnects();
   updateMainConnectCard();
@@ -234,21 +239,13 @@ function startRouteNodeDrag(e, key) {
   startRowDrag(e, rowEl, '.node-row', order, () => { done(); routeRowChanged(); });
 }
 
-// Edit mode of the list: ⋮⋮ grips for the Auto priority; taps no longer switch to Manual.
-// The switch on each row (Use in Auto) works in both modes. Everything else: Nodes.
-let connectEdit = false;
-function setConnectEdit(on) {
-  connectEdit = on;
-  const b = document.getElementById('connectEditBtn');
-  b.classList.toggle('on', on);
-  b.title = on ? 'Done' : 'Edit the Auto priority';
-  b.innerHTML = on ? ICON.check : ICON.edit;
-  renderConnects();
-}
+/* A row: ⋮⋮ grip (Auto priority, always there), tap the card = unfold its servers, the
+   AUTO / MANUAL button = the only way to pick: on another row it pins that one (Manual),
+   on the pinned row it goes back to Auto. The switch = Use in Auto. Everything else: Nodes. */
 
 function renderConnects() {
   syncCatalog();
-  document.getElementById('connectsCaption').textContent = connectEdit ? 'drag ⋮⋮ to set the order' : 'tap = Manual · switch = in Auto';
+  document.getElementById('connectsCaption').textContent = '⋮⋮ = order · switch = in Auto';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
@@ -267,7 +264,7 @@ function renderConnects() {
 function renderBrokenRow(id) {
   const e = connectEntry(id);
   return `<div class="conn-row broken" data-id="${id}" onclick="explainBroken('${id}')">
-    ${connectEdit ? '<div class="drag-handle"></div>' : ''}
+    <div class="drag-handle"></div>
     <div class="conn-main">
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
       <div class="conn-sub"><span>${esc(reasonsText(brokenBy(id)))}</span></div>

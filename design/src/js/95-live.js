@@ -19,6 +19,32 @@ function api(path, body, method) {
   }));
 }
 
+// /api/ping streams one JSON line per result as soon as it is measured; each goes to
+// onLine at once. Resolves when the stream ends; rejects on a failed request.
+function apiPing(body, onLine) {
+  return fetch('/api/ping', {
+    method: 'POST',
+    headers: { 'X-Jorm': '1', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(async r => {
+    if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      buf += dec.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      lines.filter(Boolean).forEach(l => {
+        const j = JSON.parse(l);
+        if (j.error) throw new Error(j.error);
+        onLine(j);
+      });
+      if (done) break;
+    }
+  });
+}
+
 /* ── State kept by the core ── */
 
 function liveSnapshot() {
@@ -113,8 +139,10 @@ function flushPairs() {
   live.pairQueue = null;
   if (!q.length) return;
   q.forEach(x => { x.key = x.entry.id + '>' + x.exit.id; });
-  api('/api/ping', { pairs: q.map(x => ({ key: x.key, entry: { outbound: x.entry.outbound }, exit: { outbound: x.exit.outbound } })) })
-    .then(r => q.forEach(x => x.resolve(r.pairs[x.key] ?? -1)), () => q.forEach(x => x.resolve(-1)));
+  // resolve() twice is a no-op, so the final sweep only answers the ones never reported.
+  apiPing({ pairs: q.map(x => ({ key: x.key, entry: { outbound: x.entry.outbound }, exit: { outbound: x.exit.outbound } })) },
+    l => { if (l.kind === 'p') q.filter(x => x.key === l.key).forEach(x => x.resolve(l.ms)); })
+    .catch(() => {}).then(() => q.forEach(x => x.resolve(-1)));
 }
 
 const liveBackend = {
@@ -137,10 +165,12 @@ const liveBackend = {
     const ok = nodes.filter(n => n.outbound && !n.unsupported);
     nodes.filter(n => !ok.includes(n)).forEach(n => onResult(n, -1));
     if (!ok.length) return Promise.resolve();
-    const uniq = new Map(ok.map(n => [n.id, n]));
-    return api('/api/ping', { nodes: [...uniq.values()].map(n => ({ key: n.id, outbound: n.outbound })) })
-      .then(r => ok.forEach(n => onResult(n, r.nodes[n.id] ?? -1)),
-            e => { toast('Ping failed: ' + e.message); ok.forEach(n => onResult(n, -1)); });
+    const uniq = new Map(ok.map(n => [n.id, n])), left = new Set(ok);
+    const report = (n, ms) => { if (left.delete(n)) onResult(n, ms); };
+    return apiPing({ nodes: [...uniq.values()].map(n => ({ key: n.id, outbound: n.outbound })) },
+      l => { if (l.kind === 'n') ok.filter(n => n.id === l.key).forEach(n => report(n, l.ms)); })
+      .catch(e => toast('Ping failed: ' + e.message))
+      .then(() => [...left].forEach(n => report(n, -1)));
   },
   // Pairs asked in the same moment (a chain check) go to the core as one batch.
   pingPair(entry, exit) {
@@ -156,6 +186,7 @@ const liveBackend = {
       return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
         live.planSig = JSON.stringify(plan);
         if (st.warning) toast(st.warning);
+        liveWatchExit();   // the core checks the exit after every (re)connect
       });
     });
   },
@@ -163,7 +194,30 @@ const liveBackend = {
     live.planSig = null;
     return api('/api/disconnect', {});
   },
+  exitIp() {
+    return api('/api/exit', {}).then(() => liveWatchExit());
+  },
 };
+
+// The core's exit check takes a second or two: poll its status until the answer is in
+// (a newer watch replaces an older one). Resolves with {ip, country, city?} or {error}.
+function liveWatchExit() {
+  const seq = live.exitSeq = (live.exitSeq || 0) + 1;
+  exitInfo = null;
+  renderExitIp();
+  return new Promise(resolve => {
+    let tries = 0;
+    const poll = () => api('/api/status').then(st => {
+      if (seq !== live.exitSeq) return;
+      if (st.exit || !st.connected || ++tries > 20) {
+        exitInfo = st.exit || { error: 'no answer' };
+        renderExitIp();
+        resolve(exitInfo);
+      } else setTimeout(poll, 1000);
+    }, () => setTimeout(poll, 1000));
+    setTimeout(poll, 700);
+  });
+}
 
 function livePaste() {
   (navigator.clipboard ? navigator.clipboard.readText() : Promise.reject(new Error('no clipboard'))).then(text => {
@@ -195,6 +249,8 @@ function liveInit() {
   api('/api/state').then(st => {
     if (st.snapshot) liveApply(st.snapshot);
     connected = !!st.status.connected;
+    exitInfo = st.status.exit || null;
+    if (connected && !exitInfo) liveWatchExit();
     renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
     renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
@@ -208,7 +264,11 @@ function liveInit() {
   setInterval(() => {
     if (!live.ready || !connected || connecting) return;
     api('/api/status').then(st => {
-      if (st.connected) return;
+      if (st.connected) {
+        // a check the core finished on its own (e.g. after liveMaybeReconnect)
+        if (st.exit && JSON.stringify(st.exit) !== JSON.stringify(exitInfo)) { exitInfo = st.exit; renderExitIp(); }
+        return;
+      }
       connected = false;
       live.planSig = null;
       renderConnState();
