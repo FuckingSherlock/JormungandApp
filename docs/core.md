@@ -92,9 +92,16 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 detour на копию входа.
 
 Exit IP (`exitip.dart`): после каждого (пере)подключения и по запросу ядро спрашивает
-через свой mixed-порт `ipwho.is` (ip, страна, город, провайдер), при ошибке —
-`cloudflare.com/cdn-cgi/trace` (ip, страна). Пока идёт проверка, `status.exit = null`;
-затем `{ip, country, city?, org?, source, at}` или `{error}`. Результат устаревшей
+через свой mixed-порт сразу несколько сервисов (`exitProbes`) на разной инфраструктуре,
+параллельно: с геоданными — ipwho.is (Cloudflare), ipinfo.io (Google), ip-api.com (свой
+хостинг, только HTTP); IP и страна — Cloudflare trace; только IP — Яндекс (доступен из РФ),
+Amazon, ipip.net (из Китая). Страна, которая режет один CDN (РФ — Cloudflare), не ломает
+проверку. Первый ответ со страной и городом — сразу результат; если пока есть только IP,
+ещё 1,5 с ждём геоданные, потом берём что есть (тогда в UI «Location unknown»). Ответы про
+один IP дополняют друг друга. Общий лимит — 7 с. Диагностика по сервисам на конкретной
+ноде: `dart run tool/exit_check.dart [port]`.
+Пока идёт проверка, `status.exit = null`;
+затем `{ip, country?, city?, org?, source, at}` или `{error}`. Результат устаревшей
 проверки (после нового подключения или отключения) отбрасывается. UI опрашивает status,
 пока ответа нет; тап по карточке Exit IP — `POST /api/exit`.
 

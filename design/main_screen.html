@@ -4090,7 +4090,7 @@ function renderExitIp() {
   const [flag, ip, loc] = e === undefined ? ['🌐', '—', 'Not connected']
     : e === null ? ['🌐', '…', 'Checking…']
     : e.error ? ['🌐', '—', 'No answer · tap to retry']
-    : [flagOf(e.country), e.ip, [e.city, e.country].filter(Boolean).join(', ')];
+    : [flagOf(e.country), e.ip, [e.city, e.country].filter(Boolean).join(', ') || 'Location unknown'];
   document.getElementById('exitFlag').textContent = flag;
   document.getElementById('exitIp').textContent = ip;
   document.getElementById('exitLoc').textContent = loc;
