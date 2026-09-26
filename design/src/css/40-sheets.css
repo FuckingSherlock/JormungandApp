@@ -169,7 +169,7 @@
 .conn-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .conn-sub{display:flex;align-items:center;gap:4px;margin-top:3px;font-size:13px;color:var(--t2);white-space:nowrap;overflow:hidden}
 .conn-sub .lat{min-width:0;padding:0;cursor:default}
-.conn-node{overflow:hidden;text-overflow:ellipsis}
+.conn-node{min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.3}
 .conn-flag{font-size:11px;flex-shrink:0}
 .cap-ico svg{width:11px;height:11px;vertical-align:-1px}
 .conn-arrow{color:var(--t3)}

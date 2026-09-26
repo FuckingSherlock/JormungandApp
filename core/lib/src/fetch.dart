@@ -10,6 +10,12 @@ import 'parse/subscription.dart';
 /// different set of servers from the provider (docs/subscription-parsing.md).
 const discoveryAgents = ['sing-box/1.14.2', 'mihomo/1.19.28', 'ClashMeta'];
 
+/// Bumped when parsing changes what a node looks like (names, outbounds): an ETag /
+/// Last-Modified stored by an older parser is not sent, so the next update reads the
+/// subscription in full instead of getting 304 and keeping the old nodes.
+/// 2: protocol words leave names.
+const parserVersion = 2;
+
 /// The UA chip of the subscription form → the header sent.
 String userAgentFor(String chip) => switch (chip) {
       'sing-box' => 'sing-box/1.14.2',
@@ -129,6 +135,7 @@ Future<SubscriptionResult> _run(
 }) async {
   Future<_Resp?> one(Map<String, dynamic> e, {bool conditional = true}) async {
     try {
+      conditional = conditional && e['parser'] == parserVersion;
       return await _get(c, url, e['ua'] as String,
           etag: conditional ? e['etag'] as String? : null, lastModified: conditional ? e['lastModified'] as String? : null);
     } catch (err) {
@@ -167,6 +174,7 @@ Future<SubscriptionResult> _run(
       strategy.add({
         'ua': r.ua,
         'unique': unique,
+        'parser': parserVersion,
         if (r.headers.value(HttpHeaders.etagHeader) != null) 'etag': r.headers.value(HttpHeaders.etagHeader),
         if (r.headers.value(HttpHeaders.lastModifiedHeader) != null) 'lastModified': r.headers.value(HttpHeaders.lastModifiedHeader),
       });

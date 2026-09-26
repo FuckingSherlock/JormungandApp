@@ -53,7 +53,8 @@ function fmtDate(iso) {
 function latMsHtml(v) {
   if (v === 'testing') return '<span class="lat testing">testing</span>';
   if (v == null) return '<span class="lat none">—</span>';
-  if (v < 0) return '<span class="lat bad">timeout</span>';
+  // no answer: a red warning sign (an SVG: the ⚠️ emoji is yellow and ignores color)
+  if (v < 0) return '<span class="lat bad dead" title="No answer (timeout)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18.2A2 2 0 0 0 3.5 21h17a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>';
   const cls = v < 150 ? 'good' : v < 400 ? 'mid' : 'bad';
   return `<span class="lat ${cls}">${v} ms</span>`;
 }

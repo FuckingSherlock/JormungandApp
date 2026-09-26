@@ -363,6 +363,25 @@ async function runChecks() {
     await p.close();
   });
 
+  await check('node rows: a timeout is a red warning sign, long names wrap instead of being cut', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      switchTab('nodes'); setNodesTab('simple');
+      const sid = sourceOrder[0], n = sourcesData[sid].nodes[0], was = n.name;
+      n.name = 'A very long server name from a provider that never fits on one line at all';
+      setPing(n, -1); expandState[sid] = true; renderNodes();
+      const row = document.querySelector(`#view-nodes .node-row[data-id="${n.id}"]`) || [...document.querySelectorAll('#view-nodes .node-row')].find(el => el.textContent.includes('A very long'));
+      const name = row.querySelector('.node-name'), lat = row.querySelector('.lat');
+      const out = { sign: !!lat.querySelector('svg') && !/timeout/.test(lat.textContent) && lat.classList.contains('bad'),
+        wraps: name.getClientRects().length && name.offsetHeight > parseFloat(getComputedStyle(name).lineHeight) * 1.5 && name.scrollWidth <= name.clientWidth,
+        fits: row.scrollWidth <= row.clientWidth };
+      n.name = was; renderNodes();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
   await check('live traffic: cards and Live connections follow backend.traffic, zero when off', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(async () => {

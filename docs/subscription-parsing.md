@@ -108,6 +108,10 @@ Reality pbk/sid, flow, транспорт (type, path, Host, service_name), obfs
 полностью совпадающие. Поля, которые формат дописывает сам (tag, domain_strategy…), в
 вариант не входят — одна нода из ссылки, Clash и sing-box JSON остаётся одной.
 
+ETag / Last-Modified хранятся в стратегии вместе с `parser` — версией парсера
+(`parserVersion`); после изменения разбора условные заголовки не шлются, первое обновление
+читает подписку целиком (иначе 304 оставил бы ноды в старом виде).
+
 Имя ноды (`tag`) — **не** часть ключа, разные UA могут называть одну ноду по-разному.
 Слова-протоколы из имени убираются (`stripProtocol`: vless, vmess, trojan, ss/ssr/shadowsocks,
 hysteria/hysteria2/hy2, tuic, anytls, wireguard, reality — только целыми словами, вместе с
