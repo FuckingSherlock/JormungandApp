@@ -44,10 +44,21 @@ function toggleMain() {
     return;
   }
   if (nothingInAuto()) { alertNothingInAuto(); return; }
+  if (catalogEmpty()) { toast(simpleMode() ? 'Add a subscription or a server first' : 'Create a profile first'); dockTap(); return; }
   connecting = true;
   renderConnState();
   backend.connect().then(() => { connected = true; }, e => toast(e.message))
     .then(() => { connecting = false; renderConnState(); if (!connected) refreshExitIp(); });
+}
+
+// First run (or everything deleted): nothing in this mode to connect. The dock says so and a
+// tap goes to Nodes → + (with no sources a profile has nothing to use: the Simple tab).
+const catalogEmpty = () => !connectOrder.some(entryVisible);
+function dockTap() {
+  if (!catalogEmpty()) { toggleRoute(); return; }
+  switchTab('nodes');
+  setNodesTab(simpleMode() || !sourceOrder.length ? 'simple' : 'profiles');
+  openNodesAdd();
 }
 
 /* ══════════════════════ SEGMENTED CONTROLS ══════════════════════ */
@@ -68,7 +79,8 @@ function setSegment(group, value) {
 /* Connection switches (Settings → Connection). System proxy is also the third switch on
    Home; on mobile it will leave Home (Android apps mostly ignore the system proxy). */
 // port: the core's local HTTP + SOCKS5 proxy (127.0.0.1), where the system proxy points.
-const connCfg = { sysProxy: false, killSwitch: false, port: 2080 };
+// testUrl: the latency test URL ('' = the core's default, gstatic), see 59-data.js.
+const connCfg = { sysProxy: false, killSwitch: false, port: 2080, testUrl: '' };
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());
@@ -121,14 +133,26 @@ const trafficVia = out => out.slice().reverse().map(t => {
 }).join(' → ') || '—';
 const trafficAge = iso => { const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000 | 0); return s < 60 ? s + 's' : s < 3600 ? (s / 60 | 0) + 'm' : (s / 3600 | 0) + 'h'; };
 // LiveConnRow: host:port + TCP/UDP; the route (entry → exit) and rule; app, speed, bytes, age. Newest first.
+// The filter matches host, app, rule and the servers a connection goes through; × closes one
+// (sing-box drops it, the app usually opens a new one).
+const connMatches = (c, q) => !q || [c.host, c.process, c.rule, trafficVia(c.out)].some(v => (v || '').toLowerCase().includes(q));
 function renderLiveConns() {
-  const list = connected && traffic ? traffic.conns.slice().sort((a, b) => Date.parse(b.start) - Date.parse(a.start)) : [];
+  const all = connected && traffic ? traffic.conns.slice().sort((a, b) => Date.parse(b.start) - Date.parse(a.start)) : [];
+  const q = document.getElementById('connFilter').value.trim().toLowerCase(), list = all.filter(c => connMatches(c, q));
+  document.getElementById('connCloseAll').disabled = !all.length;
   document.getElementById('liveConnList').innerHTML = list.length ? list.map(c => `
     <div class="live-conn-row">
-      <div class="live-conn-top"><span class="live-conn-host">${esc(c.host)}${c.port ? ':' + esc(c.port) : ''}</span><span class="live-conn-proto ${c.net === 'udp' ? 'udp' : 'tcp'}">${esc(c.net.toUpperCase())}</span></div>
+      <div class="live-conn-top"><span class="live-conn-host">${esc(c.host)}${c.port ? ':' + esc(c.port) : ''}</span><span class="live-conn-proto ${c.net === 'udp' ? 'udp' : 'tcp'}">${esc(c.net.toUpperCase())}</span><button class="live-conn-close" title="Close connection" data-id="${esc(c.id)}" onclick="closeLiveConn(this.dataset.id)">×</button></div>
       <div class="live-conn-meta">${trafficVia(c.out)}${c.rule ? ' · ' + esc(c.rule) : ''}</div>
       <div class="live-conn-meta dim">${c.process ? esc(c.process.split(/[\\/]/).pop()) + ' · ' : ''}↓ ${fmtRate(c.downRate).join(' ')} ↑ ${fmtRate(c.upRate).join(' ')} · ${fmtBytes(c.down + c.up)} · ${trafficAge(c.start)}</div>
-    </div>`).join('') : `<div class="live-conn-empty">${connected ? 'No open connections' : 'Not connected'}</div>`;
+    </div>`).join('') : `<div class="live-conn-empty">${!connected ? 'Not connected' : all.length ? 'Nothing matches' : 'No open connections'}</div>`;
+}
+function closeLiveConn(id) {
+  backend.closeConn(id).then(() => {
+    if (traffic) traffic.conns = id ? traffic.conns.filter(c => c.id !== id) : [];
+    renderLiveConns();
+    if (!id) toast('All connections closed');
+  }, e => toast('Not closed: ' + e.message));
 }
 setInterval(() => {
   if (!connected || connecting || document.hidden || trafficBusy) return;

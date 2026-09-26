@@ -82,7 +82,8 @@ function saveSrcForm() {
     expandState[id] = true;
     // The first fetch: nodes appear after the discovery request.
     s.updating = true;
-    backend.fetchSource(s).catch(e => toast('Could not load ' + s.name + ': ' + e.message)).then(() => {
+    backend.fetchSource(s).then(() => { delete s.lastError; },
+      e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Could not load ' + s.name + ': ' + e.message); }).then(() => {
       s.count = s.nodes.length;
       s.updating = false;
       renderAll();
@@ -109,14 +110,18 @@ function openNodeForm(sid, nid) {
   editingNode = { sid: sid || null, nid: nid || null };
   const n = sid && nid ? sourcesData[sid].nodes.find(x => x.id === nid) : null;
   document.getElementById('nfTitle').textContent = n ? 'Edit server' : 'Add server';
-  document.getElementById('nfSaveBtn').textContent = n ? 'Save' : 'Add server';
   document.getElementById('nfDeleteBtn').style.display = n ? '' : 'none';
   document.getElementById('nf-link').value = '';
+  document.getElementById('nf-link').placeholder = n ? 'vless://… — replaces this server, keeps its place'
+    : 'vless://… — fills the fields below; one link per line adds them all';
   document.getElementById('nf-name').value = n ? n.name : '';
   document.getElementById('nf-addr').value = n ? n.address : '';
   document.getElementById('nf-port').value = n ? n.port : '';
-  document.getElementById('nf-secret').value = n ? (n.secret || '') : '';
-  setChip('nf-proto', n ? n.protocol.toUpperCase().replace('VMESS','VMess') : 'VLESS');
+  document.getElementById('nf-secret').value = n ? nodeSecret(n) : '';
+  nfNameTouched = false;
+  setChip('nf-proto', n ? PROTO_CHIP[n.protocol] || 'VLESS' : 'VLESS');
+  nfProtoChanged();
+  nfShowMany(0);
 
   // Group picker only when adding; existing groups + "New group".
   const groups = manualGroups();
@@ -128,38 +133,91 @@ function openNodeForm(sid, nid) {
   openSheet('nodeform');
 }
 
+const PROTO_CHIP = { vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan', ss: 'SS', hy2: 'HY2', tuic: 'TUIC', anytls: 'AnyTLS', socks: 'SOCKS' };
+// What the secret field holds, per protocol (the core reads it the same way: manual.dart).
+const SECRET_FIELD = {
+  vless: ['UUID', '8c1f3a52-7d0e-4e2b-9d71-…'], vmess: ['UUID', '8c1f3a52-7d0e-4e2b-9d71-…'],
+  trojan: ['Password', '••••••••••••'], hy2: ['Password', '••••••••••••'], anytls: ['Password', '••••••••••••'],
+  ss: ['Method:password', 'aes-256-gcm:secret'], tuic: ['UUID:password', 'uuid:password'],
+  socks: ['User:password (optional)', 'user:password'],
+};
+let nfNameTouched = false;   // a name typed by hand wins over the link's #name
+
+function nfProtocol() {
+  const chip = chipValue('nf-proto', 'VLESS');
+  return Object.keys(PROTO_CHIP).find(k => PROTO_CHIP[k] === chip) || 'vless';
+}
+function nfProtoChanged() {
+  const [label, ph] = SECRET_FIELD[nfProtocol()];
+  document.getElementById('nf-secret-label').textContent = label;
+  document.getElementById('nf-secret').placeholder = ph;
+}
+
+// The secret as the form shows it: from the core's outbound, or the mock's field.
+function nodeSecret(n) {
+  const o = n.outbound;
+  if (!o) return n.secret || '';
+  if (o.type === 'shadowsocks') return o.method + ':' + o.password;
+  if (o.type === 'tuic') return o.uuid + ':' + (o.password || '');
+  if (o.type === 'socks') return o.username ? o.username + ':' + (o.password || '') : '';
+  return o.uuid || o.password || '';
+}
+
+// Links in the pasted text: one per line (or separated by spaces).
+const splitLinks = text => (text || '').split(/\s*[\r\n]+\s*|\s+(?=[a-z][a-z0-9+.-]*:\/\/)/i).map(s => s.trim()).filter(Boolean);
+
+function nfShowMany(count) {
+  const many = count > 1 && !editingNode.nid;
+  const note = document.getElementById('nf-many');
+  note.style.display = many ? '' : 'none';
+  note.textContent = many ? count + ' servers — each is added with the name from its link' : '';
+  document.getElementById('nf-fields').style.display = many ? 'none' : '';
+  document.getElementById('nfSaveBtn').textContent = editingNode.nid ? 'Save' : many ? 'Add ' + count + ' servers' : 'Add server';
+}
+
+// A pasted link fills the fields (several: a note instead of the fields).
 function parseNodeLink() {
-  const link = document.getElementById('nf-link').value.trim();
-  const m = link.match(/^(vless|vmess|trojan|ss|hy2|hysteria2|tuic|socks5?):\/\/(?:[^@]*@)?([^:/?#]+):(\d+)[^#]*(?:#(.*))?$/i);
-  if (!m) return;
-  const proto = m[1].toLowerCase().replace('hysteria2','hy2').replace(/^socks5?$/,'socks');
-  const map = { vless:'VLESS', vmess:'VMess', trojan:'Trojan', ss:'SS', hy2:'HY2', tuic:'TUIC', socks:'SOCKS' };
-  setChip('nf-proto', map[proto]);
-  document.getElementById('nf-addr').value = m[2];
-  document.getElementById('nf-port').value = m[3];
-  if (m[4]) document.getElementById('nf-name').value = decodeURIComponent(m[4]);
+  const got = splitLinks(document.getElementById('nf-link').value).map(parseShareLinkLite).filter(Boolean);
+  nfShowMany(got.length);
+  const p = got[0];
+  if (!p || got.length > 1) return;
+  setChip('nf-proto', PROTO_CHIP[p.protocol]);
+  nfProtoChanged();
+  document.getElementById('nf-addr').value = p.address;
+  document.getElementById('nf-port').value = p.port;
+  document.getElementById('nf-secret').value = p.secret;
+  if (p.name && !nfNameTouched) document.getElementById('nf-name').value = p.name;
 }
 
 function saveNodeForm() {
-  const protocol = chipValue('nf-proto', 'VLESS').toLowerCase();
-  const address = document.getElementById('nf-addr').value.trim();
-  const port = document.getElementById('nf-port').value.trim() || '443';
-  const secret = document.getElementById('nf-secret').value.trim();
-  const name = document.getElementById('nf-name').value.trim() || address || 'Server';
-
+  const address = document.getElementById('nf-addr').value.trim().replace(/^\[|\]$/g, '');
   const link = document.getElementById('nf-link').value.trim();
-
-  if (editingNode.nid) {
-    const n = sourcesData[editingNode.sid].nodes.find(x => x.id === editingNode.nid);
-    Object.assign(n, { name, protocol, address, port, secret });
-    closeSheet('nodeform');
-    renderAll();
-    return;
-  }
-  if (!address) { toast('Address is required'); return; }
+  const f = {
+    protocol: nfProtocol(), address, port: document.getElementById('nf-port').value.trim() || '443',
+    secret: document.getElementById('nf-secret').value.trim(),
+    name: document.getElementById('nf-name').value.trim(), nameTouched: nfNameTouched, link,
+    edit: editingNode.nid ? sourcesData[editingNode.sid].nodes.find(x => x.id === editingNode.nid) : null,
+  };
+  // a link carries its own address (vmess base64, legacy ss, IPv6: the core reads them)
+  if (!link && !address) { toast('Address is required'); return; }
   const chip = document.querySelector('#nf-group .chip.active');
   const pick = chip ? chip.dataset.gid : '__new';
-  backend.manualNode({ name, protocol, address, port, secret, link }).then(node => {
+  const btn = document.getElementById('nfSaveBtn');
+  btn.disabled = true;
+  backend.manualNodes(f).then(nodes => {
+    if (f.edit) {
+      // the id stays: profiles, chains and pins that name the server keep it
+      Object.keys(f.edit).filter(k => k !== 'id').forEach(k => delete f.edit[k]);
+      Object.assign(f.edit, nodes[0], { id: editingNode.nid });   // its ping: by the new address (serverKey)
+      closeSheet('nodeform');
+      renderAll();
+      return;
+    }
+    // the same server twice gets the same id: once per group
+    const have = new Set(pick === '__new' ? [] : sourcesData[pick].nodes.map(n => n.id));
+    const fresh = nodes.filter(n => !have.has(n.id) && have.add(n.id));
+    const dup = nodes.length - fresh.length;
+    if (!fresh.length) { toast(nodes.length > 1 ? 'These servers are already in the group' : 'This server is already in the group'); return; }
     let gid = pick;
     if (gid === '__new') {
       gid = 'src' + (sourceSeq++);
@@ -168,11 +226,12 @@ function saveNodeForm() {
       sourceAdded(gid);
     }
     const g = sourcesData[gid];
-    g.nodes.push(node);
+    g.nodes.push(...fresh);
     g.count = g.nodes.length;
     expandState[gid] = true;
     closeSheet('nodeform');
     renderAll();
-  }, e => toast(e.message));
+    if (nodes.length > 1 || dup) toast('Added ' + fresh.length + (fresh.length === 1 ? ' server' : ' servers') + (dup ? ', ' + dup + ' already there' : ''));
+  }, e => toast(e.message)).then(() => { btn.disabled = false; });
 }
 

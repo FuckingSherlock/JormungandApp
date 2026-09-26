@@ -63,7 +63,8 @@ UI собирает из `effectiveConnectId()`:
   main:  Group,            // юнит, или выход цепочки
   entry: Group,            // только цепочка: выход идёт через неё (detour)
   mixedPort: 2080, global: bool,
-  urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold } }
+  urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
+             url: connCfg.testUrl /* нет — gstatic */ } }
 Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key: 'sid::nid', outbound }] }
 ```
 
@@ -132,7 +133,9 @@ sing-box не даёт отрицательных). Процесс (`process`) �
 раз в секунду, пока подключено и страница видна: карточки Speed / This session /
 Connections и лист Live connections (новые сверху: хост:порт, TCP/UDP, вход → выход,
 правило, приложение, скорость, объём, возраст). Без подключения скорость и соединения — 0,
-итоги прошлой сессии остаются.
+итоги прошлой сессии остаются. В листе — фильтр (хост, приложение, правило, сервер), × на
+строке закрывает соединение, Close all — все (`DELETE /api/connections[/id]` → clash API
+`DELETE /connections[/{id}]`; приложение обычно тут же открывает новое).
 
 Лог (`logbook.dart`): вывод sing-box (уровень `info`, со временем) и заметки самого ядра
 (подключено / отключено / не подключилось, предупреждение системного прокси, упавшие
@@ -164,5 +167,5 @@ Trojan/HY2/TUIC/AnyTLS с TLS по адресу). Правка того же п�
 
 TUN и kill switch; правила, DNS и rule-sets из `rules.md` в конфиге; каналы загрузки
 подписки (Direct first и т.п. — сейчас всегда напрямую, с учётом `HTTP(S)_PROXY`);
-фильтр подписки, HWID; автообновление подписок по таймеру; пинг выбирает URL автоматически
-(сейчас всегда gstatic).
+фильтр подписки, HWID; автообновление подписок по таймеру; автовыбор URL пинга (сейчас —
+выбор в Settings → Connection, по умолчанию gstatic).

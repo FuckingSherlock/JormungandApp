@@ -20,6 +20,7 @@
 
 :root, :root[data-theme="original"] {
   --mono:      'Flags','JetBrains Mono',monospace;
+  --qr-dark:   #000;  --qr-light: #fff;   /* QR codes: dark on light in every theme */
   --bg:        #0B0F1A;
   --surface:   #131929;
   --card:      #1A2035;
@@ -752,6 +753,33 @@ body {
 .svc-app{color:var(--warn);cursor:pointer}
 .app-state.svc{opacity:.75}
 .aa-svc{margin-top:8px}
+/* ── LogsView (46-logs.js): time column, the message wraps under itself ── */
+#view-logs{position:relative}
+.view > .log-levels{flex-shrink:0;padding:0 14px 8px}
+.log-levels .chip{padding:5px 12px;font-size:13px}
+.log-count{margin-left:6px;font-size:11px;font-weight:700;color:var(--warn)}
+.log-count:empty{display:none}
+.chip.active .log-count{color:inherit;opacity:.85}
+.log-scroll{padding-bottom:56px}
+.log-list{font-family:var(--mono);font-size:12px;line-height:1.45}
+.log-line{display:grid;grid-template-columns:auto 1fr;gap:8px;padding:3px 14px 3px 12px;border-left:2px solid transparent}
+.log-line.warn{border-left-color:var(--warn);background:rgba(var(--warn-rgb),.05)}
+.log-line.error{border-left-color:var(--muted);background:rgba(var(--muted-rgb),.06)}
+.log-time{color:var(--t3)}
+.log-msg{color:var(--t2);min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.log-line.debug .log-msg,.log-cid{color:var(--t3)}
+.log-line.warn .log-msg,.log-line.error .log-msg{color:var(--t1)}
+.log-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;padding:0 4px;border-radius:3px;margin-right:6px;vertical-align:1px}
+.log-tag.warn{color:var(--warn);background:rgba(var(--warn-rgb),.15)}
+.log-tag.error{color:var(--muted);background:rgba(var(--muted-rgb),.15)}
+.log-tag.core{color:var(--accent);background:rgba(var(--accent-rgb),.15)}
+.log-list mark{background:rgba(var(--accent-rgb),.3);color:var(--t1);border-radius:2px}
+.log-empty{padding:48px 24px;text-align:center;color:var(--t3);font-family:var(--font);font-size:14px}
+.log-jump{
+  position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:2;
+  background:var(--accent);color:#fff;border:none;border-radius:16px;padding:7px 14px;
+  font:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);
+}
 /* ── Nodes screen ── */
 .nodes-summary{font-size:13px;color:var(--t2);margin-top:2px}
 .head-actions{display:flex;gap:8px}
@@ -882,6 +910,60 @@ body {
 .route-note{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 20px 4px;font-size:12px;color:var(--t3)}
 .route-auto{flex-shrink:0;display:flex}
 .route-ping{flex-shrink:0;min-width:34px;display:flex;justify-content:flex-end}
+/* ── ShareSheet: QR code + the text it holds (37-share.js). A QR must stay dark on light
+   in every theme or phones won't read it: --qr-dark / --qr-light. ── */
+.qr-card{padding:4px 20px 10px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.qr-box{width:min(240px,100%);aspect-ratio:1;border-radius:12px;overflow:hidden;background:var(--qr-light)}
+.qr-svg{display:block;width:100%;height:100%}
+.qr-light{fill:var(--qr-light)}
+.qr-dark{fill:var(--qr-dark)}
+.qr-text{
+  width:100%;max-height:74px;overflow-y:auto;font-family:var(--mono);font-size:11px;line-height:1.4;color:var(--t2);
+  overflow-wrap:anywhere;background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:8px;padding:6px 8px;
+  user-select:text;-webkit-user-select:text;
+}
+.menu-ico-gap{width:18px;flex-shrink:0}
+.menu-row .soon-tag{margin-left:8px;vertical-align:1px}
+
+/* ── Manual server form (32-nodes-forms.js): links, one per line ── */
+textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:break-all}
+#nf-many{font-size:13px;color:var(--accent);margin-top:7px}
+
+/* ── Live connections: filter + Close all, × per row (50-home.js) ── */
+.conn-tools{display:flex;align-items:center;gap:8px;padding:0 14px 10px;flex-shrink:0}
+.conn-tools .search{margin:0;flex:1;min-width:0}
+.conn-tools input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--t1);font:inherit;font-size:14px;padding:9px 0}
+.conn-closeall{flex-shrink:0;background:rgba(var(--muted-rgb),.12);color:var(--muted);border:1px solid rgba(var(--muted-rgb),.3);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.conn-closeall:disabled{opacity:.4;cursor:default}
+.live-conn-close{flex-shrink:0;width:24px;height:24px;margin:-4px -6px -4px 0;border:none;background:none;color:var(--t3);font-size:18px;line-height:1;cursor:pointer;border-radius:6px}
+.live-conn-close:active{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
+.live-conn-top .live-conn-host{flex:1}
+
+/* ── SourceErrorStrip (33-source-error.js) ── */
+.src-error{display:flex;align-items:center;gap:10px;margin:8px 0 2px;padding:8px 8px 8px 10px;border-radius:10px;
+  background:rgba(var(--muted-rgb),.08);border:1px solid rgba(var(--muted-rgb),.25);color:var(--muted)}
+.src-error > svg{flex-shrink:0}
+.src-error-text{flex:1;min-width:0}
+.src-error-title{font-size:13px;font-weight:600}
+.src-error-msg{font-size:12px;color:var(--t2);overflow-wrap:anywhere}
+.src-error-retry{flex-shrink:0;background:var(--card-hi);color:var(--t1);border:1px solid var(--border-hi);border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+
+/* ── Settings → Data, latency test URL (59-data.js) ── */
+#data-settings .set-group{margin:6px 0 10px;background:var(--card)}
+#data-settings .set-caption{padding:10px 4px 6px}
+#data-settings .set-row.tap{cursor:pointer}
+#data-settings .set-row.tap > svg{flex-shrink:0;color:var(--t2)}
+#data-settings .settings-value{flex-shrink:0;text-align:right}
+.settings-value.mono{font-family:var(--mono);font-size:13px}
+.data-dir{font-family:var(--mono);overflow-wrap:anywhere}
+.restore-card{margin:0 20px 8px;padding:12px 14px;border-radius:12px;background:var(--card);border:1px solid var(--border)}
+.restore-file{font-size:13px;color:var(--t2);font-family:var(--mono);overflow-wrap:anywhere}
+.restore-what{font-size:15px;font-weight:600;color:var(--t1);margin:4px 0 6px}
+.restore-warn{font-size:13px;color:var(--warn)}
+.testurl-custom{display:flex;gap:8px;padding:0 20px}
+.testurl-custom .form-input{flex:1;min-width:0;font-family:var(--mono);font-size:13px}
+.testurl-custom .btn-primary{width:auto;padding:0 16px;font-size:15px}
+.testurl-hint{padding:6px 20px 12px}
 /* ── Compact action sheets (menus) ── */
 .sheet.compact{top:auto;max-height:85vh}
 .sheet.compact .sheet-body{padding:6px 0 18px}
@@ -1097,7 +1179,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </svg>
       <svg class="power-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
     </button>
-    <div class="dock-profile" onclick="toggleRoute()">
+    <div class="dock-profile" onclick="dockTap()">
       <div class="profiles-main">
         <div class="profiles-top">
           <span class="card-label" style="margin-bottom:0" id="profCardLabel">Simple</span>
@@ -1175,7 +1257,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="settings-row" data-sheet="setgeneral" onclick="openSheet('setgeneral')"><div class="set-ico" style="color:var(--t2);background:rgba(var(--t2-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></div><div style="flex:1"><div class="settings-label">General</div><div class="settings-sub" id="setGeneralSub">Language, startup</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setconn" onclick="openSheet('setconn')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><div style="flex:1"><div class="settings-label">Connection</div><div class="settings-sub">System proxy, kill switch, TUN</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setdns" onclick="openDnsSettings()"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><div style="flex:1"><div class="settings-label">DNS</div><div class="settings-sub" id="setDnsSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
-        <div class="settings-row" data-sheet="setdata" onclick="openSheet('setdata')"><div class="set-ico" style="color:var(--purple);background:rgba(var(--purple-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div style="flex:1"><div class="settings-label">Data</div><div class="settings-sub">Backup, about</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setdata" onclick="openDataSettings()"><div class="set-ico" style="color:var(--purple);background:rgba(var(--purple-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div style="flex:1"><div class="settings-label">Data</div><div class="settings-sub">Backup, about</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
       </div>
     </div>
   </div><!-- /view-settings -->
@@ -1285,11 +1367,44 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <button class="sheet-close" onclick="closeSheet('setdata')">×</button>
     </div>
     <div class="sheet-body">
-      <div class="settings-group">
-        <div class="settings-row soon"><div class="settings-label">Backup &amp; restore</div><span class="soon-tag">soon</span></div>
-        <div class="settings-row soon"><div class="settings-label">About</div><span class="settings-value">v0.1 mockup</span></div>
+      <div id="data-settings"></div>
+      <input type="file" id="restoreFile" accept=".json,application/json" style="display:none" onchange="readRestoreFile(this)">
+    </div>
+  </div>
+  <!-- ══════════ VIEW: LOGS (LogsView: sing-box and core lines, live; 46-logs.js) ══════════ -->
+  <div class="view" id="view-logs">
+    <div class="topbar">
+      <div>
+        <div class="app-name">Logs</div>
+        <div class="nodes-summary" id="logsSummary"></div>
+      </div>
+      <div class="head-actions">
+        <button class="icon-btn" id="logSearchBtn" onclick="toggleLogSearch()" title="Search">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
+        <button class="icon-btn" onclick="copyLogs()" title="Copy all">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+        <button class="icon-btn" onclick="clearLogs()" title="Clear">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>
       </div>
     </div>
+    <div class="search" id="logSearchBar" style="display:none">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="logSearch" placeholder="Search the log" oninput="renderLogs()">
+      <button class="icon-btn ghost" onclick="toggleLogSearch(false)" title="Close search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="chip-row log-levels" id="logLevels">
+      <div class="chip active" data-lvl="all" onclick="setLogLevel('all')">All</div>
+      <div class="chip" data-lvl="warn" onclick="setLogLevel('warn')">Warnings &amp; errors<span class="log-count" id="logWarnCount"></span></div>
+    </div>
+    <div class="scroll log-scroll" id="logScroll" onscroll="logScrolled()">
+      <div class="log-list" id="logList"></div>
+    </div>
+    <button class="log-jump" id="logJump" style="display:none" onclick="logFollow()"></button>
   </div>
   <!-- Bottom nav -->
   <div class="bottomnav">
@@ -1307,7 +1422,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </svg>
       <span>Nodes</span>
     </div>
-    <div class="nav-btn" onclick="toast('Logs are not in this mockup yet')">
+    <div class="nav-btn" data-tab="logs" onclick="switchTab('logs')">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
         <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
         <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
@@ -1355,6 +1470,13 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="sheet-head">
       <span class="sheet-title">Live connections</span>
       <button class="sheet-close" onclick="closeSheet('connections')">×</button>
+    </div>
+    <div class="conn-tools">
+      <div class="search conn-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="connFilter" placeholder="Host, app, rule, server" oninput="renderLiveConns()">
+      </div>
+      <button class="conn-closeall" id="connCloseAll" onclick="closeLiveConn(null)">Close all</button>
     </div>
     <div class="sheet-body" id="liveConnList"></div>
   </div>
@@ -1796,22 +1918,25 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="sheet-body">
       <div class="form-group">
         <div class="form-label">Share link</div>
-        <input class="form-input" id="nf-link" placeholder="vless://… — fills the fields below" oninput="parseNodeLink()">
+        <textarea class="form-input nf-link" id="nf-link" rows="2" placeholder="vless://… — fills the fields below; one link per line adds them all" oninput="parseNodeLink()"></textarea>
+        <div class="form-hint" id="nf-many" style="display:none"></div>
       </div>
+      <div id="nf-fields">
       <div class="form-group">
         <div class="form-label">Name</div>
-        <input class="form-input" id="nf-name" placeholder="My server">
+        <input class="form-input" id="nf-name" placeholder="My server" oninput="nfNameTouched = true">
       </div>
       <div class="form-group">
         <div class="form-label">Protocol</div>
         <div class="chip-row" id="nf-proto" style="padding:0">
-          <div class="chip" onclick="pickChip(this,'nf-proto')">VLESS</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">VMess</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">Trojan</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">SS</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">HY2</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">TUIC</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">SOCKS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">VLESS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">VMess</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">Trojan</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">SS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">HY2</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">TUIC</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">AnyTLS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">SOCKS</div>
         </div>
       </div>
       <div class="form-group form-row2">
@@ -1825,8 +1950,9 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         </div>
       </div>
       <div class="form-group">
-        <div class="form-label">UUID / Password</div>
-        <input class="form-input" id="nf-secret" placeholder="••••••••••••">
+        <div class="form-label" id="nf-secret-label">UUID / Password</div>
+        <input class="form-input" id="nf-secret" placeholder="••••••••••••" autocomplete="off" spellcheck="false">
+      </div>
       </div>
       <div class="form-group" id="nf-group-wrap">
         <div class="form-label">Group</div>
@@ -2023,19 +2149,35 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 let backend = {
   live: false,
   // First fetch of a new subscription: fills s.nodes (and usage / expire).
+  // The mock fails any URL with "fail" in it, to show the error state of a source card.
   fetchSource(s) {
     return wait(1200).then(() => {
+      mockFetchFails(s);
       s.nodes = genNodes(8 + Math.floor(Math.random() * 20), 'sub');
       s.usage = { used: 0, total: 0 };
     });
   },
   // Update: new s.nodes, dropped servers into s.gone (see connect-model.md → gone).
   updateSource(s) {
-    return wait(900 + Math.random() * 600).then(() => { if (s.demoChurn) demoProviderChurn(s); });
+    return wait(900 + Math.random() * 600).then(() => { mockFetchFails(s); if (s.demoChurn) demoProviderChurn(s); });
   },
-  // A server added by hand. Resolves to the node, or rejects with a message.
-  manualNode(f) {
-    return Promise.resolve({ id: 'n' + Date.now(), flag: '🌐', name: f.name, protocol: f.protocol, address: f.address, port: f.port, secret: f.secret });
+  // Servers added by hand (32-nodes-forms.js): every link in f.link (one per line), else one
+  // from the fields; f.edit = the server being edited (it keeps its id). Resolves to the
+  // nodes, or rejects with a message. The mock id hashes the server, so the same one twice is caught.
+  manualNodes(f) {
+    let got;
+    if (f.link) {
+      got = splitLinks(f.link).map(parseShareLinkLite).filter(Boolean)
+        .map(p => Object.assign({}, p, splitFlagLite(p.name || p.address + ':' + p.port)));
+      if (!got.length) return Promise.reject(new Error(LINK_FORMS));
+      if (got.length === 1) typedName(got[0], f);
+    } else {
+      const sameProto = f.edit && f.edit.protocol === f.protocol;
+      got = [typedName({ flag: f.edit ? f.edit.flag : '🌐', name: f.address, protocol: f.protocol, address: f.address, port: f.port,
+        secret: f.secret || (sameProto ? f.edit.secret : ''), reality: sameProto && f.edit.reality }, f)];
+    }
+    if (f.edit) return Promise.resolve([Object.assign({}, got[0], { id: f.edit.id })]);
+    return Promise.resolve(got.map(p => Object.assign({ id: mockNodeId(p) }, p)));
   },
   // Latency of each node; onResult(n, ms) as each lands (ms -1 = timeout).
   ping(nodes, onResult) {
@@ -2061,10 +2203,91 @@ let backend = {
       conn('api.github.com', '443', 'tcp', out, 'C:\\Code\\Code.exe', 4096, 2 * MB, 40),
       conn('192.168.0.1', '53', 'udp', [], 'C:\\Windows\\System32\\svchost.exe', 0, 900, 3),
       conn('discord.com', '443', 'tcp', out, 'C:\\Discord\\Discord.exe', 128 * 1024, 30 * MB, 600),
-    ] });
+    ].filter(c => !(Date.now() - (mockClosed.get(c.id) || 0) < 15000)) });
   },
   exitIp() { return wait(600).then(() => connected ? { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' } : { ip: '178.66.12.201', country: 'RU', city: 'Moscow' }); },
+  // Close one live connection (Clash API DELETE /connections/{id}), or all with no id.
+  // The mock hides them for a while — apps open new ones.
+  closeConn(id) {
+    (id ? [id] : ['googlevideo.com', 'api.github.com', '192.168.0.1', 'discord.com']).forEach(x => mockClosed.set(x, Date.now()));
+    return Promise.resolve();
+  },
+  // A server's share link (vless://…), null when it has none (core: share.dart).
+  shareLink(n) { return Promise.resolve(mockShareLink(n)); },
+  // Logs tab: lines numbered `since` and later, and the number of the next one (core: logbook.dart).
+  log(since) {
+    mockLogTick();
+    return Promise.resolve({ lines: mockLog.lines.filter(l => since == null || l.n >= since), next: mockLog.n });
+  },
+  clearLog() { mockLog.lines = []; return Promise.resolve(); },
+  // Settings → Data → About: versions and where the core keeps its data (mock: no core).
+  version() { return Promise.resolve({ core: null, singBox: null, dataDir: null }); },
+  // Backup: the state snapshot the core stores (95-live.js liveSnapshot), and back.
+  exportState() { return Promise.resolve(liveSnapshot()); },
+  importState(snap) { liveApply(snap); return Promise.resolve(); },
 };
+
+/* ── Mock data behind the seam ── */
+
+function mockFetchFails(s) {
+  if (/fail/i.test(s.url || '')) throw new Error('Connection timed out (15 s)');
+}
+const mockClosed = new Map();   // connection id → when it was closed (hidden for 15 s)
+function mockNodeId(p) {
+  let h = 5381;
+  for (const c of [p.protocol, p.address, p.port, p.secret].join('|')) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0;
+  return 'm' + h.toString(36);
+}
+function mockShareLink(n) {
+  if (n.unsupported || n.protocol === 'socks') return null;
+  const host = /:/.test(n.address) ? '[' + n.address + ']' : n.address;
+  const name = '#' + encodeURIComponent((n.flag && n.flag !== '🌐' ? n.flag + ' ' : '') + n.name);
+  const uuid = n.secret || '8c1f3a52-7d0e-4e2b-9d71-5b2e0c6f91d4', pw = encodeURIComponent(n.secret || 'tJ3vQx9pLm2');
+  const sni = 'sni=' + (/^[\d.]+$/.test(n.address) ? 'www.microsoft.com' : n.address);
+  switch (n.protocol) {
+    case 'vless': return `vless://${uuid}@${host}:${n.port}?encryption=none&` + (n.reality
+      ? 'flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk=Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw&sid=6ba85179&type=tcp'
+      : `security=tls&${sni}&fp=chrome&type=ws&path=%2Fws&host=${n.address}`) + name;
+    case 'vmess': return 'vmess://' + btoa(unescape(encodeURIComponent(JSON.stringify({ v: '2', ps: n.name, add: n.address, port: String(n.port),
+      id: uuid, aid: '0', scy: 'auto', net: 'ws', type: 'none', host: n.address, path: '/vm', tls: 'tls', sni: n.address }))));
+    case 'ss': return `ss://${btoa('chacha20-ietf-poly1305:' + (n.secret || 'tJ3vQx9pLm2')).replace(/=+$/, '')}@${host}:${n.port}${name}`;
+    case 'hy2': return `hysteria2://${pw}@${host}:${n.port}?${sni}&obfs=salamander&obfs-password=k8Qw2${name}`;
+    case 'tuic': return `tuic://${uuid}:${pw}@${host}:${n.port}?congestion_control=bbr&alpn=h3&${sni}${name}`;
+    default: return `${n.protocol}://${pw}@${host}:${n.port}?${sni}${name}`;   // trojan, anytls
+  }
+}
+
+// Logs: plausible sing-box output — its start, then traffic lines while connected.
+const mockLog = { n: 0, lines: [], seeded: false };
+function mockLogAdd(src, lvl, msg, t) {
+  mockLog.lines.push({ n: mockLog.n++, t: t || Date.now(), src, lvl, msg });
+  if (mockLog.lines.length > 2000) mockLog.lines.shift();
+}
+function mockLogLine() {
+  const hosts = ['googlevideo.com:443', 'api.github.com:443', 'discord.com:443', 'gateway.discord.gg:443', 'www.youtube.com:443', 'update.googleapis.com:443', 'telegram.org:443'];
+  const host = hosts[Math.floor(Math.random() * hosts.length)], id = 1e9 + Math.floor(Math.random() * 3e9), ms = Math.floor(Math.random() * 90);
+  const n = unitNode(effectiveConnectId()), r = Math.random();
+  if (r < 0.04) return ['error', `[${id} 5.0s] connection: open outbound connection: dial tcp 185.22.14.61:443: i/o timeout`];
+  if (r < 0.1) return ['warn', `[${id} ${ms}ms] outbound/urltest[proxy]: outbound/vless[proxy/src2::n4]: context deadline exceeded`];
+  if (r < 0.3) return ['info', `[${id} 0ms] inbound/mixed[mixed-in]: inbound connection from 127.0.0.1:${50000 + Math.floor(Math.random() * 9000)}`];
+  if (r < 0.4) return ['info', `[${id} 0ms] router: found process path: C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe`];
+  if (r < 0.5) return ['info', `[${id} 1ms] outbound/direct[direct]: outbound connection to 192.168.0.1:53`];
+  if (r < 0.75) return ['info', `[${id} ${ms}ms] inbound/mixed[mixed-in]: inbound connection to ${host}`];
+  return ['info', `[${id} ${ms}ms] outbound/${n ? n.protocol : 'vless'}[proxy/${n ? n.name : 'server'}]: outbound connection to ${host}`];
+}
+function mockLogTick() {
+  if (!mockLog.seeded) {
+    mockLog.seeded = true;
+    const start = Date.now() - 95e3, port = connCfg.port || 2080;
+    mockLogAdd('core', 'info', 'Connected: unit, proxy on 127.0.0.1:' + port, start);
+    mockLogAdd('sing-box', 'info', 'network: updated default interface Ethernet, index 12', start + 40);
+    mockLogAdd('sing-box', 'info', 'inbound/mixed[mixed-in]: tcp server started at 127.0.0.1:' + port, start + 80);
+    mockLogAdd('sing-box', 'info', 'sing-box started (0.31s)', start + 120);
+    for (let i = 0; i < 44; i++) { const [lvl, msg] = mockLogLine(); mockLogAdd('sing-box', lvl, msg, start + 2000 + i * 2100); }
+  }
+  if (!connected || connecting) return;
+  for (let k = Math.floor(Math.random() * 4); k > 0; k--) { const [lvl, msg] = mockLogLine(); mockLogAdd('sing-box', lvl, msg); }
+}
 /* ══════════════════════ PING CACHE ══════════════════════
    One latency store for every screen. Keyed by server (protocol://address:port), so a
    server that appears in two subscriptions shares its result. Values: ms, -1 = timeout,
@@ -2633,8 +2856,9 @@ function updateMainConnectCard() {
   const detail = document.getElementById('profModeDetail');
   const nodeHtml = n => n ? `<span class="dock-node">${n.flag} ${esc(n.name)}</span>` : '<span class="dock-node none">no working node</span>';
   const ms = n => n && isAlive(n) ? ping(n) : null;
-  const none = !e && nothingInAuto();
-  document.getElementById('profCardName').textContent = e ? e.name : none ? 'Nothing in Auto' : '—';
+  const none = !e && nothingInAuto(), empty = !e && catalogEmpty();   // empty: 50-home.js dockTap
+  document.getElementById('profCardName').textContent = e ? e.name : none ? 'Nothing in Auto'
+    : empty ? (simpleMode() ? 'No servers yet' : 'No profiles yet') : '—';
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
     : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Simple' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
@@ -2642,7 +2866,8 @@ function updateMainConnectCard() {
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
   let lat = null;
-  if (!e) detail.innerHTML = none ? '<span class="dock-node none">turn on Use in Auto in Route</span>' : '';
+  if (!e) detail.innerHTML = none ? '<span class="dock-node none">turn on Use in Auto in Route</span>'
+    : empty ? `<span class="dock-node none">${simpleMode() ? 'Add in Nodes' : 'Create one in Nodes'}</span>` : '';
   else if (chainsData[id]) {
     const c = chainsData[id], a = chainEntryNode(c), b = chainExitNode(c);
     detail.innerHTML = nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);
@@ -2873,7 +3098,7 @@ function renderSourceCard(id, q) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
     </div>
-    ${usageHtml(s)}
+    ${usageHtml(s)}${srcErrorHtml(s)}
     </div>
     </div>
     <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), null,
@@ -2974,11 +3199,13 @@ function updateSource(sid) {
   if (s.kind !== 'sub' || s.updating) return;
   s.updating = true;
   refreshSourceViews();
-  backend.updateSource(s).then(() => {
+  // never loaded (its first fetch failed): Retry is that first fetch again
+  (s.nodes.length ? backend.updateSource(s) : backend.fetchSource(s)).then(() => {
     s.updatedAt = Date.now();
     s.count = s.nodes.length;
+    delete s.lastError;
     return true;
-  }, e => { toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
+  }, e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
     s.updating = false;
     purgeExpiredGone();
     refreshSourceViews();
@@ -3045,8 +3272,8 @@ function openSourceActions(sid) {
   let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`)
     + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
-    rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
-    rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
+    rows += menuRow(ICON.copy, 'Copy URL', close + `copySourceUrl('${sid}')`);
+    rows += menuRow(ICON.qr, 'Show QR code', close + `showSourceQr('${sid}')`);
     if (s.website) rows += menuRow(ICON.web, 'Open website', close + `toast('Opens ${esc(s.website)}')`);
   }
   rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteSource('${sid}')`, 'danger');
@@ -3059,8 +3286,8 @@ function openNodeActions(sid, nid) {
   const close = "closeSheet('actions');";
   const on = !isNodeDisabled(s, nid);
   let rows = menuRow(ICON.power, on ? 'Switch off<div class="menu-sub">Hidden everywhere, its settings kept</div>' : 'Switch on', close + `toggleNodeEnabled('${sid}','${nid}')`);
-  rows += menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
-  rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
+  rows += menuRow(ICON.copy, 'Copy share link', close + `copyShareLink('${sid}','${nid}')`);
+  rows += menuRow(ICON.qr, 'Show QR code', close + `showNodeQr('${sid}','${nid}')`);
   if (s.kind === 'node') {
     rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
     rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteNode('${sid}','${nid}')`, 'danger');
@@ -3349,12 +3576,11 @@ function confirmDeleteEntry(id) {
   const dead = new Set(['chain:' + id, 'profile:' + id]);
   if (profilesData[id]) {
     const others = getProfileIds().filter(x => x !== id);
-    if (!others.length) { toast('Keep at least one profile'); return; }
-    const fb = others[0];
+    const fb = others[0];   // none: the last profile goes (No profiles yet), its chains with it
     Object.values(chainsData).forEach(c => {
       if (c.inId !== id && c.outId !== id) return;
       const inId = c.inId === id ? fb : c.inId, outId = c.outId === id ? fb : c.outId;
-      if (inId === outId) { lines.push([c.name, 'chain', 'is deleted with it', 'bad']); dead.add('chain:' + c.id); }
+      if (!fb || inId === outId) { lines.push([c.name, 'chain', 'is deleted with it', 'bad']); dead.add('chain:' + c.id); }
       else lines.push([c.name, 'chain', `its ${c.inId === id ? 'entry' : 'exit'} moves to ${esc(profilesData[fb].name)}`, 'warn']);
     });
   }
@@ -3452,7 +3678,8 @@ function saveSrcForm() {
     expandState[id] = true;
     // The first fetch: nodes appear after the discovery request.
     s.updating = true;
-    backend.fetchSource(s).catch(e => toast('Could not load ' + s.name + ': ' + e.message)).then(() => {
+    backend.fetchSource(s).then(() => { delete s.lastError; },
+      e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Could not load ' + s.name + ': ' + e.message); }).then(() => {
       s.count = s.nodes.length;
       s.updating = false;
       renderAll();
@@ -3479,14 +3706,18 @@ function openNodeForm(sid, nid) {
   editingNode = { sid: sid || null, nid: nid || null };
   const n = sid && nid ? sourcesData[sid].nodes.find(x => x.id === nid) : null;
   document.getElementById('nfTitle').textContent = n ? 'Edit server' : 'Add server';
-  document.getElementById('nfSaveBtn').textContent = n ? 'Save' : 'Add server';
   document.getElementById('nfDeleteBtn').style.display = n ? '' : 'none';
   document.getElementById('nf-link').value = '';
+  document.getElementById('nf-link').placeholder = n ? 'vless://… — replaces this server, keeps its place'
+    : 'vless://… — fills the fields below; one link per line adds them all';
   document.getElementById('nf-name').value = n ? n.name : '';
   document.getElementById('nf-addr').value = n ? n.address : '';
   document.getElementById('nf-port').value = n ? n.port : '';
-  document.getElementById('nf-secret').value = n ? (n.secret || '') : '';
-  setChip('nf-proto', n ? n.protocol.toUpperCase().replace('VMESS','VMess') : 'VLESS');
+  document.getElementById('nf-secret').value = n ? nodeSecret(n) : '';
+  nfNameTouched = false;
+  setChip('nf-proto', n ? PROTO_CHIP[n.protocol] || 'VLESS' : 'VLESS');
+  nfProtoChanged();
+  nfShowMany(0);
 
   // Group picker only when adding; existing groups + "New group".
   const groups = manualGroups();
@@ -3498,38 +3729,91 @@ function openNodeForm(sid, nid) {
   openSheet('nodeform');
 }
 
+const PROTO_CHIP = { vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan', ss: 'SS', hy2: 'HY2', tuic: 'TUIC', anytls: 'AnyTLS', socks: 'SOCKS' };
+// What the secret field holds, per protocol (the core reads it the same way: manual.dart).
+const SECRET_FIELD = {
+  vless: ['UUID', '8c1f3a52-7d0e-4e2b-9d71-…'], vmess: ['UUID', '8c1f3a52-7d0e-4e2b-9d71-…'],
+  trojan: ['Password', '••••••••••••'], hy2: ['Password', '••••••••••••'], anytls: ['Password', '••••••••••••'],
+  ss: ['Method:password', 'aes-256-gcm:secret'], tuic: ['UUID:password', 'uuid:password'],
+  socks: ['User:password (optional)', 'user:password'],
+};
+let nfNameTouched = false;   // a name typed by hand wins over the link's #name
+
+function nfProtocol() {
+  const chip = chipValue('nf-proto', 'VLESS');
+  return Object.keys(PROTO_CHIP).find(k => PROTO_CHIP[k] === chip) || 'vless';
+}
+function nfProtoChanged() {
+  const [label, ph] = SECRET_FIELD[nfProtocol()];
+  document.getElementById('nf-secret-label').textContent = label;
+  document.getElementById('nf-secret').placeholder = ph;
+}
+
+// The secret as the form shows it: from the core's outbound, or the mock's field.
+function nodeSecret(n) {
+  const o = n.outbound;
+  if (!o) return n.secret || '';
+  if (o.type === 'shadowsocks') return o.method + ':' + o.password;
+  if (o.type === 'tuic') return o.uuid + ':' + (o.password || '');
+  if (o.type === 'socks') return o.username ? o.username + ':' + (o.password || '') : '';
+  return o.uuid || o.password || '';
+}
+
+// Links in the pasted text: one per line (or separated by spaces).
+const splitLinks = text => (text || '').split(/\s*[\r\n]+\s*|\s+(?=[a-z][a-z0-9+.-]*:\/\/)/i).map(s => s.trim()).filter(Boolean);
+
+function nfShowMany(count) {
+  const many = count > 1 && !editingNode.nid;
+  const note = document.getElementById('nf-many');
+  note.style.display = many ? '' : 'none';
+  note.textContent = many ? count + ' servers — each is added with the name from its link' : '';
+  document.getElementById('nf-fields').style.display = many ? 'none' : '';
+  document.getElementById('nfSaveBtn').textContent = editingNode.nid ? 'Save' : many ? 'Add ' + count + ' servers' : 'Add server';
+}
+
+// A pasted link fills the fields (several: a note instead of the fields).
 function parseNodeLink() {
-  const link = document.getElementById('nf-link').value.trim();
-  const m = link.match(/^(vless|vmess|trojan|ss|hy2|hysteria2|tuic|socks5?):\/\/(?:[^@]*@)?([^:/?#]+):(\d+)[^#]*(?:#(.*))?$/i);
-  if (!m) return;
-  const proto = m[1].toLowerCase().replace('hysteria2','hy2').replace(/^socks5?$/,'socks');
-  const map = { vless:'VLESS', vmess:'VMess', trojan:'Trojan', ss:'SS', hy2:'HY2', tuic:'TUIC', socks:'SOCKS' };
-  setChip('nf-proto', map[proto]);
-  document.getElementById('nf-addr').value = m[2];
-  document.getElementById('nf-port').value = m[3];
-  if (m[4]) document.getElementById('nf-name').value = decodeURIComponent(m[4]);
+  const got = splitLinks(document.getElementById('nf-link').value).map(parseShareLinkLite).filter(Boolean);
+  nfShowMany(got.length);
+  const p = got[0];
+  if (!p || got.length > 1) return;
+  setChip('nf-proto', PROTO_CHIP[p.protocol]);
+  nfProtoChanged();
+  document.getElementById('nf-addr').value = p.address;
+  document.getElementById('nf-port').value = p.port;
+  document.getElementById('nf-secret').value = p.secret;
+  if (p.name && !nfNameTouched) document.getElementById('nf-name').value = p.name;
 }
 
 function saveNodeForm() {
-  const protocol = chipValue('nf-proto', 'VLESS').toLowerCase();
-  const address = document.getElementById('nf-addr').value.trim();
-  const port = document.getElementById('nf-port').value.trim() || '443';
-  const secret = document.getElementById('nf-secret').value.trim();
-  const name = document.getElementById('nf-name').value.trim() || address || 'Server';
-
+  const address = document.getElementById('nf-addr').value.trim().replace(/^\[|\]$/g, '');
   const link = document.getElementById('nf-link').value.trim();
-
-  if (editingNode.nid) {
-    const n = sourcesData[editingNode.sid].nodes.find(x => x.id === editingNode.nid);
-    Object.assign(n, { name, protocol, address, port, secret });
-    closeSheet('nodeform');
-    renderAll();
-    return;
-  }
-  if (!address) { toast('Address is required'); return; }
+  const f = {
+    protocol: nfProtocol(), address, port: document.getElementById('nf-port').value.trim() || '443',
+    secret: document.getElementById('nf-secret').value.trim(),
+    name: document.getElementById('nf-name').value.trim(), nameTouched: nfNameTouched, link,
+    edit: editingNode.nid ? sourcesData[editingNode.sid].nodes.find(x => x.id === editingNode.nid) : null,
+  };
+  // a link carries its own address (vmess base64, legacy ss, IPv6: the core reads them)
+  if (!link && !address) { toast('Address is required'); return; }
   const chip = document.querySelector('#nf-group .chip.active');
   const pick = chip ? chip.dataset.gid : '__new';
-  backend.manualNode({ name, protocol, address, port, secret, link }).then(node => {
+  const btn = document.getElementById('nfSaveBtn');
+  btn.disabled = true;
+  backend.manualNodes(f).then(nodes => {
+    if (f.edit) {
+      // the id stays: profiles, chains and pins that name the server keep it
+      Object.keys(f.edit).filter(k => k !== 'id').forEach(k => delete f.edit[k]);
+      Object.assign(f.edit, nodes[0], { id: editingNode.nid });   // its ping: by the new address (serverKey)
+      closeSheet('nodeform');
+      renderAll();
+      return;
+    }
+    // the same server twice gets the same id: once per group
+    const have = new Set(pick === '__new' ? [] : sourcesData[pick].nodes.map(n => n.id));
+    const fresh = nodes.filter(n => !have.has(n.id) && have.add(n.id));
+    const dup = nodes.length - fresh.length;
+    if (!fresh.length) { toast(nodes.length > 1 ? 'These servers are already in the group' : 'This server is already in the group'); return; }
     let gid = pick;
     if (gid === '__new') {
       gid = 'src' + (sourceSeq++);
@@ -3538,14 +3822,33 @@ function saveNodeForm() {
       sourceAdded(gid);
     }
     const g = sourcesData[gid];
-    g.nodes.push(node);
+    g.nodes.push(...fresh);
     g.count = g.nodes.length;
     expandState[gid] = true;
     closeSheet('nodeform');
     renderAll();
-  }, e => toast(e.message));
+    if (nodes.length > 1 || dup) toast('Added ' + fresh.length + (fresh.length === 1 ? ' server' : ' servers') + (dup ? ', ' + dup + ' already there' : ''));
+  }, e => toast(e.message)).then(() => { btn.disabled = false; });
 }
 
+/* ══════════════════════ SOURCE ERROR ══════════════════════
+   SourceErrorStrip on a subscription card: its last fetch or update failed. s.lastError =
+   {msg, at} is kept with the source (so it survives a restart) and dropped by the next
+   success; the servers of the last good fetch keep working meanwhile. Retry = Update (a
+   source that never loaded fetches again, 30-nodes.js updateSource). */
+
+function srcErrorHtml(s) {
+  const e = s.lastError;
+  if (!e || s.kind !== 'sub' || s.updating) return '';
+  return `<div class="src-error" onclick="event.stopPropagation()">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7.5" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12.01" y2="16.5"/></svg>
+    <div class="src-error-text">
+      <div class="src-error-title">${s.nodes.length ? 'Update failed' : 'Could not load'} · ${timeAgo(e.at)}</div>
+      <div class="src-error-msg">${esc(e.msg)}</div>
+    </div>
+    <button class="src-error-retry" onclick="event.stopPropagation();updateSource('${s.id}')">Retry</button>
+  </div>`;
+}
 /* ── Toast ── */
 
 let toastTimer = null;
@@ -3567,8 +3870,414 @@ function switchTab(name) {
   document.querySelectorAll('.nav-btn[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('#view-' + name + ' > .scroll').forEach(el => el.scrollTop = 0);
   syncBackHistory();   // back from another tab goes Home (60-sheets.js)
+  if (name === 'logs') openLogs();
 }
 
+/* ══════════════════════ QR CODE ENCODER (vendored) ══════════════════════
+   Byte-mode QR encoder, a trimmed port of the QR Code generator library by Project
+   Nayuki (https://www.nayuki.io/page/qr-code-generator-library): versions 1–40, error
+   correction L/M/Q/H (raised while the data still fits), automatic mask by penalty score.
+   Only what Show QR code needs — UTF-8 text in one byte segment; no numeric / alphanumeric /
+   kanji / ECI segments. (Flutter: the qr / qr_flutter package.)
+
+   Copyright (c) Project Nayuki. (MIT License)
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy of
+   this software and associated documentation files (the "Software"), to deal in
+   the Software without restriction, including without limitation the rights to
+   use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+   the Software, and to permit persons to whom the Software is furnished to do so,
+   subject to the following conditions:
+   - The above copyright notice and this permission notice shall be included in
+     all copies or substantial portions of the Software.
+   - The Software is provided "as is", without warranty of any kind, express or
+     implied, including but not limited to the warranties of merchantability,
+     fitness for a particular purpose and noninfringement. In no event shall the
+     authors or copyright holders be liable for any claim, damages or other
+     liability, whether in an action of contract, tort or otherwise, arising from,
+     out of or in connection with the Software or the use or other dealings in the
+     Software.
+
+   qrEncode(text, ecl = 'M', mask = -1) → { size, version, ecl, mask, dark(x, y) } */
+
+const QR = (() => {
+  // index 0 unused; one row per level L, M, Q, H
+  const ECC_PER_BLOCK = [
+    [-1, 7, 10, 15, 20, 26, 18, 20, 24, 30, 18, 20, 24, 26, 30, 22, 24, 28, 30, 28, 28, 28, 28, 30, 30, 26, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
+    [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28],
+    [-1, 13, 22, 18, 26, 18, 24, 18, 22, 20, 24, 28, 26, 24, 20, 30, 24, 28, 28, 26, 30, 28, 30, 30, 30, 30, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
+    [-1, 17, 28, 22, 16, 22, 28, 26, 26, 24, 28, 24, 28, 22, 24, 24, 30, 28, 28, 26, 28, 30, 24, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
+  ];
+  const NUM_BLOCKS = [
+    [-1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 6, 6, 6, 6, 7, 8, 8, 9, 9, 10, 12, 12, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 24, 25],
+    [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49],
+    [-1, 1, 1, 2, 2, 4, 4, 6, 6, 8, 8, 8, 10, 12, 16, 12, 17, 16, 18, 21, 20, 23, 23, 25, 27, 29, 34, 34, 35, 38, 40, 43, 45, 48, 51, 53, 56, 59, 62, 65, 68],
+    [-1, 1, 1, 2, 4, 4, 4, 5, 6, 8, 8, 11, 11, 16, 16, 18, 16, 19, 21, 25, 25, 25, 34, 30, 32, 35, 37, 40, 42, 45, 48, 51, 54, 57, 60, 63, 66, 70, 74, 77, 81],
+  ];
+  const LEVELS = ['L', 'M', 'Q', 'H'];
+  const FORMAT_BITS = { L: 1, M: 0, Q: 3, H: 2 };
+  const PENALTY_N1 = 3, PENALTY_N2 = 3, PENALTY_N3 = 40, PENALTY_N4 = 10;
+  const bit = (x, i) => ((x >>> i) & 1) !== 0;
+
+  function rawDataModules(ver) {
+    let r = (16 * ver + 128) * ver + 64;
+    if (ver >= 2) {
+      const n = Math.floor(ver / 7) + 2;
+      r -= (25 * n - 10) * n - 55;
+      if (ver >= 7) r -= 36;
+    }
+    return r;
+  }
+  const dataCodewords = (ver, e) => Math.floor(rawDataModules(ver) / 8) - ECC_PER_BLOCK[e][ver] * NUM_BLOCKS[e][ver];
+
+  function rsMultiply(x, y) {   // GF(2^8 / 0x11D)
+    let z = 0;
+    for (let i = 7; i >= 0; i--) {
+      z = (z << 1) ^ ((z >>> 7) * 0x11D);
+      z ^= ((y >>> i) & 1) * x;
+    }
+    return z;
+  }
+  function rsDivisor(degree) {
+    const r = new Array(degree - 1).fill(0).concat([1]);
+    let root = 1;
+    for (let i = 0; i < degree; i++) {
+      for (let j = 0; j < r.length; j++) {
+        r[j] = rsMultiply(r[j], root);
+        if (j + 1 < r.length) r[j] ^= r[j + 1];
+      }
+      root = rsMultiply(root, 0x02);
+    }
+    return r;
+  }
+  function rsRemainder(data, divisor) {
+    const r = divisor.map(() => 0);
+    for (const b of data) {
+      const f = b ^ r.shift();
+      r.push(0);
+      divisor.forEach((c, i) => { r[i] ^= rsMultiply(c, f); });
+    }
+    return r;
+  }
+
+  function encode(text, ecl = 'M', forceMask = -1) {
+    const bytes = [...new TextEncoder().encode(String(text))];
+    let e = LEVELS.indexOf(ecl), ver = 1, used = 0;
+    for (;; ver++) {
+      used = 4 + (ver <= 9 ? 8 : 16) + bytes.length * 8;
+      if (used <= dataCodewords(ver, e) * 8) break;
+      if (ver >= 40) throw new RangeError('Data too long for a QR code');
+    }
+    for (let h = e + 1; h < 4; h++) if (used <= dataCodewords(ver, h) * 8) e = h;   // a stronger level for free
+
+    // bit stream: mode 0100 (byte), count, data, terminator, pad bytes 0xEC 0x11
+    const bits = [], put = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); };
+    put(4, 4);
+    put(bytes.length, ver <= 9 ? 8 : 16);
+    bytes.forEach(b => put(b, 8));
+    const cap = dataCodewords(ver, e) * 8;
+    put(0, Math.min(4, cap - bits.length));
+    put(0, (8 - bits.length % 8) % 8);
+    for (let pad = 0xEC; bits.length < cap; pad ^= 0xEC ^ 0x11) put(pad, 8);
+    const data = new Array(bits.length / 8).fill(0);
+    bits.forEach((b, i) => { data[i >>> 3] |= b << (7 - (i & 7)); });
+
+    // blocks + Reed-Solomon, interleaved
+    const nBlocks = NUM_BLOCKS[e][ver], eccLen = ECC_PER_BLOCK[e][ver];
+    const raw = Math.floor(rawDataModules(ver) / 8), nShort = nBlocks - raw % nBlocks, shortLen = Math.floor(raw / nBlocks);
+    const div = rsDivisor(eccLen), blocks = [];
+    for (let i = 0, k = 0; i < nBlocks; i++) {
+      const dat = data.slice(k, k + shortLen - eccLen + (i < nShort ? 0 : 1));
+      k += dat.length;
+      const ecc = rsRemainder(dat, div);
+      if (i < nShort) dat.push(0);
+      blocks.push(dat.concat(ecc));
+    }
+    const all = [];
+    for (let i = 0; i < blocks[0].length; i++)
+      blocks.forEach((b, j) => { if (i !== shortLen - eccLen || j >= nShort) all.push(b[i]); });
+
+    // grid
+    const size = ver * 4 + 17;
+    const mod = Array.from({ length: size }, () => new Array(size).fill(false));
+    const fn = Array.from({ length: size }, () => new Array(size).fill(false));
+    const setFn = (x, y, dark) => { mod[y][x] = dark; fn[y][x] = true; };
+    for (let i = 0; i < size; i++) { setFn(6, i, i % 2 === 0); setFn(i, 6, i % 2 === 0); }
+    const finder = (cx, cy) => {
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+        const d = Math.max(Math.abs(dx), Math.abs(dy)), x = cx + dx, y = cy + dy;
+        if (x >= 0 && x < size && y >= 0 && y < size) setFn(x, y, d !== 2 && d !== 4);
+      }
+    };
+    finder(3, 3); finder(size - 4, 3); finder(3, size - 4);
+    const align = [];
+    if (ver > 1) {
+      const n = Math.floor(ver / 7) + 2;
+      const step = ver === 32 ? 26 : Math.ceil((ver * 4 + 4) / (n * 2 - 2)) * 2;
+      align.push(6);
+      for (let pos = size - 7; align.length < n; pos -= step) align.splice(1, 0, pos);
+    }
+    align.forEach((ax, i) => align.forEach((ay, j) => {
+      if ((i === 0 && j === 0) || (i === 0 && j === align.length - 1) || (i === align.length - 1 && j === 0)) return;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) setFn(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+    }));
+    const drawFormat = m => {
+      const d = FORMAT_BITS[LEVELS[e]] << 3 | m;
+      let rem = d;
+      for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+      const b = (d << 10 | rem) ^ 0x5412;
+      for (let i = 0; i <= 5; i++) setFn(8, i, bit(b, i));
+      setFn(8, 7, bit(b, 6)); setFn(8, 8, bit(b, 7)); setFn(7, 8, bit(b, 8));
+      for (let i = 9; i < 15; i++) setFn(14 - i, 8, bit(b, i));
+      for (let i = 0; i < 8; i++) setFn(size - 1 - i, 8, bit(b, i));
+      for (let i = 8; i < 15; i++) setFn(8, size - 15 + i, bit(b, i));
+      setFn(8, size - 8, true);
+    };
+    drawFormat(0);   // reserves the area; drawn for real after masking
+    if (ver >= 7) {
+      let rem = ver;
+      for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1F25);
+      const b = ver << 12 | rem;
+      for (let i = 0; i < 18; i++) {
+        const a = size - 11 + i % 3, c = Math.floor(i / 3);
+        setFn(a, c, bit(b, i)); setFn(c, a, bit(b, i));
+      }
+    }
+
+    // codewords in the zigzag
+    let i = 0;
+    for (let right = size - 1; right >= 1; right -= 2) {
+      if (right === 6) right = 5;
+      for (let v = 0; v < size; v++) for (let j = 0; j < 2; j++) {
+        const x = right - j, up = ((right + 1) & 2) === 0, y = up ? size - 1 - v : v;
+        if (!fn[y][x] && i < all.length * 8) { mod[y][x] = bit(all[i >>> 3], 7 - (i & 7)); i++; }
+      }
+    }
+
+    const applyMask = m => {
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        let inv;
+        switch (m) {
+          case 0: inv = (x + y) % 2 === 0; break;
+          case 1: inv = y % 2 === 0; break;
+          case 2: inv = x % 3 === 0; break;
+          case 3: inv = (x + y) % 3 === 0; break;
+          case 4: inv = (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0; break;
+          case 5: inv = x * y % 2 + x * y % 3 === 0; break;
+          case 6: inv = (x * y % 2 + x * y % 3) % 2 === 0; break;
+          default: inv = ((x + y) % 2 + x * y % 3) % 2 === 0;
+        }
+        if (!fn[y][x] && inv) mod[y][x] = !mod[y][x];
+      }
+    };
+    const penalty = () => {
+      let r = 0;
+      const addHist = (run, h) => { if (h[0] === 0) run += size; h.pop(); h.unshift(run); };
+      const count = h => {
+        const n = h[1], core = n > 0 && h[2] === n && h[3] === n * 3 && h[4] === n && h[5] === n;
+        return (core && h[0] >= n * 4 && h[6] >= n ? 1 : 0) + (core && h[6] >= n * 4 && h[0] >= n ? 1 : 0);
+      };
+      const finish = (color, run, h) => { if (color) { addHist(run, h); run = 0; } run += size; addHist(run, h); return count(h); };
+      for (let pass = 0; pass < 2; pass++) {   // rows, then columns
+        for (let a = 0; a < size; a++) {
+          let color = false, run = 0;
+          const h = [0, 0, 0, 0, 0, 0, 0];
+          for (let b = 0; b < size; b++) {
+            const c = pass ? mod[b][a] : mod[a][b];
+            if (c === color) {
+              run++;
+              if (run === 5) r += PENALTY_N1; else if (run > 5) r++;
+            } else {
+              addHist(run, h);
+              if (!color) r += count(h) * PENALTY_N3;
+              color = c;
+              run = 1;
+            }
+          }
+          r += finish(color, run, h) * PENALTY_N3;
+        }
+      }
+      for (let y = 0; y < size - 1; y++) for (let x = 0; x < size - 1; x++) {
+        const c = mod[y][x];
+        if (c === mod[y][x + 1] && c === mod[y + 1][x] && c === mod[y + 1][x + 1]) r += PENALTY_N2;
+      }
+      let dark = 0;
+      mod.forEach(row => row.forEach(c => { if (c) dark++; }));
+      const total = size * size, k = Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1;
+      return r + k * PENALTY_N4;
+    };
+    let mask = forceMask;
+    if (mask < 0) {
+      let best = Infinity;
+      for (let m = 0; m < 8; m++) {
+        applyMask(m); drawFormat(m);
+        const p = penalty();
+        if (p < best) { best = p; mask = m; }
+        applyMask(m);   // XOR undoes it
+      }
+    }
+    applyMask(mask);
+    drawFormat(mask);
+    return { size, version: ver, ecl: LEVELS[e], mask, dark: (x, y) => x >= 0 && x < size && y >= 0 && y < size && mod[y][x] };
+  }
+
+  // One <path> of 1×1 squares, row runs merged; a 4-module quiet zone around.
+  function svg(text, ecl) {
+    const q = encode(text, ecl), n = q.size + 8;
+    let d = '';
+    for (let y = 0; y < q.size; y++) for (let x = 0; x < q.size; x++) {
+      if (!q.dark(x, y) || q.dark(x - 1, y)) continue;
+      let w = 1;
+      while (q.dark(x + w, y)) w++;
+      d += `M${x + 4},${y + 4}h${w}v1h-${w}z`;
+    }
+    return `<svg class="qr-svg" viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges" role="img" aria-label="QR code"><rect class="qr-light" width="${n}" height="${n}"/><path class="qr-dark" d="${d}"/></svg>`;
+  }
+  return { encode, svg };
+})();
+/* ══════════════════════ SHARE: clipboard, links, QR ══════════════════════
+   Copy URL / Copy share link / Show QR code in the Nodes ⋮ menus. A server's link comes
+   from the core (share.dart) through backend.shareLink; the QR is drawn here (36-qr.js).
+   (Flutter: Clipboard.setData, a QrImageView in a ShareSheet.) */
+
+// The async clipboard where the page may use it; else the old execCommand way (a page
+// opened as a file, the Artifact viewer).
+function copyText(text, what) {
+  const done = () => toast((what || 'Text') + ' copied');
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    ta.remove();
+    toast(ok ? (what || 'Text') + ' copied' : 'Copy is blocked here — select the text and copy it');
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(done, fallback);
+  fallback();
+  return Promise.resolve();
+}
+
+/* ── Share links read in the page ──
+   Only what the manual server form shows before saving (protocol, address, port, name,
+   secret) and what the mock adds; the real server is built by the core's parser. Covers
+   the forms the core reads: vmess as base64 JSON, ss legacy base64 and SIP002, IPv6 in
+   brackets, hy2 with a port range. */
+
+const SHARE_PROTOS = { vless: 'vless', vmess: 'vmess', trojan: 'trojan', ss: 'ss', hy2: 'hy2', hysteria2: 'hy2',
+  tuic: 'tuic', anytls: 'anytls', socks: 'socks', socks5: 'socks' };
+
+function b64Text(s) {
+  try {
+    s = s.trim().replace(/-/g, '+').replace(/_/g, '/');
+    s += '='.repeat((4 - s.length % 4) % 4);
+    return decodeURIComponent(escape(atob(s)));
+  } catch (e) { return null; }
+}
+const uriPart = s => { try { return decodeURIComponent(s); } catch (e) { return s; } };
+
+function parseShareLinkLite(link) {
+  const m = (link || '').trim().match(/^([a-z0-9]+):\/\/(\S+)$/i);
+  const protocol = m && SHARE_PROTOS[m[1].toLowerCase()];
+  if (!protocol) return null;
+  let rest = m[2], name = '';
+  const hash = rest.indexOf('#');
+  if (hash >= 0) { name = uriPart(rest.slice(hash + 1)).trim(); rest = rest.slice(0, hash); }
+
+  if (protocol === 'vmess' && !rest.includes('@')) {          // v2rayN: base64 of a JSON
+    let j = null;
+    try { j = JSON.parse(b64Text(rest.split('?')[0])); } catch (e) {}
+    if (!j || !j.add) return null;
+    return { protocol, address: String(j.add).replace(/^\[|\]$/g, ''), port: String(j.port || 443), name: String(j.ps || name).trim(), secret: String(j.id || '') };
+  }
+  let plainUser = false;
+  if (protocol === 'ss' && !rest.includes('@')) {             // legacy: base64(method:password@host:port)
+    const d = b64Text(rest.split(/[/?]/)[0]);
+    if (!d || !d.includes('@')) return null;
+    rest = d;
+    plainUser = true;
+  }
+  const at = rest.lastIndexOf('@');
+  let user = at >= 0 ? rest.slice(0, at) : '';
+  const hostPart = (at >= 0 ? rest.slice(at + 1) : rest).split(/[/?]/)[0];
+  const hm = hostPart.match(/^\[([0-9a-f:.%]+)\](?::(\d+))?/i) || hostPart.match(/^([^:\[\]]+)(?::(\d+))?/);
+  if (!hm || !hm[1]) return null;
+  if (!plainUser) user = uriPart(user);
+  if (protocol === 'ss' && user && !user.includes(':')) user = b64Text(user) || user;   // SIP002 userinfo
+  return { protocol, address: hm[1], port: hm[2] || '443', name, secret: user };
+}
+
+// The flag is the first pair of regional indicators in the name (as the core does).
+function splitFlagLite(name) {
+  name = (name || '').trim();
+  const m = name.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u);
+  if (!m) return { flag: '🌐', name };
+  return { flag: m[0], name: name.replace(m[0], '').trim() || name };
+}
+
+const LINK_FORMS = 'No server link recognised (vless://, vmess://, trojan://, ss://, hy2://, tuic://, anytls://, socks://)';
+
+// The manual form's name, when typed by hand (or with no link to name the server): a flag in
+// it goes to n.flag like the core does; without one the server keeps its flag.
+function typedName(n, f) {
+  if (!f.name || (f.link && !f.nameTouched)) return n;
+  const s = splitFlagLite(f.name);
+  n.name = s.name;
+  if (s.flag !== '🌐') n.flag = s.flag;
+  return n;
+}
+
+/* ── Menu actions ── */
+
+const findNode = (sid, nid) => (sourcesData[sid] && sourcesData[sid].nodes || []).find(x => x.id === nid);
+
+function copySourceUrl(sid) {
+  const s = sourcesData[sid];
+  if (s && s.url) copyText(s.url, 'Subscription URL');
+}
+
+function copyShareLink(sid, nid) {
+  const n = findNode(sid, nid);
+  if (!n) return;
+  backend.shareLink(n).then(link => link ? copyText(link, 'Share link') : toast(noLinkWhy(n)),
+    e => toast('No share link: ' + e.message));
+}
+
+const noLinkWhy = n => n.unsupported ? 'This server has no share link (' + n.unsupported + ')' : 'This server has no share link (' + n.protocol + ')';
+
+// ShareSheet: the code, the text under it and Copy. Opens in the actions sheet.
+function showQr(title, text, what, copyLabel) {
+  let svg;
+  try { svg = QR.svg(text, 'M'); } catch (e) { toast('Too long for a QR code'); return; }
+  window._qrText = text;
+  openActions(title,
+    `<div class="qr-card"><div class="qr-box">${svg}</div>
+       <div class="qr-text" onclick="selectText(this)">${esc(text)}</div></div>` +
+    menuRow(ICON.copy, copyLabel || 'Copy', `copyText(window._qrText, '${what || 'Link'}')`));
+}
+
+function showSourceQr(sid) {
+  const s = sourcesData[sid];
+  if (s && s.url) showQr(s.name, s.url, 'Subscription URL', 'Copy URL');
+}
+
+function showNodeQr(sid, nid) {
+  const n = findNode(sid, nid);
+  if (!n) return;
+  backend.shareLink(n).then(link => link ? showQr(n.flag + '  ' + n.name, link, 'Share link', 'Copy share link') : toast(noLinkWhy(n)),
+    e => toast('No share link: ' + e.message));
+}
+
+function selectText(el) {
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
 /* ══════════════════════ RULES (Home → Rules card) ══════════════════════
    One ordered list of sing-box route rules, shown in layers (docs/rules.md):
      1. Apps       — per-app action (42-apps.js);
@@ -4216,6 +4925,136 @@ function renderTargetPicker() {
     + label('Chains', chains) + chains
     || `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`;
 }
+/* ══════════════════════ LOGS ══════════════════════
+   LogsView: what sing-box prints and what the core notes itself (connected, not connected,
+   the system proxy warning, failed requests), oldest at the top. backend.log(since) gives
+   the lines numbered `since` and later (the core keeps the last 2000, logbook.dart); it is
+   asked once a second while the tab is open and the page visible. The list follows new
+   lines until the user scrolls up; then a pill counts the new ones and brings it back.
+   (Flutter: LogsView over the core's LogBook stream.) */
+
+const logState = { lines: [], next: null, level: 'all', follow: true, busy: false, unseen: 0 };
+const LOG_KEEP = 2000;
+const logsOpen = () => document.getElementById('view-logs').classList.contains('active');
+
+// Called by switchTab (34-ui.js): the latest lines at once, pinned to the bottom.
+function openLogs() {
+  logFollow();
+  pollLogs();
+}
+
+function pollLogs() {
+  if (logState.busy) return;
+  logState.busy = true;
+  backend.log(logState.next).then(r => {
+    // the core started again: its numbers start over
+    if (logState.next != null && r.next < logState.next) { logState.lines = []; logState.next = null; return pollLogs(); }
+    const fresh = r.lines.filter(l => logState.next == null || l.n >= logState.next);
+    logState.next = r.next;
+    if (!fresh.length && document.getElementById('logList').childElementCount) return renderLogSummary();
+    logState.lines.push(...fresh);
+    if (logState.lines.length > LOG_KEEP) logState.lines.splice(0, logState.lines.length - LOG_KEEP);
+    appendLogs(fresh);
+  }, () => {}).finally(() => { logState.busy = false; });
+}
+setInterval(() => { if (logsOpen() && !document.hidden) pollLogs(); }, 1000);
+
+const logQuery = () => document.getElementById('logSearch').value.trim().toLowerCase();
+const logShown = (l, q) => (logState.level === 'all' || l.lvl === 'warn' || l.lvl === 'error')
+  && (!q || l.msg.toLowerCase().includes(q) || l.src.includes(q));
+const logTime = t => { const d = new Date(t); return [d.getHours(), d.getMinutes(), d.getSeconds()].map(x => String(x).padStart(2, '0')).join(':'); };
+
+// LogLine: time, a tag for warnings / errors and the core's own lines, the message; the
+// sing-box connection prefix [id ms] is dimmed.
+function logLineHtml(l, q) {
+  let msg = esc(l.msg);
+  if (q) msg = msg.replace(new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`);
+  msg = msg.replace(/^\[(\d+ [^\]]+)\] /, '<span class="log-cid">[$1]</span> ');
+  const tag = (l.lvl === 'warn' || l.lvl === 'error' ? `<span class="log-tag ${l.lvl}">${l.lvl === 'warn' ? 'WARN' : 'ERROR'}</span>` : '')
+    + (l.src === 'core' ? '<span class="log-tag core">core</span>' : '');
+  return `<div class="log-line ${l.lvl}" data-n="${l.n}"><span class="log-time">${logTime(l.t)}</span><span class="log-msg">${tag}${msg}</span></div>`;
+}
+
+function renderLogs() {
+  const q = logQuery(), shown = logState.lines.filter(l => logShown(l, q));
+  document.getElementById('logList').innerHTML = shown.length ? shown.map(l => logLineHtml(l, q)).join('')
+    : `<div class="log-empty">${logState.lines.length ? 'Nothing matches' : backend.live ? 'No lines yet — sing-box writes here once it runs' : 'No lines yet'}</div>`;
+  logState.unseen = 0;
+  logFollowIfPinned();
+  renderLogSummary();
+}
+
+function appendLogs(fresh) {
+  const list = document.getElementById('logList');
+  if (!list.querySelector('.log-line') || logState.lines.length >= LOG_KEEP) { renderLogs(); return; }
+  const q = logQuery(), shown = fresh.filter(l => logShown(l, q));
+  if (shown.length) list.insertAdjacentHTML('beforeend', shown.map(l => logLineHtml(l, q)).join(''));
+  if (!logState.follow) logState.unseen += shown.length;
+  logFollowIfPinned();
+  renderLogSummary();
+}
+
+function renderLogSummary() {
+  const all = logState.lines, warn = all.filter(l => l.lvl === 'warn').length, err = all.filter(l => l.lvl === 'error').length;
+  document.getElementById('logsSummary').textContent = all.length + ' line' + (all.length === 1 ? '' : 's')
+    + (err ? ' · ' + err + ' error' + (err === 1 ? '' : 's') : '') + (warn ? ' · ' + warn + ' warning' + (warn === 1 ? '' : 's') : '');
+  document.getElementById('logWarnCount').textContent = warn + err ? String(warn + err) : '';
+  const jump = document.getElementById('logJump');
+  jump.style.display = logState.follow ? 'none' : '';
+  jump.textContent = logState.unseen ? '↓ ' + logState.unseen + ' new' : '↓ Latest';
+}
+
+function logFollowIfPinned() {
+  if (!logState.follow) return;
+  const box = document.getElementById('logScroll');
+  box.scrollTop = box.scrollHeight;
+}
+// Scrolled up: stop following; back at the bottom: follow again.
+function logScrolled() {
+  const box = document.getElementById('logScroll');
+  const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 24;
+  if (atEnd === logState.follow) return;
+  logState.follow = atEnd;
+  if (atEnd) logState.unseen = 0;
+  renderLogSummary();
+}
+function logFollow() {
+  logState.follow = true;
+  logState.unseen = 0;
+  logFollowIfPinned();
+  renderLogSummary();
+}
+
+function setLogLevel(lvl) {
+  logState.level = lvl;
+  document.querySelectorAll('#logLevels .chip').forEach(c => c.classList.toggle('active', c.dataset.lvl === lvl));
+  renderLogs();
+}
+
+function toggleLogSearch(show) {
+  const bar = document.getElementById('logSearchBar'), input = document.getElementById('logSearch');
+  show = show == null ? bar.style.display === 'none' : show;
+  bar.style.display = show ? '' : 'none';
+  document.getElementById('logSearchBtn').classList.toggle('on', show);
+  if (show) input.focus();
+  else if (input.value) { input.value = ''; renderLogs(); }
+}
+
+// Copies what is shown (the level filter and search apply), one line each.
+function copyLogs() {
+  const q = logQuery(), shown = logState.lines.filter(l => logShown(l, q));
+  if (!shown.length) { toast('No lines to copy'); return; }
+  const text = shown.map(l => `${new Date(l.t).toISOString()} ${l.lvl.toUpperCase().padEnd(5)} ${l.src === 'core' ? '[core] ' : ''}${l.msg}`).join('\n');
+  copyText(text, shown.length + ' line' + (shown.length === 1 ? '' : 's'));
+}
+
+function clearLogs() {
+  backend.clearLog().then(() => {
+    logState.lines = [];
+    logState.follow = true;
+    renderLogs();
+  }, e => toast('Not cleared: ' + e.message));
+}
 /* ══════════════════════ MAIN TOGGLE ══════════════════════ */
 
 let connected = true;
@@ -4262,10 +5101,21 @@ function toggleMain() {
     return;
   }
   if (nothingInAuto()) { alertNothingInAuto(); return; }
+  if (catalogEmpty()) { toast(simpleMode() ? 'Add a subscription or a server first' : 'Create a profile first'); dockTap(); return; }
   connecting = true;
   renderConnState();
   backend.connect().then(() => { connected = true; }, e => toast(e.message))
     .then(() => { connecting = false; renderConnState(); if (!connected) refreshExitIp(); });
+}
+
+// First run (or everything deleted): nothing in this mode to connect. The dock says so and a
+// tap goes to Nodes → + (with no sources a profile has nothing to use: the Simple tab).
+const catalogEmpty = () => !connectOrder.some(entryVisible);
+function dockTap() {
+  if (!catalogEmpty()) { toggleRoute(); return; }
+  switchTab('nodes');
+  setNodesTab(simpleMode() || !sourceOrder.length ? 'simple' : 'profiles');
+  openNodesAdd();
 }
 
 /* ══════════════════════ SEGMENTED CONTROLS ══════════════════════ */
@@ -4286,7 +5136,8 @@ function setSegment(group, value) {
 /* Connection switches (Settings → Connection). System proxy is also the third switch on
    Home; on mobile it will leave Home (Android apps mostly ignore the system proxy). */
 // port: the core's local HTTP + SOCKS5 proxy (127.0.0.1), where the system proxy points.
-const connCfg = { sysProxy: false, killSwitch: false, port: 2080 };
+// testUrl: the latency test URL ('' = the core's default, gstatic), see 59-data.js.
+const connCfg = { sysProxy: false, killSwitch: false, port: 2080, testUrl: '' };
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());
@@ -4339,14 +5190,26 @@ const trafficVia = out => out.slice().reverse().map(t => {
 }).join(' → ') || '—';
 const trafficAge = iso => { const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000 | 0); return s < 60 ? s + 's' : s < 3600 ? (s / 60 | 0) + 'm' : (s / 3600 | 0) + 'h'; };
 // LiveConnRow: host:port + TCP/UDP; the route (entry → exit) and rule; app, speed, bytes, age. Newest first.
+// The filter matches host, app, rule and the servers a connection goes through; × closes one
+// (sing-box drops it, the app usually opens a new one).
+const connMatches = (c, q) => !q || [c.host, c.process, c.rule, trafficVia(c.out)].some(v => (v || '').toLowerCase().includes(q));
 function renderLiveConns() {
-  const list = connected && traffic ? traffic.conns.slice().sort((a, b) => Date.parse(b.start) - Date.parse(a.start)) : [];
+  const all = connected && traffic ? traffic.conns.slice().sort((a, b) => Date.parse(b.start) - Date.parse(a.start)) : [];
+  const q = document.getElementById('connFilter').value.trim().toLowerCase(), list = all.filter(c => connMatches(c, q));
+  document.getElementById('connCloseAll').disabled = !all.length;
   document.getElementById('liveConnList').innerHTML = list.length ? list.map(c => `
     <div class="live-conn-row">
-      <div class="live-conn-top"><span class="live-conn-host">${esc(c.host)}${c.port ? ':' + esc(c.port) : ''}</span><span class="live-conn-proto ${c.net === 'udp' ? 'udp' : 'tcp'}">${esc(c.net.toUpperCase())}</span></div>
+      <div class="live-conn-top"><span class="live-conn-host">${esc(c.host)}${c.port ? ':' + esc(c.port) : ''}</span><span class="live-conn-proto ${c.net === 'udp' ? 'udp' : 'tcp'}">${esc(c.net.toUpperCase())}</span><button class="live-conn-close" title="Close connection" data-id="${esc(c.id)}" onclick="closeLiveConn(this.dataset.id)">×</button></div>
       <div class="live-conn-meta">${trafficVia(c.out)}${c.rule ? ' · ' + esc(c.rule) : ''}</div>
       <div class="live-conn-meta dim">${c.process ? esc(c.process.split(/[\\/]/).pop()) + ' · ' : ''}↓ ${fmtRate(c.downRate).join(' ')} ↑ ${fmtRate(c.upRate).join(' ')} · ${fmtBytes(c.down + c.up)} · ${trafficAge(c.start)}</div>
-    </div>`).join('') : `<div class="live-conn-empty">${connected ? 'No open connections' : 'Not connected'}</div>`;
+    </div>`).join('') : `<div class="live-conn-empty">${!connected ? 'Not connected' : all.length ? 'Nothing matches' : 'No open connections'}</div>`;
+}
+function closeLiveConn(id) {
+  backend.closeConn(id).then(() => {
+    if (traffic) traffic.conns = id ? traffic.conns.filter(c => c.id !== id) : [];
+    renderLiveConns();
+    if (!id) toast('All connections closed');
+  }, e => toast('Not closed: ' + e.message));
 }
 setInterval(() => {
   if (!connected || connecting || document.hidden || trafficBusy) return;
@@ -4642,7 +5505,8 @@ function renderConnSettings() {
     </div>
     <div class="set-group">
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
-      <div class="set-row soon"><div class="set-label">Latency test URL</div><span class="settings-value">auto</span><span class="soon-tag">soon</span></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Latency test URL<div class="set-hint">The address ping and Fastest time; pick one that answers fast from here</div></div>
+        <button class="set-value" id="conn-testurl" onclick="openTestUrlPicker()">${testUrlLabel()}${CHEVRON_R}</button></div>
     </div>`;
 }
 /* ══════════════════════ SETTINGS → GENERAL ══════════════════════
@@ -4693,8 +5557,10 @@ function renderGeneral() {
 function setGenCfg(key, v) { genCfg[key] = v; renderGeneral(); }
 
 function openLangPicker() {
-  openActions('Language', Object.entries(LANGS).map(([k, name]) =>
-    menuRow(genCfg.lang === k ? ICON.check : '', name, `closeSheet('actions');setGenCfg('lang','${k}')`)).join(''));
+  // Only English is written yet: Russian is listed, off, marked soon.
+  openActions('Language', Object.entries(LANGS).map(([k, name]) => k === 'en'
+    ? menuRow(genCfg.lang === k ? ICON.check : '', name, `closeSheet('actions');setGenCfg('lang','${k}')`)
+    : menuRow('<span class="menu-ico-gap"></span>', name + '<span class="soon-tag">soon</span><div class="menu-sub">The app is in English for now</div>', `toast('${name} is coming soon')`, 'disabled')).join(''));
 }
 
 /* On open: ping the entry the app would connect through now and the next `autoCfg.standby`
@@ -4888,6 +5754,150 @@ function openHelp(key) {
   document.getElementById('help-body').innerHTML = h.items.map(([term, text]) =>
     `<div class="help-item"><b>${esc(term)}</b> — ${esc(text)}</div>`).join('');
   openSheet('help');
+}
+/* ══════════════════════ SETTINGS → DATA, LATENCY TEST URL ══════════════════════
+   Data: Backup (the state snapshot the core keeps as one JSON file: sources with their
+   servers, profiles, chains, Route order, settings), Restore (a file → confirm → it
+   replaces everything), About (versions, the data folder).
+   Latency test URL (Settings → Connection): what ping and Fastest measure against; sent
+   to the core as the plan's urlTest.url and with every ping ('' = the core's default).
+   (Flutter: DataSettingsPage, BackupService over the core's state store.) */
+
+const APP_VERSION = '0.1.0';
+const CLOUD_ICON = {
+  down: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  up: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+};
+
+function openDataSettings() {
+  renderDataSettings(null);
+  openSheet('setdata');
+  backend.version().then(v => renderDataSettings(v), () => renderDataSettings({}));
+}
+
+function renderDataSettings(v) {
+  const val = (x, fallback) => `<span class="settings-value mono">${x ? esc(x) : fallback}</span>`;
+  const wait = '<span class="settings-value">…</span>';
+  const noCore = v && !backend.live;
+  document.getElementById('data-settings').innerHTML = `
+    <div class="set-caption">Backup</div>
+    <div class="set-group">
+      <div class="set-row tap" id="data-export" onclick="exportBackup()"><div class="set-label" style="flex:1">Export backup<div class="set-hint">Sources with their servers, profiles, chains, Route order and settings — one JSON file</div></div>${CLOUD_ICON.down}</div>
+      <div class="set-row tap" id="data-restore" onclick="document.getElementById('restoreFile').click()"><div class="set-label" style="flex:1">Restore from file<div class="set-hint">Replaces everything here with the backup; asks first</div></div>${CLOUD_ICON.up}</div>
+    </div>
+    <div class="set-caption">About</div>
+    <div class="set-group">
+      <div class="set-row"><div class="set-label" style="flex:1">Jormungand</div>${val(APP_VERSION + (backend.live ? '' : ' mockup'))}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">Core</div>${!v ? wait : noCore ? val('', 'not connected') : val(v.core, '—')}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">sing-box</div>${!v ? wait : noCore ? val('', '—') : val(v.singBox, 'not found')}</div>
+      ${v && v.dataDir ? `<div class="set-row"><div class="set-label" style="flex:1;min-width:0">Data folder<div class="set-hint data-dir">${esc(v.dataDir)}</div></div></div>` : ''}
+    </div>`;
+}
+
+function exportBackup() {
+  backend.exportState().then(snapshot => {
+    const at = new Date();
+    const file = { app: 'jormungand', backup: 1, at: at.toISOString(), snapshot };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }));
+    a.download = 'jormungand-backup-' + at.toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast('Backup saved: ' + a.download);
+  }, e => toast('Backup failed: ' + e.message));
+}
+
+// A backup file, or a bare snapshot. Only one with sources is taken.
+let pendingRestore = null;
+function readRestoreFile(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  f.text().then(text => {
+    let j;
+    try { j = JSON.parse(text); } catch (e) { throw new Error('not a JSON file'); }
+    const snap = j && j.snapshot ? j.snapshot : j;
+    if (!snap || typeof snap.sourcesData !== 'object' || !Array.isArray(snap.sourceOrder)) throw new Error('no Jormungand backup in it');
+    pendingRestore = snap;
+    confirmRestore(snap, j.at, f.name);
+  }).catch(e => toast('Cannot restore: ' + e.message));
+}
+
+function confirmRestore(snap, at, fileName) {
+  const count = o => Object.keys(o || {}).length;
+  const servers = Object.values(snap.sourcesData).reduce((n, s) => n + (s.nodes || []).length, 0);
+  const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  const what = [plural(count(snap.sourcesData), 'source'), plural(servers, 'server'), plural(count(snap.profilesData), 'profile'), plural(count(snap.chainsData), 'chain')].join(' · ');
+  openActions('Restore backup?',
+    `<div class="restore-card">
+       <div class="restore-file">${esc(fileName)}${at ? ' · ' + esc(new Date(at).toLocaleString()) : ''}</div>
+       <div class="restore-what">${what}</div>
+       <div class="restore-warn">Everything here is replaced: sources, profiles, chains, Route and settings.${connected ? ' The connection restarts with the restored state.' : ''}</div>
+     </div>` +
+    menuRow(CLOUD_ICON.up, 'Restore', "closeSheet('actions');applyRestore()", 'danger') +
+    menuRow('', 'Cancel', "closeSheet('actions')"));
+}
+
+function applyRestore() {
+  const snap = pendingRestore;
+  pendingRestore = null;
+  if (!snap) return;
+  backend.importState(snap).then(() => {
+    renderAfterRestore();
+    closeSheet('setdata');
+    toast('Backup restored');
+  }, e => toast('Not restored: ' + e.message));
+}
+
+// The whole UI from the restored state (as after the core's state loads, 95-live.js).
+function renderAfterRestore() {
+  renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
+  ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
+  renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
+}
+
+/* ── Latency test URL ── */
+
+const TEST_URLS = [
+  ['', 'Default', 'www.gstatic.com/generate_204 (Google)'],
+  ['https://cp.cloudflare.com/generate_204', 'Cloudflare', 'cp.cloudflare.com/generate_204'],
+  ['http://www.msftconnecttest.com/connecttest.txt', 'Microsoft', 'www.msftconnecttest.com'],
+  ['http://detectportal.firefox.com/success.txt', 'Mozilla', 'detectportal.firefox.com'],
+  ['http://captive.apple.com/hotspot-detect.html', 'Apple', 'captive.apple.com'],
+];
+function testUrlLabel() {
+  const p = TEST_URLS.find(([u]) => u === (connCfg.testUrl || ''));
+  if (p) return p[1];
+  try { return new URL(connCfg.testUrl).hostname; } catch (e) { return 'Custom'; }
+}
+
+function openTestUrlPicker() {
+  const cur = connCfg.testUrl || '', custom = !TEST_URLS.some(([u]) => u === cur);
+  openActions('Latency test URL',
+    TEST_URLS.map(([u, name, hint]) => menuRow(u === cur ? ICON.check : '<span class="menu-ico-gap"></span>',
+      `${name}<div class="menu-sub">${hint}</div>`, `closeSheet('actions');setTestUrl('${u}')`)).join('') +
+    `<div class="menu-caption">Custom</div>
+     <div class="form-group testurl-custom">
+       <input class="form-input" id="testurl-input" placeholder="https://example.com/generate_204" value="${custom ? esc(cur) : ''}" spellcheck="false" autocomplete="off">
+       <button class="btn-primary" onclick="setCustomTestUrl()">Use</button>
+     </div>
+     <div class="set-hint testurl-hint">Any address that answers fast over HTTP(S); the time to its reply is the ping. Pick one that works in your country.</div>`);
+}
+
+function setCustomTestUrl() {
+  const v = document.getElementById('testurl-input').value.trim();
+  if (!/^https?:\/\/[^\s/?#]+\.[^\s/?#]+/i.test(v)) { toast('Enter an http:// or https:// address'); return; }
+  closeSheet('actions');
+  setTestUrl(v);
+}
+
+function setTestUrl(url) {
+  if ((connCfg.testUrl || '') === url) return;
+  connCfg.testUrl = url;
+  renderConnSettings();
+  toast('Latency test: ' + testUrlLabel() + (connected ? ' — Fastest uses it from the next connect' : ''));
 }
 /* ══════════════════════ SHEETS (open/close + tabs) ══════════════════════ */
 
@@ -5186,14 +6196,14 @@ function saveCreateProfile() {
 
 function deleteEditingProfile() {
   if (!editingProfileId) return;
-  if (getProfileIds().length <= 1) { editingProfileId = null; closeSheet('createprofile'); return; }
   delete profilesData[editingProfileId];   // the catalog and both route lists drop it (syncCatalog)
-  const fallback = getProfileIds()[0];
+  const fallback = getProfileIds()[0] || null;   // none: it was the last one — No profiles yet
   if (activeConnectId === editingProfileId) activeConnectId = fallback;
   Object.values(chainsData).forEach(c => {
+    if (c.inId !== editingProfileId && c.outId !== editingProfileId) return;
     if (c.inId === editingProfileId) c.inId = fallback;
     if (c.outId === editingProfileId) c.outId = fallback;
-    if (c.inId === c.outId) {   // a chain through one profile is pointless: drop it
+    if (!fallback || c.inId === c.outId) {   // a chain through one profile is pointless: drop it
       delete chainsData[c.id];
       if (activeConnectId === c.id) activeConnectId = fallback;
     }
@@ -6137,7 +7147,7 @@ function apiPing(body, onLine) {
   return fetch('/api/ping', {
     method: 'POST',
     headers: { 'X-Jorm': '1', 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(Object.assign({ url: connCfg.testUrl || undefined }, body)),   // Settings → Connection → Latency test URL
   }).then(async r => {
     if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
     const reader = r.body.getReader(), dec = new TextDecoder();
@@ -6211,7 +7221,7 @@ function livePlan() {
   const id = effectiveConnectId();
   if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
   const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
-    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold } };
+    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined } };
   if (chainsData[id]) {
     const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
     return Object.assign(base, { kind: 'chain',
@@ -6281,16 +7291,33 @@ const liveBackend = {
   live: true,
   fetchSource: liveFetch,
   updateSource: liveFetch,
-  manualNode(f) {
-    if (!f.link) return Promise.reject(new Error('Paste the server link (vless://, ss://, hy2://…) — the core builds the server from it'));
-    return api('/api/parse', { text: f.link }).then(r => {
-      const n = r.nodes[0];
-      if (!n) throw new Error('Link not recognised');
-      // The form's name comes from the link's #fragment, flag included; keep an edited one.
-      const typed = (f.name || '').replace(n.flag, '').trim();
-      if (typed && f.name !== f.address) n.name = typed;
-      return n;
+  // Links: every server the core's parser finds. Fields: the core builds the outbound; an
+  // edit of the same protocol keeps the server's TLS / transport (manual.dart).
+  manualNodes(f) {
+    if (f.link) return api('/api/parse', { text: f.link }).then(r => {
+      if (!r.nodes.length) throw new Error(LINK_FORMS);
+      if (r.nodes.length === 1) typedName(r.nodes[0], f);
+      return f.edit ? r.nodes.slice(0, 1) : r.nodes;
     });
+    const same = f.edit && f.edit.protocol === f.protocol, name = f.name || f.address;
+    return api('/api/node', { protocol: f.protocol, address: f.address, port: f.port, secret: f.secret,
+      // no flag typed: an edited server keeps its own
+      name: f.edit && f.edit.flag !== '🌐' && splitFlagLite(name).flag === '🌐' ? f.edit.flag + ' ' + name : name,
+      outbound: same ? f.edit.outbound : undefined, unsupported: same ? f.edit.unsupported : undefined,
+    }).then(r => [r.node]);
+  },
+  shareLink(n) {
+    return api('/api/share', { outbound: n.outbound, name: n.name, flag: n.flag === '🌐' ? '' : n.flag, unsupported: n.unsupported }).then(r => r.link);
+  },
+  log(since) { return api('/api/log' + (since != null ? '?since=' + since : '')); },
+  clearLog() { return api('/api/log', null, 'DELETE'); },
+  version() { return api('/api/version'); },
+  closeConn(id) { return api('/api/connections' + (id ? '/' + encodeURIComponent(id) : ''), null, 'DELETE'); },
+  // Backup = the snapshot the core stores; a restore replaces it and loads it at once.
+  exportState() { return api('/api/state').then(st => st.snapshot || liveSnapshot()); },
+  importState(snap) {
+    clearTimeout(live.saveTimer);
+    return api('/api/state', { snapshot: snap }, 'PUT').then(() => api('/api/state')).then(st => liveApply(st.snapshot));
   },
   // One core call for the whole batch; the same server in two sources is pinged once.
   ping(nodes, onResult) {
@@ -6359,7 +7386,7 @@ function livePaste() {
     if (/^https?:\/\//i.test(text)) { openSrcForm(null, text); return; }
     if (/^[a-z0-9+.-]+:\/\//i.test(text)) {
       openNodeForm();
-      document.getElementById('nf-link').value = text.split(/\s/)[0];
+      document.getElementById('nf-link').value = text;   // several lines: all of them
       parseNodeLink();
       return;
     }
@@ -6372,6 +7399,7 @@ function liveInit() {
   window.pasteFromClipboard = livePaste;
   liveApply(null);                  // empty until the stored state arrives
   connected = false;
+  ['trafficDown', 'trafficUp'].forEach(id => { document.getElementById(id).textContent = '0 B'; });   // no session yet (the markup has the mock's)
   pingCache.clear();
 
   // Everything that re-renders after a change also saves and re-checks the connection.

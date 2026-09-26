@@ -194,12 +194,11 @@ function confirmDeleteEntry(id) {
   const dead = new Set(['chain:' + id, 'profile:' + id]);
   if (profilesData[id]) {
     const others = getProfileIds().filter(x => x !== id);
-    if (!others.length) { toast('Keep at least one profile'); return; }
-    const fb = others[0];
+    const fb = others[0];   // none: the last profile goes (No profiles yet), its chains with it
     Object.values(chainsData).forEach(c => {
       if (c.inId !== id && c.outId !== id) return;
       const inId = c.inId === id ? fb : c.inId, outId = c.outId === id ? fb : c.outId;
-      if (inId === outId) { lines.push([c.name, 'chain', 'is deleted with it', 'bad']); dead.add('chain:' + c.id); }
+      if (!fb || inId === outId) { lines.push([c.name, 'chain', 'is deleted with it', 'bad']); dead.add('chain:' + c.id); }
       else lines.push([c.name, 'chain', `its ${c.inId === id ? 'entry' : 'exit'} moves to ${esc(profilesData[fb].name)}`, 'warn']);
     });
   }

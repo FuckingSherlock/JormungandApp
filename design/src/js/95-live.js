@@ -25,7 +25,7 @@ function apiPing(body, onLine) {
   return fetch('/api/ping', {
     method: 'POST',
     headers: { 'X-Jorm': '1', 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(Object.assign({ url: connCfg.testUrl || undefined }, body)),   // Settings → Connection → Latency test URL
   }).then(async r => {
     if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
     const reader = r.body.getReader(), dec = new TextDecoder();
@@ -99,7 +99,7 @@ function livePlan() {
   const id = effectiveConnectId();
   if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
   const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
-    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold } };
+    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined } };
   if (chainsData[id]) {
     const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
     return Object.assign(base, { kind: 'chain',
@@ -169,16 +169,33 @@ const liveBackend = {
   live: true,
   fetchSource: liveFetch,
   updateSource: liveFetch,
-  manualNode(f) {
-    if (!f.link) return Promise.reject(new Error('Paste the server link (vless://, ss://, hy2://…) — the core builds the server from it'));
-    return api('/api/parse', { text: f.link }).then(r => {
-      const n = r.nodes[0];
-      if (!n) throw new Error('Link not recognised');
-      // The form's name comes from the link's #fragment, flag included; keep an edited one.
-      const typed = (f.name || '').replace(n.flag, '').trim();
-      if (typed && f.name !== f.address) n.name = typed;
-      return n;
+  // Links: every server the core's parser finds. Fields: the core builds the outbound; an
+  // edit of the same protocol keeps the server's TLS / transport (manual.dart).
+  manualNodes(f) {
+    if (f.link) return api('/api/parse', { text: f.link }).then(r => {
+      if (!r.nodes.length) throw new Error(LINK_FORMS);
+      if (r.nodes.length === 1) typedName(r.nodes[0], f);
+      return f.edit ? r.nodes.slice(0, 1) : r.nodes;
     });
+    const same = f.edit && f.edit.protocol === f.protocol, name = f.name || f.address;
+    return api('/api/node', { protocol: f.protocol, address: f.address, port: f.port, secret: f.secret,
+      // no flag typed: an edited server keeps its own
+      name: f.edit && f.edit.flag !== '🌐' && splitFlagLite(name).flag === '🌐' ? f.edit.flag + ' ' + name : name,
+      outbound: same ? f.edit.outbound : undefined, unsupported: same ? f.edit.unsupported : undefined,
+    }).then(r => [r.node]);
+  },
+  shareLink(n) {
+    return api('/api/share', { outbound: n.outbound, name: n.name, flag: n.flag === '🌐' ? '' : n.flag, unsupported: n.unsupported }).then(r => r.link);
+  },
+  log(since) { return api('/api/log' + (since != null ? '?since=' + since : '')); },
+  clearLog() { return api('/api/log', null, 'DELETE'); },
+  version() { return api('/api/version'); },
+  closeConn(id) { return api('/api/connections' + (id ? '/' + encodeURIComponent(id) : ''), null, 'DELETE'); },
+  // Backup = the snapshot the core stores; a restore replaces it and loads it at once.
+  exportState() { return api('/api/state').then(st => st.snapshot || liveSnapshot()); },
+  importState(snap) {
+    clearTimeout(live.saveTimer);
+    return api('/api/state', { snapshot: snap }, 'PUT').then(() => api('/api/state')).then(st => liveApply(st.snapshot));
   },
   // One core call for the whole batch; the same server in two sources is pinged once.
   ping(nodes, onResult) {
@@ -247,7 +264,7 @@ function livePaste() {
     if (/^https?:\/\//i.test(text)) { openSrcForm(null, text); return; }
     if (/^[a-z0-9+.-]+:\/\//i.test(text)) {
       openNodeForm();
-      document.getElementById('nf-link').value = text.split(/\s/)[0];
+      document.getElementById('nf-link').value = text;   // several lines: all of them
       parseNodeLink();
       return;
     }
@@ -260,6 +277,7 @@ function liveInit() {
   window.pasteFromClipboard = livePaste;
   liveApply(null);                  // empty until the stored state arrives
   connected = false;
+  ['trafficDown', 'trafficUp'].forEach(id => { document.getElementById(id).textContent = '0 B'; });   // no session yet (the markup has the mock's)
   pingCache.clear();
 
   // Everything that re-renders after a change also saves and re-checks the connection.

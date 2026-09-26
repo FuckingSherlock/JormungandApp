@@ -139,6 +139,12 @@ hysteria/hysteria2/hy2, tuic, anytls, wireguard, reality — только цел
 
 ### Fallback-список URL для latency-теста
 
+**Сделано (мокап + ядро):** Settings → Connection → **Latency test URL** — выбор из списка
+Default (gstatic, умолчание ядра), Cloudflare, Microsoft, Mozilla, Apple или свой адрес
+(http/https). Хранится в `connCfg.testUrl` (`''` = умолчание), уходит в ядро как
+`urlTest.url` плана (Fastest) и `url` каждого `/api/ping`. Работающий urltest берёт новый
+URL со следующего подключения. Автодетект ниже — ещё план.
+
 Karing использует статический список без автовыбора — пользователь выбирает вручную.
 Мы делаем автодетект: при первом запуске (и при смене сети) проверяем список **напрямую** (без прокси) и кешируем первый рабочий.
 

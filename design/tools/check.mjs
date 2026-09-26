@@ -8,7 +8,7 @@
 // Playwright is resolved from the global npm root (pre-installed in the cloud env).
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -140,7 +140,29 @@ const SHOTS = {
   'text-large': async p => { await p.evaluate(() => { applyScale(UI_SCALE_MAX); openProfiles(); }); await settle(p); },
   'text-large-rule': async p => { await p.evaluate(() => { applyScale(UI_SCALE_MAX); openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
   more:       async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodesMore()); await settle(p); },
+  // Logs tab, share / QR, Data, latency URL, empty catalog, source error, connections tools
+  logs:       async p => { await tab(p, 'logs'); await p.waitForTimeout(600); },
+  'logs-search': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => { toggleLogSearch(true); document.getElementById('logSearch').value = 'discord'; renderLogs(); }); await settle(p); },
+  'logs-warn': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => setLogLevel('warn')); await settle(p); },
+  'qr-node':  async p => { await tab(p, 'nodes'); await p.evaluate(() => showNodeQr('src1', sourcesData.src1.nodes[0].id)); await settle(p); },
+  'qr-sub':   async p => { await tab(p, 'nodes'); await p.evaluate(() => showSourceQr('src1')); await settle(p); },
+  'settings-data': async p => { await tab(p, 'settings'); await p.evaluate(() => openDataSettings()); await settle(p); },
+  'restore-confirm': async p => { await tab(p, 'settings'); await p.evaluate(() => { openDataSettings(); confirmRestore(liveSnapshot(), '2026-09-20T18:30:00Z', 'jormungand-backup-2026-09-20.json'); }); await settle(p); },
+  'test-url': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openTestUrlPicker(); }); await settle(p); },
+  'lang-soon': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setgeneral'); openLangPicker(); }); await settle(p); },
+  'conn-filter': async p => { await p.evaluate(() => backend.traffic().then(t => { traffic = t; openSheet('connections'); document.getElementById('connFilter').value = 'disc'; renderTraffic(); })); await settle(p); },
+  'source-error': async p => { await tab(p, 'nodes'); await p.evaluate(() => { sourcesData.src1.lastError = { msg: 'Connection timed out (15 s)', at: Date.now() - 180e3 }; renderNodes(); }); await settle(p); },
+  'dock-empty': async p => { await p.evaluate(() => { liveApply(null); connected = false; renderAll(); renderConnState(); updateMainConnectCard(); }); await settle(p); return { clip: await clipOf(p, '.dock', 60) }; },
+  'nodeform-many': async p => { await tab(p, 'nodes'); await p.evaluate(links => { openNodeForm(); document.getElementById('nf-link').value = links.join('\n'); parseNodeLink(); }, SAMPLE_LINKS); await settle(p); },
+  'nodeform-edit': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const g = manualGroups()[0]; openNodeForm(g, sourcesData[g].nodes[0].id); }); await settle(p); },
 };
+// Links the manual server form must read without a core: vmess base64, legacy ss, IPv6, anytls.
+const SAMPLE_LINKS = [
+  'vmess://' + Buffer.from(JSON.stringify({ v: '2', ps: '🇳🇱 Amsterdam VM', add: 'nl1.example.net', port: '443', id: '11111111-2222-3333-4444-555555555555', aid: '0', net: 'ws', tls: 'tls' })).toString('base64'),
+  'ss://' + Buffer.from('aes-256-gcm:pa55@198.51.100.7:8388').toString('base64') + '#Legacy%20SS',
+  'trojan://secret@[2001:db8::1]:443?sni=v6.example#%F0%9F%87%A9%F0%9F%87%AA%20Berlin%20v6',
+  'anytls://pw@any.example:8443?sni=any.example#AnyTLS%201',
+];
 
 async function clipOf(page, sel, extraTop = 0) {
   const r = await page.locator(sel).boundingBox();
@@ -559,7 +581,8 @@ async function runChecks() {
       return bad;
     });
     const bad = [];
-    for (const t of ['home', 'nodes', 'settings']) { await tab(narrow, t); bad.push(...await over()); }
+    await narrow.evaluate(() => { sourcesData.src1.lastError = { msg: 'Connection timed out (15 s) while fetching the subscription', at: Date.now() }; renderNodes(); });
+    for (const t of ['home', 'nodes', 'settings', 'logs']) { await tab(narrow, t); await narrow.waitForTimeout(t === 'logs' ? 300 : 0); bad.push(...await over()); }
     const sheets = [
       () => { switchTab('nodes'); setNodesTab('profiles'); },
       () => { setNodesTab('simple'); openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); },
@@ -569,6 +592,11 @@ async function runChecks() {
       () => { closeSheet('target'); closeSheet('ruleform'); openApps(); },
       () => { closeSheet('apps'); closeSheet('rules'); openEditChain('sc1'); },
       () => { closeSheet('createchain'); openSheet('setlook'); },
+      () => { closeSheet('setlook'); openDataSettings(); },
+      () => { closeSheet('setdata'); showSourceQr('src1'); },
+      () => { closeSheet('actions'); openSheet('setconn'); openTestUrlPicker(); },
+      () => { closeSheet('actions'); closeSheet('setconn'); openNodeForm(); document.getElementById('nf-link').value = 'vless://a@b.example:443#x\nvless://a@c.example:443#y'; parseNodeLink(); },
+      () => { closeSheet('nodeform'); connected = true; return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); },
     ];
     for (const f of sheets) { await narrow.evaluate(f); await settle(narrow); bad.push(...await over()); }
     const title1 = await narrow.evaluate(() => getComputedStyle(document.querySelector('.app-name')).fontSize);
@@ -674,6 +702,269 @@ async function runChecks() {
     await page.click('#nfSaveBtn');
     const found = await page.evaluate(() => Object.values(sourcesData).some(s => s.nodes.some(n => n.name === 'My HY2' && n.protocol === 'hy2' && n.port === '8443')));
     expect(found, 'server not added');
+  });
+
+  /* ── Logs, share / QR, manual servers, Data, latency URL, empty catalog, source error,
+     live connections, last profile, language ── */
+  const stubClipboard = p => p.evaluate(() => {
+    window.__copied = null;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true,
+      value: { writeText: t => { window.__copied = t; return Promise.resolve(); }, readText: () => Promise.resolve('') } });
+  });
+  const toastText = p => p.textContent('#toast');
+  // these checks add servers and restore a backup: the checks after them get the state back
+  const stateBefore = await page.evaluate(() => JSON.stringify(liveSnapshot()));
+
+  await check('share: the page reads vmess base64, legacy ss, SIP002, IPv6, anytls, hy2 port ranges', async () => {
+    const got = await page.evaluate(links => links.concat([
+      'ss://' + btoa('chacha20-ietf-poly1305:pw').replace(/=+$/, '') + '@203.0.113.9:8388#SIP',
+      'hysteria2://pw@hy.example:443,20000-30000/?sni=hy.example#Hop',
+      'vless://u@[2001:db8::2]:8443?security=reality#V6',
+      'nonsense',
+    ]).map(l => { const r = parseShareLinkLite(l); return r && [r.protocol, r.address, r.port, r.secret, r.name].join('|'); }), SAMPLE_LINKS);
+    const want = [
+      'vmess|nl1.example.net|443|11111111-2222-3333-4444-555555555555|🇳🇱 Amsterdam VM',
+      'ss|198.51.100.7|8388|aes-256-gcm:pa55|Legacy SS',
+      'trojan|2001:db8::1|443|secret|🇩🇪 Berlin v6',
+      'anytls|any.example|8443|pw|AnyTLS 1',
+      'ss|203.0.113.9|8388|chacha20-ietf-poly1305:pw|SIP',
+      'hy2|hy.example|443|pw|Hop',
+      'vless|2001:db8::2|8443|u|V6',
+      null,
+    ];
+    const bad = got.map((g, i) => g === want[i] ? null : `${i}: ${g} ≠ ${want[i]}`).filter(Boolean);
+    expect(!bad.length, bad.join(' | '));
+  });
+
+  await check('share: Copy URL / Copy share link really copy; the mock link reads back as the same server', async () => {
+    await stubClipboard(page);
+    await tab(page, 'nodes');
+    await page.evaluate(() => openSourceActions('src1'));
+    await page.click('#actions-body .menu-row:has-text("Copy URL")');
+    await page.waitForTimeout(50);
+    expect(await page.evaluate(() => window.__copied === sourcesData.src1.url), 'url: ' + await page.evaluate(() => window.__copied));
+    const nid = await page.evaluate(() => sourcesData.src1.nodes[0].id);
+    await page.evaluate(n => openNodeActions('src1', n), nid);
+    await page.click('#actions-body .menu-row:has-text("Copy share link")');
+    await page.waitForTimeout(50);
+    const r = await page.evaluate(n => {
+      const node = sourcesData.src1.nodes.find(x => x.id === n), p = parseShareLinkLite(window.__copied);
+      return { link: window.__copied, ok: !!p && p.protocol === node.protocol && p.address === node.address && p.port === String(node.port) };
+    }, nid);
+    expect(r.ok, 'share link: ' + r.link);
+    // every mock server's link reads back as itself
+    const bad = await page.evaluate(() => Object.values(sourcesData).flatMap(s => s.nodes).filter(n => {
+      const l = mockShareLink(n), p = l && parseShareLinkLite(l);
+      return l && !(p && p.protocol === n.protocol && p.address === n.address && p.port === String(n.port));
+    }).map(n => n.protocol + ' ' + n.address));
+    expect(!bad.length, 'links that do not read back: ' + bad.join(', '));
+  });
+
+  await check('share: Show QR code draws the link as a QR in the sheet', async () => {
+    const nid = await page.evaluate(() => sourcesData.src1.nodes[0].id);
+    await page.evaluate(n => showNodeQr('src1', n), nid);
+    await page.waitForSelector('#sh-actions.open .qr-svg');
+    const r = await page.evaluate(() => {
+      const svg = document.querySelector('#actions-body .qr-svg'), text = document.querySelector('#actions-body .qr-text').textContent;
+      const size = +svg.getAttribute('viewBox').split(' ')[2];
+      return { size, want: QR.encode(text, 'M').size + 8, path: svg.querySelector('.qr-dark').getAttribute('d').length, text };
+    });
+    expect(r.size === r.want && r.path > 100 && /:\/\//.test(r.text), JSON.stringify(r));
+    await page.evaluate(() => closeSheet('actions'));
+  });
+
+  await check('nodes form: several links add every server once; the same again adds none; an edit keeps the id', async () => {
+    await page.evaluate(() => openNodeForm());
+    await page.fill('#nf-link', SAMPLE_LINKS.join('\n'));
+    await page.dispatchEvent('#nf-link', 'input');
+    expect(await page.isHidden('#nf-fields'), 'fields still shown for several links');
+    expect(/Add 4 servers/.test(await page.textContent('#nfSaveBtn')), 'button: ' + await page.textContent('#nfSaveBtn'));
+    const before = await page.evaluate(() => sourceOrder.length);
+    await page.click('#nf-group .chip[data-gid=__new]');
+    await page.click('#nfSaveBtn');
+    await page.waitForTimeout(100);
+    const g = await page.evaluate(() => sourceOrder[sourceOrder.length - 1]);
+    const r1 = await page.evaluate(id => ({ n: sourcesData[id].nodes.length, names: sourcesData[id].nodes.map(n => n.flag + n.name), ids: new Set(sourcesData[id].nodes.map(n => n.id)).size }), g);
+    expect(await page.evaluate(() => sourceOrder.length) === before + 1 && r1.n === 4 && r1.ids === 4, JSON.stringify(r1));
+    expect(r1.names.includes('🇩🇪Berlin v6') && r1.names.includes('🇳🇱Amsterdam VM'), 'names: ' + r1.names.join(', '));
+    // the same links into the same group: nothing new
+    await page.evaluate(id => openNodeForm(id), g);
+    await page.fill('#nf-link', SAMPLE_LINKS.join('\n'));
+    await page.dispatchEvent('#nf-link', 'input');
+    await page.click('#nfSaveBtn');
+    await page.waitForTimeout(100);
+    expect(await page.evaluate(id => sourcesData[id].nodes.length, g) === 4, 'duplicates added');
+    expect(/already in the group/.test(await toastText(page)), 'toast: ' + await toastText(page));
+    await page.evaluate(() => closeSheet('nodeform'));
+    // no link, no address: asks for the address; an anytls link alone needs none
+    await page.evaluate(() => openNodeForm());
+    await page.click('#nfSaveBtn');
+    expect(/Address is required/.test(await toastText(page)), 'empty form: ' + await toastText(page));
+    await page.fill('#nf-link', 'anytls://pw@any2.example:443#A2');
+    await page.dispatchEvent('#nf-link', 'input');
+    await page.fill('#nf-addr', '');
+    await page.click('#nfSaveBtn');
+    await page.waitForTimeout(100);
+    expect(await page.evaluate(() => Object.values(sourcesData).some(s => s.nodes.some(n => n.address === 'any2.example'))), 'anytls link not added');
+    // edit: new port, same id; the secret field follows the protocol
+    const nid = await page.evaluate(id => sourcesData[id].nodes[0].id, g);
+    await page.evaluate(([id, n]) => openNodeForm(id, n), [g, nid]);
+    expect(await page.textContent('#nf-secret-label') === 'UUID', 'label: ' + await page.textContent('#nf-secret-label'));
+    await page.fill('#nf-port', '2053');
+    await page.click('#nfSaveBtn');
+    await page.waitForTimeout(100);
+    const r2 = await page.evaluate(([id, n]) => { const x = sourcesData[id].nodes.find(y => y.id === n); return x && x.port + ' ' + x.name; }, [g, nid]);
+    expect(r2 === '2053 Amsterdam VM', 'edited: ' + r2);
+  });
+
+  await check('logs: a real tab — lines, level filter, search, follow / pause, copy, clear', async () => {
+    await tab(page, 'logs');
+    await page.waitForTimeout(500);
+    expect(await page.isVisible('#view-logs'), 'logs view hidden');
+    const n0 = await page.locator('#logList .log-line').count();
+    expect(n0 > 40, 'lines: ' + n0);
+    await page.evaluate(() => setLogLevel('warn'));
+    const lv = await page.evaluate(() => [...document.querySelectorAll('#logList .log-line')].map(l => l.className));
+    expect(lv.length && lv.every(c => /warn|error/.test(c)), 'warn filter: ' + lv.join(','));
+    await page.evaluate(() => setLogLevel('all'));
+    await page.click('#logSearchBtn');
+    await page.fill('#logSearch', 'discord');
+    const found = await page.evaluate(() => [...document.querySelectorAll('#logList .log-line')].map(l => l.textContent.toLowerCase()));
+    expect(found.length && found.every(t => t.includes('discord')) && await page.locator('#logList mark').count() > 0, 'search: ' + found.length);
+    await page.click('#logSearchBar .icon-btn');
+    // scrolled up: stops following, new lines are counted on the pill; the pill goes back down
+    await page.evaluate(() => { document.getElementById('logScroll').scrollTop = 0; });
+    await page.waitForTimeout(100);
+    await page.evaluate(() => { for (let i = 0; i < 3; i++) mockLogAdd('sing-box', 'info', 'test line ' + i); });
+    await page.waitForTimeout(1200);
+    expect(await page.isVisible('#logJump') && /new/.test(await page.textContent('#logJump')), 'pill: ' + await page.textContent('#logJump'));
+    await page.click('#logJump');
+    await page.waitForTimeout(100);
+    const atEnd = await page.evaluate(() => { const b = document.getElementById('logScroll'); return logState.follow && b.scrollTop + b.clientHeight >= b.scrollHeight - 2; });
+    expect(atEnd, 'not back at the end');
+    await stubClipboard(page);
+    await page.evaluate(() => copyLogs());
+    const copied = await page.evaluate(() => window.__copied || '');
+    expect(copied.split('\n').length === await page.locator('#logList .log-line').count() && /test line 2/.test(copied), 'copied ' + copied.split('\n').length + ' lines');
+    await page.evaluate(() => clearLogs());
+    await page.waitForTimeout(100);
+    expect(await page.locator('#logList .log-line').count() === 0 && await page.isVisible('#logList .log-empty'), 'not cleared');
+  });
+
+  await check('connections: filter by host / app / rule, × closes one, Close all', async () => {
+    await tab(page, 'home');
+    await page.evaluate(() => { connected = true; return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); });
+    await page.waitForTimeout(300);
+    const rows = () => page.locator('#liveConnList .live-conn-row').count();
+    const n0 = await rows();
+    await page.fill('#connFilter', 'discord');
+    expect(n0 >= 3 && await rows() === 1, `filter: ${n0} → ${await rows()}`);
+    await page.fill('#connFilter', 'svchost');
+    expect(await rows() === 1, 'by app: ' + await rows());
+    await page.fill('#connFilter', '');
+    await page.click('#liveConnList .live-conn-row >> nth=0 >> .live-conn-close');
+    await page.waitForTimeout(100);
+    expect(await rows() === n0 - 1, `× : ${n0} → ${await rows()}`);
+    await page.waitForTimeout(1100);   // the next poll keeps it closed
+    expect(await rows() === n0 - 1, 'closed one came back: ' + await rows());
+    await page.click('#connCloseAll');
+    await page.waitForTimeout(100);
+    expect(await rows() === 0 && /No open connections/.test(await page.textContent('#liveConnList')), 'close all: ' + await rows());
+    await page.evaluate(() => { mockClosed.clear(); closeSheet('connections'); });
+  });
+
+  await check('nodes: a failed update shows the error on the card; Retry clears it', async () => {
+    await tab(page, 'nodes');
+    const url = await page.evaluate(() => { const u = sourcesData.src1.url; sourcesData.src1.url = 'https://fail.example/sub'; updateSource('src1'); return u; });
+    await page.waitForFunction(() => !sourcesData.src1.updating, null, { timeout: 4000 });
+    const err = await page.textContent('.src-card[data-id=src1] .src-error').catch(() => '');
+    expect(/Update failed/.test(err) && /timed out/.test(err) && await page.evaluate(() => !!sourcesData.src1.lastError), 'error strip: ' + err);
+    await page.evaluate(u => { sourcesData.src1.url = u; }, url);
+    await page.click('.src-card[data-id=src1] .src-error-retry');
+    await page.waitForFunction(() => !sourcesData.src1.updating, null, { timeout: 4000 });
+    expect(await page.locator('.src-card[data-id=src1] .src-error').count() === 0 && await page.evaluate(() => !sourcesData.src1.lastError), 'still shows the error');
+  });
+
+  await check('settings: latency test URL — a preset or a custom address goes to connCfg.testUrl', async () => {
+    await tab(page, 'settings');
+    await page.evaluate(() => openSheet('setconn'));
+    await page.click('#conn-testurl');
+    await page.click('#actions-body .menu-row:has-text("Cloudflare")');
+    expect(await page.evaluate(() => connCfg.testUrl) === 'https://cp.cloudflare.com/generate_204' && /Cloudflare/.test(await page.textContent('#conn-testurl')), 'preset: ' + await page.evaluate(() => connCfg.testUrl));
+    await page.click('#conn-testurl');
+    await page.fill('#testurl-input', 'ftp://nope');
+    await page.click('.testurl-custom .btn-primary');
+    expect(await page.evaluate(() => connCfg.testUrl) === 'https://cp.cloudflare.com/generate_204', 'bad URL taken');
+    await page.fill('#testurl-input', 'https://probe.example.org/204');
+    await page.click('.testurl-custom .btn-primary');
+    expect(await page.evaluate(() => connCfg.testUrl) === 'https://probe.example.org/204' && /probe\.example\.org/.test(await page.textContent('#conn-testurl')), 'custom: ' + await page.evaluate(() => connCfg.testUrl));
+    await page.evaluate(() => { setTestUrl(''); closeSheet('setconn'); });
+  });
+
+  await check('settings: Data — export downloads the snapshot; restore asks, then replaces the state', async () => {
+    await page.evaluate(() => openDataSettings());
+    await page.waitForTimeout(300);
+    expect(/0\.1\.0/.test(await page.textContent('#data-settings')), 'about: ' + await page.textContent('#data-settings'));
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#data-export')]);
+    expect(/^jormungand-backup-\d{4}-\d\d-\d\d\.json$/.test(dl.suggestedFilename()), 'file: ' + dl.suggestedFilename());
+    const file = JSON.parse(readFileSync(await dl.path(), 'utf8'));
+    const order = await page.evaluate(() => sourceOrder.join());
+    expect(file.backup === 1 && file.snapshot.sourceOrder.join() === order, 'backup content: ' + Object.keys(file).join());
+    // restore a changed copy: one source fewer, another renamed
+    const gone = file.snapshot.sourceOrder.pop();
+    delete file.snapshot.sourcesData[gone];
+    file.snapshot.sourcesData[file.snapshot.sourceOrder[0]].name = 'Restored name';
+    await page.setInputFiles('#restoreFile', { name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(file)) });
+    await page.waitForSelector('#sh-actions.open .restore-card');
+    expect(await page.evaluate(() => sourceOrder.length) === file.snapshot.sourceOrder.length + 1, 'replaced before the confirm');
+    await page.click('#actions-body .menu-row:has-text("Restore")');
+    await page.waitForTimeout(200);
+    const r = await page.evaluate(() => ({ order: sourceOrder.join(), name: sourcesData[sourceOrder[0]].name }));
+    expect(r.order === file.snapshot.sourceOrder.join() && r.name === 'Restored name', JSON.stringify(r));
+    // not a backup: refused
+    await page.setInputFiles('#restoreFile', { name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('{"a":1}') });
+    await page.waitForTimeout(200);
+    expect(/Cannot restore/.test(await toastText(page)), 'toast: ' + await toastText(page));
+  });
+  await page.evaluate(s => { liveApply(JSON.parse(s)); renderAfterRestore(); closeSheet('setdata'); }, stateBefore);
+
+  await check('general: Language lists Русский as soon, off', async () => {
+    await page.evaluate(() => openLangPicker());
+    const row = page.locator('#actions-body .menu-row.disabled');
+    expect(/Русский/.test(await row.textContent()) && /soon/.test(await row.textContent()), 'row: ' + await row.textContent());
+    await row.click();
+    expect(await page.evaluate(() => genCfg.lang) === 'en', 'language changed');
+    await page.evaluate(() => closeSheet('actions'));
+  });
+
+  await check('home: empty catalog — the dock says No servers yet, a tap (or power) goes to Nodes → +', async () => {
+    const p = await openPage(browser);
+    await p.evaluate(() => { liveApply(null); connected = false; renderAll(); renderConnState(); updateMainConnectCard(); });
+    const dock = async () => (await p.textContent('#profCardName')) + ' / ' + (await p.textContent('#profModeDetail'));
+    expect(/No servers yet \/ Add in Nodes/.test(await dock()), 'dock: ' + await dock());
+    await p.click('.dock-profile');
+    await p.waitForTimeout(300);
+    expect(await p.isVisible('#view-nodes') && await p.evaluate(() => document.getElementById('sh-addmenu').classList.contains('open')), 'not at Nodes → +');
+    await p.evaluate(() => { switchTab('home'); setConnectMode('profiles'); });
+    expect(/No profiles yet \/ Create one in Nodes/.test(await dock()), 'profiles dock: ' + await dock());
+    await p.evaluate(() => setConnectMode('simple'));
+    await p.click('#powerBtn');
+    await p.waitForTimeout(300);
+    expect(await p.evaluate(() => !connected && !connecting) && await p.isVisible('#view-nodes'), 'power with nothing: ' + await p.evaluate(() => connected + ' ' + connecting));
+    expect(!p.errors.length, p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('profiles: the last profile can be deleted — No profiles yet is a normal state', async () => {
+    const p = await openPage(browser);
+    await p.evaluate(() => { setConnectMode('profiles'); getProfileIds().forEach(id => deleteEntry(id)); });
+    await p.waitForTimeout(300);
+    const r = await p.evaluate(() => ({ left: getProfileIds().length, chains: Object.values(chainsData).filter(c => !connectEntry(c.inId) || !connectEntry(c.outId)).length, dock: document.getElementById('profCardName').textContent }));
+    expect(r.left === 0 && r.chains === 0 && r.dock === 'No profiles yet', JSON.stringify(r));
+    await p.evaluate(() => { openProfiles(); switchTab('nodes'); setNodesTab('profiles'); });
+    await p.waitForTimeout(200);
+    expect(!p.errors.length, p.errors.join(' | '));
+    await p.close();
   });
 
   await check('home: power off → connecting → on', async () => {

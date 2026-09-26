@@ -32,6 +32,13 @@
       <span class="sheet-title">Live connections</span>
       <button class="sheet-close" onclick="closeSheet('connections')">×</button>
     </div>
+    <div class="conn-tools">
+      <div class="search conn-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="connFilter" placeholder="Host, app, rule, server" oninput="renderLiveConns()">
+      </div>
+      <button class="conn-closeall" id="connCloseAll" onclick="closeLiveConn(null)">Close all</button>
+    </div>
     <div class="sheet-body" id="liveConnList"></div>
   </div>
 

@@ -216,7 +216,7 @@ function renderSourceCard(id, q) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
     </div>
-    ${usageHtml(s)}
+    ${usageHtml(s)}${srcErrorHtml(s)}
     </div>
     </div>
     <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), null,
@@ -317,11 +317,13 @@ function updateSource(sid) {
   if (s.kind !== 'sub' || s.updating) return;
   s.updating = true;
   refreshSourceViews();
-  backend.updateSource(s).then(() => {
+  // never loaded (its first fetch failed): Retry is that first fetch again
+  (s.nodes.length ? backend.updateSource(s) : backend.fetchSource(s)).then(() => {
     s.updatedAt = Date.now();
     s.count = s.nodes.length;
+    delete s.lastError;
     return true;
-  }, e => { toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
+  }, e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
     s.updating = false;
     purgeExpiredGone();
     refreshSourceViews();
@@ -388,8 +390,8 @@ function openSourceActions(sid) {
   let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`)
     + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
-    rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
-    rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
+    rows += menuRow(ICON.copy, 'Copy URL', close + `copySourceUrl('${sid}')`);
+    rows += menuRow(ICON.qr, 'Show QR code', close + `showSourceQr('${sid}')`);
     if (s.website) rows += menuRow(ICON.web, 'Open website', close + `toast('Opens ${esc(s.website)}')`);
   }
   rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteSource('${sid}')`, 'danger');
@@ -402,8 +404,8 @@ function openNodeActions(sid, nid) {
   const close = "closeSheet('actions');";
   const on = !isNodeDisabled(s, nid);
   let rows = menuRow(ICON.power, on ? 'Switch off<div class="menu-sub">Hidden everywhere, its settings kept</div>' : 'Switch on', close + `toggleNodeEnabled('${sid}','${nid}')`);
-  rows += menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
-  rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
+  rows += menuRow(ICON.copy, 'Copy share link', close + `copyShareLink('${sid}','${nid}')`);
+  rows += menuRow(ICON.qr, 'Show QR code', close + `showNodeQr('${sid}','${nid}')`);
   if (s.kind === 'node') {
     rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
     rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteNode('${sid}','${nid}')`, 'danger');

@@ -19,5 +19,6 @@ function switchTab(name) {
   document.querySelectorAll('.nav-btn[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('#view-' + name + ' > .scroll').forEach(el => el.scrollTop = 0);
   syncBackHistory();   // back from another tab goes Home (60-sheets.js)
+  if (name === 'logs') openLogs();
 }
 

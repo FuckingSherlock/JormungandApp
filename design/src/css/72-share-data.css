@@ -1,0 +1,54 @@
+/* ── ShareSheet: QR code + the text it holds (37-share.js). A QR must stay dark on light
+   in every theme or phones won't read it: --qr-dark / --qr-light. ── */
+.qr-card{padding:4px 20px 10px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.qr-box{width:min(240px,100%);aspect-ratio:1;border-radius:12px;overflow:hidden;background:var(--qr-light)}
+.qr-svg{display:block;width:100%;height:100%}
+.qr-light{fill:var(--qr-light)}
+.qr-dark{fill:var(--qr-dark)}
+.qr-text{
+  width:100%;max-height:74px;overflow-y:auto;font-family:var(--mono);font-size:11px;line-height:1.4;color:var(--t2);
+  overflow-wrap:anywhere;background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:8px;padding:6px 8px;
+  user-select:text;-webkit-user-select:text;
+}
+.menu-ico-gap{width:18px;flex-shrink:0}
+.menu-row .soon-tag{margin-left:8px;vertical-align:1px}
+
+/* ── Manual server form (32-nodes-forms.js): links, one per line ── */
+textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:break-all}
+#nf-many{font-size:13px;color:var(--accent);margin-top:7px}
+
+/* ── Live connections: filter + Close all, × per row (50-home.js) ── */
+.conn-tools{display:flex;align-items:center;gap:8px;padding:0 14px 10px;flex-shrink:0}
+.conn-tools .search{margin:0;flex:1;min-width:0}
+.conn-tools input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--t1);font:inherit;font-size:14px;padding:9px 0}
+.conn-closeall{flex-shrink:0;background:rgba(var(--muted-rgb),.12);color:var(--muted);border:1px solid rgba(var(--muted-rgb),.3);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.conn-closeall:disabled{opacity:.4;cursor:default}
+.live-conn-close{flex-shrink:0;width:24px;height:24px;margin:-4px -6px -4px 0;border:none;background:none;color:var(--t3);font-size:18px;line-height:1;cursor:pointer;border-radius:6px}
+.live-conn-close:active{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
+.live-conn-top .live-conn-host{flex:1}
+
+/* ── SourceErrorStrip (33-source-error.js) ── */
+.src-error{display:flex;align-items:center;gap:10px;margin:8px 0 2px;padding:8px 8px 8px 10px;border-radius:10px;
+  background:rgba(var(--muted-rgb),.08);border:1px solid rgba(var(--muted-rgb),.25);color:var(--muted)}
+.src-error > svg{flex-shrink:0}
+.src-error-text{flex:1;min-width:0}
+.src-error-title{font-size:13px;font-weight:600}
+.src-error-msg{font-size:12px;color:var(--t2);overflow-wrap:anywhere}
+.src-error-retry{flex-shrink:0;background:var(--card-hi);color:var(--t1);border:1px solid var(--border-hi);border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+
+/* ── Settings → Data, latency test URL (59-data.js) ── */
+#data-settings .set-group{margin:6px 0 10px;background:var(--card)}
+#data-settings .set-caption{padding:10px 4px 6px}
+#data-settings .set-row.tap{cursor:pointer}
+#data-settings .set-row.tap > svg{flex-shrink:0;color:var(--t2)}
+#data-settings .settings-value{flex-shrink:0;text-align:right}
+.settings-value.mono{font-family:var(--mono);font-size:13px}
+.data-dir{font-family:var(--mono);overflow-wrap:anywhere}
+.restore-card{margin:0 20px 8px;padding:12px 14px;border-radius:12px;background:var(--card);border:1px solid var(--border)}
+.restore-file{font-size:13px;color:var(--t2);font-family:var(--mono);overflow-wrap:anywhere}
+.restore-what{font-size:15px;font-weight:600;color:var(--t1);margin:4px 0 6px}
+.restore-warn{font-size:13px;color:var(--warn)}
+.testurl-custom{display:flex;gap:8px;padding:0 20px}
+.testurl-custom .form-input{flex:1;min-width:0;font-family:var(--mono);font-size:13px}
+.testurl-custom .btn-primary{width:auto;padding:0 16px;font-size:15px}
+.testurl-hint{padding:6px 20px 12px}
