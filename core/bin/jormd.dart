@@ -32,7 +32,7 @@ Future<void> main(List<String> args) async {
         ];
   final daemon = Daemon(
     singBox: opt('sing-box') ?? (File(bundled).existsSync() ? bundled : exe),
-    dataDir: opt('data') ?? p.join(home, 'Jormungand'),
+    dataDir: p.absolute(opt('data') ?? p.join(home, 'Jormungand')), // sing-box runs with -D, a relative path would miss
     uiFile: opt('ui') ?? p.normalize(p.join(root, '..', 'design', 'main_screen.html')),
     lanHosts: lanIps.toSet(),
   );

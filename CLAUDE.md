@@ -81,9 +81,9 @@ Live UI: `dart run bin/jormd.dart` → http://127.0.0.1:7788 (launch config `jor
 Running, fixing and extending tests is the `tests` subagent's job (`.claude/agents/tests.md`).
 
 Network of this machine: part of the direct traffic (not through jormd) leaves via a Russian
-IP of an outside corporate network, not the user's own. Be careful with it: no scans,
-load or odd traffic from it, and do not treat it as a test "RU exit"; test exits through
-jormd's mixed port (`dart run tool/exit_check.dart`).
+IP of an outside corporate network, not the user's own. Do not touch it at all: no direct
+requests to outside hosts (curl, probes, tests), no `--lan` for jormd. Anything that needs
+the internet goes through jormd's mixed port (`dart run tool/exit_check.dart`).
 
 Commit `design/src`, `design/tools`, the rebuilt `design/main_screen.html`, `core/`, `docs/` and
 push (the push redeploys the Cloudflare site, see Deploy). The user views the mockup as a

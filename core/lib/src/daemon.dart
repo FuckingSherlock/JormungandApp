@@ -127,18 +127,31 @@ class Daemon {
 
   /// Asks where traffic leaves the tunnel, after every (re)connect and on demand. A check
   /// that finishes after a newer one started (or after a disconnect) is dropped.
+  /// Every service failing at once, fast, means the tunnel itself is not carrying yet (a
+  /// urltest group still on an untested dead server right after connect): ask again in a
+  /// couple of seconds, for up to 15 s, before reporting the error.
   void _recheckExit() {
     final seq = ++_exitSeq;
     _exit = null;
     if (!main.running) return;
-    checkExitIp(_mixedPort).then(
-      (e) {
+    final since = Stopwatch()..start();
+    Future<void> attempt() async {
+      final sw = Stopwatch()..start();
+      try {
+        final e = await checkExitIp(_mixedPort);
         if (seq == _exitSeq) _exit = {...e, 'at': DateTime.now().millisecondsSinceEpoch};
-      },
-      onError: (Object e) {
-        if (seq == _exitSeq) _exit = {'error': '$e'};
-      },
-    );
+      } catch (e) {
+        if (seq != _exitSeq) return;
+        if (sw.elapsed < const Duration(seconds: 3) && since.elapsed < const Duration(seconds: 15) && main.running) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+          if (seq == _exitSeq) return attempt();
+          return;
+        }
+        _exit = {'error': '$e'};
+      }
+    }
+
+    attempt();
   }
 
   /// body: {url, userAgent, strategy, discoveredAt, prev: {nodes, gone}}
