@@ -80,7 +80,7 @@ Core: in `core/`, `dart analyze` + `dart test` (the sing-box tests run on loopba
 Live UI: `dart run bin/jormd.dart` → http://127.0.0.1:7788 (launch config `jormd`).
 Running, fixing and extending tests is the `tests` subagent's job (`.claude/agents/tests.md`).
 
-Network of this machine (home LAN, corporate tunnel past the router, which path to use):
+Network of this machine (home LAN is the user's own; never target the corporate network past it):
 user memory `user-home-network`. Exit checks through a tunnel: `dart run tool/exit_check.dart`.
 
 Commit `design/src`, `design/tools`, the rebuilt `design/main_screen.html`, `core/`, `docs/` and
