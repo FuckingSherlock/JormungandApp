@@ -810,12 +810,12 @@ body {
 .node-row + .node-row{border-top:1px solid rgba(255,255,255,.035)}
 /* the ping tap covers the row's whole height and its right edge, so a tap just above or
    below the ms never lands on the row (which would pick the server) */
-.lat-hit{align-self:stretch;display:flex;align-items:center;justify-content:flex-end;margin:-10px -14px -10px -4px;padding:10px 14px 10px 4px;cursor:pointer;flex-shrink:0}
+.lat-hit{align-self:stretch;display:flex;align-items:center;justify-content:flex-end;margin:-10px -14px -10px -8px;padding:10px 14px 10px 4px;cursor:pointer;flex-shrink:0}
 /* the flag is the name's first character: a long name wraps under it, not beside it */
 .node-flag{font-size:16px;line-height:1;margin-right:7px}
 .node-name{flex:1;min-width:0;font-size:14px;color:var(--t1);overflow-wrap:anywhere;line-height:1.3}
 .node-proto{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
-.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:60px;text-align:right;flex-shrink:0}
+.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:52px;text-align:right;flex-shrink:0}   /* fits "1234 ms" and "testing"; any wider only pushes the ms off the badge */
 .lat.good{color:var(--active)}
 .lat.mid{color:var(--warn)}
 .lat.bad{color:var(--muted)}
