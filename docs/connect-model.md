@@ -10,7 +10,7 @@
 
 | Сущность | Поля (макет) | Смысл |
 |---|---|---|
-| **Source** | `kind: sub \| node`, `enabled`, `nodes[]`, `gone[]`, `offNodes[]`, `disabledNodes[]`, `updateInterval`, `inAuto` | Подписка (`sub`) или ручной набор серверов (`node`). Живёт на вкладке Nodes. |
+| **Source** | `kind: sub \| node`, `enabled`, `nodes[]`, `gone[]`, `offNodes[]`, `disabledNodes[]`, `updateInterval`, `inAuto`; у `sub` ещё настройки формы (`url`, `userAgent`, `hwid`, `filter`, `channel`, `reloadAfterUpdate`, `testAfterUpdate`…) и серверные поля (`uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt` — пишет только ядро, см. subscription-parsing.md) | Подписка (`sub`) или ручной набор серверов (`node`). Живёт на вкладке Nodes. |
 | **Node** | `id`, `protocol`, `address`, `port`, креды, `flag`, `name` | Один сервер (outbound sing-box). |
 | **Profile** | `sources[]`, `nodes[]` (`sid::nid`), `inAuto` | Режим «Профили»: набор целых источников и/или отдельных нод. |
 | **Chain** | `inId`, `outId`, `inOff[]`, `outOff[]`, `exitMode`, `exitOrder[]`, `inAuto` | Вход (первый хоп) → выход. Концы — «юниты» активного режима. |
@@ -235,8 +235,14 @@ priority order»): порядок в Nodes больше на него не вл�
   | `speedOnFail` | нет | тумблер | после неудачных запросов ещё и замер скорости текущего сервера (логику порога / реакции — позже) |
   | `pauseScreenOff` | **да** | тумблер | не проверять при выключенном экране, проверить при пробуждении |
   | `subsEvery` | секунды, 10 с – 30 д, **12 ч**; 0 = выкл | окно: число + единица (seconds / minutes / hours / days); показ «30 min» / «12 h» / «2 d» | глобальный период обновления подписок; про свой период подписки — в [?] |
-- `source.updateInterval`: `'auto'` (по умолчанию) = `subsEvery`; число часов — свой
-  период (0 = не обновлять). В форме подписки пустое поле = auto.
+- `source.updateInterval`: `'auto'` (по умолчанию) = период провайдера
+  (`profile-update-interval`, не чаще раза в час), если он его прислал, иначе `subsEvery`;
+  `subsEvery` = 0 выключает и его. Число часов — свой период (0 = не обновлять). В форме
+  подписки пустое поле = auto. Обновляет по таймеру ядро (subscription-parsing.md →
+  «Автообновление»).
+- `source.reloadAfterUpdate` («Reconnect after update»): выкл — обновление подписки не
+  перезапускает sing-box, её новые серверы войдут в конфиг при следующем переподключении по
+  другой причине; вкл — переподключение сразу, если план изменился.
 - **Standby («keep warm»)**: внутри юнита sing-box `urltest` и так пингует все свои
   outbound'ы по `interval`; standby нужен для перехода между *записями* списка (и для
   Priority-выхода). Стоимость: один URL-тест ≈ 1–5 КБ; 3 маршрута раз в минуту — порядка

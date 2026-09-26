@@ -51,14 +51,15 @@ const HELP = {
   subsupdate: { title: 'Subscription updates', items: [
     ['Update every', 'how often the server lists are downloaded again from the providers.'],
     ['Own period', 'a subscription can have its own (Nodes → ⋮ → Edit → Update every). Then this setting doesn’t apply to it.'],
+    ['Provider’s period', 'a subscription left on auto follows the period its provider sends, if it sends one.'],
     ['0 = off', 'lists are updated only when you tap Update.'],
   ] },
   srcadvanced: { title: 'Advanced', items: [
     ['User-Agent', 'how the app introduces itself to the provider; the server list may depend on it. Auto is best.'],
-    ['Download via', 'fetch the subscription directly or through the VPN (if the provider’s site is blocked).'],
-    ['Send X-HWID', 'sends a device ID. Some providers limit devices by it.'],
+    ['Download via', 'fetch the subscription directly or through the VPN (if the provider’s site is blocked). “… first” tries the other way when it fails; with the VPN off it is always direct.'],
+    ['Send X-HWID', 'sends a device ID (random, made once) with the device model and OS. Some providers limit devices by it.'],
     ['Keep provider rules', 'use the routing rules that come with the subscription.'],
-    ['Filter', 'keep only servers whose name matches, e.g. DE|NL.'],
+    ['Filter', 'keep only servers whose name matches this regular expression, e.g. DE|NL or 🇩🇪.'],
     ['Decrypt password', 'only for subscriptions the provider encrypted.'],
   ] },
   nodes: { title: 'Nodes', items: [

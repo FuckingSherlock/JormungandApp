@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+
 import '../node.dart';
 
 /// Share-link style parameters (`security`, `sni`, `fp`, `pbk`, `sid`, `type`, `path`,
@@ -93,6 +95,10 @@ Map<String, dynamic>? buildTls(Params q, {required bool defaultOn}) {
         },
         null
       );
+    // V2Ray QUIC (sing-box has it; always over TLS, no header / key options of its own).
+    case 'quic':
+      final sec = (q['quicSecurity'] ?? 'none').toLowerCase();
+      return sec == 'none' || sec.isEmpty ? ({'type': 'quic'}, null) : (null, 'quic $sec');
     case 'xhttp' || 'splithttp':
       return (null, 'xhttp');
     default:
@@ -104,6 +110,8 @@ void _addTransport(Map<String, dynamic> ob, Params q, void Function(String) unsu
   final (tr, bad) = buildTransport(q);
   if (tr != null) ob['transport'] = tr;
   if (bad != null) unsupported(bad);
+  // sing-box's QUIC transport needs TLS: without it the whole config would be refused.
+  if (tr?['type'] == 'quic' && ob['tls'] == null) unsupported('quic without tls');
 }
 
 Node buildVless({required String name, required String host, required int port, required String uuid, required Params q}) {
@@ -115,6 +123,9 @@ Node buildVless({required String name, required String host, required int port, 
   if (tls != null) ob['tls'] = tls;
   String? bad;
   _addTransport(ob, q, (b) => bad = b);
+  // Xray's VLESS encryption (mlkem768x25519plus…): sing-box has none, the server would not talk to it.
+  final enc = (q['encryption'] ?? 'none').trim().toLowerCase();
+  if (enc.isNotEmpty && enc != 'none') bad ??= 'vless encryption';
   ob['packet_encoding'] = 'xudp';
   return Node.make(name: name, protocol: 'vless', address: host, port: port, identity: uuid, outbound: ob, unsupported: bad);
 }
@@ -233,6 +244,125 @@ Node buildAnytls({required String name, required String host, required int port,
   };
   return Node.make(name: name, protocol: 'anytls', address: host, port: port, identity: password, outbound: ob);
 }
+
+/// SOCKS (v5 by default; [version] `4` / `4a` too). sing-box has no SOCKS over TLS.
+Node buildSocks({
+  required String name,
+  required String host,
+  required int port,
+  String user = '',
+  String password = '',
+  String version = '5',
+  bool tls = false,
+}) {
+  final ob = <String, dynamic>{
+    'type': 'socks',
+    'server': host,
+    'server_port': port,
+    'version': version,
+    if (user.isNotEmpty) 'username': user,
+    if (password.isNotEmpty) 'password': password,
+  };
+  return Node.make(
+    name: name,
+    protocol: 'socks',
+    address: host,
+    port: port,
+    identity: '$user:$password',
+    outbound: ob,
+    unsupported: tls ? 'socks over tls' : null,
+  );
+}
+
+/// HTTP proxy, plain or over TLS (`security=tls` in [q]).
+Node buildHttp({required String name, required String host, required int port, String user = '', String password = '', required Params q}) {
+  final ob = <String, dynamic>{
+    'type': 'http',
+    'server': host,
+    'server_port': port,
+    if (user.isNotEmpty) 'username': user,
+    if (password.isNotEmpty) 'password': password,
+  };
+  final tls = buildTls(q, defaultOn: false);
+  if (tls != null) ob['tls'] = tls;
+  return Node.make(name: name, protocol: 'http', address: host, port: port, identity: '$user:$password', outbound: ob);
+}
+
+/// SSH tunnel: password and / or a private key (its text), optional pinned host keys.
+Node buildSsh({
+  required String name,
+  required String host,
+  required int port,
+  required String user,
+  String password = '',
+  String privateKey = '',
+  String passphrase = '',
+  List<String> hostKeys = const [],
+  List<String> hostKeyAlgorithms = const [],
+}) {
+  final ob = <String, dynamic>{
+    'type': 'ssh',
+    'server': host,
+    'server_port': port,
+    'user': user,
+    if (password.isNotEmpty) 'password': password,
+    if (privateKey.isNotEmpty) 'private_key': privateKey,
+    if (passphrase.isNotEmpty) 'private_key_passphrase': passphrase,
+    if (hostKeys.isNotEmpty) 'host_key': hostKeys,
+    if (hostKeyAlgorithms.isNotEmpty) 'host_key_algorithms': hostKeyAlgorithms,
+  };
+  final key = privateKey.isEmpty ? password : sha256.convert(utf8.encode(privateKey)).toString();
+  return Node.make(name: name, protocol: 'ssh', address: host, port: port, identity: '$user:$key', outbound: ob);
+}
+
+/// Hysteria v1. Bandwidth is required by the protocol: 10 / 50 Mbps when the provider gave
+/// none. [q]: `upmbps` / `downmbps` (or `up` / `down`), `obfs` (xplus password), `protocol`
+/// (only udp exists in sing-box), TLS keys.
+Node buildHysteria({required String name, required String host, required int port, required String auth, required Params q}) {
+  int? mbps(String? v) => int.tryParse(RegExp(r'\d+').stringMatch(v ?? '') ?? '');
+  final tls = buildTls({...q, 'security': 'tls'}, defaultOn: true)!;
+  tls.putIfAbsent('alpn', () => ['hysteria']);
+  final ob = <String, dynamic>{
+    'type': 'hysteria',
+    'server': host,
+    'server_port': port,
+    'up_mbps': mbps(q['upmbps'] ?? q['up']) ?? 10,
+    'down_mbps': mbps(q['downmbps'] ?? q['down']) ?? 50,
+    if (auth.isNotEmpty) 'auth_str': auth,
+    if ((q['obfs'] ?? '').isNotEmpty) 'obfs': q['obfs'],
+    'tls': tls,
+  };
+  final proto = (q['protocol'] ?? 'udp').toLowerCase();
+  return Node.make(
+    name: name,
+    protocol: 'hy',
+    address: host,
+    port: port,
+    identity: auth,
+    outbound: ob,
+    unsupported: proto == 'udp' || proto.isEmpty ? null : 'hysteria $proto',
+  );
+}
+
+/// A server of a kind sing-box cannot run (WireGuard is an endpoint there, not an
+/// outbound; SSR is gone): listed with its name so the user sees it, never in a config.
+Node unsupportedNode({
+  required String name,
+  required String protocol,
+  required String host,
+  required int port,
+  required String identity,
+  String? reason,
+}) =>
+    Node.make(
+      name: name,
+      protocol: protocol,
+      address: host,
+      port: port,
+      identity: identity,
+      outbound: {'type': protocol, 'server': host, 'server_port': port},
+      unsupported: reason ?? protocol,
+    );
 
 /// Lenient base64 (standard or url-safe, with or without padding / line breaks).
 /// Null when [s] is not base64 or does not decode to UTF-8 text.
