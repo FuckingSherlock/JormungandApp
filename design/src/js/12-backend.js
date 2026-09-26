@@ -34,5 +34,20 @@ let backend = {
   // like the core: the exit is checked again after every connect
   connect()    { exitInfo = null; return wait(1100).then(() => { exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' }; }); },
   disconnect() { return Promise.resolve(); },
+  // Live traffic (see renderTraffic): the mock keeps the numbers the cards show.
+  // out = where each connection really goes, exit first (the core gives 'proxy/<sid::nid>' tags).
+  traffic() {
+    const id = effectiveConnectId(), c = chainsData[id];
+    const out = c ? [chainExitNode(c), chainEntryNode(c)].filter(Boolean) : [unitNode(id)].filter(Boolean);
+    const MB = 1048576, ago = s => new Date(Date.now() - s * 1000).toISOString();
+    const conn = (host, port, net, via, process, downRate, down, s) =>
+      ({ id: host, host, port, net, rule: via === out ? 'final' : 'ip_is_private=true => route(direct)', out: via.length ? via : ['direct'], process, down, up: down / 20 | 0, downRate, upRate: downRate / 30 | 0, start: ago(s) });
+    return Promise.resolve({ running: true, down: 48.3 * MB, up: 6.1 * MB, downTotal: 1.84 * 1024 * MB, upTotal: 312 * MB, tcp: 43, udp: 8, conns: [
+      conn('googlevideo.com', '443', 'tcp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 3.2 * MB, 410 * MB, 95),
+      conn('api.github.com', '443', 'tcp', out, 'C:\\Code\\Code.exe', 4096, 2 * MB, 40),
+      conn('192.168.0.1', '53', 'udp', [], 'C:\\Windows\\System32\\svchost.exe', 0, 900, 3),
+      conn('discord.com', '443', 'tcp', out, 'C:\\Discord\\Discord.exe', 128 * 1024, 30 * MB, 600),
+    ] });
+  },
   exitIp() { return wait(600).then(() => connected ? { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' } : { ip: '178.66.12.201', country: 'RU', city: 'Moscow' }); },
 };

@@ -32,24 +32,7 @@
       <span class="sheet-title">Live connections</span>
       <button class="sheet-close" onclick="closeSheet('connections')">×</button>
     </div>
-    <div class="sheet-body">
-      <div class="live-conn-row">
-        <div class="live-conn-top"><span class="live-conn-host">discord.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
-        <div class="live-conn-meta">DE-FRA-01 · ↓ 128 KB/s · chrome.exe</div>
-      </div>
-      <div class="live-conn-row">
-        <div class="live-conn-top"><span class="live-conn-host">1.1.1.1:53</span><span class="live-conn-proto udp">UDP</span></div>
-        <div class="live-conn-meta">direct · DNS query · svchost.exe</div>
-      </div>
-      <div class="live-conn-row">
-        <div class="live-conn-top"><span class="live-conn-host">googlevideo.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
-        <div class="live-conn-meta">DE-FRA-01 · ↓ 3.2 MB/s · chrome.exe</div>
-      </div>
-      <div class="live-conn-row">
-        <div class="live-conn-top"><span class="live-conn-host">api.github.com:443</span><span class="live-conn-proto tcp">TCP</span></div>
-        <div class="live-conn-meta">DE-FRA-01 · ↓ 4 KB/s · Code.exe</div>
-      </div>
-    </div>
+    <div class="sheet-body" id="liveConnList"></div>
   </div>
 
   <!-- ══════════ NESTED: CREATE / EDIT PROFILE ══════════ -->

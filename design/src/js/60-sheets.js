@@ -2,6 +2,7 @@
 
 function showSheet(name, on) {
   if (name === 'profiles' && on) placeRouteSheet();
+  if (name === 'connections' && on) renderLiveConns();
   document.getElementById('ov-'+name).classList.toggle('open', on);
   document.getElementById('sh-'+name).classList.toggle('open', on);
 }

@@ -159,23 +159,35 @@ function isUsable(id) {
   return !!n && isAlive(n);
 }
 
+/* Auto passes over an entry only when it is known not to work: every server it would use
+   measured and silent. Servers not measured yet (a fresh start before the launch ping, a
+   new subscription) still count, so a restart never hands the top spot to the next entry. */
+const knownDead = n => ping(n) === -1;
+function mayWork(id) {
+  if (chainsData[id]) {
+    const c = chainsData[id];
+    return chainEntryRefs(c).some(r => !knownDead(r.node)) && chainExitRefs(c).some(r => !knownDead(r.node));
+  }
+  return unitPickRefs(id).some(r => !knownDead(r.node));
+}
+
 // What is actually connected: the pinned entry, or Auto's pick.
 function effectiveConnectId() {
   if (!autoConnect && entryVisible(activeConnectId) && !isBroken(activeConnectId)) return activeConnectId;
   const order = visibleOrder();
-  return order.find(id => connectEntry(id).inAuto && isUsable(id))
+  return order.find(id => connectEntry(id).inAuto && mayWork(id))
       || order.find(id => connectEntry(id).inAuto) || order[0];
 }
 
 function nodeSummaryHtml(n, fixed) {
   if (!n) return `<span>${fixed ? 'Fixed node not set' : 'No working nodes'}</span>`;
-  return `<span>${n.flag}</span><span class="conn-node">${esc(n.name)}</span>${latHtml(n)}`;
+  return `<span class="conn-flag">${n.flag}</span><span class="conn-node">${esc(n.name)}</span>${latHtml(n)}`;
 }
 
 function entrySummaryHtml(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
-    const end = (uid, n) => (n ? n.flag + ' ' : '') + esc(unitName(uid));
+    const end = (uid, n) => (n ? `<span class="conn-flag">${n.flag}</span> ` : '') + esc(unitName(uid));
     return `<span>${end(c.inId, chainEntryNode(c))}</span><span class="conn-arrow">→</span>`
       + (c.exitMode === 'priority' ? '<span class="conn-tag muted">priority</span>' : '') + `<span>${end(c.outId, chainExitNode(c))}</span>`;
   }
@@ -190,7 +202,7 @@ function renderConnectRow(id) {
   const current = id === effectiveConnectId();
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
-  return `<div class="conn-row ${current ? 'current' : ''} ${routeOpenId === id ? 'open' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
+  return `<div class="conn-row ${current ? 'current' : ''} ${routeOpen.has(id) ? 'open' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
     ${routeEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
     <div class="conn-main" ${chain ? '' : `onclick="toggleRouteRow('${id}')"`}>
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
@@ -198,8 +210,9 @@ function renderConnectRow(id) {
     </div>
     <button class="conn-state ${current ? 'on' : ''}" onclick="selectConnect('${id}')" title="${current && !autoConnect ? 'Back to Auto' : 'Use only this one (Manual)'}">${current && autoConnect ? 'auto' : 'manual'}</button>
     ${chain ? '' : `<span class="conn-expand" onclick="toggleRouteRow('${id}')" title="Servers and their priority"><svg class="src-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>`}
-    <div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>
-    ${!chain && routeOpenId === id ? routeRowBodyHtml(id) : ''}
+    ${routeEdit ? `<div class="route-auto" title="Use in Auto: Auto may pick it">${miniToggleHtml(id, 'toggleEntryAuto', e.inAuto)}</div>`
+      : `<div class="route-auto">${pingAllBtn(`testEntryLatency('${id}')`, 'Ping its servers')}</div>`}
+    ${!chain && routeOpen.has(id) ? routeRowBodyHtml(id) : ''}
   </div>`;
 }
 
@@ -207,9 +220,11 @@ function renderConnectRow(id) {
    order by drag — the same pickMode / pickOrder as the entry editors (Nodes → Route
    settings, the profile form), just at hand. Leaving servers out stays in those editors.
    The switch and the ⋮⋮ grips show only in edit mode; otherwise the row says how it picks. */
-let routeOpenId = null;
+// Unfolded rows: each on its own, unfolding one never folds another.
+const routeOpen = new Set();
+let routeRowFocus = null;   // the row whose switch / grips were touched last
 function toggleRouteRow(id) {
-  routeOpenId = routeOpenId === id ? null : id;
+  if (routeOpen.has(id)) routeOpen.delete(id); else { routeOpen.add(id); routeRowFocus = id; }
   renderConnects();
 }
 function routeRowBodyHtml(id) {
@@ -224,10 +239,10 @@ function routeRowBodyHtml(id) {
       <span class="node-proto">${r.node.protocol}</span>
       <span onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');
-  const acts = `<div class="conn-acts">${routeUpdateBtn(id)}${pingAllBtn(`pingRouteRow('${id}')`, 'Ping all servers')}</div>`;
+  const acts = `<div class="conn-acts">${routeUpdateBtn(id)}</div>`;   // ⚡ sits on the row itself
   const hint = pin ? 'Manual: only the highlighted server.'
     : priority ? 'The first working one from the top.' + (routeEdit ? ' Drag ⋮⋮ to order.' : '') : 'Connects through the fastest of them.';
-  return `<div class="conn-body">${routeEdit
+  return `<div class="conn-body" onpointerdown="routeRowFocus='${id}'">${routeEdit
       ? `<div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}${acts}</div><div class="set-hint conn-hint">${hint}</div>`
       : `<div class="seg-row"><div class="set-hint conn-hint conn-pick-hint">${hint}</div>${acts}</div>`}
     <div class="se-nodes">${rows || '<div class="route-empty">No servers</div>'}</div></div>`;
@@ -236,7 +251,6 @@ function routeRowBodyHtml(id) {
 const routeSubs = id => [...new Set(unitRefs(id, true).map(r => r.sid))].filter(sid => sourcesData[sid] && sourcesData[sid].kind === 'sub');
 const routeUpdateBtn = id => { const subs = routeSubs(id); return subs.length ? `<button class="icon-btn ghost" onclick="updateRouteRow('${id}')" title="Update"><span class="${subs.some(sid => sourcesData[sid].updating) ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : ''; };
 const updateRouteRow = id => routeSubs(id).forEach(updateSource);
-const pingRouteRow = id => testLatency(unitRefs(id).map(r => [r.sid, r.node.id]));
 /* Tap a server of an unfolded row: Manual on this entry and on this server. Tap the pinned
    server again: the entry stays Manual and picks by its Fastest / Priority again. Any other
    pick (another entry, AUTO / MANUAL, the Auto badge) drops the server pin. */
@@ -251,13 +265,14 @@ function routeRowChanged() {
   updateMainConnectCard();
 }
 function setRouteRowMode(mode) {
-  unitOwner(routeOpenId).pickMode = mode;
+  unitOwner(routeRowFocus).pickMode = mode;
   routeRowChanged();
 }
 function startRouteNodeDrag(e, key) {
-  const u = unitOwner(routeOpenId), shown = unitPickRefs(routeOpenId).map(refKey), cur = u.pickOrder || [];
+  routeRowFocus = e.currentTarget.closest('.conn-row').dataset.id;
+  const u = unitOwner(routeRowFocus), shown = unitPickRefs(routeRowFocus).map(refKey), cur = u.pickOrder || [];
   const [order, done] = dragShown(cur.concat(shown.filter(k => !cur.includes(k))), shown, o => { u.pickOrder = o; });
-  const rowEl = document.querySelector(`#connects-list .conn-body .node-row[data-id="${key}"]`);
+  const rowEl = document.querySelector(`#connects-list .conn-row[data-id="${routeRowFocus}"] .conn-body .node-row[data-id="${key}"]`);
   startRowDrag(e, rowEl, '.node-row', order, () => { done(); routeRowChanged(); });
 }
 
@@ -280,7 +295,7 @@ function setRouteEdit(on) {
 
 function renderConnects() {
   syncCatalog();
-  document.getElementById('connectsCaption').textContent = routeEdit ? '⋮⋮ = order · switch = in Auto' : 'switch = in Auto';
+  document.getElementById('connectsCaption').innerHTML = routeEdit ? '⋮⋮ = order · switch = in Auto' : `<span class="cap-ico">${ICON.bolt}</span> = ping its servers`;
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';

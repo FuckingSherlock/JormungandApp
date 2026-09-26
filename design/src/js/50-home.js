@@ -9,6 +9,7 @@ function renderConnState() {
   document.getElementById('mainToggle').classList.toggle('off', !connected || connecting);
   document.getElementById('connLabel').textContent = connecting ? 'Connecting…' : connected ? 'Connected' : 'Tap to connect';
   renderExitIp();
+  renderTraffic();
 }
 
 /* ExitIpCard: where traffic leaves. Connected: the tunnel's exit, checked by the core
@@ -80,3 +81,56 @@ function setSysProxy(on) {
   renderConnSettings();
 }
 
+
+/* Live traffic: StatCards (speed, this session, connections) and the Live connections
+   sheet, from backend.traffic() once a second while connected and the page is visible.
+   Speeds are the core's counter deltas; each connection names the servers it really
+   goes through, exit first ('proxy/<sid::nid>' / 'entry/<sid::nid>' tags, or 'direct').
+   Not connected: speeds and connections are 0, the last session's totals stay. */
+let traffic = null, trafficBusy = false;
+function fmtRate(b) {
+  const u = ['B/s', 'KB/s', 'MB/s', 'GB/s']; let i = 0;
+  while (b >= 1000 && i < 3) { b /= 1024; i++; }
+  return [i && b < 10 ? b.toFixed(1) : String(Math.round(b)), u[i]];
+}
+function fmtBytes(b) {
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+  while (b >= 1000 && i < 4) { b /= 1024; i++; }
+  return (i && b < 10 ? b.toFixed(2) : i && b < 100 ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
+}
+function renderTraffic() {
+  const t = traffic, set = (id, v) => { document.getElementById(id).textContent = v; };
+  if (!connected || t) {
+    const [dv, du] = fmtRate(connected ? t.down : 0), [uv, uu] = fmtRate(connected ? t.up : 0);
+    set('speedDown', dv); set('speedDownUnit', du); set('speedUp', uv); set('speedUpUnit', uu);
+    set('connTotal', connected ? t.tcp + t.udp : 0); set('connTcp', connected ? t.tcp : 0); set('connUdp', connected ? t.udp : 0);
+  }
+  if (t && connected) { set('trafficDown', fmtBytes(t.downTotal)); set('trafficUp', fmtBytes(t.upTotal)); }
+  if (document.getElementById('sh-connections').classList.contains('open')) renderLiveConns();
+}
+const trafficNode = t => {
+  if (t && typeof t === 'object') return t;
+  const m = /^(?:proxy|entry)\/(.+?)::(.+)$/.exec(t), s = m && sourcesData[m[1]];
+  return s ? s.nodes.find(n => n.id === m[2]) : null;
+};
+const trafficVia = out => out.slice().reverse().map(t => {
+  if (t === 'direct') return 'direct';
+  const n = trafficNode(t);
+  return n ? n.flag + ' ' + esc(n.name) : esc(t);
+}).join(' → ') || '—';
+const trafficAge = iso => { const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000 | 0); return s < 60 ? s + 's' : s < 3600 ? (s / 60 | 0) + 'm' : (s / 3600 | 0) + 'h'; };
+// LiveConnRow: host:port + TCP/UDP; the route (entry → exit) and rule; app, speed, bytes, age. Newest first.
+function renderLiveConns() {
+  const list = connected && traffic ? traffic.conns.slice().sort((a, b) => Date.parse(b.start) - Date.parse(a.start)) : [];
+  document.getElementById('liveConnList').innerHTML = list.length ? list.map(c => `
+    <div class="live-conn-row">
+      <div class="live-conn-top"><span class="live-conn-host">${esc(c.host)}${c.port ? ':' + esc(c.port) : ''}</span><span class="live-conn-proto ${c.net === 'udp' ? 'udp' : 'tcp'}">${esc(c.net.toUpperCase())}</span></div>
+      <div class="live-conn-meta">${trafficVia(c.out)}${c.rule ? ' · ' + esc(c.rule) : ''}</div>
+      <div class="live-conn-meta dim">${c.process ? esc(c.process.split(/[\\/]/).pop()) + ' · ' : ''}↓ ${fmtRate(c.downRate).join(' ')} ↑ ${fmtRate(c.upRate).join(' ')} · ${fmtBytes(c.down + c.up)} · ${trafficAge(c.start)}</div>
+    </div>`).join('') : `<div class="live-conn-empty">${connected ? 'No open connections' : 'Not connected'}</div>`;
+}
+setInterval(() => {
+  if (!connected || connecting || document.hidden || trafficBusy) return;
+  trafficBusy = true;
+  backend.traffic().then(t => { traffic = t; renderTraffic(); }, () => {}).finally(() => { trafficBusy = false; });
+}, 1000);

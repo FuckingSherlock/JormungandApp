@@ -87,6 +87,7 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 | `POST /api/parse` | `{text}` → ноды из ссылок |
 | `POST /api/connect` | `{plan, systemProxy}` |
 | `POST /api/disconnect`, `GET /api/status`, `GET /api/log` | status: `{connected, systemProxy, error, warning, exit}` |
+| `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (16 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
 
@@ -113,6 +114,16 @@ Amazon, ipip.net (из Китая). Страна, которая режет од
 пока ответа нет; тап по карточке — `POST /api/exit` (через туннель или напрямую, смотря по
 состоянию).
 
+Трафик (`traffic.dart`, `TrafficMeter`): clash API sing-box `/connections` даёт счётчики
+байт и только группу соединения (`chains: ["proxy"]`); реальный сервер — `now` группы из
+`/proxies` (`proxy/<sid::nid>`; у цепочки ещё `entry/<sid::nid>`, в `out` выход первым).
+Скорость — разница счётчиков между двумя опросами (любая частота опроса; перезапуск
+sing-box не даёт отрицательных). Процесс (`process`) — `route.find_process`. UI опрашивает
+раз в секунду, пока подключено и страница видна: карточки Speed / This session /
+Connections и лист Live connections (новые сверху: хост:порт, TCP/UDP, вход → выход,
+правило, приложение, скорость, объём, возраст). Без подключения скорость и соединения — 0,
+итоги прошлой сессии остаются.
+
 Системный прокси ставит ядро через реестр (HKCU Internet Settings), не sing-box: при
 убитом процессе sing-box не вернул бы настройки. Прежние значения сохраняются и
 возвращаются при отключении и при следующем старте после сбоя. PAC (AutoConfigURL,
@@ -124,4 +135,4 @@ Amazon, ipip.net (из Китая). Страна, которая режет од
 TUN и kill switch; правила, DNS и rule-sets из `rules.md` в конфиге; каналы загрузки
 подписки (Direct first и т.п. — сейчас всегда напрямую, с учётом `HTTP(S)_PROXY`);
 фильтр подписки, HWID; автообновление подписок по таймеру; пинг выбирает URL автоматически
-(сейчас всегда gstatic); сохранение пингов между запусками.
+(сейчас всегда gstatic).

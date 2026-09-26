@@ -124,11 +124,12 @@
           <span class="dock-route" id="profModeDetail"></span>
         </div>
       </div>
-      <div class="profiles-meta">
+      <div class="profiles-meta" onclick="event.stopPropagation();pingDockTop()" title="Ping the top servers">
         <div class="count" id="profMetaCount">74</div>
         <div class="src" id="profMetaSrc">nodes · 3 src</div>
+        <!-- framed = tap to ping; while the ping goes a light runs round the frame -->
+        <svg class="ping-frame" aria-hidden="true"><rect class="base" pathLength="100"/><rect class="run" pathLength="100"/></svg>
       </div>
-      <svg class="dock-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
     </div>
   </div>
   </div><!-- /view-home -->

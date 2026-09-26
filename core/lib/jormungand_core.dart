@@ -14,3 +14,4 @@ export 'src/parse/links.dart';
 export 'src/parse/subscription.dart';
 export 'src/runtime.dart';
 export 'src/sysproxy.dart';
+export 'src/traffic.dart';

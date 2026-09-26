@@ -80,6 +80,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan, {int clashPort = 909
       'final': 'proxy',
       'auto_detect_interface': true,
       'default_domain_resolver': 'local',
+      // which app opened a connection: shown in Live connections
+      'find_process': true,
     },
     'experimental': {
       'clash_api': {'external_controller': '127.0.0.1:$clashPort'},

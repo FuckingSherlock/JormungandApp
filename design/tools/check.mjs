@@ -75,6 +75,7 @@ const SHOTS = {
   'broken': async p => { await p.evaluate(() => { sourcesData.src4.enabled = false; renderAll(); openProfiles(); }); await settle(p); },
   'dock-chain': async p => { await p.evaluate(() => { selectConnect('sc1'); }); return { clip: await clipOf(p, '.dock', 60) }; },
   'dock-profile': async p => { await p.evaluate(() => { setConnectMode('profiles'); selectConnect('default'); }); return { clip: await clipOf(p, '.dock', 60) }; },
+  'connections': async p => { await p.evaluate(() => backend.traffic().then(t => { traffic = t; renderTraffic(); openSheet('connections'); })); await settle(p); },
   'sys-on': async p => { await p.evaluate(() => setSysProxy(true)); await p.waitForTimeout(400); return { clip: await clipOf(p, '.segments-card', 10) }; },
   'sys-off': async p => { return { clip: await clipOf(p, '.segments-card', 10) }; },
   'dock-off': async p => { await p.click('#powerBtn'); await p.waitForTimeout(1000); return { clip: await clipOf(p, '.dock', 60) }; },
@@ -253,6 +254,104 @@ async function runChecks() {
       return { four: cards.length === 4, pairs: cards[0].top === cards[1].top && cards[2].top === cards[3].top && cards[2].top > cards[1].bottom,
         sameH: new Set(cards.map(c => Math.round(c.height))).size === 1, low: cards[0].height <= 56,
         autoSub: /^Check every /.test(document.getElementById('autoCardSub').textContent) };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('route: unfolding a row never folds another', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      openProfiles();
+      const ids = visibleOrder().filter(x => !chainsData[x]).slice(0, 2);
+      ids.forEach(toggleRouteRow);
+      const both = ids.every(id => document.querySelector(`#connects-list .conn-row[data-id="${id}"] .conn-body`));
+      setRouteEdit(true);
+      document.querySelector(`#connects-list .conn-row[data-id="${ids[1]}"] .conn-body`).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      setRouteRowMode('priority');
+      const own = unitOwner(ids[1]).pickMode === 'priority';
+      toggleRouteRow(ids[0]);
+      const one = !document.querySelector(`#connects-list .conn-row[data-id="${ids[0]}"] .conn-body`) && !!document.querySelector(`#connects-list .conn-row[data-id="${ids[1]}"] .conn-body`);
+      setRouteEdit(false); closeSheet('profiles');
+      return { both, own, one };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('auto: an unmeasured entry on top is not passed over, a dead one is', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      setAutoConnect(true);
+      const order = visibleOrder().filter(id => connectEntry(id).inAuto && !chainsData[id]);
+      const top = order[0], nodes = () => unitPickRefs(top).map(x => x.node);
+      nodes().forEach(n => pingCache.delete(serverKey(n)));
+      const unmeasured = effectiveConnectId() === top;
+      nodes().forEach(n => setPing(n, -1));
+      const dead = effectiveConnectId() !== top;
+      return { unmeasured, dead };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('dock: the latency pings the first 3 servers of the first 4 Auto entries', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      const refs = dockTopRefs(), ids = visibleOrder().filter(id => connectEntry(id).inAuto).slice(0, 4);
+      const allowed = new Set(ids.flatMap(id => entryRefs(id).map(r => serverKey(r.node))));
+      const route = document.getElementById('sh-profiles').classList.contains('open');
+      [...pingCache.keys()].forEach(k => { if (pingCache.get(k).ms === 'testing') pingCache.delete(k); });
+      const meta = document.querySelector('.dock .profiles-meta');
+      meta.click();
+      const testing = [...pingCache.entries()].filter(([, v]) => v.ms === 'testing').map(([k]) => k);
+      const frame = meta.classList.contains('pinging') && getComputedStyle(meta.querySelector('.ping-frame .run')).display !== 'none';
+      meta.click();
+      const stopped = !meta.classList.contains('pinging') && !dockPing && getComputedStyle(meta.querySelector('.ping-frame .run')).display === 'none'
+        && getComputedStyle(meta.querySelector('.ping-frame')).display !== 'none';
+      return { some: refs.length > 0, inTop: refs.every(r => allowed.has(serverKey(r.node))),
+        perEntry: ids.every(id => refs.filter(r => entryRefs(id).includes(r)).length <= (chainsData[id] ? 6 : 3)),
+        pinged: testing.length > 0 && testing.every(k => allowed.has(k)), frame, stopped,
+        noSheet: !route && !document.getElementById('sh-profiles').classList.contains('open') };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('dock: the ping goes on past the first batch and ends at 10 working servers or when all are done', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      const total = dockPingBatches().flat().length, first = dockPingBatches()[0].length;
+      document.querySelector('.dock .profiles-meta').click();
+      const seen = new Set();
+      for (let i = 0; i < 100 && dockPing; i++) {
+        pingCache.forEach((v, k) => { if (v.ms === 'testing') seen.add(k); });
+        await new Promise(r => setTimeout(r, 50));
+      }
+      const all = dockPingBatches().flat(), alive = all.filter(n => seen.has(serverKey(n)) && isAlive(n)).length;
+      return { beyondFirst: seen.size > first, ended: !dockPing && !document.querySelector('.dock .profiles-meta.pinging'),
+        rule: alive >= 10 || seen.size === total };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('live traffic: cards and Live connections follow backend.traffic, zero when off', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      traffic = await backend.traffic(); renderTraffic(); openSheet('connections');
+      const rows = [...document.querySelectorAll('#liveConnList .live-conn-row')];
+      const node = unitNode(effectiveConnectId());
+      const n0 = sourcesData[sourceOrder[0]].nodes[0];
+      const on = { speed: document.getElementById('speedDown').textContent === '48.3' && document.getElementById('speedDownUnit').textContent === 'MB/s',
+        total: document.getElementById('trafficDown').textContent === '1.84 GB', conns: document.getElementById('connTotal').textContent === '51',
+        rows: rows.length === 4, newest: rows[0].textContent.includes('192.168.0.1:53'),
+        via: !!node && rows[1].textContent.includes(node.name), app: rows[1].textContent.includes('Code.exe'),
+        tag: trafficVia(['proxy/' + sourceOrder[0] + '::' + n0.id]).includes(n0.name) };
+      connected = false; renderConnState();
+      const off = { speed: document.getElementById('speedDown').textContent === '0', conns: document.getElementById('connTotal').textContent === '0',
+        kept: document.getElementById('trafficDown').textContent === '1.84 GB', empty: document.getElementById('liveConnList').textContent.includes('Not connected') };
+      return { ...on, ...off };
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
     await p.close();
@@ -497,7 +596,7 @@ async function runChecks() {
       const out = {}, id = visibleOrder().find(x => sourcesData[x]);
       const q = s => document.querySelectorAll('#connects-list ' + s).length;
       toggleRouteRow(id);
-      out.offPlain = !q('.drag-handle') && !q('.seg-switch') && q('.conn-pick-hint') === 1 && /^switch = in Auto/.test(document.getElementById('connectsCaption').textContent);
+      out.offPlain = !q('.drag-handle') && !q('.seg-switch') && q('.conn-pick-hint') === 1 && /= ping its servers/.test(document.getElementById('connectsCaption').textContent);
       setRouteEdit(true);
       out.onGrips = q('> .conn-row > .drag-handle') === visibleOrder().length && q('.seg-switch') === 1 && document.getElementById('routeEditBtn').classList.contains('on');
       out.swH = document.querySelector('#connects-list .seg-switch').getBoundingClientRect().height;
@@ -588,9 +687,13 @@ async function runChecks() {
       document.querySelector('#routeOrderNote .am-link').click();
       out.reset = !routeCustom[m] && connectOrder.join() === catalogOrder[m].join();
       const id = connectOrder.find(x => !isBroken(x)), was = connectEntry(id).inAuto;
+      const ed = routeEdit; setRouteEdit(false);
+      out.pingNotToggle = !document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .mini-toggle`)
+        && !!document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .seg-ping`);
+      setRouteEdit(true);
       document.querySelector(`#connects-list .conn-row[data-id=${id}] .route-auto .mini-toggle`).click();
       out.autoToggle = connectEntry(id).inAuto === !was;
-      toggleEntryAuto(id);
+      toggleEntryAuto(id); setRouteEdit(ed);
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
@@ -706,7 +809,7 @@ async function runChecks() {
     await page.click('.conn-row[data-id=work] .conn-main'); await settle(page);
     const after = await page.evaluate(() => JSON.stringify([autoConnect, activeConnectId]));
     expect(before === after, `pin changed on card tap: ${before} -> ${after}`);
-    expect(await page.evaluate(() => routeOpenId) === 'work', 'card tap did not unfold the row');
+    expect(await page.evaluate(() => routeOpen.has('work')), 'card tap did not unfold the row');
     await page.click('.conn-row[data-id=work] .conn-main'); await settle(page); // fold back
     await page.evaluate(() => closeSheet('profiles'));
   });
@@ -1110,12 +1213,12 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
-  await check('launch: pings the current entry and the next ones by priority; General settings', async () => {
+  await check('launch: pings the top Auto entries by priority and the rules\' targets; General settings', async () => {
     const r = await page.evaluate(async () => {
-      const out = {}, ids = launchPingEntries(), order = visibleOrder();
-      out.first = ids[0] === effectiveConnectId() && ids.length <= autoCfg.standby + 1 && ids.length > 1;
-      out.byOrder = ids.slice(1).every((id, i, a) => connectEntry(id).inAuto && (!i || order.indexOf(a[i - 1]) < order.indexOf(id)));
-      const keys = new Set(ids.flatMap(id => entryRefs(id).map(r => serverKey(r.node))));
+      const out = {}, ids = launchPingEntries(), order = visibleOrder(), auto = order.filter(id => connectEntry(id).inAuto);
+      out.fromTop = autoConnect && ids.join() === auto.slice(0, autoCfg.standby + 1).join() && ids.length > 1;
+      const keys = new Set(ids.flatMap(id => entryRefs(id).map(r => serverKey(r.node))).concat(ruleTargets().flatMap(t => targetRefs(t).map(r => serverKey(r.node)))));
+      out.rules = ruleTargets().includes('chain:sc1');
       // Pings of earlier checks may still be in flight: forget them, count only this call's.
       const inFlight = () => [...pingCache.entries()].filter(([, v]) => v.ms === 'testing').map(([k]) => k);
       inFlight().forEach(k => pingCache.delete(k));

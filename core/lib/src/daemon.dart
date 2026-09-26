@@ -10,6 +10,7 @@ import 'merge.dart';
 import 'parse/links.dart';
 import 'runtime.dart';
 import 'sysproxy.dart';
+import 'traffic.dart';
 
 /// jormd: the core behind a local HTTP API, so the HTML mockup can drive it as the
 /// app's UI while there is no Flutter app. The mockup keeps its own state (sources,
@@ -70,6 +71,7 @@ class Daemon {
         'GET /api/state' => _state(),
         'PUT /api/state' => _saveState(body),
         'GET /api/status' => _status(),
+        'GET /api/traffic' => _traffic(),
         'GET /api/log' => Future.value({'lines': main.logs.toList()}),
         'POST /api/sources/fetch' => _fetch(body),
         'POST /api/parse' => Future.value(_parse(body)),
@@ -117,6 +119,20 @@ class Daemon {
     await tmp.writeAsString(jsonEncode(body['snapshot']));
     await tmp.rename(_snapshot.path);
     return {'ok': true};
+  }
+
+  final _meter = TrafficMeter();
+
+  /// Speed, session totals and open connections (see traffic.dart); `running: false`
+  /// with zeros when sing-box is not up.
+  Future<Map<String, dynamic>> _traffic() async {
+    final conns = main.running ? await main.clashGet('/connections') : null;
+    if (conns == null) {
+      _meter.reset();
+      return {'running': false, 'down': 0, 'up': 0, 'downTotal': 0, 'upTotal': 0, 'tcp': 0, 'udp': 0, 'conns': []};
+    }
+    final proxies = await main.clashGet('/proxies');
+    return {'running': true, ..._meter.sample(conns, proxies, DateTime.now().millisecondsSinceEpoch)};
   }
 
   Future<Map<String, dynamic>> _status() async => {

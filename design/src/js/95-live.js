@@ -49,7 +49,9 @@ function apiPing(body, onLine) {
 
 function liveSnapshot() {
   return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
-    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg };
+    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg,
+    // measured pings survive a restart, so Auto starts from what it knew
+    pings: [...pingCache].filter(([, e]) => typeof e.ms === 'number') };
 }
 const replaceObj = (target, src) => { Object.keys(target).forEach(k => delete target[k]); Object.assign(target, src); };
 // null = a first run: nothing added yet.
@@ -73,6 +75,8 @@ function liveApply(s) {
   if (s.segState) Object.assign(segState, s.segState);
   if (s.connCfg) Object.assign(connCfg, s.connCfg);
   if (s.autoCfg) Object.assign(autoCfg, s.autoCfg);
+  pingCache.clear();
+  (s.pings || []).forEach(([k, e]) => pingCache.set(k, e));
 }
 function liveSave() {
   if (!live.ready) return;          // never overwrite the stored state before it is loaded
@@ -200,6 +204,7 @@ const liveBackend = {
     return api('/api/disconnect', {});
   },
   // Connected: the tunnel's exit; not connected: the direct IP (the core knows which).
+  traffic() { return api('/api/traffic'); },
   exitIp() {
     return api('/api/exit', {}).then(() => liveWatchExit());
   },
