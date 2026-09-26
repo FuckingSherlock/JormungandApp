@@ -6222,16 +6222,27 @@ function livePlan() {
   // a pinned server: a selector held on it (no failover, it is Manual)
   return Object.assign(base, { kind: 'unit', main: planGroup(refs, pin || unitPriority(id) ? 'priority' : 'fastest', pin || refs.find(r => r.node === n)) });
 }
-const planSig = () => { try { return JSON.stringify(livePlan()); } catch (e) { return null; } };
+/* What a reconnect is worth: the servers in each group and the pick, not their ping order.
+   A ping reorders Fastest (the urltest measures on its own anyway) and flips servers to
+   'testing' — neither may restart sing-box and drop every connection. The system proxy is
+   in it: switched while connected, the core gets it with the reconnect. */
+function planSigOf(plan) {
+  const g = x => x && Object.assign({}, x, { nodes: x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key) });
+  return JSON.stringify(Object.assign({}, plan, { main: g(plan.main), entry: g(plan.entry), systemProxy: segState.sys === 'on' }));
+}
+const planSig = () => { try { return planSigOf(livePlan()); } catch (e) { return null; } };
+const pingsRunning = () => [...pingCache.values()].some(v => v.ms === 'testing');
 
 // Connected and the plan changed (another entry, a server switched off, Global/Rules…):
-// the core gets the new config.
+// the core gets the new config. Not mid-ping: the last result re-renders and checks again.
 function liveMaybeReconnect() {
-  if (!live.ready || !connected || connecting || !live.planSig) return;
+  if (!live.ready || !connected || connecting || !live.planSig || pingsRunning()) return;
   const sig = planSig();
-  if (!sig || sig === live.planSig) return;
+  if (!sig || sig === live.planSig) { clearTimeout(live.reconnectTimer); return; }
   clearTimeout(live.reconnectTimer);
-  live.reconnectTimer = setTimeout(() => backend.connect().catch(e => toast(e.message)), 600);
+  live.reconnectTimer = setTimeout(() => {
+    if (connected && !connecting && planSig() !== live.planSig) backend.connect().catch(e => toast(e.message));
+  }, 600);
 }
 
 /* ── The real backend ── */
@@ -6305,7 +6316,7 @@ const liveBackend = {
       const plan = livePlan();
       if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
       return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
-        live.planSig = JSON.stringify(plan);
+        live.planSig = planSigOf(plan);
         if (st.warning) toast(st.warning);
         liveWatchExit();   // the core checks the exit after every (re)connect
       });
