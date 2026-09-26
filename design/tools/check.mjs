@@ -84,7 +84,7 @@ const SHOTS = {
   'gone': async p => { await p.evaluate(() => { openProfiles(); goneOpen.add('se:src1'); openSourceEntry('src1'); document.querySelector('#sh-sourceentry .sheet-body').scrollTop = 9999; }); await settle(p); },
   'nothing-ticked': async p => { await p.evaluate(() => { openProfiles(); openEditChain('sc1'); toggleCcOpen('in', 'src4'); setChainNodesAll('in'); }); await settle(p); },
   'profile-edit': async p => { await p.evaluate(() => { setConnectMode('profiles'); openProfiles(); openEditProfile('gaming'); }); await settle(p); },
-  'drag-mid': async p => { await p.evaluate(() => { openProfiles(); }); await settle(p);
+  'drag-mid': async p => { await p.evaluate(() => { openProfiles(); setRouteEdit(true); }); await settle(p);
     const g = await p.locator('.conn-row >> nth=0').locator('.drag-handle').boundingBox();
     const r = await p.locator('.conn-row >> nth=2').boundingBox();
     await p.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await p.mouse.down();
@@ -461,7 +461,25 @@ async function runChecks() {
     expect(/AUTO/.test(await page.textContent('#profModeBadge')), 'dock badge not AUTO');
   });
 
+  await check('route: ✎ shows the ⋮⋮ grips and the Fastest / Priority switch, reopening turns it off', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, id = visibleOrder().find(x => sourcesData[x]);
+      const q = s => document.querySelectorAll('#connects-list ' + s).length;
+      toggleRouteRow(id);
+      out.offPlain = !q('.drag-handle') && !q('.seg-switch') && q('.conn-pick-hint') === 1 && /^switch = in Auto/.test(document.getElementById('connectsCaption').textContent);
+      setRouteEdit(true);
+      out.onGrips = q('> .conn-row > .drag-handle') === visibleOrder().length && q('.seg-switch') === 1 && document.getElementById('routeEditBtn').classList.contains('on');
+      out.swH = document.querySelector('#connects-list .seg-switch').getBoundingClientRect().height;
+      out.lower = out.swH > 20 && out.swH <= 30;
+      toggleRouteRow(id); openProfiles();
+      out.reset = !routeEdit && !q('.drag-handle');
+      return out;
+    });
+    expect(['offPlain', 'onGrips', 'lower', 'reset'].every(k => r[k]), JSON.stringify(r));
+  });
+
   await check('profiles: dragging changes the Auto pick', async () => {
+    await page.evaluate(() => setRouteEdit(true));
     const target = await page.evaluate(() => connectOrder.filter(id => connectEntry(id).inAuto && isUsable(id))[1]);
     const g = await page.locator(`.conn-row[data-id=${target}] .drag-handle`).boundingBox();
     const top = await page.locator('.conn-row').first().boundingBox();

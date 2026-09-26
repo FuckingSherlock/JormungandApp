@@ -184,7 +184,7 @@ function renderConnectRow(id) {
   const tags = (chain ? '<span class="conn-tag">chain</span>' : sourcesData[id] && offCount(sourcesData[id]) ? `<span class="conn-tag muted">${offCount(sourcesData[id])} off</span>` : '')
     + (autoConnect && !e.inAuto ? '<span class="conn-tag muted">not in Auto</span>' : '');
   return `<div class="conn-row ${current ? 'current' : ''} ${routeOpenId === id ? 'open' : ''} ${autoConnect && !e.inAuto ? 'skip' : ''}" data-id="${id}">
-    <div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>
+    ${routeEdit ? `<div class="drag-handle" onpointerdown="startConnectDrag(event,'${id}')" title="Drag to set Auto priority">${GRIP_SVG}</div>` : ''}
     <div class="conn-main" ${chain ? '' : `onclick="toggleRouteRow('${id}')"`}>
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${tags}</div>
       <div class="conn-sub">${entrySummaryHtml(id)}</div>
@@ -198,7 +198,8 @@ function renderConnectRow(id) {
 
 /* A source or profile row unfolds to its servers: Fastest / Priority and, in Priority, the
    order by drag — the same pickMode / pickOrder as the entry editors (Nodes → Route
-   settings, the profile form), just at hand. Leaving servers out stays in those editors. */
+   settings, the profile form), just at hand. Leaving servers out stays in those editors.
+   The switch and the ⋮⋮ grips show only in edit mode; otherwise the row says how it picks. */
 let routeOpenId = null;
 function toggleRouteRow(id) {
   routeOpenId = routeOpenId === id ? null : id;
@@ -209,14 +210,17 @@ function routeRowBodyHtml(id) {
   const refs = priority ? unitPickRefs(id) : byPing(unitRefs(id), r => r.node);
   let rank = 0;
   const rows = refs.map(r => `<div class="node-row ps-node on static" data-id="${refKey(r)}">
-      ${priority ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div><span class="cc-rank">${++rank}</span>` : ''}
+      ${priority && routeEdit ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div>` : ''}${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
       <span class="node-proto">${r.node.protocol}</span>
       <span onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');
-  return `<div class="conn-body"><div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}<div class="conn-acts">${routeUpdateBtn(id)}${pingAllBtn(`pingRouteRow('${id}')`, 'Ping all servers')}</div></div>
-    <div class="set-hint conn-hint">${priority ? 'The first working one from the top. Drag ⋮⋮ to order.' : 'Connects through the fastest of them.'}</div>
+  const acts = `<div class="conn-acts">${routeUpdateBtn(id)}${pingAllBtn(`pingRouteRow('${id}')`, 'Ping all servers')}</div>`;
+  const hint = priority ? 'The first working one from the top.' + (routeEdit ? ' Drag ⋮⋮ to order.' : '') : 'Connects through the fastest of them.';
+  return `<div class="conn-body">${routeEdit
+      ? `<div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}${acts}</div><div class="set-hint conn-hint">${hint}</div>`
+      : `<div class="seg-row"><div class="set-hint conn-hint conn-pick-hint">${hint}</div>${acts}</div>`}
     <div class="se-nodes">${rows || '<div class="route-empty">No servers</div>'}</div></div>`;
 }
 // Update: the row's subscription, or every subscription a profile takes servers from.
@@ -239,13 +243,26 @@ function startRouteNodeDrag(e, key) {
   startRowDrag(e, rowEl, '.node-row', order, () => { done(); routeRowChanged(); });
 }
 
-/* A row: ⋮⋮ grip (Auto priority, always there), tap the card = unfold its servers, the
+/* Edit mode (✎ left of Simple / Profiles, ✓ while on; off whenever the sheet opens): the ⋮⋮
+   grips of the priority and, in an unfolded row, the Fastest / Priority switch and the
+   server grips. Without it the list is for looking and picking only. */
+let routeEdit = false;
+function setRouteEdit(on) {
+  routeEdit = on;
+  const b = document.getElementById('routeEditBtn');
+  b.classList.toggle('on', on);
+  b.title = on ? 'Done' : 'Edit: priority order, Fastest / Priority';
+  b.innerHTML = on ? ICON.check : ICON.edit;
+  renderConnects();
+}
+
+/* A row: ⋮⋮ grip (Auto priority, in edit mode), tap the card = unfold its servers, the
    AUTO / MANUAL button = the only way to pick: on another row it pins that one (Manual),
    on the pinned row it goes back to Auto. The switch = Use in Auto. Everything else: Nodes. */
 
 function renderConnects() {
   syncCatalog();
-  document.getElementById('connectsCaption').textContent = '⋮⋮ = order · switch = in Auto';
+  document.getElementById('connectsCaption').textContent = routeEdit ? '⋮⋮ = order · switch = in Auto' : 'switch = in Auto';
   const badge = document.getElementById('autoBadge');
   badge.classList.toggle('off', !autoConnect);
   badge.querySelector('span').textContent = autoConnect ? 'Auto' : 'Manual';
@@ -253,7 +270,7 @@ function renderConnects() {
   document.querySelectorAll('#routeModes button').forEach(b => b.classList.toggle('on', b.dataset.mode === connectMode));
   document.getElementById('routeOrderNote').innerHTML = routeCustom[connectMode]
     ? `Own priority order<button class="am-link" onclick="resetRouteOrder()">Follow Nodes order</button>`
-    : 'Priority follows the order in Nodes · drag here to override it';
+    : 'Priority follows the order in Nodes · ' + (routeEdit ? 'drag here to override it' : '✎ to set its own');
   const broken = brokenOrder();
   document.getElementById('connects-list').innerHTML = (visibleOrder().map(renderConnectRow).join('')
     || `<div class="route-empty">${simpleMode() ? 'No enabled subscriptions or servers — add or switch one on in Nodes' : 'No working profiles — create one in Nodes → Profiles'}</div>`)
@@ -264,7 +281,7 @@ function renderConnects() {
 function renderBrokenRow(id) {
   const e = connectEntry(id);
   return `<div class="conn-row broken" data-id="${id}" onclick="explainBroken('${id}')">
-    <div class="drag-handle"></div>
+    ${routeEdit ? '<div class="drag-handle"></div>' : ''}
     <div class="conn-main">
       <div class="conn-name"><span class="conn-title">${esc(e.name)}</span>${chainsData[id] ? '<span class="conn-tag">chain</span>' : ''}<span class="conn-tag off">off</span></div>
       <div class="conn-sub"><span>${esc(reasonsText(brokenBy(id)))}</span></div>
@@ -295,7 +312,7 @@ function enableNode(sid, nid) {
 }
 
 function openProfiles() {
-  renderConnects();
+  setRouteEdit(false);
   openSheet('profiles');
 }
 

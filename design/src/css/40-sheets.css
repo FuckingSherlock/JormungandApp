@@ -292,6 +292,11 @@
 .conn-row.open .conn-expand .src-chevron{transform:rotate(180deg)}
 .conn-body{flex-basis:100%;min-width:0;padding:0 0 10px}
 .conn-body .seg-row{margin:0 0 4px}
+/* the switch in a Route row is a quarter lower than in the editors */
+.conn-body .seg-switch{padding:2px}
+.conn-body .seg-switch .seg-ink{top:2px;bottom:2px;left:2px;width:calc(50% - 2px)}
+.conn-body .seg-switch button{padding:4px 6px;font-size:13px}
+.conn-pick-hint{flex:1;min-width:0;margin:0}
 .conn-hint{margin-bottom:8px}
 .conn-body .se-nodes{margin:0}
 .conn-acts{margin-left:auto;display:flex;align-items:center}
