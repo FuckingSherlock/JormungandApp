@@ -125,7 +125,7 @@ body {
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .row3 .nav-sub{font-size:12px}
-.row1{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row1{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .row1-right{display:flex;flex-direction:column;gap:10px}
 
 /* ── Card base ── */
@@ -142,25 +142,48 @@ body {
   text-transform:uppercase;color:var(--t3);margin-bottom:8px;
 }
 
-/* ── ROW 1: Speed | IP | Connections ── */
-.stat-card{padding:12px 10px;display:flex;flex-direction:column;min-height:118px}
-.stat-card-half{padding:10px 12px;flex:1;display:flex;flex-direction:column;justify-content:center;gap:2px}
-.stat-card-half .card-label{margin-bottom:4px}
-.stat-row{display:flex;align-items:baseline;gap:4px;font-family:var(--mono)}
-.stat-arrow{font-size:14px;font-weight:600}
+/* ── ROW 1: Speed | IP | Connections ──
+   Fixed geometry: the same padding and label style in all three cards, every line is one
+   non-wrapping line with a set line-height, numbers sit in fixed-width slots. Live values
+   therefore never move the labels or change the card heights. */
+.stat-card,.stat-card-half{padding:10px 12px}
+.stat-card-half{flex:1;display:flex;flex-direction:column}
+.row1 .card-label{font-size:11px;letter-spacing:.5px;line-height:15px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* SpeedCard: two equal parts around the divider. The card is as tall as the right column and
+   padded symmetrically, so the divider is level with the gap between Exit IP and Connections;
+   the session part starts where Connections starts (half gap 5 + border 1 + padding 10). */
+.stat-card{display:grid;grid-template-rows:minmax(0,1fr) 1px minmax(0,1fr)}
+.stat-part{min-width:0}
+.stat-part.session{padding-top:15px}
+.stat-row{display:flex;align-items:baseline;gap:4px;font-family:var(--mono);line-height:20px;white-space:nowrap}
+.stat-arrow{font-size:13px;font-weight:600}
 .stat-arrow.down{color:var(--accent)}
 .stat-arrow.up{color:var(--warn)}
-.stat-val{font-size:17px;font-weight:600;color:var(--t1)}
+/* value slot fits "999.9"; the formatter keeps it at 5 chars by switching units */
+.stat-val{font-size:15px;font-weight:600;color:var(--t1);min-width:5ch;text-align:right}
 .stat-unit{font-size:11px;color:var(--t2)}
-.stat-divider{height:1px;background:var(--border);margin:8px 0}
-.stat-total-label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
-.stat-total-row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:13px;color:var(--t2)}
+.stat-divider{background:var(--border)}
+.stat-total-row{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:13px;line-height:16px;color:var(--t2);white-space:nowrap}
+.stat-total-row .stat-arrow{font-size:12px}
 .stat-total-row span.v{color:var(--t1);font-weight:500}
 
-.ip-addr{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--t1);word-break:break-all;line-height:1.3}
-.ip-loc{font-size:12px;color:var(--t2);margin-top:4px}
+/* ExitIpCard: the flag sits at the right end of the label row in a fixed box (flags and the
+   globe differ in width), so the IP gets the whole card width */
+.row1 .exit-label{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.exit-label > span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.exit-flag{flex:0 0 20px;font-size:15px;line-height:15px;text-align:right;letter-spacing:0;text-transform:none;overflow:hidden}
+.exit-text{height:34px;min-width:0}
+.ip-addr,.ip-loc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ip-addr{font-family:var(--mono);font-size:13px;line-height:18px;font-weight:600;color:var(--t1)}
+.ip-loc{font-size:12px;line-height:16px;color:var(--t2)}
 
-.conn-num{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--t1);line-height:1}
+/* ConnectionsCard: total in a 3-digit slot, TCP / UDP stacked right after it, counts right-aligned */
+.conn-stats{display:grid;grid-template-columns:auto auto;grid-template-rows:17px 17px;column-gap:12px;justify-content:start;align-items:center;height:34px;font-family:var(--mono)}
+.conn-num{grid-row:1 / 3;min-width:3ch;font-size:18px;font-weight:600;color:var(--t1);line-height:1;white-space:nowrap}
+.conn-split{display:flex;justify-content:space-between;gap:6px;font-size:12px;line-height:17px;white-space:nowrap}
+.conn-split.tcp{color:var(--accent)}
+.conn-split.udp{color:var(--purple)}
+.conn-split b{min-width:3ch;text-align:right;font-weight:600}
 
 /* ── Connect dock row ── */
 .profiles-main{flex:1;min-width:0}
@@ -936,33 +959,38 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 
     <!-- ROW 1: Speed | (IP over Connections) -->
     <div class="row1">
+      <!-- StatCards: every line is one fixed-height, non-wrapping line and every number sits in
+           a fixed-width slot, so live values never move the labels or resize the cards.
+           The Speed card splits into two equal halves, so its divider always sits level with
+           the gap between Exit IP and Connections. -->
       <div class="card stat-card">
-        <div class="card-label">Speed</div>
-        <div class="stat-row"><span class="stat-arrow down">↓</span><span class="stat-val">48.3</span><span class="stat-unit">MB/s</span></div>
-        <div class="stat-row" style="margin-top:2px"><span class="stat-arrow up">↑</span><span class="stat-val">6.1</span><span class="stat-unit">MB/s</span></div>
+        <div class="stat-part">
+          <div class="card-label">Speed</div>
+          <div class="stat-row"><span class="stat-arrow down">↓</span><span class="stat-val" id="speedDown">48.3</span><span class="stat-unit" id="speedDownUnit">MB/s</span></div>
+          <div class="stat-row"><span class="stat-arrow up">↑</span><span class="stat-val" id="speedUp">6.1</span><span class="stat-unit" id="speedUpUnit">MB/s</span></div>
+        </div>
         <div class="stat-divider"></div>
-        <div class="stat-total-label">Traffic (session)</div>
-        <div class="stat-total-row"><span>↓ down</span><span class="v">1.84 GB</span></div>
-        <div class="stat-total-row"><span>↑ up</span><span class="v">312 MB</span></div>
+        <div class="stat-part session">
+          <div class="card-label">This session</div>
+          <div class="stat-total-row"><span class="stat-arrow down">↓</span><span class="v" id="trafficDown">1.84 GB</span></div>
+          <div class="stat-total-row"><span class="stat-arrow up">↑</span><span class="v" id="trafficUp">312 MB</span></div>
+        </div>
       </div>
 
       <div class="row1-right">
         <div class="card stat-card-half" onclick="refreshExitIp()" title="Tap to check again">
-          <div class="card-label">Exit IP</div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:18px" id="exitFlag">🇩🇪</span>
-            <div>
-              <div class="ip-addr" style="font-size:14px" id="exitIp">91.108.4.12</div>
-              <div class="ip-loc" style="margin-top:1px" id="exitLoc">Frankfurt, DE</div>
-            </div>
+          <div class="card-label exit-label"><span>Exit IP</span><span class="exit-flag" id="exitFlag">🇩🇪</span></div>
+          <div class="exit-text">
+            <div class="ip-addr" id="exitIp">91.108.4.12</div>
+            <div class="ip-loc" id="exitLoc">Frankfurt, DE</div>
           </div>
         </div>
         <div class="card stat-card-half" onclick="openSheet('connections')">
           <div class="card-label">Connections</div>
-          <div style="display:flex;align-items:baseline;gap:8px">
-            <span class="conn-num" style="font-size:18px">51</span>
-            <span style="font-family:var(--mono);font-size:13px;color:var(--accent)">TCP 43</span>
-            <span style="font-family:var(--mono);font-size:13px;color:var(--purple)">UDP 8</span>
+          <div class="conn-stats">
+            <span class="conn-num" id="connTotal">51</span>
+            <span class="conn-split tcp">TCP<b id="connTcp">43</b></span>
+            <span class="conn-split udp">UDP<b id="connUdp">8</b></span>
           </div>
         </div>
       </div>
@@ -989,7 +1017,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     </div>
 
     <!-- AutoCard: how Auto picks and keeps the connection (opens the Auto mode sheet) -->
-    <div class="card auto-card" id="autoCard" onclick="openAutoMode()" title="Settings → Auto mode">
+    <div class="card auto-card" id="autoCard" onclick="openAutoMode()">
       <div class="nav-icon teal" style="margin-bottom:0">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg>
       </div>
@@ -1008,7 +1036,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="nav-title">Rules</div>
         <div class="nav-sub" id="rulesCardSub">3 rules · RU region</div>
       </div>
-      <div class="card" style="padding:14px" id="dnsCard" onclick="openDnsSettings()" title="Settings → DNS">
+      <div class="card" style="padding:14px" id="dnsCard" onclick="openDnsSettings()">
         <div class="nav-icon teal">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--active)" stroke-width="2" stroke-linecap="round">
             <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
@@ -4089,7 +4117,7 @@ function renderExitIp() {
   const e = connected && !connecting ? exitInfo : undefined;
   const [flag, ip, loc] = e === undefined ? ['🌐', '—', 'Not connected']
     : e === null ? ['🌐', '…', 'Checking…']
-    : e.error ? ['🌐', '—', 'No answer · tap to retry']
+    : e.error ? ['🌐', 'No answer', 'Tap to retry']
     : [flagOf(e.country), e.ip, [e.city, e.country].filter(Boolean).join(', ') || 'Location unknown'];
   document.getElementById('exitFlag').textContent = flag;
   document.getElementById('exitIp').textContent = ip;
@@ -4138,7 +4166,7 @@ function setSysProxy(on) {
   renderConnSettings();
 }
 
-/* ══════════════════════ AUTO MODE (Settings → Auto mode sheet; Home card = a link to it) ══════════════════════
+/* ══════════════════════ AUTO MODE (Settings → Auto mode sheet; the Home card opens it over Home) ══════════════════════
    How Auto picks and keeps a connection, in one place:
    - threshold: a server takes over from the current one only if it is this much faster
      (hysteresis, so Auto does not hop between servers with close pings); typed in ms;
@@ -4211,9 +4239,8 @@ function setAutoThreshold(input) {
 }
 const stepAutoFailAfter = d => setAutoCfg('failAfter', Math.min(AUTO_FAIL_AFTER[1], Math.max(AUTO_FAIL_AFTER[0], autoCfg.failAfter + d)));
 
-// The Home card is a link: it opens Settings with the Auto mode section on top.
+// The Home card opens the Auto mode sheet right over Home (same sheet as Settings → Auto mode).
 function openAutoMode() {
-  switchTab('settings');
   openSheet('setauto');
 }
 
@@ -4250,7 +4277,7 @@ function renderAutoMode() {
         ${valueBtn('am-subs', 'subsEvery', subsEveryText(autoCfg.subsEvery))}</div>
     </div>`;
 }
-/* ══════════════════════ DNS (Settings → DNS; Home DNS card = a link to it) ══════════════════════
+/* ══════════════════════ DNS (Settings → DNS sheet; the Home DNS card opens it over Home) ══════════════════════
    - Global DNS: a list of servers. Ticked = in use, order = priority: the first ticked one
      answers; if it stops answering, the next ticked one takes over (the app pings them
      and swaps sing-box's main server itself — sing-box has no DNS fallback of its own).
@@ -4317,10 +4344,8 @@ function startDnsDrag(e, id) {
   startRowDrag(e, rowEl, '.dns-row', () => dnsOrder, renderDns);
 }
 
-// The Home card is a link, like Auto mode.
-// Opened from the Home card or the Settings row; servers never pinged get a ping at once.
+// Opened over the current view from the Home card or the Settings row; servers never pinged get a ping at once.
 function openDnsSettings() {
-  switchTab('settings');
   openSheet('setdns');
   dnsOrder.filter(id => dnsServers[id].on && dnsPing[id] === undefined).forEach(pingDns);
 }

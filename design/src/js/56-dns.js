@@ -1,4 +1,4 @@
-/* ══════════════════════ DNS (Settings → DNS; Home DNS card = a link to it) ══════════════════════
+/* ══════════════════════ DNS (Settings → DNS sheet; the Home DNS card opens it over Home) ══════════════════════
    - Global DNS: a list of servers. Ticked = in use, order = priority: the first ticked one
      answers; if it stops answering, the next ticked one takes over (the app pings them
      and swaps sing-box's main server itself — sing-box has no DNS fallback of its own).
@@ -65,10 +65,8 @@ function startDnsDrag(e, id) {
   startRowDrag(e, rowEl, '.dns-row', () => dnsOrder, renderDns);
 }
 
-// The Home card is a link, like Auto mode.
-// Opened from the Home card or the Settings row; servers never pinged get a ping at once.
+// Opened over the current view from the Home card or the Settings row; servers never pinged get a ping at once.
 function openDnsSettings() {
-  switchTab('settings');
   openSheet('setdns');
   dnsOrder.filter(id => dnsServers[id].on && dnsPing[id] === undefined).forEach(pingDns);
 }

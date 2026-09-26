@@ -12,25 +12,48 @@
   text-transform:uppercase;color:var(--t3);margin-bottom:8px;
 }
 
-/* ── ROW 1: Speed | IP | Connections ── */
-.stat-card{padding:12px 10px;display:flex;flex-direction:column;min-height:118px}
-.stat-card-half{padding:10px 12px;flex:1;display:flex;flex-direction:column;justify-content:center;gap:2px}
-.stat-card-half .card-label{margin-bottom:4px}
-.stat-row{display:flex;align-items:baseline;gap:4px;font-family:var(--mono)}
-.stat-arrow{font-size:14px;font-weight:600}
+/* ── ROW 1: Speed | IP | Connections ──
+   Fixed geometry: the same padding and label style in all three cards, every line is one
+   non-wrapping line with a set line-height, numbers sit in fixed-width slots. Live values
+   therefore never move the labels or change the card heights. */
+.stat-card,.stat-card-half{padding:10px 12px}
+.stat-card-half{flex:1;display:flex;flex-direction:column}
+.row1 .card-label{font-size:11px;letter-spacing:.5px;line-height:15px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* SpeedCard: two equal parts around the divider. The card is as tall as the right column and
+   padded symmetrically, so the divider is level with the gap between Exit IP and Connections;
+   the session part starts where Connections starts (half gap 5 + border 1 + padding 10). */
+.stat-card{display:grid;grid-template-rows:minmax(0,1fr) 1px minmax(0,1fr)}
+.stat-part{min-width:0}
+.stat-part.session{padding-top:15px}
+.stat-row{display:flex;align-items:baseline;gap:4px;font-family:var(--mono);line-height:20px;white-space:nowrap}
+.stat-arrow{font-size:13px;font-weight:600}
 .stat-arrow.down{color:var(--accent)}
 .stat-arrow.up{color:var(--warn)}
-.stat-val{font-size:17px;font-weight:600;color:var(--t1)}
+/* value slot fits "999.9"; the formatter keeps it at 5 chars by switching units */
+.stat-val{font-size:15px;font-weight:600;color:var(--t1);min-width:5ch;text-align:right}
 .stat-unit{font-size:11px;color:var(--t2)}
-.stat-divider{height:1px;background:var(--border);margin:8px 0}
-.stat-total-label{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
-.stat-total-row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:13px;color:var(--t2)}
+.stat-divider{background:var(--border)}
+.stat-total-row{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:13px;line-height:16px;color:var(--t2);white-space:nowrap}
+.stat-total-row .stat-arrow{font-size:12px}
 .stat-total-row span.v{color:var(--t1);font-weight:500}
 
-.ip-addr{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--t1);word-break:break-all;line-height:1.3}
-.ip-loc{font-size:12px;color:var(--t2);margin-top:4px}
+/* ExitIpCard: the flag sits at the right end of the label row in a fixed box (flags and the
+   globe differ in width), so the IP gets the whole card width */
+.row1 .exit-label{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.exit-label > span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.exit-flag{flex:0 0 20px;font-size:15px;line-height:15px;text-align:right;letter-spacing:0;text-transform:none;overflow:hidden}
+.exit-text{height:34px;min-width:0}
+.ip-addr,.ip-loc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ip-addr{font-family:var(--mono);font-size:13px;line-height:18px;font-weight:600;color:var(--t1)}
+.ip-loc{font-size:12px;line-height:16px;color:var(--t2)}
 
-.conn-num{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--t1);line-height:1}
+/* ConnectionsCard: total in a 3-digit slot, TCP / UDP stacked right after it, counts right-aligned */
+.conn-stats{display:grid;grid-template-columns:auto auto;grid-template-rows:17px 17px;column-gap:12px;justify-content:start;align-items:center;height:34px;font-family:var(--mono)}
+.conn-num{grid-row:1 / 3;min-width:3ch;font-size:18px;font-weight:600;color:var(--t1);line-height:1;white-space:nowrap}
+.conn-split{display:flex;justify-content:space-between;gap:6px;font-size:12px;line-height:17px;white-space:nowrap}
+.conn-split.tcp{color:var(--accent)}
+.conn-split.udp{color:var(--purple)}
+.conn-split b{min-width:3ch;text-align:right;font-weight:600}
 
 /* ── Connect dock row ── */
 .profiles-main{flex:1;min-width:0}

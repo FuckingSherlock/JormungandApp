@@ -224,6 +224,45 @@ async function runChecks() {
     await narrow.close();
   });
 
+  await check('home stat cards: labels at one offset, live values never move or resize anything', async () => {
+    const bad = [];
+    for (const [width, big] of [[400, false], [320, true]]) {
+      const p = await openPage(browser, { width });
+      if (big) await p.evaluate(() => applyScale(UI_SCALE_MAX));
+      const geo = () => p.evaluate(() => [...document.querySelectorAll('#view-home .row1 .card')].map(c => {
+        const b = c.getBoundingClientRect(), l = c.querySelector('.card-label').getBoundingClientRect();
+        return { w: Math.round(b.width), h: Math.round(b.height), lx: Math.round(l.left - b.left), ly: Math.round(l.top - b.top) };
+      }));
+      const g0 = await geo();
+      if (new Set(g0.map(g => g.lx + ',' + g.ly)).size !== 1) bad.push(`${width}: label offsets ${JSON.stringify(g0.map(g => [g.lx, g.ly]))}`);
+      // widest realistic values: 5-char speed, traffic, 3-digit counts, the globe instead of a flag
+      await p.evaluate(() => {
+        const set = (id, v) => { document.getElementById(id).textContent = v; };
+        set('speedDown', '999.9'); set('speedDownUnit', 'KB/s'); set('speedUp', '0'); set('speedUpUnit', 'B/s');
+        set('trafficDown', '999.9 GB'); set('trafficUp', '999.9 MB');
+        set('connTotal', '999'); set('connTcp', '999'); set('connUdp', '999');
+        set('exitFlag', '🌐'); set('exitLoc', 'Tap to retry');
+      });
+      const g1 = await geo();
+      if (JSON.stringify(g0) !== JSON.stringify(g1)) bad.push(`${width}: ${JSON.stringify(g0)} -> ${JSON.stringify(g1)}`);
+      // the Speed divider is level with the gap between Exit IP and Connections, and the
+      // session label with the Connections label
+      const lvl = await p.evaluate(() => {
+        const r = s => document.querySelector('#view-home .row1 ' + s).getBoundingClientRect();
+        const halves = [...document.querySelectorAll('#view-home .row1-right .card')].map(c => c.getBoundingClientRect());
+        const d = r('.stat-divider');
+        return { div: (d.top + d.bottom) / 2, gap: (halves[0].bottom + halves[1].top) / 2,
+          session: r('.stat-part.session .card-label').top, conn: halves[1].top + (r('.row1-right .card:last-child .card-label').top - halves[1].top) };
+      });
+      if (Math.abs(lvl.div - lvl.gap) > 1 || Math.abs(lvl.session - lvl.conn) > 1) bad.push(`${width}: levels ${JSON.stringify(lvl)}`);
+      const clipped = await p.evaluate(() => [...document.querySelectorAll('#view-home .row1 :is(.stat-row, .stat-total-row, .conn-stats, .card-label, .ip-addr, .ip-loc)')]
+        .filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.className + ' ' + el.textContent.trim()));
+      if (clipped.length) bad.push(`${width}: clipped ${clipped.join(', ')}`);
+      await p.close();
+    }
+    expect(!bad.length, bad.join(' | '));
+  });
+
   await check('text size: 120% on a 320px phone — nothing sticks out, titles keep their size', async () => {
     const narrow = await openPage(browser, { width: 320 });
     const title0 = await narrow.evaluate(() => getComputedStyle(document.querySelector('.app-name')).fontSize);
@@ -983,11 +1022,11 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
-  await check('Auto mode card opens Settings → Auto mode; settings apply; subscriptions default to auto', async () => {
+  await check('Auto mode card opens the Auto mode sheet over Home; settings apply; subscriptions default to auto', async () => {
     await page.click('#autoCard'); await settle(page);
     const r = await page.evaluate(() => {
       const out = {};
-      out.open = document.getElementById('view-settings').classList.contains('active') && document.getElementById('sh-setauto').classList.contains('open') && !!document.querySelector('#auto-settings .set-group');
+      out.open = document.getElementById('view-home').classList.contains('active') && document.getElementById('sh-setauto').classList.contains('open') && !!document.querySelector('#auto-settings .set-group');
       const th = document.getElementById('am-threshold'); th.value = '100'; th.dispatchEvent(new Event('change'));
       out.threshold = autoCfg.threshold === 100;
       const th2 = document.getElementById('am-threshold'); th2.value = 'abc'; th2.dispatchEvent(new Event('change'));
@@ -1057,11 +1096,11 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
-  await check('DNS: card opens Settings → DNS, pings, keeps one server, form validates, hijack note', async () => {
+  await check('DNS: card opens the DNS sheet over Home, pings, keeps one server, form validates, hijack note', async () => {
     await page.click('#dnsCard'); await settle(page);
     const r = await page.evaluate(async () => {
       const out = {};
-      out.open = document.getElementById('view-settings').classList.contains('active') && document.getElementById('sh-setdns').classList.contains('open');
+      out.open = document.getElementById('view-home').classList.contains('active') && document.getElementById('sh-setdns').classList.contains('open');
       out.pinging = dnsPing.remote !== undefined;
       toggleDnsOn('remote'); toggleDnsOn('local');
       out.keepsOne = dnsActive().length === 1; toggleDnsOn('remote');

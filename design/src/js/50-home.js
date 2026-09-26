@@ -20,7 +20,7 @@ function renderExitIp() {
   const e = connected && !connecting ? exitInfo : undefined;
   const [flag, ip, loc] = e === undefined ? ['🌐', '—', 'Not connected']
     : e === null ? ['🌐', '…', 'Checking…']
-    : e.error ? ['🌐', '—', 'No answer · tap to retry']
+    : e.error ? ['🌐', 'No answer', 'Tap to retry']
     : [flagOf(e.country), e.ip, [e.city, e.country].filter(Boolean).join(', ') || 'Location unknown'];
   document.getElementById('exitFlag').textContent = flag;
   document.getElementById('exitIp').textContent = ip;

@@ -1,4 +1,4 @@
-/* ══════════════════════ AUTO MODE (Settings → Auto mode sheet; Home card = a link to it) ══════════════════════
+/* ══════════════════════ AUTO MODE (Settings → Auto mode sheet; the Home card opens it over Home) ══════════════════════
    How Auto picks and keeps a connection, in one place:
    - threshold: a server takes over from the current one only if it is this much faster
      (hysteresis, so Auto does not hop between servers with close pings); typed in ms;
@@ -71,9 +71,8 @@ function setAutoThreshold(input) {
 }
 const stepAutoFailAfter = d => setAutoCfg('failAfter', Math.min(AUTO_FAIL_AFTER[1], Math.max(AUTO_FAIL_AFTER[0], autoCfg.failAfter + d)));
 
-// The Home card is a link: it opens Settings with the Auto mode section on top.
+// The Home card opens the Auto mode sheet right over Home (same sheet as Settings → Auto mode).
 function openAutoMode() {
-  switchTab('settings');
   openSheet('setauto');
 }
 
