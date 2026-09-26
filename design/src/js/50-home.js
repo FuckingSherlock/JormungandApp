@@ -111,7 +111,8 @@ function renderTraffic() {
 }
 const trafficNode = t => {
   if (t && typeof t === 'object') return t;
-  const m = /^(?:proxy|entry)\/(.+?)::(.+)$/.exec(t), s = m && sourcesData[m[1]];
+  // the core's tags: route<i>/<sid>::<nid>, route<i>-entry/<sid>::<nid> (a chain's entry)
+  const m = /^[^/]+\/(.+?)::(.+)$/.exec(t), s = m && sourcesData[m[1]];
   return s ? s.nodes.find(n => n.id === m[2]) : null;
 };
 const trafficVia = out => out.slice().reverse().map(t => {

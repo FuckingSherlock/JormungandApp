@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'auto.dart';
 import 'config.dart';
 import 'exitip.dart';
 import 'fetch.dart';
@@ -21,9 +22,21 @@ import 'traffic.dart';
 /// which this server never grants, so other web pages cannot drive it) and a loopback
 /// Host (against DNS rebinding); with `--lan` the machine's own LAN addresses count too.
 class Daemon {
-  Daemon({required this.singBox, required this.dataDir, required this.uiFile, this.lanHosts = const {}})
+  /// [clashPort], [exitCheck] and [sysProxy] are for tests (a free port; no probes past
+  /// loopback; a fake system proxy, so a test never touches the real registry).
+  Daemon({
+    required this.singBox,
+    required this.dataDir,
+    required this.uiFile,
+    this.lanHosts = const {},
+    this.clashPort = 9090,
+    this.exitCheck = checkExitIp,
+    SystemProxy? sysProxy,
+  })
       : main = SingBoxProcess(singBox, p.join(dataDir, 'run', 'main')),
-        sysProxy = SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json')));
+        sysProxy = sysProxy ?? SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))) {
+    main.onExit = _crashed;
+  }
 
   final String singBox;
   final String dataDir;
@@ -31,7 +44,8 @@ class Daemon {
   final Set<String> lanHosts;
   final SingBoxProcess main;
   final SystemProxy sysProxy;
-  static const clashPort = 9090;
+  final int clashPort;
+  final Future<Map<String, dynamic>> Function(int? proxyPort) exitCheck;
 
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
   String? _error;
@@ -43,6 +57,25 @@ class Daemon {
   Map<String, dynamic>? _exit;
   int _exitSeq = 0;
 
+  // What is connected, for the AutoService and a restart after a crash: the plan, the
+  // system proxy asked for. null = not connected (or given up).
+  Map<String, dynamic>? _plan;
+  bool _sysWanted = false;
+  AutoService? _auto;
+  // sing-box stopped on its own: {attempt, of, code, next} while restarting it
+  Map<String, dynamic>? _recovering;
+  int _restarts = 0, _attempt = 0, _runSeq = 0;
+  DateTime _upSince = DateTime.now();
+  static const _backoff = [Duration(seconds: 1), Duration(seconds: 4), Duration(seconds: 15)];
+  // starts and stops of sing-box one at a time (a user's connect vs a crash restart)
+  Future<void> _serial = Future.value();
+
+  Future<T> _locked<T>(Future<T> Function() f) {
+    final r = _serial.then((_) => f());
+    _serial = r.then<void>((_) {}, onError: (_) {});
+    return r;
+  }
+
   Future<void> init() async {
     await Directory(dataDir).create(recursive: true);
     await sysProxy.restore(); // left set by a crash
@@ -50,8 +83,87 @@ class Daemon {
   }
 
   Future<void> shutdown() async {
+    _runSeq++;
+    _stopAuto();
     await main.stop();
     await sysProxy.restore();
+  }
+
+  /// Auto in the core while connected (auto.dart). A move to another route or server
+  /// changes where traffic leaves: the exit is checked again.
+  void _startAuto(Map<String, dynamic> plan) {
+    _stopAuto();
+    final auto = _auto = AutoService(main, plan);
+    auto.switches.listen((s) {
+      main.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
+      _recheckExit();
+    });
+    auto.start();
+  }
+
+  void _stopAuto() {
+    _auto?.stop();
+    _auto = null;
+  }
+
+  /// sing-box stopped on its own. The system proxy goes back at once (browsers would
+  /// otherwise point at a dead port), then sing-box is started again with the same plan
+  /// on the route Auto was on, up to [_backoff] tries; the count starts over once it ran
+  /// for a minute.
+  void _crashed(int code) {
+    final plan = _plan;
+    if (plan == null) return;
+    final seq = _runSeq, at = _auto?.index;
+    _stopAuto();
+    main.note('sing-box stopped on its own (exit code $code)');
+    if (DateTime.now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
+    _recover(seq, at == null ? plan : {...plan, 'current': at}, code);
+  }
+
+  Future<void> _recover(int seq, Map<String, dynamic> plan, int code) async {
+    _recovering = {'attempt': _attempt + 1, 'of': _backoff.length, 'code': code};
+    try {
+      await sysProxy.restore();
+    } catch (e) {
+      main.note('system proxy not restored: $e');
+    }
+    while (seq == _runSeq) {
+      if (_attempt >= _backoff.length) {
+        _recovering = null;
+        _plan = null;
+        _error = 'sing-box stopped (exit code $code) and did not start again after ${_backoff.length} tries';
+        _recheckExit(); // traffic goes direct now
+        return;
+      }
+      final wait = _backoff[_attempt++];
+      _recovering = {'attempt': _attempt, 'of': _backoff.length, 'code': code, 'next': DateTime.now().add(wait).millisecondsSinceEpoch};
+      await Future<void>.delayed(wait);
+      final ok = await _locked(() async {
+        if (seq != _runSeq) return true; // connected or disconnected meanwhile
+        try {
+          await main.start(buildConfig(plan, clashPort: clashPort), clashPort: clashPort);
+        } catch (e) {
+          main.note('restart $_attempt of ${_backoff.length} failed: $e');
+          return false;
+        }
+        _plan = plan;
+        _upSince = DateTime.now();
+        _recovering = null;
+        _restarts++;
+        _warning = 'sing-box stopped (exit code $code) and was started again';
+        if (_sysWanted) {
+          try {
+            _warning = await sysProxy.enable(_mixedPort) ?? _warning;
+          } catch (e) {
+            _warning = 'System proxy not set again: $e';
+          }
+        }
+        _startAuto(plan);
+        _recheckExit();
+        return true;
+      });
+      if (ok) return;
+    }
   }
 
   Future<void> handle(HttpRequest req) async {
@@ -135,13 +247,26 @@ class Daemon {
     return {'running': true, ..._meter.sample(conns, proxies, DateTime.now().millisecondsSinceEpoch)};
   }
 
+  /// `connected` stays true while a crashed sing-box is being started again
+  /// (`recovering`); `auto` = what Auto really uses and measured (auto.dart → toJson).
   Future<Map<String, dynamic>> _status() async => {
-        'connected': main.running,
+        'connected': main.running || _recovering != null,
         'systemProxy': sysProxy.isSet,
         'error': _error,
         'warning': _warning,
         'exit': _exit,
+        'recovering': _recovering,
+        'restarts': _restarts,
+        'auto': await _autoState(),
       };
+
+  Future<Map<String, dynamic>?> _autoState() async {
+    final auto = _auto;
+    if (auto == null || !main.running) return null;
+    // the groups' `now` can change between checks (urltest re-picks on its own)
+    if (DateTime.now().millisecondsSinceEpoch - (auto.refreshedAt ?? 0) > 1000) await auto.refresh();
+    return identical(auto, _auto) ? auto.toJson() : null;
+  }
 
   /// Asks where traffic leaves: through the tunnel after every (re)connect, directly at
   /// start and after a disconnect, and on demand. A check that finishes after a newer one
@@ -157,7 +282,7 @@ class Daemon {
     Future<void> attempt() async {
       final sw = Stopwatch()..start();
       try {
-        final e = await checkExitIp(direct ? null : _mixedPort);
+        final e = await exitCheck(direct ? null : _mixedPort);
         if (seq == _exitSeq) _exit = {...e, 'direct': direct, 'at': DateTime.now().millisecondsSinceEpoch};
       } catch (e) {
         if (seq != _exitSeq) return;
@@ -196,27 +321,45 @@ class Daemon {
   /// body: {plan (see config.dart), systemProxy: bool}
   Future<Map<String, dynamic>> _connect(Map<String, dynamic> body) async {
     final plan = (body['plan'] as Map).cast<String, dynamic>();
+    final seq = ++_runSeq;
+    _recovering = null;
+    _stopAuto();
     _error = null;
     _warning = null;
-    try {
-      await main.start(buildConfig(plan, clashPort: clashPort), clashPort: clashPort);
-      _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
-      _recheckExit();
-      if (body['systemProxy'] == true) {
-        _warning = await sysProxy.enable((plan['mixedPort'] as num?)?.toInt() ?? 2080);
-      } else {
+    await _locked(() async {
+      if (seq != _runSeq) return; // a newer connect / disconnect came in
+      try {
+        _plan = null;
+        await main.start(buildConfig(plan, clashPort: clashPort), clashPort: clashPort);
+        _plan = plan;
+        _sysWanted = body['systemProxy'] == true;
+        _upSince = DateTime.now();
+        _attempt = 0;
+        _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
+        _startAuto(plan);
+        _recheckExit();
+        if (_sysWanted) {
+          _warning = await sysProxy.enable(_mixedPort);
+        } else {
+          await sysProxy.restore();
+        }
+      } catch (e) {
+        _error = '$e';
         await sysProxy.restore();
+        rethrow;
       }
-    } catch (e) {
-      _error = '$e';
-      await sysProxy.restore();
-      rethrow;
-    }
+    });
     return _status();
   }
 
   Future<Map<String, dynamic>> _disconnect() async {
-    await main.stop();
+    final seq = ++_runSeq;
+    _plan = null;
+    _recovering = null;
+    _stopAuto();
+    await _locked(() async {
+      if (seq == _runSeq) await main.stop();
+    });
     await sysProxy.restore();
     _recheckExit(); // now the direct IP
     _error = null;

@@ -2,25 +2,29 @@
 ///
 /// A connect plan (JSON from the UI):
 /// ```
-/// { kind: 'unit' | 'chain',
-///   main:  Group,          // the unit, or the chain's exit
-///   entry: Group,          // chain only: the exit dials through it
+/// { routes: [Route…], current: 0,  // Auto entries by priority (plan.dart); Manual: one
 ///   mixedPort: 2080, global: false,
-///   urlTest: { url, interval /*s*/, tolerance /*ms*/ } }
-/// Group = { pick: 'fastest' | 'priority', chosen: key?, nodes: [{ key, outbound }] }
+///   urlTest: { url, interval /*s*/, tolerance /*ms*/ },
+///   auto: { failAfter, threshold, checkEvery, keepWarm, standby } }   // auto.dart
+/// Route = { id, kind: 'unit' | 'chain',
+///   main:  Group,          // the unit, or the chain's exit
+///   entry: Group }         // chain only: the exit dials through it
+/// Group = { pick: 'fastest' | 'priority', chosen: key?, pinned?: bool, nodes: [{ key, outbound }] }
 /// ```
 /// `fastest` becomes a urltest group (interval = Auto mode's checkEvery, tolerance =
 /// threshold — docs/connect-model.md → «Открытые вопросы для бэка»); `priority` a
-/// selector set to the server the UI picked. Failover beyond that (failAfter,
-/// standby) is the app's AutoService, not the core's.
+/// selector set to the server the UI picked. The routes sit under the selector `proxy`;
+/// moving between routes and between Priority servers (failAfter, standby) is the
+/// AutoService (auto.dart), through the Clash API, with no restart.
 library;
+
+import 'plan.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 
 Map<String, dynamic> buildConfig(Map<String, dynamic> plan, {int clashPort = 9090}) {
   final outs = <Map<String, dynamic>>[];
   final test = (plan['urlTest'] as Map?) ?? const {};
-  final chain = plan['kind'] == 'chain';
 
   void group(String tag, Map g, {String? detour}) {
     final members = <String>[];
@@ -53,12 +57,25 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan, {int clashPort = 909
     }
   }
 
-  if (chain) {
-    group('entry', plan['entry'] as Map);
-    group('proxy', plan['main'] as Map, detour: 'entry');
-  } else {
-    group('proxy', plan['main'] as Map);
+  final routes = planRoutes(plan), tags = <String>[];
+  for (var i = 0; i < routes.length; i++) {
+    final r = routes[i];
+    if (r['kind'] == 'chain') {
+      group(routeEntryTag(i), r['entry'] as Map);
+      group(routeTag(i), r['main'] as Map, detour: routeEntryTag(i));
+    } else {
+      group(routeTag(i), r['main'] as Map);
+    }
+    tags.add(routeTag(i));
   }
+  // Auto moves between the routes by switching this selector (auto.dart), no restart
+  outs.add({
+    'type': 'selector',
+    'tag': topTag,
+    'outbounds': tags,
+    'default': tags[planCurrent(plan, tags.length)],
+    'interrupt_exist_connections': true,
+  });
   outs.add({'type': 'direct', 'tag': 'direct'});
 
   return {
@@ -77,7 +94,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan, {int clashPort = 909
         {'action': 'sniff'},
         if (plan['global'] != true) {'ip_is_private': true, 'outbound': 'direct'},
       ],
-      'final': 'proxy',
+      'final': topTag,
       'auto_detect_interface': true,
       'default_domain_resolver': 'local',
       // which app opened a connection: shown in Live connections

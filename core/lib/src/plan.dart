@@ -1,0 +1,26 @@
+/// The routes of a connect plan and the sing-box tags they get (config.dart builds them,
+/// auto.dart switches between them).
+///
+/// A plan carries `routes`: the Auto entries by priority, from the top down to the one the
+/// UI starts on (`current`) and `standby` more; in Manual just the pinned entry. A route
+/// is `{id, kind: 'unit' | 'chain', main: Group, entry?: Group}` (Group: see config.dart).
+/// A plan without `routes` (the old shape: kind / main / entry at the top) is one route.
+///
+/// Tags: route i is the group `route<i>` (a chain's exit), its servers `route<i>/<key>`; a
+/// chain's entry is `route<i>-entry`, servers `route<i>-entry/<key>`. The top selector
+/// `proxy` holds the routes and is the proxy outbound everything goes to.
+library;
+
+const topTag = 'proxy';
+String routeTag(int i) => 'route$i';
+String routeEntryTag(int i) => 'route$i-entry';
+
+/// The routes of [plan] in priority order.
+List<Map<String, dynamic>> planRoutes(Map<String, dynamic> plan) {
+  final rs = plan['routes'];
+  if (rs is List && rs.isNotEmpty) return [for (final r in rs) (r as Map).cast<String, dynamic>()];
+  return [plan];
+}
+
+/// The route the top selector starts on.
+int planCurrent(Map<String, dynamic> plan, int count) => ((plan['current'] as num?)?.toInt() ?? 0).clamp(0, count - 1);
