@@ -13,6 +13,11 @@ function ping(n)    { const e = pingCache.get(serverKey(n)); return e ? e.ms : n
 function pingAge(n) { const e = pingCache.get(serverKey(n)); return e && typeof e.ms === 'number' ? Date.now() - e.at : Infinity; }
 const isAlive = n => { const v = ping(n); return typeof v === 'number' && v >= 0; };
 function setPing(n, ms) { pingCache.set(serverKey(n), { ms, at: Date.now() }); }
+// Batch order by the cache: alive by ms (fastest first), then never measured, dead last.
+// The core pings in the order given, so servers that answered before get fresh numbers
+// first and dead ones (each waits out the timeout) do not hold up the rest.
+const pingRank = n => isAlive(n) ? ping(n) : typeof ping(n) === 'number' ? 2e9 : 1e9;
+const byPingRank = list => list.slice().sort((a, b) => pingRank(a) - pingRank(b));
 
 /* Mock network: each server has a hidden "true" latency (some are dead); a ping returns
    it with jitter and the occasional timeout. Pairs (entry -> exit) add a per-pair block
@@ -36,6 +41,7 @@ function mockPairPing(entry, exit) {
 }
 // Pings nodes in parallel; resolves when all are done. Views refresh as results land.
 function pingNodes(nodes) {
+  nodes = byPingRank(nodes);   // before 'testing' overwrites what the cache knew
   nodes.forEach(n => pingCache.set(serverKey(n), { ms: 'testing', at: Date.now() }));
   refreshSourceViews();
   return backend.ping(nodes, (n, ms) => {

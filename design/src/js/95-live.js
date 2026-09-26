@@ -87,8 +87,7 @@ function planGroup(refs, pick, chosenRef) {
   if (!ok.length) throw new Error('No server here the core can use' + (refs.some(r => r.node.unsupported) ? ' (XHTTP is not in sing-box)' : ''));
   // sing-box's urltest uses its first server until its own first round of tests is done
   // (a minute with a hundred servers): put the known fastest first, the dead ones last
-  const rank = r => isAlive(r.node) ? ping(r.node) : ping(r.node) == null ? 1e9 : 2e9;
-  const nodes = pick === 'fastest' ? ok.slice().sort((a, b) => rank(a) - rank(b)) : ok;
+  const nodes = pick === 'fastest' ? ok.slice().sort((a, b) => pingRank(a.node) - pingRank(b.node)) : ok;
   return { pick, chosen: pick === 'priority' && chosenRef ? refKey(chosenRef) : null, nodes: nodes.map(r => ({ key: refKey(r), outbound: r.node.outbound })) };
 }
 function livePlan() {

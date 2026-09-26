@@ -88,7 +88,7 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 | `POST /api/connect` | `{plan, systemProxy}` |
 | `POST /api/disconnect`, `GET /api/status`, `GET /api/log` | status: `{connected, systemProxy, error, warning, exit}` |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
-| `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}` |
+| `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (16 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
 
 Пинг: временный sing-box без inbound'ов, задержка через clash API
 `/proxies/{tag}/delay` (16 параллельно, таймаут 5 с). Пары entry→exit — копия выхода с

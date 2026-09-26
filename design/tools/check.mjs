@@ -224,6 +224,25 @@ async function runChecks() {
     await narrow.close();
   });
 
+  await check('ping: a batch goes out by the cache — alive fastest first, then unmeasured, dead last', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      const nodes = Object.values(sourcesData).flatMap(s => s.nodes).slice(0, 15);
+      nodes.forEach((n, i) => i % 3 === 0 ? pingCache.set(serverKey(n), { ms: -1, at: Date.now() })
+        : i % 3 === 1 ? pingCache.set(serverKey(n), { ms: 400 - i * 10, at: Date.now() }) : pingCache.delete(serverKey(n)));
+      const before = new Map(nodes.map(n => [n, ping(n)]));
+      let sent = [];
+      backend.ping = list => { sent = list.slice(); return Promise.resolve(); };
+      await pingNodes(nodes.slice().reverse());
+      const cls = v => typeof v === 'number' ? (v >= 0 ? 0 : 2) : 1, seq = sent.map(n => before.get(n));
+      const alive = seq.filter(v => cls(v) === 0);
+      return { all: sent.length === nodes.length, classes: seq.every((v, i) => !i || cls(seq[i - 1]) <= cls(v)),
+        fastestFirst: alive.every((v, i) => !i || alive[i - 1] <= v), mixed: new Set(seq.map(cls)).size === 3 };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
   await check('home stat cards: labels at one offset, live values never move or resize anything', async () => {
     const bad = [];
     for (const [width, big] of [[400, false], [320, true]]) {
