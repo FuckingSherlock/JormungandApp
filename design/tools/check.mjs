@@ -261,8 +261,8 @@ async function runChecks() {
     const p = await openPage(browser);
     const r = await p.evaluate(async () => {
       const nodes = Object.values(sourcesData).flatMap(s => s.nodes).slice(0, 15);
-      nodes.forEach((n, i) => i % 3 === 0 ? pingCache.set(serverKey(n), { ms: -1, at: Date.now() })
-        : i % 3 === 1 ? pingCache.set(serverKey(n), { ms: 400 - i * 10, at: Date.now() }) : pingCache.delete(serverKey(n)));
+      nodes.forEach((n, i) => i % 3 === 0 ? pingCache.set(pingKey(n), { ms: -1, at: Date.now() })
+        : i % 3 === 1 ? pingCache.set(pingKey(n), { ms: 400 - i * 10, at: Date.now() }) : pingCache.delete(pingKey(n)));
       const before = new Map(nodes.map(n => [n, ping(n)]));
       let sent = [];
       backend.ping = list => { sent = list.slice(); return Promise.resolve(); };
@@ -308,17 +308,24 @@ async function runChecks() {
     await p.close();
   });
 
-  await check('auto: an unmeasured entry on top is not passed over, a dead one is', async () => {
+  await check('auto: an unmeasured entry on top is not passed over, nor one lost ping or an old miss; a dead one is', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(() => {
       setAutoConnect(true);
+      autoCfg.failAfter = 2;
       const order = visibleOrder().filter(id => connectEntry(id).inAuto && !chainsData[id]);
       const top = order[0], nodes = () => unitPickRefs(top).map(x => x.node);
-      nodes().forEach(n => pingCache.delete(serverKey(n)));
+      nodes().forEach(n => pingCache.delete(pingKey(n)));
       const unmeasured = effectiveConnectId() === top;
       nodes().forEach(n => setPing(n, -1));
+      const oneMiss = effectiveConnectId() === top;
+      nodes().forEach(n => setPing(n, -1));
       const dead = effectiveConnectId() !== top;
-      return { unmeasured, dead };
+      pingNodes(nodes());   // re-measuring: still dead until the answer is in
+      const deadWhileTesting = effectiveConnectId() !== top;
+      nodes().forEach(n => pingCache.set(pingKey(n), Object.assign({}, pingEntry(n), { ms: -1, at: Date.now() - PING_FRESH_MS - 1000 })));
+      const oldMiss = effectiveConnectId() === top;
+      return { unmeasured, oneMiss, dead, deadWhileTesting, oldMiss };
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
     await p.close();
@@ -328,7 +335,7 @@ async function runChecks() {
     const p = await openPage(browser);
     const r = await p.evaluate(() => {
       const refs = dockTopRefs(), ids = visibleOrder().filter(id => connectEntry(id).inAuto).slice(0, 4);
-      const allowed = new Set(ids.flatMap(id => entryRefs(id).map(r => serverKey(r.node))));
+      const allowed = new Set(ids.flatMap(id => entryRefs(id).map(r => pingKey(r.node))));
       const route = document.getElementById('sh-profiles').classList.contains('open');
       [...pingCache.keys()].forEach(k => { if (pingCache.get(k).ms === 'testing') pingCache.delete(k); });
       const meta = document.querySelector('.dock .profiles-meta');
@@ -338,7 +345,7 @@ async function runChecks() {
       meta.click();
       const stopped = !meta.classList.contains('pinging') && !dockPing && getComputedStyle(meta.querySelector('.ping-frame .run')).display === 'none'
         && getComputedStyle(meta.querySelector('.ping-frame')).display !== 'none';
-      return { some: refs.length > 0, inTop: refs.every(r => allowed.has(serverKey(r.node))),
+      return { some: refs.length > 0, inTop: refs.every(r => allowed.has(pingKey(r.node))),
         perEntry: ids.every(id => refs.filter(r => entryRefs(id).includes(r)).length <= (chainsData[id] ? 6 : 3)),
         pinged: testing.length > 0 && testing.every(k => allowed.has(k)), frame, stopped,
         noSheet: !route && !document.getElementById('sh-profiles').classList.contains('open') };
@@ -357,7 +364,7 @@ async function runChecks() {
         pingCache.forEach((v, k) => { if (v.ms === 'testing') seen.add(k); });
         await new Promise(r => setTimeout(r, 50));
       }
-      const all = dockPingBatches().flat(), alive = all.filter(n => seen.has(serverKey(n)) && isAlive(n)).length;
+      const all = dockPingBatches().flat(), alive = all.filter(n => seen.has(pingKey(n)) && isAlive(n)).length;
       return { beyondFirst: seen.size > first, ended: !dockPing && !document.querySelector('.dock .profiles-meta.pinging'),
         rule: alive >= 10 || seen.size === total };
     });
@@ -382,7 +389,7 @@ async function runChecks() {
     const p = await openPage(browser);
     const r = await p.evaluate(() => {
       const nodes = sourcesData[sourceOrder[0]].nodes.slice(0, 5);
-      nodes.forEach(n => pingCache.set(serverKey(n), { ms: 'testing', at: Date.now() }));
+      nodes.forEach(n => pingCache.set(pingKey(n), { ms: 'testing', at: Date.now() }));
       setPing(nodes[3], 40); setPing(nodes[1], -1);
       const fast = byPing(nodes).map(n => nodes.indexOf(n));
       nodeSort = 'latency'; const sorted = sortedNodes(nodes).map(n => nodes.indexOf(n)); nodeSort = 'order';
@@ -508,7 +515,7 @@ async function runChecks() {
         total: document.getElementById('trafficDown').textContent === '1.84 GB', conns: document.getElementById('connTotal').textContent === '51',
         rows: rows.length === 4, newest: rows[0].textContent.includes('192.168.0.1:53'),
         via: !!node && rows[1].textContent.includes(node.name), app: rows[1].textContent.includes('Code.exe'),
-        tag: trafficVia(['proxy/' + sourceOrder[0] + '::' + n0.id]).includes(n0.name) };
+        tag: trafficVia(['route0/' + sourceOrder[0] + '::' + n0.id]).includes(n0.name) };
       connected = false; renderConnState();
       const off = { speed: document.getElementById('speedDown').textContent === '0', conns: document.getElementById('connTotal').textContent === '0',
         kept: document.getElementById('trafficDown').textContent === '1.84 GB', empty: document.getElementById('liveConnList').textContent.includes('Not connected') };
@@ -851,9 +858,12 @@ async function runChecks() {
     await page.evaluate(() => copyLogs());
     const copied = await page.evaluate(() => window.__copied || '');
     expect(copied.split('\n').length === await page.locator('#logList .log-line').count() && /test line 2/.test(copied), 'copied ' + copied.split('\n').length + ' lines');
-    await page.evaluate(() => clearLogs());
+    // new lines may land right after the clear (the mock keeps logging); none from before
+    const nAt = await page.evaluate(() => { const n = mockLog.n; clearLogs(); return n; });
     await page.waitForTimeout(100);
-    expect(await page.locator('#logList .log-line').count() === 0 && await page.isVisible('#logList .log-empty'), 'not cleared');
+    const left = await page.evaluate(n => ({ old: logState.lines.filter(l => l.n < n).length, kept: logState.lines.length,
+      dom: document.querySelectorAll('#logList .log-line').length, empty: !!document.querySelector('#logList .log-empty') }), nAt);
+    expect(!left.old && left.dom === left.kept && (left.kept || left.empty), 'not cleared: ' + JSON.stringify(left));
   });
 
   await check('connections: filter by host / app / rule, × closes one, Close all', async () => {
@@ -1636,7 +1646,7 @@ async function runChecks() {
     const r = await page.evaluate(() => {
       const el = document.querySelector('#cp-mode .seg-switch'), ping = document.querySelector('#cp-mode .seg-ping');
       const out = { swiped: cpPickMode === 'priority', pill: el.dataset.mode === 'priority', ping: !!ping && ping.getBoundingClientRect().left > el.getBoundingClientRect().right };
-      ping.click(); out.pinging = cpDraftRefs().some(r => (pingCache.get(serverKey(r.node)) || {}).ms === 'testing');
+      ping.click(); out.pinging = cpDraftRefs().some(r => (pingCache.get(pingKey(r.node)) || {}).ms === 'testing');
       closeSheet('createprofile'); setNodesTab('simple'); switchTab('home');
       return out;
     });
@@ -1661,7 +1671,7 @@ async function runChecks() {
     const r = await page.evaluate(async () => {
       const out = {}, ids = launchPingEntries(), order = visibleOrder(), auto = order.filter(id => connectEntry(id).inAuto);
       out.fromTop = autoConnect && ids.join() === auto.slice(0, autoCfg.standby + 1).join() && ids.length > 1;
-      const keys = new Set(ids.flatMap(id => entryRefs(id).map(r => serverKey(r.node))).concat(ruleTargets().flatMap(t => targetRefs(t).map(r => serverKey(r.node)))));
+      const keys = new Set(ids.flatMap(id => entryRefs(id).map(r => pingKey(r.node))).concat(ruleTargets().flatMap(t => targetRefs(t).map(r => pingKey(r.node)))));
       out.rules = ruleTargets().includes('chain:sc1');
       // Pings of earlier checks may still be in flight: forget them, count only this call's.
       const inFlight = () => [...pingCache.entries()].filter(([, v]) => v.ms === 'testing').map(([k]) => k);
@@ -1791,7 +1801,7 @@ async function runChecks() {
     const ok = await page.evaluate(async () => {
       const n = sourcesData.src1.nodes[0];
       await pingNodes([n]);
-      return ping(n) === pingCache.get(serverKey(n)).ms && pingAge(n) < 5000;
+      return ping(n) === pingCache.get(pingKey(n)).ms && pingAge(n) < 5000;
     });
     expect(ok, 'cache not updated by pingNodes');
   });
@@ -2142,6 +2152,111 @@ async function runChecks() {
       switchTab('nodes'); setNodesTab('profiles'); setNodesTab('simple'); switchTab('settings'); switchTab('rules'); switchTab('home');
       await wait(300);
       try { livePlan(); out.plan = false; } catch (e) { out.plan = /Nothing to connect/.test(e.message); }
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('ping cache: one result per server variant; stored server-keyed ones migrate only when unambiguous', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      const s = sourcesData[sourceOrder[0]], a = s.nodes[0], b = Object.assign({}, a, { id: a.id + '-v2' });
+      s.nodes.push(b);   // another variant (other SNI…) of the same server
+      setPing(a, 50); setPing(b, -1);
+      const out = { separate: ping(a) === 50 && ping(b) === -1 };
+      const all = Object.values(sourcesData).flatMap(x => x.nodes.concat(x.gone || []));
+      const c = all.find(n => all.filter(m => serverKey(m) === serverKey(n)).length === 1);
+      restorePings([[serverKey(a), { ms: 70, at: Date.now() }], [serverKey(c), { ms: -1, at: Date.now() }], [pingKey(b), { ms: 33, at: Date.now(), fails: 0 }]]);
+      out.ambiguous = ping(a) === null;
+      out.single = ping(c) === -1 && pingEntry(c).fails === 1;
+      out.newKey = ping(b) === 33;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('live plan: Auto entries above + the entry + standby as routes; pings and the core moving leave it be, Manual is a new one', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      setAutoConnect(true); autoCfg.standby = 1;
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = n.outbound || { type: 'direct' }; n.unsupported = false; }));
+      const order = autoOrder(), plan = livePlan(order[1]);
+      const out = { enough: order.length >= 3,
+        routes: plan.routes.map(x => x.id).join() === order.slice(0, 3).join() && plan.current === 1 && plan.auto.failAfter === autoCfg.failAfter };
+      live.anchor = order[1];
+      const sig = planSig();
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => setPing(n, Math.round(Math.random() * 300))));
+      coreRoute = { id: order[0], server: null, entryServer: null };
+      out.stable = planSig() === sig;
+      setAutoConnect(false);
+      out.manual = planSig() !== sig && livePlan().routes.map(x => x.id).join() === activeConnectId && activeConnectId === order[0];
+      coreRoute = null;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('live Auto: dock and Route show the core\'s entry and server, its checks reach the ping cache, a switch toasts (unless off), all down moves on', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      setAutoConnect(true);
+      const order = autoOrder(), id = order.find(x => !chainsData[x] && unitPickRefs(x).length > 1);
+      const refs = unitPickRefs(id), last = refs[refs.length - 1], now = Date.now() + 1000;
+      pingCache.delete(pingKey(refs[0].node));   // the launch ping may have it in flight (that one would win)
+      let toasts = [];
+      const t0 = window.toast; window.toast = m => toasts.push(m);
+      connected = true; genCfg.switchNotif = true; live.switches = 0; live.restarts = 0;
+      const st = (auto, extra) => Object.assign({ connected: true, restarts: 0, recovering: null, auto }, extra);
+      const auto = (switches, extra) => Object.assign({ now: id, server: refKey(last), entryServer: null, switches, allDown: false,
+        lastSwitch: { from: order[0], to: id, reason: 'failover', at: now }, routes: [{ id: order[0] }, { id }],
+        members: [{ key: refKey(refs[0]), ms: -1, fails: 3, oks: 0, at: now }] }, extra);
+      liveAutoStatus(st(auto(1)));
+      const out = { entry: effectiveConnectId() === id && effectiveConnectId(true) !== undefined,
+        server: unitNode(id) === last.node,
+        dock: document.getElementById('profModeDetail').textContent.includes(last.node.name) && document.getElementById('profCardName').textContent === connectEntry(id).name,
+        merged: ping(refs[0].node) === -1 && pingEntry(refs[0].node).fails === 3,
+        toast: toasts.length === 1 && toasts[0].includes(connectEntry(id).name) };
+      genCfg.switchNotif = false; toasts = [];
+      liveAutoStatus(st(auto(2)));
+      out.quiet = !toasts.length;
+      liveAutoStatus(st(null, { recovering: { attempt: 1, of: 3 } }));
+      liveAutoStatus(st(auto(0), { restarts: 1, warning: 'started again' }));
+      out.recovery = toasts.length === 2 && /starting it again/.test(toasts[0]) && toasts[1] === 'started again';
+      let asked = null;
+      liveBackend.connect = a => { asked = a; return Promise.resolve(); };
+      connecting = false; live.beyond = false;
+      const expected = order.slice(2).find(mayWork);
+      liveAutoStatus(st(auto(0, { now: order[0], routes: [{ id: order[0] }, { id: order[1] }], allDown: true })));
+      out.beyond = !!expected && asked === expected;
+      liveAutoStatus(null);
+      out.cleared = coreRoute === null;
+      window.toast = t0; connected = false;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('live plan + rules: one plan carries the Auto routes and plan.routing; the core moving a group or a rule target\'s ping order is no reconnect, a rule edit is', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      setAutoConnect(true);
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = { type: 'socks', server: '127.0.0.1', server_port: 1 }; n.unsupported = false; }));
+      const order = autoOrder(), id = order.find(x => !chainsData[x] && unitPickRefs(x).length > 1);
+      live.anchor = effectiveConnectId(true);
+      const plan = livePlan(), out = { both: plan.routes.length > 0 && !!plan.routing && !!plan.auto && plan.routes[plan.current].id === live.anchor };
+      const sig = planSig();
+      // the core moved to another entry and server; a rule target's servers re-sorted by a ping
+      coreRoute = { id, server: refKey(unitPickRefs(id).slice(-1)[0]), entryServer: null };
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => setPing(n, Math.round(Math.random() * 300))));
+      out.stable = planSig() === sig;
+      out.ownPicks =livePlan().routes.every(x => x.id !== id || x.main.chosen !== coreRoute.server || unitPriority(id));
+      rulesData[ruleOrder[0]].enabled = !rulesData[ruleOrder[0]].enabled;
+      out.ruleEdit = planSig() !== sig;
+      coreRoute = null;
       return out;
     });
     expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));

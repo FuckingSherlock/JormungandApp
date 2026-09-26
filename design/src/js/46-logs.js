@@ -6,7 +6,7 @@
    lines until the user scrolls up; then a pill counts the new ones and brings it back.
    (Flutter: LogsView over the core's LogBook stream.) */
 
-const logState = { lines: [], next: null, level: 'all', follow: true, busy: false, unseen: 0 };
+const logState = { lines: [], next: null, level: 'all', follow: true, busy: false, unseen: 0, gen: 0 };
 const LOG_KEEP = 2000;
 const logsOpen = () => document.getElementById('view-logs').classList.contains('active');
 
@@ -19,7 +19,9 @@ function openLogs() {
 function pollLogs() {
   if (logState.busy) return;
   logState.busy = true;
+  const gen = logState.gen;   // a Clear meanwhile: this answer may hold the cleared lines
   backend.log(logState.next).then(r => {
+    if (gen !== logState.gen) return;
     // the core started again: its numbers start over
     if (logState.next != null && r.next < logState.next) { logState.lines = []; logState.next = null; return pollLogs(); }
     const fresh = r.lines.filter(l => logState.next == null || l.n >= logState.next);
@@ -122,7 +124,9 @@ function copyLogs() {
 }
 
 function clearLogs() {
+  logState.gen++;
   backend.clearLog().then(() => {
+    logState.gen++;
     logState.lines = [];
     logState.follow = true;
     renderLogs();

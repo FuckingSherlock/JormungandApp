@@ -16,8 +16,9 @@ void main() {
     final m = TrafficMeter();
     final proxies = {
       'proxies': {
-        'proxy': {'now': 'proxy/s1::n7'},
-        'entry': {'now': 'entry/s2::n1'},
+        'proxy': {'now': 'route1'},
+        'route1': {'now': 'route1/s1::n7'},
+        'route1-entry': {'now': 'route1-entry/s2::n1'},
       },
     };
     final first = m.sample({'downloadTotal': 1000, 'uploadTotal': 100, 'connections': [conn('a', down: 1000, up: 100)]}, proxies, 0);
@@ -28,7 +29,7 @@ void main() {
       'downloadTotal': 3000,
       'uploadTotal': 300,
       'connections': [
-        conn('a', chains: ['proxy/s1::n7', 'proxy'], down: 2500, up: 200),
+        conn('a', chains: ['route1/s1::n7', 'route1', 'proxy'], down: 2500, up: 200),
         conn('b', net: 'udp', chains: ['direct'], down: 500, up: 100, host: ''),
       ],
     }, proxies, 2000);
@@ -36,7 +37,7 @@ void main() {
     expect(s['up'], 100);
     expect([s['tcp'], s['udp']], [1, 1]);
     final a = (s['conns'] as List).first as Map;
-    expect(a['out'], ['proxy/s1::n7', 'entry/s2::n1']);
+    expect(a['out'], ['route1/s1::n7', 'route1-entry/s2::n1']);
     expect([a['downRate'], a['upRate']], [750, 50]);
     final b = (s['conns'] as List).last as Map;
     expect(b['out'], ['direct']);

@@ -2299,20 +2299,47 @@ function mockLogTick() {
   for (let k = Math.floor(Math.random() * 4); k > 0; k--) { const [lvl, msg] = mockLogLine(); mockLogAdd('sing-box', lvl, msg); }
 }
 /* ══════════════════════ PING CACHE ══════════════════════
-   One latency store for every screen. Keyed by server (protocol://address:port), so a
-   server that appears in two subscriptions shares its result. Values: ms, -1 = timeout,
-   'testing' while a ping is in flight; `at` = when it was measured. Every ping goes
-   through pingNodes(); every view reads ping(n). (Flutter: a PingService over
-   sing-box's URL test, results in one provider.) */
+   One latency store for every screen. Keyed by node variant (pingKey: protocol://address:
+   port#id — the id is the variant: SNI, fingerprint, transport…, see subscription-parsing.md
+   → dedup), so variants of one server keep their own results (a dead one never looks alive
+   because another answered), and the same variant in two subscriptions shares one.
+   Values: ms, -1 = timeout, 'testing' while a ping is in flight; `at` = when it was
+   measured; `fails` = timeouts in a row (Auto's failAfter, see knownDead). Every ping goes
+   through pingNodes(); every view reads ping(n); the core's Auto checks land here too
+   (95-live.js). (Flutter: a PingService over sing-box's URL test, results in one provider.) */
 
 const PING_FRESH_MS = 5 * 60 * 1000;          // older results are re-measured before use
-const pingCache = new Map();                   // serverKey -> { ms, at }
-const serverKey = n => n.protocol + '://' + n.address + ':' + n.port;
+const pingCache = new Map();                   // pingKey -> { ms, at, fails }
+const serverKey = n => n.protocol + '://' + n.address + ':' + n.port;   // the server, any variant
+const pingKey = n => serverKey(n) + '#' + n.id;
 
-function ping(n)    { const e = pingCache.get(serverKey(n)); return e ? e.ms : null; }
-function pingAge(n) { const e = pingCache.get(serverKey(n)); return e && typeof e.ms === 'number' ? Date.now() - e.at : Infinity; }
+const pingEntry = n => pingCache.get(pingKey(n));
+function ping(n)    { const e = pingEntry(n); return e ? e.ms : null; }
+function pingAge(n) { const e = pingEntry(n); return e && typeof e.ms === 'number' ? Date.now() - e.at : Infinity; }
 const isAlive = n => { const v = ping(n); return typeof v === 'number' && v >= 0; };
-function setPing(n, ms) { pingCache.set(serverKey(n), { ms, at: Date.now() }); }
+function setPing(n, ms) {
+  const prev = pingEntry(n);
+  pingCache.set(pingKey(n), { ms, at: Date.now(), fails: ms === -1 ? ((prev && prev.fails) || 0) + 1 : 0 });
+}
+/* Stored results from before the per-variant key (keyed protocol://address:port): one goes
+   to its node only when exactly one variant of that server exists — with several, nobody
+   knows which one answered, so they start unmeasured. A -1 counts as one timeout. */
+function restorePings(list) {
+  pingCache.clear();
+  const variants = new Map();
+  Object.values(sourcesData).forEach(s => (s.nodes || []).concat(s.gone || []).forEach(n => {
+    const k = serverKey(n);
+    if (!variants.has(k)) variants.set(k, new Set());
+    variants.get(k).add(pingKey(n));
+  }));
+  (list || []).forEach(([k, e]) => {
+    if (!e || typeof e.ms !== 'number') return;
+    if (e.fails == null) e = Object.assign({}, e, { fails: e.ms === -1 ? 1 : 0 });
+    if (k.includes('#')) { pingCache.set(k, e); return; }
+    const v = variants.get(k);
+    if (v && v.size === 1 && !pingCache.has([...v][0])) pingCache.set([...v][0], e);
+  });
+}
 // Batch order by the cache: alive by ms (fastest first), then never measured, dead last.
 // The core pings in the order given, so servers that answered before get fresh numbers
 // first and dead ones (each waits out the timeout) do not hold up the rest.
@@ -2342,7 +2369,8 @@ function mockPairPing(entry, exit) {
 // Pings nodes in parallel; resolves when all are done. Views refresh as results land.
 function pingNodes(nodes) {
   nodes = byPingRank(nodes);   // before 'testing' overwrites what the cache knew
-  nodes.forEach(n => pingCache.set(serverKey(n), { ms: 'testing', at: Date.now() }));
+  // 'testing' keeps when and how often it missed, so Auto's knownDead holds meanwhile
+  nodes.forEach(n => pingCache.set(pingKey(n), Object.assign({ at: 0, fails: 0 }, pingEntry(n), { ms: 'testing' })));
   refreshSourceViews();
   return backend.ping(nodes, (n, ms) => {
     setPing(n, ms);
@@ -2353,10 +2381,10 @@ function pingNodes(nodes) {
 // Ping one exit through one entry.
 function pingPair(entry, exit) { return backend.pingPair(entry, exit); }
 
-// Seed: results from earlier sessions, some older than PING_FRESH_MS.
+// Seed: results from earlier sessions, some older than PING_FRESH_MS (dead ones missed a few).
 Object.values(sourcesData).forEach(s => s.nodes.forEach(n => {
   const t = truthOf(n);
-  pingCache.set(serverKey(n), { ms: t < 0 ? -1 : t, at: Date.now() - Math.random() * 9 * 60e3 });
+  pingCache.set(pingKey(n), { ms: t < 0 ? -1 : t, at: Date.now() - Math.random() * 9 * 60e3, fails: t < 0 ? 3 : 0 });
 }));
 /* ══════════════════════ PROFILES SHEET (entries + chains in one priority list) ══════════════════════
    Entries are sources in simple mode, profiles in profiles mode (see connectMode).
@@ -2476,9 +2504,21 @@ function pinnedRef(id) {
   if (autoConnect || id !== activeConnectId || !pinnedNode) return null;
   return unitRefs(id).find(r => refKey(r) === pinnedNode) || null;
 }
+/* Live and connected, the core's Auto says where traffic really goes (95-live.js, from
+   /api/status → auto): {id: the Route entry it is on, server: the unit's or the chain
+   exit's server, entryServer: the chain entry's server} ('sid::nid' keys). The dock and
+   Route show that instead of their own guess. Always null in the mockup. */
+let coreRoute = null;
+function coreNode(id, which, refs) {
+  if (!coreRoute || coreRoute.id !== id || !coreRoute[which]) return null;
+  const r = refs.find(r => refKey(r) === coreRoute[which]);
+  return r ? r.node : null;
+}
 function unitNode(id) {
   const pin = pinnedRef(id);
   if (pin) return pin.node;   // Manual on a server: that one, answering or not
+  const core = coreNode(id, 'server', unitPickRefs(id));
+  if (core) return core;
   const nodes = unitPickRefs(id).map(r => r.node);
   return unitPriority(id) ? nodes.find(isAlive) || null : bestAlive(nodes);
 }
@@ -2504,8 +2544,10 @@ function orderRefs(refs, order) {
 // Every exit server in priority order, unticked ones included.
 function chainExitOrder(c, withOff) { return orderRefs(unitRefs(c.outId, withOff), c.exitOrder); }
 function chainExitRefs(c, withOff) { return chainExitOrder(c, withOff).filter(r => !(c.outOff || []).includes(refKey(r))); }
-const chainEntryNode = c => bestAlive(chainEntryRefs(c).map(r => r.node));
+const chainEntryNode = c => coreNode(c.id, 'entryServer', chainEntryRefs(c)) || bestAlive(chainEntryRefs(c).map(r => r.node));
 function chainExitNode(c) {
+  const core = coreNode(c.id, 'server', chainExitRefs(c));
+  if (core) return core;
   const exits = chainExitRefs(c).map(r => r.node);
   return c.exitMode === 'priority' ? exits.find(isAlive) || null : bestAlive(exits);
 }
@@ -2520,9 +2562,14 @@ function isUsable(id) {
 }
 
 /* Auto passes over an entry only when it is known not to work: every server it would use
-   measured and silent. Servers not measured yet (a fresh start before the launch ping, a
-   new subscription) still count, so a restart never hands the top spot to the next entry. */
-const knownDead = n => ping(n) === -1;
+   silent failAfter times in a row, the last time within PING_FRESH_MS (a result being
+   re-measured keeps counting until the new one is in). Servers not measured yet (a fresh
+   start before the launch ping, a new subscription) or measured long ago still count, so
+   a restart never hands the top spot to the next entry over one lost ping. */
+const knownDead = n => {
+  const e = pingEntry(n);
+  return !!e && e.ms !== null && !(e.ms >= 0) && (e.fails || 0) >= autoCfg.failAfter && Date.now() - e.at < PING_FRESH_MS;
+};
 function mayWork(id) {
   if (chainsData[id]) {
     const c = chainsData[id];
@@ -2531,10 +2578,12 @@ function mayWork(id) {
   return unitPickRefs(id).some(r => !knownDead(r.node));
 }
 
-// What is actually connected: the pinned entry, or Auto's pick.
-function effectiveConnectId() {
+// What is actually connected: the pinned entry, or Auto's pick — live and connected, the
+// entry the core's Auto is really on; ownGuess = the UI's pick regardless (a new plan).
+function effectiveConnectId(ownGuess) {
   if (!autoConnect && entryVisible(activeConnectId) && !isBroken(activeConnectId)) return activeConnectId;
   const order = visibleOrder();
+  if (!ownGuess && coreRoute && order.includes(coreRoute.id) && connectEntry(coreRoute.id).inAuto) return coreRoute.id;
   return order.find(id => connectEntry(id).inAuto && mayWork(id))
       || order.find(id => connectEntry(id).inAuto) || null;   // every entry off Auto: Auto picks nothing
 }
@@ -3232,7 +3281,7 @@ function demoProviderChurn(s) {
     s.nodes = s.nodes.concat(back.map(n => { const m = Object.assign({}, n); delete m.goneAt; return m; }))
       .sort((a, b) => +a.id.slice(1) - +b.id.slice(1));
     s.gone = [];
-    back.forEach(n => { if (!pingCache.has(serverKey(n))) setPing(n, truthOf(n)); });
+    back.forEach(n => { if (!pingCache.has(pingKey(n))) setPing(n, truthOf(n)); });
     toast(`${back.length} server${back.length === 1 ? ' is' : 's are'} back — previous settings restored`);
   } else {
     const drop = s.nodes.filter((n, i) => i === 1 || i === 3);
@@ -4967,7 +5016,7 @@ function renderTargetPicker() {
    lines until the user scrolls up; then a pill counts the new ones and brings it back.
    (Flutter: LogsView over the core's LogBook stream.) */
 
-const logState = { lines: [], next: null, level: 'all', follow: true, busy: false, unseen: 0 };
+const logState = { lines: [], next: null, level: 'all', follow: true, busy: false, unseen: 0, gen: 0 };
 const LOG_KEEP = 2000;
 const logsOpen = () => document.getElementById('view-logs').classList.contains('active');
 
@@ -4980,7 +5029,9 @@ function openLogs() {
 function pollLogs() {
   if (logState.busy) return;
   logState.busy = true;
+  const gen = logState.gen;   // a Clear meanwhile: this answer may hold the cleared lines
   backend.log(logState.next).then(r => {
+    if (gen !== logState.gen) return;
     // the core started again: its numbers start over
     if (logState.next != null && r.next < logState.next) { logState.lines = []; logState.next = null; return pollLogs(); }
     const fresh = r.lines.filter(l => logState.next == null || l.n >= logState.next);
@@ -5083,7 +5134,9 @@ function copyLogs() {
 }
 
 function clearLogs() {
+  logState.gen++;
   backend.clearLog().then(() => {
+    logState.gen++;
     logState.lines = [];
     logState.follow = true;
     renderLogs();
@@ -5214,7 +5267,8 @@ function renderTraffic() {
 }
 const trafficNode = t => {
   if (t && typeof t === 'object') return t;
-  const m = /^(?:proxy|entry)\/(.+?)::(.+)$/.exec(t), s = m && sourcesData[m[1]];
+  // the core's tags: route<i>/<sid>::<nid>, route<i>-entry/<sid>::<nid> (a chain's entry)
+  const m = /^[^/]+\/(.+?)::(.+)$/.exec(t), s = m && sourcesData[m[1]];
   return s ? s.nodes.find(n => n.id === m[2]) : null;
 };
 const trafficVia = out => out.slice().reverse().map(t => {
@@ -5624,7 +5678,7 @@ function ruleTargets() {
     .concat(Object.values(appRules).filter(a => a.act === 'proxy').flatMap(a => [a.target, a.split ? a.udpTarget : '']));
   return [...new Set(ts.filter(Boolean))];
 }
-const uniqNodes = refs => { const seen = new Set(); return refs.map(r => r.node).filter(n => !seen.has(serverKey(n)) && seen.add(serverKey(n))); };
+const uniqNodes = refs => { const seen = new Set(); return refs.map(r => r.node).filter(n => !seen.has(pingKey(n)) && seen.add(pingKey(n))); };
 function pingOnLaunch() {
   const nodes = uniqNodes(launchPingEntries().flatMap(entryRefs).concat(ruleTargets().flatMap(targetRefs)));
   return nodes.length ? pingNodes(nodes) : Promise.resolve();
@@ -5656,8 +5710,8 @@ function dockPingBatches() {
     if (c) return chainEntryRefs(c).concat(chainExitRefs(c));
     return unitPriority(id) ? unitPickRefs(id) : unitPickRefs(id).slice().sort((a, b) => pingRank(a.node) - pingRank(b.node));
   };
-  const first = uniqNodes(dockTopRefs()), had = new Set(first.map(serverKey));
-  const rest = uniqNodes(ids.flatMap(own)).filter(n => !had.has(serverKey(n))), out = first.length ? [first] : [];
+  const first = uniqNodes(dockTopRefs()), had = new Set(first.map(pingKey));
+  const rest = uniqNodes(ids.flatMap(own)).filter(n => !had.has(pingKey(n))), out = first.length ? [first] : [];
   for (let i = 0; i < rest.length; i += DOCK_PING_BATCH) out.push(rest.slice(i, i + DOCK_PING_BATCH));
   return out;
 }
@@ -7216,6 +7270,121 @@ function routingPlan() {
     dns: { servers: dnsOrder.map(id => dnsServers[id]).map(s => ({ id: s.id, addr: s.addr, via: s.via, on: s.on })) },
   };
 }
+/* ══════════════════════ AUTO IN THE CORE (live) ══════════════════════
+   With jormd, Auto runs in the core while connected (core/lib/src/auto.dart, see
+   connect-model.md → Auto): the plan carries the entry to connect plus the Auto entries
+   around it as routes, and the core moves between them — and between a Priority entry's
+   servers — through sing-box's Clash API, with no restart. This file builds those routes
+   and reads back what the core did: the entry and server it is really on (coreRoute →
+   dock, Route), what it measured (→ the ping cache, so knownDead agrees with it) and when
+   it switched (→ a toast, General → When Auto switches).
+   (Flutter: the same AutoService in-process; this is its view model.) */
+
+// f() on the UI's own picks: coreRoute off meanwhile (a plan is the UI's guess; the core
+// then moves inside it by itself).
+function withoutCore(f) {
+  const c = coreRoute;
+  coreRoute = null;
+  try { return f(); } finally { coreRoute = c; }
+}
+
+// One Route entry as a route of the plan (config.dart turns it into sing-box groups).
+function planRoute(id) {
+  if (chainsData[id]) {
+    const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
+    return { id, kind: 'chain', entry: planGroup(chainEntryRefs(c), 'fastest'),
+      main: planGroup(exits, c.exitMode === 'priority' ? 'priority' : 'fastest', exits.find(r => r.node === exitNode)) };
+  }
+  const refs = unitPickRefs(id), n = unitNode(id), pin = pinnedRef(id);
+  const main = planGroup(refs, pin || unitPriority(id) ? 'priority' : 'fastest', pin || refs.find(r => r.node === n));
+  if (pin) main.pinned = true;   // Manual on a server: held there, the core never moves it
+  return { id, kind: 'unit', main };
+}
+
+/* The routes around the entry to connect (the anchor). Auto: every Auto entry above it
+   (the core moves back up when one answers again), the anchor, then autoCfg.standby
+   entries below (spares; tested ahead while keepWarm is on). Manual: the anchor alone.
+   Entries the core cannot use (no server with an outbound) are left out; the anchor
+   itself must be usable (planGroup says why not). */
+function planRoutes(anchor) {
+  const order = autoOrder(), i = order.indexOf(anchor);
+  const ids = !autoConnect || i < 0 ? [anchor] : order.slice(0, i + 1 + Math.max(0, autoCfg.standby | 0));
+  const routes = [];
+  ids.forEach(id => {
+    if (id === anchor) routes.push(planRoute(id));
+    else try { routes.push(planRoute(id)); } catch (e) { /* nothing usable: not a route */ }
+  });
+  return { routes, current: routes.findIndex(r => r.id === anchor) };
+}
+const autoOrder = () => visibleOrder().filter(id => connectEntry(id).inAuto);
+const planAuto = () => ({ failAfter: autoCfg.failAfter, threshold: autoCfg.threshold, checkEvery: autoCfg.checkEvery,
+  keepWarm: autoCfg.keepWarm, standby: autoCfg.standby });
+
+/* Which anchor the running plan is compared with (liveMaybeReconnect): in Auto the one it
+   was built on while that is still an Auto entry — the core moves inside the plan by
+   itself, so neither its moves nor a ping may restart sing-box; otherwise (Manual, the
+   entry left Auto) the UI's pick, and a different pick is a new plan. */
+const liveSigAnchor = () => autoConnect && live.anchor && autoOrder().includes(live.anchor) ? live.anchor : effectiveConnectId(true);
+// A page opened while connected: the anchor whose routes are the ones the core runs.
+function liveFindAnchor(ids) {
+  const same = id => { try { return planRoutes(id).routes.map(r => r.id).join() === ids.join(); } catch (e) { return false; } };
+  return ids.find(same) || (coreRoute && coreRoute.id) || null;
+}
+
+// A 'sid::nid' key of the plan → its server.
+function nodeOfKey(key) {
+  const i = key.indexOf('::'), s = i > 0 && sourcesData[key.slice(0, i)];
+  return s ? (s.nodes || []).find(n => n.id === key.slice(i + 2)) || null : null;
+}
+// The core's own checks land in the ping cache: newer ones only, a ping in flight wins.
+function mergeCorePings(members) {
+  let changed = false;
+  (members || []).forEach(m => {
+    const n = nodeOfKey(m.key), e = n && pingEntry(n);
+    if (!n || typeof m.ms !== 'number' || m.ms < -1 || (e && (e.ms === 'testing' || e.at >= m.at))) return;
+    pingCache.set(pingKey(n), { ms: m.ms, at: m.at, fails: m.fails || 0 });
+    changed = true;
+  });
+  return changed;
+}
+
+const entryLabel = id => { const e = connectEntry(id); return e ? e.name : chainsData[id] ? chainsData[id].name : unitName(id); };
+function switchText(s) {
+  if (!s.route) return `Auto: ${entryLabel(s.from)} → ${entryLabel(s.to)}`;
+  const name = k => { const n = nodeOfKey(k); return n ? n.name : k; };
+  return `Auto: ${entryLabel(s.route)} — ${name(s.from)} → ${name(s.to)}`;
+}
+
+/* Every status from the core while connected (the poll, the answer to a connect; null on
+   disconnect): what its Auto is on and measured. Views re-render only on a change. */
+function liveAutoStatus(st) {
+  const a = st && st.connected ? st.auto : null, was = JSON.stringify(coreRoute);
+  coreRoute = a ? { id: a.now, server: a.server || null, entryServer: a.entryServer || null } : null;
+  const pings = a ? mergeCorePings(a.members) : false;
+  if (a) {
+    if (live.switches != null && a.switches > live.switches && a.lastSwitch && genCfg.switchNotif) toast(switchText(a.lastSwitch));
+    live.switches = a.switches;
+    live.routes = (a.routes || []).map(r => r.id);
+  } else live.switches = null;
+  // sing-box stopped on its own: the core puts the system proxy back and starts it again
+  if (st && st.recovering && !live.recovering) toast('sing-box stopped — starting it again…');
+  if (st && st.connected && live.restarts != null && st.restarts > live.restarts) toast(st.warning || 'sing-box started again');
+  live.recovering = st ? st.recovering : null;
+  live.restarts = st ? st.restarts : null;
+  if (pings) refreshSourceViews();
+  else if (JSON.stringify(coreRoute) !== was) { renderConnects(); updateMainConnectCard(); }
+  if (a && a.allDown) liveBeyondDown();
+}
+/* Every route of this plan is down (the core tried them all): a new plan around the first
+   Auto entry below them that may work, if there is one. */
+function liveBeyondDown() {
+  if (connecting || live.beyond || !autoConnect) return;
+  const order = autoOrder(), last = Math.max(-1, ...live.routes.map(id => order.indexOf(id)));
+  const next = order.slice(last + 1).find(mayWork);
+  if (!next) return;
+  live.beyond = true;
+  liveBackend.connect(next).catch(e => toast(e.message)).then(() => { live.beyond = false; });
+}
 /* ══════════════════════ LIVE MODE (Dart core) ══════════════════════
    When the Dart core serves the page (core/bin/jormd.dart sets window.JORMD), `backend`
    talks to it over /api and the mock data gives way to the state the core keeps: the
@@ -7307,8 +7476,7 @@ function liveApply(s) {
   rsSeq = s.rsSeq || 1;
   if (s.dnsServers) { replaceObj(dnsServers, s.dnsServers); dnsOrder = s.dnsOrder; dnsSeq = s.dnsSeq || 1; }
   if (s.dnsCfg) Object.assign(dnsCfg, s.dnsCfg);
-  pingCache.clear();
-  (s.pings || []).forEach(([k, e]) => pingCache.set(k, e));
+  restorePings(s.pings);   // 15-ping.js: older states keyed a server, not its variant
   // a page closed mid-update saved the spinner: it would block every later update
   Object.values(sourcesData).forEach(x => { delete x.updating; });
 }
@@ -7330,32 +7498,37 @@ function planGroup(refs, pick, chosenRef) {
   const nodes = pick === 'fastest' ? ok.slice().sort((a, b) => pingRank(a.node) - pingRank(b.node)) : ok;
   return { pick, chosen: pick === 'priority' && chosenRef ? refKey(chosenRef) : null, nodes: nodes.map(r => ({ key: refKey(r), outbound: r.node.outbound })) };
 }
-function livePlan() {
-  const id = effectiveConnectId();
-  if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
-  const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
-    urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined }, routing: routingPlan() };
-  if (chainsData[id]) {
-    const c = chainsData[id], exits = chainExitRefs(c), exitNode = chainExitNode(c);
-    return Object.assign(base, { kind: 'chain',
-      entry: planGroup(chainEntryRefs(c), 'fastest'),
-      main: planGroup(exits, c.exitMode === 'priority' ? 'priority' : 'fastest', exits.find(r => r.node === exitNode)) });
-  }
-  const refs = unitPickRefs(id), n = unitNode(id), pin = pinnedRef(id);
-  // a pinned server: a selector held on it (no failover, it is Manual)
-  return Object.assign(base, { kind: 'unit', main: planGroup(refs, pin || unitPriority(id) ? 'priority' : 'fastest', pin || refs.find(r => r.node === n)) });
+// The plan around one entry (anchor; default: the UI's own pick) — main-flow routes:
+// 94-live-auto.js, rules / apps / DNS: 93-routing-plan.js. Built on the UI's own picks, not
+// the core's (withoutCore), so the core moving a Priority group is no new plan.
+function livePlan(anchor) {
+  return withoutCore(() => {
+    const id = anchor || effectiveConnectId(true);
+    if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
+    const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
+      urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined }, auto: planAuto(), routing: routingPlan() };
+    return Object.assign(base, planRoutes(id));
+  });
 }
-/* What a reconnect is worth: the servers in each group and the pick, not their ping order.
-   A ping reorders Fastest (the urltest measures on its own anyway) and flips servers to
-   'testing' — neither may restart sing-box and drop every connection. The system proxy is
-   in it: switched while connected, the core gets it with the reconnect. */
+/* What a reconnect is worth: the routes, rules and the servers in each group — not their
+   ping order (a ping reorders Fastest, in routes and in rule targets alike, and flips
+   servers to 'testing': neither may restart sing-box and drop every connection), nor the
+   server a main-flow group is on (the core moves those itself; only a Manual pin counts).
+   A rule target's Priority pick does count: nothing but a new plan moves it. The system
+   proxy is in it: switched while connected, the core gets it with the reconnect. */
 function planSigOf(plan) {
-  const g = x => x && Object.assign({}, x, { nodes: x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key) });
-  const t = x => x && Object.assign({}, x, { main: g(x.main), entry: g(x.entry) });   // rule targets alike
-  const routing = plan.routing && Object.assign({}, plan.routing, { targets: Object.fromEntries(Object.entries(plan.routing.targets).map(([k, x]) => [k, t(x)])) });
-  return JSON.stringify(Object.assign({}, plan, { main: g(plan.main), entry: g(plan.entry), routing, systemProxy: segState.sys === 'on' }));
+  const keys = x => x.pick === 'fastest' ? x.nodes.map(n => n.key).sort() : x.nodes.map(n => n.key);
+  // a Priority group with no pick (nothing measured yet) starts on its first server: the same
+  const pick = x => x.pick === 'priority' ? x.chosen || (x.nodes[0] && x.nodes[0].key) || null : null;
+  const g = x => x && Object.assign({}, x, { chosen: x.pinned ? x.chosen : null, nodes: keys(x) });
+  const gt = x => x && Object.assign({}, x, { chosen: pick(x), nodes: keys(x) });
+  const r = (x, f) => x && Object.assign({}, x, { main: f(x.main), entry: f(x.entry) });
+  const routing = plan.routing && Object.assign({}, plan.routing,
+    { targets: Object.fromEntries(Object.entries(plan.routing.targets || {}).map(([k, x]) => [k, r(x, gt)])) });
+  return JSON.stringify(Object.assign({}, plan, { current: null, routing, systemProxy: segState.sys === 'on',
+    routes: (plan.routes || []).map(x => r(x, g)) }));
 }
-const planSig = () => { try { return planSigOf(livePlan()); } catch (e) { return null; } };
+const planSig = () => { try { return planSigOf(livePlan(liveSigAnchor())); } catch (e) { return null; } };
 const pingsRunning = () => [...pingCache.values()].some(v => v.ms === 'testing');
 
 // Connected and the plan changed (another entry, a server switched off, Global/Rules…):
@@ -7495,12 +7668,15 @@ const liveBackend = {
       live.pairQueue.push({ entry, exit, resolve });
     });
   },
-  connect() {
+  connect(anchor) {
     return Promise.resolve().then(() => {
-      const plan = livePlan();
+      const plan = livePlan(anchor);
       if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
       return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
+        live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
+        live.switches = live.restarts = null;   // a new AutoService counts from 0
+        liveAutoStatus(st);
         if (st.warning) toast(st.warning);
         liveWatchExit();   // the core checks the exit after every (re)connect
       });
@@ -7508,6 +7684,7 @@ const liveBackend = {
   },
   disconnect() {
     live.planSig = null;
+    liveAutoStatus(null);
     return api('/api/disconnect', {});
   },
   // Connected: the tunnel's exit; not connected: the direct IP (the core knows which).
@@ -7575,7 +7752,11 @@ function liveInit() {
     renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
     renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
-    if (connected) live.planSig = planSig();
+    if (connected) {
+      liveAutoStatus(st.status);
+      live.anchor = liveFindAnchor(live.routes || []);
+      live.planSig = planSig();
+    }
     live.sourcesRev = st.status.sourcesRev;
     live.ready = true;
     toast(st.snapshot ? 'Core connected' : 'Core connected — add a subscription in Nodes');
@@ -7590,6 +7771,7 @@ function liveInit() {
   setInterval(() => {
     if (!live.ready || !connected || connecting) return;
     api('/api/status').then(st => {
+      liveAutoStatus(st);   // where the core's Auto is, what it measured (94-live-auto.js)
       if (st.connected) {
         // a check the core finished on its own (e.g. after liveMaybeReconnect)
         if (st.exit && JSON.stringify(st.exit) !== JSON.stringify(exitInfo)) { exitInfo = st.exit; renderExitIp(); }

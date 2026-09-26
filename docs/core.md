@@ -34,7 +34,8 @@ Windows Firewall должен пропускать входящие для `dart
 | | Мокап (UI) | Ядро |
 |---|---|---|
 | Источники, профили, цепочки, порядок, Auto/Manual, off/disabled | хранит и решает | хранит снимок (`ui-state.json`) |
-| Что подключать сейчас (entry, ноды, fastest/priority) | решает → «план» | — |
+| Что подключать (запись + резервные, ноды, fastest/priority) | решает → «план» | — |
+| Auto при подключении (failover, возврат, Priority-сервер) | показывает то, что сообщило ядро | `auto.dart` (AutoService) |
 | Скачивание подписок, UA discovery, ETag, dedup, gone | — | `fetch.dart`, `merge.dart` |
 | Парсинг ссылок / Clash / sing-box JSON | — | `parse/` |
 | Конфиг sing-box | — | `config.dart` |
@@ -61,29 +62,80 @@ regional indicators). `unsupported` — причина, по которой но
 
 ## План подключения
 
-UI собирает из `effectiveConnectId()`:
+UI собирает вокруг записи-якоря (своя догадка `effectiveConnectId(true)`: верхняя запись
+Auto, которая может работать; в Manual — закреплённая; `94-live-auto.js`):
 
 ```
-{ kind: 'unit' | 'chain',
-  main:  Group,            // юнит, или выход цепочки
-  entry: Group,            // только цепочка: выход идёт через неё (detour)
+{ routes: [Route],         // по приоритету Route
+  current: 1,              // индекс якоря: с него стартует selector
   mixedPort: 2080, global: bool,
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
-             url: connCfg.testUrl /* нет — gstatic */ },
+             url: connCfg.testUrl /* нет — gstatic; им же проверяет AutoService */ },
+  auto: { failAfter, threshold, checkEvery, keepWarm, standby },
   routing: Routing }       // правила, приложения, быстрые правила, DNS — ниже
-Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key: 'sid::nid', outbound }] }
+Route = { id, kind: 'unit' | 'chain', main: Group, entry?: Group }   // entry — вход цепочки, выход идёт через него (detour)
+Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true, nodes: [{ key: 'sid::nid', outbound }] }
 ```
 
+- Маршруты: в Auto — все записи Auto выше якоря, якорь и `standby` записей ниже; в Manual —
+  только якорь. Записи без пригодных серверов пропускаются. План без `routes` (старый вид:
+  `kind/main/entry` сверху) = один маршрут.
+- Теги (`plan.dart`): маршрут i — группа `route<i>` (у цепочки выход `route<i>` с detour на
+  `route<i>-entry`), сервер — `route<i>/<sid::nid>`; над маршрутами `selector` `proxy`
+  (`default` = `current`, `interrupt_exist_connections`), `route.final = proxy`.
 - `fastest` → `urltest` (interval/tolerance из Auto mode); `priority` → `selector` с
-  выбранным UI сервером. failAfter / standby — дело AutoService приложения, не ядра.
+  `chosen`; `pinned` — сервер закреплён в Manual, AutoService его не двигает.
 - `urltest` до конца своего первого круга замеров (со сотней серверов — около минуты) шлёт
   всё через первый сервер списка. Поэтому для `fastest` UI передаёт ноды по известному пингу:
   живые по возрастанию, потом неизмеренные, мёртвые в конце.
-- Режим Rules: правила из `routing` (ниже). Global — всё в прокси, правила не применяются.
-- Подключено и план изменился (другой entry, сервер выключен, Global/Rules, системный
-  прокси) — UI сам переподключает. Сравнивается состав групп и выбор, а не порядок: пинг
-  переставляет Fastest и помечает серверы «testing» — это не повод рвать соединения; пока
-  идёт пинг, проверка ждёт его конца.
+- Режим Rules: правила из `routing` (ниже); «через VPN», `final` и `tunnel-in` ведут в
+  selector `proxy`, то есть в маршрут, на котором сейчас Auto. Global — всё в `proxy`,
+  правила не применяются.
+- План строится на выборе самого UI, не ядра (`withoutCore`): переключения AutoService не
+  меняют план.
+- Подключено и план изменился — UI сам переподключает. Сравнивается состав: маршруты (в Auto —
+  окно вокруг якоря, с которым подключались, пока он в Auto), серверы групп (у Fastest — без
+  порядка, и в маршрутах, и в целях правил), закреп Manual, правила, Global/Rules, системный
+  прокси, настройки Auto. Не сравниваются порядок по пингу, `chosen` групп маршрутов и
+  `current`: пинг и переключения AutoService — не повод рвать соединения. `chosen` цели правила
+  сравнивается: её Priority никто, кроме нового плана, не двигает. Пока идёт пинг, проверка
+  ждёт его конца.
+
+## Auto в ядре (`auto.dart`)
+
+`AutoService(ClashApi, plan)` — чистый Dart без UI: демон держит его, пока подключено
+(Flutter возьмёт как есть). Раунд — через `checkEvery` (первый через 3 с; пока текущий
+маршрут не отвечает — каждые 10 с):
+
+1. `/proxies` — на каких серверах стоят группы. Clash API молчит — раунд ничего не решает.
+2. Замер `/proxies/<сервер>/delay` сервера, на котором стоит группа: текущий маршрут, все
+   выше него, при `keepWarm` ещё `standby` ниже (параллельно). Цепочка: вход, потом выход
+   (его замер идёт через вход и в `members` не попадает).
+   - Fastest: сервер молчит → `/group/<tag>/delay`: urltest перемеряет всех и сразу берёт
+     живой; не ответившие — тоже таймауты.
+   - Priority: `failAfter` таймаутов подряд → первый ответивший по порядку (пачки по 8),
+     `PUT /proxies/<группа>`; сервер выше текущего ответил `failAfter` раз подряд и не
+     медленнее больше чем на `threshold` → обратно на него.
+3. Маршруты: у текущего `failAfter` таймаутов подряд → `PUT /proxies/proxy` на первый по
+   приоритету ответивший (не мерянные в раунде проверяются по одному); не ответил никто —
+   `allDown`. Возврат выше — по тому же правилу, что у Priority.
+
+Настройки — `plan.auto` (URL — `urlTest.url`), `checkEvery` 10–3600 с. Тесты: `auto_test.dart`
+(фейковый Clash API из того же `buildConfig`), `auto_singbox_test.dart` (настоящий sing-box
+на loopback: переключение без перезапуска, цепочка, urltest, падение процесса). Системный
+прокси в тестах — фейк (`Daemon(sysProxy: …)`): реестр тесты не трогают.
+
+Clash API: случайный секрет на каждый запуск sing-box (`clash_api.secret`), все вызовы ядра
+идут с `Authorization: Bearer`; без него — 401, чужая программа туннель не переключит.
+
+Падение sing-box (процесс вышел сам, не наш stop): ядро сразу возвращает системный прокси,
+затем перезапускает sing-box с тем же планом на маршруте, где был Auto — паузы 1 / 4 / 15 с,
+счёт попыток сбрасывается после минуты работы. Перезапуск идёт тем же путём, что connect
+(`_startSingBox`: списки правил, новый `tunnel-in`, предупреждения сборки; потом фоновое
+обновление списков). Пока перезапускает — `connected: true`, `recovering: {attempt, of, code,
+next}`; удалось — `restarts` +1, `warning`, системный прокси снова включён (если был), новый
+AutoService; три неудачи — отключено, `error`. Фоновая докачка списков, требующая
+переподключения, тоже встаёт на маршрут, где был Auto.
 
 ## Правила в конфиге
 
@@ -131,15 +183,22 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 | `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
 | `POST /api/connect` | `{plan, systemProxy}` |
-| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, sourcesRev}`; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
+| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, recovering, restarts, auto, sourcesRev}` — `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
 | `POST /api/node` | `{protocol, address, port, secret, name, outbound?, unsupported?}` → `{node}`; ошибка формы — 400 `{error}` с текстом для пользователя |
 | `POST /api/share` | `{outbound, name, flag, unsupported?}` → `{link}` (null — у сервера нет формы ссылки) |
-| `DELETE /api/connections`, `DELETE /api/connections/{id}` | закрыть все / одно соединение (clash API sing-box); без подключения `{ok:false}` |
+| `DELETE /api/connections`, `DELETE /api/connections/{id}` | закрыть все / одно соединение (clash API sing-box, с её секретом); без подключения `{ok:false}` |
 | `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
+
+`status.auto` (пока подключено; `null` — нет): `{now: id маршрута, index, server, entryServer
+(цепочка), routes: [{id, ms, fails, oks, at}], members: [{key, ms, fails, oks, at}], switches,
+switchedAt, lastSwitch: {route?, from, to, reason: 'failover' | 'back', at}, allDown, checkedAt}`.
+`ms`: −1 таймаут, −2 не мерили; `members` — все замеренные серверы (UI кладёт в кэш пингов);
+`switches` — счёт переключений маршрутов и Priority-серверов (`lastSwitch.route` есть у второго,
+тогда `from`/`to` — ключи серверов). UI опрашивает status раз в 4 с.
 
 Пинг: временный sing-box без inbound'ов, задержка через clash API
 `/proxies/{tag}/delay` (32 параллельно, таймаут 5 с). Пары entry→exit — копия выхода с
@@ -165,8 +224,8 @@ Amazon, ipip.net (из Китая). Страна, которая режет од
 состоянию).
 
 Трафик (`traffic.dart`, `TrafficMeter`): clash API sing-box `/connections` даёт счётчики
-байт и только группу соединения (`chains: ["proxy"]`); реальный сервер — `now` группы из
-`/proxies` (`proxy/<sid::nid>`; у цепочки ещё `entry/<sid::nid>`, в `out` выход первым).
+байт и группы соединения (`chains`); реальный сервер — `now` групп из `/proxies`
+(`route<i>/<sid::nid>`; у цепочки ещё `route<i>-entry/<sid::nid>`; у цели правила `<цель>/…` и `<цель>>entry/…`; в `out` выход первым).
 Скорость — разница счётчиков между двумя опросами (любая частота опроса; перезапуск
 sing-box не даёт отрицательных). Процесс (`process`) — `route.find_process`. UI опрашивает
 раз в секунду, пока подключено и страница видна: карточки Speed / This session /
@@ -215,3 +274,5 @@ TUN и kill switch; Hijack DNS / FakeIP; «If unavailable» на лету и а�
 (сейчас — при сборке конфига / переподключении); обновление гео-списков по таймеру; Decrypt
 password подписки (нет спецификации); автовыбор URL пинга (сейчас — выбор в Settings →
 Connection, по умолчанию gstatic).
+Auto: проверка по неудачным запросам, `speedOnFail`, пауза при выключенном экране; группы
+целей правил AutoService не ведёт (их Priority меняется только новым планом).

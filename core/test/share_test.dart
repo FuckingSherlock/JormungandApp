@@ -10,6 +10,17 @@ import 'package:test/test.dart';
 
 import 'fixtures.dart';
 
+/// Never the real registry: none of these routes may reach the system proxy.
+class _NoSysProxy extends SystemProxy {
+  _NoSysProxy() : super(File('never-written'));
+  @override
+  bool get isSet => false;
+  @override
+  Future<String?> enable(int port) => throw StateError('system proxy touched');
+  @override
+  Future<void> restore() => throw StateError('system proxy touched');
+}
+
 // The same server back from its own link: key (dedup), outbound, name and flag.
 void _roundTrip(Node n) {
   final link = shareLinkOf(n);
@@ -149,7 +160,14 @@ void main() {
 
     setUp(() async {
       tmp = await Directory.systemTemp.createTemp('jormd-test');
-      d = Daemon(singBox: p.join('tool', 'bin', Platform.isWindows ? 'sing-box.exe' : 'sing-box'), dataDir: tmp.path, uiFile: 'none');
+      d = Daemon(
+        singBox: p.join('tool', 'bin', Platform.isWindows ? 'sing-box.exe' : 'sing-box'),
+        dataDir: tmp.path,
+        uiFile: 'none',
+        clashPort: await freePort(),
+        exitCheck: (_) async => throw StateError('no exit probes in tests'),
+        sysProxy: _NoSysProxy(),
+      );
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       server.listen(d.handle);
     });

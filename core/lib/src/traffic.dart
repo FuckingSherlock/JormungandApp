@@ -15,8 +15,9 @@ class TrafficMeter {
   /// [nowMs] = sample time. Result:
   /// `{down, up (B/s), downTotal, upTotal, tcp, udp,
   ///   conns: [{id, host, port, net, rule, out: [tag…], process, down, up, downRate, upRate, start}]}`
-  /// `out` lists the real outbounds, exit first: `proxy/<key>` then `entry/<key>` for a
-  /// chain, or `direct`.
+  /// `out` lists the real outbounds, exit first: `route<i>/<key>` then
+  /// `route<i>-entry/<key>` for a chain (plan.dart); a rule target `<target>/<key>` then
+  /// `<target>>entry/<key>` (routing.dart); or `direct`.
   Map<String, dynamic> sample(Map<String, dynamic> conns, Map<String, dynamic>? proxies, int nowMs) {
     final down = (conns['downloadTotal'] as num?)?.toInt() ?? 0;
     final up = (conns['uploadTotal'] as num?)?.toInt() ?? 0;
@@ -50,8 +51,12 @@ class TrafficMeter {
       final chains = ((c['chains'] as List?) ?? const []).map((e) => '$e').toList();
       // chains = the server, then the groups it was picked by: all resolve to the server
       final out = {for (final t in chains) resolve(t)}.toList();
-      // a chain's exit dials through the entry group: show where it enters too
-      if (out.isNotEmpty && out.first.startsWith('proxy/') && byName.containsKey('entry')) out.add(resolve('entry'));
+      // a chain's exit (`route1/…`, a rule target's `chain:c/…`) dials through its entry
+      // group (`route1-entry`, `chain:c>entry`): show where it enters too
+      final slash = out.isEmpty ? -1 : out.first.indexOf('/');
+      final group = slash > 0 ? out.first.substring(0, slash) : '';
+      final entry = ['$group-entry', '$group>entry'].where(byName.containsKey).firstOrNull;
+      if (slash > 0 && entry != null) out.add(resolve(entry));
       final host = '${m['host'] ?? ''}';
       list.add({
         'id': id,
