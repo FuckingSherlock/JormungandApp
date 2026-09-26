@@ -3,13 +3,15 @@
 //   node design/tools/check.mjs                 run all checks, print one line per failure
 //   node design/tools/check.mjs shot home dock  screenshots into design/.shots/
 //        options: --theme original|karing|github  --scale 1  --width 400 --height 800
+//                 --out <dir> (instead of design/.shots)  --files (with --grid: keep the single shots too)
+//                 --grid-name <name> (grid file name, default grid); preset "all" = every preset
 //        presets: see SHOTS below
 //
 // Playwright is resolved from the global npm root (pre-installed in the cloud env).
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -150,8 +152,10 @@ async function clipOf(page, sel, extraTop = 0) {
 // --grid (or verify) glues the presets into one labelled .shots/grid.png, 4 per row:
 // one image to look at instead of several.
 async function shots(names, grid = args.includes('--grid')) {
+  if (names.length === 1 && names[0] === 'all') names = Object.keys(SHOTS);   // every preset
   const browser = await playwright.chromium.launch();
-  const dir = join(root, '.shots');
+  const dir = opt('out') ? resolve(opt('out')) : join(root, '.shots');
+  const files = !grid || args.includes('--files');
   mkdirSync(dir, { recursive: true });
   const cells = [];
   for (const name of names) {
@@ -161,16 +165,17 @@ async function shots(names, grid = args.includes('--grid')) {
     });
     const extra = (await SHOTS[name](page)) || {};
     const file = join(dir, name + (opt('theme') ? '-' + opt('theme') : '') + '.png');
-    const buf = await page.screenshot({ path: grid ? undefined : file, ...extra });
+    const buf = await page.screenshot({ path: files ? file : undefined, ...extra });
     if (grid) cells.push([name, buf.toString('base64')]);
     if (!grid || page.errors.length) console.log((grid ? name : file) + (page.errors.length ? '   ERRORS: ' + page.errors.join(' | ') : ''));
     await page.close();
   }
   if (grid && cells.length) {
-    const page = await browser.newPage({ viewport: { width: 400 * Math.min(4, cells.length) + 8, height: 100 } });
+    // the grid keeps the shots' own resolution (--scale), not a 1x downscale
+    const page = await browser.newPage({ viewport: { width: 400 * Math.min(4, cells.length) + 8, height: 100 }, deviceScaleFactor: +opt('scale', 1) });
     await page.setContent(`<body style="margin:0;background:#000;display:flex;flex-wrap:wrap;gap:4px;padding:4px;width:${400 * 4 + 12}px;font:600 13px sans-serif;color:#fff">${
       cells.map(([n, b]) => `<div style="width:400px"><div style="padding:2px 4px">${n}</div><img style="display:block;width:400px" src="data:image/png;base64,${b}"></div>`).join('')}</body>`);
-    const file = join(dir, 'grid.png');
+    const file = join(dir, opt('grid-name', 'grid') + '.png');
     await page.screenshot({ path: file, fullPage: true });
     console.log(file);
   }
