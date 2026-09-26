@@ -128,6 +128,22 @@ void main() {
       expect(store.rev, 0);
     });
 
+    test('a failed update notes lastError on the source; the next good one clears it', () async {
+      await store.save(_snap(_sub('u', updatedAt: 80 * _h)));
+      final failing = SubscriptionUpdater(
+        store: store,
+        clock: () => DateTime.fromMillisecondsSinceEpoch(100 * _h),
+        update: (s, {hwid, proxyPort, rediscover = false, now, client}) async => throw const SocketException('refused'),
+      );
+      expect(await failing.runDue(), isEmpty);
+      var s = (await store.read())!['sourcesData']['src1'];
+      expect([s['lastError']['at'], s['updatedAt'], store.rev], [100 * _h, 80 * _h, 1]);
+      expect('${s['lastError']['msg']}', contains('refused'));
+      expect(await updater(null, now: 101 * _h).runDue(), ['src1']);
+      s = (await store.read())!['sourcesData']['src1'];
+      expect([s['lastError'], s['count']], [null, 1]);
+    });
+
     test('a source the UI is updating is skipped', () async {
       await store.save(_snap(_sub('u', updatedAt: 80 * _h)));
       final u = updater(null);

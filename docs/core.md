@@ -41,6 +41,9 @@ Windows Firewall должен пропускать входящие для `dart
 | Конфиг sing-box | — | `config.dart` |
 | Запуск, остановка, пинг | — | `runtime.dart` |
 | Системный прокси (Windows) | переключатель | `sysproxy.dart` |
+| Ссылка сервера (Copy share link, QR) | просит | `share.dart` |
+| Сервер вручную (форма без ссылки, правка) | поля формы | `manual.dart` |
+| Лог (вкладка Logs) | фильтр, поиск, копирование | `logbook.dart` |
 
 Во Flutter-приложении колонка «Мокап» станет Dart-кодом приложения, API уйдёт — сервисы
 будут вызывать ядро напрямую.
@@ -66,7 +69,8 @@ Auto, которая может работать; в Manual — закреплё
 { routes: [Route],         // по приоритету Route
   current: 1,              // индекс якоря: с него стартует selector
   mixedPort: 2080, global: bool,
-  urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold },
+  urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
+             url: connCfg.testUrl /* нет — gstatic; им же проверяет AutoService */ },
   auto: { failAfter, threshold, checkEvery, keepWarm, standby },
   routing: Routing }       // правила, приложения, быстрые правила, DNS — ниже
 Route = { id, kind: 'unit' | 'chain', main: Group, entry?: Group }   // entry — вход цепочки, выход идёт через него (detour)
@@ -179,7 +183,12 @@ AutoService; три неудачи — отключено, `error`. Фонова
 | `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
 | `POST /api/connect` | `{plan, systemProxy}` |
-| `POST /api/disconnect`, `GET /api/status`, `GET /api/log` | status: `{connected, systemProxy, error, warning, exit, recovering, restarts, auto, sourcesRev}` — `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке |
+| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, recovering, restarts, auto, sourcesRev}` — `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
+| `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
+| `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
+| `POST /api/node` | `{protocol, address, port, secret, name, outbound?, unsupported?}` → `{node}`; ошибка формы — 400 `{error}` с текстом для пользователя |
+| `POST /api/share` | `{outbound, name, flag, unsupported?}` → `{link}` (null — у сервера нет формы ссылки) |
+| `DELETE /api/connections`, `DELETE /api/connections/{id}` | закрыть все / одно соединение (clash API sing-box, с её секретом); без подключения `{ok:false}` |
 | `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
@@ -222,7 +231,31 @@ sing-box не даёт отрицательных). Процесс (`process`) �
 раз в секунду, пока подключено и страница видна: карточки Speed / This session /
 Connections и лист Live connections (новые сверху: хост:порт, TCP/UDP, вход → выход,
 правило, приложение, скорость, объём, возраст). Без подключения скорость и соединения — 0,
-итоги прошлой сессии остаются.
+итоги прошлой сессии остаются. В листе — фильтр (хост, приложение, правило, сервер), × на
+строке закрывает соединение, Close all — все (`DELETE /api/connections[/id]` → clash API
+`DELETE /connections[/{id}]`; приложение обычно тут же открывает новое).
+
+Лог (`logbook.dart`): вывод sing-box (уровень `info`, со временем) и заметки самого ядра
+(подключено / отключено / не подключилось, предупреждение системного прокси, упавшие
+`/api`-запросы) — одна нумерованная очередь. Префикс даты sing-box срезается, уровень
+(TRACE/DEBUG → debug, WARN → warn, ERROR/FATAL/PANIC → error) — отдельным полем; строки
+рантайма `[jormd] …` считаются строками ядра.
+
+Ссылка сервера (`share.dart`) — обратная сторона парсера ссылок: из outbound снова
+vless/trojan/hy2/tuic/anytls-URL, vmess — JSON v2rayN (URL-вид, если JSON не умеет: Reality,
+insecure), ss — SIP002 (у шифров 2022 userinfo без base64). Имя во фрагменте, флаг впереди.
+Разобранная обратно ссылка даёт тот же `key` и тот же outbound (тест `share_test.dart`).
+socks — `socks5://user:pass@host:port` (`socks4://` для v4), Hysteria v1 — `hysteria://host:port?auth=…`.
+Нет ссылки у http/wireguard
+из подписок и у `unsupported`-нод (их outbound без
+xhttp — ссылка назвала бы другой сервер).
+
+Сервер вручную (`manual.dart`): протокол, адрес, порт, секрет формы (UUID / пароль;
+`method:password` у ss, `uuid:password` у tuic, `user:password` у socks — необязательно).
+Новый — простой outbound теми же билдерами, что у парсера ссылок (VLESS/VMess без TLS,
+Trojan/HY2/TUIC/AnyTLS с TLS по адресу). Правка того же протокола меняет только адрес,
+порт и секрет (пустой секрет — прежний), TLS, транспорт, flow остаются; `key` пересчитывается,
+`id` UI оставляет прежним, чтобы настройки с этим сервером не потерялись.
 
 Системный прокси ставит ядро через реестр (HKCU Internet Settings), не sing-box: при
 убитом процессе sing-box не вернул бы настройки. Прежние значения сохраняются и
@@ -239,6 +272,7 @@ HWID (`device.dart`) и каналом Direct / Proxy; автообновлен�
 
 TUN и kill switch; Hijack DNS / FakeIP; «If unavailable» на лету и автопереключение DNS
 (сейчас — при сборке конфига / переподключении); обновление гео-списков по таймеру; Decrypt
-password подписки (нет спецификации); пинг выбирает URL автоматически (сейчас всегда gstatic).
+password подписки (нет спецификации); автовыбор URL пинга (сейчас — выбор в Settings →
+Connection, по умолчанию gstatic).
 Auto: проверка по неудачным запросам, `speedOnFail`, пауза при выключенном экране; группы
 целей правил AutoService не ведёт (их Priority меняется только новым планом).

@@ -46,8 +46,10 @@ function renderGeneral() {
 function setGenCfg(key, v) { genCfg[key] = v; renderGeneral(); }
 
 function openLangPicker() {
-  openActions('Language', Object.entries(LANGS).map(([k, name]) =>
-    menuRow(genCfg.lang === k ? ICON.check : '', name, `closeSheet('actions');setGenCfg('lang','${k}')`)).join(''));
+  // Only English is written yet: Russian is listed, off, marked soon.
+  openActions('Language', Object.entries(LANGS).map(([k, name]) => k === 'en'
+    ? menuRow(genCfg.lang === k ? ICON.check : '', name, `closeSheet('actions');setGenCfg('lang','${k}')`)
+    : menuRow('<span class="menu-ico-gap"></span>', name + '<span class="soon-tag">soon</span><div class="menu-sub">The app is in English for now</div>', `toast('${name} is coming soon')`, 'disabled')).join(''));
 }
 
 /* On open: ping the entry the app would connect through now and the next `autoCfg.standby`

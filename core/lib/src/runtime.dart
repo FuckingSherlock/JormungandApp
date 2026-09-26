@@ -35,6 +35,9 @@ class SingBoxProcess implements ClashApi {
   Process? _up; // the process that came up (start() returned), until it stops
   int? clashPort;
 
+  /// Every line sing-box writes, as it comes (jormd's Logs tab).
+  void Function(String line)? onLog;
+
   /// The Clash API secret: new and random on every start, put into the config's
   /// clash_api and sent by every call here, so no other program can steer the tunnel.
   String? clashSecret;
@@ -48,6 +51,7 @@ class SingBoxProcess implements ClashApi {
 
   void _log(String line) {
     logs.add(line);
+    onLog?.call(line);
     while (logs.length > 500) {
       logs.removeFirst();
     }
@@ -159,6 +163,20 @@ class SingBoxProcess implements ClashApi {
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(body));
       final res = await req.close().timeout(timeout);
+      await res.drain<void>().timeout(timeout);
+      return res.statusCode;
+    } catch (_) {
+      return null;
+    } finally {
+      c.close(force: true);
+    }
+  }
+
+  /// DELETE on the clash API (`/connections[/id]` closes them); the status, or null.
+  Future<int?> clashDelete(String path, {Duration timeout = const Duration(seconds: 2)}) async {
+    final c = HttpClient()..findProxy = (_) => 'DIRECT';
+    try {
+      final res = await (await _open(c, 'DELETE', path, timeout)).close().timeout(timeout);
       await res.drain<void>().timeout(timeout);
       return res.statusCode;
     } catch (_) {

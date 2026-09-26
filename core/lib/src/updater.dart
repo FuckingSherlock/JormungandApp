@@ -169,7 +169,13 @@ class SubscriptionUpdater {
     }
   }
 
-  /// Updates every due subscription now; the ids that changed in the snapshot.
+  // What the source must still have for a result to land (the user did not edit, update or
+  // delete it meanwhile).
+  static Map<String, dynamic> _expect(Map<String, dynamic> s) =>
+      {for (final k in const ['url', 'userAgent', 'filter', 'hwid', 'gone', 'updatedAt']) k: s[k]};
+
+  /// Updates every due subscription now; the ids updated (a failure only notes
+  /// `lastError` on the source).
   Future<List<String>> runDue() => _running ??= _runDue().whenComplete(() => _running = null);
 
   Future<List<String>> _runDue() async {
@@ -187,10 +193,16 @@ class SubscriptionUpdater {
           proxyPort: proxyPort?.call(),
           now: clock(),
         );
-        final expect = {for (final k in const ['url', 'userAgent', 'filter', 'hwid', 'gone', 'updatedAt']) k: s[k]};
-        if (await store.patchSource(sid, expect, (r['patch'] as Map).cast<String, dynamic>())) done.add(sid);
+        final patch = Map<String, dynamic>.of((r['patch'] as Map).cast<String, dynamic>());
+        if (s['lastError'] != null) patch['lastError'] = null; // the card's error strip goes
+        if (await store.patchSource(sid, _expect(s), patch)) done.add(sid);
       } catch (e) {
         stderr.writeln('[updater] ${s['name'] ?? sid}: $e');
+        // the card shows it with Retry (33-source-error.js); updatedAt stays, so the UI's
+        // own save still wins over it
+        await store.patchSource(sid, _expect(s), {
+          'lastError': {'msg': '$e', 'at': clock().millisecondsSinceEpoch},
+        });
       } finally {
         _busy.remove(sid);
         _triedAt[sid] = clock().millisecondsSinceEpoch;

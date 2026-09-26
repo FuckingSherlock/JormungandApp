@@ -200,14 +200,14 @@ function saveCreateProfile() {
 
 function deleteEditingProfile() {
   if (!editingProfileId) return;
-  if (getProfileIds().length <= 1) { editingProfileId = null; closeSheet('createprofile'); return; }
   delete profilesData[editingProfileId];   // the catalog and both route lists drop it (syncCatalog)
-  const fallback = getProfileIds()[0];
+  const fallback = getProfileIds()[0] || null;   // none: it was the last one — No profiles yet
   if (activeConnectId === editingProfileId) activeConnectId = fallback;
   Object.values(chainsData).forEach(c => {
+    if (c.inId !== editingProfileId && c.outId !== editingProfileId) return;
     if (c.inId === editingProfileId) c.inId = fallback;
     if (c.outId === editingProfileId) c.outId = fallback;
-    if (c.inId === c.outId) {   // a chain through one profile is pointless: drop it
+    if (!fallback || c.inId === c.outId) {   // a chain through one profile is pointless: drop it
       delete chainsData[c.id];
       if (activeConnectId === c.id) activeConnectId = fallback;
     }

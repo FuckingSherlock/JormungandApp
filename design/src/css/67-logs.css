@@ -1,0 +1,27 @@
+/* ── LogsView (46-logs.js): time column, the message wraps under itself ── */
+#view-logs{position:relative}
+.view > .log-levels{flex-shrink:0;padding:0 14px 8px}
+.log-levels .chip{padding:5px 12px;font-size:13px}
+.log-count{margin-left:6px;font-size:11px;font-weight:700;color:var(--warn)}
+.log-count:empty{display:none}
+.chip.active .log-count{color:inherit;opacity:.85}
+.log-scroll{padding-bottom:56px}
+.log-list{font-family:var(--mono);font-size:12px;line-height:1.45}
+.log-line{display:grid;grid-template-columns:auto 1fr;gap:8px;padding:3px 14px 3px 12px;border-left:2px solid transparent}
+.log-line.warn{border-left-color:var(--warn);background:rgba(var(--warn-rgb),.05)}
+.log-line.error{border-left-color:var(--muted);background:rgba(var(--muted-rgb),.06)}
+.log-time{color:var(--t3)}
+.log-msg{color:var(--t2);min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.log-line.debug .log-msg,.log-cid{color:var(--t3)}
+.log-line.warn .log-msg,.log-line.error .log-msg{color:var(--t1)}
+.log-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;padding:0 4px;border-radius:3px;margin-right:6px;vertical-align:1px}
+.log-tag.warn{color:var(--warn);background:rgba(var(--warn-rgb),.15)}
+.log-tag.error{color:var(--muted);background:rgba(var(--muted-rgb),.15)}
+.log-tag.core{color:var(--accent);background:rgba(var(--accent-rgb),.15)}
+.log-list mark{background:rgba(var(--accent-rgb),.3);color:var(--t1);border-radius:2px}
+.log-empty{padding:48px 24px;text-align:center;color:var(--t3);font-family:var(--font);font-size:14px}
+.log-jump{
+  position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:2;
+  background:var(--accent);color:#fff;border:none;border-radius:16px;padding:7px 14px;
+  font:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);
+}

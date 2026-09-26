@@ -216,7 +216,7 @@ function renderSourceCard(id, q) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
     </div>
-    ${usageHtml(s)}${s.announce ? `<div class="src-announce" title="${esc(s.announce)}">${esc(s.announce)}</div>` : ''}
+    ${usageHtml(s)}${srcErrorHtml(s)}${s.announce ? `<div class="src-announce" title="${esc(s.announce)}">${esc(s.announce)}</div>` : ''}
     </div>
     </div>
     <div class="src-body">${nodeRows}${addRow}${q ? '' : goneBlockHtml('nodes:' + id, goneRefs(id), null,
@@ -319,10 +319,13 @@ function updateSource(sid, opts) {
   if (s.kind !== 'sub' || s.updating) return;
   s.updating = true;
   refreshSourceViews();
-  backend.updateSource(s, opts && typeof opts === 'object' ? opts : {}).then(() => {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  // never loaded (its first fetch failed): Retry is that first fetch again
+  ((s.nodes || []).length ? backend.updateSource(s, o) : backend.fetchSource(s, o)).then(() => {
     s.count = s.nodes.length;
+    delete s.lastError;
     return true;
-  }, e => { toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
+  }, e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
     s.updating = false;
     purgeExpiredGone();
     refreshSourceViews();
@@ -390,8 +393,8 @@ function openSourceActions(sid) {
     + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
     if ((s.userAgent || 'Auto') === 'Auto') rows += menuRow(ICON.refresh, 'Update with all user agents<div class="menu-sub">Asks as sing-box, mihomo and Clash again and merges what each gives</div>', close + `updateSource('${sid}',{rediscover:true})`);
-    rows += menuRow(ICON.copy, 'Copy URL', close + `toast('Subscription URL copied')`);
-    rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
+    rows += menuRow(ICON.copy, 'Copy URL', close + `copySourceUrl('${sid}')`);
+    rows += menuRow(ICON.qr, 'Show QR code', close + `showSourceQr('${sid}')`);
     // the user's own website first, else the page the provider sends (profile-web-page-url)
     const site = s.website || s.webPage;
     // links from the provider go into onclick as a JSON string, never raw
@@ -409,8 +412,8 @@ function openNodeActions(sid, nid) {
   const close = "closeSheet('actions');";
   const on = !isNodeDisabled(s, nid);
   let rows = menuRow(ICON.power, on ? 'Switch off<div class="menu-sub">Hidden everywhere, its settings kept</div>' : 'Switch on', close + `toggleNodeEnabled('${sid}','${nid}')`);
-  rows += menuRow(ICON.copy, 'Copy share link', close + `toast('${n.protocol}:// link copied')`);
-  rows += menuRow(ICON.qr, 'Show QR code', close + `toast('QR code is not drawn in the mockup')`);
+  rows += menuRow(ICON.copy, 'Copy share link', close + `copyShareLink('${sid}','${nid}')`);
+  rows += menuRow(ICON.qr, 'Show QR code', close + `showNodeQr('${sid}','${nid}')`);
   if (s.kind === 'node') {
     rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
     rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteNode('${sid}','${nid}')`, 'danger');

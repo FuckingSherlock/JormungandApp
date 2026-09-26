@@ -1,0 +1,35 @@
+  <!-- ══════════ VIEW: LOGS (LogsView: sing-box and core lines, live; 46-logs.js) ══════════ -->
+  <div class="view" id="view-logs">
+    <div class="topbar">
+      <div>
+        <div class="app-name">Logs</div>
+        <div class="nodes-summary" id="logsSummary"></div>
+      </div>
+      <div class="head-actions">
+        <button class="icon-btn" id="logSearchBtn" onclick="toggleLogSearch()" title="Search">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
+        <button class="icon-btn" onclick="copyLogs()" title="Copy all">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+        <button class="icon-btn" onclick="clearLogs()" title="Clear">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="search" id="logSearchBar" style="display:none">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="logSearch" placeholder="Search the log" oninput="renderLogs()">
+      <button class="icon-btn ghost" onclick="toggleLogSearch(false)" title="Close search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="chip-row log-levels" id="logLevels">
+      <div class="chip active" data-lvl="all" onclick="setLogLevel('all')">All</div>
+      <div class="chip" data-lvl="warn" onclick="setLogLevel('warn')">Warnings &amp; errors<span class="log-count" id="logWarnCount"></span></div>
+    </div>
+    <div class="scroll log-scroll" id="logScroll" onscroll="logScrolled()">
+      <div class="log-list" id="logList"></div>
+    </div>
+    <button class="log-jump" id="logJump" style="display:none" onclick="logFollow()"></button>
+  </div>

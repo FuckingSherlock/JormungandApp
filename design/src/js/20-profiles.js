@@ -527,8 +527,9 @@ function updateMainConnectCard() {
   const detail = document.getElementById('profModeDetail');
   const nodeHtml = n => n ? `<span class="dock-node">${n.flag} ${esc(n.name)}</span>` : '<span class="dock-node none">no working node</span>';
   const ms = n => n && isAlive(n) ? ping(n) : null;
-  const none = !e && nothingInAuto();
-  document.getElementById('profCardName').textContent = e ? e.name : none ? 'Nothing in Auto' : '—';
+  const none = !e && nothingInAuto(), empty = !e && catalogEmpty();   // empty: 50-home.js dockTap
+  document.getElementById('profCardName').textContent = e ? e.name : none ? 'Nothing in Auto'
+    : empty ? (simpleMode() ? 'No servers yet' : 'No profiles yet') : '—';
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
     : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Simple' : 'Profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
@@ -536,7 +537,8 @@ function updateMainConnectCard() {
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
   let lat = null;
-  if (!e) detail.innerHTML = none ? '<span class="dock-node none">turn on Use in Auto in Route</span>' : '';
+  if (!e) detail.innerHTML = none ? '<span class="dock-node none">turn on Use in Auto in Route</span>'
+    : empty ? `<span class="dock-node none">${simpleMode() ? 'Add in Nodes' : 'Create one in Nodes'}</span>` : '';
   else if (chainsData[id]) {
     const c = chainsData[id], a = chainEntryNode(c), b = chainExitNode(c);
     detail.innerHTML = nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);

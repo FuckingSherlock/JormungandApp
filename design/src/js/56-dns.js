@@ -175,6 +175,7 @@ function renderConnSettings() {
     </div>
     <div class="set-group">
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
-      <div class="set-row soon"><div class="set-label">Latency test URL</div><span class="settings-value">auto</span><span class="soon-tag">soon</span></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Latency test URL<div class="set-hint">The address ping and Fastest time; pick one that answers fast from here</div></div>
+        <button class="set-value" id="conn-testurl" onclick="openTestUrlPicker()">${testUrlLabel()}${CHEVRON_R}</button></div>
     </div>`;
 }

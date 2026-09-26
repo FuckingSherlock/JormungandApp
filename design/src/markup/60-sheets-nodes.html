@@ -164,22 +164,25 @@
     <div class="sheet-body">
       <div class="form-group">
         <div class="form-label">Share link</div>
-        <input class="form-input" id="nf-link" placeholder="vless://… — fills the fields below" oninput="parseNodeLink()">
+        <textarea class="form-input nf-link" id="nf-link" rows="2" placeholder="vless://… — fills the fields below; one link per line adds them all" oninput="parseNodeLink()"></textarea>
+        <div class="form-hint" id="nf-many" style="display:none"></div>
       </div>
+      <div id="nf-fields">
       <div class="form-group">
         <div class="form-label">Name</div>
-        <input class="form-input" id="nf-name" placeholder="My server">
+        <input class="form-input" id="nf-name" placeholder="My server" oninput="nfNameTouched = true">
       </div>
       <div class="form-group">
         <div class="form-label">Protocol</div>
         <div class="chip-row" id="nf-proto" style="padding:0">
-          <div class="chip" onclick="pickChip(this,'nf-proto')">VLESS</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">VMess</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">Trojan</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">SS</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">HY2</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">TUIC</div>
-          <div class="chip" onclick="pickChip(this,'nf-proto')">SOCKS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">VLESS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">VMess</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">Trojan</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">SS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">HY2</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">TUIC</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">AnyTLS</div>
+          <div class="chip" onclick="pickChip(this,'nf-proto');nfProtoChanged()">SOCKS</div>
         </div>
       </div>
       <div class="form-group form-row2">
@@ -193,8 +196,9 @@
         </div>
       </div>
       <div class="form-group">
-        <div class="form-label">UUID / Password</div>
-        <input class="form-input" id="nf-secret" placeholder="••••••••••••">
+        <div class="form-label" id="nf-secret-label">UUID / Password</div>
+        <input class="form-input" id="nf-secret" placeholder="••••••••••••" autocomplete="off" spellcheck="false">
+      </div>
       </div>
       <div class="form-group" id="nf-group-wrap">
         <div class="form-label">Group</div>

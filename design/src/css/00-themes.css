@@ -11,6 +11,7 @@
 
 :root, :root[data-theme="original"] {
   --mono:      'Flags','JetBrains Mono',monospace;
+  --qr-dark:   #000;  --qr-light: #fff;   /* QR codes: dark on light in every theme */
   --bg:        #0B0F1A;
   --surface:   #131929;
   --card:      #1A2035;

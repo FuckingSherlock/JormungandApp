@@ -19,6 +19,7 @@ const sourceServerFields = [
   'supportUrl',
   'announce',
   'updatedAt',
+  'lastError', // {msg, at} of a failed update; the UI sets it for its own (Retry on the card)
 ];
 
 /// The UI's state as one JSON snapshot (`ui-state.json`), written by the UI (every change)
