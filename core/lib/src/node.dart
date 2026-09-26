@@ -4,15 +4,23 @@ import 'package:crypto/crypto.dart';
 
 /// One server as the app sees it (Flutter: the model behind NodeRow).
 ///
-/// [outbound] is the sing-box outbound without a tag. [id] stays the same across
-/// subscription updates: it hashes what makes the server itself — protocol, address,
-/// port and credentials, never the name (docs/subscription-parsing.md → Дедупликация).
+/// [outbound] is the sing-box outbound without a tag. [key] hashes the server itself
+/// (protocol, address, port, credentials — that is [base]) plus the connection variant
+/// (SNI, fingerprint, ALPN, transport…: providers list one server several times with
+/// these changed, and each is a working option of its own), never the name
+/// (docs/subscription-parsing.md → Дедупликация). [id] is [key] when the node is first
+/// seen; an update may keep an older id on a server whose variant changed (see merge.dart),
+/// so settings naming it survive. [seq] tells apart servers of one source with the same
+/// name ("VK-1", "VK-2"); it sticks to the server across updates.
 /// [unsupported] names what sing-box cannot do for this server (e.g. `xhttp`): the node
 /// is listed but never put into a config.
 class Node {
   Node({
     required this.id,
+    required this.key,
+    required this.base,
     required this.name,
+    this.seq,
     required this.flag,
     required this.protocol,
     required this.address,
@@ -30,11 +38,14 @@ class Node {
     required Map<String, dynamic> outbound,
     String? unsupported,
   }) {
-    final key = '$protocol|${address.toLowerCase()}|$port|$identity';
-    final id = 'n${sha256.convert(utf8.encode(key)).toString().substring(0, 12)}';
+    String h(String s) => 'n${sha256.convert(utf8.encode(s)).toString().substring(0, 12)}';
+    final server = '$protocol|${address.toLowerCase()}|$port|$identity';
+    final key = h('$server|${variantOf(outbound)}');
     final (flag, clean) = splitFlag(name);
     return Node(
-      id: id,
+      id: key,
+      key: key,
+      base: h(server),
       name: clean.isEmpty ? '$address:$port' : clean,
       flag: flag,
       protocol: protocol,
@@ -47,6 +58,9 @@ class Node {
 
   factory Node.fromJson(Map<String, dynamic> j) => Node(
         id: j['id'] as String,
+        key: (j['key'] ?? j['id']) as String,
+        base: (j['base'] ?? j['id']) as String, // ids before variants were the base
+        seq: (j['num'] as num?)?.toInt(),
         name: (j['name'] ?? '') as String,
         flag: (j['flag'] ?? '🌐') as String,
         protocol: (j['protocol'] ?? '') as String,
@@ -57,6 +71,9 @@ class Node {
       );
 
   final String id;
+  final String key;
+  final String base;
+  final int? seq;
   final String name;
   final String flag;
 
@@ -70,6 +87,9 @@ class Node {
   // port is a string in the UI model (mockup NodeRow), kept that way on the wire.
   Map<String, dynamic> toJson() => {
         'id': id,
+        'key': key,
+        'base': base,
+        if (seq != null) 'num': seq,
         'name': name,
         'flag': flag,
         'protocol': protocol,
@@ -78,6 +98,50 @@ class Node {
         'outbound': outbound,
         if (unsupported != null) 'unsupported': unsupported,
       };
+
+  Node copyWith({String? id, int? seq, String? name}) => Node(
+        id: id ?? this.id,
+        key: key,
+        base: base,
+        seq: seq ?? this.seq,
+        name: name ?? this.name,
+        flag: flag,
+        protocol: protocol,
+        address: address,
+        port: port,
+        outbound: outbound,
+        unsupported: unsupported,
+      );
+}
+
+/// The connection variant of an outbound: only fields that change how it connects,
+/// read the same way whatever format the node came from (defaults a format fills in,
+/// like a tag or domain_strategy, stay out, so one server in three formats is one node).
+String variantOf(Map<String, dynamic> ob) {
+  Map? m(Object? x) => x is Map ? x : null;
+  final tls = m(ob['tls']), utls = m(tls?['utls']), reality = m(tls?['reality']);
+  final tr = m(ob['transport']), headers = m(tr?['headers']), obfs = m(ob['obfs']);
+  final alpn = tls?['alpn'] is List ? ([...(tls!['alpn'] as List).map((e) => '$e')]..sort()).join(',') : null;
+  final host = headers?['Host'] ?? headers?['host'] ?? tr?['host'];
+  final v = <String, Object?>{
+    'tls': tls?['enabled'] == true ? 1 : null,
+    'sni': tls?['server_name'],
+    'nosni': tls?['disable_sni'] == true ? 1 : null,
+    'insecure': tls?['insecure'] == true ? 1 : null,
+    'alpn': alpn,
+    'fp': utls?['enabled'] == true ? utls!['fingerprint'] : null,
+    'pbk': reality?['public_key'],
+    'sid': reality?['short_id'],
+    'flow': ob['flow'],
+    'net': tr?['type'],
+    'path': tr?['path'],
+    'host': host is List ? host.join(',') : host,
+    'svc': tr?['service_name'],
+    'obfs': obfs == null ? null : '${obfs['type']}:${obfs['password']}',
+    'ports': ob['server_ports'] is List ? (ob['server_ports'] as List).join(',') : null,
+    'plugin': ob['plugin'] == null ? null : '${ob['plugin']}:${ob['plugin_opts']}',
+  }..removeWhere((_, x) => x == null || x == '');
+  return jsonEncode(v);
 }
 
 /// Pulls the first flag emoji (a pair of regional indicators) out of a server name:

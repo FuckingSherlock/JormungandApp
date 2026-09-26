@@ -22,7 +22,12 @@ Map<String, dynamic>? buildTls(Params q, {required bool defaultOn}) {
   if (sec != 'tls' && sec != 'reality' && sec != 'xtls') return null;
   final tls = <String, dynamic>{'enabled': true};
   final sni = _first([q['sni'], q['peer'], q['servername']]);
-  if (sni != null) tls['server_name'] = sni;
+  // `sni=off` (some hy2 links): send no SNI at all.
+  if (const {'off', 'none', 'false', '0'}.contains(sni?.toLowerCase())) {
+    tls['disable_sni'] = true;
+  } else if (sni != null) {
+    tls['server_name'] = sni;
+  }
   if (_truthy(q['allowInsecure']) || _truthy(q['insecure']) || _truthy(q['allow_insecure'])) {
     tls['insecure'] = true;
   }

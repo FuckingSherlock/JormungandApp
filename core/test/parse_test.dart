@@ -101,4 +101,80 @@ void main() {
     final expired = mergeUpdate(first.nodes, first.gone, [a, c], now: t0.add(const Duration(days: 16)));
     expect(expired.gone, isEmpty);
   });
+
+  group('variants of one server', () {
+    const base = 'hysteria2://pw@hy.example:443?';
+    Node hy(String q, [String name = 'VK']) => parseLink('$base$q#$name')!;
+
+    test('SNI / fingerprint / ALPN variants are separate nodes of one server', () {
+      final ns = [hy('sni=a.example'), hy('sni=b.example'), hy('sni=a.example&alpn=h3'), hy('sni=a.example')];
+      expect(ns.map((n) => n.key).toSet(), hasLength(3));
+      expect(ns.map((n) => n.base).toSet(), hasLength(1));
+    });
+
+    test('sni=off sends no SNI', () {
+      final tls = hy('sni=off').outbound['tls'] as Map;
+      expect(tls['disable_sni'], true);
+      expect(tls.containsKey('server_name'), isFalse);
+    });
+
+    test('a changed variant keeps its id when unambiguous; same names get sticky numbers', () {
+      final a = hy('sni=a.example'), b = hy('sni=b.example'), c = hy('sni=c.example', 'Other');
+      final first = mergeUpdate([], [], [a, b, c]);
+      expect(first.nodes.map((n) => n['name']), ['VK-1', 'VK-2', 'Other']);
+      final ids = first.nodes.map((n) => n['id']).toList();
+
+      // b dropped: a keeps VK-1 and is the only VK left (no number)
+      final second = mergeUpdate(first.nodes, [], [a, c]);
+      expect(second.nodes.map((n) => n['name']), ['VK', 'Other']);
+      // b back in front of a: numbers stay with their servers
+      final third = mergeUpdate(first.nodes, [], [b, a, c]);
+      expect(third.nodes.map((n) => n['name']), ['VK-2', 'VK-1', 'Other']);
+      // c's SNI changed: same server, one candidate each side -> same id, nothing gone
+      final c2 = hy('sni=c2.example', 'Other');
+      final fourth = mergeUpdate(first.nodes, [], [a, b, c2]);
+      expect(fourth.nodes.map((n) => n['id']), ids);
+      expect(fourth.gone, isEmpty);
+    });
+
+    test('a node returning from gone keeps its id and number', () {
+      final a = hy('sni=a.example'), b = hy('sni=b.example'), c = hy('sni=c.example', 'Other');
+      final first = mergeUpdate([], [], [a, b, c]);
+      expect(first.nodes.map((n) => n['name']), ['VK-1', 'VK-2', 'Other']);
+      final bId = first.nodes[1]['id'];
+
+      // b drops out: gone, a is the only VK left so it loses its number.
+      final dropped = mergeUpdate(first.nodes, [], [a, c]);
+      expect(dropped.nodes.map((n) => n['name']), ['VK', 'Other']);
+      expect(dropped.gone.single['id'], bId);
+
+      // b comes back: same id, same number, nothing left in gone.
+      final back = mergeUpdate(dropped.nodes, dropped.gone, [a, b, c]);
+      expect(back.gone, isEmpty);
+      expect(back.nodes.map((n) => n['id']), [first.nodes[0]['id'], bId, first.nodes[2]['id']]);
+      expect(back.nodes.map((n) => n['name']), ['VK-1', 'VK-2', 'Other']);
+    });
+
+    test('two variants of one server changing at once is ambiguous: new ids, old ones gone', () {
+      final a1 = hy('sni=q1.example'), a2 = hy('sni=q2.example');
+      final first = mergeUpdate([], [], [a1, a2]);
+      final oldIds = first.nodes.map((n) => n['id']).toSet();
+
+      final a3 = hy('sni=q3.example'), a4 = hy('sni=q4.example');
+      final second = mergeUpdate(first.nodes, [], [a3, a4]);
+
+      expect(second.nodes.map((n) => n['id']), [a3.key, a4.key]);
+      expect(second.nodes.any((n) => oldIds.contains(n['id'])), isFalse);
+      expect(second.gone.map((n) => n['id']).toSet(), oldIds);
+    });
+
+    test('legacy prev nodes (id only, no key/base) do not crash; a single variant keeps its old id', () {
+      final f = hy('sni=legacy.example');
+      // Before key/base existed, id was the base (protocol|address|port|identity) hash.
+      final legacy = {'id': f.base, 'name': 'VK', 'flag': f.flag, 'protocol': f.protocol, 'address': f.address, 'outbound': f.outbound};
+      final merged = mergeUpdate([legacy], [], [f]);
+      expect(merged.nodes.single['id'], f.base);
+      expect(merged.gone, isEmpty);
+    });
+  });
 }
