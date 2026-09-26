@@ -10,6 +10,7 @@ const HELP = {
     ['Manual', 'tap MANUAL on an entry to use only it; tap it again (or the Auto badge) to go back.'],
     ['✎ Edit', 'shows ⋮⋮: drag them to change the order Auto tries entries in. In an unfolded entry it also shows Fastest / Priority and the order of its servers.'],
     ['Switch', 'lets Auto pick the entry or not. Tap an entry to see its servers.'],
+    ['One server', 'tap a server of an unfolded entry to use only it (Manual). Tap it again to let the entry pick.'],
     ['Own order', 'by default the order is the one in Nodes. Drag here and the route keeps its own — “Follow Nodes order” goes back.'],
     ['Chain', 'traffic goes through two servers: the entry, then the exit.'],
     ['Greyed out below', 'something it needs is switched off in Nodes. Tap it to see what.'],

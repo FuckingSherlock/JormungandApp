@@ -111,7 +111,14 @@ function unitPickRefs(id, withOff) {
   const refs = unitRefs(id, withOff);
   return unitPriority(id) ? orderRefs(refs, unitOwner(id).pickOrder) : refs;
 }
+// The pinned server of the pinned entry, while it is still one of the entry's servers.
+function pinnedRef(id) {
+  if (autoConnect || id !== activeConnectId || !pinnedNode) return null;
+  return unitRefs(id).find(r => refKey(r) === pinnedNode) || null;
+}
 function unitNode(id) {
+  const pin = pinnedRef(id);
+  if (pin) return pin.node;   // Manual on a server: that one, answering or not
   const nodes = unitPickRefs(id).map(r => r.node);
   return unitPriority(id) ? nodes.find(isAlive) || null : bestAlive(nodes);
 }
@@ -209,15 +216,17 @@ function routeRowBodyHtml(id) {
   const priority = unitPriority(id);
   const refs = priority ? unitPickRefs(id) : byPing(unitRefs(id), r => r.node);
   let rank = 0;
-  const rows = refs.map(r => `<div class="node-row ps-node on static" data-id="${refKey(r)}">
+  const pin = pinnedRef(id);
+  const rows = refs.map(r => `<div class="node-row ps-node on ${pin && refKey(pin) === refKey(r) ? 'pinned' : ''}" data-id="${refKey(r)}" onclick="pinRouteNode('${id}','${refKey(r)}')" title="Use only this server (Manual)">
       ${priority && routeEdit ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div>` : ''}${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
       <span class="node-proto">${r.node.protocol}</span>
-      <span onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
+      <span onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');
   const acts = `<div class="conn-acts">${routeUpdateBtn(id)}${pingAllBtn(`pingRouteRow('${id}')`, 'Ping all servers')}</div>`;
-  const hint = priority ? 'The first working one from the top.' + (routeEdit ? ' Drag ⋮⋮ to order.' : '') : 'Connects through the fastest of them.';
+  const hint = pin ? 'Manual: only the highlighted server.'
+    : priority ? 'The first working one from the top.' + (routeEdit ? ' Drag ⋮⋮ to order.' : '') : 'Connects through the fastest of them.';
   return `<div class="conn-body">${routeEdit
       ? `<div class="seg-row">${pickModeSwitch('rt:' + id, priority, 'setRouteRowMode')}${acts}</div><div class="set-hint conn-hint">${hint}</div>`
       : `<div class="seg-row"><div class="set-hint conn-hint conn-pick-hint">${hint}</div>${acts}</div>`}
@@ -228,6 +237,14 @@ const routeSubs = id => [...new Set(unitRefs(id, true).map(r => r.sid))].filter(
 const routeUpdateBtn = id => { const subs = routeSubs(id); return subs.length ? `<button class="icon-btn ghost" onclick="updateRouteRow('${id}')" title="Update"><span class="${subs.some(sid => sourcesData[sid].updating) ? 'spin' : ''}" style="display:inline-flex">${ICON.refresh}</span></button>` : ''; };
 const updateRouteRow = id => routeSubs(id).forEach(updateSource);
 const pingRouteRow = id => testLatency(unitRefs(id).map(r => [r.sid, r.node.id]));
+/* Tap a server of an unfolded row: Manual on this entry and on this server. Tap the pinned
+   server again: the entry stays Manual and picks by its Fastest / Priority again. Any other
+   pick (another entry, AUTO / MANUAL, the Auto badge) drops the server pin. */
+function pinRouteNode(id, key) {
+  const again = !autoConnect && activeConnectId === id && pinnedNode === key;
+  autoConnect = false; activeConnectId = id; pinnedNode = again ? null : key;
+  routeRowChanged();
+}
 function routeRowChanged() {
   renderConnects();
   updateMainConnectCard();
@@ -348,7 +365,7 @@ function toggleEntryAuto(id) {
 }
 
 function setAutoConnect(on) {
-  autoConnect = on;
+  autoConnect = on; pinnedNode = null;
   if (!on) activeConnectId = effectiveConnectIdWhenAuto();
   renderConnects();
   updateMainConnectCard();
@@ -359,6 +376,7 @@ function effectiveConnectIdWhenAuto() {
 }
 
 function selectConnect(id) {
+  pinnedNode = null;
   if (!autoConnect && activeConnectId === id) autoConnect = true;   // second tap on the pinned entry → back to Auto
   else { autoConnect = false; activeConnectId = id; }
   renderConnects();
@@ -382,8 +400,9 @@ function openCreateMenu() {
 function setConnectMode(mode) {
   closeSheet('actions');
   if (mode === connectMode) return;
-  modeState[connectMode] = { order: connectOrder, active: activeConnectId, auto: autoConnect };
+  modeState[connectMode] = { order: connectOrder, active: activeConnectId, auto: autoConnect, pin: pinnedNode };
   ({ order: connectOrder, active: activeConnectId, auto: autoConnect } = modeState[mode]);
+  pinnedNode = modeState[mode].pin || null;
   connectMode = mode;
   renderConnects();
   // The list slides in from the side the switch moved to.

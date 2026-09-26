@@ -297,6 +297,9 @@
 .conn-body .seg-switch .seg-ink{top:2px;bottom:2px;left:2px;width:calc(50% - 2px)}
 .conn-body .seg-switch button{padding:4px 6px;font-size:13px}
 .conn-pick-hint{flex:1;min-width:0;margin:0}
+/* a Route row's server: tap = Manual on it; the pinned one is tinted like the MANUAL badge */
+.conn-body .node-row{cursor:pointer}
+.conn-body .node-row.pinned{background:rgba(var(--warn-rgb),.12);box-shadow:inset 3px 0 0 var(--warn)}
 .conn-hint{margin-bottom:8px}
 .conn-body .se-nodes{margin:0}
 .conn-acts{margin-left:auto;display:flex;align-items:center}

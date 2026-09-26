@@ -75,6 +75,8 @@ let connectMode = 'simple';
 let connectOrder = ['src1','src2','src3','src4','sc1'];
 let activeConnectId = 'src1';
 let autoConnect = true;
+// Manual on one server: 'sid::nid' of a server of the pinned entry (Manual only), else null.
+let pinnedNode = null;
 const modeState = {
   profiles: { order: ['default','work','gaming','cpdefault','cpgaming','cpwork'], active: 'default', auto: true },
 };

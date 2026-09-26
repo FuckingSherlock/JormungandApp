@@ -127,6 +127,7 @@ const SHOTS = {
   'nodes-swipe': async p => { await tab(p, 'nodes'); await p.evaluate(() => { document.getElementById('view-nodes').classList.add('swiping'); renderNodesTabs(-170); }); },
   'route-open': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); }); await settle(p); },
   'route': async p => { await p.evaluate(() => { openProfiles(); }); await settle(p); },
+  'route-pin': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x] && unitRefs(x).length > 1); toggleRouteRow(id); pinRouteNode(id, refKey(unitRefs(id)[1])); }); await settle(p); },
   'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); openEditProfile('work'); confirmDeleteEntry('work'); }); await settle(p); },
   'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.add('src2'); renderTargetPicker(); }); await settle(p); },
   'rule-fallback': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
@@ -476,6 +477,25 @@ async function runChecks() {
       return out;
     });
     expect(['offPlain', 'onGrips', 'lower', 'reset'].every(k => r[k]), JSON.stringify(r));
+  });
+
+  await check('route: tapping a server pins the entry and that server (Manual); again unpins the server', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, id = visibleOrder().filter(x => sourcesData[x] && unitRefs(x).length > 1)[0];
+      const refs = unitRefs(id), last = refs[refs.length - 1], key = refKey(last);
+      toggleRouteRow(id);
+      document.querySelector(`#connects-list .conn-body .node-row[data-id="${key}"]`).click();
+      out.pinned = !autoConnect && activeConnectId === id && pinnedNode === key && unitNode(id) === last.node && effectiveConnectId() === id;
+      out.marked = !!document.querySelector(`#connects-list .conn-body .node-row.pinned[data-id="${key}"]`);
+      out.dock = /MANUAL/.test(document.getElementById('profModeBadge').textContent) && document.getElementById('profModeDetail').textContent.includes(last.node.name);
+      document.querySelector(`#connects-list .conn-body .node-row[data-id="${key}"]`).click();
+      out.unpinned = !autoConnect && activeConnectId === id && pinnedNode === null && !document.querySelector('#connects-list .node-row.pinned');
+      pinRouteNode(id, key); setAutoConnect(true);
+      out.autoClears = autoConnect && pinnedNode === null;
+      toggleRouteRow(id);
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
   await check('profiles: dragging changes the Auto pick', async () => {

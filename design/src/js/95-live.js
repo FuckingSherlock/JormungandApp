@@ -48,7 +48,7 @@ function apiPing(body, onLine) {
 /* ── State kept by the core ── */
 
 function liveSnapshot() {
-  return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect,
+  return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
     modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg };
 }
 const replaceObj = (target, src) => { Object.keys(target).forEach(k => delete target[k]); Object.assign(target, src); };
@@ -62,6 +62,7 @@ function liveApply(s) {
   connectOrder = s.connectOrder || [];
   activeConnectId = s.activeConnectId || null;
   autoConnect = s.autoConnect !== false;
+  pinnedNode = s.pinnedNode || null;
   profilesData = s.profilesData || {};
   profileSeq = s.profileSeq || 1;
   chainsData = s.chainsData || {};
@@ -101,8 +102,9 @@ function livePlan() {
       entry: planGroup(chainEntryRefs(c), 'fastest'),
       main: planGroup(exits, c.exitMode === 'priority' ? 'priority' : 'fastest', exits.find(r => r.node === exitNode)) });
   }
-  const refs = unitPickRefs(id), n = unitNode(id);
-  return Object.assign(base, { kind: 'unit', main: planGroup(refs, unitPriority(id) ? 'priority' : 'fastest', refs.find(r => r.node === n)) });
+  const refs = unitPickRefs(id), n = unitNode(id), pin = pinnedRef(id);
+  // a pinned server: a selector held on it (no failover, it is Manual)
+  return Object.assign(base, { kind: 'unit', main: planGroup(refs, pin || unitPriority(id) ? 'priority' : 'fastest', pin || refs.find(r => r.node === n)) });
 }
 const planSig = () => { try { return JSON.stringify(livePlan()); } catch (e) { return null; } };
 
