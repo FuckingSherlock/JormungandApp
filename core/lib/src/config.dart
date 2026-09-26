@@ -13,11 +13,26 @@
 /// threshold — docs/connect-model.md → «Открытые вопросы для бэка»); `priority` a
 /// selector set to the server the UI picked. Failover beyond that (failAfter,
 /// standby) is the app's AutoService, not the core's.
+///
+/// `routing` (rules, apps, quick rules, DNS — routing.dart) adds route rules, the rule
+/// targets' groups, DNS servers and rule sets; [ruleSetFiles] = the lists on disk,
+/// [warnings] collects what the rules could not use.
+///
+/// [tunnelPort]: a second loopback mixed inbound (`tunnel-in`) whose traffic always goes
+/// through the tunnel, past every rule — the exit-IP check and lists downloaded "via VPN"
+/// use it (a Russian probe or GitHub must not go direct because a rule says so).
 library;
+
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
+import 'routing.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 
-Map<String, dynamic> buildConfig(Map<String, dynamic> plan, {int clashPort = 9090}) {
+Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
+    {int clashPort = 9090, int? tunnelPort, Map<String, String> ruleSetFiles = const {}, List<String>? warnings}) {
   final outs = <Map<String, dynamic>>[];
   final test = (plan['urlTest'] as Map?) ?? const {};
   final chain = plan['kind'] == 'chain';
@@ -60,31 +75,44 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan, {int clashPort = 909
     group('proxy', plan['main'] as Map);
   }
   outs.add({'type': 'direct', 'tag': 'direct'});
+  final routing = buildRouting(plan, group, ruleSetFiles: ruleSetFiles);
+  outs.addAll(routing.outbounds);
+  warnings?.addAll(routing.warnings);
+  // cache_file keeps a selector's pick made over the clash API across restarts, over the
+  // config's `default`: keyed by the defaults, a new pick from the UI starts clean.
+  final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
 
   return {
     'log': {'level': 'info', 'timestamp': true},
     'dns': {
-      'servers': [
-        {'type': 'local', 'tag': 'local'},
-      ],
+      'servers': routing.dnsServers,
+      if (routing.dnsRules.isNotEmpty) 'rules': routing.dnsRules,
+      'final': routing.dnsFinal,
     },
     'inbounds': [
       {'type': 'mixed', 'tag': 'mixed-in', 'listen': '127.0.0.1', 'listen_port': plan['mixedPort'] ?? 2080},
+      if (tunnelPort != null) {'type': 'mixed', 'tag': 'tunnel-in', 'listen': '127.0.0.1', 'listen_port': tunnelPort},
     ],
     'outbounds': outs,
     'route': {
       'rules': [
         {'action': 'sniff'},
-        if (plan['global'] != true) {'ip_is_private': true, 'outbound': 'direct'},
+        if (tunnelPort != null) {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': 'proxy'},
+        ...routing.rules,
       ],
-      'final': 'proxy',
+      if (routing.ruleSets.isNotEmpty) 'rule_set': routing.ruleSets,
+      'final': routing.finalOutbound,
       'auto_detect_interface': true,
-      'default_domain_resolver': 'local',
+      'default_domain_resolver': routing.domainResolver,
       // which app opened a connection: shown in Live connections
       'find_process': true,
     },
     'experimental': {
       'clash_api': {'external_controller': '127.0.0.1:$clashPort'},
+      'cache_file': {
+        'enabled': true,
+        if (picks.isNotEmpty) 'cache_id': sha1.convert(utf8.encode(picks)).toString().substring(0, 12),
+      },
     },
   };
 }

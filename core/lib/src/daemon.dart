@@ -7,6 +7,7 @@ import 'config.dart';
 import 'device.dart';
 import 'exitip.dart';
 import 'parse/links.dart';
+import 'rulesets.dart';
 import 'runtime.dart';
 import 'state.dart';
 import 'sysproxy.dart';
@@ -24,7 +25,8 @@ import 'updater.dart';
 class Daemon {
   Daemon({required this.singBox, required this.dataDir, required this.uiFile, this.lanHosts = const {}})
       : main = SingBoxProcess(singBox, p.join(dataDir, 'run', 'main')),
-        sysProxy = SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json')));
+        sysProxy = SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))),
+        ruleSets = RuleSetCache(p.join(dataDir, 'rulesets'));
 
   final String singBox;
   final String dataDir;
@@ -32,6 +34,7 @@ class Daemon {
   final Set<String> lanHosts;
   final SingBoxProcess main;
   final SystemProxy sysProxy;
+  final RuleSetCache ruleSets;
   static const clashPort = 9090;
 
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
@@ -43,6 +46,8 @@ class Daemon {
   String? _warning;
   int _pingSeq = 0;
   int _mixedPort = 2080;
+  int? _tunnelPort; // tunnel-in: always through the tunnel (exit check, lists via VPN)
+  int _connectSeq = 0;
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
   Map<String, dynamic>? _exit;
@@ -165,7 +170,7 @@ class Daemon {
     Future<void> attempt() async {
       final sw = Stopwatch()..start();
       try {
-        final e = await checkExitIp(direct ? null : _mixedPort);
+        final e = await checkExitIp(direct ? null : _tunnelPort ?? _mixedPort);
         if (seq == _exitSeq) _exit = {...e, 'direct': direct, 'at': DateTime.now().millisecondsSinceEpoch};
       } catch (e) {
         if (seq != _exitSeq) return;
@@ -204,15 +209,30 @@ class Daemon {
     final plan = (body['plan'] as Map).cast<String, dynamic>();
     _error = null;
     _warning = null;
+    final seq = ++_connectSeq;
     try {
-      await main.start(buildConfig(plan, clashPort: clashPort), clashPort: clashPort);
+      // rule lists on disk first; ones via VPN that are missing wait for this tunnel
+      final lists = await ruleSets.ensureFor(plan, proxyPort: main.running ? _tunnelPort : null);
+      final warnings = <String>[];
+      final tunnelPort = await freePort();
+      await main.start(buildConfig(plan, clashPort: clashPort, tunnelPort: tunnelPort, ruleSetFiles: lists.files, warnings: warnings),
+          clashPort: clashPort);
       _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
+      _tunnelPort = tunnelPort;
       _recheckExit();
       if (body['systemProxy'] == true) {
-        _warning = await sysProxy.enable((plan['mixedPort'] as num?)?.toInt() ?? 2080);
+        warnings.add(await sysProxy.enable((plan['mixedPort'] as num?)?.toInt() ?? 2080) ?? '');
       } else {
         await sysProxy.restore();
       }
+      _warning = joinWarnings(warnings);
+      // through the tunnel now: missing lists (then a reconnect picks them up), stale ones
+      // (replaced in place, sing-box reloads a local rule set itself)
+      ruleSets.ensureFor(plan, proxyPort: _tunnelPort, refresh: true).then((now) {
+        if (seq == _connectSeq && main.running && now.files.keys.any((t) => !lists.files.containsKey(t))) {
+          _connect(body).then((_) {}, onError: (_) {});
+        }
+      });
     } catch (e) {
       _error = '$e';
       await sysProxy.restore();
@@ -222,6 +242,8 @@ class Daemon {
   }
 
   Future<Map<String, dynamic>> _disconnect() async {
+    _connectSeq++;
+    _tunnelPort = null;
     await main.stop();
     await sysProxy.restore();
     _recheckExit(); // now the direct IP

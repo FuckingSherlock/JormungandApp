@@ -13,6 +13,8 @@ export 'src/parse/build.dart' show tryBase64, unsupportedNode;
 export 'src/parse/clash.dart';
 export 'src/parse/links.dart';
 export 'src/parse/subscription.dart';
+export 'src/routing.dart';
+export 'src/rulesets.dart';
 export 'src/runtime.dart';
 export 'src/state.dart';
 export 'src/sysproxy.dart';

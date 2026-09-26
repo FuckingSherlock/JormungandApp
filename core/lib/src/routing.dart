@@ -1,0 +1,670 @@
+/// Rules, apps, quick rules and DNS from the UI's rule model (`plan.routing`) turned into
+/// sing-box route rules, the outbounds they send traffic to, DNS servers / rules and the
+/// rule sets they need. docs/rules.md is the spec; the Flutter app sends the same model.
+///
+/// ```
+/// routing: {
+///   apps:   [{ id, kind: 'package'|'process'|'path', act: 'direct'|'proxy'|'block',
+///              target, split, udpTarget }],
+///   rules:  [{ id, name, action: 'proxy'|'direct'|'block', target, fallback:
+///              'default'|'main'|'block'|'direct', block: 'drop'|'reject', dns: 'auto'|<dns id>,
+///              groups: { domain|ip|port|source|network|process: { not, v: {field: [..]}, flag } },
+///              composite?, extra? }],             // enabled ones, in order
+///   quick:  { lan, ads, region: 'RU'|…|null, services: {key: 'vpn'|'direct'},
+///             final: 'proxy'|'direct'|'block' },
+///   fallback: 'main'|'block'|'direct',            // Rules → Target unavailable
+///   targets: { '<target>': { kind: 'unit'|'chain', main: Group, entry?: Group } },
+///   ruleSets: [{ name, url, format: 'srs'|'json', via, every /*s*/ }],   // the user's lists
+///   geo: { geosite: {via, every}, geoip: {via, every} },  // the built-in lists
+///   dns: { servers: [{ id, addr, via: 'direct'|'vpn', on }] }            // in priority order
+/// }
+/// ```
+/// A target missing from `targets` is unavailable now (off in Nodes, no usable server,
+/// deleted): its rules take their "If unavailable" when the config is built.
+library;
+
+import 'dart:io';
+
+/// Adds a server group as [tag] (see buildConfig): its members are `tag/<key>`.
+typedef GroupEmitter = void Function(String tag, Map g, {String? detour});
+
+/// A rule set sing-box reads from a local file the core downloads (see rulesets.dart).
+class RuleSetSource {
+  const RuleSetSource(this.tag, this.urls, {this.binary = true, this.viaVpn = true, this.every = const Duration(days: 1)});
+
+  final String tag;
+
+  /// Tried in order: a 404 moves to the next one (runetfreedom, then SagerNet).
+  final List<String> urls;
+  final bool binary;
+  final bool viaVpn;
+  final Duration every;
+}
+
+// runetfreedom (RU lists, rebuilt every 6 h) first; SagerNet for what it lacks.
+const _rfBase = 'https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box';
+String geositeTag(String name) => 'geosite-${name.toLowerCase()}';
+String geoipTag(String cc) => 'geoip-${cc.toLowerCase()}';
+String userSetTag(String name) => 'set-$name';
+List<String> geositeUrls(String name) => [
+      '$_rfBase/rule-set-geosite/geosite-${name.toLowerCase()}.srs',
+      'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-${name.toLowerCase()}.srs',
+    ];
+List<String> geoipUrls(String cc) => [
+      '$_rfBase/rule-set-geoip/geoip-${cc.toLowerCase()}.srs',
+      'https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-${cc.toLowerCase()}.srs',
+    ];
+
+/// Built-in services (Rules → Services): geosite / geoip categories, and the domains that
+/// stand in while the lists are not downloaded. Keys match the UI's SERVICES.
+const services = <String, ({List<String> geosite, List<String> geoip, List<String> domains})>{
+  'telegram': (geosite: ['telegram'], geoip: ['telegram'], domains: ['telegram.org', 't.me', 'telegram.me', 'telegra.ph', 'tdesktop.com']),
+  'youtube': (geosite: ['youtube'], geoip: [], domains: ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be', 'ggpht.com']),
+  'discord': (geosite: ['discord'], geoip: [], domains: ['discord.com', 'discord.gg', 'discordapp.com', 'discordapp.net', 'discord.media']),
+  'netflix': (geosite: ['netflix'], geoip: ['netflix'], domains: ['netflix.com', 'nflxvideo.net', 'nflximg.net', 'nflxext.com']),
+  'spotify': (geosite: ['spotify'], geoip: [], domains: ['spotify.com', 'scdn.co', 'spotifycdn.com']),
+  'chatgpt': (geosite: ['openai'], geoip: [], domains: ['openai.com', 'chatgpt.com', 'oaiusercontent.com', 'oaistatic.com']),
+  'instagram': (geosite: ['instagram'], geoip: [], domains: ['instagram.com', 'cdninstagram.com']),
+  'x': (geosite: ['twitter'], geoip: ['twitter'], domains: ['x.com', 'twitter.com', 'twimg.com', 't.co']),
+};
+
+/// "My region direct": the region's sites (geosite + its TLDs, IDN ones as punycode:
+/// рф = xn--p1ai) and IPs (geoip).
+const regions = <String, ({List<String> geosite, List<String> geoip, List<String> tlds})>{
+  'RU': (geosite: ['category-ru', 'ru-available-only-inside'], geoip: ['ru'], tlds: ['ru', 'xn--p1ai', 'su']),
+  'BY': (geosite: [], geoip: ['by'], tlds: ['by', 'xn--90ais']),
+  'KZ': (geosite: [], geoip: ['kz'], tlds: ['kz', 'xn--80ao21a']),
+  'UA': (geosite: [], geoip: ['ua'], tlds: ['ua', 'xn--j1amh']),
+  'CN': (geosite: ['cn'], geoip: ['cn'], tlds: ['cn']),
+  'IR': (geosite: ['category-ir'], geoip: ['ir'], tlds: ['ir']),
+};
+const adsGeosite = 'category-ads-all';
+const adsDomains = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
+
+Map<String, dynamic> _routing(Map plan) =>
+    ((plan['routing'] as Map?) ?? const {'quick': {'lan': true, 'final': 'proxy'}}).cast<String, dynamic>();
+List<Map> _list(Object? l) => (l as List? ?? const []).cast<Map>();
+List<String> _strs(Object? l) => [for (final x in (l as List? ?? const [])) '$x'];
+
+/// Every rule set the plan's routing would use: what the core must have on disk before
+/// it builds the config. Lists that fail to download are left out of the config (rules
+/// then fall back to their plain domains, or are skipped — see [buildRouting]).
+List<RuleSetSource> ruleSetsNeeded(Map plan) {
+  if (plan['global'] == true) return const [];
+  final r = _routing(plan);
+  final geo = (r['geo'] as Map?) ?? const {};
+  ({bool vpn, Duration every}) geoOf(String k) {
+    final g = (geo[k] as Map?) ?? const {};
+    return (vpn: g['via'] != 'direct', every: Duration(seconds: (g['every'] as num?)?.toInt() ?? 7 * 86400));
+  }
+
+  final gs = geoOf('geosite'), gi = geoOf('geoip');
+  final out = <String, RuleSetSource>{};
+  void site(String n) => out[geositeTag(n)] ??= RuleSetSource(geositeTag(n), geositeUrls(n), viaVpn: gs.vpn, every: gs.every);
+  void ip(String n) => out[geoipTag(n)] ??= RuleSetSource(geoipTag(n), geoipUrls(n), viaVpn: gi.vpn, every: gi.every);
+  final userSets = {for (final s in _list(r['ruleSets'])) '${s['name']}': s};
+  void user(String n) {
+    final s = userSets[n];
+    if (s == null || out.containsKey(userSetTag(n))) return;
+    out[userSetTag(n)] = RuleSetSource(userSetTag(n), ['${s['url']}'],
+        binary: s['format'] != 'json', viaVpn: s['via'] != 'direct', every: Duration(seconds: (s['every'] as num?)?.toInt() ?? 86400));
+  }
+
+  void scan(Object? o) {
+    if (o is Map) {
+      o.forEach((k, v) {
+        if (k == 'geosite') _strs(v).forEach(site);
+        if (k == 'geoip') _strs(v).forEach(ip);
+        if (k == 'rule_set') _strs(v).forEach(user);
+        if (v is Map || v is List) scan(v);
+      });
+    } else if (o is List) {
+      o.forEach(scan);
+    }
+  }
+
+  for (final rule in _list(r['rules'])) {
+    scan(rule['groups']);
+    scan(rule['composite']);
+  }
+  final q = (r['quick'] as Map?) ?? const {};
+  if (q['ads'] == true) site(adsGeosite);
+  ((q['services'] as Map?) ?? const {}).forEach((k, v) {
+    final s = services[k];
+    if (s == null || (v != 'vpn' && v != 'direct')) return;
+    s.geosite.forEach(site);
+    s.geoip.forEach(ip);
+  });
+  final reg = regions[q['region']];
+  if (reg != null) {
+    reg.geosite.forEach(site);
+    reg.geoip.forEach(ip);
+  }
+  return out.values.toList();
+}
+
+/// What [buildRouting] adds to a config.
+class Routing {
+  Routing._();
+
+  /// Route rules, after the sniff rule.
+  final rules = <Map<String, dynamic>>[];
+
+  /// Outbounds besides the target groups (added through the emitter): direct ones with
+  /// their own DNS server.
+  final outbounds = <Map<String, dynamic>>[];
+  String finalOutbound = 'proxy';
+  final dnsServers = <Map<String, dynamic>>[];
+  final dnsRules = <Map<String, dynamic>>[];
+  String dnsFinal = 'local';
+
+  /// Resolves the servers' own hostnames (proxy outbounds, DoH hosts) and what goes out
+  /// directly: a direct DNS server, never one that needs the tunnel.
+  String domainResolver = 'local';
+
+  /// `route.rule_set`: local files only.
+  final ruleSets = <Map<String, dynamic>>[];
+
+  /// Rules left out or narrowed (a list not downloaded, a bad value) — told to the user.
+  final warnings = <String>[];
+}
+
+/// Builds the routing part of a config. [group] adds a target's server group(s) the same
+/// way as the main flow; [ruleSetFiles] = rule-set tag → local file, only the ones on disk.
+Routing buildRouting(Map plan, GroupEmitter group, {Map<String, String> ruleSetFiles = const {}}) =>
+    _Builder(plan, group, ruleSetFiles).build();
+
+class _Builder {
+  _Builder(this.plan, this.group, this.files) : r = _routing(plan);
+
+  final Map plan;
+  final Map<String, dynamic> r;
+  final GroupEmitter group;
+  final Map<String, String> files;
+  final out = Routing._();
+  final _usedSets = <String>{};
+  final _targetTags = <String, String?>{};
+  late final Map<String, Map> _dnsById;
+  late final List<Map> _dnsOn;
+
+  Routing build() {
+    _dns();
+    if (plan['global'] == true) {
+      // Global: everything through the main flow, rules included (docs/rules.md).
+      out.finalOutbound = 'proxy';
+      return out;
+    }
+    _apps();
+    _ownRules();
+    _quick();
+    for (final tag in _usedSets) {
+      final path = files[tag]!;
+      out.ruleSets.add({'type': 'local', 'tag': tag, 'format': path.endsWith('.json') ? 'source' : 'binary', 'path': path});
+    }
+    return out;
+  }
+
+  /* ── DNS ── */
+
+  String _dnsTag(Map s) => 'dns-${s['id']}';
+  bool _isSystem(Map s) => '${s['addr']}'.trim() == 'system';
+  bool _viaVpn(Map s) => s['via'] == 'vpn' && !_isSystem(s);
+
+  void _dns() {
+    final all = _list(((r['dns'] as Map?) ?? const {})['servers']);
+    _dnsById = {for (final s in all) '${s['id']}': s};
+    _dnsOn = all.where((s) => s['on'] != false && dnsServerJson('x', '${s['addr']}') != null).toList();
+    final system = _dnsOn.where(_isSystem).firstOrNull;
+    // the bootstrap: resolves DoH / DoT hostnames and, without a direct server, the rest
+    _boot = system != null ? _dnsTag(system) : 'local';
+    if (system == null) out.dnsServers.add({'type': 'local', 'tag': 'local'});
+    for (final s in _dnsOn) {
+      _addDnsServer(s);
+    }
+    out.dnsFinal = _dnsOn.isEmpty ? _boot : _dnsTag(_dnsOn.first);
+    final direct = _dnsOn.where((s) => !_viaVpn(s)).firstOrNull;
+    out.domainResolver = direct != null ? _dnsTag(direct) : _boot;
+  }
+
+  String _boot = 'local';
+  final _dnsAdded = <String>{};
+  void _addDnsServer(Map s) {
+    final tag = _dnsTag(s);
+    if (!_dnsAdded.add(tag)) return;
+    final j = dnsServerJson(tag, '${s['addr']}')!;
+    if (_viaVpn(s)) j['detour'] = 'proxy';
+    if (j['server'] is String && InternetAddress.tryParse(j['server'] as String) == null) j['domain_resolver'] = _boot;
+    out.dnsServers.add(j);
+  }
+
+  /// A rule's DNS server: "Auto" = the first server in use whose route matches the
+  /// traffic's (direct → a direct one, VPN → one via VPN); or the one the rule names
+  /// (ticked in Settings → DNS or not).
+  String _dnsFor(String? pick, {required bool direct}) {
+    final named = pick == null || pick == 'auto' ? null : _dnsById[pick];
+    if (named != null && dnsServerJson('x', '${named['addr']}') != null) {
+      _addDnsServer(named);
+      return _dnsTag(named);
+    }
+    final auto = _dnsOn.where((s) => _viaVpn(s) != direct).firstOrNull;
+    return auto != null ? _dnsTag(auto) : out.dnsFinal;
+  }
+
+  /// DNS rule for the domains a rule matches (for the resolve step and, with TUN, the
+  /// apps' own queries). Only domain conditions: DNS sees names, not IPs.
+  void _dnsRule(List<Map<String, dynamic>> domainAlts, String server) {
+    if (server == out.dnsFinal || domainAlts.isEmpty) return;
+    final match = domainAlts.length == 1 ? domainAlts.first : {'type': 'logical', 'mode': 'or', 'rules': domainAlts};
+    out.dnsRules.add({...match, 'action': 'route', 'server': server});
+  }
+
+  /// Where direct traffic goes: plain `direct` resolves with the default direct DNS
+  /// server; a rule naming another server gets a direct outbound of its own (the direct
+  /// outbound never asks the DNS rules — only its domain_resolver).
+  String _directVia(String dnsTag) {
+    if (dnsTag == out.domainResolver) return 'direct';
+    final tag = 'direct@$dnsTag';
+    if (!out.outbounds.any((o) => o['tag'] == tag)) out.outbounds.add({'type': 'direct', 'tag': tag, 'domain_resolver': dnsTag});
+    return tag;
+  }
+
+  /* ── Targets and actions ── */
+
+  /// The outbound tag of a target, adding its groups once; null = unavailable now.
+  String? _target(String t) {
+    if (t.isEmpty) return 'proxy';
+    return _targetTags.putIfAbsent(t, () {
+      final spec = ((r['targets'] as Map?) ?? const {})[t] as Map?;
+      bool usable(Object? g) => g is Map && (g['nodes'] as List? ?? const []).isNotEmpty;
+      if (spec == null || !usable(spec['main'])) return null;
+      if (spec['kind'] == 'chain') {
+        if (!usable(spec['entry'])) return null;
+        group('$t>entry', spec['entry'] as Map);
+        group(t, spec['main'] as Map, detour: '$t>entry');
+      } else {
+        group(t, spec['main'] as Map);
+      }
+      return t;
+    });
+  }
+
+  Map<String, dynamic> _reject({bool drop = false}) => {'action': 'reject', if (drop) 'method': 'drop'};
+  Map<String, dynamic> _route(String outbound) => {'action': 'route', 'outbound': outbound};
+
+  /// Proxy through [target]; unavailable → [fallback] (main / block / direct).
+  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String? dns) {
+    final tag = _target(target);
+    if (tag != null) return (action: _route(tag), direct: false);
+    return switch (fallback) {
+      'block' => (action: _reject(), direct: false),
+      'direct' => (action: _route(_directVia(_dnsFor(dns, direct: true))), direct: true),
+      _ => (action: _route('proxy'), direct: false),
+    };
+  }
+
+  String get _fallback => '${r['fallback'] ?? 'main'}';
+
+  /* ── Apps: first in the order ── */
+
+  void _apps() {
+    for (final a in _list(r['apps'])) {
+      final id = '${a['id'] ?? ''}';
+      if (id.isEmpty) continue;
+      final field = switch (a['kind']) { 'process' => 'process_name', 'path' => 'process_path', _ => 'package_name' };
+      final match = <String, dynamic>{field: [id]};
+      switch (a['act']) {
+        case 'block':
+          out.rules.add({...match, ..._reject()});
+        case 'direct':
+          out.rules.add({...match, ..._route('direct')});
+        case 'proxy':
+          if (a['split'] == true) {
+            out.rules.add({...match, 'network': ['tcp'], ..._proxyAction('${a['target'] ?? ''}', _fallback, null).action});
+            out.rules.add({...match, 'network': ['udp'], ..._proxyAction('${a['udpTarget'] ?? ''}', _fallback, null).action});
+          } else {
+            out.rules.add({...match, ..._proxyAction('${a['target'] ?? ''}', _fallback, null).action});
+          }
+      }
+    }
+  }
+
+  /* ── Own rules ── */
+
+  String? _set(String tag) {
+    if (!files.containsKey(tag)) return null;
+    _usedSets.add(tag);
+    return tag;
+  }
+
+  void _ownRules() {
+    var resolved = false;
+    for (final rule in _list(r['rules'])) {
+      final title = '${rule['name'] ?? ''}'.isNotEmpty ? '"${rule['name']}"' : 'rule ${rule['id']}';
+      final built = rule['composite'] is Map ? _composite(rule['composite'] as Map, title) : _conditions(rule, title);
+      if (built == null) continue;
+      final action = '${rule['action'] ?? 'proxy'}';
+      final fallback = rule['fallback'] == null || rule['fallback'] == 'default' ? _fallback : '${rule['fallback']}';
+      final dns = rule['dns']?.toString();
+      late final Map<String, dynamic> act;
+      var direct = false;
+      switch (action) {
+        case 'block':
+          act = _reject(drop: rule['block'] != 'reject');
+        case 'direct':
+          act = _route(_directVia(_dnsFor(dns, direct: true)));
+          direct = true;
+        default:
+          final p = _proxyAction('${rule['target'] ?? ''}', fallback, dns);
+          act = p.action;
+          direct = p.direct;
+      }
+      // IP conditions need the destination's IP: resolve it once, before the first such
+      // rule (through the DNS rules, so a rule's own DNS server is used).
+      if (!resolved && _needsIp(built.match)) {
+        out.rules.add({'action': 'resolve'});
+        resolved = true;
+      }
+      out.rules.add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()});
+      if (action != 'block') _dnsRule(built.domainAlts, _dnsFor(dns, direct: direct));
+    }
+  }
+
+  bool _needsIp(Object? o) => switch (o) {
+        Map m => m.keys.any((k) => k == 'ip_cidr' || k == 'ip_is_private') ||
+            _strs(m['rule_set']).any((t) => t.startsWith('geoip-')) ||
+            m.values.any(_needsIp),
+        List l => l.any(_needsIp),
+        _ => false,
+      };
+
+  /// The rule's condition groups → one match (a flat rule when sing-box's own logic gives
+  /// the same meaning, else logical AND of the groups). null = the rule can never be
+  /// built faithfully (a list it names is missing, every value bad) — it is skipped.
+  ({Map<String, dynamic> match, List<Map<String, dynamic>> domainAlts})? _conditions(Map rule, String title) {
+    final groups = ((rule['groups'] as Map?) ?? const {}).cast<String, dynamic>();
+    final parts = <(String, bool, List<Map<String, dynamic>>)>[];
+    var domainAlts = <Map<String, dynamic>>[];
+    for (final key in const ['domain', 'ip', 'port', 'source', 'network', 'process']) {
+      final g = groups[key] as Map?;
+      if (g == null) continue;
+      final not = g['not'] == true;
+      final missing = <String>[];
+      final alts = _alts(key, g, missing);
+      if (missing.isNotEmpty && (not || alts.isEmpty)) {
+        out.warnings.add('Rule $title skipped: ${missing.join(', ')} not available');
+        return null;
+      }
+      if (missing.isNotEmpty) out.warnings.add('Rule $title: ${missing.join(', ')} not available, the rest of it works');
+      if (alts.isEmpty) continue;
+      if (key == 'domain' && !not) domainAlts = alts.where((a) => !a.containsKey('rule_set') || _strs(a['rule_set']).every((t) => t.startsWith('geosite-'))).toList();
+      parts.add((key, not, alts));
+    }
+    if (parts.isEmpty) {
+      out.warnings.add('Rule $title skipped: no conditions');
+      return null;
+    }
+    Map<String, dynamic> one((String, bool, List<Map<String, dynamic>>) p) {
+      final (_, not, alts) = p;
+      final m = alts.length == 1 ? {...alts.first} : <String, dynamic>{'type': 'logical', 'mode': 'or', 'rules': alts};
+      if (not) m['invert'] = true;
+      return m;
+    }
+
+    // sing-box ORs domain and IP fields inside one rule; the form promises AND.
+    final keys = parts.map((p) => p.$1).toSet();
+    final flat = parts.every((p) => !p.$2 && p.$3.length == 1) && !(keys.contains('domain') && keys.contains('ip'));
+    final Map<String, dynamic> match;
+    if (parts.length == 1) {
+      match = one(parts.first);
+    } else if (flat) {
+      match = {for (final p in parts) ...p.$3.first};
+    } else {
+      match = {'type': 'logical', 'mode': 'and', 'rules': [for (final p in parts) one(p)]};
+    }
+    return (match: match, domainAlts: domainAlts);
+  }
+
+  /// One condition group → alternatives (OR). [missing] collects lists not on disk.
+  List<Map<String, dynamic>> _alts(String key, Map g, List<String> missing) {
+    final v = ((g['v'] as Map?) ?? const {}).cast<String, dynamic>();
+    List<String> f(String name) => _strs(v[name]).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    final alts = <Map<String, dynamic>>[];
+    void add(Map<String, dynamic> m) {
+      m.removeWhere((_, x) => x is List && x.isEmpty);
+      if (m.isNotEmpty) alts.add(m);
+    }
+
+    List<String> sets(List<String> names, String Function(String) tagOf, String label) {
+      final tags = <String>[];
+      for (final n in names) {
+        final t = _set(tagOf(n));
+        t != null ? tags.add(t) : missing.add('$label$n');
+      }
+      return tags;
+    }
+
+    switch (key) {
+      case 'domain':
+        final exact = f('domain');
+        add({
+          'domain': exact.where((d) => !d.startsWith('*.')).toList(),
+          'domain_suffix': [...f('domain_suffix').map((d) => d.startsWith('.') ? d.substring(1) : d), ...exact.where((d) => d.startsWith('*.')).map((d) => d.substring(2))],
+          'domain_keyword': f('domain_keyword'),
+          'domain_regex': f('domain_regex'),
+        });
+        add({'rule_set': [...sets(f('geosite'), geositeTag, 'geosite:'), ...sets(f('rule_set'), userSetTag, 'rule set ')]});
+      case 'ip':
+        final cidrs = <String>[];
+        for (final x in f('ip_cidr')) {
+          final c = ipToCidrs(x);
+          if (c == null) {
+            missing.add('bad IP "$x"');
+          } else {
+            cidrs.addAll(c);
+          }
+        }
+        add({'ip_cidr': cidrs, if (g['flag'] == true) 'ip_is_private': true});
+        add({'rule_set': sets(f('geoip'), geoipTag, 'geoip:')});
+      case 'port':
+      case 'source':
+        final m = <String, dynamic>{};
+        if (key == 'source') {
+          final cidrs = [for (final x in f('source_ip_cidr')) ...?ipToCidrs(x)];
+          if (cidrs.isNotEmpty) m['source_ip_cidr'] = cidrs;
+        }
+        final field = key == 'port' ? 'port' : 'source_port';
+        final (one, ranges) = splitPorts(f(field), (bad) => missing.add('bad port "$bad"'));
+        if (one.isNotEmpty) m[field] = one;
+        if (ranges.isNotEmpty) m['${field}_range'] = ranges;
+        add(m);
+      case 'network':
+        add({'network': f('network'), 'protocol': f('protocol')});
+      case 'process':
+        final vals = f('process');
+        final paths = vals.where((x) => x.contains('/') || x.contains(r'\')).toList();
+        add({'process_name': vals.where((x) => !paths.contains(x)).toList()});
+        add({'process_path': paths.where((x) => !x.contains('*')).toList()});
+        add({'process_path_regex': paths.where((x) => x.contains('*')).map(globToRegex).toList()});
+    }
+    return alts;
+  }
+
+  /// A rule written in JSON (logical, nested): passed as is, with geosite / geoip / named
+  /// rule sets swapped for the local lists.
+  ({Map<String, dynamic> match, List<Map<String, dynamic>> domainAlts})? _composite(Map c, String title) {
+    final missing = <String>[];
+    final userNames = {for (final s in _list(r['ruleSets'])) '${s['name']}'};
+    Object? walk(Object? o) {
+      if (o is List) return o.map(walk).toList();
+      if (o is! Map) return o;
+      final m = <String, dynamic>{};
+      final sets = <String>[];
+      o.forEach((k, v) {
+        if (k == 'action' || k == 'outbound' || k == 'method') return;
+        if (k == 'geosite' || k == 'geoip' || k == 'rule_set') {
+          for (final n in _strs(v)) {
+            final tag = k == 'geosite' ? geositeTag(n) : k == 'geoip' ? geoipTag(n) : userNames.contains(n) ? userSetTag(n) : n;
+            if (_set(tag) != null) {
+              sets.add(tag);
+            } else {
+              missing.add(k == 'rule_set' ? 'rule set $n' : '$k:$n');
+            }
+          }
+        } else {
+          m['$k'] = walk(v);
+        }
+      });
+      if (sets.isNotEmpty) m['rule_set'] = sets;
+      return m;
+    }
+
+    final m = walk(c) as Map<String, dynamic>;
+    if (missing.isNotEmpty) {
+      // inside a composite rule a missing list can flip its meaning: leave it out
+      out.warnings.add('Rule $title skipped: ${missing.join(', ')} not available');
+      return null;
+    }
+    return (match: m, domainAlts: const []);
+  }
+
+  /* ── Quick rules, then everything else ── */
+
+  void _quick() {
+    final q = ((r['quick'] as Map?) ?? const {}).cast<String, dynamic>();
+    if (q['lan'] == true) {
+      out.rules.add({'ip_is_private': true, 'domain_suffix': ['local', 'localhost'], ..._route('direct')});
+    }
+    if (q['ads'] == true) {
+      final set = _set(geositeTag(adsGeosite));
+      out.rules.add({'domain_suffix': adsDomains, if (set != null) 'rule_set': [set], ..._reject()});
+      if (set == null) out.warnings.add('Block ads: the ad list is not downloaded yet, only a few known domains are blocked');
+    }
+    final svc = ((q['services'] as Map?) ?? const {}).cast<String, dynamic>();
+    for (final MapEntry(:key, :value) in svc.entries) {
+      final s = services[key];
+      if (s == null || (value != 'vpn' && value != 'direct')) continue;
+      final direct = value == 'direct';
+      final domains = <Map<String, dynamic>>[
+        {'domain_suffix': s.domains},
+        if (s.geosite.map((n) => _set(geositeTag(n))).nonNulls.toList() case final l when l.isNotEmpty) {'rule_set': l},
+      ];
+      final ips = s.geoip.map((n) => _set(geoipTag(n))).nonNulls.toList();
+      final alts = [...domains, if (ips.isNotEmpty) {'rule_set': ips}];
+      out.rules.add({...(alts.length == 1 ? alts.first : {'type': 'logical', 'mode': 'or', 'rules': alts}), ..._route(direct ? 'direct' : 'proxy')});
+      _dnsRule(domains, _dnsFor('auto', direct: direct));
+    }
+    final reg = regions[q['region']];
+    if (reg != null) {
+      final sites = reg.geosite.map((n) => _set(geositeTag(n))).nonNulls.toList();
+      final ips = reg.geoip.map((n) => _set(geoipTag(n))).nonNulls.toList();
+      final domains = <Map<String, dynamic>>[
+        {'domain_suffix': reg.tlds},
+        if (sites.isNotEmpty) {'rule_set': sites},
+      ];
+      final alts = [...domains, if (ips.isNotEmpty) {'rule_set': ips}];
+      out.rules.add({'type': 'logical', 'mode': 'or', 'rules': alts, ..._route('direct')});
+      _dnsRule(domains, _dnsFor('auto', direct: true));
+      if (sites.length < reg.geosite.length || ips.length < reg.geoip.length) {
+        out.warnings.add('My region direct: the ${q['region']} lists are not downloaded yet, only its domains (.${reg.tlds.first}) go direct');
+      }
+    }
+    switch (q['final']) {
+      case 'direct':
+        out.finalOutbound = 'direct';
+      case 'block':
+        out.rules.add(_reject());
+      default:
+        out.finalOutbound = 'proxy';
+    }
+  }
+}
+
+/* ── Values ── */
+
+/// A typed DNS server from a Settings → DNS address: `system`, `1.1.1.1[:53]`,
+/// `udp|tcp|tls|quic|https://host[:port][/path]`. null = not an address.
+Map<String, dynamic>? dnsServerJson(String tag, String addr) {
+  addr = addr.trim();
+  if (addr == 'system') return {'type': 'local', 'tag': tag};
+  final bare = RegExp(r'^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d+))?$').firstMatch(addr);
+  if (bare != null) {
+    if (InternetAddress.tryParse(bare[1]!) == null) return null;
+    return {'type': 'udp', 'tag': tag, 'server': bare[1], if (bare[2] != null) 'server_port': int.parse(bare[2]!)};
+  }
+  final u = Uri.tryParse(addr);
+  if (u == null || u.host.isEmpty || !const {'udp', 'tcp', 'tls', 'quic', 'https'}.contains(u.scheme)) return null;
+  return {
+    'type': u.scheme,
+    'tag': tag,
+    'server': u.host,
+    if (u.hasPort) 'server_port': u.port,
+    if (u.scheme == 'https' && u.path.isNotEmpty && u.path != '/' && u.path != '/dns-query') 'path': u.path,
+  };
+}
+
+/// An IP, CIDR or IPv4 range (1.1.1.1-1.1.1.9) → CIDR blocks; null = not valid.
+List<String>? ipToCidrs(String v) {
+  v = v.trim();
+  final range = v.split('-');
+  if (range.length == 2) {
+    final a = _ip4(range[0]), b = _ip4(range[1]);
+    if (a == null || b == null || a > b) return null;
+    final out = <String>[];
+    var s = a;
+    while (s <= b) {
+      var size = 32;
+      while (size > 0) {
+        final block = 1 << (32 - size + 1);
+        if (s % block != 0 || s + block - 1 > b) break;
+        size--;
+      }
+      out.add('${[24, 16, 8, 0].map((sh) => (s >> sh) & 255).join('.')}/$size');
+      s += 1 << (32 - size);
+    }
+    return out;
+  }
+  final parts = v.split('/');
+  final ip = InternetAddress.tryParse(parts[0]);
+  if (ip == null || parts.length > 2) return null;
+  if (parts.length == 2) {
+    final p = int.tryParse(parts[1]);
+    if (p == null || p < 0 || p > (ip.type == InternetAddressType.IPv4 ? 32 : 128)) return null;
+  }
+  return [v];
+}
+
+int? _ip4(String s) {
+  final p = s.trim().split('.');
+  if (p.length != 4) return null;
+  var n = 0;
+  for (final o in p) {
+    final x = int.tryParse(o);
+    if (x == null || x < 0 || x > 255) return null;
+    n = n * 256 + x;
+  }
+  return n;
+}
+
+/// '443', '8000-9000' → ports and sing-box ranges ('8000:9000').
+(List<int>, List<String>) splitPorts(List<String> vals, void Function(String bad) onBad) {
+  final one = <int>[], ranges = <String>[];
+  for (final v in vals) {
+    final m = RegExp(r'^(\d+)(?:\s*[-:]\s*(\d+))?$').firstMatch(v.trim());
+    final a = m == null ? null : int.parse(m[1]!), b = m?[2] == null ? a : int.parse(m![2]!);
+    if (a == null || b == null || a < 1 || b > 65535 || a > b) {
+      onBad(v);
+    } else if (a == b) {
+      one.add(a);
+    } else {
+      ranges.add('$a:$b');
+    }
+  }
+  return (one, ranges);
+}
+
+/// A process path with `*` → a process_path_regex (case-insensitive for Windows paths).
+String globToRegex(String glob) {
+  final body = glob.split('*').map(RegExp.escape).join('.*');
+  final windows = glob.contains(r'\') || RegExp(r'^[A-Za-z]:').hasMatch(glob);
+  return '${windows ? '(?i)' : ''}^$body\$';
+}

@@ -3,11 +3,14 @@
    Form: condition groups added with "+ Condition" (RULE_GROUPS); each field takes values as
    chips (Enter, comma or a pasted column); a bad value turns red and blocks Save.
    Action: Proxy (main flow or a target — stub picker), Direct, Block (drop / reject).
-   Strict: when the target is down, block instead of falling back to the main flow.
+   If unavailable (with a target): Default / Main / Block / Direct when the target is off,
+   empty or deleted (docs/rules.md §0).
    DNS: Auto (first ticked server with the matching route) or a server from Settings → DNS.
-   JSON: the sing-box route rule. Groups map to one flat rule; a negated group turns it into
-   {type: logical, mode: and}. Keys the form does not know are kept ("extra") and shown as
-   a plaque; any other logical rule is "composite" — edited in JSON only. */
+   JSON: the sing-box route rule. Groups map to one flat rule; a negated group, or Domains
+   together with IP (sing-box ORs those in one rule), turns it into {type: logical, mode: and}.
+   geosite / geoip stay names here: the core swaps them for its downloaded rule sets. Keys the
+   form does not know are kept ("extra") and shown as a plaque; any other logical rule is
+   "composite" — edited in JSON only. */
 
 let ruleEditing = null, ruleDraft = null, rfTab = 'form', rfAddOpen = false;
 // Empty fields stay folded as "+ Keyword" chips; a group with no values shows its first field.
@@ -172,7 +175,8 @@ function actionJson(r) {
 function ruleJson(r) {
   if (r.composite) return clone(r.composite);
   const gs = RULE_GROUPS.filter(g => r.groups[g.key]).map(g => [g.key, r.groups[g.key]]);
-  const body = gs.some(([, d]) => d.not)
+  // sing-box ORs domain and IP fields inside one rule: the form's AND needs logical then
+  const body = gs.some(([, d]) => d.not) || (r.groups.domain && r.groups.ip)
     ? { type: 'logical', mode: 'and', rules: gs.map(([k, d]) => Object.assign(groupJson(k, d), d.not ? { invert: true } : {})) }
     : Object.assign({}, ...gs.map(([k, d]) => groupJson(k, d)));
   return Object.assign(body, actionJson(r), r.extra || {});

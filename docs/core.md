@@ -65,7 +65,8 @@ UI собирает из `effectiveConnectId()`:
   main:  Group,            // юнит, или выход цепочки
   entry: Group,            // только цепочка: выход идёт через неё (detour)
   mixedPort: 2080, global: bool,
-  urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold } }
+  urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold },
+  routing: Routing }       // правила, приложения, быстрые правила, DNS — ниже
 Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key: 'sid::nid', outbound }] }
 ```
 
@@ -74,12 +75,45 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, nodes: [{ key
 - `urltest` до конца своего первого круга замеров (со сотней серверов — около минуты) шлёт
   всё через первый сервер списка. Поэтому для `fastest` UI передаёт ноды по известному пингу:
   живые по возрастанию, потом неизмеренные, мёртвые в конце.
-- Режим Rules в MVP: только приватные адреса напрямую, всё остальное — в прокси.
-  Global — всё в прокси. Экран Rules пока в конфиг не попадает.
+- Режим Rules: правила из `routing` (ниже). Global — всё в прокси, правила не применяются.
 - Подключено и план изменился (другой entry, сервер выключен, Global/Rules, системный
   прокси) — UI сам переподключает. Сравнивается состав групп и выбор, а не порядок: пинг
   переставляет Fastest и помечает серверы «testing» — это не повод рвать соединения; пока
   идёт пинг, проверка ждёт его конца.
+
+## Правила в конфиге
+
+`routing` (`js/93-routing-plan.js` → `core/lib/src/routing.dart`; логика — `rules.md`):
+
+```
+{ apps:  [{ id, kind: 'package'|'process'|'path', act, target, split, udpTarget }],
+  rules: [{ id, name, action, target, fallback, block, dns, groups, composite?, extra? }],
+  quick: { lan, ads, region: 'RU'|…|null, services: { telegram: 'vpn'|'direct', … }, final },
+  fallback: 'main'|'block'|'direct',            // Rules → Target unavailable
+  targets: { '<цель>': { kind: 'unit'|'chain', main: Group, entry?: Group } | null },
+  ruleSets: [{ name, url, format, via, every }],
+  geo: { geosite: { via, every }, geoip: { via, every } },
+  dns: { servers: [{ id, addr, via, on }] } }
+```
+
+- UI шлёт свою модель: группы условий формы, `composite` (составное правило из JSON, без
+  action), цели. Каталог живёт в UI, поэтому каждую названную цель UI сам разворачивает в
+  группы (как `main`), `null` — цель недоступна (тогда её «If unavailable»). Всё остальное —
+  AND/OR, CIDR, порты, DNS-серверы, списки — строит ядро.
+- Порядок route: `sniff` → `tunnel-in` → приложения → свои правила (перед первым с IP —
+  `resolve`) → быстрые → `final`. Группы целей — теги целей (`src:…`, `chain:…` + `chain:…>entry`).
+- `tunnel-in` — второй mixed-вход на свободном порту loopback, всегда в `proxy` мимо правил:
+  через него проверка выходного IP (российский сервис проверки иначе ушёл бы напрямую по
+  правилу региона) и списки «через VPN».
+- Списки: `RuleSetCache` (`rulesets.dart`) перед стартом кладёт нужные на диск
+  (`<dataDir>/rulesets`), в конфиг — `type: local`. После подключения в фоне: устаревшие
+  обновляет, недостающие качает через туннель — и тогда переподключает.
+- Предупреждения сборки (правило без списка, пропущенное правило) приходят в `warning`
+  ответа на connect (тост в UI).
+- `cache_file` включён; `cache_id` = хэш выбранных `default` у selector-ов: выбор через
+  Clash API переживает перезапуск, новый выбор из UI — нет.
+- Сравнение планов для переподключения нормализует и цели правил (порядок Fastest после
+  пинга — не изменение).
 
 ## API (`jormd`)
 
@@ -144,5 +178,6 @@ HWID (`device.dart`) и каналом Direct / Proxy; автообновлен�
 
 ## Не сделано в MVP
 
-TUN и kill switch; правила, DNS и rule-sets из `rules.md` в конфиге; Decrypt password
-подписки (нет спецификации); пинг выбирает URL автоматически (сейчас всегда gstatic).
+TUN и kill switch; Hijack DNS / FakeIP; «If unavailable» на лету и автопереключение DNS
+(сейчас — при сборке конфига / переподключении); обновление гео-списков по таймеру; Decrypt
+password подписки (нет спецификации); пинг выбирает URL автоматически (сейчас всегда gstatic).
