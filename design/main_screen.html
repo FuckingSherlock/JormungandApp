@@ -553,6 +553,9 @@ body {
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
 .dock{position:relative;flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);z-index:3}
+/* Route open on Home: the dock (power tab included) and the nav above the sheet and its overlay */
+.phone.route-docked .dock,.phone.route-docked .bottomnav{position:relative;z-index:12}
+.phone.route-docked #sh-profiles .sheet-body{padding-bottom:62px}
 .power-tab{
   position:absolute;left:50%;top:-50px;transform:translateX(-50%);
   width:200px;height:52px;padding:0;border:none;background:none;cursor:pointer;
@@ -839,7 +842,8 @@ body {
 .tp-nodes .node-row.picked{background:rgba(var(--accent-rgb),.10)}
 
 /* ── Route sheet ── */
-.route-bar{display:flex;align-items:center;gap:10px;padding:10px 18px 0;flex-shrink:0}
+.route-bar{display:flex;align-items:center;gap:10px;padding:10px 18px 8px;flex-shrink:0}
+#sh-profiles .sheet-body{padding-top:4px}
 .route-modes{flex:1;position:relative;display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
 .route-modes button{flex:1;position:relative;z-index:1;background:none;border:none;font:inherit;font-size:14px;font-weight:600;color:var(--t2);padding:8px 6px;cursor:pointer;transition:color .25s}
 .route-modes button.on{color:#fff}
@@ -1080,7 +1084,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       </svg>
       <svg class="power-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
     </button>
-    <div class="dock-profile" onclick="openProfiles()">
+    <div class="dock-profile" onclick="toggleRoute()">
       <div class="profiles-main">
         <div class="profiles-top">
           <span class="card-label" style="margin-bottom:0" id="profCardLabel">Simple</span>
@@ -2325,7 +2329,7 @@ function routeRowBodyHtml(id) {
   const refs = priority ? unitPickRefs(id) : byPing(unitRefs(id), r => r.node);
   let rank = 0;
   const pin = pinnedRef(id);
-  const rows = refs.map(r => `<div class="node-row ps-node on ${pin && refKey(pin) === refKey(r) ? 'pinned' : ''}" data-id="${refKey(r)}" onclick="pinRouteNode('${id}','${refKey(r)}')" title="Use only this server (Manual)">
+  const rows = refs.map(r => `<div class="node-row ps-node on ${pin && refKey(pin) === refKey(r) ? 'pinned' : ''}" data-id="${refKey(r)}" onclick="pinRouteNode('${id}','${refKey(r)}',event)" title="Use only this server (Manual)">
       ${priority && routeEdit ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div>` : ''}${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
@@ -2348,7 +2352,8 @@ const pingRouteRow = id => testLatency(unitRefs(id).map(r => [r.sid, r.node.id])
 /* Tap a server of an unfolded row: Manual on this entry and on this server. Tap the pinned
    server again: the entry stays Manual and picks by its Fastest / Priority again. Any other
    pick (another entry, AUTO / MANUAL, the Auto badge) drops the server pin. */
-function pinRouteNode(id, key) {
+function pinRouteNode(id, key, e) {
+  if (dragCtx || (e && e.target.closest('.drag-handle'))) return;   // the end of a drag, not a tap
   const again = !autoConnect && activeConnectId === id && pinnedNode === key;
   autoConnect = false; activeConnectId = id; pinnedNode = again ? null : key;
   routeRowChanged();
@@ -2436,10 +2441,28 @@ function enableNode(sid, nid) {
   renderAll();
 }
 
+// The dock opens Route and, since it stays on top of it, closes it too.
+const toggleRoute = () => document.getElementById('sh-profiles').classList.contains('open') ? closeSheet('profiles') : openProfiles();
 function openProfiles() {
   setRouteEdit(false);
   openSheet('profiles');
 }
+
+/* On Home, Route sits above the bottom block: it ends at the dock's top edge, its bottom
+   tucks under the power tab, and the dock and the nav stay on top and usable. The raised
+   layers drop back once the sheet has slid away. With no dock on screen: the whole screen. */
+function placeRouteSheet() {
+  const sh = document.getElementById('sh-profiles'), dock = document.querySelector('#view-home.active .dock');
+  document.querySelector('.phone').classList.toggle('route-docked', !!dock);
+  sh.style.bottom = dock ? (document.documentElement.clientHeight - dock.getBoundingClientRect().top) + 'px' : '';
+}
+document.getElementById('sh-profiles').addEventListener('transitionend', e => {
+  if (e.target.id === 'sh-profiles' && !e.target.classList.contains('open')) {
+    document.querySelector('.phone').classList.remove('route-docked');
+    e.target.style.bottom = '';
+  }
+});
+window.addEventListener('resize', () => { if (document.getElementById('sh-profiles').classList.contains('open')) placeRouteSheet(); });
 
 /* Keeps the catalog, sourceOrder and both route lists in step after anything was added
    or deleted: entries that no longer exist drop out; a route that follows Nodes copies
@@ -3498,6 +3521,7 @@ function toast(msg) {
 /* ── Tabs ── */
 
 function switchTab(name) {
+  if (document.querySelector('.phone.route-docked #sh-profiles.open')) closeSheet('profiles');   // Route belongs to Home
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
   document.querySelectorAll('.nav-btn[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('#view-' + name + ' > .scroll').forEach(el => el.scrollTop = 0);
@@ -4694,6 +4718,7 @@ function openHelp(key) {
 /* ══════════════════════ SHEETS (open/close + tabs) ══════════════════════ */
 
 function showSheet(name, on) {
+  if (name === 'profiles' && on) placeRouteSheet();
   document.getElementById('ov-'+name).classList.toggle('open', on);
   document.getElementById('sh-'+name).classList.toggle('open', on);
 }

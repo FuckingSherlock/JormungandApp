@@ -1,10 +1,10 @@
 // Asks every exit-IP service through a running mixed proxy and prints what each says and
 // how fast, then what checkExitIp would report. Handy on a node whose country blocks some
-// of them:  dart run tool/exit_check.dart [proxyPort=2080]
+// of them:  dart run tool/exit_check.dart [proxyPort=2080 | direct]  (direct = no proxy)
 import 'package:jormungand_core/jormungand_core.dart';
 
 Future<void> main(List<String> args) async {
-  final port = args.isEmpty ? 2080 : int.parse(args.first);
+  final int? port = args.isEmpty ? 2080 : args.first == 'direct' ? null : int.parse(args.first);
   await Future.wait([
     for (final p in exitProbes)
       () async {

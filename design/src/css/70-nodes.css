@@ -110,7 +110,8 @@
 .tp-nodes .node-row.picked{background:rgba(var(--accent-rgb),.10)}
 
 /* ── Route sheet ── */
-.route-bar{display:flex;align-items:center;gap:10px;padding:10px 18px 0;flex-shrink:0}
+.route-bar{display:flex;align-items:center;gap:10px;padding:10px 18px 8px;flex-shrink:0}
+#sh-profiles .sheet-body{padding-top:4px}
 .route-modes{flex:1;position:relative;display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
 .route-modes button{flex:1;position:relative;z-index:1;background:none;border:none;font:inherit;font-size:14px;font-weight:600;color:var(--t2);padding:8px 6px;cursor:pointer;transition:color .25s}
 .route-modes button.on{color:#fff}

@@ -217,7 +217,7 @@ function routeRowBodyHtml(id) {
   const refs = priority ? unitPickRefs(id) : byPing(unitRefs(id), r => r.node);
   let rank = 0;
   const pin = pinnedRef(id);
-  const rows = refs.map(r => `<div class="node-row ps-node on ${pin && refKey(pin) === refKey(r) ? 'pinned' : ''}" data-id="${refKey(r)}" onclick="pinRouteNode('${id}','${refKey(r)}')" title="Use only this server (Manual)">
+  const rows = refs.map(r => `<div class="node-row ps-node on ${pin && refKey(pin) === refKey(r) ? 'pinned' : ''}" data-id="${refKey(r)}" onclick="pinRouteNode('${id}','${refKey(r)}',event)" title="Use only this server (Manual)">
       ${priority && routeEdit ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div>` : ''}${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
@@ -240,7 +240,8 @@ const pingRouteRow = id => testLatency(unitRefs(id).map(r => [r.sid, r.node.id])
 /* Tap a server of an unfolded row: Manual on this entry and on this server. Tap the pinned
    server again: the entry stays Manual and picks by its Fastest / Priority again. Any other
    pick (another entry, AUTO / MANUAL, the Auto badge) drops the server pin. */
-function pinRouteNode(id, key) {
+function pinRouteNode(id, key, e) {
+  if (dragCtx || (e && e.target.closest('.drag-handle'))) return;   // the end of a drag, not a tap
   const again = !autoConnect && activeConnectId === id && pinnedNode === key;
   autoConnect = false; activeConnectId = id; pinnedNode = again ? null : key;
   routeRowChanged();
@@ -328,10 +329,28 @@ function enableNode(sid, nid) {
   renderAll();
 }
 
+// The dock opens Route and, since it stays on top of it, closes it too.
+const toggleRoute = () => document.getElementById('sh-profiles').classList.contains('open') ? closeSheet('profiles') : openProfiles();
 function openProfiles() {
   setRouteEdit(false);
   openSheet('profiles');
 }
+
+/* On Home, Route sits above the bottom block: it ends at the dock's top edge, its bottom
+   tucks under the power tab, and the dock and the nav stay on top and usable. The raised
+   layers drop back once the sheet has slid away. With no dock on screen: the whole screen. */
+function placeRouteSheet() {
+  const sh = document.getElementById('sh-profiles'), dock = document.querySelector('#view-home.active .dock');
+  document.querySelector('.phone').classList.toggle('route-docked', !!dock);
+  sh.style.bottom = dock ? (document.documentElement.clientHeight - dock.getBoundingClientRect().top) + 'px' : '';
+}
+document.getElementById('sh-profiles').addEventListener('transitionend', e => {
+  if (e.target.id === 'sh-profiles' && !e.target.classList.contains('open')) {
+    document.querySelector('.phone').classList.remove('route-docked');
+    e.target.style.bottom = '';
+  }
+});
+window.addEventListener('resize', () => { if (document.getElementById('sh-profiles').classList.contains('open')) placeRouteSheet(); });
 
 /* Keeps the catalog, sourceOrder and both route lists in step after anything was added
    or deleted: entries that no longer exist drop out; a route that follows Nodes copies

@@ -503,6 +503,48 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
+  await check('route: dragging a server grip reorders it without pinning it', async () => {
+    const id = await page.evaluate(() => {
+      const id = visibleOrder().filter(x => sourcesData[x] && unitRefs(x).length > 2)[0];
+      unitOwner(id).pickMode = 'priority'; setRouteEdit(true); toggleRouteRow(id);
+      return id;
+    });
+    await settle(page);
+    const rows = page.locator(`#connects-list .conn-row[data-id=${id}] .conn-body .node-row`);
+    const g = await rows.nth(0).locator('.drag-handle').boundingBox(), t = await rows.nth(2).boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, t.y + t.height - 4, { steps: 8 }); await page.mouse.up(); await settle(page);
+    const r = await page.evaluate(id => {
+      const out = { notPinned: pinnedNode === null && autoConnect, moved: (unitOwner(id).pickOrder || []).length > 0 };
+      unitOwner(id).pickMode = 'fastest'; toggleRouteRow(id); setRouteEdit(false);
+      return out;
+    }, id);
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('route on Home: ends at the dock, tucked under the power tab; dock and nav stay on top', async () => {
+    await page.evaluate(() => closeSheet('profiles')); await settle(page);
+    await page.click('.dock-profile'); await settle(page);
+    const r = await page.evaluate(() => {
+      const sh = document.getElementById('sh-profiles').getBoundingClientRect(), dock = document.querySelector('.dock').getBoundingClientRect();
+      const tab = document.getElementById('powerBtn').getBoundingClientRect(), nav = document.querySelector('.bottomnav').getBoundingClientRect();
+      const bar = document.querySelector('#sh-profiles .route-bar').getBoundingClientRect(), body = document.querySelector('#sh-profiles .sheet-body').getBoundingClientRect();
+      const hit = (x, y, sel) => !!document.elementFromPoint(x, y).closest(sel);
+      return { open: document.getElementById('sh-profiles').classList.contains('open'), bottom: Math.abs(sh.bottom - dock.top) <= 1,
+        tabOnTop: hit(tab.left + tab.width / 2, tab.top + tab.height / 2, '#powerBtn'), sheetUnderTab: sh.bottom > tab.top + 20,
+        dockOnTop: hit(dock.left + 40, dock.bottom - 20, '.dock-profile'), navOnTop: hit(nav.left + nav.width / 2, nav.top + nav.height / 2, '.bottomnav'),
+        gap: body.top - (bar.bottom - 8) >= 7 };
+    });
+    await page.click('.dock-profile'); await settle(page);
+    r.dockCloses = await page.evaluate(() => !document.getElementById('sh-profiles').classList.contains('open') && !document.querySelector('.phone.route-docked'));
+    await page.click('.dock-profile'); await settle(page);
+    await page.evaluate(() => switchTab('nodes')); await settle(page);
+    r.tabCloses = await page.evaluate(() => !document.getElementById('sh-profiles').classList.contains('open'));
+    await page.evaluate(() => switchTab('home')); await settle(page);
+    await page.click('.dock-profile'); await settle(page);   // leave it open, as the checks below expect
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
   await check('profiles: dragging changes the Auto pick', async () => {
     await page.evaluate(() => setRouteEdit(true));
     const target = await page.evaluate(() => connectOrder.filter(id => connectEntry(id).inAuto && isUsable(id))[1]);

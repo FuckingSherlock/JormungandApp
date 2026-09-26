@@ -12,6 +12,7 @@ function toast(msg) {
 /* ── Tabs ── */
 
 function switchTab(name) {
+  if (document.querySelector('.phone.route-docked #sh-profiles.open')) closeSheet('profiles');   // Route belongs to Home
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
   document.querySelectorAll('.nav-btn[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('#view-' + name + ' > .scroll').forEach(el => el.scrollTop = 0);

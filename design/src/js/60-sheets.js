@@ -1,6 +1,7 @@
 /* ══════════════════════ SHEETS (open/close + tabs) ══════════════════════ */
 
 function showSheet(name, on) {
+  if (name === 'profiles' && on) placeRouteSheet();
   document.getElementById('ov-'+name).classList.toggle('open', on);
   document.getElementById('sh-'+name).classList.toggle('open', on);
 }
