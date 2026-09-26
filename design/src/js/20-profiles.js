@@ -236,7 +236,7 @@ function routeRowBodyHtml(id) {
       ${priority && routeEdit ? `<div class="drag-handle cc-grip" onpointerdown="startRouteNodeDrag(event,'${refKey(r)}')">${GRIP_SVG}</div>` : ''}${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
-      <span class="node-proto">${r.node.protocol}</span>
+      <span class="node-proto">${protoLabel(r.node)}</span>
       <span onclick="event.stopPropagation();testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">${latHtml(r.node)}</span>
     </div>`).join('');
   const acts = `<div class="conn-acts">${routeUpdateBtn(id)}</div>`;   // ⚡ sits on the row itself

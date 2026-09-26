@@ -61,10 +61,12 @@ const goneKeep = Duration(days: 15);
     used.add(ids.last);
   }
 
-  // Numbers for same-named servers.
+  // Numbers for same-named servers; the protocol badge tells apart ones that differ by it
+  // (a provider's "VLESS X" and "HY2 X" both become "X").
   final groups = <String, List<int>>{};
   for (var i = 0; i < fresh.length; i++) {
-    groups.putIfAbsent('${fresh[i].flag}${fresh[i].name}', () => []).add(i);
+    final f = fresh[i];
+    groups.putIfAbsent('${f.flag}${f.name}|${protoLabel(f.protocol, f.outbound)}', () => []).add(i);
   }
   final nums = List<int?>.filled(fresh.length, null);
   for (final g in groups.values) {

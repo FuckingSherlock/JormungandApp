@@ -45,7 +45,7 @@ void main() {
 
     test('vmess v2rayN json', () {
       final n = parseLink(vmessJson)!;
-      expect(n.name, 'VMess WS');
+      expect(n.name, 'WS'); // the protocol word goes: it has its own badge
       expect(n.outbound['transport'], {'type': 'ws', 'path': '/vm', 'headers': {'Host': 'tr1.example'}});
       expect(n.outbound['tls']['server_name'], 'tr1.example');
     });
@@ -176,5 +176,17 @@ void main() {
       expect(merged.nodes.single['id'], f.base);
       expect(merged.gone, isEmpty);
     });
+  });
+
+  test('protocol words leave server names, Reality gets its own badge', () {
+    expect(stripProtocol('VLESS RU-SPB ➡️ Нидерланды'), 'RU-SPB ➡️ Нидерланды');
+    expect(stripProtocol('HY2 RU-SPB'), 'RU-SPB');
+    expect(stripProtocol('NL | Hysteria2 | Reality'), 'NL');
+    expect(stripProtocol('Frankfurt (VMess) 01'), 'Frankfurt 01');
+    expect(stripProtocol('[Trojan] Tokyo'), 'Tokyo');
+    expect(stripProtocol('Vlessland'), 'Vlessland'); // not a whole word
+    expect(stripProtocol('VLESS'), 'VLESS'); // nothing would be left
+    expect(protoLabel('vless', {'tls': {'enabled': true, 'reality': {'enabled': true}}}), 'reality');
+    expect(protoLabel('vless', {'tls': {'enabled': true}}), 'vless');
   });
 }

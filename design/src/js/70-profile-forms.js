@@ -87,7 +87,7 @@ function renderCreateProfileSources() {
       return `<div class="node-row ps-node pick ${on ? 'on' : ''}" onclick="toggleCpNode('${id}','${n.id}')">
         <span class="node-flag">${n.flag}</span>
         <span class="node-name">${esc(n.name)}</span>
-        <span class="node-proto">${n.protocol}</span>
+        <span class="node-proto">${protoLabel(n)}</span>
         <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
       </div>`;
     }).join('') + goneBlockHtml('cp:' + id, goneRefs(id),
@@ -294,7 +294,7 @@ function renderChainPicker(elId, side) {
     const nodes = open ? list.map(r => {
       const { sid, node } = r, key = refKey(r);
       const lat = `<span onclick="event.stopPropagation();pingNodes([sourcesData['${sid}'].nodes.find(x=>x.id==='${node.id}')])" title="Tap to ping">${latHtml(node)}</span>`;
-      if (!active) return `<div class="node-row static"><span class="node-flag">${node.flag}</span><span class="node-name">${esc(node.name)}</span><span class="node-proto">${node.protocol}</span>${lat}</div>`;
+      if (!active) return `<div class="node-row static"><span class="node-flag">${node.flag}</span><span class="node-name">${esc(node.name)}</span><span class="node-proto">${protoLabel(node)}</span>${lat}</div>`;
       const isOn = !off.includes(key);
       const grip = priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startExitDrag(event,'${key}')">${GRIP_SVG}</div>` : '';
       const num = priority && isOn ? `<span class="cc-rank">${++rank}</span>` : priority ? '<span class="cc-rank"></span>' : '';
@@ -302,7 +302,7 @@ function renderChainPicker(elId, side) {
         ${grip}${num}
         <span class="node-flag">${node.flag}</span>
         <span class="node-name">${esc(node.name)}</span>
-        <span class="node-proto">${node.protocol}</span>${lat}
+        <span class="node-proto">${protoLabel(node)}</span>${lat}
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
       r => !off.includes(refKey(r))) : '') : '';

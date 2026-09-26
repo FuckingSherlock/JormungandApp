@@ -6,6 +6,8 @@ const NODE_POOL = [
   ['🇸🇬','Singapore'],['🇹🇷','Istanbul'],['🇰🇿','Almaty'],['🇱🇻','Riga'],
 ];
 const PROTOS = ['vless','hy2','vless','trojan','ss','tuic','vmess'];
+// The protocol badge: Reality apart from plain VLESS + TLS (the core's node has it in outbound.tls.reality).
+const protoLabel = n => n.reality || (n.outbound && n.outbound.tls && n.outbound.tls.reality) ? 'reality' : n.protocol;
 
 function randLatency() {
   const r = Math.random();
@@ -24,6 +26,7 @@ function genNodes(count, kind) {
       flag,
       name: kind === 'node' ? ('VPS ' + city) : (city + ' ' + String(Math.floor(i / NODE_POOL.length) + 1).padStart(2, '0')),
       protocol: PROTOS[i % PROTOS.length],
+      reality: i % PROTOS.length === 2,
       address: kind === 'node' ? ('185.22.' + (10 + i) + '.' + (40 + i * 7)) : (city.toLowerCase().replace(' ', '') + '-' + count + '-' + i + '.edge.example'),
       port: '443',
     });

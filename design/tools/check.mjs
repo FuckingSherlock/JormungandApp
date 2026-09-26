@@ -336,6 +336,33 @@ async function runChecks() {
     await p.close();
   });
 
+  await check('nodes: Reality has its own protocol badge', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      switchTab('nodes'); setNodesTab('simple');
+      const sid = sourceOrder[0]; expandState[sid] = true; renderNodes();
+      const badges = [...document.querySelectorAll(`#view-nodes .node-proto`)].map(el => el.textContent);
+      return { shown: badges.includes('reality') && badges.includes('vless'),
+        core: protoLabel({ protocol: 'vless', outbound: { tls: { reality: { enabled: true } } } }) === 'reality' && protoLabel({ protocol: 'vless', outbound: { tls: {} } }) === 'vless' };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('ping sort: answers go up by ms, timeouts go to the bottom at once, waiting rows stay between', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      const nodes = sourcesData[sourceOrder[0]].nodes.slice(0, 5);
+      nodes.forEach(n => pingCache.set(serverKey(n), { ms: 'testing', at: Date.now() }));
+      setPing(nodes[3], 40); setPing(nodes[1], -1);
+      const fast = byPing(nodes).map(n => nodes.indexOf(n));
+      nodeSort = 'latency'; const sorted = sortedNodes(nodes).map(n => nodes.indexOf(n)); nodeSort = 'order';
+      return { fast: fast.join() === '3,0,2,4,1', sorted: sorted.join() === '3,0,2,4,1' };
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
   await check('live traffic: cards and Live connections follow backend.traffic, zero when off', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(async () => {

@@ -41,7 +41,7 @@ class Node {
     String h(String s) => 'n${sha256.convert(utf8.encode(s)).toString().substring(0, 12)}';
     final server = '$protocol|${address.toLowerCase()}|$port|$identity';
     final key = h('$server|${variantOf(outbound)}');
-    final (flag, clean) = splitFlag(name);
+    final (flag, clean) = splitFlag(stripProtocol(name));
     return Node(
       id: key,
       key: key,
@@ -142,6 +142,29 @@ String variantOf(Map<String, dynamic> ob) {
     'plugin': ob['plugin'] == null ? null : '${ob['plugin']}:${ob['plugin_opts']}',
   }..removeWhere((_, x) => x == null || x == '');
   return jsonEncode(v);
+}
+
+/// What the UI's protocol badge says: `reality` for VLESS over Reality (a different thing
+/// to block than plain VLESS + TLS), else [Node.protocol].
+String protoLabel(String protocol, Map<String, dynamic>? outbound) {
+  final tls = outbound?['tls'];
+  return tls is Map && tls['reality'] is Map ? 'reality' : protocol;
+}
+
+/// Protocol words providers put into server names ("VLESS RU-SPB", "NL | Hysteria2 |
+/// Reality"): the protocol has its own badge, so they go. Whole words only; separators
+/// left with nothing on one side go too. A name that would end up empty stays as it was.
+final _protoWords = RegExp(
+  r'(?<![\p{L}\p{N}])(?:vless|vmess|trojan|shadowsocksr?|ssr?|hysteria\s?2|hysteria|hy2|tuic(?:\s?v?5)?|anytls|wireguard|reality)(?![\p{L}\p{N}])',
+  caseSensitive: false,
+  unicode: true,
+);
+const _sep = r'[|/\\·•,\-–—+_:;]';
+String stripProtocol(String name) {
+  var s = name.replaceAll(_protoWords, ' ').replaceAll(RegExp(r'\(\s*\)|\[\s*\]|\{\s*\}'), ' ');
+  s = s.replaceAllMapped(RegExp('($_sep)(?:\\s*$_sep)+'), (m) => m[1]!);
+  s = s.replaceAll(RegExp('^(?:\\s|$_sep)+|(?:\\s|$_sep)+\$'), '').replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+  return s.isEmpty ? name.trim() : s;
 }
 
 /// Pulls the first flag emoji (a pair of regional indicators) out of a server name:

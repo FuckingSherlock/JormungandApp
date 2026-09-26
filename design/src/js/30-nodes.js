@@ -64,18 +64,16 @@ const latHtml = n => latMsHtml(ping(n));
 function sortedNodes(list, nodeOf = x => x) {
   list = list.slice();
   if (nodeSort === 'name') list.sort((a, b) => nodeOf(a).name.localeCompare(nodeOf(b).name));
-  if (nodeSort === 'latency') {
-    const key = x => isAlive(nodeOf(x)) ? ping(nodeOf(x)) : 1e9;
-    list.sort((a, b) => key(a) - key(b));
-  }
+  if (nodeSort === 'latency') list.sort((a, b) => pingRank(nodeOf(a)) - pingRank(nodeOf(b)));
   return list;
 }
 
 // Fastest lists (profile / chain / route entry in Fastest mode) always read by ping: quickest
-// on top, dead ones last — the top row is the one that connects.
+// on top, dead ones last — the top row is the one that connects. While a ping runs, each
+// answer moves its row at once: up by its ms, a timeout straight to the bottom; rows still
+// waiting keep their place in between (pingRank).
 function byPing(list, nodeOf = x => x) {
-  const key = x => isAlive(nodeOf(x)) ? ping(nodeOf(x)) : 1e9;
-  return list.slice().sort((a, b) => key(a) - key(b));
+  return list.slice().sort((a, b) => pingRank(nodeOf(a)) - pingRank(nodeOf(b)));
 }
 
 /* ── Servers the provider dropped (s.gone) ──
@@ -95,7 +93,7 @@ function goneBlockHtml(ctx, refs, isOn = null, action = '', rowClick = null) {
   const rows = open ? refs.map(r => `<div class="node-row gone ${isOn ? 'pick' : ''} ${isOn && isOn(r) ? 'on' : ''} ${rowClick ? 'tap' : ''}" ${rowClick ? `onclick="${rowClick(r)}"` : ''}>
       <span class="node-flag">${r.node.flag}</span>
       <span class="node-name">${esc(r.node.name)}</span>
-      <span class="node-proto">${r.node.protocol}</span>
+      <span class="node-proto">${protoLabel(r.node)}</span>
       <span class="lat none gone-left ${goneLeftDays(r.node) <= 3 ? 'soon' : ''}" title="Removed ${timeAgo(r.node.goneAt)}">${goneLeftDays(r.node)} d left</span>
     </div>`).join('') : '';
   return `<div class="gone-block ${open ? 'open' : ''}">
@@ -189,7 +187,7 @@ function renderSourceCard(id, q) {
       onclick="${nodesEdit ? 'toggleNodeEnabled' : 'openNodeActions'}('${id}','${n.id}')" title="${nodesEdit ? 'Tap: on / off' : 'Tap: menu'}">
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
-      <span class="node-proto">${n.protocol}</span>
+      <span class="node-proto">${protoLabel(n)}</span>
       <span onclick="event.stopPropagation();testLatency([['${id}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`; }).join('');
   const addRow = s.kind === 'node'

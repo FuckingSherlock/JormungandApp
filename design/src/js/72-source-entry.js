@@ -43,7 +43,7 @@ function renderSourceEntry() {
       ${priority ? `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startSourceEntryDrag(event,'${seId}::${n.id}')">${GRIP_SVG}</div><span class="cc-rank">${off ? '' : ++rank}</span>` : ''}
       <span class="node-flag">${n.flag}</span>
       <span class="node-name">${esc(n.name)}</span>
-      <span class="node-proto">${n.protocol}</span>
+      <span class="node-proto">${protoLabel(n)}</span>
       <span onclick="event.stopPropagation();testLatency([['${seId}','${n.id}']])" title="Tap to ping">${latHtml(n)}</span>
     </div>`;
   }).join('') || '<div class="route-empty">No servers yet</div>';
