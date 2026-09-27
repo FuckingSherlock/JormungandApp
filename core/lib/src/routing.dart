@@ -10,7 +10,7 @@
 ///              'default'|'main'|'block'|'direct', block: 'drop'|'reject', dns: 'auto'|<dns id>,
 ///              groups: { domain|ip|port|source|network|process: { not, v: {field: [..]}, flag } },
 ///              composite?, extra? }],             // enabled ones, in order
-///   quick:  { lan, ads, region: 'RU'|…|null, services: {key: 'vpn'|'direct'},
+///   quick:  { ads, region: 'RU'|…|null, services: {key: 'vpn'|'direct'},
 ///             final: 'proxy'|'direct'|'block' },
 ///   fallback: 'main'|'block'|'direct',            // Rules → Target unavailable
 ///   targets: { '<target>': { kind: 'unit'|'chain', main: Group, entry?: Group } },
@@ -83,8 +83,11 @@ const regions = <String, ({List<String> geosite, List<String> geoip, List<String
 const adsGeosite = 'category-ads-all';
 const adsDomains = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
 
+/// Names only a local network resolves (mDNS, the loopback, routers' own zones, RFC 8375).
+const lanSuffixes = ['local', 'localhost', 'lan', 'home.arpa'];
+
 Map<String, dynamic> _routing(Map plan) =>
-    ((plan['routing'] as Map?) ?? const {'quick': {'lan': true, 'final': 'proxy'}}).cast<String, dynamic>();
+    ((plan['routing'] as Map?) ?? const {'quick': {'final': 'proxy'}}).cast<String, dynamic>();
 List<Map> _list(Object? l) => (l as List? ?? const []).cast<Map>();
 List<String> _strs(Object? l) => [for (final x in (l as List? ?? const [])) '$x'];
 
@@ -191,8 +194,10 @@ class _Builder {
 
   Routing build() {
     _dns();
+    // local addresses always go direct: first of all, in Global too (docs/rules.md §2)
+    out.rules.add({'ip_is_private': true, 'domain_suffix': lanSuffixes, ..._route('direct')});
     if (plan['global'] == true) {
-      // Global: everything through the main flow, rules included (docs/rules.md).
+      // Global: everything else through the main flow, rules included (docs/rules.md).
       out.finalOutbound = topTag;
       return out;
     }
@@ -533,9 +538,6 @@ class _Builder {
 
   void _quick() {
     final q = ((r['quick'] as Map?) ?? const {}).cast<String, dynamic>();
-    if (q['lan'] == true) {
-      out.rules.add({'ip_is_private': true, 'domain_suffix': ['local', 'localhost'], ..._route('direct')});
-    }
     if (q['ads'] == true) {
       final set = _set(geositeTag(adsGeosite));
       out.rules.add({'domain_suffix': adsDomains, if (set != null) 'rule_set': [set], ..._reject()});

@@ -161,7 +161,7 @@ const REGIONS = [['RU', '🇷🇺 Russia', ['ru', 'рф', 'su']], ['BY', '🇧�
   ['UA', '🇺🇦 Ukraine', ['ua']], ['CN', '🇨🇳 China', ['cn']], ['IR', '🇮🇷 Iran', ['ir']]];
 const ADS = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
 const quickCfg = {
-  regionOn: true, region: 'RU', lan: true, ads: false, final: 'proxy',
+  regionOn: true, region: 'RU', ads: false, final: 'proxy',
   fallback: 'main',   // a rule's target is unavailable and the rule says Default; apps always
   services: { telegram: 'vpn', youtube: 'vpn', discord: 'default', netflix: 'default', spotify: 'default', chatgpt: 'vpn', instagram: 'vpn', x: 'default' },
 };
@@ -248,7 +248,7 @@ function renderRules() {
 
     <div class="rules-label">Quick rules</div>
     <div class="set-group">
-      ${hit('local networks') ? `<div class="set-row"><div class="set-label">Local networks direct<div class="set-hint">192.168.x.x, 10.x.x.x, printers, NAS</div></div>${toggle(quickCfg.lan, 'quickCfg.lan=!quickCfg.lan;renderRules()')}</div>` : ''}
+      ${hit('local networks') ? `<div class="set-row" id="qr-lan"><div class="set-label">Local networks direct<div class="set-hint">Always, in Global too · 192.168.x.x, 10.x.x.x, .local, printers, NAS</div></div><span class="order-act">Always</span></div>` : ''}
       ${hit('ads block') ? `<div class="set-row"><div class="set-label">Block ads<div class="set-hint">Known ad and tracker domains</div></div>${toggle(quickCfg.ads, 'quickCfg.ads=!quickCfg.ads;renderRules()')}</div>` : ''}
       ${hit('region direct') ? `<div class="set-row"><div class="set-label">My region direct<div class="set-hint">Its sites and IPs skip the VPN</div></div>${quickCfg.regionOn ? regionSel : ''}${toggle(quickCfg.regionOn, 'quickCfg.regionOn=!quickCfg.regionOn;renderRules()')}</div>` : ''}
     </div>
@@ -283,11 +283,10 @@ function startRuleDrag(e, id) {
 
 /* ── Final order: the whole list as the engine sees it ── */
 function effectiveRules() {
-  const out = [];
+  const out = [['Local networks', 'always first, in Global too', 'Direct']];
   const apps = Object.keys(appRules).length;
   if (apps) out.push(['Apps', apps + ' apps with their own route', 'mixed']);
   ruleOrder.filter(id => rulesData[id].enabled).forEach(id => { const r = rulesData[id]; out.push([ruleTitle(r), r.name ? ruleSummary(r) : '', ruleTargetText(r)]); });
-  if (quickCfg.lan) out.push(['Local networks', 'quick rule', 'Direct']);
   if (quickCfg.ads) out.push(['Ads', 'quick rule', 'Block']);
   SERVICES.filter(([k]) => quickCfg.services[k] !== 'default').forEach(([k, n]) => out.push([n, 'service', quickCfg.services[k] === 'vpn' ? 'Proxy' : 'Direct']));
   if (quickCfg.regionOn) out.push(['Region ' + quickCfg.region, 'geosite + geoip', 'Direct']);
@@ -301,6 +300,8 @@ function openRuleOrder() {
 }
 
 /* ── Test an address: which rule catches it and where it goes ── */
+// names only a local network resolves: core/lib/src/routing.dart lanSuffixes
+const LAN_SUFFIXES = ['local', 'localhost', 'lan', 'home.arpa'];
 const PRIVATE_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', '169.254.0.0/16'];
 function inCidr(ip, c) {
   if (c.includes('-')) { const [a, b] = c.split('-'); return ip2n(ip) >= ip2n(a) && ip2n(ip) <= ip2n(b); }
@@ -332,6 +333,7 @@ function testAddress(raw) {
   }
   const [host, port = '443'] = s.split(':');
   const t = { host, port: +port, ip: isIp4(host) };
+  if (t.ip ? PRIVATE_NETS.some(c => inCidr(host, c)) : LAN_SUFFIXES.some(d => onDomain(host, d))) return { rule: 'Local networks (always)', to: 'Direct' };
   for (const id of ruleOrder) {
     const r = rulesData[id];
     if (!r.enabled) continue;
@@ -339,7 +341,6 @@ function testAddress(raw) {
     const gs = Object.entries(r.groups);
     if (gs.length && gs.every(([k, d]) => groupMatches(k, d, t))) return { rule: '#' + (ruleOrder.indexOf(id) + 1) + ' ' + ruleTitle(r), to: ruleTargetText(r).replace('→ ', '') };
   }
-  if (quickCfg.lan && (t.ip ? PRIVATE_NETS.some(c => inCidr(host, c)) : host.endsWith('.local'))) return { rule: 'Local networks', to: 'Direct' };
   if (quickCfg.ads && ADS.some(d => onDomain(host, d))) return { rule: 'Block ads', to: 'Block' };
   const svc = SERVICES.find(([k, , ds]) => quickCfg.services[k] !== 'default' && ds.some(d => onDomain(host, d)));
   if (svc) return { rule: 'Service ' + svc[1], to: quickCfg.services[svc[0]] === 'vpn' ? 'Proxy' : 'Direct' };

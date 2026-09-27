@@ -1881,7 +1881,11 @@ async function runChecks() {
       out.composite = !!document.querySelector('#rf-body .rf-plaque') && !document.querySelector('#rf-body .rf-group');
       closeSheet('ruleform');
       out.apps = testAddress('Telegram').rule === 'Apps → Telegram';
-      out.lan = testAddress('192.168.1.5').to === 'Direct';
+      // local networks: always direct and first, no toggle, not in the plan (the core adds it)
+      out.lan = testAddress('192.168.1.5').to === 'Direct' && testAddress('router.lan').to === 'Direct';
+      out.lanFirst = effectiveRules()[0][0] === 'Local networks';
+      out.lanFixed = !!document.getElementById('qr-lan') && !document.querySelector('#qr-lan .toggle, #qr-lan input');
+      out.lanPlan = !('lan' in routingPlan().quick);
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));

@@ -21,6 +21,14 @@ Map<String, dynamic> _ssServer(int port, int clash) => {
       'outbounds': [
         {'type': 'direct', 'tag': 'direct'},
       ],
+      // `target.test` = the loopback, known only to the servers: a client request to it
+      // carries no IP, so the local-networks rule (always direct) does not catch it
+      'dns': {
+        'servers': [
+          {'type': 'hosts', 'tag': 'hosts', 'predefined': {'target.test': '127.0.0.1'}},
+        ],
+      },
+      'route': {'default_domain_resolver': 'hosts'},
       'experimental': {
         'clash_api': {'external_controller': '127.0.0.1:$clash'},
       },
@@ -37,6 +45,7 @@ class _Loop {
   final servers = <String, (SingBoxProcess, int port, int clash)>{};
 
   String get url => 'http://127.0.0.1:${target.port}/';
+  String get hostUrl => 'http://target.test:${target.port}/'; // through the tunnel only
 
   Future<void> up(List<String> names) async {
     target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -118,7 +127,8 @@ void main() {
         'global': true,
         'urlTest': {'url': loop.url, 'interval': 60},
       };
-      await client.start(buildConfig(plan, clashPort: clash), clashPort: clash);
+      final probe = Probe(await freePort());
+      await client.start(buildConfig(plan, clashPort: clash, probe: probe), clashPort: clash);
       final pid = client.pid;
 
       // the Clash API wants the run's secret
@@ -128,7 +138,7 @@ void main() {
       anon.close(force: true);
       expect(res.statusCode, 401);
 
-      final auto = AutoService(client, plan,
+      final auto = AutoService(client, plan, delay: probe.delayTest,
           settings: AutoSettings(failAfter: 1, threshold: 5000, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       await auto.check();
       expect(auto.toJson()['now'], 'A');
@@ -183,10 +193,11 @@ void main() {
               'groups': {'port': {'not': false, 'v': {'port': ['${side.port}']}}},
             },
           ],
-          'quick': {'lan': false, 'final': 'proxy'},
+          'quick': {'final': 'proxy'},
         },
       };
-      final config = buildConfig(plan, clashPort: clash, tunnelPort: tunnel);
+      final probe = Probe(await freePort());
+      final config = buildConfig(plan, clashPort: clash, tunnelPort: tunnel, probe: probe);
       final f = File(p.join(loop.tmp.path, 'routes-rules.json'))..writeAsStringSync(jsonEncode(config));
       final r = await Process.run(_bin, ['check', '-c', f.path, '--disable-color']);
       expect(r.exitCode, 0, reason: '${r.stderr}${r.stdout}');
@@ -197,19 +208,19 @@ void main() {
       expect(outs.firstWhere((o) => o['tag'] == topTag)['outbounds'], ['route0', 'route1']);
 
       await client.start(config, clashPort: clash);
-      expect(await _get(mixed, loop.url), 'hello from target');
+      expect(await _get(mixed, loop.hostUrl), 'hello from target');
       expect(await _get(mixed, 'http://127.0.0.1:${side.port}/'), 'side');
 
       await loop.stop('a'); // route A down: the main flow and tunnel-in with it, the rule target not
-      expect(await tryGet(mixed, loop.url), isNot('hello from target'));
-      expect(await tryGet(tunnel, loop.url), isNot('hello from target'));
+      expect(await tryGet(mixed, loop.hostUrl), isNot('hello from target'));
+      expect(await tryGet(tunnel, loop.hostUrl), isNot('hello from target'));
       expect(await _get(mixed, 'http://127.0.0.1:${side.port}/'), 'side');
 
-      final auto = AutoService(client, plan, settings: AutoSettings(failAfter: 1, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
+      final auto = AutoService(client, plan, delay: probe.delayTest, settings: AutoSettings(failAfter: 1, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       await auto.check();
       expect(auto.toJson()['now'], 'B');
-      expect(await _get(mixed, loop.url), 'hello from target');
-      expect(await _get(tunnel, loop.url), 'hello from target');
+      expect(await _get(mixed, loop.hostUrl), 'hello from target');
+      expect(await _get(tunnel, loop.hostUrl), 'hello from target');
       auto.stop();
     } finally {
       await client.stop();
@@ -240,8 +251,9 @@ void main() {
         'global': true,
         'urlTest': {'url': loop.url},
       };
-      await client.start(buildConfig(plan, clashPort: clash), clashPort: clash);
-      final auto = AutoService(client, plan, settings: AutoSettings(url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
+      final probe = Probe(await freePort());
+      await client.start(buildConfig(plan, clashPort: clash, probe: probe), clashPort: clash);
+      final auto = AutoService(client, plan, delay: probe.delayTest, settings: AutoSettings(url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       await auto.check();
       final j = auto.toJson();
       expect([j['now'], j['server'], j['entryServer']], ['X', 's::b', 's::a']);
@@ -274,8 +286,9 @@ void main() {
         'global': true,
         'urlTest': {'url': loop.url, 'interval': 600},
       };
-      await client.start(buildConfig(plan, clashPort: clash), clashPort: clash);
-      final auto = AutoService(client, plan,
+      final probe = Probe(await freePort());
+      await client.start(buildConfig(plan, clashPort: clash, probe: probe), clashPort: clash);
+      final auto = AutoService(client, plan, delay: probe.delayTest,
           settings: AutoSettings(failAfter: 2, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       // urltest's own first round picks one; wait for it
       for (var i = 0; i < 50 && auto.toJson()['server'] == null; i++) {

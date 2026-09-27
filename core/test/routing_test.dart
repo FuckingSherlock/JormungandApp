@@ -43,7 +43,10 @@ Map<String, dynamic> _rule(Map<String, dynamic> groups, {String action = 'proxy'
 
 Map<String, dynamic> _g(Map<String, List<String>> v, {bool not = false, bool flag = false}) => {'not': not, 'v': v, if (flag) 'flag': true};
 
-List<Map> _rules(Map<String, dynamic> config) => ((config['route'] as Map)['rules'] as List).cast<Map>().skip(1).toList();
+// after sniff and the local-networks rule (first always)
+List<Map> _rules(Map<String, dynamic> config) => ((config['route'] as Map)['rules'] as List).cast<Map>().skip(2).toList();
+const _lan = {'ip_is_private': true, 'domain_suffix': lanSuffixes, 'action': 'route', 'outbound': 'direct'};
+Map _lanRule(Map<String, dynamic> config) => ((config['route'] as Map)['rules'] as List).cast<Map>()[1];
 Map? _out(Map<String, dynamic> config, String tag) => (config['outbounds'] as List).cast<Map>().where((o) => o['tag'] == tag).firstOrNull;
 
 const _defaultDns = {
@@ -58,19 +61,19 @@ void main() {
   group('rules', () {
     test('no routing in the plan: local networks direct, the rest through the main flow', () {
       final c = buildConfig({'kind': 'unit', 'main': _grp([_node])});
-      expect(_rules(c), [
-        {'ip_is_private': true, 'domain_suffix': ['local', 'localhost'], 'action': 'route', 'outbound': 'direct'},
-      ]);
+      expect(_lanRule(c), _lan);
+      expect(_rules(c), isEmpty);
       expect(c['route']['final'], 'proxy');
       expect(c['experimental']['cache_file']['enabled'], true);
     });
 
-    test('Global: rules, apps and quick rules are ignored', () {
+    test('Global: rules, apps and quick rules are ignored, local networks still direct', () {
       final c = buildConfig(_plan({
         'rules': [_rule({'domain': _g({'domain_suffix': ['a.com']})}, action: 'block')],
         'apps': [{'id': 'org.telegram.messenger', 'act': 'block'}],
         'quick': {'lan': true, 'ads': true, 'final': 'direct'},
       }, global: true));
+      expect(_lanRule(c), _lan, reason: 'local networks go direct in Global too');
       expect(_rules(c), isEmpty);
       expect(c['route']['final'], 'proxy');
     });
@@ -193,14 +196,13 @@ void main() {
     test('quick rules and everything else, in order after the own rules', () {
       final c = buildConfig(_plan({
         'rules': [_rule({'domain': _g({'domain_suffix': ['mine.com']})}, action: 'direct')],
-        'quick': {'lan': true, 'ads': true, 'region': 'RU', 'services': {'telegram': 'vpn', 'youtube': 'direct', 'discord': 'default'}, 'final': 'block'},
+        'quick': {'ads': true, 'region': 'RU', 'services': {'telegram': 'vpn', 'youtube': 'direct', 'discord': 'default'}, 'final': 'block'},
         'dns': _defaultDns,
       }), ruleSetFiles: {'geosite-category-ru': '/l/ru.srs', 'geoip-ru': '/l/geoip-ru.srs', 'geosite-telegram': '/l/tg.srs'});
       final rules = _rules(c);
       expect(rules[0]['domain_suffix'], ['mine.com']);
-      expect(rules[1]['ip_is_private'], true);
-      expect(rules[2], {'domain_suffix': adsDomains, 'action': 'reject'}, reason: 'no ad list on disk: the built-in domains');
-      expect(rules[3], {
+      expect(rules[1], {'domain_suffix': adsDomains, 'action': 'reject'}, reason: 'no ad list on disk: the built-in domains');
+      expect(rules[2], {
         'type': 'logical',
         'mode': 'or',
         'rules': [
@@ -210,13 +212,13 @@ void main() {
         'action': 'route',
         'outbound': 'proxy',
       });
-      expect(rules[4]['outbound'], 'direct');
-      expect(rules[5]['rules'], [
+      expect(rules[3]['outbound'], 'direct');
+      expect(rules[4]['rules'], [
         {'domain_suffix': ['ru', 'xn--p1ai', 'su']},
         {'rule_set': ['geosite-category-ru']},
         {'rule_set': ['geoip-ru']},
       ]);
-      expect(rules[6], {'action': 'reject'}, reason: 'Everything else: Block');
+      expect(rules[5], {'action': 'reject'}, reason: 'Everything else: Block');
       expect((c['route']['rule_set'] as List).map((s) => s['tag']), unorderedEquals(['geosite-category-ru', 'geoip-ru', 'geosite-telegram']));
       expect(c['route']['rule_set'][0]['type'], 'local');
     });

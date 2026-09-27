@@ -144,7 +144,7 @@ AutoService; три неудачи — отключено, `error`. Фонова
 ```
 { apps:  [{ id, kind: 'package'|'process'|'path', act, target, split, udpTarget }],
   rules: [{ id, name, action, target, fallback, block, dns, groups, composite?, extra? }],
-  quick: { lan, ads, region: 'RU'|…|null, services: { telegram: 'vpn'|'direct', … }, final },
+  quick: { ads, region: 'RU'|…|null, services: { telegram: 'vpn'|'direct', … }, final },
   fallback: 'main'|'block'|'direct',            // Rules → Target unavailable
   targets: { '<цель>': { kind: 'unit'|'chain', main: Group, entry?: Group } | null },
   ruleSets: [{ name, url, format, via, every }],
@@ -207,7 +207,8 @@ switchedAt, lastSwitch: {route?, from, to, reason: 'failover' | 'back', at}, all
 «unified delay» mihomo). Clash API `/proxies/{tag}/delay` sing-box считает первый запрос с
 рукопожатиями — через мост (RU → EU, мост открывает своё соединение дальше) это в 3–4 раза
 больше (замер 2026-09-27: 210–290 мс против 64–90 у Karing и у нас сейчас). Сервер закрыл
-соединение после первого ответа → время первого. Каталог: временный sing-box только с
+соединение после первого ответа → время первого. Ещё причина не брать Clash API: он молча
+заменяет любой `http://` тест-URL на gstatic (`getProxyDelay` в sing-box), probe берёт URL как есть. Каталог: временный sing-box только с
 `probe-in` (32 параллельно, таймаут 5 с), пары entry→exit — копия выхода с detour на копию
 входа. Auto: `probe-in` рабочего конфига; urltest-группы Fastest внутри sing-box по-прежнему
 выбирают по своему замеру (относительный порядок тот же).

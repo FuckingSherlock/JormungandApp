@@ -45,7 +45,7 @@ function routingPlan() {
   const geo = id => { const s = ruleSets.find(x => x.id === id) || {}; return { via: s.via || 'vpn', every: s.every || 7 * 86400 }; };
   return {
     apps, rules,
-    quick: { lan: quickCfg.lan, ads: quickCfg.ads, region: quickCfg.regionOn ? quickCfg.region : null, final: quickCfg.final,
+    quick: { ads: quickCfg.ads, region: quickCfg.regionOn ? quickCfg.region : null, final: quickCfg.final,
       services: Object.fromEntries(SERVICES.filter(([k]) => quickCfg.services[k] && quickCfg.services[k] !== 'default').map(([k]) => [k, quickCfg.services[k]])) },
     fallback: quickCfg.fallback,
     targets: Object.fromEntries([...named].map(t => [t, routingTarget(t)])),

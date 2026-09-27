@@ -46,6 +46,9 @@ class Probe {
   /// request's time when the server will not keep the connection; -1 = no answer.
   Future<int> delay(String tag, String url, {int timeoutMs = 5000}) => probeDelay(this, tag, url, timeoutMs: timeoutMs);
 
+  /// [delay] as AutoService takes it.
+  Future<int> Function(String tag, String url, int timeoutMs) get delayTest => (tag, url, t) => delay(tag, url, timeoutMs: t);
+
   static String _newSecret() {
     final r = Random.secure();
     return [for (var i = 0; i < 16; i++) r.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
