@@ -5,8 +5,8 @@
 /// The config (config.dart) holds the plan's routes under the selector `proxy`: the Auto
 /// entries by priority from the top down to the current one and `standby` more; in Manual
 /// only the pinned entry. Every `checkEvery` the service tests the server each route would
-/// use now — the current route, the routes above it (to go back up) and, with keep warm,
-/// the standby ones — one delay test per group (a chain: its entry, then the exit through
+/// use now — the current route, the routes above it (to go back up) and, every `warmEvery`,
+/// the `standby` ones below (spares; 0 = none) — one delay test per group (a chain: its entry, then the exit through
 /// it):
 ///
 /// - a Fastest group (urltest) whose server did not answer has urltest test again and
@@ -39,16 +39,17 @@ class AutoSettings {
     this.failAfter = 2,
     this.threshold = 50,
     this.checkEvery = const Duration(minutes: 1),
-    this.keepWarm = true,
     this.standby = 2,
+    this.warmEvery = const Duration(minutes: 1),
     this.url = defaultTestUrl,
     this.timeoutMs = 5000,
     this.retryEvery = const Duration(seconds: 10),
     this.firstCheck = const Duration(seconds: 3),
   });
 
-  /// From a plan: `auto` = {failAfter, threshold (ms), checkEvery (s), keepWarm, standby}
-  /// (the UI's autoCfg), the test URL from `urlTest`.
+  /// From a plan: `auto` = {failAfter, threshold (ms), checkEvery (s), standby, warmEvery (s)}
+  /// (the UI's autoCfg), the test URL from `urlTest`. An older plan's `keepWarm: false` =
+  /// standby 0.
   factory AutoSettings.fromPlan(Map<String, dynamic> plan) {
     final a = (plan['auto'] as Map?) ?? const {};
     final t = (plan['urlTest'] as Map?) ?? const {};
@@ -56,11 +57,11 @@ class AutoSettings {
     final every = Duration(seconds: n(a['checkEvery'] ?? t['interval'], 60).clamp(10, 3600));
     const retry = Duration(seconds: 10);
     return AutoSettings(
-      failAfter: n(a['failAfter'], 2).clamp(1, 10),
+      failAfter: n(a['failAfter'], 2).clamp(1, 5),
       threshold: n(a['threshold'] ?? t['tolerance'], 50).clamp(0, 10000),
       checkEvery: every,
-      keepWarm: a['keepWarm'] != false,
-      standby: n(a['standby'], 2).clamp(0, 10),
+      standby: a['keepWarm'] == false ? 0 : n(a['standby'], 2).clamp(0, 20),
+      warmEvery: Duration(seconds: n(a['warmEvery'], 60).clamp(10, 3600)),
       url: (t['url'] as String?) ?? defaultTestUrl,
       retryEvery: every < retry ? every : retry,
     );
@@ -69,8 +70,8 @@ class AutoSettings {
   final int failAfter; // misses in a row before leaving a server / route
   final int threshold; // ms: how much slower a higher one may be and still come back
   final Duration checkEvery;
-  final bool keepWarm; // test the standby routes on every check
-  final int standby;
+  final int standby; // spares: routes below the current one tested ahead
+  final Duration warmEvery; // how often the spares are tested (at a check, not more often)
   final String url;
   final int timeoutMs;
   final Duration retryEvery; // while the current route misses
@@ -192,6 +193,7 @@ class AutoService {
   final _switches = StreamController<AutoSwitch>.broadcast();
   Timer? _timer;
   bool _busy = false, _started = false, _stopped = false;
+  int? _warmedAt; // when the spares were tested last
 
   /// Every move between routes and between Priority servers.
   Stream<AutoSwitch> get switches => _switches.stream;
@@ -222,10 +224,14 @@ class AutoService {
       for (final r in _routes) {
         r.checked = false;
       }
+      // the spares are due a little early rather than a whole check late
+      final now = _clock();
+      final warm = settings.standby > 0 && (_warmedAt == null || now - _warmedAt! >= settings.warmEvery.inMilliseconds - 1000);
+      if (warm) _warmedAt = now;
       final todo = {
         index,
         for (var i = 0; i < index; i++) i,
-        if (settings.keepWarm)
+        if (warm)
           for (var i = index + 1; i <= index + settings.standby && i < _routes.length; i++) i,
       };
       await Future.wait(todo.map((i) => _checkRoute(_routes[i])));
@@ -381,7 +387,7 @@ class AutoService {
     final cur = _routes[index];
     if (cur.health.fails >= settings.failAfter) {
       // failover: the first route by priority that answers; one not tested in this round
-      // (keep warm off) is tested now, one at a time, until one answers
+      // (no spares, or not their turn) is tested now, one at a time, until one answers
       for (var i = 0; i < _routes.length && !_stopped; i++) {
         final r = _routes[i];
         if (i == index) continue;

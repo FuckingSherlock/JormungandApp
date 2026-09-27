@@ -1734,16 +1734,20 @@ async function runChecks() {
       out.subsTooShort = autoCfg.subsEvery === 0; closeSheet('interval');
       dlg('am-subs', '12', '3600');
       out.subsBack = autoCfg.subsEvery === 43200;
-      const warmChips = () => [...document.querySelectorAll('#auto-settings .chip')].filter(e => /^next/.test(e.textContent)).length;
-      setAutoCfg('keepWarm', false);
-      out.warmOff = warmChips() === 0 && autoCfg.standby === 2;
-      setAutoCfg('keepWarm', true);
-      out.warmOn = warmChips() === 3;
+      const slider = () => document.querySelector('#am-standby input[type=range]');
+      const sv = v => { const r = slider(); r.value = v; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); };
+      out.slider = slider().max === '20' && slider().value === '2' && /next 2/.test(document.getElementById('am-standby-val').textContent);
+      sv(20); out.spares20 = autoCfg.standby === 20 && /next 20/.test(document.getElementById('am-standby-val').textContent);
+      out.warmPlan = planAuto().standby === 20 && planAuto().warmEvery === 60 && !('keepWarm' in planAuto());
+      dlg('am-warm', '5', '60');
+      out.warmEvery = autoCfg.warmEvery === 300 && /5 min/.test(document.getElementById('am-warm').textContent);
+      sv(0); out.sparesOff = autoCfg.standby === 0 && /off/.test(document.getElementById('am-standby-val').textContent) && !document.getElementById('am-warm');
+      sv(2); setAutoCfg('warmEvery', 60); out.sparesBack = !!document.getElementById('am-warm');
       const sp = [...document.querySelectorAll('#auto-settings .set-row')].find(r => /Speed test on failures/.test(r.textContent));
       sp.querySelector('.mini-toggle').click();
       out.speed = autoCfg.speedOnFail === true; setAutoCfg('speedOnFail', false);
       for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn:last-child').click();
-      out.stepMax = autoCfg.failAfter === 4 && document.querySelector('#am-failafter .stepper-btn:last-child').disabled;
+      out.stepMax = autoCfg.failAfter === 5 && document.querySelector('#am-failafter .stepper-btn:last-child').disabled;
       for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn').click();
       out.stepMin = autoCfg.failAfter === 1;
       setAutoCfg('failAfter', 2); setAutoCfg('checkEvery', 60);
@@ -2184,11 +2188,11 @@ async function runChecks() {
   await check('live plan: Auto entries above + the entry + standby as routes; pings and the core moving leave it be, Manual is a new one', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(() => {
-      setAutoConnect(true); autoCfg.standby = 1;
+      setAutoConnect(true); autoCfg.standby = 1;   // below the anchor: at least 2 go to the plan
       Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = n.outbound || { type: 'direct' }; n.unsupported = false; }));
       const order = autoOrder(), plan = livePlan(order[1]);
       const out = { enough: order.length >= 3,
-        routes: plan.routes.map(x => x.id).join() === order.slice(0, 3).join() && plan.current === 1 && plan.auto.failAfter === autoCfg.failAfter };
+        routes: plan.routes.map(x => x.id).join() === order.slice(0, 4).join() && plan.current === 1 && plan.auto.failAfter === autoCfg.failAfter };
       live.anchor = order[1];
       const sig = planSig();
       Object.values(sourcesData).forEach(s => s.nodes.forEach(n => setPing(n, Math.round(Math.random() * 300))));

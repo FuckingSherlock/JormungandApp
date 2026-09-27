@@ -71,13 +71,13 @@ Auto, которая может работать; в Manual — закреплё
   mixedPort: 2080, global: bool,
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
              url: connCfg.testUrl /* нет — gstatic; им же проверяет AutoService */ },
-  auto: { failAfter, threshold, checkEvery, keepWarm, standby },
+  auto: { failAfter, threshold, checkEvery, standby, warmEvery },
   routing: Routing }       // правила, приложения, быстрые правила, DNS — ниже
 Route = { id, kind: 'unit' | 'chain', main: Group, entry?: Group }   // entry — вход цепочки, выход идёт через него (detour)
 Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true, nodes: [{ key: 'sid::nid', outbound }] }
 ```
 
-- Маршруты: в Auto — все записи Auto выше якоря, якорь и `standby` записей ниже; в Manual —
+- Маршруты: в Auto — все записи Auto выше якоря, якорь и `standby` записей ниже (не меньше 2); в Manual —
   только якорь. Записи без пригодных серверов пропускаются. План без `routes` (старый вид:
   `kind/main/entry` сверху) = один маршрут.
 - Теги (`plan.dart`): маршрут i — группа `route<i>` (у цепочки выход `route<i>` с detour на
@@ -109,7 +109,8 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
 
 1. `/proxies` — на каких серверах стоят группы. Clash API молчит — раунд ничего не решает.
 2. Замер сервера, на котором стоит группа (probe, см. «Пинг» ниже): текущий маршрут, все
-   выше него, при `keepWarm` ещё `standby` ниже (параллельно). Цепочка: вход, потом выход
+   выше него, раз в `warmEvery` (на ближайшей проверке, не чаще) ещё `standby` ниже
+   (запасные; 0 = нет) — параллельно. Цепочка: вход, потом выход
    (его замер идёт через вход и в `members` не попадает).
    - Fastest: сервер молчит → `/group/<tag>/delay`: urltest перемеряет всех и сразу берёт
      живой; не ответившие — тоже таймауты.

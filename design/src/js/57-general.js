@@ -28,7 +28,7 @@ function renderGeneral() {
       ${row('launchAtStartup', 'Launch at startup', 'Start with the system (Android: after reboot)')}
       ${row('startMinimized', 'Start minimized', 'Desktop: open in the tray, not as a window')}
       ${row('connectOnLaunch', 'Connect on launch', 'Turn the VPN on as soon as the app opens')}
-      ${row('pingOnLaunch', 'Check servers on launch', `Pings the top Auto entry and the next ${n} by priority (the Keep warm count in Auto mode), and the targets of your rules`)}
+      ${row('pingOnLaunch', 'Check servers on launch', `Pings the top Auto entry and the next ${n} by priority (Spare servers in Auto mode), and the targets of your rules`)}
     </div>
     <div class="set-caption">Notifications</div>
     <div class="set-group">
@@ -55,7 +55,7 @@ function openLangPicker() {
 /* On open: ping the entry the app would connect through now and the next `autoCfg.standby`
    usable entries of the Route priority (Auto-eligible, not broken). Every server of those
    entries is pinged, so Fastest picks and failover start from fresh numbers. */
-/* Launch ping: the servers Auto would try first — the top (1 + Keep warm) Auto entries,
+/* Launch ping: the servers Auto would try first — the top (1 + Spare servers) Auto entries,
    counted from the top of the priority list, not from the current pick (after a restart
    the current pick may sit lower only because the top one is not measured yet) — the
    pinned entry in Manual, and every target of an enabled rule or app (the rules' flows). */

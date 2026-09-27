@@ -120,7 +120,7 @@ Map<String, dynamic> chain(String id, List<String> entry, List<String> exit) =>
 Map<String, dynamic> plan(List<Map<String, dynamic>> routes, {int current = 0, Map<String, dynamic> auto = const {}}) => {
       'routes': routes,
       'current': current,
-      'auto': {'failAfter': 2, 'threshold': 50, 'checkEvery': 60, 'keepWarm': true, 'standby': 2, ...auto},
+      'auto': {'failAfter': 2, 'threshold': 50, 'checkEvery': 60, 'standby': 2, 'warmEvery': 60, ...auto},
     };
 
 (AutoService, FakeClash) setup(Map<String, dynamic> p, Map<String, int> alive) {
@@ -144,12 +144,16 @@ void main() {
 
   test('settings from the plan', () {
     final s = AutoSettings.fromPlan({
-      'auto': {'failAfter': 3, 'threshold': 20, 'checkEvery': 5, 'keepWarm': false, 'standby': 1},
+      'auto': {'failAfter': 3, 'threshold': 20, 'checkEvery': 5, 'standby': 20, 'warmEvery': 300},
       'urlTest': {'url': 'http://127.0.0.1/t'},
     });
-    expect([s.failAfter, s.threshold, s.checkEvery, s.keepWarm, s.standby, s.url, s.retryEvery],
-        [3, 20, const Duration(seconds: 10), false, 1, 'http://127.0.0.1/t', const Duration(seconds: 10)]);
-    expect(AutoSettings.fromPlan({}).keepWarm, isTrue);
+    expect([s.failAfter, s.threshold, s.checkEvery, s.standby, s.warmEvery, s.url, s.retryEvery],
+        [3, 20, const Duration(seconds: 10), 20, const Duration(minutes: 5), 'http://127.0.0.1/t', const Duration(seconds: 10)]);
+    final d = AutoSettings.fromPlan({});
+    expect([d.failAfter, d.standby, d.warmEvery], [2, 2, const Duration(minutes: 1)]);
+    final big = AutoSettings.fromPlan({'auto': {'failAfter': 9, 'standby': 50}});
+    expect([big.failAfter, big.standby], [5, 20]);
+    expect(AutoSettings.fromPlan({'auto': {'keepWarm': false, 'standby': 3}}).standby, 0, reason: 'an older plan');
   });
 
   test('Fastest: a silent server is replaced inside the route at once, no route switch', () async {
@@ -243,8 +247,8 @@ void main() {
     expect(fake.tested.where((t) => t.contains('p2')), isEmpty);
   });
 
-  test('keep warm off: standby routes are tested only when the current one fails', () async {
-    final (auto, fake) = setup(plan([unit('A', ['s::a']), unit('B', ['s::b']), unit('C', ['s::c'])], auto: {'keepWarm': false}),
+  test('no spares: the routes below are tested only when the current one fails', () async {
+    final (auto, fake) = setup(plan([unit('A', ['s::a']), unit('B', ['s::b']), unit('C', ['s::c'])], auto: {'standby': 0}),
         {'s::a': 40, 's::b': 60, 's::c': 30});
     await auto.check();
     expect(fake.tested, ['route0/s::a']);
@@ -259,11 +263,27 @@ void main() {
     expect(fake.tested.where((t) => t.contains('s::c')), isEmpty);
   });
 
-  test('keep warm on: the standby routes are tested with the current one', () async {
+  test('spares: the standby routes are tested with the current one', () async {
     final (auto, fake) = setup(plan([unit('A', ['s::a']), unit('B', ['s::b']), unit('C', ['s::c']), unit('D', ['s::d'])], auto: {'standby': 2}),
         {'s::a': 40, 's::b': 60, 's::c': 30, 's::d': 30});
     await auto.check();
     expect(fake.tested.toSet(), {'route0/s::a', 'route1/s::b', 'route2/s::c'});
+  });
+
+  test('spares: tested every warmEvery, the current route every check', () async {
+    var t = 0;
+    final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])], auto: {'standby': 1, 'warmEvery': 120});
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 40, 's::b': 60});
+    final auto = AutoService(fake, p, clock: () => t);
+    final spares = <int>[];
+    for (var i = 0; i < 5; i++) {
+      t = i * 60000 + (i == 2 ? -500 : 0); // a check a little early still counts
+      fake.tested.clear();
+      await auto.check();
+      expect(fake.tested, contains('route0/s::a'));
+      if (fake.tested.contains('route1/s::b')) spares.add(i);
+    }
+    expect(spares, [0, 2, 4]);
   });
 
   test('a start below a route that answers: back up after failAfter answers', () async {

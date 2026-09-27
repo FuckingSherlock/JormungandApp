@@ -31,12 +31,13 @@ function planRoute(id) {
 
 /* The routes around the entry to connect (the anchor). Auto: every Auto entry above it
    (the core moves back up when one answers again), the anchor, then autoCfg.standby
-   entries below (spares; tested ahead while keepWarm is on). Manual: the anchor alone.
+   entries below (spares; tested ahead every warmEvery), at least 2 so that with no spares
+   a failover still has somewhere to go (tested then). Manual: the anchor alone.
    Entries the core cannot use (no server with an outbound) are left out; the anchor
    itself must be usable (planGroup says why not). */
 function planRoutes(anchor) {
   const order = autoOrder(), i = order.indexOf(anchor);
-  const ids = !autoConnect || i < 0 ? [anchor] : order.slice(0, i + 1 + Math.max(0, autoCfg.standby | 0));
+  const ids = !autoConnect || i < 0 ? [anchor] : order.slice(0, i + 1 + Math.max(2, autoCfg.standby | 0));
   const routes = [];
   ids.forEach(id => {
     if (id === anchor) routes.push(planRoute(id));
@@ -46,7 +47,7 @@ function planRoutes(anchor) {
 }
 const autoOrder = () => visibleOrder().filter(id => connectEntry(id).inAuto);
 const planAuto = () => ({ failAfter: autoCfg.failAfter, threshold: autoCfg.threshold, checkEvery: autoCfg.checkEvery,
-  keepWarm: autoCfg.keepWarm, standby: autoCfg.standby });
+  standby: autoCfg.standby, warmEvery: autoCfg.warmEvery });
 
 /* Which anchor the running plan is compared with (liveMaybeReconnect): in Auto the one it
    was built on while that is still an Auto entry — the core moves inside the plan by

@@ -5,10 +5,11 @@
    - checkEvery: how often the current route is re-pinged (seconds). Besides the timer,
      failed requests through the current server trigger a ping at once (always on);
    - speedOnFail: after such a failure, also run a speed test of the current server;
-   - standby: how many next entries by priority are pinged together with the current
-     one ("kept warm", 1–3), so a failover goes straight to a server known to work;
-     keepWarm switches it off without losing the count;
-   - failAfter: timeouts in a row (1–4) before Auto leaves the current server;
+   - standby: spares — how many next entries by priority are pinged ahead (slider 0–20,
+     0 = none), so a failover goes straight to a server known to work;
+   - warmEvery: how often the spares are pinged (seconds; at a connection check, so never
+     more often than checkEvery);
+   - failAfter: timeouts in a row (1–5) before Auto leaves the current server;
    - pauseScreenOff: no checks while the screen is off (mobile battery);
    - subsEvery: the global subscription update period; a subscription's own period
      (Nodes → Edit subscription) wins, its default 'auto' follows this one (seconds, 0 = off).
@@ -16,9 +17,10 @@
    Auto itself is switched on / off by the Auto badge of the Simple / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
-const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, keepWarm: true, standby: 2, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
+const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, standby: 2, warmEvery: 60, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
 const AUTO_THRESHOLD_MAX = 1000;
-const AUTO_FAIL_AFTER = [1, 4];
+const AUTO_FAIL_AFTER = [1, 5];
+const AUTO_STANDBY_MAX = 20;
 const CHEVRON_R = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
 // A period in seconds, in the largest unit that divides it: 90 s, 5 min, 12 h, 2 d.
@@ -30,6 +32,8 @@ const subsEveryText = s => s ? fmtEvery(s) : 'off';
    Stored in the base unit (units[0]); opens in the largest unit that divides the value. */
 const INTERVALS = {
   checkEvery: { title: 'Check the connection every', units: [['seconds', 1], ['minutes', 60]], min: 10, max: 3600, hint: 'From 10 s to 60 min' },
+  warmEvery:  { title: 'Ping the spares every', units: [['seconds', 1], ['minutes', 60]], min: 10, max: 3600,
+                hint: 'From 10 s to 60 min · at a connection check, never more often' },
   subsEvery:  { title: 'Update all subscriptions every', units: [['seconds', 1], ['minutes', 60], ['hours', 3600], ['days', 86400]], min: 10, max: 30 * 86400, off: true,
                 hint: '0 = off (only when you tap Update) · from 10 seconds to 30 days' },
   // Rules → Rule sets → one set; get / set point the dialog at a value outside autoCfg.
@@ -69,6 +73,9 @@ function setAutoThreshold(input) {
   else toast('Enter 0–' + AUTO_THRESHOLD_MAX + ' ms');
   renderAutoMode();
 }
+// The spares slider: the number follows the thumb, the rest re-renders on release.
+const previewStandby = v => { document.getElementById('am-standby-val').textContent = standbyText(+v); };
+const standbyText = n => n ? 'next ' + n : 'off';
 const stepAutoFailAfter = d => setAutoCfg('failAfter', Math.min(AUTO_FAIL_AFTER[1], Math.max(AUTO_FAIL_AFTER[0], autoCfg.failAfter + d)));
 
 // The Home card opens the Auto mode sheet right over Home (same sheet as Settings → Auto mode).
@@ -78,8 +85,6 @@ function openAutoMode() {
 
 function renderAutoMode() {
   const el = document.getElementById('auto-settings');
-  const chips = (key, opts, fmt) => `<div class="chip-row">${opts.map(v =>
-    `<div class="chip ${autoCfg[key] === v ? 'active' : ''}" onclick="setAutoCfg('${key}',${JSON.stringify(v)})">${fmt(v)}</div>`).join('')}</div>`;
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
   const valueBtn = (id, key, text) => `<button class="set-value" id="${id}" onclick="openIntervalDialog('${key}')">${text}${CHEVRON_R}</button>`;
   const [lo, hi] = AUTO_FAIL_AFTER, fa = autoCfg.failAfter;
@@ -89,11 +94,15 @@ function renderAutoMode() {
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">Switch to a faster server<div class="set-hint">Only if it is faster than the current one by at least this</div></div>
         <input class="set-input am-num" id="am-threshold" inputmode="numeric" value="${autoCfg.threshold}" onchange="setAutoThreshold(this)"><span class="am-unit">ms</span></div>
-      <div class="set-row"><div class="set-label" style="flex:1">Check the connection every<div class="set-hint">Pings the current server${autoCfg.keepWarm ? ' and the kept-warm ones' : ''}. Failed requests trigger a check at once</div></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Check the connection every<div class="set-hint">Pings the current server and the ones above it. Failed requests trigger a check at once</div></div>
         ${valueBtn('am-every', 'checkEvery', fmtEvery(autoCfg.checkEvery))}</div>
-      <div class="set-row stack"><div class="am-head"><div class="set-label" style="flex:1">Keep warm<div class="set-hint">Next entries by priority pinged with the current one — failover goes straight to a working one</div></div>
-        ${toggle(autoCfg.keepWarm, "setAutoCfg('keepWarm',!autoCfg.keepWarm)")}</div>
-        ${autoCfg.keepWarm ? chips('standby', [1, 2, 3], v => 'next ' + v) : ''}</div>
+      <div class="set-row stack" id="am-standby"><div class="set-label">Spare servers<span class="scale-val" id="am-standby-val">${standbyText(autoCfg.standby)}</span>
+          <div class="set-hint">Next entries by priority pinged ahead — failover goes straight to a working one. 0 = off</div></div>
+        <div class="scale-row"><span class="scale-a">0</span>
+          <input type="range" min="0" max="${AUTO_STANDBY_MAX}" step="1" value="${autoCfg.standby}" oninput="previewStandby(this.value)" onchange="setAutoCfg('standby',+this.value)">
+          <span class="scale-a">${AUTO_STANDBY_MAX}</span></div></div>
+      ${autoCfg.standby ? `<div class="set-row"><div class="set-label" style="flex:1">Ping the spares every<div class="set-hint">Not more often than the connection check</div></div>
+        ${valueBtn('am-warm', 'warmEvery', fmtEvery(autoCfg.warmEvery))}</div>` : ''}
       <div class="set-row"><div class="set-label" style="flex:1">Leave a server after<div class="set-hint">Timeouts in a row before Auto moves on</div></div>
         <div class="stepper" id="am-failafter">
           <button class="stepper-btn" onclick="stepAutoFailAfter(-1)" ${fa <= lo ? 'disabled' : ''}>‹</button>

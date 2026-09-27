@@ -5,7 +5,7 @@
 /// { routes: [Route…], current: 0,  // Auto entries by priority (plan.dart); Manual: one
 ///   mixedPort: 2080, global: false,
 ///   urlTest: { url, interval /*s*/, tolerance /*ms*/ },
-///   auto: { failAfter, threshold, checkEvery, keepWarm, standby } }   // auto.dart
+///   auto: { failAfter, threshold, checkEvery, standby, warmEvery } }   // auto.dart
 /// Route = { id, kind: 'unit' | 'chain',
 ///   main:  Group,          // the unit, or the chain's exit
 ///   entry: Group }         // chain only: the exit dials through it
