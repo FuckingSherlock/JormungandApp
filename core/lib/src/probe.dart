@@ -55,6 +55,30 @@ class Probe {
   }
 }
 
+/// One test of a node with backup checks: [test] of [url] first; when it does not answer,
+/// every one of [checkers] at once. The node passes traffic when any answers: the ms of
+/// [url], else of the first checker that answered; -1 = none did. (One blocked service
+/// must not make a working node look dead; the extra requests go only to a node that
+/// already missed.)
+Future<int> withCheckers(Future<int> Function(String url) test, String url, List<String> checkers) async {
+  final ms = await test(url).catchError((_) => -1);
+  final rest = [for (final c in checkers) if (c != url) c];
+  if (ms >= 0 || rest.isEmpty) return ms;
+  final done = Completer<int>();
+  var left = rest.length;
+  for (final c in rest) {
+    test(c).catchError((_) => -1).then((v) {
+      if (done.isCompleted) return;
+      if (v >= 0) {
+        done.complete(v);
+      } else if (--left == 0) {
+        done.complete(-1);
+      }
+    });
+  }
+  return done.future;
+}
+
 Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 5000}) async {
   final Uri u;
   try {
@@ -90,6 +114,34 @@ Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 500
     } catch (_) {
       return cold; // the first one answered: the server is there
     }
+  } finally {
+    w?.close();
+  }
+}
+
+/// Whether the site [dest] (`host:port`) opens through [tag]: port 443 — a TLS handshake
+/// with it (its certificate valid for the host), port 80 — an answer to HEAD /. null when
+/// it cannot be told (another port, an IP address on 443).
+Future<bool?> probeReach(Probe probe, String tag, String dest, {int timeoutMs = 5000}) async {
+  final i = dest.lastIndexOf(':');
+  final host = i > 0 ? dest.substring(0, i).replaceAll(RegExp(r'^\[|\]$'), '') : dest;
+  final port = int.tryParse(i > 0 ? dest.substring(i + 1) : '');
+  if (port != 443 && port != 80) return null;
+  if (port == 443 && InternetAddress.tryParse(host) != null) return null;
+  final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+  Duration left() => deadline.difference(DateTime.now());
+  _Wire? w;
+  try {
+    w = await _Wire.connect(probe.port).timeout(left());
+    await w.socks(tag, probe.secret, host, port!).timeout(left());
+    if (port == 443) {
+      await w.secure(host).timeout(left());
+    } else {
+      await w.request(utf8.encode('HEAD / HTTP/1.1\r\nHost: $host\r\nUser-Agent: Jormungand\r\nAccept: */*\r\n\r\n')).timeout(left());
+    }
+    return true;
+  } catch (_) {
+    return false;
   } finally {
     w?.close();
   }

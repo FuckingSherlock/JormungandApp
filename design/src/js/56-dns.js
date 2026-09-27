@@ -177,5 +177,7 @@ function renderConnSettings() {
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
       <div class="set-row"><div class="set-label" style="flex:1">Latency test URL<div class="set-hint">The address ping and Fastest time; pick one that answers fast from here</div></div>
         <button class="set-value" id="conn-testurl" onclick="openTestUrlPicker()">${testUrlLabel()}${CHEVRON_R}</button></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Backup checks<div class="set-hint">When the test URL does not answer through a server, these are tried; the server works if any answers</div></div>
+        <button class="set-value" id="conn-checkers" onclick="openCheckersPicker()">${connCfg.checkers.length ? connCfg.checkers.length : 'Off'}${CHEVRON_R}</button></div>
     </div>`;
 }

@@ -42,6 +42,22 @@ import 'routing.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 
+/// Backup checks (Settings → Connection): services of different owners tried when the
+/// test URL does not answer through a node; the node passes traffic when any answers.
+const defaultCheckers = [
+  'https://cp.cloudflare.com/generate_204',
+  'https://www.gstatic.com/generate_204',
+  'http://www.msftconnecttest.com/connecttest.txt',
+  'http://captive.apple.com/hotspot-detect.html',
+];
+
+/// The plan's `auto.checkers` (the UI sends them with Settings → Auto mode, taken live) or
+/// `urlTest.checkers`: a list of URLs; missing = [defaultCheckers], [] = none.
+List<String> planCheckers(Map<String, dynamic> plan) {
+  final c = ((plan['auto'] as Map?) ?? const {})['checkers'] ?? ((plan['urlTest'] as Map?) ?? const {})['checkers'];
+  return c is List ? [for (final u in c) if (u is String && u.isNotEmpty) u] : defaultCheckers;
+}
+
 Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     {int clashPort = 9090,
     int? tunnelPort,

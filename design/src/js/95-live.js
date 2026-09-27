@@ -25,7 +25,7 @@ function apiPing(body, onLine) {
   return fetch('/api/ping', {
     method: 'POST',
     headers: { 'X-Jorm': '1', 'Content-Type': 'application/json' },
-    body: JSON.stringify(Object.assign({ url: connCfg.testUrl || undefined }, body)),   // Settings → Connection → Latency test URL
+    body: JSON.stringify(Object.assign({ url: connCfg.testUrl || undefined, checkers: connCfg.checkers }, body)),   // Settings → Connection → Latency test URL
   }).then(async r => {
     if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
     const reader = r.body.getReader(), dec = new TextDecoder();

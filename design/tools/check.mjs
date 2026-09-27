@@ -150,6 +150,9 @@ const SHOTS = {
   'qr-sub':   async p => { await tab(p, 'nodes'); await p.evaluate(() => showSourceQr('src1')); await settle(p); },
   'settings-data': async p => { await tab(p, 'settings'); await p.evaluate(() => openDataSettings()); await settle(p); },
   'restore-confirm': async p => { await tab(p, 'settings'); await p.evaluate(() => { openDataSettings(); confirmRestore(liveSnapshot(), '2026-09-20T18:30:00Z', 'jormungand-backup-2026-09-20.json'); }); await settle(p); },
+  'checkers': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openCheckersPicker(); }); await settle(p); },
+  'blocked-toast': async p => { await p.evaluate(() => { const id = autoOrder()[0], via = autoOrder()[1] || id;
+    toast(blockedText({ route: id, via, dest: 'chat.example.com:443' }), { label: 'Rule', fn: () => {} }); }); await p.waitForTimeout(300); },
   'test-url': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openTestUrlPicker(); }); await settle(p); },
   'lang-soon': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setgeneral'); openLangPicker(); }); await settle(p); },
   'conn-filter': async p => { await p.evaluate(() => backend.traffic().then(t => { traffic = t; openSheet('connections'); document.getElementById('connFilter').value = 'disc'; renderTraffic(); })); await settle(p); },
@@ -921,6 +924,25 @@ async function runChecks() {
     await page.click('.testurl-custom .btn-primary');
     expect(await page.evaluate(() => connCfg.testUrl) === 'https://probe.example.org/204' && /probe\.example\.org/.test(await page.textContent('#conn-testurl')), 'custom: ' + await page.evaluate(() => connCfg.testUrl));
     await page.evaluate(() => { setTestUrl(''); closeSheet('setconn'); });
+  });
+
+  await check('settings: backup checks — presets toggle, a custom address is added, bad ones are refused; they go with the Auto settings and every ping', async () => {
+    await tab(page, 'settings');
+    await page.evaluate(() => openSheet('setconn'));
+    const n0 = await page.evaluate(() => connCfg.checkers.length);
+    expect(n0 === 4 && (await page.textContent('#conn-checkers')).includes('4'), 'default: ' + n0);
+    await page.click('#conn-checkers');
+    await page.click('#actions-body .menu-row:has-text("Mozilla")');
+    expect(await page.evaluate(() => connCfg.checkers.includes('http://detectportal.firefox.com/success.txt') && connCfg.checkers.length === 5), 'toggle on');
+    await page.click('#actions-body .menu-row:has-text("Apple")');
+    expect(await page.evaluate(() => !connCfg.checkers.includes('http://captive.apple.com/hotspot-detect.html')), 'toggle off');
+    await page.fill('#checker-input', 'nope');
+    await page.click('.testurl-custom .btn-primary');
+    await page.fill('#checker-input', 'https://mine.example.org/ok');
+    await page.click('.testurl-custom .btn-primary');
+    const r = await page.evaluate(() => ({ list: connCfg.checkers.slice(), auto: planAuto().checkers }));
+    expect(r.list.length === 5 && r.list.includes('https://mine.example.org/ok') && JSON.stringify(r.auto) === JSON.stringify(r.list), JSON.stringify(r));
+    await page.evaluate(() => { connCfg.checkers = DEFAULT_CHECKERS.slice(); closeSheet('actions'); closeSheet('setconn'); });
   });
 
   await check('settings: Data — export downloads the snapshot; restore asks, then replaces the state', async () => {
@@ -2277,6 +2299,35 @@ async function runChecks() {
       out.noNetQuiet = toasts.length === 1 && coreRoute.id === id;
       liveAutoStatus(null);
       out.cleared = coreRoute === null;
+      window.toast = t0; connected = false;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('live Auto: a site blocked on the node toasts with a Rule button (prefilled rule to the entry it opens through); a subscription whose servers all fail toasts once', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      const order = autoOrder(), [a, b] = [order[0], order[1] || order[0]], now = Date.now();
+      const toasts = []; const t0 = window.toast; window.toast = (m, act) => toasts.push({ m, act });
+      connected = true; live.switches = 0; live.restarts = 0; live.unstable = 0; live.blocked = 0;
+      const st = extra => ({ connected: true, restarts: 0, recovering: null, auto: Object.assign({ now: a, server: null, switches: 0, unstable: 0, blocked: 0, noNet: false, routes: [], members: [] }, extra) });
+      liveAutoStatus(st({ blocked: 1, lastBlocked: { route: a, server: 'x', dest: 'chat.example.com:443', via: b, at: now } }));
+      const out = { toast: toasts.length === 1 && toasts[0].m.includes('chat.example.com') && toasts[0].act && toasts[0].act.label === 'Rule' };
+      toasts[0].act.fn();
+      out.rule = document.getElementById('sh-ruleform').classList.contains('open') && ruleDraft.target === b && ruleDraft.action === 'proxy'
+        && JSON.stringify(ruleDraft.groups.domain.v.domain_suffix) === '["chat.example.com"]';
+      closeSheet('ruleform');
+      const sid = Object.keys(sourcesData).find(k => sourcesData[k].kind === 'sub' && sourcesData[k].nodes.length >= 2);
+      const other = Object.keys(sourcesData).find(k => k !== sid && sourcesData[k].nodes.length);
+      const mem = [...sourcesData[sid].nodes.slice(0, 2).map(n => ({ key: sid + '::' + n.id, ms: -1, fails: 3, oks: 0, at: now })),
+        { key: other + '::' + sourcesData[other].nodes[0].id, ms: 80, fails: 0, oks: 3, at: now }];
+      toasts.length = 0;
+      liveAutoStatus(st({ blocked: 1, members: mem }));
+      liveAutoStatus(st({ blocked: 1, members: mem }));
+      out.srcDown = toasts.length === 1 && toasts[0].m.includes(sourcesData[sid].name) && /support/.test(toasts[0].m);
+      liveAutoStatus(null);
       window.toast = t0; connected = false;
       return out;
     });

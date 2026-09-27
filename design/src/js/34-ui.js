@@ -1,12 +1,21 @@
 /* ── Toast ── */
 
 let toastTimer = null;
-function toast(msg) {
+// act: { label, fn } — a button in the toast (it then stays longer and takes taps).
+function toast(msg, act) {
   const el = document.getElementById('toast');
   el.textContent = msg;
+  if (act) {
+    const b = document.createElement('button');
+    b.className = 'toast-act';
+    b.textContent = act.label;
+    b.onclick = () => { el.classList.remove('show'); act.fn(); };
+    el.append(b);
+  }
+  el.classList.toggle('has-act', !!act);
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => el.classList.remove('show'), act ? 6000 : 2200);
 }
 
 /* ── Tabs ── */

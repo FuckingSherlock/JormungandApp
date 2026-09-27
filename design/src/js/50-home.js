@@ -80,7 +80,11 @@ function setSegment(group, value) {
    Home; on mobile it will leave Home (Android apps mostly ignore the system proxy). */
 // port: the core's local HTTP + SOCKS5 proxy (127.0.0.1), where the system proxy points.
 // testUrl: the latency test URL ('' = the core's default, gstatic), see 59-data.js.
-const connCfg = { sysProxy: false, killSwitch: false, port: 2080, testUrl: '' };
+// checkers: backup checks — tried when the test URL does not answer through a server; it
+// passes traffic when any answers (the core's defaultCheckers).
+const DEFAULT_CHECKERS = ['https://cp.cloudflare.com/generate_204', 'https://www.gstatic.com/generate_204',
+  'http://www.msftconnecttest.com/connecttest.txt', 'http://captive.apple.com/hotspot-detect.html'];
+const connCfg = { sysProxy: false, killSwitch: false, port: 2080, testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());

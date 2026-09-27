@@ -143,3 +143,42 @@ function setTestUrl(url) {
   renderConnSettings();
   toast('Latency test: ' + testUrlLabel() + (connected ? ' — Fastest uses it from the next connect' : ''));
 }
+
+/* ── Backup checks (connCfg.checkers) ── */
+
+// The presets are the test URL services (Default = gstatic); anything else is the user's own.
+const checkerPresets = () => TEST_URLS.map(([u, name, hint]) => [u || 'https://www.gstatic.com/generate_204', name === 'Default' ? 'Google' : name, hint.replace(' (Google)', '')]);
+function openCheckersPicker() {
+  const on = new Set(connCfg.checkers), presets = checkerPresets();
+  const own = connCfg.checkers.filter(u => !presets.some(([p]) => p === u));
+  const row = (u, name, hint) => menuRow(on.has(u) ? ICON.check : '<span class="menu-ico-gap"></span>',
+    `${esc(name)}<div class="menu-sub">${esc(hint)}</div>`, `toggleChecker('${esc(u)}')`);
+  openActions('Backup checks',
+    presets.map(([u, name, hint]) => row(u, name, hint)).join('') +
+    own.map(u => row(u, (() => { try { return new URL(u).hostname; } catch (e) { return u; } })(), u + ' · tap to remove')).join('') +
+    `<div class="menu-caption">Your own</div>
+     <div class="form-group testurl-custom">
+       <input class="form-input" id="checker-input" placeholder="https://example.com/generate_204" spellcheck="false" autocomplete="off">
+       <button class="btn-primary" onclick="addChecker()">Add</button>
+     </div>
+     <div class="set-hint testurl-hint">Services of different owners: one blocked service must not make a working server look dead. Tried only after the test URL missed.</div>`);
+}
+
+function toggleChecker(u) {
+  const i = connCfg.checkers.indexOf(u);
+  if (i >= 0) connCfg.checkers.splice(i, 1); else connCfg.checkers.push(u);
+  checkersChanged();
+}
+
+function addChecker() {
+  const v = document.getElementById('checker-input').value.trim();
+  if (!/^https?:\/\/[^\s/?#]+\.[^\s/?#]+/i.test(v)) { toast('Enter an http:// or https:// address'); return; }
+  if (!connCfg.checkers.includes(v)) connCfg.checkers.push(v);
+  checkersChanged();
+}
+
+function checkersChanged() {
+  renderConnSettings();
+  openCheckersPicker();
+  if (typeof liveSyncAuto === 'function') liveSyncAuto();
+}

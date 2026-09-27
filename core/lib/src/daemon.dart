@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,6 +15,7 @@ import 'parse/links.dart';
 import 'probe.dart';
 import 'rulesets.dart';
 import 'runtime.dart';
+import 'sbapi.dart';
 import 'share.dart';
 import 'state.dart';
 import 'sysproxy.dart';
@@ -44,7 +46,10 @@ class Daemon {
         sysProxy = sysProxy ?? SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))),
         ruleSets = RuleSetCache(p.join(dataDir, 'rulesets')) {
     main.onExit = _crashed;
-    main.onLog = log.singBox;
+    main.onLog = (line) {
+      log.singBox(line);
+      _auto?.onLog(line);
+    };
   }
 
   final String singBox;
@@ -71,6 +76,7 @@ class Daemon {
   int _mixedPort = 2080;
   int? _tunnelPort; // tunnel-in: always through the tunnel (exit check, lists via VPN)
   Probe? _probe; // probe-in: Auto's latency tests (probe.dart)
+  StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto
   int _connectSeq = 0;
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
@@ -116,7 +122,11 @@ class Daemon {
   void _startAuto(Map<String, dynamic> plan) {
     _stopAuto();
     final auto = _auto = AutoService(main, plan,
-        delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t));
+        delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
+        reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
+        note: main.note);
+    // requests that failed: sing-box's API service streams every closed connection
+    _closed = main.api?.closedConnections().listen(auto.onClosed, onError: (Object e) => main.note('auto: connection events stopped: $e'));
     auto.switches.listen((s) {
       main.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
       _recheckExit();
@@ -126,6 +136,8 @@ class Daemon {
   }
 
   void _stopAuto() {
+    unawaited(_closed?.cancel());
+    _closed = null;
     _auto?.stop();
     _auto = null;
   }
@@ -372,7 +384,8 @@ class Daemon {
     final probe = Probe(await freePort());
     await main.start(
         buildConfig(plan, clashPort: clashPort, tunnelPort: tunnelPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings),
-        clashPort: clashPort);
+        clashPort: clashPort,
+        apiPort: await freePort());
     _probe = probe;
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     _tunnelPort = tunnelPort;
@@ -513,6 +526,7 @@ class Daemon {
           nodes: nodes,
           pairs: pairs,
           url: (body['url'] as String?) ?? defaultTestUrl,
+          checkers: planCheckers({'urlTest': body}),
           // bufferOutput is off: every line leaves at once.
           onResult: (kind, key, ms) => line({'kind': kind, 'key': key, 'ms': ms}),
         );

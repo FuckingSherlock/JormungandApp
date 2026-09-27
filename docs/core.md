@@ -120,8 +120,9 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
    - Priority: `failAfter` таймаутов подряд → первый ответивший по порядку (пачки по 10),
      `PUT /proxies/<группа>`; сервер выше текущего — обратно по правилу `returnTo`.
 3. Маршруты: у текущего `failAfter` таймаутов подряд → вместе меряются маршруты выше и
-   запасные, потом следующие 10 по приоритету; `PUT /proxies/proxy` на первый по приоритету
-   ответивший. Не ответил никто — `noNet`: ничего не двигается. Возврат выше — `returnTo`
+   запасные, потом остальные пачками по 10 по приоритету, пока кто-то не ответит;
+   `PUT /proxies/proxy` на первый по приоритету ответивший. Не ответил никто — `noNet`: ничего
+   не двигается (дальше в `noNet` — только первая пачка за раунд). Возврат выше — `returnTo`
    (`always`: ответил `failAfter` раз подряд и не медленнее больше чем на `threshold`;
    `faster`: быстрее на `threshold`; `never`) и испытательный срок защиты от мигания.
 4. Раунд без единого ответа откатывает промахи всех, кроме текущего маршрута. Раунд с ответом:
@@ -132,6 +133,18 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
    `chains` его тег и счётчики байт не изменились за 10 с, — `DELETE /connections/<id>`
    (каждые 10 с, до 6 раз).
 
+Замер (`_ping`) — тест-URL, не ответил — сразу все запасные проверки (`withCheckers`,
+probe.dart; `plan.auto.checkers`, иначе `urlTest.checkers`, нет поля — `defaultCheckers`):
+живой, если ответила хоть одна.
+
+Упавшие запросы (`onClosed`): демон подписан на поток закрытых соединений API service
+(ниже); соединение через текущий маршрут без единого байта ответа → проверка сразу (одна на
+`failWindow` 10 с). Нода живая → сайты таких запросов проверяются `reach` (`probeReach`: TLS на
+443, HEAD на 80) через неё и через другой отвечающий маршрут → событие `blocked`
+(`AutoBlocked {route, server, dest, via}`, пара маршрут + сайт раз в час). `onLog`: строка
+sing-box `missing default interface` → `offline` (раунды ничего не меряют, как `noNet`),
+`updated default interface` → снова в сети, проверка сразу.
+
 Настройки — `plan.auto` (URL — `urlTest.url`), `checkEvery` 10–3600 с. Тесты: `auto_test.dart`
 (фейковый Clash API из того же `buildConfig`), `auto_singbox_test.dart` (настоящий sing-box
 на loopback: переключение без перезапуска, цепочка, urltest, падение процесса). Системный
@@ -139,6 +152,17 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
 
 Clash API: случайный секрет на каждый запуск sing-box (`clash_api.secret`), все вызовы ядра
 идут с `Authorization: Bearer`; без него — 401, чужая программа туннель не переключит.
+
+**API service sing-box** (1.14+, gRPC, `sbapi.dart`): основной процесс запускается с
+`services: [{type: api}]` на свободном порту loopback с тем же секретом
+(`SingBoxProcess.start(apiPort:)` → `api`). Это интерфейс официальных клиентов sing-box:
+push-потоки соединений (новое / обновлено / закрыто, с байтами, сервером и цепочкой), групп,
+лога, статуса и команды (select, URL test, close, clash mode). Сейчас ядро берёт из него только
+закрытые соединения; перенос остального с Clash API — отдельный шаг (state_3, п. 3.8).
+Код сообщений сгенерирован официальным `protoc` из `daemon/started_service.proto` релиза
+sing-box, лежащего в `tool/bin` (`tool/proto/`, `tool/gen_sbapi.sh`; protoc — в
+`tool/bin/protoc`, не в git, плюс `dart pub global activate protoc_plugin`). Обновили
+sing-box — перегенерировать.
 
 Падение sing-box (процесс вышел сам, не наш stop): ядро сразу возвращает системный прокси,
 затем перезапускает sing-box с тем же планом на маршруте, где был Auto — паузы 1 / 4 / 15 с,

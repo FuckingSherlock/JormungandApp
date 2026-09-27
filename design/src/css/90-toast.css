@@ -6,3 +6,5 @@
   max-width:calc(100% - 32px);text-align:center;
 }
 .toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.has-act.show{pointer-events:auto}
+.toast-act{margin-left:12px;background:none;border:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;padding:0}

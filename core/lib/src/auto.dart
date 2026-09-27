@@ -44,9 +44,11 @@ library;
 import 'dart:async';
 import 'dart:math';
 
-import 'config.dart' show defaultTestUrl;
+import 'config.dart' show defaultTestUrl, planCheckers;
 import 'plan.dart';
+import 'probe.dart' show withCheckers;
 import 'runtime.dart' show ClashApi;
+import 'sbapi.dart' show ClosedConnection;
 
 /// When a route above the current one takes the traffic back.
 enum ReturnTo { always, faster, never }
@@ -59,6 +61,7 @@ class AutoSettings {
     this.standby = 2,
     this.warmEvery = const Duration(minutes: 1),
     this.url = defaultTestUrl,
+    this.checkers = const [],
     this.timeoutMs = 5000,
     this.retryPause = const Duration(milliseconds: 500),
     this.returnTo = ReturnTo.always,
@@ -69,6 +72,7 @@ class AutoSettings {
     this.noNetEvery = const Duration(seconds: 10),
     this.stallAfter = const Duration(seconds: 10),
     this.batch = 10,
+    this.failWindow = const Duration(seconds: 10),
   });
 
   /// From a plan: `auto` = {failAfter, threshold (ms), checkEvery (s), standby, warmEvery (s),
@@ -88,6 +92,7 @@ class AutoSettings {
       standby: a['keepWarm'] == false ? 0 : n(a['standby'], 2).clamp(0, 20),
       warmEvery: Duration(seconds: n(a['warmEvery'], 60).clamp(10, 3600)),
       url: (t['url'] as String?) ?? defaultTestUrl,
+      checkers: planCheckers(plan),
       retryPause: Duration(milliseconds: pause is num ? (pause * 1000).round().clamp(100, 10000) : 500),
       returnTo: ReturnTo.values.firstWhere((m) => m.name == a['returnTo'], orElse: () => ReturnTo.always),
       flapGuard: a['flapGuard'] != false,
@@ -102,6 +107,7 @@ class AutoSettings {
   final int standby; // spares: routes below the current one tested ahead
   final Duration warmEvery; // how often the spares are tested (at a check, not more often)
   final String url;
+  final List<String> checkers; // backup checks when [url] does not answer (probe.dart withCheckers)
   final int timeoutMs;
   final Duration retryPause; // between the tests of a current route that missed
   final ReturnTo returnTo;
@@ -112,6 +118,7 @@ class AutoSettings {
   final Duration noNetEvery; // rounds while no route answers
   final Duration stallAfter; // a connection left on a dead route with no bytes this long is closed
   final int batch; // routes / servers tested at once when looking for one that answers
+  final Duration failWindow; // failed requests of the current route within it = one check
 
   /// The hold after [strikes] drops: 1, 2, 4 … minutes, up to [flapMax].
   Duration hold(int strikes) {
@@ -180,6 +187,16 @@ class AutoUnstable {
   Map<String, dynamic> toJson() => {'id': id, 'strikes': strikes, 'hold': holdMs, 'at': at};
 }
 
+/// A site ([dest], `host:port`) that does not open through [route]'s server [server]
+/// while the node passes traffic, and opens through the route [via]: the app offers a
+/// rule (the site → [via]).
+class AutoBlocked {
+  const AutoBlocked({required this.route, required this.server, required this.dest, required this.via, required this.at});
+  final String route, server, dest, via;
+  final int at;
+  Map<String, dynamic> toJson() => {'route': route, 'server': server, 'dest': dest, 'via': via, 'at': at};
+}
+
 class _Group {
   _Group(this.tag, Map g, {this.pair = false})
       : priority = g['pick'] == 'priority',
@@ -226,7 +243,7 @@ int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 typedef DelayTest = Future<int> Function(String tag, String url, int timeoutMs);
 
 class AutoService {
-  AutoService(this.api, Map<String, dynamic> plan, {AutoSettings? settings, int Function()? clock, this.delay})
+  AutoService(this.api, Map<String, dynamic> plan, {AutoSettings? settings, int Function()? clock, this.delay, this.reach, this.note})
       : settings = settings ?? AutoSettings.fromPlan(plan),
         _clock = clock ?? _wallClock {
     final rs = planRoutes(plan);
@@ -237,6 +254,13 @@ class AutoService {
 
   final ClashApi api;
   final DelayTest? delay;
+
+  /// Whether a site (`host:port`) opens through an outbound tag (probe.dart probeReach);
+  /// null = cannot be told. Without it the sites of failed requests are not tried again.
+  final Future<bool?> Function(String tag, String dest)? reach;
+
+  /// A line for the log (jormd: the Logs tab, as `[jormd] auto: …`).
+  final void Function(String line)? note;
 
   /// Replaceable while running (Settings → Auto mode changed): the next round uses it.
   AutoSettings settings;
@@ -263,6 +287,18 @@ class AutoService {
   /// everything stays as it is, a round every `noNetEvery`.
   bool noNet = false;
 
+  /// The OS has no network (sing-box: `missing default interface`): like [noNet], nothing
+  /// is tested, moved or marked until it is back.
+  bool offline = false;
+
+  /// Requests through the current route that could not open (see [onLog]) and the last.
+  int requestFails = 0;
+  Map<String, dynamic>? lastRequestFail;
+
+  /// Sites found blocked on a node (as on [blocked]) and the last.
+  int blockedCount = 0;
+  AutoBlocked? lastBlocked;
+
   /// Connections closed as stalled on a route / server left for a dead one.
   int stalledClosed = 0;
   int? checkedAt;
@@ -270,9 +306,15 @@ class AutoService {
 
   final _switches = StreamController<AutoSwitch>.broadcast();
   final _unstable = StreamController<AutoUnstable>.broadcast();
+  final _blocked = StreamController<AutoBlocked>.broadcast();
   Timer? _timer;
   final _sweeps = <Timer>{};
   bool _busy = false, _started = false, _stopped = false;
+  bool _kick = false; // a check is due at once when the running one ends
+  bool _failCheck = false; // the running / next check was asked for by failed requests
+  int? _failAt; // the first failed request of the current window
+  final _failDests = <String, String>{}; // sites that got nothing back → the server's outbound tag
+  final _blockedAt = <String, int>{}; // 'route site' → when it was reported
   int? _warmedAt; // when the spares were tested last
 
   /// Every move between routes and between Priority servers.
@@ -280,6 +322,9 @@ class AutoService {
 
   /// A route that keeps dropping (flap guard).
   Stream<AutoUnstable> get unstable => _unstable.stream;
+
+  /// A site that does not open through the current node but does through another route.
+  Stream<AutoBlocked> get blocked => _blocked.stream;
 
   /// Checks on a timer from now on (the first one after `firstCheck`).
   void start() {
@@ -295,6 +340,7 @@ class AutoService {
     }
     _switches.close();
     _unstable.close();
+    _blocked.close();
   }
 
   void _schedule(Duration d) {
@@ -308,6 +354,10 @@ class AutoService {
     _busy = true;
     try {
       if (!await refresh()) return; // sing-box not answering: nothing to judge
+      if (offline) {
+        noNet = true;
+        return;
+      }
       for (final r in _routes) {
         r.checked = false;
       }
@@ -344,15 +394,113 @@ class AutoService {
         _judge();
       }
       checkedAt = _clock();
+      if (_failCheck) {
+        _failCheck = false;
+        if (identical(_routes[index], cur) && cur.health.answered) {
+          unawaited(_sites(cur));
+        } else if (identical(_routes[index], cur) && !noNet) {
+          note?.call('auto: ${cur.id} does not pass traffic: tests again every ${settings.retryPause.inMilliseconds} ms');
+        }
+      }
     } finally {
       _busy = false;
       final f = _routes[index].health.fails;
-      _schedule(noNet
-          ? settings.noNetEvery
-          : f > 0
-              ? settings.retryPause
-              : settings.checkEvery);
+      _schedule(_kick
+          ? Duration.zero
+          : noNet
+              ? settings.noNetEvery
+              : f > 0
+                  ? settings.retryPause
+                  : settings.checkEvery);
+      _kick = false;
     }
+  }
+
+  /// A line sing-box wrote (runtime `onLog`): the OS without a network (`missing default
+  /// interface`) sets [offline], its return (`updated default interface`) clears it and
+  /// has a check run at once.
+  void onLog(String line) {
+    if (_stopped) return;
+    if (line.contains('missing default interface')) {
+      if (!offline) note?.call('auto: the system has no network: nothing is tested or moved until it is back');
+      offline = true;
+    } else if (line.contains('updated default interface') && offline) {
+      offline = false;
+      note?.call('auto: the system network is back: checking');
+      _kickNow();
+    }
+  }
+
+  /// A connection sing-box closed (its API service, sbapi.dart). One through the current
+  /// route that got nothing back is a failed request: sent nothing either — it could not
+  /// open (the node: dial, handshake, the server gone); sent something — the node or the
+  /// site. The first one has the route checked at once instead of at the next round; the
+  /// ones within `failWindow` go into that one check. The check tests the node with the
+  /// backup checks: it does not answer — the usual retries, `failAfter`, failover; it
+  /// answers — the sites the requests went to are tried again ([_sites]).
+  void onClosed(ClosedConnection c) {
+    if (_stopped || offline || c.down > 0) return;
+    if (c.chain.map(_routeOf).firstWhere((i) => i != null, orElse: () => null) != index) return;
+    final now = _clock();
+    requestFails++;
+    lastRequestFail = {'route': _routes[index].id, 'dest': c.destination, 'sent': c.up, 'at': now};
+    if (c.up > 0 && _failDests.length < 20) _failDests[c.destination] = c.outbound;
+    if (_failAt != null && now - _failAt! < settings.failWindow.inMilliseconds) return;
+    _failAt = now;
+    _failDests.removeWhere((d, _) => d != c.destination);
+    note?.call('auto: a request through ${_routes[index].id} got nothing back (${c.destination}): checking it now');
+    _failCheck = true;
+    _kickNow();
+  }
+
+  // The node passes traffic, yet requests through it got nothing back: each site again
+  // through it; opens now — one-off; not — through another route that answers: opens
+  // there — the site is blocked on this node ([blocked], once an hour per site and route);
+  // not there either — the site is down (a log line).
+  Future<void> _sites(_Route cur) async {
+    final dests = Map.of(_failDests);
+    _failDests.clear();
+    if (reach == null || dests.isEmpty) return;
+    final alt = [for (var i = 0; i < _routes.length; i++) if (i != index && _routes[i].health.answered) _routes[i]].firstOrNull;
+    for (final MapEntry(key: dest, value: tag) in dests.entries) {
+      if (_stopped) return;
+      final here = await reach!(tag, dest);
+      if (here != false) continue; // opens now, or cannot be told
+      final altTag = alt?.main.member(alt.main.current);
+      final there = altTag == null ? null : await reach!(altTag, dest);
+      if (there != true) {
+        note?.call('auto: $dest does not open through ${cur.id}${alt == null ? '' : ' nor ${alt.id}'}: the site is down or blocked everywhere');
+        continue;
+      }
+      final key = '${cur.id} $dest', now = _clock();
+      if (now - (_blockedAt[key] ?? -3600000) < 3600000) continue;
+      _blockedAt[key] = now;
+      final b = AutoBlocked(route: cur.id, server: cur.main.current, dest: dest, via: alt!.id, at: now);
+      blockedCount++;
+      lastBlocked = b;
+      note?.call('auto: $dest does not open through ${cur.id}, opens through ${alt.id}');
+      if (!_blocked.isClosed) _blocked.add(b);
+    }
+  }
+
+  void _kickNow() {
+    if (_busy) {
+      _kick = true;
+    } else {
+      _schedule(Duration.zero);
+    }
+  }
+
+  // The route an outbound tag of a log line belongs to: `proxy` = the current one; a
+  // route's group or one of its servers.
+  int? _routeOf(String tag) {
+    if (tag == topTag) return index;
+    for (var i = 0; i < _routes.length; i++) {
+      for (final g in _routes[i].groups) {
+        if (g.tag == tag || g.keyOf(tag) != null) return i;
+      }
+    }
+    return null;
   }
 
   /// Reads which route and servers sing-box uses now (`now` of the groups in /proxies).
@@ -407,12 +555,15 @@ class AutoService {
     return ms >= 0 ? ms : _heal(g, key);
   }
 
-  /// The one test of a server: ms through the group member [key], -1 = no answer.
-  /// (The single point a set of checkers — alive when any answers — would replace.)
-  Future<int> _ping(_Group g, String key) async {
+  /// The one test of a server: ms through the group member [key], -1 = no answer. The
+  /// test URL, then the backup checks at once (withCheckers): it passes traffic when any
+  /// answers.
+  Future<int> _ping(_Group g, String key) => withCheckers((url) => _pingUrl(g.member(key), url), settings.url, settings.checkers);
+
+  Future<int> _pingUrl(String tag, String url) async {
     final t = settings.timeoutMs;
-    if (delay != null) return delay!(g.member(key), settings.url, t);
-    final r = await api.clashGet('/proxies/${Uri.encodeComponent(g.member(key))}/delay?timeout=$t&url=${Uri.encodeQueryComponent(settings.url)}',
+    if (delay != null) return delay!(tag, url, t);
+    final r = await api.clashGet('/proxies/${Uri.encodeComponent(tag)}/delay?timeout=$t&url=${Uri.encodeQueryComponent(url)}',
         timeout: Duration(milliseconds: t + 2000));
     return r != null && r['_status'] == 200 && r['delay'] is int ? r['delay'] as int : -1;
   }
@@ -536,14 +687,17 @@ class AutoService {
       final first = [for (var i = 0; i < _routes.length; i++) if (untested(i) && (i < index || i <= index + settings.standby)) i];
       await Future.wait(first.map((i) => _checkRoute(_routes[i])));
       var to = _firstAnswered();
-      if (to == null && !_stopped) {
-        final next = [for (var i = 0; i < _routes.length; i++) if (untested(i)) i].take(settings.batch);
-        await Future.wait(next.map((i) => _checkRoute(_routes[i])));
+      // the rest by priority, a batch at a time, until one answers; once in no network,
+      // only the first batch (the whole list again every noNetEvery would be a waste)
+      final rest = [for (var i = 0; i < _routes.length; i++) if (untested(i)) i];
+      final upTo = noNet ? min(settings.batch, rest.length) : rest.length;
+      for (var b = 0; to == null && b < upTo && !_stopped; b += settings.batch) {
+        await Future.wait(rest.sublist(b, min(b + settings.batch, upTo)).map((i) => _checkRoute(_routes[i])));
         to = _firstAnswered();
       }
       if (_stopped) return;
       if (to == null) {
-        noNet = true; // the first batch silent too: no network, not this route
+        noNet = true; // no route answers: no network, not this route
         return;
       }
       final old = cur.tag;
@@ -654,6 +808,11 @@ class AutoService {
       'unstable': unstableCount,
       'lastUnstable': lastUnstable?.toJson(),
       'noNet': noNet,
+      'offline': offline,
+      'requestFails': requestFails,
+      'lastRequestFail': lastRequestFail,
+      'blocked': blockedCount,
+      'lastBlocked': lastBlocked?.toJson(),
       'stalledClosed': stalledClosed,
       'checkedAt': checkedAt,
     };

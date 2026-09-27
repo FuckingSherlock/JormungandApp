@@ -48,7 +48,8 @@ const autoOrder = () => visibleOrder().filter(id => connectEntry(id).inAuto);
 // Settings → Auto mode as the core reads it (auto.dart → AutoSettings.fromPlan).
 const planAuto = () => ({ failAfter: autoCfg.failAfter, threshold: autoCfg.threshold, checkEvery: autoCfg.checkEvery,
   standby: autoCfg.standby, warmEvery: autoCfg.warmEvery, retryPause: autoCfg.retryPause, returnTo: autoCfg.returnTo,
-  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset });
+  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset,
+  checkers: connCfg.checkers });   // Settings → Connection → Backup checks, taken live too
 
 /* Which anchor the running plan is compared with (liveMaybeReconnect): in Auto the one it
    was built on while that is still an Auto entry — the core moves inside the plan by
@@ -94,10 +95,13 @@ function liveAutoStatus(st) {
   if (a) {
     if (live.switches != null && a.switches > live.switches && a.lastSwitch && genCfg.switchNotif) toast(switchText(a.lastSwitch));
     if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable && genCfg.switchNotif) toast(unstableText(a.lastUnstable));
+    if (live.blocked != null && a.blocked > live.blocked && a.lastBlocked) toast(blockedText(a.lastBlocked), { label: 'Rule', fn: () => openBlockedRule(a.lastBlocked) });
+    sourcesDown(a.members);
     live.switches = a.switches;
     live.unstable = a.unstable || 0;
+    live.blocked = a.blocked || 0;
     live.routes = (a.routes || []).map(r => r.id);
-  } else live.switches = live.unstable = null;
+  } else { live.switches = live.unstable = live.blocked = null; live.srcDown = new Set(); }
   // sing-box stopped on its own: the core puts the system proxy back and starts it again
   if (st && st.recovering && !live.recovering) toast('sing-box stopped — starting it again…');
   if (st && st.connected && live.restarts != null && st.restarts > live.restarts) toast(st.warning || 'sing-box started again');
@@ -108,3 +112,33 @@ function liveAutoStatus(st) {
 }
 // The flap guard (Settings → Auto mode): an entry that keeps dropping waits before it gets the traffic back.
 const unstableText = u => `Auto: ${entryLabel(u.id)} is unstable — back to it after ${Math.round(u.hold / 60000)} min without drops`;
+
+/* A request through the current node got nothing back while the node passes traffic, and
+   the site opens through another Auto entry (the core checked both): offer a rule. */
+const destHost = d => d.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+const blockedText = b => `${destHost(b.dest)} does not open via ${entryLabel(b.route)} — it does via ${entryLabel(b.via)}`;
+function openBlockedRule(b) {
+  const host = destHost(b.dest);
+  openRuleForm();
+  ruleDraft = newRule({ name: host + ' via ' + entryLabel(b.via), action: 'proxy', target: b.via,
+    groups: { domain: { not: false, v: { domain_suffix: [host] } } } });
+  renderRuleForm();
+}
+
+/* Every tested server of one subscription fails the checks (failAfter in a row) while a
+   server of another source answers: the provider's side (run out, blocked, down). Once per
+   subscription until one of its servers answers again. */
+function sourcesDown(members) {
+  const by = {}, fa = autoCfg.failAfter || 2;
+  (members || []).forEach(m => { const i = m.key.indexOf('::'); if (i > 0) (by[m.key.slice(0, i)] ||= []).push(m); });
+  live.srcDown ||= new Set();
+  Object.entries(by).forEach(([sid, ms]) => {
+    const s = sourcesData[sid];
+    const down = s && s.kind === 'sub' && ms.length >= 2 && ms.every(m => m.ms < 0 && m.fails >= fa);
+    const others = Object.entries(by).some(([o, x]) => o !== sid && x.some(m => m.ms >= 0));
+    if (!down) { live.srcDown.delete(sid); return; }
+    if (!others || live.srcDown.has(sid)) return;
+    live.srcDown.add(sid);
+    toast(`${s.name}: its servers do not respond — contact the subscription provider's support`);
+  });
+}

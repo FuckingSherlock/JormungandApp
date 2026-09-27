@@ -1,0 +1,131 @@
+// SingBoxApi (sbapi.dart) against the real sing-box, on loopback only: a second sing-box
+// as a VLESS server that rejects one domain, our client config with a selector, a request
+// through the mixed inbound. Nothing leaves the machine. Skipped when the binary is missing.
+import 'dart:io';
+
+import 'package:jormungand_core/jormungand_core.dart';
+import 'package:path/path.dart' as p;
+import 'package:test/test.dart';
+
+final _bin = p.join('tool', 'bin', Platform.isWindows ? 'sing-box.exe' : 'sing-box');
+final _skip = File(_bin).existsSync() ? false : 'no sing-box in tool/bin';
+
+const _uuid = 'd290f1ee-6c54-4b01-90e6-d701748f0851'; // made up, loopback only
+
+Map<String, dynamic> _server(int listenPort, int clash) => {
+      'log': {'level': 'warn'},
+      'inbounds': [
+        {
+          'type': 'vless',
+          'tag': 'vless-in',
+          'listen': '127.0.0.1',
+          'listen_port': listenPort,
+          'users': [
+            {'uuid': _uuid},
+          ],
+        },
+      ],
+      'outbounds': [
+        {'type': 'direct', 'tag': 'direct'},
+      ],
+      // no DNS needed: a VLESS client sends the domain itself, so the domain rule below
+      // matches (and rejects) before any resolution would happen.
+      'route': {
+        'rules': [
+          {
+            'domain': ['blocked.example'],
+            'action': 'reject',
+          },
+        ],
+        'final': 'direct',
+      },
+      'experimental': {
+        'clash_api': {'external_controller': '127.0.0.1:$clash'},
+      },
+    };
+
+Map<String, dynamic> _client(int mixedPort, int serverPort, int clash) => {
+      'log': {'level': 'warn'},
+      'inbounds': [
+        {'type': 'mixed', 'tag': 'mixed-in', 'listen': '127.0.0.1', 'listen_port': mixedPort},
+      ],
+      'outbounds': [
+        {'type': 'vless', 'tag': 'route0/nodeA', 'server': '127.0.0.1', 'server_port': serverPort, 'uuid': _uuid, 'packet_encoding': 'xudp'},
+        {'type': 'selector', 'tag': 'proxy', 'outbounds': ['route0/nodeA'], 'default': 'route0/nodeA'},
+      ],
+      'route': {'final': 'proxy'},
+      'experimental': {
+        'clash_api': {'external_controller': '127.0.0.1:$clash'},
+      },
+    };
+
+// A request through the mixed inbound as a plain HTTP proxy: the whole request (method,
+// absolute-form URI, headers) reaches sing-box's inbound in one read, before it dials the
+// outbound at all — so it counts as `up` even when the outbound then rejects at once and
+// nothing at all comes back (`down` stays 0). A SOCKS5 CONNECT would not: the destination
+// is negotiated separately from the payload, and a `reject` closes the tunnel before the
+// payload the client queues right after ever reaches sing-box's copy loop.
+Future<void> _get(int mixedPort, String url) async {
+  final http = HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:$mixedPort';
+  try {
+    final req = await http.getUrl(Uri.parse(url)).timeout(const Duration(seconds: 3));
+    await req.close().timeout(const Duration(seconds: 3));
+  } catch (_) {
+    // rejected / refused: the point of the test is the ClosedConnection sing-box's API
+    // reports, not this request's own outcome
+  } finally {
+    http.close(force: true);
+  }
+}
+
+void main() {
+  test('closedConnections: up>0/down==0 when the server rejects the domain; up==0/down==0 when it is stopped', () async {
+    final tmp = await Directory.systemTemp.createTemp('jorm-sbapi');
+    final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
+    final client = SingBoxProcess(_bin, p.join(tmp.path, 'client'));
+    try {
+      final serverPort = await freePort(), serverClash = await freePort();
+      final mixed = await freePort(), clientClash = await freePort(), apiPort = await freePort();
+
+      await server.start(_server(serverPort, serverClash), clashPort: serverClash);
+      await client.start(_client(mixed, serverPort, clientClash), clashPort: clientClash, apiPort: apiPort);
+      expect(client.api, isNotNull);
+
+      final closed = <ClosedConnection>[];
+      // an error surfaces on this stream once the gRPC channel is torn down at teardown
+      // (client.stop() closing it out from under the subscription) — expected, not a test
+      // failure; daemon.dart's own consumer handles it the same way (an onError callback).
+      final sub = client.api!.closedConnections().listen(closed.add, onError: (Object _) {});
+      addTearDown(sub.cancel);
+      await Future<void>.delayed(const Duration(milliseconds: 300)); // let the subscription settle
+
+      await _get(mixed, 'http://blocked.example/');
+      final c = await _waitFor(closed, (c) => c.destination.startsWith('blocked.example'));
+      expect(c.outbound, 'route0/nodeA');
+      expect(c.chain, contains('proxy'));
+      expect(c.up, greaterThan(0));
+      expect(c.down, 0);
+
+      closed.clear();
+      await server.stop();
+      await _get(mixed, 'http://blocked.example/');
+      final c2 = await _waitFor(closed, (c) => c.destination.startsWith('blocked.example'));
+      expect(c2.up, 0);
+      expect(c2.down, 0);
+    } finally {
+      await client.stop();
+      await server.stop();
+      await tmp.delete(recursive: true);
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 30)));
+}
+
+Future<T> _waitFor<T>(List<T> list, bool Function(T) test, {Duration timeout = const Duration(seconds: 5)}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    final hit = list.where(test);
+    if (hit.isNotEmpty) return hit.first;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+  throw StateError('no matching ClosedConnection within $timeout');
+}

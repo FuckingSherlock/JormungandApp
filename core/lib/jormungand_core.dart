@@ -21,6 +21,7 @@ export 'src/probe.dart';
 export 'src/routing.dart';
 export 'src/rulesets.dart';
 export 'src/runtime.dart';
+export 'src/sbapi.dart';
 export 'src/share.dart';
 export 'src/state.dart';
 export 'src/sysproxy.dart';

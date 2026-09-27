@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import 'config.dart';
 import 'probe.dart';
+import 'sbapi.dart';
 
 class SingBoxError implements Exception {
   SingBoxError(this.message);
@@ -39,6 +40,10 @@ class SingBoxProcess implements ClashApi {
   Process? _up; // the process that came up (start() returned), until it stops
   int? clashPort;
 
+  /// sing-box's API service (sbapi.dart) while it runs, when start() was given an apiPort;
+  /// the same secret as the Clash API.
+  SingBoxApi? api;
+
   /// Every line sing-box writes, as it comes (jormd's Logs tab).
   void Function(String line)? onLog;
 
@@ -65,12 +70,13 @@ class SingBoxProcess implements ClashApi {
   void note(String line) => _log('[jormd] $line');
 
   /// Writes [config], has sing-box check it, runs it and waits for the clash API.
-  Future<void> start(Map<String, dynamic> config, {required int clashPort}) async {
+  /// [apiPort]: also run the API service there (`api`).
+  Future<void> start(Map<String, dynamic> config, {required int clashPort, int? apiPort}) async {
     await stop();
     await Directory(workDir).create(recursive: true);
     final secret = clashSecret = _newSecret();
     final file = File(p.join(workDir, 'config.json'));
-    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(_withSecret(config, secret)));
+    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(_withSecret(config, secret, apiPort)));
 
     final check = await Process.run(binary, ['check', '-c', file.path, '--disable-color']);
     if (check.exitCode != 0) {
@@ -100,6 +106,7 @@ class SingBoxProcess implements ClashApi {
       }
       if (await clashGet('/version') != null) {
         _up = proc;
+        if (apiPort != null) api = SingBoxApi(apiPort, secret);
         return;
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -111,6 +118,9 @@ class SingBoxProcess implements ClashApi {
   Future<void> stop() async {
     final proc = _proc;
     _up = null;
+    final a = api;
+    api = null;
+    unawaited(a?.close());
     if (proc == null) return;
     _proc = null;
     proc.kill();
@@ -122,12 +132,17 @@ class SingBoxProcess implements ClashApi {
     return [for (var i = 0; i < 16; i++) r.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
   }
 
-  static Map<String, dynamic> _withSecret(Map<String, dynamic> config, String secret) {
+  static Map<String, dynamic> _withSecret(Map<String, dynamic> config, String secret, [int? apiPort]) {
     final exp = (config['experimental'] as Map?)?.cast<String, dynamic>();
     final api = (exp?['clash_api'] as Map?)?.cast<String, dynamic>();
     if (exp == null || api == null) return config;
     return {
       ...config,
+      if (apiPort != null)
+        'services': [
+          ...?(config['services'] as List?),
+          {'type': 'api', 'tag': 'api', 'listen': '127.0.0.1', 'listen_port': apiPort, 'secret': secret},
+        ],
       'experimental': {
         ...exp,
         'clash_api': {...api, 'secret': secret},
@@ -224,6 +239,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
   required List<Map> nodes,
   List<Map> pairs = const [],
   String url = defaultTestUrl,
+  List<String> checkers = const [],
   int timeoutMs = 5000,
   int parallel = 32,
   void Function(String kind, String key, int ms)? onResult,
@@ -242,7 +258,8 @@ Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
     Future<void> worker() async {
       while (next < jobs.length) {
         final (kind, key) = jobs[next++];
-        final ms = await probe.delay('${kind == 'n' ? 't' : 'p'}/$key', url, timeoutMs: timeoutMs);
+        final tag = '${kind == 'n' ? 't' : 'p'}/$key';
+        final ms = await withCheckers((u) => probe.delay(tag, u, timeoutMs: timeoutMs), url, checkers);
         (kind == 'n' ? res.nodes : res.pairs)[key] = ms;
         onResult?.call(kind, key, ms);
       }

@@ -7,7 +7,10 @@ environment:
   sdk: ^3.9.0
 dependencies:
   crypto: ^3.0.7
+  fixnum: ^1.1.1
+  grpc: ^5.1.0
   path: ^1.9.1
+  protobuf: ^6.1.0
   yaml: ^3.1.4
 dev_dependencies:
   lints: ^6.1.0

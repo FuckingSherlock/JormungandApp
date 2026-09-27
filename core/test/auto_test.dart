@@ -3,6 +3,8 @@
 // like sing-box: a delay test goes through a group to the server it uses now, a chain's
 // exit through its entry group, a group delay has a urltest pick again.
 import 'package:jormungand_core/jormungand_core.dart';
+// sbapi.dart is not re-exported by the package barrel (jormungand_core.dart) — a lib/
+// oversight, reported but not fixed here (out of this task's scope).
 import 'package:test/test.dart';
 
 class FakeGroup {
@@ -366,21 +368,47 @@ void main() {
     expect(fake.tested.where((t) => t == 'route0/s::a').length, 2, reason: 'failAfter 2: the first round and one retry');
   });
 
-  test('failover: batches of 10 by priority; the whole first batch silent = no network, nobody struck', () async {
+  test('failover: batches of 10 by priority, scanning every remaining route until one answers', () async {
     final routes = [for (var i = 0; i < 13; i++) unit('R$i', ['s::r$i'])];
     final p = plan(routes, auto: {'standby': 0, 'flapGuard': true});
     var t = 0;
+    // only R12 (second batch) still answers: the failover must not stop at the first batch
     final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::r0': 30, 's::r12': 30});
     final auto = AutoService(fake, p, clock: () => t);
     await auto.check();
     fake.alive.remove('s::r0');
+    await auto.check(); // one miss: failAfter is 2, still on R0
     await auto.check();
+    var j = auto.toJson();
+    expect([j['now'], j['noNet'], j['switches']], ['R12', false, 1]);
+    expect(fake.tested.any((x) => x.contains('r12')), isTrue, reason: 'the second batch (R11…R12) was tried too');
+    expect((j['routes'] as List).cast<Map>().first['strikes'], 1, reason: 'R0 dropped while another route answered');
+  });
+
+  test('failover: nothing answers at all = no network, nobody struck; once noNet only the first batch of the rest is retried', () async {
+    final routes = [for (var i = 0; i < 13; i++) unit('R$i', ['s::r$i'])];
+    final p = plan(routes, auto: {'standby': 0, 'flapGuard': true});
+    var t = 0;
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::r0': 30});
+    final auto = AutoService(fake, p, clock: () => t);
+    await auto.check();
+    fake.alive.remove('s::r0');
+    await auto.check(); // one miss: failAfter is 2, no failover attempt yet
     await auto.check();
     var j = auto.toJson();
     expect([j['now'], j['noNet'], j['switches'], fake.groups['proxy']!.now], ['R0', true, 0, 'route0']);
-    expect(fake.tested.where((x) => x.contains('r11') || x.contains('r12')), isEmpty, reason: 'only the first batch (R1…R10)');
+    expect(fake.tested.any((x) => x.contains('r12')), isTrue, reason: 'the first noNet round still scans every route once');
     expect((j['routes'] as List).cast<Map>().skip(1).every((r) => r['fails'] == 0 && r['strikes'] == 0), isTrue);
     expect((j['routes'] as List).cast<Map>().first['strikes'], 0, reason: 'no network: the current one is not struck either');
+
+    fake.tested.clear();
+    t += 10000;
+    await auto.check();
+    j = auto.toJson();
+    expect([j['now'], j['noNet']], ['R0', true]);
+    expect(fake.tested.where((x) => x.contains('r11') || x.contains('r12')), isEmpty,
+        reason: 'already noNet: only the first batch (R1…R10) is retried this round');
+
     // the network is back, R0 is still dead: R7 and R3 answer — R3 is first by priority
     fake.alive['s::r7'] = 10;
     fake.alive['s::r3'] = 90;
@@ -517,6 +545,194 @@ void main() {
     expect([for (final c in fake.conns) c['id']], ['moving', 'other']);
     expect(auto.toJson()['stalledClosed'], 1);
     auto.stop();
+  });
+
+  test('a route whose test URL fails but a checker answers is alive (withCheckers via the delay fake)', () async {
+    final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+    // keyed by url, not by tag: the test url always misses, only the checker answers
+    Future<int> delay(String tag, String url, int t) async => url == 'https://checker.example/' ? 20 : -1;
+    final auto = AutoService(fake, p,
+        delay: delay, settings: const AutoSettings(url: 'https://dead.example/', checkers: ['https://checker.example/']));
+    await auto.check();
+    final j = auto.toJson();
+    expect([j['now'], j['noNet']], ['A', false], reason: 'the checker answering keeps A alive despite the test url failing');
+  });
+
+  test('no checkers configured: the test url failing is the final answer (no network)', () async {
+    final p = plan([unit('A', ['s::a'])]);
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30});
+    Future<int> delay(String tag, String url, int t) async => -1;
+    final auto = AutoService(fake, p, delay: delay, settings: const AutoSettings(url: 'https://dead.example/', checkers: []));
+    await auto.check();
+    await auto.check();
+    final j = auto.toJson();
+    expect(j['noNet'], isTrue);
+  });
+
+  group('onLog: offline on "missing default interface"', () {
+    test('offline suppresses a check round; recovery runs one at once', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      final auto = AutoService(fake, p);
+      await auto.check();
+      fake.alive.remove('s::a'); // would normally start failing A over
+
+      auto.onLog('some sing-box line, missing default interface, no network');
+      expect(auto.offline, isTrue);
+      fake.tested.clear();
+      await auto.check();
+      var j = auto.toJson();
+      expect([j['offline'], j['noNet'], j['now']], [true, true, 'A'], reason: 'offline: nothing tested, marked or moved');
+      expect(fake.tested, isEmpty);
+      expect((j['routes'] as List).cast<Map>().every((r) => r['fails'] == 0 && r['strikes'] == 0), isTrue);
+
+      auto.onLog('updated default interface');
+      expect(auto.offline, isFalse);
+    });
+
+    test('an unrelated log line does not toggle offline', () {
+      final p = plan([unit('A', ['s::a'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30});
+      final auto = AutoService(fake, p);
+      auto.onLog('some ordinary sing-box line');
+      expect(auto.offline, isFalse);
+    });
+  });
+
+  group('onClosed: requests that got nothing back', () {
+    ClosedConnection cc({String outbound = 'route0/s::a', List<String> chain = const ['route0/s::a', 'route0', 'proxy'], String dest = 'blocked.example:443', int up = 120, int down = 0}) =>
+        ClosedConnection(outbound: outbound, chain: chain, destination: dest, up: up, down: down);
+
+    test('ignored: down > 0 (the request did get something back)', () async {
+      final p = plan([unit('A', ['s::a'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30});
+      final auto = AutoService(fake, p);
+      await auto.check();
+      auto.onClosed(cc(down: 5));
+      expect(auto.requestFails, 0);
+      expect(auto.lastRequestFail, isNull);
+    });
+
+    test('ignored: the chain maps to no route', () async {
+      final p = plan([unit('A', ['s::a'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30});
+      final auto = AutoService(fake, p);
+      await auto.check();
+      auto.onClosed(cc(outbound: 'direct', chain: ['direct']));
+      expect(auto.requestFails, 0);
+    });
+
+    test('ignored: the chain maps to a route that is not the current one', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      final auto = AutoService(fake, p);
+      await auto.check(); // current: A
+      auto.onClosed(cc(outbound: 'route1/s::b', chain: ['route1/s::b', 'route1', 'proxy']));
+      expect(auto.requestFails, 0);
+    });
+
+    test('the current route: counts requestFails, records lastRequestFail, two within failWindow count as one check', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      var t = 0;
+      final auto = AutoService(fake, p, clock: () => t, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      await auto.check(); // current: A
+
+      auto.onClosed(cc(dest: 'blocked.example:443'));
+      expect(auto.requestFails, 1);
+      expect(auto.lastRequestFail, {'route': 'A', 'dest': 'blocked.example:443', 'sent': 120, 'at': 0});
+
+      t += 5000; // within failWindow (10s)
+      auto.onClosed(cc(dest: 'other.example:443'));
+      expect(auto.requestFails, 2, reason: 'every failed request is still counted');
+      expect(auto.lastRequestFail!['dest'], 'other.example:443');
+    });
+
+    test('a node that answers again: the failed site is reachable through it now — no AutoBlocked', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      var t = 0;
+      final reached = <(String, String)>[];
+      Future<bool?> reach(String tag, String dest) async {
+        reached.add((tag, dest));
+        return true; // the site opens through A again: a one-off, nothing to report
+      }
+
+      final events = <AutoBlocked>[];
+      final auto = AutoService(fake, p, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      auto.blocked.listen(events.add);
+      await auto.check();
+      auto.onClosed(cc());
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(reached, [('route0/s::a', 'blocked.example:443')]);
+      expect(auto.blockedCount, 0);
+      expect(events, isEmpty);
+    });
+
+    test('a node that answers again: the site stays unreachable through it, opens through another route — AutoBlocked, once an hour', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      var t = 0;
+      Future<bool?> reach(String tag, String dest) async => tag == 'route0/s::a' ? false : true;
+      final events = <AutoBlocked>[];
+      final auto = AutoService(fake, p, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      auto.blocked.listen(events.add);
+      await auto.check();
+      auto.onClosed(cc());
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(auto.blockedCount, 1);
+      expect(auto.lastBlocked?.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'B', 'at': 0});
+      expect(events.length, 1);
+
+      // the same route + site again, still within the hour: not reported again
+      t += 5000;
+      auto.onClosed(cc());
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(auto.blockedCount, 1);
+      expect(events.length, 1);
+    });
+
+    test('reachable neither on this node nor on another route: nothing reported (a note only)', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      var t = 0;
+      Future<bool?> reach(String tag, String dest) async => false; // down everywhere
+      final events = <AutoBlocked>[];
+      final notes = <String>[];
+      final auto = AutoService(fake, p, clock: () => t, reach: reach, note: notes.add, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      auto.blocked.listen(events.add);
+      await auto.check();
+      auto.onClosed(cc());
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(auto.blockedCount, 0);
+      expect(events, isEmpty);
+      expect(notes.any((n) => n.contains('down or blocked everywhere')), isTrue);
+    });
+
+    test('node does not answer at all: no _sites lookup, just the usual retries', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      var t = 0;
+      var reachCalls = 0;
+      Future<bool?> reach(String tag, String dest) async {
+        reachCalls++;
+        return true;
+      }
+
+      final auto = AutoService(fake, p, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      await auto.check(); // current: A
+      fake.alive.remove('s::a'); // now dead
+      auto.onClosed(cc());
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(reachCalls, 0, reason: 'the node itself does not answer: sites are not tried');
+    });
   });
 }
 

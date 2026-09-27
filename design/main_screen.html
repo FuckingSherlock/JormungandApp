@@ -1012,6 +1012,8 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   max-width:calc(100% - 32px);text-align:center;
 }
 .toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.has-act.show{pointer-events:auto}
+.toast-act{margin-left:12px;background:none;border:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;padding:0}
 /* ── Settings screen ── */
 .settings-group{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .settings-row{display:flex;align-items:center;gap:12px;padding:13px 14px;cursor:pointer;transition:background .12s}
@@ -3937,12 +3939,21 @@ function srcErrorHtml(s) {
 /* ── Toast ── */
 
 let toastTimer = null;
-function toast(msg) {
+// act: { label, fn } — a button in the toast (it then stays longer and takes taps).
+function toast(msg, act) {
   const el = document.getElementById('toast');
   el.textContent = msg;
+  if (act) {
+    const b = document.createElement('button');
+    b.className = 'toast-act';
+    b.textContent = act.label;
+    b.onclick = () => { el.classList.remove('show'); act.fn(); };
+    el.append(b);
+  }
+  el.classList.toggle('has-act', !!act);
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => el.classList.remove('show'), act ? 6000 : 2200);
 }
 
 /* ── Tabs ── */
@@ -5227,7 +5238,11 @@ function setSegment(group, value) {
    Home; on mobile it will leave Home (Android apps mostly ignore the system proxy). */
 // port: the core's local HTTP + SOCKS5 proxy (127.0.0.1), where the system proxy points.
 // testUrl: the latency test URL ('' = the core's default, gstatic), see 59-data.js.
-const connCfg = { sysProxy: false, killSwitch: false, port: 2080, testUrl: '' };
+// checkers: backup checks — tried when the test URL does not answer through a server; it
+// passes traffic when any answers (the core's defaultCheckers).
+const DEFAULT_CHECKERS = ['https://cp.cloudflare.com/generate_204', 'https://www.gstatic.com/generate_204',
+  'http://www.msftconnecttest.com/connecttest.txt', 'http://captive.apple.com/hotspot-detect.html'];
+const connCfg = { sysProxy: false, killSwitch: false, port: 2080, testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());
@@ -5640,6 +5655,8 @@ function renderConnSettings() {
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
       <div class="set-row"><div class="set-label" style="flex:1">Latency test URL<div class="set-hint">The address ping and Fastest time; pick one that answers fast from here</div></div>
         <button class="set-value" id="conn-testurl" onclick="openTestUrlPicker()">${testUrlLabel()}${CHEVRON_R}</button></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Backup checks<div class="set-hint">When the test URL does not answer through a server, these are tried; the server works if any answers</div></div>
+        <button class="set-value" id="conn-checkers" onclick="openCheckersPicker()">${connCfg.checkers.length ? connCfg.checkers.length : 'Off'}${CHEVRON_R}</button></div>
     </div>`;
 }
 /* ══════════════════════ SETTINGS → GENERAL ══════════════════════
@@ -6042,6 +6059,45 @@ function setTestUrl(url) {
   connCfg.testUrl = url;
   renderConnSettings();
   toast('Latency test: ' + testUrlLabel() + (connected ? ' — Fastest uses it from the next connect' : ''));
+}
+
+/* ── Backup checks (connCfg.checkers) ── */
+
+// The presets are the test URL services (Default = gstatic); anything else is the user's own.
+const checkerPresets = () => TEST_URLS.map(([u, name, hint]) => [u || 'https://www.gstatic.com/generate_204', name === 'Default' ? 'Google' : name, hint.replace(' (Google)', '')]);
+function openCheckersPicker() {
+  const on = new Set(connCfg.checkers), presets = checkerPresets();
+  const own = connCfg.checkers.filter(u => !presets.some(([p]) => p === u));
+  const row = (u, name, hint) => menuRow(on.has(u) ? ICON.check : '<span class="menu-ico-gap"></span>',
+    `${esc(name)}<div class="menu-sub">${esc(hint)}</div>`, `toggleChecker('${esc(u)}')`);
+  openActions('Backup checks',
+    presets.map(([u, name, hint]) => row(u, name, hint)).join('') +
+    own.map(u => row(u, (() => { try { return new URL(u).hostname; } catch (e) { return u; } })(), u + ' · tap to remove')).join('') +
+    `<div class="menu-caption">Your own</div>
+     <div class="form-group testurl-custom">
+       <input class="form-input" id="checker-input" placeholder="https://example.com/generate_204" spellcheck="false" autocomplete="off">
+       <button class="btn-primary" onclick="addChecker()">Add</button>
+     </div>
+     <div class="set-hint testurl-hint">Services of different owners: one blocked service must not make a working server look dead. Tried only after the test URL missed.</div>`);
+}
+
+function toggleChecker(u) {
+  const i = connCfg.checkers.indexOf(u);
+  if (i >= 0) connCfg.checkers.splice(i, 1); else connCfg.checkers.push(u);
+  checkersChanged();
+}
+
+function addChecker() {
+  const v = document.getElementById('checker-input').value.trim();
+  if (!/^https?:\/\/[^\s/?#]+\.[^\s/?#]+/i.test(v)) { toast('Enter an http:// or https:// address'); return; }
+  if (!connCfg.checkers.includes(v)) connCfg.checkers.push(v);
+  checkersChanged();
+}
+
+function checkersChanged() {
+  renderConnSettings();
+  openCheckersPicker();
+  if (typeof liveSyncAuto === 'function') liveSyncAuto();
 }
 /* ══════════════════════ SHEETS (open/close + tabs) ══════════════════════ */
 
@@ -7374,7 +7430,8 @@ const autoOrder = () => visibleOrder().filter(id => connectEntry(id).inAuto);
 // Settings → Auto mode as the core reads it (auto.dart → AutoSettings.fromPlan).
 const planAuto = () => ({ failAfter: autoCfg.failAfter, threshold: autoCfg.threshold, checkEvery: autoCfg.checkEvery,
   standby: autoCfg.standby, warmEvery: autoCfg.warmEvery, retryPause: autoCfg.retryPause, returnTo: autoCfg.returnTo,
-  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset });
+  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset,
+  checkers: connCfg.checkers });   // Settings → Connection → Backup checks, taken live too
 
 /* Which anchor the running plan is compared with (liveMaybeReconnect): in Auto the one it
    was built on while that is still an Auto entry — the core moves inside the plan by
@@ -7420,10 +7477,13 @@ function liveAutoStatus(st) {
   if (a) {
     if (live.switches != null && a.switches > live.switches && a.lastSwitch && genCfg.switchNotif) toast(switchText(a.lastSwitch));
     if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable && genCfg.switchNotif) toast(unstableText(a.lastUnstable));
+    if (live.blocked != null && a.blocked > live.blocked && a.lastBlocked) toast(blockedText(a.lastBlocked), { label: 'Rule', fn: () => openBlockedRule(a.lastBlocked) });
+    sourcesDown(a.members);
     live.switches = a.switches;
     live.unstable = a.unstable || 0;
+    live.blocked = a.blocked || 0;
     live.routes = (a.routes || []).map(r => r.id);
-  } else live.switches = live.unstable = null;
+  } else { live.switches = live.unstable = live.blocked = null; live.srcDown = new Set(); }
   // sing-box stopped on its own: the core puts the system proxy back and starts it again
   if (st && st.recovering && !live.recovering) toast('sing-box stopped — starting it again…');
   if (st && st.connected && live.restarts != null && st.restarts > live.restarts) toast(st.warning || 'sing-box started again');
@@ -7434,6 +7494,36 @@ function liveAutoStatus(st) {
 }
 // The flap guard (Settings → Auto mode): an entry that keeps dropping waits before it gets the traffic back.
 const unstableText = u => `Auto: ${entryLabel(u.id)} is unstable — back to it after ${Math.round(u.hold / 60000)} min without drops`;
+
+/* A request through the current node got nothing back while the node passes traffic, and
+   the site opens through another Auto entry (the core checked both): offer a rule. */
+const destHost = d => d.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+const blockedText = b => `${destHost(b.dest)} does not open via ${entryLabel(b.route)} — it does via ${entryLabel(b.via)}`;
+function openBlockedRule(b) {
+  const host = destHost(b.dest);
+  openRuleForm();
+  ruleDraft = newRule({ name: host + ' via ' + entryLabel(b.via), action: 'proxy', target: b.via,
+    groups: { domain: { not: false, v: { domain_suffix: [host] } } } });
+  renderRuleForm();
+}
+
+/* Every tested server of one subscription fails the checks (failAfter in a row) while a
+   server of another source answers: the provider's side (run out, blocked, down). Once per
+   subscription until one of its servers answers again. */
+function sourcesDown(members) {
+  const by = {}, fa = autoCfg.failAfter || 2;
+  (members || []).forEach(m => { const i = m.key.indexOf('::'); if (i > 0) (by[m.key.slice(0, i)] ||= []).push(m); });
+  live.srcDown ||= new Set();
+  Object.entries(by).forEach(([sid, ms]) => {
+    const s = sourcesData[sid];
+    const down = s && s.kind === 'sub' && ms.length >= 2 && ms.every(m => m.ms < 0 && m.fails >= fa);
+    const others = Object.entries(by).some(([o, x]) => o !== sid && x.some(m => m.ms >= 0));
+    if (!down) { live.srcDown.delete(sid); return; }
+    if (!others || live.srcDown.has(sid)) return;
+    live.srcDown.add(sid);
+    toast(`${s.name}: its servers do not respond — contact the subscription provider's support`);
+  });
+}
 /* ══════════════════════ LIVE MODE (Dart core) ══════════════════════
    When the Dart core serves the page (core/bin/jormd.dart sets window.JORMD), `backend`
    talks to it over /api and the mock data gives way to the state the core keeps: the
@@ -7461,7 +7551,7 @@ function apiPing(body, onLine) {
   return fetch('/api/ping', {
     method: 'POST',
     headers: { 'X-Jorm': '1', 'Content-Type': 'application/json' },
-    body: JSON.stringify(Object.assign({ url: connCfg.testUrl || undefined }, body)),   // Settings → Connection → Latency test URL
+    body: JSON.stringify(Object.assign({ url: connCfg.testUrl || undefined, checkers: connCfg.checkers }, body)),   // Settings → Connection → Latency test URL
   }).then(async r => {
     if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
     const reader = r.body.getReader(), dec = new TextDecoder();
