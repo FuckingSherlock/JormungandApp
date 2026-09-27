@@ -33,6 +33,10 @@ class FakeClash implements ClashApi {
   final groups = <String, FakeGroup>{};
   final detours = <String, String?>{};
   final tested = <String>[]; // servers / groups a delay test was asked for
+  // open connections as /connections lists them: {id, chains, upload, download}
+  final conns = <Map<String, dynamic>>[];
+  final closed = <String>[];
+  void Function()? onConnections; // before each /connections answer (traffic moves)
 
   String _leaf(String tag) {
     for (var g = groups[tag]; g != null; g = groups[tag]) {
@@ -67,6 +71,10 @@ class FakeClash implements ClashApi {
   @override
   Future<Map<String, dynamic>?> clashGet(String path, {Duration timeout = const Duration(seconds: 2)}) async {
     final s = Uri.parse(path).pathSegments;
+    if (s.length == 1 && s[0] == 'connections') {
+      onConnections?.call();
+      return {'_status': 200, 'connections': [for (final c in conns) {...c}]};
+    }
     if (s.length == 1 && s[0] == 'proxies') {
       return {
         '_status': 200,
@@ -101,6 +109,14 @@ class FakeClash implements ClashApi {
     g.now = body['name'] as String;
     return 204;
   }
+
+  @override
+  Future<int?> clashDelete(String path, {Duration timeout = const Duration(seconds: 2)}) async {
+    final id = Uri.parse(path).pathSegments.last;
+    closed.add(id);
+    conns.removeWhere((c) => c['id'] == id);
+    return 204;
+  }
 }
 
 Map<String, dynamic> _node(String key) => {
@@ -120,7 +136,8 @@ Map<String, dynamic> chain(String id, List<String> entry, List<String> exit) =>
 Map<String, dynamic> plan(List<Map<String, dynamic>> routes, {int current = 0, Map<String, dynamic> auto = const {}}) => {
       'routes': routes,
       'current': current,
-      'auto': {'failAfter': 2, 'threshold': 50, 'checkEvery': 60, 'standby': 2, 'warmEvery': 60, ...auto},
+      // the flap guard has its own tests (it holds a return on the wall clock)
+      'auto': {'failAfter': 2, 'threshold': 50, 'checkEvery': 60, 'standby': 2, 'warmEvery': 60, 'flapGuard': false, ...auto},
     };
 
 (AutoService, FakeClash) setup(Map<String, dynamic> p, Map<String, int> alive) {
@@ -147,10 +164,18 @@ void main() {
       'auto': {'failAfter': 3, 'threshold': 20, 'checkEvery': 5, 'standby': 20, 'warmEvery': 300},
       'urlTest': {'url': 'http://127.0.0.1/t'},
     });
-    expect([s.failAfter, s.threshold, s.checkEvery, s.standby, s.warmEvery, s.url, s.retryEvery],
-        [3, 20, const Duration(seconds: 10), 20, const Duration(minutes: 5), 'http://127.0.0.1/t', const Duration(seconds: 10)]);
+    expect([s.failAfter, s.threshold, s.checkEvery, s.standby, s.warmEvery, s.url],
+        [3, 20, const Duration(seconds: 10), 20, const Duration(minutes: 5), 'http://127.0.0.1/t']);
     final d = AutoSettings.fromPlan({});
-    expect([d.failAfter, d.standby, d.warmEvery], [2, 2, const Duration(minutes: 1)]);
+    expect([d.failAfter, d.standby, d.warmEvery, d.retryPause, d.returnTo, d.flapGuard, d.flapMax, d.flapReset],
+        [2, 2, const Duration(minutes: 1), const Duration(milliseconds: 500), ReturnTo.always, true, const Duration(minutes: 30), const Duration(minutes: 15)],
+        reason: 'an older plan: return always, guard on');
+    final o = AutoSettings.fromPlan({'auto': {'retryPause': 2.5, 'returnTo': 'faster', 'flapGuard': false, 'flapMax': 90, 'flapReset': 1}});
+    expect([o.retryPause, o.returnTo, o.flapGuard, o.flapMax, o.flapReset],
+        [const Duration(milliseconds: 2500), ReturnTo.faster, false, const Duration(minutes: 60), const Duration(minutes: 5)]);
+    expect([AutoSettings.fromPlan({'auto': {'retryPause': 0.01}}).retryPause, AutoSettings.fromPlan({'auto': {'retryPause': 60}}).retryPause],
+        [const Duration(milliseconds: 100), const Duration(seconds: 10)]);
+    expect(AutoSettings.fromPlan({'auto': {'returnTo': 'never'}}).returnTo, ReturnTo.never);
     final big = AutoSettings.fromPlan({'auto': {'failAfter': 9, 'standby': 50}});
     expect([big.failAfter, big.standby], [5, 20]);
     expect(AutoSettings.fromPlan({'auto': {'keepWarm': false, 'standby': 3}}).standby, 0, reason: 'an older plan');
@@ -163,7 +188,7 @@ void main() {
     fake.alive.remove('s::a1');
     await auto.check();
     final j = auto.toJson();
-    expect([j['now'], j['server'], j['switches'], j['allDown']], ['A', 's::a2', 0, false]);
+    expect([j['now'], j['server'], j['switches'], j['noNet']], ['A', 's::a2', 0, false]);
     expect((j['routes'] as List).first['fails'], 0);
     expect(fake.tested, contains('group:route0'));
     // the group test's silent servers are misses too (the app's ping cache learns them), one each
@@ -210,12 +235,15 @@ void main() {
     expect(auto.toJson()['now'], 'A');
   });
 
-  test('every route silent: stays, says allDown', () async {
-    final (auto, _) = setup(plan([unit('A', ['s::a']), unit('B', ['s::b'])]), {});
+  test('every route silent: no network — stays, marks no one', () async {
+    final (auto, fake) = setup(plan([unit('A', ['s::a']), unit('B', ['s::b'])]), {});
     await auto.check();
     await auto.check();
     final j = auto.toJson();
-    expect([j['now'], j['allDown'], j['switches']], ['A', true, 0]);
+    expect([j['now'], j['noNet'], j['switches'], fake.groups['proxy']!.now], ['A', true, 0, 'route0']);
+    final b = (j['routes'] as List).cast<Map>()[1];
+    expect([b['ms'], b['fails']], [-2, 0], reason: 'the misses of a round nobody answered are put back');
+    expect((j['routes'] as List).cast<Map>()[0]['fails'], 2, reason: 'the current one keeps counting');
   });
 
   test('Priority: leaves its server after failAfter misses for the first answering one in order, comes back', () async {
@@ -229,7 +257,7 @@ void main() {
     await auto.check();
     expect(auto.toJson()['server'], 's::p2', reason: 'the next in order, not the fastest');
     expect(fake.groups['route0']!.now, 'route0/s::p2');
-    expect(auto.toJson()['allDown'], isFalse);
+    expect(auto.toJson()['noNet'], isFalse);
     fake.alive['s::p1'] = 60;
     await auto.check();
     await auto.check();
@@ -243,11 +271,11 @@ void main() {
     for (var i = 0; i < 3; i++) {
       await auto.check();
     }
-    expect([auto.toJson()['server'], auto.toJson()['allDown']], ['s::p1', true]);
+    expect([auto.toJson()['server'], auto.toJson()['noNet']], ['s::p1', true]);
     expect(fake.tested.where((t) => t.contains('p2')), isEmpty);
   });
 
-  test('no spares: the routes below are tested only when the current one fails', () async {
+  test('no spares: the routes below are tested only when the current one fails, as one batch', () async {
     final (auto, fake) = setup(plan([unit('A', ['s::a']), unit('B', ['s::b']), unit('C', ['s::c'])], auto: {'standby': 0}),
         {'s::a': 40, 's::b': 60, 's::c': 30});
     await auto.check();
@@ -255,8 +283,8 @@ void main() {
     fake.alive.remove('s::a');
     await auto.check();
     await auto.check();
-    expect(auto.toJson()['now'], 'B');
-    expect(fake.tested.where((t) => t.contains('s::c')), isEmpty, reason: 'B answered first');
+    expect(auto.toJson()['now'], 'B', reason: 'B and C tested together, B first by priority');
+    expect(fake.tested, contains('route2/s::c'));
     fake.tested.clear();
     await auto.check();
     expect(fake.tested, containsAll(['route0/s::a', 'route1/s::b']), reason: 'the route above is tested to come back');
@@ -315,13 +343,189 @@ void main() {
     final auto = AutoService(_Dead(), plan([unit('A', ['s::a']), unit('B', ['s::b'])]));
     await auto.check();
     await auto.check();
-    expect([auto.toJson()['now'], auto.toJson()['allDown'], (auto.toJson()['routes'] as List).first['fails']], ['A', false, 0]);
+    expect([auto.toJson()['now'], auto.toJson()['noNet'], (auto.toJson()['routes'] as List).first['fails']], ['A', false, 0]);
+  });
+
+  test('config: the groups Auto switches keep open connections', () {
+    final c = buildConfig(plan([unit('A', ['s::a']), unit('P', ['s::p1', 's::p2'], pick: 'priority', chosen: 's::p1'), chain('X', ['s::e'], ['s::x'])]));
+    final outs = {for (final o in (c['outbounds'] as List).cast<Map>()) o['tag']: o};
+    for (final t in ['proxy', 'route0', 'route1', 'route2', 'route2-entry']) {
+      expect(outs[t]?['interrupt_exist_connections'], isFalse, reason: t);
+    }
+  });
+
+  test('retry pause: after a miss the current one is tested again that soon, not at checkEvery', () async {
+    final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::b': 30});
+    final auto = AutoService(fake, p,
+        settings: const AutoSettings(checkEvery: Duration(hours: 1), firstCheck: Duration(milliseconds: 1), retryPause: Duration(milliseconds: 20)));
+    auto.start();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    auto.stop();
+    expect(auto.toJson()['now'], 'B');
+    expect(fake.tested.where((t) => t == 'route0/s::a').length, 2, reason: 'failAfter 2: the first round and one retry');
+  });
+
+  test('failover: batches of 10 by priority; the whole first batch silent = no network, nobody struck', () async {
+    final routes = [for (var i = 0; i < 13; i++) unit('R$i', ['s::r$i'])];
+    final p = plan(routes, auto: {'standby': 0, 'flapGuard': true});
+    var t = 0;
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::r0': 30, 's::r12': 30});
+    final auto = AutoService(fake, p, clock: () => t);
+    await auto.check();
+    fake.alive.remove('s::r0');
+    await auto.check();
+    await auto.check();
+    var j = auto.toJson();
+    expect([j['now'], j['noNet'], j['switches'], fake.groups['proxy']!.now], ['R0', true, 0, 'route0']);
+    expect(fake.tested.where((x) => x.contains('r11') || x.contains('r12')), isEmpty, reason: 'only the first batch (R1…R10)');
+    expect((j['routes'] as List).cast<Map>().skip(1).every((r) => r['fails'] == 0 && r['strikes'] == 0), isTrue);
+    expect((j['routes'] as List).cast<Map>().first['strikes'], 0, reason: 'no network: the current one is not struck either');
+    // the network is back, R0 is still dead: R7 and R3 answer — R3 is first by priority
+    fake.alive['s::r7'] = 10;
+    fake.alive['s::r3'] = 90;
+    t += 10000;
+    await auto.check();
+    j = auto.toJson();
+    expect([j['now'], j['noNet']], ['R3', false]);
+    expect((j['routes'] as List).cast<Map>().first['strikes'], 1, reason: 'R0 dropped while another route answered');
+  });
+
+  test('flap guard: a strike only when another route answered; the hold doubles up to flapMax, stable work forgets it', () async {
+    var t = 0;
+    final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])], auto: {'flapGuard': true, 'flapMax': 3, 'flapReset': 5, 'failAfter': 1});
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+    final auto = AutoService(fake, p, clock: () => t);
+    final unstable = <AutoUnstable>[];
+    auto.unstable.listen(unstable.add);
+    Map route(String id) => (auto.toJson()['routes'] as List).cast<Map>().firstWhere((r) => r['id'] == id);
+    Future<void> at(int minutes) async {
+      t = minutes * 60000;
+      await auto.check();
+    }
+
+    await at(0);
+    // no network: A and B both silent — nobody struck
+    fake.alive.clear();
+    await at(1);
+    expect([auto.toJson()['now'], auto.toJson()['noNet'], route('A')['strikes']], ['A', true, 0]);
+    // B back, A not: a drop of A (strike 1, hold 1 min)
+    fake.alive['s::b'] = 60;
+    await at(2);
+    expect([auto.toJson()['now'], route('A')['strikes']], ['B', 1]);
+    fake.alive['s::a'] = 30;
+    await at(3); // answers from 3:00
+    expect(auto.toJson()['now'], 'B', reason: 'on hold: 1 min of answers first');
+    expect(route('A')['holdUntil'], 4 * 60000);
+    await at(4);
+    expect(auto.toJson()['now'], 'A');
+    // drops again: strike 2 (2 min), then 3 (min(4, flapMax 3) = 3 min)
+    Future<void> drop(int m) async {
+      fake.alive.remove('s::a');
+      await at(m);
+      expect(auto.toJson()['now'], 'B');
+      fake.alive['s::a'] = 30;
+    }
+
+    await drop(5);
+    expect(route('A')['strikes'], 2);
+    await at(6);
+    await at(7);
+    expect(auto.toJson()['now'], 'B', reason: 'hold 2 min: answers since 6:00');
+    await at(8);
+    expect(auto.toJson()['now'], 'A');
+    await drop(9);
+    expect(route('A')['strikes'], 3);
+    await at(10);
+    expect(route('A')['holdUntil'], 13 * 60000, reason: 'capped at flapMax');
+    await at(12);
+    expect(auto.toJson()['now'], 'B');
+    await at(13);
+    expect(auto.toJson()['now'], 'A');
+    await Future<void>.delayed(Duration.zero);
+    expect([for (final u in unstable) '${u.id} ${u.strikes} ${u.holdMs ~/ 60000}'], ['A 2 2', 'A 3 3']);
+    expect(auto.toJson()['unstable'], 2);
+    // 5 min of stable work on A forgets the strikes
+    await at(17);
+    expect(route('A')['strikes'], 3);
+    await at(18);
+    expect(route('A')['strikes'], 0);
+  });
+
+  test('flap guard off: back as soon as the return rule allows', () async {
+    var t = 0;
+    final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])], auto: {'failAfter': 1});
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+    final auto = AutoService(fake, p, clock: () => t);
+    await auto.check();
+    fake.alive.remove('s::a');
+    await auto.check();
+    expect(auto.toJson()['now'], 'B');
+    fake.alive['s::a'] = 30;
+    await auto.check();
+    expect(auto.toJson()['now'], 'A');
+  });
+
+  test('return modes: faster — only when faster by threshold; never — stays until a reconnect', () async {
+    Future<String> run(String mode, int aBack) async {
+      final (auto, fake) = setup(plan([unit('A', ['s::a']), unit('B', ['s::b'])], auto: {'returnTo': mode, 'failAfter': 1}), {'s::a': 30, 's::b': 100});
+      await auto.check();
+      fake.alive.remove('s::a');
+      await auto.check();
+      expect(auto.toJson()['now'], 'B');
+      fake.alive['s::a'] = aBack;
+      await auto.check();
+      await auto.check();
+      return auto.toJson()['now'] as String;
+    }
+
+    expect(await run('always', 120), 'A', reason: 'within B + threshold');
+    expect(await run('faster', 120), 'B', reason: 'slower than B');
+    expect(await run('faster', 60), 'B', reason: 'faster, but by less than threshold (50)');
+    expect(await run('faster', 40), 'A');
+    expect(await run('never', 10), 'B');
+  });
+
+  test('return never: Priority servers stay too, and routes above are not tested', () async {
+    final (auto, fake) = setup(plan([unit('A', ['s::a']), unit('P', ['s::p1', 's::p2'], pick: 'priority', chosen: 's::p2')],
+        current: 1, auto: {'returnTo': 'never'}), {'s::a': 10, 's::p1': 10, 's::p2': 40});
+    await auto.check();
+    await auto.check();
+    expect([auto.toJson()['now'], auto.toJson()['server']], ['P', 's::p2']);
+    expect(fake.tested.where((x) => x.contains('s::a') || x.contains('s::p1')), isEmpty);
+  });
+
+  test('after a failover only the stalled connections of the dead route are closed', () async {
+    final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+    final auto = AutoService(fake, p, settings: const AutoSettings(failAfter: 1, flapGuard: false, stallAfter: Duration(milliseconds: 30)));
+    fake.conns.addAll([
+      {'id': 'moving', 'chains': ['route0/s::a', 'route0', 'proxy'], 'upload': 10, 'download': 100},
+      {'id': 'stuck', 'chains': ['route0/s::a', 'route0', 'proxy'], 'upload': 10, 'download': 100},
+      {'id': 'other', 'chains': ['direct'], 'upload': 0, 'download': 0},
+    ]);
+    fake.onConnections = () => fake.conns.firstWhere((c) => c['id'] == 'moving')['download'] += 1;
+    await auto.check();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(fake.closed, isEmpty, reason: 'no switch: nothing is closed');
+    fake.alive.remove('s::a');
+    await auto.check();
+    expect(auto.toJson()['now'], 'B');
+    expect(fake.closed, isEmpty, reason: 'not at the switch: after stallAfter');
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    expect(fake.closed, ['stuck']);
+    expect([for (final c in fake.conns) c['id']], ['moving', 'other']);
+    expect(auto.toJson()['stalledClosed'], 1);
+    auto.stop();
   });
 }
+
 
 class _Dead implements ClashApi {
   @override
   Future<Map<String, dynamic>?> clashGet(String path, {Duration timeout = const Duration(seconds: 2)}) async => null;
   @override
   Future<int?> clashPut(String path, Map<String, dynamic> body, {Duration timeout = const Duration(seconds: 2)}) async => null;
+  @override
+  Future<int?> clashDelete(String path, {Duration timeout = const Duration(seconds: 2)}) async => null;
 }

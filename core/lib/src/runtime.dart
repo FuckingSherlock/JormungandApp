@@ -23,6 +23,9 @@ abstract interface class ClashApi {
 
   /// PUT with a JSON body; the HTTP status (204 = done), or null when it does not answer.
   Future<int?> clashPut(String path, Map<String, dynamic> body, {Duration timeout});
+
+  /// DELETE (`/connections/<id>` closes one); the HTTP status, or null when it does not answer.
+  Future<int?> clashDelete(String path, {Duration timeout});
 }
 
 /// One sing-box process (Flutter on mobile: libbox instead of a process).
@@ -174,6 +177,7 @@ class SingBoxProcess implements ClashApi {
   }
 
   /// DELETE on the clash API (`/connections[/id]` closes them); the status, or null.
+  @override
   Future<int?> clashDelete(String path, {Duration timeout = const Duration(seconds: 2)}) async {
     final c = HttpClient()..findProxy = (_) => 'DIRECT';
     try {

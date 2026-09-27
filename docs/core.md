@@ -71,18 +71,20 @@ Auto, которая может работать; в Manual — закреплё
   mixedPort: 2080, global: bool,
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
              url: connCfg.testUrl /* нет — gstatic; им же проверяет AutoService */ },
-  auto: { failAfter, threshold, checkEvery, standby, warmEvery },
+  auto: { failAfter, threshold, checkEvery, standby, warmEvery,
+          retryPause /*с*/, returnTo: 'always' | 'faster' | 'never', flapGuard, flapMax /*мин*/, flapReset /*мин*/ },
   routing: Routing }       // правила, приложения, быстрые правила, DNS — ниже
 Route = { id, kind: 'unit' | 'chain', main: Group, entry?: Group }   // entry — вход цепочки, выход идёт через него (detour)
 Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true, nodes: [{ key: 'sid::nid', outbound }] }
 ```
 
-- Маршруты: в Auto — все записи Auto выше якоря, якорь и `standby` записей ниже (не меньше 2); в Manual —
-  только якорь. Записи без пригодных серверов пропускаются. План без `routes` (старый вид:
+- Маршруты: в Auto — все записи Auto (`current` — якорь); в Manual — только якорь. Записи без пригодных серверов пропускаются. План без `routes` (старый вид:
   `kind/main/entry` сверху) = один маршрут.
 - Теги (`plan.dart`): маршрут i — группа `route<i>` (у цепочки выход `route<i>` с detour на
   `route<i>-entry`), сервер — `route<i>/<sid::nid>`; над маршрутами `selector` `proxy`
-  (`default` = `current`, `interrupt_exist_connections`), `route.final = proxy`.
+  (`default` = `current`), `route.final = proxy`. У `proxy` и групп маршрутов
+  `interrupt_exist_connections: false` (переключение Auto соединений не рвёт); у групп целей
+  правил — `true`.
 - `fastest` → `urltest` (interval/tolerance из Auto mode); `priority` → `selector` с
   `chosen`; `pinned` — сервер закреплён в Manual, AutoService его не двигает.
 - `urltest` до конца своего первого круга замеров (со сотней серверов — около минуты) шлёт
@@ -93,10 +95,11 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
   правила не применяются.
 - План строится на выборе самого UI, не ядра (`withoutCore`): переключения AutoService не
   меняют план.
-- Подключено и план изменился — UI сам переподключает. Сравнивается состав: маршруты (в Auto —
-  окно вокруг якоря, с которым подключались, пока он в Auto), серверы групп (у Fastest — без
-  порядка, и в маршрутах, и в целях правил), закреп Manual, правила, Global/Rules, системный
-  прокси, настройки Auto. Не сравниваются порядок по пингу, `chosen` групп маршрутов и
+- Подключено и план изменился — UI сам переподключает. Сравнивается состав: маршруты (все записи
+  Auto), серверы групп (у Fastest — без порядка, и в маршрутах, и в целях правил), закреп Manual,
+  правила, Global/Rules, системный прокси, `urlTest`. `plan.auto` не сравнивается: изменённые
+  настройки Auto mode UI шлёт в `POST /api/auto`, работающий AutoService берёт их со следующего
+  раунда. Не сравниваются порядок по пингу, `chosen` групп маршрутов и
   `current`: пинг и переключения AutoService — не повод рвать соединения. `chosen` цели правила
   сравнивается: её Priority никто, кроме нового плана, не двигает. Пока идёт пинг, проверка
   ждёт его конца.
@@ -104,22 +107,30 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
 ## Auto в ядре (`auto.dart`)
 
 `AutoService(ClashApi, plan)` — чистый Dart без UI: демон держит его, пока подключено
-(Flutter возьмёт как есть). Раунд — через `checkEvery` (первый через 3 с; пока текущий
-маршрут не отвечает — каждые 10 с):
+(Flutter возьмёт как есть). Раунд — через `checkEvery` (первый через 3 с; после промаха
+текущего — через `retryPause`, и такой раунд меряет только его; «нет сети» — раз в 10 с):
 
 1. `/proxies` — на каких серверах стоят группы. Clash API молчит — раунд ничего не решает.
-2. Замер сервера, на котором стоит группа (probe, см. «Пинг» ниже): текущий маршрут, все
-   выше него, раз в `warmEvery` (на ближайшей проверке, не чаще) ещё `standby` ниже
+2. Замер сервера, на котором стоит группа (`_ping`: probe, см. «Пинг» ниже): текущий маршрут, все
+   выше него (не при `returnTo: never`), раз в `warmEvery` (на ближайшей проверке, не чаще) ещё `standby` ниже
    (запасные; 0 = нет) — параллельно. Цепочка: вход, потом выход
    (его замер идёт через вход и в `members` не попадает).
    - Fastest: сервер молчит → `/group/<tag>/delay`: urltest перемеряет всех и сразу берёт
      живой; не ответившие — тоже таймауты.
-   - Priority: `failAfter` таймаутов подряд → первый ответивший по порядку (пачки по 8),
-     `PUT /proxies/<группа>`; сервер выше текущего ответил `failAfter` раз подряд и не
-     медленнее больше чем на `threshold` → обратно на него.
-3. Маршруты: у текущего `failAfter` таймаутов подряд → `PUT /proxies/proxy` на первый по
-   приоритету ответивший (не мерянные в раунде проверяются по одному); не ответил никто —
-   `allDown`. Возврат выше — по тому же правилу, что у Priority.
+   - Priority: `failAfter` таймаутов подряд → первый ответивший по порядку (пачки по 10),
+     `PUT /proxies/<группа>`; сервер выше текущего — обратно по правилу `returnTo`.
+3. Маршруты: у текущего `failAfter` таймаутов подряд → вместе меряются маршруты выше и
+   запасные, потом следующие 10 по приоритету; `PUT /proxies/proxy` на первый по приоритету
+   ответивший. Не ответил никто — `noNet`: ничего не двигается. Возврат выше — `returnTo`
+   (`always`: ответил `failAfter` раз подряд и не медленнее больше чем на `threshold`;
+   `faster`: быстрее на `threshold`; `never`) и испытательный срок защиты от мигания.
+4. Раунд без единого ответа откатывает промахи всех, кроме текущего маршрута. Раунд с ответом:
+   маршрут, набравший `failAfter` промахов, пока другой отвечал, получает «падение»
+   (`strikes`; срок 1, 2, 4 … `flapMax` мин ответов подряд до возврата; сброс после `flapReset`
+   работы на нём); со второго — событие `unstable`.
+5. После ухода с мёртвого маршрута / сервера: `GET /connections` → соединения, у которых в
+   `chains` его тег и счётчики байт не изменились за 10 с, — `DELETE /connections/<id>`
+   (каждые 10 с, до 6 раз).
 
 Настройки — `plan.auto` (URL — `urlTest.url`), `checkEvery` 10–3600 с. Тесты: `auto_test.dart`
 (фейковый Clash API из того же `buildConfig`), `auto_singbox_test.dart` (настоящий sing-box
@@ -184,6 +195,7 @@ AutoService; три неудачи — отключено, `error`. Фонова
 | `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
 | `POST /api/connect` | `{plan, systemProxy}` |
+| `POST /api/auto` | `{auto}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения → status |
 | `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, recovering, restarts, auto, sourcesRev}` — `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
@@ -195,8 +207,10 @@ AutoService; три неудачи — отключено, `error`. Фонова
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
 
 `status.auto` (пока подключено; `null` — нет): `{now: id маршрута, index, server, entryServer
-(цепочка), routes: [{id, ms, fails, oks, at}], members: [{key, ms, fails, oks, at}], switches,
-switchedAt, lastSwitch: {route?, from, to, reason: 'failover' | 'back', at}, allDown, checkedAt}`.
+(цепочка), routes: [{id, ms, fails, oks, at, strikes, holdUntil}], members: [{key, ms, fails, oks,
+at}], switches, switchedAt, lastSwitch: {route?, from, to, reason: 'failover' | 'back', at}, unstable
+(счёт), lastUnstable: {id, strikes, hold (мс), at}, noNet, stalledClosed, checkedAt}`. `holdUntil` —
+когда запись на испытательном сроке сможет забрать трафик, если продолжит отвечать.
 `ms`: −1 таймаут, −2 не мерили; `members` — все замеренные серверы (UI кладёт в кэш пингов);
 `switches` — счёт переключений маршрутов и Priority-серверов (`lastSwitch.route` есть у второго,
 тогда `from`/`to` — ключи серверов). UI опрашивает status раз в 4 с.

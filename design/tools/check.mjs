@@ -604,13 +604,20 @@ async function runChecks() {
       () => { closeSheet('target'); closeSheet('ruleform'); openApps(); },
       () => { closeSheet('apps'); closeSheet('rules'); openEditChain('sc1'); },
       () => { closeSheet('createchain'); openSheet('setlook'); },
-      () => { closeSheet('setlook'); openDataSettings(); },
+      () => { closeSheet('setlook'); openSheet('setauto'); },
+      () => { closeSheet('setauto'); openDataSettings(); },
       () => { closeSheet('setdata'); showSourceQr('src1'); },
       () => { closeSheet('actions'); openSheet('setconn'); openTestUrlPicker(); },
       () => { closeSheet('actions'); closeSheet('setconn'); openNodeForm(); document.getElementById('nf-link').value = 'vless://a@b.example:443#x\nvless://a@c.example:443#y'; parseNodeLink(); },
       () => { closeSheet('nodeform'); connected = true; return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); },
     ];
     for (const f of sheets) { await narrow.evaluate(f); await settle(narrow); bad.push(...await over()); }
+    // Auto mode: every row's controls stay inside the row
+    await narrow.evaluate(() => { closeSheet('connections'); openSheet('setauto'); }); await settle(narrow);
+    bad.push(...await narrow.evaluate(() => [...document.querySelectorAll('#auto-settings .set-row')].filter(row => {
+      const r = row.getBoundingClientRect();
+      return row.scrollWidth > row.clientWidth + 1 || [...row.children].some(c => c.getBoundingClientRect().right > r.right + 1);
+    }).map(row => 'auto row: ' + row.textContent.trim().slice(0, 30))));
     const title1 = await narrow.evaluate(() => getComputedStyle(document.querySelector('.app-name')).fontSize);
     expect(!bad.length, bad.join(' | '));
     expect(title0 === title1, `title ${title0} -> ${title1}`);
@@ -1750,6 +1757,26 @@ async function runChecks() {
       out.stepMax = autoCfg.failAfter === 5 && document.querySelector('#am-failafter .stepper-btn:last-child').disabled;
       for (let i = 0; i < 6; i++) document.querySelector('#am-failafter .stepper-btn').click();
       out.stepMin = autoCfg.failAfter === 1;
+      const num = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('change')); };
+      out.retryDefault = autoCfg.retryPause === 0.5 && document.getElementById('am-retry').value === '0.5' && planAuto().retryPause === 0.5;
+      num('am-retry', '2,5'); out.retry = autoCfg.retryPause === 2.5 && planAuto().retryPause === 2.5;
+      num('am-retry', '0'); out.retryNoOff = autoCfg.retryPause === 2.5 && document.getElementById('am-retry').value === '2.5';
+      num('am-retry', '11'); out.retryMax = autoCfg.retryPause === 2.5;
+      num('am-retry', '0.15'); out.retryTenths = autoCfg.retryPause === 2.5;
+      num('am-retry', '0.1'); out.retryLow = autoCfg.retryPause === 0.1;
+      num('am-retry', '0.5');
+      const ret = document.getElementById('am-return');
+      out.returnDefault = ret.value === 'always' && planAuto().returnTo === 'always' && ret.options.length === 3;
+      ret.value = 'faster'; ret.dispatchEvent(new Event('change'));
+      out.returnFaster = autoCfg.returnTo === 'faster' && planAuto().returnTo === 'faster' && document.getElementById('am-return').value === 'faster';
+      setAutoCfg('returnTo', 'always');
+      out.flapDefault = autoCfg.flapGuard && document.getElementById('am-flapmax').value === '30' && document.getElementById('am-flapreset').value === '15';
+      num('am-flapmax', '61'); num('am-flapreset', '4'); out.flapBounds = autoCfg.flapMax === 30 && autoCfg.flapReset === 15;
+      num('am-flapmax', '60'); num('am-flapreset', '5'); out.flapSet = autoCfg.flapMax === 60 && autoCfg.flapReset === 5 && planAuto().flapMax === 60 && planAuto().flapReset === 5;
+      document.querySelector('#am-flap .mini-toggle').click();
+      out.flapOff = autoCfg.flapGuard === false && !document.getElementById('am-flapmax') && planAuto().flapGuard === false;
+      setAutoCfg('flapGuard', true); setAutoCfg('flapMax', 30); setAutoCfg('flapReset', 15);
+      out.help = !!HELP.autoreturn && !!document.querySelector('#auto-settings .help-btn[onclick*="autoreturn"]');
       setAutoCfg('failAfter', 2); setAutoCfg('checkEvery', 60);
       setAutoCfg('threshold', 50);
       closeSheet('setauto'); switchTab('home');
@@ -2185,19 +2212,29 @@ async function runChecks() {
     await p.close();
   });
 
-  await check('live plan: Auto entries above + the entry + standby as routes; pings and the core moving leave it be, Manual is a new one', async () => {
+  await check('live plan: every Auto entry is a route; pings, the core moving and Auto mode settings leave it be (settings go to the core live), Manual is a new one', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(() => {
-      setAutoConnect(true); autoCfg.standby = 1;   // below the anchor: at least 2 go to the plan
+      setAutoConnect(true); autoCfg.standby = 0;   // no spares: still every Auto entry
       Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = n.outbound || { type: 'direct' }; n.unsupported = false; }));
       const order = autoOrder(), plan = livePlan(order[1]);
-      const out = { enough: order.length >= 3,
-        routes: plan.routes.map(x => x.id).join() === order.slice(0, 4).join() && plan.current === 1 && plan.auto.failAfter === autoCfg.failAfter };
+      const out = { enough: order.length >= 5,
+        routes: plan.routes.map(x => x.id).join() === order.join() && plan.current === 1 && plan.auto.failAfter === autoCfg.failAfter && plan.auto.retryPause === 0.5 };
       live.anchor = order[1];
       const sig = planSig();
       Object.values(sourcesData).forEach(s => s.nodes.forEach(n => setPing(n, Math.round(Math.random() * 300))));
       coreRoute = { id: order[0], server: null, entryServer: null };
       out.stable = planSig() === sig;
+      // Settings → Auto mode: no reconnect, the running core gets it once
+      const sent = [], ab = backend.autoSettings, st = [live.ready, live.planSig, connected];
+      backend.autoSettings = a => { sent.push(a); return Promise.resolve(); };
+      live.ready = true; live.planSig = sig; connected = true; live.autoSig = JSON.stringify(planAuto());
+      autoCfg.retryPause = 2; autoCfg.returnTo = 'never';
+      out.autoNoSig = planSig() === sig;
+      liveSyncAuto(); liveSyncAuto();
+      out.autoSent = sent.length === 1 && sent[0].retryPause === 2 && sent[0].returnTo === 'never';
+      autoCfg.retryPause = 0.5; autoCfg.returnTo = 'always';
+      backend.autoSettings = ab; [live.ready, live.planSig, connected] = st;
       setAutoConnect(false);
       out.manual = planSig() !== sig && livePlan().routes.map(x => x.id).join() === activeConnectId && activeConnectId === order[0];
       coreRoute = null;
@@ -2207,7 +2244,7 @@ async function runChecks() {
     await p.close();
   });
 
-  await check('live Auto: dock and Route show the core\'s entry and server, its checks reach the ping cache, a switch toasts (unless off), all down moves on', async () => {
+  await check('live Auto: dock and Route show the core\'s entry and server, its checks reach the ping cache, a switch and an unstable entry toast (unless off)', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(() => {
       setAutoConnect(true);
@@ -2218,7 +2255,7 @@ async function runChecks() {
       const t0 = window.toast; window.toast = m => toasts.push(m);
       connected = true; genCfg.switchNotif = true; live.switches = 0; live.restarts = 0;
       const st = (auto, extra) => Object.assign({ connected: true, restarts: 0, recovering: null, auto }, extra);
-      const auto = (switches, extra) => Object.assign({ now: id, server: refKey(last), entryServer: null, switches, allDown: false,
+      const auto = (switches, extra) => Object.assign({ now: id, server: refKey(last), entryServer: null, switches, noNet: false, unstable: 0,
         lastSwitch: { from: order[0], to: id, reason: 'failover', at: now }, routes: [{ id: order[0] }, { id }],
         members: [{ key: refKey(refs[0]), ms: -1, fails: 3, oks: 0, at: now }] }, extra);
       liveAutoStatus(st(auto(1)));
@@ -2233,12 +2270,11 @@ async function runChecks() {
       liveAutoStatus(st(null, { recovering: { attempt: 1, of: 3 } }));
       liveAutoStatus(st(auto(0), { restarts: 1, warning: 'started again' }));
       out.recovery = toasts.length === 2 && /starting it again/.test(toasts[0]) && toasts[1] === 'started again';
-      let asked = null;
-      liveBackend.connect = a => { asked = a; return Promise.resolve(); };
-      connecting = false; live.beyond = false;
-      const expected = order.slice(2).find(mayWork);
-      liveAutoStatus(st(auto(0, { now: order[0], routes: [{ id: order[0] }, { id: order[1] }], allDown: true })));
-      out.beyond = !!expected && asked === expected;
+      genCfg.switchNotif = true; toasts = [];
+      liveAutoStatus(st(auto(0, { unstable: 1, lastUnstable: { id: order[0], strikes: 2, hold: 120000, at: now } })));
+      out.unstable = toasts.length === 1 && toasts[0].includes(entryLabel(order[0])) && /unstable/.test(toasts[0]) && /2 min/.test(toasts[0]);
+      liveAutoStatus(st(auto(0, { unstable: 1, noNet: true })));
+      out.noNetQuiet = toasts.length === 1 && coreRoute.id === id;
       liveAutoStatus(null);
       out.cleared = coreRoute === null;
       window.toast = t0; connected = false;

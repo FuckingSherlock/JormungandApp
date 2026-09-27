@@ -1,8 +1,8 @@
 /// The routes of a connect plan and the sing-box tags they get (config.dart builds them,
 /// auto.dart switches between them).
 ///
-/// A plan carries `routes`: the Auto entries by priority, from the top down to the one the
-/// UI starts on (`current`) and `standby` more; in Manual just the pinned entry. A route
+/// A plan carries `routes`: every Auto entry by priority, `current` = the one the UI starts
+/// on; in Manual just the pinned entry. A route
 /// is `{id, kind: 'unit' | 'chain', main: Group, entry?: Group}` (Group: see config.dart).
 /// A plan without `routes` (the old shape: kind / main / entry at the top) is one route.
 ///

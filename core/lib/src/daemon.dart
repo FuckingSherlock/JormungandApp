@@ -121,6 +121,7 @@ class Daemon {
       main.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
       _recheckExit();
     });
+    auto.unstable.listen((u) => main.note('auto: ${u.id} is unstable (${u.strikes} drops), back to it after ${u.holdMs ~/ 60000} min of answers'));
     auto.start();
   }
 
@@ -228,6 +229,7 @@ class Daemon {
         'POST /api/parse' => Future.value(_parse(body)),
         'POST /api/connect' => _connect(body),
         'POST /api/disconnect' => _disconnect(),
+        'POST /api/auto' => _autoSettings(body),
         'POST /api/exit' => Future(() {
             _recheckExit();
             return _status();
@@ -423,6 +425,17 @@ class Daemon {
         rethrow;
       }
     });
+    return _status();
+  }
+
+  /// body: {auto} — Settings → Auto mode changed while connected: the running AutoService
+  /// takes it at its next round, no reconnect (none of it is in the sing-box config).
+  Future<Map<String, dynamic>> _autoSettings(Map<String, dynamic> body) async {
+    final plan = _plan, auto = body['auto'];
+    if (plan != null && auto is Map) {
+      _plan = {...plan, 'auto': auto};
+      _auto?.settings = AutoSettings.fromPlan(_plan!);
+    }
     return _status();
   }
 

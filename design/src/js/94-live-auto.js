@@ -1,11 +1,11 @@
 /* ══════════════════════ AUTO IN THE CORE (live) ══════════════════════
    With jormd, Auto runs in the core while connected (core/lib/src/auto.dart, see
-   connect-model.md → Auto): the plan carries the entry to connect plus the Auto entries
-   around it as routes, and the core moves between them — and between a Priority entry's
+   connect-model.md → Auto): the plan carries every Auto entry as a route (and which one to
+   start on), and the core moves between them — and between a Priority entry's
    servers — through sing-box's Clash API, with no restart. This file builds those routes
    and reads back what the core did: the entry and server it is really on (coreRoute →
    dock, Route), what it measured (→ the ping cache, so knownDead agrees with it) and when
-   it switched (→ a toast, General → When Auto switches).
+   it switched or found an entry unstable (→ a toast, General → When Auto switches).
    (Flutter: the same AutoService in-process; this is its view model.) */
 
 // f() on the UI's own picks: coreRoute off meanwhile (a plan is the UI's guess; the core
@@ -29,15 +29,14 @@ function planRoute(id) {
   return { id, kind: 'unit', main };
 }
 
-/* The routes around the entry to connect (the anchor). Auto: every Auto entry above it
-   (the core moves back up when one answers again), the anchor, then autoCfg.standby
-   entries below (spares; tested ahead every warmEvery), at least 2 so that with no spares
-   a failover still has somewhere to go (tested then). Manual: the anchor alone.
+/* The routes of the plan and the one to start on (the anchor). Auto: every Auto entry —
+   the core moves between them through a selector, so a failover or a return never
+   restarts sing-box; only a change of this list does. Manual: the anchor alone.
    Entries the core cannot use (no server with an outbound) are left out; the anchor
    itself must be usable (planGroup says why not). */
 function planRoutes(anchor) {
   const order = autoOrder(), i = order.indexOf(anchor);
-  const ids = !autoConnect || i < 0 ? [anchor] : order.slice(0, i + 1 + Math.max(2, autoCfg.standby | 0));
+  const ids = !autoConnect || i < 0 ? [anchor] : order;
   const routes = [];
   ids.forEach(id => {
     if (id === anchor) routes.push(planRoute(id));
@@ -46,8 +45,10 @@ function planRoutes(anchor) {
   return { routes, current: routes.findIndex(r => r.id === anchor) };
 }
 const autoOrder = () => visibleOrder().filter(id => connectEntry(id).inAuto);
+// Settings → Auto mode as the core reads it (auto.dart → AutoSettings.fromPlan).
 const planAuto = () => ({ failAfter: autoCfg.failAfter, threshold: autoCfg.threshold, checkEvery: autoCfg.checkEvery,
-  standby: autoCfg.standby, warmEvery: autoCfg.warmEvery });
+  standby: autoCfg.standby, warmEvery: autoCfg.warmEvery, retryPause: autoCfg.retryPause, returnTo: autoCfg.returnTo,
+  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset });
 
 /* Which anchor the running plan is compared with (liveMaybeReconnect): in Auto the one it
    was built on while that is still an Auto entry — the core moves inside the plan by
@@ -92,9 +93,11 @@ function liveAutoStatus(st) {
   const pings = a ? mergeCorePings(a.members) : false;
   if (a) {
     if (live.switches != null && a.switches > live.switches && a.lastSwitch && genCfg.switchNotif) toast(switchText(a.lastSwitch));
+    if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable && genCfg.switchNotif) toast(unstableText(a.lastUnstable));
     live.switches = a.switches;
+    live.unstable = a.unstable || 0;
     live.routes = (a.routes || []).map(r => r.id);
-  } else live.switches = null;
+  } else live.switches = live.unstable = null;
   // sing-box stopped on its own: the core puts the system proxy back and starts it again
   if (st && st.recovering && !live.recovering) toast('sing-box stopped — starting it again…');
   if (st && st.connected && live.restarts != null && st.restarts > live.restarts) toast(st.warning || 'sing-box started again');
@@ -102,15 +105,6 @@ function liveAutoStatus(st) {
   live.restarts = st ? st.restarts : null;
   if (pings) refreshSourceViews();
   else if (JSON.stringify(coreRoute) !== was) { renderConnects(); updateMainConnectCard(); }
-  if (a && a.allDown) liveBeyondDown();
 }
-/* Every route of this plan is down (the core tried them all): a new plan around the first
-   Auto entry below them that may work, if there is one. */
-function liveBeyondDown() {
-  if (connecting || live.beyond || !autoConnect) return;
-  const order = autoOrder(), last = Math.max(-1, ...live.routes.map(id => order.indexOf(id)));
-  const next = order.slice(last + 1).find(mayWork);
-  if (!next) return;
-  live.beyond = true;
-  liveBackend.connect(next).catch(e => toast(e.message)).then(() => { live.beyond = false; });
-}
+// The flap guard (Settings → Auto mode): an entry that keeps dropping waits before it gets the traffic back.
+const unstableText = u => `Auto: ${entryLabel(u.id)} is unstable — back to it after ${Math.round(u.hold / 60000)} min without drops`;

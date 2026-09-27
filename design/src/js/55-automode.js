@@ -10,6 +10,13 @@
    - warmEvery: how often the spares are pinged (seconds; at a connection check, so never
      more often than checkEvery);
    - failAfter: timeouts in a row (1–5) before Auto leaves the current server;
+   - retryPause: after a missed check, the pause before the next test of the current
+     server (0.1–10 s, typed; failAfter misses in a row → failover);
+   - returnTo: when an entry above the current one gets the traffic back — 'always' (it
+     answers and is no slower by more than threshold), 'faster' (faster by threshold),
+     'never' (not until a reconnect);
+   - flapGuard: an entry that keeps dropping waits 1, 2, 4 … flapMax minutes of answers
+     before Auto goes back to it; flapReset minutes of stable work forget the drops;
    - pauseScreenOff: no checks while the screen is off (mobile battery);
    - subsEvery: the global subscription update period; a subscription's own period
      (Nodes → Edit subscription) wins, its default 'auto' follows this one (seconds, 0 = off).
@@ -17,10 +24,14 @@
    Auto itself is switched on / off by the Auto badge of the Simple / Profiles list.
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
-const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, standby: 2, warmEvery: 60, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
+const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, standby: 2, warmEvery: 60, retryPause: 0.5, returnTo: 'always',
+  flapGuard: true, flapMax: 30, flapReset: 15, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
 const AUTO_THRESHOLD_MAX = 1000;
 const AUTO_FAIL_AFTER = [1, 5];
 const AUTO_STANDBY_MAX = 20;
+// Typed numbers of the sheet: [min, max, unit]; a value outside puts the old one back.
+const AUTO_NUMS = { retryPause: [0.1, 10, 's'], flapMax: [1, 60, 'min'], flapReset: [5, 60, 'min'] };
+const AUTO_RETURN = [['always', 'Always'], ['faster', 'If faster'], ['never', 'Never']];
 const CHEVRON_R = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
 // A period in seconds, in the largest unit that divides it: 90 s, 5 min, 12 h, 2 d.
@@ -73,6 +84,14 @@ function setAutoThreshold(input) {
   else toast('Enter 0–' + AUTO_THRESHOLD_MAX + ' ms');
   renderAutoMode();
 }
+// retryPause takes tenths (a comma too), the minutes whole numbers.
+function setAutoNum(input, key) {
+  const [lo, hi, unit] = AUTO_NUMS[key], raw = input.value.trim().replace(',', '.'), v = Number(raw);
+  const ok = raw !== '' && isFinite(v) && v >= lo && v <= hi && (key === 'retryPause' ? Math.abs(v * 10 - Math.round(v * 10)) < 1e-9 : Number.isInteger(v));
+  if (ok) autoCfg[key] = key === 'retryPause' ? Math.round(v * 10) / 10 : v;
+  else toast(`Enter ${lo}–${hi} ${unit}`);
+  renderAutoMode();
+}
 // The spares slider: the number follows the thumb, the rest re-renders on release.
 const previewStandby = v => { document.getElementById('am-standby-val').textContent = standbyText(+v); };
 const standbyText = n => n ? 'next ' + n : 'off';
@@ -88,6 +107,7 @@ function renderAutoMode() {
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
   const valueBtn = (id, key, text) => `<button class="set-value" id="${id}" onclick="openIntervalDialog('${key}')">${text}${CHEVRON_R}</button>`;
   const [lo, hi] = AUTO_FAIL_AFTER, fa = autoCfg.failAfter;
+  const num = (key, id) => `<input class="set-input am-num" id="${id}" inputmode="decimal" value="${autoCfg[key]}" onchange="setAutoNum(this,'${key}')"><span class="am-unit">${AUTO_NUMS[key][2]}</span>`;
 
   document.getElementById('autoCardSub').textContent = 'Check every ' + fmtEvery(autoCfg.checkEvery);
   el.innerHTML = `
@@ -109,8 +129,21 @@ function renderAutoMode() {
           <span class="stepper-val">${fa}</span>
           <button class="stepper-btn" onclick="stepAutoFailAfter(1)" ${fa >= hi ? 'disabled' : ''}>›</button>
         </div></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Retry pause<div class="set-hint">After a missed check, before the next try</div></div>
+        ${num('retryPause', 'am-retry')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Speed test on failures<div class="set-hint">When requests fail, also measure the server’s speed</div></div>${toggle(autoCfg.speedOnFail, "setAutoCfg('speedOnFail',!autoCfg.speedOnFail)")}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
+    </div>
+
+    <div class="am-label">Going back up<button class="help-btn" onclick="openHelp('autoreturn')" title="What is this?">?</button></div>
+    <div class="set-group">
+      <div class="set-row"><div class="set-label" style="flex:1">Return to a higher entry<div class="set-hint">When an entry above the current one works again</div></div>
+        <select class="set-select" id="am-return" onchange="setAutoCfg('returnTo',this.value)">${AUTO_RETURN.map(([v, l]) => `<option value="${v}" ${v === autoCfg.returnTo ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="set-row" id="am-flap"><div class="set-label" style="flex:1">Flap protection<div class="set-hint">An entry that keeps dropping waits longer each time before it gets the traffic back</div></div>${toggle(autoCfg.flapGuard, "setAutoCfg('flapGuard',!autoCfg.flapGuard)")}</div>
+      ${autoCfg.flapGuard ? `<div class="set-row"><div class="set-label" style="flex:1">Longest wait<div class="set-hint">1, 2, 4 … minutes, up to this</div></div>
+        ${num('flapMax', 'am-flapmax')}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">Forget drops after<div class="set-hint">This long of stable work on the entry</div></div>
+        ${num('flapReset', 'am-flapreset')}</div>` : ''}
     </div>
 
     <div class="am-label">Subscriptions<button class="help-btn" onclick="openHelp('subsupdate')" title="What is this?">?</button></div>

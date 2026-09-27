@@ -5,7 +5,8 @@
 /// { routes: [Route…], current: 0,  // Auto entries by priority (plan.dart); Manual: one
 ///   mixedPort: 2080, global: false,
 ///   urlTest: { url, interval /*s*/, tolerance /*ms*/ },
-///   auto: { failAfter, threshold, checkEvery, standby, warmEvery } }   // auto.dart
+///   auto: { failAfter, threshold, checkEvery, standby, warmEvery, retryPause,
+///           returnTo, flapGuard, flapMax, flapReset } }   // auto.dart
 /// Route = { id, kind: 'unit' | 'chain',
 ///   main:  Group,          // the unit, or the chain's exit
 ///   entry: Group }         // chain only: the exit dials through it
@@ -50,7 +51,9 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   final outs = <Map<String, dynamic>>[];
   final test = (plan['urlTest'] as Map?) ?? const {};
 
-  void group(String tag, Map g, {String? detour}) {
+  // [auto]: a main-flow group the AutoService switches — a switch keeps the open
+  // connections (auto.dart closes the stalled ones itself); a rule target's group is not.
+  void group(String tag, Map g, {String? detour, bool auto = false}) {
     final members = <String>[];
     for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
       final t = '$tag/${n['key']}';
@@ -66,7 +69,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
         'tag': tag,
         'outbounds': members,
         'default': members.contains(chosen) ? chosen : members.first,
-        'interrupt_exist_connections': true,
+        'interrupt_exist_connections': !auto,
       });
     } else {
       outs.add({
@@ -76,7 +79,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
         'url': test['url'] ?? defaultTestUrl,
         'interval': '${test['interval'] ?? 60}s',
         'tolerance': test['tolerance'] ?? 50,
-        'interrupt_exist_connections': true,
+        'interrupt_exist_connections': !auto,
       });
     }
   }
@@ -85,20 +88,21 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   for (var i = 0; i < routes.length; i++) {
     final r = routes[i];
     if (r['kind'] == 'chain') {
-      group(routeEntryTag(i), r['entry'] as Map);
-      group(routeTag(i), r['main'] as Map, detour: routeEntryTag(i));
+      group(routeEntryTag(i), r['entry'] as Map, auto: true);
+      group(routeTag(i), r['main'] as Map, detour: routeEntryTag(i), auto: true);
     } else {
-      group(routeTag(i), r['main'] as Map);
+      group(routeTag(i), r['main'] as Map, auto: true);
     }
     tags.add(routeTag(i));
   }
-  // Auto moves between the routes by switching this selector (auto.dart), no restart
+  // Auto moves between the routes by switching this selector (auto.dart), no restart and
+  // no cut: open connections stay on the route they started on
   outs.add({
     'type': 'selector',
     'tag': topTag,
     'outbounds': tags,
     'default': tags[planCurrent(plan, tags.length)],
-    'interrupt_exist_connections': true,
+    'interrupt_exist_connections': false,
   });
   outs.add({'type': 'direct', 'tag': 'direct'});
   final routing = buildRouting(plan, group, ruleSetFiles: ruleSetFiles);

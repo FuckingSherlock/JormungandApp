@@ -139,7 +139,7 @@ void main() {
       expect(res.statusCode, 401);
 
       final auto = AutoService(client, plan, delay: probe.delayTest,
-          settings: AutoSettings(failAfter: 1, threshold: 5000, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
+          settings: AutoSettings(failAfter: 1, threshold: 5000, flapGuard: false, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       await auto.check();
       expect(auto.toJson()['now'], 'A');
       expect(await _get(mixed, loop.url), 'hello from target');

@@ -138,7 +138,8 @@ function planSigOf(plan) {
   const r = (x, f) => x && Object.assign({}, x, { main: f(x.main), entry: f(x.entry) });
   const routing = plan.routing && Object.assign({}, plan.routing,
     { targets: Object.fromEntries(Object.entries(plan.routing.targets || {}).map(([k, x]) => [k, r(x, gt)])) });
-  return JSON.stringify(Object.assign({}, plan, { current: null, routing, systemProxy: segState.sys === 'on',
+  // plan.auto is not in it: the running core takes Settings → Auto mode as it is (liveSyncAuto)
+  return JSON.stringify(Object.assign({}, plan, { current: null, auto: null, routing, systemProxy: segState.sys === 'on',
     routes: (plan.routes || []).map(x => r(x, g)) }));
 }
 const planSig = () => { try { return planSigOf(livePlan(liveSigAnchor())); } catch (e) { return null; } };
@@ -147,6 +148,7 @@ const pingsRunning = () => [...pingCache.values()].some(v => v.ms === 'testing')
 // Connected and the plan changed (another entry, a server switched off, Global/Rules…):
 // the core gets the new config. Not mid-ping: the last result re-renders and checks again.
 function liveMaybeReconnect() {
+  liveSyncAuto();
   if (!live.ready || !connected || connecting || !live.planSig || pingsRunning()) return;
   const sig = planSig();
   if (!sig || sig === live.planSig) { clearTimeout(live.reconnectTimer); return; }
@@ -154,6 +156,15 @@ function liveMaybeReconnect() {
   live.reconnectTimer = setTimeout(() => {
     if (connected && !connecting && planSig() !== live.planSig) backend.connect().catch(e => toast(e.message));
   }, 600);
+}
+
+// Settings → Auto mode changed while connected: the core's Auto takes it at its next check, no reconnect.
+function liveSyncAuto() {
+  if (!live.ready || !connected || connecting || !live.planSig) return;
+  const a = JSON.stringify(planAuto());
+  if (a === live.autoSig) return;
+  live.autoSig = a;
+  backend.autoSettings(planAuto()).catch(e => toast(e.message));
 }
 
 /* ── The real backend ── */
@@ -255,6 +266,7 @@ const liveBackend = {
   log(since) { return api('/api/log' + (since != null ? '?since=' + since : '')); },
   clearLog() { return api('/api/log', null, 'DELETE'); },
   version() { return api('/api/version'); },
+  autoSettings(auto) { return api('/api/auto', { auto }); },
   closeConn(id) { return api('/api/connections' + (id ? '/' + encodeURIComponent(id) : ''), null, 'DELETE'); },
   // Backup = the snapshot the core stores; a restore replaces it and loads it at once.
   exportState() { return api('/api/state').then(st => st.snapshot || liveSnapshot()); },
@@ -288,7 +300,8 @@ const liveBackend = {
       return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
-        live.switches = live.restarts = null;   // a new AutoService counts from 0
+        live.autoSig = JSON.stringify(plan.auto);
+        live.switches = live.unstable = live.restarts = null;   // a new AutoService counts from 0
         liveAutoStatus(st);
         if (st.warning) toast(st.warning);
         liveWatchExit();   // the core checks the exit after every (re)connect
@@ -369,6 +382,7 @@ function liveInit() {
       liveAutoStatus(st.status);
       live.anchor = liveFindAnchor(live.routes || []);
       live.planSig = planSig();
+      live.autoSig = JSON.stringify(planAuto());   // what the running core has is not known: the next change sends it
     }
     live.sourcesRev = st.status.sourcesRev;
     live.ready = true;

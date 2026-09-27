@@ -53,6 +53,8 @@ let backend = {
   // like the core: the exit is checked again after every connect
   connect()    { exitInfo = null; return wait(1100).then(() => { exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' }; }); },
   disconnect() { return Promise.resolve(); },
+  // Settings → Auto mode changed while connected: the core's Auto takes it as is (no reconnect).
+  autoSettings(auto) { return Promise.resolve(); },
   // Live traffic (see renderTraffic): the mock keeps the numbers the cards show.
   // out = where each connection really goes, exit first (the core gives 'proxy/<sid::nid>' tags).
   traffic() {

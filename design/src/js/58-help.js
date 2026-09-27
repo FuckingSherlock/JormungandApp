@@ -48,6 +48,15 @@ const HELP = {
     ['On / off', 'the Auto badge in the Simple / Profiles list. Off = Manual: stays on the entry you tapped.'],
     ['Priority', 'the order Auto tries entries in — drag ⋮⋮ in that list.'],
   ] },
+  autoreturn: { title: 'Going back up', items: [
+    ['Retry pause', 'after a missed check the server is tried again this soon; “Leave a server after” misses in a row and Auto moves on.'],
+    ['No drop', 'switching never cuts what is already open. After leaving a dead entry, only the connections that stopped moving are closed.'],
+    ['Always', 'go back to a higher entry once it works and is not much slower than the current one.'],
+    ['If faster', 'go back only if the higher entry is faster by at least “Switch to a faster server”.'],
+    ['Never', 'stay on the entry Auto moved to until you reconnect.'],
+    ['Flap protection', 'each drop of an entry doubles the wait before Auto goes back to it: 1, 2, 4 … minutes, up to “Longest wait”.'],
+    ['No network', 'if no entry answers at all, nothing is switched or counted as a drop: Auto waits for the network to come back.'],
+  ] },
   subsupdate: { title: 'Subscription updates', items: [
     ['Update every', 'how often the server lists are downloaded again from the providers.'],
     ['Own period', 'a subscription can have its own (Nodes → ⋮ → Edit → Update every). Then this setting doesn’t apply to it.'],
