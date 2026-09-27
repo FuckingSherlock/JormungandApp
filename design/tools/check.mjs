@@ -133,6 +133,8 @@ const SHOTS = {
   'route-open': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); }); await settle(p); },
   'no-auto': async p => { await p.evaluate(() => { visibleOrder().forEach(id => { connectEntry(id).inAuto = false; }); connected = false; renderConnState(); updateMainConnectCard(); toggleMain(); }); await settle(p); },
   'no-auto-dock': async p => { await p.evaluate(() => { visibleOrder().forEach(id => { connectEntry(id).inAuto = false; }); connected = false; renderConnState(); updateMainConnectCard(); }); await settle(p); },
+  'ping-testing': async p => { await p.evaluate(() => { openProfiles(); const id = autoOrder()[0]; toggleRouteRow(id);
+    unitPickRefs(id).slice(0, 2).forEach(r => pingCache.set(pingKey(r.node), { ms: 'testing', at: Date.now() })); renderConnects(); }); await settle(p); },
   'route': async p => { await p.evaluate(() => { openProfiles(); }); await settle(p); },
   'route-pin': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x] && unitRefs(x).length > 1); toggleRouteRow(id); pinRouteNode(id, refKey(unitRefs(id)[1])); }); await settle(p); },
   'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); openEditProfile('work'); confirmDeleteEntry('work'); }); await settle(p); },
@@ -147,6 +149,7 @@ const SHOTS = {
   'logs-search': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => { toggleLogSearch(true); document.getElementById('logSearch').value = 'discord'; renderLogs(); }); await settle(p); },
   'logs-warn': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => setLogLevel('warn')); await settle(p); },
   'qr-node':  async p => { await tab(p, 'nodes'); await p.evaluate(() => showNodeQr('src1', sourcesData.src1.nodes[0].id)); await settle(p); },
+  'speed-test': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => mockPing(x) >= 0); openSpeedTest('src1', n.id); }); await p.waitForTimeout(4200); },
   'qr-sub':   async p => { await tab(p, 'nodes'); await p.evaluate(() => showSourceQr('src1')); await settle(p); },
   'settings-data': async p => { await tab(p, 'settings'); await p.evaluate(() => openDataSettings()); await settle(p); },
   'restore-confirm': async p => { await tab(p, 'settings'); await p.evaluate(() => { openDataSettings(); confirmRestore(liveSnapshot(), '2026-09-20T18:30:00Z', 'jormungand-backup-2026-09-20.json'); }); await settle(p); },
@@ -793,6 +796,36 @@ async function runChecks() {
     });
     expect(r.size === r.want && r.path > 100 && /:\/\//.test(r.text), JSON.stringify(r));
     await page.evaluate(() => closeSheet('actions'));
+  });
+
+  await check('chain editor: tapping the other end swaps entry and exit (two profiles only: no other way to turn it); a chain lists no source under its servers', async () => {
+    const r = await page.evaluate(() => {
+      setConnectMode('profiles'); openProfiles(); openEditChain('cpdefault');
+      const before = [chainDraft.inId, chainDraft.outId];
+      document.querySelector(`#cc-in-list .cc-prof[data-id="${before[1]}"] .pick-row`).click();
+      const after = [chainDraft.inId, chainDraft.outId];
+      closeSheet('createchain');
+      return { before, after };
+    });
+    expect(r.after[0] === r.before[1] && r.after[1] === r.before[0], JSON.stringify(r));
+    const src = await page.evaluate(() => { const c = Object.values(chainsData).find(c => sourcesData[c.inId] && sourcesData[c.outId]);
+      if (!c) return 'none'; return entryNodeRowsHtml(chainEntryRefs(c), null).includes('node-src') ? 'shown' : 'hidden'; });
+    expect(src !== 'shown', 'source repeated in chain rows');
+  });
+
+  await check('speed test: the node ⋮ runs it — latency, download, upload fill in, then Done; closing the sheet stops it', async () => {
+    const nid = await page.evaluate(() => sourcesData.src1.nodes.find(x => mockPing(x) >= 0).id);
+    await page.evaluate(n => openNodeActions('src1', n), nid);
+    expect(await page.evaluate(() => /Speed test/.test(document.getElementById('actions-body').textContent)), 'no Speed test row in the node menu');
+    await page.evaluate(n => { closeSheet('actions'); openSpeedTest('src1', n); }, nid);
+    await page.waitForFunction(() => /Done/.test((document.querySelector('#speed-card .speed-status') || {}).textContent || ''), null, { timeout: 12000 });
+    const vals = await page.evaluate(() => [...document.querySelectorAll('#speed-card .speed-val')].map(e => e.textContent));
+    expect(vals.slice(0, 3).every(v => /^\d/.test(v)), 'numbers missing: ' + vals.join(' | '));
+    // a second run closed early must not keep drawing
+    await page.evaluate(n => openSpeedTest('src1', n), nid);
+    await page.evaluate(() => closeSheet('actions'));
+    await page.waitForTimeout(600);
+    expect(await page.evaluate(() => !document.querySelector('#sh-actions.open')), 'sheet reopened');
   });
 
   await check('nodes form: several links add every server once; the same again adds none; an edit keeps the id', async () => {

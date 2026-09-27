@@ -24,7 +24,7 @@ Nodes edit mode: ✎ sits left of the Simple / Profiles tabs, ✓ while editing;
 the header never changes (search, ⚡, ⋮, + stay available in edit mode).
 
 Also: Logs tab (sing-box + core lines, filter, search, follow), Settings → Data (backup,
-restore, about), Copy URL / share link and QR in the Nodes ⋮ menus (QR encoder vendored in
+restore, about), Copy URL / share link, QR and Speed test in the Nodes ⋮ menus (QR encoder vendored in
 `36-qr.js`), the source error strip with Retry, filter / close in Live connections.
 
 ## Layout
@@ -82,7 +82,7 @@ rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, ru
 rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, text-large, text-large-rule,
 connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-search, logs-warn,
 qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, source-error,
-dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast.
+dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test.
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
 there for each new interaction.
 

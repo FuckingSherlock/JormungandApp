@@ -31,14 +31,13 @@ import 'updater.dart';
 /// which this server never grants, so other web pages cannot drive it) and a loopback
 /// Host (against DNS rebinding); with `--lan` the machine's own LAN addresses count too.
 class Daemon {
-  /// [clashPort], [exitCheck] and [sysProxy] are for tests (a free port; no probes past
-  /// loopback; a fake system proxy, so a test never touches the real registry).
+  /// [exitCheck] and [sysProxy] are for tests (no probes past loopback; a fake system
+  /// proxy, so a test never touches the real registry).
   Daemon({
     required this.singBox,
     required this.dataDir,
     required this.uiFile,
     this.lanHosts = const {},
-    this.clashPort = 9090,
     this.exitCheck = checkExitIp,
     SystemProxy? sysProxy,
   })
@@ -59,7 +58,6 @@ class Daemon {
   final SingBoxProcess main;
   final SystemProxy sysProxy;
   final RuleSetCache ruleSets;
-  final int clashPort;
   final Future<Map<String, dynamic>> Function(int? proxyPort) exitCheck;
 
   /// sing-box output and the core's own notes (the Logs tab).
@@ -121,12 +119,12 @@ class Daemon {
   /// changes where traffic leaves: the exit is checked again.
   void _startAuto(Map<String, dynamic> plan) {
     _stopAuto();
-    final auto = _auto = AutoService(main, plan,
+    final auto = _auto = AutoService(main.api!, plan,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         note: main.note);
     // requests that failed: sing-box's API service streams every closed connection
-    _closed = main.api?.closedConnections().listen(auto.onClosed, onError: (Object e) => main.note('auto: connection events stopped: $e'));
+    _closed = main.api!.closedConnections().listen(auto.onClosed, onError: (Object e) => main.note('auto: connection events stopped: $e'));
     auto.switches.listen((s) {
       main.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
       _recheckExit();
@@ -221,6 +219,7 @@ class Daemon {
           ? (jsonDecode(await utf8.decodeStream(req)) as Map).cast<String, dynamic>()
           : const <String, dynamic>{};
       if (req.method == 'POST' && path == '/api/ping') return await _ping(body, res);
+      if (req.method == 'POST' && path == '/api/speedtest') return await _speedTest(body, res);
       if (req.method == 'DELETE' && (path == '/api/connections' || path.startsWith('/api/connections/'))) {
         return await _send(res, 200, await _closeConnections(path.length > 17 ? Uri.decodeComponent(path.substring(17)) : null));
       }
@@ -289,18 +288,14 @@ class Daemon {
     return {'ok': true};
   }
 
-  final _meter = TrafficMeter();
-
   /// Speed, session totals and open connections (see traffic.dart); `running: false`
   /// with zeros when sing-box is not up.
   Future<Map<String, dynamic>> _traffic() async {
-    final conns = main.running ? await main.clashGet('/connections') : null;
-    if (conns == null) {
-      _meter.reset();
+    final api = main.api;
+    if (!main.running || api == null) {
       return {'running': false, 'down': 0, 'up': 0, 'downTotal': 0, 'upTotal': 0, 'tcp': 0, 'udp': 0, 'conns': []};
     }
-    final proxies = await main.clashGet('/proxies');
-    return {'running': true, ..._meter.sample(conns, proxies, DateTime.now().millisecondsSinceEpoch)};
+    return {'running': true, ...trafficOf(api)};
   }
 
   /// `connected` stays true while a crashed sing-box is being started again
@@ -320,8 +315,6 @@ class Daemon {
   Future<Map<String, dynamic>?> _autoState() async {
     final auto = _auto;
     if (auto == null || !main.running) return null;
-    // the groups' `now` can change between checks (urltest re-picks on its own)
-    if (DateTime.now().millisecondsSinceEpoch - (auto.refreshedAt ?? 0) > 1000) await auto.refresh();
     return identical(auto, _auto) ? auto.toJson() : null;
   }
 
@@ -383,9 +376,13 @@ class Daemon {
     final tunnelPort = await freePort();
     final probe = Probe(await freePort());
     await main.start(
-        buildConfig(plan, clashPort: clashPort, tunnelPort: tunnelPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings),
-        clashPort: clashPort,
-        apiPort: await freePort());
+        buildConfig(plan, tunnelPort: tunnelPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings));
+    // what a later sing-box will no longer take in this config
+    try {
+      for (final w in await main.api!.deprecatedWarnings()) {
+        log.note('warn', 'sing-box: $w');
+      }
+    } catch (_) {}
     _probe = probe;
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     _tunnelPort = tunnelPort;
@@ -498,19 +495,69 @@ class Daemon {
       );
 
   /// Closes one open connection ([id] from /api/traffic) or all of them, through sing-box's
-  /// clash API (with its secret, runtime.dart). Not connected: nothing to close.
+  /// API service (with its secret, runtime.dart). Not connected: nothing to close.
   Future<Map<String, dynamic>> _closeConnections(String? id) async {
-    if (!main.running) return {'ok': false};
-    final code = await main.clashDelete(id == null ? '/connections' : '/connections/${Uri.encodeComponent(id)}');
-    if (code == null) throw SingBoxError('sing-box did not answer');
+    final api = main.api;
+    if (!main.running || api == null) return {'ok': false};
+    if (!await (id == null ? api.closeAllConnections() : api.closeConnection(id))) throw SingBoxError('sing-box did not answer');
     log.note('info', id == null ? 'Closed all connections' : 'Closed connection $id');
-    return {'ok': code < 300};
+    return {'ok': true};
   }
 
   /// body: {nodes: [{key, outbound}], pairs: [{key, entry: {outbound}, exit: {outbound}}], url?}
   /// Streams one NDJSON line per result as soon as it is measured —
   /// `{"kind":"n"|"p","key":…,"ms":…}` (-1 = no answer) — then `{"done":true}`,
   /// or `{"error":…}` if the tester could not start.
+  /// body: {node: {key, outbound}} or {pair: {key, entry: {outbound}, exit: {outbound}}},
+  /// configUrl? Streams NDJSON as the test goes — `{phase (0 latency, 1 download,
+  /// 2 upload, 3 done), down, up (bit/s), downRpm, upRpm, latency (ms), elapsed (ms),
+  /// final}` — the last with `final: true` (and `error` when it failed); `{"error":…}`
+  /// when the tester could not start. Stops when the page goes away.
+  Future<void> _speedTest(Map<String, dynamic> body, HttpResponse res) async {
+    res.headers.contentType = ContentType('application', 'x-ndjson', charset: 'utf-8');
+    res.headers.set('Cache-Control', 'no-store');
+    res.bufferOutput = false;
+    final gone = Completer<void>();
+    void line(Object o) {
+      if (gone.isCompleted) return;
+      try {
+        res.write('${jsonEncode(o)}\n');
+      } catch (_) {
+        gone.complete();
+      }
+    }
+
+    unawaited(res.done.then((_) {}, onError: (_) {}).whenComplete(() {
+      if (!gone.isCompleted) gone.complete();
+    }));
+    try {
+      await speedTest(
+        binary: singBox,
+        workDir: p.join(dataDir, 'run', 'speed'),
+        node: body['node'] as Map?,
+        pair: body['pair'] as Map?,
+        configUrl: '${body['configUrl'] ?? ''}',
+        cancel: gone.future,
+        onProgress: (x) => line({
+          'phase': x.phase,
+          'down': x.downloadCapacity.toInt(),
+          'up': x.uploadCapacity.toInt(),
+          'downRpm': x.downloadRPM,
+          'upRpm': x.uploadRPM,
+          'latency': x.idleLatencyMs,
+          'elapsed': x.elapsedMs.toInt(),
+          'final': x.isFinal,
+          if (x.error.isNotEmpty) 'error': x.error,
+        }),
+      );
+    } catch (e) {
+      line({'error': '$e', 'final': true});
+    }
+    try {
+      await res.close();
+    } catch (_) {}
+  }
+
   Future<void> _ping(Map<String, dynamic> body, HttpResponse res) async {
     final nodes = (body['nodes'] as List? ?? const []).cast<Map>();
     final pairs = (body['pairs'] as List? ?? const []).cast<Map>();

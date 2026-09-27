@@ -13,7 +13,7 @@ import 'package:test/test.dart';
 final _bin = p.join('tool', 'bin', Platform.isWindows ? 'sing-box.exe' : 'sing-box');
 final _skip = File(_bin).existsSync() ? false : 'no sing-box in tool/bin';
 
-Map<String, dynamic> _ssServer(int port, int clash) => {
+Map<String, dynamic> _ssServer(int port) => {
       'log': {'level': 'warn'},
       'inbounds': [
         {'type': 'shadowsocks', 'listen': '127.0.0.1', 'listen_port': port, 'method': 'aes-128-gcm', 'password': 'loopback'},
@@ -29,9 +29,6 @@ Map<String, dynamic> _ssServer(int port, int clash) => {
         ],
       },
       'route': {'default_domain_resolver': 'hosts'},
-      'experimental': {
-        'clash_api': {'external_controller': '127.0.0.1:$clash'},
-      },
     };
 
 Map<String, dynamic> _node(String key, int port) => {
@@ -42,7 +39,7 @@ Map<String, dynamic> _node(String key, int port) => {
 class _Loop {
   late HttpServer target;
   late Directory tmp;
-  final servers = <String, (SingBoxProcess, int port, int clash)>{};
+  final servers = <String, (SingBoxProcess, int port)>{};
 
   String get url => 'http://127.0.0.1:${target.port}/';
   String get hostUrl => 'http://target.test:${target.port}/'; // through the tunnel only
@@ -54,15 +51,15 @@ class _Loop {
       ..close());
     tmp = await Directory.systemTemp.createTemp('jorm-auto');
     for (final n in names) {
-      final s = (SingBoxProcess(_bin, p.join(tmp.path, n)), await freePort(), await freePort());
+      final s = (SingBoxProcess(_bin, p.join(tmp.path, n)), await freePort());
       servers[n] = s;
       await start(n);
     }
   }
 
   Future<void> start(String n) async {
-    final (sb, port, clash) = servers[n]!;
-    await sb.start(_ssServer(port, clash), clashPort: clash);
+    final (sb, port) = servers[n]!;
+    await sb.start(_ssServer(port));
   }
 
   Future<void> stop(String n) => servers[n]!.$1.stop();
@@ -114,7 +111,7 @@ void main() {
   test('Auto moves between routes and back through the Clash API, with no restart', () async {
     final loop = _Loop();
     await loop.up(['a', 'b']);
-    final clash = await freePort(), mixed = await freePort();
+    final mixed = await freePort();
     final client = SingBoxProcess(_bin, p.join(loop.tmp.path, 'client'));
     try {
       final plan = {
@@ -128,17 +125,11 @@ void main() {
         'urlTest': {'url': loop.url, 'interval': 60},
       };
       final probe = Probe(await freePort());
-      await client.start(buildConfig(plan, clashPort: clash, probe: probe), clashPort: clash);
+      await client.start(buildConfig(plan, probe: probe));
       final pid = client.pid;
+      expect(client.api, isNotNull);
 
-      // the Clash API wants the run's secret
-      final anon = HttpClient();
-      final res = await (await anon.getUrl(Uri.parse('http://127.0.0.1:$clash/proxies'))).close();
-      await res.drain<void>();
-      anon.close(force: true);
-      expect(res.statusCode, 401);
-
-      final auto = AutoService(client, plan, delay: probe.delayTest,
+      final auto = AutoService(client.api!, plan, delay: probe.delayTest,
           settings: AutoSettings(failAfter: 1, threshold: 5000, flapGuard: false, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       await auto.check();
       expect(auto.toJson()['now'], 'A');
@@ -152,7 +143,7 @@ void main() {
       await loop.start('a');
       await auto.check();
       expect(auto.toJson()['now'], 'A');
-      expect(((await client.clashGet('/proxies/proxy'))!)['now'], 'route0');
+      expect(client.api!.groups['proxy']?.selected, 'route0');
       expect(client.pid, pid, reason: 'sing-box was never restarted');
       auto.stop();
     } finally {
@@ -168,7 +159,7 @@ void main() {
     side.listen((r) => r.response
       ..write('side')
       ..close());
-    final clash = await freePort(), mixed = await freePort(), tunnel = await freePort();
+    final mixed = await freePort(), tunnel = await freePort();
     final client = SingBoxProcess(_bin, p.join(loop.tmp.path, 'client'));
     Future<String?> tryGet(int port, String url) => _get(port, url).then<String?>((b) => b, onError: (_) => null);
     try {
@@ -197,7 +188,7 @@ void main() {
         },
       };
       final probe = Probe(await freePort());
-      final config = buildConfig(plan, clashPort: clash, tunnelPort: tunnel, probe: probe);
+      final config = buildConfig(plan, tunnelPort: tunnel, probe: probe);
       final f = File(p.join(loop.tmp.path, 'routes-rules.json'))..writeAsStringSync(jsonEncode(config));
       final r = await Process.run(_bin, ['check', '-c', f.path, '--disable-color']);
       expect(r.exitCode, 0, reason: '${r.stderr}${r.stdout}');
@@ -207,7 +198,7 @@ void main() {
       expect((route['rules'] as List).cast<Map>().any((x) => x['outbound'] == 'src:x'), isTrue);
       expect(outs.firstWhere((o) => o['tag'] == topTag)['outbounds'], ['route0', 'route1']);
 
-      await client.start(config, clashPort: clash);
+      await client.start(config);
       expect(await _get(mixed, loop.hostUrl), 'hello from target');
       expect(await _get(mixed, 'http://127.0.0.1:${side.port}/'), 'side');
 
@@ -216,7 +207,7 @@ void main() {
       expect(await tryGet(tunnel, loop.hostUrl), isNot('hello from target'));
       expect(await _get(mixed, 'http://127.0.0.1:${side.port}/'), 'side');
 
-      final auto = AutoService(client, plan, delay: probe.delayTest, settings: AutoSettings(failAfter: 1, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
+      final auto = AutoService(client.api!, plan, delay: probe.delayTest, settings: AutoSettings(failAfter: 1, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       await auto.check();
       expect(auto.toJson()['now'], 'B');
       expect(await _get(mixed, loop.hostUrl), 'hello from target');
@@ -232,7 +223,7 @@ void main() {
   test('routes with a chain and a Priority exit: sing-box takes the config, the chain enters through its own entry', () async {
     final loop = _Loop();
     await loop.up(['a', 'b']);
-    final clash = await freePort(), mixed = await freePort();
+    final mixed = await freePort();
     final client = SingBoxProcess(_bin, p.join(loop.tmp.path, 'client'));
     try {
       final a = _node('s::a', loop.port('a')), b = _node('s::b', loop.port('b'));
@@ -252,8 +243,13 @@ void main() {
         'urlTest': {'url': loop.url},
       };
       final probe = Probe(await freePort());
-      await client.start(buildConfig(plan, clashPort: clash, probe: probe), clashPort: clash);
-      final auto = AutoService(client, plan, delay: probe.delayTest, settings: AutoSettings(url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
+      await client.start(buildConfig(plan, probe: probe));
+      // the groups stream's first snapshot (sing-box's own async push) may not have
+      // arrived yet right after start(): wait for the chain's entry group to show up
+      for (var i = 0; i < 50 && !client.api!.groups.containsKey('route1-entry'); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      final auto = AutoService(client.api!, plan, delay: probe.delayTest, settings: AutoSettings(url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       await auto.check();
       final j = auto.toJson();
       expect([j['now'], j['server'], j['entryServer']], ['X', 's::b', 's::a']);
@@ -268,7 +264,7 @@ void main() {
   test('Fastest: urltest re-picks at once when its server stops answering', () async {
     final loop = _Loop();
     await loop.up(['a', 'b']);
-    final clash = await freePort(), mixed = await freePort();
+    final mixed = await freePort();
     final client = SingBoxProcess(_bin, p.join(loop.tmp.path, 'client'));
     try {
       final plan = {
@@ -287,8 +283,8 @@ void main() {
         'urlTest': {'url': loop.url, 'interval': 600},
       };
       final probe = Probe(await freePort());
-      await client.start(buildConfig(plan, clashPort: clash, probe: probe), clashPort: clash);
-      final auto = AutoService(client, plan, delay: probe.delayTest,
+      await client.start(buildConfig(plan, probe: probe));
+      final auto = AutoService(client.api!, plan, delay: probe.delayTest,
           settings: AutoSettings(failAfter: 2, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       // urltest's own first round picks one; wait for it
       for (var i = 0; i < 50 && auto.toJson()['server'] == null; i++) {
@@ -297,8 +293,15 @@ void main() {
       }
       final first = auto.toJson()['server'] as String;
       await loop.stop(first == 's::a' ? 'a' : 'b');
-      await auto.check();
-      final j = auto.toJson();
+      // sing-box's URLTest RPC (testGroup) ignores a forced re-test called too soon after
+      // the previous one (an internal cooldown, observed on loopback, outside our control):
+      // retry the round for a while instead of a single check().
+      Map<String, dynamic> j = auto.toJson();
+      for (var i = 0; i < 20 && j['server'] == first; i++) {
+        await auto.check();
+        j = auto.toJson();
+        if (j['server'] == first) await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
       expect(j['server'], isNot(first));
       expect((j['routes'] as List).first['fails'], 0);
       expect(await _get(mixed, loop.url), 'hello from target');
@@ -318,7 +321,6 @@ void main() {
       singBox: _bin,
       dataDir: p.join(loop.tmp.path, 'data'),
       uiFile: p.join(loop.tmp.path, 'none.html'),
-      clashPort: await freePort(),
       exitCheck: (_) async => {'ip': '127.0.0.1'},
       sysProxy: sys,
     );

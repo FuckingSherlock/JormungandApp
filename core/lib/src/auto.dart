@@ -1,5 +1,5 @@
 /// AutoService: keeps the connection on a working route while sing-box runs, through
-/// sing-box's Clash API and with no restart — the failover Auto promises
+/// sing-box's API service (sbapi.dart) and with no restart — the failover Auto promises
 /// (docs/connect-model.md → Auto / Manual).
 ///
 /// The config (config.dart) holds every Auto entry of the plan as a route under the
@@ -34,8 +34,7 @@
 /// but the current one are put back as they were.
 ///
 /// A test is [delay] (see [_ping]): one round trip on an open connection through the
-/// config's probe inbound (probe.dart), what the catalog shows; without it (tests) the
-/// Clash API delay.
+/// config's probe inbound (probe.dart), what the catalog shows.
 ///
 /// Pure Dart with no UI in it: the app reads [toJson] and listens to [switches] and
 /// [unstable] (jormd serves them through /api/status; Flutter will call it directly).
@@ -47,8 +46,7 @@ import 'dart:math';
 import 'config.dart' show defaultTestUrl, planCheckers;
 import 'plan.dart';
 import 'probe.dart' show withCheckers;
-import 'runtime.dart' show ClashApi;
-import 'sbapi.dart' show ClosedConnection;
+import 'sbapi.dart' show BoxControl, ClosedConnection;
 
 /// When a route above the current one takes the traffic back.
 enum ReturnTo { always, faster, never }
@@ -243,7 +241,7 @@ int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 typedef DelayTest = Future<int> Function(String tag, String url, int timeoutMs);
 
 class AutoService {
-  AutoService(this.api, Map<String, dynamic> plan, {AutoSettings? settings, int Function()? clock, this.delay, this.reach, this.note})
+  AutoService(this.api, Map<String, dynamic> plan, {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note})
       : settings = settings ?? AutoSettings.fromPlan(plan),
         _clock = clock ?? _wallClock {
     final rs = planRoutes(plan);
@@ -252,8 +250,8 @@ class AutoService {
     _routes[index].inUseSince = _clock();
   }
 
-  final ClashApi api;
-  final DelayTest? delay;
+  final BoxControl api;
+  final DelayTest delay;
 
   /// Whether a site (`host:port`) opens through an outbound tag (probe.dart probeReach);
   /// null = cannot be told. Without it the sites of failed requests are not tried again.
@@ -308,6 +306,7 @@ class AutoService {
   final _unstable = StreamController<AutoUnstable>.broadcast();
   final _blocked = StreamController<AutoBlocked>.broadcast();
   Timer? _timer;
+  StreamSubscription<void>? _groupsSub;
   final _sweeps = <Timer>{};
   bool _busy = false, _started = false, _stopped = false;
   bool _kick = false; // a check is due at once when the running one ends
@@ -329,12 +328,15 @@ class AutoService {
   /// Checks on a timer from now on (the first one after `firstCheck`).
   void start() {
     _started = true;
+    // urltest re-picks on its own after its rounds: the groups stream tells at once
+    _groupsSub = api.groupsChanged.listen((_) => refresh());
     _schedule(settings.firstCheck);
   }
 
   void stop() {
     _stopped = true;
     _timer?.cancel();
+    _groupsSub?.cancel();
     for (final t in _sweeps) {
       t.cancel();
     }
@@ -503,25 +505,24 @@ class AutoService {
     return null;
   }
 
-  /// Reads which route and servers sing-box uses now (`now` of the groups in /proxies).
-  /// False when the Clash API does not answer.
+  /// Reads which route and servers sing-box uses now (the groups stream, sbapi.dart). A
+  /// Fastest group of the current route that moved by itself (urltest re-picked) is a
+  /// switch too (reason `fastest`). False before sing-box first told.
   Future<bool> refresh() async {
-    final px = await api.clashGet('/proxies');
-    final by = px?['proxies'];
-    if (px == null || px['_status'] != 200 || by is! Map) return false;
-    String? nowOf(String tag) {
-      final n = (by[tag] as Map?)?['now'];
-      return n is String && n.isNotEmpty ? n : null;
-    }
-
-    final i = _routes.indexWhere((r) => r.tag == nowOf(topTag));
+    final by = api.selected;
+    if (by.isEmpty || _stopped) return false;
+    final i = _routes.indexWhere((r) => r.tag == by[topTag]);
     if (i >= 0 && i != index) {
       index = i;
       _routes[i].inUseSince = _clock();
     }
     for (final r in _routes) {
       for (final g in r.groups) {
-        g.now = g.keyOf(nowOf(g.tag)) ?? g.now;
+        final was = g.now, now = g.keyOf(by[g.tag]) ?? g.now;
+        g.now = now;
+        if (!g.priority && identical(r, _routes[index]) && was != null && now != null && now != was) {
+          _emit(AutoSwitch(route: r.id, from: was, to: now, reason: 'fastest', at: _clock()));
+        }
       }
     }
     refreshedAt = _clock();
@@ -560,13 +561,7 @@ class AutoService {
   /// answers.
   Future<int> _ping(_Group g, String key) => withCheckers((url) => _pingUrl(g.member(key), url), settings.url, settings.checkers);
 
-  Future<int> _pingUrl(String tag, String url) async {
-    final t = settings.timeoutMs;
-    if (delay != null) return delay!(tag, url, t);
-    final r = await api.clashGet('/proxies/${Uri.encodeComponent(tag)}/delay?timeout=$t&url=${Uri.encodeQueryComponent(url)}',
-        timeout: Duration(milliseconds: t + 2000));
-    return r != null && r['_status'] == 200 && r['delay'] is int ? r['delay'] as int : -1;
-  }
+  Future<int> _pingUrl(String tag, String url) => delay(tag, url, settings.timeoutMs);
 
   Future<int> _test(_Group g, String key) async {
     final ms = await _ping(g, key);
@@ -618,37 +613,30 @@ class AutoService {
     return curMs;
   }
 
-  // Fastest: our failed test took the server's history away; urltest tests again (the
-  // Clash API group delay) and picks again among the ones that answer.
+  // Fastest: our failed test does not reach urltest's own history; it tests all its
+  // servers again (the API's group test) and picks among the ones that answer.
   Future<int> _heal(_Group g, String failed) async {
-    final t = settings.timeoutMs;
-    final res = await api.clashGet('/group/${Uri.encodeComponent(g.tag)}/delay?timeout=$t&url=${Uri.encodeQueryComponent(settings.url)}',
-        timeout: Duration(milliseconds: t + 20000));
+    final res = await api.testGroup(g.tag, leaving: g.member(failed), timeout: Duration(milliseconds: settings.timeoutMs + 5000));
     if (_stopped) return -1;
-    final answered = <String, int>{};
-    res?.forEach((tag, v) {
-      final k = g.keyOf(tag);
-      if (k != null && v is int) answered[k] = v;
-    });
     final now = _clock();
-    // the group test covers every server: the ones missing from the answer missed (the
-    // failed one is counted once, by its own test just before)
-    if (res != null) {
+    // urltest's numbers are sing-box's (first request, handshakes and all). The group test
+    // covers every member: the ones missing from the answer missed too (the failed one is
+    // counted once, by its own test just before _heal was called). No fresh result at all =
+    // sing-box skipped the test (it ignores one asked too soon after its last): nothing known.
+    if (res != null && res.isNotEmpty) {
       for (final k in g.keys) {
-        final v = answered[k];
-        if (v != null || k != failed) g.of(k).record(v ?? -1, now);
+        if (k == failed) continue;
+        g.of(k).record(res[g.member(k)] ?? -1, now);
       }
     }
-    final px = await api.clashGet('/proxies/${Uri.encodeComponent(g.tag)}');
-    g.now = g.keyOf(px?['now']) ?? g.now;
+    await refresh();
     if (g.current == failed) return -1;
     _closeStalled(g.member(failed), () => g.current != failed);
-    // the group's own numbers are sing-box's (first request, handshakes and all)
-    return delay == null ? answered[g.current] ?? await _test(g, g.current) : await _test(g, g.current);
+    return _test(g, g.current);
   }
 
   Future<bool> _pick(_Route r, _Group g, String key, String reason) async {
-    if (_stopped || await api.clashPut('/proxies/${Uri.encodeComponent(g.tag)}', {'name': g.member(key)}) != 204) return false;
+    if (_stopped || !await api.select(g.tag, g.member(key))) return false;
     final from = g.current;
     g.now = key;
     _emit(AutoSwitch(route: r.id, from: from, to: key, reason: reason, at: _clock()));
@@ -656,7 +644,7 @@ class AutoService {
   }
 
   Future<bool> _moveTo(int i, String reason) async {
-    if (_stopped || await api.clashPut('/proxies/$topTag', {'name': _routes[i].tag}) != 204) return false;
+    if (_stopped || !await api.select(topTag, _routes[i].tag)) return false;
     final from = _routes[index].id;
     index = i;
     _routes[i].inUseSince = _clock();
@@ -741,20 +729,14 @@ class AutoService {
     var left = 6;
     Future<void> pass() async {
       if (_stopped || !away()) return;
-      final c = await api.clashGet('/connections');
-      final list = c?['connections'];
-      if (list is! List) return;
-      final now = <String, int>{};
-      for (final x in list.whereType<Map>()) {
-        final chains = x['chains'];
-        if (chains is List && chains.contains(tag)) {
-          now['${x['id']}'] = ((x['upload'] as num?) ?? 0).toInt() + ((x['download'] as num?) ?? 0).toInt();
-        }
-      }
+      final now = <String, int>{
+        for (final c in api.connections)
+          if (c.chain.contains(tag)) c.id: c.up + c.down,
+      };
       if (before != null) {
         for (final e in [...now.entries]) {
           if (before![e.key] == e.value && !_stopped) {
-            if (await api.clashDelete('/connections/${Uri.encodeComponent(e.key)}') != null) stalledClosed++;
+            if (await api.closeConnection(e.key)) stalledClosed++;
             now.remove(e.key);
           }
         }

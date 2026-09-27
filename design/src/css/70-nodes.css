@@ -63,7 +63,11 @@
 .node-flag{font-size:16px;line-height:1;margin-right:7px}
 .node-name{flex:1;min-width:0;font-size:14px;color:var(--t1);overflow-wrap:anywhere;line-height:1.3}
 .node-proto{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
-.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:52px;text-align:right;flex-shrink:0}   /* fits "1234 ms" and "testing"; any wider only pushes the ms off the badge */
+.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:44px;text-align:right;flex-shrink:0}   /* fits "999 ms"; "1234 ms" only nudges the badge */
+.node-proto + .lat{margin-left:-5px}   /* badge and ms read as one pair */
+.node-proto + .lat-hit{margin-left:-13px}
+.lat.testing{display:flex;justify-content:flex-end;align-items:center;min-height:14px}
+.lat-spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(var(--t2-rgb),.3);border-top-color:var(--t2);box-sizing:border-box}
 .lat.good{color:var(--active)}
 .lat.mid{color:var(--warn)}
 .lat.bad{color:var(--muted)}

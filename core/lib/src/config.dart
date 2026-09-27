@@ -17,7 +17,7 @@
 /// selector set to the server the UI picked. The routes sit under the selector `proxy`
 /// (the main flow: what rules send "through the VPN", and `final`); moving between routes
 /// and between Priority servers (failAfter, standby) is the AutoService (auto.dart),
-/// through the Clash API, with no restart.
+/// through sing-box's API service (sbapi.dart, added by runtime.dart), with no restart.
 ///
 /// `routing` (rules, apps, quick rules, DNS — routing.dart) adds route rules, the rule
 /// targets' groups, DNS servers and rule sets; [ruleSetFiles] = the lists on disk,
@@ -59,8 +59,7 @@ List<String> planCheckers(Map<String, dynamic> plan) {
 }
 
 Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
-    {int clashPort = 9090,
-    int? tunnelPort,
+    {int? tunnelPort,
     Probe? probe,
     Map<String, String> ruleSetFiles = const {},
     List<String>? warnings}) {
@@ -124,7 +123,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   final routing = buildRouting(plan, group, ruleSetFiles: ruleSetFiles);
   outs.addAll(routing.outbounds);
   warnings?.addAll(routing.warnings);
-  // cache_file keeps a selector's pick made over the clash API across restarts, over the
+  // cache_file keeps a selector's pick made over the API across restarts, over the
   // config's `default`: keyed by the defaults, a new pick from the UI starts clean.
   final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
   final pr = probe?.inbound(_servers(outs));
@@ -157,7 +156,6 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       'find_process': true,
     },
     'experimental': {
-      'clash_api': {'external_controller': '127.0.0.1:$clashPort'},
       'cache_file': {
         'enabled': true,
         if (picks.isNotEmpty) 'cache_id': sha1.convert(utf8.encode(picks)).toString().substring(0, 12),
@@ -172,7 +170,6 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
 Map<String, dynamic> buildTesterConfig({
   required List<Map> nodes,
   List<Map> pairs = const [],
-  required int clashPort,
   Probe? probe,
 }) {
   final outs = <Map<String, dynamic>>[
@@ -200,9 +197,6 @@ Map<String, dynamic> buildTesterConfig({
       'final': 'direct',
       'auto_detect_interface': true,
       'default_domain_resolver': 'local',
-    },
-    'experimental': {
-      'clash_api': {'external_controller': '127.0.0.1:$clashPort'},
     },
   };
 }

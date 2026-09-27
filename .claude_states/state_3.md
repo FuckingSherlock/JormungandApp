@@ -67,19 +67,26 @@ service sing-box (`sbapi.dart`, код из официального proto че�
    сети; схема чекеров выше.
    **Открытый вопрос юзеру (задан, ответа нет):** что значит «выкл» у паузы между повторами:
    переход по первому промаху или счёт `failAfter` на обычном таймере `checkEvery`?
-3.8. **Ревизия под gRPC API service sing-box** (решение юзера, сразу после 3.7). API service (1.14+,
-   `services: [{type: api}]`, `daemon/started_service.proto`, клиент `core/lib/src/sbapi.dart`) — push-потоки
-   соединений / групп / лога / статуса и команды (select, URL test, close, clash mode). Сделать:
-   (а) пройти **всё уже готовое** взаимодействие ядра с sing-box (Clash API в `auto.dart`, `runtime.dart`,
-   `daemon.dart`, `traffic.dart`, Live connections, Logs, пинг каталога, закрытие зависших соединений
-   через опрос `/connections`, проверка готовности на старте) и перенести на gRPC всё, где это лучше;
-   (б) пересмотреть оставшийся план (п. 4–9 и отложенное из state_2) — что gRPC упрощает или улучшает;
-   (в) просмотреть весь proto (NetworkQualityTest, STUN, SubscribeStatus, SubscribeNotifications,
-   SubscribeOutbounds, `managed_service.proto`) на полезное для нас. Итог — предложения юзеру.
+3.8. (сделан) **Переход на gRPC API service.** Clash API убран совсем: старт по `ServiceStatus`
+   (FATAL — с причиной), Auto (select, группы потоком, urltest-группы через `URLTest` + ожидание,
+   зависшие соединения из таблицы соединений), трафик и Live connections из потоков статуса и
+   соединений, закрытие соединений, тестер пинга каталога. Новое: Fastest сам сменил сервер →
+   переключение `fastest` (тост «When Auto switches»); `DeprecatedWarnings` → Logs; **Speed Test**
+   (Nodes → ⋮ сервера, `POST /api/speedtest`, network quality test sing-box).
+   Решения юзера: SSE jormd → UI не делаем (во Flutter слоя нет). Наш probe-пинг и чтение лога
+   остаются (gRPC URLTest без своего URL, лог по gRPC — те же строки).
+   **Под вопросом (юзер пока не понял пользы):** проверка UDP / NAT сервера (`StartSTUNTest`):
+   пропускает ли сервер UDP (звонки Telegram/WhatsApp/Discord, игры, QUIC) и тип NAT. Сделать
+   рядом со Speed Test, если юзер решит.
+   На будущее (Flutter): libbox (`StartOrReloadService` — перезагрузка конфига без перезапуска,
+   PlatformInterface), boxdd — официальный демон sing-box for Desktop (служба для TUN на
+   Windows, отчёты о падениях), `managed_service.proto`.
 4. Экран Settings → Notifications (все типы, см. state_2 Auto п.7).
 5. Настройка «если ядро упало: блокировать / напрямую» (state_2 «Системный прокси…»).
-6. If unavailable на ходу + Block без костыля: сначала прочитать доку sing-box (state_2 Rules п.3).
-7. DNS failover через `clash_mode` (state_2 Rules п.4).
+6. If unavailable на ходу + Block без костыля: selector [цель, block] (block для selector'ов вернули в
+   1.11.10) + `SelectOutbound` (state_2 Rules п.3).
+7. DNS failover через `clash_mode` (state_2 Rules п.4). Проверить, работает ли `SetClashMode` по gRPC
+   без clash_api в конфиге (`clashmode.Manager` из контекста box).
 8. Защита mixed-порта: два inbound'а, пароль на пользовательском (согласовано).
 9. Резолв перед IP-правилами + подсказка про IP в правиле (state_2 Rules п.1).
 Каждый шаг: `cd core && dart analyze && dart test`, `npm run verify -- <presets>`, доки в том же
@@ -94,4 +101,3 @@ service sing-box (`sbapi.dart`, код из официального proto че�
 ## Известные хвосты
 - На Windows дочерний sing-box переживает убитый процесс теста. Правило и команда очистки
   теперь в `CLAUDE.md` → Workflow (только наши, с мёртвым родителем).
-- Speed Test «потом».

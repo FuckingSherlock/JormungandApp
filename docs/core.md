@@ -26,8 +26,8 @@ dart test                          # парсеры, конфиги (sing-box ch
 Авторизации нет: любой в сети может управлять ядром, поэтому только в доверенной сети.
 Windows Firewall должен пропускать входящие для `dartvm.exe` на этот порт.
 
-Прокси: mixed (HTTP + SOCKS5) на `127.0.0.1:<mixedPort>` (Settings → Connection → Proxy port, по умолчанию 2080). Clash API основного процесса —
-`127.0.0.1:9090`. TUN в MVP нет: переключатель TUN подключает как прокси с предупреждением.
+Прокси: mixed (HTTP + SOCKS5) на `127.0.0.1:<mixedPort>` (Settings → Connection → Proxy port, по умолчанию 2080). С sing-box ядро говорит только
+через его API service (gRPC, свободный порт loopback, см. ниже); Clash API не включается. TUN в MVP нет: переключатель TUN подключает как прокси с предупреждением.
 
 ## Кто за что отвечает
 
@@ -106,22 +106,25 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
 
 ## Auto в ядре (`auto.dart`)
 
-`AutoService(ClashApi, plan)` — чистый Dart без UI: демон держит его, пока подключено
+`AutoService(BoxControl, plan, delay:)` — чистый Dart без UI: демон держит его, пока подключено
 (Flutter возьмёт как есть). Раунд — через `checkEvery` (первый через 3 с; после промаха
 текущего — через `retryPause`, и такой раунд меряет только его; «нет сети» — раз в 10 с):
 
-1. `/proxies` — на каких серверах стоят группы. Clash API молчит — раунд ничего не решает.
+1. На каких серверах стоят группы — из потока групп API service (`api.selected`, приходит
+   после каждого раунда urltest; до первого ответа раунд ничего не решает). Fastest группа
+   текущего маршрута сама сменила сервер → тоже переключение (`reason: fastest`, тост «Auto: …»).
 2. Замер сервера, на котором стоит группа (`_ping`: probe, см. «Пинг» ниже): текущий маршрут, все
    выше него (не при `returnTo: never`), раз в `warmEvery` (на ближайшей проверке, не чаще) ещё `standby` ниже
    (запасные; 0 = нет) — параллельно. Цепочка: вход, потом выход
    (его замер идёт через вход и в `members` не попадает).
-   - Fastest: сервер молчит → `/group/<tag>/delay`: urltest перемеряет всех и сразу берёт
-     живой; не ответившие — тоже таймауты.
+   - Fastest: сервер молчит → `URLTest(<группа>)`: urltest перемеряет всех и сам берёт
+     живой; ждём, пока он уйдёт с упавшего или у всех будут свежие результаты
+     (`timeoutMs + 5 с` максимум). Ответившие засчитываются как живые (числа — наши, probe).
    - Priority: `failAfter` таймаутов подряд → первый ответивший по порядку (пачки по 10),
-     `PUT /proxies/<группа>`; сервер выше текущего — обратно по правилу `returnTo`.
+     `SelectOutbound(<группа>)`; сервер выше текущего — обратно по правилу `returnTo`.
 3. Маршруты: у текущего `failAfter` таймаутов подряд → вместе меряются маршруты выше и
    запасные, потом остальные пачками по 10 по приоритету, пока кто-то не ответит;
-   `PUT /proxies/proxy` на первый по приоритету ответивший. Не ответил никто — `noNet`: ничего
+   `SelectOutbound(proxy)` на первый по приоритету ответивший. Не ответил никто — `noNet`: ничего
    не двигается (дальше в `noNet` — только первая пачка за раунд). Возврат выше — `returnTo`
    (`always`: ответил `failAfter` раз подряд и не медленнее больше чем на `threshold`;
    `faster`: быстрее на `threshold`; `never`) и испытательный срок защиты от мигания.
@@ -129,8 +132,8 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
    маршрут, набравший `failAfter` промахов, пока другой отвечал, получает «падение»
    (`strikes`; срок 1, 2, 4 … `flapMax` мин ответов подряд до возврата; сброс после `flapReset`
    работы на нём); со второго — событие `unstable`.
-5. После ухода с мёртвого маршрута / сервера: `GET /connections` → соединения, у которых в
-   `chains` его тег и счётчики байт не изменились за 10 с, — `DELETE /connections/<id>`
+5. После ухода с мёртвого маршрута / сервера: соединения из таблицы потока соединений, у
+   которых в цепочке его тег и счётчики байт не изменились за 10 с, — `CloseConnection`
    (каждые 10 с, до 6 раз).
 
 Замер (`_ping`) — тест-URL, не ответил — сразу все запасные проверки (`withCheckers`,
@@ -146,19 +149,24 @@ sing-box `missing default interface` → `offline` (раунды ничего н
 `updated default interface` → снова в сети, проверка сразу.
 
 Настройки — `plan.auto` (URL — `urlTest.url`), `checkEvery` 10–3600 с. Тесты: `auto_test.dart`
-(фейковый Clash API из того же `buildConfig`), `auto_singbox_test.dart` (настоящий sing-box
+(фейковый `BoxControl`), `auto_singbox_test.dart` (настоящий sing-box
 на loopback: переключение без перезапуска, цепочка, urltest, падение процесса). Системный
 прокси в тестах — фейк (`Daemon(sysProxy: …)`): реестр тесты не трогают.
 
-Clash API: случайный секрет на каждый запуск sing-box (`clash_api.secret`), все вызовы ядра
-идут с `Authorization: Bearer`; без него — 401, чужая программа туннель не переключит.
-
-**API service sing-box** (1.14+, gRPC, `sbapi.dart`): основной процесс запускается с
-`services: [{type: api}]` на свободном порту loopback с тем же секретом
-(`SingBoxProcess.start(apiPort:)` → `api`). Это интерфейс официальных клиентов sing-box:
-push-потоки соединений (новое / обновлено / закрыто, с байтами, сервером и цепочкой), групп,
-лога, статуса и команды (select, URL test, close, clash mode). Сейчас ядро берёт из него только
-закрытые соединения; перенос остального с Clash API — отдельный шаг (state_3, п. 3.8).
+**API service sing-box** (1.14+, gRPC, `sbapi.dart`) — единственная связь ядра с sing-box
+(Clash API убран, шаг 3.8). `SingBoxProcess.start(config)` добавляет `services: [{type: api}]`
+на свободном порту loopback со случайным секретом на каждый запуск (все вызовы — с
+`authorization: Bearer`; чужая программа туннель не переключит) и ждёт `ServiceStatus`:
+STARTED — поднялся, FATAL — ошибка с причиной от sing-box. Потом `api.watch()` держит
+открытыми (переоткрывает после ошибки) три потока:
+- соединения (раз в 1 с): таблица открытых (сервер — конечный outbound, цепочка, приложение,
+  байты и скорость за секунду) и события закрытия (→ Auto `onClosed`);
+- группы: что выбрано в каждом selector / urltest и результаты urltest (→ Auto, трафик);
+- статус (раз в 1 с): скорость, итоги сессии (с уже закрытыми соединениями), память.
+Команды: `SelectOutbound`, `URLTest`, `CloseConnection` / `CloseAllConnections`,
+`GetDeprecatedWarnings` (после старта — в лог как `warn`: что сломается в конфиге с
+новым sing-box), `StartNetworkQualityTest` (Speed Test). Тестер пинга каталога запускается
+так же (готовность — по статусу сервиса).
 Код сообщений сгенерирован официальным `protoc` из `daemon/started_service.proto` релиза
 sing-box, лежащего в `tool/bin` (`tool/proto/`, `tool/gen_sbapi.sh`; protoc — в
 `tool/bin/protoc`, не в git, плюс `dart pub global activate protoc_plugin`). Обновили
@@ -203,7 +211,7 @@ AutoService; три неудачи — отключено, `error`. Фонова
 - Предупреждения сборки (правило без списка, пропущенное правило) приходят в `warning`
   ответа на connect (тост в UI).
 - `cache_file` включён; `cache_id` = хэш выбранных `default` у selector-ов: выбор через
-  Clash API переживает перезапуск, новый выбор из UI — нет.
+  API переживает перезапуск, новый выбор из UI — нет.
 - Сравнение планов для переподключения нормализует и цели правил (порядок Fastest после
   пинга — не изменение).
 
@@ -225,9 +233,10 @@ AutoService; три неудачи — отключено, `error`. Фонова
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
 | `POST /api/node` | `{protocol, address, port, secret, name, outbound?, unsupported?}` → `{node}`; ошибка формы — 400 `{error}` с текстом для пользователя |
 | `POST /api/share` | `{outbound, name, flag, unsupported?}` → `{link}` (null — у сервера нет формы ссылки) |
-| `DELETE /api/connections`, `DELETE /api/connections/{id}` | закрыть все / одно соединение (clash API sing-box, с её секретом); без подключения `{ok:false}` |
+| `DELETE /api/connections`, `DELETE /api/connections/{id}` | закрыть все / одно соединение (API service sing-box); без подключения `{ok:false}` |
 | `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
+| `POST /api/speedtest` | `{node:{key, outbound}}` или `{pair:{key, entry, exit}}`, `configUrl?` → поток NDJSON по ходу замера: `{phase (0 задержка, 1 загрузка, 2 отдача, 3 готово), down, up (бит/с), downRpm, upRpm, latency (мс), elapsed, final}`, последняя строка `final: true` (при сбое с `error`). Отдельный sing-box с одним сервером, network quality test sing-box (серверы Apple mensura, если не задан `configUrl`); закрыли страницу/лист — замер останавливается |
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
 
 `status.auto` (пока подключено; `null` — нет): `{now: id маршрута, index, server, entryServer
@@ -271,17 +280,17 @@ Amazon, ipip.net (из Китая). Страна, которая режет од
 пока ответа нет; тап по карточке — `POST /api/exit` (через туннель или напрямую, смотря по
 состоянию).
 
-Трафик (`traffic.dart`, `TrafficMeter`): clash API sing-box `/connections` даёт счётчики
-байт и группы соединения (`chains`); реальный сервер — `now` групп из `/proxies`
-(`route<i>/<sid::nid>`; у цепочки ещё `route<i>-entry/<sid::nid>`; у цели правила `<цель>/…` и `<цель>>entry/…`; в `out` выход первым).
-Скорость — разница счётчиков между двумя опросами (любая частота опроса; перезапуск
-sing-box не даёт отрицательных). Процесс (`process`) — `route.find_process`. UI опрашивает
+Трафик (`traffic.dart`, `trafficOf`): всё из потоков API service — скорость и итоги из статуса,
+соединения из таблицы (сервер — конечный outbound, `route<i>/<sid::nid>`; у цепочки ещё
+выбранный сервер входа `route<i>-entry/…` из потока групп; у цели правила `<цель>/…` и
+`<цель>>entry/…`; в `out` выход первым; скорость соединения — байты за последнюю секунду).
+Процесс (`process`) — `route.find_process`. UI опрашивает
 раз в секунду, пока подключено и страница видна: карточки Speed / This session /
 Connections и лист Live connections (новые сверху: хост:порт, TCP/UDP, вход → выход,
 правило, приложение, скорость, объём, возраст). Без подключения скорость и соединения — 0,
 итоги прошлой сессии остаются. В листе — фильтр (хост, приложение, правило, сервер), × на
-строке закрывает соединение, Close all — все (`DELETE /api/connections[/id]` → clash API
-`DELETE /connections[/{id}]`; приложение обычно тут же открывает новое).
+строке закрывает соединение, Close all — все (`DELETE /api/connections[/id]` → `CloseConnection` /
+`CloseAllConnections`; приложение обычно тут же открывает новое).
 
 Лог (`logbook.dart`): вывод sing-box (уровень `info`, со временем) и заметки самого ядра
 (подключено / отключено / не подключилось, предупреждение системного прокси, упавшие

@@ -1,10 +1,12 @@
-// AutoService against a fake Clash API. The fake is built from the real config
-// (buildConfig), so the tags the service switches are the ones sing-box would get; it acts
-// like sing-box: a delay test goes through a group to the server it uses now, a chain's
-// exit through its entry group, a group delay has a urltest pick again.
+// AutoService against a fake sing-box API service (BoxControl, sbapi.dart). The fake is
+// built from the real config (buildConfig), so the tags the service switches are the ones
+// sing-box would get; it acts like sing-box: a delay test goes through a group to the
+// server it uses now, a chain's exit through its entry group, a group test (testGroup) has
+// a urltest pick again.
+import 'dart:async';
+
+import 'package:fixnum/fixnum.dart';
 import 'package:jormungand_core/jormungand_core.dart';
-// sbapi.dart is not re-exported by the package barrel (jormungand_core.dart) — a lib/
-// oversight, reported but not fixed here (out of this task's scope).
 import 'package:test/test.dart';
 
 class FakeGroup {
@@ -14,8 +16,8 @@ class FakeGroup {
   String? now;
 }
 
-class FakeClash implements ClashApi {
-  FakeClash(Map<String, dynamic> config, this.alive) {
+class FakeBox implements BoxControl {
+  FakeBox(Map<String, dynamic> config, this.alive) {
     for (final o in (config['outbounds'] as List).cast<Map>()) {
       final tag = o['tag'] as String;
       if (o['type'] == 'selector' || o['type'] == 'urltest') {
@@ -34,11 +36,11 @@ class FakeClash implements ClashApi {
   final Map<String, int> alive; // node key -> ms; missing or -1 = no answer
   final groups = <String, FakeGroup>{};
   final detours = <String, String?>{};
-  final tested = <String>[]; // servers / groups a delay test was asked for
-  // open connections as /connections lists them: {id, chains, upload, download}
-  final conns = <Map<String, dynamic>>[];
+  final tested = <String>[]; // servers a delay test was asked for, and 'group:<tag>' for a group test
+  final conns = <LiveConnection>[]; // open connections, as api.connections would list them
   final closed = <String>[];
-  void Function()? onConnections; // before each /connections answer (traffic moves)
+  void Function()? onConnections; // before each read of connections (traffic moves)
+  final _changedCtl = StreamController<void>.broadcast();
 
   String _leaf(String tag) {
     for (var g = groups[tag]; g != null; g = groups[tag]) {
@@ -47,79 +49,80 @@ class FakeClash implements ClashApi {
     return tag;
   }
 
-  int delay(String tag) {
+  int _delayOf(String tag) {
     final leaf = _leaf(tag);
     final ms = alive[leaf.substring(leaf.indexOf('/') + 1)] ?? -1;
     final via = detours[leaf];
     if (ms < 0 || via == null) return ms;
-    final d = delay(via);
+    final d = _delayOf(via);
     return d < 0 ? -1 : ms + d;
+  }
+
+  /// The [DelayTest] AutoService is given in these tests: one server (or chain exit,
+  /// through its entry) by its full outbound tag.
+  Future<int> delayTest(String tag, String url, int timeoutMs) async {
+    tested.add(tag);
+    return _delayOf(tag);
   }
 
   void _repick(FakeGroup g) {
     String? best;
     for (final m in g.all) {
-      final d = delay(m);
-      if (d >= 0 && (best == null || d < delay(best))) best = m;
+      final d = _delayOf(m);
+      if (d >= 0 && (best == null || d < _delayOf(best))) best = m;
     }
     if (best != null) g.now = best;
   }
 
-  Map<String, dynamic> _info(String tag) {
-    final g = groups[tag];
-    return g == null ? {'type': 'Shadowsocks'} : {'type': g.type, 'now': g.now ?? '', 'all': g.all};
-  }
-
   @override
-  Future<Map<String, dynamic>?> clashGet(String path, {Duration timeout = const Duration(seconds: 2)}) async {
-    final s = Uri.parse(path).pathSegments;
-    if (s.length == 1 && s[0] == 'connections') {
-      onConnections?.call();
-      return {'_status': 200, 'connections': [for (final c in conns) {...c}]};
-    }
-    if (s.length == 1 && s[0] == 'proxies') {
-      return {
-        '_status': 200,
-        'proxies': {for (final t in [...groups.keys, ...detours.keys]) t: _info(t)},
+  Map<String, String> get selected => {
+        for (final e in groups.entries)
+          if (e.value.now != null) e.key: e.value.now!,
       };
-    }
-    if (s.length == 2 && s[0] == 'proxies') return {'_status': 200, ..._info(s[1])};
-    if (s.length == 3 && s[0] == 'proxies' && s[2] == 'delay') {
-      tested.add(s[1]);
-      final d = delay(s[1]);
-      return d < 0 ? {'_status': 503, 'message': 'An error occurred in the delay test'} : {'_status': 200, 'delay': d};
-    }
-    if (s.length == 3 && s[0] == 'group' && s[2] == 'delay') {
-      final g = groups[s[1]]!;
-      tested.add('group:${s[1]}');
-      final res = <String, dynamic>{};
-      for (final m in g.all) {
-        final d = delay(m);
-        if (d >= 0) res[m] = d;
-      }
-      if (g.type == 'urltest') _repick(g);
-      return {'_status': 200, ...res};
-    }
-    return {'_status': 404};
+
+  @override
+  Stream<void> get groupsChanged => _changedCtl.stream;
+
+  @override
+  Future<bool> select(String group, String outbound) async {
+    final g = groups[group];
+    if (g == null || g.type != 'selector' || !g.all.contains(outbound)) return false;
+    g.now = outbound;
+    _changedCtl.add(null);
+    return true;
   }
 
   @override
-  Future<int?> clashPut(String path, Map<String, dynamic> body, {Duration timeout = const Duration(seconds: 2)}) async {
-    final s = Uri.parse(path).pathSegments;
-    final g = groups[s[1]];
-    if (g == null || g.type != 'selector' || !g.all.contains(body['name'])) return 400;
-    g.now = body['name'] as String;
-    return 204;
+  Future<Map<String, int>?> testGroup(String group, {String? leaving, required Duration timeout}) async {
+    final g = groups[group];
+    if (g == null) return null;
+    tested.add('group:$group');
+    final res = <String, int>{};
+    for (final m in g.all) {
+      final d = _delayOf(m);
+      if (d >= 0) res[m] = d;
+    }
+    if (g.type == 'urltest') _repick(g);
+    _changedCtl.add(null);
+    return res;
   }
 
   @override
-  Future<int?> clashDelete(String path, {Duration timeout = const Duration(seconds: 2)}) async {
-    final id = Uri.parse(path).pathSegments.last;
+  Iterable<LiveConnection> get connections {
+    onConnections?.call();
+    return conns;
+  }
+
+  @override
+  Future<bool> closeConnection(String id) async {
     closed.add(id);
-    conns.removeWhere((c) => c['id'] == id);
-    return 204;
+    conns.removeWhere((c) => c.id == id);
+    return true;
   }
 }
+
+LiveConnection _conn(String id, List<String> chain, {int up = 0, int down = 0}) =>
+    LiveConnection(Connection(id: id, chainList: chain, uplinkTotal: Int64(up), downlinkTotal: Int64(down)));
 
 Map<String, dynamic> _node(String key) => {
       'key': key,
@@ -142,9 +145,9 @@ Map<String, dynamic> plan(List<Map<String, dynamic>> routes, {int current = 0, M
       'auto': {'failAfter': 2, 'threshold': 50, 'checkEvery': 60, 'standby': 2, 'warmEvery': 60, 'flapGuard': false, ...auto},
     };
 
-(AutoService, FakeClash) setup(Map<String, dynamic> p, Map<String, int> alive) {
-  final fake = FakeClash(buildConfig(p, clashPort: 1), alive);
-  return (AutoService(fake, p), fake);
+(AutoService, FakeBox) setup(Map<String, dynamic> p, Map<String, int> alive) {
+  final fake = FakeBox(buildConfig(p), alive);
+  return (AutoService(fake, p, delay: fake.delayTest), fake);
 }
 
 void main() {
@@ -190,12 +193,49 @@ void main() {
     fake.alive.remove('s::a1');
     await auto.check();
     final j = auto.toJson();
-    expect([j['now'], j['server'], j['switches'], j['noNet']], ['A', 's::a2', 0, false]);
+    // no route switch (still A), but the heal's own refresh() sees the group moved and
+    // counts it as a switch too — refresh() cannot tell a heal's own pick from sing-box
+    // re-picking on its own (the 'refresh(): a Fastest group…' test below)
+    expect([j['now'], j['server'], j['switches'], j['noNet']], ['A', 's::a2', 1, false]);
+    expect((j['lastSwitch'] as Map)['reason'], 'fastest');
     expect((j['routes'] as List).first['fails'], 0);
     expect(fake.tested, contains('group:route0'));
     // the group test's silent servers are misses too (the app's ping cache learns them), one each
     final m = {for (final e in (j['members'] as List).cast<Map>()) e['key']: [e['ms'], e['fails']]};
     expect([m['s::a1'], m['s::a2'], m['s::a3']], [[-1, 1], [80, 0], [-1, 1]]);
+  });
+
+  test('refresh(): a Fastest group that moved on its own (urltest re-pick) is a switch, reason fastest', () async {
+    final (auto, fake) = setup(plan([unit('A', ['s::a1', 's::a2'])]), {'s::a1': 40, 's::a2': 80});
+    await auto.check();
+    expect(auto.toJson()['server'], 's::a1');
+    final events = <AutoSwitch>[];
+    auto.switches.listen(events.add);
+    fake.groups['route0']!.now = 'route0/s::a2'; // sing-box re-picked on its own (not through AutoService)
+    final again = await auto.refresh();
+    expect(again, isTrue);
+    expect(auto.toJson()['server'], 's::a2');
+    await Future<void>.delayed(Duration.zero);
+    expect(events, hasLength(1));
+    expect([events.single.route, events.single.from, events.single.to, events.single.reason], ['A', 's::a1', 's::a2', 'fastest']);
+    expect(events.single.isRoute, isFalse);
+  });
+
+  test('refresh(): false before sing-box first answers (selected empty)', () async {
+    final auto = AutoService(_Dead(), plan([unit('A', ['s::a'])]), delay: (tag, url, t) async => -1);
+    expect(await auto.refresh(), isFalse);
+  });
+
+  test('BoxControl.testGroup: only the members that answered are in the result, picks the fastest of them, notifies groupsChanged', () async {
+    final (_, fake) = setup(plan([unit('A', ['s::a1', 's::a2', 's::a3'])]), {'s::a1': 40, 's::a2': 20});
+    final changed = <void>[];
+    fake.groupsChanged.listen(changed.add);
+    final res = await fake.testGroup('route0', leaving: 'route0/s::a1', timeout: const Duration(seconds: 1));
+    expect(res, {'route0/s::a1': 40, 'route0/s::a2': 20});
+    expect(fake.groups['route0']!.now, 'route0/s::a2', reason: 'the fastest among the ones that answered');
+    await Future<void>.delayed(Duration.zero);
+    expect(changed, hasLength(1));
+    expect(await fake.testGroup('no-such-group', timeout: const Duration(seconds: 1)), isNull);
   });
 
   test('failover after failAfter misses to the first answering route by priority, back when the top answers again', () async {
@@ -303,8 +343,8 @@ void main() {
   test('spares: tested every warmEvery, the current route every check', () async {
     var t = 0;
     final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])], auto: {'standby': 1, 'warmEvery': 120});
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 40, 's::b': 60});
-    final auto = AutoService(fake, p, clock: () => t);
+    final fake = FakeBox(buildConfig(p), {'s::a': 40, 's::b': 60});
+    final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t);
     final spares = <int>[];
     for (var i = 0; i < 5; i++) {
       t = i * 60000 + (i == 2 ? -500 : 0); // a check a little early still counts
@@ -342,7 +382,7 @@ void main() {
   });
 
   test('sing-box not answering: the check judges nothing', () async {
-    final auto = AutoService(_Dead(), plan([unit('A', ['s::a']), unit('B', ['s::b'])]));
+    final auto = AutoService(_Dead(), plan([unit('A', ['s::a']), unit('B', ['s::b'])]), delay: (tag, url, t) async => -1);
     await auto.check();
     await auto.check();
     expect([auto.toJson()['now'], auto.toJson()['noNet'], (auto.toJson()['routes'] as List).first['fails']], ['A', false, 0]);
@@ -358,8 +398,9 @@ void main() {
 
   test('retry pause: after a miss the current one is tested again that soon, not at checkEvery', () async {
     final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::b': 30});
+    final fake = FakeBox(buildConfig(p), {'s::b': 30});
     final auto = AutoService(fake, p,
+        delay: fake.delayTest,
         settings: const AutoSettings(checkEvery: Duration(hours: 1), firstCheck: Duration(milliseconds: 1), retryPause: Duration(milliseconds: 20)));
     auto.start();
     await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -373,8 +414,8 @@ void main() {
     final p = plan(routes, auto: {'standby': 0, 'flapGuard': true});
     var t = 0;
     // only R12 (second batch) still answers: the failover must not stop at the first batch
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::r0': 30, 's::r12': 30});
-    final auto = AutoService(fake, p, clock: () => t);
+    final fake = FakeBox(buildConfig(p), {'s::r0': 30, 's::r12': 30});
+    final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t);
     await auto.check();
     fake.alive.remove('s::r0');
     await auto.check(); // one miss: failAfter is 2, still on R0
@@ -389,8 +430,8 @@ void main() {
     final routes = [for (var i = 0; i < 13; i++) unit('R$i', ['s::r$i'])];
     final p = plan(routes, auto: {'standby': 0, 'flapGuard': true});
     var t = 0;
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::r0': 30});
-    final auto = AutoService(fake, p, clock: () => t);
+    final fake = FakeBox(buildConfig(p), {'s::r0': 30});
+    final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t);
     await auto.check();
     fake.alive.remove('s::r0');
     await auto.check(); // one miss: failAfter is 2, no failover attempt yet
@@ -422,8 +463,8 @@ void main() {
   test('flap guard: a strike only when another route answered; the hold doubles up to flapMax, stable work forgets it', () async {
     var t = 0;
     final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])], auto: {'flapGuard': true, 'flapMax': 3, 'flapReset': 5, 'failAfter': 1});
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
-    final auto = AutoService(fake, p, clock: () => t);
+    final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
+    final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t);
     final unstable = <AutoUnstable>[];
     auto.unstable.listen(unstable.add);
     Map route(String id) => (auto.toJson()['routes'] as List).cast<Map>().firstWhere((r) => r['id'] == id);
@@ -483,8 +524,8 @@ void main() {
   test('flap guard off: back as soon as the return rule allows', () async {
     var t = 0;
     final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])], auto: {'failAfter': 1});
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
-    final auto = AutoService(fake, p, clock: () => t);
+    final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
+    final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t);
     await auto.check();
     fake.alive.remove('s::a');
     await auto.check();
@@ -525,14 +566,15 @@ void main() {
 
   test('after a failover only the stalled connections of the dead route are closed', () async {
     final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
-    final auto = AutoService(fake, p, settings: const AutoSettings(failAfter: 1, flapGuard: false, stallAfter: Duration(milliseconds: 30)));
+    final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
+    final auto = AutoService(fake, p,
+        delay: fake.delayTest, settings: const AutoSettings(failAfter: 1, flapGuard: false, stallAfter: Duration(milliseconds: 30)));
     fake.conns.addAll([
-      {'id': 'moving', 'chains': ['route0/s::a', 'route0', 'proxy'], 'upload': 10, 'download': 100},
-      {'id': 'stuck', 'chains': ['route0/s::a', 'route0', 'proxy'], 'upload': 10, 'download': 100},
-      {'id': 'other', 'chains': ['direct'], 'upload': 0, 'download': 0},
+      _conn('moving', ['route0/s::a', 'route0', 'proxy'], up: 10, down: 100),
+      _conn('stuck', ['route0/s::a', 'route0', 'proxy'], up: 10, down: 100),
+      _conn('other', ['direct']),
     ]);
-    fake.onConnections = () => fake.conns.firstWhere((c) => c['id'] == 'moving')['download'] += 1;
+    fake.onConnections = () => fake.conns.firstWhere((c) => c.id == 'moving').down += 1;
     await auto.check();
     await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(fake.closed, isEmpty, reason: 'no switch: nothing is closed');
@@ -542,14 +584,14 @@ void main() {
     expect(fake.closed, isEmpty, reason: 'not at the switch: after stallAfter');
     await Future<void>.delayed(const Duration(milliseconds: 120));
     expect(fake.closed, ['stuck']);
-    expect([for (final c in fake.conns) c['id']], ['moving', 'other']);
+    expect([for (final c in fake.conns) c.id], ['moving', 'other']);
     expect(auto.toJson()['stalledClosed'], 1);
     auto.stop();
   });
 
   test('a route whose test URL fails but a checker answers is alive (withCheckers via the delay fake)', () async {
     final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+    final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
     // keyed by url, not by tag: the test url always misses, only the checker answers
     Future<int> delay(String tag, String url, int t) async => url == 'https://checker.example/' ? 20 : -1;
     final auto = AutoService(fake, p,
@@ -561,7 +603,7 @@ void main() {
 
   test('no checkers configured: the test url failing is the final answer (no network)', () async {
     final p = plan([unit('A', ['s::a'])]);
-    final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30});
+    final fake = FakeBox(buildConfig(p), {'s::a': 30});
     Future<int> delay(String tag, String url, int t) async => -1;
     final auto = AutoService(fake, p, delay: delay, settings: const AutoSettings(url: 'https://dead.example/', checkers: []));
     await auto.check();
@@ -573,8 +615,8 @@ void main() {
   group('onLog: offline on "missing default interface"', () {
     test('offline suppresses a check round; recovery runs one at once', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
-      final auto = AutoService(fake, p);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
+      final auto = AutoService(fake, p, delay: fake.delayTest);
       await auto.check();
       fake.alive.remove('s::a'); // would normally start failing A over
 
@@ -593,8 +635,8 @@ void main() {
 
     test('an unrelated log line does not toggle offline', () {
       final p = plan([unit('A', ['s::a'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30});
-      final auto = AutoService(fake, p);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30});
+      final auto = AutoService(fake, p, delay: fake.delayTest);
       auto.onLog('some ordinary sing-box line');
       expect(auto.offline, isFalse);
     });
@@ -606,8 +648,8 @@ void main() {
 
     test('ignored: down > 0 (the request did get something back)', () async {
       final p = plan([unit('A', ['s::a'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30});
-      final auto = AutoService(fake, p);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30});
+      final auto = AutoService(fake, p, delay: fake.delayTest);
       await auto.check();
       auto.onClosed(cc(down: 5));
       expect(auto.requestFails, 0);
@@ -616,8 +658,8 @@ void main() {
 
     test('ignored: the chain maps to no route', () async {
       final p = plan([unit('A', ['s::a'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30});
-      final auto = AutoService(fake, p);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30});
+      final auto = AutoService(fake, p, delay: fake.delayTest);
       await auto.check();
       auto.onClosed(cc(outbound: 'direct', chain: ['direct']));
       expect(auto.requestFails, 0);
@@ -625,8 +667,8 @@ void main() {
 
     test('ignored: the chain maps to a route that is not the current one', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
-      final auto = AutoService(fake, p);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
+      final auto = AutoService(fake, p, delay: fake.delayTest);
       await auto.check(); // current: A
       auto.onClosed(cc(outbound: 'route1/s::b', chain: ['route1/s::b', 'route1', 'proxy']));
       expect(auto.requestFails, 0);
@@ -634,9 +676,9 @@ void main() {
 
     test('the current route: counts requestFails, records lastRequestFail, two within failWindow count as one check', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
       var t = 0;
-      final auto = AutoService(fake, p, clock: () => t, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
       await auto.check(); // current: A
 
       auto.onClosed(cc(dest: 'blocked.example:443'));
@@ -651,7 +693,7 @@ void main() {
 
     test('a node that answers again: the failed site is reachable through it now — no AutoBlocked', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
       var t = 0;
       final reached = <(String, String)>[];
       Future<bool?> reach(String tag, String dest) async {
@@ -660,7 +702,7 @@ void main() {
       }
 
       final events = <AutoBlocked>[];
-      final auto = AutoService(fake, p, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
       auto.blocked.listen(events.add);
       await auto.check();
       auto.onClosed(cc());
@@ -673,11 +715,11 @@ void main() {
 
     test('a node that answers again: the site stays unreachable through it, opens through another route — AutoBlocked, once an hour', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
       var t = 0;
       Future<bool?> reach(String tag, String dest) async => tag == 'route0/s::a' ? false : true;
       final events = <AutoBlocked>[];
-      final auto = AutoService(fake, p, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
       auto.blocked.listen(events.add);
       await auto.check();
       auto.onClosed(cc());
@@ -699,12 +741,13 @@ void main() {
 
     test('reachable neither on this node nor on another route: nothing reported (a note only)', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
       var t = 0;
       Future<bool?> reach(String tag, String dest) async => false; // down everywhere
       final events = <AutoBlocked>[];
       final notes = <String>[];
-      final auto = AutoService(fake, p, clock: () => t, reach: reach, note: notes.add, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      final auto = AutoService(fake, p,
+          delay: fake.delayTest, clock: () => t, reach: reach, note: notes.add, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
       auto.blocked.listen(events.add);
       await auto.check();
       auto.onClosed(cc());
@@ -717,7 +760,7 @@ void main() {
 
     test('node does not answer at all: no _sites lookup, just the usual retries', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeClash(buildConfig(p, clashPort: 1), {'s::a': 30, 's::b': 60});
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
       var t = 0;
       var reachCalls = 0;
       Future<bool?> reach(String tag, String dest) async {
@@ -725,7 +768,7 @@ void main() {
         return true;
       }
 
-      final auto = AutoService(fake, p, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
       await auto.check(); // current: A
       fake.alive.remove('s::a'); // now dead
       auto.onClosed(cc());
@@ -736,12 +779,17 @@ void main() {
   });
 }
 
-
-class _Dead implements ClashApi {
+class _Dead implements BoxControl {
   @override
-  Future<Map<String, dynamic>?> clashGet(String path, {Duration timeout = const Duration(seconds: 2)}) async => null;
+  Map<String, String> get selected => {};
   @override
-  Future<int?> clashPut(String path, Map<String, dynamic> body, {Duration timeout = const Duration(seconds: 2)}) async => null;
+  Stream<void> get groupsChanged => const Stream.empty();
   @override
-  Future<int?> clashDelete(String path, {Duration timeout = const Duration(seconds: 2)}) async => null;
+  Future<bool> select(String group, String outbound) async => false;
+  @override
+  Future<Map<String, int>?> testGroup(String group, {String? leaving, required Duration timeout}) async => null;
+  @override
+  Iterable<LiveConnection> get connections => const [];
+  @override
+  Future<bool> closeConnection(String id) async => false;
 }

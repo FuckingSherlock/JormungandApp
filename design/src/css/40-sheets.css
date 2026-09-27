@@ -220,7 +220,7 @@
 .route-more{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent);cursor:pointer}
 .cc-prof{position:relative}
 .cc-prof .pick-row{padding-right:48px}
-.cc-prof.disabled .pick-row{opacity:.35;cursor:default}
+.cc-prof.taken .pick-row{opacity:.6}   /* the other end: a tap swaps them */
 .cc-expand{position:absolute;right:8px;top:4px}
 .cc-prof.open .cc-expand .src-chevron{transform:rotate(180deg)}
 .cc-nodes{margin:0 14px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
@@ -297,7 +297,7 @@
 
 /* Route row unfolded: its servers, Fastest / Priority and the priority order */
 .conn-row.open{flex-wrap:wrap}
-.conn-body{flex-basis:100%;min-width:0;padding:0 0 10px}
+.conn-body{flex-basis:100%;min-width:0;padding:0 4px 10px 0}   /* the row pads 12 left / 8 right: the list sits even */
 .conn-body .seg-row{margin:0 0 4px}
 /* the switch in a Route row is a quarter lower than in the editors */
 .conn-body .seg-switch{padding:2px}

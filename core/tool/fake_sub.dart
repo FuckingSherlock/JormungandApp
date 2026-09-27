@@ -12,7 +12,6 @@ import 'package:path/path.dart' as p;
 Future<void> main() async {
   final bin = p.join('tool', 'bin', Platform.isWindows ? 'sing-box.exe' : 'sing-box');
   final ss = SingBoxProcess(bin, p.join(Directory.systemTemp.path, 'jorm-fake-sub'));
-  final clash = await freePort();
   await ss.start({
     'log': {'level': 'warn'},
     'inbounds': [
@@ -21,10 +20,7 @@ Future<void> main() async {
     'outbounds': [
       {'type': 'direct', 'tag': 'direct'},
     ],
-    'experimental': {
-      'clash_api': {'external_controller': '127.0.0.1:$clash'},
-    },
-  }, clashPort: clash);
+  });
 
   String b64(String s) => base64.encode(utf8.encode(s));
   final list = [

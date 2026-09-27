@@ -22,10 +22,16 @@ function api(path, body, method) {
 // /api/ping streams one JSON line per result as soon as it is measured; each goes to
 // onLine at once. Resolves when the stream ends; rejects on a failed request.
 function apiPing(body, onLine) {
-  return fetch('/api/ping', {
+  // Settings → Connection → Latency test URL
+  return ndjson('/api/ping', Object.assign({ url: connCfg.testUrl || undefined, checkers: connCfg.checkers }, body), onLine);
+}
+// A POST whose answer is NDJSON (/api/ping, /api/speedtest): each line to onLine as it comes.
+function ndjson(path, body, onLine, signal) {
+  return fetch(path, {
     method: 'POST',
     headers: { 'X-Jorm': '1', 'Content-Type': 'application/json' },
-    body: JSON.stringify(Object.assign({ url: connCfg.testUrl || undefined, checkers: connCfg.checkers }, body)),   // Settings → Connection → Latency test URL
+    body: JSON.stringify(body),
+    signal,
   }).then(async r => {
     if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
     const reader = r.body.getReader(), dec = new TextDecoder();
@@ -259,6 +265,10 @@ const liveBackend = {
       name: f.edit && f.edit.flag !== '🌐' && splitFlagLite(name).flag === '🌐' ? f.edit.flag + ' ' + name : name,
       outbound: same ? f.edit.outbound : undefined, unsupported: same ? f.edit.unsupported : undefined,
     }).then(r => [r.node]);
+  },
+  speedTest(n, onProgress, signal) {
+    if (!n.outbound || n.unsupported) return Promise.reject(new Error('This server cannot be tested (no sing-box outbound)'));
+    return ndjson('/api/speedtest', { node: { key: n.id, outbound: n.outbound } }, onProgress, signal);
   },
   shareLink(n) {
     return api('/api/share', { outbound: n.outbound, name: n.name, flag: n.flag === '🌐' ? '' : n.flag, unsupported: n.unsupported }).then(r => r.link);

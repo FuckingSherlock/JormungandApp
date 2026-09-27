@@ -486,7 +486,7 @@ body {
 .route-more{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent);cursor:pointer}
 .cc-prof{position:relative}
 .cc-prof .pick-row{padding-right:48px}
-.cc-prof.disabled .pick-row{opacity:.35;cursor:default}
+.cc-prof.taken .pick-row{opacity:.6}   /* the other end: a tap swaps them */
 .cc-expand{position:absolute;right:8px;top:4px}
 .cc-prof.open .cc-expand .src-chevron{transform:rotate(180deg)}
 .cc-nodes{margin:0 14px 8px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
@@ -563,7 +563,7 @@ body {
 
 /* Route row unfolded: its servers, Fastest / Priority and the priority order */
 .conn-row.open{flex-wrap:wrap}
-.conn-body{flex-basis:100%;min-width:0;padding:0 0 10px}
+.conn-body{flex-basis:100%;min-width:0;padding:0 4px 10px 0}   /* the row pads 12 left / 8 right: the list sits even */
 .conn-body .seg-row{margin:0 0 4px}
 /* the switch in a Route row is a quarter lower than in the editors */
 .conn-body .seg-switch{padding:2px}
@@ -845,7 +845,11 @@ body {
 .node-flag{font-size:16px;line-height:1;margin-right:7px}
 .node-name{flex:1;min-width:0;font-size:14px;color:var(--t1);overflow-wrap:anywhere;line-height:1.3}
 .node-proto{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;flex-shrink:0}
-.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:52px;text-align:right;flex-shrink:0}   /* fits "1234 ms" and "testing"; any wider only pushes the ms off the badge */
+.lat{cursor:pointer;padding:4px 0;font-family:var(--mono);font-size:12px;font-weight:600;min-width:44px;text-align:right;flex-shrink:0}   /* fits "999 ms"; "1234 ms" only nudges the badge */
+.node-proto + .lat{margin-left:-5px}   /* badge and ms read as one pair */
+.node-proto + .lat-hit{margin-left:-13px}
+.lat.testing{display:flex;justify-content:flex-end;align-items:center;min-height:14px}
+.lat-spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(var(--t2-rgb),.3);border-top-color:var(--t2);box-sizing:border-box}
 .lat.good{color:var(--active)}
 .lat.mid{color:var(--warn)}
 .lat.bad{color:var(--muted)}
@@ -966,6 +970,17 @@ textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:bre
 .testurl-custom .form-input{flex:1;min-width:0;font-family:var(--mono);font-size:13px}
 .testurl-custom .btn-primary{width:auto;padding:0 16px;font-size:15px}
 .testurl-hint{padding:6px 20px 12px}
+
+/* ── SpeedCard (38-speed.js) ── */
+.speed-card{padding:4px 16px 10px;display:flex;flex-direction:column;gap:10px}
+.speed-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.speed-cell{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:rgba(var(--t2-rgb),.05);min-width:0}
+.speed-cell.on{border-color:rgba(var(--accent-rgb),.6);background:rgba(var(--accent-rgb),.08)}
+.speed-val{font-size:22px;font-weight:700;color:var(--t1);white-space:nowrap}
+.speed-unit{font-size:11px;font-weight:500;color:var(--t2);margin-left:4px}
+.speed-label{font-size:11px;color:var(--t2);margin-top:2px}
+.speed-status{font-size:12px;color:var(--t2);text-align:center;overflow-wrap:anywhere}
+.speed-status.err{color:var(--muted)}
 /* ── Compact action sheets (menus) ── */
 .sheet.compact{top:auto;max-height:85vh}
 .sheet.compact .sheet-body{padding:6px 0 18px}
@@ -2222,6 +2237,25 @@ let backend = {
     (id ? [id] : ['googlevideo.com', 'api.github.com', '192.168.0.1', 'discord.com']).forEach(x => mockClosed.set(x, Date.now()));
     return Promise.resolve();
   },
+  // Speed Test through one server: onProgress({phase 0 latency / 1 download / 2 upload / 3 done,
+  // down, up (bit/s), latency (ms), downRpm, final, error?}) as it goes; stops on signal.
+  speedTest(n, onProgress, signal) {
+    const ms = mockPing(n), down = 40e6 + Math.random() * 80e6, up = down * (0.25 + Math.random() * 0.2);
+    const steps = [];
+    for (let i = 1; i <= 4; i++) steps.push({ phase: 0, latency: ms > 0 ? Math.round(ms * (1.3 - i * .075)) : 0 });
+    for (let i = 1; i <= 10; i++) steps.push({ phase: 1, down: down * Math.min(1, i / 7) });
+    for (let i = 1; i <= 8; i++) steps.push({ phase: 2, up: up * Math.min(1, i / 6) });
+    let p = { phase: 0, down: 0, up: 0, latency: 0, downRpm: 0 };
+    return (async () => {
+      if (ms < 0) { await wait(1500); if (!signal.aborted) onProgress({ ...p, final: true, error: 'The server does not answer' }); return; }
+      for (const s of steps) {
+        await wait(250);
+        if (signal.aborted) return;
+        onProgress(p = { ...p, ...s });
+      }
+      onProgress({ ...p, phase: 3, downRpm: Math.round(60000 / Math.max(p.latency, 20) * 4), final: true });
+    })();
+  },
   // A server's share link (vless://…), null when it has none (core: share.dart).
   shareLink(n) { return Promise.resolve(mockShareLink(n)); },
   // Logs tab: lines numbered `since` and later, and the number of the next one (core: logbook.dart).
@@ -2962,6 +2996,7 @@ function setNodesEdit(on) {
 }
 
 const ICON = {
+  gauge:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14l4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>',
   refresh: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',
   check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
   bolt:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>',
@@ -2996,7 +3031,7 @@ function fmtDate(iso) {
 }
 
 function latMsHtml(v) {
-  if (v === 'testing') return '<span class="lat testing">testing</span>';
+  if (v === 'testing') return '<span class="lat testing" title="Pinging…"><span class="lat-spin spin"></span></span>';
   if (v == null) return '<span class="lat none">—</span>';
   // no answer: a red warning sign (an SVG: the ⚠️ emoji is yellow and ignores color)
   if (v < 0) return '<span class="lat bad dead" title="No answer (timeout)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18.2A2 2 0 0 0 3.5 21h17a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>';
@@ -3359,6 +3394,7 @@ function openNodeActions(sid, nid) {
   let rows = menuRow(ICON.power, on ? 'Switch off<div class="menu-sub">Hidden everywhere, its settings kept</div>' : 'Switch on', close + `toggleNodeEnabled('${sid}','${nid}')`);
   rows += menuRow(ICON.copy, 'Copy share link', close + `copyShareLink('${sid}','${nid}')`);
   rows += menuRow(ICON.qr, 'Show QR code', close + `showNodeQr('${sid}','${nid}')`);
+  rows += menuRow(ICON.gauge, 'Speed test<div class="menu-sub">Download, upload and latency through this server</div>', close + `openSpeedTest('${sid}','${nid}')`);
   if (s.kind === 'node') {
     rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
     rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteNode('${sid}','${nid}')`, 'danger');
@@ -3570,10 +3606,15 @@ function entryNowHtml(id) {
   return `<div class="entry-now">${entrySummaryHtml(id)}</div>`;
 }
 
+// The source under a server only when the list mixes sources: a chain end or a profile of
+// one source has its name in the heading already.
+const mixedSources = refs => new Set(refs.map(r => r.sid)).size > 1;
+
 function entryNodeRowsHtml(refs, now) {
+  const srcs = mixedSources(refs);
   return refs.map(r => `<div class="node-row tap ${r.node === now ? 'now' : ''}" onclick="testLatency([['${r.sid}','${r.node.id}']])" title="Tap to ping">
       
-      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}${srcs ? `<span class="node-src">${esc(sourcesData[r.sid].name)}</span>` : ''}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`).join('')
     || '<div class="entry-empty">No working servers</div>';
 }
@@ -3583,10 +3624,11 @@ function entryNodeRowsHtml(refs, now) {
 function chainEditRowsHtml(id, side) {
   const c = chainsData[id], off = (side === 'in' ? c.inOff : c.outOff) || [];
   const refs = side === 'in' || c.exitMode !== 'priority' ? byPing(side === 'in' ? unitRefs(c.inId) : chainExitOrder(c), r => r.node) : chainExitOrder(c);
+  const srcs = mixedSources(refs);
   return refs.map(r => { const k = refKey(r), on = !off.includes(k);
     return `<div class="node-row pick ${on ? 'on' : 'disabled'}" data-key="${k}" onclick="toggleChainNodeIn('${id}','${side}','${k}')" title="Tap: on / off in this chain">
       
-      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}<span class="node-src">${esc(sourcesData[r.sid].name)}</span></span>
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}${srcs ? `<span class="node-src">${esc(sourcesData[r.sid].name)}</span>` : ''}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`; }).join('')
     || '<div class="entry-empty">No working servers</div>';
 }
@@ -4373,6 +4415,45 @@ function selectText(el) {
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(r);
+}
+/* ══════════════════════ SPEED TEST ══════════════════════
+   Nodes → a server's ⋮ → Speed test. sing-box's own network quality test through that
+   server (core: runtime.dart speedTest, a throwaway sing-box; Apple's test servers):
+   latency first, then download, then upload, the numbers growing as it measures. Closing
+   the sheet stops it. SpeedCard in Flutter. */
+
+const SPEED_PHASES = ['Latency', 'Download', 'Upload', 'Done'];
+const fmtMbps = bps => bps > 0 ? (bps / 1e6 >= 100 ? Math.round(bps / 1e6) : (bps / 1e6).toFixed(1)) : '—';
+
+function speedCardHtml(p) {
+  const ph = p.error ? 'Failed' : SPEED_PHASES[p.phase] || '';
+  const cell = (label, val, unit, on) => `<div class="speed-cell${on ? ' on' : ''}"><div class="speed-val">${val}<span class="speed-unit">${unit}</span></div><div class="speed-label">${label}</div></div>`;
+  return `<div class="speed-card" id="speed-card">
+      <div class="speed-grid">
+        ${cell('Download', fmtMbps(p.down), 'Mbps', p.phase === 1)}
+        ${cell('Upload', fmtMbps(p.up), 'Mbps', p.phase === 2)}
+        ${cell('Latency', p.latency > 0 ? p.latency : '—', 'ms', p.phase === 0)}
+        ${cell('Responsiveness', p.downRpm > 0 ? p.downRpm : '—', 'RPM', false)}
+      </div>
+      <div class="speed-status${p.error ? ' err' : ''}">${p.final ? (p.error ? esc(p.error) : 'Done') : ph + '…'}</div>
+    </div>`;
+}
+
+function openSpeedTest(sid, nid) {
+  const n = findNode(sid, nid);
+  if (!n) return;
+  const ctl = new AbortController();
+  let p = { phase: 0 };
+  const draw = () => {
+    const card = document.getElementById('speed-card');
+    if (!card) { ctl.abort(); return; }   // the sheet shows something else now
+    card.outerHTML = speedCardHtml(p);
+  };
+  openActions(n.flag + '  ' + n.name + ' · Speed test', speedCardHtml(p) +
+    menuRow(ICON.refresh, 'Run again', `closeSheet('actions');openSpeedTest('${sid}','${nid}')`));
+  sheetCloseHooks.actions = () => { ctl.abort(); delete sheetCloseHooks.actions; };
+  backend.speedTest(n, x => { p = x; draw(); }, ctl.signal)
+    .catch(e => { if (!ctl.signal.aborted) { p = Object.assign({}, p, { final: true, error: e.message }); draw(); } });
 }
 /* ══════════════════════ RULES (Home → Rules card) ══════════════════════
    One ordered list of sing-box route rules, shown in layers (docs/rules.md):
@@ -6483,7 +6564,7 @@ function renderChainPicker(elId, side) {
     const nOn = active ? all.filter(r => !off.includes(refKey(r))).length : all.length;
     const n = active ? (side === 'in' ? chainEntryNode(d) : chainExitNode(d)) : unitNode(id);
     const broken = isBroken(id);
-    const sub = broken ? '<span class="off-meta">off in Nodes</span>' : taken ? (side === 'in' ? 'used as exit' : 'used as entry')
+    const sub = broken ? '<span class="off-meta">off in Nodes</span>' : taken ? (side === 'in' ? 'used as exit · tap to swap' : 'used as entry · tap to swap')
       : (n ? n.flag + ' ' : '') + (nOn < all.length ? `${nOn} of ${all.length}` : all.length) + ' nodes';
     let rank = 0;
     const list = active && priority ? chainExitOrder(d) : byPing(all, r => r.node);
@@ -6502,8 +6583,8 @@ function renderChainPicker(elId, side) {
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
       r => !off.includes(refKey(r))) : '') : '';
-    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''} ${broken ? 'off' : ''}" data-id="${id}">
-      <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
+    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'taken' : ''} ${broken ? 'off' : ''}" data-id="${id}">
+      <div class="pick-row" onclick="${taken ? 'swapChainEnds()' : `pickChainSide('${side}','${id}')`}">
         <div class="profile-radio ${active ? 'active' : ''}"></div>
         <span class="pick-row-name">${esc(unitName(id))}</span>
         <span class="pick-row-sub">${sub}</span>
@@ -6571,6 +6652,15 @@ function startExitDrag(e, key) {
   const [order, done] = dragShown(full, shown, o => { chainDraft.exitOrder = o; });
   const rowEl = document.querySelector(`#cc-out-list .cc-nodes .node-row[data-id="${key}"]`);
   startRowDrag(e, rowEl, '.node-row', order, () => { done(); renderChainEditor(); });
+}
+
+// A tap on the other end's pick swaps the ends (with two profiles / sources that is the only
+// way to turn a chain around); the servers ticked off go with their end, the exit order starts over.
+function swapChainEnds() {
+  const d = chainDraft;
+  Object.assign(d, { inId: d.outId, outId: d.inId, inOff: d.outOff || [], outOff: d.inOff || [], exitOrder: [] });
+  chainTest = null;
+  renderChainEditor();
 }
 
 function pickChainSide(side, id) {
@@ -7548,10 +7638,16 @@ function api(path, body, method) {
 // /api/ping streams one JSON line per result as soon as it is measured; each goes to
 // onLine at once. Resolves when the stream ends; rejects on a failed request.
 function apiPing(body, onLine) {
-  return fetch('/api/ping', {
+  // Settings → Connection → Latency test URL
+  return ndjson('/api/ping', Object.assign({ url: connCfg.testUrl || undefined, checkers: connCfg.checkers }, body), onLine);
+}
+// A POST whose answer is NDJSON (/api/ping, /api/speedtest): each line to onLine as it comes.
+function ndjson(path, body, onLine, signal) {
+  return fetch(path, {
     method: 'POST',
     headers: { 'X-Jorm': '1', 'Content-Type': 'application/json' },
-    body: JSON.stringify(Object.assign({ url: connCfg.testUrl || undefined, checkers: connCfg.checkers }, body)),   // Settings → Connection → Latency test URL
+    body: JSON.stringify(body),
+    signal,
   }).then(async r => {
     if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
     const reader = r.body.getReader(), dec = new TextDecoder();
@@ -7785,6 +7881,10 @@ const liveBackend = {
       name: f.edit && f.edit.flag !== '🌐' && splitFlagLite(name).flag === '🌐' ? f.edit.flag + ' ' + name : name,
       outbound: same ? f.edit.outbound : undefined, unsupported: same ? f.edit.unsupported : undefined,
     }).then(r => [r.node]);
+  },
+  speedTest(n, onProgress, signal) {
+    if (!n.outbound || n.unsupported) return Promise.reject(new Error('This server cannot be tested (no sing-box outbound)'));
+    return ndjson('/api/speedtest', { node: { key: n.id, outbound: n.outbound } }, onProgress, signal);
   },
   shareLink(n) {
     return api('/api/share', { outbound: n.outbound, name: n.name, flag: n.flag === '🌐' ? '' : n.flag, unsupported: n.unsupported }).then(r => r.link);

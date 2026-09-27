@@ -17,6 +17,7 @@ function setNodesEdit(on) {
 }
 
 const ICON = {
+  gauge:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14l4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>',
   refresh: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>',
   check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
   bolt:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>',
@@ -51,7 +52,7 @@ function fmtDate(iso) {
 }
 
 function latMsHtml(v) {
-  if (v === 'testing') return '<span class="lat testing">testing</span>';
+  if (v === 'testing') return '<span class="lat testing" title="Pinging…"><span class="lat-spin spin"></span></span>';
   if (v == null) return '<span class="lat none">—</span>';
   // no answer: a red warning sign (an SVG: the ⚠️ emoji is yellow and ignores color)
   if (v < 0) return '<span class="lat bad dead" title="No answer (timeout)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18.2A2 2 0 0 0 3.5 21h17a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>';
@@ -414,6 +415,7 @@ function openNodeActions(sid, nid) {
   let rows = menuRow(ICON.power, on ? 'Switch off<div class="menu-sub">Hidden everywhere, its settings kept</div>' : 'Switch on', close + `toggleNodeEnabled('${sid}','${nid}')`);
   rows += menuRow(ICON.copy, 'Copy share link', close + `copyShareLink('${sid}','${nid}')`);
   rows += menuRow(ICON.qr, 'Show QR code', close + `showNodeQr('${sid}','${nid}')`);
+  rows += menuRow(ICON.gauge, 'Speed test<div class="menu-sub">Download, upload and latency through this server</div>', close + `openSpeedTest('${sid}','${nid}')`);
   if (s.kind === 'node') {
     rows += menuRow(ICON.edit, 'Edit server', close + `openNodeForm('${sid}','${nid}')`);
     rows += menuRow(ICON.trash, 'Delete', close + `confirmDeleteNode('${sid}','${nid}')`, 'danger');

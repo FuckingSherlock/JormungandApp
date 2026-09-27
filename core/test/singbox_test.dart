@@ -57,7 +57,6 @@ void main() {
       pairs: [
         {'key': 'a>b', 'entry': {'outbound': supported[0].outbound}, 'exit': {'outbound': supported[1].outbound}},
       ],
-      clashPort: 19090,
     ));
   }, skip: _skip);
 
@@ -66,7 +65,7 @@ void main() {
     target.listen((r) => r.response
       ..write('hello from target')
       ..close());
-    final ssPort = await freePort(), mixedPort = await freePort(), clash = await freePort(), clash2 = await freePort();
+    final ssPort = await freePort(), mixedPort = await freePort();
     final tmp = await Directory.systemTemp.createTemp('jorm-e2e');
     final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
     final client = SingBoxProcess(_bin, p.join(tmp.path, 'client'));
@@ -79,17 +78,11 @@ void main() {
         'outbounds': [
           {'type': 'direct', 'tag': 'direct'},
         ],
-        'experimental': {
-          'clash_api': {'external_controller': '127.0.0.1:$clash2'},
-        },
-      }, clashPort: clash2);
+      });
 
       final node = parseLink('ss://${base64.encode(utf8.encode('aes-128-gcm:loopback'))}@127.0.0.1:$ssPort#loop')!;
       final probe = Probe(await freePort());
-      await client.start(
-          buildConfig({'kind': 'unit', 'main': _group([node]), 'mixedPort': mixedPort, 'global': true},
-              clashPort: clash, probe: probe),
-          clashPort: clash);
+      await client.start(buildConfig({'kind': 'unit', 'main': _group([node]), 'mixedPort': mixedPort, 'global': true}, probe: probe));
 
       final http = HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:$mixedPort';
       final res = await (await http.getUrl(Uri.parse('http://127.0.0.1:${target.port}/'))).close();
@@ -97,8 +90,7 @@ void main() {
       http.close(force: true);
 
       // the connection really went through the proxy group
-      final conns = await client.clashGet('/connections');
-      expect(conns, isNotNull);
+      expect(client.api, isNotNull);
 
       // the probe inbound: two requests on one connection, the second one's time
       final before = target.connectionsInfo().total;

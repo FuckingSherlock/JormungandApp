@@ -287,7 +287,7 @@ function renderChainPicker(elId, side) {
     const nOn = active ? all.filter(r => !off.includes(refKey(r))).length : all.length;
     const n = active ? (side === 'in' ? chainEntryNode(d) : chainExitNode(d)) : unitNode(id);
     const broken = isBroken(id);
-    const sub = broken ? '<span class="off-meta">off in Nodes</span>' : taken ? (side === 'in' ? 'used as exit' : 'used as entry')
+    const sub = broken ? '<span class="off-meta">off in Nodes</span>' : taken ? (side === 'in' ? 'used as exit · tap to swap' : 'used as entry · tap to swap')
       : (n ? n.flag + ' ' : '') + (nOn < all.length ? `${nOn} of ${all.length}` : all.length) + ' nodes';
     let rank = 0;
     const list = active && priority ? chainExitOrder(d) : byPing(all, r => r.node);
@@ -306,8 +306,8 @@ function renderChainPicker(elId, side) {
       </div>`;
     }).join('') + (active ? goneBlockHtml(`cc:${side}:${id}`, unitGoneRefs(id),
       r => !off.includes(refKey(r))) : '') : '';
-    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'disabled' : ''} ${broken ? 'off' : ''}" data-id="${id}">
-      <div class="pick-row" ${taken ? '' : `onclick="pickChainSide('${side}','${id}')"`}>
+    return `<div class="cc-prof ${open ? 'open' : ''} ${taken ? 'taken' : ''} ${broken ? 'off' : ''}" data-id="${id}">
+      <div class="pick-row" onclick="${taken ? 'swapChainEnds()' : `pickChainSide('${side}','${id}')`}">
         <div class="profile-radio ${active ? 'active' : ''}"></div>
         <span class="pick-row-name">${esc(unitName(id))}</span>
         <span class="pick-row-sub">${sub}</span>
@@ -375,6 +375,15 @@ function startExitDrag(e, key) {
   const [order, done] = dragShown(full, shown, o => { chainDraft.exitOrder = o; });
   const rowEl = document.querySelector(`#cc-out-list .cc-nodes .node-row[data-id="${key}"]`);
   startRowDrag(e, rowEl, '.node-row', order, () => { done(); renderChainEditor(); });
+}
+
+// A tap on the other end's pick swaps the ends (with two profiles / sources that is the only
+// way to turn a chain around); the servers ticked off go with their end, the exit order starts over.
+function swapChainEnds() {
+  const d = chainDraft;
+  Object.assign(d, { inId: d.outId, outId: d.inId, inOff: d.outOff || [], outOff: d.inOff || [], exitOrder: [] });
+  chainTest = null;
+  renderChainEditor();
 }
 
 function pickChainSide(side, id) {

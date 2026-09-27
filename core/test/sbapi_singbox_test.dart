@@ -1,6 +1,7 @@
 // SingBoxApi (sbapi.dart) against the real sing-box, on loopback only: a second sing-box
 // as a VLESS server that rejects one domain, our client config with a selector, a request
 // through the mixed inbound. Nothing leaves the machine. Skipped when the binary is missing.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:jormungand_core/jormungand_core.dart';
@@ -12,7 +13,7 @@ final _skip = File(_bin).existsSync() ? false : 'no sing-box in tool/bin';
 
 const _uuid = 'd290f1ee-6c54-4b01-90e6-d701748f0851'; // made up, loopback only
 
-Map<String, dynamic> _server(int listenPort, int clash) => {
+Map<String, dynamic> _server(int listenPort) => {
       'log': {'level': 'warn'},
       'inbounds': [
         {
@@ -39,12 +40,9 @@ Map<String, dynamic> _server(int listenPort, int clash) => {
         ],
         'final': 'direct',
       },
-      'experimental': {
-        'clash_api': {'external_controller': '127.0.0.1:$clash'},
-      },
     };
 
-Map<String, dynamic> _client(int mixedPort, int serverPort, int clash) => {
+Map<String, dynamic> _client(int mixedPort, int serverPort) => {
       'log': {'level': 'warn'},
       'inbounds': [
         {'type': 'mixed', 'tag': 'mixed-in', 'listen': '127.0.0.1', 'listen_port': mixedPort},
@@ -54,9 +52,6 @@ Map<String, dynamic> _client(int mixedPort, int serverPort, int clash) => {
         {'type': 'selector', 'tag': 'proxy', 'outbounds': ['route0/nodeA'], 'default': 'route0/nodeA'},
       ],
       'route': {'final': 'proxy'},
-      'experimental': {
-        'clash_api': {'external_controller': '127.0.0.1:$clash'},
-      },
     };
 
 // A request through the mixed inbound as a plain HTTP proxy: the whole request (method,
@@ -84,11 +79,11 @@ void main() {
     final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
     final client = SingBoxProcess(_bin, p.join(tmp.path, 'client'));
     try {
-      final serverPort = await freePort(), serverClash = await freePort();
-      final mixed = await freePort(), clientClash = await freePort(), apiPort = await freePort();
+      final serverPort = await freePort();
+      final mixed = await freePort();
 
-      await server.start(_server(serverPort, serverClash), clashPort: serverClash);
-      await client.start(_client(mixed, serverPort, clientClash), clashPort: clientClash, apiPort: apiPort);
+      await server.start(_server(serverPort));
+      await client.start(_client(mixed, serverPort));
       expect(client.api, isNotNull);
 
       final closed = <ClosedConnection>[];
@@ -115,6 +110,47 @@ void main() {
     } finally {
       await client.stop();
       await server.stop();
+      await tmp.delete(recursive: true);
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('trafficOf: an open connection shows its outbound; status totals move after it closes', () async {
+    final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    target.listen((r) => Future<void>.delayed(const Duration(milliseconds: 400), () => r.response
+      ..write('ok')
+      ..close()));
+    final tmp = await Directory.systemTemp.createTemp('jorm-sbapi-traffic');
+    final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
+    final client = SingBoxProcess(_bin, p.join(tmp.path, 'client'));
+    try {
+      final serverPort = await freePort(), mixed = await freePort();
+      await server.start(_server(serverPort));
+      await client.start(_client(mixed, serverPort));
+
+      final http = HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:$mixed';
+      final pending = http.getUrl(Uri.parse('http://127.0.0.1:${target.port}/')).then((q) => q.close());
+      pending.ignore();
+      await Future<void>.delayed(const Duration(milliseconds: 150)); // still open: the target holds the response
+
+      var t = trafficOf(client.api!);
+      final mine = (t['conns'] as List).cast<Map>().where((c) => c['port'] == '${target.port}').firstOrNull;
+      expect(mine, isNotNull, reason: 'the open connection is listed');
+      expect(mine!['out'], contains('route0/nodeA'));
+      expect(mine['net'], 'tcp');
+
+      final res = await pending;
+      await res.transform(utf8.decoder).join();
+      http.close(force: true);
+      await Future<void>.delayed(const Duration(seconds: 2)); // the status stream pushes every second
+
+      t = trafficOf(client.api!);
+      expect((t['conns'] as List).cast<Map>().where((c) => c['port'] == '${target.port}'), isEmpty, reason: 'closed now');
+      expect(t['downTotal'], greaterThan(0));
+      expect(t['upTotal'], greaterThan(0));
+    } finally {
+      await client.stop();
+      await server.stop();
+      await target.close(force: true);
       await tmp.delete(recursive: true);
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 30)));

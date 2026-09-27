@@ -164,7 +164,6 @@ void main() {
         singBox: p.join('tool', 'bin', Platform.isWindows ? 'sing-box.exe' : 'sing-box'),
         dataDir: tmp.path,
         uiFile: 'none',
-        clashPort: await freePort(),
         exitCheck: (_) async => throw StateError('no exit probes in tests'),
         sysProxy: _NoSysProxy(),
       );

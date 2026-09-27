@@ -428,7 +428,7 @@ void main() {
         ..close()));
       final log = <String>[];
       final dnsA = await _fakeDns('A', log), dnsB = await _fakeDns('B', log);
-      final mixed = await freePort(), clash = await freePort(), tunnel = await freePort();
+      final mixed = await freePort(), tunnel = await freePort();
       final sb = SingBoxProcess(_bin, p.join(tmp.path, 'run'));
       // the "servers" are direct outbounds: every group is real, nothing needs a proxy
       final plan = {
@@ -454,7 +454,7 @@ void main() {
         },
       };
       try {
-        await sb.start(buildConfig(plan, clashPort: clash, tunnelPort: tunnel), clashPort: clash);
+        await sb.start(buildConfig(plan, tunnelPort: tunnel));
         Future<(String?, List<String>)> get(String host, [int? port]) async {
           final http = HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:${port ?? mixed}';
           try {
@@ -462,11 +462,10 @@ void main() {
             pending.ignore();
             // while the target holds the answer: which outbounds the connection went through
             await Future<void>.delayed(const Duration(milliseconds: 250));
-            final conns = ((await sb.clashGet('/connections'))?['connections'] as List? ?? const []).cast<Map>();
-            final mine = conns.where((c) => (c['metadata'] as Map)['host'] == host).firstOrNull;
+            final mine = sb.api!.connections.where((c) => c.hostPort.$1 == host).firstOrNull;
             final res = await pending;
             final body = await res.transform(utf8.decoder).join();
-            return (res.statusCode == 200 ? body : null, [for (final t in (mine?['chains'] as List? ?? const [])) '$t']);
+            return (res.statusCode == 200 ? body : null, [...?mine?.chain]);
           } catch (_) {
             return (null, <String>[]);
           } finally {
