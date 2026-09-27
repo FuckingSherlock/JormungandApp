@@ -11,6 +11,7 @@ import 'logbook.dart';
 import 'manual.dart';
 import 'node.dart';
 import 'parse/links.dart';
+import 'probe.dart';
 import 'rulesets.dart';
 import 'runtime.dart';
 import 'share.dart';
@@ -69,6 +70,7 @@ class Daemon {
   int _pingSeq = 0;
   int _mixedPort = 2080;
   int? _tunnelPort; // tunnel-in: always through the tunnel (exit check, lists via VPN)
+  Probe? _probe; // probe-in: Auto's latency tests (probe.dart)
   int _connectSeq = 0;
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
@@ -113,7 +115,8 @@ class Daemon {
   /// changes where traffic leaves: the exit is checked again.
   void _startAuto(Map<String, dynamic> plan) {
     _stopAuto();
-    final auto = _auto = AutoService(main, plan);
+    final auto = _auto = AutoService(main, plan,
+        delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t));
     auto.switches.listen((s) {
       main.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
       _recheckExit();
@@ -364,8 +367,11 @@ class Daemon {
     final lists = await ruleSets.ensureFor(plan, proxyPort: main.running ? _tunnelPort : null);
     final warnings = <String>[];
     final tunnelPort = await freePort();
-    await main.start(buildConfig(plan, clashPort: clashPort, tunnelPort: tunnelPort, ruleSetFiles: lists.files, warnings: warnings),
+    final probe = Probe(await freePort());
+    await main.start(
+        buildConfig(plan, clashPort: clashPort, tunnelPort: tunnelPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings),
         clashPort: clashPort);
+    _probe = probe;
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     _tunnelPort = tunnelPort;
     return (lists, warnings);

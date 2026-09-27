@@ -26,6 +26,9 @@
 /// through the tunnel (`proxy`: the route Auto is on), past every rule — the exit-IP check
 /// and lists downloaded "via VPN" use it (a Russian probe or GitHub must not go direct
 /// because a rule says so).
+///
+/// [probe]: the loopback inbound the core measures latency through (probe.dart), its
+/// route rule per server first of all.
 library;
 
 import 'dart:convert';
@@ -33,12 +36,17 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import 'plan.dart';
+import 'probe.dart';
 import 'routing.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 
 Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
-    {int clashPort = 9090, int? tunnelPort, Map<String, String> ruleSetFiles = const {}, List<String>? warnings}) {
+    {int clashPort = 9090,
+    int? tunnelPort,
+    Probe? probe,
+    Map<String, String> ruleSetFiles = const {},
+    List<String>? warnings}) {
   final outs = <Map<String, dynamic>>[];
   final test = (plan['urlTest'] as Map?) ?? const {};
 
@@ -99,6 +107,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   // cache_file keeps a selector's pick made over the clash API across restarts, over the
   // config's `default`: keyed by the defaults, a new pick from the UI starts clean.
   final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
+  final pr = probe?.inbound(_servers(outs));
 
   return {
     'log': {'level': 'info', 'timestamp': true},
@@ -110,10 +119,12 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     'inbounds': [
       {'type': 'mixed', 'tag': 'mixed-in', 'listen': '127.0.0.1', 'listen_port': plan['mixedPort'] ?? 2080},
       if (tunnelPort != null) {'type': 'mixed', 'tag': 'tunnel-in', 'listen': '127.0.0.1', 'listen_port': tunnelPort},
+      ?pr?.inbound,
     ],
     'outbounds': outs,
     'route': {
       'rules': [
+        ...?pr?.rules,
         {'action': 'sniff'},
         if (tunnelPort != null) {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag},
         ...routing.rules,
@@ -135,13 +146,14 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   };
 }
 
-/// A config with no inbounds that only exists to measure latency through the clash API:
+/// A config that only exists to measure latency (through its probe inbound, probe.dart):
 /// every node as `t/<key>`, every entry → exit pair as `p/<key>` (the exit dialing
 /// through its own copy of the entry, `pe/<key>`).
 Map<String, dynamic> buildTesterConfig({
   required List<Map> nodes,
   List<Map> pairs = const [],
   required int clashPort,
+  Probe? probe,
 }) {
   final outs = <Map<String, dynamic>>[
     {'type': 'direct', 'tag': 'direct'},
@@ -153,17 +165,30 @@ Map<String, dynamic> buildTesterConfig({
     outs.add({...(entry['outbound'] as Map).cast<String, dynamic>(), 'tag': 'pe/${p['key']}'});
     outs.add({...(exit['outbound'] as Map).cast<String, dynamic>(), 'tag': 'p/${p['key']}', 'detour': 'pe/${p['key']}'});
   }
+  final pr = probe?.inbound(_servers(outs));
   return {
     'log': {'level': 'warn'},
+    if (pr != null) 'inbounds': [pr.inbound],
     'dns': {
       'servers': [
         {'type': 'local', 'tag': 'local'},
       ],
     },
     'outbounds': outs,
-    'route': {'final': 'direct', 'auto_detect_interface': true, 'default_domain_resolver': 'local'},
+    'route': {
+      if (pr != null) 'rules': pr.rules,
+      'final': 'direct',
+      'auto_detect_interface': true,
+      'default_domain_resolver': 'local',
+    },
     'experimental': {
       'clash_api': {'external_controller': '127.0.0.1:$clashPort'},
     },
   };
 }
+
+/// The outbounds that are servers (not groups, not direct / block): what a probe tests.
+Iterable<String> _servers(List<Map<String, dynamic>> outs) => [
+      for (final o in outs)
+        if (!const {'selector', 'urltest', 'direct', 'block', 'dns'}.contains(o['type'])) '${o['tag']}',
+    ];

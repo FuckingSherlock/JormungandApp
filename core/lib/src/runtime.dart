@@ -7,6 +7,7 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 
 import 'config.dart';
+import 'probe.dart';
 
 class SingBoxError implements Exception {
   SingBoxError(this.message);
@@ -212,7 +213,7 @@ Future<int> freePort() async {
 final _ports = Random();
 
 /// Measures latency through each node (and each entry → exit pair) with a throwaway
-/// sing-box and its clash API `/proxies/{tag}/delay`. Results: ms, or -1 = no answer.
+/// sing-box, one round trip on an open connection each (probe.dart). Results: ms, or -1 = no answer.
 Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
   required String binary,
   required String workDir,
@@ -224,8 +225,9 @@ Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
   void Function(String kind, String key, int ms)? onResult,
 }) async {
   final port = await freePort();
+  final probe = Probe(await freePort());
   final sb = SingBoxProcess(binary, workDir);
-  await sb.start(buildTesterConfig(nodes: nodes, pairs: pairs, clashPort: port), clashPort: port);
+  await sb.start(buildTesterConfig(nodes: nodes, pairs: pairs, clashPort: port, probe: probe), clashPort: port);
   try {
     final jobs = <(String, String)>[
       for (final n in nodes) ('n', '${n['key']}'),
@@ -236,10 +238,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
     Future<void> worker() async {
       while (next < jobs.length) {
         final (kind, key) = jobs[next++];
-        final tag = Uri.encodeComponent('${kind == 'n' ? 't' : 'p'}/$key');
-        final r = await sb.clashGet('/proxies/$tag/delay?timeout=$timeoutMs&url=${Uri.encodeQueryComponent(url)}',
-            timeout: Duration(milliseconds: timeoutMs + 2000));
-        final ms = r != null && r['_status'] == 200 && r['delay'] is int ? r['delay'] as int : -1;
+        final ms = await probe.delay('${kind == 'n' ? 't' : 'p'}/$key', url, timeoutMs: timeoutMs);
         (kind == 'n' ? res.nodes : res.pairs)[key] = ms;
         onResult?.call(kind, key, ms);
       }

@@ -85,7 +85,10 @@ void main() {
       }, clashPort: clash2);
 
       final node = parseLink('ss://${base64.encode(utf8.encode('aes-128-gcm:loopback'))}@127.0.0.1:$ssPort#loop')!;
-      await client.start(buildConfig({'kind': 'unit', 'main': _group([node]), 'mixedPort': mixedPort, 'global': true}, clashPort: clash),
+      final probe = Probe(await freePort());
+      await client.start(
+          buildConfig({'kind': 'unit', 'main': _group([node]), 'mixedPort': mixedPort, 'global': true},
+              clashPort: clash, probe: probe),
           clashPort: clash);
 
       final http = HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:$mixedPort';
@@ -96,6 +99,15 @@ void main() {
       // the connection really went through the proxy group
       final conns = await client.clashGet('/connections');
       expect(conns, isNotNull);
+
+      // the probe inbound: two requests on one connection, the second one's time
+      final before = target.connectionsInfo().total;
+      final url = 'http://127.0.0.1:${target.port}/';
+      expect(await probe.delay('${routeTag(0)}/src::${node.id}', url, timeoutMs: 3000), greaterThanOrEqualTo(0));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(target.connectionsInfo().total - before, lessThanOrEqualTo(1));
+      expect(await Probe(probe.port, 'wrong').delay('${routeTag(0)}/src::${node.id}', url, timeoutMs: 1500), -1);
+      expect(await probe.delay('no-such-outbound', url, timeoutMs: 1500), -1);
 
       final lat = await measureLatency(
         binary: _bin,

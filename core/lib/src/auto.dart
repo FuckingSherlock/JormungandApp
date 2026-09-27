@@ -20,6 +20,9 @@
 ///   back by the same rule as a Priority server.
 /// While the current route misses, checks come every `retryEvery` instead of `checkEvery`.
 ///
+/// A test is [delay]: one round trip on an open connection through the config's probe
+/// inbound (probe.dart), what the catalog shows; without it (tests) the Clash API delay.
+///
 /// Pure Dart with no UI in it: the app reads [toJson] and listens to [switches]
 /// (jormd serves both through /api/status; Flutter will call it directly).
 library;
@@ -151,8 +154,11 @@ class _Route {
 
 int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 
+/// ms through the outbound [tag] to [url]; -1 = no answer.
+typedef DelayTest = Future<int> Function(String tag, String url, int timeoutMs);
+
 class AutoService {
-  AutoService(this.api, Map<String, dynamic> plan, {AutoSettings? settings, int Function()? clock})
+  AutoService(this.api, Map<String, dynamic> plan, {AutoSettings? settings, int Function()? clock, this.delay})
       : settings = settings ?? AutoSettings.fromPlan(plan),
         _clock = clock ?? _wallClock {
     final rs = planRoutes(plan);
@@ -161,6 +167,7 @@ class AutoService {
   }
 
   final ClashApi api;
+  final DelayTest? delay;
   final AutoSettings settings;
   final int Function() _clock;
   late final List<_Route> _routes;
@@ -281,9 +288,14 @@ class AutoService {
 
   Future<int> _test(_Group g, String key) async {
     final t = settings.timeoutMs;
-    final r = await api.clashGet('/proxies/${Uri.encodeComponent(g.member(key))}/delay?timeout=$t&url=${Uri.encodeQueryComponent(settings.url)}',
-        timeout: Duration(milliseconds: t + 2000));
-    final ms = r != null && r['_status'] == 200 && r['delay'] is int ? r['delay'] as int : -1;
+    final int ms;
+    if (delay != null) {
+      ms = await delay!(g.member(key), settings.url, t);
+    } else {
+      final r = await api.clashGet('/proxies/${Uri.encodeComponent(g.member(key))}/delay?timeout=$t&url=${Uri.encodeQueryComponent(settings.url)}',
+          timeout: Duration(milliseconds: t + 2000));
+      ms = r != null && r['_status'] == 200 && r['delay'] is int ? r['delay'] as int : -1;
+    }
     if (!_stopped) g.of(key).record(ms, _clock());
     return ms;
   }
@@ -338,7 +350,8 @@ class AutoService {
     final px = await api.clashGet('/proxies/${Uri.encodeComponent(g.tag)}');
     g.now = g.keyOf(px?['now']) ?? g.now;
     if (g.current == failed) return -1;
-    return answered[g.current] ?? await _test(g, g.current);
+    // the group's own numbers are sing-box's (first request, handshakes and all)
+    return delay == null ? answered[g.current] ?? await _test(g, g.current) : await _test(g, g.current);
   }
 
   Future<bool> _pick(_Route r, _Group g, String key, String reason) async {
