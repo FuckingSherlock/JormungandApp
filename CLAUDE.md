@@ -89,17 +89,19 @@ there for each new interaction.
 Core: in `core/`, `dart analyze` + `dart test` (the sing-box tests run on loopback only).
 Live UI: `dart run bin/jormd.dart` → http://127.0.0.1:7788 (launch config `jormd`).
 Running, fixing and extending tests is the `tests` subagent's job (`.claude/agents/tests.md`).
+On Windows a sing-box started by a test outlives a killed / timed-out test process. After such
+a run (and before finishing), kill the orphans: ours only (path in this repo), parent gone —
+never the user's tunnel or jormd's live child:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='sing-box.exe'" | Where-Object { $_.ExecutablePath -like '*JormungandApp*' -and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
 
 Network of this machine (home LAN is the user's own; never target the corporate network past it):
 user memory `user-home-network`. Exit checks through a tunnel: `dart run tool/exit_check.dart`.
 
 Commit `design/src`, `design/tools`, the rebuilt `design/main_screen.html`, `core/`, `docs/` and
-push (the push redeploys the Cloudflare site, see Deploy). The user views the mockup as a
-claude.ai Artifact, which live-updates in their app: the build stages it, so after each
-change republish `design/.artifact/jormungand.html` with the Artifact tool to
-https://claude.ai/artifact/Lu4gwFjCVtcv8BogsvqbhS (pass it as `url`). In a new session the
-first publish is refused and the live copy is saved locally: it is the previous build
-wrapped by the host, so read only its first lines to confirm, then publish again.
+push (the push redeploys the Cloudflare site, see Deploy).
 Do not send `main_screen.html` as a file unless asked.
 
 ## End of session

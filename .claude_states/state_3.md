@@ -9,8 +9,6 @@
   `claude/karing-fork-environment-a45c2c`. Рабочее дерево чистое.
 - Тесты: `core`: `dart analyze` чисто, `dart test` 125/125. Мокап: `npm run verify` 114/114. Один раз
   был сбой `liveApply is not defined`, повтор прошёл. Похоже на нестабильность, причину не искал.
-- Artifact не переопубликован: в этой сессии не было Artifact-тула. Опубликовать
-  `design/.artifact/jormungand.html` → https://claude.ai/artifact/Lu4gwFjCVtcv8BogsvqbhS.
 - jormd крутился на 7788 через `preview_start` (конфиг `jormd`). Перезапуск jormd юзер разрешал
   только в этой сессии; в новой спросить.
 
@@ -74,6 +72,6 @@
 - Корпоративную сеть за домашним роутером не трогать.
 
 ## Известные хвосты
-- На Windows дочерний sing-box переживает убитый процесс теста, остаются сироты. Не срочно;
-  убивать через PowerShell `Stop-Process`.
+- На Windows дочерний sing-box переживает убитый процесс теста. Правило и команда очистки
+  теперь в `CLAUDE.md` → Workflow (только наши, с мёртвым родителем).
 - Speed Test «потом».

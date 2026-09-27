@@ -42,3 +42,6 @@ one check can still be in flight during the next. A check that fails once in sev
 3. make the check independent of that (clear or await the leftover state, wait for the
    element), never just add a longer sleep.
 Report the root cause in one line.
+
+After a Dart test run that was killed or timed out, kill the orphaned sing-box processes
+with the command in `CLAUDE.md` → Workflow (ours only, parent gone).
