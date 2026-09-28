@@ -574,7 +574,7 @@ body {
 .conn-body .node-row{cursor:pointer}
 .conn-body .node-row.pinned{background:rgba(var(--warn-rgb),.12);box-shadow:inset 3px 0 0 var(--warn)}
 .conn-hint{margin-bottom:8px}
-.conn-body .se-nodes{margin:0}
+.conn-body .se-nodes{margin:0;background:none;border:0;border-radius:0}   /* the row is the frame */
 .conn-acts{margin-left:auto;display:flex;align-items:center}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
@@ -972,15 +972,45 @@ textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:bre
 .testurl-hint{padding:6px 20px 12px}
 
 /* ── SpeedCard (38-speed.js) ── */
-.speed-card{padding:4px 16px 10px;display:flex;flex-direction:column;gap:10px}
-.speed-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.speed-cell{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:rgba(var(--t2-rgb),.05);min-width:0}
-.speed-cell.on{border-color:rgba(var(--accent-rgb),.6);background:rgba(var(--accent-rgb),.08)}
-.speed-val{font-size:22px;font-weight:700;color:var(--t1);white-space:nowrap}
-.speed-unit{font-size:11px;font-weight:500;color:var(--t2);margin-left:4px}
-.speed-label{font-size:11px;color:var(--t2);margin-top:2px}
-.speed-status{font-size:12px;color:var(--t2);text-align:center;overflow-wrap:anywhere}
-.speed-status.err{color:var(--muted)}
+.speed-card{padding:0 16px 14px;display:flex;flex-direction:column;align-items:stretch;gap:12px}
+.speed-node{display:flex;align-items:center;justify-content:center;gap:6px;min-width:0;font-size:13px;color:var(--t2)}
+.speed-node-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1);font-weight:600}
+.speed-gauge{position:relative;width:220px;max-width:100%;margin:0 auto}
+.speed-gauge svg{display:block;width:100%;height:auto}
+.sg-track,.sg-fill{fill:none;stroke-width:9;stroke-linecap:round}
+.sg-track{stroke:rgba(var(--t2-rgb),.12)}
+.sg-fill{transition:stroke-dasharray .35s ease-out}
+.sg-fill.down{stroke:var(--accent)}
+.sg-fill.up{stroke:var(--purple)}
+.speed-card.failed .sg-fill{opacity:.35}
+.speed-center{position:absolute;left:0;right:0;top:34%;text-align:center}
+.speed-big{font-size:38px;font-weight:700;line-height:1;color:var(--t1);font-variant-numeric:tabular-nums}
+.speed-big-unit{font-size:12px;color:var(--t2);margin-top:2px}
+.speed-big-label{font-size:11px;color:var(--t3);margin-top:12px;display:flex;align-items:center;justify-content:center;gap:5px}
+.speed-card .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block}
+.speed-card .dot.down{background:var(--accent)}
+.speed-card .dot.up{background:var(--purple)}
+.speed-stats{display:grid;grid-template-columns:1fr 1fr 1.25fr;border:1px solid var(--border);border-radius:var(--r);background:var(--card)}
+.speed-stat{padding:10px 8px;text-align:center;min-width:0}
+.speed-stat + .speed-stat{border-left:1px solid var(--border)}
+.speed-stat-val{white-space:nowrap}
+.speed-stat-val b{font-size:18px;font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums}
+.speed-stat-val span{font-size:11px;color:var(--t2);margin-left:3px}
+.speed-stat-label{font-size:11px;color:var(--t3);margin-top:3px;display:flex;align-items:center;justify-content:center;gap:5px;flex-wrap:wrap}
+.speed-stat-label[data-word]:not([data-word=""])::after{content:attr(data-word);font-weight:600;color:var(--t2)}
+.speed-stat[data-q="good"] .speed-stat-label::after{color:var(--active)}
+.speed-stat[data-q="bad"] .speed-stat-label::after{color:var(--warn)}
+.speed-foot{display:flex;flex-direction:column;gap:6px}
+.speed-status{display:flex;justify-content:space-between;font-size:12px;color:var(--t2)}
+.speed-time{font-variant-numeric:tabular-nums;color:var(--t3)}
+.speed-prog{height:3px;border-radius:2px;background:rgba(var(--t2-rgb),.12);overflow:hidden}
+.speed-prog i{display:block;height:100%;width:0;background:var(--accent);border-radius:2px;transition:width .5s linear}
+.speed-card.failed .speed-prog i{background:var(--muted)}
+.speed-err:empty{display:none}
+.speed-err{display:flex;flex-direction:column;gap:4px;margin-top:4px;padding:10px 12px;border-radius:var(--r);border:1px solid rgba(var(--muted-rgb),.35);background:rgba(var(--muted-rgb),.08);font-size:12px;color:var(--t2)}
+.speed-err b{font-size:13px;color:var(--muted)}
+.speed-err code{font-family:var(--mono);font-size:11px;color:var(--t3);overflow-wrap:anywhere}
+.speed-btn{align-self:center;justify-content:center;min-width:140px}
 /* ── Compact action sheets (menus) ── */
 .sheet.compact{top:auto;max-height:85vh}
 .sheet.compact .sheet-body{padding:6px 0 18px}
@@ -2239,21 +2269,20 @@ let backend = {
   },
   // Speed Test through one server: onProgress({phase 0 latency / 1 download / 2 upload / 3 done,
   // down, up (bit/s), latency (ms), downRpm, final, error?}) as it goes; stops on signal.
+  // sing-box's network quality test: latency, then download and upload at once (the steps
+  // interleave phase 1 / 2), phase 3 + final at the end (core: runtime.dart speedTest).
   speedTest(n, onProgress, signal) {
-    const ms = mockPing(n), down = 40e6 + Math.random() * 80e6, up = down * (0.25 + Math.random() * 0.2);
-    const steps = [];
-    for (let i = 1; i <= 4; i++) steps.push({ phase: 0, latency: ms > 0 ? Math.round(ms * (1.3 - i * .075)) : 0 });
-    for (let i = 1; i <= 10; i++) steps.push({ phase: 1, down: down * Math.min(1, i / 7) });
-    for (let i = 1; i <= 8; i++) steps.push({ phase: 2, up: up * Math.min(1, i / 6) });
-    let p = { phase: 0, down: 0, up: 0, latency: 0, downRpm: 0 };
+    const ms = truthOf(n), down = 40e6 + Math.random() * 80e6, up = down * (0.25 + Math.random() * 0.2);
+    let p = { phase: 0, down: 0, up: 0, latency: 0, downRpm: 0, elapsed: 0 };
+    const step = async s => { await wait(250); if (signal.aborted) throw new DOMException('stopped', 'AbortError'); onProgress(p = { ...p, ...s, elapsed: p.elapsed + 1000 }); };
     return (async () => {
-      if (ms < 0) { await wait(1500); if (!signal.aborted) onProgress({ ...p, final: true, error: 'The server does not answer' }); return; }
-      for (const s of steps) {
-        await wait(250);
-        if (signal.aborted) return;
-        onProgress(p = { ...p, ...s });
+      if (ms < 0) { await wait(1500); if (!signal.aborted) onProgress({ ...p, elapsed: 5000, final: true, error: 'fetch config: Get "https://mensura.cdn-apple.com/api/v1/gm/config": net/http: TLS handshake timeout' }); return; }
+      for (let i = 1; i <= 3; i++) await step({ latency: Math.round(ms * (1.3 - i * .1)) });
+      for (let i = 1; i <= 16; i++) {
+        const f = Math.min(1, i / 9) * (0.92 + Math.random() * 0.12);
+        await step(i % 2 ? { phase: 1, down: down * f, downRpm: i > 4 ? Math.round(60000 / Math.max(ms, 20) * .4) : 0 } : { phase: 2, up: up * f });
       }
-      onProgress({ ...p, phase: 3, downRpm: Math.round(60000 / Math.max(p.latency, 20) * 4), final: true });
+      onProgress({ ...p, phase: 3, final: true });
     })();
   },
   // A server's share link (vless://…), null when it has none (core: share.dart).
@@ -4419,41 +4448,111 @@ function selectText(el) {
 /* ══════════════════════ SPEED TEST ══════════════════════
    Nodes → a server's ⋮ → Speed test. sing-box's own network quality test through that
    server (core: runtime.dart speedTest, a throwaway sing-box; Apple's test servers):
-   latency first, then download, then upload, the numbers growing as it measures. Closing
-   the sheet stops it. SpeedCard in Flutter. */
+   idle latency first, then download and upload together (sing-box runs them at once, the
+   progress steps interleave), the numbers growing as it measures; ~20 s. Closing the sheet
+   stops it. SpeedCard in Flutter: a two-ring gauge (outer download, inner upload, log scale
+   up to 1 Gbps), upload / latency / responsiveness under it, a progress line, Stop / Run again. */
 
-const SPEED_PHASES = ['Latency', 'Download', 'Upload', 'Done'];
+const SPEED_SECONDS = 20;   // sing-box's default runtime; the progress line fills over it
 const fmtMbps = bps => bps > 0 ? (bps / 1e6 >= 100 ? Math.round(bps / 1e6) : (bps / 1e6).toFixed(1)) : '—';
+const speedFrac = bps => bps > 0 ? Math.min(1, Math.log10(1 + bps / 1e6) / 3) : 0;   // 1 → 1000 Mbps
+// RPM = round trips a minute while the line is loaded (Apple's scale).
+const rpmWord = rpm => rpm >= 1000 ? ['High', 'good'] : rpm >= 300 ? ['Medium', ''] : ['Low', 'bad'];
+// sing-box / Go errors in plain words; the raw text stays under it.
+function speedErrText(msg) {
+  const m = String(msg || '');
+  return /timeout|timed out|deadline/i.test(m) ? 'The server did not answer in time'
+    : /refused/i.test(m) ? 'The server refused the connection'
+    : /no such host|lookup/i.test(m) ? 'The server address does not resolve'
+    : /reset|EOF|closed/i.test(m) ? 'The server dropped the connection'
+    : /cannot be tested/i.test(m) ? m : 'The test could not finish';
+}
 
-function speedCardHtml(p) {
-  const ph = p.error ? 'Failed' : SPEED_PHASES[p.phase] || '';
-  const cell = (label, val, unit, on) => `<div class="speed-cell${on ? ' on' : ''}"><div class="speed-val">${val}<span class="speed-unit">${unit}</span></div><div class="speed-label">${label}</div></div>`;
+// A 240° arc around (110,110), pathLength 100 so a fraction is a dash length.
+const speedArc = r => `M${110 - r * .866} ${110 + r * .5}A${r} ${r} 0 1 1 ${110 + r * .866} ${110 + r * .5}`;
+
+function speedShellHtml(n) {
+  const ring = (cls, r) => `<path class="sg-track" d="${speedArc(r)}" pathLength="100"/><path class="sg-fill ${cls}" d="${speedArc(r)}" pathLength="100" stroke-dasharray="0 100"/>`;
+  const stat = (key, label, unit) => `<div class="speed-stat" data-k="${key}"><div class="speed-stat-val"><b>—</b><span>${unit}</span></div><div class="speed-stat-label">${label}</div></div>`;
   return `<div class="speed-card" id="speed-card">
-      <div class="speed-grid">
-        ${cell('Download', fmtMbps(p.down), 'Mbps', p.phase === 1)}
-        ${cell('Upload', fmtMbps(p.up), 'Mbps', p.phase === 2)}
-        ${cell('Latency', p.latency > 0 ? p.latency : '—', 'ms', p.phase === 0)}
-        ${cell('Responsiveness', p.downRpm > 0 ? p.downRpm : '—', 'RPM', false)}
+      <div class="speed-node"><span class="node-flag">${n.flag}</span><span class="speed-node-name">${esc(n.name)}</span><span class="node-proto">${protoLabel(n)}</span></div>
+      <div class="speed-gauge">
+        <svg viewBox="0 0 220 168">${ring('down', 96)}${ring('up', 80)}</svg>
+        <div class="speed-center"><div class="speed-big">—</div><div class="speed-big-unit">Mbps</div><div class="speed-big-label"><i class="dot down"></i>Download</div></div>
       </div>
-      <div class="speed-status${p.error ? ' err' : ''}">${p.final ? (p.error ? esc(p.error) : 'Done') : ph + '…'}</div>
+      <div class="speed-stats">${stat('up', '<i class="dot up"></i>Upload', 'Mbps')}${stat('lat', 'Latency', 'ms')}${stat('rpm', 'Responsiveness', 'RPM')}</div>
+      <div class="speed-foot">
+        <div class="speed-status"><span class="speed-status-text"></span><span class="speed-time"></span></div>
+        <div class="speed-prog"><i></i></div>
+        <div class="speed-err"></div>
+      </div>
+      <button class="btn-secondary speed-btn" onclick="speedButton()"></button>
     </div>`;
 }
+
+let speedRun = null;   // {sid, nid, ctl, p, t0}: the run the open SpeedCard shows
 
 function openSpeedTest(sid, nid) {
   const n = findNode(sid, nid);
   if (!n) return;
-  const ctl = new AbortController();
-  let p = { phase: 0 };
-  const draw = () => {
-    const card = document.getElementById('speed-card');
-    if (!card) { ctl.abort(); return; }   // the sheet shows something else now
-    card.outerHTML = speedCardHtml(p);
+  openActions('Speed test', speedShellHtml(n));
+  sheetCloseHooks.actions = () => { stopSpeedTest(); delete sheetCloseHooks.actions; };
+  runSpeedTest(sid, nid);
+}
+
+function runSpeedTest(sid, nid) {
+  const n = findNode(sid, nid);
+  stopSpeedTest();
+  const run = speedRun = { sid, nid, ctl: new AbortController(), p: { phase: 0 }, t0: Date.now() };
+  const show = p => { if (speedRun === run) { run.p = p; paintSpeed(run); } };
+  show(run.p);
+  backend.speedTest(n, show, run.ctl.signal)
+    .then(() => { if (!run.p.final) show(Object.assign({}, run.p, { final: true, error: run.ctl.signal.aborted ? '' : 'The test ended without a result' })); })
+    .catch(e => { if (!run.ctl.signal.aborted) show(Object.assign({}, run.p, { final: true, error: e.message })); });
+}
+
+// Stop the running test; [keep] leaves its numbers on the card as "Stopped".
+function stopSpeedTest(keep) {
+  const run = speedRun;
+  if (!run || run.p.final) return;
+  run.ctl.abort();
+  if (keep) { run.p = Object.assign({}, run.p, { final: true, stopped: true }); paintSpeed(run); }
+  else speedRun = null;
+}
+const speedButton = () => speedRun && !speedRun.p.final ? stopSpeedTest(true) : speedRun && runSpeedTest(speedRun.sid, speedRun.nid);
+
+function paintSpeed(run) {
+  const card = document.getElementById('speed-card');
+  if (!card) { stopSpeedTest(); return; }   // the sheet shows something else now
+  const p = run.p, err = p.final && p.error, done = p.final && !p.error && !p.stopped;
+  const secs = Math.round((p.elapsed || Date.now() - run.t0) / 1000);
+  card.classList.toggle('failed', !!err);
+  card.classList.toggle('running', !p.final);
+  const fill = (cls, bps) => {   // an empty ring hides: a round cap would draw a dot
+    const el = card.querySelector('.sg-fill.' + cls);
+    el.setAttribute('stroke-dasharray', `${speedFrac(bps) * 100} 100`);
+    el.style.visibility = bps > 0 ? '' : 'hidden';
   };
-  openActions(n.flag + '  ' + n.name + ' · Speed test', speedCardHtml(p) +
-    menuRow(ICON.refresh, 'Run again', `closeSheet('actions');openSpeedTest('${sid}','${nid}')`));
-  sheetCloseHooks.actions = () => { ctl.abort(); delete sheetCloseHooks.actions; };
-  backend.speedTest(n, x => { p = x; draw(); }, ctl.signal)
-    .catch(e => { if (!ctl.signal.aborted) { p = Object.assign({}, p, { final: true, error: e.message }); draw(); } });
+  fill('down', p.down);
+  fill('up', p.up);
+  card.querySelector('.speed-big').textContent = fmtMbps(p.down);
+  const stat = (k, val, extra) => {
+    const el = card.querySelector(`.speed-stat[data-k="${k}"]`);
+    el.querySelector('b').textContent = val;
+    el.querySelector('.speed-stat-label').dataset.word = extra ? extra[0] : '';
+    el.dataset.q = extra ? extra[1] : '';
+  };
+  stat('up', fmtMbps(p.up));
+  stat('lat', p.latency > 0 ? p.latency : '—');
+  stat('rpm', p.downRpm > 0 ? p.downRpm : '—', p.downRpm > 0 ? rpmWord(p.downRpm) : null);
+  card.querySelector('.speed-status-text').textContent = err ? 'Test failed' : p.stopped ? 'Stopped'
+    : done ? 'Done' : p.phase === 0 ? 'Measuring latency…' : 'Measuring speed…';
+  card.querySelector('.speed-time').textContent = secs > 0 ? secs + ' s' : '';
+  card.querySelector('.speed-prog i').style.width = (p.final ? (done ? 100 : Math.min(100, secs / SPEED_SECONDS * 100)) : Math.min(97, secs / SPEED_SECONDS * 100)) + '%';
+  const why = err ? speedErrText(p.error) : '';
+  card.querySelector('.speed-err').innerHTML = err ? `<b>${esc(why)}</b>${why !== p.error ? `<code>${esc(p.error)}</code>` : ''}<span>The server may be down right now. Ping it or try again later.</span>` : '';
+  const btn = card.querySelector('.speed-btn');
+  btn.innerHTML = p.final ? ICON.refresh + 'Run again' : ICON.close + 'Stop';
 }
 /* ══════════════════════ RULES (Home → Rules card) ══════════════════════
    One ordered list of sing-box route rules, shown in layers (docs/rules.md):

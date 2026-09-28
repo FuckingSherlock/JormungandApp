@@ -82,7 +82,7 @@ rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, ru
 rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, text-large, text-large-rule,
 connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-search, logs-warn,
 qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, source-error,
-dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test.
+dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test, speed-done, speed-fail.
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
 there for each new interaction.
 

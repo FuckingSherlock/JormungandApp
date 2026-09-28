@@ -149,7 +149,9 @@ const SHOTS = {
   'logs-search': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => { toggleLogSearch(true); document.getElementById('logSearch').value = 'discord'; renderLogs(); }); await settle(p); },
   'logs-warn': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => setLogLevel('warn')); await settle(p); },
   'qr-node':  async p => { await tab(p, 'nodes'); await p.evaluate(() => showNodeQr('src1', sourcesData.src1.nodes[0].id)); await settle(p); },
-  'speed-test': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => mockPing(x) >= 0); openSpeedTest('src1', n.id); }); await p.waitForTimeout(4200); },
+  'speed-test': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => truthOf(x) >= 0); openSpeedTest('src1', n.id); }); await p.waitForTimeout(3000); },
+  'speed-done': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => truthOf(x) >= 0); openSpeedTest('src1', n.id); }); await p.waitForFunction(() => speedRun && speedRun.p.final); await p.waitForTimeout(600); },
+  'speed-fail': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => truthOf(x) < 0) || sourcesData.src1.nodes[0]; const m = truthOf; truthOf = x => x.id === n.id ? -1 : m(x); openSpeedTest('src1', n.id); }); await p.waitForTimeout(1900); },
   'qr-sub':   async p => { await tab(p, 'nodes'); await p.evaluate(() => showSourceQr('src1')); await settle(p); },
   'settings-data': async p => { await tab(p, 'settings'); await p.evaluate(() => openDataSettings()); await settle(p); },
   'restore-confirm': async p => { await tab(p, 'settings'); await p.evaluate(() => { openDataSettings(); confirmRestore(liveSnapshot(), '2026-09-20T18:30:00Z', 'jormungand-backup-2026-09-20.json'); }); await settle(p); },
@@ -814,13 +816,26 @@ async function runChecks() {
   });
 
   await check('speed test: the node ⋮ runs it — latency, download, upload fill in, then Done; closing the sheet stops it', async () => {
-    const nid = await page.evaluate(() => sourcesData.src1.nodes.find(x => mockPing(x) >= 0).id);
+    const nid = await page.evaluate(() => sourcesData.src1.nodes.find(x => truthOf(x) >= 0).id);
     await page.evaluate(n => openNodeActions('src1', n), nid);
     expect(await page.evaluate(() => /Speed test/.test(document.getElementById('actions-body').textContent)), 'no Speed test row in the node menu');
     await page.evaluate(n => { closeSheet('actions'); openSpeedTest('src1', n); }, nid);
     await page.waitForFunction(() => /Done/.test((document.querySelector('#speed-card .speed-status') || {}).textContent || ''), null, { timeout: 12000 });
-    const vals = await page.evaluate(() => [...document.querySelectorAll('#speed-card .speed-val')].map(e => e.textContent));
-    expect(vals.slice(0, 3).every(v => /^\d/.test(v)), 'numbers missing: ' + vals.join(' | '));
+    const vals = await page.evaluate(() => [...document.querySelectorAll('#speed-card .speed-big, #speed-card .speed-stat b')].map(e => e.textContent));
+    expect(vals.every(v => /^\d/.test(v)), 'numbers missing: ' + vals.join(' | '));
+    expect(/Run again/.test(await page.textContent('#speed-card .speed-btn')), 'no Run again when done');
+    // Run again restarts in place; Stop keeps the numbers so far and offers Run again
+    await page.click('#speed-card .speed-btn');
+    await page.waitForTimeout(1200);
+    expect(/Stop/.test(await page.textContent('#speed-card .speed-btn')), 'no Stop while running');
+    await page.click('#speed-card .speed-btn');
+    const stopped = await page.evaluate(() => [document.querySelector('#speed-card .speed-status-text').textContent, document.querySelector('#speed-card .speed-btn').textContent]);
+    expect(stopped[0] === 'Stopped' && /Run again/.test(stopped[1]), 'stop: ' + stopped.join(' | '));
+    // a Go error shows in plain words, the raw text under it
+    await page.evaluate(n => { const m = truthOf; truthOf = x => x.id === n ? -1 : m(x); openSpeedTest('src1', n); truthOf = m; }, nid);
+    await page.waitForFunction(() => document.querySelector('#speed-card.failed'), null, { timeout: 4000 });
+    const err = await page.textContent('#speed-card .speed-err');
+    expect(/did not answer in time/.test(err) && /TLS handshake timeout/.test(err), 'error text: ' + err);
     // a second run closed early must not keep drawing
     await page.evaluate(n => openSpeedTest('src1', n), nid);
     await page.evaluate(() => closeSheet('actions'));

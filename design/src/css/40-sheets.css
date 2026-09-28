@@ -308,5 +308,5 @@
 .conn-body .node-row{cursor:pointer}
 .conn-body .node-row.pinned{background:rgba(var(--warn-rgb),.12);box-shadow:inset 3px 0 0 var(--warn)}
 .conn-hint{margin-bottom:8px}
-.conn-body .se-nodes{margin:0}
+.conn-body .se-nodes{margin:0;background:none;border:0;border-radius:0}   /* the row is the frame */
 .conn-acts{margin-left:auto;display:flex;align-items:center}

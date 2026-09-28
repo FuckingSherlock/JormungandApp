@@ -79,21 +79,20 @@ let backend = {
   },
   // Speed Test through one server: onProgress({phase 0 latency / 1 download / 2 upload / 3 done,
   // down, up (bit/s), latency (ms), downRpm, final, error?}) as it goes; stops on signal.
+  // sing-box's network quality test: latency, then download and upload at once (the steps
+  // interleave phase 1 / 2), phase 3 + final at the end (core: runtime.dart speedTest).
   speedTest(n, onProgress, signal) {
-    const ms = mockPing(n), down = 40e6 + Math.random() * 80e6, up = down * (0.25 + Math.random() * 0.2);
-    const steps = [];
-    for (let i = 1; i <= 4; i++) steps.push({ phase: 0, latency: ms > 0 ? Math.round(ms * (1.3 - i * .075)) : 0 });
-    for (let i = 1; i <= 10; i++) steps.push({ phase: 1, down: down * Math.min(1, i / 7) });
-    for (let i = 1; i <= 8; i++) steps.push({ phase: 2, up: up * Math.min(1, i / 6) });
-    let p = { phase: 0, down: 0, up: 0, latency: 0, downRpm: 0 };
+    const ms = truthOf(n), down = 40e6 + Math.random() * 80e6, up = down * (0.25 + Math.random() * 0.2);
+    let p = { phase: 0, down: 0, up: 0, latency: 0, downRpm: 0, elapsed: 0 };
+    const step = async s => { await wait(250); if (signal.aborted) throw new DOMException('stopped', 'AbortError'); onProgress(p = { ...p, ...s, elapsed: p.elapsed + 1000 }); };
     return (async () => {
-      if (ms < 0) { await wait(1500); if (!signal.aborted) onProgress({ ...p, final: true, error: 'The server does not answer' }); return; }
-      for (const s of steps) {
-        await wait(250);
-        if (signal.aborted) return;
-        onProgress(p = { ...p, ...s });
+      if (ms < 0) { await wait(1500); if (!signal.aborted) onProgress({ ...p, elapsed: 5000, final: true, error: 'fetch config: Get "https://mensura.cdn-apple.com/api/v1/gm/config": net/http: TLS handshake timeout' }); return; }
+      for (let i = 1; i <= 3; i++) await step({ latency: Math.round(ms * (1.3 - i * .1)) });
+      for (let i = 1; i <= 16; i++) {
+        const f = Math.min(1, i / 9) * (0.92 + Math.random() * 0.12);
+        await step(i % 2 ? { phase: 1, down: down * f, downRpm: i > 4 ? Math.round(60000 / Math.max(ms, 20) * .4) : 0 } : { phase: 2, up: up * f });
       }
-      onProgress({ ...p, phase: 3, downRpm: Math.round(60000 / Math.max(p.latency, 20) * 4), final: true });
+      onProgress({ ...p, phase: 3, final: true });
     })();
   },
   // A server's share link (vless://…), null when it has none (core: share.dart).
