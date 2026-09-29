@@ -87,7 +87,9 @@ Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add 
 there for each new interaction.
 
 Core: in `core/`, `dart analyze` + `dart test` (the sing-box tests run on loopback only).
-Live UI: `dart run bin/jormd.dart` → http://127.0.0.1:7788 (launch config `jormd`).
+Live UI: `dart run bin/jormd.dart` → http://127.0.0.1:7788 (launch config `jormd`). After core changes
+restart the dev jormd yourself (standing permission): stop the old `dart … jormd.dart` process, then
+preview_start `jormd`.
 Running, fixing and extending tests is the `tests` subagent's job (`.claude/agents/tests.md`).
 On Windows a sing-box started by a test outlives a killed / timed-out test process. After such
 a run (and before finishing), kill the orphans: ours only (path in this repo), parent gone —
