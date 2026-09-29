@@ -15,6 +15,7 @@ class _FakeSys extends SystemProxy {
       : _on = on,
         super(File('never-written'));
   final calls = <String>[];
+  final ports = <int>[]; // what enable was asked to point at
   bool _on;
 
   @override
@@ -23,6 +24,7 @@ class _FakeSys extends SystemProxy {
   @override
   Future<String?> enable(int port) async {
     calls.add('enable');
+    ports.add(port);
     _on = true;
     return null;
   }
@@ -39,6 +41,7 @@ class _FakeBox extends SingBoxProcess {
   _FakeBox() : super('none', 'none');
   bool up = false;
   int starts = 0, failStarts = 0;
+  Map<String, dynamic>? config; // the last one asked for
 
   @override
   bool get running => up;
@@ -49,6 +52,7 @@ class _FakeBox extends SingBoxProcess {
   @override
   Future<void> start(Map<String, dynamic> config) async {
     starts++;
+    this.config = config;
     if (failStarts > 0) {
       failStarts--;
       throw SingBoxError('boom');
@@ -181,6 +185,7 @@ class _Rig {
     bool killWhileClosed = false,
     String downProxy = 'remove',
     bool sysProxy = true,
+    Map<String, String>? auth, // plan.mixedAuth: the user port has a password
   }) =>
       call('/api/connect', {
         'plan': {
@@ -201,6 +206,7 @@ class _Rig {
             },
           ],
           'mixedPort': 2080,
+          'mixedAuth': ?auth,
           'global': true,
           'urlTest': {'url': 'http://127.0.0.1:1/'},
         },
@@ -687,6 +693,111 @@ void main() {
       } finally {
         await r.close();
       }
+    });
+  });
+
+  // A password on the user port (plan.mixedAuth): the system proxy cannot send it, so it points at
+  // sys-in, an open loopback inbound on a port picked once and kept (docs/core.md → Inbounds).
+  group('password on the user port', () {
+    const auth = {'user': 'jorm', 'pass': 's3cret'};
+    List<Map> inbounds(_Rig r) => ((r.box.config!['inbounds']) as List).cast<Map>();
+    Map? sysIn(_Rig r) => inbounds(r).where((i) => i['tag'] == 'sys-in').firstOrNull;
+    Map mixedIn(_Rig r) => inbounds(r).firstWhere((i) => i['tag'] == 'mixed-in');
+
+    test('off: one inbound, the system proxy points at the user port', () async {
+      final r = await _Rig.start();
+      try {
+        final s = await r.connect();
+        expect(mixedIn(r).containsKey('users'), isFalse);
+        expect(sysIn(r), isNull);
+        expect(r.sys.ports, [2080]);
+        expect(s['sysPort'], isNull);
+      } finally {
+        await r.close();
+      }
+    });
+
+    test('on: users on mixed-in, an open sys-in, the system proxy and status point at it', () async {
+      final r = await _Rig.start();
+      try {
+        final s = await r.connect(auth: auth);
+        expect(mixedIn(r)['users'], [
+          {'username': 'jorm', 'password': 's3cret'},
+        ]);
+        final sys = sysIn(r)!;
+        expect(sys.containsKey('users'), isFalse);
+        expect(sys['listen'], '127.0.0.1');
+        final port = sys['listen_port'] as int;
+        expect(port, isNot(2080));
+        expect(r.sys.ports, [port]);
+        expect(s['sysPort'], port);
+        expect(jsonDecode(File(p.join(r.tmp.path, 'data', 'sys-in.json')).readAsStringSync()), {'port': port});
+        // the daemon's own requests go through tunnel-in, never the user port
+        expect(inbounds(r).any((i) => i['tag'] == 'tunnel-in' && !i.containsKey('users')), isTrue);
+      } finally {
+        await r.close();
+      }
+    });
+
+    test('on, system proxy off: no sys-in', () async {
+      final r = await _Rig.start();
+      try {
+        final s = await r.connect(auth: auth, sysProxy: false);
+        expect(sysIn(r), isNull);
+        expect(mixedIn(r).containsKey('users'), isTrue);
+        expect(r.sys.ports, isEmpty);
+        expect(s['sysPort'], isNull);
+      } finally {
+        await r.close();
+      }
+    });
+
+    test('the same port after a crash restart, a reconnect and a new jormd; a busy one is replaced', () async {
+      final tmp = await Directory.systemTemp.createTemp('jorm-kill');
+      final r = await _Rig.start(dir: tmp);
+      int? port;
+      try {
+        await r.connect(auth: auth, killSwitch: true, killWhileClosed: true);
+        port = sysIn(r)!['listen_port'] as int;
+        r.box.crash(9);
+        await r.untilStatus((s) => s['recovering'] != null, 'recovering');
+        await r.timers.tick();
+        await r.untilStatus((s) => s['recovering'] == null && s['restarts'] == 1, 'restarted');
+        expect(sysIn(r)!['listen_port'], port, reason: 'a proxy the kill switch holds must still hit it');
+        await r.connect(auth: auth);
+        expect(sysIn(r)!['listen_port'], port, reason: 'a reconnect keeps it too (our own sing-box holds it)');
+        expect(r.sys.ports.every((x) => x == port), isTrue, reason: '${r.sys.ports}');
+        await r.daemon.shutdown();
+        await r.api.close(force: true);
+
+        final r2 = await _Rig.start(dir: tmp, timers: r.timers);
+        try {
+          await r2.connect(auth: auth);
+          expect(sysIn(r2)!['listen_port'], port, reason: 'kept on disk across runs');
+          await r2.daemon.shutdown(); // sing-box is "down"
+          // someone else holds it now
+          final squatter = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+          try {
+            await r2.connect(auth: auth);
+            final next = sysIn(r2)!['listen_port'] as int;
+            expect(next, isNot(port));
+            expect(r2.sys.ports.last, next);
+            expect(jsonDecode(File(p.join(tmp.path, 'data', 'sys-in.json')).readAsStringSync()), {'port': next});
+          } finally {
+            await squatter.close();
+          }
+        } finally {
+          await r2.close();
+        }
+      } finally {
+        if (tmp.existsSync()) await tmp.delete(recursive: true);
+      }
+    });
+
+    test('an empty password is an error, not an open port', () {
+      expect(() => buildConfig({'mixedAuth': {'user': 'a', 'pass': ''}}), throwsArgumentError);
+      expect(() => mixedAuthUser({'mixedAuth': {'user': 'a:b', 'pass': 'x'}}), throwsArgumentError);
+      expect(mixedAuthUser({}), isNull);
     });
   });
 }

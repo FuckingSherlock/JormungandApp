@@ -26,7 +26,7 @@ String userAgentFor(String chip) => switch (chip) {
       _ => chip,
     };
 
-/// "Download via" of the subscription form. Proxy = the running tunnel's mixed port; with
+/// "Download via" of the subscription form. Proxy = the running tunnel's own inbound (tunnel-in, no password); with
 /// no tunnel up every choice goes direct.
 enum Channel {
   directFirst,
@@ -206,7 +206,7 @@ Future<_Resp> _get(
 /// [headers] go with every request (the HWID set, see device.dart). [filter] (a regex on
 /// the server name, flag included) keeps only the matching servers; it is part of a
 /// cached answer, so a changed filter reads the subscription in full. [channel] with
-/// [proxyPort] (the running tunnel's mixed port, null when not connected) says how to
+/// [proxyPort] (the running tunnel's tunnel-in port, null when not connected) says how to
 /// reach the provider; a "first" channel tries the other way when the first one fails.
 Future<SubscriptionResult> fetchSubscription(
   String url, {

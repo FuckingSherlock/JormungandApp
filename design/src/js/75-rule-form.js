@@ -6,6 +6,9 @@
    If unavailable (with a target): Default / Main / Block / Direct when the target is off,
    empty or deleted (docs/rules.md §0).
    DNS: Auto (first ticked server with the matching route) or a server from Settings → DNS.
+   IP block (only with an IP / GeoIP / local-networks condition): "IP conditions only in TUN"
+   (rule.ipTunOnly: the core adds no `resolve` for this rule), the state of Settings → DNS →
+   Resolve for IP rules and a link there.
    JSON: the sing-box route rule. Groups map to one flat rule; a negated group, or Domains
    together with IP (sing-box ORs those in one rule), turns it into {type: logical, mode: and}.
    geosite / geoip stay names here: the core swaps them for its downloaded rule sets. Keys the
@@ -40,7 +43,7 @@ function renderRuleForm() {
   if (rfTab === 'json') {
     el.innerHTML = `<div class="form-group"><textarea class="form-input code-area tall" id="rf-json" spellcheck="false" oninput="rfCheckJson()">${esc(JSON.stringify(ruleJson(ruleDraft), null, 2))}</textarea>
       <div class="set-hint warn" id="rf-json-err"></div>
-      <div class="set-hint">The sing-box route rule. Name, If unavailable and DNS live in the form.</div></div>`;
+      <div class="set-hint">The sing-box route rule. Name, If unavailable, DNS and "IP conditions only in TUN" live in the form.</div></div>`;
     return;
   }
   const d = ruleDraft;
@@ -58,6 +61,7 @@ function renderRuleForm() {
     ${plaque}
     ${d.composite ? '' : `<div class="rf-label">If<span class="rules-note">values in a field: any · groups: all</span></div>`}
     ${groups}${addRow}
+    ${ruleHasIpCondition(d) ? rfIpBlockHtml(d) : ''}
     <div class="rf-label">Then</div>
     <div class="rf-then">
       <div class="seg3 wide">${acts.map(([v, l]) => `<button class="${d.action === v ? 'on ' + v : ''}" onclick="ruleDraft.action='${v}';renderRuleForm()">${l}</button>`).join('')}</div>
@@ -71,6 +75,33 @@ function renderRuleForm() {
       </div>
     </div>`;
 }
+
+// Does the rule match on the destination IP: IP / CIDR, local networks, GeoIP. A JSON (composite) rule: any of
+// those keys anywhere inside. Own rule sets are not looked into (an .srs does not say what it holds).
+function ruleHasIpCondition(d) {
+  const inJson = o => Array.isArray(o) ? o.some(inJson) : o && typeof o === 'object'
+    && Object.entries(o).some(([k, v]) => k === 'ip_cidr' || k === 'ip_is_private' || k === 'geoip' || (k === 'rule_set' && [].concat(v).some(t => /^geoip-/.test(t))) || inJson(v));
+  if (d.composite) return inJson(d.composite);
+  const g = d.groups.ip;
+  return !!g && (!!g.flag || (g.v.ip_cidr || []).length > 0 || (g.v.geoip || []).length > 0);
+}
+// Shown only for a rule with an IP condition. Through the proxy port a site arrives as a name: IP conditions
+// see it only when the core resolves first (Settings → DNS → Resolve for IP rules) unless the rule opts out.
+function rfIpBlockHtml(d) {
+  const on = !!d.ipTunOnly, off = dnsResolveEff() === 'off';
+  return `<div class="rf-ip" data-key="ipTunOnly">
+    <div class="rf-ip-row" onclick="ruleDraft.ipTunOnly=!ruleDraft.ipTunOnly;renderRuleForm()"><div class="sub-checkbox ${on ? 'checked' : ''}"></div><div class="rf-flabel">IP conditions only in TUN</div></div>
+    <div class="set-hint">${on ? 'This rule never makes the core resolve a name: through the proxy port it matches only when the address is already known. '
+      : 'Through the proxy port an app sends a site name, so IP conditions match only if names are resolved first. '}Resolve for IP rules is <b>${esc(dnsResolveText())}</b>${off && !on ? ': the rule works in TUN only' : ''}.</div>
+    <button class="am-link rf-ip-link" onclick="rfOpenDnsResolve()">Open DNS settings ›</button></div>`;
+}
+// The DNS sheet is a level below the form: the form closes to make room and Back reopens it as it was
+// (the draft is kept; its state text is refreshed when the DNS sheet closes).
+function rfOpenDnsResolve() {
+  closeSheet('ruleform');
+  openDnsSettings('dnsResolve');
+}
+sheetCloseHooks.setdns = () => setTimeout(() => { if (sheetStack.some(s => s.name === 'ruleform')) renderRuleForm(); }, 0);
 
 function rfGroupHtml(g, d) {
   const any = (g.fields || []).some(([f]) => (d.v[f] || []).length);
@@ -237,7 +268,7 @@ function rfApplyJson() {
   if (rfTab !== 'json') return true;
   if (!rfCheckJson()) { toast('Fix the JSON first'); return false; }
   const r = ruleFromJson(JSON.parse(document.getElementById('rf-json').value));
-  ['id', 'name', 'enabled', 'fallback', 'dns'].forEach(k => r[k] = ruleDraft[k]);
+  ['id', 'name', 'enabled', 'fallback', 'dns', 'ipTunOnly'].forEach(k => r[k] = ruleDraft[k]);
   ruleDraft = r;
   return true;
 }
@@ -254,6 +285,7 @@ function saveRuleForm() {
     if (!Object.keys(d.groups).length) { toast('Add at least one condition'); renderRuleForm(); return; }
   }
   if (!(d.action === 'proxy' && d.target)) d.fallback = 'default';
+  if (!ruleHasIpCondition(d) || !d.ipTunOnly) delete d.ipTunOnly;
   if (ruleEditing) rulesData[ruleEditing] = Object.assign(d, { id: ruleEditing });
   else { d.id = 'r' + (ruleSeq++); rulesData[d.id] = d; ruleOrder.push(d.id); }
   closeSheet('ruleform');

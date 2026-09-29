@@ -35,6 +35,7 @@ function routingPlan() {
       o.composite = match;
     }
     if (r.extra && Object.keys(r.extra).length) o.extra = r.extra;
+    if (r.ipTunOnly) o.ipTunOnly = true;   // no `resolve` for its IP conditions
     return o;
   });
   // an app: the top-level fields are all its traffic (TCP when split), udp the other half
@@ -55,6 +56,7 @@ function routingPlan() {
     targets: Object.fromEntries([...named].map(t => [t, routingTarget(t)])),
     ruleSets: ruleSets.filter(s => !s.builtin).map(s => ({ name: s.name, url: s.url, format: s.format, via: s.via, every: s.every })),
     geo: { geosite: geo('geosite'), geoip: geo('geoip') },
-    dns: { servers: dnsOrder.map(id => dnsServers[id]).map(s => ({ id: s.id, addr: s.addr, via: s.via, on: s.on })) },
+    dns: { servers: dnsOrder.map(id => dnsServers[id]).map(s => ({ id: s.id, addr: s.addr, via: s.via, on: s.on })),
+      resolve: dnsCfg.resolve },   // 'auto' | 'off' | a server id: the `resolve` step before IP rules
   };
 }

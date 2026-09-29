@@ -468,6 +468,66 @@ void main() {
       expect(_rules(c)[1]['outbound'], 'direct@dns-ya');
       expect(_out(c, 'direct@dns-ya'), {'type': 'direct', 'tag': 'direct@dns-ya', 'domain_resolver': 'dns-ya'});
     });
+
+    group('resolve before IP rules', () {
+      final ipRule = _rule({'ip': _g({'ip_cidr': ['10.0.0.0/8']})}, action: 'direct');
+      Map<String, dynamic> ipRuleFlagged(String id, {bool tunOnly = false}) => {
+            ..._rule({'ip': _g({'ip_cidr': ['10.0.0.0/8']})}, action: 'direct', id: id),
+            if (tunOnly) 'ipTunOnly': true,
+          };
+      final domainRule = _rule({'domain': _g({'domain_suffix': ['a.com']})}, id: 'rd');
+      List<Map> run(Map<String, dynamic> dns, List<Map<String, dynamic>> rules, [List<String>? w]) =>
+          _rules(buildConfig(_plan({'dns': dns, 'rules': rules}), warnings: w));
+      Map<String, dynamic> withResolve(Object? resolve, [List<Map>? servers]) => {'servers': servers ?? _defaultDns['servers'], 'resolve': ?resolve};
+
+      test('default (auto): the first ticked server via VPN, named explicitly, before the first IP rule only', () {
+        for (final dns in [_defaultDns, withResolve('auto')]) {
+          final rules = run(dns, [domainRule, ipRule, ipRuleFlagged('r3')]);
+          expect(rules.map((r) => r['action']), ['route', 'resolve', 'route', 'route']);
+          expect(rules[1], {'action': 'resolve', 'server': 'dns-remote'});
+        }
+      });
+
+      test('off: no resolve step, the IP rule stays', () {
+        final rules = run(withResolve('off'), [ipRule]);
+        expect(rules.map((r) => r['action']), ['route']);
+        expect(rules.single['ip_cidr'], ['10.0.0.0/8']);
+      });
+
+      test('a named server (even a direct one); deleted or unticked = auto again', () {
+        expect(run(withResolve('local'), [ipRule]).first, {'action': 'resolve', 'server': 'dns-local'});
+        expect(run(withResolve('google'), [ipRule]).first, {'action': 'resolve', 'server': 'dns-remote'}, reason: 'google is unticked');
+        expect(run(withResolve('gone'), [ipRule]).first, {'action': 'resolve', 'server': 'dns-remote'});
+      });
+
+      test('auto with no server via VPN: plain resolve and a warning', () {
+        final w = <String>[];
+        final rules = run(withResolve('auto', [{'id': 'local', 'addr': 'system', 'via': 'direct', 'on': true}]), [ipRule], w);
+        expect(rules.first, {'action': 'resolve'});
+        expect(w.single, contains('no DNS server via VPN'));
+      });
+
+      test('TUN-only rules do not force resolve: it goes before the first IP rule that is not', () {
+        final rules = run(_defaultDns, [ipRuleFlagged('a', tunOnly: true), domainRule, ipRuleFlagged('b'), ipRuleFlagged('c')]);
+        expect(rules.map((r) => r['action']), ['route', 'route', 'resolve', 'route', 'route']);
+        expect(rules[0].containsKey('ip_cidr'), isTrue);
+        expect(run(_defaultDns, [ipRuleFlagged('a', tunOnly: true), ipRuleFlagged('b', tunOnly: true)]).map((r) => r['action']), ['route', 'route'],
+            reason: 'nothing needs a resolve');
+      });
+
+      test('geoip rule sets and JSON (composite) rules count as IP conditions; quick rules never resolve', () {
+        final composite = {
+          ..._rule({}, id: 'rc'),
+          'composite': {'type': 'logical', 'mode': 'or', 'rules': [{'ip_cidr': ['1.1.1.1/32']}, {'domain_keyword': ['x']}]},
+        };
+        expect(run(_defaultDns, [composite]).first, {'action': 'resolve', 'server': 'dns-remote'});
+        expect(run(_defaultDns, [{...composite, 'ipTunOnly': true}]).map((r) => r['action']), ['route']);
+        final geo = buildConfig(_plan({'dns': _defaultDns, 'rules': [_rule({'ip': _g({'geoip': ['ru']})}, action: 'direct')]}), ruleSetFiles: {'geoip-ru': '/l/ru.srs'});
+        expect(_rules(geo).first, {'action': 'resolve', 'server': 'dns-remote'});
+        final q = buildConfig(_plan({'dns': _defaultDns, 'quick': {'region': 'RU', 'final': 'proxy'}}), ruleSetFiles: {'geoip-ru': '/l/ru.srs', 'geosite-category-ru': '/l/s.srs', 'geosite-ru-available-only-inside': '/l/s.srs'});
+        expect(_rules(q).where((r) => r['action'] == 'resolve'), isEmpty);
+      });
+    });
   });
 
   group('sing-box', () {

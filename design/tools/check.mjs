@@ -118,6 +118,8 @@ const SHOTS = {
   'rules-more': async p => { await p.evaluate(() => { openRules(); document.getElementById('rules-body').scrollTop = 9999; }); await settle(p); },
   'rule-form': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); }); await settle(p); },
   'rule-new':  async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddGroup('ip'); rfAddValues('domain', 'domain_suffix', 'youtube.com, bad domain', false); }); await settle(p); },
+  // a rule with an IP condition: the "IP conditions only in TUN" block, the state of Resolve for IP rules, the link
+  'rule-ip-resolve': async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddGroup('ip'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8, 192.168.0.0/16', false); document.querySelector('.rf-ip').scrollIntoView({ block: 'end' }); }); await settle(p); },
   'rule-json': async p => { await p.evaluate(() => { openRules(); openRuleForm('r4'); setRfTab('json'); }); await settle(p); },
   'rule-test': async p => { await p.evaluate(() => { openRules(); openRuleTest(); document.getElementById('rt-input').value = 'discord.com'; runRuleTest(); }); await settle(p); },
   'rule-order': async p => { await p.evaluate(() => { openRules(); openRuleOrder(); }); await settle(p); },
@@ -127,11 +129,15 @@ const SHOTS = {
   'app-act':  async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.target = 'src:src1'; appDraft.fallback = 'block'; renderAppAct(); }); await settle(p); },
   'app-split': async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.split = true; appDraft.act = 'proxy'; appDraft.target = 'src:src1'; appDraft.fallback = 'block'; appDraft.udp.act = 'block'; renderAppAct(); }); await settle(p); },
   'settings-dns': async p => { await p.evaluate(() => openDnsSettings()); await settle(p); },
+  // Resolve for IP rules on a direct server (the leak warning), scrolled to and flashed as the rule form's link does
+  'dns-resolve': async p => { await p.evaluate(() => { dnsCfg.resolve = 'local'; openDnsSettings('dnsResolve'); }); await settle(p); },
   // one server fails its checks, the next one is in use (the mock: from the pings)
   'dns-failover': async p => { await p.evaluate(async () => { openDnsSettings(); await wait(1200); dnsPing.remote = -1; dnsPing.local = 12; dnsPing.google = 30; renderDns(); }); await settle(p); },
   'dns-form': async p => { await p.evaluate(() => { openDnsSettings(); openDnsForm(); }); await settle(p); },
   'settings-conn': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setconn'); }); await settle(p); },
   'kill-off-confirm': async p => { await p.evaluate(() => { connCfg.killSwitch = true; connected = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); toggleKillSwitch(); }); await settle(p); },
+  // password on the proxy port: a login and password shown, copy buttons (fixed values: the shot must not change)
+  'conn-proxy-auth': async p => { await p.evaluate(() => { connCfg.sysProxy = true; connCfg.proxyAuth = true; connCfg.proxyUser = 'k7m2xq9d'; connCfg.proxyPass = 'Kq7mT2vXp9Rd4WzN8sYb'; switchTab('settings'); openSheet('setconn'); renderConnSettings(); }); await settle(p); },
   'kill-on': async p => { await p.evaluate(() => { connCfg.killSwitch = true; connCfg.killOnDisconnect = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); }); await settle(p); },
   'core-down-kept': async p => { await p.evaluate(() => { connected = true; vpn.down = { since: Date.now() - 83e3, attempt: 4, proxy: 'kept' }; renderConnState(); }); await settle(p); },
   'core-down-direct': async p => { await p.evaluate(() => { connected = true; vpn.down = { since: Date.now() - 250e3, attempt: 9, proxy: 'removed' }; renderConnState(); }); await settle(p); },
@@ -580,6 +586,55 @@ async function runChecks() {
         shown: document.getElementById('conn-port').value === '10808' };
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  await check('settings: password on the proxy port — off by default, generated when on, own login / password into the plan, copy strings, New password, validation', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      window.__copied = null;
+      Object.defineProperty(navigator, 'clipboard', { configurable: true,
+        value: { writeText: t => { window.__copied = t; return Promise.resolve(); }, readText: () => Promise.resolve('') } });
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = { type: 'socks', server: '127.0.0.1', server_port: 1 }; n.unsupported = false; }));
+      switchTab('settings'); openSheet('setconn');
+      const $ = id => document.getElementById(id), text = () => $('conn-settings').textContent, toast = () => $('toast').textContent;
+      const set = (id, v) => { $(id).value = v; $(id).dispatchEvent(new Event('change')); };
+      const out = {};
+      const sigOff = planSig();
+      out.off = connCfg.proxyAuth === false && !$('conn-user') && livePlan().mixedAuth === undefined && /any program on this PC/i.test(text());
+      document.querySelector('[data-key=proxyAuth] .mini-toggle').click();
+      out.generated = connCfg.proxyAuth && /^[a-z0-9]{8}$/.test(connCfg.proxyUser) && connCfg.proxyPass.length === 20
+        && $('conn-user').value === connCfg.proxyUser && $('conn-pass').value === connCfg.proxyPass;
+      out.planOn = JSON.stringify(livePlan().mixedAuth) === JSON.stringify({ user: connCfg.proxyUser, pass: connCfg.proxyPass }) && planSig() !== sigOff;
+      // the user's own
+      set('conn-user', 'alice'); set('conn-pass', 'S3cret&pass');
+      out.own = JSON.stringify(livePlan().mixedAuth) === JSON.stringify({ user: 'alice', pass: 'S3cret&pass' }) && $('conn-user').value === 'alice' && $('conn-pass').value === 'S3cret&pass';
+      $('conn-copy-socks').click();
+      out.socks = window.__copied === 'socks5://alice:S3cret%26pass@127.0.0.1:' + connCfg.port;
+      $('conn-copy-http').click();
+      out.http = window.__copied === 'http://alice:S3cret%26pass@127.0.0.1:' + connCfg.port;
+      out.shown = $('conn-auth-url').textContent === 'socks5://alice:S3cret%26pass@127.0.0.1:' + connCfg.port;
+      // New password: another one, the login stays
+      const old = connCfg.proxyPass;
+      $('conn-newpass').click();
+      out.fresh = connCfg.proxyPass !== old && connCfg.proxyPass.length === 20 && connCfg.proxyUser === 'alice' && $('conn-pass').value === connCfg.proxyPass;
+      // validation: the old values stay, a toast says why
+      const keep = { u: connCfg.proxyUser, p: connCfg.proxyPass }, bad = [];
+      [['conn-user', '', /empty/], ['conn-user', 'a:b', /:/], ['conn-user', 'a b', /spaces/], ['conn-user', 'x'.repeat(65), /too long/],
+        ['conn-pass', '', /empty/], ['conn-pass', 'abc', /too short/], ['conn-pass', 'has space', /spaces/], ['conn-pass', 'x'.repeat(129), /too long/]]
+        .forEach(([id, v, why]) => {
+          $('toast').textContent = '';
+          set(id, v);
+          if (connCfg.proxyUser !== keep.u || connCfg.proxyPass !== keep.p || !why.test(toast()) || $(id).value !== (id === 'conn-user' ? keep.u : keep.p)) bad.push(id + '=' + v.slice(0, 6));
+        });
+      out.validation = !bad.length;
+      out.validationWhy = bad.join(',');
+      // off: nothing kept
+      document.querySelector('[data-key=proxyAuth] .mini-toggle').click();
+      out.cleared = !connCfg.proxyAuth && connCfg.proxyUser === '' && connCfg.proxyPass === '' && !$('conn-user') && livePlan().mixedAuth === undefined && planSig() === sigOff;
+      return out;
+    });
+    expect(Object.entries(r).every(([k, v]) => k === 'validationWhy' || v) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
     await p.close();
   });
 
@@ -2938,6 +2993,65 @@ async function runChecks() {
       rulesData[ruleOrder[0]].enabled = !rulesData[ruleOrder[0]].enabled;
       out.ruleEdit = planSig() !== sig;
       coreRoute = null;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  // Resolve for IP rules (docs/rules.md §4, §6): the DNS setting, the rule form's IP block, plan.routing.
+  await check('Resolve for IP rules: default Auto, off / server / unticked server, IP block only with IP conditions, flag saved, link to DNS', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      const out = {};
+      out.def = dnsCfg.resolve === 'auto' && dnsResolveEff() === 'auto' && dnsResolveServer().id === 'remote' && routingPlan().dns.resolve === 'auto';
+      openDnsSettings();
+      const sel = () => document.getElementById('dns-resolve'), warn = () => !!document.querySelector('#dns-settings [data-key=dnsResolve] .set-hint.warn');
+      out.select = [...sel().options].map(o => o.value).join() === 'off,auto,remote,local' && sel().value === 'auto' && !warn();
+      setDnsCfg('resolve', 'off');
+      out.off = sel().value === 'off' && routingPlan().dns.resolve === 'off' && dnsResolveServer() === null && !warn();
+      setDnsCfg('resolve', 'local');
+      out.direct = sel().value === 'local' && routingPlan().dns.resolve === 'local' && warn();
+      toggleDnsOn('local');   // the chosen server is unticked: Auto again (the choice stays for when it comes back)
+      out.unticked = sel().value === 'auto' && dnsResolveEff() === 'auto' && routingPlan().dns.resolve === 'local';
+      toggleDnsOn('local'); setDnsCfg('resolve', 'auto');
+      closeSheet('setdns');
+      // the block: only with an IP condition (IP / CIDR, GeoIP, local networks, JSON)
+      const block = () => !!document.querySelector('#rf-body .rf-ip');
+      openRuleForm('r1');
+      out.noIp = !block();
+      rfAddGroup('ip');
+      out.emptyIp = !block();
+      rfAddValues('ip', 'ip_cidr', '10.0.0.0/8', false);
+      out.shown = block() && /Resolve for IP rules is via Cloudflare/.test(document.querySelector('#rf-body .rf-ip .set-hint').textContent)
+        && !document.querySelector('#rf-body .rf-ip .sub-checkbox').classList.contains('checked');
+      document.querySelector('#rf-body .rf-ip-row').click();
+      out.flagOn = ruleDraft.ipTunOnly === true && /never makes the core resolve/.test(document.querySelector('#rf-body .rf-ip .set-hint').textContent);
+      setRfTab('json'); setRfTab('form');
+      out.jsonKeeps = ruleDraft.ipTunOnly === true && !JSON.stringify(ruleJson(ruleDraft)).includes('ipTunOnly');
+      saveRuleForm();
+      out.saved = rulesData.r1.ipTunOnly === true && routingPlan().rules.find(x => x.id === 'r1').ipTunOnly === true && !('ipTunOnly' in routingPlan().rules.find(x => x.id === 'r2'));
+      openRuleForm('r3'); rfAddGroup('ip'); ruleDraft.groups.ip.flag = true; renderRuleForm();
+      out.localNets = block();
+      ruleDraft.groups.ip.flag = false; rfAddValues('ip', 'geoip', 'ru', false);
+      out.geoip = block();
+      out.json = ruleHasIpCondition({ composite: { type: 'logical', mode: 'or', rules: [{ domain_keyword: ['x'] }, { ip_cidr: ['1.1.1.1/32'] }] }, groups: {} })
+        && !ruleHasIpCondition(rulesData.r4);
+      closeSheet('ruleform');
+      // dropping the IP conditions drops the flag
+      openRuleForm('r1'); rfRemoveGroup('ip'); saveRuleForm();
+      out.dropped = !('ipTunOnly' in rulesData.r1);
+      // the link: the form gives way to Settings → DNS at the setting; Back returns to the form with the new state
+      openRuleForm('r1'); rfAddGroup('ip'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8', false);
+      document.querySelector('#rf-body .rf-ip-link').click();
+      await wait(150);
+      const open = n => document.getElementById('sh-' + n).classList.contains('open');
+      out.link = open('setdns') && !open('ruleform') && sheetStack[sheetStack.length - 1].name === 'setdns' && !!document.querySelector('#dns-settings [data-key=dnsResolve].hit');
+      setDnsCfg('resolve', 'off');
+      goBack();
+      await wait(100);
+      out.back = open('ruleform') && !open('setdns') && /Resolve for IP rules is off/.test(document.querySelector('#rf-body .rf-ip .set-hint').textContent) && ruleDraft.groups.ip.v.ip_cidr[0] === '10.0.0.0/8';
+      closeSheet('ruleform');
       return out;
     });
     expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));

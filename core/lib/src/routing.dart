@@ -9,6 +9,7 @@
 ///              split, udp: { act, target, fallback } }], // split: the fields above = TCP, udp = UDP
 ///   rules:  [{ id, name, action: 'proxy'|'direct'|'block', target, fallback:
 ///              'default'|'main'|'block'|'direct', block: 'drop'|'reject', dns: 'auto'|<dns id>,
+///              ipTunOnly?: true,                 // IP conditions do not force a `resolve`
 ///              groups: { domain|ip|port|source|network|process: { not, v: {field: [..]}, flag } },
 ///              composite?, extra? }],             // enabled ones, in order
 ///   quick:  { ads, region: 'RU'|…|null, services: {key: 'vpn'|'direct'},
@@ -17,7 +18,8 @@
 ///   targets: { '<target>': { kind: 'unit'|'chain', main: Group, entry?: Group } },
 ///   ruleSets: [{ name, url, format: 'srs'|'json', via, every /*s*/ }],   // the user's lists
 ///   geo: { geosite: {via, every}, geoip: {via, every} },  // the built-in lists
-///   dns: { servers: [{ id, addr, via: 'direct'|'vpn', on }] }            // in priority order
+///   dns: { servers: [{ id, addr, via: 'direct'|'vpn', on }],            // in priority order
+///          resolve: 'auto'|'off'|<dns id> }   // `resolve` before IP rules; default 'auto'
 /// }
 /// ```
 /// A target missing from `targets` is unavailable now (off in Nodes, no usable server,
@@ -481,15 +483,37 @@ class _Builder {
           act = p.action;
           direct = p.direct;
       }
-      // IP conditions need the destination's IP: resolve it once, before the first such
-      // rule (through the DNS rules, so a rule's own DNS server is used).
-      if (!resolved && _needsIp(built.match)) {
-        out.rules.add({'action': 'resolve'});
+      // IP conditions need the destination's IP: resolve it once, before the first such rule
+      // that has not asked to see IPs only when known (`ipTunOnly`). Later rules see the
+      // resolved address whatever their flag says (sing-box resolves once).
+      if (!resolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
         resolved = true;
+        final step = _resolveAction();
+        if (step != null) out.rules.add(step);
       }
       out.rules.add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()});
       if (action != 'block') _dnsRule(built.domainAlts, _dnsFor(dns, direct: direct));
     }
+  }
+
+  /// The `resolve` step before the IP rules (Settings → DNS "Resolve for IP rules",
+  /// `dns.resolve`): null = off. `auto` (also a server that is deleted or unticked) = the first
+  /// ticked server via VPN, so the name never goes to the provider's DNS; a server id = that
+  /// one. The server is named explicitly, so the DNS failover (clash modes) and the rules' own
+  /// DNS servers do not apply to this step. No VPN server on: `resolve` without a server
+  /// (the DNS rules and `dns.final` decide), with a warning.
+  Map<String, dynamic>? _resolveAction() {
+    final pick = '${((r['dns'] as Map?) ?? const {})['resolve'] ?? 'auto'}';
+    if (pick == 'off') return null;
+    final named = pick == 'auto' ? null : _dnsOn.where((s) => '${s['id']}' == pick).firstOrNull;
+    final server = named ?? _dnsOn.where(_viaVpn).firstOrNull;
+    if (server == null) {
+      if (_dnsOn.isNotEmpty) {
+        out.warnings.add('Resolve for IP rules: no DNS server via VPN is on, the first one in use resolves and its query may leave outside the tunnel');
+      }
+      return {'action': 'resolve'};
+    }
+    return {'action': 'resolve', 'server': _dnsTag(server)};
   }
 
   bool _needsIp(Object? o) => switch (o) {

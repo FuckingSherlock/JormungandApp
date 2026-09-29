@@ -133,7 +133,8 @@ function livePlan(anchor) {
   return withoutCore(() => {
     const id = anchor || effectiveConnectId(true);
     if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
-    const base = { mixedPort: connCfg.port || 2080, global: segState.route === 'global',
+    // mixedAuth: the port asks for a login; with the system proxy on the core opens a second, open port for it (docs/core.md)
+    const base = { mixedPort: connCfg.port || 2080, mixedAuth: connCfg.proxyAuth ? { user: connCfg.proxyUser, pass: connCfg.proxyPass } : undefined, global: segState.route === 'global',
       urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined }, auto: planAuto(), routing: routingPlan() };
     return Object.assign(base, planRoutes(id));
   });

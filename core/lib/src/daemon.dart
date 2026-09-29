@@ -86,7 +86,7 @@ class Daemon {
   late final updater = SubscriptionUpdater(
     store: store,
     hwid: () => _hwid,
-    proxyPort: () => main.running ? _mixedPort : null,
+    proxyPort: () => _innerPort,
     onEvent: (type, data) => _event('sub', type, type == 'failed' ? 'error' : 'info', data,
         note: type == 'failed'
             ? 'Subscription ${data['name']} not updated: ${data['error']}'
@@ -98,6 +98,10 @@ class Daemon {
   int _pingSeq = 0;
   int _mixedPort = 2080;
   int? _tunnelPort; // tunnel-in: always through the tunnel (exit check, lists via VPN)
+  int? _sysPort; // sys-in: the system proxy's own open inbound; null = it points at the user port
+  // The core's own requests (subscriptions "via proxy") go in through tunnel-in, never the user
+  // port: it may ask for a password.
+  int? get _innerPort => main.running ? _tunnelPort ?? _mixedPort : null;
   Probe? _probe; // probe-in: Auto's latency tests (probe.dart)
   StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto
   int _connectSeq = 0;
@@ -225,8 +229,9 @@ class Daemon {
   /// warning; errors go on to the caller.
   Future<String?> _sysOn({required bool own}) async {
     try {
-      final w = await sysProxy.enable(_mixedPort);
-      _event('core', 'sysProxy', 'info', {'on': true}, own: own, note: 'System proxy on 127.0.0.1:$_mixedPort');
+      final port = _sysPort ?? _mixedPort; // with a password on the user port: the open sys-in
+      final w = await sysProxy.enable(port);
+      _event('core', 'sysProxy', 'info', {'on': true}, own: own, note: 'System proxy on 127.0.0.1:$port');
       return w;
     } catch (e) {
       _event('core', 'sysProxy', 'warn', {'on': true, 'error': '$e'}, own: own, note: 'System proxy not set: $e');
@@ -399,7 +404,7 @@ class Daemon {
         final RuleSetFetch lists;
         final warnings = ['sing-box stopped (exit code $code) and was started again'];
         try {
-          final (l, w) = await _startSingBox(plan); // the same path as a connect
+          final (l, w) = await _startSingBox(plan, sys: _sysWanted); // the same path as a connect
           lists = l;
           warnings.addAll(w);
         } catch (e) {
@@ -639,6 +644,7 @@ class Daemon {
   Future<Map<String, dynamic>> _status() async => {
         'connected': main.running || _recovering != null,
         'systemProxy': sysProxy.isSet,
+        'sysPort': main.running || _recovering != null ? _sysPort : null,
         'error': _error,
         'warning': _warning,
         'exit': _exit,
@@ -698,7 +704,7 @@ class Daemon {
       () async => updateSubscription(
         s,
         hwid: s['hwid'] == true ? await _hwid : null,
-        proxyPort: main.running ? _mixedPort : null,
+        proxyPort: _innerPort,
         rediscover: body['rediscover'] == true,
       ),
     );
@@ -710,15 +716,20 @@ class Daemon {
   /// The one way sing-box is started, by a connect and by a restart after a crash: the
   /// rule lists on disk first (ones via VPN that are missing wait for the tunnel — the
   /// old one, if it still runs), a fresh tunnel-in port, the config. The lists used and
-  /// the config's warnings.
-  Future<(RuleSetFetch, List<String>)> _startSingBox(Map<String, dynamic> plan) async {
+  /// the config's warnings. [sys]: the system proxy is asked for; with a password on the
+  /// user port it needs its own open inbound (`sys-in`, [_sysInPort]).
+  Future<(RuleSetFetch, List<String>)> _startSingBox(Map<String, dynamic> plan, {required bool sys}) async {
     final lists = await ruleSets.ensureFor(plan, proxyPort: main.running ? _tunnelPort : null);
     final warnings = <String>[];
-    final tunnelPort = await freePort();
-    final probe = Probe(await freePort());
+    final mixed = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
+    final tunnelPort = await freePort(exclude: {mixed});
+    final probePort = await freePort(exclude: {mixed, tunnelPort});
+    final sysPort = sys && plan['mixedAuth'] != null ? await _sysInPort({mixed, tunnelPort, probePort}) : null;
+    final probe = Probe(probePort);
     final info = RoutingInfo();
-    await main.start(
-        buildConfig(plan, tunnelPort: tunnelPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings, info: info));
+    await main.start(buildConfig(plan,
+        tunnelPort: tunnelPort, sysPort: sysPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings, info: info));
+    _sysPort = sysPort;
     // what a later sing-box will no longer take in this config
     try {
       for (final w in await main.api!.deprecatedWarnings()) {
@@ -732,6 +743,25 @@ class Daemon {
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     _tunnelPort = tunnelPort;
     return (lists, warnings);
+  }
+
+  /// The loopback port of `sys-in`, the open inbound the system proxy points at while the user
+  /// port has a password. Picked once and kept in `<dataDir>/sys-in.json`: a proxy left in the
+  /// registry (kill switch) must still hit it after a restart of sing-box or of jormd. Reused
+  /// while free (or held by our own running sing-box); a busy one is replaced by a new pick.
+  Future<int> _sysInPort(Set<int> taken) async {
+    final f = File(p.join(dataDir, 'sys-in.json'));
+    int? saved;
+    try {
+      saved = ((jsonDecode(f.readAsStringSync()) as Map)['port'] as num?)?.toInt();
+    } catch (_) {}
+    if (saved != null && !taken.contains(saved) && ((main.running && saved == _sysPort) || await portIsFree(saved))) return saved;
+    final port = await freePort(exclude: taken);
+    try {
+      f.parent.createSync(recursive: true);
+      f.writeAsStringSync(jsonEncode({'port': port}));
+    } catch (_) {} // not kept: the next connect picks again
+    return port;
   }
 
   /// Through the tunnel now: missing lists (then a restart picks them up, on the route
@@ -765,9 +795,10 @@ class Daemon {
       if (seq != _connectSeq) return; // a newer connect / disconnect came in
       try {
         _plan = null;
-        final (lists, warnings) = await _startSingBox(plan);
+        final sys = body['systemProxy'] == true;
+        final (lists, warnings) = await _startSingBox(plan, sys: sys);
         _plan = plan;
-        _sysWanted = body['systemProxy'] == true;
+        _sysWanted = sys;
         _upSince = _now();
         _attempt = 0;
         _startAuto(plan);

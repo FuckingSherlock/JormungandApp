@@ -10,6 +10,11 @@
      and "via": Direct or VPN (the server's detour).
    - Rules with DNS "Auto" use the first ticked server whose "via" matches the rule's
      action: Direct → a direct server, VPN → a server via VPN (see docs/rules.md).
+   - Resolve for IP rules (dnsCfg.resolve: 'auto' | 'off' | a server id): through the proxy port a
+     site arrives as a name, so IP conditions (IP / CIDR, local networks, GeoIP) see nothing unless
+     the core resolves the name first. Auto = the first ticked server via VPN (no leak to the
+     provider's DNS); a server that is unticked or deleted counts as Auto. TUN has the address
+     already. A rule can opt out (rule form: "IP conditions only in TUN").
    - Hijack DNS: every DNS query, even to a hard-coded 8.8.8.8, is sent to the core's DNS.
      TUN only, but switchable any time (a note says when TUN is off).
    - FakeIP: answer with fake addresses (198.18.0.0/15) and route by domain; off by default;
@@ -24,7 +29,7 @@ const dnsServers = {
 let dnsOrder = ['remote', 'local', 'google'];
 let dnsSeq = 1;
 const dnsCfg = {
-  hijack: true, fakeip: false, auto: true,
+  hijack: true, fakeip: false, auto: true, resolve: 'auto',
   fakeipExclude: ['*.sberbank.ru', '*.tinkoff.ru', '*.gosuslugi.ru', '*.steamserver.net', '*.xboxlive.com', 'time.*.com'],
 };
 const dnsPing = {};   // id -> ms | -1 | 'testing'
@@ -64,6 +69,12 @@ function dnsKind(addr) {
 const dnsActive = () => dnsOrder.filter(id => dnsServers[id].on);
 // The server a rule's DNS "Auto" resolves to: first ticked one with the matching route.
 const dnsAutoFor = via => dnsActive().map(id => dnsServers[id]).find(s => s.via === via);
+// "Resolve for IP rules" as it works now: 'off', a ticked server's id, or 'auto'.
+const dnsResolveEff = () => dnsCfg.resolve === 'off' ? 'off' : dnsActive().includes(dnsCfg.resolve) ? dnsCfg.resolve : 'auto';
+// The server that resolves (null = off, or Auto with no server via VPN: the first one in use then).
+const dnsResolveServer = () => { const e = dnsResolveEff(); return e === 'off' ? null : e === 'auto' ? dnsAutoFor('vpn') || null : dnsServers[e]; };
+// For the rule form's hint: 'off' / 'via Cloudflare'.
+const dnsResolveText = () => { const s = dnsResolveServer(); return dnsResolveEff() === 'off' ? 'off' : 'via ' + (s ? s.name : dnsServers[dnsActive()[0]].name); };
 
 async function pingDns(id) {
   const s = dnsServers[id];
@@ -101,11 +112,19 @@ function startDnsDrag(e, id) {
 }
 
 // Opened over the current view from the Home card or the Settings row; servers never pinged get a ping at once.
-function openDnsSettings() {
+// focus = a row's data-key to scroll to and flash (the rule form's link to "Resolve for IP rules").
+function openDnsSettings(focus) {
   openSheet('setdns');
   dnsOrder.filter(id => dnsServers[id].on && dnsPing[id] === undefined).forEach(pingDns);
+  if (typeof focus !== 'string') return;
+  requestAnimationFrame(() => {
+    const row = document.querySelector('#dns-settings [data-key="' + focus + '"]');
+    if (!row) return;
+    row.scrollIntoView({ block: 'center' });
+    row.classList.add('hit');
+    setTimeout(() => row.classList.remove('hit'), 2600);
+  });
 }
-
 function renderDns() {
   const el = document.getElementById('dns-settings');
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
@@ -126,6 +145,13 @@ function renderDns() {
     </div>`;
   }).join('');
   const tunOff = segState.mode !== 'tun';
+  const resolveEff = dnsResolveEff(), autoServer = dnsAutoFor('vpn');
+  const resolveOpts = [['off', 'Off'], ['auto', 'Auto · ' + (autoServer ? autoServer.name : 'no VPN server')],
+    ...dnsActive().map(id => [id, dnsServers[id].name + (dnsServers[id].via === 'vpn' ? '' : ' · Direct')])];
+  const resolveWarn = resolveEff === 'off' ? false : resolveEff === 'auto' ? !autoServer : dnsServers[resolveEff].via !== 'vpn';
+  const resolveHint = resolveEff === 'off' ? 'IP conditions (IP, CIDR, local networks, GeoIP) match a site opened by name only in TUN'
+    : resolveWarn ? 'This query leaves outside the tunnel' + (resolveEff === 'auto' ? ': no DNS server via VPN is on, the first one in use resolves' : ', through a direct server')
+    : 'Sites opened by name are resolved here so IP conditions see the address. System proxy only, TUN has it already';
   el.innerHTML = `
     <div class="am-label">Global DNS<button class="help-btn" onclick="openHelp('dns')" title="What is this?">?</button>
       <button class="am-link" onclick="pingAllDns()">Ping all</button></div>
@@ -135,6 +161,12 @@ function renderDns() {
     <div class="set-group">
       <div class="set-row" data-key="dnsAuto"><div class="set-label" style="flex:1">Switch automatically<div class="set-hint">${dnsCfg.auto ? 'A server that stops answering is replaced by the next one; the higher one takes over again when it recovers' : 'The first server stays in use even when it does not answer'}</div></div>
         ${toggle(dnsCfg.auto, "setDnsCfg('auto',!dnsCfg.auto)")}</div>
+    </div>
+    <div class="am-label">Through the proxy port</div>
+    <div class="set-group">
+      <div class="set-row" data-key="dnsResolve"><div class="set-label" style="flex:1">Resolve for IP rules<div class="set-hint ${resolveWarn ? 'warn' : ''}">${resolveHint}</div></div>
+        <select class="set-select" id="dns-resolve" style="max-width:46%" onchange="setDnsCfg('resolve',this.value)">${resolveOpts.map(([v, l]) =>
+          `<option value="${v}" ${resolveEff === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     </div>
     <div class="am-label">In TUN mode</div>
     <div class="set-group">
@@ -239,6 +271,52 @@ function toggleKillSwitch() {
     + menuRow(ICON.check, 'Turn it off', close + 'connCfg.killSwitch=false;renderConnSettings()')
     + menuRow(ICON.close, 'Keep it on', close));
 }
+/* Password on the proxy port. Off (default): open, any program on this PC can use it. On: a login
+   and password are generated, both editable; the plan sends them as mixedAuth and, with the system
+   proxy on, the core opens a second port without a password for it (Windows cannot send one). */
+const PROXY_LOGIN_MAX = 64, PROXY_PASS_MIN = 4, PROXY_PASS_MAX = 128;
+function randomToken(n, alphabet) {
+  const a = new Uint32Array(n);
+  crypto.getRandomValues(a);
+  return Array.from(a, v => alphabet[v % alphabet.length]).join('');
+}
+const newProxyLogin = () => randomToken(8, 'abcdefghjkmnpqrstuvwxyz23456789');
+const newProxySecret = () => randomToken(20, 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789');
+function toggleProxyAuth() {
+  connCfg.proxyAuth = !connCfg.proxyAuth;
+  // turned on: fresh ones; off: nothing left behind in the snapshot / backups
+  connCfg.proxyUser = connCfg.proxyAuth ? newProxyLogin() : '';
+  connCfg.proxyPass = connCfg.proxyAuth ? newProxySecret() : '';
+  renderConnSettings();
+}
+function newProxyPassword() {
+  connCfg.proxyPass = newProxySecret();
+  renderConnSettings();
+  toast('New password set — programs using the old one need it');
+}
+// null = fine, else the reason
+function proxyCredError(which, v) {
+  if (!v) return (which === 'user' ? 'Login' : 'Password') + ' must not be empty';
+  if (/\s/.test(v)) return (which === 'user' ? 'Login' : 'Password') + ' cannot contain spaces';
+  if (which === 'user') {
+    if (v.includes(':')) return "Login cannot contain ':'";
+    if (v.length > PROXY_LOGIN_MAX) return 'Login is too long (max ' + PROXY_LOGIN_MAX + ')';
+  } else {
+    if (v.length < PROXY_PASS_MIN) return 'Password is too short (min ' + PROXY_PASS_MIN + ')';
+    if (v.length > PROXY_PASS_MAX) return 'Password is too long (max ' + PROXY_PASS_MAX + ')';
+  }
+  return null;
+}
+function setProxyCred(which, input) {
+  const v = input.value, err = proxyCredError(which, v);
+  if (err) toast(err);
+  else connCfg[which === 'user' ? 'proxyUser' : 'proxyPass'] = v;
+  renderConnSettings();
+}
+// what a program is told to use: socks5://login:password@127.0.0.1:port or http://…; the login and password percent-encoded
+const proxyUrl = scheme => scheme + '://' + encodeURIComponent(connCfg.proxyUser) + ':' + encodeURIComponent(connCfg.proxyPass) + '@127.0.0.1:' + connCfg.port;
+const copyProxyUrl = scheme => copyText(proxyUrl(scheme), scheme === 'socks5' ? 'SOCKS5 address' : 'HTTP address');
+
 function renderConnSettings() {
   const closedOk = killClosedOk();
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
@@ -246,8 +324,22 @@ function renderConnSettings() {
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">System proxy<div class="set-hint">Apps that follow the OS proxy setting go through the core. Also on Home</div></div>
         ${toggle(connCfg.sysProxy, 'setSysProxy(!connCfg.sysProxy)')}</div>
-      <div class="set-row"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — the system proxy points here; set it by hand in other apps</div></div>
+      <div class="set-row"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — ${connCfg.proxyAuth ? 'set it by hand in other apps, with the login below' : 'the system proxy points here; set it by hand in other apps'}</div></div>
         <input class="set-input am-num port-num" id="conn-port" inputmode="numeric" value="${connCfg.port}" onchange="setProxyPort(this)"></div>
+      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<div class="set-hint">${connCfg.proxyAuth ? 'The port asks for this login' + (connCfg.sysProxy ? '. The system proxy uses its own port without one: Windows cannot send a password' : '') : 'Off: any program on this PC can use the port'}</div></div>
+        ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
+      ${connCfg.proxyAuth ? `
+      <div class="set-row set-sub" data-key="proxyUser"><div class="set-label" style="flex:0 0 auto">Login</div>
+        <input class="set-input am-num auth-in" id="conn-user" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyUser)}" onchange="setProxyCred('user',this)"></div>
+      <div class="set-row set-sub" data-key="proxyPass"><div class="set-label" style="flex:0 0 auto">Password</div>
+        <input class="set-input am-num auth-in" id="conn-pass" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyPass)}" onchange="setProxyCred('pass',this)"></div>
+      <div class="set-row set-sub stack" data-key="proxyCopy">
+        <div class="chip-row">
+          <div class="chip" id="conn-copy-socks" onclick="copyProxyUrl('socks5')">Copy SOCKS5</div>
+          <div class="chip" id="conn-copy-http" onclick="copyProxyUrl('http')">Copy HTTP</div>
+          <div class="chip" id="conn-newpass" onclick="newProxyPassword()">New password</div>
+        </div>
+        <div class="auth-url" id="conn-auth-url">${esc(proxyUrl('socks5'))}</div></div>` : ''}
       <div class="set-row" data-key="killSwitch"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">Blocks traffic when the VPN is down. Works for apps that use the system proxy; full block needs TUN.</div></div>
         ${toggle(connCfg.killSwitch, 'toggleKillSwitch()')}</div>
       ${connCfg.killSwitch ? `

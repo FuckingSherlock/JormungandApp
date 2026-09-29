@@ -145,20 +145,28 @@ class SingBoxProcess {
 /// not a port 0: Windows hands those out one after another, straight into its reserved
 /// ranges (Hyper-V / WinNAT, blocks of hundreds, TCP and UDP apart). UDP is bound without
 /// SO_REUSEADDR, as sing-box does, so a port another process holds on 0.0.0.0 counts as taken.
-Future<int> freePort() async {
+/// [exclude]: ports not to hand out (ones chosen for this config already).
+Future<int> freePort({Set<int> exclude = const {}}) async {
   for (var i = 0;; i++) {
     final port = 20000 + _ports.nextInt(29000);
-    RawDatagramSocket? u;
-    try {
-      u = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, port, reuseAddress: false);
-      final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
-      await s.close();
-      return port;
-    } on SocketException {
-      if (i >= 200) rethrow;
-    } finally {
-      u?.close();
-    }
+    if (exclude.contains(port)) continue;
+    if (await portIsFree(port, throwOnFail: i >= 200)) return port;
+  }
+}
+
+/// Whether [port] is free on loopback for UDP and TCP (see [freePort]).
+Future<bool> portIsFree(int port, {bool throwOnFail = false}) async {
+  RawDatagramSocket? u;
+  try {
+    u = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, port, reuseAddress: false);
+    final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+    await s.close();
+    return true;
+  } on SocketException {
+    if (throwOnFail) rethrow;
+    return false;
+  } finally {
+    u?.close();
   }
 }
 

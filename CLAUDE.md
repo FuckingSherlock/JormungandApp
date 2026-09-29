@@ -78,8 +78,8 @@ profiles, broken, profiles-full, source-entry, gone, nothing-ticked,
 simple-chain, chain-priority, profile-edit, chain-edit, chain-groups, drag-mid, addmenu,
 srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm,
 nodes-edit, nodes-edit-chain, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
-rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
-rule-sets, apps, app-act, app-split, settings-dns, dns-form, dns-failover, settings-conn, kill-on, kill-off-confirm, core-down-kept, core-down-direct, kill-blocking, core-recovering, settings-notif, text-large, text-large-rule,
+rules, rules-more, rules-services, rule-form, rule-new, rule-ip-resolve, rule-json, rule-test, rule-order, rule-io,
+rule-sets, apps, app-act, app-split, settings-dns, dns-resolve, dns-form, dns-failover, settings-conn, conn-proxy-auth, kill-on, kill-off-confirm, core-down-kept, core-down-direct, kill-blocking, core-recovering, settings-notif, text-large, text-large-rule,
 connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-raw, logs-search, logs-warn, logs-filter, logs-event-open, logs-new-below, nav-dots, toast-fly,
 qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, source-error,
 dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test, speed-done, speed-fail.
@@ -88,8 +88,8 @@ there for each new interaction.
 
 Core: in `core/`, `dart analyze` + `dart test` (the sing-box tests run on loopback only).
 Live UI: `dart run bin/jormd.dart` → http://127.0.0.1:7788 (launch config `jormd`). After core changes
-restart the dev jormd yourself (standing permission): stop the old `dart … jormd.dart` process, then
-preview_start `jormd`.
+restart the dev jormd yourself (standing permission): stop the old `dart … jormd.dart` process and
+its sing-box child (a force-killed jormd leaves it running, holding the ports), then preview_start `jormd`.
 Running, fixing and extending tests is the `tests` subagent's job (`.claude/agents/tests.md`).
 On Windows a sing-box started by a test outlives a killed / timed-out test process. After such
 a run (and before finishing), kill the orphans: ours only (path in this repo), parent gone —

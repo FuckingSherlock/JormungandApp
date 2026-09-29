@@ -132,11 +132,14 @@ function setSegment(group, value) {
 // testUrl: the latency test URL ('' = the core's default, gstatic), see 59-data.js.
 // checkers: backup checks — tried when the test URL does not answer through a server; it
 // passes traffic when any answers (the core's defaultCheckers).
+// proxyAuth / proxyUser / proxyPass: an optional password on the port (default off = open, like Karing);
+// the plan carries it as mixedAuth (95-live.js), the login and password sit in the UI snapshot, so
+// backups hold them. Handling: 56-dns.js → Connection.
 const DEFAULT_CHECKERS = ['https://cp.cloudflare.com/generate_204', 'https://www.gstatic.com/generate_204',
   'http://www.msftconnecttest.com/connecttest.txt', 'http://captive.apple.com/hotspot-detect.html'];
 // Kill switch (rules.md §7): killOnDisconnect / killWhileClosed only count with killSwitch on (the latter also
 // needs genCfg.launchAtStartup + connectOnLaunch); downProxy only with it off: the proxy when the VPN cannot recover.
-const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
+const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, proxyAuth: false, proxyUser: '', proxyPass: '', testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());

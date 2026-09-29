@@ -66,10 +66,12 @@ Future<Map<String, dynamic>> checkExitIp(
   List<ExitProbe>? probes,
   Duration timeout = const Duration(seconds: 7),
   Duration grace = const Duration(milliseconds: 1500),
+  String? proxyAuth,
 }) async {
   probes ??= exitProbes;
+  // [proxyAuth] `user:pass` of a user port with a password (the daemon itself asks tunnel-in, which has none)
   final client = HttpClient()
-    ..findProxy = ((_) => proxyPort == null ? 'DIRECT' : 'PROXY 127.0.0.1:$proxyPort')
+    ..findProxy = ((_) => proxyPort == null ? 'DIRECT' : 'PROXY ${proxyAuth == null ? '' : '$proxyAuth@'}127.0.0.1:$proxyPort')
     ..connectionTimeout = timeout;
   final done = Completer<Map<String, dynamic>>();
   final errors = <String>[];

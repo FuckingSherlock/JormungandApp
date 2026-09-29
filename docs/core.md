@@ -27,7 +27,8 @@ dart test                          # парсеры, конфиги (sing-box ch
 Windows Firewall должен пропускать входящие для `dartvm.exe` на этот порт.
 
 Прокси: mixed (HTTP + SOCKS5) на `127.0.0.1:<mixedPort>` (Settings → Connection → Proxy port, по умолчанию 2080). С sing-box ядро говорит только
-через его API service (gRPC, свободный порт loopback, см. ниже); Clash API не включается. TUN в MVP нет: переключатель TUN подключает как прокси с предупреждением.
+через его API service (gRPC, свободный порт loopback, см. ниже); Clash API не включается.
+Пароль на порт — необязательный (`plan.mixedAuth`, см. «Входы sing-box»); по умолчанию порт открыт. TUN в MVP нет: переключатель TUN подключает как прокси с предупреждением.
 
 ## Кто за что отвечает
 
@@ -69,6 +70,7 @@ Auto, которая может работать; в Manual — закреплё
 { routes: [Route],         // по приоритету Route
   current: 1,              // индекс якоря: с него стартует selector
   mixedPort: 2080, global: bool,
+  mixedAuth?: { user, pass },   // пароль на пользовательский порт; нет = порт открыт
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
              url: connCfg.testUrl /* нет — gstatic; им же проверяет AutoService */ },
   auto: { failAfter, threshold, checkEvery, standby, warmEvery,
@@ -247,6 +249,44 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
   считается заново, 30 с до down не сбрасывается). Не перезапускается — ничего не делает.
   Все три POST принимают пустое тело.
 
+## Входы sing-box
+
+Все — mixed (HTTP + SOCKS5), только `127.0.0.1`:
+
+| тег | порт | пароль | зачем |
+|---|---|---|---|
+| `mixed-in` | `plan.mixedPort` (2080) | по `plan.mixedAuth` | пользовательский: его вписывают в программы вручную; идёт по правилам |
+| `sys-in` | свой, см. ниже | никогда | системный прокси при пароле на `mixed-in`; идёт по правилам, как `mixed-in` |
+| `tunnel-in` | свободный, новый на каждый запуск | никогда | сам процесс ядра: проверка выхода, подписки «via proxy», списки «через VPN»; всегда в `proxy` мимо правил |
+| `probe-in` | свободный | случайный, на запуск | замер пинга (`probe.dart`) |
+
+- **Пароль на `mixed-in`.** `plan.mixedAuth = {user, pass}` → `users: [{username, password}]` у
+  `mixed-in` (SOCKS5 user/pass и HTTP Basic `Proxy-Authorization`; без логина — отказ SOCKS5 /
+  `407`). Нет поля — порт открыт, как раньше (как и у Karing). Пустой логин / пароль или `:` в
+  логине — `ArgumentError` (`mixedAuthUser`, connect не удаётся): лучше ошибка, чем порт, который
+  выглядит защищённым и не защищён. Пароль в плане — часть плана: смена при подключении =
+  переподключение, как у порта (UI сравнивает план целиком). Логин и пароль хранятся в снимке UI
+  (`connCfg`), значит бэкапы их содержат.
+- **`sys-in`.** Системный прокси Windows не умеет отдавать пароль, поэтому при
+  `plan.mixedAuth` **и** `systemProxy: true` в конфиг добавляется `sys-in` без пароля, и
+  `SystemProxy.enable` ставит его порт (в том числе прокси, который держит kill switch, и после
+  перезапуска sing-box). Без пароля `sys-in` нет, системный прокси указывает на `mixedPort`.
+  Порт выбирается один раз и хранится в `<dataDir>/sys-in.json` `{port}`: удерживаемый прокси
+  должен попадать в него и после падения sing-box, и после нового запуска jormd. Переиспользуется,
+  пока свободен (или занят нашим же работающим sing-box — переподключение), иначе выбирается
+  новый и перезаписывается. Порты `mixed-in` / `tunnel-in` / `probe-in` / `sys-in` не совпадают.
+  `status.sysPort` — порт `sys-in` (`null` — его нет).
+- **Что ядро делает через порты сам** — только через `tunnel-in` (`_innerPort` = `tunnel-in`):
+  проверка выхода (`exitCheck`), подписки с каналом Proxy (`updater` / `_fetch`), списки правил.
+  Пользовательский порт ядро не трогает, поэтому пароль на нём ничего не ломает. Инструмент
+  `tool/exit_check.dart [порт] [логин:пароль]` — для порта с паролем.
+- **Android.** В TUN пользовательский порт по умолчанию не открывается (приложения идут через
+  VPN-интерфейс); порт, пароль и `sys-in` нужны только в режиме прокси.
+- Тесты: `proxy_auth_singbox_test.dart` (настоящий sing-box на loopback: без логина и с неверным
+  — отказ, верный — работает по SOCKS5 и HTTP; `sys-in` и `tunnel-in` открыты; без пароля порт
+  открыт), `killswitch_test.dart` → «password on the user port» (порт `sys-in` в конфиге,
+  в реестр, в status; тот же после падения, переподключения и нового jormd; занятый заменяется).
+
 ## Правила в конфиге
 
 `routing` (`js/93-routing-plan.js` → `core/lib/src/routing.dart`; логика — `rules.md`):
@@ -254,21 +294,37 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 ```
 { apps:  [{ id, kind: 'package'|'process'|'path', name, act: 'default'|'proxy'|'direct'|'block', target,
             fallback, split, udp: { act, target, fallback } }],   // split: act… = TCP, udp = UDP
-  rules: [{ id, name, action, target, fallback, block, dns, groups, composite?, extra? }],
+  rules: [{ id, name, action, target, fallback, block, dns, groups, composite?, extra?,
+            ipTunOnly? }],                          // ipTunOnly: его IP-условия не требуют resolve
   quick: { ads, region: 'RU'|…|null, services: { telegram: 'vpn'|'direct', … }, final },
   fallback: 'main'|'block'|'direct',            // Rules → Target unavailable
   targets: { '<цель>': { kind: 'unit'|'chain', main: Group, entry?: Group } | null },
   ruleSets: [{ name, url, format, via, every }],
   geo: { geosite: { via, every }, geoip: { via, every } },
-  dns: { servers: [{ id, addr, via, on }] } }
+  dns: { servers: [{ id, addr, via, on }],
+         resolve?: 'auto'|'off'|'<id сервера>' } }   // «Resolve for IP rules», по умолчанию 'auto'
 ```
 
 - UI шлёт свою модель: группы условий формы, `composite` (составное правило из JSON, без
   action), цели. Каталог живёт в UI, поэтому каждую названную цель UI сам разворачивает в
   группы (как `main`), `null` — цель недоступна (тогда её «If unavailable»). Всё остальное —
   AND/OR, CIDR, порты, DNS-серверы, списки — строит ядро.
-- Порядок route: `sniff` → `tunnel-in` → приложения → свои правила (перед первым с IP —
-  `resolve`) → быстрые → `final`. Группы целей — теги целей (`src:…`, `chain:…` + `chain:…>entry`).
+- Порядок route: `sniff` → `tunnel-in` → приложения → свои правила (перед первым с IP-условиями
+  и без `ipTunOnly` — `resolve`, см. ниже) → быстрые → `final`. Группы целей — теги целей
+  (`src:…`, `chain:…` + `chain:…>entry`).
+- **`resolve` перед IP-правилами** (`routing.dart` `_resolveAction`, `rules.md` §4). Через
+  proxy-порт приложение шлёт домен, IP-условия его не видят — поэтому один `resolve` ставится
+  перед первым своим правилом с IP-условиями (`ip_cidr`, `ip_is_private`, `geoip-*`, в том числе
+  внутри `composite`), у которого нет `ipTunOnly`. `dns.resolve`: `off` — шага нет; `auto`
+  (по умолчанию; так же — id удалённого или снятого с галочки сервера) — `{action: resolve,
+  server: dns-<первый отмеченный «через VPN»>}`; id — `server: dns-<id>` (любой отмеченный,
+  и прямой — выбор пользователя). Сервер названа явно, поэтому переключение DNS (clash_mode)
+  и свои DNS-серверы правил на этот шаг не влияют; если выбранный молчит — домены под IP-правила
+  не соединяются. Нет отмеченного сервера «через VPN» в `auto` → `resolve` без `server` (решают
+  DNS-правила и `dns.final`) и предупреждение о возможной утечке. Один `resolve` на конфиг:
+  правило с `ipTunOnly` ниже него всё равно видит уже полученный адрес. Собственные rule-sets
+  IP-условием не считаются (по .srs не видно, что внутри). Быстрые правила не резолвят. В TUN
+  адрес известен, шаг ничего не меняет.
 - `tunnel-in` — второй mixed-вход на свободном порту loopback, всегда в `proxy` мимо правил:
   через него проверка выходного IP (российский сервис проверки иначе ушёл бы напрямую по
   правилу региона) и списки «через VPN».
@@ -332,7 +388,7 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
 | `POST /api/auto` | `{auto}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения → status |
-| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, recovering, down, blocking, restarts, auto, sourcesRev}` — `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
+| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, sourcesRev}` — `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
 | `GET /api/events?since=N` | `{events:[…], next, first}` — журнал событий (ниже): события с `id ≥ N`, старые первыми; без `since` — последние 200. `next` — id следующего события, `first` — id самого старого из хранимых (пропуск между своим `next` и `first` = журнал обрезан или очищен). `POST /api/events` `{cat, type, level, own?, data?}` → `{id}` — событие, которое первым узнал UI (400 с причиной, если форма не та: неизвестные `cat` / `level`, `type` не `[A-Za-z][A-Za-z0-9_]{0,47}`, `own` не bool, `data` не объект или больше 4096 знаков JSON); к такому событию `log` не привязывается. `DELETE /api/events` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
@@ -372,7 +428,7 @@ auto, servers: [{id, ok, ms}]}` в порядке приоритета. `ok`: `n
 выбирают по своему замеру (относительный порядок тот же).
 
 Exit IP (`exitip.dart`): после каждого (пере)подключения и по запросу ядро спрашивает
-через свой mixed-порт сразу несколько сервисов (`exitProbes`) на разной инфраструктуре,
+через свой вход `tunnel-in` (не пользовательский порт: на нём может быть пароль) сразу несколько сервисов (`exitProbes`) на разной инфраструктуре,
 параллельно: с геоданными — ipwho.is (Cloudflare), ipinfo.io (Google), ip-api.com (свой
 хостинг, только HTTP); IP и страна — Cloudflare trace; только IP — Яндекс (доступен из РФ),
 Amazon, ipip.net (из Китая). Страна, которая режет один CDN (РФ — Cloudflare), не ломает
@@ -479,7 +535,8 @@ Trojan/HY2/TUIC/AnyTLS с TLS по адресу). Правка того же п�
 порт и секрет (пустой секрет — прежний), TLS, транспорт, flow остаются; `key` пересчитывается,
 `id` UI оставляет прежним, чтобы настройки с этим сервером не потерялись.
 
-Системный прокси ставит ядро через реестр (HKCU Internet Settings), не sing-box: при
+Системный прокси ставит ядро через реестр (HKCU Internet Settings), не sing-box; порт — `mixedPort`,
+а при пароле на нём — открытый `sys-in` («Входы sing-box»): при
 убитом процессе sing-box не вернул бы настройки. Прежние значения сохраняются и
 возвращаются при отключении, при остановке и при следующем старте после сбоя (kill switch может
 оставить прокси на месте — «Kill switch»; при падении sing-box прокси не снимается). PAC (AutoConfigURL,

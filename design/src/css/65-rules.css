@@ -68,6 +68,11 @@
 .rf-flabel{font-size:12px;color:var(--t2);margin-bottom:5px}
 .rf-flag{display:flex;align-items:center}
 .rf-flag .rf-flabel{margin:0}
+.rf-ip{margin:2px 18px 10px;padding:8px 12px 10px;border:1px dashed var(--border-hi);border-radius:12px}
+.rf-ip-row{display:flex;align-items:center;gap:10px;cursor:pointer}
+.rf-ip-row .rf-flabel{margin:0;font-size:14px;font-weight:600;color:var(--t1)}
+.rf-ip .set-hint{margin-top:6px}
+.rf-ip .rf-ip-link{display:block;margin:6px 0 0;text-align:left}
 .rf-add{padding:4px 18px 8px}
 .rf-add .chip{padding:5px 10px;font-size:13px}
 .rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}

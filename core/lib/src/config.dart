@@ -4,6 +4,7 @@
 /// ```
 /// { routes: [Route…], current: 0,  // Auto entries by priority (plan.dart); Manual: one
 ///   mixedPort: 2080, global: false,
+///   mixedAuth: { user, pass },   // optional: the user port asks for this login / password
 ///   urlTest: { url, interval /*s*/, tolerance /*ms*/ },
 ///   auto: { failAfter, threshold, checkEvery, standby, warmEvery, retryPause,
 ///           returnTo, flapGuard, flapMax, flapReset } }   // auto.dart
@@ -27,6 +28,10 @@
 /// through the tunnel (`proxy`: the route Auto is on), past every rule — the exit-IP check
 /// and lists downloaded "via VPN" use it (a Russian probe or GitHub must not go direct
 /// because a rule says so).
+///
+/// [sysPort]: with `mixedAuth` and the system proxy on, a third mixed inbound (`sys-in`) on
+/// loopback without a password, routed like `mixed-in`: the Windows system proxy cannot pass
+/// a login, so it points here (daemon.dart picks and keeps the port).
 ///
 /// [probe]: the loopback inbound the core measures latency through (probe.dart), its
 /// route rule per server first of all, and per DNS server in use a rule that resolves a
@@ -62,14 +67,29 @@ List<String> planCheckers(Map<String, dynamic> plan) {
   return c is List ? [for (final u in c) if (u is String && u.isNotEmpty) u] : defaultCheckers;
 }
 
+/// The plan's `mixedAuth` as a sing-box `users` entry; null = the user port is open. An empty
+/// login or password (or a `:` in the login) is an error: better a failed connect than a port
+/// that looks protected and is not.
+Map<String, dynamic>? mixedAuthUser(Map<String, dynamic> plan) {
+  final a = plan['mixedAuth'];
+  if (a == null) return null;
+  final user = a is Map ? a['user'] : null, pass = a is Map ? a['pass'] : null;
+  if (user is! String || pass is! String || user.isEmpty || pass.isEmpty || user.contains(':')) {
+    throw ArgumentError('Proxy password: the login and password must not be empty, and the login has no ":"');
+  }
+  return {'username': user, 'password': pass};
+}
+
 Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     {int? tunnelPort,
+    int? sysPort,
     Probe? probe,
     Map<String, String> ruleSetFiles = const {},
     List<String>? warnings,
     RoutingInfo? info}) {
   final outs = <Map<String, dynamic>>[];
   final test = (plan['urlTest'] as Map?) ?? const {};
+  final auth = mixedAuthUser(plan);
 
   // [auto]: a main-flow group the AutoService switches — a switch keeps the open
   // connections (auto.dart closes the stalled ones itself); a rule target's group is not.
@@ -143,7 +163,14 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       'final': routing.dnsFinal,
     },
     'inbounds': [
-      {'type': 'mixed', 'tag': 'mixed-in', 'listen': '127.0.0.1', 'listen_port': plan['mixedPort'] ?? 2080},
+      {
+        'type': 'mixed',
+        'tag': 'mixed-in',
+        'listen': '127.0.0.1',
+        'listen_port': plan['mixedPort'] ?? 2080,
+        if (auth != null) 'users': [auth],
+      },
+      if (sysPort != null) {'type': 'mixed', 'tag': 'sys-in', 'listen': '127.0.0.1', 'listen_port': sysPort},
       if (tunnelPort != null) {'type': 'mixed', 'tag': 'tunnel-in', 'listen': '127.0.0.1', 'listen_port': tunnelPort},
       ?pr?.inbound,
     ],
