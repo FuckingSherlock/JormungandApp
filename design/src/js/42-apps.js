@@ -70,6 +70,8 @@ function renderApps() {
 // Right column: the app's own route; otherwise a service that covers it ("via service"), or —.
 function appStateHtml(pkg) {
   const r = appRules[pkg], svc = serviceOfApp(pkg), sv = svc && quickCfg.services[svc[0]];
+  if (r && r.split) return `<span class="app-state split" title="${esc(appActText(r))}">${appHalves(r).map(([p, h]) =>
+    `<span class="${h.act}">${p} ${esc(appHalfText(h))}</span>`).join('')}</span>`;   // one line per protocol
   if (r) return `<span class="app-state ${appStateClass(r)}" title="${esc(appActText(r))}">${esc(appActText(r))}</span>`;
   if (sv && sv !== 'default') return `<span class="app-state svc ${sv === 'vpn' ? 'proxy' : 'direct'}" title="Set by the ${esc(svc[1])} service">${svcState(sv)} · service</span>`;
   return '<span class="app-state">—</span>';
