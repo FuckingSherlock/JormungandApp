@@ -432,6 +432,8 @@ void main() {
     var t = 0;
     final fake = FakeBox(buildConfig(p), {'s::r0': 30});
     final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t);
+    final net = <AutoNet>[];
+    auto.net.listen(net.add);
     await auto.check();
     fake.alive.remove('s::r0');
     await auto.check(); // one miss: failAfter is 2, no failover attempt yet
@@ -458,6 +460,9 @@ void main() {
     j = auto.toJson();
     expect([j['now'], j['noNet']], ['R3', false]);
     expect((j['routes'] as List).cast<Map>().first['strikes'], 1, reason: 'R0 dropped while another route answered');
+    await Future<void>.delayed(Duration.zero);
+    expect([for (final n in net) n.kind], ['lost', 'restored'], reason: 'the lost network is told once, however many rounds it lasted');
+    expect(net.last.downMs, 20000);
   });
 
   test('flap guard: a strike only when another route answered; the hold doubles up to flapMax, stable work forgets it', () async {
@@ -620,7 +625,10 @@ void main() {
       await auto.check();
       fake.alive.remove('s::a'); // would normally start failing A over
 
+      final net = <AutoNet>[];
+      auto.net.listen(net.add);
       auto.onLog('some sing-box line, missing default interface, no network');
+      auto.onLog('missing default interface again');
       expect(auto.offline, isTrue);
       fake.tested.clear();
       await auto.check();
@@ -631,6 +639,9 @@ void main() {
 
       auto.onLog('updated default interface');
       expect(auto.offline, isFalse);
+      await Future<void>.delayed(Duration.zero);
+      expect([for (final n in net) n.kind], ['offline', 'online'], reason: 'offline is no "lost": the OS is at fault; told once');
+      expect(net.last.downMs, isNotNull);
     });
 
     test('an unrelated log line does not toggle offline', () {

@@ -33,6 +33,7 @@
   --active-dim:#009E78;
   --warn:      #F0A040;  --warn-rgb:   240,160,64;
   --muted:     #F05060;  --muted-rgb:  240,80,96;
+  --danger:    #F05060;  --danger-rgb: 240,80,96;
   --purple:    #A064FF;  --purple-rgb: 160,100,255;
   --t1:        #D4DEFF;
   --t2:        #7B8EC8;  --t2-rgb:     123,142,200;
@@ -54,6 +55,7 @@
   --active-dim:#23994F;
   --warn:      #F0A040;  --warn-rgb:   240,160,64;
   --muted:     #EF5350;  --muted-rgb:  239,83,80;
+  --danger:    #EF5350;  --danger-rgb: 239,83,80;
   --purple:    #A78BFA;  --purple-rgb: 167,139,250;
   --t1:        #EDEDED;
   --t2:        #A3A3A3;  --t2-rgb:     163,163,163;
@@ -75,6 +77,7 @@
   --active-dim:#238636;
   --warn:      #D29922;  --warn-rgb:   210,153,34;
   --muted:     #F85149;  --muted-rgb:  248,81,73;
+  --danger:    #F85149;  --danger-rgb: 248,81,73;
   --purple:    #A371F7;  --purple-rgb: 163,113,247;
   --t1:        #E6EDF3;
   --t2:        #8B949E;  --t2-rgb:     139,148,158;
@@ -261,7 +264,14 @@ body {
 .bottomnav{position:relative;z-index:60;display:flex;justify-content:space-around;align-items:center;padding:4px 0 max(6px, env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--surface)}
 .nav-btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 16px;cursor:pointer;opacity:.45}
 .nav-btn.active{opacity:1}
-.nav-btn span{font-size:12px;font-weight:600;letter-spacing:.4px;color:var(--t2)}
+/* Logs: unseen error / warning events (47-events.js renderNavDots) — on the icon, out of the layout */
+.nav-ico{position:relative;width:20px;height:20px;display:flex}
+.nav-dot{position:absolute;top:-2px;width:8px;height:8px;border-radius:50%;display:none;box-shadow:0 0 0 2px var(--surface)}
+.nav-dot.err{right:-4px;background:var(--danger)}
+.nav-dot.warn{right:-4px;background:var(--warn)}
+.nav-dot.err.both{top:-3px;right:-6px}
+.nav-dot.warn.both{top:3px;right:-7px}
+.nav-dot.on{display:block}.nav-btn span{font-size:12px;font-weight:600;letter-spacing:.4px;color:var(--t2)}
 .nav-btn.active span{color:var(--accent)}
 
 /* ── Sheets (level 1) ── */
@@ -775,6 +785,64 @@ body {
 .log-tag.core{color:var(--accent);background:rgba(var(--accent-rgb),.15)}
 .log-list mark{background:rgba(var(--accent-rgb),.3);color:var(--t1);border-radius:2px}
 .log-empty{padding:48px 24px;text-align:center;color:var(--t3);font-family:var(--font);font-size:14px}
+.log-line.hit{animation:log-hit 2.2s ease-out}
+@keyframes log-hit{0%,60%{background:rgba(var(--accent-rgb),.35)}100%{background:transparent}}
+
+/* ── EventsView (47-events.js): EventRow = category icon, title + time, reason, actions, and
+   every field when tapped open; the category colour is --ev-c ── */
+.log-tabbar{margin-bottom:8px}
+.icon-btn{position:relative}
+.icon-badge{position:absolute;top:-3px;right:-3px;min-width:15px;height:15px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;line-height:15px;text-align:center}
+.icon-btn.on{color:var(--accent)}
+.ev-filterbar{flex-shrink:0;display:flex;align-items:center;gap:10px;margin:0 14px 8px;padding:6px 6px 6px 12px;border-radius:10px;background:rgba(var(--accent-rgb),.12);font-size:12.5px;color:var(--t1)}
+.evfb-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.evfb-reset{background:none;border:none;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;padding:2px 8px;flex-shrink:0}
+.ev-list{padding:0 0 8px}
+.ev-day{padding:12px 16px 6px;font-size:11.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--t3)}
+.cat-conn{--ev-c:var(--active)}
+.cat-auto{--ev-c:var(--accent)}
+.cat-site{--ev-c:var(--purple)}
+.cat-sub{--ev-c:var(--active-dim)}
+.cat-rules{--ev-c:var(--accent-dim)}
+.cat-core{--ev-c:var(--t2)}
+.cat-user{--ev-c:var(--t3)}
+.ev-row{display:flex;gap:10px;padding:9px 14px 9px 12px;border-left:2px solid transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ev-row + .ev-row{border-top:1px solid var(--border)}
+.ev-row.lvl-warn{border-left-color:var(--warn);background:rgba(var(--warn-rgb),.05)}
+.ev-row.lvl-error{border-left-color:var(--danger);background:rgba(var(--danger-rgb),.07)}
+.ev-row.hit{animation:ev-hit 2.6s ease-out}
+@keyframes ev-hit{0%,55%{box-shadow:inset 0 0 0 100vmax rgba(var(--accent-rgb),.22)}100%{box-shadow:inset 0 0 0 100vmax transparent}}
+.ev-ico{flex-shrink:0;width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--ev-c);background:color-mix(in srgb,var(--ev-c) 16%,transparent)}
+.ev-body{flex:1;min-width:0}
+.ev-top{display:flex;align-items:baseline;gap:8px}
+.ev-title{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--t1);overflow-wrap:anywhere}
+.ev-time,.ev-rep{flex-shrink:0;font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums}
+.ev-rep{font-weight:700;color:var(--t2)}
+.ev-detail{margin-top:1px;font-size:12.5px;line-height:1.4;color:var(--t2);overflow-wrap:anywhere}
+.ev-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.ev-act{background:rgba(var(--accent-rgb),.13);border:none;border-radius:8px;color:var(--accent);font:inherit;font-size:12.5px;font-weight:600;padding:4px 10px;cursor:pointer}
+.ev-more{display:none;margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.035);font-size:12px}
+.ev-row.open .ev-more{display:block}
+.ev-f{display:flex;gap:10px;padding:2px 0}
+.ev-f span{flex:0 0 84px;color:var(--t3)}
+.ev-f b{flex:1;min-width:0;font-weight:500;color:var(--t1);overflow-wrap:anywhere}
+
+/* the filter sheet: tri-state category → its event types */
+.ev-q{margin:0 0 6px}
+#evfilter-body .set-group{margin:6px 0 10px;background:var(--card)}
+#evfilter-body .set-caption{padding:10px 4px 6px}
+.evf-cat + .evf-cat{border-top:1px solid var(--border)}
+.evf-head,.evf-type{cursor:pointer}
+.evf-type{padding-left:44px;border-top:1px solid var(--border);background:rgba(255,255,255,.02)}
+.evf-check{flex-shrink:0;width:20px;height:20px;box-sizing:border-box;border-radius:6px;border:2px solid var(--border-hi);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;line-height:1;color:#fff}
+.evf-check.on,.evf-check.part{background:var(--accent);border-color:var(--accent)}
+.evf-name{flex:1;min-width:0;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--t1)}
+.evf-ico{display:inline-flex;color:var(--ev-c)}
+.evf-n{margin-left:auto;font-size:12px;color:var(--t3)}
+.evf-chev{color:var(--t3);font-size:20px;line-height:1;transition:transform .2s}
+.evf-chev.open{transform:rotate(90deg)}
+.evf-reset{padding:0 4px 8px}
+.evf-kept{border-color:rgba(var(--accent-rgb),.5)}
 .log-jump{
   position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:2;
   background:var(--accent);color:#fff;border:none;border-radius:16px;padding:7px 14px;
@@ -1057,7 +1125,14 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   max-width:calc(100% - 32px);text-align:center;
 }
 .toast.show{opacity:1;transform:translate(-50%,0)}
-.toast.has-act.show{pointer-events:auto}
+.toast.has-act.show,.toast.has-tap.show{pointer-events:auto}
+.toast.has-tap{cursor:pointer}
+/* a journal event's toast leaving: into the Logs item of the nav (34-ui.js hideToast) */
+.toast.show.fly{
+  transform:translate(calc(-50% + var(--fx,0px)),var(--fy,0px)) scale(.08);opacity:0;pointer-events:none;
+  transition:transform .4s ease-in,opacity .4s ease-in;
+}
+@media (prefers-reduced-motion:reduce){.toast.show.fly{transition:opacity .2s}}
 .toast-act{margin-left:12px;background:none;border:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;padding:0}
 /* ── Settings screen ── */
 .settings-group{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
@@ -1432,14 +1507,27 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <input type="file" id="restoreFile" accept=".json,application/json" style="display:none" onchange="readRestoreFile(this)">
     </div>
   </div>
-  <!-- ══════════ VIEW: LOGS (LogsView: sing-box and core lines, live; 46-logs.js) ══════════ -->
+<!-- raw-html-confirmed -->
+  <!-- ══════════ VIEW: LOGS (LogsView: Events = the journal, Raw = sing-box and core lines; 46-logs.js, 47-events.js) ══════════ -->
   <div class="view" id="view-logs">
     <div class="topbar">
       <div>
         <div class="app-name">Logs</div>
         <div class="nodes-summary" id="logsSummary"></div>
       </div>
-      <div class="head-actions">
+      <div class="head-actions" id="evActions">
+        <button class="icon-btn" id="evFilterBtn" onclick="openEvFilter()" title="Filter events">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <span class="icon-badge" id="evFilterBadge" style="display:none"></span>
+        </button>
+        <button class="icon-btn" onclick="exportLogs()" title="Export both logs">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="icon-btn" onclick="confirmClearEvents()" title="Clear events">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>
+      </div>
+      <div class="head-actions" id="rawActions" style="display:none">
         <button class="icon-btn" id="logSearchBtn" onclick="toggleLogSearch()" title="Search">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </button>
@@ -1451,6 +1539,14 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         </button>
       </div>
     </div>
+    <div class="nodes-bar log-tabbar">
+      <div class="nodes-tabs" id="logTabs">
+        <button class="nodes-tab active" data-tab="events" onclick="setLogTab('events')">Events</button>
+        <button class="nodes-tab" data-tab="raw" onclick="setLogTab('raw')">Raw</button>
+        <div class="nodes-tab-ink" id="logTabInk"></div>
+      </div>
+    </div>
+    <div class="ev-filterbar" id="evFilterBar" style="display:none"></div>
     <div class="search" id="logSearchBar" style="display:none">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input id="logSearch" placeholder="Search the log" oninput="renderLogs()">
@@ -1458,14 +1554,32 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-    <div class="chip-row log-levels" id="logLevels">
+    <div class="chip-row log-levels" id="logLevels" style="display:none">
       <div class="chip active" data-lvl="all" onclick="setLogLevel('all')">All</div>
       <div class="chip" data-lvl="warn" onclick="setLogLevel('warn')">Warnings &amp; errors<span class="log-count" id="logWarnCount"></span></div>
     </div>
-    <div class="scroll log-scroll" id="logScroll" onscroll="logScrolled()">
+    <div class="scroll log-scroll" id="evScroll" onscroll="evScrolled()">
+      <div class="ev-list" id="evList"></div>
+    </div>
+    <div class="scroll log-scroll" id="logScroll" style="display:none" onscroll="logScrolled()">
       <div class="log-list" id="logList"></div>
     </div>
-    <button class="log-jump" id="logJump" style="display:none" onclick="logFollow()"></button>
+    <button class="log-jump" id="logJump" style="display:none" onclick="logJumpTap()"></button>
+  </div>
+  <div class="overlay" id="ov-evfilter" onclick="closeSheet('evfilter')"></div>
+  <div class="sheet set-sheet" id="sh-evfilter">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Filter events</span>
+      <button class="sheet-close" onclick="closeSheet('evfilter')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="search ev-q">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="evQ" placeholder="Search events" oninput="setEvQuery(this.value)">
+      </div>
+      <div id="evfilter-body"></div>
+    </div>
   </div>
   <!-- Bottom nav -->
   <div class="bottomnav">
@@ -1484,10 +1598,12 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <span>Nodes</span>
     </div>
     <div class="nav-btn" data-tab="logs" onclick="switchTab('logs')">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
-        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-        <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-      </svg>
+      <div class="nav-ico">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <i class="nav-dot err" id="navDotErr" title="Unseen errors"></i><i class="nav-dot warn" id="navDotWarn" title="Unseen warnings"></i>
+      </div>
       <span>Logs</span>
     </div>
     <div class="nav-btn" data-tab="settings" onclick="switchTab('settings')">
@@ -2253,8 +2369,11 @@ let backend = {
     return wait(250 + Math.random() * 700).then(() => mockPairPing(entry, exit));
   },
   // like the core: the exit is checked again after every connect
-  connect()    { exitInfo = null; return wait(1100).then(() => { exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' }; }); },
-  disconnect() { return Promise.resolve(); },
+  connect()    { exitInfo = null; return wait(1100).then(() => {
+    exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' };
+    mockEventAdd('conn', 'connected', 'info', { entry: effectiveConnectId(), mode: segState.mode, route: segState.route }, { own: true, raw: 'Connected: ' + entryLabel(effectiveConnectId()) });
+  }); },
+  disconnect() { mockEventAdd('conn', 'disconnected', 'info', { by: 'user' }, { own: true }); return Promise.resolve(); },
   // Settings → Auto mode changed while connected: the core's Auto takes it as is (no reconnect).
   autoSettings(auto) { return Promise.resolve(); },
   // Live traffic (see renderTraffic): the mock keeps the numbers the cards show.
@@ -2305,6 +2424,12 @@ let backend = {
     return Promise.resolve({ lines: mockLog.lines.filter(l => since == null || l.n >= since), next: mockLog.n });
   },
   clearLog() { mockLog.lines = []; return Promise.resolve(); },
+  // Events journal (core: contract in docs/core.md): the events with id >= since (none given:
+  // the last 200), oldest first; next = the id the next event gets, first = the oldest id
+  // still kept. The UI adds its own (subscription results, user actions) and clears.
+  events(since) { return Promise.resolve(mockEventsGet(since)); },
+  addEvent(ev) { return Promise.resolve({ id: mockEventAdd(ev.cat, ev.type, ev.level || 'info', ev.data || {}, { own: ev.own }).id }); },
+  clearEvents() { mockEvSeed(); mockEv.list = []; return Promise.resolve(); },
   // Settings → Data → About: versions and where the core keeps its data (mock: no core).
   version() { return Promise.resolve({ core: null, singBox: null, dataDir: null }); },
   // Backup: the state snapshot the core stores (95-live.js liveSnapshot), and back.
@@ -2349,8 +2474,10 @@ function mockShareLink(n) {
 // Logs: plausible sing-box output — its start, then traffic lines while connected.
 const mockLog = { n: 0, lines: [], seeded: false };
 function mockLogAdd(src, lvl, msg, t) {
-  mockLog.lines.push({ n: mockLog.n++, t: t || Date.now(), src, lvl, msg });
+  const n = mockLog.n++;
+  mockLog.lines.push({ n, t: t || Date.now(), src, lvl, msg });
   if (mockLog.lines.length > 2000) mockLog.lines.shift();
+  return n;
 }
 function mockLogLine() {
   const hosts = ['googlevideo.com:443', 'api.github.com:443', 'discord.com:443', 'gateway.discord.gg:443', 'www.youtube.com:443', 'update.googleapis.com:443', 'telegram.org:443'];
@@ -2376,6 +2503,75 @@ function mockLogTick() {
   }
   if (!connected || connecting) return;
   for (let k = Math.floor(Math.random() * 4); k > 0; k--) { const [lvl, msg] = mockLogLine(); mockLogAdd('sing-box', lvl, msg); }
+}
+
+/* Events: a journal seeded with a believable history (yesterday and today, every category,
+   the user's own actions too), then now and then a new one while connected. Ids and names
+   come from the catalog as it is, so the rows resolve to real entries. */
+const mockEv = { n: 1, list: [], seeded: false, lastRand: 0 };
+// opts: own, at, raw (a line the core writes to the raw log at the same moment → ev.log)
+function mockEventAdd(cat, type, level, data, opts) {
+  mockEvSeed();
+  const o = opts || {}, ev = { id: mockEv.n++, at: o.at || Date.now(), cat, type, level, own: !!o.own, data: data || {} };
+  if (o.raw) { mockLogTick(); ev.log = mockLogAdd('core', level, o.raw); }
+  else if (o.log != null) ev.log = o.log;
+  mockEv.list.push(ev);
+  if (mockEv.list.length > 1000) mockEv.list.shift();
+  return ev;
+}
+function mockEvSeed() {
+  if (mockEv.seeded) return;
+  mockEv.seeded = true;
+  mockLogTick();
+  const ids = visibleOrder(), a = ids[0] || 'src1', b = ids[1] || a;
+  const sid = sourceOrder.find(x => sourcesData[x].kind === 'sub') || 'src1', s = sourcesData[sid] || { name: 'Subscription', nodes: [] };
+  const key = i => sid + '::' + ((s.nodes && s.nodes.length ? s.nodes[i % s.nodes.length] : { id: 'n' + i }).id);
+  const now = Date.now(), d0 = new Date().setHours(0, 0, 0, 0);
+  const warn = mockLog.lines.find(l => l.lvl === 'warn'), n0 = mockLog.lines[0];
+  const Y = h => d0 - h * 36e5, M = m => Math.max(d0 + 1000, now - m * 6e4);
+  const total = (s.nodes || []).length || 12;
+  const blocked = { host: 'rutracker.org', dest: 'rutracker.org:443', entry: a, server: key(0), route: a, via: b };
+  const list = [
+    [Y(15.5), 'user', 'connect', 'info', { action: 'connect', entry: a }, 1],
+    [Y(15.5) + 500, 'conn', 'connected', 'info', { entry: a, mode: 'tun', route: 'rules' }],
+    [Y(14), 'auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }],
+    [Y(13.9), 'site', 'blocked', 'warn', blocked], [Y(13.85), 'site', 'blocked', 'warn', blocked], [Y(13.8), 'site', 'blocked', 'warn', blocked],
+    [Y(12), 'sub', 'updated', 'info', { source: sid, name: s.name, added: 2, removed: 0, total }],
+    [Y(9), 'conn', 'lost', 'warn', {}], [Y(8.9), 'conn', 'restored', 'info', { downMs: 41000 }],
+    [Y(6), 'sub', 'failed', 'error', { source: sid, name: s.name, error: 'Connection timed out (15 s)' }],
+    [Y(5.95), 'sub', 'failed', 'error', { source: sid, name: s.name, error: 'Connection timed out (15 s)' }],
+    [Y(5), 'rules', 'ruleSetFailed', 'warn', { tag: 'geosite-ru', url: 'https://example.net/rules/geosite-ru.srs', error: 'HTTP 503' }],
+    [Y(2), 'user', 'pin', 'info', { action: 'pin', entry: a, server: key(1) }, 1],
+    [Y(1), 'user', 'disconnect', 'info', { action: 'disconnect' }, 1], [Y(1) + 500, 'conn', 'disconnected', 'info', { by: 'user' }],
+    [M(200), 'user', 'connect', 'info', { action: 'connect', entry: a }, 1],
+    [M(200) + 500, 'conn', 'connected', 'info', { entry: a, mode: 'tun', route: 'rules' }, 0, n0 && n0.n],
+    [M(170), 'user', 'mode', 'info', { action: 'mode', value: 'tun' }, 1], [M(160), 'user', 'route', 'info', { action: 'route', value: 'rules' }, 1],
+    [M(150), 'sub', 'updated', 'info', { source: sid, name: s.name, added: 0, removed: 1, total }],
+    [M(95), 'auto', 'fastest', 'info', { route: a, from: key(0), to: key(2) }],
+    [M(60), 'core', 'sysProxy', 'warn', { on: true, error: 'Access is denied' }],
+    [M(45), 'user', 'sysProxy', 'info', { action: 'sysProxy', on: true }, 1],
+    [M(30), 'sub', 'dead', 'error', { source: sid, name: s.name }],
+    [M(20), 'core', 'crashed', 'error', { code: 1 }], [M(19.9), 'core', 'restarted', 'info', { attempt: 1 }],
+    [M(12), 'auto', 'unstable', 'warn', { id: b, strikes: 2, holdMs: 120000 }, 0, warn && warn.n],
+    [M(8), 'sub', 'removed', 'warn', { source: sid, name: s.name, count: 2 }],
+    [M(3), 'conn', 'offline', 'warn', {}], [M(2.5), 'conn', 'online', 'info', { downMs: 30000 }],
+  ].sort((x, y) => x[0] - y[0]);
+  list.forEach(([at, cat, type, level, data, own, log]) => mockEventAdd(cat, type, level, data, { at, own, log }));
+  // a first run has seen everything but the last hour
+  logCfg.seen = mockEv.list.filter(e => e.level !== 'info' && e.at < now - 36e5).map(e => e.id);
+}
+// A new event now and then while connected (not under automation: tests add their own).
+function mockEventsGet(since) {
+  mockEvSeed();
+  if (connected && !connecting && !navigator.webdriver && Date.now() - mockEv.lastRand > 20000 && Math.random() < .5) {
+    mockEv.lastRand = Date.now();
+    const ids = visibleOrder(), a = ids[0], b = ids[1] || a, r = Math.random();
+    if (r < .4) mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }, { raw: 'Auto: switched ' + entryLabel(a) + ' → ' + entryLabel(b) });
+    else if (r < .7) mockEventAdd('site', 'blocked', 'warn', { host: 'discord.com', dest: 'discord.com:443', entry: a, route: a, via: b }, { raw: 'discord.com:443 does not open via ' + entryLabel(a) });
+    else mockEventAdd('auto', 'unstable', 'warn', { id: a, strikes: 2, holdMs: 120000 }, { raw: entryLabel(a) + ' is unstable' });
+  }
+  const events = since == null ? mockEv.list.slice(-200) : mockEv.list.filter(e => e.id >= since);
+  return { events, next: mockEv.n, first: mockEv.list.length ? mockEv.list[0].id : mockEv.n };
 }
 /* ══════════════════════ PING CACHE ══════════════════════
    One latency store for every screen. Keyed by node variant (pingKey: protocol://address:
@@ -2752,6 +2948,7 @@ function pinRouteNode(id, key, e) {
   if (dragCtx || (e && e.target.closest('.drag-handle'))) return;   // the end of a drag, not a tap
   const again = !autoConnect && activeConnectId === id && pinnedNode === key;
   autoConnect = false; activeConnectId = id; pinnedNode = again ? null : key;
+  journal('user', 'pin', { action: 'pin', entry: id, server: again ? null : key });
   routeRowChanged();
 }
 function routeRowChanged() {
@@ -3341,6 +3538,7 @@ function updateSource(sid, opts) {
   s.updating = true;
   refreshSourceViews();
   const o = opts && typeof opts === 'object' ? opts : {};
+  const before = new Set((s.nodes || []).map(n => n.id)), gone0 = (s.gone || []).length;
   // never loaded (its first fetch failed): Retry is that first fetch again
   ((s.nodes || []).length ? backend.updateSource(s, o) : backend.fetchSource(s, o)).then(() => {
     s.count = s.nodes.length;
@@ -3348,21 +3546,31 @@ function updateSource(sid, opts) {
     return true;
   }, e => {
     s.lastError = { msg: e.message, at: Date.now() };
-    // the user's own Update / Retry always says so; a timer update (o.background) is up to Settings → Notifications
-    (o.background ? notify.bind(null, 'subFailed') : toast)('Update of ' + s.name + ' failed: ' + e.message);
+    // the user's own Update / Retry always says so; a timer update (o.background) tells through
+    // its event (sub/failed, not own): Settings → Notifications decides
+    if (!o.background) toast('Update of ' + s.name + ' failed: ' + e.message);
+    journal('sub', 'failed', { source: sid, name: s.name, error: e.message }, { level: 'error', own: !o.background });
     return false;
   }).then(ok => {
     s.updating = false;
     purgeExpiredGone();
     refreshSourceViews();
-    if (ok && o.background) notify('subUpdated', `${s.name} updated: ${s.count} servers`);
+    if (ok) subResultEvents(sid, before, gone0, !o.background);
     if (ok && s.testAfterUpdate) testSourceLatency(sid);
   });
+}
+// The events of a finished update: updated (new / removed servers, total), and the provider
+// removing servers or bringing them back. own: the user pressed Update (no notification).
+function subResultEvents(sid, before, gone0, own) {
+  const s = sourcesData[sid], now = new Set(s.nodes.map(n => n.id)), data = { source: sid, name: s.name }, g = (s.gone || []).length;
+  journal('sub', 'updated', Object.assign({ added: [...now].filter(id => !before.has(id)).length, removed: [...before].filter(id => !now.has(id)).length, total: s.nodes.length }, data), { own });
+  if (g > gone0) journal('sub', 'removed', Object.assign({ count: g - gone0 }, data), { level: 'warn', own });
+  else if (g < gone0) journal('sub', 'back', Object.assign({ count: gone0 - g }, data), { own });
 }
 // Mockup only: an update of a demo subscription alternates between the provider dropping
 // two servers and bringing the dropped ones back (with their old settings).
 function demoProviderChurn(s, o) {
-  const say = o && o.background ? notify.bind(null, 'subFailed') : toast;
+  const say = o && o.background ? () => {} : toast;   // a timer update's removed / back events come from updateSource
   if ((s.gone || []).length) {
     const back = s.gone;
     s.nodes = s.nodes.concat(back.map(n => { const m = Object.assign({}, n); delete m.goneAt; return m; }))
@@ -3855,8 +4063,8 @@ function saveSrcForm() {
     expandState[id] = true;
     // The first fetch: nodes appear after the discovery request.
     s.updating = true;
-    backend.fetchSource(s).then(() => { delete s.lastError; },
-      e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Could not load ' + s.name + ': ' + e.message); }).then(() => {
+    backend.fetchSource(s).then(() => { delete s.lastError; journal('sub', 'updated', { source: id, name: s.name, added: s.nodes.length, removed: 0, total: s.nodes.length }, { own: true }); },
+      e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Could not load ' + s.name + ': ' + e.message); journal('sub', 'failed', { source: id, name: s.name, error: e.message }, { level: 'error', own: true }); }).then(() => {
       s.count = s.nodes.length;
       s.updating = false;
       renderAll();
@@ -4030,20 +4238,40 @@ function srcErrorHtml(s) {
 
 let toastTimer = null;
 // act: { label, fn } — a button in the toast (it then stays longer and takes taps).
-function toast(msg, act) {
+// onTap: the toast of a journal event (notify, 58-notif.js): a tap opens the event, and when
+// it goes by itself it flies into the Logs tab of the bottom nav.
+function toast(msg, act, onTap) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   if (act) {
     const b = document.createElement('button');
     b.className = 'toast-act';
     b.textContent = act.label;
-    b.onclick = () => { el.classList.remove('show'); act.fn(); };
+    b.onclick = e => { e.stopPropagation(); el.classList.remove('show'); act.fn(); };
     el.append(b);
   }
+  el.onclick = onTap ? () => { el.classList.remove('show'); onTap(); } : null;
   el.classList.toggle('has-act', !!act);
+  el.classList.toggle('has-tap', !!onTap);
+  el.classList.remove('fly');
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), act ? 6000 : 2200);
+  toastTimer = setTimeout(hideToast, act || onTap ? 6000 : 2200);
+}
+// The toast goes: a journal event's one flies (shrinking, fading) to the Logs item of the nav —
+// transform and opacity only, ~0.4 s; with reduced motion, or the page hidden, it just fades.
+function hideToast() {
+  const el = document.getElementById('toast'), nav = document.querySelector('.nav-btn[data-tab="logs"] svg');
+  clearTimeout(toastTimer);
+  if (!el.classList.contains('has-tap') || !el.classList.contains('show') || !nav || document.hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.classList.remove('show');
+    return;
+  }
+  const a = el.getBoundingClientRect(), b = nav.getBoundingClientRect();
+  el.style.setProperty('--fx', (b.left + b.width / 2 - (a.left + a.width / 2)) + 'px');
+  el.style.setProperty('--fy', (b.top + b.height / 2 - (a.top + a.height / 2)) + 'px');
+  el.classList.add('fly');
+  toastTimer = setTimeout(() => el.classList.remove('show', 'fly'), (parseFloat(getComputedStyle(el).transitionDuration) || .4) * 1000 + 20);
 }
 
 /* ── Tabs ── */
@@ -5032,7 +5260,7 @@ function saveRsForm() {
   closeSheet('rsform');
   renderRuleSets(); renderRules();
   // Mockup only: a URL with "fail" plays the background download failing (the core reports it inside the connect warning)
-  if (!window.JORMD && !rsDraft.builtin && /fail/i.test(url)) setTimeout(() => notify('ruleSets', `Rule set ${name} could not be downloaded — the last copy is used`), 800);
+  if (!window.JORMD && !rsDraft.builtin && /fail/i.test(url)) setTimeout(() => journal('rules', 'ruleSetFailed', { tag: name, url, error: 'download failed' }, { level: 'warn', own: false }), 800);
 }
 function deleteRuleSet() {
   const s = ruleSets.find(x => x.id === rsEditing);
@@ -5224,21 +5452,41 @@ function renderTargetPicker() {
     || `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`;
 }
 /* ══════════════════════ LOGS ══════════════════════
-   LogsView: what sing-box prints and what the core notes itself (connected, not connected,
-   the system proxy warning, failed requests), oldest at the top. backend.log(since) gives
-   the lines numbered `since` and later (the core keeps the last 2000, logbook.dart); it is
-   asked once a second while the tab is open and the page visible. The list follows new
-   lines until the user scrolls up; then a pill counts the new ones and brings it back.
-   (Flutter: LogsView over the core's LogBook stream.) */
+   LogsView, two tabs: Events (47-events.js: what happened, as sentences, from the events
+   journal) and Raw (this file: what sing-box prints and what the core notes itself —
+   connected, not connected, the system proxy warning, failed requests), oldest at the top.
+   backend.log(since) gives the lines numbered `since` and later (the core keeps the last 2000,
+   logbook.dart); it is asked once a second while the Raw tab is open and the page visible.
+   The list follows new lines until the user scrolls up; then a pill counts the new ones and
+   brings it back (the same pill serves Events). (Flutter: LogsView over the core's LogBook
+   stream and the events stream.) */
 
 const logState = { lines: [], next: null, level: 'all', follow: true, busy: false, unseen: 0, gen: 0 };
 const LOG_KEEP = 2000;
 const logsOpen = () => document.getElementById('view-logs').classList.contains('active');
+let logTab = 'events';
 
-// Called by switchTab (34-ui.js): the latest lines at once, pinned to the bottom.
-function openLogs() {
-  logFollow();
+// Called by switchTab (34-ui.js): Events, the latest at once, pinned to the bottom.
+function openLogs(tab) {
+  setLogTab(tab || 'events');
+  if (logTab === 'events') evFollow(false); else logFollow();
   pollLogs();
+}
+
+function setLogTab(tab) {
+  logTab = tab;
+  const ev = tab === 'events', on = id => document.getElementById(id);
+  on('evScroll').style.display = ev ? '' : 'none';
+  on('logScroll').style.display = ev ? 'none' : '';
+  on('evActions').style.display = ev ? '' : 'none';
+  on('rawActions').style.display = ev ? 'none' : '';
+  on('logLevels').style.display = ev ? 'none' : '';
+  on('logSearchBar').style.display = !ev && on('logSearchBtn').classList.contains('on') ? '' : 'none';
+  on('logTabInk').style.transform = ev ? '' : 'translateX(100%)';
+  document.querySelectorAll('#logTabs .nodes-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  renderEvFilterBar();
+  if (ev) { renderEvents(); evFollowIfPinned(); evMarkSeen(); } else { logFollowIfPinned(); pollLogs(); }
+  renderLogSummary();
 }
 
 function pollLogs() {
@@ -5257,7 +5505,7 @@ function pollLogs() {
     appendLogs(fresh);
   }, () => {}).finally(() => { logState.busy = false; });
 }
-setInterval(() => { if (logsOpen() && !document.hidden) pollLogs(); }, 1000);
+setInterval(() => { if (logsOpen() && logTab === 'raw' && !document.hidden) pollLogs(); }, 1000);
 
 const logQuery = () => document.getElementById('logSearch').value.trim().toLowerCase();
 const logShown = (l, q) => (logState.level === 'all' || l.lvl === 'warn' || l.lvl === 'error')
@@ -5294,15 +5542,19 @@ function appendLogs(fresh) {
   renderLogSummary();
 }
 
+// The header line under "Logs" (of the tab that is open), the warning count on the level chip
+// and the pill "↓ N new" / "↓ Latest" of the tab that is open.
 function renderLogSummary() {
   const all = logState.lines, warn = all.filter(l => l.lvl === 'warn').length, err = all.filter(l => l.lvl === 'error').length;
-  document.getElementById('logsSummary').textContent = all.length + ' line' + (all.length === 1 ? '' : 's')
-    + (err ? ' · ' + err + ' error' + (err === 1 ? '' : 's') : '') + (warn ? ' · ' + warn + ' warning' + (warn === 1 ? '' : 's') : '');
   document.getElementById('logWarnCount').textContent = warn + err ? String(warn + err) : '';
-  const jump = document.getElementById('logJump');
-  jump.style.display = logState.follow ? 'none' : '';
-  jump.textContent = logState.unseen ? '↓ ' + logState.unseen + ' new' : '↓ Latest';
+  document.getElementById('logsSummary').textContent = logTab === 'events' ? evSummaryText()
+    : all.length + ' line' + (all.length === 1 ? '' : 's')
+      + (err ? ' · ' + err + ' error' + (err === 1 ? '' : 's') : '') + (warn ? ' · ' + warn + ' warning' + (warn === 1 ? '' : 's') : '');
+  const st = logTab === 'events' ? evState : logState, jump = document.getElementById('logJump');
+  jump.style.display = st.follow ? 'none' : '';
+  jump.textContent = st.unseen ? '↓ ' + st.unseen + ' new' : '↓ Latest';
 }
+function logJumpTap() { if (logTab === 'events') evFollow(true); else logFollow(); }
 
 function logFollowIfPinned() {
   if (!logState.follow) return;
@@ -5325,6 +5577,27 @@ function logFollow() {
   renderLogSummary();
 }
 
+// Events → "In raw log": the Raw tab at the line n (the filters cleared so it is there), lit for a moment.
+function showRawLine(n) {
+  setLogTab('raw');
+  logState.level = 'all';
+  document.querySelectorAll('#logLevels .chip').forEach(c => c.classList.toggle('active', c.dataset.lvl === 'all'));
+  toggleLogSearch(false);
+  pollLogs();   // the line may be newer than what is loaded
+  const find = () => document.querySelector('#logList .log-line[data-n="' + n + '"]');
+  const go = () => {
+    const el = find();
+    if (!el) { toast('That line is no longer in the raw log'); return; }
+    logState.follow = false;
+    el.scrollIntoView({ block: 'center' });
+    el.classList.add('hit');
+    setTimeout(() => el.classList.remove('hit'), 2200);
+    renderLogSummary();
+  };
+  renderLogs();
+  find() ? go() : setTimeout(() => { renderLogs(); go(); }, 400);
+}
+
 function setLogLevel(lvl) {
   logState.level = lvl;
   document.querySelectorAll('#logLevels .chip').forEach(c => c.classList.toggle('active', c.dataset.lvl === lvl));
@@ -5344,9 +5617,9 @@ function toggleLogSearch(show) {
 function copyLogs() {
   const q = logQuery(), shown = logState.lines.filter(l => logShown(l, q));
   if (!shown.length) { toast('No lines to copy'); return; }
-  const text = shown.map(l => `${new Date(l.t).toISOString()} ${l.lvl.toUpperCase().padEnd(5)} ${l.src === 'core' ? '[core] ' : ''}${l.msg}`).join('\n');
-  copyText(text, shown.length + ' line' + (shown.length === 1 ? '' : 's'));
+  copyText(rawLogText(shown), shown.length + ' line' + (shown.length === 1 ? '' : 's'));
 }
+const rawLogText = lines => lines.map(l => `${new Date(l.t).toISOString()} ${l.lvl.toUpperCase().padEnd(5)} ${l.src === 'core' ? '[core] ' : ''}${l.msg}`).join('\n');
 
 function clearLogs() {
   logState.gen++;
@@ -5356,6 +5629,483 @@ function clearLogs() {
     logState.follow = true;
     renderLogs();
   }, e => toast('Not cleared: ' + e.message));
+}
+/* ══════════════════════ EVENTS (Logs → Events) ══════════════════════
+   EventsView: the events journal (contract: docs/core.md → Events; ids, cat, type, level, own,
+   log, data) as rows a person reads. The core writes it (Auto switched, a site is blocked, a
+   subscription failed, sing-box crashed…); the UI adds what only it knows (subscription
+   results, the user's own actions) through backend.addEvent. Everything the UI shows is built
+   here from the structured data: ids are resolved to names through the catalog, falling back
+   to the raw id. The journal is polled every second while Events is open, every 3 s otherwise,
+   because the background NOTIFICATIONS come from it too (58-notif.js): events newer than the
+   page's first look (never history), not own, mapped to a toggle by EV_NOTIF.
+   Oldest at the top, opened at the bottom; new event + at the bottom = a smooth scroll to it,
+   scrolled up = the view stays and the pill counts them (the pill of the Raw tab, 46-logs.js).
+   Filter (search, only problems, categories → event types) is temporary; Show my actions and
+   which warnings / errors were seen (the dots on the Logs tab) are kept with the UI state.
+   (Flutter: EventsView, EventRow, EventFilterSheet over the events stream.) */
+
+const logCfg = { showOwn: false, seen: [] };   // kept (liveSnapshot): user actions shown; ids of warn / error events seen
+const evState = { list: [], next: null, notifyFrom: null, busy: null, gen: 0, follow: true, unseen: 0, smoothUntil: 0, open: new Set(), shown: 0 };
+const evFilter = { q: '', problems: false, off: new Set() };   // temporary: gone with the page
+const evFilterOpen = new Set();                                 // categories unfolded in the sheet
+const EV_KEEP = 1000;
+const EV_REPEAT_MS = 10 * 60 * 1000;
+
+// Category: label, icon (the colour is --ev-c of .cat-<cat>, 67-logs.css) and its event types.
+const EV_CATS = [
+  ['conn', 'Connection', [['connected', 'Connected'], ['disconnected', 'Disconnected'], ['connectFailed', 'Connect failed'], ['lost', 'Connection lost'], ['restored', 'Connection restored'], ['offline', 'No network'], ['online', 'Network back']]],
+  ['auto', 'Auto', [['switched', 'Entry or server switched'], ['fastest', 'Fastest moved'], ['unstable', 'Unstable entry']]],
+  ['site', 'Sites', [['blocked', 'Site does not open']]],
+  ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
+  ['rules', 'Rules', [['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
+  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting']]],
+];
+const svgI = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const EV_ICON = {
+  conn: svgI('<path d="M5 12.55a11 11 0 0114.08 0M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>'),
+  auto: svgI('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>'),
+  site: svgI('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>'),
+  sub: svgI('<path d="M8 17l4 4 4-4"/><path d="M12 12v9"/><path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29"/>'),
+  rules: svgI('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/>'),
+  core: svgI('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>'),
+  user: svgI('<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7"/>'),
+};
+// Which Settings → Notifications toggle an event type answers to (none: never a notification).
+const EV_NOTIF = {
+  'auto/switched': 'autoSwitch', 'auto/fastest': 'autoSwitch', 'auto/unstable': 'unstable',
+  'conn/lost': 'connLost', 'conn/restored': 'connLost', 'conn/offline': 'connLost', 'conn/online': 'connLost',
+  'core/crashed': 'coreCrash', 'core/restarted': 'coreCrash', 'core/restartFailed': 'coreCrash',
+  'site/blocked': 'blocked', 'sub/updated': 'subUpdated',
+  'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
+  'rules/ruleSetFailed': 'ruleSets',
+};
+
+/* ── Words: the structured data → the sentences ── */
+
+const evEntry = id => { if (id == null || id === '') return ''; const e = connectEntry(id); return e ? e.name : String(id); };
+const evServer = k => { if (k == null || k === '') return ''; const n = nodeOfKey(String(k)); return n ? n.name : String(k); };
+const evSource = (sid, name) => (sourcesData[sid] && sourcesData[sid].name) || name || String(sid || '');
+const evName = k => String(k).includes('::') ? evServer(k) : evEntry(k);   // 'sid::nid' is a server, anything else an entry
+function evDuration(ms) {
+  const s = Math.round(ms / 1000);
+  return s < 90 ? s + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : Math.floor(s / 3600) + ' h ' + Math.round((s % 3600) / 60) + ' min';
+}
+function evReason(d) {
+  const from = d.route ? evServer(d.from) : evEntry(d.from), to = d.route ? evServer(d.to) : evEntry(d.to);
+  if (d.reason === 'failover') return `${from} failed${d.fails ? ' ' + d.fails + ' checks' : ' its checks'}`;
+  if (d.reason === 'back') return `${to} is back — returned to it`;
+  if (d.reason === 'fastest') return `${to} is faster`;
+  return d.reason ? String(d.reason) : '';
+}
+const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+const EV_TEXT = {
+  'conn/connected': d => ['Connected' + (d.entry ? ': ' + evEntry(d.entry) : ''),
+    [d.server && evServer(d.server), d.mode === 'tun' ? 'TUN' : d.mode === 'proxy' ? 'Proxy' : '', d.route === 'global' ? 'Global' : d.route === 'rules' ? 'By rules' : ''].filter(Boolean).join(' · ')],
+  'conn/disconnected': d => ['Disconnected', d.by === 'error' ? d.reason || 'The connection dropped' : 'You disconnected'],
+  'conn/connectFailed': d => ['Could not connect', d.reason || ''],
+  'conn/lost': () => ['Connection lost', 'No route answers — waiting for the network'],
+  'conn/restored': d => ['Connection restored', d.downMs != null ? 'Down for ' + evDuration(d.downMs) : ''],
+  'conn/offline': () => ['No network', 'The system reports no connection'],
+  'conn/online': d => ['Network is back', d.downMs != null ? 'Down for ' + evDuration(d.downMs) : ''],
+  'auto/switched': d => [d.route ? `Auto: ${evEntry(d.route)} — ${evServer(d.from)} → ${evServer(d.to)}` : `Auto: ${evEntry(d.from)} → ${evEntry(d.to)}`, evReason(d)],
+  'auto/fastest': d => [`Fastest: ${evEntry(d.route)} — ${evServer(d.from)} → ${evServer(d.to)}`, `${evServer(d.to)} is now the fastest`],
+  'auto/unstable': d => [`${evEntry(d.id)} is unstable`, `Dropped ${d.strikes}× — back to it after ${Math.max(1, Math.round(d.holdMs / 60000))} min without drops`],
+  'site/blocked': d => {
+    const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route;
+    return [`${host} does not open`, (entry ? `Not via ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}` : '') + (d.via ? `${entry ? ' — it does' : 'It does'} via ${evEntry(d.via)}` : '')];
+  },
+  'sub/updated': d => [`${evSource(d.source, d.name)} updated`, [evPlural(d.total, 'server', 'servers'), d.added ? d.added + ' new' : '', d.removed ? d.removed + ' removed' : ''].filter(Boolean).join(' · ')],
+  'sub/failed': d => [`${evSource(d.source, d.name)}: update failed`, d.error || ''],
+  'sub/removed': d => [`${evSource(d.source, d.name)}: the provider removed ${evPlural(d.count, 'server', 'servers')}`, 'See Unavailable in Nodes — their settings are kept'],
+  'sub/back': d => [`${evSource(d.source, d.name)}: ${evPlural(d.count, 'server is', 'servers are')} back`, 'Previous settings restored'],
+  'sub/dead': d => [`${evSource(d.source, d.name)}: its servers do not respond`, "Contact the subscription provider's support"],
+  'rules/ruleSetFailed': d => [`Rule set ${d.tag} not downloaded`, [d.error, 'the last copy is used'].filter(Boolean).join(' — ')],
+  'rules/ruleSetUpdated': d => [`Rule set ${d.tag} updated`, ''],
+  'core/crashed': d => ['sing-box stopped', (d.code != null ? 'Exit code ' + d.code + ' — ' : '') + 'starting it again'],
+  'core/restarted': d => ['sing-box started again', d.attempt ? 'Attempt ' + d.attempt : ''],
+  'core/restartFailed': d => ['sing-box could not start again', [d.attempt && 'Attempt ' + d.attempt, d.error].filter(Boolean).join(' · ')],
+  'core/sysProxy': d => [d.error ? 'System proxy could not be ' + (d.on ? 'set' : 'restored') : 'System proxy ' + (d.on ? 'on' : 'off'), d.error || ''],
+  'core/deprecated': d => ['sing-box: a deprecated setting', d.text || ''],
+};
+const EV_USER = {
+  connect: d => ['You connected', evEntry(d.entry)],
+  disconnect: () => ['You disconnected', ''],
+  pin: d => d.server ? ['You pinned ' + evServer(d.server), evEntry(d.entry)] : ['You unpinned the server', evEntry(d.entry)],
+  mode: d => ['You switched to ' + (d.value === 'tun' ? 'TUN' : 'Proxy') + ' mode', ''],
+  route: d => ['You switched to ' + (d.value === 'global' ? 'Global' : 'By rules'), ''],
+  sysProxy: d => ['You turned the system proxy ' + (d.on ? 'on' : 'off'), ''],
+};
+function evDescribe(e) {
+  const d = e.data || {}, f = e.cat === 'user' ? EV_USER[e.type] : EV_TEXT[e.cat + '/' + e.type];
+  const [title, detail] = f ? f(d) : [e.cat + ' / ' + e.type, ''];
+  return { title, detail: detail || '' };
+}
+// One line, for a notification and the export.
+function evText(e) { const d = evDescribe(e); return d.title + (d.detail ? ' — ' + d.detail : ''); }
+
+// The expanded row: every field of the event in words.
+const EV_FIELD = { entry: 'Entry', server: 'Server', mode: 'Mode', route: 'Route', from: 'From', to: 'To', reason: 'Reason', by: 'By', host: 'Site', dest: 'Address', via: 'Opens via',
+  source: 'Subscription', name: 'Name', added: 'New servers', removed: 'Removed', total: 'Servers', count: 'Servers', error: 'Error', tag: 'Rule set', url: 'URL', code: 'Exit code',
+  attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
+function evValue(k, v) {
+  if (typeof v === 'boolean') return k === 'on' ? (v ? 'On' : 'Off') : v ? 'Yes' : 'No';
+  if (k === 'downMs' || k === 'holdMs') return evDuration(v);
+  if (k === 'mode') return v === 'tun' ? 'TUN' : v === 'proxy' ? 'Proxy' : String(v);
+  if (k === 'route' && (v === 'global' || v === 'rules')) return v === 'global' ? 'Global' : 'By rules';
+  if (k === 'by') return v === 'user' ? 'You' : 'An error';
+  if (k === 'source') return evSource(v);
+  if (['entry', 'server', 'route', 'from', 'to', 'via', 'id'].includes(k) && typeof v === 'string') return evName(v);
+  return typeof v === 'object' ? JSON.stringify(v) : String(v);
+}
+const evStamp = t => { const d = new Date(t); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' + logTime(t); };
+function evFieldsHtml(g) {
+  const e = g.ev, f = (k, v) => `<div class="ev-f"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
+  let h = g.items.length > 1 ? f('Times', g.items.map(x => logTime(x.at)).join(', ')) : f('Time', evStamp(e.at));
+  h += f('Event', e.cat + ' / ' + e.type + (e.own ? ' (yours)' : ''));
+  Object.entries(e.data || {}).forEach(([k, v]) => { if (v != null && v !== '') h += f(EV_FIELD[k] || k.charAt(0).toUpperCase() + k.slice(1), evValue(k, v)); });
+  return h;
+}
+
+/* ── Rows: repeats folded, day separators, actions ── */
+
+const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
+function evKey(e) {
+  const t = e.cat + '/' + e.type, d = e.data || {}, f = EV_KEYF[t] || (e.cat === 'sub' ? ['source'] : null);
+  return t + '|' + (f ? f.map(k => d[k]).join('|') : e.cat === 'user' ? JSON.stringify(d) : '');
+}
+// The same event again within 10 minutes of its last time is one row: ×N, the last time; the
+// row then sits where its last time puts it.
+function evGroups(list) {
+  const groups = [], last = new Map(), rank = { info: 0, warn: 1, error: 2 };
+  list.forEach(e => {
+    const k = evKey(e), g = last.get(k);
+    if (g && e.at - g.at <= EV_REPEAT_MS) {
+      g.items.push(e); g.at = e.at; g.ev = e;
+      if (rank[e.level] > rank[g.level]) g.level = e.level;
+      groups.splice(groups.indexOf(g), 1); groups.push(g);
+    } else { const n = { key: e.id, items: [e], at: e.at, ev: e, level: e.level }; groups.push(n); last.set(k, n); }
+  });
+  return groups;
+}
+const evDayStart = t => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+function evDayLabel(t) {
+  const diff = Math.round((evDayStart(Date.now()) - evDayStart(t)) / 864e5);
+  return diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : new Date(t).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+const evClock = t => logTime(t).slice(0, 5);
+
+function evActions(e) {
+  const d = e.data || {}, a = [];
+  if (e.cat === 'site' && e.type === 'blocked' && d.via) a.push(['rule', 'Rule']);
+  if (e.cat === 'sub' && e.type === 'failed' && sourcesData[d.source] && sourcesData[d.source].kind === 'sub') a.push(['retry', 'Retry']);
+  if (evOpenTarget(e)) a.push(['open', 'Open']);
+  if (e.log != null) a.push(['raw', 'In raw log']);
+  return a;
+}
+function evOpenTarget(e) {
+  const d = e.data || {};
+  if (e.cat === 'sub') return sourcesData[d.source] ? d.source : null;
+  if (e.cat === 'auto' && e.type === 'unstable') return connectEntry(d.id) ? d.id : null;
+  if (e.cat === 'site') return d.entry && connectEntry(d.entry) ? d.entry : null;
+  if (e.cat === 'rules') return 'rules';
+  return null;
+}
+function evAct(key, id) {
+  const e = evState.list.find(x => x.id === id), d = e && e.data || {};
+  if (!e) return;
+  if (key === 'rule') openBlockedRule({ dest: d.dest || d.host, via: d.via });
+  else if (key === 'retry') updateSource(d.source);
+  else if (key === 'raw') showRawLine(e.log);
+  else if (key === 'open') {
+    const t = evOpenTarget(e);
+    if (t === 'rules') { openRuleSets(); return; }
+    switchTab('nodes');
+    setNodesTab(catalogOrder.simple.includes(t) ? 'simple' : 'profiles');
+    expandState[t] = true;
+    renderNodes();
+    requestAnimationFrame(() => { const c = document.querySelector('#view-nodes .src-card[data-id="' + t + '"]'); if (c) c.scrollIntoView({ block: 'center' }); });
+  }
+}
+
+function evRowHtml(g) {
+  const e = g.ev, d = evDescribe(e), acts = evActions(e), rep = g.items.length;
+  const tag = g.level === 'warn' || g.level === 'error' ? `<span class="log-tag ${g.level}">${g.level === 'warn' ? 'WARN' : 'ERROR'}</span>` : '';
+  return `<div class="ev-row cat-${e.cat} lvl-${g.level}${evState.open.has(g.key) ? ' open' : ''}" data-key="${g.key}" data-ids="${g.items.map(x => x.id).join(',')}" onclick="evToggle(${g.key})">
+    <div class="ev-ico">${EV_ICON[e.cat] || ''}</div>
+    <div class="ev-body">
+      <div class="ev-top"><span class="ev-title">${tag}${esc(d.title)}</span>${rep > 1 ? `<span class="ev-rep">×${rep}</span>` : ''}<span class="ev-time">${evClock(g.at)}</span></div>
+      ${d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
+      ${acts.length ? `<div class="ev-acts">${acts.map(([k, l]) => `<button class="ev-act" onclick="event.stopPropagation();evAct('${k}',${e.id})">${l}</button>`).join('')}</div>` : ''}
+      <div class="ev-more">${evFieldsHtml(g)}</div>
+    </div></div>`;
+}
+function evToggle(key) {
+  const row = document.querySelector('#evList .ev-row[data-key="' + key + '"]');
+  if (evState.open.delete(key)) row.classList.remove('open');
+  else { evState.open.add(key); row.classList.add('open'); }
+}
+
+/* ── Filter: temporary (evFilter) + Show my actions (kept, logCfg) ── */
+
+const evTypeKey = e => e.cat + '/' + e.type;
+function evVisible(e) {
+  if (e.cat === 'user' && !logCfg.showOwn) return false;
+  if (evFilter.problems && e.level === 'info') return false;
+  if (evFilter.off.has(evTypeKey(e))) return false;
+  if (evFilter.q && !(evText(e) + ' ' + Object.values(e.data || {}).join(' ')).toLowerCase().includes(evFilter.q)) return false;
+  return true;
+}
+const evOffCats = () => EV_CATS.filter(([c, , ts]) => ts.some(([t]) => evFilter.off.has(c + '/' + t)));
+const evFilterCount = () => (evFilter.q ? 1 : 0) + (evFilter.problems ? 1 : 0) + evOffCats().length;
+function evFilterText() {
+  const parts = [];
+  if (evFilter.q) parts.push('“' + evFilter.q + '”');
+  if (evFilter.problems) parts.push('only problems');
+  evOffCats().forEach(([c, label, ts]) => {
+    const n = ts.filter(([t]) => !evFilter.off.has(c + '/' + t)).length;
+    parts.push(n ? `${label} ${n}/${ts.length}` : 'no ' + label);
+  });
+  return parts.join(' · ');
+}
+function renderEvFilterBar() {
+  const n = evFilterCount(), bar = document.getElementById('evFilterBar'), badge = document.getElementById('evFilterBadge');
+  badge.style.display = n ? '' : 'none';
+  badge.textContent = n;
+  document.getElementById('evFilterBtn').classList.toggle('on', n > 0);
+  bar.style.display = n && logTab === 'events' ? '' : 'none';
+  bar.innerHTML = `<span class="evfb-text">Filtered: ${esc(evFilterText())}</span><button class="evfb-reset" onclick="evResetFilter()">Reset</button>`;
+}
+// A filter changed: the list is built again and stays at the bottom if it was there.
+function evRefilter() {
+  renderEvents();
+  evFollowIfPinned();
+  renderEvFilterBar();
+  renderLogSummary();
+  if (document.getElementById('sh-evfilter').classList.contains('open')) renderEvFilter();
+  evMarkSeenSoon();
+}
+function setEvQuery(v) { evFilter.q = v.trim().toLowerCase(); evRefilter(); }
+function setEvProblems(v) { evFilter.problems = v; evRefilter(); }
+function evResetFilter() { evFilter.q = ''; evFilter.problems = false; evFilter.off.clear(); document.getElementById('evQ').value = ''; evRefilter(); }
+function evToggleType(key) { if (!evFilter.off.delete(key)) evFilter.off.add(key); evRefilter(); }
+// All of a category's types on → all off; otherwise → all on.
+function evToggleCat(cat) {
+  const types = EV_CATS.find(c => c[0] === cat)[2].map(([t]) => cat + '/' + t), allOn = types.every(k => !evFilter.off.has(k));
+  types.forEach(k => allOn ? evFilter.off.add(k) : evFilter.off.delete(k));
+  evRefilter();
+}
+function evFilterFold(cat) { if (!evFilterOpen.delete(cat)) evFilterOpen.add(cat); renderEvFilter(); }
+function setShowOwn(v) { logCfg.showOwn = v; evRefilter(); liveSave(); }
+
+function openEvFilter() {
+  document.getElementById('evQ').value = evFilter.q;
+  renderEvFilter();
+  openSheet('evfilter');
+}
+function renderEvFilter() {
+  const toggle = (on, fn) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${fn}"><div class="mini-toggle-thumb"></div></div>`;
+  const check = st => `<div class="evf-check ${st}">${st === 'on' ? '✓' : st === 'part' ? '–' : ''}</div>`;
+  const cat = ([c, label, types]) => {
+    const n = types.filter(([t]) => !evFilter.off.has(c + '/' + t)).length, st = n === types.length ? 'on' : n ? 'part' : '', open = evFilterOpen.has(c);
+    return `<div class="evf-cat cat-${c}" data-cat="${c}">
+      <div class="set-row evf-head"><span onclick="evToggleCat('${c}')">${check(st)}</span>
+        <div class="evf-name" onclick="evFilterFold('${c}')"><span class="evf-ico">${EV_ICON[c]}</span>${label}<span class="evf-n">${n}/${types.length}</span></div>
+        <div class="evf-chev ${open ? 'open' : ''}" onclick="evFilterFold('${c}')">›</div></div>
+      ${open ? types.map(([t, tl]) => `<div class="set-row evf-type" data-type="${c}/${t}" onclick="evToggleType('${c}/${t}')">${check(evFilter.off.has(c + '/' + t) ? '' : 'on')}<div class="evf-name">${tl}</div></div>`).join('') : ''}
+    </div>`;
+  };
+  document.getElementById('evfilter-body').innerHTML = `
+    <div class="set-group"><div class="set-row" data-key="problems"><div class="set-label" style="flex:1">Only problems<div class="set-hint">Warnings and errors</div></div>${toggle(evFilter.problems, `setEvProblems(${!evFilter.problems})`)}</div></div>
+    <div class="set-caption">Categories</div>
+    <div class="set-group">${EV_CATS.map(cat).join('')}</div>
+    ${evFilterCount() ? '<div class="evf-reset"><button class="ev-act" onclick="evResetFilter()">Reset the filter</button></div>' : ''}
+    <div class="set-caption">Kept with your settings</div>
+    <div class="set-group evf-kept"><div class="set-row" data-key="showOwn"><div class="set-label" style="flex:1">Show my actions<div class="set-hint">Connect, disconnect, pin, mode and route switches, system proxy. The filter above is forgotten when the app restarts; this switch is not.</div></div>${toggle(logCfg.showOwn, `setShowOwn(${!logCfg.showOwn})`)}</div></div>`;
+}
+
+/* ── The list ── */
+
+function renderEvents() {
+  const box = document.getElementById('evScroll'), list = document.getElementById('evList'), top = box.scrollTop;
+  const shown = evState.list.filter(evVisible), groups = evGroups(shown);
+  evState.shown = shown.length;
+  let html = '', day = null;
+  groups.forEach(g => {
+    const dk = evDayStart(g.at);
+    if (dk !== day) { day = dk; html += `<div class="ev-day">${evDayLabel(g.at)}</div>`; }
+    html += evRowHtml(g);
+  });
+  list.innerHTML = html || `<div class="log-empty">${evState.list.length ? 'No events match the filter' : 'No events yet'}</div>`;
+  if (!evState.follow && box.clientHeight) box.scrollTop = top;
+}
+function evSummaryText() {
+  const all = evState.list, warn = all.filter(e => e.level === 'warn').length, err = all.filter(e => e.level === 'error').length;
+  return (evFilterCount() ? evState.shown + ' of ' : '') + evPlural(all.length, 'event', 'events')
+    + (err ? ' · ' + evPlural(err, 'error', 'errors') : '') + (warn ? ' · ' + evPlural(warn, 'warning', 'warnings') : '');
+}
+
+/* Follow: at the bottom, a new event scrolls smoothly to itself; scrolled up, the view stays
+   and the pill counts the new ones. The scroll handler ignores the smooth scroll's own
+   steps (the bottom is still a few pixels away while it runs). */
+function evScrollBottom(smooth) {
+  const box = document.getElementById('evScroll');
+  if (!box.clientHeight) return;
+  if (smooth) { evState.smoothUntil = Date.now() + 700; box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' }); }
+  else box.scrollTop = box.scrollHeight;
+}
+function evFollowIfPinned(smooth) { if (evState.follow) evScrollBottom(smooth); }
+function evFollow(smooth) {
+  evState.follow = true;
+  evState.unseen = 0;
+  evScrollBottom(smooth);
+  renderLogSummary();
+  evMarkSeenSoon();
+}
+function evScrolled() {
+  const box = document.getElementById('evScroll'), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 24;
+  evMarkSeenSoon();
+  if (!atEnd && evState.follow && Date.now() < evState.smoothUntil) return;
+  if (atEnd === evState.follow) return;
+  evState.follow = atEnd;
+  if (atEnd) evState.unseen = 0;
+  renderLogSummary();
+}
+
+/* ── Seen: the dots on the Logs tab ── */
+
+let evSeenTimer = null;
+const evMarkSeenSoon = () => { if (!evSeenTimer) evSeenTimer = setTimeout(() => { evSeenTimer = null; evMarkSeen(); }, 150); };
+// The warnings / errors whose row is in the list's viewport are seen (a folded row: all its repeats).
+function evMarkSeen() {
+  if (!logsOpen() || logTab !== 'events') return;
+  const r = document.getElementById('evScroll').getBoundingClientRect();
+  if (!r.height) return;
+  const ids = [];
+  document.querySelectorAll('#evList .ev-row.lvl-warn, #evList .ev-row.lvl-error').forEach(row => {
+    const b = row.getBoundingClientRect();
+    if (b.bottom > r.top + 8 && b.top < r.bottom - 8) ids.push(...row.dataset.ids.split(',').map(Number));
+  });
+  evMarkIds(ids);
+}
+function evMarkIds(ids) {
+  const seen = new Set(logCfg.seen), n = seen.size;
+  ids.forEach(id => seen.add(id));
+  if (seen.size === n) return;
+  logCfg.seen = [...seen];
+  renderNavDots();
+  liveSave();
+}
+// red = an unseen error, yellow = an unseen warning (both may show); hidden-by-filter ones count
+function renderNavDots() {
+  const seen = new Set(logCfg.seen), unseen = lvl => evState.list.some(e => e.level === lvl && !seen.has(e.id));
+  const err = unseen('error'), warn = unseen('warn'), E = document.getElementById('navDotErr'), W = document.getElementById('navDotWarn');
+  E.classList.toggle('on', err); W.classList.toggle('on', warn);
+  E.classList.toggle('both', err && warn); W.classList.toggle('both', err && warn);
+}
+
+/* ── The journal: poll, notify, add, clear ── */
+
+function pollEvents() {
+  if (evState.busy) { evState.again = true; return evState.busy; }   // asked again meanwhile (an event was just added): once more after
+  const gen = evState.gen, first = evState.next == null;
+  return evState.busy = backend.events(evState.next).then(r => {
+    if (gen !== evState.gen) return;
+    // numbering started over (the core's data was reset): read the journal again, notify nothing
+    if (!first && r.next < evState.next) { evState.next = null; evState.list = []; return; }
+    const n0 = evState.list.length;
+    if (r.first != null) evState.list = evState.list.filter(e => e.id >= r.first);   // pruned, or cleared elsewhere
+    const fresh = r.events.filter(e => first || e.id >= evState.next);
+    if (first) evState.notifyFrom = r.next;   // what was there when the page looked is history: never a notification
+    evState.next = r.next;
+    evState.list.push(...fresh);
+    if (evState.list.length > EV_KEEP) evState.list.splice(0, evState.list.length - EV_KEEP);
+    const ids = new Set(evState.list.map(e => e.id)), seen = logCfg.seen.filter(id => ids.has(id));
+    if (seen.length !== logCfg.seen.length) { logCfg.seen = seen; liveSave(); }
+    if (fresh.length || first || evState.list.length !== n0) evAfterNew(fresh, first);
+    fresh.filter(e => e.id >= evState.notifyFrom && !e.own).forEach(evNotify);
+  }, () => {}).finally(() => { evState.busy = null; if (evState.again) { evState.again = false; pollEvents(); } });
+}
+function evAfterNew(fresh, first) {
+  const open = logsOpen() && logTab === 'events';
+  renderEvents();
+  if (open) {
+    if (evState.follow) evScrollBottom(!first);
+    else evState.unseen += fresh.filter(evVisible).length;
+  }
+  renderLogSummary();
+  renderNavDots();
+  evMarkSeenSoon();
+}
+// A background event → its notification (Settings → Notifications decides). Tap → the event in Logs.
+function evNotify(e) {
+  const kind = EV_NOTIF[evTypeKey(e)];
+  if (!kind) return;
+  notify(kind, evText(e), e.cat === 'site' && e.data && e.data.via ? { label: 'Rule', fn: () => evAct('rule', e.id) } : null, e.id);
+}
+let evTick = 0;
+setInterval(() => { if (!document.hidden && (logsOpen() && logTab === 'events' || (++evTick) % 3 === 0)) pollEvents(); }, 1000);
+
+setTimeout(pollEvents, 0);
+
+// What only the UI knows goes into the journal: a subscription's result, the user's own action.
+// opts: level ('info'), own (true for cat 'user'). The list follows at once.
+function journal(cat, type, data, opts) {
+  const o = opts || {};
+  return backend.addEvent({ cat, type, level: o.level || 'info', own: o.own != null ? o.own : cat === 'user', data: data || {} })
+    .then(() => pollEvents(), () => {});
+}
+
+// A notification was tapped: Logs → Events at that event (the filter cleared if it hides it).
+function openEventInLogs(id) {
+  switchTab('logs');
+  const e = evState.list.find(x => x.id === id);
+  if (e && !evVisible(e)) evResetFilter();
+  const row = [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id)));
+  if (!row) return;
+  evMarkIds(row.dataset.ids.split(',').map(Number));
+  row.scrollIntoView({ block: 'center' });
+  row.classList.add('hit');
+  setTimeout(() => row.classList.remove('hit'), 2600);
+  evScrolled();
+}
+
+function confirmClearEvents() {
+  openActions('Clear events?', '<div class="menu-note">The events list is emptied. The raw log stays as it is.</div>'
+    + menuRow(ICON.trash, 'Clear events', "closeSheet('actions');clearEvents()", 'danger')
+    + menuRow(ICON.close, 'Cancel', "closeSheet('actions')"));
+}
+function clearEvents() {
+  evState.gen++;
+  backend.clearEvents().then(() => {
+    evState.gen++;
+    evState.list = [];
+    evState.follow = true;
+    evState.unseen = 0;
+    logCfg.seen = [];
+    renderEvents(); renderNavDots(); renderLogSummary();
+    liveSave();
+  }, e => toast('Not cleared: ' + e.message));
+}
+
+// Both logs as text: the events (readable), then the raw lines.
+function logsExportText() {
+  return Promise.all([backend.events(0), backend.log(null)]).then(([ev, raw]) => {
+    const events = ev.events.map(e => `${new Date(e.at).toISOString()} ${e.level.toUpperCase().padEnd(5)} ${e.own ? '[you] ' : ''}${evText(e)}`).join('\n');
+    return `Jormungand logs, ${new Date().toISOString()}\n\n== Events (${ev.events.length}) ==\n${events}\n\n== Raw log (${raw.lines.length} lines) ==\n${rawLogText(raw.lines)}\n`;
+  });
+}
+function exportLogs() {
+  logsExportText().then(text => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    a.download = 'jormungand-logs-' + new Date().toISOString().slice(0, 10) + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast('Logs saved: ' + a.download);
+  }, e => toast('Export failed: ' + e.message));
 }
 /* ══════════════════════ MAIN TOGGLE ══════════════════════ */
 
@@ -5399,6 +6149,7 @@ function toggleMain() {
     connected = false;
     exitInfo = null;
     renderConnState();
+    journal('user', 'disconnect', { action: 'disconnect' });
     backend.disconnect().then(refreshExitIp, e => toast(e.message));
     return;
   }
@@ -5406,7 +6157,7 @@ function toggleMain() {
   if (catalogEmpty()) { toast(simpleMode() ? 'Add a subscription or a server first' : 'Create a profile first'); dockTap(); return; }
   connecting = true;
   renderConnState();
-  backend.connect().then(() => { connected = true; }, e => toast(e.message))
+  backend.connect().then(() => { connected = true; journal('user', 'connect', { action: 'connect', entry: effectiveConnectId() }); }, e => toast(e.message))
     .then(() => { connecting = false; renderConnState(); if (!connected) refreshExitIp(); });
 }
 
@@ -5427,7 +6178,8 @@ const SEG_OPTS = { mode: ['tun', 'proxy'], route: ['global', 'rules'], sys: ['on
 // Two options only, so a tap anywhere on the control flips it.
 function toggleSegment(group) {
   const next = SEG_OPTS[group].find(o => o !== segState[group]);
-  if (group === 'sys') setSysProxy(next === 'on'); else setSegment(group, next);
+  if (group === 'sys') setSysProxy(next === 'on');
+  else { setSegment(group, next); journal('user', group, { action: group, value: next }); }
 }
 function setSegment(group, value) {
   segState[group] = value;
@@ -5460,6 +6212,7 @@ function setSysProxy(on) {
   connCfg.sysProxy = on;
   setSegment('sys', on ? 'on' : 'off');
   renderConnSettings();
+  journal('user', 'sysProxy', { action: 'sysProxy', on });
 }
 
 
@@ -6131,6 +6884,7 @@ const notifCfg = {
   subUpdated: false,    // a subscription updated in the background
   subFailed: true,      // background update failed; provider removed / brought back servers; servers do not respond
   ruleSets: true,       // rule sets could not be downloaded
+  desktopStyle: 'own',  // PC: 'own' pop-ups in the corner (also with the app closed to the tray) or 'system' notifications
 };
 const NOTIF_GROUPS = [
   ['Status', [
@@ -6151,10 +6905,12 @@ const NOTIF_GROUPS = [
 ];
 const NOTIF_KEYS = NOTIF_GROUPS.flatMap(g => g[1].map(r => r[0]));
 
-// A background event: shown only if the master and its own toggle are on.
-function notify(kind, msg, act) {
+// A background event: shown only if the master and its own toggle are on. evId = the journal
+// event behind it (47-events.js): a tap on the toast opens Logs → Events at that event, and
+// the toast flies into the Logs tab when it goes.
+function notify(kind, msg, act, evId) {
   if (!notifCfg.enabled || !notifCfg[kind]) return;
-  toast(msg, act);
+  toast(msg, act, evId == null ? null : () => openEventInLogs(evId));
 }
 
 function renderNotif() {
@@ -6167,7 +6923,15 @@ function renderNotif() {
     <div id="notif-groups" style="${notifCfg.enabled ? '' : 'opacity:.4;pointer-events:none'}">
       ${NOTIF_GROUPS.map(([cap, rows]) => `<div class="set-caption">${cap}</div><div class="set-group">${rows.map(row).join('')}</div>`).join('')}
     </div>
-    <div class="set-caption" style="text-transform:none;letter-spacing:0">On the phone and desktop these come as system notifications; in the app, as a toast at the bottom. What you start yourself (Update, Add, Ping) is always shown.</div>`;
+    <div class="set-caption">Pop-ups on PC</div>
+    <div class="set-group"><div class="set-row" data-key="desktopStyle" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div class="set-label">Where they show<div class="set-hint">Own pop-ups show even when Windows notifications are muted; they appear in the corner while the app is closed to the tray. System notifications go through the Windows notification centre.</div></div>
+      <div class="chip-row" style="padding:0">
+        <div class="chip ${notifCfg.desktopStyle === 'own' ? 'active' : ''}" onclick="setNotifCfg('desktopStyle','own')">Own pop-ups</div>
+        <div class="chip ${notifCfg.desktopStyle === 'system' ? 'active' : ''}" onclick="setNotifCfg('desktopStyle','system')">System notifications</div>
+      </div>
+    </div></div>
+    <div class="set-caption" style="text-transform:none;letter-spacing:0">On the phone these come as system notifications; in the app, as a toast at the bottom (tap it to see the event). What you start yourself (Update, Add, Ping) is always shown.</div>`;
   const sub = document.getElementById('setNotifSub');
   if (sub) {
     const n = NOTIF_KEYS.filter(k => notifCfg[k]).length;
@@ -7655,8 +8419,7 @@ function routingPlan() {
    start on), and the core moves between them — and between a Priority entry's
    servers — through sing-box's Clash API, with no restart. This file builds those routes
    and reads back what the core did: the entry and server it is really on (coreRoute →
-   dock, Route), what it measured (→ the ping cache, so knownDead agrees with it) and when
-   it switched or found an entry unstable (→ a toast, General → When Auto switches).
+   dock, Route) and what it measured (→ the ping cache, so knownDead agrees with it).
    (Flutter: the same AutoService in-process; this is its view model.) */
 
 // f() on the UI's own picks: coreRoute off meanwhile (a plan is the UI's guess; the core
@@ -7731,47 +8494,24 @@ function mergeCorePings(members) {
 }
 
 const entryLabel = id => { const e = connectEntry(id); return e ? e.name : chainsData[id] ? chainsData[id].name : unitName(id); };
-function switchText(s) {
-  if (!s.route) return `Auto: ${entryLabel(s.from)} → ${entryLabel(s.to)}`;
-  const name = k => { const n = nodeOfKey(k); return n ? n.name : k; };
-  return `Auto: ${entryLabel(s.route)} — ${name(s.from)} → ${name(s.to)}`;
-}
 
 /* Every status from the core while connected (the poll, the answer to a connect; null on
-   disconnect): what its Auto is on and measured. Views re-render only on a change. */
+   disconnect): what its Auto is on and measured. Views re-render only on a change. What
+   the core did (switched, unstable, blocked, lost, crashed…) is not read from here: it comes
+   as events (47-events.js), which also drive the background notifications; only a
+   subscription's servers all failing (sourcesDown) is the UI's to post. */
 function liveAutoStatus(st) {
   const a = st && st.connected ? st.auto : null, was = JSON.stringify(coreRoute);
   coreRoute = a ? { id: a.now, server: a.server || null, entryServer: a.entryServer || null } : null;
   const pings = a ? mergeCorePings(a.members) : false;
-  if (a) {
-    if (live.switches != null && a.switches > live.switches && a.lastSwitch) notify('autoSwitch', switchText(a.lastSwitch));
-    if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable) notify('unstable', unstableText(a.lastUnstable));
-    if (live.blocked != null && a.blocked > live.blocked && a.lastBlocked) notify('blocked', blockedText(a.lastBlocked), { label: 'Rule', fn: () => openBlockedRule(a.lastBlocked) });
-    // no network at all (the OS, or no route answers): said once, and once more when it is back
-    const lost = !!(a.offline || a.noNet);
-    if (live.lost != null && lost !== live.lost) notify('connLost', lost ? 'Connection lost — waiting for the network' : 'Connection restored');
-    live.lost = lost;
-    sourcesDown(a.members);
-    live.switches = a.switches;
-    live.unstable = a.unstable || 0;
-    live.blocked = a.blocked || 0;
-    live.routes = (a.routes || []).map(r => r.id);
-  } else { live.switches = live.unstable = live.blocked = live.lost = null; live.srcDown = new Set(); }
-  // sing-box stopped on its own: the core puts the system proxy back and starts it again
-  if (st && st.recovering && !live.recovering) notify('coreCrash', 'sing-box stopped — starting it again…');
-  if (st && st.connected && live.restarts != null && st.restarts > live.restarts) notify('coreCrash', st.warning || 'sing-box started again');
-  live.recovering = st ? st.recovering : null;
-  live.restarts = st ? st.restarts : null;
+  if (a) { sourcesDown(a.members); live.routes = (a.routes || []).map(r => r.id); } else live.srcDown = new Set();
   if (pings) refreshSourceViews();
   else if (JSON.stringify(coreRoute) !== was) { renderConnects(); updateMainConnectCard(); }
 }
-// The flap guard (Settings → Auto mode): an entry that keeps dropping waits before it gets the traffic back.
-const unstableText = u => `Auto: ${entryLabel(u.id)} is unstable — back to it after ${Math.round(u.hold / 60000)} min without drops`;
 
 /* A request through the current node got nothing back while the node passes traffic, and
    the site opens through another Auto entry (the core checked both): offer a rule. */
 const destHost = d => d.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-const blockedText = b => `${destHost(b.dest)} does not open via ${entryLabel(b.route)} — it does via ${entryLabel(b.via)}`;
 function openBlockedRule(b) {
   const host = destHost(b.dest);
   openRuleForm();
@@ -7781,8 +8521,9 @@ function openBlockedRule(b) {
 }
 
 /* Every tested server of one subscription fails the checks (failAfter in a row) while a
-   server of another source answers: the provider's side (run out, blocked, down). Once per
-   subscription until one of its servers answers again. */
+   server of another source answers: the provider's side (run out, blocked, down). The UI
+   knows this (it maps the core's members to sources), so it posts the sub/dead event, once
+   per subscription until one of its servers answers again. */
 function sourcesDown(members) {
   const by = {}, fa = autoCfg.failAfter || 2;
   (members || []).forEach(m => { const i = m.key.indexOf('::'); if (i > 0) (by[m.key.slice(0, i)] ||= []).push(m); });
@@ -7794,7 +8535,7 @@ function sourcesDown(members) {
     if (!down) { live.srcDown.delete(sid); return; }
     if (!others || live.srcDown.has(sid)) return;
     live.srcDown.add(sid);
-    notify('subFailed', `${s.name}: its servers do not respond — contact the subscription provider's support`);
+    journal('sub', 'dead', { source: sid, name: s.name }, { level: 'error', own: false });
   });
 }
 /* ══════════════════════ LIVE MODE (Dart core) ══════════════════════
@@ -7854,7 +8595,7 @@ function ndjson(path, body, onLine, signal) {
 
 function liveSnapshot() {
   return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
-    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg, notifCfg,
+    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg, notifCfg, logCfg,
     // Rules, apps, rule sets, DNS (sent to the core as plan.routing, see 93-routing-plan.js)
     rulesData, ruleOrder, ruleSeq, quickCfg, appRules, ruleSets, rsSeq, dnsServers, dnsOrder, dnsSeq, dnsCfg,
     // measured pings survive a restart, so Auto starts from what it knew
@@ -7890,6 +8631,7 @@ function liveApply(s) {
     Object.assign(genCfg, g);
   }
   if (s.notifCfg) Object.assign(notifCfg, s.notifCfg);
+  if (s.logCfg) { logCfg.showOwn = !!s.logCfg.showOwn; logCfg.seen = Array.isArray(s.logCfg.seen) ? s.logCfg.seen.slice() : []; }
   // no demo rules or apps: a first run starts with the defaults of a fresh install
   rulesData = s.rulesData || {};
   ruleOrder = s.ruleOrder || [];
@@ -7904,6 +8646,7 @@ function liveApply(s) {
   restorePings(s.pings);   // 15-ping.js: older states keyed a server, not its variant
   // a page closed mid-update saved the spinner: it would block every later update
   Object.values(sourcesData).forEach(x => { delete x.updating; });
+  renderEvents(); renderNavDots();   // 47-events.js: the Show my actions switch and the seen marks came with it
 }
 function liveSave() {
   if (!live.ready) return;          // never overwrite the stored state before it is loaded
@@ -8025,17 +8768,17 @@ function liveSyncSources() {
         // a timer update that failed: only its lastError (the card's error strip with Retry)
         if (t.lastError && (t.updatedAt || 0) === (s.updatedAt || 0) && t.lastError.at > ((s.lastError && s.lastError.at) || 0)) {
           s.lastError = t.lastError;
-          failed = true;
-          notify('subFailed', 'Update of ' + s.name + ' failed: ' + t.lastError.msg);
+          failed = true;   // the core's events journal says so (sub/failed → a notification, 58-notif.js)
         }
         if (!((t.updatedAt || 0) > (s.updatedAt || 0))) return;
         const gone0 = (s.gone || []).length;
         SERVER_FIELDS.forEach(k => { if (k in t) s[k] = t[k]; else delete s[k]; });
         updated.push(s);
-        const gone1 = (s.gone || []).length;
-        if (gone1 > gone0) notify('subFailed', `${s.name}: the provider removed ${gone1 - gone0} server${gone1 - gone0 === 1 ? '' : 's'} — see Unavailable, settings kept`);
-        else if (gone1 < gone0) notify('subFailed', `${s.name}: ${gone0 - gone1} server${gone0 - gone1 === 1 ? ' is' : 's are'} back — previous settings restored`);
-        else notify('subUpdated', `${s.name} updated: ${(s.nodes || []).length} servers`);
+        // the core's own sub/updated / sub/failed say the update happened; what it did to the
+        // provider's servers (removed / back) is worked out here, so the UI posts those
+        const gone1 = (s.gone || []).length, data = { source: sid, name: s.name };
+        if (gone1 > gone0) journal('sub', 'removed', Object.assign({ count: gone1 - gone0 }, data), { level: 'warn', own: false });
+        else if (gone1 < gone0) journal('sub', 'back', Object.assign({ count: gone0 - gone1 }, data), { own: false });
       });
       if (failed && !updated.length) refreshSourceViews();
       if (!updated.length) return;
@@ -8087,6 +8830,10 @@ const liveBackend = {
   },
   log(since) { return api('/api/log' + (since != null ? '?since=' + since : '')); },
   clearLog() { return api('/api/log', null, 'DELETE'); },
+  // Events journal (core: events.dart): the same three calls as the mock's.
+  events(since) { return api('/api/events' + (since != null ? '?since=' + since : '')); },
+  addEvent(ev) { return api('/api/events', { cat: ev.cat, type: ev.type, level: ev.level || 'info', own: !!ev.own, data: ev.data || {} }); },
+  clearEvents() { return api('/api/events', null, 'DELETE'); },
   version() { return api('/api/version'); },
   autoSettings(auto) { return api('/api/auto', { auto }); },
   closeConn(id) { return api('/api/connections' + (id ? '/' + encodeURIComponent(id) : ''), null, 'DELETE'); },
@@ -8123,7 +8870,6 @@ const liveBackend = {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
         live.autoSig = JSON.stringify(plan.auto);
-        live.switches = live.unstable = live.restarts = live.lost = null;   // a new AutoService counts from 0
         liveAutoStatus(st);
         if (st.warning) toast(st.warning);
         liveWatchExit();   // the core checks the exit after every (re)connect
@@ -8228,8 +8974,7 @@ function liveInit() {
       }
       connected = false;
       live.planSig = null;
-      renderConnState();
-      notify('coreCrash', st.error || 'sing-box stopped');
+      renderConnState();   // the core's core/crashed event tells the user (58-notif.js)
     }, () => {});
   }, 4000);
 }

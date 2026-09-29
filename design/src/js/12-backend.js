@@ -51,8 +51,11 @@ let backend = {
     return wait(250 + Math.random() * 700).then(() => mockPairPing(entry, exit));
   },
   // like the core: the exit is checked again after every connect
-  connect()    { exitInfo = null; return wait(1100).then(() => { exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' }; }); },
-  disconnect() { return Promise.resolve(); },
+  connect()    { exitInfo = null; return wait(1100).then(() => {
+    exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' };
+    mockEventAdd('conn', 'connected', 'info', { entry: effectiveConnectId(), mode: segState.mode, route: segState.route }, { own: true, raw: 'Connected: ' + entryLabel(effectiveConnectId()) });
+  }); },
+  disconnect() { mockEventAdd('conn', 'disconnected', 'info', { by: 'user' }, { own: true }); return Promise.resolve(); },
   // Settings → Auto mode changed while connected: the core's Auto takes it as is (no reconnect).
   autoSettings(auto) { return Promise.resolve(); },
   // Live traffic (see renderTraffic): the mock keeps the numbers the cards show.
@@ -103,6 +106,12 @@ let backend = {
     return Promise.resolve({ lines: mockLog.lines.filter(l => since == null || l.n >= since), next: mockLog.n });
   },
   clearLog() { mockLog.lines = []; return Promise.resolve(); },
+  // Events journal (core: contract in docs/core.md): the events with id >= since (none given:
+  // the last 200), oldest first; next = the id the next event gets, first = the oldest id
+  // still kept. The UI adds its own (subscription results, user actions) and clears.
+  events(since) { return Promise.resolve(mockEventsGet(since)); },
+  addEvent(ev) { return Promise.resolve({ id: mockEventAdd(ev.cat, ev.type, ev.level || 'info', ev.data || {}, { own: ev.own }).id }); },
+  clearEvents() { mockEvSeed(); mockEv.list = []; return Promise.resolve(); },
   // Settings → Data → About: versions and where the core keeps its data (mock: no core).
   version() { return Promise.resolve({ core: null, singBox: null, dataDir: null }); },
   // Backup: the state snapshot the core stores (95-live.js liveSnapshot), and back.
@@ -147,8 +156,10 @@ function mockShareLink(n) {
 // Logs: plausible sing-box output — its start, then traffic lines while connected.
 const mockLog = { n: 0, lines: [], seeded: false };
 function mockLogAdd(src, lvl, msg, t) {
-  mockLog.lines.push({ n: mockLog.n++, t: t || Date.now(), src, lvl, msg });
+  const n = mockLog.n++;
+  mockLog.lines.push({ n, t: t || Date.now(), src, lvl, msg });
   if (mockLog.lines.length > 2000) mockLog.lines.shift();
+  return n;
 }
 function mockLogLine() {
   const hosts = ['googlevideo.com:443', 'api.github.com:443', 'discord.com:443', 'gateway.discord.gg:443', 'www.youtube.com:443', 'update.googleapis.com:443', 'telegram.org:443'];
@@ -174,4 +185,73 @@ function mockLogTick() {
   }
   if (!connected || connecting) return;
   for (let k = Math.floor(Math.random() * 4); k > 0; k--) { const [lvl, msg] = mockLogLine(); mockLogAdd('sing-box', lvl, msg); }
+}
+
+/* Events: a journal seeded with a believable history (yesterday and today, every category,
+   the user's own actions too), then now and then a new one while connected. Ids and names
+   come from the catalog as it is, so the rows resolve to real entries. */
+const mockEv = { n: 1, list: [], seeded: false, lastRand: 0 };
+// opts: own, at, raw (a line the core writes to the raw log at the same moment → ev.log)
+function mockEventAdd(cat, type, level, data, opts) {
+  mockEvSeed();
+  const o = opts || {}, ev = { id: mockEv.n++, at: o.at || Date.now(), cat, type, level, own: !!o.own, data: data || {} };
+  if (o.raw) { mockLogTick(); ev.log = mockLogAdd('core', level, o.raw); }
+  else if (o.log != null) ev.log = o.log;
+  mockEv.list.push(ev);
+  if (mockEv.list.length > 1000) mockEv.list.shift();
+  return ev;
+}
+function mockEvSeed() {
+  if (mockEv.seeded) return;
+  mockEv.seeded = true;
+  mockLogTick();
+  const ids = visibleOrder(), a = ids[0] || 'src1', b = ids[1] || a;
+  const sid = sourceOrder.find(x => sourcesData[x].kind === 'sub') || 'src1', s = sourcesData[sid] || { name: 'Subscription', nodes: [] };
+  const key = i => sid + '::' + ((s.nodes && s.nodes.length ? s.nodes[i % s.nodes.length] : { id: 'n' + i }).id);
+  const now = Date.now(), d0 = new Date().setHours(0, 0, 0, 0);
+  const warn = mockLog.lines.find(l => l.lvl === 'warn'), n0 = mockLog.lines[0];
+  const Y = h => d0 - h * 36e5, M = m => Math.max(d0 + 1000, now - m * 6e4);
+  const total = (s.nodes || []).length || 12;
+  const blocked = { host: 'rutracker.org', dest: 'rutracker.org:443', entry: a, server: key(0), route: a, via: b };
+  const list = [
+    [Y(15.5), 'user', 'connect', 'info', { action: 'connect', entry: a }, 1],
+    [Y(15.5) + 500, 'conn', 'connected', 'info', { entry: a, mode: 'tun', route: 'rules' }],
+    [Y(14), 'auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }],
+    [Y(13.9), 'site', 'blocked', 'warn', blocked], [Y(13.85), 'site', 'blocked', 'warn', blocked], [Y(13.8), 'site', 'blocked', 'warn', blocked],
+    [Y(12), 'sub', 'updated', 'info', { source: sid, name: s.name, added: 2, removed: 0, total }],
+    [Y(9), 'conn', 'lost', 'warn', {}], [Y(8.9), 'conn', 'restored', 'info', { downMs: 41000 }],
+    [Y(6), 'sub', 'failed', 'error', { source: sid, name: s.name, error: 'Connection timed out (15 s)' }],
+    [Y(5.95), 'sub', 'failed', 'error', { source: sid, name: s.name, error: 'Connection timed out (15 s)' }],
+    [Y(5), 'rules', 'ruleSetFailed', 'warn', { tag: 'geosite-ru', url: 'https://example.net/rules/geosite-ru.srs', error: 'HTTP 503' }],
+    [Y(2), 'user', 'pin', 'info', { action: 'pin', entry: a, server: key(1) }, 1],
+    [Y(1), 'user', 'disconnect', 'info', { action: 'disconnect' }, 1], [Y(1) + 500, 'conn', 'disconnected', 'info', { by: 'user' }],
+    [M(200), 'user', 'connect', 'info', { action: 'connect', entry: a }, 1],
+    [M(200) + 500, 'conn', 'connected', 'info', { entry: a, mode: 'tun', route: 'rules' }, 0, n0 && n0.n],
+    [M(170), 'user', 'mode', 'info', { action: 'mode', value: 'tun' }, 1], [M(160), 'user', 'route', 'info', { action: 'route', value: 'rules' }, 1],
+    [M(150), 'sub', 'updated', 'info', { source: sid, name: s.name, added: 0, removed: 1, total }],
+    [M(95), 'auto', 'fastest', 'info', { route: a, from: key(0), to: key(2) }],
+    [M(60), 'core', 'sysProxy', 'warn', { on: true, error: 'Access is denied' }],
+    [M(45), 'user', 'sysProxy', 'info', { action: 'sysProxy', on: true }, 1],
+    [M(30), 'sub', 'dead', 'error', { source: sid, name: s.name }],
+    [M(20), 'core', 'crashed', 'error', { code: 1 }], [M(19.9), 'core', 'restarted', 'info', { attempt: 1 }],
+    [M(12), 'auto', 'unstable', 'warn', { id: b, strikes: 2, holdMs: 120000 }, 0, warn && warn.n],
+    [M(8), 'sub', 'removed', 'warn', { source: sid, name: s.name, count: 2 }],
+    [M(3), 'conn', 'offline', 'warn', {}], [M(2.5), 'conn', 'online', 'info', { downMs: 30000 }],
+  ].sort((x, y) => x[0] - y[0]);
+  list.forEach(([at, cat, type, level, data, own, log]) => mockEventAdd(cat, type, level, data, { at, own, log }));
+  // a first run has seen everything but the last hour
+  logCfg.seen = mockEv.list.filter(e => e.level !== 'info' && e.at < now - 36e5).map(e => e.id);
+}
+// A new event now and then while connected (not under automation: tests add their own).
+function mockEventsGet(since) {
+  mockEvSeed();
+  if (connected && !connecting && !navigator.webdriver && Date.now() - mockEv.lastRand > 20000 && Math.random() < .5) {
+    mockEv.lastRand = Date.now();
+    const ids = visibleOrder(), a = ids[0], b = ids[1] || a, r = Math.random();
+    if (r < .4) mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }, { raw: 'Auto: switched ' + entryLabel(a) + ' → ' + entryLabel(b) });
+    else if (r < .7) mockEventAdd('site', 'blocked', 'warn', { host: 'discord.com', dest: 'discord.com:443', entry: a, route: a, via: b }, { raw: 'discord.com:443 does not open via ' + entryLabel(a) });
+    else mockEventAdd('auto', 'unstable', 'warn', { id: a, strikes: 2, holdMs: 120000 }, { raw: entryLabel(a) + ' is unstable' });
+  }
+  const events = since == null ? mockEv.list.slice(-200) : mockEv.list.filter(e => e.id >= since);
+  return { events, next: mockEv.n, first: mockEv.list.length ? mockEv.list[0].id : mockEv.n };
 }

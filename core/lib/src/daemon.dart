@@ -7,11 +7,13 @@ import 'package:path/path.dart' as p;
 import 'auto.dart';
 import 'config.dart';
 import 'device.dart';
+import 'eventbook.dart';
 import 'exitip.dart';
 import 'logbook.dart';
 import 'manual.dart';
 import 'node.dart';
 import 'parse/links.dart';
+import 'plan.dart';
 import 'probe.dart';
 import 'rulesets.dart';
 import 'runtime.dart';
@@ -49,6 +51,9 @@ class Daemon {
       log.singBox(line);
       _auto?.onLog(line);
     };
+    ruleSets.onFailed = (tag, url, error) => _event('rules', 'ruleSetFailed', 'warn', {'tag': tag, 'url': url, 'error': error},
+        note: 'Rule set $tag not downloaded ($url): $error');
+    ruleSets.onUpdated = (tag) => _event('rules', 'ruleSetUpdated', 'info', {'tag': tag}, note: 'Rule set $tag updated');
   }
 
   final String singBox;
@@ -63,10 +68,21 @@ class Daemon {
   /// sing-box output and the core's own notes (the Logs tab).
   final log = LogBook();
 
+  /// What happened, structured (eventbook.dart): the Events tab and the notifications.
+  late final events = EventBook(File(p.join(dataDir, 'events.jsonl')), log: log);
+
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
   late final store = SnapshotStore(_snapshot);
   // Subscriptions update themselves on their periods, also with the UI closed.
-  late final updater = SubscriptionUpdater(store: store, hwid: () => _hwid, proxyPort: () => main.running ? _mixedPort : null);
+  late final updater = SubscriptionUpdater(
+    store: store,
+    hwid: () => _hwid,
+    proxyPort: () => main.running ? _mixedPort : null,
+    onEvent: (type, data) => _event('sub', type, type == 'failed' ? 'error' : 'info', data,
+        note: type == 'failed'
+            ? 'Subscription ${data['name']} not updated: ${data['error']}'
+            : 'Subscription ${data['name']} updated: +${data['added']} -${data['removed']}, ${data['total']} servers'),
+  );
   late final Future<Map<String, String>> _hwid = deviceHeaders(dataDir);
   String? _error;
   String? _warning;
@@ -76,6 +92,7 @@ class Daemon {
   Probe? _probe; // probe-in: Auto's latency tests (probe.dart)
   StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto
   int _connectSeq = 0;
+  final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
   Map<String, dynamic>? _exit;
@@ -102,7 +119,8 @@ class Daemon {
 
   Future<void> init() async {
     await Directory(dataDir).create(recursive: true);
-    await sysProxy.restore(); // left set by a crash
+    events.load(); // trims an old journal at start
+    await _sysOff(); // left set by a crash
     _recheckExit(); // the direct IP, shown on Home before any connect
     updater.start();
   }
@@ -113,6 +131,37 @@ class Daemon {
     updater.stop();
     await main.stop();
     await sysProxy.restore();
+  }
+
+  /// One journal entry; [note] also goes to the raw log first, so the event links to it.
+  int _event(String cat, String type, String level, Map<String, dynamic> data, {bool own = false, String? note}) {
+    if (note != null) log.note(level, note);
+    return events.add(cat, type, level, data: data, own: own);
+  }
+
+  /// The system proxy on / back off, each one written to the journal (`core/sysProxy`,
+  /// `on` = what was asked for; `error` = it did not work). Returns [SystemProxy.enable]'s
+  /// warning; errors go on to the caller.
+  Future<String?> _sysOn({required bool own}) async {
+    try {
+      final w = await sysProxy.enable(_mixedPort);
+      _event('core', 'sysProxy', 'info', {'on': true}, own: own, note: 'System proxy on 127.0.0.1:$_mixedPort');
+      return w;
+    } catch (e) {
+      _event('core', 'sysProxy', 'warn', {'on': true, 'error': '$e'}, own: own, note: 'System proxy not set: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _sysOff({bool own = false}) async {
+    final was = sysProxy.isSet;
+    try {
+      await sysProxy.restore();
+    } catch (e) {
+      _event('core', 'sysProxy', 'warn', {'on': false, 'error': '$e'}, own: own, note: 'System proxy not restored: $e');
+      rethrow;
+    }
+    if (was) _event('core', 'sysProxy', 'info', {'on': false}, own: own, note: 'System proxy back off');
   }
 
   /// Auto in the core while connected (auto.dart). A move to another route or server
@@ -127,9 +176,37 @@ class Daemon {
     _closed = main.api!.closedConnections().listen(auto.onClosed, onError: (Object e) => main.note('auto: connection events stopped: $e'));
     auto.switches.listen((s) {
       main.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
+      if (s.reason == 'fastest') {
+        events.add('auto', 'fastest', 'info', data: {'route': s.route, 'from': s.from, 'to': s.to});
+      } else {
+        events.add('auto', 'switched', 'info', data: {'route': ?s.route, 'from': s.from, 'to': s.to, 'reason': s.reason});
+      }
       _recheckExit();
     });
-    auto.unstable.listen((u) => main.note('auto: ${u.id} is unstable (${u.strikes} drops), back to it after ${u.holdMs ~/ 60000} min of answers'));
+    auto.unstable.listen((u) {
+      main.note('auto: ${u.id} is unstable (${u.strikes} drops), back to it after ${u.holdMs ~/ 60000} min of answers');
+      events.add('auto', 'unstable', 'warn', data: {'id': u.id, 'strikes': u.strikes, 'holdMs': u.holdMs});
+    });
+    auto.blocked.listen((b) {
+      final at = b.dest.lastIndexOf(':'), port = at < 0 ? null : int.tryParse(b.dest.substring(at + 1));
+      events.add('site', 'blocked', 'warn', data: {
+        'host': port == null ? b.dest : b.dest.substring(0, at),
+        'port': ?port,
+        'entry': b.route,
+        'server': b.server,
+        'dest': b.dest,
+        'via': b.via,
+      });
+    });
+    auto.net.listen((n) {
+      final (type, level) = switch (n.kind) {
+        'lost' => ('lost', 'warn'),
+        'restored' => ('restored', 'info'),
+        'offline' => ('offline', 'warn'),
+        _ => ('online', 'info'),
+      };
+      events.add('conn', type, level, data: {'downMs': ?n.downMs});
+    });
     auto.start();
   }
 
@@ -150,6 +227,7 @@ class Daemon {
     final seq = _connectSeq, at = _auto?.index;
     _stopAuto();
     main.note('sing-box stopped on its own (exit code $code)');
+    events.add('core', 'crashed', 'error', data: {'code': code});
     if (DateTime.now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
     _recover(seq, at == null ? plan : {...plan, 'current': at}, code);
   }
@@ -157,7 +235,7 @@ class Daemon {
   Future<void> _recover(int seq, Map<String, dynamic> plan, int code) async {
     _recovering = {'attempt': _attempt + 1, 'of': _backoff.length, 'code': code};
     try {
-      await sysProxy.restore();
+      await _sysOff();
     } catch (e) {
       main.note('system proxy not restored: $e');
     }
@@ -167,6 +245,7 @@ class Daemon {
         _plan = null;
         _tunnelPort = null;
         _error = 'sing-box stopped (exit code $code) and did not start again after ${_backoff.length} tries';
+        _event('conn', 'disconnected', 'error', {'by': 'error', 'reason': _error}, note: 'Disconnected: $_error');
         _recheckExit(); // traffic goes direct now
         return;
       }
@@ -183,15 +262,17 @@ class Daemon {
           warnings.addAll(w);
         } catch (e) {
           main.note('restart $_attempt of ${_backoff.length} failed: $e');
+          events.add('core', 'restartFailed', 'error', data: {'attempt': _attempt, 'error': '$e'});
           return false;
         }
         _plan = plan;
         _upSince = DateTime.now();
         _recovering = null;
         _restarts++;
+        _event('core', 'restarted', 'info', {'attempt': _attempt}, note: 'sing-box started again (attempt $_attempt)');
         if (_sysWanted) {
           try {
-            warnings.add(await sysProxy.enable(_mixedPort) ?? '');
+            warnings.add(await _sysOn(own: false) ?? '');
           } catch (e) {
             warnings.add('System proxy not set again: $e');
           }
@@ -231,6 +312,12 @@ class Daemon {
         'GET /api/log' => Future.value(log.since(int.tryParse(req.uri.queryParameters['since'] ?? ''))),
         'DELETE /api/log' => Future(() {
             log.clear();
+            return {'ok': true};
+          }),
+        'GET /api/events' => Future.value(events.since(int.tryParse(req.uri.queryParameters['since'] ?? ''))),
+        'POST /api/events' => Future(() => _postEvent(body)),
+        'DELETE /api/events' => Future(() {
+            events.clear();
             return {'ok': true};
           }),
         'GET /api/version' => _version(),
@@ -381,6 +468,7 @@ class Daemon {
     try {
       for (final w in await main.api!.deprecatedWarnings()) {
         log.note('warn', 'sing-box: $w');
+        if (_deprecatedSeen.add(w)) events.add('core', 'deprecated', 'warn', data: {'text': w});
       }
     } catch (_) {}
     _probe = probe;
@@ -395,13 +483,14 @@ class Daemon {
     ruleSets.ensureFor(plan, proxyPort: _tunnelPort, refresh: true).then((now) {
       if (seq == _connectSeq && main.running && now.files.keys.any((t) => !lists.files.containsKey(t))) {
         final at = _auto?.index;
-        _connect({'plan': at == null ? plan : {...plan, 'current': at}, 'systemProxy': _sysWanted}).then((_) {}, onError: (_) {});
+        _connect({'plan': at == null ? plan : {...plan, 'current': at}, 'systemProxy': _sysWanted}, own: false).then((_) {}, onError: (_) {});
       }
     }, onError: (_) {});
   }
 
-  /// body: {plan (see config.dart), systemProxy: bool}
-  Future<Map<String, dynamic>> _connect(Map<String, dynamic> body) async {
+  /// body: {plan (see config.dart), systemProxy: bool}. [own]: the user asked (the journal
+  /// marks it so no notification comes of it); the reconnect that picks up lists is not.
+  Future<Map<String, dynamic>> _connect(Map<String, dynamic> body, {bool own = true}) async {
     final plan = (body['plan'] as Map).cast<String, dynamic>();
     final seq = ++_connectSeq;
     _recovering = null;
@@ -420,22 +509,38 @@ class Daemon {
         _startAuto(plan);
         _recheckExit();
         if (_sysWanted) {
-          warnings.add(await sysProxy.enable(_mixedPort) ?? '');
+          warnings.add(await _sysOn(own: own) ?? '');
         } else {
-          await sysProxy.restore();
+          await _sysOff(own: own);
         }
         _warning = joinWarnings(warnings);
         log.note('info', 'Connected: ${plan['kind']}, proxy on 127.0.0.1:$_mixedPort${_sysWanted ? ', system proxy on' : ''}');
         if (_warning != null) log.note('warn', _warning!);
         _refreshLists(seq, plan, lists);
+        events.add('conn', 'connected', 'info', own: own, data: _connectedData(plan));
       } catch (e) {
         _error = '$e';
         log.note('error', 'Connect failed: $e');
-        await sysProxy.restore();
+        events.add('conn', 'connectFailed', 'error', own: own, data: {'reason': '$e'});
+        await _sysOff(own: own);
         rethrow;
       }
     });
     return _status();
+  }
+
+  // conn/connected: the entry Auto starts on and its server when known (a Fastest group
+  // has none until urltest picked), the mode (TUN is not built yet) and the routing.
+  Map<String, dynamic> _connectedData(Map<String, dynamic> plan) {
+    final routes = planRoutes(plan);
+    final i = planCurrent(plan, routes.length);
+    final server = _auto?.toJson()['server'];
+    return {
+      'entry': '${routes[i]['id'] ?? routeTag(i)}',
+      'server': ?server,
+      'mode': plan['mode'] == 'tun' ? 'tun' : 'proxy',
+      'route': plan['global'] == true ? 'global' : 'rules',
+    };
   }
 
   /// body: {auto} — Settings → Auto mode changed while connected: the running AutoService
@@ -451,6 +556,7 @@ class Daemon {
 
   Future<Map<String, dynamic>> _disconnect() async {
     final seq = ++_connectSeq;
+    final was = main.running || _plan != null || _recovering != null;
     _plan = null;
     _recovering = null;
     _stopAuto();
@@ -459,11 +565,29 @@ class Daemon {
     });
     _tunnelPort = null;
     log.note('info', 'Disconnected');
-    await sysProxy.restore();
+    if (was) events.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'});
+    await _sysOff(own: true);
     _recheckExit(); // now the direct IP
     _error = null;
     _warning = null;
     return _status();
+  }
+
+  static final _eventType = RegExp(r'^[A-Za-z][A-Za-z0-9_]{0,47}$');
+  static const _eventDataMax = 4096; // JSON characters
+
+  /// body: {cat, type, level, own?, data?} → {id}: an event the UI knows first (the
+  /// subscription updates it ran itself, the user's own actions). Not linked to a raw line.
+  /// A bad shape is a 400 with the reason.
+  Map<String, dynamic> _postEvent(Map<String, dynamic> body) {
+    final cat = body['cat'], type = body['type'], level = body['level'], own = body['own'], data = body['data'] ?? const {};
+    if (cat is! String || !EventBook.cats.contains(cat)) throw const FormatException('bad event cat');
+    if (type is! String || !_eventType.hasMatch(type)) throw const FormatException('bad event type');
+    if (level is! String || !EventBook.levels.contains(level)) throw const FormatException('bad event level');
+    if (own != null && own is! bool) throw const FormatException('bad event own');
+    if (data is! Map) throw const FormatException('event data must be an object');
+    if (jsonEncode(data).length > _eventDataMax) throw const FormatException('event data too large');
+    return {'id': events.add(cat, type, level, data: data.cast<String, dynamic>(), own: own == true, link: false)};
   }
 
   String? _singBoxVer;

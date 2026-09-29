@@ -195,6 +195,16 @@ class AutoBlocked {
   Map<String, dynamic> toJson() => {'route': route, 'server': server, 'dest': dest, 'via': via, 'at': at};
 }
 
+/// The network came or went: [kind] `lost` (no route answers) / `restored`, `offline` (the
+/// OS has no network) / `online`; [downMs] on the second of each pair.
+class AutoNet {
+  const AutoNet({required this.kind, required this.at, this.downMs});
+  final String kind;
+  final int at;
+  final int? downMs;
+  Map<String, dynamic> toJson() => {'kind': kind, 'at': at, 'downMs': ?downMs};
+}
+
 class _Group {
   _Group(this.tag, Map g, {this.pair = false})
       : priority = g['pick'] == 'priority',
@@ -305,6 +315,8 @@ class AutoService {
   final _switches = StreamController<AutoSwitch>.broadcast();
   final _unstable = StreamController<AutoUnstable>.broadcast();
   final _blocked = StreamController<AutoBlocked>.broadcast();
+  final _net = StreamController<AutoNet>.broadcast();
+  int? _lostAt, _offlineAt; // since when: no route answers / the OS has no network
   Timer? _timer;
   StreamSubscription<void>? _groupsSub;
   final _sweeps = <Timer>{};
@@ -325,6 +337,14 @@ class AutoService {
   /// A site that does not open through the current node but does through another route.
   Stream<AutoBlocked> get blocked => _blocked.stream;
 
+  /// No route answers, and answers again; the OS offline and back.
+  Stream<AutoNet> get net => _net.stream;
+
+  void _emitNet(String kind, int? since) {
+    final now = _clock();
+    if (!_net.isClosed) _net.add(AutoNet(kind: kind, at: now, downMs: since == null ? null : now - since));
+  }
+
   /// Checks on a timer from now on (the first one after `firstCheck`).
   void start() {
     _started = true;
@@ -343,6 +363,7 @@ class AutoService {
     _switches.close();
     _unstable.close();
     _blocked.close();
+    _net.close();
   }
 
   void _schedule(Duration d) {
@@ -393,6 +414,11 @@ class AutoService {
         saved.forEach((h, s) => h._load(s));
       } else {
         noNet = false;
+        if (_lostAt != null) {
+          final since = _lostAt;
+          _lostAt = null;
+          _emitNet('restored', since);
+        }
         _judge();
       }
       checkedAt = _clock();
@@ -424,11 +450,17 @@ class AutoService {
   void onLog(String line) {
     if (_stopped) return;
     if (line.contains('missing default interface')) {
-      if (!offline) note?.call('auto: the system has no network: nothing is tested or moved until it is back');
+      if (!offline) {
+        note?.call('auto: the system has no network: nothing is tested or moved until it is back');
+        _offlineAt = _clock();
+        _emitNet('offline', null);
+      }
       offline = true;
     } else if (line.contains('updated default interface') && offline) {
       offline = false;
       note?.call('auto: the system network is back: checking');
+      _emitNet('online', _offlineAt);
+      _offlineAt = null;
       _kickNow();
     }
   }
@@ -636,16 +668,17 @@ class AutoService {
   }
 
   Future<bool> _pick(_Route r, _Group g, String key, String reason) async {
-    if (_stopped || !await api.select(g.tag, g.member(key))) return false;
+    // `from` before the await: sing-box's groups stream can call refresh() meanwhile
     final from = g.current;
+    if (_stopped || !await api.select(g.tag, g.member(key))) return false;
     g.now = key;
     _emit(AutoSwitch(route: r.id, from: from, to: key, reason: reason, at: _clock()));
     return true;
   }
 
   Future<bool> _moveTo(int i, String reason) async {
+    final from = _routes[index].id; // before the await: refresh() may move `index` meanwhile
     if (_stopped || !await api.select(topTag, _routes[i].tag)) return false;
-    final from = _routes[index].id;
     index = i;
     _routes[i].inUseSince = _clock();
     _emit(AutoSwitch(from: from, to: _routes[i].id, reason: reason, at: _clock()));
@@ -686,6 +719,11 @@ class AutoService {
       if (_stopped) return;
       if (to == null) {
         noNet = true; // no route answers: no network, not this route
+        if (_lostAt == null) {
+          _lostAt = _clock();
+          note?.call('auto: no route answers: nothing is moved until one does');
+          _emitNet('lost', null);
+        }
         return;
       }
       final old = cur.tag;

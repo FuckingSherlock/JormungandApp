@@ -375,6 +375,93 @@ void main() {
       expect(await _get(mixed, loop.url), 'hello from target');
       final off = await call('/api/disconnect', {});
       expect([off['connected'], off['systemProxy']], [false, false]);
+
+      // the journal: connect (the user's), the crash, the restart (the core's), disconnect (the user's)
+      final ev = [
+        for (final e in (await call('/api/events'))['events'] as List)
+          if ((e as Map)['type'] != 'deprecated') e,
+      ];
+      expect([for (final e in ev) '${e['cat']}/${e['type']}'], [
+        'core/sysProxy',
+        'conn/connected',
+        'core/crashed',
+        'core/sysProxy',
+        'core/restarted',
+        'core/sysProxy',
+        'conn/disconnected',
+        'core/sysProxy',
+      ]);
+      expect([for (final e in ev) e['own']], [true, true, false, false, false, false, true, true]);
+      expect([for (final e in ev) (e['data'] as Map)['on']], [true, null, null, false, null, true, null, false]);
+      expect(ev[1]['data'], {'entry': 'A', 'mode': 'proxy', 'route': 'global', if ((ev[1]['data'] as Map).containsKey('server')) 'server': isA<String>()});
+      expect(ev[2]['data'], {'code': isA<int>()});
+      expect(ev[2]['level'], 'error');
+      expect(ev[4]['data'], {'attempt': 1});
+      expect(ev[6]['data'], {'by': 'user'});
+      expect(ev.every((e) => e['log'] is int), isTrue, reason: 'every one of them wrote its raw line');
+    } finally {
+      await daemon.shutdown();
+      await api.close(force: true);
+      await loop.down();
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+
+  test('daemon: an Auto failover is an auto/switched event, with the raw line it links to', () async {
+    final loop = _Loop();
+    await loop.up(['a', 'b']);
+    await loop.stop('a'); // route A is dead from the start: the first check moves to B
+    final mixed = await freePort();
+    final daemon = Daemon(
+      singBox: _bin,
+      dataDir: p.join(loop.tmp.path, 'data'),
+      uiFile: p.join(loop.tmp.path, 'none.html'),
+      exitCheck: (_) async => {'ip': '127.0.0.1'},
+      sysProxy: _FakeSysProxy(),
+    );
+    final api = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    api.listen(daemon.handle);
+    Future<Map<String, dynamic>> call(String path, [Map<String, dynamic>? body]) async {
+      final c = HttpClient()..findProxy = (_) => 'DIRECT';
+      try {
+        final req = await c.openUrl(body == null ? 'GET' : 'POST', Uri.parse('http://127.0.0.1:${api.port}$path'));
+        req.headers.set('X-Jorm', '1');
+        if (body != null) req.write(jsonEncode(body));
+        final res = await req.close();
+        return (jsonDecode(await res.transform(utf8.decoder).join()) as Map).cast<String, dynamic>();
+      } finally {
+        c.close(force: true);
+      }
+    }
+
+    try {
+      await call('/api/connect', {
+        'plan': {
+          'routes': [
+            {'id': 'A', 'kind': 'unit', 'main': {'pick': 'fastest', 'nodes': [_node('s::a', loop.port('a'))]}},
+            {'id': 'B', 'kind': 'unit', 'main': {'pick': 'priority', 'chosen': 's::b', 'nodes': [_node('s::b', loop.port('b'))]}},
+          ],
+          'mixedPort': mixed,
+          'global': true,
+          'urlTest': {'url': loop.url},
+          'auto': {'failAfter': 1, 'checkers': <String>[], 'returnTo': 'never', 'retryPause': 0.1},
+        },
+        'systemProxy': false,
+      });
+      List<Map> switched = [];
+      for (var i = 0; i < 100 && switched.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        switched = [
+          for (final e in (await call('/api/events'))['events'] as List)
+            if ((e as Map)['cat'] == 'auto') e,
+        ];
+      }
+      expect(switched, hasLength(1));
+      final e = switched.single;
+      expect([e['type'], e['level'], e['own']], ['switched', 'info', false]);
+      expect(e['data'], {'from': 'A', 'to': 'B', 'reason': 'failover'});
+      final raw = ((await call('/api/log'))['lines'] as List).cast<Map>();
+      expect(raw.firstWhere((l) => l['n'] == e['log'])['msg'], contains('auto: A → B (failover)'));
+      expect((await call('/api/status'))['auto']['now'], 'B');
     } finally {
       await daemon.shutdown();
       await api.close(force: true);

@@ -20,6 +20,64 @@
 .log-tag.core{color:var(--accent);background:rgba(var(--accent-rgb),.15)}
 .log-list mark{background:rgba(var(--accent-rgb),.3);color:var(--t1);border-radius:2px}
 .log-empty{padding:48px 24px;text-align:center;color:var(--t3);font-family:var(--font);font-size:14px}
+.log-line.hit{animation:log-hit 2.2s ease-out}
+@keyframes log-hit{0%,60%{background:rgba(var(--accent-rgb),.35)}100%{background:transparent}}
+
+/* ── EventsView (47-events.js): EventRow = category icon, title + time, reason, actions, and
+   every field when tapped open; the category colour is --ev-c ── */
+.log-tabbar{margin-bottom:8px}
+.icon-btn{position:relative}
+.icon-badge{position:absolute;top:-3px;right:-3px;min-width:15px;height:15px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;line-height:15px;text-align:center}
+.icon-btn.on{color:var(--accent)}
+.ev-filterbar{flex-shrink:0;display:flex;align-items:center;gap:10px;margin:0 14px 8px;padding:6px 6px 6px 12px;border-radius:10px;background:rgba(var(--accent-rgb),.12);font-size:12.5px;color:var(--t1)}
+.evfb-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.evfb-reset{background:none;border:none;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;padding:2px 8px;flex-shrink:0}
+.ev-list{padding:0 0 8px}
+.ev-day{padding:12px 16px 6px;font-size:11.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--t3)}
+.cat-conn{--ev-c:var(--active)}
+.cat-auto{--ev-c:var(--accent)}
+.cat-site{--ev-c:var(--purple)}
+.cat-sub{--ev-c:var(--active-dim)}
+.cat-rules{--ev-c:var(--accent-dim)}
+.cat-core{--ev-c:var(--t2)}
+.cat-user{--ev-c:var(--t3)}
+.ev-row{display:flex;gap:10px;padding:9px 14px 9px 12px;border-left:2px solid transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ev-row + .ev-row{border-top:1px solid var(--border)}
+.ev-row.lvl-warn{border-left-color:var(--warn);background:rgba(var(--warn-rgb),.05)}
+.ev-row.lvl-error{border-left-color:var(--danger);background:rgba(var(--danger-rgb),.07)}
+.ev-row.hit{animation:ev-hit 2.6s ease-out}
+@keyframes ev-hit{0%,55%{box-shadow:inset 0 0 0 100vmax rgba(var(--accent-rgb),.22)}100%{box-shadow:inset 0 0 0 100vmax transparent}}
+.ev-ico{flex-shrink:0;width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--ev-c);background:color-mix(in srgb,var(--ev-c) 16%,transparent)}
+.ev-body{flex:1;min-width:0}
+.ev-top{display:flex;align-items:baseline;gap:8px}
+.ev-title{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--t1);overflow-wrap:anywhere}
+.ev-time,.ev-rep{flex-shrink:0;font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums}
+.ev-rep{font-weight:700;color:var(--t2)}
+.ev-detail{margin-top:1px;font-size:12.5px;line-height:1.4;color:var(--t2);overflow-wrap:anywhere}
+.ev-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.ev-act{background:rgba(var(--accent-rgb),.13);border:none;border-radius:8px;color:var(--accent);font:inherit;font-size:12.5px;font-weight:600;padding:4px 10px;cursor:pointer}
+.ev-more{display:none;margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.035);font-size:12px}
+.ev-row.open .ev-more{display:block}
+.ev-f{display:flex;gap:10px;padding:2px 0}
+.ev-f span{flex:0 0 84px;color:var(--t3)}
+.ev-f b{flex:1;min-width:0;font-weight:500;color:var(--t1);overflow-wrap:anywhere}
+
+/* the filter sheet: tri-state category → its event types */
+.ev-q{margin:0 0 6px}
+#evfilter-body .set-group{margin:6px 0 10px;background:var(--card)}
+#evfilter-body .set-caption{padding:10px 4px 6px}
+.evf-cat + .evf-cat{border-top:1px solid var(--border)}
+.evf-head,.evf-type{cursor:pointer}
+.evf-type{padding-left:44px;border-top:1px solid var(--border);background:rgba(255,255,255,.02)}
+.evf-check{flex-shrink:0;width:20px;height:20px;box-sizing:border-box;border-radius:6px;border:2px solid var(--border-hi);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;line-height:1;color:#fff}
+.evf-check.on,.evf-check.part{background:var(--accent);border-color:var(--accent)}
+.evf-name{flex:1;min-width:0;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--t1)}
+.evf-ico{display:inline-flex;color:var(--ev-c)}
+.evf-n{margin-left:auto;font-size:12px;color:var(--t3)}
+.evf-chev{color:var(--t3);font-size:20px;line-height:1;transition:transform .2s}
+.evf-chev.open{transform:rotate(90deg)}
+.evf-reset{padding:0 4px 8px}
+.evf-kept{border-color:rgba(var(--accent-rgb),.5)}
 .log-jump{
   position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:2;
   background:var(--accent);color:#fff;border:none;border-radius:16px;padding:7px 14px;

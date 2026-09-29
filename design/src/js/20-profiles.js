@@ -285,6 +285,7 @@ function pinRouteNode(id, key, e) {
   if (dragCtx || (e && e.target.closest('.drag-handle'))) return;   // the end of a drag, not a tap
   const again = !autoConnect && activeConnectId === id && pinnedNode === key;
   autoConnect = false; activeConnectId = id; pinnedNode = again ? null : key;
+  journal('user', 'pin', { action: 'pin', entry: id, server: again ? null : key });
   routeRowChanged();
 }
 function routeRowChanged() {

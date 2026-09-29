@@ -116,6 +116,7 @@ class SubscriptionUpdater {
     this.tick = const Duration(minutes: 1),
     this.firstRun = const Duration(seconds: 20),
     this.update = updateSubscription,
+    this.onEvent,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
@@ -131,6 +132,12 @@ class SubscriptionUpdater {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic> s,
       {Map<String, String>? hwid, int? proxyPort, bool rediscover, DateTime? now, HttpClient? client}) update;
   final DateTime Function() clock;
+
+  /// What the timer's updates did, for the events journal: `('updated', {source, name,
+  /// added, removed, total})` when the server list changed, `('failed', {source, name,
+  /// error})` on the first failure after a good update (not on every retry). The UI's own
+  /// updates are the UI's to report.
+  final void Function(String type, Map<String, dynamic> data)? onEvent;
 
   final _busy = <String>{};
   final _triedAt = <String, int>{};
@@ -174,6 +181,16 @@ class SubscriptionUpdater {
   static Map<String, dynamic> _expect(Map<String, dynamic> s) =>
       {for (final k in const ['url', 'userAgent', 'filter', 'hwid', 'gone', 'updatedAt']) k: s[k]};
 
+  void _report(String sid, Map<String, dynamic> s, Map<String, dynamic> patch) {
+    final now = patch['nodes'];
+    if (onEvent == null || now is! List) return;
+    Set<String> keys(Object? l) => {for (final n in (l as List? ?? const [])) '${(n as Map)['key'] ?? n['id']}'};
+    final was = keys(s['nodes']), nowKeys = keys(now);
+    final added = nowKeys.difference(was).length, removed = was.difference(nowKeys).length;
+    if (added == 0 && removed == 0) return;
+    onEvent!('updated', {'source': sid, 'name': '${s['name'] ?? sid}', 'added': added, 'removed': removed, 'total': now.length});
+  }
+
   /// Updates every due subscription now; the ids updated (a failure only notes
   /// `lastError` on the source).
   Future<List<String>> runDue() => _running ??= _runDue().whenComplete(() => _running = null);
@@ -195,9 +212,13 @@ class SubscriptionUpdater {
         );
         final patch = Map<String, dynamic>.of((r['patch'] as Map).cast<String, dynamic>());
         if (s['lastError'] != null) patch['lastError'] = null; // the card's error strip goes
-        if (await store.patchSource(sid, _expect(s), patch)) done.add(sid);
+        if (await store.patchSource(sid, _expect(s), patch)) {
+          done.add(sid);
+          _report(sid, s, patch);
+        }
       } catch (e) {
         stderr.writeln('[updater] ${s['name'] ?? sid}: $e');
+        if (s['lastError'] == null) onEvent?.call('failed', {'source': sid, 'name': '${s['name'] ?? sid}', 'error': '$e'});
         // the card shows it with Retry (33-source-error.js); updatedAt stays, so the UI's
         // own save still wins over it
         await store.patchSource(sid, _expect(s), {

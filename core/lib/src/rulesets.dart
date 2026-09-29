@@ -55,6 +55,14 @@ class RuleSetCache {
   final _failedAt = <String, DateTime>{};
   final _running = <String, Future<void>>{};
 
+  /// A download that failed (once per download, however many callers waited on it): the
+  /// tag, the last URL tried and the reason. The daemon writes the events journal from it.
+  void Function(String tag, String url, String error)? onFailed;
+
+  /// A list replaced by a newer copy, or downloaded after a failure (not the first
+  /// download of a missing one: that is what a connect does anyway).
+  void Function(String tag)? onUpdated;
+
   String pathOf(RuleSetSource s) => p.join(dir, '${s.tag}.${s.binary ? 'srs' : 'json'}');
 
   /// [proxyPort]: a loopback mixed inbound that always goes through the tunnel; lists "via
@@ -73,7 +81,7 @@ class RuleSetCache {
         final backoff = failed != null && _now().difference(failed) < retryAfter;
         if (stale && canFetch && !backoff && (!have || refresh)) {
           try {
-            await (_running[s.tag] ??= _download(s, f, s.viaVpn ? proxyPort : null).whenComplete(() {
+            await (_running[s.tag] ??= _fetch(s, f, s.viaVpn ? proxyPort : null, notable: have || failed != null).whenComplete(() {
               _running.remove(s.tag); // not returned: whenComplete would wait on this very future
             }));
             _failedAt.remove(s.tag);
@@ -96,13 +104,26 @@ class RuleSetCache {
   Future<RuleSetFetch> ensureFor(Map plan, {int? proxyPort, bool refresh = false}) =>
       ensure(ruleSetsNeeded(plan), proxyPort: proxyPort, refresh: refresh);
 
+  Future<void> _fetch(RuleSetSource s, File f, int? proxyPort, {required bool notable}) async {
+    try {
+      await _download(s, f, proxyPort);
+    } catch (e) {
+      final url = e is _DownloadFailed ? e.url : s.urls.last;
+      onFailed?.call(s.tag, url, '${e is _DownloadFailed ? e.cause : e}');
+      rethrow;
+    }
+    if (notable) onUpdated?.call(s.tag);
+  }
+
   Future<void> _download(RuleSetSource s, File f, int? proxyPort) async {
     final c = HttpClient()
       ..connectionTimeout = timeout
       ..findProxy = proxyPort == null ? HttpClient.findProxyFromEnvironment : (_) => 'PROXY 127.0.0.1:$proxyPort';
+    var tried = s.urls.isEmpty ? '' : s.urls.first;
     try {
       var last = '';
       for (final url in s.urls) {
+        tried = url;
         final res = await (await c.getUrl(Uri.parse(url)).timeout(timeout)).close().timeout(timeout);
         if (res.statusCode == 404 || res.statusCode == 410) {
           await res.drain<void>();
@@ -122,6 +143,8 @@ class RuleSetCache {
         return;
       }
       throw HttpException('not found ($last)');
+    } catch (e) {
+      throw _DownloadFailed(tried, e);
     } finally {
       c.close(force: true);
     }
@@ -143,6 +166,15 @@ class RuleSetCache {
     }
     if (j is! Map || j['rules'] is! List) throw const FormatException('not a sing-box JSON rule set');
   }
+}
+
+// A failed download with the URL it stopped at; reads as the plain reason.
+class _DownloadFailed implements Exception {
+  _DownloadFailed(this.url, this.cause);
+  final String url;
+  final Object cause;
+  @override
+  String toString() => '$cause';
 }
 
 /// The warnings of one connect as one toast: blanks and repeats dropped, at most three.

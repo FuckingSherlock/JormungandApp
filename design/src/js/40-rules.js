@@ -457,7 +457,7 @@ function saveRsForm() {
   closeSheet('rsform');
   renderRuleSets(); renderRules();
   // Mockup only: a URL with "fail" plays the background download failing (the core reports it inside the connect warning)
-  if (!window.JORMD && !rsDraft.builtin && /fail/i.test(url)) setTimeout(() => notify('ruleSets', `Rule set ${name} could not be downloaded — the last copy is used`), 800);
+  if (!window.JORMD && !rsDraft.builtin && /fail/i.test(url)) setTimeout(() => journal('rules', 'ruleSetFailed', { tag: name, url, error: 'download failed' }, { level: 'warn', own: false }), 800);
 }
 function deleteRuleSet() {
   const s = ruleSets.find(x => x.id === rsEditing);

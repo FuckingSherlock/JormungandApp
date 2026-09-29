@@ -63,4 +63,7 @@ class LogBook {
       };
 
   void clear() => _lines.clear();
+
+  /// The number of the line written last (null before any): what an event links to.
+  int? get last => _next == 0 ? null : _next - 1;
 }

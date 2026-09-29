@@ -1,11 +1,24 @@
-  <!-- ══════════ VIEW: LOGS (LogsView: sing-box and core lines, live; 46-logs.js) ══════════ -->
+<!-- raw-html-confirmed -->
+  <!-- ══════════ VIEW: LOGS (LogsView: Events = the journal, Raw = sing-box and core lines; 46-logs.js, 47-events.js) ══════════ -->
   <div class="view" id="view-logs">
     <div class="topbar">
       <div>
         <div class="app-name">Logs</div>
         <div class="nodes-summary" id="logsSummary"></div>
       </div>
-      <div class="head-actions">
+      <div class="head-actions" id="evActions">
+        <button class="icon-btn" id="evFilterBtn" onclick="openEvFilter()" title="Filter events">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <span class="icon-badge" id="evFilterBadge" style="display:none"></span>
+        </button>
+        <button class="icon-btn" onclick="exportLogs()" title="Export both logs">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="icon-btn" onclick="confirmClearEvents()" title="Clear events">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>
+      </div>
+      <div class="head-actions" id="rawActions" style="display:none">
         <button class="icon-btn" id="logSearchBtn" onclick="toggleLogSearch()" title="Search">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </button>
@@ -17,6 +30,14 @@
         </button>
       </div>
     </div>
+    <div class="nodes-bar log-tabbar">
+      <div class="nodes-tabs" id="logTabs">
+        <button class="nodes-tab active" data-tab="events" onclick="setLogTab('events')">Events</button>
+        <button class="nodes-tab" data-tab="raw" onclick="setLogTab('raw')">Raw</button>
+        <div class="nodes-tab-ink" id="logTabInk"></div>
+      </div>
+    </div>
+    <div class="ev-filterbar" id="evFilterBar" style="display:none"></div>
     <div class="search" id="logSearchBar" style="display:none">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input id="logSearch" placeholder="Search the log" oninput="renderLogs()">
@@ -24,12 +45,30 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-    <div class="chip-row log-levels" id="logLevels">
+    <div class="chip-row log-levels" id="logLevels" style="display:none">
       <div class="chip active" data-lvl="all" onclick="setLogLevel('all')">All</div>
       <div class="chip" data-lvl="warn" onclick="setLogLevel('warn')">Warnings &amp; errors<span class="log-count" id="logWarnCount"></span></div>
     </div>
-    <div class="scroll log-scroll" id="logScroll" onscroll="logScrolled()">
+    <div class="scroll log-scroll" id="evScroll" onscroll="evScrolled()">
+      <div class="ev-list" id="evList"></div>
+    </div>
+    <div class="scroll log-scroll" id="logScroll" style="display:none" onscroll="logScrolled()">
       <div class="log-list" id="logList"></div>
     </div>
-    <button class="log-jump" id="logJump" style="display:none" onclick="logFollow()"></button>
+    <button class="log-jump" id="logJump" style="display:none" onclick="logJumpTap()"></button>
+  </div>
+  <div class="overlay" id="ov-evfilter" onclick="closeSheet('evfilter')"></div>
+  <div class="sheet set-sheet" id="sh-evfilter">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Filter events</span>
+      <button class="sheet-close" onclick="closeSheet('evfilter')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="search ev-q">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="evQ" placeholder="Search events" oninput="setEvQuery(this.value)">
+      </div>
+      <div id="evfilter-body"></div>
+    </div>
   </div>

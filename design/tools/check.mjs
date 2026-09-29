@@ -146,9 +146,21 @@ const SHOTS = {
   'text-large-rule': async p => { await p.evaluate(() => { applyScale(UI_SCALE_MAX); openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
   more:       async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodesMore()); await settle(p); },
   // Logs tab, share / QR, Data, latency URL, empty catalog, source error, connections tools
-  logs:       async p => { await tab(p, 'logs'); await p.waitForTimeout(600); },
-  'logs-search': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => { toggleLogSearch(true); document.getElementById('logSearch').value = 'discord'; renderLogs(); }); await settle(p); },
-  'logs-warn': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => setLogLevel('warn')); await settle(p); },
+  logs:       async p => { await tab(p, 'logs'); await p.waitForTimeout(600); },   // Events, at the bottom
+  'logs-raw': async p => { await tab(p, 'logs'); await p.evaluate(() => setLogTab('raw')); await p.waitForTimeout(500); },
+  // the filter sheet: Auto and Subscriptions unfolded, one type off (the Auto box goes half), Show my actions on
+  'logs-filter': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => { openEvFilter(); evFilterFold('auto'); evFilterFold('sub'); evToggleType('auto/fastest'); evToggleType('sub/updated'); setEvProblems(true); logCfg.showOwn = true; renderEvFilter(); }); await settle(p); },
+  // a folded row (×3 repeats) opened: its times and every field
+  'logs-event-open': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { const r = document.querySelector('#evList .ev-row.cat-site'); evToggle(+r.dataset.key); r.scrollIntoView({ block: 'center' }); }); await settle(p); },
+  // scrolled up, two events arrive: the view stays, the pill counts them
+  'logs-new-below': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { document.getElementById('evScroll').scrollTop = 0; }); await p.waitForTimeout(200);
+    await p.evaluate(() => { const [a, b] = visibleOrder(); mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }); mockEventAdd('site', 'blocked', 'warn', { host: 'discord.com', dest: 'discord.com:443', entry: a, via: b }); return pollEvents(); }); await p.waitForTimeout(400); },
+  // an unseen error and warning: both dots on the Logs tab
+  'nav-dots': async p => { await p.evaluate(() => { mockEventAdd('core', 'crashed', 'error', { code: 1 }); mockEventAdd('conn', 'lost', 'warn', {}); return pollEvents(); }); await p.waitForTimeout(400); },
+  // a notification toast on its way into the Logs tab (mid-flight frame)
+  'toast-fly': async p => { await p.evaluate(async () => { const [a, b] = visibleOrder(); mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }); await pollEvents(); await new Promise(r => setTimeout(r, 400)); document.getElementById('toast').style.transition = 'transform 2.4s ease-in, opacity 2.4s ease-in'; hideToast(); }); await p.waitForTimeout(1100); },
+  'logs-search': async p => { await tab(p, 'logs'); await p.evaluate(() => setLogTab('raw')); await p.waitForTimeout(400); await p.evaluate(() => { toggleLogSearch(true); document.getElementById('logSearch').value = 'discord'; renderLogs(); }); await settle(p); },
+  'logs-warn': async p => { await tab(p, 'logs'); await p.evaluate(() => setLogTab('raw')); await p.waitForTimeout(400); await p.evaluate(() => setLogLevel('warn')); await settle(p); },
   'qr-node':  async p => { await tab(p, 'nodes'); await p.evaluate(() => showNodeQr('src1', sourcesData.src1.nodes[0].id)); await settle(p); },
   'speed-test': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => truthOf(x) >= 0); openSpeedTest('src1', n.id); }); await p.waitForTimeout(3000); },
   'speed-done': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => truthOf(x) >= 0); openSpeedTest('src1', n.id); }); await p.waitForFunction(() => speedRun && speedRun.p.final); await p.waitForTimeout(600); },
@@ -158,7 +170,7 @@ const SHOTS = {
   'restore-confirm': async p => { await tab(p, 'settings'); await p.evaluate(() => { openDataSettings(); confirmRestore(liveSnapshot(), '2026-09-20T18:30:00Z', 'jormungand-backup-2026-09-20.json'); }); await settle(p); },
   'checkers': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openCheckersPicker(); }); await settle(p); },
   'blocked-toast': async p => { await p.evaluate(() => { const id = autoOrder()[0], via = autoOrder()[1] || id;
-    toast(blockedText({ route: id, via, dest: 'chat.example.com:443' }), { label: 'Rule', fn: () => {} }); }); await p.waitForTimeout(300); },
+    mockEventAdd('site', 'blocked', 'warn', { host: 'chat.example.com', dest: 'chat.example.com:443', entry: id, route: id, via }); return pollEvents(); }); await p.waitForTimeout(300); },
   'test-url': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openTestUrlPicker(); }); await settle(p); },
   'lang-soon': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setgeneral'); openLangPicker(); }); await settle(p); },
   'conn-filter': async p => { await p.evaluate(() => backend.traffic().then(t => { traffic = t; openSheet('connections'); document.getElementById('connFilter').value = 'disc'; renderTraffic(); })); await settle(p); },
@@ -603,8 +615,9 @@ async function runChecks() {
     });
     const bad = [];
     await narrow.evaluate(() => { sourcesData.src1.lastError = { msg: 'Connection timed out (15 s) while fetching the subscription', at: Date.now() }; renderNodes(); });
-    for (const t of ['home', 'nodes', 'settings', 'logs']) { await tab(narrow, t); await narrow.waitForTimeout(t === 'logs' ? 300 : 0); bad.push(...await over()); }
+    for (const t of ['home', 'nodes', 'settings', 'logs']) { await tab(narrow, t); await narrow.waitForTimeout(t === 'logs' ? 300 : 0); if (t === 'logs') await narrow.evaluate(() => document.querySelectorAll('#evList .ev-row').forEach(r => r.classList.add('open'))); bad.push(...await over()); }
     const sheets = [
+      () => { switchTab('logs'); openEvFilter(); evFilterFold('auto'); evFilterFold('sub'); setShowOwn(true); },
       () => { switchTab('nodes'); setNodesTab('profiles'); },
       () => { setNodesTab('simple'); openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); },
       () => { closeSheet('profiles'); openRules(); svcOpen = true; renderRules(); },
@@ -889,8 +902,9 @@ async function runChecks() {
     expect(r2 === '2053 Amsterdam VM', 'edited: ' + r2);
   });
 
-  await check('logs: a real tab — lines, level filter, search, follow / pause, copy, clear', async () => {
+  await check('logs (Raw tab): lines, level filter, search, follow / pause, copy, clear', async () => {
     await tab(page, 'logs');
+    await page.evaluate(() => setLogTab('raw'));
     await page.waitForTimeout(500);
     expect(await page.isVisible('#view-logs'), 'logs view hidden');
     const n0 = await page.locator('#logList .log-line').count();
@@ -2325,16 +2339,14 @@ async function runChecks() {
     await p.close();
   });
 
-  await check('live Auto: dock and Route show the core\'s entry and server, its checks reach the ping cache, a switch and an unstable entry toast (unless off)', async () => {
+  await check('live Auto: dock and Route show the core\'s entry and server, its checks reach the ping cache (what the core did comes as events, see Events)', async () => {
     const p = await openPage(browser);
     const r = await p.evaluate(() => {
       setAutoConnect(true);
       const order = autoOrder(), id = order.find(x => !chainsData[x] && unitPickRefs(x).length > 1);
       const refs = unitPickRefs(id), last = refs[refs.length - 1], now = Date.now() + 1000;
       pingCache.delete(pingKey(refs[0].node));   // the launch ping may have it in flight (that one would win)
-      let toasts = [];
-      const t0 = window.toast; window.toast = m => toasts.push(m);
-      connected = true; notifCfg.autoSwitch = true; live.switches = 0; live.restarts = 0;
+      connected = true;
       const st = (auto, extra) => Object.assign({ connected: true, restarts: 0, recovering: null, auto }, extra);
       const auto = (switches, extra) => Object.assign({ now: id, server: refKey(last), entryServer: null, switches, noNet: false, unstable: 0,
         lastSwitch: { from: order[0], to: id, reason: 'failover', at: now }, routes: [{ id: order[0] }, { id }],
@@ -2343,22 +2355,10 @@ async function runChecks() {
       const out = { entry: effectiveConnectId() === id && effectiveConnectId(true) !== undefined,
         server: unitNode(id) === last.node,
         dock: document.getElementById('profModeDetail').textContent.includes(last.node.name) && document.getElementById('profCardName').textContent === connectEntry(id).name,
-        merged: ping(refs[0].node) === -1 && pingEntry(refs[0].node).fails === 3,
-        toast: toasts.length === 1 && toasts[0].includes(connectEntry(id).name) };
-      notifCfg.autoSwitch = false; toasts = [];
-      liveAutoStatus(st(auto(2)));
-      out.quiet = !toasts.length;
-      liveAutoStatus(st(null, { recovering: { attempt: 1, of: 3 } }));
-      liveAutoStatus(st(auto(0), { restarts: 1, warning: 'started again' }));
-      out.recovery = toasts.length === 2 && /starting it again/.test(toasts[0]) && toasts[1] === 'started again';
-      notifCfg.autoSwitch = true; toasts = [];
-      liveAutoStatus(st(auto(0, { unstable: 1, lastUnstable: { id: order[0], strikes: 2, hold: 120000, at: now } })));
-      out.unstable = toasts.length === 1 && toasts[0].includes(entryLabel(order[0])) && /unstable/.test(toasts[0]) && /2 min/.test(toasts[0]);
-      liveAutoStatus(st(auto(0, { unstable: 1, noNet: true })));
-      out.noNetQuiet = toasts.length === 2 && /Connection lost/.test(toasts[1]) && coreRoute.id === id;
+        merged: ping(refs[0].node) === -1 && pingEntry(refs[0].node).fails === 3 };
       liveAutoStatus(null);
       out.cleared = coreRoute === null;
-      window.toast = t0; connected = false;
+      connected = false;
       return out;
     });
     expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
@@ -2371,7 +2371,11 @@ async function runChecks() {
       const out = {}, toasts = []; const t0 = window.toast; window.toast = m => toasts.push(m);
       // the screen: master + 9 toggles, none left in General
       switchTab('settings'); openSheet('setnotif');
-      out.rows = document.querySelectorAll('#notif-settings .set-row').length === 1 + NOTIF_KEYS.length;
+      out.rows = document.querySelectorAll('#notif-settings .set-row').length === 1 + NOTIF_KEYS.length + 1;   // + Pop-ups on PC
+      out.desktop = notifCfg.desktopStyle === 'own' && document.querySelector('#notif-settings [data-key="desktopStyle"] .chip.active').textContent === 'Own pop-ups';
+      setNotifCfg('desktopStyle', 'system');
+      out.desktop2 = notifCfg.desktopStyle === 'system' && document.querySelector('#notif-settings [data-key="desktopStyle"] .chip.active').textContent === 'System notifications';
+      setNotifCfg('desktopStyle', 'own');
       out.noGeneral = !document.querySelector('#general-settings [data-key="statusNotif"]') && !('statusNotif' in genCfg) && !('switchNotif' in genCfg);
       out.sub = /^\d of \d on$/.test(document.getElementById('setNotifSub').textContent);
       setNotifCfg('enabled', false);
@@ -2398,7 +2402,7 @@ async function runChecks() {
       out.timerQuiet = !toasts.length;
       notifCfg.subFailed = true; updateSource(sid, { background: true });
       await new Promise(r => setTimeout(r, 2500));
-      out.timerOn = toasts.some(m => /Update of .* failed/.test(m));
+      out.timerOn = toasts.some(m => /update failed/.test(m));
       s.url = url0; window.toast = t0;
       // saved with the snapshot; an old one migrates
       out.saved = 'notifCfg' in liveSnapshot();
@@ -2412,29 +2416,249 @@ async function runChecks() {
     await p.close();
   });
 
-  await check('live Auto: a site blocked on the node toasts with a Rule button (prefilled rule to the entry it opens through); a subscription whose servers all fail toasts once', async () => {
+  // The journal drives the background notifications (47-events.js → 58-notif.js): only events newer than the page's first look, not own, with their toggle on.
+  await check('events → notifications: history never, a new one yes (toggle on, not own), a Rule button on a blocked site, a tap opens Logs at the event; sub/dead is posted by the UI', async () => {
     const p = await openPage(browser);
-    const r = await p.evaluate(() => {
-      const order = autoOrder(), [a, b] = [order[0], order[1] || order[0]], now = Date.now();
-      const toasts = []; const t0 = window.toast; window.toast = (m, act) => toasts.push({ m, act });
-      connected = true; live.switches = 0; live.restarts = 0; live.unstable = 0; live.blocked = 0;
-      const st = extra => ({ connected: true, restarts: 0, recovering: null, auto: Object.assign({ now: a, server: null, switches: 0, unstable: 0, blocked: 0, noNet: false, routes: [], members: [] }, extra) });
-      liveAutoStatus(st({ blocked: 1, lastBlocked: { route: a, server: 'x', dest: 'chat.example.com:443', via: b, at: now } }));
-      const out = { toast: toasts.length === 1 && toasts[0].m.includes('chat.example.com') && toasts[0].act && toasts[0].act.label === 'Rule' };
+    const r = await p.evaluate(async () => {
+      const toasts = []; window.toast = (m, act, tap) => toasts.push({ m, act, tap });
+      const order = autoOrder(), [a, b] = [order[0], order[1] || order[0]], now = Date.now(), wait = ms => new Promise(r => setTimeout(r, ms));
+      const add = (cat, type, level, data, own) => { const e = mockEventAdd(cat, type, level, data, { own }); return pollEvents().then(() => e); };
+      await pollEvents();
+      const out = { history: !toasts.length && evState.list.length > 20 };   // the seeded history holds warnings and errors: silent
+      await add('site', 'blocked', 'warn', { host: 'chat.example.com', dest: 'chat.example.com:443', entry: a, via: b });
+      out.toast = toasts.length === 1 && toasts[0].m.includes('chat.example.com') && toasts[0].act && toasts[0].act.label === 'Rule' && typeof toasts[0].tap === 'function';
       toasts[0].act.fn();
       out.rule = document.getElementById('sh-ruleform').classList.contains('open') && ruleDraft.target === b && ruleDraft.action === 'proxy'
         && JSON.stringify(ruleDraft.groups.domain.v.domain_suffix) === '["chat.example.com"]';
       closeSheet('ruleform');
+      notifCfg.blocked = false; toasts.length = 0;
+      await add('site', 'blocked', 'warn', { host: 'x.test', dest: 'x.test:443', entry: a, via: b });
+      out.off = !toasts.length;
+      notifCfg.blocked = true;
+      await add('auto', 'switched', 'info', { from: a, to: b, reason: 'failover' }, true);
+      out.own = !toasts.length;
+      const sw = await add('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 });
+      out.switch = toasts.length === 1 && toasts[0].m.includes(connectEntry(a).name) && /failed 3 checks/.test(toasts[0].m);
+      notifCfg.enabled = false; toasts.length = 0;
+      await add('core', 'crashed', 'error', { code: 1 });
+      out.master = !toasts.length;
+      notifCfg.enabled = true;
+      // a tap on the toast: Logs → Events at that event
+      toasts[0] = { tap: () => openEventInLogs(sw.id) };
+      toasts[0].tap();
+      await wait(200);
+      out.tap = logsOpen() && logTab === 'events' && !!document.querySelector('#evList .ev-row.hit');
+      // every tested server of a subscription fails while another source answers: sub/dead, once
       const sid = Object.keys(sourcesData).find(k => sourcesData[k].kind === 'sub' && sourcesData[k].nodes.length >= 2);
       const other = Object.keys(sourcesData).find(k => k !== sid && sourcesData[k].nodes.length);
       const mem = [...sourcesData[sid].nodes.slice(0, 2).map(n => ({ key: sid + '::' + n.id, ms: -1, fails: 3, oks: 0, at: now })),
         { key: other + '::' + sourcesData[other].nodes[0].id, ms: 80, fails: 0, oks: 3, at: now }];
+      const st = { connected: true, restarts: 0, recovering: null, auto: { now: a, server: null, switches: 0, unstable: 0, blocked: 0, noNet: false, routes: [], members: mem } };
       toasts.length = 0;
-      liveAutoStatus(st({ blocked: 1, members: mem }));
-      liveAutoStatus(st({ blocked: 1, members: mem }));
-      out.srcDown = toasts.length === 1 && toasts[0].m.includes(sourcesData[sid].name) && /support/.test(toasts[0].m);
+      const dead0 = evState.list.filter(e => e.type === 'dead').length;
+      liveAutoStatus(st); liveAutoStatus(st);
+      await wait(300);
+      out.srcDown = toasts.length === 1 && toasts[0].m.includes(sourcesData[sid].name) && /support/.test(toasts[0].m) && evState.list.filter(e => e.type === 'dead').length === dead0 + 1;
       liveAutoStatus(null);
-      window.toast = t0; connected = false;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('Events: opens on its tab at the bottom, day separators, repeats ×N, level marks, row opens; a new event at the bottom scrolls to it, scrolled up the view stays and the pill counts', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs');
+    await p.waitForTimeout(700);
+    const r = await p.evaluate(async () => {
+      const out = {}, box = document.getElementById('evScroll'), wait = ms => new Promise(r => setTimeout(r, ms));
+      const bottom = () => box.scrollTop + box.clientHeight >= box.scrollHeight - 3;
+      const jump = document.getElementById('logJump');
+      out.tab = logTab === 'events' && getComputedStyle(box).display !== 'none' && getComputedStyle(document.getElementById('logScroll')).display === 'none'
+        && document.querySelector('#logTabs .nodes-tab.active').textContent === 'Events';
+      out.bottom = bottom() && box.scrollHeight > box.clientHeight;
+      const days = [...document.querySelectorAll('#evList .ev-day')].map(x => x.textContent);
+      out.days = days.includes('Today') && days.includes('Yesterday');
+      const rep = document.querySelector('#evList .ev-row.cat-site .ev-rep');
+      out.rep = !!rep && rep.textContent === '×3';
+      out.lvl = !!document.querySelector('#evList .ev-row.lvl-warn .log-tag.warn') && !!document.querySelector('#evList .ev-row.lvl-error .log-tag.error');
+      out.noOwn = !document.querySelector('#evList .ev-row.cat-user');
+      out.names = [...document.querySelectorAll('#evList .ev-title')].every(t => !/\bsrc\d/.test(t.textContent)) && /^Auto: .+ → .+/.test(document.querySelector('#evList .ev-row.cat-auto .ev-title').textContent);
+      const site = document.querySelector('#evList .ev-row.cat-site');
+      out.acts = [...site.querySelectorAll('.ev-act')].map(x => x.textContent).join() === 'Rule,Open';
+      site.click();
+      out.open = site.classList.contains('open') && getComputedStyle(site.querySelector('.ev-more')).display !== 'none' && /Times/.test(site.querySelector('.ev-more').textContent);
+      site.click();
+      out.shut = !site.classList.contains('open');
+      // In raw log: the connected row jumps to its line
+      const con = [...document.querySelectorAll('#evList .ev-row.cat-conn')].find(x => x.querySelector('.ev-act'));
+      out.rawBtn = !!con;
+      // a new event while at the bottom: smooth scroll to it, no pill
+      const last = () => box.querySelector('.ev-row:last-child .ev-title').textContent;
+      mockEventAdd('auto', 'switched', 'info', { from: visibleOrder()[0], to: visibleOrder()[1], reason: 'back' });
+      await pollEvents(); await wait(1100);
+      out.follow = bottom() && /^Auto:/.test(last()) && jump.style.display === 'none' && evState.unseen === 0;
+      // scrolled up: it stays, the pill counts
+      box.scrollTop = 0; await wait(150);
+      mockEventAdd('auto', 'switched', 'info', { from: visibleOrder()[1], to: visibleOrder()[0], reason: 'failover', fails: 2 });
+      mockEventAdd('core', 'crashed', 'error', { code: 2 });
+      await pollEvents(); await wait(300);
+      out.stay = box.scrollTop === 0 && evState.unseen === 2 && jump.style.display !== 'none' && /2 new/.test(jump.textContent);
+      jump.click(); await wait(1100);
+      out.back = bottom() && jump.style.display === 'none' && evState.unseen === 0;
+      // In raw log: Raw tab, at the line, lit
+      const withLog = evState.list.find(e => e.log != null && e.cat === 'auto');
+      evAct('raw', withLog.id);
+      await wait(700);
+      out.raw = logTab === 'raw' && !!document.querySelector('#logList .log-line.hit[data-n="' + withLog.log + '"]');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('Events filter: by type, category tri-state, only problems, search, badge + Filtered bar + Reset; Show my actions is kept with the state, the filter is not', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs');
+    await p.waitForTimeout(600);
+    const r = await p.evaluate(async () => {
+      const out = {}, rows = () => document.querySelectorAll('#evList .ev-row').length, n0 = rows();
+      const badge = document.getElementById('evFilterBadge'), bar = document.getElementById('evFilterBar');
+      openEvFilter(); evFilterFold('auto');
+      out.sheet = document.getElementById('sh-evfilter').classList.contains('open') && document.querySelectorAll('#evfilter-body .evf-type').length === 3
+        && document.querySelectorAll('#evfilter-body .evf-cat').length === 6;
+      const unstable = () => [...document.querySelectorAll('#evList .ev-title')].some(t => /is unstable/.test(t.textContent));
+      out.before = unstable() && !!document.querySelector('#evList .cat-auto');
+      evToggleType('auto/unstable');
+      out.type = !unstable() && !!document.querySelector('#evList .cat-auto') && rows() < n0
+        && !!document.querySelector('#evfilter-body [data-cat="auto"] .evf-check.part')
+        && badge.style.display !== 'none' && badge.textContent === '1' && bar.style.display !== 'none' && /Filtered: Auto 2\/3/.test(bar.textContent) && /Reset/.test(bar.textContent);
+      evToggleCat('auto');   // half → all on
+      out.catOn = unstable() && !!document.querySelector('#evfilter-body [data-cat="auto"] .evf-check.on');
+      evToggleCat('auto');   // all on → all off
+      out.catOff = !document.querySelector('#evList .cat-auto') && !document.querySelector('#evfilter-body [data-cat="auto"] .evf-check.on, #evfilter-body [data-cat="auto"] .evf-check.part');
+      evResetFilter();
+      out.reset = rows() === n0 && badge.style.display === 'none' && bar.style.display === 'none';
+      setEvProblems(true);
+      out.problems = rows() > 0 && rows() < n0 && [...document.querySelectorAll('#evList .ev-row')].every(x => /lvl-(warn|error)/.test(x.className)) && /only problems/.test(bar.textContent);
+      evResetFilter();
+      const inp = document.getElementById('evQ'); inp.value = 'rutracker'; inp.dispatchEvent(new Event('input'));
+      out.search = rows() === 1 && /rutracker/.test(document.querySelector('#evList .ev-title').textContent);
+      evResetFilter();
+      // hidden by default; the switch shows them and is kept, the filter is not part of the state
+      out.ownHidden = !document.querySelector('#evList .cat-user') && logCfg.showOwn === false;
+      setShowOwn(true);
+      out.ownShown = !!document.querySelector('#evList .cat-user') && document.querySelector('#evfilter-body [data-key="showOwn"] .mini-toggle').classList.contains('on');
+      setEvProblems(true); evFilter.off.add('core/crashed');
+      const snap = JSON.parse(JSON.stringify(liveSnapshot()));
+      out.snap = snap.logCfg.showOwn === true && Object.keys(snap.logCfg).sort().join() === 'seen,showOwn' && !JSON.stringify(snap).includes('core/crashed');
+      logCfg.showOwn = false;
+      liveApply(snap);
+      out.kept = logCfg.showOwn === true;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('Logs tab dots: a new error → red, a warning → yellow (both may show), seen in Events or via the toast → gone, filtered-out ones count, kept in the snapshot, no layout shift', async () => {
+    const p = await openPage(browser);
+    await p.waitForTimeout(300);
+    const r = await p.evaluate(async () => {
+      const out = {}, on = id => document.getElementById(id).classList.contains('on'), wait = ms => new Promise(r => setTimeout(r, ms));
+      const add = (cat, type, level, data) => { const e = mockEventAdd(cat, type, level, data); return pollEvents().then(() => e); };
+      await pollEvents();
+      out.hist = on('navDotErr') && on('navDotWarn');   // the mock's last hour is unseen
+      const w0 = document.querySelector('.nav-btn[data-tab="logs"]').getBoundingClientRect().width;
+      evMarkIds(evState.list.filter(e => e.level !== 'info').map(e => e.id));
+      out.clear = !on('navDotErr') && !on('navDotWarn');
+      out.noShift = document.querySelector('.nav-btn[data-tab="logs"]').getBoundingClientRect().width === w0 && getComputedStyle(document.getElementById('navDotErr')).position === 'absolute';
+      const crash = await add('core', 'crashed', 'error', { code: 1 });
+      out.red = on('navDotErr') && !on('navDotWarn');
+      await wait(3400);   // its toast is gone by itself
+      const lost = await add('conn', 'lost', 'warn', {});
+      out.both = on('navDotErr') && on('navDotWarn');
+      // the toast of a journal event, tapped: it is seen (its own dot goes, the other stays)
+      document.getElementById('toast').click();
+      await wait(300);
+      out.tapSeen = logCfg.seen.includes(lost.id) && !on('navDotWarn');
+      // viewed in Events: the error at the bottom row is in the viewport
+      switchTab('logs'); await wait(500);
+      out.viewed = !on('navDotErr') && !on('navDotWarn');
+      // a warning alone, the tab closed; hidden by the filter it still counts
+      switchTab('home');
+      evFilter.off.add('conn/offline');
+      await add('conn', 'offline', 'warn', {});
+      out.warn = on('navDotWarn') && !on('navDotErr');
+      evFilter.off.clear();
+      // kept: through a snapshot round trip
+      const snap = JSON.parse(JSON.stringify(liveSnapshot()));
+      logCfg.seen = []; renderNavDots();
+      out.lostState = on('navDotErr');
+      liveApply(snap);
+      out.kept = logCfg.seen.includes(crash.id) && on('navDotWarn') && !on('navDotErr');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('notification toast: tappable, flies into the Logs tab when it goes (transform + opacity), an own-action toast just fades, reduced motion fades', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      const out = {}, el = document.getElementById('toast'), wait = ms => new Promise(r => setTimeout(r, ms));
+      const [a, b] = visibleOrder();
+      mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 });
+      await pollEvents();
+      out.shown = el.classList.contains('show') && el.classList.contains('has-tap');
+      await wait(350);   // fully shown first
+      hideToast();
+      await wait(150);
+      const cs = getComputedStyle(el), m = new DOMMatrix(cs.transform);
+      out.fly = el.classList.contains('fly') && +cs.opacity < 1 && +cs.opacity > 0.1 && m.a < 0.98;
+      await wait(500);
+      out.gone = !el.classList.contains('show') && !el.classList.contains('fly');
+      toast('Backup saved');
+      hideToast();
+      out.plain = !el.classList.contains('fly') && !el.classList.contains('show');
+      return out;
+    });
+    await p.emulateMedia({ reducedMotion: 'reduce' });
+    r.reduced = await p.evaluate(async () => {
+      const el = document.getElementById('toast'), [a, b] = visibleOrder();
+      mockEventAdd('auto', 'switched', 'info', { from: b, to: a, reason: 'failover' });
+      await pollEvents();
+      hideToast();
+      return !el.classList.contains('fly') && !el.classList.contains('show');
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('Events: Clear (confirm) empties the journal, Export has both logs as text, sub results and user actions are journaled (own)', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs');
+    await p.waitForTimeout(600);
+    const r = await p.evaluate(async () => {
+      const out = {}, wait = ms => new Promise(r => setTimeout(r, ms));
+      const text = await logsExportText();
+      out.export = /== Events \(\d+\) ==/.test(text) && /== Raw log \(\d+ lines\) ==/.test(text) && /Auto: /.test(text) && /Connected: /.test(text);
+      // the user's own actions and a manual update land in the journal, own, so they never notify
+      const n0 = evState.list.length;
+      toggleSegment('mode'); setSysProxy(true);
+      const sid = sourceOrder.find(id => sourcesData[id].kind === 'sub');
+      updateSource(sid);
+      await wait(2800);
+      const fresh = evState.list.slice(n0);
+      out.user = fresh.some(e => e.cat === 'user' && e.type === 'mode' && e.own) && fresh.some(e => e.cat === 'user' && e.type === 'sysProxy' && e.data.on === true);
+      out.sub = fresh.some(e => e.cat === 'sub' && e.type === 'updated' && e.own && e.data.source === sid);
+      confirmClearEvents();
+      out.confirm = document.getElementById('sh-actions').classList.contains('open') && /Clear events/.test(document.getElementById('actions-body').textContent);
+      clearEvents();
+      await wait(300);
+      out.cleared = !evState.list.length && !document.querySelector('#evList .ev-row') && !!document.querySelector('#evList .log-empty');
+      await pollEvents();
+      out.stays = !evState.list.length;
       return out;
     });
     expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));

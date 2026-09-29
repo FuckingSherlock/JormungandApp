@@ -40,6 +40,7 @@ function toggleMain() {
     connected = false;
     exitInfo = null;
     renderConnState();
+    journal('user', 'disconnect', { action: 'disconnect' });
     backend.disconnect().then(refreshExitIp, e => toast(e.message));
     return;
   }
@@ -47,7 +48,7 @@ function toggleMain() {
   if (catalogEmpty()) { toast(simpleMode() ? 'Add a subscription or a server first' : 'Create a profile first'); dockTap(); return; }
   connecting = true;
   renderConnState();
-  backend.connect().then(() => { connected = true; }, e => toast(e.message))
+  backend.connect().then(() => { connected = true; journal('user', 'connect', { action: 'connect', entry: effectiveConnectId() }); }, e => toast(e.message))
     .then(() => { connecting = false; renderConnState(); if (!connected) refreshExitIp(); });
 }
 
@@ -68,7 +69,8 @@ const SEG_OPTS = { mode: ['tun', 'proxy'], route: ['global', 'rules'], sys: ['on
 // Two options only, so a tap anywhere on the control flips it.
 function toggleSegment(group) {
   const next = SEG_OPTS[group].find(o => o !== segState[group]);
-  if (group === 'sys') setSysProxy(next === 'on'); else setSegment(group, next);
+  if (group === 'sys') setSysProxy(next === 'on');
+  else { setSegment(group, next); journal('user', group, { action: group, value: next }); }
 }
 function setSegment(group, value) {
   segState[group] = value;
@@ -101,6 +103,7 @@ function setSysProxy(on) {
   connCfg.sysProxy = on;
   setSegment('sys', on ? 'on' : 'off');
   renderConnSettings();
+  journal('user', 'sysProxy', { action: 'sysProxy', on });
 }
 
 

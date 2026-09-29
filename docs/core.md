@@ -230,6 +230,7 @@ AutoService; три неудачи — отключено, `error`. Фонова
 | `POST /api/auto` | `{auto}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения → status |
 | `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, recovering, restarts, auto, sourcesRev}` — `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
+| `GET /api/events?since=N` | `{events:[…], next, first}` — журнал событий (ниже): события с `id ≥ N`, старые первыми; без `since` — последние 200. `next` — id следующего события, `first` — id самого старого из хранимых (пропуск между своим `next` и `first` = журнал обрезан или очищен). `POST /api/events` `{cat, type, level, own?, data?}` → `{id}` — событие, которое первым узнал UI (400 с причиной, если форма не та: неизвестные `cat` / `level`, `type` не `[A-Za-z][A-Za-z0-9_]{0,47}`, `own` не bool, `data` не объект или больше 4096 знаков JSON); к такому событию `log` не привязывается. `DELETE /api/events` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
 | `POST /api/node` | `{protocol, address, port, secret, name, outbound?, unsupported?}` → `{node}`; ошибка формы — 400 `{error}` с текстом для пользователя |
 | `POST /api/share` | `{outbound, name, flag, unsupported?}` → `{link}` (null — у сервера нет формы ссылки) |
@@ -297,6 +298,57 @@ Connections и лист Live connections (новые сверху: хост:по
 `/api`-запросы) — одна нумерованная очередь. Префикс даты sing-box срезается, уровень
 (TRACE/DEBUG → debug, WARN → warn, ERROR/FATAL/PANIC → error) — отдельным полем; строки
 рантайма `[jormd] …` считаются строками ядра.
+
+Журнал событий (`eventbook.dart`, `EventBook`) — «что произошло», структурно: вкладка
+Logs → Events и все уведомления делаются из него; сырой лог выше остаётся как есть (вкладка
+Raw). Событие:
+
+```
+{ id,        // растёт на 1, не откатывается: ни после рестарта, ни после очистки
+  at,        // мс с эпохи
+  cat,       // conn | auto | site | sub | rules | core | user
+  type, level: 'info' | 'warn' | 'error',
+  own,       // true = причина — действие самого пользователя: уведомления нет
+  log?,      // номер строки LogBook, записанной в тот же момент (переход в Raw)
+  data }     // только поля, без готовой фразы: текст и язык — дело приложения
+```
+
+Хранится в `<dataDir>/events.jsonl` (JSON Lines): последние 7 суток и не больше 1000
+событий, обрезка при старте и при каждой записи; при обрезке и очистке файл переписывается
+целиком, первой строкой `{"seq": N}` — по ней id продолжаются, даже когда событий не осталось.
+Битая строка (запись оборвалась на сбое) пропускается. Ошибка записи на диск до вызывающего
+не доходит (журнал остаётся в памяти). Ядро пишет сначала строку в сырой лог, потом событие —
+`log` указывает на неё.
+
+Что и где пишет ядро (`cat/type`, уровень, `data`):
+
+| событие | когда | `data` |
+|---|---|---|
+| `conn/connected` info | подключились (`own: true`, если по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, mode: 'proxy', route: 'global'\|'rules'}` — `server` только если он уже известен (у Fastest его выбирает urltest позже); `mode: 'tun'`, когда TUN появится |
+| `conn/connectFailed` error | подключение не вышло | `{reason}` |
+| `conn/disconnected` info / error | `by: 'user'` — по команде (`own: true`, пишется, только если было подключено); `by: 'error'` — sing-box не поднялся после всех попыток | `{by, reason?}` |
+| `conn/lost` warn | Auto: ни один маршрут не отвечает (`noNet` стал true из-за проверок) | `{}` |
+| `conn/restored` info | `noNet` снова false | `{downMs}` |
+| `conn/offline` warn / `conn/online` info | у ОС нет сети — по строке sing-box `missing default interface` / `updated default interface` (пока подключено) | `{}` / `{downMs}` |
+| `auto/switched` info | Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
+| `auto/fastest` info | Fastest сам сменил сервер (urltest внутри sing-box) | `{route, from, to}` |
+| `auto/unstable` warn | маршрут падает снова и снова (flap guard) | `{id, strikes, holdMs}` |
+| `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Rule) | `{host, port?, entry, server, dest, via}` |
+| `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
+| `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
+| `rules/ruleSetFailed` warn | скачивание списка не удалось (не чаще, чем раз в `retryAfter` = 5 мин на список) | `{tag, url, error}` — `url` последний из пробованных |
+| `rules/ruleSetUpdated` info | старая копия списка заменена новой, или список скачан после сбоя (первая закачка отсутствующего списка — не новость) | `{tag}` |
+| `core/crashed` error | sing-box вышел сам | `{code}` |
+| `core/restarted` info | после падения запущен снова | `{attempt}` |
+| `core/restartFailed` error | попытка перезапуска не удалась | `{attempt, error}` |
+| `core/sysProxy` info / warn | системный прокси включён / возвращён (`own: true` при команде пользователя); `warn` — не вышло | `{on, error?}`, `on` — что хотели получить |
+| `core/deprecated` warn | sing-box сообщил, что конфиг перестанет работать в новой версии; каждый текст — раз за запуск демона (в сыром логе — при каждом подключении) | `{text}` |
+
+Не пишет ядро (нет данных или это знает только UI): `sub/removed`, `sub/back`, `sub/dead` (модель
+серверов и пинги живут в UI; UI шлёт их `POST /api/events`), `user/*` (действия пользователя — тоже
+`POST`; у них `own: true`), а также результаты ручного обновления подписки из UI. Провал скачивания
+списка правил в предупреждение `warning` ответа на connect не попадает (туда идут только
+предупреждения сборки: правило пропущено, потому что списка нет).
 
 Ссылка сервера (`share.dart`) — обратная сторона парсера ссылок: из outbound снова
 vless/trojan/hy2/tuic/anytls-URL, vmess — JSON v2rayN (URL-вид, если JSON не умеет: Reality,

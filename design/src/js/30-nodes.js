@@ -321,6 +321,7 @@ function updateSource(sid, opts) {
   s.updating = true;
   refreshSourceViews();
   const o = opts && typeof opts === 'object' ? opts : {};
+  const before = new Set((s.nodes || []).map(n => n.id)), gone0 = (s.gone || []).length;
   // never loaded (its first fetch failed): Retry is that first fetch again
   ((s.nodes || []).length ? backend.updateSource(s, o) : backend.fetchSource(s, o)).then(() => {
     s.count = s.nodes.length;
@@ -328,21 +329,31 @@ function updateSource(sid, opts) {
     return true;
   }, e => {
     s.lastError = { msg: e.message, at: Date.now() };
-    // the user's own Update / Retry always says so; a timer update (o.background) is up to Settings → Notifications
-    (o.background ? notify.bind(null, 'subFailed') : toast)('Update of ' + s.name + ' failed: ' + e.message);
+    // the user's own Update / Retry always says so; a timer update (o.background) tells through
+    // its event (sub/failed, not own): Settings → Notifications decides
+    if (!o.background) toast('Update of ' + s.name + ' failed: ' + e.message);
+    journal('sub', 'failed', { source: sid, name: s.name, error: e.message }, { level: 'error', own: !o.background });
     return false;
   }).then(ok => {
     s.updating = false;
     purgeExpiredGone();
     refreshSourceViews();
-    if (ok && o.background) notify('subUpdated', `${s.name} updated: ${s.count} servers`);
+    if (ok) subResultEvents(sid, before, gone0, !o.background);
     if (ok && s.testAfterUpdate) testSourceLatency(sid);
   });
+}
+// The events of a finished update: updated (new / removed servers, total), and the provider
+// removing servers or bringing them back. own: the user pressed Update (no notification).
+function subResultEvents(sid, before, gone0, own) {
+  const s = sourcesData[sid], now = new Set(s.nodes.map(n => n.id)), data = { source: sid, name: s.name }, g = (s.gone || []).length;
+  journal('sub', 'updated', Object.assign({ added: [...now].filter(id => !before.has(id)).length, removed: [...before].filter(id => !now.has(id)).length, total: s.nodes.length }, data), { own });
+  if (g > gone0) journal('sub', 'removed', Object.assign({ count: g - gone0 }, data), { level: 'warn', own });
+  else if (g < gone0) journal('sub', 'back', Object.assign({ count: gone0 - g }, data), { own });
 }
 // Mockup only: an update of a demo subscription alternates between the provider dropping
 // two servers and bringing the dropped ones back (with their old settings).
 function demoProviderChurn(s, o) {
-  const say = o && o.background ? notify.bind(null, 'subFailed') : toast;
+  const say = o && o.background ? () => {} : toast;   // a timer update's removed / back events come from updateSource
   if ((s.gone || []).length) {
     const back = s.gone;
     s.nodes = s.nodes.concat(back.map(n => { const m = Object.assign({}, n); delete m.goneAt; return m; }))

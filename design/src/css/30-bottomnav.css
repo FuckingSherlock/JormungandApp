@@ -2,6 +2,13 @@
 .bottomnav{position:relative;z-index:60;display:flex;justify-content:space-around;align-items:center;padding:4px 0 max(6px, env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--surface)}
 .nav-btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 16px;cursor:pointer;opacity:.45}
 .nav-btn.active{opacity:1}
-.nav-btn span{font-size:12px;font-weight:600;letter-spacing:.4px;color:var(--t2)}
+/* Logs: unseen error / warning events (47-events.js renderNavDots) — on the icon, out of the layout */
+.nav-ico{position:relative;width:20px;height:20px;display:flex}
+.nav-dot{position:absolute;top:-2px;width:8px;height:8px;border-radius:50%;display:none;box-shadow:0 0 0 2px var(--surface)}
+.nav-dot.err{right:-4px;background:var(--danger)}
+.nav-dot.warn{right:-4px;background:var(--warn)}
+.nav-dot.err.both{top:-3px;right:-6px}
+.nav-dot.warn.both{top:3px;right:-7px}
+.nav-dot.on{display:block}.nav-btn span{font-size:12px;font-weight:600;letter-spacing:.4px;color:var(--t2)}
 .nav-btn.active span{color:var(--accent)}
 

@@ -1,19 +1,39 @@
 /* ══════════════════════ LOGS ══════════════════════
-   LogsView: what sing-box prints and what the core notes itself (connected, not connected,
-   the system proxy warning, failed requests), oldest at the top. backend.log(since) gives
-   the lines numbered `since` and later (the core keeps the last 2000, logbook.dart); it is
-   asked once a second while the tab is open and the page visible. The list follows new
-   lines until the user scrolls up; then a pill counts the new ones and brings it back.
-   (Flutter: LogsView over the core's LogBook stream.) */
+   LogsView, two tabs: Events (47-events.js: what happened, as sentences, from the events
+   journal) and Raw (this file: what sing-box prints and what the core notes itself —
+   connected, not connected, the system proxy warning, failed requests), oldest at the top.
+   backend.log(since) gives the lines numbered `since` and later (the core keeps the last 2000,
+   logbook.dart); it is asked once a second while the Raw tab is open and the page visible.
+   The list follows new lines until the user scrolls up; then a pill counts the new ones and
+   brings it back (the same pill serves Events). (Flutter: LogsView over the core's LogBook
+   stream and the events stream.) */
 
 const logState = { lines: [], next: null, level: 'all', follow: true, busy: false, unseen: 0, gen: 0 };
 const LOG_KEEP = 2000;
 const logsOpen = () => document.getElementById('view-logs').classList.contains('active');
+let logTab = 'events';
 
-// Called by switchTab (34-ui.js): the latest lines at once, pinned to the bottom.
-function openLogs() {
-  logFollow();
+// Called by switchTab (34-ui.js): Events, the latest at once, pinned to the bottom.
+function openLogs(tab) {
+  setLogTab(tab || 'events');
+  if (logTab === 'events') evFollow(false); else logFollow();
   pollLogs();
+}
+
+function setLogTab(tab) {
+  logTab = tab;
+  const ev = tab === 'events', on = id => document.getElementById(id);
+  on('evScroll').style.display = ev ? '' : 'none';
+  on('logScroll').style.display = ev ? 'none' : '';
+  on('evActions').style.display = ev ? '' : 'none';
+  on('rawActions').style.display = ev ? 'none' : '';
+  on('logLevels').style.display = ev ? 'none' : '';
+  on('logSearchBar').style.display = !ev && on('logSearchBtn').classList.contains('on') ? '' : 'none';
+  on('logTabInk').style.transform = ev ? '' : 'translateX(100%)';
+  document.querySelectorAll('#logTabs .nodes-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  renderEvFilterBar();
+  if (ev) { renderEvents(); evFollowIfPinned(); evMarkSeen(); } else { logFollowIfPinned(); pollLogs(); }
+  renderLogSummary();
 }
 
 function pollLogs() {
@@ -32,7 +52,7 @@ function pollLogs() {
     appendLogs(fresh);
   }, () => {}).finally(() => { logState.busy = false; });
 }
-setInterval(() => { if (logsOpen() && !document.hidden) pollLogs(); }, 1000);
+setInterval(() => { if (logsOpen() && logTab === 'raw' && !document.hidden) pollLogs(); }, 1000);
 
 const logQuery = () => document.getElementById('logSearch').value.trim().toLowerCase();
 const logShown = (l, q) => (logState.level === 'all' || l.lvl === 'warn' || l.lvl === 'error')
@@ -69,15 +89,19 @@ function appendLogs(fresh) {
   renderLogSummary();
 }
 
+// The header line under "Logs" (of the tab that is open), the warning count on the level chip
+// and the pill "↓ N new" / "↓ Latest" of the tab that is open.
 function renderLogSummary() {
   const all = logState.lines, warn = all.filter(l => l.lvl === 'warn').length, err = all.filter(l => l.lvl === 'error').length;
-  document.getElementById('logsSummary').textContent = all.length + ' line' + (all.length === 1 ? '' : 's')
-    + (err ? ' · ' + err + ' error' + (err === 1 ? '' : 's') : '') + (warn ? ' · ' + warn + ' warning' + (warn === 1 ? '' : 's') : '');
   document.getElementById('logWarnCount').textContent = warn + err ? String(warn + err) : '';
-  const jump = document.getElementById('logJump');
-  jump.style.display = logState.follow ? 'none' : '';
-  jump.textContent = logState.unseen ? '↓ ' + logState.unseen + ' new' : '↓ Latest';
+  document.getElementById('logsSummary').textContent = logTab === 'events' ? evSummaryText()
+    : all.length + ' line' + (all.length === 1 ? '' : 's')
+      + (err ? ' · ' + err + ' error' + (err === 1 ? '' : 's') : '') + (warn ? ' · ' + warn + ' warning' + (warn === 1 ? '' : 's') : '');
+  const st = logTab === 'events' ? evState : logState, jump = document.getElementById('logJump');
+  jump.style.display = st.follow ? 'none' : '';
+  jump.textContent = st.unseen ? '↓ ' + st.unseen + ' new' : '↓ Latest';
 }
+function logJumpTap() { if (logTab === 'events') evFollow(true); else logFollow(); }
 
 function logFollowIfPinned() {
   if (!logState.follow) return;
@@ -100,6 +124,27 @@ function logFollow() {
   renderLogSummary();
 }
 
+// Events → "In raw log": the Raw tab at the line n (the filters cleared so it is there), lit for a moment.
+function showRawLine(n) {
+  setLogTab('raw');
+  logState.level = 'all';
+  document.querySelectorAll('#logLevels .chip').forEach(c => c.classList.toggle('active', c.dataset.lvl === 'all'));
+  toggleLogSearch(false);
+  pollLogs();   // the line may be newer than what is loaded
+  const find = () => document.querySelector('#logList .log-line[data-n="' + n + '"]');
+  const go = () => {
+    const el = find();
+    if (!el) { toast('That line is no longer in the raw log'); return; }
+    logState.follow = false;
+    el.scrollIntoView({ block: 'center' });
+    el.classList.add('hit');
+    setTimeout(() => el.classList.remove('hit'), 2200);
+    renderLogSummary();
+  };
+  renderLogs();
+  find() ? go() : setTimeout(() => { renderLogs(); go(); }, 400);
+}
+
 function setLogLevel(lvl) {
   logState.level = lvl;
   document.querySelectorAll('#logLevels .chip').forEach(c => c.classList.toggle('active', c.dataset.lvl === lvl));
@@ -119,9 +164,9 @@ function toggleLogSearch(show) {
 function copyLogs() {
   const q = logQuery(), shown = logState.lines.filter(l => logShown(l, q));
   if (!shown.length) { toast('No lines to copy'); return; }
-  const text = shown.map(l => `${new Date(l.t).toISOString()} ${l.lvl.toUpperCase().padEnd(5)} ${l.src === 'core' ? '[core] ' : ''}${l.msg}`).join('\n');
-  copyText(text, shown.length + ' line' + (shown.length === 1 ? '' : 's'));
+  copyText(rawLogText(shown), shown.length + ' line' + (shown.length === 1 ? '' : 's'));
 }
+const rawLogText = lines => lines.map(l => `${new Date(l.t).toISOString()} ${l.lvl.toUpperCase().padEnd(5)} ${l.src === 'core' ? '[core] ' : ''}${l.msg}`).join('\n');
 
 function clearLogs() {
   logState.gen++;

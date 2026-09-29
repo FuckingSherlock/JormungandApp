@@ -4,8 +4,7 @@
    start on), and the core moves between them — and between a Priority entry's
    servers — through sing-box's Clash API, with no restart. This file builds those routes
    and reads back what the core did: the entry and server it is really on (coreRoute →
-   dock, Route), what it measured (→ the ping cache, so knownDead agrees with it) and when
-   it switched or found an entry unstable (→ a toast, General → When Auto switches).
+   dock, Route) and what it measured (→ the ping cache, so knownDead agrees with it).
    (Flutter: the same AutoService in-process; this is its view model.) */
 
 // f() on the UI's own picks: coreRoute off meanwhile (a plan is the UI's guess; the core
@@ -80,47 +79,24 @@ function mergeCorePings(members) {
 }
 
 const entryLabel = id => { const e = connectEntry(id); return e ? e.name : chainsData[id] ? chainsData[id].name : unitName(id); };
-function switchText(s) {
-  if (!s.route) return `Auto: ${entryLabel(s.from)} → ${entryLabel(s.to)}`;
-  const name = k => { const n = nodeOfKey(k); return n ? n.name : k; };
-  return `Auto: ${entryLabel(s.route)} — ${name(s.from)} → ${name(s.to)}`;
-}
 
 /* Every status from the core while connected (the poll, the answer to a connect; null on
-   disconnect): what its Auto is on and measured. Views re-render only on a change. */
+   disconnect): what its Auto is on and measured. Views re-render only on a change. What
+   the core did (switched, unstable, blocked, lost, crashed…) is not read from here: it comes
+   as events (47-events.js), which also drive the background notifications; only a
+   subscription's servers all failing (sourcesDown) is the UI's to post. */
 function liveAutoStatus(st) {
   const a = st && st.connected ? st.auto : null, was = JSON.stringify(coreRoute);
   coreRoute = a ? { id: a.now, server: a.server || null, entryServer: a.entryServer || null } : null;
   const pings = a ? mergeCorePings(a.members) : false;
-  if (a) {
-    if (live.switches != null && a.switches > live.switches && a.lastSwitch) notify('autoSwitch', switchText(a.lastSwitch));
-    if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable) notify('unstable', unstableText(a.lastUnstable));
-    if (live.blocked != null && a.blocked > live.blocked && a.lastBlocked) notify('blocked', blockedText(a.lastBlocked), { label: 'Rule', fn: () => openBlockedRule(a.lastBlocked) });
-    // no network at all (the OS, or no route answers): said once, and once more when it is back
-    const lost = !!(a.offline || a.noNet);
-    if (live.lost != null && lost !== live.lost) notify('connLost', lost ? 'Connection lost — waiting for the network' : 'Connection restored');
-    live.lost = lost;
-    sourcesDown(a.members);
-    live.switches = a.switches;
-    live.unstable = a.unstable || 0;
-    live.blocked = a.blocked || 0;
-    live.routes = (a.routes || []).map(r => r.id);
-  } else { live.switches = live.unstable = live.blocked = live.lost = null; live.srcDown = new Set(); }
-  // sing-box stopped on its own: the core puts the system proxy back and starts it again
-  if (st && st.recovering && !live.recovering) notify('coreCrash', 'sing-box stopped — starting it again…');
-  if (st && st.connected && live.restarts != null && st.restarts > live.restarts) notify('coreCrash', st.warning || 'sing-box started again');
-  live.recovering = st ? st.recovering : null;
-  live.restarts = st ? st.restarts : null;
+  if (a) { sourcesDown(a.members); live.routes = (a.routes || []).map(r => r.id); } else live.srcDown = new Set();
   if (pings) refreshSourceViews();
   else if (JSON.stringify(coreRoute) !== was) { renderConnects(); updateMainConnectCard(); }
 }
-// The flap guard (Settings → Auto mode): an entry that keeps dropping waits before it gets the traffic back.
-const unstableText = u => `Auto: ${entryLabel(u.id)} is unstable — back to it after ${Math.round(u.hold / 60000)} min without drops`;
 
 /* A request through the current node got nothing back while the node passes traffic, and
    the site opens through another Auto entry (the core checked both): offer a rule. */
 const destHost = d => d.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-const blockedText = b => `${destHost(b.dest)} does not open via ${entryLabel(b.route)} — it does via ${entryLabel(b.via)}`;
 function openBlockedRule(b) {
   const host = destHost(b.dest);
   openRuleForm();
@@ -130,8 +106,9 @@ function openBlockedRule(b) {
 }
 
 /* Every tested server of one subscription fails the checks (failAfter in a row) while a
-   server of another source answers: the provider's side (run out, blocked, down). Once per
-   subscription until one of its servers answers again. */
+   server of another source answers: the provider's side (run out, blocked, down). The UI
+   knows this (it maps the core's members to sources), so it posts the sub/dead event, once
+   per subscription until one of its servers answers again. */
 function sourcesDown(members) {
   const by = {}, fa = autoCfg.failAfter || 2;
   (members || []).forEach(m => { const i = m.key.indexOf('::'); if (i > 0) (by[m.key.slice(0, i)] ||= []).push(m); });
@@ -143,6 +120,6 @@ function sourcesDown(members) {
     if (!down) { live.srcDown.delete(sid); return; }
     if (!others || live.srcDown.has(sid)) return;
     live.srcDown.add(sid);
-    notify('subFailed', `${s.name}: its servers do not respond — contact the subscription provider's support`);
+    journal('sub', 'dead', { source: sid, name: s.name }, { level: 'error', own: false });
   });
 }

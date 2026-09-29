@@ -6,5 +6,12 @@
   max-width:calc(100% - 32px);text-align:center;
 }
 .toast.show{opacity:1;transform:translate(-50%,0)}
-.toast.has-act.show{pointer-events:auto}
+.toast.has-act.show,.toast.has-tap.show{pointer-events:auto}
+.toast.has-tap{cursor:pointer}
+/* a journal event's toast leaving: into the Logs item of the nav (34-ui.js hideToast) */
+.toast.show.fly{
+  transform:translate(calc(-50% + var(--fx,0px)),var(--fy,0px)) scale(.08);opacity:0;pointer-events:none;
+  transition:transform .4s ease-in,opacity .4s ease-in;
+}
+@media (prefers-reduced-motion:reduce){.toast.show.fly{transition:opacity .2s}}
 .toast-act{margin-left:12px;background:none;border:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;padding:0}

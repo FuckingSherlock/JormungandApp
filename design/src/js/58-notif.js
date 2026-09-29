@@ -15,6 +15,7 @@ const notifCfg = {
   subUpdated: false,    // a subscription updated in the background
   subFailed: true,      // background update failed; provider removed / brought back servers; servers do not respond
   ruleSets: true,       // rule sets could not be downloaded
+  desktopStyle: 'own',  // PC: 'own' pop-ups in the corner (also with the app closed to the tray) or 'system' notifications
 };
 const NOTIF_GROUPS = [
   ['Status', [
@@ -35,10 +36,12 @@ const NOTIF_GROUPS = [
 ];
 const NOTIF_KEYS = NOTIF_GROUPS.flatMap(g => g[1].map(r => r[0]));
 
-// A background event: shown only if the master and its own toggle are on.
-function notify(kind, msg, act) {
+// A background event: shown only if the master and its own toggle are on. evId = the journal
+// event behind it (47-events.js): a tap on the toast opens Logs → Events at that event, and
+// the toast flies into the Logs tab when it goes.
+function notify(kind, msg, act, evId) {
   if (!notifCfg.enabled || !notifCfg[kind]) return;
-  toast(msg, act);
+  toast(msg, act, evId == null ? null : () => openEventInLogs(evId));
 }
 
 function renderNotif() {
@@ -51,7 +54,15 @@ function renderNotif() {
     <div id="notif-groups" style="${notifCfg.enabled ? '' : 'opacity:.4;pointer-events:none'}">
       ${NOTIF_GROUPS.map(([cap, rows]) => `<div class="set-caption">${cap}</div><div class="set-group">${rows.map(row).join('')}</div>`).join('')}
     </div>
-    <div class="set-caption" style="text-transform:none;letter-spacing:0">On the phone and desktop these come as system notifications; in the app, as a toast at the bottom. What you start yourself (Update, Add, Ping) is always shown.</div>`;
+    <div class="set-caption">Pop-ups on PC</div>
+    <div class="set-group"><div class="set-row" data-key="desktopStyle" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div class="set-label">Where they show<div class="set-hint">Own pop-ups show even when Windows notifications are muted; they appear in the corner while the app is closed to the tray. System notifications go through the Windows notification centre.</div></div>
+      <div class="chip-row" style="padding:0">
+        <div class="chip ${notifCfg.desktopStyle === 'own' ? 'active' : ''}" onclick="setNotifCfg('desktopStyle','own')">Own pop-ups</div>
+        <div class="chip ${notifCfg.desktopStyle === 'system' ? 'active' : ''}" onclick="setNotifCfg('desktopStyle','system')">System notifications</div>
+      </div>
+    </div></div>
+    <div class="set-caption" style="text-transform:none;letter-spacing:0">On the phone these come as system notifications; in the app, as a toast at the bottom (tap it to see the event). What you start yourself (Update, Add, Ping) is always shown.</div>`;
   const sub = document.getElementById('setNotifSub');
   if (sub) {
     const n = NOTIF_KEYS.filter(k => notifCfg[k]).length;

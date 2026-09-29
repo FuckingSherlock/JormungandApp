@@ -98,8 +98,8 @@ function saveSrcForm() {
     expandState[id] = true;
     // The first fetch: nodes appear after the discovery request.
     s.updating = true;
-    backend.fetchSource(s).then(() => { delete s.lastError; },
-      e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Could not load ' + s.name + ': ' + e.message); }).then(() => {
+    backend.fetchSource(s).then(() => { delete s.lastError; journal('sub', 'updated', { source: id, name: s.name, added: s.nodes.length, removed: 0, total: s.nodes.length }, { own: true }); },
+      e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Could not load ' + s.name + ': ' + e.message); journal('sub', 'failed', { source: id, name: s.name, error: e.message }, { level: 'error', own: true }); }).then(() => {
       s.count = s.nodes.length;
       s.updating = false;
       renderAll();

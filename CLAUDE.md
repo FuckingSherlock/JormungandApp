@@ -23,7 +23,7 @@ closes the top sheet and reopens the one it replaced (Add → Subscription), the
 Nodes edit mode: ✎ sits left of the Simple / Profiles tabs, ✓ while editing;
 the header never changes (search, ⚡, ⋮, + stay available in edit mode).
 
-Also: Logs tab (sing-box + core lines, filter, search, follow), Settings → Data (backup,
+Also: Logs tab (Events journal with filter, dots on the tab and notifications driven by it; Raw = sing-box + core lines, filter, search, follow), Settings → Data (backup,
 restore, about), Copy URL / share link, QR and Speed test in the Nodes ⋮ menus (QR encoder vendored in
 `36-qr.js`), the source error strip with Retry, filter / close in Live connections.
 
@@ -80,7 +80,7 @@ srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confir
 nodes-edit, nodes-edit-chain, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
 rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
 rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, settings-notif, text-large, text-large-rule,
-connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-search, logs-warn,
+connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-raw, logs-search, logs-warn, logs-filter, logs-event-open, logs-new-below, nav-dots, toast-fly,
 qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, source-error,
 dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test, speed-done, speed-fail.
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check

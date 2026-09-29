@@ -55,7 +55,7 @@ function ndjson(path, body, onLine, signal) {
 
 function liveSnapshot() {
   return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
-    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg, notifCfg,
+    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg, notifCfg, logCfg,
     // Rules, apps, rule sets, DNS (sent to the core as plan.routing, see 93-routing-plan.js)
     rulesData, ruleOrder, ruleSeq, quickCfg, appRules, ruleSets, rsSeq, dnsServers, dnsOrder, dnsSeq, dnsCfg,
     // measured pings survive a restart, so Auto starts from what it knew
@@ -91,6 +91,7 @@ function liveApply(s) {
     Object.assign(genCfg, g);
   }
   if (s.notifCfg) Object.assign(notifCfg, s.notifCfg);
+  if (s.logCfg) { logCfg.showOwn = !!s.logCfg.showOwn; logCfg.seen = Array.isArray(s.logCfg.seen) ? s.logCfg.seen.slice() : []; }
   // no demo rules or apps: a first run starts with the defaults of a fresh install
   rulesData = s.rulesData || {};
   ruleOrder = s.ruleOrder || [];
@@ -105,6 +106,7 @@ function liveApply(s) {
   restorePings(s.pings);   // 15-ping.js: older states keyed a server, not its variant
   // a page closed mid-update saved the spinner: it would block every later update
   Object.values(sourcesData).forEach(x => { delete x.updating; });
+  renderEvents(); renderNavDots();   // 47-events.js: the Show my actions switch and the seen marks came with it
 }
 function liveSave() {
   if (!live.ready) return;          // never overwrite the stored state before it is loaded
@@ -226,17 +228,17 @@ function liveSyncSources() {
         // a timer update that failed: only its lastError (the card's error strip with Retry)
         if (t.lastError && (t.updatedAt || 0) === (s.updatedAt || 0) && t.lastError.at > ((s.lastError && s.lastError.at) || 0)) {
           s.lastError = t.lastError;
-          failed = true;
-          notify('subFailed', 'Update of ' + s.name + ' failed: ' + t.lastError.msg);
+          failed = true;   // the core's events journal says so (sub/failed → a notification, 58-notif.js)
         }
         if (!((t.updatedAt || 0) > (s.updatedAt || 0))) return;
         const gone0 = (s.gone || []).length;
         SERVER_FIELDS.forEach(k => { if (k in t) s[k] = t[k]; else delete s[k]; });
         updated.push(s);
-        const gone1 = (s.gone || []).length;
-        if (gone1 > gone0) notify('subFailed', `${s.name}: the provider removed ${gone1 - gone0} server${gone1 - gone0 === 1 ? '' : 's'} — see Unavailable, settings kept`);
-        else if (gone1 < gone0) notify('subFailed', `${s.name}: ${gone0 - gone1} server${gone0 - gone1 === 1 ? ' is' : 's are'} back — previous settings restored`);
-        else notify('subUpdated', `${s.name} updated: ${(s.nodes || []).length} servers`);
+        // the core's own sub/updated / sub/failed say the update happened; what it did to the
+        // provider's servers (removed / back) is worked out here, so the UI posts those
+        const gone1 = (s.gone || []).length, data = { source: sid, name: s.name };
+        if (gone1 > gone0) journal('sub', 'removed', Object.assign({ count: gone1 - gone0 }, data), { level: 'warn', own: false });
+        else if (gone1 < gone0) journal('sub', 'back', Object.assign({ count: gone0 - gone1 }, data), { own: false });
       });
       if (failed && !updated.length) refreshSourceViews();
       if (!updated.length) return;
@@ -288,6 +290,10 @@ const liveBackend = {
   },
   log(since) { return api('/api/log' + (since != null ? '?since=' + since : '')); },
   clearLog() { return api('/api/log', null, 'DELETE'); },
+  // Events journal (core: events.dart): the same three calls as the mock's.
+  events(since) { return api('/api/events' + (since != null ? '?since=' + since : '')); },
+  addEvent(ev) { return api('/api/events', { cat: ev.cat, type: ev.type, level: ev.level || 'info', own: !!ev.own, data: ev.data || {} }); },
+  clearEvents() { return api('/api/events', null, 'DELETE'); },
   version() { return api('/api/version'); },
   autoSettings(auto) { return api('/api/auto', { auto }); },
   closeConn(id) { return api('/api/connections' + (id ? '/' + encodeURIComponent(id) : ''), null, 'DELETE'); },
@@ -324,7 +330,6 @@ const liveBackend = {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
         live.autoSig = JSON.stringify(plan.auto);
-        live.switches = live.unstable = live.restarts = live.lost = null;   // a new AutoService counts from 0
         liveAutoStatus(st);
         if (st.warning) toast(st.warning);
         liveWatchExit();   // the core checks the exit after every (re)connect
@@ -429,8 +434,7 @@ function liveInit() {
       }
       connected = false;
       live.planSig = null;
-      renderConnState();
-      notify('coreCrash', st.error || 'sing-box stopped');
+      renderConnState();   // the core's core/crashed event tells the user (58-notif.js)
     }, () => {});
   }, 4000);
 }

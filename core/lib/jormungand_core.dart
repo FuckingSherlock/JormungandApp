@@ -6,6 +6,7 @@ export 'src/auto.dart';
 export 'src/config.dart';
 export 'src/daemon.dart';
 export 'src/device.dart';
+export 'src/eventbook.dart';
 export 'src/exitip.dart';
 export 'src/fetch.dart';
 export 'src/logbook.dart';
