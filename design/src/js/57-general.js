@@ -69,7 +69,7 @@ function targetRefs(t) {
 }
 function ruleTargets() {
   const ts = Object.values(rulesData).filter(r => r.enabled && r.action === 'proxy' && r.target).map(r => r.target)
-    .concat(Object.values(appRules).filter(a => a.act === 'proxy').flatMap(a => [a.target, a.split ? a.udpTarget : '']));
+    .concat(Object.values(appRules).flatMap(a => appHalves(a).filter(([, h]) => h.act === 'proxy').map(([, h]) => h.target)));
   return [...new Set(ts.filter(Boolean))];
 }
 const uniqNodes = refs => { const seen = new Set(); return refs.map(r => r.node).filter(n => !seen.has(pingKey(n)) && seen.add(pingKey(n))); };

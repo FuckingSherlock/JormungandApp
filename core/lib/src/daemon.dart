@@ -305,7 +305,13 @@ class Daemon {
         networkUncertain: () => auto.networkUncertain,
         note: main.note);
     fb.changes.listen((c) {
-      final data = {'rule': c.rules.first, if (c.rules.length > 1) 'more': c.rules.length - 1, 'target': c.target};
+      // the journal names the first rule (else the first app) and counts the rest
+      final total = c.rules.length + c.apps.length;
+      final data = {
+        if (c.rules.isNotEmpty) 'rule': c.rules.first else 'app': c.apps.first,
+        if (total > 1) 'more': total - 1,
+        'target': c.target,
+      };
       if (c.back) {
         events.add('rules', 'targetBack', 'info', data: data);
       } else {

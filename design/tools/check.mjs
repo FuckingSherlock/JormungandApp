@@ -124,7 +124,8 @@ const SHOTS = {
   'rule-io':   async p => { await p.evaluate(() => { openRules(); openRuleIO(); setRuleIO('export', 'clash'); }); await settle(p); },
   'rule-sets': async p => { await p.evaluate(() => { openRules(); openRuleSets(); }); await settle(p); },
   apps:       async p => { await p.evaluate(() => { openRules(); openApps(); }); await settle(p); },
-  'app-act':  async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('com.discord'); }); await settle(p); },
+  'app-act':  async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.target = 'src:src1'; appDraft.fallback = 'block'; renderAppAct(); }); await settle(p); },
+  'app-split': async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.split = true; appDraft.act = 'proxy'; appDraft.target = 'src:src1'; appDraft.fallback = 'block'; appDraft.udp.act = 'block'; renderAppAct(); }); await settle(p); },
   'settings-dns': async p => { await p.evaluate(() => openDnsSettings()); await settle(p); },
   // one server fails its checks, the next one is in use (the mock: from the pings)
   'dns-failover': async p => { await p.evaluate(async () => { openDnsSettings(); await wait(1200); dnsPing.remote = -1; dnsPing.local = 12; dnsPing.google = 30; renderDns(); }); await settle(p); },
@@ -2114,14 +2115,76 @@ async function runChecks() {
       out.every = rsDraft.every === 7200 && /2 h/.test(document.getElementById('rs-every').textContent);
       closeSheet('rsform'); closeSheet('rulesets');
       openApps(); openAppAct('com.whatsapp');
-      appDraft.act = 'proxy'; appDraft.split = true; appDraft.udpTarget = 'profile:work'; renderAppAct();
+      appDraft.act = 'proxy'; appDraft.split = true; appDraft.udp.act = 'proxy'; appDraft.udp.target = 'profile:work'; renderAppAct();
       out.twoTargets = document.querySelectorAll('#aa-body .tgt-row').length === 2;
       saveAppAct();
       out.saved = appRules['com.whatsapp'].split && /UDP/.test(document.querySelector('.app-row[data-pkg="com.whatsapp"] .app-state').textContent);
-      openAppAct('com.whatsapp'); appDraft.act = 'default'; saveAppAct();
+      openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.udp.act = 'default'; saveAppAct();
       out.reset = !appRules['com.whatsapp'];
       closeSheet('apps'); closeSheet('rules');
       return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('per-app routing: action order, If unavailable, split on any action, old shape migrates', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      const out = {}, txt = () => document.getElementById('aa-body').textContent;
+      out.order = APP_ACTS.map(a => a[1]).join() === 'Default,Proxy,Direct,Block';
+      openRules(); openApps(); openAppAct('com.whatsapp');
+      out.orderUi = [...document.querySelectorAll('#aa-body .seg3 button')].map(b => b.textContent).join() === 'Default,Proxy,Direct,Block';
+      // the toggle sits right under the segment, also on Default
+      const kids = [...document.querySelector('#aa-body .aa-half').children].map(e => e.classList.contains('seg3') ? 'seg' : e.classList.contains('aa-split') ? 'split' : '');
+      out.toggleUnderSeg = kids.indexOf('seg') + 1 === kids.indexOf('split') && !!document.getElementById('aa-split');
+      // If unavailable: only for a proxy half with a target, saved with the app
+      appDraft.act = 'proxy'; renderAppAct();
+      out.noFallbackMain = !document.querySelector('#aa-fallback-all');
+      appDraft.target = 'src:src1'; renderAppAct();
+      out.fallbackRow = !!document.querySelector('#aa-fallback-all') && /Default: /.test(txt());
+      document.querySelectorAll('#aa-fallback-all button')[2].click();
+      out.fallbackSet = appDraft.fallback === 'block' && /Off in Nodes/.test(txt());
+      saveAppAct();
+      out.fallbackSaved = appRules['com.whatsapp'].fallback === 'block' && routingPlan().apps.find(a => a.id === 'com.whatsapp').fallback === 'block';
+      // Split on Block: TCP Default + UDP Block = one udp reject rule in the plan, nothing for TCP
+      openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.split = true; appDraft.udp.act = 'block'; renderAppAct();
+      out.twoBlocks = document.querySelectorAll('#aa-body .aa-half').length === 2 && [...document.querySelectorAll('#aa-body .aa-proto')].map(e => e.textContent).join() === 'TCP,UDP';
+      saveAppAct();
+      const wa = routingPlan().apps.find(a => a.id === 'com.whatsapp');
+      out.udpOnly = wa.split && wa.act === 'default' && wa.udp.act === 'block';
+      out.text = appActText(appRules['com.whatsapp']) === 'TCP Default · UDP Block'
+        && /UDP Block/.test(document.querySelector('.app-row[data-pkg="com.whatsapp"] .app-state').textContent);
+      // Split on Direct, and a proxy half with its own fallback in the UDP block
+      openAppAct('com.whatsapp'); appDraft.act = 'direct'; appDraft.udp.act = 'proxy'; appDraft.udp.target = 'src:src1'; renderAppAct();
+      out.udpFallback = !!document.querySelector('#aa-fallback-udp') && !document.querySelector('#aa-fallback-tcp');
+      document.querySelectorAll('#aa-fallback-udp button')[3].click(); saveAppAct();
+      const w2 = routingPlan().apps.find(a => a.id === 'com.whatsapp');
+      out.splitDirect = w2.act === 'direct' && w2.udp.act === 'proxy' && w2.udp.target === 'src:src1' && w2.udp.fallback === 'direct';
+      out.named = 'src:src1' in routingPlan().targets && w2.name === 'WhatsApp';
+      out.impact = targetImpact(t => t === 'src:src1').some(l => l[0] === 'WhatsApp' && /UDP/.test(l[1]) && /direct/.test(l[2]));
+      // both halves Default: no own route
+      openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.udp.act = 'default'; saveAppAct();
+      out.none = !appRules['com.whatsapp'] && !routingPlan().apps.some(a => a.id === 'com.whatsapp');
+      // switching Split off drops the UDP half
+      openAppAct('org.telegram.messenger'); appDraft.split = true; appDraft.udp.act = 'block'; appDraft.split = false; saveAppAct();
+      out.splitOff = !appRules['org.telegram.messenger'].split && appRules['org.telegram.messenger'].udp.act === 'default';
+      closeSheet('appact'); closeSheet('apps'); closeSheet('rules');
+      // the old shape { act: 'proxy', split, udpTarget } becomes udp: { act: 'proxy', target }
+      const m = appRulesNormalize({ a: { act: 'proxy', target: 'src:src1', split: true, udpTarget: 'chain:sc1' }, b: { act: 'direct', target: '', split: false, udpTarget: '' }, c: { act: 'proxy', target: '', split: false, udpTarget: 'chain:sc1' } });
+      out.migrated = m.a.udp.act === 'proxy' && m.a.udp.target === 'chain:sc1' && m.a.fallback === 'default' && !('udpTarget' in m.a)
+        && m.b.act === 'direct' && m.b.udp.act === 'default' && m.c.udp.act === 'default' && m.c.split === false;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('app events name the app; rule events stay as they were', async () => {
+    const r = await page.evaluate(() => {
+      const a = evDescribe({ cat: 'rules', type: 'fallback', data: { app: 'Telegram', target: 'src:src1', to: 'block' } });
+      const b = evDescribe({ cat: 'rules', type: 'fallback', data: { rule: 'Streaming', more: 2, target: 'src:src1', to: 'direct' } });
+      const c = evDescribe({ cat: 'rules', type: 'targetBack', data: { app: 'Telegram', more: 1, target: 'src:src1' } });
+      return { app: /App Telegram/.test(a.detail) && /blocked/.test(a.detail), rule: /Rule Streaming and 2 more/.test(b.detail), back: /App Telegram and 1 more/.test(c.detail) };
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
@@ -2249,7 +2312,7 @@ async function runChecks() {
   await check('services and per-app routing know about each other', async () => {
     const r = await page.evaluate(() => {
       const out = {}, keepT = quickCfg.services.telegram, keepA = appRules['org.telegram.messenger'];
-      quickCfg.services.telegram = 'vpn'; appRules['org.telegram.messenger'] = { act: 'direct', target: '', split: false, udpTarget: '' };
+      quickCfg.services.telegram = 'vpn'; appRules['org.telegram.messenger'] = appNormalize({ act: 'direct' });
       openRules(); svcOpen = true; renderRules();
       out.svcHint = /App: Direct/.test(document.querySelector('.svc-row[data-svc=telegram]').textContent);
       delete appRules['org.telegram.messenger']; openApps(); appFilter = 'user'; renderApps();
@@ -2893,7 +2956,7 @@ async function runChecks() {
       out.enabledOnly = plan.rules.every(x => rulesData[x.id].enabled) && plan.rules.length === ruleOrder.filter(id => rulesData[id].enabled).length;
       const chain = plan.targets['chain:sc1'];
       out.chainTarget = targetInfo('chain:sc1').ok ? chain.kind === 'chain' && chain.entry.nodes.length > 0 && chain.main.nodes.length > 0 : chain === null;
-      out.appSplit = plan.apps.some(a => a.id === 'com.discord' && a.split && a.udpTarget === 'chain:sc1' && a.kind === 'package');
+      out.appSplit = plan.apps.some(a => a.id === 'com.discord' && a.split && a.udp.act === 'proxy' && a.udp.target === 'chain:sc1' && a.name === 'Discord' && a.kind === 'package');
       out.services = Object.keys(plan.quick.services).every(k => quickCfg.services[k] !== 'default') && Object.keys(plan.quick.services).length > 0;
       out.region = plan.quick.region === (quickCfg.regionOn ? quickCfg.region : null);
       out.dns = plan.dns.servers.map(s => s.id).join() === dnsOrder.join() && plan.geo.geosite.via === 'vpn';
@@ -2901,7 +2964,7 @@ async function runChecks() {
       rulesData.r4.enabled = true;
       out.composite = routingPlan().rules.some(x => x.composite && !('action' in x.composite) && x.composite.type === 'logical');
       // a target switched off in Nodes: null (the rule takes its If unavailable)
-      appRules['org.telegram.messenger'] = { act: 'proxy', target: 'src:src1', split: false, udpTarget: '' };
+      appRules['org.telegram.messenger'] = appNormalize({ act: 'proxy', target: 'src:src1' });
       out.srcOk = routingPlan().targets['src:src1'].main.pick === 'fastest';
       sourcesData.src1.enabled = false;
       out.srcOff = routingPlan().targets['src:src1'] === null;

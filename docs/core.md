@@ -252,7 +252,8 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 `routing` (`js/93-routing-plan.js` → `core/lib/src/routing.dart`; логика — `rules.md`):
 
 ```
-{ apps:  [{ id, kind: 'package'|'process'|'path', act, target, split, udpTarget }],
+{ apps:  [{ id, kind: 'package'|'process'|'path', name, act: 'default'|'proxy'|'direct'|'block', target,
+            fallback, split, udp: { act, target, fallback } }],   // split: act… = TCP, udp = UDP
   rules: [{ id, name, action, target, fallback, block, dns, groups, composite?, extra? }],
   quick: { ads, region: 'RU'|…|null, services: { telegram: 'vpn'|'direct', … }, final },
   fallback: 'main'|'block'|'direct',            // Rules → Target unavailable
@@ -444,8 +445,8 @@ Raw). Событие:
 | `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Rule) | `{host, port?, entry, server, dest, via}` |
 | `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
-| `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule, more?, target, to: 'block'\|'direct'\|'main'}` — `rule`: имя первого правила (приложения — его id, безымянного — `rule <id>`), `more` — сколько ещё правил / приложений через тот же selector |
-| `rules/targetBack` info | цель снова отвечает, трафик вернулся | `{rule, more?, target}` |
+| `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'}` — `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |
+| `rules/targetBack` info | цель снова отвечает, трафик вернулся | `{rule?, app?, more?, target}` |
 | `dns/switched` info | DNS-сервер в работе сменился (Switch automatically); `own: true` при `reason: 'off'` | `{from, to, reason: 'failover'\|'back'\|'off'}` — id серверов из UI |
 | `rules/ruleSetFailed` warn | скачивание списка не удалось (не чаще, чем раз в `retryAfter` = 5 мин на список) | `{tag, url, error}` — `url` последний из пробованных |
 | `rules/ruleSetUpdated` info | старая копия списка заменена новой, или список скачан после сбоя (первая закачка отсутствующего списка — не новость) | `{tag}` |

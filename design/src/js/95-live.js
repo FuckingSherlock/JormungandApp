@@ -96,7 +96,7 @@ function liveApply(s) {
   rulesData = s.rulesData || {};
   ruleOrder = s.ruleOrder || [];
   ruleSeq = s.ruleSeq || 1;
-  appRules = s.appRules || {};
+  appRules = appRulesNormalize(s.appRules);   // 42-apps.js: older states had { split, udpTarget }
   replaceObj(quickCfg, Object.assign({ regionOn: true, region: 'RU', ads: false, final: 'proxy', fallback: 'main', services: {} }, s.quickCfg));
   SERVICES.forEach(([k]) => { quickCfg.services[k] = quickCfg.services[k] || 'default'; });
   ruleSets = s.ruleSets || ['geosite', 'geoip'].map(id => ({ id, name: id, builtin: true, url: 'built-in', format: 'srs', via: 'vpn', every: 7 * 86400, updated: 'with the first connect' }));

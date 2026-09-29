@@ -37,11 +37,15 @@ function routingPlan() {
     if (r.extra && Object.keys(r.extra).length) o.extra = r.extra;
     return o;
   });
-  const apps = Object.entries(appRules).map(([pkg, a]) => ({ id: pkg, kind: (APPS.find(x => x.pkg === pkg) || {}).kind || 'package',
-    act: a.act, target: a.target || '', split: !!a.split, udpTarget: a.udpTarget || '' }));
+  // an app: the top-level fields are all its traffic (TCP when split), udp the other half
+  const half = h => ({ act: h.act || 'default', target: h.act === 'proxy' ? h.target || '' : '', fallback: h.fallback || 'default' });
+  const apps = Object.entries(appRules).map(([pkg, a]) => {
+    const app = APPS.find(x => x.pkg === pkg) || {};
+    return { id: pkg, kind: app.kind || 'package', name: app.name || pkg, ...half(a), split: !!a.split, udp: half(a.udp || {}) };
+  });
   const named = new Set();
   rules.forEach(r => { if (r.action === 'proxy' && r.target) named.add(r.target); });
-  apps.forEach(a => { if (a.act === 'proxy') [a.target, a.split ? a.udpTarget : ''].forEach(t => t && named.add(t)); });
+  apps.forEach(a => [a, ...(a.split ? [a.udp] : [])].forEach(h => { if (h.act === 'proxy' && h.target) named.add(h.target); }));
   const geo = id => { const s = ruleSets.find(x => x.id === id) || {}; return { via: s.via || 'vpn', every: s.every || 7 * 86400 }; };
   return {
     apps, rules,

@@ -1,8 +1,9 @@
 /* ══════════════════════ APPS (Rules → Per-app routing) ══════════════════════
    Each app gets its own action — no global switch on top: Default (goes by the rules),
-   Direct, Proxy (through a target from the target picker) or Block. "Split TCP / UDP" gives
-   the app two targets, e.g. Discord chat via one server and voice (UDP to bare IPs, which
-   domain rules cannot catch) via another. Apps come first in the engine's order.
+   Proxy (through a target from the target picker, with "If unavailable" like a rule's),
+   Direct or Block. "Split TCP / UDP" (any action) gives TCP and UDP an action each, e.g.
+   Discord chat via one server and voice (UDP to bare IPs, which domain rules cannot catch) via
+   another, or TCP Default + UDP Block to kill QUIC. Apps come first in the engine's order.
    Android: package names; desktop: running processes + "add by path" (same screen).
    Flutter: installed apps via a platform channel; sing-box rules on package_name /
    process_name, with network: tcp|udp when split. */
@@ -17,20 +18,37 @@ const APPS = [
   { pkg: 'com.google.android.gms', name: 'Google Play services', sys: true }, { pkg: 'com.android.vending', name: 'Play Store', sys: true },
   { pkg: 'com.android.providers.downloads', name: 'Downloads', sys: true }, { pkg: 'com.android.systemui', name: 'System UI', sys: true },
 ];
-// pkg -> { act: 'direct' | 'proxy' | 'block', target, split, udpTarget }
+// pkg -> { act: 'default' | 'proxy' | 'direct' | 'block', target, fallback: 'default' | 'main' | 'block' | 'direct',
+//          split, udp: { act, target, fallback } } — with split the top-level fields are TCP, `udp` is UDP.
+// A half that is 'default' has no rule of its own; an app with nothing set is not stored at all.
 let appRules = {
-  'org.telegram.messenger': { act: 'proxy', target: '', split: false, udpTarget: '' },
-  'com.discord': { act: 'proxy', target: '', split: true, udpTarget: 'chain:sc1' },
-  'ru.sberbankmobile': { act: 'direct', target: '', split: false, udpTarget: '' },
+  'org.telegram.messenger': { act: 'proxy', target: '', fallback: 'default', split: false },
+  'com.discord': { act: 'proxy', target: '', fallback: 'default', split: true, udp: { act: 'proxy', target: 'chain:sc1', fallback: 'default' } },
+  'ru.sberbankmobile': { act: 'direct', target: '', fallback: 'default', split: false },
 };
-const APP_ACTS = [['default', 'Default'], ['direct', 'Direct'], ['proxy', 'Proxy'], ['block', 'Block']];
+const APP_ACTS = [['default', 'Default'], ['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
+const appBlankHalf = () => ({ act: 'default', target: '', fallback: 'default' });
 
-function appActText(a) {
-  if (a.act === 'direct') return 'Direct';
-  if (a.act === 'block') return 'Block';
-  if (a.split) return 'TCP ' + (a.target ? targetName(a.target) : 'Proxy') + ' · UDP ' + (a.udpTarget ? targetName(a.udpTarget) : 'Proxy');
-  return a.target ? '→ ' + targetName(a.target) : 'Proxy';
+// Full shape from any stored one; the old { act: 'proxy', split, udpTarget } becomes udp: { act: 'proxy', target: udpTarget }.
+function appNormalize(a) {
+  const o = Object.assign({ split: false }, appBlankHalf(), a);
+  const old = 'udpTarget' in o;
+  if (!o.udp && old && o.split) o.udp = { act: 'proxy', target: o.udpTarget || '', fallback: 'default' };
+  delete o.udpTarget;
+  o.udp = Object.assign(appBlankHalf(), o.udp);
+  o.split = !!o.split;
+  return o;
 }
+function appRulesNormalize(rules) { return Object.fromEntries(Object.entries(rules || {}).map(([k, v]) => [k, appNormalize(v)])); }
+// [protocol label, half]: one half for the whole app, or TCP and UDP when split.
+const appHalves = a => a.split ? [['TCP', a], ['UDP', a.udp || appBlankHalf()]] : [['', a]];
+const appHalfText = h => h.act === 'proxy' ? (h.target ? '→ ' + targetName(h.target) : 'Proxy') : ({ default: 'Default', direct: 'Direct', block: 'Block' })[h.act];
+function appActText(a) {
+  if (!a.split) return appHalfText(a);
+  return appHalves(a).map(([p, h]) => p + ' ' + appHalfText(h)).join(' · ');
+}
+// the colour of the right column: the one action, or the first non-default half
+const appStateClass = a => (appHalves(a).find(([, h]) => h.act !== 'default') || [0, a])[1].act;
 
 let appQuery = '', appFilter = 'user';
 function openApps() { appQuery = ''; document.getElementById('apps-search').value = ''; renderApps(); openSheet('apps'); }
@@ -52,7 +70,7 @@ function renderApps() {
 // Right column: the app's own route; otherwise a service that covers it ("via service"), or —.
 function appStateHtml(pkg) {
   const r = appRules[pkg], svc = serviceOfApp(pkg), sv = svc && quickCfg.services[svc[0]];
-  if (r) return `<span class="app-state ${r.act}">${esc(appActText(r))}</span>`;
+  if (r) return `<span class="app-state ${appStateClass(r)}" title="${esc(appActText(r))}">${esc(appActText(r))}</span>`;
   if (sv && sv !== 'default') return `<span class="app-state svc ${sv === 'vpn' ? 'proxy' : 'direct'}" title="Set by the ${esc(svc[1])} service">${svcState(sv)} · service</span>`;
   return '<span class="app-state">—</span>';
 }
@@ -61,22 +79,36 @@ function appStateHtml(pkg) {
 let appEditing = null, appDraft = null;
 function openAppAct(pkg) {
   appEditing = pkg;
-  appDraft = Object.assign({ act: 'default', target: '', split: false, udpTarget: '' }, appRules[pkg] || {});
+  appDraft = clone(appNormalize(appRules[pkg]));
   document.getElementById('aaTitle').textContent = APPS.find(a => a.pkg === pkg).name;
   renderAppAct();
   openSheet('appact');
 }
+// One action (h = appDraft or appDraft.udp, path = its JS path): the segment, and for Proxy the
+// target with "If unavailable" — the same rows as the rule form — or a hint for the others.
+// `between` goes right under the segment (the Split switch, while it is off).
+function appHalfHtml(h, path, proto, between = '') {
+  const id = proto ? proto.toLowerCase() : 'all';
+  const hint = { default: proto ? `No own route for ${proto}: it goes by the rules` : 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN',
+    block: proto ? `${proto} is blocked while connected` : 'No network at all while connected' }[h.act];
+  return `<div class="aa-half" data-half="${id}">
+    ${proto ? `<div class="aa-proto">${proto}</div>` : ''}
+    <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${h.act === v ? 'on ' + v : ''}" onclick="${path}.act='${v}';renderAppAct()">${l}</button>`).join('')}</div>
+    ${between}
+    ${h.act === 'proxy' ? `<div class="set-group aa-group">
+      ${targetRowHtml('Via', h.target, `t => { ${path}.target = t; renderAppAct(); }`)}
+      ${h.target ? fallbackRowsHtml(h, path, 'renderAppAct', 'aa-fallback-' + id) : ''}
+    </div>` : `<div class="set-hint aa-hint">${hint}</div>`}</div>`;
+}
+// The app has an own route unless every half is Default.
+const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default') ? 'default' : 'own';
 function renderAppAct() {
   const d = appDraft;
-  document.getElementById('aa-body').innerHTML = `
-    <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${d.act === v ? 'on ' + v : ''}" onclick="appDraft.act='${v}';renderAppAct()">${l}</button>`).join('')}</div>
-    ${d.act === 'proxy' ? `<div class="set-group aa-group">
-      ${targetRowHtml(d.split ? 'TCP via' : 'Via', d.target, 't => { appDraft.target = t; renderAppAct(); }')}
-      ${d.split ? targetRowHtml('UDP via', d.udpTarget, 't => { appDraft.udpTarget = t; renderAppAct(); }') : ''}
-      <div class="set-row"><div class="set-label">Split TCP / UDP<div class="set-hint">Different routes, e.g. voice (UDP) apart from chat</div></div>
-        <div class="mini-toggle ${d.split ? 'on' : ''}" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div>
-    </div>` : `<div class="set-hint aa-hint">${{ default: 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN', block: 'No network at all while connected' }[d.act]}</div>`}
-    ${appSvcNote(appEditing, d.act)}`;
+  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row"><div class="set-label">Split TCP / UDP<div class="set-hint">Different actions per protocol, e.g. block UDP (QUIC) so the app falls back to TCP</div></div>
+      <div class="mini-toggle ${d.split ? 'on' : ''}" id="aa-split" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div></div>`;
+  document.getElementById('aa-body').innerHTML = (d.split
+    ? toggle + appHalfHtml(d, 'appDraft', 'TCP') + appHalfHtml(d.udp, 'appDraft.udp', 'UDP')
+    : appHalfHtml(d, 'appDraft', '', toggle)) + appSvcNote(appEditing, appDraftAct(d));
 }
 // The service with the same app: what it does, and who wins.
 function appSvcNote(pkg, act) {
@@ -89,8 +121,12 @@ function appSvcNote(pkg, act) {
 }
 
 function saveAppAct() {
-  if (appDraft.act === 'default') delete appRules[appEditing];
-  else appRules[appEditing] = appDraft;
+  if (appDraftAct(appDraft) === 'default') delete appRules[appEditing];
+  else {
+    const a = clone(appDraft);
+    if (!a.split) a.udp = appBlankHalf();   // the UDP half only lives while Split is on
+    appRules[appEditing] = a;
+  }
   closeSheet('appact');
   renderApps(); renderRules();
 }

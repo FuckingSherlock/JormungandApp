@@ -4,8 +4,9 @@
 ///
 /// ```
 /// routing: {
-///   apps:   [{ id, kind: 'package'|'process'|'path', act: 'direct'|'proxy'|'block',
-///              target, split, udpTarget }],
+///   apps:   [{ id, kind: 'package'|'process'|'path', name, act: 'default'|'direct'|'proxy'|'block',
+///              target, fallback: 'default'|'main'|'block'|'direct',      // as a rule's
+///              split, udp: { act, target, fallback } }], // split: the fields above = TCP, udp = UDP
 ///   rules:  [{ id, name, action: 'proxy'|'direct'|'block', target, fallback:
 ///              'default'|'main'|'block'|'direct', block: 'drop'|'reject', dns: 'auto'|<dns id>,
 ///              groups: { domain|ip|port|source|network|process: { not, v: {field: [..]}, flag } },
@@ -173,8 +174,9 @@ class TargetFallback {
   /// `proxy` (the main flow), `direct` / `direct@dns-<id>`, or `block`.
   final String fallbackTag;
 
-  /// The rules and apps that route here (their names, for the journal).
+  /// The rules and the apps that route here (their names, for the journal).
   final rules = <String>[];
+  final apps = <String>[];
 
   /// The fallback as the journal names it.
   String get to => fallbackTag == 'block' ? 'block' : (fallbackTag == topTag ? 'main' : 'direct');
@@ -367,8 +369,8 @@ class _Builder {
   /// Proxy through [target]; unavailable → [fallback] (main / block / direct). Unavailable
   /// now = the config's choice; a target that goes down later is the core's
   /// (fallback.dart): the route leads to a selector [target, fallback outbound] it flips.
-  /// [label] names the rule / app in the journal.
-  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String? dns, String label) {
+  /// [label] names the rule / app ([app]) in the journal.
+  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String? dns, String label, {bool app = false}) {
     final tag = _target(target);
     if (tag == topTag) return (action: _route(topTag), direct: false); // the main flow has no fallback
     if (tag != null) {
@@ -377,7 +379,7 @@ class _Builder {
         'direct' => _directVia(_dnsFor(dns, direct: true)),
         _ => topTag,
       };
-      return (action: _route(_fallbackSelector(target, fb, label)), direct: false);
+      return (action: _route(_fallbackSelector(target, fb, label, app)), direct: false);
     }
     return switch (fallback) {
       'block' => (action: _reject(), direct: false),
@@ -395,7 +397,7 @@ class _Builder {
 
   /// The selector [target, fallbackTag] for [target] (once per pair): the config's
   /// `default` is the target, the core moves it.
-  String _fallbackSelector(String target, String fallbackTag, String label) {
+  String _fallbackSelector(String target, String fallbackTag, String label, bool app) {
     final tag = '$target~$fallbackTag';
     var f = out.fallbacks.where((x) => x.tag == tag).firstOrNull;
     if (f == null) {
@@ -410,7 +412,8 @@ class _Builder {
         'interrupt_exist_connections': false,
       });
     }
-    if (!f.rules.contains(label)) f.rules.add(label);
+    final names = app ? f.apps : f.rules;
+    if (!names.contains(label)) names.add(label);
     return tag;
   }
 
@@ -418,24 +421,32 @@ class _Builder {
 
   /* ── Apps: first in the order ── */
 
+  /// An app's rules: one for all its traffic, or with `split` one per network (TCP = the
+  /// app's own fields, UDP = `udp`). A half that is `default` has no rule: its traffic goes
+  /// by the rules below. A proxy half has "If unavailable" like a rule's.
   void _apps() {
     for (final a in _list(r['apps'])) {
       final id = '${a['id'] ?? ''}';
       if (id.isEmpty) continue;
       final field = switch (a['kind']) { 'process' => 'process_name', 'path' => 'process_path', _ => 'package_name' };
       final match = <String, dynamic>{field: [id]};
-      switch (a['act']) {
-        case 'block':
-          out.rules.add({...match, ..._reject()});
-        case 'direct':
-          out.rules.add({...match, ..._route('direct')});
-        case 'proxy':
-          if (a['split'] == true) {
-            out.rules.add({...match, 'network': ['tcp'], ..._proxyAction('${a['target'] ?? ''}', _fallback, null, id).action});
-            out.rules.add({...match, 'network': ['udp'], ..._proxyAction('${a['udpTarget'] ?? ''}', _fallback, null, id).action});
-          } else {
-            out.rules.add({...match, ..._proxyAction('${a['target'] ?? ''}', _fallback, null, id).action});
-          }
+      final label = '${a['name'] ?? ''}'.isNotEmpty ? '${a['name']}' : id;
+      void half(Map h, List<String>? network) {
+        final fallback = h['fallback'] == null || h['fallback'] == 'default' ? _fallback : '${h['fallback']}';
+        final act = switch (h['act']) {
+          'block' => _reject(),
+          'direct' => _route('direct'),
+          'proxy' => _proxyAction('${h['target'] ?? ''}', fallback, null, label, app: true).action,
+          _ => null,
+        };
+        if (act != null) out.rules.add({...match, 'network': ?network, ...act});
+      }
+
+      if (a['split'] == true) {
+        half(a, ['tcp']);
+        half((a['udp'] as Map?) ?? const {}, ['udp']);
+      } else {
+        half(a, null);
       }
     }
   }

@@ -159,7 +159,7 @@ void main() {
           _rule({'network': _g({'network': ['udp']})}, target: 'chain:c', id: 'r3'),
         ],
         'apps': [
-          {'id': 'com.discord', 'kind': 'package', 'act': 'proxy', 'target': 'src:a', 'split': true, 'udpTarget': 'chain:c'},
+          {'id': 'com.discord', 'kind': 'package', 'act': 'proxy', 'target': 'src:a', 'split': true, 'udp': {'act': 'proxy', 'target': 'chain:c'}},
         ],
       }));
       final outs = (c['outbounds'] as List).cast<Map>();
@@ -207,17 +207,70 @@ void main() {
       expect(_out(c, 'src:a~direct')!['outbounds'], ['src:a', 'direct']);
       expect(_out(c, 'src:a~proxy')!['outbounds'], ['src:a', 'proxy'], reason: 'the app has the global fallback: Main flow');
       expect(_out(c, 'chain:c~proxy')!['default'], 'chain:c');
-      expect(info.fallbacks.map((f) => '${f.tag} ${f.target} ${f.to} ${f.rules.join('/')}'), [
-        'src:a~proxy src:a main com.x',
-        'src:a~block src:a block Streaming/rule r2',
-        'src:a~direct src:a direct rule r3',
-        'chain:c~proxy chain:c main rule r4',
+      expect(info.fallbacks.map((f) => '${f.tag} ${f.target} ${f.to} ${f.rules.join('/')}|${f.apps.join('/')}'), [
+        'src:a~proxy src:a main |com.x',
+        'src:a~block src:a block Streaming/rule r2|',
+        'src:a~direct src:a direct rule r3|',
+        'chain:c~proxy chain:c main rule r4|',
       ]);
       expect(_rules(c).map((r) => r['outbound']).skip(1), ['src:a~block', 'src:a~block', 'src:a~direct', 'chain:c~proxy']);
       // the main flow is no target: no selector, no fallback to watch
       final main = RoutingInfo();
       buildConfig(_plan({'rules': [_rule({'domain': _g({'domain_suffix': ['a.com']})}, target: '')]}), info: main);
       expect(main.fallbacks, isEmpty);
+    });
+
+    test('apps: a proxy half has "If unavailable" like a rule (selectors shared), split per network, Default half = no rule', () {
+      final targets = {
+        'src:a': {'kind': 'unit', 'main': _grp([_node, _node2], prefix: 'a')},
+        'chain:c': {'kind': 'chain', 'entry': _grp([_node], prefix: 'in'), 'main': _grp([_node2], pick: 'priority', prefix: 'out')},
+      };
+      final info = RoutingInfo();
+      final c = buildConfig(_plan({
+        'fallback': 'main',
+        'targets': targets,
+        'rules': [_rule({'domain': _g({'domain_suffix': ['a.com']})}, target: 'src:a', fallback: 'block', id: 'r1')],
+        'apps': [
+          // TCP through a target that goes Block when down, UDP through another that goes Direct
+          {'id': 'com.tg', 'kind': 'package', 'name': 'Telegram', 'act': 'proxy', 'target': 'src:a', 'fallback': 'block', 'split': true,
+            'udp': {'act': 'proxy', 'target': 'chain:c', 'fallback': 'direct'}},
+          // TCP Default, UDP Block: only a udp reject rule (QUIC dies, the app falls back to TCP)
+          {'id': 'chrome.exe', 'kind': 'process', 'name': 'Chrome', 'act': 'default', 'split': true, 'udp': {'act': 'block'}},
+          // TCP Direct, UDP Default
+          {'id': 'a.exe', 'kind': 'process', 'act': 'direct', 'split': true, 'udp': {'act': 'default'}},
+          // one action for everything, "Default" fallback = the global one
+          {'id': 'com.d', 'kind': 'package', 'name': 'Dd', 'act': 'proxy', 'target': 'src:a'},
+          // both halves Default: no rule at all
+          {'id': 'com.none', 'kind': 'package', 'act': 'default', 'split': true, 'udp': {'act': 'default'}},
+        ],
+      }), info: info);
+      expect(_rules(c).take(5), [
+        {'package_name': ['com.tg'], 'network': ['tcp'], 'action': 'route', 'outbound': 'src:a~block'},
+        {'package_name': ['com.tg'], 'network': ['udp'], 'action': 'route', 'outbound': 'chain:c~direct'},
+        {'process_name': ['chrome.exe'], 'network': ['udp'], 'action': 'reject'},
+        {'process_name': ['a.exe'], 'network': ['tcp'], 'action': 'route', 'outbound': 'direct'},
+        {'package_name': ['com.d'], 'action': 'route', 'outbound': 'src:a~proxy'},
+      ]);
+      expect(_rules(c).where((r) => '${r['package_name']}'.contains('com.none')), isEmpty);
+      expect(_out(c, 'chain:c~direct')!['outbounds'], ['chain:c', 'direct']);
+      // the rule and the app share src:a~block; the journal names both
+      expect([for (final f in info.fallbacks) '${f.tag} r=${f.rules.join('/')} a=${f.apps.join('/')}'], [
+        'src:a~block r=rule r1 a=Telegram',
+        'chain:c~direct r= a=Telegram',
+        'src:a~proxy r= a=Dd',
+      ]);
+      // a target that is unavailable now: the half's own fallback, the global one for Default
+      final gone = buildConfig(_plan({
+        'fallback': 'direct',
+        'targets': {'src:off': null},
+        'apps': [
+          {'id': 'com.q', 'kind': 'package', 'act': 'proxy', 'target': 'src:off', 'fallback': 'block', 'split': true, 'udp': {'act': 'proxy', 'target': 'src:off'}},
+        ],
+      }));
+      expect(_rules(gone).take(2), [
+        {'package_name': ['com.q'], 'network': ['tcp'], 'action': 'reject'},
+        {'package_name': ['com.q'], 'network': ['udp'], 'action': 'route', 'outbound': 'direct'},
+      ]);
     });
 
     test('an unavailable target takes the rule\'s If unavailable; Default = the global setting; apps use the global one', () {
@@ -458,7 +511,7 @@ void main() {
           'chain:c': {'kind': 'chain', 'entry': _grp([_node], prefix: 'in'), 'main': _grp([_node2], pick: 'priority', prefix: 'out')},
         },
         'apps': [
-          {'id': 'com.discord', 'kind': 'package', 'act': 'proxy', 'target': 'src:a', 'split': true, 'udpTarget': 'chain:c'},
+          {'id': 'com.discord', 'kind': 'package', 'act': 'proxy', 'target': 'src:a', 'split': true, 'udp': {'act': 'proxy', 'target': 'chain:c'}},
           {'id': 'chrome.exe', 'kind': 'process', 'act': 'direct'},
           {'id': r'C:\x\y.exe', 'kind': 'path', 'act': 'block'},
         ],

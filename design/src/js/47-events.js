@@ -72,7 +72,8 @@ function evReason(d) {
 }
 const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 const evDns = id => (dnsServers[id] && dnsServers[id].name) || String(id);
-const evRules = d => `Rule ${d.rule}` + (d.more ? ` and ${evPlural(d.more, 'more', 'more')}` : '');   // "Rule Streaming and 2 more"
+// "Rule Streaming and 2 more"; an app when no rule is involved: "App Telegram"
+const evRules = d => (d.rule ? `Rule ${d.rule}` : `App ${d.app}`) + (d.more ? ` and ${evPlural(d.more, 'more', 'more')}` : '');
 const EV_FALLBACK = { block: 'blocked while it is down', direct: 'goes direct', main: 'goes through the main flow' };
 const EV_TEXT = {
   'conn/connected': d => ['Connected' + (d.entry ? ': ' + evEntry(d.entry) : ''),
@@ -127,7 +128,7 @@ function evText(e) { const d = evDescribe(e); return d.title + (d.detail ? ' —
 // The expanded row: every field of the event in words.
 const EV_FIELD = { entry: 'Entry', server: 'Server', mode: 'Mode', route: 'Route', from: 'From', to: 'To', reason: 'Reason', by: 'By', host: 'Site', dest: 'Address', via: 'Opens via',
   source: 'Subscription', name: 'Name', added: 'New servers', removed: 'Removed', total: 'Servers', count: 'Servers', error: 'Error', tag: 'Rule set', url: 'URL', code: 'Exit code',
-  rule: 'Rule', target: 'Target', more: 'More rules',
+  rule: 'Rule', app: 'App', target: 'Target', more: 'More rules and apps',
   attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
 function evValue(k, v, e) {
   if (e && e.cat === 'dns') {

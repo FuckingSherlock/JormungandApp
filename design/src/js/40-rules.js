@@ -49,6 +49,14 @@ const FALLBACKS = [['main', 'Main flow'], ['block', 'Block'], ['direct', 'Direct
 const fallbackName = v => (FALLBACKS.find(f => f[0] === v) || [, ''])[1];
 const ruleFallback = r => r.fallback && r.fallback !== 'default' ? r.fallback : quickCfg.fallback;
 const fallbackText = v => ({ main: 'through the main flow', block: 'nowhere (blocked)', direct: 'direct' })[v];
+// The "If unavailable" rows under a proxy target, shared by the rule form and an app's dialog.
+// d: { fallback }; path: JS path of d (e.g. 'ruleDraft'); render: name of the re-render function.
+function fallbackRowsHtml(d, path, render, segId) {
+  return `<div class="set-row rf-fallback"><div class="set-label">If unavailable<div class="set-hint">${d.fallback === 'default'
+      ? 'Default: ' + fallbackName(quickCfg.fallback) + ' (Rules → Target unavailable)' : 'Off in Nodes, no working server or deleted'}</div></div></div>
+    <div class="set-row"><div class="seg3 wide" id="${segId}">${[['default', 'Default'], ['main', 'Main'], ['block', 'Block'], ['direct', 'Direct']].map(([v, l]) =>
+      `<button class="${d.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" onclick="${path}.fallback='${v}';${render}()">${l}</button>`).join('')}</div></div>`;
+}
 
 // Rules and apps whose target a deletion removes (gone: target -> bool), for the delete dialog.
 function targetImpact(gone) {
@@ -59,8 +67,10 @@ function targetImpact(gone) {
       lines.push([ruleTitle(r), 'rule #' + (i + 1), 'loses its target — traffic goes ' + fallbackText(ruleFallback(r)), 'warn']);
   });
   Object.entries(appRules).forEach(([pkg, a]) => {
-    if (a.act === 'proxy' && [a.target, a.split ? a.udpTarget : ''].some(t => t && gone(t)))
-      lines.push([APPS.find(x => x.pkg === pkg).name, 'app', 'loses its target — traffic goes ' + fallbackText(quickCfg.fallback), 'warn']);
+    appHalves(a).forEach(([proto, h]) => {
+      if (h.act === 'proxy' && h.target && gone(h.target))
+        lines.push([APPS.find(x => x.pkg === pkg).name, 'app' + (proto ? ' · ' + proto : ''), 'loses its target — traffic goes ' + fallbackText(ruleFallback(h)), 'warn']);
+    });
   });
   return lines;
 }

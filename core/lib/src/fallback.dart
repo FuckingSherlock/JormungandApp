@@ -35,15 +35,16 @@ import 'watched.dart';
 
 /// A rule target went to its fallback ([back] false) or came back.
 class FallbackChange {
-  const FallbackChange({required this.target, required this.to, required this.rules, required this.back, required this.at});
+  const FallbackChange({required this.target, required this.to, required this.rules, this.apps = const [], required this.back, required this.at});
 
   final String target; // the UI's target id
   final String to; // the fallback: 'block' | 'direct' | 'main' (also on the way back: what it left)
-  final List<String> rules; // the names of the rules and apps that route through this selector
+  final List<String> rules; // the names of the rules that route through this selector
+  final List<String> apps; // … and of the apps
   final bool back;
   final int at;
 
-  Map<String, dynamic> toJson() => {'target': target, 'to': to, 'rules': rules, 'back': back, 'at': at};
+  Map<String, dynamic> toJson() => {'target': target, 'to': to, 'rules': rules, 'apps': apps, 'back': back, 'at': at};
 }
 
 class _Group {
@@ -205,10 +206,9 @@ class FallbackService {
     for (final s in t.selectors) {
       if (_stopped || !await api.select(s.tag, toFallback ? s.fallbackTag : s.target)) continue;
       any = true;
-      final c = FallbackChange(target: t.id, to: s.to, rules: List.of(s.rules), back: !toFallback, at: _clock());
-      note?.call(toFallback
-          ? 'rules: ${t.id} does not answer: ${s.rules.join(', ')} → ${s.to}'
-          : 'rules: ${t.id} answers again: ${s.rules.join(', ')} back to it');
+      final c = FallbackChange(target: t.id, to: s.to, rules: List.of(s.rules), apps: List.of(s.apps), back: !toFallback, at: _clock());
+      final names = [...s.rules, ...s.apps.map((a) => 'app $a')].join(', ');
+      note?.call(toFallback ? 'rules: ${t.id} does not answer: $names → ${s.to}' : 'rules: ${t.id} answers again: $names back to it');
       if (!_changes.isClosed) _changes.add(c);
     }
     if (!any || _stopped) return;
