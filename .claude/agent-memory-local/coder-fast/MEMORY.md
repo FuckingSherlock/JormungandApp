@@ -1,1 +1,0 @@
-- [Jormungand tooling gotchas](project_gotchas.md) — hook limits on heredoc/html writes, verify behaviour, toast timing

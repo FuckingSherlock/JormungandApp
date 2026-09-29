@@ -5,3 +5,5 @@ design/.deploy/
 design/.artifact/
 
 .claude/worktrees/
+
+.claude/agent-memory-local/
