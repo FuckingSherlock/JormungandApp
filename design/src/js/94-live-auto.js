@@ -93,18 +93,22 @@ function liveAutoStatus(st) {
   coreRoute = a ? { id: a.now, server: a.server || null, entryServer: a.entryServer || null } : null;
   const pings = a ? mergeCorePings(a.members) : false;
   if (a) {
-    if (live.switches != null && a.switches > live.switches && a.lastSwitch && genCfg.switchNotif) toast(switchText(a.lastSwitch));
-    if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable && genCfg.switchNotif) toast(unstableText(a.lastUnstable));
-    if (live.blocked != null && a.blocked > live.blocked && a.lastBlocked) toast(blockedText(a.lastBlocked), { label: 'Rule', fn: () => openBlockedRule(a.lastBlocked) });
+    if (live.switches != null && a.switches > live.switches && a.lastSwitch) notify('autoSwitch', switchText(a.lastSwitch));
+    if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable) notify('unstable', unstableText(a.lastUnstable));
+    if (live.blocked != null && a.blocked > live.blocked && a.lastBlocked) notify('blocked', blockedText(a.lastBlocked), { label: 'Rule', fn: () => openBlockedRule(a.lastBlocked) });
+    // no network at all (the OS, or no route answers): said once, and once more when it is back
+    const lost = !!(a.offline || a.noNet);
+    if (live.lost != null && lost !== live.lost) notify('connLost', lost ? 'Connection lost — waiting for the network' : 'Connection restored');
+    live.lost = lost;
     sourcesDown(a.members);
     live.switches = a.switches;
     live.unstable = a.unstable || 0;
     live.blocked = a.blocked || 0;
     live.routes = (a.routes || []).map(r => r.id);
-  } else { live.switches = live.unstable = live.blocked = null; live.srcDown = new Set(); }
+  } else { live.switches = live.unstable = live.blocked = live.lost = null; live.srcDown = new Set(); }
   // sing-box stopped on its own: the core puts the system proxy back and starts it again
-  if (st && st.recovering && !live.recovering) toast('sing-box stopped — starting it again…');
-  if (st && st.connected && live.restarts != null && st.restarts > live.restarts) toast(st.warning || 'sing-box started again');
+  if (st && st.recovering && !live.recovering) notify('coreCrash', 'sing-box stopped — starting it again…');
+  if (st && st.connected && live.restarts != null && st.restarts > live.restarts) notify('coreCrash', st.warning || 'sing-box started again');
   live.recovering = st ? st.recovering : null;
   live.restarts = st ? st.restarts : null;
   if (pings) refreshSourceViews();
@@ -139,6 +143,6 @@ function sourcesDown(members) {
     if (!down) { live.srcDown.delete(sid); return; }
     if (!others || live.srcDown.has(sid)) return;
     live.srcDown.add(sid);
-    toast(`${s.name}: its servers do not respond — contact the subscription provider's support`);
+    notify('subFailed', `${s.name}: its servers do not respond — contact the subscription provider's support`);
   });
 }

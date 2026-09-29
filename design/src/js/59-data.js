@@ -97,7 +97,7 @@ function applyRestore() {
 
 // The whole UI from the restored state (as after the core's state loads, 95-live.js).
 function renderAfterRestore() {
-  renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
+  renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral(); renderNotif();
   ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
   renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
 }

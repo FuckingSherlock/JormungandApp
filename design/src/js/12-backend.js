@@ -22,7 +22,7 @@ let backend = {
   // provider's headers (usage, expire, format, announce…), s.updatedAt. opts.rediscover:
   // ask with every User-Agent again (the core; the mock just updates).
   updateSource(s, opts) {
-    return wait(900 + Math.random() * 600).then(() => { mockFetchFails(s); if (s.demoChurn) demoProviderChurn(s); s.updatedAt = Date.now(); });
+    return wait(900 + Math.random() * 600).then(() => { mockFetchFails(s); if (s.demoChurn) demoProviderChurn(s, opts); s.updatedAt = Date.now(); });
   },
   // Servers added by hand (32-nodes-forms.js): every link in f.link (one per line), else one
   // from the fields; f.edit = the server being edited (it keeps its id). Resolves to the

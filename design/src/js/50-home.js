@@ -65,6 +65,11 @@ function dockTap() {
 
 const segState = { mode: 'tun', route: 'rules', sys: 'off' };
 const SEG_OPTS = { mode: ['tun', 'proxy'], route: ['global', 'rules'], sys: ['on', 'off'] };
+// Two options only, so a tap anywhere on the control flips it.
+function toggleSegment(group) {
+  const next = SEG_OPTS[group].find(o => o !== segState[group]);
+  if (group === 'sys') setSysProxy(next === 'on'); else setSegment(group, next);
+}
 function setSegment(group, value) {
   segState[group] = value;
   const index = SEG_OPTS[group].indexOf(value);

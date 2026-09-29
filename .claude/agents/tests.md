@@ -2,6 +2,7 @@
 name: tests
 description: Runs, fixes and extends the tests of this repo — mockup smoke checks (design/tools/check.mjs) and the Dart core tests (core/test). Use after changes under design/ or core/, when a check fails or is flaky, or when a new interaction / parser / config path needs a test.
 model: sonnet
+background: true
 tools: Bash, PowerShell, Read, Edit, Write, Grep, Glob
 ---
 

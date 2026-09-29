@@ -1,5 +1,5 @@
 /* ══════════════════════ SETTINGS → GENERAL ══════════════════════
-   Language, startup, notifications, clipboard, updates. genCfg is what the Flutter app
+   Language, startup, clipboard, updates. genCfg is what the Flutter app
    keeps in its settings store. */
 const genCfg = {
   lang: 'en',             // 'en' | 'ru' (mockup text stays English)
@@ -7,8 +7,6 @@ const genCfg = {
   startMinimized: true,   // desktop: start in the tray
   connectOnLaunch: false, // connect as soon as the app opens
   pingOnLaunch: true,     // ping the top Auto entries by priority and the rules' targets on open
-  statusNotif: true,      // Android: ongoing notification with the entry and speed
-  switchNotif: true,      // notify when Auto moves to another entry
   clipboard: true,        // offer to import a subscription / server link found in the clipboard
   updates: true,          // check for app updates
 };
@@ -29,11 +27,6 @@ function renderGeneral() {
       ${row('startMinimized', 'Start minimized', 'Desktop: open in the tray, not as a window')}
       ${row('connectOnLaunch', 'Connect on launch', 'Turn the VPN on as soon as the app opens')}
       ${row('pingOnLaunch', 'Check servers on launch', `Pings the top Auto entry and the next ${n} by priority (Spare servers in Auto mode), and the targets of your rules`)}
-    </div>
-    <div class="set-caption">Notifications</div>
-    <div class="set-group">
-      ${row('statusNotif', 'Status notification', 'Android: shows the entry, server and speed while connected')}
-      ${row('switchNotif', 'When Auto switches', 'Tell me when Auto moves to another entry or server')}
     </div>
     <div class="set-caption">Other</div>
     <div class="set-group">

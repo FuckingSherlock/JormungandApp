@@ -54,24 +54,24 @@
 
     <!-- ROW 3: Segmented controls -->
     <div class="card segments-card">
-      <div class="segment-control mode-tun" id="seg-mode">
+      <div class="segment-control mode-tun" id="seg-mode" onclick="toggleSegment('mode')">
         <div class="segment-pill" id="pill-mode"></div>
-        <div class="segment active" id="seg-mode-tun" onclick="setSegment('mode','tun')">TUN</div>
-        <div class="segment" id="seg-mode-proxy" onclick="setSegment('mode','proxy')">Proxy</div>
+        <div class="segment active" id="seg-mode-tun">TUN</div>
+        <div class="segment" id="seg-mode-proxy">Proxy</div>
       </div>
-      <div class="segment-control" id="seg-route">
+      <div class="segment-control" id="seg-route" onclick="toggleSegment('route')">
         <div class="segment-pill" id="pill-route"></div>
-        <div class="segment" id="seg-route-global" onclick="setSegment('route','global')">Global</div>
-        <div class="segment active" id="seg-route-rules" onclick="setSegment('route','rules')">Rules</div>
+        <div class="segment" id="seg-route-global">Global</div>
+        <div class="segment active" id="seg-route-rules">Rules</div>
       </div>
       <!-- System proxy: test switch; also in Settings → Connection, will leave Home on mobile -->
       <!-- the name on top, On | Off side by side below it -->
-      <div class="segment-control seg-split" id="seg-sys">
+      <div class="segment-control seg-split" id="seg-sys" onclick="toggleSegment('sys')">
         <div class="seg-title">Sys proxy</div>
         <div class="seg-halves">
           <div class="segment-pill" id="pill-sys"></div>
-          <div class="segment" id="seg-sys-on" onclick="setSysProxy(true)">On</div>
-          <div class="segment active" id="seg-sys-off" onclick="setSysProxy(false)">Off</div>
+          <div class="segment" id="seg-sys-on">On</div>
+          <div class="segment active" id="seg-sys-off">Off</div>
         </div>
       </div>
     </div>

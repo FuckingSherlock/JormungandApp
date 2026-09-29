@@ -1169,24 +1169,24 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 
     <!-- ROW 3: Segmented controls -->
     <div class="card segments-card">
-      <div class="segment-control mode-tun" id="seg-mode">
+      <div class="segment-control mode-tun" id="seg-mode" onclick="toggleSegment('mode')">
         <div class="segment-pill" id="pill-mode"></div>
-        <div class="segment active" id="seg-mode-tun" onclick="setSegment('mode','tun')">TUN</div>
-        <div class="segment" id="seg-mode-proxy" onclick="setSegment('mode','proxy')">Proxy</div>
+        <div class="segment active" id="seg-mode-tun">TUN</div>
+        <div class="segment" id="seg-mode-proxy">Proxy</div>
       </div>
-      <div class="segment-control" id="seg-route">
+      <div class="segment-control" id="seg-route" onclick="toggleSegment('route')">
         <div class="segment-pill" id="pill-route"></div>
-        <div class="segment" id="seg-route-global" onclick="setSegment('route','global')">Global</div>
-        <div class="segment active" id="seg-route-rules" onclick="setSegment('route','rules')">Rules</div>
+        <div class="segment" id="seg-route-global">Global</div>
+        <div class="segment active" id="seg-route-rules">Rules</div>
       </div>
       <!-- System proxy: test switch; also in Settings → Connection, will leave Home on mobile -->
       <!-- the name on top, On | Off side by side below it -->
-      <div class="segment-control seg-split" id="seg-sys">
+      <div class="segment-control seg-split" id="seg-sys" onclick="toggleSegment('sys')">
         <div class="seg-title">Sys proxy</div>
         <div class="seg-halves">
           <div class="segment-pill" id="pill-sys"></div>
-          <div class="segment" id="seg-sys-on" onclick="setSysProxy(true)">On</div>
-          <div class="segment active" id="seg-sys-off" onclick="setSysProxy(false)">Off</div>
+          <div class="segment" id="seg-sys-on">On</div>
+          <div class="segment active" id="seg-sys-off">Off</div>
         </div>
       </div>
     </div>
@@ -1304,6 +1304,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="settings-row" data-sheet="setauto" onclick="openSheet('setauto')"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg></div><div style="flex:1"><div class="settings-label">Auto mode</div><div class="settings-sub">Failover, checks, subscription updates</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setlook" onclick="openSheet('setlook')"><div class="set-ico" style="color:var(--accent);background:rgba(var(--accent-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18z" fill="currentColor"/></svg></div><div style="flex:1"><div class="settings-label">Appearance</div><div class="settings-sub" id="setLookSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setgeneral" onclick="openSheet('setgeneral')"><div class="set-ico" style="color:var(--t2);background:rgba(var(--t2-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></div><div style="flex:1"><div class="settings-label">General</div><div class="settings-sub" id="setGeneralSub">Language, startup</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setnotif" onclick="openSheet('setnotif')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg></div><div style="flex:1"><div class="settings-label">Notifications</div><div class="settings-sub" id="setNotifSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setconn" onclick="openSheet('setconn')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><div style="flex:1"><div class="settings-label">Connection</div><div class="settings-sub">System proxy, kill switch, TUN</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setdns" onclick="openDnsSettings()"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><div style="flex:1"><div class="settings-label">DNS</div><div class="settings-sub" id="setDnsSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setdata" onclick="openDataSettings()"><div class="set-ico" style="color:var(--purple);background:rgba(var(--purple-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div style="flex:1"><div class="settings-label">Data</div><div class="settings-sub">Backup, about</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
@@ -1350,6 +1351,17 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     </div>
     <div class="sheet-body">
       <div id="general-settings"></div>
+    </div>
+  </div>
+  <div class="overlay" id="ov-setnotif" onclick="closeSheet('setnotif')"></div>
+  <div class="sheet set-sheet" id="sh-setnotif">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">Notifications</span>
+      <button class="sheet-close" onclick="closeSheet('setnotif')">×</button>
+    </div>
+    <div class="sheet-body">
+      <div id="notif-settings"></div>
     </div>
   </div>
   <div class="overlay" id="ov-setconn" onclick="closeSheet('setconn')"></div>
@@ -2212,7 +2224,7 @@ let backend = {
   // provider's headers (usage, expire, format, announce…), s.updatedAt. opts.rediscover:
   // ask with every User-Agent again (the core; the mock just updates).
   updateSource(s, opts) {
-    return wait(900 + Math.random() * 600).then(() => { mockFetchFails(s); if (s.demoChurn) demoProviderChurn(s); s.updatedAt = Date.now(); });
+    return wait(900 + Math.random() * 600).then(() => { mockFetchFails(s); if (s.demoChurn) demoProviderChurn(s, opts); s.updatedAt = Date.now(); });
   },
   // Servers added by hand (32-nodes-forms.js): every link in f.link (one per line), else one
   // from the fields; f.edit = the server being edited (it keeps its id). Resolves to the
@@ -3334,28 +3346,35 @@ function updateSource(sid, opts) {
     s.count = s.nodes.length;
     delete s.lastError;
     return true;
-  }, e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
+  }, e => {
+    s.lastError = { msg: e.message, at: Date.now() };
+    // the user's own Update / Retry always says so; a timer update (o.background) is up to Settings → Notifications
+    (o.background ? notify.bind(null, 'subFailed') : toast)('Update of ' + s.name + ' failed: ' + e.message);
+    return false;
+  }).then(ok => {
     s.updating = false;
     purgeExpiredGone();
     refreshSourceViews();
+    if (ok && o.background) notify('subUpdated', `${s.name} updated: ${s.count} servers`);
     if (ok && s.testAfterUpdate) testSourceLatency(sid);
   });
 }
 // Mockup only: an update of a demo subscription alternates between the provider dropping
 // two servers and bringing the dropped ones back (with their old settings).
-function demoProviderChurn(s) {
+function demoProviderChurn(s, o) {
+  const say = o && o.background ? notify.bind(null, 'subFailed') : toast;
   if ((s.gone || []).length) {
     const back = s.gone;
     s.nodes = s.nodes.concat(back.map(n => { const m = Object.assign({}, n); delete m.goneAt; return m; }))
       .sort((a, b) => +a.id.slice(1) - +b.id.slice(1));
     s.gone = [];
     back.forEach(n => { if (!pingCache.has(pingKey(n))) setPing(n, truthOf(n)); });
-    toast(`${back.length} server${back.length === 1 ? ' is' : 's are'} back — previous settings restored`);
+    say(`${back.length} server${back.length === 1 ? ' is' : 's are'} back — previous settings restored`);
   } else {
     const drop = s.nodes.filter((n, i) => i === 1 || i === 3);
     s.nodes = s.nodes.filter(n => !drop.includes(n));
     s.gone = drop.map(n => Object.assign({}, n, { goneAt: Date.now() }));
-    toast(`The provider removed ${drop.length} servers — see Unavailable, settings kept`);
+    say(`The provider removed ${drop.length} servers — see Unavailable, settings kept`);
   }
   s.count = s.nodes.length;
 }
@@ -5012,6 +5031,8 @@ function saveRsForm() {
   else ruleSets.push(Object.assign(rsDraft, { id: 'rs' + (rsSeq++), updated: 'never' }));
   closeSheet('rsform');
   renderRuleSets(); renderRules();
+  // Mockup only: a URL with "fail" plays the background download failing (the core reports it inside the connect warning)
+  if (!window.JORMD && !rsDraft.builtin && /fail/i.test(url)) setTimeout(() => notify('ruleSets', `Rule set ${name} could not be downloaded — the last copy is used`), 800);
 }
 function deleteRuleSet() {
   const s = ruleSets.find(x => x.id === rsEditing);
@@ -5403,6 +5424,11 @@ function dockTap() {
 
 const segState = { mode: 'tun', route: 'rules', sys: 'off' };
 const SEG_OPTS = { mode: ['tun', 'proxy'], route: ['global', 'rules'], sys: ['on', 'off'] };
+// Two options only, so a tap anywhere on the control flips it.
+function toggleSegment(group) {
+  const next = SEG_OPTS[group].find(o => o !== segState[group]);
+  if (group === 'sys') setSysProxy(next === 'on'); else setSegment(group, next);
+}
 function setSegment(group, value) {
   segState[group] = value;
   const index = SEG_OPTS[group].indexOf(value);
@@ -5840,7 +5866,7 @@ function renderConnSettings() {
     </div>`;
 }
 /* ══════════════════════ SETTINGS → GENERAL ══════════════════════
-   Language, startup, notifications, clipboard, updates. genCfg is what the Flutter app
+   Language, startup, clipboard, updates. genCfg is what the Flutter app
    keeps in its settings store. */
 const genCfg = {
   lang: 'en',             // 'en' | 'ru' (mockup text stays English)
@@ -5848,8 +5874,6 @@ const genCfg = {
   startMinimized: true,   // desktop: start in the tray
   connectOnLaunch: false, // connect as soon as the app opens
   pingOnLaunch: true,     // ping the top Auto entries by priority and the rules' targets on open
-  statusNotif: true,      // Android: ongoing notification with the entry and speed
-  switchNotif: true,      // notify when Auto moves to another entry
   clipboard: true,        // offer to import a subscription / server link found in the clipboard
   updates: true,          // check for app updates
 };
@@ -5870,11 +5894,6 @@ function renderGeneral() {
       ${row('startMinimized', 'Start minimized', 'Desktop: open in the tray, not as a window')}
       ${row('connectOnLaunch', 'Connect on launch', 'Turn the VPN on as soon as the app opens')}
       ${row('pingOnLaunch', 'Check servers on launch', `Pings the top Auto entry and the next ${n} by priority (Spare servers in Auto mode), and the targets of your rules`)}
-    </div>
-    <div class="set-caption">Notifications</div>
-    <div class="set-group">
-      ${row('statusNotif', 'Status notification', 'Android: shows the entry, server and speed while connected')}
-      ${row('switchNotif', 'When Auto switches', 'Tell me when Auto moves to another entry or server')}
     </div>
     <div class="set-caption">Other</div>
     <div class="set-group">
@@ -6095,6 +6114,67 @@ function openHelp(key) {
     `<div class="help-item"><b>${esc(term)}</b> — ${esc(text)}</div>`).join('');
   openSheet('help');
 }
+/* ══════════════════════ SETTINGS → NOTIFICATIONS ══════════════════════
+   NotificationSettings (Flutter): what the app may tell the user on its own. notifCfg is what
+   the Flutter app keeps in its settings store. The toggles gate only BACKGROUND events (Auto
+   moved, a timer update failed…): the answer to the user's own tap (a manual Update that
+   failed, a form error, "Backup saved") is always shown. Background events go through
+   notify(kind, msg, act); direct feedback keeps calling toast(). */
+const notifCfg = {
+  enabled: true,        // master: off silences every background notification, the status one too
+  status: true,         // Android: ongoing notification with the entry, server and speed
+  autoSwitch: true,     // Auto moved to another entry or server
+  unstable: true,       // an entry is unstable (flap guard)
+  connLost: true,       // connection lost / restored
+  coreCrash: true,      // sing-box stopped / started again
+  blocked: true,        // a site does not open through the current entry (Rule button)
+  subUpdated: false,    // a subscription updated in the background
+  subFailed: true,      // background update failed; provider removed / brought back servers; servers do not respond
+  ruleSets: true,       // rule sets could not be downloaded
+};
+const NOTIF_GROUPS = [
+  ['Status', [
+    ['status', 'Status notification', 'Android: shows the entry, server and speed while connected'],
+  ]],
+  ['Connection', [
+    ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server'],
+    ['unstable', 'Unstable entry', 'An entry keeps dropping and waits before it gets the traffic back'],
+    ['connLost', 'Connection lost', 'No network or no server answers, and when it is back'],
+    ['coreCrash', 'sing-box stopped', 'It stopped on its own and was started again'],
+    ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Rule button)'],
+  ]],
+  ['Subscriptions and rules', [
+    ['subUpdated', 'Subscription updated', 'A background update finished: name and number of servers'],
+    ['subFailed', 'Subscription problems', 'A background update failed, the provider removed or brought back servers, its servers do not respond'],
+    ['ruleSets', 'Rule sets', 'A rule set could not be downloaded'],
+  ]],
+];
+const NOTIF_KEYS = NOTIF_GROUPS.flatMap(g => g[1].map(r => r[0]));
+
+// A background event: shown only if the master and its own toggle are on.
+function notify(kind, msg, act) {
+  if (!notifCfg.enabled || !notifCfg[kind]) return;
+  toast(msg, act);
+}
+
+function renderNotif() {
+  const toggle = key => `<div class="mini-toggle ${notifCfg[key] ? 'on' : ''}" onclick="setNotifCfg('${key}',!notifCfg.${key})"><div class="mini-toggle-thumb"></div></div>`;
+  const row = ([key, label, hint]) => `<div class="set-row" data-key="${key}"><div class="set-label" style="flex:1">${label}<div class="set-hint">${hint}</div></div>${toggle(key)}</div>`;
+  document.getElementById('notif-settings').innerHTML = `
+    <div class="set-group">
+      <div class="set-row" data-key="enabled"><div class="set-label" style="flex:1">Notifications<div class="set-hint">Off: the app stays silent in the background</div></div>${toggle('enabled')}</div>
+    </div>
+    <div id="notif-groups" style="${notifCfg.enabled ? '' : 'opacity:.4;pointer-events:none'}">
+      ${NOTIF_GROUPS.map(([cap, rows]) => `<div class="set-caption">${cap}</div><div class="set-group">${rows.map(row).join('')}</div>`).join('')}
+    </div>
+    <div class="set-caption" style="text-transform:none;letter-spacing:0">On the phone and desktop these come as system notifications; in the app, as a toast at the bottom. What you start yourself (Update, Add, Ping) is always shown.</div>`;
+  const sub = document.getElementById('setNotifSub');
+  if (sub) {
+    const n = NOTIF_KEYS.filter(k => notifCfg[k]).length;
+    sub.textContent = !notifCfg.enabled ? 'Off' : n === NOTIF_KEYS.length ? 'All on' : n === 0 ? 'All off' : `${n} of ${NOTIF_KEYS.length} on`;
+  }
+}
+function setNotifCfg(key, v) { notifCfg[key] = v; renderNotif(); }
 /* ══════════════════════ SETTINGS → DATA, LATENCY TEST URL ══════════════════════
    Data: Backup (the state snapshot the core keeps as one JSON file: sources with their
    servers, profiles, chains, Route order, settings), Restore (a file → confirm → it
@@ -6194,7 +6274,7 @@ function applyRestore() {
 
 // The whole UI from the restored state (as after the core's state loads, 95-live.js).
 function renderAfterRestore() {
-  renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
+  renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral(); renderNotif();
   ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
   renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
 }
@@ -7664,18 +7744,22 @@ function liveAutoStatus(st) {
   coreRoute = a ? { id: a.now, server: a.server || null, entryServer: a.entryServer || null } : null;
   const pings = a ? mergeCorePings(a.members) : false;
   if (a) {
-    if (live.switches != null && a.switches > live.switches && a.lastSwitch && genCfg.switchNotif) toast(switchText(a.lastSwitch));
-    if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable && genCfg.switchNotif) toast(unstableText(a.lastUnstable));
-    if (live.blocked != null && a.blocked > live.blocked && a.lastBlocked) toast(blockedText(a.lastBlocked), { label: 'Rule', fn: () => openBlockedRule(a.lastBlocked) });
+    if (live.switches != null && a.switches > live.switches && a.lastSwitch) notify('autoSwitch', switchText(a.lastSwitch));
+    if (live.unstable != null && a.unstable > live.unstable && a.lastUnstable) notify('unstable', unstableText(a.lastUnstable));
+    if (live.blocked != null && a.blocked > live.blocked && a.lastBlocked) notify('blocked', blockedText(a.lastBlocked), { label: 'Rule', fn: () => openBlockedRule(a.lastBlocked) });
+    // no network at all (the OS, or no route answers): said once, and once more when it is back
+    const lost = !!(a.offline || a.noNet);
+    if (live.lost != null && lost !== live.lost) notify('connLost', lost ? 'Connection lost — waiting for the network' : 'Connection restored');
+    live.lost = lost;
     sourcesDown(a.members);
     live.switches = a.switches;
     live.unstable = a.unstable || 0;
     live.blocked = a.blocked || 0;
     live.routes = (a.routes || []).map(r => r.id);
-  } else { live.switches = live.unstable = live.blocked = null; live.srcDown = new Set(); }
+  } else { live.switches = live.unstable = live.blocked = live.lost = null; live.srcDown = new Set(); }
   // sing-box stopped on its own: the core puts the system proxy back and starts it again
-  if (st && st.recovering && !live.recovering) toast('sing-box stopped — starting it again…');
-  if (st && st.connected && live.restarts != null && st.restarts > live.restarts) toast(st.warning || 'sing-box started again');
+  if (st && st.recovering && !live.recovering) notify('coreCrash', 'sing-box stopped — starting it again…');
+  if (st && st.connected && live.restarts != null && st.restarts > live.restarts) notify('coreCrash', st.warning || 'sing-box started again');
   live.recovering = st ? st.recovering : null;
   live.restarts = st ? st.restarts : null;
   if (pings) refreshSourceViews();
@@ -7710,7 +7794,7 @@ function sourcesDown(members) {
     if (!down) { live.srcDown.delete(sid); return; }
     if (!others || live.srcDown.has(sid)) return;
     live.srcDown.add(sid);
-    toast(`${s.name}: its servers do not respond — contact the subscription provider's support`);
+    notify('subFailed', `${s.name}: its servers do not respond — contact the subscription provider's support`);
   });
 }
 /* ══════════════════════ LIVE MODE (Dart core) ══════════════════════
@@ -7770,7 +7854,7 @@ function ndjson(path, body, onLine, signal) {
 
 function liveSnapshot() {
   return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
-    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg,
+    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg, notifCfg,
     // Rules, apps, rule sets, DNS (sent to the core as plan.routing, see 93-routing-plan.js)
     rulesData, ruleOrder, ruleSeq, quickCfg, appRules, ruleSets, rsSeq, dnsServers, dnsOrder, dnsSeq, dnsCfg,
     // measured pings survive a restart, so Auto starts from what it knew
@@ -7798,7 +7882,14 @@ function liveApply(s) {
   if (s.segState) Object.assign(segState, s.segState);
   if (s.connCfg) Object.assign(connCfg, s.connCfg);
   if (s.autoCfg) Object.assign(autoCfg, s.autoCfg);
-  if (s.genCfg) Object.assign(genCfg, s.genCfg);
+  if (s.genCfg) {
+    // older states kept the two notification toggles in General
+    if ('statusNotif' in s.genCfg && !(s.notifCfg && 'status' in s.notifCfg)) notifCfg.status = s.genCfg.statusNotif;
+    if ('switchNotif' in s.genCfg && !(s.notifCfg && 'autoSwitch' in s.notifCfg)) notifCfg.autoSwitch = notifCfg.unstable = s.genCfg.switchNotif;
+    const g = Object.assign({}, s.genCfg); delete g.statusNotif; delete g.switchNotif;
+    Object.assign(genCfg, g);
+  }
+  if (s.notifCfg) Object.assign(notifCfg, s.notifCfg);
   // no demo rules or apps: a first run starts with the defaults of a fresh install
   rulesData = s.rulesData || {};
   ruleOrder = s.ruleOrder || [];
@@ -7935,10 +8026,16 @@ function liveSyncSources() {
         if (t.lastError && (t.updatedAt || 0) === (s.updatedAt || 0) && t.lastError.at > ((s.lastError && s.lastError.at) || 0)) {
           s.lastError = t.lastError;
           failed = true;
+          notify('subFailed', 'Update of ' + s.name + ' failed: ' + t.lastError.msg);
         }
         if (!((t.updatedAt || 0) > (s.updatedAt || 0))) return;
+        const gone0 = (s.gone || []).length;
         SERVER_FIELDS.forEach(k => { if (k in t) s[k] = t[k]; else delete s[k]; });
         updated.push(s);
+        const gone1 = (s.gone || []).length;
+        if (gone1 > gone0) notify('subFailed', `${s.name}: the provider removed ${gone1 - gone0} server${gone1 - gone0 === 1 ? '' : 's'} — see Unavailable, settings kept`);
+        else if (gone1 < gone0) notify('subFailed', `${s.name}: ${gone0 - gone1} server${gone0 - gone1 === 1 ? ' is' : 's are'} back — previous settings restored`);
+        else notify('subUpdated', `${s.name} updated: ${(s.nodes || []).length} servers`);
       });
       if (failed && !updated.length) refreshSourceViews();
       if (!updated.length) return;
@@ -8026,7 +8123,7 @@ const liveBackend = {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
         live.autoSig = JSON.stringify(plan.auto);
-        live.switches = live.unstable = live.restarts = null;   // a new AutoService counts from 0
+        live.switches = live.unstable = live.restarts = live.lost = null;   // a new AutoService counts from 0
         liveAutoStatus(st);
         if (st.warning) toast(st.warning);
         liveWatchExit();   // the core checks the exit after every (re)connect
@@ -8088,7 +8185,7 @@ function liveInit() {
   pingCache.clear();
 
   // Everything that re-renders after a change also saves and re-checks the connection.
-  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'renderGeneral', 'setSegment', 'updateMainConnectCard',
+  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'renderGeneral', 'renderNotif', 'setSegment', 'updateMainConnectCard',
     'renderRules', 'renderApps', 'renderRuleSets', 'renderDns'].forEach(name => {
     const orig = window[name];
     window[name] = function () { const r = orig.apply(this, arguments); liveSave(); liveMaybeReconnect(); return r; };
@@ -8100,7 +8197,7 @@ function liveInit() {
     connected = !!st.status.connected;
     exitInfo = st.status.exit || null;
     if (!exitInfo) liveWatchExit();   // still checking (the direct one runs from the core's start)
-    renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
+    renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral(); renderNotif();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
     renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
     if (connected) {
@@ -8132,7 +8229,7 @@ function liveInit() {
       connected = false;
       live.planSig = null;
       renderConnState();
-      toast(st.error || 'sing-box stopped');
+      notify('coreCrash', st.error || 'sing-box stopped');
     }, () => {});
   }, 4000);
 }
@@ -8147,6 +8244,7 @@ renderAutoMode();
 renderConnSettings();
 renderDns();
 renderGeneral();
+renderNotif();
 ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
 
 renderConnects();

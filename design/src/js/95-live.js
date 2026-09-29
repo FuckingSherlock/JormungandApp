@@ -55,7 +55,7 @@ function ndjson(path, body, onLine, signal) {
 
 function liveSnapshot() {
   return { sourcesData, sourceOrder, sourceSeq, connectMode, connectOrder, activeConnectId, autoConnect, pinnedNode,
-    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg,
+    modeState, profilesData, profileSeq, chainsData, chainSeq, catalogOrder, routeCustom, segState, connCfg, autoCfg, genCfg, notifCfg,
     // Rules, apps, rule sets, DNS (sent to the core as plan.routing, see 93-routing-plan.js)
     rulesData, ruleOrder, ruleSeq, quickCfg, appRules, ruleSets, rsSeq, dnsServers, dnsOrder, dnsSeq, dnsCfg,
     // measured pings survive a restart, so Auto starts from what it knew
@@ -83,7 +83,14 @@ function liveApply(s) {
   if (s.segState) Object.assign(segState, s.segState);
   if (s.connCfg) Object.assign(connCfg, s.connCfg);
   if (s.autoCfg) Object.assign(autoCfg, s.autoCfg);
-  if (s.genCfg) Object.assign(genCfg, s.genCfg);
+  if (s.genCfg) {
+    // older states kept the two notification toggles in General
+    if ('statusNotif' in s.genCfg && !(s.notifCfg && 'status' in s.notifCfg)) notifCfg.status = s.genCfg.statusNotif;
+    if ('switchNotif' in s.genCfg && !(s.notifCfg && 'autoSwitch' in s.notifCfg)) notifCfg.autoSwitch = notifCfg.unstable = s.genCfg.switchNotif;
+    const g = Object.assign({}, s.genCfg); delete g.statusNotif; delete g.switchNotif;
+    Object.assign(genCfg, g);
+  }
+  if (s.notifCfg) Object.assign(notifCfg, s.notifCfg);
   // no demo rules or apps: a first run starts with the defaults of a fresh install
   rulesData = s.rulesData || {};
   ruleOrder = s.ruleOrder || [];
@@ -220,10 +227,16 @@ function liveSyncSources() {
         if (t.lastError && (t.updatedAt || 0) === (s.updatedAt || 0) && t.lastError.at > ((s.lastError && s.lastError.at) || 0)) {
           s.lastError = t.lastError;
           failed = true;
+          notify('subFailed', 'Update of ' + s.name + ' failed: ' + t.lastError.msg);
         }
         if (!((t.updatedAt || 0) > (s.updatedAt || 0))) return;
+        const gone0 = (s.gone || []).length;
         SERVER_FIELDS.forEach(k => { if (k in t) s[k] = t[k]; else delete s[k]; });
         updated.push(s);
+        const gone1 = (s.gone || []).length;
+        if (gone1 > gone0) notify('subFailed', `${s.name}: the provider removed ${gone1 - gone0} server${gone1 - gone0 === 1 ? '' : 's'} — see Unavailable, settings kept`);
+        else if (gone1 < gone0) notify('subFailed', `${s.name}: ${gone0 - gone1} server${gone0 - gone1 === 1 ? ' is' : 's are'} back — previous settings restored`);
+        else notify('subUpdated', `${s.name} updated: ${(s.nodes || []).length} servers`);
       });
       if (failed && !updated.length) refreshSourceViews();
       if (!updated.length) return;
@@ -311,7 +324,7 @@ const liveBackend = {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
         live.autoSig = JSON.stringify(plan.auto);
-        live.switches = live.unstable = live.restarts = null;   // a new AutoService counts from 0
+        live.switches = live.unstable = live.restarts = live.lost = null;   // a new AutoService counts from 0
         liveAutoStatus(st);
         if (st.warning) toast(st.warning);
         liveWatchExit();   // the core checks the exit after every (re)connect
@@ -373,7 +386,7 @@ function liveInit() {
   pingCache.clear();
 
   // Everything that re-renders after a change also saves and re-checks the connection.
-  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'renderGeneral', 'setSegment', 'updateMainConnectCard',
+  ['renderAll', 'renderConnects', 'renderNodes', 'renderAutoMode', 'renderConnSettings', 'renderGeneral', 'renderNotif', 'setSegment', 'updateMainConnectCard',
     'renderRules', 'renderApps', 'renderRuleSets', 'renderDns'].forEach(name => {
     const orig = window[name];
     window[name] = function () { const r = orig.apply(this, arguments); liveSave(); liveMaybeReconnect(); return r; };
@@ -385,7 +398,7 @@ function liveInit() {
     connected = !!st.status.connected;
     exitInfo = st.status.exit || null;
     if (!exitInfo) liveWatchExit();   // still checking (the direct one runs from the core's start)
-    renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral();
+    renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral(); renderNotif();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
     renderConnects(); renderNodes(); renderRules(); updateMainConnectCard(); renderConnState();
     if (connected) {
@@ -417,7 +430,7 @@ function liveInit() {
       connected = false;
       live.planSig = null;
       renderConnState();
-      toast(st.error || 'sing-box stopped');
+      notify('coreCrash', st.error || 'sing-box stopped');
     }, () => {});
   }, 4000);
 }

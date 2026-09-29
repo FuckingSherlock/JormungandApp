@@ -326,28 +326,35 @@ function updateSource(sid, opts) {
     s.count = s.nodes.length;
     delete s.lastError;
     return true;
-  }, e => { s.lastError = { msg: e.message, at: Date.now() }; toast('Update of ' + s.name + ' failed: ' + e.message); return false; }).then(ok => {
+  }, e => {
+    s.lastError = { msg: e.message, at: Date.now() };
+    // the user's own Update / Retry always says so; a timer update (o.background) is up to Settings → Notifications
+    (o.background ? notify.bind(null, 'subFailed') : toast)('Update of ' + s.name + ' failed: ' + e.message);
+    return false;
+  }).then(ok => {
     s.updating = false;
     purgeExpiredGone();
     refreshSourceViews();
+    if (ok && o.background) notify('subUpdated', `${s.name} updated: ${s.count} servers`);
     if (ok && s.testAfterUpdate) testSourceLatency(sid);
   });
 }
 // Mockup only: an update of a demo subscription alternates between the provider dropping
 // two servers and bringing the dropped ones back (with their old settings).
-function demoProviderChurn(s) {
+function demoProviderChurn(s, o) {
+  const say = o && o.background ? notify.bind(null, 'subFailed') : toast;
   if ((s.gone || []).length) {
     const back = s.gone;
     s.nodes = s.nodes.concat(back.map(n => { const m = Object.assign({}, n); delete m.goneAt; return m; }))
       .sort((a, b) => +a.id.slice(1) - +b.id.slice(1));
     s.gone = [];
     back.forEach(n => { if (!pingCache.has(pingKey(n))) setPing(n, truthOf(n)); });
-    toast(`${back.length} server${back.length === 1 ? ' is' : 's are'} back — previous settings restored`);
+    say(`${back.length} server${back.length === 1 ? ' is' : 's are'} back — previous settings restored`);
   } else {
     const drop = s.nodes.filter((n, i) => i === 1 || i === 3);
     s.nodes = s.nodes.filter(n => !drop.includes(n));
     s.gone = drop.map(n => Object.assign({}, n, { goneAt: Date.now() }));
-    toast(`The provider removed ${drop.length} servers — see Unavailable, settings kept`);
+    say(`The provider removed ${drop.length} servers — see Unavailable, settings kept`);
   }
   s.count = s.nodes.length;
 }

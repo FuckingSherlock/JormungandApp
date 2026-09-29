@@ -456,6 +456,8 @@ function saveRsForm() {
   else ruleSets.push(Object.assign(rsDraft, { id: 'rs' + (rsSeq++), updated: 'never' }));
   closeSheet('rsform');
   renderRuleSets(); renderRules();
+  // Mockup only: a URL with "fail" plays the background download failing (the core reports it inside the connect warning)
+  if (!window.JORMD && !rsDraft.builtin && /fail/i.test(url)) setTimeout(() => notify('ruleSets', `Rule set ${name} could not be downloaded — the last copy is used`), 800);
 }
 function deleteRuleSet() {
   const s = ruleSets.find(x => x.id === rsEditing);

@@ -128,6 +128,7 @@ const SHOTS = {
   'settings-dns': async p => { await p.evaluate(() => openDnsSettings()); await settle(p); },
   'dns-form': async p => { await p.evaluate(() => { openDnsSettings(); openDnsForm(); }); await settle(p); },
   'settings-conn': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setconn'); }); await settle(p); },
+  'settings-notif': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setnotif'); }); await settle(p); },
   'nodes-profiles': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); expandState.default = true; renderNodes(); }); await settle(p); },
   'nodes-swipe': async p => { await tab(p, 'nodes'); await p.evaluate(() => { document.getElementById('view-nodes').classList.add('swiping'); renderNodesTabs(-170); }); },
   'route-open': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x]); sourcesData[id].pickMode = 'priority'; toggleRouteRow(id); }); await settle(p); },
@@ -613,7 +614,8 @@ async function runChecks() {
       () => { closeSheet('apps'); closeSheet('rules'); openEditChain('sc1'); },
       () => { closeSheet('createchain'); openSheet('setlook'); },
       () => { closeSheet('setlook'); openSheet('setauto'); },
-      () => { closeSheet('setauto'); openDataSettings(); },
+      () => { closeSheet('setauto'); openSheet('setnotif'); },
+      () => { closeSheet('setnotif'); openDataSettings(); },
       () => { closeSheet('setdata'); showSourceQr('src1'); },
       () => { closeSheet('actions'); openSheet('setconn'); openTestUrlPicker(); },
       () => { closeSheet('actions'); closeSheet('setconn'); openNodeForm(); document.getElementById('nf-link').value = 'vless://a@b.example:443#x\nvless://a@c.example:443#y'; parseNodeLink(); },
@@ -1758,7 +1760,7 @@ async function runChecks() {
       out.onlyThose = testing.length > 0 && testing.every(k => keys.has(k));
       await p;
       switchTab('settings'); openSheet('setgeneral');
-      out.rows = document.querySelectorAll('#general-settings .set-row').length >= 9;
+      out.rows = document.querySelectorAll('#general-settings .set-row').length >= 7;
       document.querySelector('#general-settings [data-key=connectOnLaunch] .mini-toggle').click();
       out.toggled = genCfg.connectOnLaunch && /connects on launch/.test(document.getElementById('setGeneralSub').textContent);
       document.querySelector('#general-settings [data-key=connectOnLaunch] .mini-toggle').click();
@@ -1915,6 +1917,15 @@ async function runChecks() {
       out.settings = document.querySelector('#conn-settings .mini-toggle').classList.contains('on');
       document.querySelector('#conn-settings .mini-toggle').click();
       out.off = connCfg.sysProxy === false && segState.sys === 'off' && document.getElementById('seg-sys-off').classList.contains('active');
+      // a tap anywhere on a two-option switch flips it, even on the option already chosen
+      const route = segState.route;
+      document.getElementById('seg-route-' + route).click();
+      out.flip = segState.route !== route;
+      document.querySelector('#seg-route .segment-pill').click();
+      out.back = segState.route === route;
+      document.querySelector('#seg-sys .seg-title').click();
+      out.title = connCfg.sysProxy === true;
+      document.getElementById('seg-sys').click();
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
@@ -2323,7 +2334,7 @@ async function runChecks() {
       pingCache.delete(pingKey(refs[0].node));   // the launch ping may have it in flight (that one would win)
       let toasts = [];
       const t0 = window.toast; window.toast = m => toasts.push(m);
-      connected = true; genCfg.switchNotif = true; live.switches = 0; live.restarts = 0;
+      connected = true; notifCfg.autoSwitch = true; live.switches = 0; live.restarts = 0;
       const st = (auto, extra) => Object.assign({ connected: true, restarts: 0, recovering: null, auto }, extra);
       const auto = (switches, extra) => Object.assign({ now: id, server: refKey(last), entryServer: null, switches, noNet: false, unstable: 0,
         lastSwitch: { from: order[0], to: id, reason: 'failover', at: now }, routes: [{ id: order[0] }, { id }],
@@ -2334,20 +2345,67 @@ async function runChecks() {
         dock: document.getElementById('profModeDetail').textContent.includes(last.node.name) && document.getElementById('profCardName').textContent === connectEntry(id).name,
         merged: ping(refs[0].node) === -1 && pingEntry(refs[0].node).fails === 3,
         toast: toasts.length === 1 && toasts[0].includes(connectEntry(id).name) };
-      genCfg.switchNotif = false; toasts = [];
+      notifCfg.autoSwitch = false; toasts = [];
       liveAutoStatus(st(auto(2)));
       out.quiet = !toasts.length;
       liveAutoStatus(st(null, { recovering: { attempt: 1, of: 3 } }));
       liveAutoStatus(st(auto(0), { restarts: 1, warning: 'started again' }));
       out.recovery = toasts.length === 2 && /starting it again/.test(toasts[0]) && toasts[1] === 'started again';
-      genCfg.switchNotif = true; toasts = [];
+      notifCfg.autoSwitch = true; toasts = [];
       liveAutoStatus(st(auto(0, { unstable: 1, lastUnstable: { id: order[0], strikes: 2, hold: 120000, at: now } })));
       out.unstable = toasts.length === 1 && toasts[0].includes(entryLabel(order[0])) && /unstable/.test(toasts[0]) && /2 min/.test(toasts[0]);
       liveAutoStatus(st(auto(0, { unstable: 1, noNet: true })));
-      out.noNetQuiet = toasts.length === 1 && coreRoute.id === id;
+      out.noNetQuiet = toasts.length === 2 && /Connection lost/.test(toasts[1]) && coreRoute.id === id;
       liveAutoStatus(null);
       out.cleared = coreRoute === null;
       window.toast = t0; connected = false;
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('Notifications: toggles gate background events only; master off silences all; own-action failures always toast; state saved and old genCfg toggles migrate', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      const out = {}, toasts = []; const t0 = window.toast; window.toast = m => toasts.push(m);
+      // the screen: master + 9 toggles, none left in General
+      switchTab('settings'); openSheet('setnotif');
+      out.rows = document.querySelectorAll('#notif-settings .set-row').length === 1 + NOTIF_KEYS.length;
+      out.noGeneral = !document.querySelector('#general-settings [data-key="statusNotif"]') && !('statusNotif' in genCfg) && !('switchNotif' in genCfg);
+      out.sub = /^\d of \d on$/.test(document.getElementById('setNotifSub').textContent);
+      setNotifCfg('enabled', false);
+      out.subOff = document.getElementById('setNotifSub').textContent === 'Off' && getComputedStyle(document.getElementById('notif-groups')).opacity === '0.4';
+      setNotifCfg('enabled', true);
+      // background events
+      notifCfg.subFailed = false; toasts.length = 0;
+      notify('subFailed', 'bg');
+      out.bgOff = !toasts.length;
+      notifCfg.subFailed = true; notify('subFailed', 'bg');
+      out.bgOn = toasts.length === 1;
+      notifCfg.enabled = false; toasts.length = 0;
+      Object.keys(notifCfg).forEach(k => notify(k, 'x'));
+      out.masterOff = !toasts.length;
+      notifCfg.enabled = true;
+      // the user's own manual update failing still toasts with subFailed off; a timer one does not
+      const sid = sourceOrder.find(id => sourcesData[id].kind === 'sub'), s = sourcesData[sid], url0 = s.url;
+      s.url = 'https://example.test/fail'; notifCfg.subFailed = false; toasts.length = 0;
+      updateSource(sid);
+      await new Promise(r => setTimeout(r, 2500));
+      out.manual = toasts.some(m => /Update of .* failed/.test(m));
+      toasts.length = 0; updateSource(sid, { background: true });
+      await new Promise(r => setTimeout(r, 2500));
+      out.timerQuiet = !toasts.length;
+      notifCfg.subFailed = true; updateSource(sid, { background: true });
+      await new Promise(r => setTimeout(r, 2500));
+      out.timerOn = toasts.some(m => /Update of .* failed/.test(m));
+      s.url = url0; window.toast = t0;
+      // saved with the snapshot; an old one migrates
+      out.saved = 'notifCfg' in liveSnapshot();
+      const keep = Object.assign({}, notifCfg);
+      liveApply(Object.assign(liveSnapshot(), { notifCfg: undefined, genCfg: Object.assign({}, genCfg, { statusNotif: false, switchNotif: false }) }));
+      out.migrated = !notifCfg.status && !notifCfg.autoSwitch && !('statusNotif' in genCfg);
+      Object.assign(notifCfg, keep);
       return out;
     });
     expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
