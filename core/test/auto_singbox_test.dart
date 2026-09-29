@@ -312,7 +312,7 @@ void main() {
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
 
-  test('daemon: sing-box killed from outside: system proxy back at once, started again, reported', () async {
+  test('daemon: sing-box killed from outside: started again in the background, the system proxy never released', () async {
     final loop = _Loop();
     await loop.up(['a']);
     final mixed = await freePort();
@@ -357,10 +357,11 @@ void main() {
       final pid = daemon.main.pid!;
       Process.killPid(pid);
       Map<String, dynamic> s = {};
-      var sawRecovering = false, sysOffWhileDown = false;
+      var sawRecovering = false, sysOffWhileDown = false, connectedDropped = false;
       for (var i = 0; i < 100; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 100));
         s = await call('/api/status');
+        connectedDropped |= s['connected'] == false;
         if (s['recovering'] != null) {
           sawRecovering = true;
           sysOffWhileDown |= s['systemProxy'] == false;
@@ -368,15 +369,17 @@ void main() {
         if (s['restarts'] == 1 && s['recovering'] == null) break;
       }
       expect(sawRecovering, isTrue);
-      expect(sysOffWhileDown, isTrue, reason: 'the system proxy goes back while sing-box is down');
-      expect([s['connected'], s['restarts'], s['error'], s['systemProxy']], [true, 1, null, true]);
-      expect(sys.calls, ['enable', 'restore', 'enable']);
+      expect(sysOffWhileDown, isFalse, reason: 'the system proxy stays while sing-box restarts');
+      expect(connectedDropped, isFalse);
+      expect([s['connected'], s['restarts'], s['error'], s['systemProxy'], s['down']], [true, 1, null, true, null]);
+      expect(sys.calls, ['enable']);
       expect(daemon.main.pid, isNot(pid));
       expect(await _get(mixed, loop.url), 'hello from target');
       final off = await call('/api/disconnect', {});
       expect([off['connected'], off['systemProxy']], [false, false]);
 
-      // the journal: connect (the user's), the crash, the restart (the core's), disconnect (the user's)
+      // the journal: connect (the user's), the crash, the restart (the core's, no proxy events:
+      // it was never taken off), disconnect (the user's)
       final ev = [
         for (final e in (await call('/api/events'))['events'] as List)
           if ((e as Map)['type'] != 'deprecated') e,
@@ -385,19 +388,17 @@ void main() {
         'core/sysProxy',
         'conn/connected',
         'core/crashed',
-        'core/sysProxy',
         'core/restarted',
-        'core/sysProxy',
         'conn/disconnected',
         'core/sysProxy',
       ]);
-      expect([for (final e in ev) e['own']], [true, true, false, false, false, false, true, true]);
-      expect([for (final e in ev) (e['data'] as Map)['on']], [true, null, null, false, null, true, null, false]);
+      expect([for (final e in ev) e['own']], [true, true, false, false, true, true]);
+      expect([for (final e in ev) (e['data'] as Map)['on']], [true, null, null, null, null, false]);
       expect(ev[1]['data'], {'entry': 'A', 'mode': 'proxy', 'route': 'global', if ((ev[1]['data'] as Map).containsKey('server')) 'server': isA<String>()});
       expect(ev[2]['data'], {'code': isA<int>()});
       expect(ev[2]['level'], 'error');
-      expect(ev[4]['data'], {'attempt': 1});
-      expect(ev[6]['data'], {'by': 'user'});
+      expect(ev[3]['data'], {'attempt': 1});
+      expect(ev[4]['data'], {'by': 'user'});
       expect(ev.every((e) => e['log'] is int), isTrue, reason: 'every one of them wrote its raw line');
     } finally {
       await daemon.shutdown();

@@ -36,7 +36,7 @@ function renderGeneral() {
   const sub = document.getElementById('setGeneralSub');
   if (sub) sub.textContent = LANGS[genCfg.lang] + (genCfg.connectOnLaunch ? ' · connects on launch' : '');
 }
-function setGenCfg(key, v) { genCfg[key] = v; renderGeneral(); }
+function setGenCfg(key, v) { genCfg[key] = v; renderGeneral(); renderConnSettings(); }   // Kill switch → while the app is closed depends on two of them
 
 function openLangPicker() {
   // Only English is written yet: Russian is listed, off, marked soon.

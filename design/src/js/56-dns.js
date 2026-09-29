@@ -162,7 +162,43 @@ function deleteDnsServer() {
 /* ══════════════════════ SETTINGS → CONNECTION ══════════════════════
    System proxy (also a switch on Home — to be dropped from Home on mobile) and the
    kill switch: while the VPN is down or reconnecting, all traffic is blocked. */
+const killClosedOk = () => genCfg.launchAtStartup && genCfg.connectOnLaunch;
+// The four kill switch settings as the core reads them (connect body and POST /api/killswitch): the sub-options only count with their conditions.
+function killPlan() {
+  const kill = connCfg.killSwitch;
+  return { killSwitch: kill, killOnDisconnect: kill && connCfg.killOnDisconnect, killWhileClosed: kill && connCfg.killWhileClosed && !!killClosedOk(), downProxy: connCfg.downProxy };
+}
+// Any of them (or autostart / autoconnect, which gate killWhileClosed) changed while connected or down: the core takes it live.
+let killSig;
+function syncKillSettings() {
+  const sig = JSON.stringify(killPlan());
+  if (killSig === undefined) { killSig = sig; return; }
+  if (sig === killSig) return;
+  killSig = sig;
+  // connected / down, or a block after disconnect / while closed: turning its setting off lifts it
+  if (connected || vpn.blocking) backend.killSettings(killPlan()).catch(e => toast(e.message));
+}
+function offerClosedKill() {
+  const close = "closeSheet('actions');";
+  openActions('Also while the app is closed', `<div class="menu-note">Keeping the proxy while the app is closed only makes sense if the app starts with the computer and connects by itself: otherwise the internet stays blocked until you start it by hand. Turn on <b>Launch at startup</b> and <b>Connect on launch</b>?</div>`
+    + menuRow(ICON.check, 'Turn them on', close + "genCfg.launchAtStartup=genCfg.connectOnLaunch=true;connCfg.killWhileClosed=true;renderConnSettings();renderGeneral()")
+    + menuRow(ICON.close, 'Cancel', close));
+}
+/* Turning the kill switch off while it protects something (connected, down, or a block after
+   disconnect) asks first; turning it on, or off while idle, does not. */
+function toggleKillSwitch() {
+  const flip = () => { connCfg.killSwitch = !connCfg.killSwitch; renderConnSettings(); };
+  if (!connCfg.killSwitch || !(connected || vpn.blocking)) { flip(); return; }
+  const close = "closeSheet('actions');";
+  const what = vpn.blocking ? 'The internet is unblocked now: the system proxy is removed.'
+    : vpn.down ? 'The VPN is down right now: ' + (connCfg.downProxy === 'keep' ? 'the proxy stays, but nothing guarantees it any more.' : 'the system proxy is removed and your traffic goes direct at once.')
+    : 'The connection stays, but if the VPN goes down, ' + (connCfg.downProxy === 'keep' ? 'nothing guarantees the block any more.' : 'your traffic goes direct (If the VPN cannot recover: Remove proxy).');
+  openActions('Turn the kill switch off?', `<div class="menu-note">${what}</div>`
+    + menuRow(ICON.check, 'Turn it off', close + 'connCfg.killSwitch=false;renderConnSettings()')
+    + menuRow(ICON.close, 'Keep it on', close));
+}
 function renderConnSettings() {
+  const closedOk = killClosedOk();
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
   document.getElementById('conn-settings').innerHTML = `
     <div class="set-group">
@@ -170,8 +206,20 @@ function renderConnSettings() {
         ${toggle(connCfg.sysProxy, 'setSysProxy(!connCfg.sysProxy)')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — the system proxy points here; set it by hand in other apps</div></div>
         <input class="set-input am-num port-num" id="conn-port" inputmode="numeric" value="${connCfg.port}" onchange="setProxyPort(this)"></div>
-      <div class="set-row"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">While the VPN is down or reconnecting, block all traffic — nothing leaks out directly</div></div>
-        ${toggle(connCfg.killSwitch, 'connCfg.killSwitch=!connCfg.killSwitch;renderConnSettings()')}</div>
+      <div class="set-row" data-key="killSwitch"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">Blocks traffic when the VPN is down. Works for apps that use the system proxy; full block needs TUN.</div></div>
+        ${toggle(connCfg.killSwitch, 'toggleKillSwitch()')}</div>
+      ${connCfg.killSwitch ? `
+      <div class="set-row set-sub" data-key="killOnDisconnect"><div class="set-label" style="flex:1">Also after I disconnect<div class="set-hint">Internet stays blocked until you connect again or tap Remove on Home</div></div>
+        ${toggle(connCfg.killOnDisconnect, 'connCfg.killOnDisconnect=!connCfg.killOnDisconnect;renderConnSettings()')}</div>
+      <div class="set-row set-sub ${closedOk ? '' : 'dim'}" data-key="killWhileClosed"${closedOk ? '' : ' onclick="offerClosedKill()"'}><div class="set-label" style="flex:1">Also while the app is closed<div class="set-hint">${closedOk ? 'The proxy stays set when the app is closed, so nothing leaks before it starts again' : 'Needs Launch at startup and Connect on launch — tap to turn them on'}</div></div>
+        ${toggle(closedOk && connCfg.killWhileClosed, closedOk ? 'connCfg.killWhileClosed=!connCfg.killWhileClosed;renderConnSettings()' : '')}</div>`
+      : `
+      <div class="set-row" data-key="downProxy" style="flex-direction:column;align-items:stretch;gap:10px">
+        <div class="set-label">If the VPN cannot recover<div class="set-hint">${connCfg.downProxy === 'keep' ? 'Keep it: the proxy stays set, so apps that use it have no internet until the VPN is back' : 'Remove: traffic goes direct until the VPN is back'}</div></div>
+        <div class="chip-row" style="padding:0">
+          <div class="chip ${connCfg.downProxy !== 'keep' ? 'active' : ''}" onclick="connCfg.downProxy='remove';renderConnSettings()">Remove proxy</div>
+          <div class="chip ${connCfg.downProxy === 'keep' ? 'active' : ''}" onclick="connCfg.downProxy='keep';renderConnSettings()">Keep it</div>
+        </div></div>`}
     </div>
     <div class="set-group">
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
@@ -180,4 +228,5 @@ function renderConnSettings() {
       <div class="set-row"><div class="set-label" style="flex:1">Backup checks<div class="set-hint">When the test URL does not answer through a server, these are tried; the server works if any answers</div></div>
         <button class="set-value" id="conn-checkers" onclick="openCheckersPicker()">${connCfg.checkers.length ? connCfg.checkers.length : 'Off'}${CHEVRON_R}</button></div>
     </div>`;
+  syncKillSettings();
 }

@@ -86,12 +86,25 @@ const entryLabel = id => { const e = connectEntry(id); return e ? e.name : chain
    as events (47-events.js), which also drive the background notifications; only a
    subscription's servers all failing (sourcesDown) is the UI's to post. */
 function liveAutoStatus(st) {
+  liveVpnState(st);
   const a = st && st.connected ? st.auto : null, was = JSON.stringify(coreRoute);
   coreRoute = a ? { id: a.now, server: a.server || null, entryServer: a.entryServer || null } : null;
   const pings = a ? mergeCorePings(a.members) : false;
   if (a) { sourcesDown(a.members); live.routes = (a.routes || []).map(r => r.id); } else live.srcDown = new Set();
   if (pings) refreshSourceViews();
   else if (JSON.stringify(coreRoute) !== was) { renderConnects(); updateMainConnectCard(); }
+}
+
+/* status.recovering / down / blocking → the dock and Home (50-home.js vpn). A background restart
+   (recovering) is deliberately invisible: no toast, the dock stays Connected; its events stay in
+   the journal (core/crashed → the coreCrash toggle, default off). conn: whether the UI takes the
+   status as connected (default: st.connected). */
+function liveVpnState(st, conn) {
+  const on = conn === undefined ? !!(st && st.connected) : conn;
+  const next = { recovering: on && st && st.recovering || null, down: on && st && st.down || null, blocking: !on && st && st.blocking || null };
+  if (JSON.stringify(next) === JSON.stringify(vpn)) return;
+  Object.assign(vpn, next);
+  renderConnState();
 }
 
 /* A request through the current node got nothing back while the node passes traffic, and

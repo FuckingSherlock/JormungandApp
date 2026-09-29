@@ -10,7 +10,7 @@ const notifCfg = {
   autoSwitch: true,     // Auto moved to another entry or server
   unstable: true,       // an entry is unstable (flap guard)
   connLost: true,       // connection lost / restored
-  coreCrash: true,      // sing-box stopped / started again
+  coreCrash: false,     // sing-box stopped / started again: background restarts are silent
   blocked: true,        // a site does not open through the current entry (Rule button)
   subUpdated: false,    // a subscription updated in the background
   subFailed: true,      // background update failed; provider removed / brought back servers; servers do not respond
@@ -25,7 +25,7 @@ const NOTIF_GROUPS = [
     ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server'],
     ['unstable', 'Unstable entry', 'An entry keeps dropping and waits before it gets the traffic back'],
     ['connLost', 'Connection lost', 'No network or no server answers, and when it is back'],
-    ['coreCrash', 'sing-box stopped', 'It stopped on its own and was started again'],
+    ['coreCrash', 'sing-box stopped', 'Background restarts are silent; this shows them'],
     ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Rule button)'],
   ]],
   ['Subscriptions and rules', [

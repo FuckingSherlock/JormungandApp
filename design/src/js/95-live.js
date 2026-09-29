@@ -326,7 +326,10 @@ const liveBackend = {
     return Promise.resolve().then(() => {
       const plan = livePlan(anchor);
       if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
-      return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
+      // Kill switch options as the core reads them (killswitch: rules.md §7); the sub-options only count with their conditions
+      const ks = killPlan();
+      killSig = JSON.stringify(ks);
+      return api('/api/connect', Object.assign({ plan, systemProxy: segState.sys === 'on' }, ks)).then(st => {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
         live.autoSig = JSON.stringify(plan.auto);
@@ -339,8 +342,12 @@ const liveBackend = {
   disconnect() {
     live.planSig = null;
     liveAutoStatus(null);
-    return api('/api/disconnect', {});
+    return api('/api/disconnect', {}).then(st => { liveVpnState(st, false); return st; });
   },
+  releaseSysProxy() { return api('/api/sysproxy/release', {}); },
+  retry() { return api('/api/retry', {}); },
+  // Kill switch settings changed while connected / down: the core takes them live (same fields as the connect body).
+  killSettings(cfg) { return api('/api/killswitch', cfg); },
   // Connected: the tunnel's exit; not connected: the direct IP (the core knows which).
   traffic() { return api('/api/traffic'); },
   exitIp() {
@@ -402,6 +409,7 @@ function liveInit() {
     purgeExpiredGone();   // the start-up purge in 99-init ran on the empty pre-load state; only 15-day-old ones go
     connected = !!st.status.connected;
     exitInfo = st.status.exit || null;
+    liveVpnState(st.status);
     if (!exitInfo) liveWatchExit();   // still checking (the direct one runs from the core's start)
     renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral(); renderNotif();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
@@ -424,7 +432,9 @@ function liveInit() {
 
   // sing-box can stop on its own (bad server, crash): the dock must say so.
   setInterval(() => {
-    if (!live.ready || !connected || connecting) return;
+    if (!live.ready || connecting) return;
+    // not connected: only the Kill switch plaque (blocking) is read from the core
+    if (!connected) { api('/api/status').then(st => { if (!connected && !connecting) liveVpnState(st, false); }, () => {}); return; }
     api('/api/status').then(st => {
       liveAutoStatus(st);   // where the core's Auto is, what it measured (94-live-auto.js)
       if (st.connected) {

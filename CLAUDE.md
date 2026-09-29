@@ -79,7 +79,7 @@ simple-chain, chain-priority, profile-edit, chain-edit, chain-groups, drag-mid, 
 srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm,
 nodes-edit, nodes-edit-chain, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
 rules, rules-more, rules-services, rule-form, rule-new, rule-json, rule-test, rule-order, rule-io,
-rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, settings-notif, text-large, text-large-rule,
+rule-sets, apps, app-act, settings-dns, dns-form, settings-conn, kill-on, kill-off-confirm, core-down-kept, core-down-direct, kill-blocking, core-recovering, settings-notif, text-large, text-large-rule,
 connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-raw, logs-search, logs-warn, logs-filter, logs-event-open, logs-new-below, nav-dots, toast-fly,
 qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, source-error,
 dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test, speed-done, speed-fail.

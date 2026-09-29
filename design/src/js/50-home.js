@@ -2,15 +2,57 @@
 
 let connected = true;
 let connecting = false;
+/* What the core reports beyond connected / not (status.recovering / down / blocking, see
+   connect-model.md → dock states). recovering = sing-box restarts in the background: the dock
+   looks exactly as Connected, nothing is shown. down = it did not come back in 30 s: the power
+   button stays on (a tap disconnects = stop trying), the dock and an alert on Home say so.
+   blocking = disconnected but Kill switch still holds the system proxy: a plaque on Home. */
+const vpn = { recovering: null, down: null, blocking: null };
 function renderConnState() {
-  const btn = document.getElementById('powerBtn');
+  const btn = document.getElementById('powerBtn'), down = connected && !connecting && vpn.down;
   btn.classList.toggle('on', connected && !connecting);
   btn.classList.toggle('busy', connecting);
-  document.getElementById('mainToggle').classList.toggle('off', !connected || connecting);
-  document.getElementById('connLabel').textContent = connecting ? 'Connecting…' : connected ? 'Connected' : 'Tap to connect';
+  btn.classList.toggle('down', !!down);
+  const badge = document.getElementById('mainToggle');
+  badge.classList.toggle('off', !connected || connecting);
+  badge.classList.toggle('down', !!down);
+  document.getElementById('connLabel').textContent = connecting ? 'Connecting…' : down ? 'VPN is down' : connected ? 'Connected' : 'Tap to connect';
+  renderVpnAlert();
   renderExitIp();
   renderTraffic();
 }
+// The alert strip on Home and the red line in the dock. Buttons: Retry (try a restart now), and
+// while our system proxy is still set, Disable sys proxy / Remove (POST /api/sysproxy/release).
+// Never a Disconnect here — that is the power button.
+function renderVpnAlert() {
+  const el = document.getElementById('vpnAlert'), dd = document.getElementById('dockDown');
+  const down = connected && !connecting ? vpn.down : null;
+  const block = !connected && !connecting && vpn.blocking && vpn.blocking.proxy !== 'released' ? vpn.blocking : null;
+  document.getElementById('dock').classList.toggle('down', !!down);
+  dd.textContent = down ? 'VPN is down · ' + evDuration(Date.now() - down.since) + ' · retrying' : '';
+  const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  const btn = (label, fn) => `<button class="src-error-retry" onclick="${fn}">${label}</button>`;
+  if (down) {
+    const held = down.proxy === 'kept';
+    el.innerHTML = `<div class="src-error vpn-alert" data-kind="down">${svg}
+      <div class="src-error-text"><div class="src-error-title">${held ? 'VPN is down — internet is blocked' : 'VPN is down — traffic goes direct'}</div>
+      <div class="src-error-msg">${held ? 'The system proxy is kept so nothing leaks. ' : ''}Trying again in the background</div></div>
+      <div class="vpn-alert-btns">${btn('Retry', 'vpnRetry()')}${held ? btn('Disable sys proxy', 'vpnReleaseProxy()') : ''}</div></div>`;
+  } else if (block) {
+    el.innerHTML = `<div class="src-error vpn-alert" data-kind="blocking">${svg}
+      <div class="src-error-text"><div class="src-error-title">Kill switch: internet is blocked until you connect</div></div>
+      <div class="vpn-alert-btns">${btn('Remove', 'vpnReleaseProxy()')}</div></div>`;
+  } else el.innerHTML = '';
+}
+function vpnRetry() { backend.retry().then(() => renderConnState(), e => toast(e.message)); }
+function vpnReleaseProxy() {
+  backend.releaseSysProxy().then(() => {
+    if (vpn.down) vpn.down.proxy = 'released';
+    if (vpn.blocking) vpn.blocking.proxy = 'released';
+    renderConnState();
+  }, e => toast(e.message));
+}
+setInterval(() => { if (vpn.down) renderVpnAlert(); }, 15000);
 
 /* ExitIpCard: where traffic leaves. Connected: the tunnel's exit, checked by the core
    through the tunnel after every (re)connect. Not connected: the device's own IP (label
@@ -38,6 +80,7 @@ function toggleMain() {
   if (connecting) return;
   if (connected) {
     connected = false;
+    vpn.down = vpn.recovering = null;
     exitInfo = null;
     renderConnState();
     journal('user', 'disconnect', { action: 'disconnect' });
@@ -48,7 +91,7 @@ function toggleMain() {
   if (catalogEmpty()) { toast(simpleMode() ? 'Add a subscription or a server first' : 'Create a profile first'); dockTap(); return; }
   connecting = true;
   renderConnState();
-  backend.connect().then(() => { connected = true; journal('user', 'connect', { action: 'connect', entry: effectiveConnectId() }); }, e => toast(e.message))
+  backend.connect().then(() => { connected = true; vpn.blocking = null; journal('user', 'connect', { action: 'connect', entry: effectiveConnectId() }); }, e => toast(e.message))
     .then(() => { connecting = false; renderConnState(); if (!connected) refreshExitIp(); });
 }
 
@@ -91,7 +134,9 @@ function setSegment(group, value) {
 // passes traffic when any answers (the core's defaultCheckers).
 const DEFAULT_CHECKERS = ['https://cp.cloudflare.com/generate_204', 'https://www.gstatic.com/generate_204',
   'http://www.msftconnecttest.com/connecttest.txt', 'http://captive.apple.com/hotspot-detect.html'];
-const connCfg = { sysProxy: false, killSwitch: false, port: 2080, testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
+// Kill switch (rules.md §7): killOnDisconnect / killWhileClosed only count with killSwitch on (the latter also
+// needs genCfg.launchAtStartup + connectOnLaunch); downProxy only with it off: the proxy when the VPN cannot recover.
+const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());

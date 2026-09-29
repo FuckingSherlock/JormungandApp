@@ -510,8 +510,9 @@ Nodes → ⋮ сервера → **Speed test**: штатный network quality 
 - **Status** — `status` [вкл]: постоянное уведомление Android (запись, сервер, скорость).
 - **Connection**: `autoSwitch` [вкл] Auto перешёл на другую запись / сервер; `unstable` [вкл] запись
   нестабильна (flap guard); `connLost` [вкл] нет сети / не отвечает ни один маршрут и возврат сети
-  (`status.auto.noNet`: ни один маршрут не отвечает); `coreCrash` [вкл] sing-box остановился сам и запущен снова
-  (не отключение пользователем); `blocked` [вкл] «сайт не открывается через запись» с кнопкой Rule.
+  (`status.auto.noNet`: ни один маршрут не отвечает); `coreCrash` [**выкл**] sing-box остановился сам и запущен снова
+  (фоновые перезапуски тихие, переключатель их показывает; подсказка «Background restarts are silent;
+  this shows them»). Событие `core/down` («VPN is down», ядро не поднялось 30 с) идёт под `connLost`; `blocked` [вкл] «сайт не открывается через запись» с кнопкой Rule.
 - **Subscriptions and rules**: `subUpdated` [выкл] фоновое обновление прошло (имя, число серверов);
   `subFailed` [вкл] фоновое обновление не удалось / провайдер убрал серверы / серверы вернулись /
   серверы подписки не отвечают → обратитесь в поддержку; `ruleSets` [вкл] набор правил не скачался
@@ -529,7 +530,7 @@ Nodes → ⋮ сервера → **Speed test**: штатный network quality 
 события журнала: `id` больше последнего, увиденного при загрузке страницы (история не
 уведомляет никогда), `own: false`. Соответствие тип → переключатель: `auto/switched|fastest` →
 `autoSwitch`; `auto/unstable` → `unstable`; `conn/lost|restored|offline|online` → `connLost`;
-`core/crashed|restarted|restartFailed` → `coreCrash`; `site/blocked` → `blocked` (кнопка Rule);
+`core/crashed|restarted|restartFailed` → `coreCrash`; `core/down` → `connLost`; `site/blocked` → `blocked` (кнопка Rule);
 `sub/updated` → `subUpdated`; `sub/failed|removed|back|dead` → `subFailed`; `rules/ruleSetFailed`
 → `ruleSets`. Остальные события уведомлений не дают. Текст — та же строка, что заголовок и
 пояснение строки события. Счётчики статуса ядра (`switches`, `unstable`, `blocked`, `restarts`)
@@ -644,6 +645,22 @@ sysProxy). Для событий, добавленных UI, `log` нет — к
 Справа — задержка (для цепочки — сумма двух хопов) в рамке: тап — пинг (см. «Пинг»), бейдж
 AUTO / MANUAL. Иконки слева и стрелки справа нет; тап по остальному доку открывает Route.
 При подключении запись и серверы — те, на которых реально стоит Auto в ядре (см. «Auto / Manual»).
+
+**Состояния дока по `status`** (kill switch и перезапуск — rules.md §7):
+- *Recovering* (`status.recovering`, sing-box перезапускается в фоне, `down` ещё нет): док и кнопка
+  питания **точно как Connected** — ни тоста, ни смены состояния (события остаются в журнале).
+- *Down* (`status.down = {since, attempt, proxy}`: перезапуск не удался за 30 с): кнопка питания **остаётся
+  включённой** (тап = отключиться = перестать пытаться), но красная; бейдж вверху «VPN is down»; в доке
+  красная строка «VPN is down · <сколько> · retrying». На главной сверху красная плашка: «VPN is down —
+  internet is blocked» (`proxy: 'kept'`) или «VPN is down — traffic goes direct» (`removed` / `released`);
+  кнопки **Retry** (`backend.retry()` → `POST /api/retry`) и, пока прокси держится, **Disable sys proxy**
+  (`backend.releaseSysProxy()` → `POST /api/sysproxy/release`; после него `proxy: 'released'`, кнопка
+  уходит). Кнопки «Disconnect» в плашке нет — это кнопка питания. Событие `core/sysProxy {on:false,
+  by:'user'}` (`own`) в журнале.
+- *Blocking* (`status.blocking = {since, reason: 'disconnect'|'closed', proxy}`, док при этом Disconnected):
+  на главной плашка «Kill switch: internet is blocked until you connect» с кнопкой **Remove**
+  (`releaseSysProxy`); подключение её убирает. UI опрашивает `/api/status` и при отключении, чтобы
+  увидеть `blocking` после старта приложения (`reason: 'closed'`).
 
 **Пустой каталог** (первый запуск или всё удалено — в текущем режиме нечего подключать):
 док пишет «No servers yet · Add in Nodes» (Профили — «No profiles yet · Create one in

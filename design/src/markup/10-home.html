@@ -6,12 +6,16 @@
     <span class="app-name">Jormungand</span>
     <div class="conn-badge" id="mainToggle" onclick="toggleMain()">
       <div class="conn-dot"></div>
-      <span id="connLabel">Connected</span>
+      <!-- one width for every state (the widest label sizes it), so the badge does not jump -->
+      <span class="conn-label"><span id="connLabel">Connected</span><span aria-hidden="true">Tap to connect</span><span aria-hidden="true">Connecting…</span><span aria-hidden="true">VPN is down</span></span>
     </div>
   </div>
 
   <!-- Main scroll -->
   <div class="scroll">
+
+    <!-- VpnAlert: VPN is down / Kill switch is blocking (50-home.js renderVpnAlert) -->
+    <div id="vpnAlert"></div>
 
     <!-- ROW 1: Speed | (IP over Connections) -->
     <div class="row1">
@@ -100,7 +104,8 @@
   </div><!-- /scroll -->
 
   <!-- Connect dock: power button in a trapezoid tab + active profile -->
-  <div class="dock">
+  <div class="dock" id="dock">
+    <div class="dock-down" id="dockDown"></div>
     <button class="power-tab on" id="powerBtn" onclick="toggleMain()" aria-label="Connect / disconnect">
       <svg class="power-shape" viewBox="0 0 200 52" preserveAspectRatio="none" aria-hidden="true">
         <!-- shared frame: dock edge rising into the tab (all tab corners rounded alike) -->

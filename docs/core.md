@@ -151,7 +151,7 @@ sing-box `missing default interface` → `offline` (раунды ничего н
 Настройки — `plan.auto` (URL — `urlTest.url`), `checkEvery` 10–3600 с. Тесты: `auto_test.dart`
 (фейковый `BoxControl`), `auto_singbox_test.dart` (настоящий sing-box
 на loopback: переключение без перезапуска, цепочка, urltest, падение процесса). Системный
-прокси в тестах — фейк (`Daemon(sysProxy: …)`): реестр тесты не трогают.
+прокси в тестах — фейк (`Daemon(sysProxy: …)`): реестр тесты не трогают. Перезапуск, down и kill switch — `killswitch_test.dart`: фейковые sing-box (`process:`), часы и паузы (`now:`, `timer:`), ничего не ждётся.
 
 **API service sing-box** (1.14+, gRPC, `sbapi.dart`) — единственная связь ядра с sing-box
 (Clash API убран, шаг 3.8). `SingBoxProcess.start(config)` добавляет `services: [{type: api}]`
@@ -172,14 +172,78 @@ sing-box, лежащего в `tool/bin` (`tool/proto/`, `tool/gen_sbapi.sh`; pr
 `tool/bin/protoc`, не в git, плюс `dart pub global activate protoc_plugin`). Обновили
 sing-box — перегенерировать.
 
-Падение sing-box (процесс вышел сам, не наш stop): ядро сразу возвращает системный прокси,
-затем перезапускает sing-box с тем же планом на маршруте, где был Auto — паузы 1 / 4 / 15 с,
-счёт попыток сбрасывается после минуты работы. Перезапуск идёт тем же путём, что connect
-(`_startSingBox`: списки правил, новый `tunnel-in`, предупреждения сборки; потом фоновое
-обновление списков). Пока перезапускает — `connected: true`, `recovering: {attempt, of, code,
-next}`; удалось — `restarts` +1, `warning`, системный прокси снова включён (если был), новый
-AutoService; три неудачи — отключено, `error`. Фоновая докачка списков, требующая
+Падение sing-box (процесс вышел сам, не наш stop): ядро **не трогает системный прокси** и в
+фоне, незаметно для пользователя, перезапускает sing-box с тем же планом на маршруте, где был
+Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без предела, пока пользователь не отключился
+(счёт попыток сбрасывается после минуты работы; после долгого простоя быстрый повторный сбой
+идёт сразу с 30-секундной паузы). Перезапуск идёт тем же путём, что connect (`_startSingBox`:
+списки правил, новый `tunnel-in`, предупреждения сборки; потом фоновое обновление списков).
+Пока перезапускает — `connected: true`, `recovering: {attempt, code, next}` (`next` — мс с эпохи,
+когда следующая попытка; `attempt` — номер ожидаемой / идущей попытки); удалось — `restarts`
++1, `warning`, `recovering` и `down` = null, системный прокси снова включён, если он был снят
+(при «down» или кнопкой пользователя; если стоял всё время — событие про него не пишется),
+новый AutoService, событие `core/restarted`. Фоновая докачка списков, требующая
 переподключения, тоже встаёт на маршрут, где был Auto.
+
+**Down.** Перезапуск, не удавшийся за 30 с от падения (после третьей неудачной попытки), — «down»:
+`status.down = {since (мс, когда объявлено), attempt, proxy}`, событие `core/down` (error,
+`{proxy}`). Попытки идут дальше, `connected` остаётся true. `proxy` — что с системным прокси:
+`kept` (стоит; программы, слушающие прокси, без интернета), `removed` (снят, трафик идёт
+напрямую; также когда системного прокси не было), `released` (снял пользователь). Что делает
+ядро в момент down (заданные в connect настройки, см. «Kill switch»):
+- killSwitch включён → прокси остаётся (`kept`);
+- killSwitch выключен, `downProxy: 'remove'` → прокси возвращается на прежний (`removed`),
+  проверка выхода идёт напрямую;
+- killSwitch выключен, `downProxy: 'keep'` → прокси остаётся (`kept`).
+
+До 30-й секунды прокси остаётся при любых настройках.
+
+Не пишется в журнал: `core/restartFailed` только за первые три попытки (сбой раз в 30 с
+заполнил бы журнал; в сыром логе — каждая).
+
+## Kill switch
+
+Только системный прокси (TUN в MVP нет). Настройки приходят **верхнеуровневыми полями** тела
+`POST /api/connect` (не в `plan`); отсутствующее поле остаётся как было (демон при старте —
+всё выключено). Менять на ходу, без переподключения — `POST /api/killswitch` (те же поля).
+
+| поле | по умолчанию | смысл |
+|---|---|---|
+| `killSwitch` | false | системный прокси не снимается, пока VPN должен быть включён (см. Down выше) |
+| `killOnDisconnect` | false | нужен `killSwitch`; отключение пользователем оставляет прокси → интернет закрыт до connect / Remove |
+| `killWhileClosed` | false | нужен `killSwitch`; остановка jormd не возвращает прокси. Решение «только при автозапуске + connectOnLaunch» принимает UI: ядро верит булеву |
+| `downProxy` | `'remove'` | `'remove'` \| `'keep'`; только при выключенном `killSwitch`: что делать с прокси при down |
+
+- **Отключение пользователем** (`POST /api/disconnect`): `killSwitch && killOnDisconnect` и прокси
+  стоит → он остаётся, `status.blocking = {since (мс), reason: 'disconnect', proxy: 'kept'}`;
+  событие «прокси снят» не пишется. Иначе прокси возвращается, как раньше. Повторный disconnect
+  блок не меняет. Отключение во время перезапуска / down останавливает попытки, прокси — по тому
+  же правилу.
+- **Остановка jormd** (`shutdown`): `killSwitch && killWhileClosed` и прокси стоит → не
+  возвращается; в `<dataDir>/kill.json` пишется `{keepWhileClosed: true, since}` (пишется и при
+  connect / смене настроек, если оба поля включены; удаляется, если выключены). Иначе
+  прокси возвращается, событие `core/sysProxy {on:false}` (`own: false`) пишется, как для любого
+  снятия прокси.
+- **Старт jormd**: `kill.json` с `keepWhileClosed` и прокси стоит → он не трогается,
+  `status.blocking = {since (из файла), reason: 'closed', proxy: 'kept'}`. Прокси стоит без
+  такого файла (след падения ядра) → возвращается, как раньше.
+- **connect** сбрасывает `blocking`. Если connect не удался при действующем блоке
+  (killSwitch включён, прокси стоит) — блок остаётся как был, а не снимается.
+- **Remove / Disable sys proxy** — `POST /api/sysproxy/release`: возвращает сохранённый системный
+  прокси сейчас; во время перезапуска / down — `down.proxy = 'released'` (попытки идут), при
+  блоке — `blocking.proxy = 'released'` (запись остаётся до connect). Событие `core/sysProxy
+  {on: false, by: 'user'}`, `own: true`. Вне перезапуска / блока ничего не делает. Восстановление
+  соединения после release снова ставит прокси.
+- **Смена настроек на ходу** (`POST /api/killswitch`) — для следующего решения про down /
+  disconnect / shutdown; уже случившееся пересматривается сразу: при down прокси ставится
+  (killSwitch включили или `downProxy: 'keep'`) или снимается (оба выключены, `remove`), кроме
+  снятого пользователем (`released` остаётся); при блоке прокси возвращается, если
+  настройка, на которой он держался (`killOnDisconnect` для `disconnect`, `killWhileClosed`
+  для `closed`, оба — с `killSwitch`), выключена; `blocking` тогда null. События `core/sysProxy`
+  при этом `own: true`.
+- **Retry** — `POST /api/retry`: попытка перезапуска сейчас, не дожидаясь паузы (следующая пауза
+  считается заново, 30 с до down не сбрасывается). Не перезапускается — ничего не делает.
+  Все три POST принимают пустое тело.
 
 ## Правила в конфиге
 
@@ -226,9 +290,12 @@ AutoService; три неудачи — отключено, `error`. Фонова
 | `GET/PUT /api/state` | снимок состояния UI / статус |
 | `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
-| `POST /api/connect` | `{plan, systemProxy}` |
+| `POST /api/connect` | `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — kill switch, см. «Kill switch» |
+| `POST /api/killswitch` | `{killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — сменить на ходу, без переподключения → status |
+| `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
+| `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
 | `POST /api/auto` | `{auto}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения → status |
-| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, recovering, restarts, auto, sourcesRev}` — `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
+| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, error, warning, exit, recovering, down, blocking, restarts, auto, sourcesRev}` — `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
 | `GET /api/events?since=N` | `{events:[…], next, first}` — журнал событий (ниже): события с `id ≥ N`, старые первыми; без `since` — последние 200. `next` — id следующего события, `first` — id самого старого из хранимых (пропуск между своим `next` и `first` = журнал обрезан или очищен). `POST /api/events` `{cat, type, level, own?, data?}` → `{id}` — событие, которое первым узнал UI (400 с причиной, если форма не та: неизвестные `cat` / `level`, `type` не `[A-Za-z][A-Za-z0-9_]{0,47}`, `own` не bool, `data` не объект или больше 4096 знаков JSON); к такому событию `log` не привязывается. `DELETE /api/events` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
@@ -338,10 +405,11 @@ Raw). Событие:
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
 | `rules/ruleSetFailed` warn | скачивание списка не удалось (не чаще, чем раз в `retryAfter` = 5 мин на список) | `{tag, url, error}` — `url` последний из пробованных |
 | `rules/ruleSetUpdated` info | старая копия списка заменена новой, или список скачан после сбоя (первая закачка отсутствующего списка — не новость) | `{tag}` |
-| `core/crashed` error | sing-box вышел сам | `{code}` |
-| `core/restarted` info | после падения запущен снова | `{attempt}` |
-| `core/restartFailed` error | попытка перезапуска не удалась | `{attempt, error}` |
-| `core/sysProxy` info / warn | системный прокси включён / возвращён (`own: true` при команде пользователя); `warn` — не вышло | `{on, error?}`, `on` — что хотели получить |
+| `core/crashed` error | sing-box вышел сам (перезапуск идёт в фоне; уведомление — по решению UI) | `{code}` |
+| `core/down` error | перезапуск не удался за 30 с от падения (см. «Down») | `{proxy: 'kept'\|'removed'\|'released'}` |
+| `core/restarted` info | после падения запущен снова | `{attempt, downMs?}` — `downMs` (мс от падения) только если успел быть down |
+| `core/restartFailed` error | попытка перезапуска не удалась (только первые три) | `{attempt, error}` |
+| `core/sysProxy` info / warn | системный прокси включён / возвращён (`own: true` при команде пользователя); при остановке jormd тоже; `warn` — не вышло. Прокси, оставленный kill switch'ем, события не пишет | `{on, by?, error?}`, `on` — что хотели получить; `by: 'user'` — кнопка Remove / Disable sys proxy (`POST /api/sysproxy/release`) |
 | `core/deprecated` warn | sing-box сообщил, что конфиг перестанет работать в новой версии; каждый текст — раз за запуск демона (в сыром логе — при каждом подключении) | `{text}` |
 
 Не пишет ядро (нет данных или это знает только UI): `sub/removed`, `sub/back`, `sub/dead` (модель
@@ -368,7 +436,8 @@ Trojan/HY2/TUIC/AnyTLS с TLS по адресу). Правка того же п�
 
 Системный прокси ставит ядро через реестр (HKCU Internet Settings), не sing-box: при
 убитом процессе sing-box не вернул бы настройки. Прежние значения сохраняются и
-возвращаются при отключении и при следующем старте после сбоя. PAC (AutoConfigURL,
+возвращаются при отключении, при остановке и при следующем старте после сбоя (kill switch может
+оставить прокси на месте — «Kill switch»; при падении sing-box прокси не снимается). PAC (AutoConfigURL,
 типично для корпоративной сети) Windows спрашивает раньше ручного прокси — ядро
 предупреждает.
 
@@ -379,7 +448,7 @@ HWID (`device.dart`) и каналом Direct / Proxy; автообновлен�
 
 ## Не сделано в MVP
 
-TUN и kill switch; Hijack DNS / FakeIP; «If unavailable» на лету и автопереключение DNS
+TUN (и kill switch для него; для системного прокси он есть, см. «Kill switch»); Hijack DNS / FakeIP; «If unavailable» на лету и автопереключение DNS
 (сейчас — при сборке конфига / переподключении); обновление гео-списков по таймеру; Decrypt
 password подписки (нет спецификации); автовыбор URL пинга (сейчас — выбор в Settings →
 Connection, по умолчанию gstatic).

@@ -120,7 +120,7 @@
 .nav-sub{font-size:13px;color:var(--t2)}
 /* NavCards on Home: 2 per row, small icon beside one-line title and summary */
 .row-nav{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
-.nav-card{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.nav-card{display:flex;align-items:center;gap:8px;padding:10px}
 .nav-card .nav-icon{width:28px;height:28px;border-radius:7px;margin-bottom:0;flex-shrink:0}
 .nav-card .nav-icon svg{width:15px;height:15px}
 .nav-text{flex:1;min-width:0}
@@ -128,3 +128,6 @@
 .nav-card .nav-sub{font-size:12px;line-height:16px}
 .nav-card .nav-title,.nav-card .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
+
+/* Home: 2px narrower side margins, so card titles and the exit IP fit whole down to ~300px */
+#view-home > .scroll{padding-left:12px;padding-right:12px}

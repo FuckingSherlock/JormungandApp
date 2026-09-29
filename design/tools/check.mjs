@@ -128,6 +128,12 @@ const SHOTS = {
   'settings-dns': async p => { await p.evaluate(() => openDnsSettings()); await settle(p); },
   'dns-form': async p => { await p.evaluate(() => { openDnsSettings(); openDnsForm(); }); await settle(p); },
   'settings-conn': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setconn'); }); await settle(p); },
+  'kill-off-confirm': async p => { await p.evaluate(() => { connCfg.killSwitch = true; connected = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); toggleKillSwitch(); }); await settle(p); },
+  'kill-on': async p => { await p.evaluate(() => { connCfg.killSwitch = true; connCfg.killOnDisconnect = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); }); await settle(p); },
+  'core-down-kept': async p => { await p.evaluate(() => { connected = true; vpn.down = { since: Date.now() - 83e3, attempt: 4, proxy: 'kept' }; renderConnState(); }); await settle(p); },
+  'core-down-direct': async p => { await p.evaluate(() => { connected = true; vpn.down = { since: Date.now() - 250e3, attempt: 9, proxy: 'removed' }; renderConnState(); }); await settle(p); },
+  'kill-blocking': async p => { await p.evaluate(() => { connected = false; vpn.blocking = { since: Date.now() - 40e3, reason: 'disconnect', proxy: 'kept' }; renderConnState(); }); await settle(p); },
+  'core-recovering': async p => { await p.evaluate(() => { connected = true; vpn.recovering = { attempt: 1, next: 4000, code: 1 }; renderConnState(); }); await settle(p); },
   'settings-notif': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setnotif'); }); await settle(p); },
   'nodes-profiles': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); expandState.default = true; renderNodes(); }); await settle(p); },
   'nodes-swipe': async p => { await tab(p, 'nodes'); await p.evaluate(() => { document.getElementById('view-nodes').classList.add('swiping'); renderNodesTabs(-170); }); },
@@ -254,6 +260,21 @@ async function runChecks() {
     const h = await page.$eval('.segments-card', el => el.getBoundingClientRect().height);
     await page.setViewportSize(vp);
     expect(h >= 90, 'mode switch card squashed to ' + h + 'px');
+  });
+
+  await check('home header at 320px: name whole, badge one line and one width in every state', async () => {
+    const vp = page.viewportSize();
+    await tab(page, 'home');
+    await page.setViewportSize({ width: 320, height: 640 });
+    const r = await page.evaluate(() => {
+      const n = document.querySelector('.app-name'), b = document.getElementById('mainToggle'), L = document.getElementById('connLabel'), was = L.textContent;
+      const boxes = ['Tap to connect', 'Connecting…', 'Connected', 'VPN is down'].map(t => { L.textContent = t; const x = b.getBoundingClientRect(); return [Math.round(x.left), Math.round(x.right), Math.round(x.height)]; });
+      L.textContent = was;
+      const titles = [...document.querySelectorAll('#view-home .nav-title, #exitIp')].filter(e => e.scrollWidth > e.clientWidth).map(e => e.textContent);
+      return { whole: n.scrollWidth <= n.clientWidth, same: boxes.every(x => x.join() === boxes[0].join()), oneLine: boxes[0][2] < 32, titles };
+    });
+    await page.setViewportSize(vp);
+    expect(r.whole && r.same && r.oneLine && !r.titles.length, JSON.stringify(r));
   });
 
   await check('header and bottom nav stay fixed while content scrolls', async () => {
@@ -614,7 +635,7 @@ async function runChecks() {
       return bad;
     });
     const bad = [];
-    await narrow.evaluate(() => { sourcesData.src1.lastError = { msg: 'Connection timed out (15 s) while fetching the subscription', at: Date.now() }; renderNodes(); });
+    await narrow.evaluate(() => { sourcesData.src1.lastError = { msg: 'Connection timed out (15 s) while fetching the subscription', at: Date.now() }; renderNodes(); connected = true; vpn.down = { since: Date.now() - 65e3, attempt: 4, proxy: 'kept' }; renderConnState(); });
     for (const t of ['home', 'nodes', 'settings', 'logs']) { await tab(narrow, t); await narrow.waitForTimeout(t === 'logs' ? 300 : 0); if (t === 'logs') await narrow.evaluate(() => document.querySelectorAll('#evList .ev-row').forEach(r => r.classList.add('open'))); bad.push(...await over()); }
     const sheets = [
       () => { switchTab('logs'); openEvFilter(); evFilterFold('auto'); evFilterFold('sub'); setShowOwn(true); },
@@ -630,7 +651,9 @@ async function runChecks() {
       () => { closeSheet('setauto'); openSheet('setnotif'); },
       () => { closeSheet('setnotif'); openDataSettings(); },
       () => { closeSheet('setdata'); showSourceQr('src1'); },
-      () => { closeSheet('actions'); openSheet('setconn'); openTestUrlPicker(); },
+      () => { closeSheet('actions'); connCfg.killSwitch = true; openSheet('setconn'); renderConnSettings(); },
+      () => { connCfg.killSwitch = false; renderConnSettings(); },
+      () => { openTestUrlPicker(); },
       () => { closeSheet('actions'); closeSheet('setconn'); openNodeForm(); document.getElementById('nf-link').value = 'vless://a@b.example:443#x\nvless://a@c.example:443#y'; parseNodeLink(); },
       () => { closeSheet('nodeform'); connected = true; return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); },
     ];
@@ -2460,6 +2483,109 @@ async function runChecks() {
       await wait(300);
       out.srcDown = toasts.length === 1 && toasts[0].m.includes(sourcesData[sid].name) && /support/.test(toasts[0].m) && evState.list.filter(e => e.type === 'dead').length === dead0 + 1;
       liveAutoStatus(null);
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('Kill switch: turning it off while connected or blocked asks first; on / off while idle does not', async () => {
+    const r = await page.evaluate(async () => {
+      const out = {}, wait = ms => new Promise(r => setTimeout(r, ms)), was = connected;
+      const sw = () => document.querySelector('#conn-settings [data-key="killSwitch"] .mini-toggle');
+      const asked = () => document.getElementById('sh-actions').classList.contains('open');
+      switchTab('settings'); openSheet('setconn');
+      connected = false; connCfg.killSwitch = false; renderConnSettings();
+      sw().click(); await wait(30);
+      out.onFree = connCfg.killSwitch === true && !asked();
+      sw().click(); await wait(30);
+      out.offIdleFree = connCfg.killSwitch === false && !asked();
+      connected = true; connCfg.killSwitch = true; renderConnSettings();
+      sw().click(); await wait(30);
+      out.asks = asked() && connCfg.killSwitch === true && /Turn the kill switch off/.test(document.getElementById('sh-actions').textContent);
+      closeSheet('actions'); await wait(30);
+      out.kept = connCfg.killSwitch === true;
+      sw().click(); await wait(30);
+      [...document.querySelectorAll('#sh-actions .menu-row')].find(e => /Turn it off/.test(e.textContent)).click(); await wait(30);
+      out.off = connCfg.killSwitch === false;
+      connected = was; closeSheet('setconn'); renderConnSettings();
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('Kill switch: sub-toggles only with it on, killWhileClosed needs autostart + autoconnect, downProxy row only with it off; saved; recovering is invisible; down keeps the power button on with the right buttons; release / retry; power tap while down disconnects; blocking plaque', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(async () => {
+      const out = {}, wait = ms => new Promise(r => setTimeout(r, ms)), toasts = []; const t0 = window.toast; window.toast = m => toasts.push(m);
+      const has = k => !!document.querySelector(`#conn-settings [data-key="${k}"]`);
+      switchTab('settings'); openSheet('setconn');
+      out.off = has('killSwitch') && !has('killOnDisconnect') && !has('killWhileClosed') && has('downProxy') && connCfg.downProxy === 'remove';
+      connCfg.downProxy = 'keep'; renderConnSettings();
+      out.chip = document.querySelector('#conn-settings [data-key="downProxy"] .chip.active').textContent === 'Keep it';
+      connCfg.killSwitch = true; renderConnSettings();
+      out.on = !has('downProxy') && has('killOnDisconnect') && has('killWhileClosed');
+      const wc = () => document.querySelector('#conn-settings [data-key="killWhileClosed"]');
+      out.dim = wc().classList.contains('dim') && !wc().querySelector('.mini-toggle.on');
+      wc().click(); await wait(50);
+      out.offer = document.getElementById('sh-actions').classList.contains('open') && !connCfg.killWhileClosed;
+      genCfg.launchAtStartup = genCfg.connectOnLaunch = true; closeSheet('actions'); renderConnSettings();
+      out.enabled = !wc().classList.contains('dim');
+      wc().querySelector('.mini-toggle').click();
+      out.toggled = connCfg.killWhileClosed === true && !!wc().querySelector('.mini-toggle.on');
+      genCfg.connectOnLaunch = false; setGenCfg('launchAtStartup', true);
+      out.dimAgain = wc().classList.contains('dim');
+      out.saved = ['killSwitch', 'killOnDisconnect', 'killWhileClosed', 'downProxy'].every(k => k in liveSnapshot().connCfg);
+      closeSheet('setconn'); switchTab('home');
+      // a background restart: nothing to see
+      connected = true; connecting = false; toasts.length = 0;
+      const label = () => document.getElementById('connLabel').textContent, pw = () => document.getElementById('powerBtn').className;
+      const before = label() + '|' + pw();
+      liveAutoStatus({ connected: true, recovering: { attempt: 1, next: 1000, code: 1 }, down: null });
+      await wait(100);
+      out.recovering = label() + '|' + pw() === before && label() === 'Connected' && !toasts.length && !document.querySelector('#vpnAlert .vpn-alert');
+      // down, proxy kept: blocked wording, both buttons, power button still on
+      liveAutoStatus({ connected: true, recovering: { attempt: 4 }, down: { since: Date.now() - 65e3, attempt: 4, proxy: 'kept' } });
+      const btns = () => [...document.querySelectorAll('#vpnAlert button')].map(b => b.textContent);
+      out.kept = /internet is blocked/.test(document.querySelector('#vpnAlert').textContent) && btns().join() === 'Retry,Disable sys proxy'
+        && document.getElementById('powerBtn').classList.contains('on') && label() === 'VPN is down' && /VPN is down · .*retrying/.test(document.getElementById('dockDown').textContent);
+      out.noDisconnect = !btns().some(b => /disconnect/i.test(b));
+      const rel = backend.releaseSysProxy; let released = 0; backend.releaseSysProxy = () => { released++; return Promise.resolve(); };
+      [...document.querySelectorAll('#vpnAlert button')].find(b => b.textContent === 'Disable sys proxy').click(); await wait(50);
+      backend.releaseSysProxy = rel;
+      out.release = released === 1 && /traffic goes direct/.test(document.querySelector('#vpnAlert').textContent) && btns().join() === 'Retry';
+      // down, proxy removed
+      liveAutoStatus({ connected: true, down: { since: Date.now() - 65e3, attempt: 4, proxy: 'removed' } });
+      out.direct = /traffic goes direct/.test(document.querySelector('#vpnAlert').textContent) && btns().join() === 'Retry';
+      // settings apply live while down: kill switch on → proxy kept; off + Remove → removed; autoconnect ungates killWhileClosed
+      renderConnSettings(); mockKill = null; connCfg.killSwitch = true; connCfg.downProxy = 'remove'; renderConnSettings(); await wait(50);
+      out.liveOn = !!mockKill && mockKill.killSwitch === true && mockKill.killWhileClosed === false && vpn.down.proxy === 'kept' && /internet is blocked/.test(document.querySelector('#vpnAlert').textContent);
+      setGenCfg('connectOnLaunch', true); await wait(50);
+      out.liveGate = mockKill.killWhileClosed === true;
+      connCfg.killSwitch = false; renderConnSettings(); await wait(50);
+      out.liveOff = mockKill.killSwitch === false && vpn.down.proxy === 'removed';
+      connCfg.downProxy = 'keep'; renderConnSettings(); await wait(50);
+      out.liveKeep = mockKill.downProxy === 'keep' && vpn.down.proxy === 'kept';
+      connCfg.downProxy = 'remove'; renderConnSettings();
+      // Retry recovers (mock)
+      vpn.down = { since: Date.now() - 65e3, attempt: 4, proxy: 'kept' }; renderConnState();
+      document.querySelector('#vpnAlert button').click(); await wait(1000);
+      out.retry = !vpn.down && !document.querySelector('#vpnAlert .vpn-alert') && label() === 'Connected';
+      // power tap while down = disconnect (blocking plaque with kill + killOnDisconnect)
+      connCfg.killSwitch = true; connCfg.killOnDisconnect = true;
+      vpn.down = { since: Date.now() - 65e3, attempt: 4, proxy: 'kept' }; renderConnState();
+      toggleMain(); await wait(100);
+      out.tap = connected === false && !vpn.down && !!vpn.blocking && /Kill switch: internet is blocked/.test(document.querySelector('#vpnAlert').textContent)
+        && btns().join() === 'Remove' && label() === 'Tap to connect';
+      [...document.querySelectorAll('#vpnAlert button')][0].click(); await wait(50);
+      out.remove = !document.querySelector('#vpnAlert .vpn-alert') && vpn.blocking.proxy === 'released';
+      // a block is lifted by turning its setting off (settings reach the core while blocked, not only connected)
+      vpn.blocking = { since: Date.now(), reason: 'disconnect', proxy: 'kept' }; renderConnState();
+      connCfg.killOnDisconnect = false; renderConnSettings(); await wait(50);
+      out.lift = !vpn.blocking && !document.querySelector('#vpnAlert .vpn-alert');
+      connCfg.killSwitch = false; connCfg.killOnDisconnect = false; vpn.blocking = null; renderConnState();
+      out.crashDefault = notifCfg.coreCrash === false;
+      window.toast = t0;
       return out;
     });
     expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));

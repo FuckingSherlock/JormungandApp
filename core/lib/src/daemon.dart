@@ -33,8 +33,9 @@ import 'updater.dart';
 /// which this server never grants, so other web pages cannot drive it) and a loopback
 /// Host (against DNS rebinding); with `--lan` the machine's own LAN addresses count too.
 class Daemon {
-  /// [exitCheck] and [sysProxy] are for tests (no probes past loopback; a fake system
-  /// proxy, so a test never touches the real registry).
+  /// [exitCheck], [sysProxy], [process], [timer] and [now] are for tests (no probes past
+  /// loopback; a fake system proxy, so a test never touches the real registry; a fake
+  /// sing-box process; the restart waits and the clock under the test's control).
   Daemon({
     required this.singBox,
     required this.dataDir,
@@ -42,8 +43,13 @@ class Daemon {
     this.lanHosts = const {},
     this.exitCheck = checkExitIp,
     SystemProxy? sysProxy,
+    SingBoxProcess? process,
+    Timer Function(Duration, void Function())? timer,
+    DateTime Function()? now,
   })
-      : main = SingBoxProcess(singBox, p.join(dataDir, 'run', 'main')),
+      : main = process ?? SingBoxProcess(singBox, p.join(dataDir, 'run', 'main')),
+        _timer = timer ?? Timer.new,
+        _now = now ?? DateTime.now,
         sysProxy = sysProxy ?? SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))),
         ruleSets = RuleSetCache(p.join(dataDir, 'rulesets')) {
     main.onExit = _crashed;
@@ -103,11 +109,27 @@ class Daemon {
   Map<String, dynamic>? _plan;
   bool _sysWanted = false;
   AutoService? _auto;
-  // sing-box stopped on its own: {attempt, of, code, next} while restarting it
+  final Timer Function(Duration, void Function()) _timer;
+  final DateTime Function() _now;
+  // sing-box stopped on its own: {attempt, code, next} while restarting it (endless, until
+  // the user disconnects)
   Map<String, dynamic>? _recovering;
   int _restarts = 0, _attempt = 0;
-  DateTime _upSince = DateTime.now();
+  late DateTime _upSince = _now();
   static const _backoff = [Duration(seconds: 1), Duration(seconds: 4), Duration(seconds: 15)];
+  static const _slowRetry = Duration(seconds: 30); // after the third
+  static const _downAfter = Duration(seconds: 30); // since the crash: "down"
+  // While restarting: when it went down (null = not yet, invisible to the user), what the
+  // system proxy was then, and whether the user pressed "Disable sys proxy" (_released).
+  DateTime? _downSince;
+  String _downProxy = 'kept';
+  bool _released = false;
+  Completer<bool>? _wake; // the restart's wait; completed early by a retry / connect / disconnect
+  // Kill switch: the fields arrive with connect (_applyKill)
+  bool _killSwitch = false, _killOnDisconnect = false, _killWhileClosed = false;
+  String _downProxyMode = 'remove'; // 'remove' | 'keep', only when the kill switch is off
+  // Not connected, and the system proxy is deliberately left on: {since, reason, proxy}
+  Map<String, dynamic>? _blocking;
   // starts and stops of sing-box one at a time (a user's connect vs a crash restart)
   Future<void> _serial = Future.value();
 
@@ -120,17 +142,66 @@ class Daemon {
   Future<void> init() async {
     await Directory(dataDir).create(recursive: true);
     events.load(); // trims an old journal at start
-    await _sysOff(); // left set by a crash
+    final m = _readKillMarker();
+    if (m != null && m['keepWhileClosed'] == true && sysProxy.isSet) {
+      // left on purpose (kill switch while the app is closed): internet stays blocked
+      _blocking = {'since': (m['since'] as num?)?.toInt() ?? _now().millisecondsSinceEpoch, 'reason': 'closed', 'proxy': 'kept'};
+      log.note('warn', 'System proxy kept from the last run (kill switch): no internet until connect or Remove');
+    } else {
+      await _sysOff(); // left set by a crash
+    }
     _recheckExit(); // the direct IP, shown on Home before any connect
     updater.start();
   }
 
   Future<void> shutdown() async {
     _connectSeq++;
+    _wakeUp();
     _stopAuto();
     updater.stop();
     await main.stop();
-    await sysProxy.restore();
+    if (_killSwitch && _killWhileClosed && sysProxy.isSet) {
+      _writeKillMarker(); // left set: the next start reports it as blocking
+    } else {
+      await _sysOff();
+    }
+  }
+
+  // The kill switch's "also while the app is closed" has to outlive the process: the next
+  // start tells a proxy left on purpose from one a crash left behind by this file.
+  File get _killFile => File(p.join(dataDir, 'kill.json'));
+
+  Map<String, dynamic>? _readKillMarker() {
+    try {
+      final f = _killFile;
+      if (!f.existsSync()) return null;
+      return (jsonDecode(f.readAsStringSync()) as Map).cast<String, dynamic>();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _writeKillMarker() {
+    try {
+      final f = _killFile;
+      if (_killSwitch && _killWhileClosed) {
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync(jsonEncode({'keepWhileClosed': true, 'since': _now().millisecondsSinceEpoch}));
+      } else if (f.existsSync()) {
+        f.deleteSync();
+      }
+    } catch (_) {}
+  }
+
+  /// The kill switch fields of a connect body (a missing one stays as it was): killSwitch,
+  /// killOnDisconnect (only with killSwitch), killWhileClosed (only with killSwitch),
+  /// downProxy 'remove' | 'keep' (only without killSwitch).
+  void _applyKill(Map<String, dynamic> body) {
+    if (body['killSwitch'] is bool) _killSwitch = body['killSwitch'] as bool;
+    if (body['killOnDisconnect'] is bool) _killOnDisconnect = body['killOnDisconnect'] as bool;
+    if (body['killWhileClosed'] is bool) _killWhileClosed = body['killWhileClosed'] as bool;
+    if (body['downProxy'] is String) _downProxyMode = body['downProxy'] == 'keep' ? 'keep' : 'remove';
+    _writeKillMarker();
   }
 
   /// One journal entry; [note] also goes to the raw log first, so the event links to it.
@@ -153,27 +224,29 @@ class Daemon {
     }
   }
 
-  Future<void> _sysOff({bool own = false}) async {
+  Future<void> _sysOff({bool own = false, String? by}) async {
     final was = sysProxy.isSet;
     try {
       await sysProxy.restore();
     } catch (e) {
-      _event('core', 'sysProxy', 'warn', {'on': false, 'error': '$e'}, own: own, note: 'System proxy not restored: $e');
+      _event('core', 'sysProxy', 'warn', {'on': false, 'by': ?by, 'error': '$e'}, own: own, note: 'System proxy not restored: $e');
       rethrow;
     }
-    if (was) _event('core', 'sysProxy', 'info', {'on': false}, own: own, note: 'System proxy back off');
+    if (was) _event('core', 'sysProxy', 'info', {'on': false, 'by': ?by}, own: own, note: 'System proxy back off');
   }
 
   /// Auto in the core while connected (auto.dart). A move to another route or server
   /// changes where traffic leaves: the exit is checked again.
   void _startAuto(Map<String, dynamic> plan) {
     _stopAuto();
-    final auto = _auto = AutoService(main.api!, plan,
+    final api = main.api;
+    if (api == null) return; // no API service (a test's fake process)
+    final auto = _auto = AutoService(api, plan,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         note: main.note);
     // requests that failed: sing-box's API service streams every closed connection
-    _closed = main.api!.closedConnections().listen(auto.onClosed, onError: (Object e) => main.note('auto: connection events stopped: $e'));
+    _closed = api.closedConnections().listen(auto.onClosed, onError: (Object e) => main.note('auto: connection events stopped: $e'));
     auto.switches.listen((s) {
       main.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
       if (s.reason == 'fastest') {
@@ -217,10 +290,11 @@ class Daemon {
     _auto = null;
   }
 
-  /// sing-box stopped on its own. The system proxy goes back at once (browsers would
-  /// otherwise point at a dead port), then sing-box is started again with the same plan
-  /// on the route Auto was on, up to [_backoff] tries; the count starts over once it ran
-  /// for a minute.
+  /// sing-box stopped on its own. The system proxy is NOT touched: sing-box is started
+  /// again in the background with the same plan on the route Auto was on, invisibly to the
+  /// user (`connected` stays true), after 1, 4, 15 s and then every 30 s, for as long as the
+  /// user stays connected. The count of tries starts over once it ran for a minute.
+  /// 30 s after the crash the connection is "down" ([_goDown]).
   void _crashed(int code) {
     final plan = _plan;
     if (plan == null) return;
@@ -228,30 +302,38 @@ class Daemon {
     _stopAuto();
     main.note('sing-box stopped on its own (exit code $code)');
     events.add('core', 'crashed', 'error', data: {'code': code});
-    if (DateTime.now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
+    if (_now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
+    _downSince = null;
+    _released = false;
     _recover(seq, at == null ? plan : {...plan, 'current': at}, code);
   }
 
   Future<void> _recover(int seq, Map<String, dynamic> plan, int code) async {
-    _recovering = {'attempt': _attempt + 1, 'of': _backoff.length, 'code': code};
-    try {
-      await _sysOff();
-    } catch (e) {
-      main.note('system proxy not restored: $e');
-    }
+    final crashed = _now();
+    _recovering = {'attempt': _attempt + 1, 'code': code};
     while (seq == _connectSeq) {
-      if (_attempt >= _backoff.length) {
-        _recovering = null;
-        _plan = null;
-        _tunnelPort = null;
-        _error = 'sing-box stopped (exit code $code) and did not start again after ${_backoff.length} tries';
-        _event('conn', 'disconnected', 'error', {'by': 'error', 'reason': _error}, note: 'Disconnected: $_error');
-        _recheckExit(); // traffic goes direct now
-        return;
+      final wait = _attempt < _backoff.length ? _backoff[_attempt] : _slowRetry;
+      _attempt++;
+      _recovering = {'attempt': _attempt, 'code': code, 'next': _now().add(wait).millisecondsSinceEpoch};
+      var woke = false;
+      var left = wait;
+      if (_downSince == null) {
+        final toDown = crashed.add(_downAfter).difference(_now());
+        if (toDown <= wait) {
+          // "down" comes before the next try
+          if (toDown > Duration.zero) woke = await _pause(toDown);
+          if (seq != _connectSeq) return;
+          if (woke) {
+            left = Duration.zero;
+          } else {
+            await _goDown(seq);
+            if (seq != _connectSeq) return;
+            if (toDown > Duration.zero) left = wait - toDown;
+          }
+        }
       }
-      final wait = _backoff[_attempt++];
-      _recovering = {'attempt': _attempt, 'of': _backoff.length, 'code': code, 'next': DateTime.now().add(wait).millisecondsSinceEpoch};
-      await Future<void>.delayed(wait);
+      if (!woke && left > Duration.zero) woke = await _pause(left);
+      if (seq != _connectSeq) return;
       final ok = await _locked(() async {
         if (seq != _connectSeq) return true; // connected or disconnected meanwhile
         final RuleSetFetch lists;
@@ -261,16 +343,23 @@ class Daemon {
           lists = l;
           warnings.addAll(w);
         } catch (e) {
-          main.note('restart $_attempt of ${_backoff.length} failed: $e');
-          events.add('core', 'restartFailed', 'error', data: {'attempt': _attempt, 'error': '$e'});
+          main.note('restart $_attempt failed: $e');
+          // the journal gets the first ones only: a dead server retried every 30 s would fill it
+          if (_attempt <= _backoff.length) events.add('core', 'restartFailed', 'error', data: {'attempt': _attempt, 'error': '$e'});
           return false;
         }
         _plan = plan;
-        _upSince = DateTime.now();
+        _upSince = _now();
         _recovering = null;
         _restarts++;
-        _event('core', 'restarted', 'info', {'attempt': _attempt}, note: 'sing-box started again (attempt $_attempt)');
-        if (_sysWanted) {
+        final wasDown = _downSince != null;
+        final downMs = _now().difference(crashed).inMilliseconds;
+        _downSince = null;
+        _released = false;
+        _event('core', 'restarted', 'info', {'attempt': _attempt, if (wasDown) 'downMs': downMs},
+            note: 'sing-box started again (attempt $_attempt)');
+        if (_sysWanted && !sysProxy.isSet) {
+          // it was taken off while down (or released by the user): the connection is back in full
           try {
             warnings.add(await _sysOn(own: false) ?? '');
           } catch (e) {
@@ -287,6 +376,95 @@ class Daemon {
     }
   }
 
+  /// Waits [d]; true = cut short ([_wakeUp]: a retry, or a connect / disconnect / shutdown).
+  Future<bool> _pause(Duration d) async {
+    final c = _wake = Completer<bool>();
+    final t = _timer(d, () {
+      if (!c.isCompleted) c.complete(false);
+    });
+    final woke = await c.future;
+    t.cancel();
+    if (identical(_wake, c)) _wake = null;
+    return woke;
+  }
+
+  void _wakeUp() {
+    final c = _wake;
+    if (c != null && !c.isCompleted) c.complete(true);
+  }
+
+  /// 30 s of restarting without success: `status.down`, the event. The system proxy stays
+  /// with the kill switch on and with downProxy 'keep' (traffic is blocked for programs that
+  /// obey it); otherwise it goes back (traffic is direct). Tries go on either way.
+  Future<void> _goDown(int seq) async {
+    if (!_killSwitch && _downProxyMode == 'remove' && !_released && sysProxy.isSet) {
+      try {
+        await _sysOff();
+      } catch (e) {
+        main.note('system proxy not restored: $e');
+      }
+      if (seq == _connectSeq) _recheckExit(); // traffic goes direct now
+    }
+    if (seq != _connectSeq) return;
+    _downSince = _now();
+    _downProxy = _released ? 'released' : (sysProxy.isSet ? 'kept' : 'removed');
+    _event('core', 'down', 'error', {'proxy': _downProxy}, note: 'Connection down: sing-box does not start (system proxy $_downProxy)');
+  }
+
+  /// POST /api/killswitch: the same four fields as a connect's, changed while connected (or
+  /// blocked), no restart of sing-box. They count for the next down / disconnect / shutdown;
+  /// what already happened is re-decided at once: while down, the system proxy is set
+  /// again (kill switch on, or downProxy 'keep') or taken off (both off, 'remove'), unless the
+  /// user released it; while blocking, the proxy goes back when the setting that justified the
+  /// block (killOnDisconnect / killWhileClosed, with killSwitch) is off now.
+  Future<Map<String, dynamic>> _killSwitchSettings(Map<String, dynamic> body) async {
+    _applyKill(body);
+    try {
+      if (_downSince != null && !_released) {
+        final keep = _killSwitch || _downProxyMode == 'keep';
+        if (keep && !sysProxy.isSet && _sysWanted) {
+          await _sysOn(own: true);
+        } else if (!keep && sysProxy.isSet) {
+          await _sysOff(own: true);
+          _recheckExit(); // traffic goes direct now
+        }
+        _downProxy = sysProxy.isSet ? 'kept' : 'removed';
+      }
+      final b = _blocking;
+      if (b != null && b['proxy'] == 'kept') {
+        final holds = _killSwitch && (b['reason'] == 'closed' ? _killWhileClosed : _killOnDisconnect);
+        if (!holds) {
+          await _sysOff(own: true);
+          _blocking = null;
+        }
+      }
+    } catch (e) {
+      main.note('kill switch settings: the system proxy was not changed: $e'); // the event has it
+    }
+    return _status();
+  }
+
+  /// POST /api/sysproxy/release: the user takes the system proxy off now ("Disable sys proxy"
+  /// in the down alert, "Remove" on the blocked plaque). Tries to restart go on.
+  Future<Map<String, dynamic>> _release() async {
+    if (_recovering != null || _downSince != null) {
+      _released = true;
+      await _sysOff(own: true, by: 'user');
+      if (_downSince != null) _downProxy = 'released';
+    } else if (_blocking != null && _blocking!['proxy'] == 'kept') {
+      await _sysOff(own: true, by: 'user');
+      _blocking = {..._blocking!, 'proxy': 'released'};
+    }
+    return _status();
+  }
+
+  /// POST /api/retry: a restart now, instead of waiting out the pause (the next pause
+  /// starts over). Nothing to do unless sing-box is being restarted.
+  Future<Map<String, dynamic>> _retry() async {
+    if (_recovering != null) _wakeUp();
+    return _status();
+  }
+
   Future<void> handle(HttpRequest req) async {
     final res = req.response;
     try {
@@ -297,7 +475,7 @@ class Daemon {
       if (!path.startsWith('/api/')) return await _send(res, 404, {'error': 'not found'});
       if (req.headers.value('x-jorm') != '1') return await _send(res, 403, {'error': 'missing X-Jorm header'});
       final body = req.method == 'POST' || req.method == 'PUT'
-          ? (jsonDecode(await utf8.decodeStream(req)) as Map).cast<String, dynamic>()
+          ? await _readBody(req)
           : const <String, dynamic>{};
       if (req.method == 'POST' && path == '/api/ping') return await _ping(body, res);
       if (req.method == 'POST' && path == '/api/speedtest') return await _speedTest(body, res);
@@ -327,6 +505,9 @@ class Daemon {
         'POST /api/parse' => Future.value(_parse(body)),
         'POST /api/connect' => _connect(body),
         'POST /api/disconnect' => _disconnect(),
+        'POST /api/sysproxy/release' => _release(),
+        'POST /api/retry' => _retry(),
+        'POST /api/killswitch' => _killSwitchSettings(body),
         'POST /api/auto' => _autoSettings(body),
         'POST /api/exit' => Future(() {
             _recheckExit();
@@ -343,6 +524,12 @@ class Daemon {
       stderr.writeln('[jormd] ${req.method} ${req.uri.path}: $e\n$st');
       return await _send(res, 500, {'error': '$e'});
     }
+  }
+
+  // An empty body is `{}` (release / retry / disconnect carry nothing).
+  Future<Map<String, dynamic>> _readBody(HttpRequest req) async {
+    final text = await utf8.decodeStream(req);
+    return text.trim().isEmpty ? const {} : (jsonDecode(text) as Map).cast<String, dynamic>();
   }
 
   Future<void> _send(HttpResponse res, int code, Object body) async {
@@ -386,7 +573,8 @@ class Daemon {
   }
 
   /// `connected` stays true while a crashed sing-box is being started again
-  /// (`recovering`); `auto` = what Auto really uses and measured (auto.dart → toJson).
+  /// (`recovering`, then `down` after 30 s); `blocking` = not connected and the system proxy
+  /// left on by the kill switch; `auto` = what Auto really uses and measured (auto.dart → toJson).
   Future<Map<String, dynamic>> _status() async => {
         'connected': main.running || _recovering != null,
         'systemProxy': sysProxy.isSet,
@@ -394,6 +582,10 @@ class Daemon {
         'warning': _warning,
         'exit': _exit,
         'recovering': _recovering,
+        'down': _downSince == null
+            ? null
+            : {'since': _downSince!.millisecondsSinceEpoch, 'attempt': _attempt, 'proxy': _downProxy},
+        'blocking': _blocking,
         'restarts': _restarts,
         'auto': await _autoState(),
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
@@ -493,7 +685,13 @@ class Daemon {
   Future<Map<String, dynamic>> _connect(Map<String, dynamic> body, {bool own = true}) async {
     final plan = (body['plan'] as Map).cast<String, dynamic>();
     final seq = ++_connectSeq;
+    _wakeUp();
     _recovering = null;
+    _downSince = null;
+    _released = false;
+    final wasBlocking = _blocking;
+    _blocking = null; // a connect ends the blocking
+    _applyKill(body);
     _stopAuto();
     _error = null;
     _warning = null;
@@ -504,7 +702,7 @@ class Daemon {
         final (lists, warnings) = await _startSingBox(plan);
         _plan = plan;
         _sysWanted = body['systemProxy'] == true;
-        _upSince = DateTime.now();
+        _upSince = _now();
         _attempt = 0;
         _startAuto(plan);
         _recheckExit();
@@ -522,7 +720,11 @@ class Daemon {
         _error = '$e';
         log.note('error', 'Connect failed: $e');
         events.add('conn', 'connectFailed', 'error', own: own, data: {'reason': '$e'});
-        await _sysOff(own: own);
+        if (wasBlocking != null && _killSwitch && sysProxy.isSet) {
+          _blocking = wasBlocking; // still blocked: only a connect that works, or Remove, ends it
+        } else {
+          await _sysOff(own: own);
+        }
         rethrow;
       }
     });
@@ -556,9 +758,12 @@ class Daemon {
 
   Future<Map<String, dynamic>> _disconnect() async {
     final seq = ++_connectSeq;
+    _wakeUp(); // ends the restart's retries
     final was = main.running || _plan != null || _recovering != null;
     _plan = null;
     _recovering = null;
+    _downSince = null;
+    _released = false;
     _stopAuto();
     await _locked(() async {
       if (seq == _connectSeq) await main.stop();
@@ -566,7 +771,13 @@ class Daemon {
     _tunnelPort = null;
     log.note('info', 'Disconnected');
     if (was) events.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'});
-    await _sysOff(own: true);
+    if (_killSwitch && _killOnDisconnect && sysProxy.isSet && (was || _blocking != null)) {
+      // kill switch, "also after I disconnect": the proxy stays, nothing gets out
+      _blocking ??= {'since': _now().millisecondsSinceEpoch, 'reason': 'disconnect', 'proxy': 'kept'};
+    } else {
+      _blocking = null;
+      await _sysOff(own: true);
+    }
     _recheckExit(); // now the direct IP
     _error = null;
     _warning = null;

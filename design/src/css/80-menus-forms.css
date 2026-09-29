@@ -19,6 +19,9 @@
 .set-input::placeholder{color:var(--t3)}
 .set-input:focus{outline:none}
 .set-row .chip-row{padding:0}
+.set-row.set-sub{padding-left:30px;background:rgba(255,255,255,.02)}   /* sub-option of the row above (Kill switch) */
+.set-row.dim{cursor:pointer}
+.set-row.dim .set-label,.set-row.dim .mini-toggle{opacity:.45}
 .set-row.stack{flex-direction:column;align-items:stretch;gap:8px}
 .section-toggle{display:flex;align-items:center;gap:6px;padding:8px 18px 4px;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;cursor:pointer}
 .section-toggle svg{transition:transform .2s}

@@ -22,6 +22,16 @@
 .power-tab.busy .power-body{fill:rgba(var(--accent-rgb),.12);stroke:var(--accent);transition-duration:.35s}
 .power-tab.busy .power-icon{animation:power-pulse 1s ease-in-out infinite}
 @keyframes power-pulse{50%{opacity:.4}}
+/* VPN is down (50-home.js): the button stays on, in red; a line in the dock and an alert on Home */
+.power-tab.down{color:var(--danger);filter:drop-shadow(0 0 8px rgba(var(--danger-rgb),.28))}
+.power-tab.down .power-body{fill:rgba(var(--danger-rgb),.14);stroke:var(--danger)}
+.conn-badge.down{background:rgba(var(--danger-rgb),.12);border-color:rgba(var(--danger-rgb),.3);color:var(--danger)}
+.conn-badge.down .conn-dot{background:var(--danger)}
+.dock-down{display:none;padding:8px 14px 0;font-size:12px;font-weight:600;color:var(--danger);text-align:left}
+.dock.down .dock-down{display:block}
+.vpn-alert{margin:0 0 12px;background:rgba(var(--danger-rgb),.09);border-color:rgba(var(--danger-rgb),.35);color:var(--danger)}
+.vpn-alert .src-error-title{color:var(--danger)}
+.vpn-alert-btns{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
 .dock-profile{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;cursor:pointer}
 .dock-profile:active{background:rgba(255,255,255,.02)}
 

@@ -6,6 +6,7 @@
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
+let mockKill = null;   // the last kill switch settings the mock "core" got
 let backend = {
   live: false,
   // First fetch of a new subscription: fills s.nodes (and usage / expire).
@@ -53,9 +54,36 @@ let backend = {
   // like the core: the exit is checked again after every connect
   connect()    { exitInfo = null; return wait(1100).then(() => {
     exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' };
+    vpn.blocking = null;
     mockEventAdd('conn', 'connected', 'info', { entry: effectiveConnectId(), mode: segState.mode, route: segState.route }, { own: true, raw: 'Connected: ' + entryLabel(effectiveConnectId()) });
   }); },
-  disconnect() { mockEventAdd('conn', 'disconnected', 'info', { by: 'user' }, { own: true }); return Promise.resolve(); },
+  // Kill switch + "Also after I disconnect": the core keeps the system proxy, status.blocking says so.
+  disconnect() {
+    mockEventAdd('conn', 'disconnected', 'info', { by: 'user' }, { own: true });
+    vpn.blocking = connCfg.killSwitch && connCfg.killOnDisconnect ? { since: Date.now(), reason: 'disconnect', proxy: 'kept' } : null;
+    renderConnState();
+    return Promise.resolve();
+  },
+  // The down alert / the blocking plaque: POST /api/sysproxy/release (restore the saved system proxy now)
+  // and POST /api/retry (try a restart right now). The mock recovers on Retry.
+  releaseSysProxy() { mockEventAdd('core', 'sysProxy', 'info', { on: false, by: 'user' }, { own: true }); return Promise.resolve(); },
+  // POST /api/killswitch: while down the proxy follows the new settings (a released one stays released).
+  killSettings(cfg) {
+    mockKill = cfg;
+    if (vpn.down && vpn.down.proxy !== 'released') vpn.down.proxy = cfg.killSwitch || cfg.downProxy === 'keep' ? 'kept' : 'removed';
+    // the setting that justified a block is off now: the proxy goes, the block with it (as the core does)
+    const b = vpn.blocking;
+    if (b && !(cfg.killSwitch && (b.reason === 'closed' ? cfg.killWhileClosed : cfg.killOnDisconnect))) vpn.blocking = null;
+    renderConnState();
+    return Promise.resolve();
+  },
+  retry() {
+    return wait(700).then(() => {
+      const downMs = vpn.down ? Date.now() - vpn.down.since : 0;
+      vpn.down = vpn.recovering = null;
+      mockEventAdd('core', 'restarted', 'info', { attempt: 4, downMs });
+    });
+  },
   // Settings → Auto mode changed while connected: the core's Auto takes it as is (no reconnect).
   autoSettings(auto) { return Promise.resolve(); },
   // Live traffic (see renderTraffic): the mock keeps the numbers the cards show.

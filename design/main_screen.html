@@ -106,17 +106,22 @@ body {
   min-height:100vh;
 }
 
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 12px}
-.app-name{font-size:22px;font-weight:600;color:var(--t1);letter-spacing:-.3px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 20px 6px}
+/* the name grows with the room left by the badge ("Tap to connect" at 320px → ~22px), up to 25px;
+   ellipsis only below 320px; the badge never wraps */
+.app-name{font-size:clamp(18px,calc((100vw - 186px) / 6.1),25px);font-weight:600;color:var(--t1);letter-spacing:-.3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .conn-badge {
-  display:flex;align-items:center;gap:6px;
+  display:flex;align-items:center;gap:6px;flex-shrink:0;white-space:nowrap;
   background:rgba(var(--active-rgb),.12);border:1px solid rgba(var(--active-rgb),.25);
   border-radius:20px;padding:5px 12px;
   font-size:14px;font-weight:600;color:var(--active);cursor:pointer;
 }
 .conn-badge.off{background:rgba(var(--muted-rgb),.10);border-color:rgba(var(--muted-rgb),.22);color:var(--muted)}
-.conn-dot{width:6px;height:6px;border-radius:50%;background:var(--active)}
+.conn-label{display:grid;justify-items:center}
+.conn-label > *{grid-area:1/1}
+.conn-label > [aria-hidden]{visibility:hidden}
+.conn-dot{order:1;width:6px;height:6px;flex-shrink:0;border-radius:50%;background:var(--active)}
 .conn-badge.off .conn-dot{background:var(--muted)}
 
 /* ── Scroll ── */
@@ -252,7 +257,7 @@ body {
 .nav-sub{font-size:13px;color:var(--t2)}
 /* NavCards on Home: 2 per row, small icon beside one-line title and summary */
 .row-nav{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
-.nav-card{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.nav-card{display:flex;align-items:center;gap:8px;padding:10px}
 .nav-card .nav-icon{width:28px;height:28px;border-radius:7px;margin-bottom:0;flex-shrink:0}
 .nav-card .nav-icon svg{width:15px;height:15px}
 .nav-text{flex:1;min-width:0}
@@ -260,6 +265,9 @@ body {
 .nav-card .nav-sub{font-size:12px;line-height:16px}
 .nav-card .nav-title,.nav-card .nav-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
+
+/* Home: 2px narrower side margins, so card titles and the exit IP fit whole down to ~300px */
+#view-home > .scroll{padding-left:12px;padding-right:12px}
 /* ── Bottom nav ── */
 .bottomnav{position:relative;z-index:60;display:flex;justify-content:space-around;align-items:center;padding:4px 0 max(6px, env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--surface)}
 .nav-btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 16px;cursor:pointer;opacity:.45}
@@ -610,6 +618,16 @@ body {
 .power-tab.busy .power-body{fill:rgba(var(--accent-rgb),.12);stroke:var(--accent);transition-duration:.35s}
 .power-tab.busy .power-icon{animation:power-pulse 1s ease-in-out infinite}
 @keyframes power-pulse{50%{opacity:.4}}
+/* VPN is down (50-home.js): the button stays on, in red; a line in the dock and an alert on Home */
+.power-tab.down{color:var(--danger);filter:drop-shadow(0 0 8px rgba(var(--danger-rgb),.28))}
+.power-tab.down .power-body{fill:rgba(var(--danger-rgb),.14);stroke:var(--danger)}
+.conn-badge.down{background:rgba(var(--danger-rgb),.12);border-color:rgba(var(--danger-rgb),.3);color:var(--danger)}
+.conn-badge.down .conn-dot{background:var(--danger)}
+.dock-down{display:none;padding:8px 14px 0;font-size:12px;font-weight:600;color:var(--danger);text-align:left}
+.dock.down .dock-down{display:block}
+.vpn-alert{margin:0 0 12px;background:rgba(var(--danger-rgb),.09);border-color:rgba(var(--danger-rgb),.35);color:var(--danger)}
+.vpn-alert .src-error-title{color:var(--danger)}
+.vpn-alert-btns{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
 .dock-profile{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;cursor:pointer}
 .dock-profile:active{background:rgba(255,255,255,.02)}
 
@@ -1100,6 +1118,9 @@ textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:bre
 .set-input::placeholder{color:var(--t3)}
 .set-input:focus{outline:none}
 .set-row .chip-row{padding:0}
+.set-row.set-sub{padding-left:30px;background:rgba(255,255,255,.02)}   /* sub-option of the row above (Kill switch) */
+.set-row.dim{cursor:pointer}
+.set-row.dim .set-label,.set-row.dim .mini-toggle{opacity:.45}
 .set-row.stack{flex-direction:column;align-items:stretch;gap:8px}
 .section-toggle{display:flex;align-items:center;gap:6px;padding:8px 18px 4px;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;cursor:pointer}
 .section-toggle svg{transition:transform .2s}
@@ -1196,12 +1217,16 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <span class="app-name">Jormungand</span>
     <div class="conn-badge" id="mainToggle" onclick="toggleMain()">
       <div class="conn-dot"></div>
-      <span id="connLabel">Connected</span>
+      <!-- one width for every state (the widest label sizes it), so the badge does not jump -->
+      <span class="conn-label"><span id="connLabel">Connected</span><span aria-hidden="true">Tap to connect</span><span aria-hidden="true">Connecting…</span><span aria-hidden="true">VPN is down</span></span>
     </div>
   </div>
 
   <!-- Main scroll -->
   <div class="scroll">
+
+    <!-- VpnAlert: VPN is down / Kill switch is blocking (50-home.js renderVpnAlert) -->
+    <div id="vpnAlert"></div>
 
     <!-- ROW 1: Speed | (IP over Connections) -->
     <div class="row1">
@@ -1290,7 +1315,8 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   </div><!-- /scroll -->
 
   <!-- Connect dock: power button in a trapezoid tab + active profile -->
-  <div class="dock">
+  <div class="dock" id="dock">
+    <div class="dock-down" id="dockDown"></div>
     <button class="power-tab on" id="powerBtn" onclick="toggleMain()" aria-label="Connect / disconnect">
       <svg class="power-shape" viewBox="0 0 200 52" preserveAspectRatio="none" aria-hidden="true">
         <!-- shared frame: dock edge rising into the tab (all tab corners rounded alike) -->
@@ -2324,6 +2350,7 @@ function profileNodeCount(p) { return profileNodeRefs(p).length; }
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
+let mockKill = null;   // the last kill switch settings the mock "core" got
 let backend = {
   live: false,
   // First fetch of a new subscription: fills s.nodes (and usage / expire).
@@ -2371,9 +2398,36 @@ let backend = {
   // like the core: the exit is checked again after every connect
   connect()    { exitInfo = null; return wait(1100).then(() => {
     exitInfo = { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' };
+    vpn.blocking = null;
     mockEventAdd('conn', 'connected', 'info', { entry: effectiveConnectId(), mode: segState.mode, route: segState.route }, { own: true, raw: 'Connected: ' + entryLabel(effectiveConnectId()) });
   }); },
-  disconnect() { mockEventAdd('conn', 'disconnected', 'info', { by: 'user' }, { own: true }); return Promise.resolve(); },
+  // Kill switch + "Also after I disconnect": the core keeps the system proxy, status.blocking says so.
+  disconnect() {
+    mockEventAdd('conn', 'disconnected', 'info', { by: 'user' }, { own: true });
+    vpn.blocking = connCfg.killSwitch && connCfg.killOnDisconnect ? { since: Date.now(), reason: 'disconnect', proxy: 'kept' } : null;
+    renderConnState();
+    return Promise.resolve();
+  },
+  // The down alert / the blocking plaque: POST /api/sysproxy/release (restore the saved system proxy now)
+  // and POST /api/retry (try a restart right now). The mock recovers on Retry.
+  releaseSysProxy() { mockEventAdd('core', 'sysProxy', 'info', { on: false, by: 'user' }, { own: true }); return Promise.resolve(); },
+  // POST /api/killswitch: while down the proxy follows the new settings (a released one stays released).
+  killSettings(cfg) {
+    mockKill = cfg;
+    if (vpn.down && vpn.down.proxy !== 'released') vpn.down.proxy = cfg.killSwitch || cfg.downProxy === 'keep' ? 'kept' : 'removed';
+    // the setting that justified a block is off now: the proxy goes, the block with it (as the core does)
+    const b = vpn.blocking;
+    if (b && !(cfg.killSwitch && (b.reason === 'closed' ? cfg.killWhileClosed : cfg.killOnDisconnect))) vpn.blocking = null;
+    renderConnState();
+    return Promise.resolve();
+  },
+  retry() {
+    return wait(700).then(() => {
+      const downMs = vpn.down ? Date.now() - vpn.down.since : 0;
+      vpn.down = vpn.recovering = null;
+      mockEventAdd('core', 'restarted', 'info', { attempt: 4, downMs });
+    });
+  },
   // Settings → Auto mode changed while connected: the core's Auto takes it as is (no reconnect).
   autoSettings(auto) { return Promise.resolve(); },
   // Live traffic (see renderTraffic): the mock keeps the numbers the cards show.
@@ -5659,7 +5713,7 @@ const EV_CATS = [
   ['site', 'Sites', [['blocked', 'Site does not open']]],
   ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
   ['rules', 'Rules', [['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
-  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting']]],
+  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting']]],
 ];
 const svgI = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const EV_ICON = {
@@ -5676,6 +5730,7 @@ const EV_NOTIF = {
   'auto/switched': 'autoSwitch', 'auto/fastest': 'autoSwitch', 'auto/unstable': 'unstable',
   'conn/lost': 'connLost', 'conn/restored': 'connLost', 'conn/offline': 'connLost', 'conn/online': 'connLost',
   'core/crashed': 'coreCrash', 'core/restarted': 'coreCrash', 'core/restartFailed': 'coreCrash',
+  'core/down': 'connLost',
   'site/blocked': 'blocked', 'sub/updated': 'subUpdated',
   'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
   'rules/ruleSetFailed': 'ruleSets',
@@ -5723,9 +5778,10 @@ const EV_TEXT = {
   'rules/ruleSetFailed': d => [`Rule set ${d.tag} not downloaded`, [d.error, 'the last copy is used'].filter(Boolean).join(' — ')],
   'rules/ruleSetUpdated': d => [`Rule set ${d.tag} updated`, ''],
   'core/crashed': d => ['sing-box stopped', (d.code != null ? 'Exit code ' + d.code + ' — ' : '') + 'starting it again'],
-  'core/restarted': d => ['sing-box started again', d.attempt ? 'Attempt ' + d.attempt : ''],
+  'core/restarted': d => ['sing-box started again', [d.attempt && 'Attempt ' + d.attempt, d.downMs != null && 'was down ' + evDuration(d.downMs)].filter(Boolean).join(' · ')],
+  'core/down': d => ['VPN is down', d.proxy === 'kept' ? 'Internet is blocked (the system proxy is kept) — still trying' : 'Traffic goes direct — still trying'],
   'core/restartFailed': d => ['sing-box could not start again', [d.attempt && 'Attempt ' + d.attempt, d.error].filter(Boolean).join(' · ')],
-  'core/sysProxy': d => [d.error ? 'System proxy could not be ' + (d.on ? 'set' : 'restored') : 'System proxy ' + (d.on ? 'on' : 'off'), d.error || ''],
+  'core/sysProxy': d => d.by === 'user' ? ['You ' + (d.on ? 'set' : 'removed') + ' the system proxy', 'From the VPN is down / Kill switch notice'] : [d.error ?'System proxy could not be ' + (d.on ? 'set' : 'restored') : 'System proxy ' + (d.on ? 'on' : 'off'), d.error || ''],
   'core/deprecated': d => ['sing-box: a deprecated setting', d.text || ''],
 };
 const EV_USER = {
@@ -6111,15 +6167,57 @@ function exportLogs() {
 
 let connected = true;
 let connecting = false;
+/* What the core reports beyond connected / not (status.recovering / down / blocking, see
+   connect-model.md → dock states). recovering = sing-box restarts in the background: the dock
+   looks exactly as Connected, nothing is shown. down = it did not come back in 30 s: the power
+   button stays on (a tap disconnects = stop trying), the dock and an alert on Home say so.
+   blocking = disconnected but Kill switch still holds the system proxy: a plaque on Home. */
+const vpn = { recovering: null, down: null, blocking: null };
 function renderConnState() {
-  const btn = document.getElementById('powerBtn');
+  const btn = document.getElementById('powerBtn'), down = connected && !connecting && vpn.down;
   btn.classList.toggle('on', connected && !connecting);
   btn.classList.toggle('busy', connecting);
-  document.getElementById('mainToggle').classList.toggle('off', !connected || connecting);
-  document.getElementById('connLabel').textContent = connecting ? 'Connecting…' : connected ? 'Connected' : 'Tap to connect';
+  btn.classList.toggle('down', !!down);
+  const badge = document.getElementById('mainToggle');
+  badge.classList.toggle('off', !connected || connecting);
+  badge.classList.toggle('down', !!down);
+  document.getElementById('connLabel').textContent = connecting ? 'Connecting…' : down ? 'VPN is down' : connected ? 'Connected' : 'Tap to connect';
+  renderVpnAlert();
   renderExitIp();
   renderTraffic();
 }
+// The alert strip on Home and the red line in the dock. Buttons: Retry (try a restart now), and
+// while our system proxy is still set, Disable sys proxy / Remove (POST /api/sysproxy/release).
+// Never a Disconnect here — that is the power button.
+function renderVpnAlert() {
+  const el = document.getElementById('vpnAlert'), dd = document.getElementById('dockDown');
+  const down = connected && !connecting ? vpn.down : null;
+  const block = !connected && !connecting && vpn.blocking && vpn.blocking.proxy !== 'released' ? vpn.blocking : null;
+  document.getElementById('dock').classList.toggle('down', !!down);
+  dd.textContent = down ? 'VPN is down · ' + evDuration(Date.now() - down.since) + ' · retrying' : '';
+  const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  const btn = (label, fn) => `<button class="src-error-retry" onclick="${fn}">${label}</button>`;
+  if (down) {
+    const held = down.proxy === 'kept';
+    el.innerHTML = `<div class="src-error vpn-alert" data-kind="down">${svg}
+      <div class="src-error-text"><div class="src-error-title">${held ? 'VPN is down — internet is blocked' : 'VPN is down — traffic goes direct'}</div>
+      <div class="src-error-msg">${held ? 'The system proxy is kept so nothing leaks. ' : ''}Trying again in the background</div></div>
+      <div class="vpn-alert-btns">${btn('Retry', 'vpnRetry()')}${held ? btn('Disable sys proxy', 'vpnReleaseProxy()') : ''}</div></div>`;
+  } else if (block) {
+    el.innerHTML = `<div class="src-error vpn-alert" data-kind="blocking">${svg}
+      <div class="src-error-text"><div class="src-error-title">Kill switch: internet is blocked until you connect</div></div>
+      <div class="vpn-alert-btns">${btn('Remove', 'vpnReleaseProxy()')}</div></div>`;
+  } else el.innerHTML = '';
+}
+function vpnRetry() { backend.retry().then(() => renderConnState(), e => toast(e.message)); }
+function vpnReleaseProxy() {
+  backend.releaseSysProxy().then(() => {
+    if (vpn.down) vpn.down.proxy = 'released';
+    if (vpn.blocking) vpn.blocking.proxy = 'released';
+    renderConnState();
+  }, e => toast(e.message));
+}
+setInterval(() => { if (vpn.down) renderVpnAlert(); }, 15000);
 
 /* ExitIpCard: where traffic leaves. Connected: the tunnel's exit, checked by the core
    through the tunnel after every (re)connect. Not connected: the device's own IP (label
@@ -6147,6 +6245,7 @@ function toggleMain() {
   if (connecting) return;
   if (connected) {
     connected = false;
+    vpn.down = vpn.recovering = null;
     exitInfo = null;
     renderConnState();
     journal('user', 'disconnect', { action: 'disconnect' });
@@ -6157,7 +6256,7 @@ function toggleMain() {
   if (catalogEmpty()) { toast(simpleMode() ? 'Add a subscription or a server first' : 'Create a profile first'); dockTap(); return; }
   connecting = true;
   renderConnState();
-  backend.connect().then(() => { connected = true; journal('user', 'connect', { action: 'connect', entry: effectiveConnectId() }); }, e => toast(e.message))
+  backend.connect().then(() => { connected = true; vpn.blocking = null; journal('user', 'connect', { action: 'connect', entry: effectiveConnectId() }); }, e => toast(e.message))
     .then(() => { connecting = false; renderConnState(); if (!connected) refreshExitIp(); });
 }
 
@@ -6200,7 +6299,9 @@ function setSegment(group, value) {
 // passes traffic when any answers (the core's defaultCheckers).
 const DEFAULT_CHECKERS = ['https://cp.cloudflare.com/generate_204', 'https://www.gstatic.com/generate_204',
   'http://www.msftconnecttest.com/connecttest.txt', 'http://captive.apple.com/hotspot-detect.html'];
-const connCfg = { sysProxy: false, killSwitch: false, port: 2080, testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
+// Kill switch (rules.md §7): killOnDisconnect / killWhileClosed only count with killSwitch on (the latter also
+// needs genCfg.launchAtStartup + connectOnLaunch); downProxy only with it off: the proxy when the VPN cannot recover.
+const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());
@@ -6599,7 +6700,43 @@ function deleteDnsServer() {
 /* ══════════════════════ SETTINGS → CONNECTION ══════════════════════
    System proxy (also a switch on Home — to be dropped from Home on mobile) and the
    kill switch: while the VPN is down or reconnecting, all traffic is blocked. */
+const killClosedOk = () => genCfg.launchAtStartup && genCfg.connectOnLaunch;
+// The four kill switch settings as the core reads them (connect body and POST /api/killswitch): the sub-options only count with their conditions.
+function killPlan() {
+  const kill = connCfg.killSwitch;
+  return { killSwitch: kill, killOnDisconnect: kill && connCfg.killOnDisconnect, killWhileClosed: kill && connCfg.killWhileClosed && !!killClosedOk(), downProxy: connCfg.downProxy };
+}
+// Any of them (or autostart / autoconnect, which gate killWhileClosed) changed while connected or down: the core takes it live.
+let killSig;
+function syncKillSettings() {
+  const sig = JSON.stringify(killPlan());
+  if (killSig === undefined) { killSig = sig; return; }
+  if (sig === killSig) return;
+  killSig = sig;
+  // connected / down, or a block after disconnect / while closed: turning its setting off lifts it
+  if (connected || vpn.blocking) backend.killSettings(killPlan()).catch(e => toast(e.message));
+}
+function offerClosedKill() {
+  const close = "closeSheet('actions');";
+  openActions('Also while the app is closed', `<div class="menu-note">Keeping the proxy while the app is closed only makes sense if the app starts with the computer and connects by itself: otherwise the internet stays blocked until you start it by hand. Turn on <b>Launch at startup</b> and <b>Connect on launch</b>?</div>`
+    + menuRow(ICON.check, 'Turn them on', close + "genCfg.launchAtStartup=genCfg.connectOnLaunch=true;connCfg.killWhileClosed=true;renderConnSettings();renderGeneral()")
+    + menuRow(ICON.close, 'Cancel', close));
+}
+/* Turning the kill switch off while it protects something (connected, down, or a block after
+   disconnect) asks first; turning it on, or off while idle, does not. */
+function toggleKillSwitch() {
+  const flip = () => { connCfg.killSwitch = !connCfg.killSwitch; renderConnSettings(); };
+  if (!connCfg.killSwitch || !(connected || vpn.blocking)) { flip(); return; }
+  const close = "closeSheet('actions');";
+  const what = vpn.blocking ? 'The internet is unblocked now: the system proxy is removed.'
+    : vpn.down ? 'The VPN is down right now: ' + (connCfg.downProxy === 'keep' ? 'the proxy stays, but nothing guarantees it any more.' : 'the system proxy is removed and your traffic goes direct at once.')
+    : 'The connection stays, but if the VPN goes down, ' + (connCfg.downProxy === 'keep' ? 'nothing guarantees the block any more.' : 'your traffic goes direct (If the VPN cannot recover: Remove proxy).');
+  openActions('Turn the kill switch off?', `<div class="menu-note">${what}</div>`
+    + menuRow(ICON.check, 'Turn it off', close + 'connCfg.killSwitch=false;renderConnSettings()')
+    + menuRow(ICON.close, 'Keep it on', close));
+}
 function renderConnSettings() {
+  const closedOk = killClosedOk();
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
   document.getElementById('conn-settings').innerHTML = `
     <div class="set-group">
@@ -6607,8 +6744,20 @@ function renderConnSettings() {
         ${toggle(connCfg.sysProxy, 'setSysProxy(!connCfg.sysProxy)')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — the system proxy points here; set it by hand in other apps</div></div>
         <input class="set-input am-num port-num" id="conn-port" inputmode="numeric" value="${connCfg.port}" onchange="setProxyPort(this)"></div>
-      <div class="set-row"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">While the VPN is down or reconnecting, block all traffic — nothing leaks out directly</div></div>
-        ${toggle(connCfg.killSwitch, 'connCfg.killSwitch=!connCfg.killSwitch;renderConnSettings()')}</div>
+      <div class="set-row" data-key="killSwitch"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">Blocks traffic when the VPN is down. Works for apps that use the system proxy; full block needs TUN.</div></div>
+        ${toggle(connCfg.killSwitch, 'toggleKillSwitch()')}</div>
+      ${connCfg.killSwitch ? `
+      <div class="set-row set-sub" data-key="killOnDisconnect"><div class="set-label" style="flex:1">Also after I disconnect<div class="set-hint">Internet stays blocked until you connect again or tap Remove on Home</div></div>
+        ${toggle(connCfg.killOnDisconnect, 'connCfg.killOnDisconnect=!connCfg.killOnDisconnect;renderConnSettings()')}</div>
+      <div class="set-row set-sub ${closedOk ? '' : 'dim'}" data-key="killWhileClosed"${closedOk ? '' : ' onclick="offerClosedKill()"'}><div class="set-label" style="flex:1">Also while the app is closed<div class="set-hint">${closedOk ? 'The proxy stays set when the app is closed, so nothing leaks before it starts again' : 'Needs Launch at startup and Connect on launch — tap to turn them on'}</div></div>
+        ${toggle(closedOk && connCfg.killWhileClosed, closedOk ? 'connCfg.killWhileClosed=!connCfg.killWhileClosed;renderConnSettings()' : '')}</div>`
+      : `
+      <div class="set-row" data-key="downProxy" style="flex-direction:column;align-items:stretch;gap:10px">
+        <div class="set-label">If the VPN cannot recover<div class="set-hint">${connCfg.downProxy === 'keep' ? 'Keep it: the proxy stays set, so apps that use it have no internet until the VPN is back' : 'Remove: traffic goes direct until the VPN is back'}</div></div>
+        <div class="chip-row" style="padding:0">
+          <div class="chip ${connCfg.downProxy !== 'keep' ? 'active' : ''}" onclick="connCfg.downProxy='remove';renderConnSettings()">Remove proxy</div>
+          <div class="chip ${connCfg.downProxy === 'keep' ? 'active' : ''}" onclick="connCfg.downProxy='keep';renderConnSettings()">Keep it</div>
+        </div></div>`}
     </div>
     <div class="set-group">
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
@@ -6617,6 +6766,7 @@ function renderConnSettings() {
       <div class="set-row"><div class="set-label" style="flex:1">Backup checks<div class="set-hint">When the test URL does not answer through a server, these are tried; the server works if any answers</div></div>
         <button class="set-value" id="conn-checkers" onclick="openCheckersPicker()">${connCfg.checkers.length ? connCfg.checkers.length : 'Off'}${CHEVRON_R}</button></div>
     </div>`;
+  syncKillSettings();
 }
 /* ══════════════════════ SETTINGS → GENERAL ══════════════════════
    Language, startup, clipboard, updates. genCfg is what the Flutter app
@@ -6656,7 +6806,7 @@ function renderGeneral() {
   const sub = document.getElementById('setGeneralSub');
   if (sub) sub.textContent = LANGS[genCfg.lang] + (genCfg.connectOnLaunch ? ' · connects on launch' : '');
 }
-function setGenCfg(key, v) { genCfg[key] = v; renderGeneral(); }
+function setGenCfg(key, v) { genCfg[key] = v; renderGeneral(); renderConnSettings(); }   // Kill switch → while the app is closed depends on two of them
 
 function openLangPicker() {
   // Only English is written yet: Russian is listed, off, marked soon.
@@ -6879,7 +7029,7 @@ const notifCfg = {
   autoSwitch: true,     // Auto moved to another entry or server
   unstable: true,       // an entry is unstable (flap guard)
   connLost: true,       // connection lost / restored
-  coreCrash: true,      // sing-box stopped / started again
+  coreCrash: false,     // sing-box stopped / started again: background restarts are silent
   blocked: true,        // a site does not open through the current entry (Rule button)
   subUpdated: false,    // a subscription updated in the background
   subFailed: true,      // background update failed; provider removed / brought back servers; servers do not respond
@@ -6894,7 +7044,7 @@ const NOTIF_GROUPS = [
     ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server'],
     ['unstable', 'Unstable entry', 'An entry keeps dropping and waits before it gets the traffic back'],
     ['connLost', 'Connection lost', 'No network or no server answers, and when it is back'],
-    ['coreCrash', 'sing-box stopped', 'It stopped on its own and was started again'],
+    ['coreCrash', 'sing-box stopped', 'Background restarts are silent; this shows them'],
     ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Rule button)'],
   ]],
   ['Subscriptions and rules', [
@@ -8501,12 +8651,25 @@ const entryLabel = id => { const e = connectEntry(id); return e ? e.name : chain
    as events (47-events.js), which also drive the background notifications; only a
    subscription's servers all failing (sourcesDown) is the UI's to post. */
 function liveAutoStatus(st) {
+  liveVpnState(st);
   const a = st && st.connected ? st.auto : null, was = JSON.stringify(coreRoute);
   coreRoute = a ? { id: a.now, server: a.server || null, entryServer: a.entryServer || null } : null;
   const pings = a ? mergeCorePings(a.members) : false;
   if (a) { sourcesDown(a.members); live.routes = (a.routes || []).map(r => r.id); } else live.srcDown = new Set();
   if (pings) refreshSourceViews();
   else if (JSON.stringify(coreRoute) !== was) { renderConnects(); updateMainConnectCard(); }
+}
+
+/* status.recovering / down / blocking → the dock and Home (50-home.js vpn). A background restart
+   (recovering) is deliberately invisible: no toast, the dock stays Connected; its events stay in
+   the journal (core/crashed → the coreCrash toggle, default off). conn: whether the UI takes the
+   status as connected (default: st.connected). */
+function liveVpnState(st, conn) {
+  const on = conn === undefined ? !!(st && st.connected) : conn;
+  const next = { recovering: on && st && st.recovering || null, down: on && st && st.down || null, blocking: !on && st && st.blocking || null };
+  if (JSON.stringify(next) === JSON.stringify(vpn)) return;
+  Object.assign(vpn, next);
+  renderConnState();
 }
 
 /* A request through the current node got nothing back while the node passes traffic, and
@@ -8866,7 +9029,10 @@ const liveBackend = {
     return Promise.resolve().then(() => {
       const plan = livePlan(anchor);
       if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
-      return api('/api/connect', { plan, systemProxy: segState.sys === 'on' }).then(st => {
+      // Kill switch options as the core reads them (killswitch: rules.md §7); the sub-options only count with their conditions
+      const ks = killPlan();
+      killSig = JSON.stringify(ks);
+      return api('/api/connect', Object.assign({ plan, systemProxy: segState.sys === 'on' }, ks)).then(st => {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
         live.autoSig = JSON.stringify(plan.auto);
@@ -8879,8 +9045,12 @@ const liveBackend = {
   disconnect() {
     live.planSig = null;
     liveAutoStatus(null);
-    return api('/api/disconnect', {});
+    return api('/api/disconnect', {}).then(st => { liveVpnState(st, false); return st; });
   },
+  releaseSysProxy() { return api('/api/sysproxy/release', {}); },
+  retry() { return api('/api/retry', {}); },
+  // Kill switch settings changed while connected / down: the core takes them live (same fields as the connect body).
+  killSettings(cfg) { return api('/api/killswitch', cfg); },
   // Connected: the tunnel's exit; not connected: the direct IP (the core knows which).
   traffic() { return api('/api/traffic'); },
   exitIp() {
@@ -8942,6 +9112,7 @@ function liveInit() {
     purgeExpiredGone();   // the start-up purge in 99-init ran on the empty pre-load state; only 15-day-old ones go
     connected = !!st.status.connected;
     exitInfo = st.status.exit || null;
+    liveVpnState(st.status);
     if (!exitInfo) liveWatchExit();   // still checking (the direct one runs from the core's start)
     renderAutoMode(); renderConnSettings(); renderDns(); renderGeneral(); renderNotif();
     ['mode', 'route', 'sys'].forEach(g => setSegment(g, segState[g]));
@@ -8964,7 +9135,9 @@ function liveInit() {
 
   // sing-box can stop on its own (bad server, crash): the dock must say so.
   setInterval(() => {
-    if (!live.ready || !connected || connecting) return;
+    if (!live.ready || connecting) return;
+    // not connected: only the Kill switch plaque (blocking) is read from the core
+    if (!connected) { api('/api/status').then(st => { if (!connected && !connecting) liveVpnState(st, false); }, () => {}); return; }
     api('/api/status').then(st => {
       liveAutoStatus(st);   // where the core's Auto is, what it measured (94-live-auto.js)
       if (st.connected) {

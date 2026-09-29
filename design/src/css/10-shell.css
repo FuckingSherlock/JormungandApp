@@ -5,17 +5,22 @@
   min-height:100vh;
 }
 
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 12px}
-.app-name{font-size:22px;font-weight:600;color:var(--t1);letter-spacing:-.3px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 20px 6px}
+/* the name grows with the room left by the badge ("Tap to connect" at 320px → ~22px), up to 25px;
+   ellipsis only below 320px; the badge never wraps */
+.app-name{font-size:clamp(18px,calc((100vw - 186px) / 6.1),25px);font-weight:600;color:var(--t1);letter-spacing:-.3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .conn-badge {
-  display:flex;align-items:center;gap:6px;
+  display:flex;align-items:center;gap:6px;flex-shrink:0;white-space:nowrap;
   background:rgba(var(--active-rgb),.12);border:1px solid rgba(var(--active-rgb),.25);
   border-radius:20px;padding:5px 12px;
   font-size:14px;font-weight:600;color:var(--active);cursor:pointer;
 }
 .conn-badge.off{background:rgba(var(--muted-rgb),.10);border-color:rgba(var(--muted-rgb),.22);color:var(--muted)}
-.conn-dot{width:6px;height:6px;border-radius:50%;background:var(--active)}
+.conn-label{display:grid;justify-items:center}
+.conn-label > *{grid-area:1/1}
+.conn-label > [aria-hidden]{visibility:hidden}
+.conn-dot{order:1;width:6px;height:6px;flex-shrink:0;border-radius:50%;background:var(--active)}
 .conn-badge.off .conn-dot{background:var(--muted)}
 
 /* ── Scroll ── */
