@@ -195,7 +195,7 @@ void main() {
       final route = config['route'] as Map, outs = (config['outbounds'] as List).cast<Map>();
       expect(route['final'], topTag);
       expect(route['rules'], contains(equals({'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag})));
-      expect((route['rules'] as List).cast<Map>().any((x) => x['outbound'] == 'src:x'), isTrue);
+      expect((route['rules'] as List).cast<Map>().any((x) => x['outbound'] == 'src:x~proxy'), isTrue);
       expect(outs.firstWhere((o) => o['tag'] == topTag)['outbounds'], ['route0', 'route1']);
 
       await client.start(config);

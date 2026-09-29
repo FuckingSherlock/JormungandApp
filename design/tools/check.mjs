@@ -126,6 +126,8 @@ const SHOTS = {
   apps:       async p => { await p.evaluate(() => { openRules(); openApps(); }); await settle(p); },
   'app-act':  async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('com.discord'); }); await settle(p); },
   'settings-dns': async p => { await p.evaluate(() => openDnsSettings()); await settle(p); },
+  // one server fails its checks, the next one is in use (the mock: from the pings)
+  'dns-failover': async p => { await p.evaluate(async () => { openDnsSettings(); await wait(1200); dnsPing.remote = -1; dnsPing.local = 12; dnsPing.google = 30; renderDns(); }); await settle(p); },
   'dns-form': async p => { await p.evaluate(() => { openDnsSettings(); openDnsForm(); }); await settle(p); },
   'settings-conn': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setconn'); }); await settle(p); },
   'kill-off-confirm': async p => { await p.evaluate(() => { connCfg.killSwitch = true; connected = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); toggleKillSwitch(); }); await settle(p); },
@@ -145,7 +147,8 @@ const SHOTS = {
   'route': async p => { await p.evaluate(() => { openProfiles(); }); await settle(p); },
   'route-pin': async p => { await p.evaluate(() => { openProfiles(); const id = visibleOrder().find(x => sourcesData[x] && unitRefs(x).length > 1); toggleRouteRow(id); pinRouteNode(id, refKey(unitRefs(id)[1])); }); await settle(p); },
   'entry-delete': async p => { await tab(p, 'nodes'); await p.evaluate(() => { setNodesTab('profiles'); openEditProfile('work'); confirmDeleteEntry('work'); }); await settle(p); },
-  'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.add('src2'); renderTargetPicker(); }); await settle(p); },
+  'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.clear(); renderTargetPicker(); }); await settle(p); },
+  'target-picker-open': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.clear(); tpOpen.add('src:src2'); renderTargetPicker(); pickTarget('node:src2::' + sourcesData.src2.nodes[1].id); }); await settle(p); },
   'rule-fallback': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
   'rules-services': async p => { await p.evaluate(() => { openRules(); svcOpen = true; svcAddOpen = true; renderRules(); document.querySelector('.svc-group').scrollIntoView(); }); await settle(p); },
   'text-large': async p => { await p.evaluate(() => { applyScale(UI_SCALE_MAX); openProfiles(); }); await settle(p); },
@@ -234,6 +237,7 @@ async function shots(names, grid = args.includes('--grid')) {
 /* ═══════════════ CHECKS ═══════════════ */
 
 const results = [];
+
 async function check(name, fn) {
   try { await fn(); results.push([name, null]); }
   catch (e) { results.push([name, e.message.split('\n')[0]]); }
@@ -1065,7 +1069,7 @@ async function runChecks() {
     await page.waitForTimeout(200);
     expect(/Cannot restore/.test(await toastText(page)), 'toast: ' + await toastText(page));
   });
-  await page.evaluate(s => { liveApply(JSON.parse(s)); renderAfterRestore(); closeSheet('setdata'); }, stateBefore);
+  await check('settings: Data — state put back for the next checks', () => page.evaluate(s => { liveApply(JSON.parse(s)); renderAfterRestore(); closeSheet('setdata'); }, stateBefore));
 
   await check('general: Language lists Русский as soon, off', async () => {
     await page.evaluate(() => openLangPicker());
@@ -1998,6 +2002,38 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
+  await check('DNS failover: the server in use and a failed one are marked, Switch automatically off keeps the first, events in the journal', async () => {
+    const r = await page.evaluate(async () => {
+      const out = {}, tags = () => [...document.querySelectorAll('#dns-settings .dns-row')].map(r => r.dataset.id + ':' + [...r.querySelectorAll('.dns-state')].map(s => s.textContent).join());
+      openDnsSettings(); await wait(1200);
+      dnsPing.remote = 20; dnsPing.local = 12; dnsPing.google = 30; renderDns();
+      out.first = tags().join() === 'remote:In use,local:,google:';
+      const n0 = mockEv.list.filter(e => e.cat === 'dns').length;
+      dnsPing.remote = -1; renderDns();
+      out.failover = tags().join() === 'remote:No answer,local:In use,google:';
+      const ev = mockEv.list.filter(e => e.cat === 'dns').slice(n0);
+      out.event = ev.length === 1 && ev[0].data.from === 'remote' && ev[0].data.to === 'local' && ev[0].data.reason === 'failover' && /DNS: Cloudflare → Local/.test(evText(ev[0]));
+      setDnsCfg('auto', false);
+      out.off = tags().join() === 'remote:No answer,local:,google:' && dnsHealth().active === 'remote';
+      const last = mockEv.list.filter(e => e.cat === 'dns').pop();
+      out.offEvent = last.data.reason === 'off' && last.own === true;
+      setDnsCfg('auto', true);
+      dnsPing.remote = 20; renderDns();
+      out.back = dnsHealth().active === 'remote' && mockEv.list.filter(e => e.cat === 'dns').pop().data.reason === 'back';
+      out.hint = !!document.querySelector('#dns-settings [data-key=dnsAuto] .mini-toggle.on');
+      // the rules events read as words: the target by its name, what the rule does meanwhile
+      const src = catalogOrder.simple[0], nm = sourcesData[src].name;
+      const a = evDescribe({ cat: 'rules', type: 'fallback', data: { rule: 'Streaming', more: 2, target: 'src:' + src, to: 'block' } });
+      const b = evDescribe({ cat: 'rules', type: 'targetBack', data: { rule: 'Streaming', target: 'src:' + src } });
+      out.words = a.title === nm + ' does not answer' && a.detail === 'Rule Streaming and 2 more blocked while it is down' && b.title === nm + ' answers again' && b.detail === 'Rule Streaming back through it';
+      out.notif = EV_NOTIF['rules/fallback'] === 'autoSwitch' && EV_NOTIF['rules/targetBack'] === 'autoSwitch' && EV_NOTIF['dns/switched'] === 'autoSwitch';
+      out.filter = EV_CATS.some(c => c[0] === 'dns') && EV_CATS.find(c => c[0] === 'rules')[2].some(t => t[0] === 'fallback');
+      closeSheet('setdns');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
   await check('rules: chips, paste, validation, save / delete, JSON round-trip, composite', async () => {
     const r = await page.evaluate(() => {
       const out = {};
@@ -2143,9 +2179,37 @@ async function runChecks() {
       out.open = document.getElementById('sh-target').classList.contains('open');
       const ts = [...document.querySelectorAll('#tp-body .tp-card')].map(e => e.dataset.t);
       out.all = ts.includes('') && ts.some(t => t.startsWith('src:')) && ts.some(t => t.startsWith('profile:')) && ts.some(t => t.startsWith('chain:'));
-      tpToggle(sourceOrder[0]);
-      document.querySelector('#tp-body .tp-nodes .node-row').click();
-      out.node = ruleDraft.target.startsWith('node:') && !document.getElementById('sh-target').classList.contains('open');
+      // a tap on a card unfolds it and does not pick; AUTO picks the whole item; a server picks the node
+      const sid = sourceOrder[0], card = () => document.querySelector(`#tp-body .tp-card[data-t="src:${sid}"]`);
+      // picks only mark the selection (Save bar while it differs from the opening target); Save applies; tapping the selected item deselects
+      const before = ruleDraft.target, saveOn = () => document.getElementById('tp-save').classList.contains('show'), shut = () => !document.getElementById('sh-target').classList.contains('open');
+      out.noSave = !saveOn();
+      card().querySelector('.src-head').click();
+      out.unfold = card().classList.contains('open') && ruleDraft.target === before && !shut() && !saveOn()
+        && card().querySelectorAll('.conn-body .node-row').length > 0;
+      card().querySelector('.src-head').click();
+      out.fold = !card().classList.contains('open');
+      out.autoCollapsed = !!card().querySelector('.src-head .conn-state') && !card().classList.contains('open');
+      card().querySelector('.src-head .conn-state').click();   // AUTO on the collapsed card marks the whole item, no close
+      out.auto = ruleDraft.target === before && !shut() && saveOn() && card().classList.contains('picked') && !card().classList.contains('open')
+        && card().querySelector('.src-head .conn-state').classList.contains('on');
+      card().querySelector('.src-head .conn-state').click();   // tapped again: deselected -> main flow, with the warning
+      out.deselect = !card().classList.contains('picked') && document.getElementById('tp-save').classList.contains('reset') === (before !== '') && saveOn() === (before !== '');
+      card().querySelector('.src-head').click();
+      card().querySelector('.conn-body .node-row').click();   // a server marks itself
+      out.nodePick = !shut() && saveOn() && !!card().querySelector('.node-row.picked') && ruleDraft.target === before;
+      document.querySelector('#tp-save button').click();
+      out.node = ruleDraft.target.startsWith('node:') && shut();
+      document.querySelector('#rf-body .tgt-row').click();
+      out.nodeOpen = card().classList.contains('open') && !!card().querySelector('.node-row.picked') && !saveOn();
+      const kept = ruleDraft.target;
+      card().querySelector('.node-row.picked').click();   // deselect: Save bar with the reset warning
+      out.resetWarn = saveOn() && document.getElementById('tp-save').classList.contains('reset');
+      card().querySelector('.node-row[data-t="' + kept + '"]').click();   // the original again: bar hides
+      out.repick = !saveOn();
+      card().querySelector('.node-row.picked').click();
+      closeSheet('target');   // closed without Save
+      out.closeKeeps = ruleDraft.target === kept;
       out.row = /node/.test(document.querySelector('#rf-body .tgt-row').textContent);
       out.fbDefault = /Default: Main flow/.test(document.getElementById('rf-body').textContent);
       [...document.querySelectorAll('#rf-fallback button')].find(b => b.textContent === 'Direct').click();
@@ -2339,6 +2403,8 @@ async function runChecks() {
       const out = { enough: order.length >= 5,
         routes: plan.routes.map(x => x.id).join() === order.join() && plan.current === 1 && plan.auto.failAfter === autoCfg.failAfter && plan.auto.retryPause === 0.5 };
       live.anchor = order[1];
+      // every server measured and alive first: a leftover in-flight / failed ping of an earlier check would move a Priority pick
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => setPing(n, 100)));
       const sig = planSig();
       Object.values(sourcesData).forEach(s => s.nodes.forEach(n => setPing(n, Math.round(Math.random() * 300))));
       coreRoute = { id: order[0], server: null, entryServer: null };
@@ -2652,7 +2718,7 @@ async function runChecks() {
       const badge = document.getElementById('evFilterBadge'), bar = document.getElementById('evFilterBar');
       openEvFilter(); evFilterFold('auto');
       out.sheet = document.getElementById('sh-evfilter').classList.contains('open') && document.querySelectorAll('#evfilter-body .evf-type').length === 3
-        && document.querySelectorAll('#evfilter-body .evf-cat').length === 6;
+        && document.querySelectorAll('#evfilter-body .evf-cat').length === 7;
       const unstable = () => [...document.querySelectorAll('#evList .ev-title')].some(t => /is unstable/.test(t.textContent));
       out.before = unstable() && !!document.querySelector('#evList .cat-auto');
       evToggleType('auto/unstable');
@@ -2799,6 +2865,7 @@ async function runChecks() {
       const order = autoOrder(), id = order.find(x => !chainsData[x] && unitPickRefs(x).length > 1);
       live.anchor = effectiveConnectId(true);
       const plan = livePlan(), out = { both: plan.routes.length > 0 && !!plan.routing && !!plan.auto && plan.routes[plan.current].id === live.anchor };
+      Object.values(sourcesData).forEach(s => s.nodes.forEach(n => setPing(n, 100)));   // all alive: leftover pings of earlier checks move a Priority pick
       const sig = planSig();
       // the core moved to another entry and server; a rule target's servers re-sorted by a ping
       coreRoute = { id, server: refKey(unitPickRefs(id).slice(-1)[0]), entryServer: null };

@@ -93,6 +93,9 @@ function liveAutoStatus(st) {
   if (a) { sourcesDown(a.members); live.routes = (a.routes || []).map(r => r.id); } else live.srcDown = new Set();
   if (pings) refreshSourceViews();
   else if (JSON.stringify(coreRoute) !== was) { renderConnects(); updateMainConnectCard(); }
+  // status.dns: the server in use and the ones that do not answer (Settings → DNS marks them)
+  const dns = st && st.connected ? st.dns || null : null;
+  if (JSON.stringify(dns) !== JSON.stringify(liveDns)) { liveDns = dns; renderDns(); }
 }
 
 /* status.recovering / down / blocking → the dock and Home (50-home.js vpn). A background restart

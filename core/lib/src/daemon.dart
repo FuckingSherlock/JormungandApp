@@ -7,14 +7,17 @@ import 'package:path/path.dart' as p;
 import 'auto.dart';
 import 'config.dart';
 import 'device.dart';
+import 'dns_failover.dart';
 import 'eventbook.dart';
 import 'exitip.dart';
+import 'fallback.dart';
 import 'logbook.dart';
 import 'manual.dart';
 import 'node.dart';
 import 'parse/links.dart';
 import 'plan.dart';
 import 'probe.dart';
+import 'routing.dart';
 import 'rulesets.dart';
 import 'runtime.dart';
 import 'sbapi.dart';
@@ -109,6 +112,13 @@ class Daemon {
   Map<String, dynamic>? _plan;
   bool _sysWanted = false;
   AutoService? _auto;
+  // Beside Auto while connected: rule targets' "If unavailable" (fallback.dart) and the DNS
+  // servers' failover (dns_failover.dart); what the config holds for them comes from _startSingBox.
+  FallbackService? _fallback;
+  DnsFailover? _dns;
+  List<TargetFallback> _fallbacks = const [];
+  List<DnsEntry> _dnsServers = const [];
+  bool _dnsAuto = true; // Settings → DNS → Switch automatically (connect body `dnsAuto`, POST /api/dns/auto)
   final Timer Function(Duration, void Function()) _timer;
   final DateTime Function() _now;
   // sing-box stopped on its own: {attempt, code, next} while restarting it (endless, until
@@ -281,6 +291,46 @@ class Daemon {
       events.add('conn', type, level, data: {'downMs': ?n.downMs});
     });
     auto.start();
+    _startFallback(api, auto);
+    _startDnsFailover(api, auto);
+  }
+
+  /// "If unavailable" live: a target that stops answering has its rules' selectors flipped to
+  /// the fallback, and back (fallback.dart). Not while Auto doubts the network.
+  void _startFallback(SingBoxApi api, AutoService auto) {
+    if (_fallbacks.isEmpty) return;
+    final fb = _fallback = FallbackService(api, _fallbacks,
+        delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
+        settings: auto.settings,
+        networkUncertain: () => auto.networkUncertain,
+        note: main.note);
+    fb.changes.listen((c) {
+      final data = {'rule': c.rules.first, if (c.rules.length > 1) 'more': c.rules.length - 1, 'target': c.target};
+      if (c.back) {
+        events.add('rules', 'targetBack', 'info', data: data);
+      } else {
+        events.add('rules', 'fallback', 'warn', data: {...data, 'to': c.to});
+      }
+    });
+    fb.start();
+  }
+
+  /// DNS failover: the servers in use are checked and the clash mode set to the best one
+  /// that answers (dns_failover.dart). A new sing-box starts on the mode `Rule` = the first
+  /// server in use (`dns.final`), which is where the service starts too.
+  void _startDnsFailover(SingBoxApi api, AutoService auto) {
+    if (_dnsServers.isEmpty) return;
+    final probe = _probe;
+    if (probe == null) return;
+    final dns = _dns = DnsFailover(_dnsServers,
+        setMode: api.setClashMode,
+        query: (tag, name, t) => probeDns(probe, tag, name, timeoutMs: t),
+        settings: auto.settings,
+        auto: _dnsAuto,
+        networkUncertain: () => auto.networkUncertain,
+        note: main.note);
+    dns.switches.listen((s) => _event('dns', 'switched', 'info', {'from': s.from, 'to': s.to, 'reason': s.reason}, own: s.reason == 'off'));
+    dns.start();
   }
 
   void _stopAuto() {
@@ -288,6 +338,10 @@ class Daemon {
     _closed = null;
     _auto?.stop();
     _auto = null;
+    _fallback?.stop();
+    _fallback = null;
+    _dns?.stop();
+    _dns = null;
   }
 
   /// sing-box stopped on its own. The system proxy is NOT touched: sing-box is started
@@ -509,6 +563,7 @@ class Daemon {
         'POST /api/retry' => _retry(),
         'POST /api/killswitch' => _killSwitchSettings(body),
         'POST /api/auto' => _autoSettings(body),
+        'POST /api/dns/auto' => _dnsAutoSetting(body),
         'POST /api/exit' => Future(() {
             _recheckExit();
             return _status();
@@ -588,6 +643,7 @@ class Daemon {
         'blocking': _blocking,
         'restarts': _restarts,
         'auto': await _autoState(),
+        'dns': main.running ? _dns?.toJson() : null,
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
       };
 
@@ -654,8 +710,9 @@ class Daemon {
     final warnings = <String>[];
     final tunnelPort = await freePort();
     final probe = Probe(await freePort());
+    final info = RoutingInfo();
     await main.start(
-        buildConfig(plan, tunnelPort: tunnelPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings));
+        buildConfig(plan, tunnelPort: tunnelPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings, info: info));
     // what a later sing-box will no longer take in this config
     try {
       for (final w in await main.api!.deprecatedWarnings()) {
@@ -664,6 +721,8 @@ class Daemon {
       }
     } catch (_) {}
     _probe = probe;
+    _fallbacks = info.fallbacks;
+    _dnsServers = info.dnsServers;
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     _tunnelPort = tunnelPort;
     return (lists, warnings);
@@ -692,6 +751,7 @@ class Daemon {
     final wasBlocking = _blocking;
     _blocking = null; // a connect ends the blocking
     _applyKill(body);
+    if (body['dnsAuto'] is bool) _dnsAuto = body['dnsAuto'] as bool;
     _stopAuto();
     _error = null;
     _warning = null;
@@ -751,7 +811,21 @@ class Daemon {
     final plan = _plan, auto = body['auto'];
     if (plan != null && auto is Map) {
       _plan = {...plan, 'auto': auto};
-      _auto?.settings = AutoSettings.fromPlan(_plan!);
+      final s = _auto?.settings = AutoSettings.fromPlan(_plan!);
+      if (s != null) {
+        _fallback?.settings = s;
+        _dns?.settings = s;
+      }
+    }
+    return _status();
+  }
+
+  /// body: {auto: bool} — Settings → DNS → Switch automatically, live (no reconnect). Off puts
+  /// the first server in use back at once.
+  Future<Map<String, dynamic>> _dnsAutoSetting(Map<String, dynamic> body) async {
+    if (body['auto'] is bool) {
+      _dnsAuto = body['auto'] as bool;
+      await _dns?.setAuto(_dnsAuto);
     }
     return _status();
   }

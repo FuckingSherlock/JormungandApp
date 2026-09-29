@@ -168,11 +168,56 @@ void main() {
       expect(_out(c, 'src:a')!['outbounds'], ['src:a/a::0', 'src:a/a::1']);
       expect(_out(c, 'chain:c')!['type'], 'selector');
       expect(_out(c, 'chain:c/out::0')!['detour'], 'chain:c>entry');
+      // rules and apps lead to a selector [target, fallback] per target (Main flow by default): live "If unavailable"
       expect(_rules(c).take(2), [
-        {'package_name': ['com.discord'], 'network': ['tcp'], 'action': 'route', 'outbound': 'src:a'},
-        {'package_name': ['com.discord'], 'network': ['udp'], 'action': 'route', 'outbound': 'chain:c'},
+        {'package_name': ['com.discord'], 'network': ['tcp'], 'action': 'route', 'outbound': 'src:a~proxy'},
+        {'package_name': ['com.discord'], 'network': ['udp'], 'action': 'route', 'outbound': 'chain:c~proxy'},
       ]);
-      expect(_rules(c).map((r) => r['outbound']).skip(2).take(3), ['src:a', 'src:a', 'chain:c']);
+      expect(_rules(c).map((r) => r['outbound']).skip(2).take(3), ['src:a~proxy', 'src:a~proxy', 'chain:c~proxy']);
+      expect(_out(c, 'src:a~proxy'), {
+        'type': 'selector',
+        'tag': 'src:a~proxy',
+        'outbounds': ['src:a', 'proxy'],
+        'default': 'src:a',
+        'interrupt_exist_connections': false,
+      });
+    });
+
+    test('If unavailable live: a selector per (target, fallback); Block is an outbound only a selector holds; the info names the rules', () {
+      final targets = {
+        'src:a': {'kind': 'unit', 'main': _grp([_node, _node2], prefix: 'a')},
+        'chain:c': {'kind': 'chain', 'entry': _grp([_node], prefix: 'in'), 'main': _grp([_node2], pick: 'priority', prefix: 'out')},
+      };
+      final info = RoutingInfo();
+      final c = buildConfig(_plan({
+        'fallback': 'main',
+        'targets': targets,
+        'rules': [
+          {..._rule({'domain': _g({'domain_suffix': ['a.com']})}, target: 'src:a', fallback: 'block'), 'name': 'Streaming'},
+          _rule({'domain': _g({'domain_suffix': ['b.com']})}, target: 'src:a', fallback: 'block', id: 'r2'),
+          _rule({'domain': _g({'domain_suffix': ['c.com']})}, target: 'src:a', fallback: 'direct', id: 'r3'),
+          _rule({'domain': _g({'domain_suffix': ['d.com']})}, target: 'chain:c', id: 'r4'),
+        ],
+        'apps': [
+          {'id': 'com.x', 'kind': 'package', 'act': 'proxy', 'target': 'src:a'},
+        ],
+      }), info: info);
+      expect(_out(c, 'block'), {'type': 'block', 'tag': 'block'});
+      expect(_out(c, 'src:a~block')!['outbounds'], ['src:a', 'block']);
+      expect(_out(c, 'src:a~direct')!['outbounds'], ['src:a', 'direct']);
+      expect(_out(c, 'src:a~proxy')!['outbounds'], ['src:a', 'proxy'], reason: 'the app has the global fallback: Main flow');
+      expect(_out(c, 'chain:c~proxy')!['default'], 'chain:c');
+      expect(info.fallbacks.map((f) => '${f.tag} ${f.target} ${f.to} ${f.rules.join('/')}'), [
+        'src:a~proxy src:a main com.x',
+        'src:a~block src:a block Streaming/rule r2',
+        'src:a~direct src:a direct rule r3',
+        'chain:c~proxy chain:c main rule r4',
+      ]);
+      expect(_rules(c).map((r) => r['outbound']).skip(1), ['src:a~block', 'src:a~block', 'src:a~direct', 'chain:c~proxy']);
+      // the main flow is no target: no selector, no fallback to watch
+      final main = RoutingInfo();
+      buildConfig(_plan({'rules': [_rule({'domain': _g({'domain_suffix': ['a.com']})}, target: '')]}), info: main);
+      expect(main.fallbacks, isEmpty);
     });
 
     test('an unavailable target takes the rule\'s If unavailable; Default = the global setting; apps use the global one', () {
@@ -296,6 +341,29 @@ void main() {
   });
 
   group('dns', () {
+    test('a clash mode per DNS server in use, only with two or more; a fallback to Direct keeps the rule\'s DNS server', () {
+      final one = buildConfig(_plan({
+        'dns': {
+          'servers': [
+            {'id': 'a', 'addr': 'https://1.1.1.1/dns-query', 'via': 'vpn', 'on': true},
+            {'id': 'b', 'addr': 'system', 'via': 'direct', 'on': false},
+          ],
+        },
+      }));
+      expect(((one['dns'] as Map?)?['rules'] ?? const []), isEmpty, reason: 'one server: nothing to fail over to');
+      final info = RoutingInfo();
+      final two = buildConfig(_plan({
+        'fallback': 'main',
+        'targets': {'src:a': {'kind': 'unit', 'main': _grp([_node], prefix: 'a')}},
+        'dns': {'servers': [..._defaultDns['servers']!.take(2), {'id': 'ya', 'addr': 'udp://77.88.8.8', 'via': 'direct', 'on': true}]},
+        'rules': [_rule({'domain': _g({'domain_suffix': ['a.com']})}, target: 'src:a', fallback: 'direct', dns: 'ya')],
+      }), info: info);
+      expect(((two['dns'] as Map)['rules'] as List).map((r) => (r as Map)['clash_mode']).whereType<String>(), ['dns-remote', 'dns-local', 'dns-ya']);
+      expect(info.dnsServers.map((s) => '${s.id}=${s.tag}'), ['remote=dns-remote', 'local=dns-local', 'ya=dns-ya']);
+      expect(_out(two, 'src:a~direct@dns-ya')!['outbounds'], ['src:a', 'direct@dns-ya']);
+      expect(_out(two, 'direct@dns-ya'), {'type': 'direct', 'tag': 'direct@dns-ya', 'domain_resolver': 'dns-ya'});
+    });
+
     test('typed servers from Settings → DNS: via VPN = detour, final = first ticked, direct resolver for server names', () {
       final c = buildConfig(_plan({'dns': _defaultDns}));
       final dns = c['dns'] as Map;
@@ -333,6 +401,9 @@ void main() {
       expect(dns['rules'], [
         {'domain_suffix': ['bank.ru'], 'action': 'route', 'server': 'dns-local'},
         {'domain_suffix': ['gov.ru'], 'action': 'route', 'server': 'dns-ya'},
+        // after the rules' own servers: a clash mode per server in use, for the DNS failover
+        {'clash_mode': 'dns-remote', 'action': 'route', 'server': 'dns-remote'},
+        {'clash_mode': 'dns-local', 'action': 'route', 'server': 'dns-local'},
       ], reason: 'x.com goes via VPN: the final server already');
       expect((dns['servers'] as List).last, {
         'type': 'https',
@@ -395,7 +466,7 @@ void main() {
           _rule({'domain': _g({'domain_suffix': ['a.com'], 'geosite': ['youtube'], 'rule_set': ['blocked']}), 'ip': _g({'ip_cidr': ['10.0.0.0/8'], 'geoip': ['ru']}, not: true, flag: true)},
               target: 'src:a', dns: 'google'),
           _rule({'port': _g({'port': ['443', '1000-2000']}), 'network': _g({'network': ['udp'], 'protocol': ['quic']})}, action: 'block', id: 'r2'),
-          _rule({'process': _g({'process': ['a.exe', r'C:\b\*.exe']})}, target: 'node:a::1', id: 'r3'),
+          _rule({'process': _g({'process': ['a.exe', r'C:\b\*.exe']})}, target: 'node:a::1', fallback: 'block', id: 'r3'),
           _rule({'source': _g({'source_ip_cidr': ['192.168.0.0/16'], 'source_port': ['80']})}, action: 'direct', dns: 'google', id: 'r4'),
           _rule({'domain': _g({'domain_regex': [r'^.+\.ru$']})}, target: 'chain:gone', fallback: 'direct', id: 'r5'),
           {

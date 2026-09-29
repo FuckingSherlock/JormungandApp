@@ -1,7 +1,11 @@
 /* ══════════════════════ DNS (Settings → DNS sheet; the Home DNS card opens it over Home) ══════════════════════
    - Global DNS: a list of servers. Ticked = in use, order = priority: the first ticked one
-     answers; if it stops answering, the next ticked one takes over (the app pings them
-     and swaps sing-box's main server itself — sing-box has no DNS fallback of its own).
+     answers; if it stops answering, the next ticked one takes over (the core checks them
+     and switches sing-box's clash mode itself — sing-box has no DNS fallback of its own),
+     and back when a higher one recovers. "Switch automatically" (dnsCfg.auto, on by default)
+     turns that off: then the first ticked server stays, whatever it does. While connected
+     the list marks the server in use and the ones that do not answer (dnsHealth: the core's
+     status.dns; the mockup derives it from the pings).
    - Each server: address (system | udp:// | tcp:// | tls:// | https:// | quic:// | bare IP)
      and "via": Direct or VPN (the server's detour).
    - Rules with DNS "Auto" use the first ticked server whose "via" matches the rule's
@@ -20,10 +24,36 @@ const dnsServers = {
 let dnsOrder = ['remote', 'local', 'google'];
 let dnsSeq = 1;
 const dnsCfg = {
-  hijack: true, fakeip: false,
+  hijack: true, fakeip: false, auto: true,
   fakeipExclude: ['*.sberbank.ru', '*.tinkoff.ru', '*.gosuslugi.ru', '*.steamserver.net', '*.xboxlive.com', 'time.*.com'],
 };
 const dnsPing = {};   // id -> ms | -1 | 'testing'
+let liveDns = null;   // status.dns while connected: { active, auto, servers: [{ id, ok, ms }] } (94-live-auto.js)
+let dnsMockActive = null;
+
+// The server in use and the ones that fail, while connected: the core's answer; the mockup
+// takes the first server that does not fail its ping (the first ticked one when Switch
+// automatically is off).
+function dnsHealth() {
+  if (window.JORMD) {
+    if (!connected || !liveDns || !liveDns.active) return null;
+    return { active: liveDns.active, failed: new Set((liveDns.servers || []).filter(s => s.ok === false).map(s => s.id)) };
+  }
+  const act = dnsActive();
+  if (!connected || !act.length) return null;
+  const failed = new Set(act.filter(id => dnsPing[id] === -1));
+  return { active: (dnsCfg.auto && act.find(id => !failed.has(id))) || act[0], failed };
+}
+// The mockup's core writes the journal entry when the server in use changes.
+function dnsMockSync() {
+  const h = window.JORMD ? null : dnsHealth();
+  if (!h) { dnsMockActive = null; return; }
+  const from = dnsMockActive;
+  dnsMockActive = h.active;
+  if (!from || from === h.active || !dnsServers[from]) return;
+  const reason = h.failed.has(from) ? 'failover' : dnsCfg.auto ? 'back' : 'off';
+  mockEventAdd('dns', 'switched', 'info', { from, to: h.active, reason }, { own: reason === 'off', raw: 'dns: ' + from + ' → ' + h.active + ' (' + reason + ')' });
+}
 
 const DNS_ADDR_RE = /^(system|(udp|tcp|tls|https|quic):\/\/[^\s/]+(\/\S*)?|\d{1,3}(\.\d{1,3}){3}(:\d+)?)$/;
 function dnsKind(addr) {
@@ -51,7 +81,12 @@ function toggleDnsOn(id) {
   s.on = !s.on;
   renderDns();
 }
-function setDnsCfg(key, val) { dnsCfg[key] = val; renderDns(); }
+function setDnsCfg(key, val) {
+  dnsCfg[key] = val;
+  // Switch automatically: the core takes it at once while connected (POST /api/dns/auto), no reconnect
+  if (key === 'auto' && connected) backend.dnsAuto(val).catch(e => toast(e.message));
+  renderDns();
+}
 function addFakeipExclude(input) {
   const v = input.value.trim();
   if (v && !dnsCfg.fakeipExclude.includes(v)) dnsCfg.fakeipExclude.push(v);
@@ -74,14 +109,17 @@ function openDnsSettings() {
 function renderDns() {
   const el = document.getElementById('dns-settings');
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
+  dnsMockSync();   // every change (a ping, a tick, the order, Switch automatically) passes here
+  const health = dnsHealth();
   const rows = dnsOrder.map((id, i) => {
     const s = dnsServers[id], rank = s.on ? dnsActive().indexOf(id) + 1 : '';
-    return `<div class="set-row dns-row ${s.on ? '' : 'off'}" data-id="${id}">
+    const state = !health || !s.on ? '' : health.failed.has(id) ? '<span class="dns-state fail">No answer</span>' : health.active === id ? '<span class="dns-state use">In use</span>' : '';
+    return `<div class="set-row dns-row ${s.on ? '' : 'off'} ${state ? (health.failed.has(id) ? 'failed' : 'in-use') : ''}" data-id="${id}">
       <div class="drag-handle cc-grip" onpointerdown="startDnsDrag(event,'${id}')">${GRIP_SVG}</div>
       <span class="cc-rank">${rank}</span>
       <div class="sub-checkbox ${s.on ? 'checked' : ''}" onclick="toggleDnsOn('${id}')"></div>
       <div class="dns-main" onclick="openDnsForm('${id}')">
-        <div class="dns-name">${esc(s.name)}<span class="via-tag ${s.via}">${s.via === 'vpn' ? 'VPN' : 'Direct'}</span></div>
+        <div class="dns-name">${esc(s.name)}<span class="via-tag ${s.via}">${s.via === 'vpn' ? 'VPN' : 'Direct'}</span>${state}</div>
         <div class="dns-addr">${esc(s.addr)}</div>
       </div>
       <span onclick="pingDns('${id}')">${latMsHtml(dnsPing[id])}</span>
@@ -93,6 +131,10 @@ function renderDns() {
       <button class="am-link" onclick="pingAllDns()">Ping all</button></div>
     <div class="set-group" id="dns-list">${rows}
       <div class="node-add" onclick="openDnsForm()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add DNS server</div>
+    </div>
+    <div class="set-group">
+      <div class="set-row" data-key="dnsAuto"><div class="set-label" style="flex:1">Switch automatically<div class="set-hint">${dnsCfg.auto ? 'A server that stops answering is replaced by the next one; the higher one takes over again when it recovers' : 'The first server stays in use even when it does not answer'}</div></div>
+        ${toggle(dnsCfg.auto, "setDnsCfg('auto',!dnsCfg.auto)")}</div>
     </div>
     <div class="am-label">In TUN mode</div>
     <div class="set-group">

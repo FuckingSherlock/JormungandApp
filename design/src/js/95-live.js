@@ -329,7 +329,7 @@ const liveBackend = {
       // Kill switch options as the core reads them (killswitch: rules.md §7); the sub-options only count with their conditions
       const ks = killPlan();
       killSig = JSON.stringify(ks);
-      return api('/api/connect', Object.assign({ plan, systemProxy: segState.sys === 'on' }, ks)).then(st => {
+      return api('/api/connect', Object.assign({ plan, systemProxy: segState.sys === 'on', dnsAuto: dnsCfg.auto }, ks)).then(st => {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
         live.autoSig = JSON.stringify(plan.auto);
@@ -348,6 +348,8 @@ const liveBackend = {
   retry() { return api('/api/retry', {}); },
   // Kill switch settings changed while connected / down: the core takes them live (same fields as the connect body).
   killSettings(cfg) { return api('/api/killswitch', cfg); },
+  // Settings → DNS → Switch automatically changed while connected (the connect body has it too: dnsAuto).
+  dnsAuto(on) { return api('/api/dns/auto', { auto: on }); },
   // Connected: the tunnel's exit; not connected: the direct IP (the core knows which).
   traffic() { return api('/api/traffic'); },
   exitIp() {

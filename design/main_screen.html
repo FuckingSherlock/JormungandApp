@@ -822,6 +822,7 @@ body {
 .cat-site{--ev-c:var(--purple)}
 .cat-sub{--ev-c:var(--active-dim)}
 .cat-rules{--ev-c:var(--accent-dim)}
+.cat-dns{--ev-c:var(--purple)}
 .cat-core{--ev-c:var(--t2)}
 .cat-user{--ev-c:var(--t3)}
 .ev-row{display:flex;gap:10px;padding:9px 14px 9px 12px;border-left:2px solid transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -985,8 +986,15 @@ body {
 .tp-card.picked{border-color:var(--accent);background:rgba(var(--accent-rgb),.07)}
 .tp-card.down .src-main{opacity:.6}
 .tp-check{color:var(--accent);flex-shrink:0;margin:0 4px}
-.tp-nodes{display:block}
-.tp-nodes .node-row.picked{background:rgba(var(--accent-rgb),.10)}
+.tp-save{position:absolute;left:0;right:0;bottom:0;padding:12px 18px 14px;background:var(--sheet);border-top:1px solid var(--border);box-shadow:0 -8px 20px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:8px;transform:translateY(110%);transition:transform .25s cubic-bezier(.32,1,.4,1);pointer-events:none}
+.tp-save.show{transform:translateY(0);pointer-events:auto}
+.tp-save .tp-warn{margin:0;text-align:center;display:none}
+.tp-save.reset .tp-warn{display:block}
+.tp-body.saving{padding-bottom:110px}
+.tp-card .conn-body{padding:2px 14px 10px}
+.tp-card .conn-body .node-row.picked{background:rgba(var(--accent-rgb),.10);box-shadow:inset 3px 0 0 var(--accent)}
+.tp-card .src-name .conn-state{margin-right:8px;vertical-align:2px}
+.tp-card .tp-chevron{flex-shrink:0;margin:0 6px;color:var(--t3)}
 
 /* ── Route sheet ── */
 .route-bar{display:flex;align-items:center;gap:10px;padding:10px 18px 8px;flex-shrink:0}
@@ -1187,7 +1195,10 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 .dns-row{gap:8px;padding:8px 10px 8px 12px}
 .dns-row.off .dns-main{opacity:.5}
 .dns-main{flex:1;min-width:0;cursor:pointer}
-.dns-name{display:flex;align-items:center;gap:6px;font-size:15px;color:var(--t1)}
+.dns-name{display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;font-size:15px;color:var(--t1)}
+.dns-state{font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:4px;padding:1px 5px;white-space:nowrap}
+.dns-state.use{border:1px solid rgba(var(--active-rgb),.55);color:var(--active)}
+.dns-state.fail{background:rgba(var(--danger-rgb),.14);color:var(--danger)}
 .dns-addr{font-family:var(--mono);font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 .via-tag{font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:4px;padding:1px 5px}
 .via-tag.vpn{background:rgba(var(--accent-rgb),.15);color:var(--accent)}
@@ -1954,6 +1965,10 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
       <input id="tp-search" placeholder="Search profiles, chains, servers" oninput="renderTargetPicker()">
     </div>
     <div class="sheet-body tp-body" id="tp-body"></div>
+    <div class="tp-save" id="tp-save">
+      <div class="set-hint tp-warn" id="tp-warn">Nothing picked — goes through the main flow.</div>
+      <button class="btn-primary" onclick="saveTarget()">Save</button>
+    </div>
   </div>
   <!-- ══════════ NODES: ADD MENU ══════════ -->
   <div class="overlay overlay-l2" id="ov-addmenu" onclick="closeSheet('addmenu')"></div>
@@ -2421,6 +2436,10 @@ let backend = {
     renderConnState();
     return Promise.resolve();
   },
+  // POST /api/dns/auto {auto}: Settings → DNS → Switch automatically while connected (the core
+  // puts the first server back at once when it is turned off). The mock derives the server in
+  // use from the pings (56-dns.js dnsHealth), so there is nothing to keep here.
+  dnsAuto(on) { return Promise.resolve(); },
   retry() {
     return wait(700).then(() => {
       const downMs = vpn.down ? Date.now() - vpn.down.since : 0;
@@ -5422,80 +5441,110 @@ function saveAppAct() {
 }
 /* ══════════════════════ TARGET PICKER (rules, apps) ══════════════════════
    One sheet above everything that lists what traffic can go through: Main flow, then the
-   whole Nodes catalog whatever the route's mode — subscriptions / server groups (tap the
-   card = all its servers, ⌄ opens its servers to pick one), profiles, chains. Cards carry
-   the same details as in Nodes: what it is made of, traffic / expiry, the server it would
-   use now with its ping. Off / empty ones stay pickable, marked unavailable (the rule then
-   follows its "If unavailable"). */
+   whole Nodes catalog whatever the route's mode — subscriptions / server groups, profiles,
+   chains. Cards carry the same details as in Nodes: what it is made of, traffic / expiry,
+   the server it would use now with its ping. A card with servers (subscription, profile)
+   unfolds on a tap; AUTO in its header (as on Route) marks the whole item, the unfolded body
+   shows how it picks (Fastest / Priority, the item's own setting, read-only) and its servers,
+   a tap on one marks it. Main flow and chains are marked by a tap. A tap on the marked item
+   unmarks it (→ main flow). Marks don't close the sheet: a Save bar slides in while the
+   selection differs from the opening one; ×, swipe and Back apply nothing. Off / empty ones
+   stay pickable, marked unavailable (the rule then follows its "If unavailable"). */
 
-let tpCurrent = '', tpApply = null;
-const tpOpen = new Set();
+let tpCurrent = '', tpOrig = '', tpApply = null;   // tpCurrent = the selection so far, tpOrig = what the picker opened with
+const tpOpen = new Set();   // unfolded cards, by target id ('src:<id>', 'profile:<id>')
 
 function openTargetPicker(t, apply) {
-  tpCurrent = t || '';
+  tpCurrent = tpOrig = t || '';
   tpApply = apply;
   tpOpen.clear();
-  if (tpCurrent.startsWith('node:')) tpOpen.add(tpCurrent.slice(5).split('::')[0]);
+  if (tpCurrent.startsWith('node:')) tpOpen.add('src:' + tpCurrent.slice(5).split('::')[0]);
   document.getElementById('tp-search').value = '';
   renderTargetPicker();
   openSheet('target');
 }
 
+/* A pick only marks the selection; the Save bar slides in while it differs from the opening
+   target, Save applies and closes, closing any other way applies nothing. Tapping the
+   selected item again deselects it: the target is then '' = the main flow. */
 function pickTarget(t) {
+  tpCurrent = t === tpCurrent ? '' : t;
+  renderTargetPicker();
+}
+function saveTarget() {
   closeSheet('target');
-  if (tpApply) tpApply(t);
+  if (tpApply) tpApply(tpCurrent);
 }
 
-function tpToggle(sid) {
-  if (tpOpen.has(sid)) tpOpen.delete(sid); else tpOpen.add(sid);
+function tpToggle(t) {
+  if (tpOpen.has(t)) tpOpen.delete(t); else tpOpen.add(t);
   renderTargetPicker();
 }
 
 const TP_CHECK = '<svg class="tp-check" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+const TP_CHEVRON = open => `<svg class="src-chevron tp-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${open ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg>`;
 
-function tpCardHtml(t, name, meta, below, extra = '', body = '') {
-  const i = targetInfo(t), picked = t === tpCurrent;
-  return `<div class="src-card tp-card ${picked ? 'picked' : ''} ${i.ok ? '' : 'down'}" data-t="${t}">
-    <div class="src-head" onclick="pickTarget('${t}')">
+// opts.rows (a list of {sid, node}) makes the card unfoldable; opts.id = its source / profile id.
+function tpCardHtml(t, name, meta, below, opts = {}) {
+  const i = targetInfo(t), picked = t === tpCurrent, fold = opts.rows !== undefined, open = fold && opts.open;
+  return `<div class="src-card tp-card ${picked ? 'picked' : ''} ${i.ok ? '' : 'down'} ${open ? 'open' : ''}" data-t="${t}">
+    <div class="src-head" onclick="${fold ? `tpToggle('${t}')` : `pickTarget('${t}')`}">
       <div class="src-main">
-        <div class="src-name">${name}${i.ok ? '' : '<span class="conn-tag off">off</span>'}</div>
+        <div class="src-name">${fold ? `<button class="conn-state ${picked ? 'on' : ''}" onclick="event.stopPropagation();pickTarget('${t}')" title="Use the whole item as the target">auto</button>` : ''}${name}${i.ok ? '' : '<span class="conn-tag off">off</span>'}</div>
         <div class="src-meta">${meta}</div>
       </div>
-      ${picked ? TP_CHECK : ''}${extra}
+      ${picked && !fold ? TP_CHECK : ''}${fold ? TP_CHEVRON(open) : ''}
     </div>
-    ${below}${body}
+    ${below}${open ? tpBodyHtml(t, opts.id, opts.rows) : ''}
   </div>`;
+}
+
+// Route's routeRowBodyHtml, without grips / edit / ping taps: the mode is read-only, a server row picks.
+function tpBodyHtml(t, id, refs) {
+  const priority = unitPriority(id);
+  let rank = 0;
+  const rows = refs.map(r => {
+    const nt = 'node:' + r.sid + '::' + r.node.id, off = isNodeDisabled(sourcesData[r.sid], r.node.id);
+    return `<div class="node-row ps-node on ${nt === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" data-t="${nt}" onclick="pickTarget('${nt}')">
+      ${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
+      <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
+      <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}${nt === tpCurrent ? TP_CHECK : ''}</div>`;
+  }).join('');
+  const hint = priority ? 'Priority: the first working one from the top.' : 'Fastest: the quickest working one.';
+  return `<div class="conn-body"><div class="seg-row"><div class="set-hint conn-hint conn-pick-hint">${hint}</div></div>
+    <div class="se-nodes">${rows || '<div class="route-empty">No servers</div>'}</div></div>`;
 }
 
 function renderTargetPicker() {
   const q = document.getElementById('tp-search').value.trim().toLowerCase();
   const hit = s => !q || s.toLowerCase().includes(q);
   const label = (text, n) => n ? `<div class="tp-label">${text}</div>` : '';
+  const nodeHit = n => hit(n.name + ' ' + n.protocol);
+  // Servers of an unfolded card: all, or (the search hit servers, not the card) the matching ones; as on Route.
+  const listed = (id, refs, nameHit) => {
+    const rs = nameHit ? refs : refs.filter(r => nodeHit(r.node));
+    return unitPriority(id) ? orderRefs(rs, unitOwner(id).pickOrder) : byPing(rs, r => r.node);
+  };
 
   const cur = effectiveConnectId(), ce = connectEntry(cur);
   const main = hit('main flow') ? tpCardHtml('', 'Main flow', '<span>What Home connects through · follows Route</span>',
     `<div class="entry-now"><span class="conn-tag muted">now</span><span class="conn-node">${ce ? esc(ce.name) : '—'}</span></div>`) : '';
 
   const srcs = sourceOrder.map(sid => {
-    const s = sourcesData[sid];
-    const nodes = s.nodes.filter(n => hit(n.name + ' ' + n.protocol));
-    if (!hit(s.name) && !nodes.length) return '';
-    const open = tpOpen.has(sid) || (q && !hit(s.name));
-    const rows = open ? (hit(s.name) ? s.nodes : nodes).map(n => {
-      const t = 'node:' + sid + '::' + n.id, off = isNodeDisabled(s, n.id);
-      return `<div class="node-row tap ${t === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" onclick="pickTarget('${t}')">
-        <span class="node-name"><span class="node-flag">${n.flag}</span>${esc(n.name)}</span><span class="node-proto">${protoLabel(n)}</span>${latHtml(n)}${t === tpCurrent ? TP_CHECK : ''}</div>`;
-    }).join('') : '';
-    const chevron = `<button class="icon-btn ghost" onclick="event.stopPropagation();tpToggle('${sid}')" title="Pick one server">
-      <svg class="src-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${open ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg></button>`;
+    const s = sourcesData[sid], t = 'src:' + sid, refs = s.nodes.map(node => ({ sid, node }));
+    if (!hit(s.name) && !refs.some(r => nodeHit(r.node))) return '';
     const best = bestAlive(liveNodes(s));
-    return tpCardHtml('src:' + sid, esc(s.name), srcMetaHtml(s),
-      usageHtml(s) + `<div class="entry-now"><span class="conn-tag muted">fastest</span>${nodeSummaryHtml(best, false)}</div>`,
-      chevron, open ? `<div class="src-body tp-nodes">${rows}</div>` : '');
+    return tpCardHtml(t, esc(s.name), srcMetaHtml(s),
+      usageHtml(s) + `<div class="entry-now"><span class="conn-tag muted">${unitPriority(sid) ? 'priority' : 'fastest'}</span>${nodeSummaryHtml(best, false)}</div>`,
+      { id: sid, open: tpOpen.has(t) || (!!q && !hit(s.name)), rows: listed(sid, refs, hit(s.name)) });
   }).join('');
 
-  const profs = getProfileIds().filter(id => hit(profilesData[id].name))
-    .map(id => tpCardHtml('profile:' + id, esc(profilesData[id].name), entryMetaHtml(id), entryNowHtml(id))).join('');
+  const profs = getProfileIds().map(id => {
+    const p = profilesData[id], t = 'profile:' + id, refs = unitRefs(id, true);
+    if (!hit(p.name) && !refs.some(r => nodeHit(r.node))) return '';
+    return tpCardHtml(t, esc(p.name), entryMetaHtml(id), entryNowHtml(id),
+      { id, open: tpOpen.has(t) || (!!q && !hit(p.name)), rows: listed(id, refs, hit(p.name)) });
+  }).join('');
   const chains = catalogOrder.simple.concat(catalogOrder.profiles).filter(id => chainsData[id] && hit(chainsData[id].name))
     .map(id => tpCardHtml('chain:' + id, esc(chainsData[id].name), entryMetaHtml(id), entryNowHtml(id))).join('');
 
@@ -5504,6 +5553,11 @@ function renderTargetPicker() {
     + label('Profiles', profs) + profs
     + label('Chains', chains) + chains
     || `<div class="nodes-empty">Nothing matches “${esc(q)}”.</div>`;
+  const dirty = tpCurrent !== tpOrig;
+  const bar = document.getElementById('tp-save');
+  bar.classList.toggle('show', dirty);
+  bar.classList.toggle('reset', dirty && tpCurrent === '');
+  document.getElementById('tp-body').classList.toggle('saving', dirty);
 }
 /* ══════════════════════ LOGS ══════════════════════
    LogsView, two tabs: Events (47-events.js: what happened, as sentences, from the events
@@ -5712,7 +5766,8 @@ const EV_CATS = [
   ['auto', 'Auto', [['switched', 'Entry or server switched'], ['fastest', 'Fastest moved'], ['unstable', 'Unstable entry']]],
   ['site', 'Sites', [['blocked', 'Site does not open']]],
   ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
-  ['rules', 'Rules', [['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
+  ['rules', 'Rules', [['fallback', 'Rule target unavailable'], ['targetBack', 'Rule target back'], ['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
+  ['dns', 'DNS', [['switched', 'DNS server switched']]],
   ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting']]],
 ];
 const svgI = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
@@ -5722,6 +5777,7 @@ const EV_ICON = {
   site: svgI('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>'),
   sub: svgI('<path d="M8 17l4 4 4-4"/><path d="M12 12v9"/><path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29"/>'),
   rules: svgI('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/>'),
+  dns: svgI('<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/>'),
   core: svgI('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>'),
   user: svgI('<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7"/>'),
 };
@@ -5734,6 +5790,7 @@ const EV_NOTIF = {
   'site/blocked': 'blocked', 'sub/updated': 'subUpdated',
   'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
   'rules/ruleSetFailed': 'ruleSets',
+  'rules/fallback': 'autoSwitch', 'rules/targetBack': 'autoSwitch', 'dns/switched': 'autoSwitch',
 };
 
 /* ── Words: the structured data → the sentences ── */
@@ -5754,6 +5811,9 @@ function evReason(d) {
   return d.reason ? String(d.reason) : '';
 }
 const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+const evDns = id => (dnsServers[id] && dnsServers[id].name) || String(id);
+const evRules = d => `Rule ${d.rule}` + (d.more ? ` and ${evPlural(d.more, 'more', 'more')}` : '');   // "Rule Streaming and 2 more"
+const EV_FALLBACK = { block: 'blocked while it is down', direct: 'goes direct', main: 'goes through the main flow' };
 const EV_TEXT = {
   'conn/connected': d => ['Connected' + (d.entry ? ': ' + evEntry(d.entry) : ''),
     [d.server && evServer(d.server), d.mode === 'tun' ? 'TUN' : d.mode === 'proxy' ? 'Proxy' : '', d.route === 'global' ? 'Global' : d.route === 'rules' ? 'By rules' : ''].filter(Boolean).join(' · ')],
@@ -5777,6 +5837,10 @@ const EV_TEXT = {
   'sub/dead': d => [`${evSource(d.source, d.name)}: its servers do not respond`, "Contact the subscription provider's support"],
   'rules/ruleSetFailed': d => [`Rule set ${d.tag} not downloaded`, [d.error, 'the last copy is used'].filter(Boolean).join(' — ')],
   'rules/ruleSetUpdated': d => [`Rule set ${d.tag} updated`, ''],
+  'rules/fallback': d => [`${targetName(d.target)} does not answer`, `${evRules(d)} ${EV_FALLBACK[d.to] || d.to}`],
+  'rules/targetBack': d => [`${targetName(d.target)} answers again`, `${evRules(d)} back through it`],
+  'dns/switched': d => [`DNS: ${evDns(d.from)} → ${evDns(d.to)}`,
+    d.reason === 'failover' ? `${evDns(d.from)} does not answer` : d.reason === 'back' ? `${evDns(d.to)} answers again — returned to it` : 'Switch automatically is off: the first server is back'],
   'core/crashed': d => ['sing-box stopped', (d.code != null ? 'Exit code ' + d.code + ' — ' : '') + 'starting it again'],
   'core/restarted': d => ['sing-box started again', [d.attempt && 'Attempt ' + d.attempt, d.downMs != null && 'was down ' + evDuration(d.downMs)].filter(Boolean).join(' · ')],
   'core/down': d => ['VPN is down', d.proxy === 'kept' ? 'Internet is blocked (the system proxy is kept) — still trying' : 'Traffic goes direct — still trying'],
@@ -5803,8 +5867,17 @@ function evText(e) { const d = evDescribe(e); return d.title + (d.detail ? ' —
 // The expanded row: every field of the event in words.
 const EV_FIELD = { entry: 'Entry', server: 'Server', mode: 'Mode', route: 'Route', from: 'From', to: 'To', reason: 'Reason', by: 'By', host: 'Site', dest: 'Address', via: 'Opens via',
   source: 'Subscription', name: 'Name', added: 'New servers', removed: 'Removed', total: 'Servers', count: 'Servers', error: 'Error', tag: 'Rule set', url: 'URL', code: 'Exit code',
+  rule: 'Rule', target: 'Target', more: 'More rules',
   attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
-function evValue(k, v) {
+function evValue(k, v, e) {
+  if (e && e.cat === 'dns') {
+    if (k === 'from' || k === 'to') return evDns(v);
+    if (k === 'reason') return { failover: 'It stopped answering', back: 'A higher server answers again', off: 'Switch automatically turned off' }[v] || String(v);
+  }
+  if (e && e.cat === 'rules') {
+    if (k === 'target') return targetName(v);
+    if (k === 'to') return { block: 'Block', direct: 'Direct', main: 'Main flow' }[v] || String(v);
+  }
   if (typeof v === 'boolean') return k === 'on' ? (v ? 'On' : 'Off') : v ? 'Yes' : 'No';
   if (k === 'downMs' || k === 'holdMs') return evDuration(v);
   if (k === 'mode') return v === 'tun' ? 'TUN' : v === 'proxy' ? 'Proxy' : String(v);
@@ -5819,13 +5892,13 @@ function evFieldsHtml(g) {
   const e = g.ev, f = (k, v) => `<div class="ev-f"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
   let h = g.items.length > 1 ? f('Times', g.items.map(x => logTime(x.at)).join(', ')) : f('Time', evStamp(e.at));
   h += f('Event', e.cat + ' / ' + e.type + (e.own ? ' (yours)' : ''));
-  Object.entries(e.data || {}).forEach(([k, v]) => { if (v != null && v !== '') h += f(EV_FIELD[k] || k.charAt(0).toUpperCase() + k.slice(1), evValue(k, v)); });
+  Object.entries(e.data || {}).forEach(([k, v]) => { if (v != null && v !== '') h += f(EV_FIELD[k] || k.charAt(0).toUpperCase() + k.slice(1), evValue(k, v, e)); });
   return h;
 }
 
 /* ── Rows: repeats folded, day separators, actions ── */
 
-const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
+const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/fallback': ['target', 'to'], 'rules/targetBack': ['target'], 'dns/switched': ['from', 'to'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
 function evKey(e) {
   const t = e.cat + '/' + e.type, d = e.data || {}, f = EV_KEYF[t] || (e.cat === 'sub' ? ['source'] : null);
   return t + '|' + (f ? f.map(k => d[k]).join('|') : e.cat === 'user' ? JSON.stringify(d) : '');
@@ -5864,7 +5937,8 @@ function evOpenTarget(e) {
   if (e.cat === 'sub') return sourcesData[d.source] ? d.source : null;
   if (e.cat === 'auto' && e.type === 'unstable') return connectEntry(d.id) ? d.id : null;
   if (e.cat === 'site') return d.entry && connectEntry(d.entry) ? d.entry : null;
-  if (e.cat === 'rules') return 'rules';
+  if (e.cat === 'rules') return e.type === 'fallback' || e.type === 'targetBack' ? 'rulelist' : 'rules';
+  if (e.cat === 'dns') return 'dns';
   return null;
 }
 function evAct(key, id) {
@@ -5876,6 +5950,8 @@ function evAct(key, id) {
   else if (key === 'open') {
     const t = evOpenTarget(e);
     if (t === 'rules') { openRuleSets(); return; }
+    if (t === 'rulelist') { openRules(); return; }
+    if (t === 'dns') { openDnsSettings(); return; }
     switchTab('nodes');
     setNodesTab(catalogOrder.simple.includes(t) ? 'simple' : 'profiles');
     expandState[t] = true;
@@ -6538,8 +6614,12 @@ function renderAutoMode() {
 }
 /* ══════════════════════ DNS (Settings → DNS sheet; the Home DNS card opens it over Home) ══════════════════════
    - Global DNS: a list of servers. Ticked = in use, order = priority: the first ticked one
-     answers; if it stops answering, the next ticked one takes over (the app pings them
-     and swaps sing-box's main server itself — sing-box has no DNS fallback of its own).
+     answers; if it stops answering, the next ticked one takes over (the core checks them
+     and switches sing-box's clash mode itself — sing-box has no DNS fallback of its own),
+     and back when a higher one recovers. "Switch automatically" (dnsCfg.auto, on by default)
+     turns that off: then the first ticked server stays, whatever it does. While connected
+     the list marks the server in use and the ones that do not answer (dnsHealth: the core's
+     status.dns; the mockup derives it from the pings).
    - Each server: address (system | udp:// | tcp:// | tls:// | https:// | quic:// | bare IP)
      and "via": Direct or VPN (the server's detour).
    - Rules with DNS "Auto" use the first ticked server whose "via" matches the rule's
@@ -6558,10 +6638,36 @@ const dnsServers = {
 let dnsOrder = ['remote', 'local', 'google'];
 let dnsSeq = 1;
 const dnsCfg = {
-  hijack: true, fakeip: false,
+  hijack: true, fakeip: false, auto: true,
   fakeipExclude: ['*.sberbank.ru', '*.tinkoff.ru', '*.gosuslugi.ru', '*.steamserver.net', '*.xboxlive.com', 'time.*.com'],
 };
 const dnsPing = {};   // id -> ms | -1 | 'testing'
+let liveDns = null;   // status.dns while connected: { active, auto, servers: [{ id, ok, ms }] } (94-live-auto.js)
+let dnsMockActive = null;
+
+// The server in use and the ones that fail, while connected: the core's answer; the mockup
+// takes the first server that does not fail its ping (the first ticked one when Switch
+// automatically is off).
+function dnsHealth() {
+  if (window.JORMD) {
+    if (!connected || !liveDns || !liveDns.active) return null;
+    return { active: liveDns.active, failed: new Set((liveDns.servers || []).filter(s => s.ok === false).map(s => s.id)) };
+  }
+  const act = dnsActive();
+  if (!connected || !act.length) return null;
+  const failed = new Set(act.filter(id => dnsPing[id] === -1));
+  return { active: (dnsCfg.auto && act.find(id => !failed.has(id))) || act[0], failed };
+}
+// The mockup's core writes the journal entry when the server in use changes.
+function dnsMockSync() {
+  const h = window.JORMD ? null : dnsHealth();
+  if (!h) { dnsMockActive = null; return; }
+  const from = dnsMockActive;
+  dnsMockActive = h.active;
+  if (!from || from === h.active || !dnsServers[from]) return;
+  const reason = h.failed.has(from) ? 'failover' : dnsCfg.auto ? 'back' : 'off';
+  mockEventAdd('dns', 'switched', 'info', { from, to: h.active, reason }, { own: reason === 'off', raw: 'dns: ' + from + ' → ' + h.active + ' (' + reason + ')' });
+}
 
 const DNS_ADDR_RE = /^(system|(udp|tcp|tls|https|quic):\/\/[^\s/]+(\/\S*)?|\d{1,3}(\.\d{1,3}){3}(:\d+)?)$/;
 function dnsKind(addr) {
@@ -6589,7 +6695,12 @@ function toggleDnsOn(id) {
   s.on = !s.on;
   renderDns();
 }
-function setDnsCfg(key, val) { dnsCfg[key] = val; renderDns(); }
+function setDnsCfg(key, val) {
+  dnsCfg[key] = val;
+  // Switch automatically: the core takes it at once while connected (POST /api/dns/auto), no reconnect
+  if (key === 'auto' && connected) backend.dnsAuto(val).catch(e => toast(e.message));
+  renderDns();
+}
 function addFakeipExclude(input) {
   const v = input.value.trim();
   if (v && !dnsCfg.fakeipExclude.includes(v)) dnsCfg.fakeipExclude.push(v);
@@ -6612,14 +6723,17 @@ function openDnsSettings() {
 function renderDns() {
   const el = document.getElementById('dns-settings');
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
+  dnsMockSync();   // every change (a ping, a tick, the order, Switch automatically) passes here
+  const health = dnsHealth();
   const rows = dnsOrder.map((id, i) => {
     const s = dnsServers[id], rank = s.on ? dnsActive().indexOf(id) + 1 : '';
-    return `<div class="set-row dns-row ${s.on ? '' : 'off'}" data-id="${id}">
+    const state = !health || !s.on ? '' : health.failed.has(id) ? '<span class="dns-state fail">No answer</span>' : health.active === id ? '<span class="dns-state use">In use</span>' : '';
+    return `<div class="set-row dns-row ${s.on ? '' : 'off'} ${state ? (health.failed.has(id) ? 'failed' : 'in-use') : ''}" data-id="${id}">
       <div class="drag-handle cc-grip" onpointerdown="startDnsDrag(event,'${id}')">${GRIP_SVG}</div>
       <span class="cc-rank">${rank}</span>
       <div class="sub-checkbox ${s.on ? 'checked' : ''}" onclick="toggleDnsOn('${id}')"></div>
       <div class="dns-main" onclick="openDnsForm('${id}')">
-        <div class="dns-name">${esc(s.name)}<span class="via-tag ${s.via}">${s.via === 'vpn' ? 'VPN' : 'Direct'}</span></div>
+        <div class="dns-name">${esc(s.name)}<span class="via-tag ${s.via}">${s.via === 'vpn' ? 'VPN' : 'Direct'}</span>${state}</div>
         <div class="dns-addr">${esc(s.addr)}</div>
       </div>
       <span onclick="pingDns('${id}')">${latMsHtml(dnsPing[id])}</span>
@@ -6631,6 +6745,10 @@ function renderDns() {
       <button class="am-link" onclick="pingAllDns()">Ping all</button></div>
     <div class="set-group" id="dns-list">${rows}
       <div class="node-add" onclick="openDnsForm()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add DNS server</div>
+    </div>
+    <div class="set-group">
+      <div class="set-row" data-key="dnsAuto"><div class="set-label" style="flex:1">Switch automatically<div class="set-hint">${dnsCfg.auto ? 'A server that stops answering is replaced by the next one; the higher one takes over again when it recovers' : 'The first server stays in use even when it does not answer'}</div></div>
+        ${toggle(dnsCfg.auto, "setDnsCfg('auto',!dnsCfg.auto)")}</div>
     </div>
     <div class="am-label">In TUN mode</div>
     <div class="set-group">
@@ -7041,7 +7159,7 @@ const NOTIF_GROUPS = [
     ['status', 'Status notification', 'Android: shows the entry, server and speed while connected'],
   ]],
   ['Connection', [
-    ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server'],
+    ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server; a rule went to its "If unavailable" or a DNS server was replaced'],
     ['unstable', 'Unstable entry', 'An entry keeps dropping and waits before it gets the traffic back'],
     ['connLost', 'Connection lost', 'No network or no server answers, and when it is back'],
     ['coreCrash', 'sing-box stopped', 'Background restarts are silent; this shows them'],
@@ -7316,27 +7434,33 @@ function closeSheet(name) {
    entry; syncBackHistory() matches the entries to what is open, once per tick. */
 const sheetStack = [];   // open sheets, bottom first: {name, prev: [closed entries back reopens]}
 let justClosed = [];     // top sheets the UI closed in this tick (the next open replaces them)
-let histDepth = (history.state && history.state.jorm) || 0, histSkip = 0, histTimer = null;   // a reload keeps its entries
+let histDepth = (history.state && history.state.jorm) || 0, histSkip = 0, histSkipAt = 0, histTimer = null;   // a reload keeps its entries
 const backDepth = () => sheetStack.length + (activeTab() !== 'home' ? 1 : 0);
 const activeTab = () => (document.querySelector('.view.active') || { id: 'view-home' }).id.slice(5);
 
-function syncBackHistory() {
+function syncBackHistory(wait) {
   if (histTimer) return;
   histTimer = setTimeout(() => {
     histTimer = null;
+    // history.go() lands later than it is called: a pushState or a second go() before it lands
+    // shifts the entries under it and can walk out of the page. Wait for the pending one.
+    if (histSkip) {
+      if (Date.now() - histSkipAt < 1000) { syncBackHistory(true); return; }
+      histSkip = 0;   // the popstate never came (a viewer without history)
+    }
     justClosed = [];
     const want = backDepth();
     try {
       while (histDepth < want) history.pushState({ jorm: ++histDepth }, '');
-      if (histDepth > want) { histSkip++; history.go(want - histDepth); histDepth = want; }
+      if (histDepth > want) { histSkip++; histSkipAt = Date.now(); history.go(want - histDepth); histDepth = want; }
     } catch (e) { /* a sandboxed viewer may refuse history */ }
-  });
+  }, wait ? 30 : 0);
 }
 syncBackHistory();   // after a reload: back to the base entry
 window.addEventListener('popstate', e => {
   if (histSkip) { histSkip--; return; }
   const depth = (e.state && e.state.jorm) || 0;
-  if (depth > histDepth) { histSkip++; history.go(histDepth - depth); return; }   // forward: undo
+  if (depth > histDepth) { histSkip++; histSkipAt = Date.now(); history.go(histDepth - depth); return; }   // forward: undo
   for (; histDepth > depth; histDepth--) goBack();
   syncBackHistory();
 });
@@ -8658,6 +8782,9 @@ function liveAutoStatus(st) {
   if (a) { sourcesDown(a.members); live.routes = (a.routes || []).map(r => r.id); } else live.srcDown = new Set();
   if (pings) refreshSourceViews();
   else if (JSON.stringify(coreRoute) !== was) { renderConnects(); updateMainConnectCard(); }
+  // status.dns: the server in use and the ones that do not answer (Settings → DNS marks them)
+  const dns = st && st.connected ? st.dns || null : null;
+  if (JSON.stringify(dns) !== JSON.stringify(liveDns)) { liveDns = dns; renderDns(); }
 }
 
 /* status.recovering / down / blocking → the dock and Home (50-home.js vpn). A background restart
@@ -9032,7 +9159,7 @@ const liveBackend = {
       // Kill switch options as the core reads them (killswitch: rules.md §7); the sub-options only count with their conditions
       const ks = killPlan();
       killSig = JSON.stringify(ks);
-      return api('/api/connect', Object.assign({ plan, systemProxy: segState.sys === 'on' }, ks)).then(st => {
+      return api('/api/connect', Object.assign({ plan, systemProxy: segState.sys === 'on', dnsAuto: dnsCfg.auto }, ks)).then(st => {
         live.anchor = plan.routes[plan.current].id;
         live.planSig = planSigOf(plan);
         live.autoSig = JSON.stringify(plan.auto);
@@ -9051,6 +9178,8 @@ const liveBackend = {
   retry() { return api('/api/retry', {}); },
   // Kill switch settings changed while connected / down: the core takes them live (same fields as the connect body).
   killSettings(cfg) { return api('/api/killswitch', cfg); },
+  // Settings → DNS → Switch automatically changed while connected (the connect body has it too: dnsAuto).
+  dnsAuto(on) { return api('/api/dns/auto', { auto: on }); },
   // Connected: the tunnel's exit; not connected: the direct IP (the core knows which).
   traffic() { return api('/api/traffic'); },
   exitIp() {

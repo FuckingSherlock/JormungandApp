@@ -24,20 +24,30 @@ class Probe {
   final int port;
   final String secret;
 
-  /// The inbound and its route rules (to go first) for [tags].
-  ({Map<String, dynamic> inbound, List<Map<String, dynamic>> rules}) inbound(Iterable<String> tags) {
-    final ts = tags.toSet().toList();
+  /// The user name that has a name resolved through the DNS server [tag] and nothing else.
+  static String dnsUser(String tag) => 'dns-check/$tag';
+
+  /// The inbound and its route rules (to go first) for [tags]; [dnsServers] (DNS server
+  /// tags): per server a rule resolving the requested name through it alone (`resolve`
+  /// with its own `server`, no cache) and then ending the connection at the inbound
+  /// itself: the SOCKS reply is a success exactly when the name resolved ([probeDns]).
+  ({Map<String, dynamic> inbound, List<Map<String, dynamic>> rules}) inbound(Iterable<String> tags, {Iterable<String> dnsServers = const []}) {
+    final ts = tags.toSet().toList(), ds = dnsServers.toSet().toList();
     return (
       inbound: {
         'type': 'socks',
         'tag': probeInboundTag,
         'listen': '127.0.0.1',
         'listen_port': port,
-        'users': [for (final t in ts) {'username': t, 'password': secret}],
+        'users': [for (final t in [...ts, ...ds.map(dnsUser)]) {'username': t, 'password': secret}],
       },
       rules: [
         for (final t in ts)
           {'inbound': [probeInboundTag], 'auth_user': [t], 'action': 'route', 'outbound': t},
+        for (final s in ds) ...[
+          {'inbound': [probeInboundTag], 'auth_user': [dnsUser(s)], 'action': 'resolve', 'server': s, 'strategy': 'ipv4_only', 'disable_cache': true},
+          {'inbound': [probeInboundTag], 'auth_user': [dnsUser(s)], 'action': 'route', 'outbound': 'direct', 'override_address': '127.0.0.1', 'override_port': port},
+        ],
       ],
     );
   }
@@ -142,6 +152,25 @@ Future<bool?> probeReach(Probe probe, String tag, String dest, {int timeoutMs = 
     return true;
   } catch (_) {
     return false;
+  } finally {
+    w?.close();
+  }
+}
+
+/// ms until the DNS server [server] (its tag in the config) has resolved [name] — a real
+/// query on the server's own path, direct or through the VPN as the server is set (see
+/// [Probe.inbound]); -1 = no answer with an address (so [name] must be one that exists).
+Future<int> probeDns(Probe probe, String server, String name, {int timeoutMs = 5000}) async {
+  final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+  Duration left() => deadline.difference(DateTime.now());
+  _Wire? w;
+  try {
+    final sw = Stopwatch()..start();
+    w = await _Wire.connect(probe.port).timeout(left());
+    await w.socks(Probe.dnsUser(server), probe.secret, name, 80).timeout(left());
+    return sw.elapsedMilliseconds;
+  } catch (_) {
+    return -1;
   } finally {
     w?.close();
   }

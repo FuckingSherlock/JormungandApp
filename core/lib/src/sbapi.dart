@@ -259,6 +259,20 @@ class SingBoxApi implements BoxControl {
 
   Future<bool> closeAllConnections() => _ok(_c.closeAllConnections(Empty()));
 
+  /// Switches sing-box's clash mode (the DNS rules with `clash_mode` follow it, see
+  /// routing.dart); false when sing-box refused or is gone.
+  Future<bool> setClashMode(String mode) => _ok(_c.setClashMode(ClashMode(mode: mode)));
+
+  /// The clash mode in use and the ones the config knows; null when sing-box refused.
+  Future<({String current, List<String> modes})?> clashMode() async {
+    try {
+      final s = await _c.getClashModeStatus(Empty()).timeout(const Duration(seconds: 3));
+      return (current: s.currentMode, modes: List.of(s.modeList));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Speed Test through [outbound]: progress as it goes, the last one `isFinal` (with
   /// `error` when it failed). [configUrl] empty = sing-box's default (Apple's servers).
   Stream<NetworkQualityTestProgress> speedTest(String outbound, {String configUrl = '', int maxSeconds = 0}) =>

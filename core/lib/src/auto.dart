@@ -47,6 +47,7 @@ import 'config.dart' show defaultTestUrl, planCheckers;
 import 'plan.dart';
 import 'probe.dart' show withCheckers;
 import 'sbapi.dart' show BoxControl, ClosedConnection;
+import 'stall.dart';
 
 /// When a route above the current one takes the traffic back.
 enum ReturnTo { always, faster, never }
@@ -299,6 +300,10 @@ class AutoService {
   /// is tested, moved or marked until it is back.
   bool offline = false;
 
+  /// The network may be down right now (offline, no route answers, the current one just
+  /// missed): what other checkers (fallback.dart, dns_failover.dart) must not judge in.
+  bool get networkUncertain => noNet || offline || _routes[index].health.fails > 0;
+
   /// Requests through the current route that could not open (see [onLog]) and the last.
   int requestFails = 0;
   Map<String, dynamic>? lastRequestFail;
@@ -319,7 +324,7 @@ class AutoService {
   int? _lostAt, _offlineAt; // since when: no route answers / the OS has no network
   Timer? _timer;
   StreamSubscription<void>? _groupsSub;
-  final _sweeps = <Timer>{};
+  late final _stall = StallSweeper(api);
   bool _busy = false, _started = false, _stopped = false;
   bool _kick = false; // a check is due at once when the running one ends
   bool _failCheck = false; // the running / next check was asked for by failed requests
@@ -357,9 +362,7 @@ class AutoService {
     _stopped = true;
     _timer?.cancel();
     _groupsSub?.cancel();
-    for (final t in _sweeps) {
-      t.cancel();
-    }
+    _stall.stop();
     _switches.close();
     _unstable.close();
     _blocked.close();
@@ -762,35 +765,8 @@ class AutoService {
   /// Connections left on [tag] (a route or a server Auto just left because it stopped
   /// answering): the ones whose byte counters stood still for `stallAfter` are closed, the
   /// ones still moving live on. Again every `stallAfter`, up to 6 times, while [away].
-  void _closeStalled(String tag, bool Function() away) {
-    Map<String, int>? before;
-    var left = 6;
-    Future<void> pass() async {
-      if (_stopped || !away()) return;
-      final now = <String, int>{
-        for (final c in api.connections)
-          if (c.chain.contains(tag)) c.id: c.up + c.down,
-      };
-      if (before != null) {
-        for (final e in [...now.entries]) {
-          if (before![e.key] == e.value && !_stopped) {
-            if (await api.closeConnection(e.key)) stalledClosed++;
-            now.remove(e.key);
-          }
-        }
-      }
-      before = now;
-      if (now.isEmpty || --left <= 0 || _stopped) return;
-      late final Timer t;
-      t = Timer(settings.stallAfter, () {
-        _sweeps.remove(t);
-        unawaited(pass());
-      });
-      _sweeps.add(t);
-    }
-
-    unawaited(pass());
-  }
+  void _closeStalled(String tag, bool Function() away) =>
+      _stall.sweep(tag, away, every: settings.stallAfter, onClosed: () => stalledClosed++);
 
   /// For the app: `{now: route id, index, server, entryServer (chain), routes: [{id, ms,
   /// fails, oks, at, strikes, holdUntil}], members: [{key, ms, fails, oks, at}] (every

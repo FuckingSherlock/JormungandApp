@@ -26,7 +26,8 @@ const EV_CATS = [
   ['auto', 'Auto', [['switched', 'Entry or server switched'], ['fastest', 'Fastest moved'], ['unstable', 'Unstable entry']]],
   ['site', 'Sites', [['blocked', 'Site does not open']]],
   ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
-  ['rules', 'Rules', [['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
+  ['rules', 'Rules', [['fallback', 'Rule target unavailable'], ['targetBack', 'Rule target back'], ['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
+  ['dns', 'DNS', [['switched', 'DNS server switched']]],
   ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting']]],
 ];
 const svgI = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
@@ -36,6 +37,7 @@ const EV_ICON = {
   site: svgI('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>'),
   sub: svgI('<path d="M8 17l4 4 4-4"/><path d="M12 12v9"/><path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29"/>'),
   rules: svgI('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/>'),
+  dns: svgI('<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/>'),
   core: svgI('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>'),
   user: svgI('<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7"/>'),
 };
@@ -48,6 +50,7 @@ const EV_NOTIF = {
   'site/blocked': 'blocked', 'sub/updated': 'subUpdated',
   'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
   'rules/ruleSetFailed': 'ruleSets',
+  'rules/fallback': 'autoSwitch', 'rules/targetBack': 'autoSwitch', 'dns/switched': 'autoSwitch',
 };
 
 /* ── Words: the structured data → the sentences ── */
@@ -68,6 +71,9 @@ function evReason(d) {
   return d.reason ? String(d.reason) : '';
 }
 const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+const evDns = id => (dnsServers[id] && dnsServers[id].name) || String(id);
+const evRules = d => `Rule ${d.rule}` + (d.more ? ` and ${evPlural(d.more, 'more', 'more')}` : '');   // "Rule Streaming and 2 more"
+const EV_FALLBACK = { block: 'blocked while it is down', direct: 'goes direct', main: 'goes through the main flow' };
 const EV_TEXT = {
   'conn/connected': d => ['Connected' + (d.entry ? ': ' + evEntry(d.entry) : ''),
     [d.server && evServer(d.server), d.mode === 'tun' ? 'TUN' : d.mode === 'proxy' ? 'Proxy' : '', d.route === 'global' ? 'Global' : d.route === 'rules' ? 'By rules' : ''].filter(Boolean).join(' · ')],
@@ -91,6 +97,10 @@ const EV_TEXT = {
   'sub/dead': d => [`${evSource(d.source, d.name)}: its servers do not respond`, "Contact the subscription provider's support"],
   'rules/ruleSetFailed': d => [`Rule set ${d.tag} not downloaded`, [d.error, 'the last copy is used'].filter(Boolean).join(' — ')],
   'rules/ruleSetUpdated': d => [`Rule set ${d.tag} updated`, ''],
+  'rules/fallback': d => [`${targetName(d.target)} does not answer`, `${evRules(d)} ${EV_FALLBACK[d.to] || d.to}`],
+  'rules/targetBack': d => [`${targetName(d.target)} answers again`, `${evRules(d)} back through it`],
+  'dns/switched': d => [`DNS: ${evDns(d.from)} → ${evDns(d.to)}`,
+    d.reason === 'failover' ? `${evDns(d.from)} does not answer` : d.reason === 'back' ? `${evDns(d.to)} answers again — returned to it` : 'Switch automatically is off: the first server is back'],
   'core/crashed': d => ['sing-box stopped', (d.code != null ? 'Exit code ' + d.code + ' — ' : '') + 'starting it again'],
   'core/restarted': d => ['sing-box started again', [d.attempt && 'Attempt ' + d.attempt, d.downMs != null && 'was down ' + evDuration(d.downMs)].filter(Boolean).join(' · ')],
   'core/down': d => ['VPN is down', d.proxy === 'kept' ? 'Internet is blocked (the system proxy is kept) — still trying' : 'Traffic goes direct — still trying'],
@@ -117,8 +127,17 @@ function evText(e) { const d = evDescribe(e); return d.title + (d.detail ? ' —
 // The expanded row: every field of the event in words.
 const EV_FIELD = { entry: 'Entry', server: 'Server', mode: 'Mode', route: 'Route', from: 'From', to: 'To', reason: 'Reason', by: 'By', host: 'Site', dest: 'Address', via: 'Opens via',
   source: 'Subscription', name: 'Name', added: 'New servers', removed: 'Removed', total: 'Servers', count: 'Servers', error: 'Error', tag: 'Rule set', url: 'URL', code: 'Exit code',
+  rule: 'Rule', target: 'Target', more: 'More rules',
   attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
-function evValue(k, v) {
+function evValue(k, v, e) {
+  if (e && e.cat === 'dns') {
+    if (k === 'from' || k === 'to') return evDns(v);
+    if (k === 'reason') return { failover: 'It stopped answering', back: 'A higher server answers again', off: 'Switch automatically turned off' }[v] || String(v);
+  }
+  if (e && e.cat === 'rules') {
+    if (k === 'target') return targetName(v);
+    if (k === 'to') return { block: 'Block', direct: 'Direct', main: 'Main flow' }[v] || String(v);
+  }
   if (typeof v === 'boolean') return k === 'on' ? (v ? 'On' : 'Off') : v ? 'Yes' : 'No';
   if (k === 'downMs' || k === 'holdMs') return evDuration(v);
   if (k === 'mode') return v === 'tun' ? 'TUN' : v === 'proxy' ? 'Proxy' : String(v);
@@ -133,13 +152,13 @@ function evFieldsHtml(g) {
   const e = g.ev, f = (k, v) => `<div class="ev-f"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
   let h = g.items.length > 1 ? f('Times', g.items.map(x => logTime(x.at)).join(', ')) : f('Time', evStamp(e.at));
   h += f('Event', e.cat + ' / ' + e.type + (e.own ? ' (yours)' : ''));
-  Object.entries(e.data || {}).forEach(([k, v]) => { if (v != null && v !== '') h += f(EV_FIELD[k] || k.charAt(0).toUpperCase() + k.slice(1), evValue(k, v)); });
+  Object.entries(e.data || {}).forEach(([k, v]) => { if (v != null && v !== '') h += f(EV_FIELD[k] || k.charAt(0).toUpperCase() + k.slice(1), evValue(k, v, e)); });
   return h;
 }
 
 /* ── Rows: repeats folded, day separators, actions ── */
 
-const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
+const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/fallback': ['target', 'to'], 'rules/targetBack': ['target'], 'dns/switched': ['from', 'to'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
 function evKey(e) {
   const t = e.cat + '/' + e.type, d = e.data || {}, f = EV_KEYF[t] || (e.cat === 'sub' ? ['source'] : null);
   return t + '|' + (f ? f.map(k => d[k]).join('|') : e.cat === 'user' ? JSON.stringify(d) : '');
@@ -178,7 +197,8 @@ function evOpenTarget(e) {
   if (e.cat === 'sub') return sourcesData[d.source] ? d.source : null;
   if (e.cat === 'auto' && e.type === 'unstable') return connectEntry(d.id) ? d.id : null;
   if (e.cat === 'site') return d.entry && connectEntry(d.entry) ? d.entry : null;
-  if (e.cat === 'rules') return 'rules';
+  if (e.cat === 'rules') return e.type === 'fallback' || e.type === 'targetBack' ? 'rulelist' : 'rules';
+  if (e.cat === 'dns') return 'dns';
   return null;
 }
 function evAct(key, id) {
@@ -190,6 +210,8 @@ function evAct(key, id) {
   else if (key === 'open') {
     const t = evOpenTarget(e);
     if (t === 'rules') { openRuleSets(); return; }
+    if (t === 'rulelist') { openRules(); return; }
+    if (t === 'dns') { openDnsSettings(); return; }
     switchTab('nodes');
     setNodesTab(catalogOrder.simple.includes(t) ? 'simple' : 'profiles');
     expandState[t] = true;

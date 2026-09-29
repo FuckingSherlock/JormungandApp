@@ -39,6 +39,7 @@
 .cat-site{--ev-c:var(--purple)}
 .cat-sub{--ev-c:var(--active-dim)}
 .cat-rules{--ev-c:var(--accent-dim)}
+.cat-dns{--ev-c:var(--purple)}
 .cat-core{--ev-c:var(--t2)}
 .cat-user{--ev-c:var(--t3)}
 .ev-row{display:flex;gap:10px;padding:9px 14px 9px 12px;border-left:2px solid transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}

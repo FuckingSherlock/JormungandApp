@@ -21,6 +21,12 @@
 /// ```
 /// A target missing from `targets` is unavailable now (off in Nodes, no usable server,
 /// deleted): its rules take their "If unavailable" when the config is built.
+///
+/// A target that is available goes through a selector `<target>~<fallback>` =
+/// `[target, fallback]` ([TargetFallback], listed in [RoutingInfo]), so the core can move its
+/// traffic to the fallback and back with no restart when the target stops answering
+/// (fallback.dart). With two or more DNS servers in use each also has a DNS rule for its own
+/// clash mode, for the DNS failover (dns_failover.dart).
 library;
 
 import 'dart:io';
@@ -148,6 +154,45 @@ List<RuleSetSource> ruleSetsNeeded(Map plan) {
   return out.values.toList();
 }
 
+/// A rule target with its "If unavailable" (docs/rules.md §0) as the config holds it: the
+/// selector [tag] = [target's group, fallback], which rules and apps route to. The core
+/// flips it while sing-box runs (fallback.dart): the target stops answering → [fallbackTag],
+/// answers again → the target.
+class TargetFallback {
+  TargetFallback(this.tag, this.target, this.spec, this.fallbackTag);
+
+  final String tag;
+
+  /// The UI's target id (`src:…`, `chain:…`); its group in the config has the same tag.
+  final String target;
+
+  /// The plan's `targets[target]`: `{kind, main: Group, entry?: Group}` (the groups' tags:
+  /// `target`, and `target>entry` for a chain).
+  final Map spec;
+
+  /// `proxy` (the main flow), `direct` / `direct@dns-<id>`, or `block`.
+  final String fallbackTag;
+
+  /// The rules and apps that route here (their names, for the journal).
+  final rules = <String>[];
+
+  /// The fallback as the journal names it.
+  String get to => fallbackTag == 'block' ? 'block' : (fallbackTag == topTag ? 'main' : 'direct');
+}
+
+/// A DNS server in use ([id] = the UI's, [tag] = `dns-<id>` in the config) — the core
+/// checks each one and switches between them (dns_failover.dart).
+typedef DnsEntry = ({String id, String tag});
+
+/// What [buildConfig] learned besides the config, for the services that run beside sing-box.
+class RoutingInfo {
+  /// One per selector, in the order the rules use them.
+  final fallbacks = <TargetFallback>[];
+
+  /// The enabled DNS servers by priority: the first is `dns.final`.
+  final dnsServers = <DnsEntry>[];
+}
+
 /// What [buildRouting] adds to a config.
 class Routing {
   Routing._();
@@ -158,10 +203,17 @@ class Routing {
   /// Outbounds besides the target groups (added through the emitter): direct ones with
   /// their own DNS server.
   final outbounds = <Map<String, dynamic>>[];
+
+  /// The "If unavailable" selectors rules and apps route to (see [TargetFallback]).
+  final fallbacks = <TargetFallback>[];
   String finalOutbound = topTag;
   final dnsServers = <Map<String, dynamic>>[];
   final dnsRules = <Map<String, dynamic>>[];
   String dnsFinal = 'local';
+
+  /// The servers in use, by priority; with two or more, each also has a DNS rule for its
+  /// own clash mode (its tag), so the core can make any of them the default ([dnsModeOf]).
+  final dnsEnabled = <DnsEntry>[];
 
   /// Resolves the servers' own hostnames (proxy outbounds, DoH hosts) and what goes out
   /// directly: a direct DNS server, never one that needs the tunnel.
@@ -199,11 +251,13 @@ class _Builder {
     if (plan['global'] == true) {
       // Global: everything else through the main flow, rules included (docs/rules.md).
       out.finalOutbound = topTag;
+      _dnsModes();
       return out;
     }
     _apps();
     _ownRules();
     _quick();
+    _dnsModes();
     for (final tag in _usedSets) {
       final path = files[tag]!;
       out.ruleSets.add({'type': 'local', 'tag': tag, 'format': path.endsWith('.json') ? 'source' : 'binary', 'path': path});
@@ -229,6 +283,7 @@ class _Builder {
       _addDnsServer(s);
     }
     out.dnsFinal = _dnsOn.isEmpty ? _boot : _dnsTag(_dnsOn.first);
+    out.dnsEnabled.addAll([for (final s in _dnsOn) (id: '${s['id']}', tag: _dnsTag(s))]);
     final direct = _dnsOn.where((s) => !_viaVpn(s)).firstOrNull;
     out.domainResolver = direct != null ? _dnsTag(direct) : _boot;
   }
@@ -255,6 +310,17 @@ class _Builder {
     }
     final auto = _dnsOn.where((s) => _viaVpn(s) != direct).firstOrNull;
     return auto != null ? _dnsTag(auto) : out.dnsFinal;
+  }
+
+  /// The failover switch: a DNS rule per server for the clash mode named like it, after
+  /// every other DNS rule: a rule with its own server keeps it, the mode replaces only the
+  /// default (`dns.final`, which is also what the initial mode `Rule` gives). The core
+  /// sets the mode over the API (dns_failover.dart). One server has nothing to switch to.
+  void _dnsModes() {
+    if (_dnsOn.length < 2) return;
+    for (final s in _dnsOn) {
+      out.dnsRules.add({'clash_mode': dnsModeOf(_dnsTag(s)), 'action': 'route', 'server': _dnsTag(s)});
+    }
   }
 
   /// DNS rule for the domains a rule matches (for the resolve step and, with TUN, the
@@ -298,15 +364,54 @@ class _Builder {
   Map<String, dynamic> _reject({bool drop = false}) => {'action': 'reject', if (drop) 'method': 'drop'};
   Map<String, dynamic> _route(String outbound) => {'action': 'route', 'outbound': outbound};
 
-  /// Proxy through [target]; unavailable → [fallback] (main / block / direct).
-  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String? dns) {
+  /// Proxy through [target]; unavailable → [fallback] (main / block / direct). Unavailable
+  /// now = the config's choice; a target that goes down later is the core's
+  /// (fallback.dart): the route leads to a selector [target, fallback outbound] it flips.
+  /// [label] names the rule / app in the journal.
+  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String? dns, String label) {
     final tag = _target(target);
-    if (tag != null) return (action: _route(tag), direct: false);
+    if (tag == topTag) return (action: _route(topTag), direct: false); // the main flow has no fallback
+    if (tag != null) {
+      final fb = switch (fallback) {
+        'block' => _blockOutbound(),
+        'direct' => _directVia(_dnsFor(dns, direct: true)),
+        _ => topTag,
+      };
+      return (action: _route(_fallbackSelector(target, fb, label)), direct: false);
+    }
     return switch (fallback) {
       'block' => (action: _reject(), direct: false),
       'direct' => (action: _route(_directVia(_dnsFor(dns, direct: true))), direct: true),
       _ => (action: _route(topTag), direct: false),
     };
+  }
+
+  /// Block as an outbound: only a selector can hold it (a rule blocks with `reject`).
+  /// sing-box 1.11.10 brought `block` back for selectors.
+  String _blockOutbound() {
+    if (!out.outbounds.any((o) => o['tag'] == 'block')) out.outbounds.add({'type': 'block', 'tag': 'block'});
+    return 'block';
+  }
+
+  /// The selector [target, fallbackTag] for [target] (once per pair): the config's
+  /// `default` is the target, the core moves it.
+  String _fallbackSelector(String target, String fallbackTag, String label) {
+    final tag = '$target~$fallbackTag';
+    var f = out.fallbacks.where((x) => x.tag == tag).firstOrNull;
+    if (f == null) {
+      f = TargetFallback(tag, target, (r['targets'] as Map)[target] as Map, fallbackTag);
+      out.fallbacks.add(f);
+      out.outbounds.add({
+        'type': 'selector',
+        'tag': tag,
+        'outbounds': [target, fallbackTag],
+        'default': target,
+        // a switch keeps the open connections; the core closes the stalled ones (stall.dart)
+        'interrupt_exist_connections': false,
+      });
+    }
+    if (!f.rules.contains(label)) f.rules.add(label);
+    return tag;
   }
 
   String get _fallback => '${r['fallback'] ?? 'main'}';
@@ -326,10 +431,10 @@ class _Builder {
           out.rules.add({...match, ..._route('direct')});
         case 'proxy':
           if (a['split'] == true) {
-            out.rules.add({...match, 'network': ['tcp'], ..._proxyAction('${a['target'] ?? ''}', _fallback, null).action});
-            out.rules.add({...match, 'network': ['udp'], ..._proxyAction('${a['udpTarget'] ?? ''}', _fallback, null).action});
+            out.rules.add({...match, 'network': ['tcp'], ..._proxyAction('${a['target'] ?? ''}', _fallback, null, id).action});
+            out.rules.add({...match, 'network': ['udp'], ..._proxyAction('${a['udpTarget'] ?? ''}', _fallback, null, id).action});
           } else {
-            out.rules.add({...match, ..._proxyAction('${a['target'] ?? ''}', _fallback, null).action});
+            out.rules.add({...match, ..._proxyAction('${a['target'] ?? ''}', _fallback, null, id).action});
           }
       }
     }
@@ -361,7 +466,7 @@ class _Builder {
           act = _route(_directVia(_dnsFor(dns, direct: true)));
           direct = true;
         default:
-          final p = _proxyAction('${rule['target'] ?? ''}', fallback, dns);
+          final p = _proxyAction('${rule['target'] ?? ''}', fallback, dns, '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}');
           act = p.action;
           direct = p.direct;
       }
@@ -584,6 +689,9 @@ class _Builder {
 }
 
 /* ── Values ── */
+
+/// The clash mode that makes the DNS server [tag] the default (see `_dnsModes`).
+String dnsModeOf(String tag) => tag;
 
 /// A typed DNS server from a Settings → DNS address: `system`, `1.1.1.1[:53]`,
 /// `udp|tcp|tls|quic|https://host[:port][/path]`. null = not an address.

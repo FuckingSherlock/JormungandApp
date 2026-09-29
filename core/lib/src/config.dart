@@ -29,7 +29,11 @@
 /// because a rule says so).
 ///
 /// [probe]: the loopback inbound the core measures latency through (probe.dart), its
-/// route rule per server first of all.
+/// route rule per server first of all, and per DNS server in use a rule that resolves a
+/// name through that server alone (the DNS check, dns_failover.dart).
+///
+/// [info] receives what the services beside sing-box need to know about the routing: the
+/// "If unavailable" selectors (fallback.dart) and the DNS servers in use (dns_failover.dart).
 library;
 
 import 'dart:convert';
@@ -62,7 +66,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     {int? tunnelPort,
     Probe? probe,
     Map<String, String> ruleSetFiles = const {},
-    List<String>? warnings}) {
+    List<String>? warnings,
+    RoutingInfo? info}) {
   final outs = <Map<String, dynamic>>[];
   final test = (plan['urlTest'] as Map?) ?? const {};
 
@@ -123,10 +128,12 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   final routing = buildRouting(plan, group, ruleSetFiles: ruleSetFiles);
   outs.addAll(routing.outbounds);
   warnings?.addAll(routing.warnings);
+  info?.fallbacks.addAll(routing.fallbacks);
+  info?.dnsServers.addAll(routing.dnsEnabled);
   // cache_file keeps a selector's pick made over the API across restarts, over the
   // config's `default`: keyed by the defaults, a new pick from the UI starts clean.
   final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
-  final pr = probe?.inbound(_servers(outs));
+  final pr = probe?.inbound(_servers(outs), dnsServers: [for (final s in routing.dnsEnabled) s.tag]);
 
   return {
     'log': {'level': 'info', 'timestamp': true},

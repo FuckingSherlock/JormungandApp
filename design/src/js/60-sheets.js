@@ -41,27 +41,33 @@ function closeSheet(name) {
    entry; syncBackHistory() matches the entries to what is open, once per tick. */
 const sheetStack = [];   // open sheets, bottom first: {name, prev: [closed entries back reopens]}
 let justClosed = [];     // top sheets the UI closed in this tick (the next open replaces them)
-let histDepth = (history.state && history.state.jorm) || 0, histSkip = 0, histTimer = null;   // a reload keeps its entries
+let histDepth = (history.state && history.state.jorm) || 0, histSkip = 0, histSkipAt = 0, histTimer = null;   // a reload keeps its entries
 const backDepth = () => sheetStack.length + (activeTab() !== 'home' ? 1 : 0);
 const activeTab = () => (document.querySelector('.view.active') || { id: 'view-home' }).id.slice(5);
 
-function syncBackHistory() {
+function syncBackHistory(wait) {
   if (histTimer) return;
   histTimer = setTimeout(() => {
     histTimer = null;
+    // history.go() lands later than it is called: a pushState or a second go() before it lands
+    // shifts the entries under it and can walk out of the page. Wait for the pending one.
+    if (histSkip) {
+      if (Date.now() - histSkipAt < 1000) { syncBackHistory(true); return; }
+      histSkip = 0;   // the popstate never came (a viewer without history)
+    }
     justClosed = [];
     const want = backDepth();
     try {
       while (histDepth < want) history.pushState({ jorm: ++histDepth }, '');
-      if (histDepth > want) { histSkip++; history.go(want - histDepth); histDepth = want; }
+      if (histDepth > want) { histSkip++; histSkipAt = Date.now(); history.go(want - histDepth); histDepth = want; }
     } catch (e) { /* a sandboxed viewer may refuse history */ }
-  });
+  }, wait ? 30 : 0);
 }
 syncBackHistory();   // after a reload: back to the base entry
 window.addEventListener('popstate', e => {
   if (histSkip) { histSkip--; return; }
   const depth = (e.state && e.state.jorm) || 0;
-  if (depth > histDepth) { histSkip++; history.go(histDepth - depth); return; }   // forward: undo
+  if (depth > histDepth) { histSkip++; histSkipAt = Date.now(); history.go(histDepth - depth); return; }   // forward: undo
   for (; histDepth > depth; histDepth--) goBack();
   syncBackHistory();
 });

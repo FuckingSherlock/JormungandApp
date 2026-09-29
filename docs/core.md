@@ -164,6 +164,8 @@ STARTED — поднялся, FATAL — ошибка с причиной от si
 - группы: что выбрано в каждом selector / urltest и результаты urltest (→ Auto, трафик);
 - статус (раз в 1 с): скорость, итоги сессии (с уже закрытыми соединениями), память.
 Команды: `SelectOutbound`, `URLTest`, `CloseConnection` / `CloseAllConnections`,
+`SetClashMode` / `GetClashModeStatus` (режим clash работает и без блока `clash_api` в
+конфиге — проверено на 1.14.2; на нём держится переключение DNS, см. «Правила в конфиге»),
 `GetDeprecatedWarnings` (после старта — в лог как `warn`: что сломается в конфиге с
 новым sing-box), `StartNetworkQualityTest` (Speed Test). Тестер пинга каталога запускается
 так же (готовность — по статусу сервиса).
@@ -278,6 +280,39 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
   API переживает перезапуск, новый выбор из UI — нет.
 - Сравнение планов для переподключения нормализует и цели правил (порядок Fastest после
   пинга — не изменение).
+- **«If unavailable» на лету** (`fallback.dart`, `FallbackService`). Правило / приложение с
+  доступной целью (не Main flow) ведёт в selector `<цель>~<запасной>` = `[цель, запасной]`,
+  `default` — цель, `interrupt_exist_connections: false`; запасной — `block` (outbound
+  `block` добавляется в конфиг, только если нужен selector; sing-box 1.14.2 принимает его
+  внутри selector'а, deprecated не ругается — проверено настоящим sing-box), `direct`
+  (или `direct@dns-<id>`, если у правила свой DNS) или `proxy` (Main flow). `buildConfig`
+  отдаёт список таких selector'ов в `info: RoutingInfo` (`fallbacks`: тег, цель, группы,
+  запасной, имена правил для журнала). Сервис — раз в `checkEvery` (Auto-настройки, тот же
+  probe inbound и `withCheckers`, второго пингера нет) мерит сервер, на котором стоит группа
+  цели (цепочка — выход через вход); молчит `failAfter` раундов подряд → `SelectOutbound`
+  на запасной, тем же путём назад после `failAfter` ответов и паузы flap guard
+  (`Watched`, общий с DNS). Fastest-группа при промахе сначала перетестируется
+  (`URLTest` + повтор), Priority не двигается. Не судит, пока `AutoService.networkUncertain`
+  (нет сети / у текущего маршрута промахи). Уход на запасной выход закрывает зависшие
+  соединения через цель (`StallSweeper`, общий с Auto: байты стоят `stallAfter`). Выбор в
+  начале раунда читается из `api.selected` (после рестарта `cache_file` мог оставить
+  запасной). Группы целей по-прежнему не ведёт AutoService.
+- **Переключение DNS** (`dns_failover.dart`, `DnsFailover`). При двух и более отмеченных
+  серверах у каждого `dns-<id>` DNS-правило `clash_mode: "dns-<id>"` (после остальных
+  DNS-правил, `routing.dart` `_dnsModes`); `dns.final` — первый отмеченный, стартовый режим
+  `Rule` ему же и равен. Проверка сервера — `probeDns` (`probe.dart`): SOCKS-запрос в probe
+  inbound с пользователем `dns-check/<тег>`; для него в конфиге правило `resolve` с явным
+  `server` (`disable_cache`, `ipv4_only`) и следом `route` в `direct` с `override_address`
+  на сам probe inbound, поэтому успех SOCKS-ответа = имя разрешилось именно этим сервером
+  (по его же пути: `detour` сервера действует). Имена — `cp.cloudflare.com`, запасные
+  `www.gstatic.com`, `captive.apple.com`. Раунд — `checkEvery`; сервер упал после
+  `failAfter` промахов, вернулся после `failAfter` ответов и паузы flap guard; при падении
+  используемого — `SetClashMode(dns-<самый приоритетный из отвечающих>)`, когда оживает
+  более приоритетный — обратно. Настройка «Switch automatically» — поле `dnsAuto` тела
+  connect (не в `plan`, чтобы её смена не давала переподключения) и `POST /api/dns/auto`
+  `{auto}`; выключение возвращает первый сервер сразу (`reason: 'off'`), проверки и
+  `status.dns` продолжаются. Ограничение: `default_domain_resolver` (адреса серверов прокси,
+  прямой трафик) режим не меняет.
 
 ## API (`jormd`)
 
@@ -290,7 +325,8 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 | `GET/PUT /api/state` | снимок состояния UI / статус |
 | `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
-| `POST /api/connect` | `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — kill switch, см. «Kill switch» |
+| `POST /api/connect` | `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?, dnsAuto?}` — kill switch, см. «Kill switch»; `dnsAuto` — Settings → DNS → Switch automatically (по умолчанию true), см. «Правила в конфиге» |
+| `POST /api/dns/auto` | `{auto: bool}` — Switch automatically на ходу, без переподключения (выкл — первый сервер сразу) → status |
 | `POST /api/killswitch` | `{killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — сменить на ходу, без переподключения → status |
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
@@ -315,6 +351,11 @@ at}], switches, switchedAt, lastSwitch: {route?, from, to, reason: 'failover' | 
 `ms`: −1 таймаут, −2 не мерили; `members` — все замеренные серверы (UI кладёт в кэш пингов);
 `switches` — счёт переключений маршрутов и Priority-серверов (`lastSwitch.route` есть у второго,
 тогда `from`/`to` — ключи серверов). UI опрашивает status раз в 4 с.
+
+`status.dns` (пока подключено и есть DNS-серверы; иначе `null`): `{active: id сервера в работе,
+auto, servers: [{id, ok, ms}]}` в порядке приоритета. `ok`: `null` не мерили, `false` — упал
+(`failAfter` промахов подряд); `ms`: −1 нет ответа, −2 не мерили. Метки «In use» / «No answer»
+в Settings → DNS. При одном сервере переключать некуда, но проверка и `status.dns` есть.
 
 Пинг (`probe.dart`): ядро меряет само, через loopback SOCKS5-inbound конфига `probe-in` —
 имя пользователя = тег outbound'а (правило `auth_user` → этот outbound, первым в route),
@@ -373,7 +414,7 @@ Raw). Событие:
 ```
 { id,        // растёт на 1, не откатывается: ни после рестарта, ни после очистки
   at,        // мс с эпохи
-  cat,       // conn | auto | site | sub | rules | core | user
+  cat,       // conn | auto | site | sub | rules | dns | core | user
   type, level: 'info' | 'warn' | 'error',
   own,       // true = причина — действие самого пользователя: уведомления нет
   log?,      // номер строки LogBook, записанной в тот же момент (переход в Raw)
@@ -403,6 +444,9 @@ Raw). Событие:
 | `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Rule) | `{host, port?, entry, server, dest, via}` |
 | `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
+| `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule, more?, target, to: 'block'\|'direct'\|'main'}` — `rule`: имя первого правила (приложения — его id, безымянного — `rule <id>`), `more` — сколько ещё правил / приложений через тот же selector |
+| `rules/targetBack` info | цель снова отвечает, трафик вернулся | `{rule, more?, target}` |
+| `dns/switched` info | DNS-сервер в работе сменился (Switch automatically); `own: true` при `reason: 'off'` | `{from, to, reason: 'failover'\|'back'\|'off'}` — id серверов из UI |
 | `rules/ruleSetFailed` warn | скачивание списка не удалось (не чаще, чем раз в `retryAfter` = 5 мин на список) | `{tag, url, error}` — `url` последний из пробованных |
 | `rules/ruleSetUpdated` info | старая копия списка заменена новой, или список скачан после сбоя (первая закачка отсутствующего списка — не новость) | `{tag}` |
 | `core/crashed` error | sing-box вышел сам (перезапуск идёт в фоне; уведомление — по решению UI) | `{code}` |
@@ -448,9 +492,11 @@ HWID (`device.dart`) и каналом Direct / Proxy; автообновлен�
 
 ## Не сделано в MVP
 
-TUN (и kill switch для него; для системного прокси он есть, см. «Kill switch»); Hijack DNS / FakeIP; «If unavailable» на лету и автопереключение DNS
-(сейчас — при сборке конфига / переподключении); обновление гео-списков по таймеру; Decrypt
+TUN (и kill switch для него; для системного прокси он есть, см. «Kill switch»); Hijack DNS / FakeIP; обновление гео-списков по таймеру; Decrypt
 password подписки (нет спецификации); автовыбор URL пинга (сейчас — выбор в Settings →
 Connection, по умолчанию gstatic).
 Auto: проверка по неудачным запросам, `speedOnFail`, пауза при выключенном экране; группы
-целей правил AutoService не ведёт (их Priority меняется только новым планом).
+целей правил AutoService не ведёт (их Priority меняется только новым планом), за целями следит
+`FallbackService` («If unavailable» на лету), но и он Priority не двигает. Переключение DNS не
+меняет `default_domain_resolver`; в `status.auto` нет состояния целей правил (только события
+`rules/fallback` / `rules/targetBack`).

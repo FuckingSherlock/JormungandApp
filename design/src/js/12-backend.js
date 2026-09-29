@@ -77,6 +77,10 @@ let backend = {
     renderConnState();
     return Promise.resolve();
   },
+  // POST /api/dns/auto {auto}: Settings → DNS → Switch automatically while connected (the core
+  // puts the first server back at once when it is turned off). The mock derives the server in
+  // use from the pings (56-dns.js dnsHealth), so there is nothing to keep here.
+  dnsAuto(on) { return Promise.resolve(); },
   retry() {
     return wait(700).then(() => {
       const downMs = vpn.down ? Date.now() - vpn.down.since : 0;
