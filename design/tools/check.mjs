@@ -481,8 +481,10 @@ async function runChecks() {
     const p = await openPage(browser);
     const r = await p.evaluate(async () => {
       openProfiles(); setRouteEdit(false);
-      const id = visibleOrder().find(x => sourcesData[x] && unitNode(x)), n = unitNode(id), was = n.name;
-      n.name = 'RU-SPB ➡️ Нидерланды ➡️ WARP and a long tail that wraps twice';
+      const id = visibleOrder().find(x => sourcesData[x] && unitNode(x));
+      // the row shows the best-by-ping server, which random pings can swap mid-check: rename them all
+      const all = unitPickRefs(id).map(r => r.node), was = all.map(x => x.name);
+      all.forEach(x => { x.name = 'RU-SPB ➡️ Нидерланды ➡️ WARP and a long tail that wraps twice'; });
       renderConnects(); toggleRouteRow(id);
       await new Promise(r => setTimeout(r, 600));
       const row = document.querySelector(`#connects-list .conn-row[data-id="${id}"]`);
@@ -491,7 +493,7 @@ async function runChecks() {
       const nr = [...row.querySelectorAll('.conn-body .node-name')].find(el => el.textContent.includes('long tail'));
       const out = { wraps: node.offsetHeight > 30, flagInName: !!node.querySelector('.conn-flag') && !!nr && nr.firstElementChild.classList.contains('node-flag'),
         msFirstLine: lat.top >= first.top - 3 && lat.bottom <= first.bottom + 3 };
-      n.name = was; toggleRouteRow(id);
+      all.forEach((x, i) => { x.name = was[i]; }); toggleRouteRow(id);
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
