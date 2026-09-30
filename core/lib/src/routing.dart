@@ -35,6 +35,7 @@ library;
 import 'dart:io';
 
 import 'plan.dart';
+import 'rulenames.dart';
 
 /// Adds a server group as [tag] (see buildConfig): its members are `tag/<key>`.
 typedef GroupEmitter = void Function(String tag, Map g, {String? detour});
@@ -88,6 +89,17 @@ const regions = <String, ({List<String> geosite, List<String> geoip, List<String
   'UA': (geosite: [], geoip: ['ua'], tlds: ['ua', 'xn--j1amh']),
   'CN': (geosite: ['cn'], geoip: ['cn'], tlds: ['cn']),
   'IR': (geosite: ['category-ir'], geoip: ['ir'], tlds: ['ir']),
+};
+/// The services' names as the UI shows them (keys as in [services]).
+const serviceTitles = {
+  'telegram': 'Telegram',
+  'youtube': 'YouTube',
+  'discord': 'Discord',
+  'netflix': 'Netflix',
+  'spotify': 'Spotify',
+  'chatgpt': 'ChatGPT',
+  'instagram': 'Instagram',
+  'x': 'X / Twitter',
 };
 const adsGeosite = 'category-ads-all';
 const adsDomains = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google.com', 'an.yandex.ru'];
@@ -193,6 +205,10 @@ class RoutingInfo {
   /// One per selector, in the order the rules use them.
   final fallbacks = <TargetFallback>[];
 
+  /// The config's route rules by the text sing-box reports for a connection (rulenames.dart):
+  /// Live connections name the rule a connection went by with it.
+  final ruleNames = RuleNames();
+
   /// The enabled DNS servers by priority: the first is `dns.final`.
   final dnsServers = <DnsEntry>[];
 }
@@ -203,6 +219,15 @@ class Routing {
 
   /// Route rules, after the sniff rule.
   final rules = <Map<String, dynamic>>[];
+
+  /// The origin of each of [rules] (same index); null = one that never names a connection
+  /// (a resolve step, a bare reject).
+  final origins = <RuleOrigin?>[];
+
+  void _add(Map<String, dynamic> rule, [RuleOrigin? origin]) {
+    rules.add(rule);
+    origins.add(origin);
+  }
 
   /// Outbounds besides the target groups (added through the emitter): direct ones with
   /// their own DNS server.
@@ -251,7 +276,7 @@ class _Builder {
   Routing build() {
     _dns();
     // local addresses always go direct: first of all, in Global too (docs/rules.md §2)
-    out.rules.add({'ip_is_private': true, 'domain_suffix': lanSuffixes, ..._route('direct')});
+    out._add({'ip_is_private': true, 'domain_suffix': lanSuffixes, ..._route('direct')}, const RuleOrigin('system', 'Private networks', id: 'private'));
     if (plan['global'] == true) {
       // Global: everything else through the main flow, rules included (docs/rules.md).
       out.finalOutbound = topTag;
@@ -441,7 +466,8 @@ class _Builder {
           'proxy' => _proxyAction('${h['target'] ?? ''}', fallback, null, label, app: true).action,
           _ => null,
         };
-        if (act != null) out.rules.add({...match, 'network': ?network, ...act});
+        final name = network == null ? label : '$label (${network.first.toUpperCase()})';
+        if (act != null) out._add({...match, 'network': ?network, ...act}, RuleOrigin('app', name, id: id));
       }
 
       if (a['split'] == true) {
@@ -489,9 +515,10 @@ class _Builder {
       if (!resolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
         resolved = true;
         final step = _resolveAction();
-        if (step != null) out.rules.add(step);
+        if (step != null) out._add(step);
       }
-      out.rules.add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()});
+      out._add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()},
+          RuleOrigin('user', '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}', id: '${rule['id'] ?? ''}'));
       if (action != 'block') _dnsRule(built.domainAlts, _dnsFor(dns, direct: direct));
     }
   }
@@ -680,7 +707,7 @@ class _Builder {
     final q = ((r['quick'] as Map?) ?? const {}).cast<String, dynamic>();
     if (q['ads'] == true) {
       final set = _set(geositeTag(adsGeosite));
-      out.rules.add({'domain_suffix': adsDomains, if (set != null) 'rule_set': [set], ..._reject()});
+      out._add({'domain_suffix': adsDomains, if (set != null) 'rule_set': [set], ..._reject()}, const RuleOrigin('quick', 'Block ads', id: 'ads'));
       if (set == null) out.warnings.add('Block ads: the ad list is not downloaded yet, only a few known domains are blocked');
     }
     final svc = ((q['services'] as Map?) ?? const {}).cast<String, dynamic>();
@@ -694,7 +721,8 @@ class _Builder {
       ];
       final ips = s.geoip.map((n) => _set(geoipTag(n))).nonNulls.toList();
       final alts = [...domains, if (ips.isNotEmpty) {'rule_set': ips}];
-      out.rules.add({...(alts.length == 1 ? alts.first : {'type': 'logical', 'mode': 'or', 'rules': alts}), ..._route(direct ? 'direct' : topTag)});
+      out._add({...(alts.length == 1 ? alts.first : {'type': 'logical', 'mode': 'or', 'rules': alts}), ..._route(direct ? 'direct' : topTag)},
+          RuleOrigin('service', serviceTitles[key] ?? key, id: key));
       _dnsRule(domains, _dnsFor('auto', direct: direct));
     }
     final reg = regions[q['region']];
@@ -706,7 +734,7 @@ class _Builder {
         if (sites.isNotEmpty) {'rule_set': sites},
       ];
       final alts = [...domains, if (ips.isNotEmpty) {'rule_set': ips}];
-      out.rules.add({'type': 'logical', 'mode': 'or', 'rules': alts, ..._route('direct')});
+      out._add({'type': 'logical', 'mode': 'or', 'rules': alts, ..._route('direct')}, const RuleOrigin('quick', 'My region direct', id: 'region'));
       _dnsRule(domains, _dnsFor('auto', direct: true));
       if (sites.length < reg.geosite.length || ips.length < reg.geoip.length) {
         out.warnings.add('My region direct: the ${q['region']} lists are not downloaded yet, only its domains (.${reg.tlds.first}) go direct');
@@ -716,7 +744,7 @@ class _Builder {
       case 'direct':
         out.finalOutbound = 'direct';
       case 'block':
-        out.rules.add(_reject());
+        out._add(_reject());
       default:
         out.finalOutbound = topTag;
     }

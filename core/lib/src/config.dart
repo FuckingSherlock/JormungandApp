@@ -48,6 +48,7 @@ import 'package:crypto/crypto.dart';
 import 'plan.dart';
 import 'probe.dart';
 import 'routing.dart';
+import 'rulenames.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 
@@ -154,6 +155,19 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   // config's `default`: keyed by the defaults, a new pick from the UI starts clean.
   final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
   final pr = probe?.inbound(_servers(outs), dnsServers: [for (final s in routing.dnsEnabled) s.tag]);
+  final Map<String, dynamic>? tunnelRule = tunnelPort == null ? null : {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag};
+  if (info != null) {
+    // the route rules in the config's order, named for Live connections (rulenames.dart)
+    for (final r in pr?.rules ?? const <Map<String, dynamic>>[]) {
+      final dns = r.containsKey('server') || r.containsKey('override_address');
+      info.ruleNames.add(r, dns ? const RuleOrigin('system', 'DNS check', id: 'dns-check') : const RuleOrigin('system', 'Latency check', id: 'probe'));
+    }
+    if (tunnelRule != null) info.ruleNames.add(tunnelRule, const RuleOrigin('system', 'Core checks', id: 'tunnel'));
+    for (var i = 0; i < routing.rules.length; i++) {
+      final o = routing.origins[i];
+      if (o != null) info.ruleNames.add(routing.rules[i], o);
+    }
+  }
 
   return {
     'log': {'level': 'info', 'timestamp': true},
@@ -179,7 +193,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       'rules': [
         ...?pr?.rules,
         {'action': 'sniff'},
-        if (tunnelPort != null) {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag},
+        ?tunnelRule,
         ...routing.rules,
       ],
       if (routing.ruleSets.isNotEmpty) 'rule_set': routing.ruleSets,

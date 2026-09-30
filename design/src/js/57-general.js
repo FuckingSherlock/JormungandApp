@@ -9,6 +9,7 @@ const genCfg = {
   pingOnLaunch: true,     // ping the top Auto entries by priority and the rules' targets on open
   clipboard: true,        // offer to import a subscription / server link found in the clipboard
   updates: true,          // check for app updates
+  nodeSort: 'order',      // Nodes ⋮ → Sort nodes (30-nodes.js), kept between launches
 };
 const LANGS = { en: 'English', ru: 'Русский' };
 

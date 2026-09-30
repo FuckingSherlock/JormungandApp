@@ -129,6 +129,32 @@ size are what cost, not the code written.
   offset+limit. Never read `main_screen.html`; the JS files in `design/src/js` are big.
 - Plan and discuss in one session, implement in a fresh one pointed at `docs/`.
 
+## Working method (lead + agents)
+
+- The lead session plans, talks to the user, keeps the architecture, reviews diffs and grids,
+  commits. Implementation goes to background agents by brief: `coder-fast` (clear UI / feature
+  work), `coder-deep` (core logic, state, tricky bugs), `tests` / `test-runner` (running and
+  fixing checks), `general-purpose` for mixed jobs (e.g. translation). Agents always in background;
+  the lead stays available to the user meanwhile.
+- A brief states: goal, files / functions to start from (with line hints), constraints (no
+  commit, never read `main_screen.html`, CSS vars only, 320px / 120% fit), presets and checks to
+  add, docs to update, the exact `npm run verify -- …` to finish with, and "report briefly".
+- Independent tasks run as parallel agents. Tell each one which files others are editing at the
+  same time: small Edit-tool edits only, re-read the region before editing, never rewrite a
+  shared file (`check.mjs`, `04-i18n-ru.js`, `CLAUDE.md` are the usual shared ones).
+- Agents never commit. After an agent reports, the lead runs the full `npm run verify` (and
+  `dart analyze` / `dart test` for core work), looks at the grid, then commits, pushes and
+  fast-forwards the default branch: `git push origin claude/core-mvp:<default branch>`.
+  One commit may bundle several agents' work when their files overlap.
+- A failing check is investigated, not retried until green: find whether the app or the check
+  is wrong (timing, random base times and live pings made several checks flaky before).
+- Every new UI string needs its Russian entry in `design/src/js/04-i18n-ru.js` (rules and
+  glossary in its header and `docs/i18n.md`); `node design/tools/check.mjs audit-ru <presets>`
+  lists leftovers, `ru-<preset>` shoots in Russian.
+- While the user is testing the live UI, don't drive it with browser tools; ask or wait.
+- User decisions and the plan go into `.claude_states/state_N.md` ("Дальше"); a new session
+  starts from the newest state file.
+
 ## Deploy (Cloudflare Worker)
 
 The mockup is served by the Worker `jormungand-design` (static assets only,

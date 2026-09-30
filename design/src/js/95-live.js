@@ -89,6 +89,7 @@ function liveApply(s) {
     if ('switchNotif' in s.genCfg && !(s.notifCfg && 'autoSwitch' in s.notifCfg)) notifCfg.autoSwitch = notifCfg.unstable = s.genCfg.switchNotif;
     const g = Object.assign({}, s.genCfg); delete g.statusNotif; delete g.switchNotif;
     Object.assign(genCfg, g);
+    nodeSort = genCfg.nodeSort || 'order';
     I18N.setLang(genCfg.lang);
   }
   if (s.notifCfg) Object.assign(notifCfg, s.notifCfg);

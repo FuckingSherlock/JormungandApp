@@ -395,7 +395,7 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 | `POST /api/node` | `{protocol, address, port, secret, name, outbound?, unsupported?}` → `{node}`; ошибка формы — 400 `{error}` с текстом для пользователя |
 | `POST /api/share` | `{outbound, name, flag, unsupported?}` → `{link}` (null — у сервера нет формы ссылки) |
 | `DELETE /api/connections`, `DELETE /api/connections/{id}` | закрыть все / одно соединение (API service sing-box); без подключения `{ok:false}` |
-| `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
+| `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, ruleName, ruleKind, ruleId?, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
 | `POST /api/speedtest` | `{node:{key, outbound}}` или `{pair:{key, entry, exit}}`, `configUrl?` → поток NDJSON по ходу замера: `{phase (0 задержка, 1 загрузка, 2 отдача, 3 готово), down, up (бит/с), downRpm, upRpm, latency (мс), elapsed, final}`, последняя строка `final: true` (при сбое с `error`). Отдельный sing-box с одним сервером, network quality test sing-box (серверы Apple mensura, если не задан `configUrl`); закрыли страницу/лист — замер останавливается |
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
@@ -450,7 +450,29 @@ Amazon, ipip.net (из Китая). Страна, которая режет од
 соединения из таблицы (сервер — конечный outbound, `route<i>/<sid::nid>`; у цепочки ещё
 выбранный сервер входа `route<i>-entry/…` из потока групп; у цели правила `<цель>/…` и
 `<цель>>entry/…`; в `out` выход первым; скорость соединения — байты за последнюю секунду).
-Процесс (`process`) — `route.find_process`. UI опрашивает
+Процесс (`process`) — `route.find_process`.
+
+Правило соединения (`rulenames.dart`). sing-box сообщает сработавшее правило только как его
+`String()` — условия без действия и без номера (`network=tcp port=443`), списки длиннее
+3 значений обрезаны (`domain_suffix=[a b c...]`, у `domain_regex` / `process_path_regex`
+без `...`); это `rule` — сырое, оставляется как есть. Поэтому при сборке конфига ядро
+считает тот же текст для каждого сгенерированного правила (`ruleText`: порядок и формат
+полей как в `NewDefaultRule` sing-box, сверено с настоящим sing-box в
+`test/rulenames_test.dart`) и запоминает происхождение (`RuleOrigin`) в
+`RoutingInfo.ruleNames`; `trafficOf(api, names:)` ищет по нему текст соединения. К
+соединению добавляются `ruleKind` — `user` (своё правило: `ruleName` = его имя, `ruleId` =
+id), `app` (правило приложения, у Split — «Имя (TCP)» / «Имя (UDP)», `ruleId` = id
+приложения), `service` (Rules → Services, `ruleId` = ключ сервиса), `quick` (`Block ads`,
+`My region direct`), `system` (своё ядра: `Private networks` / `private`, `Core checks` /
+`tunnel` — tunnel-in, `Latency check` / `probe`, `DNS check` / `dns-check`), `final` (ни одно
+правило не сработало, `ruleName` = ''), либо '' — имя не определить (`ruleName` = '': UI
+показывает `rule`). Не определить = условие, которого `ruleText` не знает (в JSON-правиле),
+или два правила с разными условиями, у которых текст совпал из-за обрезки списков (лучше
+без имени, чем с чужим). Правила с одинаковыми условиями и разными действиями — то же
+соединение: берётся первое (его и применяет sing-box). Правила без условий (sniff,
+resolve, голый reject) имён не дают.
+
+UI опрашивает
 раз в секунду, пока подключено и страница видна: карточки Speed / This session /
 Connections и лист Live connections (новые сверху: хост:порт, TCP/UDP, вход → выход,
 правило, приложение, скорость, объём, возраст). Без подключения скорость и соединения — 0,

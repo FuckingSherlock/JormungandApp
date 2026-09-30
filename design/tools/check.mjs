@@ -213,7 +213,8 @@ const SHOTS = {
   'conn-sort': async p => { await connBase(p, () => { connSort = 'down'; renderLiveConns(); openConnSort(); }); },
   'conn-menu': async p => { await connBase(p, () => { connF.app.add('chrome.exe'); openConnMore(); }); },
   'conn-filter-sheet': async p => { await connBase(p, () => { openConnFilter(); ['net:tcp', 'app:chrome.exe', 'app:Telegram.exe', 'exit:direct'].forEach(s => connFilterToggle(...s.split(':'))); document.getElementById('cf-body').scrollTop = 0; }); },
-  'conn-open': async p => { await connBase(p, () => { connOpen = 'api.github.com'; renderLiveConns(); }); },
+  'conn-open': async p => { await connBase(p, () => { connOpen = 'wiki.corp.local'; renderLiveConns(); document.querySelector('#liveConnList .open').scrollIntoView({ block: 'center' }); }); },
+  'conn-groups': async p => { await connBase(p, () => { connFolded.add('service|s:telegram'); connFolded.add('service|s:discord'); renderLiveConns(); document.querySelector('.live-group.folded').scrollIntoView({ block: 'center' }); }); },
   'conn-paused': async p => { await connBase(p, () => { connSetPaused(true); traffic.conns.push({ ...traffic.conns[0], id: 'new1', host: 'new.example.com', start: new Date().toISOString() }); connOpen = 't.me'; renderLiveConns(); }); },
   'source-error': async p => { await tab(p, 'nodes'); await p.evaluate(() => { sourcesData.src1.lastError = { msg: 'Connection timed out (15 s)', at: Date.now() - 180e3 }; renderNodes(); }); await settle(p); },
   'dock-empty': async p => { await p.evaluate(() => { liveApply(null); connected = false; renderAll(); renderConnState(); updateMainConnectCard(); }); await settle(p); return { clip: await clipOf(p, '.dock', 60) }; },
@@ -590,13 +591,13 @@ async function runChecks() {
     const r = await p.evaluate(async () => {
       // the launch ping may still be measuring: wait until Auto has a server to go through
       for (let i = 0; i < 50 && !unitNode(effectiveConnectId()); i++) await new Promise(r => setTimeout(r, 100));
-      traffic = await backend.traffic(); renderTraffic(); openSheet('connections');
+      connGroup = 'none'; traffic = await backend.traffic(); renderTraffic(); openSheet('connections');
       const rows = [...document.querySelectorAll('#liveConnList .live-conn-row')];
       const node = unitNode(effectiveConnectId());
       const n0 = sourcesData[sourceOrder[0]].nodes[0];
       const on = { speed: document.getElementById('speedDown').textContent === '48.3' && document.getElementById('speedDownUnit').textContent === 'MB/s',
         total: document.getElementById('trafficDown').textContent === '1.84 GB', conns: document.getElementById('connTotal').textContent === '51',
-        rows: rows.length === 15, newest: rows[0].textContent.includes('192.168.0.1:53'),
+        rows: rows.length === 17, newest: rows[0].textContent.includes('192.168.0.1:53'),
         via: !!node && rows[1].textContent.includes(node.name), app: rows[1].textContent.includes('Code.exe'),
         tag: trafficVia(['route0/' + sourceOrder[0] + '::' + n0.id]).includes(n0.name) };
       connected = false; renderConnState();
@@ -790,7 +791,7 @@ async function runChecks() {
       () => { closeSheet('nodeform'); connected = true; return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); },
     ];
     // Live connections: an unfolded row, a long sort label and the filter badge — the tools row keeps its size and stays inside
-    sheets.push(() => { connOpen = 'rr3.googlevideo.com'; connSort = 'downed'; connF.app.add('chrome.exe'); connF.rule.add('rule #1'); connF.exit.add('direct'); renderLiveConns(); });
+    sheets.push(() => { connOpen = 'rr3.googlevideo.com'; connSort = 'downed'; connF.app.add('chrome.exe'); connF.rule.add('YouTube'); connF.exit.add('direct'); renderLiveConns(); });
     sheets.push(() => { openConnFilter(); connFExp.add('host'); renderConnFilter(); });
     for (const f of sheets) { await narrow.evaluate(f); await settle(narrow); bad.push(...await over()); }
     // Auto mode: every row's controls stay inside the row
@@ -1111,7 +1112,7 @@ async function runChecks() {
     const rows = () => page.locator('#liveConnList .live-conn-row').count();
     const n0 = await rows();
     await page.fill('#connFilter', 'discord');
-    expect(n0 >= 3 && await rows() === 2, `filter: ${n0} → ${await rows()}`);
+    expect(n0 >= 3 && await rows() === 3, `filter: ${n0} → ${await rows()}`);
     await page.fill('#connFilter', 'svchost');
     expect(await rows() === 2, 'by app: ' + await rows());
     await page.fill('#connFilter', '');
@@ -1187,6 +1188,98 @@ async function runChecks() {
     await page.click('.live-conn-detail .chip:has-text("Rule for this address")'); await page.waitForTimeout(300);
     expect(/ip_cidr":\["224.0.0.251"\]/.test(await page.evaluate(() => JSON.stringify(ruleDraft.groups))), 'ip prefill');
     await page.evaluate(() => { ruleDraft = newRule({}); renderRuleForm(); closeSheet('ruleform'); mockClosed.clear(); closeSheet('connections'); });
+  });
+
+  // The rule a connection went by is the user's rule name; sing-box's raw text stays in the details (76-conns.js)
+  await check('connections: rows, the Rule filter and search show rule names, the raw text only in the details; Open rule opens the rule / the app', async () => {
+    await tab(page, 'home');
+    await page.evaluate(() => { mockClosed.clear(); connected = true; connGroup = 'service'; connFolded.clear(); connF = connFNew(); return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); });
+    await page.waitForTimeout(300);
+    const list = () => page.textContent('#liveConnList');
+    const text = await list();
+    expect(/Work network/.test(text) && /Discord voice/.test(text) && /My region direct/.test(text) && /Private networks/.test(text) && !/domain_suffix|ip_is_private|package_name|rule_set=/.test(text), 'raw text in rows: ' + text.slice(0, 300));
+    // the Rule section of the filter: names (and Default / final), never the raw text
+    await page.click('#connFilterBtn'); await page.waitForTimeout(350);
+    const secs = await page.textContent('#cf-body');
+    expect(/Work network/.test(secs) && /YouTube/.test(secs) && /Private networks/.test(secs) && /Default \/ final/.test(secs) && !/domain_suffix|ip_is_private/.test(secs), 'filter: ' + secs.slice(0, 300));
+    await page.evaluate(() => closeSheet('connfilter')); await page.waitForTimeout(350);
+    // search: by name, and by the raw text
+    const rows = () => page.locator('#liveConnList .live-conn-row').count();
+    await page.fill('#connFilter', 'work network');
+    expect(await rows() === 1 && /wiki\.corp\.local/.test(await list()), 'search by name: ' + await rows());
+    await page.fill('#connFilter', 'intra.example');
+    expect(await rows() === 1, 'search by the raw text: ' + await rows());
+    await page.fill('#connFilter', '');
+    // details: the name, the raw text under it dimmed; Open rule for a user rule
+    await page.evaluate(() => { connOpen = 'wiki.corp.local'; renderLiveConns(); });
+    const det = await page.textContent('.live-conn-detail');
+    expect(/Work network/.test(det) && await page.locator('.live-conn-detail .lcd-raw').textContent() === 'domain_suffix=[corp.local intra.example.com]', 'detail: ' + det);
+    await page.click('.live-conn-detail .chip:has-text("Open rule")'); await page.waitForTimeout(400);
+    expect(await page.evaluate(() => ruleEditing === 'r1' && document.getElementById('sh-ruleform').classList.contains('open')), 'Open rule did not open the rule form');
+    await page.evaluate(() => closeSheet('ruleform')); await page.waitForTimeout(350);
+    // an app's own rule: its dialog
+    await page.evaluate(() => { connOpen = 'discord.com'; renderLiveConns(); });
+    await page.click('.live-conn-detail .chip:has-text("Open rule")'); await page.waitForTimeout(400);
+    expect(await page.evaluate(() => appEditing === 'com.discord' && document.getElementById('sh-appact').classList.contains('open')), 'Open rule did not open the app dialog');
+    await page.evaluate(() => closeSheet('appact')); await page.waitForTimeout(350);
+    // no rule of the user's to open: a service, a quick rule, the final route, an unnamed one (raw text shown)
+    for (const id of ['rr3.googlevideo.com', 'mirror.yandex.ru', 'gitlab.com']) {
+      await page.evaluate(i => { connOpen = i; renderLiveConns(); }, id);
+      expect(await page.locator('.live-conn-detail .chip:has-text("Open rule")').count() === 0, 'Open rule on ' + id);
+    }
+    await page.evaluate(() => { traffic.conns.push({ ...traffic.conns[0], id: 'raw1', host: 'raw.example', rule: 'port=9999', ruleKind: '', ruleName: '' }); connOpen = 'raw1'; renderLiveConns(); });
+    expect(/port=9999/.test(await page.textContent('[data-id="raw1"] .live-conn-meta')) && await page.locator('.live-conn-detail .lcd-raw').count() === 0, 'a rule with no name shows its raw text');
+    await page.evaluate(() => { connOpen = null; mockClosed.clear(); closeSheet('connections'); });
+  });
+
+  // Groups: Service by default, fold kept, Group by App / None, × closes a group, copy (76-conns.js)
+  await check('connections: grouped by service by default, a group folds, Group by App, None restores the flat list', async () => {
+    await tab(page, 'home');
+    await page.evaluate(() => { mockClosed.clear(); connected = true; connGroup = 'service'; connSort = 'new'; connFolded.clear(); connF = connFNew(); return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); });
+    await page.waitForTimeout(300);
+    const heads = () => page.evaluate(() => [...document.querySelectorAll('#liveConnList .live-group .lg-title')].map(e => e.textContent));
+    const rows = () => page.locator('#liveConnList .live-conn-row').count();
+    const n0 = await rows();
+    const h = await heads();
+    for (const g of ['YouTube', 'Telegram', 'Discord', 'github.com', 'yandex.ru', 'gitlab.com', 'corp.local', 'svchost.exe', 'Other']) expect(h.includes(g), 'no group ' + g + ': ' + h);
+    expect(h[0] === 'svchost.exe', 'Newest: the group with the newest connection first: ' + h);
+    const yt = await page.evaluate(() => { const g = [...document.querySelectorAll('.live-group')].find(x => x.querySelector('.lg-title').textContent === 'YouTube'); return { n: g.querySelector('.lg-n').textContent, rate: g.textContent, rows: [...(function* () { for (let e = g.nextElementSibling; e && !e.classList.contains('live-group'); e = e.nextElementSibling) yield e.dataset.id; })()] }; });
+    expect(yt.n === '3' && /MB\/s/.test(yt.rate) && yt.rows.length === 3 && yt.rows.includes('rr3.googlevideo.com'), 'YouTube group: ' + JSON.stringify(yt));
+    // sort applies to the groups by their sum, and inside them
+    await page.evaluate(() => { connSort = 'down'; renderLiveConns(); });
+    const h2 = await heads();
+    expect(h2[0] === 'yandex.ru' && h2.indexOf('YouTube') === 1, 'by ↓ speed: ' + h2);
+    await page.evaluate(() => { connSort = 'new'; renderLiveConns(); });
+    // fold: the rows go, the header stays with its count; the fold survives a redraw and the Sort menu
+    await page.click('.live-group:has(.lg-title:text-is("YouTube"))'); await page.waitForTimeout(100);
+    expect(await rows() === n0 - 3 && await page.locator('.live-group.folded').count() === 1, 'fold: ' + await rows());
+    await page.evaluate(() => renderLiveConns());
+    expect(await rows() === n0 - 3, 'the fold did not survive a redraw');
+    await page.fill('#connFilter', 'youtube');   // a search shows what it finds, folded or not
+    expect(await rows() === 2, 'search inside a folded group: ' + await rows());
+    await page.fill('#connFilter', '');
+    await page.click('.live-group:has(.lg-title:text-is("YouTube"))'); await page.waitForTimeout(100);
+    expect(await rows() === n0, 'unfold: ' + await rows());
+    // copy: a header line before each group
+    const copied = await page.evaluate(() => { let got = ''; const was = copyText; copyText = t => { got = t; }; connCopyShown(); copyText = was; return got; });
+    expect(/^# svchost\.exe · \d+ connections? · ↓ /.test(copied) && /\n# YouTube · 3 connections · ↓ /.test(copied), 'copy: ' + copied.slice(0, 200));
+    // Group by App
+    await page.click('#connSortBtn'); await page.waitForTimeout(350);
+    expect(/Group by/.test(await page.textContent('#actions-body')), 'the Sort menu has Group by');
+    await page.click('#actions-body .menu-row >> nth=7'); await page.waitForTimeout(150);
+    const ha = await heads();
+    expect(ha.includes('chrome.exe') && ha.includes('Discord.exe') && ha.includes('Unknown') && !ha.includes('YouTube') && await rows() === n0, 'by app: ' + ha);
+    // None: the flat list again
+    await page.click('#connSortBtn'); await page.waitForTimeout(350);
+    await page.click('#actions-body .menu-row >> nth=8'); await page.waitForTimeout(150);
+    expect(await page.locator('.live-group').count() === 0 && await rows() === n0, 'None: ' + await page.locator('.live-group').count());
+    // back to Service; × on a header closes the group's connections
+    await page.click('#connSortBtn'); await page.waitForTimeout(350);
+    await page.click('#actions-body .menu-row >> nth=6'); await page.waitForTimeout(150);
+    await page.click('.live-group:has(.lg-title:text-is("Telegram")) .live-conn-close'); await page.waitForTimeout(150);
+    const after = await heads();
+    expect(!after.includes('Telegram') && await rows() === n0 - 2, 'close group: ' + after + ' ' + await rows());
+    await page.evaluate(() => { connFolded.clear(); mockClosed.clear(); closeSheet('connections'); });
   });
 
   await check('nodes: a failed update shows the error on the card; Retry clears it', async () => {
@@ -1278,7 +1371,7 @@ async function runChecks() {
     await page.locator('#actions-body .menu-row').nth(1).click(); await settle(page);
     const ru = await page.evaluate(() => ({ lang: genCfg.lang, tabs: [...document.querySelectorAll('.nav-btn')].map(b => b.textContent.trim()), set: document.querySelector('#view-settings .app-name').textContent.trim(), html: document.documentElement.lang,
       title: document.getElementById('evFilterBtn').title, toast: I18N.tr('Copied'), t: t('{0} nodes', 3) }));
-    expect(ru.lang === 'ru' && ru.set === 'Настройки' && ru.html === 'ru' && ru.title === 'Фильтр событий' && ru.toast === 'Скопировано' && ru.t === '3 сервера' && ru.tabs.join() !== '', 'ru: ' + JSON.stringify(ru));
+    expect(ru.lang === 'ru' && ru.set === 'Настройки' && ru.html === 'ru' && ru.title === 'Фильтр событий' && ru.toast === 'Скопировано' && ru.t === '3 узла' && ru.tabs.join() !== '', 'ru: ' + JSON.stringify(ru));
     // text that JS writes later is translated too; the English original comes back with the language
     await page.evaluate(() => { const d = document.createElement('div'); d.id = 'i18nProbe'; d.textContent = 'No events yet'; document.body.appendChild(d); }); await settle(page);
     expect(await page.textContent('#i18nProbe') === 'Событий пока нет', 'live text: ' + await page.textContent('#i18nProbe'));

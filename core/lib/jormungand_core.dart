@@ -22,6 +22,7 @@ export 'src/parse/subscription.dart';
 export 'src/plan.dart';
 export 'src/probe.dart';
 export 'src/routing.dart';
+export 'src/rulenames.dart';
 export 'src/rulesets.dart';
 export 'src/runtime.dart';
 export 'src/sbapi.dart';

@@ -382,19 +382,20 @@ function menuRow(icon, label, onclick, extraCls) {
 }
 
 function openNodesMore() {
-  const sortChip = (key, label) => `<div class="chip ${nodeSort === key ? 'active' : ''}" onclick="setNodeSort('${key}')">${label}</div>`;
+  const sortBtn = (key, label) => `<button class="${nodeSort === key ? 'on proxy' : ''}" onclick="setNodeSort('${key}')">${label}</button>`;
   const anyOpen = catalogOrder[nodesTab].some(id => expandState[id]);
   document.getElementById('nodesmore-body').innerHTML =
     menuRow(ICON.refresh, 'Update all subscriptions', 'updateAllSources()') +
     (anyOpen ? menuRow(ICON.collapse, 'Collapse all', 'setAllOpen(false)')
              : menuRow(ICON.expand, 'Expand all', 'setAllOpen(true)')) +
     `<div class="menu-caption">Sort nodes</div>
-     <div class="chip-row" style="padding:0 20px 6px">${sortChip('order','As in source')}${sortChip('latency','By latency')}${sortChip('name','By name')}</div>`;
+     <div class="seg3 wide menu-seg">${sortBtn('order','As in source')}${sortBtn('latency','By latency')}${sortBtn('name','By name')}</div>`;
   openSheet('nodesmore');
 }
 
 function setNodeSort(key) {
-  nodeSort = key;
+  nodeSort = genCfg.nodeSort = key;
+  liveSave();
   renderNodes();
   openNodesMore();
 }

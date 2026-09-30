@@ -18,6 +18,7 @@ import 'parse/links.dart';
 import 'plan.dart';
 import 'probe.dart';
 import 'routing.dart';
+import 'rulenames.dart';
 import 'rulesets.dart';
 import 'runtime.dart';
 import 'sbapi.dart';
@@ -121,6 +122,7 @@ class Daemon {
   FallbackService? _fallback;
   DnsFailover? _dns;
   List<TargetFallback> _fallbacks = const [];
+  RuleNames? _ruleNames; // the running config's rules by name (Live connections)
   List<DnsEntry> _dnsServers = const [];
   bool _dnsAuto = true; // Settings → DNS → Switch automatically (connect body `dnsAuto`, POST /api/dns/auto)
   final Timer Function(Duration, void Function()) _timer;
@@ -635,7 +637,7 @@ class Daemon {
     if (!main.running || api == null) {
       return {'running': false, 'down': 0, 'up': 0, 'downTotal': 0, 'upTotal': 0, 'tcp': 0, 'udp': 0, 'conns': []};
     }
-    return {'running': true, ...trafficOf(api)};
+    return {'running': true, ...trafficOf(api, names: _ruleNames)};
   }
 
   /// `connected` stays true while a crashed sing-box is being started again
@@ -739,6 +741,7 @@ class Daemon {
     } catch (_) {}
     _probe = probe;
     _fallbacks = info.fallbacks;
+    _ruleNames = info.ruleNames;
     _dnsServers = info.dnsServers;
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     _tunnelPort = tunnelPort;

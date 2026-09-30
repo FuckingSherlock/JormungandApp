@@ -96,9 +96,18 @@ let backend = {
     const id = effectiveConnectId(), c = chainsData[id];
     const out = c ? [chainExitNode(c), chainEntryNode(c)].filter(Boolean) : id ? [unitNode(id)].filter(Boolean) : [];
     const MB = 1048576, ago = s => new Date(Date.now() - s * 1000).toISOString();
-    // rule: undefined = by the route (final through the server / the private-network rule for direct), '' = final
-    const conn = (host, port, net, via, process, downRate, down, s, rule, id) =>
-      ({ id: id || host, host, port, net, rule: rule !== undefined ? rule : via === out ? 'final' : 'ip_is_private=true => route(direct)', out: via.length ? via : ['direct'], process, down, up: down / 20 | 0, downRate, upRate: downRate / 30 | 0, start: ago(s) });
+    // rule = sing-box's own text of the matched rule (the conditions only; '' = no rule: final), o = what the core
+    // makes of it (traffic.dart): [ruleKind, ruleName, ruleId]. undefined = by the route (final through the server /
+    // the private-networks rule for direct)
+    const PRIVATE = 'domain_suffix=[local localhost lan...] ip_is_private=true';
+    const conn = (host, port, net, via, process, downRate, down, s, rule, id, o) => {
+      if (rule === undefined) rule = via === out ? '' : PRIVATE;
+      if (!o) o = !rule ? ['final', ''] : rule === PRIVATE ? ['system', 'Private networks', 'private'] : ['', ''];
+      return { id: id || host, host, port, net, rule, ruleKind: o[0], ruleName: o[1], ...(o[2] ? { ruleId: o[2] } : {}), out: via.length ? via : ['direct'], process, down, up: down / 20 | 0, downRate, upRate: downRate / 30 | 0, start: ago(s) };
+    };
+    const YT = ['service', 'YouTube', 'youtube'], TG = ['service', 'Telegram', 'telegram'], REGION = ['quick', 'My region direct', 'region'];
+    const YT_RULE = 'domain_suffix=[youtube.com googlevideo.com ytimg.com...]', TG_RULE = 'domain_suffix=[telegram.org t.me telegram.me...] || rule_set=geosite-telegram || rule_set=geoip-telegram';
+    const RU_RULE = 'domain_suffix=[ru xn--p1ai su] || rule_set=[geosite-category-ru geosite-ru-available-only-inside] || rule_set=geoip-ru';
     // a chain-like route for the extra rows: the second server of the first source as an entry, when there is one
     const alt = (sourcesData[sourceOrder[0]] || { nodes: [] }).nodes.slice(-1).map(n => ({ ...n }))[0];
     const CH = 'C:\\Program Files\\', altOut = alt && out.length ? [alt, ...out.slice(0, 1)] : out;
@@ -106,18 +115,20 @@ let backend = {
       conn('googlevideo.com', '443', 'tcp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 3.2 * MB, 410 * MB, 95),
       conn('api.github.com', '443', 'tcp', out, 'C:\\Code\\Code.exe', 4096, 2 * MB, 40),
       conn('192.168.0.1', '53', 'udp', [], 'C:\\Windows\\System32\\svchost.exe', 0, 900, 3),
-      conn('discord.com', '443', 'tcp', out, 'C:\\Discord\\Discord.exe', 128 * 1024, 30 * MB, 600),
+      conn('discord.com', '443', 'tcp', out, 'C:\\Discord\\Discord.exe', 128 * 1024, 30 * MB, 600, 'network=tcp package_name=com.discord', undefined, ['app', 'Discord (TCP)', 'com.discord']),
       // older ones, for the list tools: other apps, rules, chains, UDP, addresses, no app
-      conn('rr3.googlevideo.com', '443', 'tcp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 1.1 * MB, 120 * MB, 700, 'rule #1: domain_suffix=[googlevideo.com] => route(proxy)'),
-      conn('www.youtube.com', '443', 'udp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 512 * 1024, 60 * MB, 900, 'rule #1: domain_suffix=[googlevideo.com] => route(proxy)', 'www.youtube.com/udp'),
-      conn('t.me', '443', 'tcp', altOut, 'C:\\Telegram\\Telegram.exe', 64 * 1024, 8 * MB, 1200, 'rule #3: domain_suffix=[t.me, telegram.org] => route(chain)'),
-      conn('149.154.167.51', '443', 'tcp', altOut, 'C:\\Telegram\\Telegram.exe', 20 * 1024, 3 * MB, 1300, 'rule #3: domain_suffix=[t.me, telegram.org] => route(chain)'),
+      conn('rr3.googlevideo.com', '443', 'tcp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 1.1 * MB, 120 * MB, 700, YT_RULE, undefined, YT),
+      conn('www.youtube.com', '443', 'udp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 512 * 1024, 60 * MB, 900, YT_RULE, 'www.youtube.com/udp', YT),
+      conn('t.me', '443', 'tcp', altOut, 'C:\\Telegram\\Telegram.exe', 64 * 1024, 8 * MB, 1200, TG_RULE, undefined, TG),
+      conn('149.154.167.51', '443', 'tcp', altOut, 'C:\\Telegram\\Telegram.exe', 20 * 1024, 3 * MB, 1300, TG_RULE, undefined, TG),
+      conn('wiki.corp.local', '443', 'tcp', [], 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 40 * 1024, 6 * MB, 1000, 'domain_suffix=[corp.local intra.example.com]', undefined, ['user', 'Work network', 'r1']),
+      conn('us-east42.discord.media', '443', 'udp', altOut, 'C:\\Discord\\Discord.exe', 96 * 1024, 12 * MB, 1100, 'network=udp domain_suffix=[discord.gg discord.media]', undefined, ['user', 'Discord voice', 'r2']),
       conn('gitlab.com', '22', 'tcp', out, 'C:\\Program Files\\Git\\usr\\bin\\ssh.exe', 2048, 400 * 1024, 1500, ''),
-      conn('mirror.yandex.ru', '443', 'tcp', [], 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 6 * MB, 800 * MB, 1800, 'rule #2: geosite=[category-ru] => route(direct)'),
-      conn('vk.com', '443', 'tcp', [], 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 256 * 1024, 40 * MB, 2000, 'rule #2: geosite=[category-ru] => route(direct)'),
+      conn('mirror.yandex.ru', '443', 'tcp', [], 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 6 * MB, 800 * MB, 1800, RU_RULE, undefined, REGION),
+      conn('vk.com', '443', 'tcp', [], 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 256 * 1024, 40 * MB, 2000, RU_RULE, undefined, REGION),
       conn('1.1.1.1', '443', 'tcp', out, '', 1024, 200 * 1024, 2200, ''),
-      conn('224.0.0.251', '5353', 'udp', [], 'C:\\Windows\\System32\\svchost.exe', 0, 3000, 2600, 'ip_is_private=true => route(direct)', '224.0.0.251/udp'),
-      conn('fe80::1', '53', 'udp', [], '', 0, 1200, 2800, 'ip_is_private=true => route(direct)', 'fe80::1/udp'),
+      conn('224.0.0.251', '5353', 'udp', [], 'C:\\Windows\\System32\\svchost.exe', 0, 3000, 2600, undefined, '224.0.0.251/udp'),
+      conn('fe80::1', '53', 'udp', [], '', 0, 1200, 2800, undefined, 'fe80::1/udp'),
       conn('cdn.discordapp.com', '443', 'tcp', out, 'C:\\Discord\\Discord.exe', 900 * 1024, 90 * MB, 3000, ''),
     ].filter(c => !(Date.now() - (mockClosed.get(c.id) || mockClosed.get('*') || 0) < 15000)) });
   },
