@@ -21,8 +21,32 @@ textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:bre
 .conn-tools{display:flex;align-items:center;gap:8px;padding:0 14px 10px;flex-shrink:0}
 .conn-tools .search{margin:0;flex:1;min-width:0}
 .conn-tools input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--t1);font:inherit;font-size:14px;padding:9px 0}
-.conn-closeall{flex-shrink:0;background:rgba(var(--muted-rgb),.12);color:var(--muted);border:1px solid rgba(var(--muted-rgb),.3);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
-.conn-closeall:disabled{opacity:.4;cursor:default}
+/* tools row: fixed-size buttons, the sort label is cut, so nothing resizes when the sort or filter changes */
+.conn-tools .search{min-width:60px}
+.conn-sort{flex-shrink:0;width:88px;height:36px;box-sizing:border-box;display:flex;align-items:center;gap:5px;padding:0 8px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--t2);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.conn-sort svg{flex-shrink:0}
+.conn-sort span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conn-sort.on{color:var(--accent);border-color:var(--accent)}
+.conn-paused{flex-shrink:0;display:flex;align-items:center;gap:10px;margin:0 14px 8px;padding:6px 6px 6px 12px;border-radius:10px;background:rgba(var(--warn-rgb),.14);font-size:12.5px;color:var(--t1)}
+.conn-paused span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conn-paused button{background:none;border:none;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;padding:2px 8px;flex-shrink:0}
+.live-conn-row{cursor:pointer}
+.live-conn-row.open{background:rgba(var(--accent-rgb),.06)}
+.live-conn-detail{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12.5px;cursor:default}
+.lcd-line{display:flex;gap:10px;padding:2px 0;min-width:0}
+.lcd-k{flex-shrink:0;width:64px;color:var(--t3)}
+.lcd-v{flex:1;min-width:0;color:var(--t1);font-family:var(--mono);word-break:break-all}
+.lcd-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.lcd-acts .chip{padding:4px 10px;font-size:12.5px}
+/* filter sheet: sections of checkbox rows (connFilter*, 51-conns.js) */
+.cf-row{display:flex;align-items:center;gap:12px;padding:10px 20px;cursor:pointer;min-width:0}
+.cf-row:active{background:rgba(255,255,255,.04)}
+.cf-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;color:var(--t1)}
+.cf-count{flex-shrink:0;font-size:12.5px;color:var(--t3);font-family:var(--mono)}
+.cf-dim{margin-left:6px;font-size:12px;color:var(--t3)}
+.cf-row.zero .cf-name{color:var(--t3)}
+.cf-more{padding:8px 20px 10px;background:none;border:none;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.cf-apply{color:var(--accent)}
 .live-conn-close{flex-shrink:0;width:24px;height:24px;margin:-4px -6px -4px 0;border:none;background:none;color:var(--t3);font-size:18px;line-height:1;cursor:pointer;border-radius:6px}
 .live-conn-close:active{background:rgba(var(--muted-rgb),.15);color:var(--muted)}
 .live-conn-top .live-conn-host{flex:1}

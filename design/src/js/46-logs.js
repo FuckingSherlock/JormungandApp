@@ -32,7 +32,7 @@ function setLogTab(tab) {
   on('logTabInk').style.transform = ev ? '' : 'translateX(100%)';
   document.querySelectorAll('#logTabs .nodes-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   renderEvFilterBar();
-  if (ev) { renderEvents(); evFollowIfPinned(); evMarkSeen(); } else { logFollowIfPinned(); pollLogs(); logMarkReadSoon(); }
+  if (ev) { renderEvents(); evFollowIfPinned(); evMarkSeen(); } else { logFollowIfPinned(); pollLogs(); logMarkRead(); logMarkReadSoon(); }
   renderLogSummary();
 }
 
@@ -43,14 +43,16 @@ function pollLogs() {
   backend.log(logState.next).then(r => {
     if (gen !== logState.gen) return;
     // the core started again: its numbers start over
-    if (logState.next != null && r.next < logState.next) { logState.lines = []; logState.next = null; logCfg.rawRead = 0; return pollLogs(); }
-    // a saved read mark from a core that has since started over
-    if (logState.next == null && logCfg.rawRead >= r.next) logCfg.rawRead = 0;
+    if (logState.next != null && r.next < logState.next) { logState.lines = []; logState.next = null; logRawReset(); return pollLogs(); }
+    // a saved read state from a core that has since started over
+    if (logState.next == null && logCfg.rawTop != null && logCfg.rawTop >= r.next) logRawReset();
     const fresh = r.lines.filter(l => logState.next == null || l.n >= logState.next);
     logState.next = r.next;
+    logTrack(fresh, r.next);
     if (!fresh.length && document.getElementById('logList').childElementCount) return renderLogSummary();
     logState.lines.push(...fresh);
     if (logState.lines.length > LOG_KEEP) logState.lines.splice(0, logState.lines.length - LOG_KEEP);
+    logPrune();
     appendLogs(fresh);
   }, () => {}).finally(() => { logState.busy = false; });
 }
@@ -91,7 +93,7 @@ function renderLogs() {
   logState.unseen = 0;
   logFollowIfPinned();
   renderLogSummary();
-  logMarkReadSoon();
+  logMarkRead();
 }
 
 function appendLogs(fresh) {
@@ -102,29 +104,78 @@ function appendLogs(fresh) {
   if (!logState.follow) logState.unseen += shown.length;
   logFollowIfPinned();
   renderLogSummary();
-  logMarkReadSoon();
+  logMarkRead();
 }
 
 /* ── Read: the badges on the level chips count the lines not read yet ──
-   A line is read once it has been in the list's viewport while the Raw tab is shown; the read
-   mark is one number, the newest line read (logCfg.rawRead, kept like the seen events). */
-let logReadTimer = null;
+   Per line, like the seen events (47-events.js evMarkSeen): a line is read once it has been in
+   the list's viewport (at least partly) while the Raw tab is shown and the page is visible; each
+   line of a group is judged by its own place. What arrives while the list is scrolled up, or the
+   tab is not open, stays unread. logUnread = the numbers of the unread lines. Kept with the state
+   as ranges (logCfg.rawUnread = [from, to, from, to…]) and rawTop, the newest number the UI has
+   taken into account: a line above it that is not unread is read, a line beyond it is new.
+   Never kept before (rawTop null): what the core already holds counts as read, so a first run
+   does not start with hundreds. Numbers below the oldest line the core still keeps are dropped. */
+const logUnread = new Set();
+let logReadTimer = null, logSavedKey = '', logPersistTimer = null;
 const logMarkReadSoon = () => { if (!logReadTimer) logReadTimer = setTimeout(() => { logReadTimer = null; logMarkRead(); }, 150); };
+
+function logUnreadRanges() {
+  const out = [];
+  [...logUnread].sort((a, b) => a - b).forEach(n => { const k = out.length; if (k && out[k - 1] === n - 1) out[k - 1] = n; else out.push(n, n); });
+  return out;
+}
+// logCfg follows the set at once (the snapshot is always current); the save is spaced out so
+// a stream of lines does not save the whole state every second.
+function logSync() {
+  logCfg.rawUnread = logUnreadRanges();
+  if (logPersistTimer || JSON.stringify([logCfg.rawUnread, logCfg.rawTop]) === logSavedKey) return;
+  logPersistTimer = setTimeout(logPersistNow, 3000);
+}
+function logPersistNow() {
+  clearTimeout(logPersistTimer); logPersistTimer = null;
+  logSavedKey = JSON.stringify([logCfg.rawUnread, logCfg.rawTop]);
+  liveSave();
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) { if (logPersistTimer) logPersistNow(); } else logMarkReadSoon(); });
+// From a saved logCfg (95-live.js liveApply).
+function logRawRestore(c) {
+  logUnread.clear();
+  logCfg.rawTop = typeof c.rawTop === 'number' && c.rawTop >= -1 ? c.rawTop : null;   // -1: the core had no line yet (its numbers start at 0)
+  const a = Array.isArray(c.rawUnread) ? c.rawUnread : [];
+  for (let i = 0; i + 1 < a.length; i += 2) for (let n = +a[i]; n <= +a[i + 1] && n - a[i] < LOG_KEEP; n++) logUnread.add(n);
+  logCfg.rawUnread = logUnreadRanges();
+  logSavedKey = JSON.stringify([logCfg.rawUnread, logCfg.rawTop]);
+}
+// The core's numbers started over: whatever it holds now is new.
+function logRawReset() { logUnread.clear(); logCfg.rawTop = -1; logSync(); }
+// New lines from the core: beyond rawTop they are unread (the ones in view are read at once, logMarkRead).
+function logTrack(fresh, next) {
+  const top = logCfg.rawTop;
+  if (top != null) fresh.forEach(l => { if (l.n > top) logUnread.add(l.n); });
+  logCfg.rawTop = Math.max(top ?? -1, next - 1);
+  logSync();
+}
+function logPrune() {
+  const lo = logState.lines.length ? logState.lines[0].n : logState.next ?? 0;
+  let cut = false;
+  logUnread.forEach(n => { if (n < lo) { logUnread.delete(n); cut = true; } });
+  if (cut) logSync();
+}
 function logMarkRead() {
-  if (!logsOpen() || logTab !== 'raw') return;
+  if (!logUnread.size || !logsOpen() || logTab !== 'raw' || document.hidden) return;
   const r = document.getElementById('logScroll').getBoundingClientRect();
   if (!r.height) return;
-  let top = logCfg.rawRead;
+  let read = 0;
   document.querySelectorAll('#logList .log-line').forEach(el => {
     const n = +el.dataset.n;
-    if (n <= top) return;
+    if (!logUnread.has(n)) return;
     const b = el.getBoundingClientRect();
-    if (b.bottom > r.top + 4 && b.top < r.bottom - 4) top = n;
+    if (b.bottom > r.top + 8 && b.top < r.bottom - 8) { logUnread.delete(n); read++; }
   });
-  if (top === logCfg.rawRead) return;
-  logCfg.rawRead = top;
+  if (!read) return;
+  logSync();
   renderLogSummary();
-  liveSave();
 }
 // One badge: the unread count (99+ at most), the colour of the worst unread line: red error, yellow warning, green info.
 function logBadge(el, lines) {
@@ -138,7 +189,7 @@ function logBadge(el, lines) {
 // and the pill "↓ N new" / "↓ Latest" of the tab that is open.
 function renderLogSummary() {
   const all = logState.lines, warn = all.filter(l => l.lvl === 'warn').length, err = all.filter(l => l.lvl === 'error').length;
-  const unread = all.filter(l => l.n > logCfg.rawRead);
+  const unread = all.filter(l => logUnread.has(l.n));
   logBadge(document.getElementById('logAllCount'), unread);
   logBadge(document.getElementById('logWarnCount'), unread.filter(l => l.lvl === 'warn' || l.lvl === 'error'));
   document.getElementById('logsSummary').textContent = logTab === 'events' ? evSummaryText()
@@ -222,8 +273,9 @@ function clearLogs() {
     logState.gen++;
     logState.lines = [];
     logState.follow = true;
-    logCfg.rawRead = Math.max(logCfg.rawRead, (logState.next || 1) - 1);
-    liveSave();
+    logUnread.clear();
+    logCfg.rawTop = Math.max(logCfg.rawTop ?? -1, (logState.next ?? 0) - 1);
+    logSync();
     renderLogs();
   }, e => toast('Not cleared: ' + e.message));
 }

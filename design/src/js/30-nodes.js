@@ -490,8 +490,9 @@ function confirmDeleteSource(sid) {
   const s = sourcesData[sid];
   if (!s) return;
   const n = s.nodes.length, g = (s.gone || []).length;
-  const note = (s.kind === 'sub' ? `The subscription and its ${n} server${n === 1 ? '' : 's'}` : `The group and its ${n} server${n === 1 ? '' : 's'}`)
-    + ' are removed' + (g ? `, with ${g} unavailable one${g === 1 ? '' : 's'} kept for their settings` : '') + '. This can’t be undone.';
+  const what = (s.kind === 'sub' ? 'The subscription and its {0} server' : 'The group and its {0} server') + (n === 1 ? '' : 's');
+  const note = g ? tn(n, what + ' are removed') + tn(g, ', with {0} unavailable one' + (g === 1 ? '' : 's') + ' kept for their settings') + t('. This can’t be undone.')
+    : tn(n, what + ' are removed. This can’t be undone.');
   const dead = new Set(Object.values(chainsData).filter(c => c.inId === sid || c.outId === sid).map(c => 'chain:' + c.id));
   const impact = deleteImpact(r => r.sid === sid, sid).concat(targetImpact(t => t === 'src:' + sid || t.startsWith('node:' + sid + '::') || dead.has(t)));
   openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, impact, `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));

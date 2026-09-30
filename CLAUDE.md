@@ -81,8 +81,13 @@ nodes-edit, nodes-edit-chain, entry-priority, profile-priority, help, interval, 
 rules, rules-more, rules-services, rule-form, rule-new, rule-ip-resolve, rule-json, rule-add, rule-dns-over, rule-test, rule-order, rule-io,
 rule-sets, apps, app-act, app-split, settings-dns, dns-resolve, dns-form, dns-failover, settings-conn, conn-proxy-auth, kill-on, kill-off-confirm, core-down-kept, core-down-direct, kill-blocking, core-recovering, settings-notif, text-large, text-large-rule,
 connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-raw, logs-search, logs-warn, logs-filter, logs-event-open, logs-new-below, nav-dots, toast-fly,
-qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, source-error,
+qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, conn-sort, conn-menu, conn-filter-sheet, conn-open, conn-paused, source-error,
 dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test, speed-done, speed-fail.
+Russian: `ru-<preset>` opens the preset in ru (ru-home, ru-nodes, ru-route, ru-settings, ru-rules, ru-rule-form,
+ru-logs, ru-profiles, ru-settings-auto, ru-settings-dns, ru-dock, ru-connections, ru-help; `all` skips them), or
+`--lang ru` on any preset. `node design/tools/check.mjs audit-ru [presets|all]` lists Latin text left on the page
+in ru. New user-visible English text needs an entry in `js/04-i18n-ru.js` (`node design/tools/i18n-extract.mjs --missing`
+lists gaps); mechanism and glossary: `docs/i18n.md`.
 Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
 there for each new interaction.
 

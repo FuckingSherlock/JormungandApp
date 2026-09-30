@@ -2,7 +2,7 @@
    Language, startup, clipboard, updates. genCfg is what the Flutter app
    keeps in its settings store. */
 const genCfg = {
-  lang: 'en',             // 'en' | 'ru' (mockup text stays English)
+  lang: 'en',             // 'en' | 'ru' (docs/i18n.md)
   launchAtStartup: false, // start with the OS (Android: after boot; desktop: login item)
   startMinimized: true,   // desktop: start in the tray
   connectOnLaunch: false, // connect as soon as the app opens
@@ -36,13 +36,19 @@ function renderGeneral() {
   const sub = document.getElementById('setGeneralSub');
   if (sub) sub.textContent = LANGS[genCfg.lang] + (genCfg.connectOnLaunch ? ' · connects on launch' : '');
 }
-function setGenCfg(key, v) { genCfg[key] = v; renderGeneral(); renderConnSettings(); }   // Kill switch → while the app is closed depends on two of them
+function setGenCfg(key, v) {
+  genCfg[key] = v;
+  if (key === 'lang') {
+    I18N.setLang(v);   // every text of the page is translated in place (03-i18n.js)
+    renderEvents();    // dates in the rows are made by the locale
+  }
+  renderGeneral(); renderConnSettings();
+}   // Kill switch → while the app is closed depends on two of them
 
+// The language names are shown in their own language and never translated (data-notr).
 function openLangPicker() {
-  // Only English is written yet: Russian is listed, off, marked soon.
-  openActions('Language', Object.entries(LANGS).map(([k, name]) => k === 'en'
-    ? menuRow(genCfg.lang === k ? ICON.check : '', name, `closeSheet('actions');setGenCfg('lang','${k}')`)
-    : menuRow('<span class="menu-ico-gap"></span>', name + '<span class="soon-tag">soon</span><div class="menu-sub">The app is in English for now</div>', `toast('${name} is coming soon')`, 'disabled')).join(''));
+  openActions('Language', Object.entries(LANGS).map(([k, name]) =>
+    menuRow(genCfg.lang === k ? ICON.check : '<span class="menu-ico-gap"></span>', `<span data-notr>${name}</span>`, `closeSheet('actions');setGenCfg('lang','${k}')`)).join(''));
 }
 
 /* On open: ping the entry the app would connect through now and the next `autoCfg.standby`

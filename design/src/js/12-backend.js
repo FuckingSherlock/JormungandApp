@@ -96,20 +96,36 @@ let backend = {
     const id = effectiveConnectId(), c = chainsData[id];
     const out = c ? [chainExitNode(c), chainEntryNode(c)].filter(Boolean) : id ? [unitNode(id)].filter(Boolean) : [];
     const MB = 1048576, ago = s => new Date(Date.now() - s * 1000).toISOString();
-    const conn = (host, port, net, via, process, downRate, down, s) =>
-      ({ id: host, host, port, net, rule: via === out ? 'final' : 'ip_is_private=true => route(direct)', out: via.length ? via : ['direct'], process, down, up: down / 20 | 0, downRate, upRate: downRate / 30 | 0, start: ago(s) });
+    // rule: undefined = by the route (final through the server / the private-network rule for direct), '' = final
+    const conn = (host, port, net, via, process, downRate, down, s, rule, id) =>
+      ({ id: id || host, host, port, net, rule: rule !== undefined ? rule : via === out ? 'final' : 'ip_is_private=true => route(direct)', out: via.length ? via : ['direct'], process, down, up: down / 20 | 0, downRate, upRate: downRate / 30 | 0, start: ago(s) });
+    // a chain-like route for the extra rows: the second server of the first source as an entry, when there is one
+    const alt = (sourcesData[sourceOrder[0]] || { nodes: [] }).nodes.slice(-1).map(n => ({ ...n }))[0];
+    const CH = 'C:\\Program Files\\', altOut = alt && out.length ? [alt, ...out.slice(0, 1)] : out;
     return Promise.resolve({ running: true, down: 48.3 * MB, up: 6.1 * MB, downTotal: 1.84 * 1024 * MB, upTotal: 312 * MB, tcp: 43, udp: 8, conns: [
       conn('googlevideo.com', '443', 'tcp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 3.2 * MB, 410 * MB, 95),
       conn('api.github.com', '443', 'tcp', out, 'C:\\Code\\Code.exe', 4096, 2 * MB, 40),
       conn('192.168.0.1', '53', 'udp', [], 'C:\\Windows\\System32\\svchost.exe', 0, 900, 3),
       conn('discord.com', '443', 'tcp', out, 'C:\\Discord\\Discord.exe', 128 * 1024, 30 * MB, 600),
-    ].filter(c => !(Date.now() - (mockClosed.get(c.id) || 0) < 15000)) });
+      // older ones, for the list tools: other apps, rules, chains, UDP, addresses, no app
+      conn('rr3.googlevideo.com', '443', 'tcp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 1.1 * MB, 120 * MB, 700, 'rule #1: domain_suffix=[googlevideo.com] => route(proxy)'),
+      conn('www.youtube.com', '443', 'udp', out, 'C:\\Program Files\\Google\\Chrome\\chrome.exe', 512 * 1024, 60 * MB, 900, 'rule #1: domain_suffix=[googlevideo.com] => route(proxy)', 'www.youtube.com/udp'),
+      conn('t.me', '443', 'tcp', altOut, 'C:\\Telegram\\Telegram.exe', 64 * 1024, 8 * MB, 1200, 'rule #3: domain_suffix=[t.me, telegram.org] => route(chain)'),
+      conn('149.154.167.51', '443', 'tcp', altOut, 'C:\\Telegram\\Telegram.exe', 20 * 1024, 3 * MB, 1300, 'rule #3: domain_suffix=[t.me, telegram.org] => route(chain)'),
+      conn('gitlab.com', '22', 'tcp', out, 'C:\\Program Files\\Git\\usr\\bin\\ssh.exe', 2048, 400 * 1024, 1500, ''),
+      conn('mirror.yandex.ru', '443', 'tcp', [], 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 6 * MB, 800 * MB, 1800, 'rule #2: geosite=[category-ru] => route(direct)'),
+      conn('vk.com', '443', 'tcp', [], 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 256 * 1024, 40 * MB, 2000, 'rule #2: geosite=[category-ru] => route(direct)'),
+      conn('1.1.1.1', '443', 'tcp', out, '', 1024, 200 * 1024, 2200, ''),
+      conn('224.0.0.251', '5353', 'udp', [], 'C:\\Windows\\System32\\svchost.exe', 0, 3000, 2600, 'ip_is_private=true => route(direct)', '224.0.0.251/udp'),
+      conn('fe80::1', '53', 'udp', [], '', 0, 1200, 2800, 'ip_is_private=true => route(direct)', 'fe80::1/udp'),
+      conn('cdn.discordapp.com', '443', 'tcp', out, 'C:\\Discord\\Discord.exe', 900 * 1024, 90 * MB, 3000, ''),
+    ].filter(c => !(Date.now() - (mockClosed.get(c.id) || mockClosed.get('*') || 0) < 15000)) });
   },
   exitIp() { return wait(600).then(() => connected ? { ip: '91.108.4.12', country: 'DE', city: 'Frankfurt' } : { ip: '178.66.12.201', country: 'RU', city: 'Moscow' }); },
   // Close one live connection (Clash API DELETE /connections/{id}), or all with no id.
   // The mock hides them for a while — apps open new ones.
   closeConn(id) {
-    (id ? [id] : ['googlevideo.com', 'api.github.com', '192.168.0.1', 'discord.com']).forEach(x => mockClosed.set(x, Date.now()));
+    mockClosed.set(id || '*', Date.now());
     return Promise.resolve();
   },
   // Speed Test through one server: onProgress({phase 0 latency / 1 download / 2 upload / 3 done,

@@ -193,28 +193,7 @@ const trafficVia = out => out.slice().reverse().map(t => {
   return n ? n.flag + ' ' + esc(n.name) : esc(t);
 }).join(' → ') || '—';
 const trafficAge = iso => { const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000 | 0); return s < 60 ? s + 's' : s < 3600 ? (s / 60 | 0) + 'm' : (s / 3600 | 0) + 'h'; };
-// LiveConnRow: host:port + TCP/UDP; the route (entry → exit) and rule; app, speed, bytes, age. Newest first.
-// The filter matches host, app, rule and the servers a connection goes through; × closes one
-// (sing-box drops it, the app usually opens a new one).
-const connMatches = (c, q) => !q || [c.host, c.process, c.rule, trafficVia(c.out)].some(v => (v || '').toLowerCase().includes(q));
-function renderLiveConns() {
-  const all = connected && traffic ? traffic.conns.slice().sort((a, b) => Date.parse(b.start) - Date.parse(a.start)) : [];
-  const q = document.getElementById('connFilter').value.trim().toLowerCase(), list = all.filter(c => connMatches(c, q));
-  document.getElementById('connCloseAll').disabled = !all.length;
-  document.getElementById('liveConnList').innerHTML = list.length ? list.map(c => `
-    <div class="live-conn-row">
-      <div class="live-conn-top"><span class="live-conn-host">${esc(c.host)}${c.port ? ':' + esc(c.port) : ''}</span><span class="live-conn-proto ${c.net === 'udp' ? 'udp' : 'tcp'}">${esc(c.net.toUpperCase())}</span><button class="live-conn-close" title="Close connection" data-id="${esc(c.id)}" onclick="closeLiveConn(this.dataset.id)">×</button></div>
-      <div class="live-conn-meta">${trafficVia(c.out)}${c.rule ? ' · ' + esc(c.rule) : ''}</div>
-      <div class="live-conn-meta dim">${c.process ? esc(c.process.split(/[\\/]/).pop()) + ' · ' : ''}↓ ${fmtRate(c.downRate).join(' ')} ↑ ${fmtRate(c.upRate).join(' ')} · ${fmtBytes(c.down + c.up)} · ${trafficAge(c.start)}</div>
-    </div>`).join('') : `<div class="live-conn-empty">${!connected ? 'Not connected' : all.length ? 'Nothing matches' : 'No open connections'}</div>`;
-}
-function closeLiveConn(id) {
-  backend.closeConn(id).then(() => {
-    if (traffic) traffic.conns = id ? traffic.conns.filter(c => c.id !== id) : [];
-    renderLiveConns();
-    if (!id) toast('All connections closed');
-  }, e => toast('Not closed: ' + e.message));
-}
+// The Live connections sheet (list, filter, sort, pause, details): 76-conns.js.
 setInterval(() => {
   if (!connected || connecting || document.hidden || trafficBusy) return;
   trafficBusy = true;

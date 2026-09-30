@@ -41,7 +41,7 @@ function seedScript(seed) {
   })();`;
 }
 
-async function openPage(browser, { width = 400, height = 800, scale = 1, theme } = {}) {
+async function openPage(browser, { width = 400, height = 800, scale = 1, theme, lang } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
   page.setDefaultTimeout(5000);
   page.errors = [];
@@ -52,12 +52,24 @@ async function openPage(browser, { width = 400, height = 800, scale = 1, theme }
   await page.goto(PAGE);
   await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
   if (theme) await page.evaluate(t => applyTheme(t), theme);
+  if (lang && lang !== 'en') await page.evaluate(l => setGenCfg('lang', l), lang);   // docs/i18n.md
   await page.waitForTimeout(350);   // let initial transitions settle
   return page;
 }
 
 const settle = page => page.waitForTimeout(400);
 const tab = (page, name) => page.click(`.nav-btn[data-tab=${name}]`);
+// Raw open: scrolled up to the top, a few new lines (error, warnings, info) arrive below and stay unread.
+const logsRawUnread = async page => {
+  await page.evaluate(() => { document.getElementById('logScroll').scrollTop = 0; });
+  await page.waitForTimeout(250);
+  await page.evaluate(async () => {
+    [['info', 'inbound/mixed[mixed-in]: inbound connection to discord.com:443'], ['warn', 'outbound/urltest[proxy]: context deadline exceeded'], ['error', 'connection: open outbound connection: dial tcp 185.22.14.61:443: i/o timeout'], ['info', 'router: found process path: chrome.exe'], ['warn', 'dns: exchange failed for example.org']]
+      .forEach(([lvl, msg]) => mockLogAdd('sing-box', lvl, msg));
+    pollLogs();
+  });
+  await page.waitForTimeout(300);
+};
 // Back button (60-sheets.js): syncBackHistory runs in setTimeout 0, so give it a moment
 // to land before history.back(), and a moment after for goBack()'s re-render + any
 // corrective pushState to settle before the next assertion or back() call.
@@ -68,6 +80,8 @@ async function backAndSettle(p) { await preBack(p); await p.goBack(); await p.wa
 
 /* ═══════════════ SCREENSHOT PRESETS ═══════════════ */
 
+// Live connections presets: open the sheet on the mock connections, then run fn in the page
+const connBase = async (p, fn) => { await p.evaluate(() => backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); })); await p.evaluate(fn); await settle(p); };
 const SHOTS = {
   home:       async p => {},
   nodes:      async p => { await tab(p, 'nodes'); },
@@ -168,7 +182,8 @@ const SHOTS = {
   more:       async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodesMore()); await settle(p); },
   // Logs tab, share / QR, Data, latency URL, empty catalog, source error, connections tools
   logs:       async p => { await tab(p, 'logs'); await p.waitForTimeout(600); },   // Events, at the bottom
-  'logs-raw': async p => { await tab(p, 'logs'); await p.evaluate(() => setLogTab('raw')); await p.waitForTimeout(500); },
+  // Raw, scrolled up to old lines while new ones arrive below: unread badges on the chips
+  'logs-raw': async p => { await tab(p, 'logs'); await p.evaluate(() => setLogTab('raw')); await p.waitForTimeout(500); await logsRawUnread(p); },
   // the filter sheet: Auto and Subscriptions unfolded, one type off (the Auto box goes half), Show my actions on
   'logs-filter': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => { openEvFilter(); evFilterFold('auto'); evFilterFold('sub'); evToggleType('auto/fastest'); evToggleType('sub/updated'); setEvProblems(true); logCfg.showOwn = true; renderEvFilter(); }); await settle(p); },
   // a folded row (×3 repeats) opened: its times and every field
@@ -181,7 +196,7 @@ const SHOTS = {
   // a notification toast on its way into the Logs tab (mid-flight frame)
   'toast-fly': async p => { await p.evaluate(async () => { const [a, b] = visibleOrder(); mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }); await pollEvents(); await new Promise(r => setTimeout(r, 400)); document.getElementById('toast').style.transition = 'transform 2.4s ease-in, opacity 2.4s ease-in'; hideToast(); }); await p.waitForTimeout(1100); },
   'logs-search': async p => { await tab(p, 'logs'); await p.evaluate(() => setLogTab('raw')); await p.waitForTimeout(400); await p.evaluate(() => { toggleLogSearch(true); document.getElementById('logSearch').value = 'discord'; renderLogs(); }); await settle(p); },
-  'logs-warn': async p => { await tab(p, 'logs'); await p.evaluate(() => setLogTab('raw')); await p.waitForTimeout(400); await p.evaluate(() => setLogLevel('warn')); await settle(p); },
+  'logs-warn': async p => { await tab(p, 'logs'); await p.evaluate(() => setLogTab('raw')); await p.waitForTimeout(400); await logsRawUnread(p); await p.evaluate(() => setLogLevel('warn')); await settle(p); },
   'qr-node':  async p => { await tab(p, 'nodes'); await p.evaluate(() => showNodeQr('src1', sourcesData.src1.nodes[0].id)); await settle(p); },
   'speed-test': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => truthOf(x) >= 0); openSpeedTest('src1', n.id); }); await p.waitForTimeout(3000); },
   'speed-done': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => truthOf(x) >= 0); openSpeedTest('src1', n.id); }); await p.waitForFunction(() => speedRun && speedRun.p.final); await p.waitForTimeout(600); },
@@ -195,11 +210,18 @@ const SHOTS = {
   'test-url': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openTestUrlPicker(); }); await settle(p); },
   'lang-soon': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setgeneral'); openLangPicker(); }); await settle(p); },
   'conn-filter': async p => { await p.evaluate(() => backend.traffic().then(t => { traffic = t; openSheet('connections'); document.getElementById('connFilter').value = 'disc'; renderTraffic(); })); await settle(p); },
+  'conn-sort': async p => { await connBase(p, () => { connSort = 'down'; renderLiveConns(); openConnSort(); }); },
+  'conn-menu': async p => { await connBase(p, () => { connF.app.add('chrome.exe'); openConnMore(); }); },
+  'conn-filter-sheet': async p => { await connBase(p, () => { openConnFilter(); ['net:tcp', 'app:chrome.exe', 'app:Telegram.exe', 'exit:direct'].forEach(s => connFilterToggle(...s.split(':'))); document.getElementById('cf-body').scrollTop = 0; }); },
+  'conn-open': async p => { await connBase(p, () => { connOpen = 'api.github.com'; renderLiveConns(); }); },
+  'conn-paused': async p => { await connBase(p, () => { connSetPaused(true); traffic.conns.push({ ...traffic.conns[0], id: 'new1', host: 'new.example.com', start: new Date().toISOString() }); connOpen = 't.me'; renderLiveConns(); }); },
   'source-error': async p => { await tab(p, 'nodes'); await p.evaluate(() => { sourcesData.src1.lastError = { msg: 'Connection timed out (15 s)', at: Date.now() - 180e3 }; renderNodes(); }); await settle(p); },
   'dock-empty': async p => { await p.evaluate(() => { liveApply(null); connected = false; renderAll(); renderConnState(); updateMainConnectCard(); }); await settle(p); return { clip: await clipOf(p, '.dock', 60) }; },
   'nodeform-many': async p => { await tab(p, 'nodes'); await p.evaluate(links => { openNodeForm(); document.getElementById('nf-link').value = links.join('\n'); parseNodeLink(); }, SAMPLE_LINKS); await settle(p); },
   'nodeform-edit': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const g = manualGroups()[0]; openNodeForm(g, sourcesData[g].nodes[0].id); }); await settle(p); },
 };
+// ru-<preset>: the same preset with the language set to Russian (docs/i18n.md); `all` skips them.
+for (const n of ['home', 'nodes', 'route', 'settings', 'rules', 'rule-form', 'logs', 'profiles', 'settings-auto', 'settings-dns', 'dock', 'connections', 'help']) if (SHOTS[n]) SHOTS['ru-' + n] = SHOTS[n];
 // Links the manual server form must read without a core: vmess base64, legacy ss, IPv6, anytls.
 const SAMPLE_LINKS = [
   'vmess://' + Buffer.from(JSON.stringify({ v: '2', ps: '🇳🇱 Amsterdam VM', add: 'nl1.example.net', port: '443', id: '11111111-2222-3333-4444-555555555555', aid: '0', net: 'ws', tls: 'tls' })).toString('base64'),
@@ -216,7 +238,7 @@ async function clipOf(page, sel, extraTop = 0) {
 // --grid (or verify) glues the presets into one labelled .shots/grid.png, 4 per row:
 // one image to look at instead of several.
 async function shots(names, grid = args.includes('--grid')) {
-  if (names.length === 1 && names[0] === 'all') names = Object.keys(SHOTS);   // every preset
+  if (names.length === 1 && names[0] === 'all') names = Object.keys(SHOTS).filter(n => !n.startsWith('ru-'));   // every preset
   const browser = await playwright.chromium.launch();
   const dir = opt('out') ? resolve(opt('out')) : join(root, '.shots');
   const files = !grid || args.includes('--files');
@@ -226,8 +248,9 @@ async function shots(names, grid = args.includes('--grid')) {
     if (!SHOTS[name]) { console.log(`unknown preset "${name}". presets: ${Object.keys(SHOTS).join(', ')}`); continue; }
     const page = await openPage(browser, {
       width: +opt('width', 400), height: +opt('height', 800), scale: +opt('scale', 1), theme: opt('theme'),
+      lang: opt('lang', name.startsWith('ru-') ? 'ru' : undefined),   // ru-<preset> = the same preset in Russian
     });
-    const extra = (await SHOTS[name](page)) || {};
+    const extra = (await (SHOTS[name] || SHOTS[name.replace(/^ru-/, '')])(page)) || {};
     const file = join(dir, name + (opt('theme') ? '-' + opt('theme') : '') + '.png');
     const buf = await page.screenshot({ path: files ? file : undefined, ...extra });
     if (grid) cells.push([name, buf.toString('base64')]);
@@ -573,7 +596,7 @@ async function runChecks() {
       const n0 = sourcesData[sourceOrder[0]].nodes[0];
       const on = { speed: document.getElementById('speedDown').textContent === '48.3' && document.getElementById('speedDownUnit').textContent === 'MB/s',
         total: document.getElementById('trafficDown').textContent === '1.84 GB', conns: document.getElementById('connTotal').textContent === '51',
-        rows: rows.length === 4, newest: rows[0].textContent.includes('192.168.0.1:53'),
+        rows: rows.length === 15, newest: rows[0].textContent.includes('192.168.0.1:53'),
         via: !!node && rows[1].textContent.includes(node.name), app: rows[1].textContent.includes('Code.exe'),
         tag: trafficVia(['route0/' + sourceOrder[0] + '::' + n0.id]).includes(n0.name) };
       connected = false; renderConnState();
@@ -723,15 +746,18 @@ async function runChecks() {
     expect(!bad.length, bad.join(' | '));
   });
 
-  await check('text size: 120% on a 320px phone — nothing sticks out, titles keep their size', async () => {
-    const narrow = await openPage(browser, { width: 320 });
+  for (const lang of ['en', 'ru']) await check('text size: 120% on a 320px phone — nothing sticks out, titles keep their size' + (lang === 'ru' ? ' [ru]' : ''), async () => {
+    const narrow = await openPage(browser, { width: 320, lang });
     const title0 = await narrow.evaluate(() => getComputedStyle(document.querySelector('.app-name')).fontSize);
     await narrow.evaluate(() => applyScale(UI_SCALE_MAX));
     const over = () => narrow.evaluate(() => {
       const bad = [];
       document.querySelectorAll('.view.active .scroll, .view.active .nodes-page, .sheet.open .sheet-body').forEach(el => {
         if (el.closest('.nodes-pager') && !el.getBoundingClientRect().width) return;
-        if (el.scrollWidth > el.clientWidth + 1) bad.push((el.id || el.className) + ' ' + el.scrollWidth + '>' + el.clientWidth);
+        if (el.scrollWidth > el.clientWidth + 1) {
+          const r = el.getBoundingClientRect(), w = [...el.querySelectorAll('*')].find(c => c.getBoundingClientRect().right > r.right + 1);
+          bad.push((el.id || el.className) + ' ' + el.scrollWidth + '>' + el.clientWidth + (w ? ' <' + (w.className || w.tagName) + ': ' + w.textContent.trim().slice(0, 40) + '>' : ''));
+        }
       });
       // the source meta line wraps between items instead of being clipped
       document.querySelectorAll('.view.active .src-meta.wrap').forEach(el => {
@@ -763,8 +789,17 @@ async function runChecks() {
       () => { closeSheet('actions'); closeSheet('setconn'); openNodeForm(); document.getElementById('nf-link').value = 'vless://a@b.example:443#x\nvless://a@c.example:443#y'; parseNodeLink(); },
       () => { closeSheet('nodeform'); connected = true; return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); },
     ];
+    // Live connections: an unfolded row, a long sort label and the filter badge — the tools row keeps its size and stays inside
+    sheets.push(() => { connOpen = 'rr3.googlevideo.com'; connSort = 'downed'; connF.app.add('chrome.exe'); connF.rule.add('rule #1'); connF.exit.add('direct'); renderLiveConns(); });
+    sheets.push(() => { openConnFilter(); connFExp.add('host'); renderConnFilter(); });
     for (const f of sheets) { await narrow.evaluate(f); await settle(narrow); bad.push(...await over()); }
     // Auto mode: every row's controls stay inside the row
+    await narrow.evaluate(() => { closeSheet('connfilter'); connOpen = null; renderLiveConns(); });
+    bad.push(...await narrow.evaluate(() => {   // the tools row: every control inside it, the search keeps room, sizes fixed
+      const row = document.querySelector('#sh-connections .conn-tools'), r = row.getBoundingClientRect();
+      const kids = [...row.querySelectorAll('.search, .icon-btn, .conn-sort')].map(e => e.getBoundingClientRect());
+      return kids.some(k => k.right > r.right + 1 || k.left < r.left - 1) || kids[0].width < 60 || document.getElementById('connSortBtn').getBoundingClientRect().width !== 88 ? ['conn-tools: ' + JSON.stringify(kids.map(k => [k.left | 0, k.right | 0]))] : [];
+    }));
     await narrow.evaluate(() => { closeSheet('connections'); openSheet('setauto'); }); await settle(narrow);
     bad.push(...await narrow.evaluate(() => [...document.querySelectorAll('#auto-settings .set-row')].filter(row => {
       const r = row.getBoundingClientRect();
@@ -1076,19 +1111,82 @@ async function runChecks() {
     const rows = () => page.locator('#liveConnList .live-conn-row').count();
     const n0 = await rows();
     await page.fill('#connFilter', 'discord');
-    expect(n0 >= 3 && await rows() === 1, `filter: ${n0} → ${await rows()}`);
+    expect(n0 >= 3 && await rows() === 2, `filter: ${n0} → ${await rows()}`);
     await page.fill('#connFilter', 'svchost');
-    expect(await rows() === 1, 'by app: ' + await rows());
+    expect(await rows() === 2, 'by app: ' + await rows());
     await page.fill('#connFilter', '');
     await page.click('#liveConnList .live-conn-row >> nth=0 >> .live-conn-close');
     await page.waitForTimeout(100);
     expect(await rows() === n0 - 1, `× : ${n0} → ${await rows()}`);
     await page.waitForTimeout(1100);   // the next poll keeps it closed
     expect(await rows() === n0 - 1, 'closed one came back: ' + await rows());
-    await page.click('#connCloseAll');
-    await page.waitForTimeout(100);
+    await page.click('#connMoreBtn');
+    await page.waitForTimeout(350);
+    expect(/Close all/.test(await page.textContent('#actions-body')), 'menu label: ' + await page.textContent('#actions-body'));
+    await page.click('#actions-body .menu-row.danger');
+    await page.waitForTimeout(150);
     expect(await rows() === 0 && /No open connections/.test(await page.textContent('#liveConnList')), 'close all: ' + await rows());
     await page.evaluate(() => { mockClosed.clear(); closeSheet('connections'); });
+  });
+
+  // Live connections tools: sort, filter sheet, pause, close shown, details (76-conns.js)
+  await check('connections: sort, filter (OR inside a section, AND across), pause, close shown, details, rule prefill', async () => {
+    await tab(page, 'home');
+    await page.evaluate(() => { mockClosed.clear(); connected = true; return backend.traffic().then(t => { traffic = t; openSheet('connections'); renderTraffic(); }); });
+    await page.waitForTimeout(300);
+    const hosts = () => page.evaluate(() => [...document.querySelectorAll('#liveConnList .live-conn-row .live-conn-host')].map(e => e.textContent));
+    const n0 = (await hosts()).length;
+    // sort by download speed: the fastest first, and the label on the button
+    await page.click('#connSortBtn'); await page.waitForTimeout(350);
+    await page.click('#actions-body .menu-row >> nth=1'); await page.waitForTimeout(150);
+    const bySpeed = await page.evaluate(() => connShown().map(c => c.downRate));
+    expect(bySpeed.every((v, i) => !i || bySpeed[i - 1] >= v) && bySpeed[0] === Math.max(...bySpeed) && await page.textContent('#connSortLabel') === '↓ speed', 'sort: ' + bySpeed);
+    await page.evaluate(() => { connSort = 'new'; renderLiveConns(); });
+    // filter: Chrome or Telegram (OR) and TCP (AND); Back applies nothing, ✓ does
+    await page.click('#connFilterBtn'); await page.waitForTimeout(350);
+    const tog = (k, v) => page.click(`#cf-body .cf-row[data-k=${k}][data-v="${v}"]`);
+    await tog('app', 'chrome.exe'); await tog('app', 'Telegram.exe'); await tog('net', 'tcp');
+    await page.evaluate(() => closeSheet('connfilter')); await page.waitForTimeout(350);
+    expect((await hosts()).length === n0 && !await page.isVisible('#connFilterBadge'), 'closed without ✓ must apply nothing');
+    await page.click('#connFilterBtn'); await page.waitForTimeout(350);
+    await tog('app', 'chrome.exe'); await tog('app', 'Telegram.exe'); await tog('net', 'tcp');
+    await page.click('#cfApply'); await page.waitForTimeout(350);
+    const filtered = await hosts();
+    expect(filtered.length === 4 && !filtered.some(h => h === 'www.youtube.com') && await page.textContent('#connFilterBadge') === '3', 'filter: ' + filtered + ' badge ' + await page.textContent('#connFilterBadge'));
+    // reopened: a selected value with no connection stays with 0; trash clears the draft
+    await page.click('#connFilterBtn'); await page.waitForTimeout(350);
+    expect(await page.locator('#cf-body .sub-checkbox.checked').count() === 3, 'the selection is not restored');
+    await page.click('#cfClear'); expect(await page.locator('#cf-body .sub-checkbox.checked').count() === 0, 'trash');
+    await page.evaluate(() => closeSheet('connfilter')); await page.waitForTimeout(350);
+    // close shown: only the 4 filtered ones go
+    await page.click('#connMoreBtn'); await page.waitForTimeout(350);
+    expect(/Close 4 shown/.test(await page.textContent('#actions-body')), 'label: ' + await page.textContent('#actions-body'));
+    await page.click('#actions-body .menu-row.danger'); await page.waitForTimeout(200);
+    await page.evaluate(() => { connF = connFNew(); renderLiveConns(); });
+    expect((await hosts()).length === n0 - 4, `close shown: ${n0} → ${(await hosts()).length}`);
+    await page.evaluate(() => { mockClosed.clear(); });
+    // pause: the list freezes, new ones only grow the banner
+    await page.evaluate(() => { backend.traffic().then(t => { traffic = t; renderLiveConns(); }); });
+    await page.waitForTimeout(150);
+    const before = await hosts();
+    await page.click('#connMoreBtn'); await page.waitForTimeout(350);
+    await page.click('#actions-body .menu-row >> nth=0'); await page.waitForTimeout(150);
+    await page.evaluate(() => { traffic.conns.push({ ...traffic.conns[0], id: 'n1', host: 'fresh1.example' }, { ...traffic.conns[0], id: 'n2', host: 'fresh2.example' }); renderLiveConns(); });
+    expect(JSON.stringify(await hosts()) === JSON.stringify(before) && /2 new connections/.test(await page.textContent('#connPaused')), 'pause: ' + await page.textContent('#connPaused'));
+    await page.click('#connPaused button'); await page.waitForTimeout(100);
+    expect(!await page.isVisible('#connPaused') && await page.evaluate(() => !connPaused), 'resume');
+    // details and the rule prefill
+    await page.click('#liveConnList .live-conn-row[data-id="discord.com"] .live-conn-meta'); await page.waitForTimeout(100);
+    expect(await page.locator('#liveConnList .live-conn-detail').count() === 1 && /Discord\.exe/.test(await page.textContent('.live-conn-detail')), 'detail');
+    await page.click('.live-conn-detail .chip:has-text("Rule for this host")'); await page.waitForTimeout(400);
+    const rd = await page.evaluate(() => JSON.stringify(ruleDraft.groups));
+    expect(/"domain":\["discord.com"\]/.test(rd), 'host prefill: ' + rd);
+    await page.evaluate(() => { closeSheet('ruleform'); connOpen = '1.1.1.1'; renderLiveConns(); });
+    expect(await page.locator('.live-conn-detail .chip:has-text("Rule for this app")').count() === 0, 'no app, no app rule');
+    await page.evaluate(() => { connOpen = '224.0.0.251/udp'; renderLiveConns(); });
+    await page.click('.live-conn-detail .chip:has-text("Rule for this address")'); await page.waitForTimeout(300);
+    expect(/ip_cidr":\["224.0.0.251"\]/.test(await page.evaluate(() => JSON.stringify(ruleDraft.groups))), 'ip prefill');
+    await page.evaluate(() => { ruleDraft = newRule({}); renderRuleForm(); closeSheet('ruleform'); mockClosed.clear(); closeSheet('connections'); });
   });
 
   await check('nodes: a failed update shows the error on the card; Retry clears it', async () => {
@@ -1173,13 +1271,23 @@ async function runChecks() {
   });
   await check('settings: Data — state put back for the next checks', () => page.evaluate(s => { liveApply(JSON.parse(s)); renderAfterRestore(); closeSheet('setdata'); }, stateBefore));
 
-  await check('general: Language lists Русский as soon, off', async () => {
+  await check('general: Language — Русский switches every text live and English brings it back', async () => {
     await page.evaluate(() => openLangPicker());
-    const row = page.locator('#actions-body .menu-row.disabled');
-    expect(/Русский/.test(await row.textContent()) && /soon/.test(await row.textContent()), 'row: ' + await row.textContent());
-    await row.click();
-    expect(await page.evaluate(() => genCfg.lang) === 'en', 'language changed');
-    await page.evaluate(() => closeSheet('actions'));
+    const rows = await page.locator('#actions-body .menu-row').allTextContents();
+    expect(rows.length === 2 && /English/.test(rows[0]) && /Русский/.test(rows[1]) && !/soon/.test(rows[1]), 'rows: ' + rows.join(' | '));
+    await page.locator('#actions-body .menu-row').nth(1).click(); await settle(page);
+    const ru = await page.evaluate(() => ({ lang: genCfg.lang, tabs: [...document.querySelectorAll('.nav-btn')].map(b => b.textContent.trim()), set: document.querySelector('#view-settings .app-name').textContent.trim(), html: document.documentElement.lang,
+      title: document.getElementById('evFilterBtn').title, toast: I18N.tr('Copied'), t: t('{0} nodes', 3) }));
+    expect(ru.lang === 'ru' && ru.set === 'Настройки' && ru.html === 'ru' && ru.title === 'Фильтр событий' && ru.toast === 'Скопировано' && ru.t === '3 сервера' && ru.tabs.join() !== '', 'ru: ' + JSON.stringify(ru));
+    // text that JS writes later is translated too; the English original comes back with the language
+    await page.evaluate(() => { const d = document.createElement('div'); d.id = 'i18nProbe'; d.textContent = 'No events yet'; document.body.appendChild(d); }); await settle(page);
+    expect(await page.textContent('#i18nProbe') === 'Событий пока нет', 'live text: ' + await page.textContent('#i18nProbe'));
+    await page.evaluate(() => { document.getElementById('i18nProbe').textContent = 'No rules yet'; }); await settle(page);
+    expect(await page.textContent('#i18nProbe') === 'Правил пока нет', 'rewritten text: ' + await page.textContent('#i18nProbe'));
+    await page.evaluate(() => setGenCfg('lang', 'en')); await settle(page);
+    const en = await page.evaluate(() => ({ set: document.querySelector('#view-settings .app-name').textContent.trim(), probe: document.getElementById('i18nProbe').textContent, title: document.getElementById('evFilterBtn').title }));
+    expect(en.set === 'Settings' && en.probe === 'No rules yet' && en.title === 'Filter events', 'en: ' + JSON.stringify(en));
+    await page.evaluate(() => { document.getElementById('i18nProbe').remove(); closeSheet('actions'); });
   });
 
   await check('home: empty catalog — the dock says No servers yet, a tap (or power) goes to Nodes → +', async () => {
@@ -2981,7 +3089,7 @@ async function runChecks() {
       out.ownShown = !!document.querySelector('#evList .cat-user') && document.querySelector('#evfilter-body [data-key="showOwn"] .mini-toggle').classList.contains('on');
       setEvProblems(true); evFilter.off.add('core/crashed');
       const snap = JSON.parse(JSON.stringify(liveSnapshot()));
-      out.snap = snap.logCfg.showOwn === true && Object.keys(snap.logCfg).sort().join() === 'rawRead,seen,showOwn' && !JSON.stringify(snap).includes('core/crashed');
+      out.snap = snap.logCfg.showOwn === true && Object.keys(snap.logCfg).sort().join() === 'rawTop,rawUnread,seen,showOwn' && !JSON.stringify(snap).includes('core/crashed');
       logCfg.showOwn = false;
       liveApply(snap);
       out.kept = logCfg.showOwn === true;
@@ -3073,11 +3181,11 @@ async function runChecks() {
       const out = {}, wait = ms => new Promise(r => setTimeout(r, ms)), rect = s => document.querySelector(s).getBoundingClientRect();
       setLogTab('raw');
       const line = (n, lvl) => ({ n, t: Date.now(), lvl, src: 'sing-box', msg: lvl + ' message ' + n });
-      logCfg.rawRead = 0;
-      logState.lines = [line(1, 'warn'), line(2, 'info')];
+      const unread = ls => { logState.lines = ls; logUnread.clear(); ls.forEach(l => logUnread.add(l.n)); };
+      unread([line(1, 'warn'), line(2, 'info')]);
       renderLogSummary();
       const chip = () => document.querySelector('#logLevels .chip[data-lvl="warn"]'), w1 = chip().getBoundingClientRect().width;
-      logState.lines = Array.from({ length: 123 }, (_, i) => line(i + 10, 'warn'));
+      unread(Array.from({ length: 123 }, (_, i) => line(i + 10, 'warn')));
       renderLogSummary();
       const badge = document.getElementById('logWarnCount'), br = badge.getBoundingClientRect(), cr = chip().getBoundingClientRect();
       out.badge = chip().getBoundingClientRect().width === w1 && badge.textContent === '99+' && getComputedStyle(badge).position === 'absolute' && br.right > cr.right - 12 && br.top < cr.top + 4;
@@ -3110,12 +3218,12 @@ async function runChecks() {
     expect(r.badge && r.twoLines && r.slots && r.same, JSON.stringify(r));
   });
 
-  await check('Logs (Raw): chip badges count unread lines and fall as they are read, colour = worst unread (green / yellow / red), dividers between entries, same second + level + source = one group, search finds a line inside a group', async () => {
+  await check('Logs (Raw): badge colour = worst unread (green / yellow / red), 99+ cap, dividers between entries, same second + level + source = one group, search finds a line inside a group', async () => {
     const p = await openPage(browser);
     await tab(p, 'logs');
     await p.waitForTimeout(400);
     const r = await p.evaluate(() => {
-      const out = {}, base = Date.now() - 6e5;
+      const out = {}, base = Math.floor((Date.now() - 6e5) / 1000) * 1000;
       setLogTab('raw');
       const mk = (n, lvl, t, msg) => ({ n, t, lvl, src: 'sing-box', msg: msg || lvl + ' message ' + n });
       const lines = Array.from({ length: 80 }, (_, i) => mk(i + 1, 'info', base + i * 5000));
@@ -3124,22 +3232,18 @@ async function runChecks() {
       // three lines in one second, one in the next
       lines.push(mk(81, 'info', base + 1e6, 'grouped needle-one'), mk(82, 'info', base + 1e6 + 100, 'grouped two'), mk(83, 'info', base + 1e6 + 200, 'grouped three'), mk(84, 'info', base + 1e6 + 1500, 'later'));
       const all = () => document.getElementById('logAllCount'), wc = () => document.getElementById('logWarnCount');
-      logCfg.rawRead = 0; logState.lines = lines; logState.follow = false; logState.level = 'all';
+      logState.lines = lines; logState.follow = false; logState.level = 'all'; logUnread.clear();
       renderLogs();
-      const box = document.getElementById('logScroll');
-      box.scrollTop = 0; logMarkRead();
-      const a0 = +all().textContent, w0 = +wc().textContent;
-      box.scrollTop = box.scrollHeight; logMarkRead();
-      out.falls = a0 > 0 && a0 < lines.length && w0 === 1 && all().textContent === '' && wc().textContent === '' && logCfg.rawRead === 84;
-      out.counts = [a0, w0];
       // colours: info only → green, a warning → yellow, an error → red; hidden at 0
-      const col = (rawRead, ls) => { logCfg.rawRead = rawRead; logState.lines = ls; renderLogSummary(); return getComputedStyle(all()).backgroundColor; };
+      const col = ls => { logState.lines = ls; logUnread.clear(); ls.forEach(l => logUnread.add(l.n)); renderLogSummary(); return getComputedStyle(all()).backgroundColor; };
       const probe = v => { const d = document.createElement('i'); d.style.background = 'var(' + v + ')'; document.body.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; };
-      const g = col(0, [mk(1, 'info', base)]), y = col(0, [mk(1, 'info', base), mk(2, 'warn', base)]), rd = col(0, [mk(1, 'warn', base), mk(2, 'error', base)]);
+      const g = col([mk(1, 'info', base)]), y = col([mk(1, 'info', base), mk(2, 'warn', base)]), rd = col([mk(1, 'warn', base), mk(2, 'error', base)]);
       out.colors = g === probe('--active') && y === probe('--warn') && rd === probe('--danger');
-      out.cap = (logState.lines = Array.from({ length: 150 }, (_, i) => mk(i + 1, 'info', base + i * 5000)), logCfg.rawRead = 0, renderLogSummary(), all().textContent === '99+');
+      out.cap = (col(Array.from({ length: 150 }, (_, i) => mk(i + 1, 'info', base + i * 5000))), all().textContent === '99+');
+      logUnread.clear(); renderLogSummary();
+      out.hidden = all().textContent === '' && wc().textContent === '';
       // dividers and groups
-      logState.lines = lines; logCfg.rawRead = 84; renderLogs();
+      logState.lines = lines; renderLogs();
       const gs = [...document.querySelectorAll('#logList .log-group')];
       out.divider = gs.length > 2 && gs.slice(1).every(x => getComputedStyle(x).borderTopWidth === '1px');
       const grp = [...document.querySelectorAll('#logList .log-group')].find(x => x.textContent.includes('grouped two'));
@@ -3152,7 +3256,82 @@ async function runChecks() {
       return out;
     });
     await p.close();
-    expect(r.falls && r.colors && r.cap && r.divider && r.grouped && r.search, JSON.stringify(r));
+    expect(r.colors && r.cap && r.hidden && r.divider && r.grouped && r.search, JSON.stringify(r));
+  });
+
+  await check('Logs (Raw): unread is per line — a line is read only once it was in the viewport (Raw open, page visible); new lines off-screen raise the badges at once, scrolling reads exactly what came into view, a filter does not read what it hides, kept as ranges, core numbering restarting and Clear reset it', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs');
+    await p.waitForTimeout(400);
+    const r = await p.evaluate(async () => {
+      const out = {}, wait = ms => new Promise(r => setTimeout(r, ms));
+      connected = false;   // the mock adds no lines of its own
+      setLogTab('raw'); await wait(300);
+      const box = document.getElementById('logScroll'), all = () => document.getElementById('logAllCount'), wc = () => document.getElementById('logWarnCount');
+      const feed = async specs => { const ns = specs.map(([lvl, msg]) => mockLogAdd('sing-box', lvl, msg)); pollLogs(); await wait(80); return ns; };
+      const inView = n => { const el = document.querySelector('#logList .log-line[data-n="' + n + '"]'); if (!el) return false; const b = el.getBoundingClientRect(), v = box.getBoundingClientRect(); return b.bottom > v.top + 8 && b.top < v.bottom - 8; };
+      const scrollTo = async y => { box.scrollTop = y; await wait(320); };
+      // cold start: what the core already had is read
+      out.cold = logUnread.size === 0 && all().textContent === '' && logCfg.rawTop === mockLog.n - 1;
+      // following at the bottom: new lines are in view, read at once
+      await feed([['info', 'follow 1'], ['warn', 'follow 2'], ['info', 'follow 3']]);
+      out.follow = logUnread.size === 0 && all().textContent === '' && logState.follow === true;
+      // (a batch taller than the viewport would leave its top unread: length only here)
+      await feed(Array.from({ length: 40 }, (_, i) => ['info', 'filler ' + i]));
+      logUnread.clear(); renderLogSummary();
+      // scrolled up: the new ones are off-screen, unread, the badges go up at once
+      await scrollTo(0);
+      out.scrolledUp = logState.follow === false;
+      const batch = await feed(Array.from({ length: 90 }, (_, i) => [i === 30 ? 'warn' : i === 60 ? 'error' : 'info', 'batch ' + i]));
+      out.up = all().textContent === '90' && wc().textContent === '2' && all().classList.contains('err') && logUnread.size === 90;
+      // scrolling to the bottom reads only what is in view, the middle stays unread
+      await scrollTo(box.scrollHeight);
+      const seen = batch.filter(inView).length;
+      out.bottom = seen > 0 && seen < 90 && logUnread.size === 90 - seen && all().textContent === String(90 - seen) && batch.every(n => logUnread.has(n) !== inView(n));
+      // scrolling them into view reduces the badge by exactly those lines
+      const before = new Set(logUnread), first = [...before].sort((a, b) => a - b)[0];
+      document.querySelector('#logList .log-line[data-n="' + first + '"]').scrollIntoView({ block: 'start' });
+      await wait(320);
+      const came = [...before].filter(inView).length;
+      out.middle = came > 0 && logUnread.size === before.size - came && all().textContent === String(before.size - came) && [...before].every(n => inView(n) === !logUnread.has(n));
+      // the filter hides the info lines: they are not read, whatever is in view
+      const info = [...logUnread].filter(n => { const l = logState.lines.find(x => x.n === n); return l.lvl === 'info'; });
+      setLogLevel('warn'); await wait(320);
+      const prob = logState.lines.filter(l => logUnread.has(l.n) && l.lvl !== 'info').length;
+      out.filter = info.length > 0 && info.every(n => logUnread.has(n)) && wc().textContent === (prob ? String(prob) : '');
+      setLogLevel('all'); await wait(50);
+      // the page is not visible: new lines in view stay unread until it is
+      await scrollTo(box.scrollHeight);
+      logUnread.clear(); renderLogSummary();
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      const hid = await feed([['info', 'while hidden 1'], ['warn', 'while hidden 2']]);
+      out.hiddenUnread = logUnread.size === 2 && all().textContent === '2' && hid.every(inView);
+      delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); await wait(320);
+      out.visibleRead = logUnread.size === 0 && all().textContent === '';
+      // kept as ranges; lines that came while the page was away are unread on top of them
+      await scrollTo(0);
+      const more = await feed(Array.from({ length: 50 }, (_, i) => ['info', 'more ' + i]));
+      const keep = [...logUnread].sort((a, b) => a - b).join(), snap = JSON.parse(JSON.stringify(liveSnapshot())), top = logCfg.rawTop;
+      out.ranges = logUnread.size === 50 && snap.logCfg.rawUnread.length === 2 && snap.logCfg.rawTop === top;
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      logUnread.clear(); logCfg.rawTop = null; logState.lines = []; logState.next = null; document.getElementById('logList').innerHTML = '';
+      liveApply(snap);
+      const away = mockLogAdd('sing-box', 'warn', 'while away');
+      pollLogs(); await wait(80);
+      out.reload = [...logUnread].sort((a, b) => a - b).join() === keep + ',' + away && logCfg.rawTop === top + 1;
+      // the core started numbering again: what it holds is new
+      mockLog.n = 0; mockLog.lines = [];
+      mockLogAdd('sing-box', 'info', 'fresh 0'); mockLogAdd('sing-box', 'info', 'fresh 1');
+      pollLogs(); await wait(80); pollLogs(); await wait(80);
+      out.restart = [...logUnread].sort().join() === '0,1' && logCfg.rawTop === 1;
+      // Clear reads everything
+      delete document.hidden;
+      clearLogs(); await wait(150);
+      out.clear = logUnread.size === 0 && all().textContent === '' && wc().textContent === '' && logCfg.rawUnread.length === 0;
+      return out;
+    });
+    await p.close();
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
   });
 
   await check('Events: Clear (confirm) empties the journal, Export has both logs as text, sub results and user actions are journaled (own)', async () => {
@@ -3368,8 +3547,39 @@ async function runChecks() {
   return failed.length;
 }
 
+// audit-ru [presets|all] — every text (and title / placeholder / aria-label) still Latin after a preset in Russian:
+// what the dictionary (js/04-i18n-ru.js) misses. Names, protocols and the kept terms are filtered out.
+async function auditRu(names) {
+  if (!names.length || names[0] === 'all') names = Object.keys(SHOTS).filter(n => !n.startsWith('ru-'));
+  const browser = await playwright.chromium.launch();
+  const found = new Map();
+  for (const name of names) {
+    if (!SHOTS[name]) continue;
+    const page = await openPage(browser, { lang: 'ru' });
+    try { await SHOTS[name](page); await page.waitForTimeout(300); } catch (e) { console.log('preset failed: ' + name + ' ' + e.message.split('\n')[0]); }
+    const texts = await page.evaluate(() => {
+      const out = [], skip = 'script,style,textarea,[data-notr],.log-line,.log-time,.log-tag';
+      const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n; (n = w.nextNode());) if (!(n.parentElement && n.parentElement.closest(skip))) out.push(n.nodeValue);
+      document.querySelectorAll('[title],[placeholder],[aria-label]').forEach(el => { if (!el.closest(skip)) for (const a of ['title', 'placeholder', 'aria-label']) if (el.getAttribute(a)) out.push(el.getAttribute(a)); });
+      return out;
+    });
+    for (let t of texts) {
+      t = t.replace(/\s+/g, ' ').trim();
+      const rest = t.replace(/\b(TUN|sing-box|DNS|IP|CIDR|GeoIP|Geosite|SOCKS5?|HTTPS?|UDP|TCP|QUIC|FakeIP|UUID|URL|JSON|YAML|Regex|VLESS|VMess|Trojan|Hysteria2?|HY2|TUIC|AnyTLS|Shadowsocks|SS|Clash|mihomo|Jormungand|Karing|Kill switch|HWID|DoH|DoT|DoQ|GB|MB|KB|Mbps|ms|OS|PC|UA|VPN|QR|Wi-?Fi|Android|Windows|SRS|Sub|GitHub|Dark|Discord|Telegram|Google|Yandex|YouTube|Netflix)\b/gi, '');
+      if (!/[A-Za-z]{3}/.test(rest)) continue;
+      if (!found.has(t)) found.set(t, name);
+    }
+    await page.close();
+  }
+  await browser.close();
+  for (const [t, n] of [...found.entries()].sort((a, b) => a[0].localeCompare(b[0]))) console.log(t + '\t' + n);
+  console.log(`# ${found.size} untranslated texts over ${names.length} presets`);
+}
+
 // shot <presets> — screenshots; verify [presets] — checks, then one grid of the presets.
-if (positional[0] === 'shot') await shots(positional.slice(1).length ? positional.slice(1) : ['home']);
+if (positional[0] === 'audit-ru') await auditRu(positional.slice(1));
+else if (positional[0] === 'shot') await shots(positional.slice(1).length ? positional.slice(1) : ['home']);
 else {
   const failed = await runChecks();
   if (positional[0] === 'verify' && positional.length > 1) await shots(positional.slice(1), true);

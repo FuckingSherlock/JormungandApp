@@ -13,7 +13,7 @@
    which warnings / errors were seen (the dots on the Logs tab) are kept with the UI state.
    (Flutter: EventsView, EventRow, EventFilterSheet over the events stream.) */
 
-const logCfg = { showOwn: false, seen: [], rawRead: 0 };   // kept (liveSnapshot): user actions shown; ids of warn / error events seen; the newest raw line read
+const logCfg = { showOwn: false, seen: [], rawUnread: [], rawTop: null };   // kept (liveSnapshot): user actions shown; ids of warn / error events seen; the unread raw lines (ranges) and the newest raw line taken into account (46-logs.js)
 const evState = { list: [], next: null, notifyFrom: null, busy: null, gen: 0, follow: true, unseen: 0, smoothUntil: 0, open: new Set(), shown: 0 };
 const evFilter = { q: '', problems: false, off: new Set() };   // temporary: gone with the page
 const evFilterOpen = new Set();                                 // categories unfolded in the sheet
@@ -159,7 +159,7 @@ function evValue(k, v, e) {
   if (['entry', 'server', 'route', 'from', 'to', 'via', 'id'].includes(k) && typeof v === 'string') return evName(v);
   return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
-const evStamp = t => { const d = new Date(t); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' + logTime(t); };
+const evStamp = t => { const d = new Date(t); return d.toLocaleDateString(I18N.locale(), { day: 'numeric', month: 'short' }) + ' ' + logTime(t); };
 function evFieldsHtml(g) {
   const e = g.ev, f = (k, v) => `<div class="ev-f"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
   let h = g.items.length > 1 ? f('Times', g.items.map(x => logTime(x.at)).join(', ')) : f('Time', evStamp(e.at));
@@ -192,7 +192,7 @@ function evGroups(list) {
 const evDayStart = t => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
 function evDayLabel(t) {
   const diff = Math.round((evDayStart(Date.now()) - evDayStart(t)) / 864e5);
-  return diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : new Date(t).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : new Date(t).toLocaleDateString(I18N.locale(), { weekday: 'short', day: 'numeric', month: 'short' });
 }
 const evClock = t => logTime(t).slice(0, 5);
 
@@ -271,7 +271,7 @@ function evFilterText() {
   if (evFilter.problems) parts.push('only problems');
   evOffCats().forEach(([c, label, ts]) => {
     const n = ts.filter(([t]) => !evFilter.off.has(c + '/' + t)).length;
-    parts.push(n ? `${label} ${n}/${ts.length}` : 'no ' + label);
+    parts.push(n ? `${t(label)} ${n}/${ts.length}` : t('no {0}', label));
   });
   return parts.join(' · ');
 }

@@ -89,9 +89,10 @@ function liveApply(s) {
     if ('switchNotif' in s.genCfg && !(s.notifCfg && 'autoSwitch' in s.notifCfg)) notifCfg.autoSwitch = notifCfg.unstable = s.genCfg.switchNotif;
     const g = Object.assign({}, s.genCfg); delete g.statusNotif; delete g.switchNotif;
     Object.assign(genCfg, g);
+    I18N.setLang(genCfg.lang);
   }
   if (s.notifCfg) Object.assign(notifCfg, s.notifCfg);
-  if (s.logCfg) { logCfg.showOwn = !!s.logCfg.showOwn; logCfg.seen = Array.isArray(s.logCfg.seen) ? s.logCfg.seen.slice() : []; logCfg.rawRead = +s.logCfg.rawRead || 0; }
+  if (s.logCfg) { logCfg.showOwn = !!s.logCfg.showOwn; logCfg.seen = Array.isArray(s.logCfg.seen) ? s.logCfg.seen.slice() : []; logRawRestore(s.logCfg); }
   // no demo rules or apps: a first run starts with the defaults of a fresh install
   rulesData = s.rulesData || {};
   ruleOrder = s.ruleOrder || [];
@@ -106,7 +107,7 @@ function liveApply(s) {
   restorePings(s.pings);   // 15-ping.js: older states keyed a server, not its variant
   // a page closed mid-update saved the spinner: it would block every later update
   Object.values(sourcesData).forEach(x => { delete x.updating; });
-  renderEvents(); renderNavDots();   // 47-events.js: the Show my actions switch and the seen marks came with it
+  renderEvents(); renderNavDots(); renderLogSummary();   // 47-events.js: the Show my actions switch and the seen marks came with it
 }
 function liveSave() {
   if (!live.ready) return;          // never overwrite the stored state before it is loaded

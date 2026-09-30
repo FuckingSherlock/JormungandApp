@@ -357,7 +357,7 @@ function explainBroken(id) {
     : rs.length > 1 ? 'servers' : 'server';
   const edit = chainsData[id] ? `openEditChain('${id}')` : profilesData[id] ? `openEditProfile('${id}')` : `openSourceEntry('${id}')`;
   openActions(connectEntry(id).name,
-    `<div class="menu-note">This ${kind} has nothing to connect through: the ${what} it uses ${rs.length > 1 ? 'are' : 'is'} switched off in Nodes. Switch ${rs.length > 1 ? 'one' : 'it'} on, or select another server in the ${kind}. Its settings are kept either way.</div>`
+    `<div class="menu-note">${t('This {0} has nothing to connect through: the', kind)} ${t(what + ' it uses ' + (rs.length > 1 ? 'are' : 'is'))} ${t('switched off in Nodes.')} ${t('Switch {0} on, or select another server in the {1}. Its settings are kept either way.', rs.length > 1 ? 'one' : 'it', kind)}</div>`
     + rs.map(r => menuRow(ICON.power, 'Switch on ' + esc(reasonLabel(r)) + (r.nid ? `<div class="menu-sub">${esc(sourcesData[r.sid].name)}</div>` : ''),
         close + (r.nid ? `enableNode('${r.sid}','${r.nid}')` : `enableSource('${r.sid}')`))).join('')
     + menuRow(ICON.edit, 'Edit ' + kind, close + edit));

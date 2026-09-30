@@ -3,11 +3,11 @@
 let editingSourceId = null;
 
 function setChip(groupId, value) {
-  document.querySelectorAll('#' + groupId + ' .chip').forEach(c => c.classList.toggle('active', c.textContent === value));
+  document.querySelectorAll('#' + groupId + ' .chip').forEach(c => c.classList.toggle('active', I18N.en(c) === value));
 }
 function chipValue(groupId, fallback) {
   const c = document.querySelector('#' + groupId + ' .chip.active');
-  return c ? c.textContent : fallback;
+  return c ? I18N.en(c) : fallback;
 }
 
 function toggleSrcAdvanced(force) {
