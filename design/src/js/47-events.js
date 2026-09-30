@@ -13,7 +13,7 @@
    which warnings / errors were seen (the dots on the Logs tab) are kept with the UI state.
    (Flutter: EventsView, EventRow, EventFilterSheet over the events stream.) */
 
-const logCfg = { showOwn: false, seen: [] };   // kept (liveSnapshot): user actions shown; ids of warn / error events seen
+const logCfg = { showOwn: false, seen: [], rawRead: 0 };   // kept (liveSnapshot): user actions shown; ids of warn / error events seen; the newest raw line read
 const evState = { list: [], next: null, notifyFrom: null, busy: null, gen: 0, follow: true, unseen: 0, smoothUntil: 0, open: new Set(), shown: 0 };
 const evFilter = { q: '', problems: false, off: new Set() };   // temporary: gone with the page
 const evFilterOpen = new Set();                                 // categories unfolded in the sheet

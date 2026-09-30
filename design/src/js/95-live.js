@@ -91,7 +91,7 @@ function liveApply(s) {
     Object.assign(genCfg, g);
   }
   if (s.notifCfg) Object.assign(notifCfg, s.notifCfg);
-  if (s.logCfg) { logCfg.showOwn = !!s.logCfg.showOwn; logCfg.seen = Array.isArray(s.logCfg.seen) ? s.logCfg.seen.slice() : []; }
+  if (s.logCfg) { logCfg.showOwn = !!s.logCfg.showOwn; logCfg.seen = Array.isArray(s.logCfg.seen) ? s.logCfg.seen.slice() : []; logCfg.rawRead = +s.logCfg.rawRead || 0; }
   // no demo rules or apps: a first run starts with the defaults of a fresh install
   rulesData = s.rulesData || {};
   ruleOrder = s.ruleOrder || [];

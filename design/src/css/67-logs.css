@@ -4,16 +4,19 @@
 .log-levels .chip{position:relative;padding:5px 12px;font-size:13px}
 /* the count: a round badge on the chip's corner (like an app-icon badge), so the chip never changes width */
 .log-count{position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:var(--warn);color:#000;font-size:10px;font-weight:700;line-height:16px;text-align:center}
+.log-count.ok{background:var(--active);color:#000}
 .log-count.err{background:var(--danger);color:#fff}
 .log-count:empty{display:none}
 .log-scroll{padding-bottom:56px}
 .log-list{font-family:var(--mono);font-size:12px;line-height:1.45}
-.log-line{display:grid;grid-template-columns:1fr;gap:1px;padding:4px 14px 4px 12px;border-left:2px solid transparent}
-/* every line: the meta line (time, level, source), the message on its own line below */
+/* LogGroup: the meta line (time, level, source), then the messages of that second, each on its own line */
+.log-group{display:grid;grid-template-columns:1fr;gap:1px;padding:4px 14px 4px 12px;border-left:2px solid transparent}
+.log-group + .log-group{border-top:1px solid var(--border)}
+.log-group .log-line + .log-line{margin-top:3px}
 .log-meta{display:flex;align-items:center;gap:6px}
 .log-meta .log-tag{margin-right:0}
-.log-line.warn{border-left-color:var(--warn);background:rgba(var(--warn-rgb),.05)}
-.log-line.error{border-left-color:var(--muted);background:rgba(var(--muted-rgb),.06)}
+.log-group.warn{border-left-color:var(--warn);background:rgba(var(--warn-rgb),.05)}
+.log-group.error{border-left-color:var(--muted);background:rgba(var(--muted-rgb),.06)}
 .log-time{color:var(--t3)}
 .log-msg{color:var(--t2);min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .log-line.debug .log-msg,.log-cid{color:var(--t3)}

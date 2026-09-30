@@ -32,7 +32,7 @@ function setLogTab(tab) {
   on('logTabInk').style.transform = ev ? '' : 'translateX(100%)';
   document.querySelectorAll('#logTabs .nodes-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   renderEvFilterBar();
-  if (ev) { renderEvents(); evFollowIfPinned(); evMarkSeen(); } else { logFollowIfPinned(); pollLogs(); }
+  if (ev) { renderEvents(); evFollowIfPinned(); evMarkSeen(); } else { logFollowIfPinned(); pollLogs(); logMarkReadSoon(); }
   renderLogSummary();
 }
 
@@ -43,7 +43,9 @@ function pollLogs() {
   backend.log(logState.next).then(r => {
     if (gen !== logState.gen) return;
     // the core started again: its numbers start over
-    if (logState.next != null && r.next < logState.next) { logState.lines = []; logState.next = null; return pollLogs(); }
+    if (logState.next != null && r.next < logState.next) { logState.lines = []; logState.next = null; logCfg.rawRead = 0; return pollLogs(); }
+    // a saved read mark from a core that has since started over
+    if (logState.next == null && logCfg.rawRead >= r.next) logCfg.rawRead = 0;
     const fresh = r.lines.filter(l => logState.next == null || l.n >= logState.next);
     logState.next = r.next;
     if (!fresh.length && document.getElementById('logList').childElementCount) return renderLogSummary();
@@ -61,42 +63,84 @@ const logTime = t => { const d = new Date(t); return [d.getHours(), d.getMinutes
 
 // LogLine: time, a tag for warnings / errors and the core's own lines, the message; the
 // sing-box connection prefix [id ms] is dimmed.
+// A LogLine is the message only; LogGroup (below) puts the meta line above the messages.
 function logLineHtml(l, q) {
   let msg = esc(l.msg);
   if (q) msg = msg.replace(new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`);
   msg = msg.replace(/^\[(\d+ [^\]]+)\] /, '<span class="log-cid">[$1]</span> ');
+  return `<div class="log-line ${l.lvl}" data-n="${l.n}"><span class="log-msg">${msg}</span></div>`;
+}
+// Lines of the same second, level and source follow each other under one meta line (time, level, source).
+const logKey = l => Math.floor(l.t / 1000) + '|' + l.lvl + '|' + l.src;
+function logGroupHtml(l, q) {
   const lvlTag = `<span class="log-tag ${l.lvl}">${l.lvl === 'warn' ? 'WARN' : l.lvl.toUpperCase()}</span>`;
   const tag = l.src === 'core' ? '<span class="log-tag core">core</span>' : '';
-  // every line: the meta line (time, level, source), the message on its own line below
-  return `<div class="log-line ${l.lvl}" data-n="${l.n}"><div class="log-meta"><span class="log-time">${logTime(l.t)}</span>${lvlTag}${tag}</div><span class="log-msg">${msg}</span></div>`;
+  return `<div class="log-group ${l.lvl}" data-key="${logKey(l)}"><div class="log-meta"><span class="log-time">${logTime(l.t)}</span>${lvlTag}${tag}</div>${logLineHtml(l, q)}</div>`;
+}
+function logAppendTo(list, l, q) {
+  const last = list.lastElementChild;
+  if (last && last.classList.contains('log-group') && last.dataset.key === logKey(l)) last.insertAdjacentHTML('beforeend', logLineHtml(l, q));
+  else list.insertAdjacentHTML('beforeend', logGroupHtml(l, q));
 }
 
 function renderLogs() {
-  const q = logQuery(), shown = logState.lines.filter(l => logShown(l, q));
-  document.getElementById('logList').innerHTML = shown.length ? shown.map(l => logLineHtml(l, q)).join('')
-    : `<div class="log-empty">${logState.lines.length ? 'Nothing matches' : backend.live ? 'No lines yet — sing-box writes here once it runs' : 'No lines yet'}</div>`;
+  const q = logQuery(), shown = logState.lines.filter(l => logShown(l, q)), list = document.getElementById('logList');
+  list.innerHTML = '';
+  if (shown.length) shown.forEach(l => logAppendTo(list, l, q));
+  else list.innerHTML = `<div class="log-empty">${logState.lines.length ? 'Nothing matches' : backend.live ? 'No lines yet — sing-box writes here once it runs' : 'No lines yet'}</div>`;
   logState.unseen = 0;
   logFollowIfPinned();
   renderLogSummary();
+  logMarkReadSoon();
 }
 
 function appendLogs(fresh) {
   const list = document.getElementById('logList');
   if (!list.querySelector('.log-line') || logState.lines.length >= LOG_KEEP) { renderLogs(); return; }
   const q = logQuery(), shown = fresh.filter(l => logShown(l, q));
-  if (shown.length) list.insertAdjacentHTML('beforeend', shown.map(l => logLineHtml(l, q)).join(''));
+  shown.forEach(l => logAppendTo(list, l, q));
   if (!logState.follow) logState.unseen += shown.length;
   logFollowIfPinned();
   renderLogSummary();
+  logMarkReadSoon();
 }
 
-// The header line under "Logs" (of the tab that is open), the warning count on the level chip
+/* ── Read: the badges on the level chips count the lines not read yet ──
+   A line is read once it has been in the list's viewport while the Raw tab is shown; the read
+   mark is one number, the newest line read (logCfg.rawRead, kept like the seen events). */
+let logReadTimer = null;
+const logMarkReadSoon = () => { if (!logReadTimer) logReadTimer = setTimeout(() => { logReadTimer = null; logMarkRead(); }, 150); };
+function logMarkRead() {
+  if (!logsOpen() || logTab !== 'raw') return;
+  const r = document.getElementById('logScroll').getBoundingClientRect();
+  if (!r.height) return;
+  let top = logCfg.rawRead;
+  document.querySelectorAll('#logList .log-line').forEach(el => {
+    const n = +el.dataset.n;
+    if (n <= top) return;
+    const b = el.getBoundingClientRect();
+    if (b.bottom > r.top + 4 && b.top < r.bottom - 4) top = n;
+  });
+  if (top === logCfg.rawRead) return;
+  logCfg.rawRead = top;
+  renderLogSummary();
+  liveSave();
+}
+// One badge: the unread count (99+ at most), the colour of the worst unread line: red error, yellow warning, green info.
+function logBadge(el, lines) {
+  const n = lines.length, sev = lines.some(l => l.lvl === 'error') ? 'err' : lines.some(l => l.lvl === 'warn') ? 'warn' : 'ok';
+  el.textContent = n ? (n > 99 ? '99+' : String(n)) : '';
+  el.classList.remove('err', 'warn', 'ok');
+  el.classList.add(sev);
+}
+
+// The header line under "Logs" (of the tab that is open), the unread counts on the level chips
 // and the pill "↓ N new" / "↓ Latest" of the tab that is open.
 function renderLogSummary() {
   const all = logState.lines, warn = all.filter(l => l.lvl === 'warn').length, err = all.filter(l => l.lvl === 'error').length;
-  const wc = document.getElementById('logWarnCount');
-  wc.textContent = warn + err ? String(warn + err) : '';
-  wc.classList.toggle('err', err > 0);   // red with an error, yellow for warnings only
+  const unread = all.filter(l => l.n > logCfg.rawRead);
+  logBadge(document.getElementById('logAllCount'), unread);
+  logBadge(document.getElementById('logWarnCount'), unread.filter(l => l.lvl === 'warn' || l.lvl === 'error'));
   document.getElementById('logsSummary').textContent = logTab === 'events' ? evSummaryText()
     : all.length + ' line' + (all.length === 1 ? '' : 's')
       + (err ? ' · ' + err + ' error' + (err === 1 ? '' : 's') : '') + (warn ? ' · ' + warn + ' warning' + (warn === 1 ? '' : 's') : '');
@@ -115,6 +159,7 @@ function logFollowIfPinned() {
 function logScrolled() {
   const box = document.getElementById('logScroll');
   const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 24;
+  logMarkReadSoon();
   if (atEnd === logState.follow) return;
   logState.follow = atEnd;
   if (atEnd) logState.unseen = 0;
@@ -177,6 +222,8 @@ function clearLogs() {
     logState.gen++;
     logState.lines = [];
     logState.follow = true;
+    logCfg.rawRead = Math.max(logCfg.rawRead, (logState.next || 1) - 1);
+    liveSave();
     renderLogs();
   }, e => toast('Not cleared: ' + e.message));
 }

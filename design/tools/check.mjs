@@ -2981,7 +2981,7 @@ async function runChecks() {
       out.ownShown = !!document.querySelector('#evList .cat-user') && document.querySelector('#evfilter-body [data-key="showOwn"] .mini-toggle').classList.contains('on');
       setEvProblems(true); evFilter.off.add('core/crashed');
       const snap = JSON.parse(JSON.stringify(liveSnapshot()));
-      out.snap = snap.logCfg.showOwn === true && Object.keys(snap.logCfg).sort().join() === 'seen,showOwn' && !JSON.stringify(snap).includes('core/crashed');
+      out.snap = snap.logCfg.showOwn === true && Object.keys(snap.logCfg).sort().join() === 'rawRead,seen,showOwn' && !JSON.stringify(snap).includes('core/crashed');
       logCfg.showOwn = false;
       liveApply(snap);
       out.kept = logCfg.showOwn === true;
@@ -3073,17 +3073,18 @@ async function runChecks() {
       const out = {}, wait = ms => new Promise(r => setTimeout(r, ms)), rect = s => document.querySelector(s).getBoundingClientRect();
       setLogTab('raw');
       const line = (n, lvl) => ({ n, t: Date.now(), lvl, src: 'sing-box', msg: lvl + ' message ' + n });
+      logCfg.rawRead = 0;
       logState.lines = [line(1, 'warn'), line(2, 'info')];
       renderLogSummary();
       const chip = () => document.querySelector('#logLevels .chip[data-lvl="warn"]'), w1 = chip().getBoundingClientRect().width;
       logState.lines = Array.from({ length: 123 }, (_, i) => line(i + 10, 'warn'));
       renderLogSummary();
       const badge = document.getElementById('logWarnCount'), br = badge.getBoundingClientRect(), cr = chip().getBoundingClientRect();
-      out.badge = chip().getBoundingClientRect().width === w1 && badge.textContent === '123' && getComputedStyle(badge).position === 'absolute' && br.right > cr.right - 12 && br.top < cr.top + 4;
+      out.badge = chip().getBoundingClientRect().width === w1 && badge.textContent === '99+' && getComputedStyle(badge).position === 'absolute' && br.right > cr.right - 12 && br.top < cr.top + 4;
       out.badgeColor = getComputedStyle(badge).backgroundColor;
       logState.lines = [line(1, 'error'), line(2, 'info'), line(3, 'warn')];
       renderLogs();
-      const w = document.querySelector('#logList .log-line.warn'), i = document.querySelector('#logList .log-line.info');
+      const w = document.querySelector('#logList .log-group.warn'), i = document.querySelector('#logList .log-group.info');
       out.twoLines = !!w && w.querySelector('.log-msg').getBoundingClientRect().top >= w.querySelector('.log-meta').getBoundingClientRect().bottom - 1
         && !!i && i.querySelector('.log-msg').getBoundingClientRect().top >= i.querySelector('.log-meta').getBoundingClientRect().bottom - 1;
       const btns = () => [...document.querySelectorAll('#rawActions .icon-btn')].map(b => { const q = b.getBoundingClientRect(); return q.x + ',' + q.y; }).join(' ');
@@ -3107,6 +3108,51 @@ async function runChecks() {
     });
     await p.close();
     expect(r.badge && r.twoLines && r.slots && r.same, JSON.stringify(r));
+  });
+
+  await check('Logs (Raw): chip badges count unread lines and fall as they are read, colour = worst unread (green / yellow / red), dividers between entries, same second + level + source = one group, search finds a line inside a group', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs');
+    await p.waitForTimeout(400);
+    const r = await p.evaluate(() => {
+      const out = {}, base = Date.now() - 6e5;
+      setLogTab('raw');
+      const mk = (n, lvl, t, msg) => ({ n, t, lvl, src: 'sing-box', msg: msg || lvl + ' message ' + n });
+      const lines = Array.from({ length: 80 }, (_, i) => mk(i + 1, 'info', base + i * 5000));
+      lines[10] = mk(11, 'warn', base + 10 * 5000);
+      lines[70] = mk(71, 'error', base + 70 * 5000);
+      // three lines in one second, one in the next
+      lines.push(mk(81, 'info', base + 1e6, 'grouped needle-one'), mk(82, 'info', base + 1e6 + 100, 'grouped two'), mk(83, 'info', base + 1e6 + 200, 'grouped three'), mk(84, 'info', base + 1e6 + 1500, 'later'));
+      const all = () => document.getElementById('logAllCount'), wc = () => document.getElementById('logWarnCount');
+      logCfg.rawRead = 0; logState.lines = lines; logState.follow = false; logState.level = 'all';
+      renderLogs();
+      const box = document.getElementById('logScroll');
+      box.scrollTop = 0; logMarkRead();
+      const a0 = +all().textContent, w0 = +wc().textContent;
+      box.scrollTop = box.scrollHeight; logMarkRead();
+      out.falls = a0 > 0 && a0 < lines.length && w0 === 1 && all().textContent === '' && wc().textContent === '' && logCfg.rawRead === 84;
+      out.counts = [a0, w0];
+      // colours: info only → green, a warning → yellow, an error → red; hidden at 0
+      const col = (rawRead, ls) => { logCfg.rawRead = rawRead; logState.lines = ls; renderLogSummary(); return getComputedStyle(all()).backgroundColor; };
+      const probe = v => { const d = document.createElement('i'); d.style.background = 'var(' + v + ')'; document.body.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; };
+      const g = col(0, [mk(1, 'info', base)]), y = col(0, [mk(1, 'info', base), mk(2, 'warn', base)]), rd = col(0, [mk(1, 'warn', base), mk(2, 'error', base)]);
+      out.colors = g === probe('--active') && y === probe('--warn') && rd === probe('--danger');
+      out.cap = (logState.lines = Array.from({ length: 150 }, (_, i) => mk(i + 1, 'info', base + i * 5000)), logCfg.rawRead = 0, renderLogSummary(), all().textContent === '99+');
+      // dividers and groups
+      logState.lines = lines; logCfg.rawRead = 84; renderLogs();
+      const gs = [...document.querySelectorAll('#logList .log-group')];
+      out.divider = gs.length > 2 && gs.slice(1).every(x => getComputedStyle(x).borderTopWidth === '1px');
+      const grp = [...document.querySelectorAll('#logList .log-group')].find(x => x.textContent.includes('grouped two'));
+      out.grouped = !!grp && grp.querySelectorAll('.log-line').length === 3 && grp.querySelectorAll('.log-meta').length === 1 && !grp.textContent.includes('later');
+      // search inside a group
+      document.getElementById('logSearch').value = 'grouped two'; renderLogs();
+      const f = [...document.querySelectorAll('#logList .log-line')];
+      out.search = f.length === 1 && f[0].textContent.includes('grouped two') && !!f[0].querySelector('mark');
+      document.getElementById('logSearch').value = ''; renderLogs();
+      return out;
+    });
+    await p.close();
+    expect(r.falls && r.colors && r.cap && r.divider && r.grouped && r.search, JSON.stringify(r));
   });
 
   await check('Events: Clear (confirm) empties the journal, Export has both logs as text, sub results and user actions are journaled (own)', async () => {
