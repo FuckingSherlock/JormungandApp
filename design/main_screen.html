@@ -298,11 +298,14 @@ body {
 .sheet-body::-webkit-scrollbar{display:none}
 
 /* ── Sheets (level 2 — nested modals for add/create flows) ── */
+.overlay.under{z-index:8}
+.sheet.under{z-index:9}
 .overlay-l2{z-index:20}
 .sheet-l2{z-index:21}
 .overlay-l3{z-index:30}
 .overlay-l4{z-index:40}
 .sheet-l3{z-index:31}
+#ov-help{z-index:42}#sh-help{z-index:43}   /* the tips open over dialogs (level 4) too */
 
 /* [?] help: a small round button next to a title, and its tips sheet */
 .help-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:7px;padding:0;border-radius:50%;
@@ -745,10 +748,18 @@ body {
 .rf-ip{margin:2px 18px 10px;padding:8px 12px 10px;border:1px dashed var(--border-hi);border-radius:12px}
 .rf-ip-row{display:flex;align-items:center;gap:10px;cursor:pointer}
 .rf-ip-row .rf-flabel{margin:0;font-size:14px;font-weight:600;color:var(--t1)}
+.rf-ip-row .help-btn{margin-left:0}
 .rf-ip .set-hint{margin-top:6px}
 .rf-ip .rf-ip-link{display:block;margin:6px 0 0;text-align:left}
 .rf-add{padding:4px 18px 8px}
 .rf-add .chip{padding:5px 10px;font-size:13px}
+.rf-add-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px}
+.rf-add-t{font-size:12px;color:var(--t3);margin:8px 0 4px}
+.rf-add .chip-row{padding:0}
+.rf-fhead{display:flex;align-items:center;gap:6px}
+.rf-fhead .rf-flabel{flex:1}
+.rf-field .rf-x{font-size:17px;margin-bottom:4px}
+.rf-flag .rf-x{margin:0 0 0 8px}
 .rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}
 .rf-then .seg3{margin:4px 18px 8px}
 .rf-then .set-group{margin-top:0}
@@ -784,28 +795,32 @@ body {
 .aa-hint{padding:4px 2px}
 
 .mono{font-family:var(--mono)}
-.rf-more{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px}
-.rf-more button{background:none;border:none;padding:2px 0;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .tgt-row .set-label{white-space:nowrap}
 .rs-row .conn-tag{margin-left:8px;vertical-align:1px}
 .svc-app{color:var(--warn);cursor:pointer}
 .app-state.svc{opacity:.75}
 .aa-svc{margin-top:8px}
-#sh-appact{max-height:calc(100% - 32px);display:flex;flex-direction:column}
+/* top edge fixed at 1/3 of the screen: the dialog grows only downward and scrolls inside above the nav */
+#sh-appact{top:33.333%;max-height:calc(66.667% - var(--nav-h,0px) - 8px);display:flex;flex-direction:column;transform-origin:top center;transform:scale(.96)}
+#sh-appact.open{transform:none}
 #aa-body{overflow-y:auto;min-height:0}
 .aa-proto{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;margin:12px 0 6px}
 .aa-proto:first-child{margin-top:0}
 #aa-body .aa-split{margin:0 0 12px}
 /* ── LogsView (46-logs.js): time column, the message wraps under itself ── */
 #view-logs{position:relative}
-.view > .log-levels{flex-shrink:0;padding:0 14px 8px}
-.log-levels .chip{padding:5px 12px;font-size:13px}
-.log-count{margin-left:6px;font-size:11px;font-weight:700;color:var(--warn)}
+.view > .log-levels{flex-shrink:0;padding:6px 18px 8px}
+.log-levels .chip{position:relative;padding:5px 12px;font-size:13px}
+/* the count: a round badge on the chip's corner (like an app-icon badge), so the chip never changes width */
+.log-count{position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:var(--warn);color:#000;font-size:10px;font-weight:700;line-height:16px;text-align:center}
+.log-count.err{background:var(--danger);color:#fff}
 .log-count:empty{display:none}
-.chip.active .log-count{color:inherit;opacity:.85}
 .log-scroll{padding-bottom:56px}
 .log-list{font-family:var(--mono);font-size:12px;line-height:1.45}
-.log-line{display:grid;grid-template-columns:auto 1fr;gap:8px;padding:3px 14px 3px 12px;border-left:2px solid transparent}
+.log-line{display:grid;grid-template-columns:1fr;gap:1px;padding:4px 14px 4px 12px;border-left:2px solid transparent}
+/* every line: the meta line (time, level, source), the message on its own line below */
+.log-meta{display:flex;align-items:center;gap:6px}
+.log-meta .log-tag{margin-right:0}
 .log-line.warn{border-left-color:var(--warn);background:rgba(var(--warn-rgb),.05)}
 .log-line.error{border-left-color:var(--muted);background:rgba(var(--muted-rgb),.06)}
 .log-time{color:var(--t3)}
@@ -815,6 +830,7 @@ body {
 .log-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;padding:0 4px;border-radius:3px;margin-right:6px;vertical-align:1px}
 .log-tag.warn{color:var(--warn);background:rgba(var(--warn-rgb),.15)}
 .log-tag.error{color:var(--muted);background:rgba(var(--muted-rgb),.15)}
+.log-tag.info,.log-tag.debug,.log-tag.trace{color:var(--t3);background:rgba(255,255,255,.06)}
 .log-tag.core{color:var(--accent);background:rgba(var(--accent-rgb),.15)}
 .log-list mark{background:rgba(var(--accent-rgb),.3);color:var(--t1);border-radius:2px}
 .log-empty{padding:48px 24px;text-align:center;color:var(--t3);font-family:var(--font);font-size:14px}
@@ -849,6 +865,15 @@ body {
 .ev-ico{flex-shrink:0;width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--ev-c);background:color-mix(in srgb,var(--ev-c) 16%,transparent)}
 .ev-body{flex:1;min-width:0}
 .ev-top{display:flex;align-items:baseline;gap:8px}
+/* warnings / errors: the meta line (level, repeats, time), the title on its own line below */
+.ev-meta{display:flex;align-items:center;gap:6px;font-size:11.5px;line-height:1.3}
+.ev-meta .ev-time,.ev-meta .ev-rep{font-size:11.5px}
+.ev-meta .log-tag{margin-right:0}
+.ev-row.lvl-warn .ev-title,.ev-row.lvl-error .ev-title{margin-top:1px}
+/* the header buttons keep their slots in both tabs: nothing moves when Search opens */
+#view-logs .topbar > div:first-child{min-width:0}
+#view-logs .nodes-summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#view-logs .head-actions{flex-shrink:0;width:124px;justify-content:flex-end}
 .ev-title{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--t1);overflow-wrap:anywhere}
 .ev-time,.ev-rep{flex-shrink:0;font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums}
 .ev-rep{font-weight:700;color:var(--t2)}
@@ -1057,6 +1082,7 @@ textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:bre
 /* ── SourceErrorStrip (33-source-error.js) ── */
 .src-error{display:flex;align-items:center;gap:10px;margin:8px 0 2px;padding:8px 8px 8px 10px;border-radius:10px;
   background:rgba(var(--muted-rgb),.08);border:1px solid rgba(var(--muted-rgb),.25);color:var(--muted)}
+.src-top-main > .src-error{margin:0 14px 12px 0}   /* in a card: the inset of the usage line / announce on the right and bottom */
 .src-error > svg{flex-shrink:0}
 .src-error-text{flex:1;min-width:0}
 .src-error-title{font-size:13px;font-weight:600}
@@ -1207,7 +1233,16 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
 .set-row.soon{opacity:.5}
 .set-hint.warn{color:var(--warn)}
 .set-input.auth-in{flex:1;width:auto;min-width:0;max-width:210px;font-size:13px;text-align:left}   /* Connection → Password: login / password fields */
-.auth-url{font-family:var(--mono);font-size:11px;color:var(--t2);word-break:break-all;margin-top:8px}
+.auth-lbl{flex:0 0 76px}   /* one label column for Login and Password, so the fields start at the same x */
+.auth-field{position:relative;flex:1;min-width:0}
+.auth-field .auth-in{width:100%;max-width:none;box-sizing:border-box}
+.auth-field .auth-in.has-btn{padding-right:34px}
+.auth-regen{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:26px;height:26px;padding:0;border:none;border-radius:50%;background:none;color:var(--t2);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.auth-regen:active{color:var(--accent)}
+.auth-regen svg{width:15px;height:15px}
+.hint-stack{display:grid}
+.hint-stack > *{grid-area:1/1}
+.hint-stack > [aria-hidden]{visibility:hidden}
 .set-row.hit{animation:ev-hit 2.6s ease-out}   /* a row the rule form's link scrolled to */
 .am-link{margin-left:auto;background:none;border:none;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:0}
 .dns-row{gap:8px;padding:8px 10px 8px 12px}
@@ -5479,11 +5514,11 @@ function appHalfHtml(h, path, proto, between = '') {
 const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default') ? 'default' : 'own';
 function renderAppAct() {
   const d = appDraft;
-  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row"><div class="set-label">Split TCP / UDP<div class="set-hint">Different actions per protocol, e.g. block UDP (QUIC) so the app falls back to TCP</div></div>
+  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row"><div class="set-label">Split TCP / UDP<button class="help-btn" onclick="openHelp('apps')" title="What is this?">?</button></div>
       <div class="mini-toggle ${d.split ? 'on' : ''}" id="aa-split" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div></div>`;
-  document.getElementById('aa-body').innerHTML = (d.split
-    ? toggle + appHalfHtml(d, 'appDraft', 'TCP') + appHalfHtml(d.udp, 'appDraft.udp', 'UDP')
-    : appHalfHtml(d, 'appDraft', '', toggle)) + appSvcNote(appEditing, appDraftAct(d));
+  document.getElementById('aa-body').innerHTML = toggle + (d.split
+    ? appHalfHtml(d, 'appDraft', 'TCP') + appHalfHtml(d.udp, 'appDraft.udp', 'UDP')
+    : appHalfHtml(d, 'appDraft', '')) + appSvcNote(appEditing, appDraftAct(d));
 }
 // The service with the same app: what it does, and who wins.
 function appSvcNote(pkg, act) {
@@ -5692,9 +5727,10 @@ function logLineHtml(l, q) {
   let msg = esc(l.msg);
   if (q) msg = msg.replace(new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`);
   msg = msg.replace(/^\[(\d+ [^\]]+)\] /, '<span class="log-cid">[$1]</span> ');
-  const tag = (l.lvl === 'warn' || l.lvl === 'error' ? `<span class="log-tag ${l.lvl}">${l.lvl === 'warn' ? 'WARN' : 'ERROR'}</span>` : '')
-    + (l.src === 'core' ? '<span class="log-tag core">core</span>' : '');
-  return `<div class="log-line ${l.lvl}" data-n="${l.n}"><span class="log-time">${logTime(l.t)}</span><span class="log-msg">${tag}${msg}</span></div>`;
+  const lvlTag = `<span class="log-tag ${l.lvl}">${l.lvl === 'warn' ? 'WARN' : l.lvl.toUpperCase()}</span>`;
+  const tag = l.src === 'core' ? '<span class="log-tag core">core</span>' : '';
+  // every line: the meta line (time, level, source), the message on its own line below
+  return `<div class="log-line ${l.lvl}" data-n="${l.n}"><div class="log-meta"><span class="log-time">${logTime(l.t)}</span>${lvlTag}${tag}</div><span class="log-msg">${msg}</span></div>`;
 }
 
 function renderLogs() {
@@ -5720,7 +5756,9 @@ function appendLogs(fresh) {
 // and the pill "↓ N new" / "↓ Latest" of the tab that is open.
 function renderLogSummary() {
   const all = logState.lines, warn = all.filter(l => l.lvl === 'warn').length, err = all.filter(l => l.lvl === 'error').length;
-  document.getElementById('logWarnCount').textContent = warn + err ? String(warn + err) : '';
+  const wc = document.getElementById('logWarnCount');
+  wc.textContent = warn + err ? String(warn + err) : '';
+  wc.classList.toggle('err', err > 0);   // red with an error, yellow for warnings only
   document.getElementById('logsSummary').textContent = logTab === 'events' ? evSummaryText()
     : all.length + ' line' + (all.length === 1 ? '' : 's')
       + (err ? ' · ' + err + ' error' + (err === 1 ? '' : 's') : '') + (warn ? ' · ' + warn + ' warning' + (warn === 1 ? '' : 's') : '');
@@ -5783,7 +5821,7 @@ function toggleLogSearch(show) {
   show = show == null ? bar.style.display === 'none' : show;
   bar.style.display = show ? '' : 'none';
   document.getElementById('logSearchBtn').classList.toggle('on', show);
-  if (show) input.focus();
+  if (show) input.focus({ preventScroll: true });
   else if (input.value) { input.value = ''; renderLogs(); }
 }
 
@@ -5864,13 +5902,23 @@ const EV_NOTIF = {
 const evEntry = id => { if (id == null || id === '') return ''; const e = connectEntry(id); return e ? e.name : String(id); };
 const evServer = k => { if (k == null || k === '') return ''; const n = nodeOfKey(String(k)); return n ? n.name : String(k); };
 const evSource = (sid, name) => (sourcesData[sid] && sourcesData[sid].name) || name || String(sid || '');
+// A switch between two servers: when both show the same name (another protocol, or another address),
+// the protocol is appended ("· HY2"), and when that is the same too, the address:port.
+function evServerPair(from, to) {
+  const a = evServer(from), b = evServer(to);
+  if (!from || !to || a !== b) return [a, b];
+  const na = nodeOfKey(String(from)), nb = nodeOfKey(String(to));
+  if (!na || !nb || String(from) === String(to)) return [a, b];
+  const pa = String(protoLabel(na)).toUpperCase(), pb = String(protoLabel(nb)).toUpperCase();
+  return pa !== pb ? [`${a} · ${pa}`, `${b} · ${pb}`] : [`${a} · ${na.address}:${na.port}`, `${b} · ${nb.address}:${nb.port}`];
+}
 const evName = k => String(k).includes('::') ? evServer(k) : evEntry(k);   // 'sid::nid' is a server, anything else an entry
 function evDuration(ms) {
   const s = Math.round(ms / 1000);
   return s < 90 ? s + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : Math.floor(s / 3600) + ' h ' + Math.round((s % 3600) / 60) + ' min';
 }
 function evReason(d) {
-  const from = d.route ? evServer(d.from) : evEntry(d.from), to = d.route ? evServer(d.to) : evEntry(d.to);
+  const [from, to] = d.route ? evServerPair(d.from, d.to) : [evEntry(d.from), evEntry(d.to)];
   if (d.reason === 'failover') return `${from} failed${d.fails ? ' ' + d.fails + ' checks' : ' its checks'}`;
   if (d.reason === 'back') return `${to} is back — returned to it`;
   if (d.reason === 'fastest') return `${to} is faster`;
@@ -5890,8 +5938,8 @@ const EV_TEXT = {
   'conn/restored': d => ['Connection restored', d.downMs != null ? 'Down for ' + evDuration(d.downMs) : ''],
   'conn/offline': () => ['No network', 'The system reports no connection'],
   'conn/online': d => ['Network is back', d.downMs != null ? 'Down for ' + evDuration(d.downMs) : ''],
-  'auto/switched': d => [d.route ? `Auto: ${evEntry(d.route)} — ${evServer(d.from)} → ${evServer(d.to)}` : `Auto: ${evEntry(d.from)} → ${evEntry(d.to)}`, evReason(d)],
-  'auto/fastest': d => [`Fastest: ${evEntry(d.route)} — ${evServer(d.from)} → ${evServer(d.to)}`, `${evServer(d.to)} is now the fastest`],
+  'auto/switched': d => { const [f, t] = evServerPair(d.from, d.to); return [d.route ? `Auto: ${evEntry(d.route)} — ${f} → ${t}` : `Auto: ${evEntry(d.from)} → ${evEntry(d.to)}`, evReason(d)]; },
+  'auto/fastest': d => { const [f, t] = evServerPair(d.from, d.to); return [`Fastest: ${evEntry(d.route)} — ${f} → ${t}`, `${t} is now the fastest`]; },
   'auto/unstable': d => [`${evEntry(d.id)} is unstable`, `Dropped ${d.strikes}× — back to it after ${Math.max(1, Math.round(d.holdMs / 60000))} min without drops`],
   'site/blocked': d => {
     const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route;
@@ -5951,6 +5999,7 @@ function evValue(k, v, e) {
   if (k === 'route' && (v === 'global' || v === 'rules')) return v === 'global' ? 'Global' : 'By rules';
   if (k === 'by') return v === 'user' ? 'You' : 'An error';
   if (k === 'source') return evSource(v);
+  if ((k === 'from' || k === 'to') && e && e.cat === 'auto' && e.data && e.data.route && typeof v === 'string') return evServerPair(e.data.from, e.data.to)[k === 'from' ? 0 : 1];
   if (['entry', 'server', 'route', 'from', 'to', 'via', 'id'].includes(k) && typeof v === 'string') return evName(v);
   return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
@@ -6030,10 +6079,13 @@ function evAct(key, id) {
 function evRowHtml(g) {
   const e = g.ev, d = evDescribe(e), acts = evActions(e), rep = g.items.length;
   const tag = g.level === 'warn' || g.level === 'error' ? `<span class="log-tag ${g.level}">${g.level === 'warn' ? 'WARN' : 'ERROR'}</span>` : '';
+  const repH = rep > 1 ? `<span class="ev-rep">×${rep}</span>` : '', timeH = `<span class="ev-time">${evClock(g.at)}</span>`;
+  // the meta line (level for warnings / errors, repeats, time), the title on its own line below
+  const top = `<div class="ev-meta">${timeH}${tag}${repH}</div><div class="ev-title">${esc(d.title)}</div>`;
   return `<div class="ev-row cat-${e.cat} lvl-${g.level}${evState.open.has(g.key) ? ' open' : ''}" data-key="${g.key}" data-ids="${g.items.map(x => x.id).join(',')}" onclick="evToggle(${g.key})">
     <div class="ev-ico">${EV_ICON[e.cat] || ''}</div>
     <div class="ev-body">
-      <div class="ev-top"><span class="ev-title">${tag}${esc(d.title)}</span>${rep > 1 ? `<span class="ev-rep">×${rep}</span>` : ''}<span class="ev-time">${evClock(g.at)}</span></div>
+      ${top}
       ${d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
       ${acts.length ? `<div class="ev-acts">${acts.map(([k, l]) => `<button class="ev-act" onclick="event.stopPropagation();evAct('${k}',${e.id})">${l}</button>`).join('')}</div>` : ''}
       <div class="ev-more">${evFieldsHtml(g)}</div>
@@ -6843,10 +6895,10 @@ function renderDns() {
       <div class="node-add" onclick="openDnsForm()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add DNS server</div>
     </div>
     <div class="set-group">
-      <div class="set-row" data-key="dnsAuto"><div class="set-label" style="flex:1">Switch automatically<div class="set-hint">${dnsCfg.auto ? 'A server that stops answering is replaced by the next one; the higher one takes over again when it recovers' : 'The first server stays in use even when it does not answer'}</div></div>
+      <div class="set-row" data-key="dnsAuto"><div class="set-label" style="flex:1">Switch automatically<button class="help-btn" onclick="openHelp('dnsauto')" title="What is this?">?</button></div>
         ${toggle(dnsCfg.auto, "setDnsCfg('auto',!dnsCfg.auto)")}</div>
     </div>
-    <div class="am-label">Through the proxy port</div>
+    <div class="am-label">Without TUN</div>
     <div class="set-group">
       <div class="set-row" data-key="dnsResolve"><div class="set-label" style="flex:1">Resolve for IP rules<div class="set-hint ${resolveWarn ? 'warn' : ''}">${resolveHint}</div></div>
         <select class="set-select" id="dns-resolve" style="max-width:46%" onchange="setDnsCfg('resolve',this.value)">${resolveOpts.map(([v, l]) =>
@@ -6968,11 +7020,15 @@ const newProxyLogin = () => randomToken(8, 'abcdefghjkmnpqrstuvwxyz23456789');
 const newProxySecret = () => randomToken(20, 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789');
 function toggleProxyAuth() {
   connCfg.proxyAuth = !connCfg.proxyAuth;
-  // turned on: fresh ones; off: nothing left behind in the snapshot / backups
-  connCfg.proxyUser = connCfg.proxyAuth ? newProxyLogin() : '';
-  connCfg.proxyPass = connCfg.proxyAuth ? newProxySecret() : '';
+  // off keeps the login and password (the plan just stops sending them); on reuses them, generates only when empty
+  if (connCfg.proxyAuth) {
+    if (!connCfg.proxyUser) connCfg.proxyUser = newProxyLogin();
+    if (!connCfg.proxyPass) connCfg.proxyPass = newProxySecret();
+  }
   renderConnSettings();
 }
+// Both texts of a hint in one grid cell, the inactive one hidden: the row keeps its height when it flips.
+const hintStack = (first, a, b) => `<div class="set-hint" ${first ? '' : 'aria-hidden="true"'}>${a}</div><div class="set-hint" ${first ? 'aria-hidden="true"' : ''}>${b}</div>`;
 function newProxyPassword() {
   connCfg.proxyPass = newProxySecret();
   renderConnSettings();
@@ -6998,7 +7054,8 @@ function setProxyCred(which, input) {
   renderConnSettings();
 }
 // what a program is told to use: socks5://login:password@127.0.0.1:port or http://…; the login and password percent-encoded
-const proxyUrl = scheme => scheme + '://' + encodeURIComponent(connCfg.proxyUser) + ':' + encodeURIComponent(connCfg.proxyPass) + '@127.0.0.1:' + connCfg.port;
+// (no credentials while the password is off: socks5://127.0.0.1:port)
+const proxyUrl = scheme => scheme + '://' + (connCfg.proxyAuth ? encodeURIComponent(connCfg.proxyUser) + ':' + encodeURIComponent(connCfg.proxyPass) + '@' : '') + '127.0.0.1:' + connCfg.port;
 const copyProxyUrl = scheme => copyText(proxyUrl(scheme), scheme === 'socks5' ? 'SOCKS5 address' : 'HTTP address');
 
 function renderConnSettings() {
@@ -7008,22 +7065,20 @@ function renderConnSettings() {
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">System proxy<div class="set-hint">Apps that follow the OS proxy setting go through the core. Also on Home</div></div>
         ${toggle(connCfg.sysProxy, 'setSysProxy(!connCfg.sysProxy)')}</div>
-      <div class="set-row"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — ${connCfg.proxyAuth ? 'set it by hand in other apps, with the login below' : 'the system proxy points here; set it by hand in other apps'}</div></div>
+      <div class="set-row stack" data-key="proxyPort"><div class="am-head"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — set it by hand in other apps</div></div>
         <input class="set-input am-num port-num" id="conn-port" inputmode="numeric" value="${connCfg.port}" onchange="setProxyPort(this)"></div>
-      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<div class="set-hint">${connCfg.proxyAuth ? 'The port asks for this login' + (connCfg.sysProxy ? '. The system proxy uses its own port without one: Windows cannot send a password' : '') : 'Off: any program on this PC can use the port'}</div></div>
-        ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
-      ${connCfg.proxyAuth ? `
-      <div class="set-row set-sub" data-key="proxyUser"><div class="set-label" style="flex:0 0 auto">Login</div>
-        <input class="set-input am-num auth-in" id="conn-user" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyUser)}" onchange="setProxyCred('user',this)"></div>
-      <div class="set-row set-sub" data-key="proxyPass"><div class="set-label" style="flex:0 0 auto">Password</div>
-        <input class="set-input am-num auth-in" id="conn-pass" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyPass)}" onchange="setProxyCred('pass',this)"></div>
-      <div class="set-row set-sub stack" data-key="proxyCopy">
-        <div class="chip-row">
+        <div class="chip-row" style="padding:0">
           <div class="chip" id="conn-copy-socks" onclick="copyProxyUrl('socks5')">Copy SOCKS5</div>
           <div class="chip" id="conn-copy-http" onclick="copyProxyUrl('http')">Copy HTTP</div>
-          <div class="chip" id="conn-newpass" onclick="newProxyPassword()">New password</div>
-        </div>
-        <div class="auth-url" id="conn-auth-url">${esc(proxyUrl('socks5'))}</div></div>` : ''}
+        </div></div>
+      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<div class="hint-stack">${hintStack(connCfg.proxyAuth, 'The port asks for this login. The system proxy uses its own port without one: Windows cannot send a password', 'Off: any program on this PC can use the port')}</div></div>
+        ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
+      ${connCfg.proxyAuth ? `
+      <div class="set-row set-sub" data-key="proxyUser"><div class="set-label auth-lbl">Login</div>
+        <div class="auth-field"><input class="set-input am-num auth-in" id="conn-user" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyUser)}" onchange="setProxyCred('user',this)"></div></div>
+      <div class="set-row set-sub" data-key="proxyPass"><div class="set-label auth-lbl">Password</div>
+        <div class="auth-field"><input class="set-input am-num auth-in has-btn" id="conn-pass" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyPass)}" onchange="setProxyCred('pass',this)">
+          <button class="auth-regen" id="conn-newpass" onclick="newProxyPassword()" title="New password">${ICON.refresh}</button></div></div>` : ''}
       <div class="set-row" data-key="killSwitch"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">Blocks traffic when the VPN is down. Works for apps that use the system proxy; full block needs TUN.</div></div>
         ${toggle(connCfg.killSwitch, 'toggleKillSwitch()')}</div>
       ${connCfg.killSwitch ? `
@@ -7032,12 +7087,8 @@ function renderConnSettings() {
       <div class="set-row set-sub ${closedOk ? '' : 'dim'}" data-key="killWhileClosed"${closedOk ? '' : ' onclick="offerClosedKill()"'}><div class="set-label" style="flex:1">Also while the app is closed<div class="set-hint">${closedOk ? 'The proxy stays set when the app is closed, so nothing leaks before it starts again' : 'Needs Launch at startup and Connect on launch — tap to turn them on'}</div></div>
         ${toggle(closedOk && connCfg.killWhileClosed, closedOk ? 'connCfg.killWhileClosed=!connCfg.killWhileClosed;renderConnSettings()' : '')}</div>`
       : `
-      <div class="set-row" data-key="downProxy" style="flex-direction:column;align-items:stretch;gap:10px">
-        <div class="set-label">If the VPN cannot recover<div class="set-hint">${connCfg.downProxy === 'keep' ? 'Keep it: the proxy stays set, so apps that use it have no internet until the VPN is back' : 'Remove: traffic goes direct until the VPN is back'}</div></div>
-        <div class="chip-row" style="padding:0">
-          <div class="chip ${connCfg.downProxy !== 'keep' ? 'active' : ''}" onclick="connCfg.downProxy='remove';renderConnSettings()">Remove proxy</div>
-          <div class="chip ${connCfg.downProxy === 'keep' ? 'active' : ''}" onclick="connCfg.downProxy='keep';renderConnSettings()">Keep it</div>
-        </div></div>`}
+      <div class="set-row" data-key="downProxy"><div class="set-label" style="flex:1">Remove the proxy if the VPN cannot recover<div class="hint-stack">${hintStack(connCfg.downProxy !== 'keep', 'On: the system proxy is removed and traffic goes direct until the VPN is back', 'Off: the proxy stays set, so apps that use it have no internet until the VPN is back')}</div></div>
+        ${toggle(connCfg.downProxy !== 'keep', "connCfg.downProxy=connCfg.downProxy==='keep'?'remove':'keep';renderConnSettings()")}</div>`}
     </div>
     <div class="set-group">
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
@@ -7278,7 +7329,7 @@ const HELP = {
   apps: { title: 'Per-app routing', items: [
     ['Default', 'the app goes by the rules like everything else.'],
     ['Direct / Proxy / Block', 'the app always goes this way, before any other rule.'],
-    ['Split TCP / UDP', 'two routes for one app, e.g. Discord voice apart from chat.'],
+    ['Split TCP / UDP', 'two routes for one app, e.g. Discord voice apart from chat, or block UDP (QUIC) so the app falls back to TCP.'],
   ] },
   dns: { title: 'DNS', items: [
     ['Servers', 'the first ticked server from the top answers; if it fails, the next one does. Drag ⋮⋮ to reorder.'],
@@ -7286,6 +7337,10 @@ const HELP = {
     ['ms', 'how fast the server answers. Tap it to check again.'],
     ['Hijack DNS', 'catches apps that ask their own DNS servers. Works in TUN mode only.'],
     ['FakeIP', 'answers at once with a stand-in address; faster, but some apps dislike it.'],
+  ] },
+  dnsauto: { title: 'Switch automatically', items: [
+    ['On', 'a server that stops answering is replaced by the next one; the higher one takes over again when it recovers.'],
+    ['Off', 'the first server stays in use even when it does not answer.'],
   ] },
 };
 
@@ -7574,10 +7629,27 @@ function openSheet(name) {
   showSheet(name, true);
   syncBackHistory();
 }
+// A sheet opened above the ones already open, which stay (drafts and all) instead of being replaced: e.g.
+// Settings → DNS over the rule form. Their level drops below the base one while it is open, so a
+// base-level sheet can cover level-2 ones. Any way of closing it leaves them as they were; Back's next stop.
+const sheetUnder = {};   // the sheet opened over -> the names lowered under it
+function setSheetUnder(name, on) { ['ov-', 'sh-'].forEach(p => document.getElementById(p + name).classList.toggle('under', on)); }
+function openSheetOver(open) {
+  const under = sheetStack.map(s => s.name);
+  under.forEach(n => setSheetUnder(n, true));
+  open();
+  const top = sheetStack[sheetStack.length - 1].name;
+  if (!under.includes(top)) sheetUnder[top] = under;
+}
 // A sheet may clean up on close (any way: ×, overlay, swipe, Done, back).
 const sheetCloseHooks = {};
 function closeSheet(name) {
   if (sheetCloseHooks[name]) sheetCloseHooks[name]();
+  if (sheetUnder[name]) {   // raised again once it has slid away
+    const lowered = sheetUnder[name];
+    delete sheetUnder[name];
+    setTimeout(() => lowered.forEach(n => { if (!Object.values(sheetUnder).some(a => a.includes(n))) setSheetUnder(n, false); }), 340);
+  }
   showSheet(name, false);
   const i = sheetStack.findIndex(s => s.name === name);
   if (i < 0) return;
@@ -8337,30 +8409,33 @@ sourceViewHooks.push(() => {
 });
 /* ══════════════════════ RULE FORM (Rules → + Add / tap a rule) ══════════════════════
    Form | JSON tabs over one draft.
-   Form: condition groups added with "+ Condition" (RULE_GROUPS); each field takes values as
-   chips (Enter, comma or a pasted column); a bad value turns red and blocks Save.
+   Form: condition cards; "+ Condition" adds a field (its card appears with it, RULE_GROUPS), a
+   field's × removes it (the last one takes the card away). A field takes values as chips (Enter,
+   comma or a pasted column); a bad value turns red and blocks Save. A field is on its card when its
+   key is in group.v (an empty list = added, not filled yet); Local networks when group.flag is set.
    Action: Proxy (main flow or a target — stub picker), Direct, Block (drop / reject).
    If unavailable (with a target): Default / Main / Block / Direct when the target is off,
    empty or deleted (docs/rules.md §0).
    DNS: Auto (first ticked server with the matching route) or a server from Settings → DNS.
    IP block (only with an IP / GeoIP / local-networks condition): "IP conditions only in TUN"
-   (rule.ipTunOnly: the core adds no `resolve` for this rule), the state of Settings → DNS →
-   Resolve for IP rules and a link there.
+   (rule.ipTunOnly: the core adds no `resolve` for this rule) with a (?) that explains it and shows
+   the state of Settings → DNS → Resolve for IP rules, and a link there (the DNS sheet opens above
+   the form, the draft stays under it).
    JSON: the sing-box route rule. Groups map to one flat rule; a negated group, or Domains
    together with IP (sing-box ORs those in one rule), turns it into {type: logical, mode: and}.
+   Whatever the form writes reads back into the same cards (empty cards carry no JSON: they are
+   kept from the previous draft).
    geosite / geoip stay names here: the core swaps them for its downloaded rule sets. Keys the
    form does not know are kept ("extra") and shown as a plaque; any other logical rule is
    "composite" — edited in JSON only. */
 
 let ruleEditing = null, ruleDraft = null, rfTab = 'form', rfAddOpen = false;
-// Empty fields stay folded as "+ Keyword" chips; a group with no values shows its first field.
-let rfOpenFields = new Set();
 const clone = o => JSON.parse(JSON.stringify(o));
 
 function openRuleForm(id) {
   ruleEditing = id || null;
-  ruleDraft = id ? clone(rulesData[id]) : newRule({ groups: { domain: { not: false, v: {} } } });
-  rfTab = 'form'; rfAddOpen = false; rfOpenFields = new Set();
+  ruleDraft = id ? clone(rulesData[id]) : newRule({ groups: { domain: { not: false, v: { domain_suffix: [] } } } });
+  rfTab = 'form'; rfAddOpen = false;
   document.getElementById('rfTitle').textContent = id ? 'Rule #' + (ruleOrder.indexOf(id) + 1) : 'New rule';
   document.getElementById('rf-delete').style.display = id ? '' : 'none';
   renderRuleForm();
@@ -8387,9 +8462,12 @@ function renderRuleForm() {
   const plaque = d.composite ? `<div class="rf-plaque">Composite rule (${esc(d.composite.mode || '')} of ${(d.composite.rules || []).length}) — edit it in JSON</div>`
     : Object.keys(d.extra || {}).length ? `<div class="rf-plaque">Extra fields: ${Object.keys(d.extra).map(esc).join(', ')} — edit them in JSON</div>` : '';
   const groups = d.composite ? '' : RULE_GROUPS.filter(g => d.groups[g.key]).map(g => rfGroupHtml(g, d.groups[g.key])).join('');
-  const unused = RULE_GROUPS.filter(g => !d.groups[g.key]);
-  const addRow = d.composite || !unused.length ? '' : rfAddOpen
-    ? `<div class="chip-row rf-add">${unused.map(g => `<div class="chip" onclick="rfAddGroup('${g.key}')">${g.title}${g.desktop ? ' · desktop' : ''}</div>`).join('')}</div>`
+  // + Condition offers every field not on the form yet, under its card's title
+  const avail = RULE_GROUPS.map(g => [g, rfFieldsOf(g).filter(([f]) => !rfHasField(d.groups[g.key], g, f))]).filter(([, fs]) => fs.length);
+  const addRow = d.composite || !avail.length ? '' : rfAddOpen
+    ? `<div class="rf-add"><div class="rf-add-head"><span>Add a condition</span><button class="am-link" onclick="rfAddOpen=false;renderRuleForm()">Cancel</button></div>
+      ${avail.map(([g, fs]) => `<div class="rf-add-t">${g.title}${g.desktop ? ' · desktop' : ''}</div><div class="chip-row">${fs.map(([f, label]) =>
+        `<div class="chip" onclick="rfAddField('${g.key}','${f}')">${esc(label)}</div>`).join('')}</div>`).join('')}</div>`
     : `<div class="node-add rf-add-btn" onclick="rfAddOpen=true;renderRuleForm()">+ Condition</div>`;
   const acts = [['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
   const dnsOpts = [['auto', 'Auto · ' + ((dnsAutoFor(d.action === 'direct' ? 'direct' : 'vpn') || {}).name || '—')], ...dnsOrder.map(id => [id, dnsServers[id].name])];
@@ -8424,54 +8502,71 @@ function ruleHasIpCondition(d) {
 }
 // Shown only for a rule with an IP condition. Through the proxy port a site arrives as a name: IP conditions
 // see it only when the core resolves first (Settings → DNS → Resolve for IP rules) unless the rule opts out.
+// The explanation and the current state live in the (?) (HELP.ruleip is filled when it opens).
 function rfIpBlockHtml(d) {
-  const on = !!d.ipTunOnly, off = dnsResolveEff() === 'off';
   return `<div class="rf-ip" data-key="ipTunOnly">
-    <div class="rf-ip-row" onclick="ruleDraft.ipTunOnly=!ruleDraft.ipTunOnly;renderRuleForm()"><div class="sub-checkbox ${on ? 'checked' : ''}"></div><div class="rf-flabel">IP conditions only in TUN</div></div>
-    <div class="set-hint">${on ? 'This rule never makes the core resolve a name: through the proxy port it matches only when the address is already known. '
-      : 'Through the proxy port an app sends a site name, so IP conditions match only if names are resolved first. '}Resolve for IP rules is <b>${esc(dnsResolveText())}</b>${off && !on ? ': the rule works in TUN only' : ''}.</div>
+    <div class="rf-ip-row" onclick="ruleDraft.ipTunOnly=!ruleDraft.ipTunOnly;renderRuleForm()"><div class="sub-checkbox ${d.ipTunOnly ? 'checked' : ''}"></div><div class="rf-flabel">IP conditions only in TUN</div>
+      <button class="help-btn" onclick="event.stopPropagation();rfIpHelp()" title="What is this?">?</button></div>
     <button class="am-link rf-ip-link" onclick="rfOpenDnsResolve()">Open DNS settings ›</button></div>`;
 }
-// The DNS sheet is a level below the form: the form closes to make room and Back reopens it as it was
-// (the draft is kept; its state text is refreshed when the DNS sheet closes).
-function rfOpenDnsResolve() {
-  closeSheet('ruleform');
-  openDnsSettings('dnsResolve');
+function rfIpHelp() {
+  const on = !!ruleDraft.ipTunOnly, off = dnsResolveEff() === 'off';
+  HELP.ruleip = { title: 'IP conditions only in TUN', items: [
+    ['Why', 'through the proxy port an app sends a site name, not an address, so an IP condition matches only if the core resolves the name first. In TUN mode the address is always known.'],
+    ['Ticked', 'this rule never makes the core resolve a name: through the proxy port it matches only when the address is already known.'],
+    ['Not ticked', 'the core resolves names for this rule, as set in Settings → DNS → Resolve for IP rules.'],
+    ['Now', `this rule is ${on ? 'ticked' : 'not ticked'}; Resolve for IP rules is ${dnsResolveText()}${off && !on ? ', so the rule works in TUN only' : ''}.`],
+  ] };
+  openHelp('ruleip');
 }
+// The DNS sheet opens above the form (the form and its draft stay open under it); closing DNS any way
+// (×, swipe, Back) lands on the form, and its state text is refreshed then.
+function rfOpenDnsResolve() { openSheetOver(() => openDnsSettings('dnsResolve')); }
 sheetCloseHooks.setdns = () => setTimeout(() => { if (sheetStack.some(s => s.name === 'ruleform')) renderRuleForm(); }, 0);
 
+// Every field a card can hold, as [key, label]: value fields, choices, the flag (its key is flag[0]).
+const rfFieldsOf = g => [...(g.fields || []), ...(g.choices || []), ...(g.flag ? [g.flag] : [])].map(([f, label]) => [f, label]);
+const rfHasField = (d, g, f) => !!d && (g.flag && f === g.flag[0] ? d.flag !== undefined : f in d.v);
+const rfXBtn = (g, f) => `<button class="rf-x" onclick="rfRemoveField('${g}','${f}')" title="Remove this field">×</button>`;
+
 function rfGroupHtml(g, d) {
-  const any = (g.fields || []).some(([f]) => (d.v[f] || []).length);
-  const shown = (g.fields || []).filter(([f], i) => (d.v[f] || []).length || rfOpenFields.has(g.key + '.' + f) || (!any && i === 0));
-  const folded = (g.fields || []).filter(x => !shown.includes(x));
-  const more = folded.length ? `<div class="rf-more">${folded.map(([f, label]) =>
-    `<button onclick="rfOpenField('${g.key}','${f}')">+ ${label}</button>`).join('')}</div>` : '';
-  const fields = shown.map(([f, label, ph, kind]) => {
+  const fields = (g.fields || []).filter(([f]) => f in d.v).map(([f, label, ph, kind]) => {
     const vals = d.v[f] || [];
-    return `<div class="rf-field"><div class="rf-flabel">${label}</div>
+    return `<div class="rf-field"><div class="rf-fhead"><div class="rf-flabel">${label}</div>${rfXBtn(g.key, f)}</div>
       <div class="chip-input" onclick="if (event.target === this) this.querySelector('input').focus()">${vals.map((v, i) => {
         const ok = validVal(kind, v);
         return `<span class="vchip ${ok ? '' : 'bad'}" ${ok ? '' : `title="${esc(VAL_HINT[kind])}"`}>${esc(v)}<b onclick="rfRemoveVal('${g.key}','${f}',${i})">×</b></span>`;
       }).join('')}<input data-g="${g.key}" data-f="${f}" placeholder="${vals.length ? '' : esc(ph)}" onkeydown="rfKey(event,this)" onpaste="rfPaste(event,this)" onblur="rfCommit(this)"></div>
       ${vals.some(v => !validVal(kind, v)) ? `<div class="set-hint warn">Red: ${esc(VAL_HINT[kind])}</div>` : ''}</div>`;
   }).join('');
-  const choices = (g.choices || []).map(([f, label, opts]) => `<div class="rf-field"><div class="rf-flabel">${label}</div><div class="chip-row" style="padding:0">${opts.map(o =>
+  const choices = (g.choices || []).filter(([f]) => f in d.v).map(([f, label, opts]) => `<div class="rf-field"><div class="rf-fhead"><div class="rf-flabel">${label}</div>${rfXBtn(g.key, f)}</div><div class="chip-row" style="padding:0">${opts.map(o =>
     `<div class="chip ${(d.v[f] || []).includes(o) ? 'active' : ''}" onclick="rfToggleChoice('${g.key}','${f}','${o}')">${o.toUpperCase()}</div>`).join('')}</div></div>`).join('');
-  const flag = g.flag ? `<div class="rf-field rf-flag"><div class="rf-flabel" style="flex:1">${g.flag[1]}</div>
-    <div class="mini-toggle ${d.flag ? 'on' : ''}" onclick="ruleDraft.groups.${g.key}.flag=!ruleDraft.groups.${g.key}.flag;renderRuleForm()"><div class="mini-toggle-thumb"></div></div></div>` : '';
+  const flag = g.flag && d.flag !== undefined ? `<div class="rf-field rf-flag"><div class="rf-flabel" style="flex:1">${g.flag[1]}</div>
+    <div class="mini-toggle ${d.flag ? 'on' : ''}" onclick="ruleDraft.groups.${g.key}.flag=!ruleDraft.groups.${g.key}.flag;renderRuleForm()"><div class="mini-toggle-thumb"></div></div>${rfXBtn(g.key, g.flag[0])}</div>` : '';
   return `<div class="rf-group ${d.not ? 'not' : ''}" data-g="${g.key}">
     <div class="rf-ghead"><span class="rf-gtitle">${d.not ? 'Not ' : ''}${g.title}${g.desktop ? '<span class="conn-tag muted">desktop</span>' : ''}</span>
       <button class="rf-not ${d.not ? 'on' : ''}" onclick="ruleDraft.groups.${g.key}.not=!ruleDraft.groups.${g.key}.not;renderRuleForm()">except</button>
       <button class="rf-x" onclick="rfRemoveGroup('${g.key}')" title="Remove">×</button></div>
-    ${fields}${more}${choices}${flag}</div>`;
+    ${fields}${choices}${flag}</div>`;
 }
 
-function rfOpenField(g, f) {
-  rfOpenFields.add(g + '.' + f);
+// + Condition: the field goes on its card (the card is made if it is not there yet)
+function rfAddField(g, f) {
+  const grp = ruleDraft.groups[g] = ruleDraft.groups[g] || { not: false, v: {} };
+  if (GROUP[g].flag && f === GROUP[g].flag[0]) grp.flag = true;
+  else grp.v[f] = grp.v[f] || [];
+  rfAddOpen = false;
   renderRuleForm();
-  document.querySelector(`#rf-body input[data-g="${g}"][data-f="${f}"]`).focus();
+  const input = document.querySelector(`#rf-body input[data-g="${g}"][data-f="${f}"]`);
+  if (input) input.focus();
 }
-function rfAddGroup(key) { ruleDraft.groups[key] = { not: false, v: {} }; rfAddOpen = false; renderRuleForm(); }
+// A field's ×: the card goes with its last field
+function rfRemoveField(g, f) {
+  const grp = ruleDraft.groups[g];
+  if (GROUP[g].flag && f === GROUP[g].flag[0]) delete grp.flag; else delete grp.v[f];
+  if (!Object.keys(grp.v).length && grp.flag === undefined) delete ruleDraft.groups[g];
+  renderRuleForm();
+}
 function rfRemoveGroup(key) { delete ruleDraft.groups[key]; renderRuleForm(); }
 function rfRemoveVal(g, f, i) { ruleDraft.groups[g].v[f].splice(i, 1); renderRuleForm(); }
 function rfToggleChoice(g, f, o) {
@@ -8539,7 +8634,8 @@ function actionJson(r) {
 }
 function ruleJson(r) {
   if (r.composite) return clone(r.composite);
-  const gs = RULE_GROUPS.filter(g => r.groups[g.key]).map(g => [g.key, r.groups[g.key]]);
+  // an empty card says nothing: no JSON for it (a {} inside the logical rule would not read back)
+  const gs = RULE_GROUPS.filter(g => r.groups[g.key] && Object.keys(groupJson(g.key, r.groups[g.key])).length).map(g => [g.key, r.groups[g.key]]);
   // sing-box ORs domain and IP fields inside one rule: the form's AND needs logical then
   const body = gs.some(([, d]) => d.not) || (r.groups.domain && r.groups.ip)
     ? { type: 'logical', mode: 'and', rules: gs.map(([k, d]) => Object.assign(groupJson(k, d), d.not ? { invert: true } : {})) }
@@ -8606,6 +8702,17 @@ function rfApplyJson() {
   if (!rfCheckJson()) { toast('Fix the JSON first'); return false; }
   const r = ruleFromJson(JSON.parse(document.getElementById('rf-json').value));
   ['id', 'name', 'enabled', 'fallback', 'dns', 'ipTunOnly'].forEach(k => r[k] = ruleDraft[k]);
+  if (r.action !== 'proxy') r.target = ruleDraft.target;   // the JSON has no place for what the action does not use
+  if (r.action !== 'block') r.block = ruleDraft.block;
+  // cards and fields not filled yet are not in the JSON: keep them as the form had them
+  if (!r.composite) Object.entries(ruleDraft.groups).forEach(([k, g]) => {
+    const n0 = r.groups[k], empty = Object.keys(g.v).filter(f => !g.v[f].length && !(n0 && f in n0.v));
+    const flagOff = g.flag === false && !(n0 && n0.flag !== undefined);
+    if (!empty.length && !flagOff) return;
+    const n = r.groups[k] = n0 || { not: g.not, v: {} };
+    empty.forEach(f => n.v[f] = []);
+    if (flagOff) n.flag = false;
+  });
   ruleDraft = r;
   return true;
 }

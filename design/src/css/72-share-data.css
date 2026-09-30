@@ -30,6 +30,7 @@ textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:bre
 /* ── SourceErrorStrip (33-source-error.js) ── */
 .src-error{display:flex;align-items:center;gap:10px;margin:8px 0 2px;padding:8px 8px 8px 10px;border-radius:10px;
   background:rgba(var(--muted-rgb),.08);border:1px solid rgba(var(--muted-rgb),.25);color:var(--muted)}
+.src-top-main > .src-error{margin:0 14px 12px 0}   /* in a card: the inset of the usage line / announce on the right and bottom */
 .src-error > svg{flex-shrink:0}
 .src-error-text{flex:1;min-width:0}
 .src-error-title{font-size:13px;font-weight:600}

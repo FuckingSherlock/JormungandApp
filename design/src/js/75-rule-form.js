@@ -1,29 +1,32 @@
 /* ══════════════════════ RULE FORM (Rules → + Add / tap a rule) ══════════════════════
    Form | JSON tabs over one draft.
-   Form: condition groups added with "+ Condition" (RULE_GROUPS); each field takes values as
-   chips (Enter, comma or a pasted column); a bad value turns red and blocks Save.
+   Form: condition cards; "+ Condition" adds a field (its card appears with it, RULE_GROUPS), a
+   field's × removes it (the last one takes the card away). A field takes values as chips (Enter,
+   comma or a pasted column); a bad value turns red and blocks Save. A field is on its card when its
+   key is in group.v (an empty list = added, not filled yet); Local networks when group.flag is set.
    Action: Proxy (main flow or a target — stub picker), Direct, Block (drop / reject).
    If unavailable (with a target): Default / Main / Block / Direct when the target is off,
    empty or deleted (docs/rules.md §0).
    DNS: Auto (first ticked server with the matching route) or a server from Settings → DNS.
    IP block (only with an IP / GeoIP / local-networks condition): "IP conditions only in TUN"
-   (rule.ipTunOnly: the core adds no `resolve` for this rule), the state of Settings → DNS →
-   Resolve for IP rules and a link there.
+   (rule.ipTunOnly: the core adds no `resolve` for this rule) with a (?) that explains it and shows
+   the state of Settings → DNS → Resolve for IP rules, and a link there (the DNS sheet opens above
+   the form, the draft stays under it).
    JSON: the sing-box route rule. Groups map to one flat rule; a negated group, or Domains
    together with IP (sing-box ORs those in one rule), turns it into {type: logical, mode: and}.
+   Whatever the form writes reads back into the same cards (empty cards carry no JSON: they are
+   kept from the previous draft).
    geosite / geoip stay names here: the core swaps them for its downloaded rule sets. Keys the
    form does not know are kept ("extra") and shown as a plaque; any other logical rule is
    "composite" — edited in JSON only. */
 
 let ruleEditing = null, ruleDraft = null, rfTab = 'form', rfAddOpen = false;
-// Empty fields stay folded as "+ Keyword" chips; a group with no values shows its first field.
-let rfOpenFields = new Set();
 const clone = o => JSON.parse(JSON.stringify(o));
 
 function openRuleForm(id) {
   ruleEditing = id || null;
-  ruleDraft = id ? clone(rulesData[id]) : newRule({ groups: { domain: { not: false, v: {} } } });
-  rfTab = 'form'; rfAddOpen = false; rfOpenFields = new Set();
+  ruleDraft = id ? clone(rulesData[id]) : newRule({ groups: { domain: { not: false, v: { domain_suffix: [] } } } });
+  rfTab = 'form'; rfAddOpen = false;
   document.getElementById('rfTitle').textContent = id ? 'Rule #' + (ruleOrder.indexOf(id) + 1) : 'New rule';
   document.getElementById('rf-delete').style.display = id ? '' : 'none';
   renderRuleForm();
@@ -50,9 +53,12 @@ function renderRuleForm() {
   const plaque = d.composite ? `<div class="rf-plaque">Composite rule (${esc(d.composite.mode || '')} of ${(d.composite.rules || []).length}) — edit it in JSON</div>`
     : Object.keys(d.extra || {}).length ? `<div class="rf-plaque">Extra fields: ${Object.keys(d.extra).map(esc).join(', ')} — edit them in JSON</div>` : '';
   const groups = d.composite ? '' : RULE_GROUPS.filter(g => d.groups[g.key]).map(g => rfGroupHtml(g, d.groups[g.key])).join('');
-  const unused = RULE_GROUPS.filter(g => !d.groups[g.key]);
-  const addRow = d.composite || !unused.length ? '' : rfAddOpen
-    ? `<div class="chip-row rf-add">${unused.map(g => `<div class="chip" onclick="rfAddGroup('${g.key}')">${g.title}${g.desktop ? ' · desktop' : ''}</div>`).join('')}</div>`
+  // + Condition offers every field not on the form yet, under its card's title
+  const avail = RULE_GROUPS.map(g => [g, rfFieldsOf(g).filter(([f]) => !rfHasField(d.groups[g.key], g, f))]).filter(([, fs]) => fs.length);
+  const addRow = d.composite || !avail.length ? '' : rfAddOpen
+    ? `<div class="rf-add"><div class="rf-add-head"><span>Add a condition</span><button class="am-link" onclick="rfAddOpen=false;renderRuleForm()">Cancel</button></div>
+      ${avail.map(([g, fs]) => `<div class="rf-add-t">${g.title}${g.desktop ? ' · desktop' : ''}</div><div class="chip-row">${fs.map(([f, label]) =>
+        `<div class="chip" onclick="rfAddField('${g.key}','${f}')">${esc(label)}</div>`).join('')}</div>`).join('')}</div>`
     : `<div class="node-add rf-add-btn" onclick="rfAddOpen=true;renderRuleForm()">+ Condition</div>`;
   const acts = [['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
   const dnsOpts = [['auto', 'Auto · ' + ((dnsAutoFor(d.action === 'direct' ? 'direct' : 'vpn') || {}).name || '—')], ...dnsOrder.map(id => [id, dnsServers[id].name])];
@@ -87,54 +93,71 @@ function ruleHasIpCondition(d) {
 }
 // Shown only for a rule with an IP condition. Through the proxy port a site arrives as a name: IP conditions
 // see it only when the core resolves first (Settings → DNS → Resolve for IP rules) unless the rule opts out.
+// The explanation and the current state live in the (?) (HELP.ruleip is filled when it opens).
 function rfIpBlockHtml(d) {
-  const on = !!d.ipTunOnly, off = dnsResolveEff() === 'off';
   return `<div class="rf-ip" data-key="ipTunOnly">
-    <div class="rf-ip-row" onclick="ruleDraft.ipTunOnly=!ruleDraft.ipTunOnly;renderRuleForm()"><div class="sub-checkbox ${on ? 'checked' : ''}"></div><div class="rf-flabel">IP conditions only in TUN</div></div>
-    <div class="set-hint">${on ? 'This rule never makes the core resolve a name: through the proxy port it matches only when the address is already known. '
-      : 'Through the proxy port an app sends a site name, so IP conditions match only if names are resolved first. '}Resolve for IP rules is <b>${esc(dnsResolveText())}</b>${off && !on ? ': the rule works in TUN only' : ''}.</div>
+    <div class="rf-ip-row" onclick="ruleDraft.ipTunOnly=!ruleDraft.ipTunOnly;renderRuleForm()"><div class="sub-checkbox ${d.ipTunOnly ? 'checked' : ''}"></div><div class="rf-flabel">IP conditions only in TUN</div>
+      <button class="help-btn" onclick="event.stopPropagation();rfIpHelp()" title="What is this?">?</button></div>
     <button class="am-link rf-ip-link" onclick="rfOpenDnsResolve()">Open DNS settings ›</button></div>`;
 }
-// The DNS sheet is a level below the form: the form closes to make room and Back reopens it as it was
-// (the draft is kept; its state text is refreshed when the DNS sheet closes).
-function rfOpenDnsResolve() {
-  closeSheet('ruleform');
-  openDnsSettings('dnsResolve');
+function rfIpHelp() {
+  const on = !!ruleDraft.ipTunOnly, off = dnsResolveEff() === 'off';
+  HELP.ruleip = { title: 'IP conditions only in TUN', items: [
+    ['Why', 'through the proxy port an app sends a site name, not an address, so an IP condition matches only if the core resolves the name first. In TUN mode the address is always known.'],
+    ['Ticked', 'this rule never makes the core resolve a name: through the proxy port it matches only when the address is already known.'],
+    ['Not ticked', 'the core resolves names for this rule, as set in Settings → DNS → Resolve for IP rules.'],
+    ['Now', `this rule is ${on ? 'ticked' : 'not ticked'}; Resolve for IP rules is ${dnsResolveText()}${off && !on ? ', so the rule works in TUN only' : ''}.`],
+  ] };
+  openHelp('ruleip');
 }
+// The DNS sheet opens above the form (the form and its draft stay open under it); closing DNS any way
+// (×, swipe, Back) lands on the form, and its state text is refreshed then.
+function rfOpenDnsResolve() { openSheetOver(() => openDnsSettings('dnsResolve')); }
 sheetCloseHooks.setdns = () => setTimeout(() => { if (sheetStack.some(s => s.name === 'ruleform')) renderRuleForm(); }, 0);
 
+// Every field a card can hold, as [key, label]: value fields, choices, the flag (its key is flag[0]).
+const rfFieldsOf = g => [...(g.fields || []), ...(g.choices || []), ...(g.flag ? [g.flag] : [])].map(([f, label]) => [f, label]);
+const rfHasField = (d, g, f) => !!d && (g.flag && f === g.flag[0] ? d.flag !== undefined : f in d.v);
+const rfXBtn = (g, f) => `<button class="rf-x" onclick="rfRemoveField('${g}','${f}')" title="Remove this field">×</button>`;
+
 function rfGroupHtml(g, d) {
-  const any = (g.fields || []).some(([f]) => (d.v[f] || []).length);
-  const shown = (g.fields || []).filter(([f], i) => (d.v[f] || []).length || rfOpenFields.has(g.key + '.' + f) || (!any && i === 0));
-  const folded = (g.fields || []).filter(x => !shown.includes(x));
-  const more = folded.length ? `<div class="rf-more">${folded.map(([f, label]) =>
-    `<button onclick="rfOpenField('${g.key}','${f}')">+ ${label}</button>`).join('')}</div>` : '';
-  const fields = shown.map(([f, label, ph, kind]) => {
+  const fields = (g.fields || []).filter(([f]) => f in d.v).map(([f, label, ph, kind]) => {
     const vals = d.v[f] || [];
-    return `<div class="rf-field"><div class="rf-flabel">${label}</div>
+    return `<div class="rf-field"><div class="rf-fhead"><div class="rf-flabel">${label}</div>${rfXBtn(g.key, f)}</div>
       <div class="chip-input" onclick="if (event.target === this) this.querySelector('input').focus()">${vals.map((v, i) => {
         const ok = validVal(kind, v);
         return `<span class="vchip ${ok ? '' : 'bad'}" ${ok ? '' : `title="${esc(VAL_HINT[kind])}"`}>${esc(v)}<b onclick="rfRemoveVal('${g.key}','${f}',${i})">×</b></span>`;
       }).join('')}<input data-g="${g.key}" data-f="${f}" placeholder="${vals.length ? '' : esc(ph)}" onkeydown="rfKey(event,this)" onpaste="rfPaste(event,this)" onblur="rfCommit(this)"></div>
       ${vals.some(v => !validVal(kind, v)) ? `<div class="set-hint warn">Red: ${esc(VAL_HINT[kind])}</div>` : ''}</div>`;
   }).join('');
-  const choices = (g.choices || []).map(([f, label, opts]) => `<div class="rf-field"><div class="rf-flabel">${label}</div><div class="chip-row" style="padding:0">${opts.map(o =>
+  const choices = (g.choices || []).filter(([f]) => f in d.v).map(([f, label, opts]) => `<div class="rf-field"><div class="rf-fhead"><div class="rf-flabel">${label}</div>${rfXBtn(g.key, f)}</div><div class="chip-row" style="padding:0">${opts.map(o =>
     `<div class="chip ${(d.v[f] || []).includes(o) ? 'active' : ''}" onclick="rfToggleChoice('${g.key}','${f}','${o}')">${o.toUpperCase()}</div>`).join('')}</div></div>`).join('');
-  const flag = g.flag ? `<div class="rf-field rf-flag"><div class="rf-flabel" style="flex:1">${g.flag[1]}</div>
-    <div class="mini-toggle ${d.flag ? 'on' : ''}" onclick="ruleDraft.groups.${g.key}.flag=!ruleDraft.groups.${g.key}.flag;renderRuleForm()"><div class="mini-toggle-thumb"></div></div></div>` : '';
+  const flag = g.flag && d.flag !== undefined ? `<div class="rf-field rf-flag"><div class="rf-flabel" style="flex:1">${g.flag[1]}</div>
+    <div class="mini-toggle ${d.flag ? 'on' : ''}" onclick="ruleDraft.groups.${g.key}.flag=!ruleDraft.groups.${g.key}.flag;renderRuleForm()"><div class="mini-toggle-thumb"></div></div>${rfXBtn(g.key, g.flag[0])}</div>` : '';
   return `<div class="rf-group ${d.not ? 'not' : ''}" data-g="${g.key}">
     <div class="rf-ghead"><span class="rf-gtitle">${d.not ? 'Not ' : ''}${g.title}${g.desktop ? '<span class="conn-tag muted">desktop</span>' : ''}</span>
       <button class="rf-not ${d.not ? 'on' : ''}" onclick="ruleDraft.groups.${g.key}.not=!ruleDraft.groups.${g.key}.not;renderRuleForm()">except</button>
       <button class="rf-x" onclick="rfRemoveGroup('${g.key}')" title="Remove">×</button></div>
-    ${fields}${more}${choices}${flag}</div>`;
+    ${fields}${choices}${flag}</div>`;
 }
 
-function rfOpenField(g, f) {
-  rfOpenFields.add(g + '.' + f);
+// + Condition: the field goes on its card (the card is made if it is not there yet)
+function rfAddField(g, f) {
+  const grp = ruleDraft.groups[g] = ruleDraft.groups[g] || { not: false, v: {} };
+  if (GROUP[g].flag && f === GROUP[g].flag[0]) grp.flag = true;
+  else grp.v[f] = grp.v[f] || [];
+  rfAddOpen = false;
   renderRuleForm();
-  document.querySelector(`#rf-body input[data-g="${g}"][data-f="${f}"]`).focus();
+  const input = document.querySelector(`#rf-body input[data-g="${g}"][data-f="${f}"]`);
+  if (input) input.focus();
 }
-function rfAddGroup(key) { ruleDraft.groups[key] = { not: false, v: {} }; rfAddOpen = false; renderRuleForm(); }
+// A field's ×: the card goes with its last field
+function rfRemoveField(g, f) {
+  const grp = ruleDraft.groups[g];
+  if (GROUP[g].flag && f === GROUP[g].flag[0]) delete grp.flag; else delete grp.v[f];
+  if (!Object.keys(grp.v).length && grp.flag === undefined) delete ruleDraft.groups[g];
+  renderRuleForm();
+}
 function rfRemoveGroup(key) { delete ruleDraft.groups[key]; renderRuleForm(); }
 function rfRemoveVal(g, f, i) { ruleDraft.groups[g].v[f].splice(i, 1); renderRuleForm(); }
 function rfToggleChoice(g, f, o) {
@@ -202,7 +225,8 @@ function actionJson(r) {
 }
 function ruleJson(r) {
   if (r.composite) return clone(r.composite);
-  const gs = RULE_GROUPS.filter(g => r.groups[g.key]).map(g => [g.key, r.groups[g.key]]);
+  // an empty card says nothing: no JSON for it (a {} inside the logical rule would not read back)
+  const gs = RULE_GROUPS.filter(g => r.groups[g.key] && Object.keys(groupJson(g.key, r.groups[g.key])).length).map(g => [g.key, r.groups[g.key]]);
   // sing-box ORs domain and IP fields inside one rule: the form's AND needs logical then
   const body = gs.some(([, d]) => d.not) || (r.groups.domain && r.groups.ip)
     ? { type: 'logical', mode: 'and', rules: gs.map(([k, d]) => Object.assign(groupJson(k, d), d.not ? { invert: true } : {})) }
@@ -269,6 +293,17 @@ function rfApplyJson() {
   if (!rfCheckJson()) { toast('Fix the JSON first'); return false; }
   const r = ruleFromJson(JSON.parse(document.getElementById('rf-json').value));
   ['id', 'name', 'enabled', 'fallback', 'dns', 'ipTunOnly'].forEach(k => r[k] = ruleDraft[k]);
+  if (r.action !== 'proxy') r.target = ruleDraft.target;   // the JSON has no place for what the action does not use
+  if (r.action !== 'block') r.block = ruleDraft.block;
+  // cards and fields not filled yet are not in the JSON: keep them as the form had them
+  if (!r.composite) Object.entries(ruleDraft.groups).forEach(([k, g]) => {
+    const n0 = r.groups[k], empty = Object.keys(g.v).filter(f => !g.v[f].length && !(n0 && f in n0.v));
+    const flagOff = g.flag === false && !(n0 && n0.flag !== undefined);
+    if (!empty.length && !flagOff) return;
+    const n = r.groups[k] = n0 || { not: g.not, v: {} };
+    empty.forEach(f => n.v[f] = []);
+    if (flagOff) n.flag = false;
+  });
   ruleDraft = r;
   return true;
 }

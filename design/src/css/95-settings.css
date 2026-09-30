@@ -27,7 +27,16 @@
 .set-row.soon{opacity:.5}
 .set-hint.warn{color:var(--warn)}
 .set-input.auth-in{flex:1;width:auto;min-width:0;max-width:210px;font-size:13px;text-align:left}   /* Connection → Password: login / password fields */
-.auth-url{font-family:var(--mono);font-size:11px;color:var(--t2);word-break:break-all;margin-top:8px}
+.auth-lbl{flex:0 0 76px}   /* one label column for Login and Password, so the fields start at the same x */
+.auth-field{position:relative;flex:1;min-width:0}
+.auth-field .auth-in{width:100%;max-width:none;box-sizing:border-box}
+.auth-field .auth-in.has-btn{padding-right:34px}
+.auth-regen{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:26px;height:26px;padding:0;border:none;border-radius:50%;background:none;color:var(--t2);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.auth-regen:active{color:var(--accent)}
+.auth-regen svg{width:15px;height:15px}
+.hint-stack{display:grid}
+.hint-stack > *{grid-area:1/1}
+.hint-stack > [aria-hidden]{visibility:hidden}
 .set-row.hit{animation:ev-hit 2.6s ease-out}   /* a row the rule form's link scrolled to */
 .am-link{margin-left:auto;background:none;border:none;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:0}
 .dns-row{gap:8px;padding:8px 10px 8px 12px}

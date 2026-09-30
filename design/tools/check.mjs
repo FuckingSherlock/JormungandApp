@@ -117,10 +117,15 @@ const SHOTS = {
   rules:      async p => { await p.evaluate(() => openRules()); await settle(p); },
   'rules-more': async p => { await p.evaluate(() => { openRules(); document.getElementById('rules-body').scrollTop = 9999; }); await settle(p); },
   'rule-form': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); }); await settle(p); },
-  'rule-new':  async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddGroup('ip'); rfAddValues('domain', 'domain_suffix', 'youtube.com, bad domain', false); }); await settle(p); },
+  'rule-new':  async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddField('ip', 'ip_cidr'); rfAddValues('domain', 'domain_suffix', 'youtube.com, bad domain', false); }); await settle(p); },
   // a rule with an IP condition: the "IP conditions only in TUN" block, the state of Resolve for IP rules, the link
-  'rule-ip-resolve': async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddGroup('ip'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8, 192.168.0.0/16', false); document.querySelector('.rf-ip').scrollIntoView({ block: 'end' }); }); await settle(p); },
-  'rule-json': async p => { await p.evaluate(() => { openRules(); openRuleForm('r4'); setRfTab('json'); }); await settle(p); },
+  'rule-ip-resolve': async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddField('ip', 'ip_cidr'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8, 192.168.0.0/16', false); document.querySelector('.rf-ip').scrollIntoView({ block: 'end' }); }); await settle(p); },
+  // Domains + IP (a logical AND in JSON) with an except card; the JSON tab, as the form wrote it
+  'rule-json': async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddValues('domain', 'domain_suffix', 'youtube.com', false); rfAddField('ip', 'ip_cidr'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8', false); rfAddField('port', 'port'); rfAddValues('port', 'port', '443', false); ruleDraft.groups.port.not = true; setRfTab('json'); }); await settle(p); },
+  // + Condition open: every field not on the form yet, under its card's title
+  'rule-add': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); rfAddOpen = true; renderRuleForm(); document.querySelector('.rf-add').scrollIntoView(); }); await settle(p); },
+  // Settings → DNS opened from the rule form's link: above the form
+  'rule-dns-over': async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddField('ip', 'ip_cidr'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8', false); rfOpenDnsResolve(); }); await p.waitForTimeout(700); },
   'rule-test': async p => { await p.evaluate(() => { openRules(); openRuleTest(); document.getElementById('rt-input').value = 'discord.com'; runRuleTest(); }); await settle(p); },
   'rule-order': async p => { await p.evaluate(() => { openRules(); openRuleOrder(); }); await settle(p); },
   'rule-io':   async p => { await p.evaluate(() => { openRules(); openRuleIO(); setRuleIO('export', 'clash'); }); await settle(p); },
@@ -613,7 +618,9 @@ async function runChecks() {
       out.socks = window.__copied === 'socks5://alice:S3cret%26pass@127.0.0.1:' + connCfg.port;
       $('conn-copy-http').click();
       out.http = window.__copied === 'http://alice:S3cret%26pass@127.0.0.1:' + connCfg.port;
-      out.shown = $('conn-auth-url').textContent === 'socks5://alice:S3cret%26pass@127.0.0.1:' + connCfg.port;
+      // the fields start at one x, the regenerate button sits inside the Password field
+      const ru = $('conn-user').getBoundingClientRect(), rp = $('conn-pass').getBoundingClientRect(), rb = $('conn-newpass').getBoundingClientRect();
+      out.aligned = Math.abs(ru.left - rp.left) < 1 && Math.abs(ru.right - rp.right) < 1 && rb.left >= rp.left && rb.right <= rp.right + 1 && !!$('conn-newpass').querySelector('svg');
       // New password: another one, the login stays
       const old = connCfg.proxyPass;
       $('conn-newpass').click();
@@ -629,12 +636,49 @@ async function runChecks() {
         });
       out.validation = !bad.length;
       out.validationWhy = bad.join(',');
-      // off: nothing kept
+      // off: the credentials are kept, the plan does not send them, the copy strings have none
+      const kept = { u: connCfg.proxyUser, p: connCfg.proxyPass };
       document.querySelector('[data-key=proxyAuth] .mini-toggle').click();
-      out.cleared = !connCfg.proxyAuth && connCfg.proxyUser === '' && connCfg.proxyPass === '' && !$('conn-user') && livePlan().mixedAuth === undefined && planSig() === sigOff;
+      out.kept = !connCfg.proxyAuth && connCfg.proxyUser === kept.u && connCfg.proxyPass === kept.p && !$('conn-user') && livePlan().mixedAuth === undefined && planSig() === sigOff;
+      $('conn-copy-socks').click();
+      out.plainSocks = window.__copied === 'socks5://127.0.0.1:' + connCfg.port;
+      $('conn-copy-http').click();
+      out.plainHttp = window.__copied === 'http://127.0.0.1:' + connCfg.port;
+      // on again: the same ones come back
+      document.querySelector('[data-key=proxyAuth] .mini-toggle').click();
+      out.reused = connCfg.proxyUser === kept.u && connCfg.proxyPass === kept.p && $('conn-user').value === kept.u
+        && JSON.stringify(livePlan().mixedAuth) === JSON.stringify({ user: kept.u, pass: kept.p });
+      // empty ones are generated on
+      document.querySelector('[data-key=proxyAuth] .mini-toggle').click();
+      connCfg.proxyUser = connCfg.proxyPass = '';
+      document.querySelector('[data-key=proxyAuth] .mini-toggle').click();
+      out.generatedEmpty = /^[a-z0-9]{8}$/.test(connCfg.proxyUser) && connCfg.proxyPass.length === 20;
+      // no row changes its height on the toggles (both hint texts are reserved)
+      const hs = () => ['proxyPort', 'proxyAuth', 'killSwitch', 'downProxy'].map(k => { const e = document.querySelector(`#conn-settings [data-key="${k}"]`); return e ? Math.round(e.getBoundingClientRect().height) : -1; }).join();
+      connCfg.killSwitch = false; document.querySelector('[data-key=proxyAuth] .mini-toggle').click(); renderConnSettings();
+      const h0 = hs();
+      document.querySelector('[data-key=proxyAuth] .mini-toggle').click(); const h1 = hs();
+      setSysProxy(!connCfg.sysProxy); renderConnSettings(); const h2 = hs();
+      document.querySelector('[data-key=downProxy] .mini-toggle').click(); const h3 = hs();
+      out.heights = h0 === h1 && h1 === h2 && h2 === h3 && !h0.includes('-1');
+      out.heightsWhy = [h0, h1, h2, h3].join(' | ');
       return out;
     });
-    expect(Object.entries(r).every(([k, v]) => k === 'validationWhy' || v) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    expect(Object.entries(r).every(([k, v]) => k === 'validationWhy' || k === 'heightsWhy' || v) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('per-app dialog: its top edge stays put through Default → Proxy → Split, and it ends above the bottom nav', async () => {
+    const p = await openPage(browser);
+    await p.evaluate(() => { openRules(); openApps(); openAppAct('com.whatsapp'); });
+    await p.waitForTimeout(400);
+    const top = () => p.evaluate(() => { const r = document.getElementById('sh-appact').getBoundingClientRect(); return { t: Math.round(r.top), b: Math.round(r.bottom), h: innerHeight, nav: document.querySelector('.bottomnav').getBoundingClientRect().top }; });
+    const a = await top();
+    await p.evaluate(() => { appDraft.act = 'proxy'; appDraft.target = 'src:src1'; renderAppAct(); });
+    const b = await top();
+    await p.evaluate(() => { appDraft.split = true; appDraft.udp.act = 'proxy'; appDraft.udp.target = 'src:src1'; renderAppAct(); });
+    const c = await top();
+    expect(a.t === b.t && b.t === c.t && Math.abs(a.t - a.h / 3) <= 2 && c.b <= c.nav + 1 && b.b > a.b, JSON.stringify({ a, b, c }));
     await p.close();
   });
 
@@ -2101,9 +2145,10 @@ async function runChecks() {
       const n = ruleOrder.length; saveRuleForm();
       out.refused = ruleOrder.length === n;
       rfRemoveVal('domain', 'domain_suffix', 3);
-      rfOpenField('domain', 'domain_keyword');
+      out.noLinks = !document.querySelector('#rf-body .rf-more');   // no "+ Keyword" links inside cards
+      rfAddField('domain', 'domain_keyword');
       out.fold = !!document.querySelector('#rf-body input[data-f="domain_keyword"]');
-      rfAddGroup('port'); rfAddValues('port', 'port', '443, 8000-9000', false);
+      rfAddField('port', 'port'); rfAddValues('port', 'port', '443, 8000-9000', false);
       ruleDraft.action = 'direct';
       setRfTab('json');
       const j = JSON.parse(document.getElementById('rf-json').value);
@@ -2130,6 +2175,77 @@ async function runChecks() {
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('rule form: + Condition offers every field; a field × (the last takes the card); no links inside cards', async () => {
+    const r = await page.evaluate(() => {
+      const out = {};
+      openRules(); openRuleForm();
+      out.startOne = Object.keys(ruleDraft.groups).join() === 'domain' && document.querySelectorAll('#rf-body .rf-field').length === 1 && !document.querySelector('#rf-body .rf-more');
+      // every field of every group is reachable through the picker, and leaves it once on the form
+      ruleDraft.groups = {}; rfAddOpen = true; renderRuleForm();
+      const all = RULE_GROUPS.flatMap(g => rfFieldsOf(g).map(([f]) => [g.key, f]));
+      out.offered = all.every(([g, f]) => !!document.querySelector(`#rf-body .rf-add .chip[onclick="rfAddField('${g}','${f}')"]`)) && document.querySelectorAll('#rf-body .rf-add .chip').length === all.length;
+      all.forEach(([g, f]) => { rfAddOpen = true; renderRuleForm(); document.querySelector(`#rf-body .rf-add .chip[onclick="rfAddField('${g}','${f}')"]`).click(); });
+      out.allOn = document.querySelectorAll('#rf-body .rf-group').length === RULE_GROUPS.length && !document.querySelector('#rf-body .rf-add, #rf-body .rf-add-btn')
+        && document.querySelectorAll('#rf-body .rf-group > .rf-ghead').length === RULE_GROUPS.length
+        && document.querySelectorAll('#rf-body .rf-field .rf-x').length === all.length && !document.querySelector('#rf-body .rf-more');
+      // × on a field: the others stay; on the last one the card goes
+      document.querySelector('#rf-body .rf-group[data-g="domain"] .rf-field .rf-x').click();
+      out.oneField = ruleDraft.groups.domain && !('domain_suffix' in ruleDraft.groups.domain.v) && 'domain' in ruleDraft.groups.domain.v && document.querySelectorAll('#rf-body .rf-group[data-g="domain"] .rf-field').length === 5;
+      ['domain', 'domain_keyword', 'domain_regex', 'geosite', 'rule_set'].forEach(f => rfRemoveField('domain', f));
+      out.cardGone = !ruleDraft.groups.domain && !document.querySelector('#rf-body .rf-group[data-g="domain"]');
+      rfRemoveField('ip', 'ip_is_private'); rfRemoveField('ip', 'ip_cidr');
+      out.flagField = !!ruleDraft.groups.ip && ruleDraft.groups.ip.flag === undefined; rfRemoveField('ip', 'geoip');
+      out.ipGone = !ruleDraft.groups.ip;
+      rfRemoveField('network', 'network');
+      out.choice = !!ruleDraft.groups.network && !('network' in ruleDraft.groups.network.v) && 'protocol' in ruleDraft.groups.network.v;
+      // the picker offers the removed field again, and the card × still removes a whole card
+      rfAddOpen = true; renderRuleForm();
+      out.again = !!document.querySelector('#rf-body .rf-add .chip[onclick="rfAddField(\'domain\',\'domain_suffix\')"]') && !document.querySelector('#rf-body .rf-add .chip[onclick="rfAddField(\'network\',\'protocol\')"]');
+      rfRemoveGroup('port'); out.cardX = !ruleDraft.groups.port;
+      closeSheet('ruleform');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('rule form: Form → JSON → Form gives the same draft (single group, Domains + IP, except, GeoIP / local networks, fallback, dns, block, name)', async () => {
+    const r = await page.evaluate(() => {
+      const out = {};
+      const canon = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a < b ? -1 : 1)) : v);
+      const tgt = allTargets().find(Boolean), srv = dnsOrder[dnsOrder.length - 1];
+      const g = (v, o) => Object.assign({ not: false, v }, o);
+      const cases = {
+        single: { groups: { domain: g({ domain_suffix: ['a.com', 'b.com'], domain_keyword: ['ads'] }) } },
+        domainIp: { action: 'direct', dns: srv, groups: { domain: g({ domain_suffix: ['a.com'] }), ip: g({ ip_cidr: ['10.0.0.0/8', '1.1.1.1'] }) } },
+        except: { name: 'Not RU', groups: { domain: g({ domain_suffix: ['ru'] }, { not: true }), port: g({ port: ['443'] }) } },
+        exceptBoth: { ipTunOnly: true, groups: { domain: g({ domain: ['x.org'] }, { not: true }), ip: g({ geoip: ['ru'] }, { not: true }) } },
+        geoipLan: { groups: { ip: g({ geoip: ['ru', 'by'] }, { flag: true }), network: g({ network: ['tcp'], protocol: ['tls', 'quic'] }) } },
+        lanOnly: { action: 'direct', groups: { domain: g({ geosite: ['youtube'], rule_set: ['ru-blocked'] }), ip: g({}, { flag: true }) } },
+        fallback: { action: 'proxy', target: tgt, fallback: 'block', name: 'Via target', groups: { domain: g({ domain_regex: ['^a.+$'] }), source: g({ source_ip_cidr: ['192.168.1.0/24'], source_port: ['5000'] }) } },
+        proxyMain: { groups: { process: g({ process: ['chrome.exe', '/usr/bin/x'] }), ip: g({ ip_cidr: ['8.8.8.8'] }) } },
+        directDns: { action: 'direct', dns: srv, groups: { domain: g({ domain_suffix: ['lan'] }) } },
+        blockDrop: { action: 'block', block: 'drop', groups: { domain: g({ domain_keyword: ['tracker'] }), ip: g({ ip_cidr: ['1.2.3.4'] }) } },
+        blockReject: { action: 'block', block: 'reject', name: 'No ads', groups: { domain: g({ domain_suffix: ['ads.com'] }) } },
+        emptyCard: { groups: { domain: g({ domain_suffix: [] }), ip: g({ ip_cidr: ['10.0.0.0/8'] }) } },
+      };
+      openRules(); openRuleForm();
+      for (const [name, o] of Object.entries(cases)) {
+        const want = newRule(o); want.id = '';
+        ruleDraft = JSON.parse(JSON.stringify(want)); rfTab = 'form'; renderRuleForm();
+        const groups = Object.keys(want.groups).length;
+        setRfTab('json'); setRfTab('form');
+        out[name] = canon(ruleDraft) === canon(want) && !document.querySelector('#rf-body .rf-plaque') && document.querySelectorAll('#rf-body .rf-group').length === groups;
+        if (!out[name]) out[name + '_got'] = canon(ruleDraft) + ' vs ' + canon(want);
+      }
+      // a genuinely foreign rule still says so
+      openRuleForm('r4');
+      out.foreign = !!document.querySelector('#rf-body .rf-plaque') && !document.querySelector('#rf-body .rf-group');
+      closeSheet('ruleform');
+      return out;
+    });
+    expect(Object.entries(r).every(([k, v]) => k.endsWith('_got') || v === true), JSON.stringify(r));
   });
 
   await check('rules: drag reorders my rules; search hides grips', async () => {
@@ -2189,9 +2305,9 @@ async function runChecks() {
       out.order = APP_ACTS.map(a => a[1]).join() === 'Default,Proxy,Direct,Block';
       openRules(); openApps(); openAppAct('com.whatsapp');
       out.orderUi = [...document.querySelectorAll('#aa-body .seg3 button')].map(b => b.textContent).join() === 'Default,Proxy,Direct,Block';
-      // the toggle sits right under the segment, also on Default
-      const kids = [...document.querySelector('#aa-body .aa-half').children].map(e => e.classList.contains('seg3') ? 'seg' : e.classList.contains('aa-split') ? 'split' : '');
-      out.toggleUnderSeg = kids.indexOf('seg') + 1 === kids.indexOf('split') && !!document.getElementById('aa-split');
+      // the Split toggle is the first item, above the segment, its explanation in a (?)
+      const first = document.getElementById('aa-body').firstElementChild;
+      out.toggleFirst = first.classList.contains('aa-split') && !!document.getElementById('aa-split') && !!first.querySelector('.help-btn') && !first.querySelector('.set-hint');
       // If unavailable: only for a proxy half with a target, saved with the app
       appDraft.act = 'proxy'; renderAppAct();
       out.noFallbackMain = !document.querySelector('#aa-fallback-all');
@@ -2705,8 +2821,10 @@ async function runChecks() {
       const has = k => !!document.querySelector(`#conn-settings [data-key="${k}"]`);
       switchTab('settings'); openSheet('setconn');
       out.off = has('killSwitch') && !has('killOnDisconnect') && !has('killWhileClosed') && has('downProxy') && connCfg.downProxy === 'remove';
-      connCfg.downProxy = 'keep'; renderConnSettings();
-      out.chip = document.querySelector('#conn-settings [data-key="downProxy"] .chip.active').textContent === 'Keep it';
+      const dpTg = () => document.querySelector('#conn-settings [data-key="downProxy"] .mini-toggle');
+      out.chipOn = dpTg().classList.contains('on');
+      dpTg().click();
+      out.chip = connCfg.downProxy === 'keep' && !dpTg().classList.contains('on');
       connCfg.killSwitch = true; renderConnSettings();
       out.on = !has('downProxy') && has('killOnDisconnect') && has('killWhileClosed');
       const wc = () => document.querySelector('#conn-settings [data-key="killWhileClosed"]');
@@ -2945,6 +3063,50 @@ async function runChecks() {
     await p.close();
   });
 
+  await check('Logs: count badge keeps the chip width (1 vs 123), warn / error lines are two lines (meta, message), same-name servers in Auto events get the protocol / address, header buttons stay put when Search opens', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs');
+    await p.waitForTimeout(500);
+    const r = await p.evaluate(async () => {
+      const out = {}, wait = ms => new Promise(r => setTimeout(r, ms)), rect = s => document.querySelector(s).getBoundingClientRect();
+      setLogTab('raw');
+      const line = (n, lvl) => ({ n, t: Date.now(), lvl, src: 'sing-box', msg: lvl + ' message ' + n });
+      logState.lines = [line(1, 'warn'), line(2, 'info')];
+      renderLogSummary();
+      const chip = () => document.querySelector('#logLevels .chip[data-lvl="warn"]'), w1 = chip().getBoundingClientRect().width;
+      logState.lines = Array.from({ length: 123 }, (_, i) => line(i + 10, 'warn'));
+      renderLogSummary();
+      const badge = document.getElementById('logWarnCount'), br = badge.getBoundingClientRect(), cr = chip().getBoundingClientRect();
+      out.badge = chip().getBoundingClientRect().width === w1 && badge.textContent === '123' && getComputedStyle(badge).position === 'absolute' && br.right > cr.right - 12 && br.top < cr.top + 4;
+      out.badgeColor = getComputedStyle(badge).backgroundColor;
+      logState.lines = [line(1, 'error'), line(2, 'info'), line(3, 'warn')];
+      renderLogs();
+      const w = document.querySelector('#logList .log-line.warn'), i = document.querySelector('#logList .log-line.info');
+      out.twoLines = !!w && w.querySelector('.log-msg').getBoundingClientRect().top >= w.querySelector('.log-meta').getBoundingClientRect().bottom - 1
+        && !!i && i.querySelector('.log-msg').getBoundingClientRect().top >= i.querySelector('.log-meta').getBoundingClientRect().bottom - 1;
+      const btns = () => [...document.querySelectorAll('#rawActions .icon-btn')].map(b => { const q = b.getBoundingClientRect(); return q.x + ',' + q.y; }).join(' ');
+      const b0 = btns(); toggleLogSearch(true); await wait(150);
+      out.slots = b0 === btns();
+      toggleLogSearch(false);
+      // the same name, another protocol / the same protocol on another address
+      const sid = sourceOrder.find(x => sourcesData[x].kind === 'sub' && sourcesData[x].nodes.length > 1) || sourceOrder[0], ns = sourcesData[sid].nodes;
+      const a = ns[0], b = { ...ns[1], id: 'dup-proto', name: a.name, protocol: a.protocol === 'hy2' ? 'vless' : 'hy2', reality: false, outbound: undefined };
+      ns.push(b);
+      const ev = { cat: 'auto', type: 'fastest', level: 'info', data: { route: visibleOrder()[0], from: sid + '::' + a.id, to: sid + '::' + b.id } };
+      const t1 = evDescribe(ev).title, f1 = evValue('to', ev.data.to, ev);
+      const c = { ...ns[1], id: 'dup-same', name: a.name, protocol: a.protocol, address: 'other.example', port: '8443', reality: a.reality, outbound: a.outbound };
+      ns.push(c);
+      ev.data.to = sid + '::' + c.id;
+      const t2 = evDescribe(ev).title;
+      ns.length -= 2;
+      out.same = t1.includes('· ' + String(b.protocol).toUpperCase()) && t1.includes('· ' + String(a.protocol).toUpperCase()) && f1.includes('·') && t2.includes('other.example:8443');
+      out.titles = t1 + ' | ' + t2;
+      return out;
+    });
+    await p.close();
+    expect(r.badge && r.twoLines && r.slots && r.same, JSON.stringify(r));
+  });
+
   await check('Events: Clear (confirm) empties the journal, Export has both logs as text, sub results and user actions are journaled (own)', async () => {
     const p = await openPage(browser);
     await tab(p, 'logs');
@@ -3020,20 +3182,27 @@ async function runChecks() {
       const block = () => !!document.querySelector('#rf-body .rf-ip');
       openRuleForm('r1');
       out.noIp = !block();
-      rfAddGroup('ip');
+      rfAddField('ip', 'ip_cidr');
       out.emptyIp = !block();
       rfAddValues('ip', 'ip_cidr', '10.0.0.0/8', false);
-      out.shown = block() && /Resolve for IP rules is via Cloudflare/.test(document.querySelector('#rf-body .rf-ip .set-hint').textContent)
-        && !document.querySelector('#rf-body .rf-ip .sub-checkbox').classList.contains('checked');
+      // the block: checkbox + (?) + link only; the explanation and the state live in the (?)
+      const helpText = () => document.getElementById('help-body').textContent;
+      out.shown = block() && !document.querySelector('#rf-body .rf-ip .set-hint') && !!document.querySelector('#rf-body .rf-ip .rf-ip-row .help-btn')
+        && !!document.querySelector('#rf-body .rf-ip .rf-ip-link') && !document.querySelector('#rf-body .rf-ip .sub-checkbox').classList.contains('checked');
+      document.querySelector('#rf-body .rf-ip .help-btn').click();
+      out.helpOpen = document.getElementById('sh-help').classList.contains('open') && !ruleDraft.ipTunOnly && /Resolve for IP rules is via Cloudflare/.test(helpText()) && /this rule is not ticked/.test(helpText());
+      closeSheet('help');
       document.querySelector('#rf-body .rf-ip-row').click();
-      out.flagOn = ruleDraft.ipTunOnly === true && /never makes the core resolve/.test(document.querySelector('#rf-body .rf-ip .set-hint').textContent);
+      document.querySelector('#rf-body .rf-ip .help-btn').click();
+      out.flagOn = ruleDraft.ipTunOnly === true && /this rule is ticked/.test(helpText());
+      closeSheet('help');
       setRfTab('json'); setRfTab('form');
       out.jsonKeeps = ruleDraft.ipTunOnly === true && !JSON.stringify(ruleJson(ruleDraft)).includes('ipTunOnly');
       saveRuleForm();
       out.saved = rulesData.r1.ipTunOnly === true && routingPlan().rules.find(x => x.id === 'r1').ipTunOnly === true && !('ipTunOnly' in routingPlan().rules.find(x => x.id === 'r2'));
-      openRuleForm('r3'); rfAddGroup('ip'); ruleDraft.groups.ip.flag = true; renderRuleForm();
-      out.localNets = block();
-      ruleDraft.groups.ip.flag = false; rfAddValues('ip', 'geoip', 'ru', false);
+      openRuleForm('r3'); rfAddField('ip', 'ip_is_private'); renderRuleForm();
+      out.localNets = block() && ruleDraft.groups.ip.flag === true;
+      ruleDraft.groups.ip.flag = false; rfAddField('ip', 'geoip'); rfAddValues('ip', 'geoip', 'ru', false);
       out.geoip = block();
       out.json = ruleHasIpCondition({ composite: { type: 'logical', mode: 'or', rules: [{ domain_keyword: ['x'] }, { ip_cidr: ['1.1.1.1/32'] }] }, groups: {} })
         && !ruleHasIpCondition(rulesData.r4);
@@ -3041,16 +3210,31 @@ async function runChecks() {
       // dropping the IP conditions drops the flag
       openRuleForm('r1'); rfRemoveGroup('ip'); saveRuleForm();
       out.dropped = !('ipTunOnly' in rulesData.r1);
-      // the link: the form gives way to Settings → DNS at the setting; Back returns to the form with the new state
-      openRuleForm('r1'); rfAddGroup('ip'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8', false);
-      document.querySelector('#rf-body .rf-ip-link').click();
-      await wait(150);
+      // the link: Settings → DNS opens ABOVE the form (its draft stays under it); ×, swipe and Back all return to the form as it was
       const open = n => document.getElementById('sh-' + n).classList.contains('open');
-      out.link = open('setdns') && !open('ruleform') && sheetStack[sheetStack.length - 1].name === 'setdns' && !!document.querySelector('#dns-settings [data-key=dnsResolve].hit');
-      setDnsCfg('resolve', 'off');
-      goBack();
-      await wait(100);
-      out.back = open('ruleform') && !open('setdns') && /Resolve for IP rules is off/.test(document.querySelector('#rf-body .rf-ip .set-hint').textContent) && ruleDraft.groups.ip.v.ip_cidr[0] === '10.0.0.0/8';
+      const z = n => +getComputedStyle(document.getElementById('sh-' + n)).zIndex;
+      const fire = (el, type, y) => el.dispatchEvent(new PointerEvent(type, { clientY: y, bubbles: true }));
+      const closers = {
+        x: () => document.querySelector('#sh-setdns .sheet-close').click(),
+        swipe: () => { fire(document.querySelector('#sh-setdns .sheet-head'), 'pointerdown', 100); fire(window, 'pointermove', 320); fire(window, 'pointerup', 320); },
+        back: () => history.back(),
+      };
+      openRuleForm('r1'); rfAddField('ip', 'ip_cidr'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8', false); ruleDraft.name = 'Keep me';
+      for (const [how, close] of Object.entries(closers)) {
+        document.querySelector('#rf-body .rf-ip-link').click();
+        await wait(150);
+        out[how + 'Over'] = open('setdns') && open('ruleform') && sheetStack[sheetStack.length - 1].name === 'setdns' && z('setdns') > z('ruleform')
+          && !!document.querySelector('#dns-settings [data-key=dnsResolve].hit');
+        await wait(350);
+        setDnsCfg('resolve', how === 'x' ? 'off' : 'auto');
+        close();
+        await wait(700);
+        out[how + 'Back'] = open('ruleform') && !open('setdns') && sheetStack[sheetStack.length - 1].name === 'ruleform' && z('ruleform') > z('setdns')
+          && ruleDraft.groups.ip.v.ip_cidr[0] === '10.0.0.0/8' && ruleDraft.name === 'Keep me' && document.getElementById('rf-name').value === 'Keep me';
+      }
+      document.querySelector('#rf-body .rf-ip .help-btn').click();
+      out.state = /Resolve for IP rules is via Cloudflare/.test(helpText());
+      closeSheet('help');
       closeSheet('ruleform');
       return out;
     });

@@ -19,10 +19,27 @@ function openSheet(name) {
   showSheet(name, true);
   syncBackHistory();
 }
+// A sheet opened above the ones already open, which stay (drafts and all) instead of being replaced: e.g.
+// Settings → DNS over the rule form. Their level drops below the base one while it is open, so a
+// base-level sheet can cover level-2 ones. Any way of closing it leaves them as they were; Back's next stop.
+const sheetUnder = {};   // the sheet opened over -> the names lowered under it
+function setSheetUnder(name, on) { ['ov-', 'sh-'].forEach(p => document.getElementById(p + name).classList.toggle('under', on)); }
+function openSheetOver(open) {
+  const under = sheetStack.map(s => s.name);
+  under.forEach(n => setSheetUnder(n, true));
+  open();
+  const top = sheetStack[sheetStack.length - 1].name;
+  if (!under.includes(top)) sheetUnder[top] = under;
+}
 // A sheet may clean up on close (any way: ×, overlay, swipe, Done, back).
 const sheetCloseHooks = {};
 function closeSheet(name) {
   if (sheetCloseHooks[name]) sheetCloseHooks[name]();
+  if (sheetUnder[name]) {   // raised again once it has slid away
+    const lowered = sheetUnder[name];
+    delete sheetUnder[name];
+    setTimeout(() => lowered.forEach(n => { if (!Object.values(sheetUnder).some(a => a.includes(n))) setSheetUnder(n, false); }), 340);
+  }
   showSheet(name, false);
   const i = sheetStack.findIndex(s => s.name === name);
   if (i < 0) return;

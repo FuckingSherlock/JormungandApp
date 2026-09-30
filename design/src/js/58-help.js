@@ -99,7 +99,7 @@ const HELP = {
   apps: { title: 'Per-app routing', items: [
     ['Default', 'the app goes by the rules like everything else.'],
     ['Direct / Proxy / Block', 'the app always goes this way, before any other rule.'],
-    ['Split TCP / UDP', 'two routes for one app, e.g. Discord voice apart from chat.'],
+    ['Split TCP / UDP', 'two routes for one app, e.g. Discord voice apart from chat, or block UDP (QUIC) so the app falls back to TCP.'],
   ] },
   dns: { title: 'DNS', items: [
     ['Servers', 'the first ticked server from the top answers; if it fails, the next one does. Drag ⋮⋮ to reorder.'],
@@ -107,6 +107,10 @@ const HELP = {
     ['ms', 'how fast the server answers. Tap it to check again.'],
     ['Hijack DNS', 'catches apps that ask their own DNS servers. Works in TUN mode only.'],
     ['FakeIP', 'answers at once with a stand-in address; faster, but some apps dislike it.'],
+  ] },
+  dnsauto: { title: 'Switch automatically', items: [
+    ['On', 'a server that stops answering is replaced by the next one; the higher one takes over again when it recovers.'],
+    ['Off', 'the first server stays in use even when it does not answer.'],
   ] },
 };
 

@@ -106,11 +106,11 @@ function appHalfHtml(h, path, proto, between = '') {
 const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default') ? 'default' : 'own';
 function renderAppAct() {
   const d = appDraft;
-  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row"><div class="set-label">Split TCP / UDP<div class="set-hint">Different actions per protocol, e.g. block UDP (QUIC) so the app falls back to TCP</div></div>
+  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row"><div class="set-label">Split TCP / UDP<button class="help-btn" onclick="openHelp('apps')" title="What is this?">?</button></div>
       <div class="mini-toggle ${d.split ? 'on' : ''}" id="aa-split" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div></div>`;
-  document.getElementById('aa-body').innerHTML = (d.split
-    ? toggle + appHalfHtml(d, 'appDraft', 'TCP') + appHalfHtml(d.udp, 'appDraft.udp', 'UDP')
-    : appHalfHtml(d, 'appDraft', '', toggle)) + appSvcNote(appEditing, appDraftAct(d));
+  document.getElementById('aa-body').innerHTML = toggle + (d.split
+    ? appHalfHtml(d, 'appDraft', 'TCP') + appHalfHtml(d.udp, 'appDraft.udp', 'UDP')
+    : appHalfHtml(d, 'appDraft', '')) + appSvcNote(appEditing, appDraftAct(d));
 }
 // The service with the same app: what it does, and who wins.
 function appSvcNote(pkg, act) {

@@ -65,9 +65,10 @@ function logLineHtml(l, q) {
   let msg = esc(l.msg);
   if (q) msg = msg.replace(new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`);
   msg = msg.replace(/^\[(\d+ [^\]]+)\] /, '<span class="log-cid">[$1]</span> ');
-  const tag = (l.lvl === 'warn' || l.lvl === 'error' ? `<span class="log-tag ${l.lvl}">${l.lvl === 'warn' ? 'WARN' : 'ERROR'}</span>` : '')
-    + (l.src === 'core' ? '<span class="log-tag core">core</span>' : '');
-  return `<div class="log-line ${l.lvl}" data-n="${l.n}"><span class="log-time">${logTime(l.t)}</span><span class="log-msg">${tag}${msg}</span></div>`;
+  const lvlTag = `<span class="log-tag ${l.lvl}">${l.lvl === 'warn' ? 'WARN' : l.lvl.toUpperCase()}</span>`;
+  const tag = l.src === 'core' ? '<span class="log-tag core">core</span>' : '';
+  // every line: the meta line (time, level, source), the message on its own line below
+  return `<div class="log-line ${l.lvl}" data-n="${l.n}"><div class="log-meta"><span class="log-time">${logTime(l.t)}</span>${lvlTag}${tag}</div><span class="log-msg">${msg}</span></div>`;
 }
 
 function renderLogs() {
@@ -93,7 +94,9 @@ function appendLogs(fresh) {
 // and the pill "↓ N new" / "↓ Latest" of the tab that is open.
 function renderLogSummary() {
   const all = logState.lines, warn = all.filter(l => l.lvl === 'warn').length, err = all.filter(l => l.lvl === 'error').length;
-  document.getElementById('logWarnCount').textContent = warn + err ? String(warn + err) : '';
+  const wc = document.getElementById('logWarnCount');
+  wc.textContent = warn + err ? String(warn + err) : '';
+  wc.classList.toggle('err', err > 0);   // red with an error, yellow for warnings only
   document.getElementById('logsSummary').textContent = logTab === 'events' ? evSummaryText()
     : all.length + ' line' + (all.length === 1 ? '' : 's')
       + (err ? ' · ' + err + ' error' + (err === 1 ? '' : 's') : '') + (warn ? ' · ' + warn + ' warning' + (warn === 1 ? '' : 's') : '');
@@ -156,7 +159,7 @@ function toggleLogSearch(show) {
   show = show == null ? bar.style.display === 'none' : show;
   bar.style.display = show ? '' : 'none';
   document.getElementById('logSearchBtn').classList.toggle('on', show);
-  if (show) input.focus();
+  if (show) input.focus({ preventScroll: true });
   else if (input.value) { input.value = ''; renderLogs(); }
 }
 

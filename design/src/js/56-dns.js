@@ -159,10 +159,10 @@ function renderDns() {
       <div class="node-add" onclick="openDnsForm()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add DNS server</div>
     </div>
     <div class="set-group">
-      <div class="set-row" data-key="dnsAuto"><div class="set-label" style="flex:1">Switch automatically<div class="set-hint">${dnsCfg.auto ? 'A server that stops answering is replaced by the next one; the higher one takes over again when it recovers' : 'The first server stays in use even when it does not answer'}</div></div>
+      <div class="set-row" data-key="dnsAuto"><div class="set-label" style="flex:1">Switch automatically<button class="help-btn" onclick="openHelp('dnsauto')" title="What is this?">?</button></div>
         ${toggle(dnsCfg.auto, "setDnsCfg('auto',!dnsCfg.auto)")}</div>
     </div>
-    <div class="am-label">Through the proxy port</div>
+    <div class="am-label">Without TUN</div>
     <div class="set-group">
       <div class="set-row" data-key="dnsResolve"><div class="set-label" style="flex:1">Resolve for IP rules<div class="set-hint ${resolveWarn ? 'warn' : ''}">${resolveHint}</div></div>
         <select class="set-select" id="dns-resolve" style="max-width:46%" onchange="setDnsCfg('resolve',this.value)">${resolveOpts.map(([v, l]) =>
@@ -284,11 +284,15 @@ const newProxyLogin = () => randomToken(8, 'abcdefghjkmnpqrstuvwxyz23456789');
 const newProxySecret = () => randomToken(20, 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789');
 function toggleProxyAuth() {
   connCfg.proxyAuth = !connCfg.proxyAuth;
-  // turned on: fresh ones; off: nothing left behind in the snapshot / backups
-  connCfg.proxyUser = connCfg.proxyAuth ? newProxyLogin() : '';
-  connCfg.proxyPass = connCfg.proxyAuth ? newProxySecret() : '';
+  // off keeps the login and password (the plan just stops sending them); on reuses them, generates only when empty
+  if (connCfg.proxyAuth) {
+    if (!connCfg.proxyUser) connCfg.proxyUser = newProxyLogin();
+    if (!connCfg.proxyPass) connCfg.proxyPass = newProxySecret();
+  }
   renderConnSettings();
 }
+// Both texts of a hint in one grid cell, the inactive one hidden: the row keeps its height when it flips.
+const hintStack = (first, a, b) => `<div class="set-hint" ${first ? '' : 'aria-hidden="true"'}>${a}</div><div class="set-hint" ${first ? 'aria-hidden="true"' : ''}>${b}</div>`;
 function newProxyPassword() {
   connCfg.proxyPass = newProxySecret();
   renderConnSettings();
@@ -314,7 +318,8 @@ function setProxyCred(which, input) {
   renderConnSettings();
 }
 // what a program is told to use: socks5://login:password@127.0.0.1:port or http://…; the login and password percent-encoded
-const proxyUrl = scheme => scheme + '://' + encodeURIComponent(connCfg.proxyUser) + ':' + encodeURIComponent(connCfg.proxyPass) + '@127.0.0.1:' + connCfg.port;
+// (no credentials while the password is off: socks5://127.0.0.1:port)
+const proxyUrl = scheme => scheme + '://' + (connCfg.proxyAuth ? encodeURIComponent(connCfg.proxyUser) + ':' + encodeURIComponent(connCfg.proxyPass) + '@' : '') + '127.0.0.1:' + connCfg.port;
 const copyProxyUrl = scheme => copyText(proxyUrl(scheme), scheme === 'socks5' ? 'SOCKS5 address' : 'HTTP address');
 
 function renderConnSettings() {
@@ -324,22 +329,20 @@ function renderConnSettings() {
     <div class="set-group">
       <div class="set-row"><div class="set-label" style="flex:1">System proxy<div class="set-hint">Apps that follow the OS proxy setting go through the core. Also on Home</div></div>
         ${toggle(connCfg.sysProxy, 'setSysProxy(!connCfg.sysProxy)')}</div>
-      <div class="set-row"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — ${connCfg.proxyAuth ? 'set it by hand in other apps, with the login below' : 'the system proxy points here; set it by hand in other apps'}</div></div>
+      <div class="set-row stack" data-key="proxyPort"><div class="am-head"><div class="set-label" style="flex:1">Proxy port<div class="set-hint">HTTP + SOCKS5 on 127.0.0.1 — set it by hand in other apps</div></div>
         <input class="set-input am-num port-num" id="conn-port" inputmode="numeric" value="${connCfg.port}" onchange="setProxyPort(this)"></div>
-      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<div class="set-hint">${connCfg.proxyAuth ? 'The port asks for this login' + (connCfg.sysProxy ? '. The system proxy uses its own port without one: Windows cannot send a password' : '') : 'Off: any program on this PC can use the port'}</div></div>
-        ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
-      ${connCfg.proxyAuth ? `
-      <div class="set-row set-sub" data-key="proxyUser"><div class="set-label" style="flex:0 0 auto">Login</div>
-        <input class="set-input am-num auth-in" id="conn-user" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyUser)}" onchange="setProxyCred('user',this)"></div>
-      <div class="set-row set-sub" data-key="proxyPass"><div class="set-label" style="flex:0 0 auto">Password</div>
-        <input class="set-input am-num auth-in" id="conn-pass" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyPass)}" onchange="setProxyCred('pass',this)"></div>
-      <div class="set-row set-sub stack" data-key="proxyCopy">
-        <div class="chip-row">
+        <div class="chip-row" style="padding:0">
           <div class="chip" id="conn-copy-socks" onclick="copyProxyUrl('socks5')">Copy SOCKS5</div>
           <div class="chip" id="conn-copy-http" onclick="copyProxyUrl('http')">Copy HTTP</div>
-          <div class="chip" id="conn-newpass" onclick="newProxyPassword()">New password</div>
-        </div>
-        <div class="auth-url" id="conn-auth-url">${esc(proxyUrl('socks5'))}</div></div>` : ''}
+        </div></div>
+      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<div class="hint-stack">${hintStack(connCfg.proxyAuth, 'The port asks for this login. The system proxy uses its own port without one: Windows cannot send a password', 'Off: any program on this PC can use the port')}</div></div>
+        ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
+      ${connCfg.proxyAuth ? `
+      <div class="set-row set-sub" data-key="proxyUser"><div class="set-label auth-lbl">Login</div>
+        <div class="auth-field"><input class="set-input am-num auth-in" id="conn-user" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyUser)}" onchange="setProxyCred('user',this)"></div></div>
+      <div class="set-row set-sub" data-key="proxyPass"><div class="set-label auth-lbl">Password</div>
+        <div class="auth-field"><input class="set-input am-num auth-in has-btn" id="conn-pass" spellcheck="false" autocomplete="off" autocapitalize="off" value="${esc(connCfg.proxyPass)}" onchange="setProxyCred('pass',this)">
+          <button class="auth-regen" id="conn-newpass" onclick="newProxyPassword()" title="New password">${ICON.refresh}</button></div></div>` : ''}
       <div class="set-row" data-key="killSwitch"><div class="set-label" style="flex:1">Kill switch<div class="set-hint">Blocks traffic when the VPN is down. Works for apps that use the system proxy; full block needs TUN.</div></div>
         ${toggle(connCfg.killSwitch, 'toggleKillSwitch()')}</div>
       ${connCfg.killSwitch ? `
@@ -348,12 +351,8 @@ function renderConnSettings() {
       <div class="set-row set-sub ${closedOk ? '' : 'dim'}" data-key="killWhileClosed"${closedOk ? '' : ' onclick="offerClosedKill()"'}><div class="set-label" style="flex:1">Also while the app is closed<div class="set-hint">${closedOk ? 'The proxy stays set when the app is closed, so nothing leaks before it starts again' : 'Needs Launch at startup and Connect on launch — tap to turn them on'}</div></div>
         ${toggle(closedOk && connCfg.killWhileClosed, closedOk ? 'connCfg.killWhileClosed=!connCfg.killWhileClosed;renderConnSettings()' : '')}</div>`
       : `
-      <div class="set-row" data-key="downProxy" style="flex-direction:column;align-items:stretch;gap:10px">
-        <div class="set-label">If the VPN cannot recover<div class="set-hint">${connCfg.downProxy === 'keep' ? 'Keep it: the proxy stays set, so apps that use it have no internet until the VPN is back' : 'Remove: traffic goes direct until the VPN is back'}</div></div>
-        <div class="chip-row" style="padding:0">
-          <div class="chip ${connCfg.downProxy !== 'keep' ? 'active' : ''}" onclick="connCfg.downProxy='remove';renderConnSettings()">Remove proxy</div>
-          <div class="chip ${connCfg.downProxy === 'keep' ? 'active' : ''}" onclick="connCfg.downProxy='keep';renderConnSettings()">Keep it</div>
-        </div></div>`}
+      <div class="set-row" data-key="downProxy"><div class="set-label" style="flex:1">Remove the proxy if the VPN cannot recover<div class="hint-stack">${hintStack(connCfg.downProxy !== 'keep', 'On: the system proxy is removed and traffic goes direct until the VPN is back', 'Off: the proxy stays set, so apps that use it have no internet until the VPN is back')}</div></div>
+        ${toggle(connCfg.downProxy !== 'keep', "connCfg.downProxy=connCfg.downProxy==='keep'?'remove':'keep';renderConnSettings()")}</div>`}
     </div>
     <div class="set-group">
       <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>

@@ -58,13 +58,23 @@ const EV_NOTIF = {
 const evEntry = id => { if (id == null || id === '') return ''; const e = connectEntry(id); return e ? e.name : String(id); };
 const evServer = k => { if (k == null || k === '') return ''; const n = nodeOfKey(String(k)); return n ? n.name : String(k); };
 const evSource = (sid, name) => (sourcesData[sid] && sourcesData[sid].name) || name || String(sid || '');
+// A switch between two servers: when both show the same name (another protocol, or another address),
+// the protocol is appended ("· HY2"), and when that is the same too, the address:port.
+function evServerPair(from, to) {
+  const a = evServer(from), b = evServer(to);
+  if (!from || !to || a !== b) return [a, b];
+  const na = nodeOfKey(String(from)), nb = nodeOfKey(String(to));
+  if (!na || !nb || String(from) === String(to)) return [a, b];
+  const pa = String(protoLabel(na)).toUpperCase(), pb = String(protoLabel(nb)).toUpperCase();
+  return pa !== pb ? [`${a} · ${pa}`, `${b} · ${pb}`] : [`${a} · ${na.address}:${na.port}`, `${b} · ${nb.address}:${nb.port}`];
+}
 const evName = k => String(k).includes('::') ? evServer(k) : evEntry(k);   // 'sid::nid' is a server, anything else an entry
 function evDuration(ms) {
   const s = Math.round(ms / 1000);
   return s < 90 ? s + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : Math.floor(s / 3600) + ' h ' + Math.round((s % 3600) / 60) + ' min';
 }
 function evReason(d) {
-  const from = d.route ? evServer(d.from) : evEntry(d.from), to = d.route ? evServer(d.to) : evEntry(d.to);
+  const [from, to] = d.route ? evServerPair(d.from, d.to) : [evEntry(d.from), evEntry(d.to)];
   if (d.reason === 'failover') return `${from} failed${d.fails ? ' ' + d.fails + ' checks' : ' its checks'}`;
   if (d.reason === 'back') return `${to} is back — returned to it`;
   if (d.reason === 'fastest') return `${to} is faster`;
@@ -84,8 +94,8 @@ const EV_TEXT = {
   'conn/restored': d => ['Connection restored', d.downMs != null ? 'Down for ' + evDuration(d.downMs) : ''],
   'conn/offline': () => ['No network', 'The system reports no connection'],
   'conn/online': d => ['Network is back', d.downMs != null ? 'Down for ' + evDuration(d.downMs) : ''],
-  'auto/switched': d => [d.route ? `Auto: ${evEntry(d.route)} — ${evServer(d.from)} → ${evServer(d.to)}` : `Auto: ${evEntry(d.from)} → ${evEntry(d.to)}`, evReason(d)],
-  'auto/fastest': d => [`Fastest: ${evEntry(d.route)} — ${evServer(d.from)} → ${evServer(d.to)}`, `${evServer(d.to)} is now the fastest`],
+  'auto/switched': d => { const [f, t] = evServerPair(d.from, d.to); return [d.route ? `Auto: ${evEntry(d.route)} — ${f} → ${t}` : `Auto: ${evEntry(d.from)} → ${evEntry(d.to)}`, evReason(d)]; },
+  'auto/fastest': d => { const [f, t] = evServerPair(d.from, d.to); return [`Fastest: ${evEntry(d.route)} — ${f} → ${t}`, `${t} is now the fastest`]; },
   'auto/unstable': d => [`${evEntry(d.id)} is unstable`, `Dropped ${d.strikes}× — back to it after ${Math.max(1, Math.round(d.holdMs / 60000))} min without drops`],
   'site/blocked': d => {
     const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route;
@@ -145,6 +155,7 @@ function evValue(k, v, e) {
   if (k === 'route' && (v === 'global' || v === 'rules')) return v === 'global' ? 'Global' : 'By rules';
   if (k === 'by') return v === 'user' ? 'You' : 'An error';
   if (k === 'source') return evSource(v);
+  if ((k === 'from' || k === 'to') && e && e.cat === 'auto' && e.data && e.data.route && typeof v === 'string') return evServerPair(e.data.from, e.data.to)[k === 'from' ? 0 : 1];
   if (['entry', 'server', 'route', 'from', 'to', 'via', 'id'].includes(k) && typeof v === 'string') return evName(v);
   return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
@@ -224,10 +235,13 @@ function evAct(key, id) {
 function evRowHtml(g) {
   const e = g.ev, d = evDescribe(e), acts = evActions(e), rep = g.items.length;
   const tag = g.level === 'warn' || g.level === 'error' ? `<span class="log-tag ${g.level}">${g.level === 'warn' ? 'WARN' : 'ERROR'}</span>` : '';
+  const repH = rep > 1 ? `<span class="ev-rep">×${rep}</span>` : '', timeH = `<span class="ev-time">${evClock(g.at)}</span>`;
+  // the meta line (level for warnings / errors, repeats, time), the title on its own line below
+  const top = `<div class="ev-meta">${timeH}${tag}${repH}</div><div class="ev-title">${esc(d.title)}</div>`;
   return `<div class="ev-row cat-${e.cat} lvl-${g.level}${evState.open.has(g.key) ? ' open' : ''}" data-key="${g.key}" data-ids="${g.items.map(x => x.id).join(',')}" onclick="evToggle(${g.key})">
     <div class="ev-ico">${EV_ICON[e.cat] || ''}</div>
     <div class="ev-body">
-      <div class="ev-top"><span class="ev-title">${tag}${esc(d.title)}</span>${rep > 1 ? `<span class="ev-rep">×${rep}</span>` : ''}<span class="ev-time">${evClock(g.at)}</span></div>
+      ${top}
       ${d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
       ${acts.length ? `<div class="ev-acts">${acts.map(([k, l]) => `<button class="ev-act" onclick="event.stopPropagation();evAct('${k}',${e.id})">${l}</button>`).join('')}</div>` : ''}
       <div class="ev-more">${evFieldsHtml(g)}</div>

@@ -14,11 +14,14 @@
 .sheet-body::-webkit-scrollbar{display:none}
 
 /* ── Sheets (level 2 — nested modals for add/create flows) ── */
+.overlay.under{z-index:8}
+.sheet.under{z-index:9}
 .overlay-l2{z-index:20}
 .sheet-l2{z-index:21}
 .overlay-l3{z-index:30}
 .overlay-l4{z-index:40}
 .sheet-l3{z-index:31}
+#ov-help{z-index:42}#sh-help{z-index:43}   /* the tips open over dialogs (level 4) too */
 
 /* [?] help: a small round button next to a title, and its tips sheet */
 .help-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:7px;padding:0;border-radius:50%;
