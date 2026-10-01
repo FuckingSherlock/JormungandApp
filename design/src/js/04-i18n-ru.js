@@ -8,7 +8,7 @@
    Source «источник» · Subscription «подписка» · Profile «профиль» · Chain «цепочка» ·
    entry (a row of the route / catalogue) «пункт» · chain entry / exit «вход» / «выход»
    Auto, Fastest, Direct, Block — NOT translated, left in English inline («в режиме Auto», «идёт Direct»); sys proxy (system proxy) too
-   Manual «Вручную» · Priority «Приоритет» · Main flow «Основной поток» · Global «Глобально» · Proxy «Прокси» · Reject «Отклонить» ·
+   Manual «Вручную» · Priority «Приоритет» · Main flow «Основной поток» · Global «Глобально» · Default, Proxy as labels / buttons / values — NOT translated (only inside hint sentences) · Reject «Отклонить» ·
    If unavailable «Если недоступно» · Spare servers «Запасные узлы» ·
    Ping «Пинг» · Latency «Задержка» · Update «Обновить» · Rule set «Набор правил» · Service «Сервис» ·
    Kill switch stays «Kill switch»: the term the Russian VPN clients and forums use; a translation
@@ -195,8 +195,6 @@ Object.assign(I18N, { ru: {
   "Data": "Данные",
   "Data folder": "Папка данных",
   "Decrypt password": "Пароль для расшифровки",
-  "Default": "По умолчанию",
-  "Default:": "По умолчанию:",
   "Delete": "Удалить",
   "Delete chain": "Удалить цепочку",
   "Delete profile": "Удалить профиль",
@@ -472,6 +470,7 @@ Object.assign(I18N, { ru: {
   "Own priority order": "Свой порядок приоритета",
   "Pairs": "Пары",
   "Password": "Пароль",
+  "Fallback (if unavailable)": "Запасной вариант (если недоступно)",
   "Paste a subscription URL": "Вставьте URL подписки",
   "Paste a subscription URL first": "Сначала вставьте URL подписки",
   "Pause checks with the screen off": "Не проверять при выключенном экране",
@@ -495,7 +494,6 @@ Object.assign(I18N, { ru: {
   "Protocol": "Протокол",
   "Protocol (sniffed)": "Протокол (определён)",
   "Provider’s period": "Период провайдера",
-  "Proxy": "Прокси",
   "PROXY": "ПРОКСИ",
   "Proxy first": "Сначала прокси",
   "Proxy port": "Порт прокси",
@@ -791,7 +789,8 @@ Object.assign(I18N, { ru: {
   "Nothing picked — goes through the main flow.": "Ничего не выбрано — идёт через основной поток.",
   "Nothing to connect — add a subscription in Nodes": "Нечего подключать — добавьте подписку в «Узлах»",
   "Off in Nodes, no working server or deleted": "Выключен в «Узлах», нет рабочего узла или удалён",
-  "Off: any program on this PC can use the port": "Выкл.: порт может использовать любая программа на этом ПК",
+  "any program on this PC can use the port": "порт может использовать любая программа на этом ПК",
+  "Password on the port": "Пароль на порту",
   "Off: the app stays silent in the background": "Выкл.: в фоне приложение молчит",
   "Off: the proxy stays set, so apps that use it have no internet until the VPN is back": "Выкл.: sys proxy остаётся, поэтому у приложений, которые его используют, нет интернета, пока VPN не вернётся",
   "on for at least one entry, or pick one yourself with MANUAL.": "хотя бы у одного пункта или выберите пункт сами кнопкой «ВРУЧНУЮ».",
@@ -844,7 +843,7 @@ Object.assign(I18N, { ru: {
   "the next entries are pinged ahead (on their own period), so a switch lands on one that is known to work. 0 = fewer pings, slower failover.": "следующие пункты пингуются заранее (со своим периодом), чтобы переключение попало на заведомо рабочий. 0 = меньше пингов, медленнее переключение.",
   "the order Auto tries entries in — drag ⋮⋮ in that list.": "порядок, в котором Auto перебирает пункты, — перетаскивайте ⋮⋮ в этом списке.",
   "the order here is the route’s priority, unless the Route sheet has its own.": "порядок здесь — приоритет маршрута, если у «Маршрута» нет своего.",
-  "The port asks for this login. The system proxy uses its own port without one: Windows cannot send a password": "Порт запрашивает этот логин. sys proxy использует свой порт без пароля: Windows не умеет отправлять пароль",
+  "the port asks for this login. The system proxy uses its own port without one: Windows cannot send a password": "порт запрашивает этот логин. sys proxy использует свой порт без пароля: Windows не умеет отправлять пароль",
   "The profile connects through the fastest of its servers.": "Профиль подключается через самый быстрый из своих узлов.",
   "The proxy stays set when the app is closed, so nothing leaks before it starts again": "Прокси остаётся при закрытом приложении, чтобы ничего не утекло до его повторного запуска",
   "the proxy stays, but nothing guarantees it any more.": "sys proxy остаётся, но больше ничем не гарантирован.",
@@ -876,7 +875,7 @@ Object.assign(I18N, { ru: {
   "where matching traffic goes: the main flow or a chosen profile, chain, subscription or node.": "куда идёт подходящий трафик: в основной поток или в выбранный профиль, цепочку, подписку или узел.",
   "which tab of Nodes the route uses. Everything is created and edited in Nodes.": "какую вкладку «Узлы» использует маршрут. Всё создаётся и редактируется в «Узлах».",
   "your own set of servers, from any subscriptions.": "ваш набор узлов из любых подписок.",
-  "your traffic goes direct (If the VPN cannot recover: Remove proxy).": "ваш трафик идёт Direct (Если VPN не удаётся восстановить: Убрать sys proxy).",
+  "the system proxy is removed and your traffic goes direct.": "sys proxy снимается, и ваш трафик идёт Direct.",
   "your traffic goes to the entry server first, then out through the exit. Sites see the exit’s address.": "ваш трафик идёт сначала на входной узел, затем выходит через выходной. Сайты видят адрес выхода.",
   // ── units, counts, time ({#0} = a number, {0} = any text; an array = [1, 2–4, 5+]) ──
   "{#0} s": "{0} с",
@@ -1121,7 +1120,7 @@ Object.assign(I18N, { ru: {
   "Delete subscription": "Удалить подписку",
   "Trying again in the background": "Повторяем в фоне",
   "The system proxy is kept so nothing leaks. Trying again in the background": "Sys proxy сохранён, чтобы ничего не утекло. Повторяем в фоне",
-  "The connection stays, but if the VPN goes down, your traffic goes direct (If the VPN cannot recover: Remove proxy).": "Соединение сохраняется, но если VPN упадёт, ваш трафик пойдёт Direct (Если VPN не удаётся восстановить: Убрать sys proxy).",
+  "The connection stays, but if the VPN goes down, the system proxy is removed and your traffic goes direct.": "Соединение сохраняется, но если VPN упадёт, sys proxy снимется, и ваш трафик пойдёт Direct.",
   "This query leaves outside the tunnel, through a direct server": "Этот запрос уходит вне туннеля, через прямой узел",
   "VPN is down · {0} · retrying": "VPN не работает · {0} · повторяем",
   "Removed by the provider {0}. If a subscription update brings it back within": "Удалён провайдером {0}. Если обновление подписки вернёт его в течение",
@@ -1281,4 +1280,10 @@ Object.assign(I18N, { ru: {
   "Core checks": "Проверки ядра",
   "Latency check": "Проверка задержки",
   "DNS check": "Проверка DNS",
+
+  // hints (batch 2)
+  "rules on Default, and apps": "правила на Default и приложения",
+  "https:// (DoH) · tls:// (DoT) · quic:// (DoQ) · udp:// or an IP · system": "https:// (DoH) · tls:// (DoT) · quic:// (DoQ) · udp:// или IP · system",
+  "Disable sys proxy": "Отключить sys proxy",
+  "Enter 0–{#0} ms": "Введите 0–{0} мс",
 } });

@@ -27,7 +27,7 @@ let appRules = {
   'ru.sberbankmobile': { act: 'direct', target: '', fallback: 'default', split: false },
 };
 const APP_ACTS = [['default', 'Default'], ['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
-const appBlankHalf = () => ({ act: 'default', target: '', fallback: 'default' });
+const appBlankHalf = () => ({ act: 'default', target: '', fallback: 'default', fallbackTarget: '' });   // fallbackTarget: UI only so far (fallback 'main' = Proxy)
 
 // Full shape from any stored one; the old { act: 'proxy', split, udpTarget } becomes udp: { act: 'proxy', target: udpTarget }.
 function appNormalize(a) {
@@ -80,38 +80,65 @@ function appStateHtml(pkg) {
 /* ── One app's action (small dialog) ── */
 let appEditing = null, appDraft = null;
 function openAppAct(pkg) {
-  appEditing = pkg;
+  appEditing = pkg; appTab = 'tcp';
   appDraft = clone(appNormalize(appRules[pkg]));
   document.getElementById('aaTitle').textContent = APPS.find(a => a.pkg === pkg).name;
   renderAppAct();
   openSheet('appact');
 }
-// One action (h = appDraft or appDraft.udp, path = its JS path): the segment, and for Proxy the
-// target with "If unavailable" — the same rows as the rule form — or a hint for the others.
-// `between` goes right under the segment (the Split switch, while it is off).
-function appHalfHtml(h, path, proto, between = '') {
-  const id = proto ? proto.toLowerCase() : 'all';
+// One action (h = appDraft or appDraft.udp, path = its JS path), the same rows for every action:
+// Route (Default | Proxy | Direct | Block), Via (the target picker) and Fallback ("If unavailable":
+// Default | Proxy | Direct | Block; Proxy = through a target of its own, an extra Via row under it).
+// Via and Fallback stay in place, dimmed and inert, unless Route is Proxy.
+const APP_LINK = '<svg class="aa-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+let appTab = 'tcp';
+// fallback value -> label: 'main' (the old "Main flow") is the Proxy button
+const APP_FALLBACKS = [['default', 'Default'], ['main', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
+function appHalfHtml(h, path, proto) {
+  const id = proto ? proto.toLowerCase() : 'all', own = h.act === 'proxy';
   const hint = { default: proto ? `No own route for ${proto}: it goes by the rules` : 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN',
     block: proto ? `${proto} is blocked while connected` : 'No network at all while connected' }[h.act];
+  const via = own ? targetRowHtml('Via', h.target, `t => { ${path}.target = t; renderAppAct(); }`)
+    : `<div class="set-row tgt-row aa-inert"><div class="set-label">Via</div><span class="tgt-val aa-dash">—</span></div>`;
+  const fb = `<div class="set-row aa-route aa-fb ${own ? '' : 'aa-inert'}"><div class="set-label">Fallback (if unavailable)</div>
+      <div class="seg3 wide" id="aa-fallback-${id}">${APP_FALLBACKS.map(([v, l]) =>
+        `<button class="${h.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${own ? '' : 'disabled'} onclick="${path}.fallback='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>`;
+  const fbVia = own && h.fallback === 'main'
+    ? targetRowHtml('Via', h.fallbackTarget, `t => { ${path}.fallbackTarget = t; renderAppAct(); }`).replace('tgt-row', 'tgt-row aa-fb-via') : '';
   return `<div class="aa-half" data-half="${id}">
-    ${proto ? `<div class="aa-proto">${proto}</div>` : ''}
-    <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${h.act === v ? 'on ' + v : ''}" onclick="${path}.act='${v}';renderAppAct()">${l}</button>`).join('')}</div>
-    ${between}
-    ${h.act === 'proxy' ? `<div class="set-group aa-group">
-      ${targetRowHtml('Via', h.target, `t => { ${path}.target = t; renderAppAct(); }`)}
-      ${h.target ? fallbackRowsHtml(h, path, 'renderAppAct', 'aa-fallback-' + id) : ''}
-    </div>` : `<div class="set-hint aa-hint">${hint}</div>`}</div>`;
+    <div class="set-group aa-group">
+      <div class="set-row aa-route"><div class="set-label">Route</div>
+        <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${h.act === v ? 'on ' + v : ''}" onclick="${path}.act='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>
+      ${via}${fb}${fbVia}
+    </div>${own ? '' : `<div class="set-hint aa-hint">${hint}</div>`}</div>`;
 }
 // The app has an own route unless every half is Default.
 const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default') ? 'default' : 'own';
+const appTabHalf = () => appTab === 'udp' ? ['appDraft.udp', 'UDP', appDraft.udp] : ['appDraft', 'TCP', appDraft];
 function renderAppAct() {
   const d = appDraft;
-  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row"><div class="set-label">Split TCP / UDP<button class="help-btn" onclick="openHelp('apps')" title="What is this?">?</button></div>
+  if (!d.split) appTab = 'tcp';
+  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row">${APP_LINK}<div class="set-label">Split TCP / UDP<button class="help-btn" onclick="openHelp('apps')" title="What is this?">?</button></div>
       <div class="mini-toggle ${d.split ? 'on' : ''}" id="aa-split" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div></div>`;
-  document.getElementById('aa-body').innerHTML = toggle + (d.split
-    ? appHalfHtml(d, 'appDraft', 'TCP') + appHalfHtml(d.udp, 'appDraft.udp', 'UDP')
-    : appHalfHtml(d, 'appDraft', '')) + appSvcNote(appEditing, appDraftAct(d));
+  // the tabs look and swipe like Nodes' Simple / Profiles (swipe: segSwipeStart, as the Fastest / Priority switch)
+  const tabs = d.split ? `<div class="nodes-tabs aa-tabs" id="aa-tabs">
+      <button class="nodes-tab ${appTab === 'tcp' ? 'active' : ''}" data-tab="tcp" onclick="setAppTab('tcp')">TCP</button>
+      <button class="nodes-tab ${appTab === 'udp' ? 'active' : ''}" data-tab="udp" onclick="setAppTab('udp')">UDP</button>
+      <div class="nodes-tab-ink" id="aa-tab-ink" style="transform:translateX(${appTab === 'udp' ? 100 : 0}%)"></div></div>` : '';
+  const [path, proto, h] = appTabHalf();
+  document.getElementById('aa-body').innerHTML = toggle + tabs + `<div id="aa-card">${appHalfHtml(h, path, d.split ? proto : '')}</div>` + appSvcNote(appEditing, appDraftAct(d));
 }
+// Slides the pill and swaps the card without redrawing the tabs.
+function setAppTab(tab) {
+  if (tab === appTab || !appDraft.split) return;
+  appTab = tab;
+  document.getElementById('aa-tab-ink').style.transform = `translateX(${tab === 'udp' ? 100 : 0}%)`;
+  document.querySelectorAll('#aa-tabs .nodes-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  const [path, proto, h] = appTabHalf();
+  document.getElementById('aa-card').innerHTML = appHalfHtml(h, path, proto);
+}
+// segSwipeStart reports a right swipe as 'priority' and a left one as 'fastest': back to TCP / on to UDP.
+function appSwipeTab(m) { setAppTab(m === 'priority' ? 'tcp' : 'udp'); }
 // The service with the same app: what it does, and who wins.
 function appSvcNote(pkg, act) {
   const svc = serviceOfApp(pkg), sv = svc && quickCfg.services[svc[0]];

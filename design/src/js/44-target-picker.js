@@ -40,7 +40,6 @@ function tpToggle(t) {
   renderTargetPicker();
 }
 
-const TP_CHECK = '<svg class="tp-check" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 const TP_CHEVRON = open => `<svg class="src-chevron tp-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${open ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg>`;
 
 // opts.rows (a list of {sid, node}) makes the card unfoldable; opts.id = its source / profile id.
@@ -52,7 +51,7 @@ function tpCardHtml(t, name, meta, below, opts = {}) {
         <div class="src-name">${fold ? `<button class="conn-state ${picked ? 'on' : ''}" onclick="event.stopPropagation();pickTarget('${t}')" title="Use the whole item as the target">auto</button>` : ''}${name}${i.ok ? '' : '<span class="conn-tag off">off</span>'}</div>
         <div class="src-meta">${meta}</div>
       </div>
-      ${picked && !fold ? TP_CHECK : ''}${fold ? TP_CHEVRON(open) : ''}
+      ${fold ? TP_CHEVRON(open) : ''}
     </div>
     ${below}${open ? tpBodyHtml(t, opts.id, opts.rows) : ''}
   </div>`;
@@ -67,7 +66,7 @@ function tpBodyHtml(t, id, refs) {
     return `<div class="node-row ps-node on ${nt === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" data-t="${nt}" onclick="pickTarget('${nt}')">
       ${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
-      <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}${nt === tpCurrent ? TP_CHECK : ''}</div>`;
+      <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`;
   }).join('');
   const hint = priority ? 'Priority: the first working one from the top.' : 'Fastest: the quickest working one.';
   return `<div class="conn-body"><div class="seg-row"><div class="set-hint conn-hint conn-pick-hint">${hint}</div></div>

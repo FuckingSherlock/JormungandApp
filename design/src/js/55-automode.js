@@ -81,7 +81,7 @@ function setAutoCfg(key, val) {
 function setAutoThreshold(input) {
   const v = Number(input.value.trim());
   if (input.value.trim() !== '' && Number.isInteger(v) && v >= 0 && v <= AUTO_THRESHOLD_MAX) autoCfg.threshold = v;
-  else toast('Enter 0–' + AUTO_THRESHOLD_MAX + ' ms');
+  else toast(t('Enter 0–{#0} ms', AUTO_THRESHOLD_MAX));
   renderAutoMode();
 }
 // retryPause takes tenths (a comma too), the minutes whole numbers.

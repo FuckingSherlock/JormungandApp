@@ -632,7 +632,7 @@ async function runChecks() {
       const set = (id, v) => { $(id).value = v; $(id).dispatchEvent(new Event('change')); };
       const out = {};
       const sigOff = planSig();
-      out.off = connCfg.proxyAuth === false && !$('conn-user') && livePlan().mixedAuth === undefined && /any program on this PC/i.test(text());
+      out.off = connCfg.proxyAuth === false && !$('conn-user') && livePlan().mixedAuth === undefined && !!document.querySelector('[data-key=proxyAuth] .help-btn');
       document.querySelector('[data-key=proxyAuth] .mini-toggle').click();
       out.generated = connCfg.proxyAuth && /^[a-z0-9]{8}$/.test(connCfg.proxyUser) && connCfg.proxyPass.length === 20
         && $('conn-user').value === connCfg.proxyUser && $('conn-pass').value === connCfg.proxyPass;
@@ -694,17 +694,83 @@ async function runChecks() {
     await p.close();
   });
 
-  await check('per-app dialog: its top edge stays put through Default → Proxy → Split, and it ends above the bottom nav', async () => {
-    const p = await openPage(browser);
-    await p.evaluate(() => { openRules(); openApps(); openAppAct('com.whatsapp'); });
+  await check('per-app dialog: vertically centred, Split tabs only while Split is on, swipe TCP → UDP, Via inert unless Proxy, fits 320 wide at 120%', async () => {
+    const p = await openPage(browser, { width: 320 });
+    await p.evaluate(() => { applyScale(UI_SCALE_MAX); openRules(); openApps(); openAppAct('com.whatsapp'); });
     await p.waitForTimeout(400);
-    const top = () => p.evaluate(() => { const r = document.getElementById('sh-appact').getBoundingClientRect(); return { t: Math.round(r.top), b: Math.round(r.bottom), h: innerHeight, nav: document.querySelector('.bottomnav').getBoundingClientRect().top }; });
-    const a = await top();
+    const box = () => p.evaluate(() => { const r = document.getElementById('sh-appact').getBoundingClientRect(); return { t: Math.round(r.top), b: Math.round(r.bottom), h: innerHeight }; });
+    const a = await box();
+    const out = { centred: Math.abs((a.t + a.b) / 2 - a.h / 2) <= 2 };
+    out.noTabs = await p.evaluate(() => !document.getElementById('aa-tabs') && document.querySelectorAll('#aa-body .aa-route .seg3 button').length === 8);
+    out.inertDefault = await p.evaluate(() => document.querySelectorAll('#aa-body .aa-inert').length === 2 && /—/.test(document.querySelector('#aa-body .aa-inert').textContent));
+    await p.evaluate(() => { appDraft.act = 'direct'; renderAppAct(); });
+    out.inertDirect = await p.evaluate(() => { document.querySelector('#aa-body .aa-inert').click(); return document.querySelectorAll('#aa-body .aa-inert').length === 2 && !document.getElementById('sh-target').classList.contains('open'); });
     await p.evaluate(() => { appDraft.act = 'proxy'; appDraft.target = 'src:src1'; renderAppAct(); });
-    const b = await top();
-    await p.evaluate(() => { appDraft.split = true; appDraft.udp.act = 'proxy'; appDraft.udp.target = 'src:src1'; renderAppAct(); });
-    const c = await top();
-    expect(a.t === b.t && b.t === c.t && Math.abs(a.t - a.h / 3) <= 2 && c.b <= c.nav + 1 && b.b > a.b, JSON.stringify({ a, b, c }));
+    out.proxyLive = await p.evaluate(() => !document.querySelector('#aa-body .aa-inert') && document.querySelectorAll('#aa-body .tgt-row').length === 1 && !document.querySelector('#aa-body .aa-fb-via'));
+    await p.evaluate(() => document.getElementById('aa-split').click());
+    out.tabs = await p.evaluate(() => !!document.getElementById('aa-tabs') && document.querySelector('#aa-tabs .nodes-tab.active').dataset.tab === 'tcp');
+    const bb = await p.evaluate(() => document.getElementById('aa-body').getBoundingClientRect());
+    const y = bb.top + 120, x0 = bb.left + bb.width * 0.7;
+    await p.mouse.move(x0, y); await p.mouse.down(); await p.mouse.move(x0 - 80, y, { steps: 5 }); await p.mouse.up();
+    await p.waitForTimeout(200);
+    out.swipe = await p.evaluate(() => appTab === 'udp' && document.querySelector('#aa-tabs .nodes-tab.active').dataset.tab === 'udp' && document.getElementById('aa-card').dataset.half === undefined && document.querySelector('#aa-card .aa-half').dataset.half === 'udp');
+    await p.mouse.move(bb.left + bb.width * 0.3, y); await p.mouse.down(); await p.mouse.move(bb.left + bb.width * 0.3 + 80, y, { steps: 5 }); await p.mouse.up();
+    await p.waitForTimeout(200);
+    out.swipeBack = await p.evaluate(() => appTab === 'tcp');
+    await p.evaluate(() => document.getElementById('aa-split').click());
+    out.tabsGone = await p.evaluate(() => !document.getElementById('aa-tabs'));
+    out.fits = await p.evaluate(() => { const d = document.getElementById('sh-appact'); return d.scrollWidth <= d.clientWidth + 1 && [...d.querySelectorAll('.set-row')].every(r => r.scrollWidth <= r.clientWidth + 1); });
+    expect(Object.values(out).every(Boolean) && !p.errors.length, JSON.stringify(out) + ' ' + p.errors.join(' | '));
+    await p.close();
+  });
+
+  await check('selected rows: pinned (Route) and picked (target picker) rows show the left stripe unclipped, no ✓ in the picker; kill switch text; password hint behind (?)', async () => {
+    const p = await openPage(browser);
+    const r = await p.evaluate(() => {
+      const out = {};
+      // the stripe is an inset box-shadow: the row must start at or right of every clipping ancestor's left edge
+      const stripe = el => {
+        if (!el || !/inset/.test(getComputedStyle(el).boxShadow)) return false;
+        const l = el.getBoundingClientRect().left;
+        for (let a = el.parentElement; a && a !== document.body; a = a.parentElement)
+          { const cs = getComputedStyle(a); if (cs.overflowX !== 'visible' && a.getBoundingClientRect().left - (cs.overflowX === 'clip' ? parseFloat(cs.overflowClipMargin) || 0 : 0) > l + 0.5) return false; }
+        return el.getBoundingClientRect().width > 0;
+      };
+      openProfiles();
+      const id = visibleOrder().find(x => sourcesData[x] && unitRefs(x).length > 1);
+      toggleRouteRow(id); pinRouteNode(id, refKey(unitRefs(id)[1]));
+      const pin = document.querySelector('#connects-list .conn-body .node-row.pinned');
+      out.pinStripe = stripe(pin) && /3px/.test(getComputedStyle(pin).boxShadow);
+      const hint = document.querySelector('#connects-list .conn-body .conn-hint, #connects-list .conn-body .set-hint');
+      out.pinAligned = !hint || Math.abs(pin.querySelector('.node-name').getBoundingClientRect().left - hint.getBoundingClientRect().left) <= 8;
+      pinRouteNode(id, refKey(unitRefs(id)[1])); toggleRouteRow(id);
+      // the picker
+      openRules(); openRuleForm('r1'); ruleDraft.action = 'proxy'; renderRuleForm();
+      document.querySelector('#rf-body .tgt-row').click();
+      const sid = sourceOrder[0], card = () => document.querySelector(`#tp-body .tp-card[data-t="src:${sid}"]`);
+      card().querySelector('.src-head .conn-state').click();
+      out.cardStripe = stripe(card());
+      out.noCheck = !document.querySelector('#tp-body .tp-check');
+      card().querySelector('.src-head .conn-state').click();
+      card().querySelector('.src-head').click();
+      const row = card().querySelector('.conn-body .node-row'); row.click();
+      const pr = card().querySelector('.node-row.picked');
+      out.rowStripe = stripe(pr);
+      out.noCheck2 = !document.querySelector('#tp-body .tp-check, #tp-body .node-row.picked svg.tp-check');
+      out.flagInset = pr.querySelector('.node-flag').getBoundingClientRect().left - pr.getBoundingClientRect().left >= 10;
+      closeSheet('target'); closeSheet('ruleform'); closeSheet('rules');
+      // kill switch confirm
+      connCfg.killSwitch = true; connected = true; connCfg.downProxy = 'remove'; toggleKillSwitch();
+      const t = document.getElementById('actions-body').textContent;
+      out.killText = !/cannot recover/i.test(t) && /system proxy is removed and your traffic goes direct/.test(t);
+      closeSheet('actions'); connected = false;
+      // password row: hint behind (?)
+      openSheet('setconn'); renderConnSettings();
+      const row2 = document.querySelector('#conn-settings [data-key="proxyAuth"]');
+      out.pwHelp = !!row2.querySelector('.help-btn') && !row2.querySelector('.set-hint, .hint-stack');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean) && !p.errors.length, JSON.stringify(r) + ' ' + p.errors.join(' | '));
     await p.close();
   });
 
@@ -2490,7 +2556,8 @@ async function runChecks() {
       closeSheet('rsform'); closeSheet('rulesets');
       openApps(); openAppAct('com.whatsapp');
       appDraft.act = 'proxy'; appDraft.split = true; appDraft.udp.act = 'proxy'; appDraft.udp.target = 'profile:work'; renderAppAct();
-      out.twoTargets = document.querySelectorAll('#aa-body .tgt-row').length === 2;
+      out.twoTargets = document.querySelectorAll('#aa-body .tgt-row').length === 1;   // Via of the TCP tab
+      setAppTab('udp'); out.udpTab = document.querySelectorAll('#aa-body .tgt-row').length === 1 && !!document.querySelector('#aa-card .aa-half[data-half="udp"]');
       saveAppAct();
       out.saved = appRules['com.whatsapp'].split && /UDP/.test(document.querySelector('.app-row[data-pkg="com.whatsapp"] .app-state').textContent);
       openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.udp.act = 'default'; saveAppAct();
@@ -2507,31 +2574,32 @@ async function runChecks() {
       const out = {}, txt = () => document.getElementById('aa-body').textContent;
       out.order = APP_ACTS.map(a => a[1]).join() === 'Default,Proxy,Direct,Block';
       openRules(); openApps(); openAppAct('com.whatsapp');
-      out.orderUi = [...document.querySelectorAll('#aa-body .seg3 button')].map(b => b.textContent).join() === 'Default,Proxy,Direct,Block';
+      out.orderUi = [...document.querySelectorAll('#aa-body .aa-route:first-child .seg3 button, #aa-body .aa-group > .aa-route:first-child .seg3 button')].map(b => b.textContent).join() === 'Default,Proxy,Direct,Block';
       // the Split toggle is the first item, above the segment, its explanation in a (?)
       const first = document.getElementById('aa-body').firstElementChild;
       out.toggleFirst = first.classList.contains('aa-split') && !!document.getElementById('aa-split') && !!first.querySelector('.help-btn') && !first.querySelector('.set-hint');
       // If unavailable: only for a proxy half with a target, saved with the app
-      appDraft.act = 'proxy'; renderAppAct();
-      out.noFallbackMain = !document.querySelector('#aa-fallback-all');
-      appDraft.target = 'src:src1'; renderAppAct();
-      out.fallbackRow = !!document.querySelector('#aa-fallback-all') && /Default: /.test(txt());
-      document.querySelectorAll('#aa-fallback-all button')[2].click();
-      out.fallbackSet = appDraft.fallback === 'block' && /Off in Nodes/.test(txt());
+      appDraft.act = 'direct'; renderAppAct();
+      out.noFallbackMain = !!document.querySelector("#aa-body .aa-fb.aa-inert") && [...document.querySelectorAll("#aa-fallback-all button")].every(b => b.disabled) && !document.querySelector("#aa-body .aa-fb-via");
+      appDraft.act = 'proxy'; appDraft.target = 'src:src1'; renderAppAct();
+      out.fallbackRow = !!document.querySelector("#aa-fallback-all") && [...document.querySelectorAll("#aa-fallback-all button")].map(b => b.textContent).join() === "Default,Proxy,Direct,Block" && !document.querySelector("#aa-body .aa-fb-via");
+      document.querySelectorAll("#aa-fallback-all button")[1].click(); out.fbVia = document.querySelectorAll("#aa-body .aa-fb-via").length === 1; document.querySelectorAll("#aa-fallback-all button")[3].click();
+      out.fallbackSet = appDraft.fallback === "block" && !document.querySelector("#aa-body .aa-fb-via");
       saveAppAct();
       out.fallbackSaved = appRules['com.whatsapp'].fallback === 'block' && routingPlan().apps.find(a => a.id === 'com.whatsapp').fallback === 'block';
       // Split on Block: TCP Default + UDP Block = one udp reject rule in the plan, nothing for TCP
       openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.split = true; appDraft.udp.act = 'block'; renderAppAct();
-      out.twoBlocks = document.querySelectorAll('#aa-body .aa-half').length === 2 && [...document.querySelectorAll('#aa-body .aa-proto')].map(e => e.textContent).join() === 'TCP,UDP';
+      out.twoBlocks = document.querySelectorAll('#aa-body .aa-half').length === 1 && [...document.querySelectorAll('#aa-tabs .nodes-tab')].map(e => e.textContent).join() === 'TCP,UDP';
       saveAppAct();
       const wa = routingPlan().apps.find(a => a.id === 'com.whatsapp');
       out.udpOnly = wa.split && wa.act === 'default' && wa.udp.act === 'block';
       out.text = appActText(appRules['com.whatsapp']) === 'TCP Default · UDP Block'
         && /UDP Block/.test(document.querySelector('.app-row[data-pkg="com.whatsapp"] .app-state').textContent);
       // Split on Direct, and a proxy half with its own fallback in the UDP block
-      openAppAct('com.whatsapp'); appDraft.act = 'direct'; appDraft.udp.act = 'proxy'; appDraft.udp.target = 'src:src1'; renderAppAct();
+      openAppAct('com.whatsapp'); appDraft.act = 'direct'; appDraft.udp.act = 'proxy'; appDraft.udp.target = 'src:src1'; appDraft.split = true; renderAppAct();
+      setAppTab("udp");
       out.udpFallback = !!document.querySelector('#aa-fallback-udp') && !document.querySelector('#aa-fallback-tcp');
-      document.querySelectorAll('#aa-fallback-udp button')[3].click(); saveAppAct();
+      document.querySelectorAll('#aa-fallback-udp button')[2].click(); saveAppAct();
       const w2 = routingPlan().apps.find(a => a.id === 'com.whatsapp');
       out.splitDirect = w2.act === 'direct' && w2.udp.act === 'proxy' && w2.udp.target === 'src:src1' && w2.udp.fallback === 'direct';
       out.named = 'src:src1' in routingPlan().targets && w2.name === 'WhatsApp';

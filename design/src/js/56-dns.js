@@ -266,7 +266,7 @@ function toggleKillSwitch() {
   const close = "closeSheet('actions');";
   const what = vpn.blocking ? 'The internet is unblocked now: the system proxy is removed.'
     : vpn.down ? 'The VPN is down right now: ' + (connCfg.downProxy === 'keep' ? 'the proxy stays, but nothing guarantees it any more.' : 'the system proxy is removed and your traffic goes direct at once.')
-    : 'The connection stays, but if the VPN goes down, ' + (connCfg.downProxy === 'keep' ? 'nothing guarantees the block any more.' : 'your traffic goes direct (If the VPN cannot recover: Remove proxy).');
+    : 'The connection stays, but if the VPN goes down, ' + (connCfg.downProxy === 'keep' ? 'nothing guarantees the block any more.' : 'the system proxy is removed and your traffic goes direct.');
   openActions('Turn the kill switch off?', `<div class="menu-note">${what}</div>`
     + menuRow(ICON.check, 'Turn it off', close + 'connCfg.killSwitch=false;renderConnSettings()')
     + menuRow(ICON.close, 'Keep it on', close));
@@ -335,7 +335,7 @@ function renderConnSettings() {
           <div class="chip" id="conn-copy-socks" onclick="copyProxyUrl('socks5')">Copy SOCKS5</div>
           <div class="chip" id="conn-copy-http" onclick="copyProxyUrl('http')">Copy HTTP</div>
         </div></div>
-      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<div class="hint-stack">${hintStack(connCfg.proxyAuth, 'The port asks for this login. The system proxy uses its own port without one: Windows cannot send a password', 'Off: any program on this PC can use the port')}</div></div>
+      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<button class="help-btn" onclick="openHelp('proxyauth')" title="What is this?">?</button></div>
         ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
       ${connCfg.proxyAuth ? `
       <div class="set-row set-sub" data-key="proxyUser"><div class="set-label auth-lbl">Login</div>

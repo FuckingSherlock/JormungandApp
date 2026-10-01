@@ -114,9 +114,8 @@
 .tp-label{padding:8px 4px 0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--t3)}
 .tp-card .src-head{padding-left:14px;cursor:pointer}
 .tp-card .src-usage,.tp-card .entry-now{padding-left:14px}
-.tp-card.picked{border-color:var(--accent);background:rgba(var(--accent-rgb),.07)}
+.tp-card.picked{border-color:var(--accent);background:rgba(var(--accent-rgb),.07);box-shadow:inset 3px 0 0 var(--accent)}
 .tp-card.down .src-main{opacity:.6}
-.tp-check{color:var(--accent);flex-shrink:0;margin:0 4px}
 .tp-save{position:absolute;left:0;right:0;bottom:0;padding:12px 18px 14px;background:var(--sheet);border-top:1px solid var(--border);box-shadow:0 -8px 20px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:8px;transform:translateY(110%);transition:transform .25s cubic-bezier(.32,1,.4,1);pointer-events:none}
 .tp-save.show{transform:translateY(0);pointer-events:auto}
 .tp-save .tp-warn{margin:0;text-align:center;display:none}
@@ -124,6 +123,7 @@
 .tp-body.saving{padding-bottom:110px}
 .tp-card .conn-body{padding:2px 14px 10px}
 .tp-card .conn-body .node-row.picked{background:rgba(var(--accent-rgb),.10);box-shadow:inset 3px 0 0 var(--accent)}
+.tp-card .conn-body .node-row{padding-left:12px;padding-right:12px}
 .tp-card .src-name .conn-state{margin-right:8px;vertical-align:2px}
 .tp-card .tp-chevron{flex-shrink:0;margin:0 6px;color:var(--t3)}
 

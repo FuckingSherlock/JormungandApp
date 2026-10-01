@@ -55,7 +55,7 @@
   <div class="overlay overlay-l4" id="ov-appact" onclick="closeSheet('appact')"></div>
   <div class="dialog" id="sh-appact">
     <div class="dialog-title" id="aaTitle"></div>
-    <div id="aa-body"></div>
+    <div id="aa-body" onpointerdown="if (appDraft && appDraft.split) segSwipeStart(event, 'appSwipeTab')"></div>
     <div class="dialog-actions">
       <button class="btn-secondary" onclick="closeSheet('appact')">Cancel</button>
       <button class="btn-secondary primary" onclick="saveAppAct()">Save</button>

@@ -311,5 +311,5 @@
 .conn-body .node-row{cursor:pointer;padding:10px 6px;margin:0 -6px}   /* no frame: text lines up with the hint, the pinned tint still breathes */
 .conn-body .node-row.pinned{background:rgba(var(--warn-rgb),.12);box-shadow:inset 3px 0 0 var(--warn)}
 .conn-hint{margin-bottom:8px}
-.conn-body .se-nodes{margin:0;background:none;border:0;border-radius:0}   /* the row is the frame */
+.conn-body .se-nodes{margin:0;background:none;border:0;border-radius:0;overflow:clip;overflow-clip-margin:6px}   /* the row is the frame */
 .conn-acts{margin-left:auto;display:flex;align-items:center}

@@ -595,7 +595,7 @@ body {
 .conn-body .node-row{cursor:pointer;padding:10px 6px;margin:0 -6px}   /* no frame: text lines up with the hint, the pinned tint still breathes */
 .conn-body .node-row.pinned{background:rgba(var(--warn-rgb),.12);box-shadow:inset 3px 0 0 var(--warn)}
 .conn-hint{margin-bottom:8px}
-.conn-body .se-nodes{margin:0;background:none;border:0;border-radius:0}   /* the row is the frame */
+.conn-body .se-nodes{margin:0;background:none;border:0;border-radius:0;overflow:clip;overflow-clip-margin:6px}   /* the row is the frame */
 .conn-acts{margin-left:auto;display:flex;align-items:center}
 /* ── Connect dock (home) ── */
 #view-home > .scroll{padding-bottom:60px}
@@ -789,7 +789,13 @@ body {
 .app-state .proxy{color:var(--accent)}
 .app-state .direct{color:var(--active)}
 .app-state .block{color:var(--muted)}
-#aa-body .seg3{margin-bottom:10px}
+#aa-body .aa-tabs{margin:0 0 12px}
+#aa-body .aa-ico{color:var(--t3);flex-shrink:0}
+.aa-route{flex-wrap:wrap;row-gap:8px}
+.aa-route .set-label{flex:0 0 auto}
+.aa-route .seg3{flex:1 1 190px;min-width:0}
+.aa-inert{cursor:default;opacity:.5;pointer-events:none}
+.aa-dash{color:var(--t3);margin-left:auto}
 #aa-body .aa-group{margin:0 0 10px}
 #aa-body .set-row .seg3{margin:0}
 .aa-hint{padding:4px 2px}
@@ -800,12 +806,8 @@ body {
 .svc-app{color:var(--warn);cursor:pointer}
 .app-state.svc{opacity:.75}
 .aa-svc{margin-top:8px}
-/* top edge fixed at 1/3 of the screen: the dialog grows only downward and scrolls inside above the nav */
-#sh-appact{top:33.333%;max-height:calc(66.667% - var(--nav-h,0px) - 8px);display:flex;flex-direction:column;transform-origin:top center;transform:scale(.96)}
-#sh-appact.open{transform:none}
+#sh-appact{max-height:calc(100% - 32px);display:flex;flex-direction:column}
 #aa-body{overflow-y:auto;min-height:0}
-.aa-proto{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;margin:12px 0 6px}
-.aa-proto:first-child{margin-top:0}
 #aa-body .aa-split{margin:0 0 12px}
 .menu-seg{margin:0 20px 10px}
 /* ── LogsView (46-logs.js): time column, the message wraps under itself ── */
@@ -1027,9 +1029,8 @@ body {
 .tp-label{padding:8px 4px 0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--t3)}
 .tp-card .src-head{padding-left:14px;cursor:pointer}
 .tp-card .src-usage,.tp-card .entry-now{padding-left:14px}
-.tp-card.picked{border-color:var(--accent);background:rgba(var(--accent-rgb),.07)}
+.tp-card.picked{border-color:var(--accent);background:rgba(var(--accent-rgb),.07);box-shadow:inset 3px 0 0 var(--accent)}
 .tp-card.down .src-main{opacity:.6}
-.tp-check{color:var(--accent);flex-shrink:0;margin:0 4px}
 .tp-save{position:absolute;left:0;right:0;bottom:0;padding:12px 18px 14px;background:var(--sheet);border-top:1px solid var(--border);box-shadow:0 -8px 20px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:8px;transform:translateY(110%);transition:transform .25s cubic-bezier(.32,1,.4,1);pointer-events:none}
 .tp-save.show{transform:translateY(0);pointer-events:auto}
 .tp-save .tp-warn{margin:0;text-align:center;display:none}
@@ -1037,6 +1038,7 @@ body {
 .tp-body.saving{padding-bottom:110px}
 .tp-card .conn-body{padding:2px 14px 10px}
 .tp-card .conn-body .node-row.picked{background:rgba(var(--accent-rgb),.10);box-shadow:inset 3px 0 0 var(--accent)}
+.tp-card .conn-body .node-row{padding-left:12px;padding-right:12px}
 .tp-card .src-name .conn-state{margin-right:8px;vertical-align:2px}
 .tp-card .tp-chevron{flex-shrink:0;margin:0 6px;color:var(--t3)}
 
@@ -1996,7 +1998,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
   <div class="overlay overlay-l4" id="ov-appact" onclick="closeSheet('appact')"></div>
   <div class="dialog" id="sh-appact">
     <div class="dialog-title" id="aaTitle"></div>
-    <div id="aa-body"></div>
+    <div id="aa-body" onpointerdown="if (appDraft && appDraft.split) segSwipeStart(event, 'appSwipeTab')"></div>
     <div class="dialog-actions">
       <button class="btn-secondary" onclick="closeSheet('appact')">Cancel</button>
       <button class="btn-secondary primary" onclick="saveAppAct()">Save</button>
@@ -2532,7 +2534,7 @@ const tn = (n, en, ...vars) => t(en, n, ...vars);
    Source «источник» · Subscription «подписка» · Profile «профиль» · Chain «цепочка» ·
    entry (a row of the route / catalogue) «пункт» · chain entry / exit «вход» / «выход»
    Auto, Fastest, Direct, Block — NOT translated, left in English inline («в режиме Auto», «идёт Direct»); sys proxy (system proxy) too
-   Manual «Вручную» · Priority «Приоритет» · Main flow «Основной поток» · Global «Глобально» · Proxy «Прокси» · Reject «Отклонить» ·
+   Manual «Вручную» · Priority «Приоритет» · Main flow «Основной поток» · Global «Глобально» · Default, Proxy as labels / buttons / values — NOT translated (only inside hint sentences) · Reject «Отклонить» ·
    If unavailable «Если недоступно» · Spare servers «Запасные узлы» ·
    Ping «Пинг» · Latency «Задержка» · Update «Обновить» · Rule set «Набор правил» · Service «Сервис» ·
    Kill switch stays «Kill switch»: the term the Russian VPN clients and forums use; a translation
@@ -2719,8 +2721,6 @@ Object.assign(I18N, { ru: {
   "Data": "Данные",
   "Data folder": "Папка данных",
   "Decrypt password": "Пароль для расшифровки",
-  "Default": "По умолчанию",
-  "Default:": "По умолчанию:",
   "Delete": "Удалить",
   "Delete chain": "Удалить цепочку",
   "Delete profile": "Удалить профиль",
@@ -2996,6 +2996,7 @@ Object.assign(I18N, { ru: {
   "Own priority order": "Свой порядок приоритета",
   "Pairs": "Пары",
   "Password": "Пароль",
+  "Fallback (if unavailable)": "Запасной вариант (если недоступно)",
   "Paste a subscription URL": "Вставьте URL подписки",
   "Paste a subscription URL first": "Сначала вставьте URL подписки",
   "Pause checks with the screen off": "Не проверять при выключенном экране",
@@ -3019,7 +3020,6 @@ Object.assign(I18N, { ru: {
   "Protocol": "Протокол",
   "Protocol (sniffed)": "Протокол (определён)",
   "Provider’s period": "Период провайдера",
-  "Proxy": "Прокси",
   "PROXY": "ПРОКСИ",
   "Proxy first": "Сначала прокси",
   "Proxy port": "Порт прокси",
@@ -3315,7 +3315,8 @@ Object.assign(I18N, { ru: {
   "Nothing picked — goes through the main flow.": "Ничего не выбрано — идёт через основной поток.",
   "Nothing to connect — add a subscription in Nodes": "Нечего подключать — добавьте подписку в «Узлах»",
   "Off in Nodes, no working server or deleted": "Выключен в «Узлах», нет рабочего узла или удалён",
-  "Off: any program on this PC can use the port": "Выкл.: порт может использовать любая программа на этом ПК",
+  "any program on this PC can use the port": "порт может использовать любая программа на этом ПК",
+  "Password on the port": "Пароль на порту",
   "Off: the app stays silent in the background": "Выкл.: в фоне приложение молчит",
   "Off: the proxy stays set, so apps that use it have no internet until the VPN is back": "Выкл.: sys proxy остаётся, поэтому у приложений, которые его используют, нет интернета, пока VPN не вернётся",
   "on for at least one entry, or pick one yourself with MANUAL.": "хотя бы у одного пункта или выберите пункт сами кнопкой «ВРУЧНУЮ».",
@@ -3368,7 +3369,7 @@ Object.assign(I18N, { ru: {
   "the next entries are pinged ahead (on their own period), so a switch lands on one that is known to work. 0 = fewer pings, slower failover.": "следующие пункты пингуются заранее (со своим периодом), чтобы переключение попало на заведомо рабочий. 0 = меньше пингов, медленнее переключение.",
   "the order Auto tries entries in — drag ⋮⋮ in that list.": "порядок, в котором Auto перебирает пункты, — перетаскивайте ⋮⋮ в этом списке.",
   "the order here is the route’s priority, unless the Route sheet has its own.": "порядок здесь — приоритет маршрута, если у «Маршрута» нет своего.",
-  "The port asks for this login. The system proxy uses its own port without one: Windows cannot send a password": "Порт запрашивает этот логин. sys proxy использует свой порт без пароля: Windows не умеет отправлять пароль",
+  "the port asks for this login. The system proxy uses its own port without one: Windows cannot send a password": "порт запрашивает этот логин. sys proxy использует свой порт без пароля: Windows не умеет отправлять пароль",
   "The profile connects through the fastest of its servers.": "Профиль подключается через самый быстрый из своих узлов.",
   "The proxy stays set when the app is closed, so nothing leaks before it starts again": "Прокси остаётся при закрытом приложении, чтобы ничего не утекло до его повторного запуска",
   "the proxy stays, but nothing guarantees it any more.": "sys proxy остаётся, но больше ничем не гарантирован.",
@@ -3400,7 +3401,7 @@ Object.assign(I18N, { ru: {
   "where matching traffic goes: the main flow or a chosen profile, chain, subscription or node.": "куда идёт подходящий трафик: в основной поток или в выбранный профиль, цепочку, подписку или узел.",
   "which tab of Nodes the route uses. Everything is created and edited in Nodes.": "какую вкладку «Узлы» использует маршрут. Всё создаётся и редактируется в «Узлах».",
   "your own set of servers, from any subscriptions.": "ваш набор узлов из любых подписок.",
-  "your traffic goes direct (If the VPN cannot recover: Remove proxy).": "ваш трафик идёт Direct (Если VPN не удаётся восстановить: Убрать sys proxy).",
+  "the system proxy is removed and your traffic goes direct.": "sys proxy снимается, и ваш трафик идёт Direct.",
   "your traffic goes to the entry server first, then out through the exit. Sites see the exit’s address.": "ваш трафик идёт сначала на входной узел, затем выходит через выходной. Сайты видят адрес выхода.",
   // ── units, counts, time ({#0} = a number, {0} = any text; an array = [1, 2–4, 5+]) ──
   "{#0} s": "{0} с",
@@ -3645,7 +3646,7 @@ Object.assign(I18N, { ru: {
   "Delete subscription": "Удалить подписку",
   "Trying again in the background": "Повторяем в фоне",
   "The system proxy is kept so nothing leaks. Trying again in the background": "Sys proxy сохранён, чтобы ничего не утекло. Повторяем в фоне",
-  "The connection stays, but if the VPN goes down, your traffic goes direct (If the VPN cannot recover: Remove proxy).": "Соединение сохраняется, но если VPN упадёт, ваш трафик пойдёт Direct (Если VPN не удаётся восстановить: Убрать sys proxy).",
+  "The connection stays, but if the VPN goes down, the system proxy is removed and your traffic goes direct.": "Соединение сохраняется, но если VPN упадёт, sys proxy снимется, и ваш трафик пойдёт Direct.",
   "This query leaves outside the tunnel, through a direct server": "Этот запрос уходит вне туннеля, через прямой узел",
   "VPN is down · {0} · retrying": "VPN не работает · {0} · повторяем",
   "Removed by the provider {0}. If a subscription update brings it back within": "Удалён провайдером {0}. Если обновление подписки вернёт его в течение",
@@ -3805,6 +3806,12 @@ Object.assign(I18N, { ru: {
   "Core checks": "Проверки ядра",
   "Latency check": "Проверка задержки",
   "DNS check": "Проверка DNS",
+
+  // hints (batch 2)
+  "rules on Default, and apps": "правила на Default и приложения",
+  "https:// (DoH) · tls:// (DoT) · quic:// (DoQ) · udp:// or an IP · system": "https:// (DoH) · tls:// (DoT) · quic:// (DoQ) · udp:// или IP · system",
+  "Disable sys proxy": "Отключить sys proxy",
+  "Enter 0–{#0} ms": "Введите 0–{0} мс",
 } });
 /* ══════════════════════ DATA MODEL ══════════════════════ */
 
@@ -7003,7 +7010,7 @@ let appRules = {
   'ru.sberbankmobile': { act: 'direct', target: '', fallback: 'default', split: false },
 };
 const APP_ACTS = [['default', 'Default'], ['proxy', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
-const appBlankHalf = () => ({ act: 'default', target: '', fallback: 'default' });
+const appBlankHalf = () => ({ act: 'default', target: '', fallback: 'default', fallbackTarget: '' });   // fallbackTarget: UI only so far (fallback 'main' = Proxy)
 
 // Full shape from any stored one; the old { act: 'proxy', split, udpTarget } becomes udp: { act: 'proxy', target: udpTarget }.
 function appNormalize(a) {
@@ -7056,38 +7063,65 @@ function appStateHtml(pkg) {
 /* ── One app's action (small dialog) ── */
 let appEditing = null, appDraft = null;
 function openAppAct(pkg) {
-  appEditing = pkg;
+  appEditing = pkg; appTab = 'tcp';
   appDraft = clone(appNormalize(appRules[pkg]));
   document.getElementById('aaTitle').textContent = APPS.find(a => a.pkg === pkg).name;
   renderAppAct();
   openSheet('appact');
 }
-// One action (h = appDraft or appDraft.udp, path = its JS path): the segment, and for Proxy the
-// target with "If unavailable" — the same rows as the rule form — or a hint for the others.
-// `between` goes right under the segment (the Split switch, while it is off).
-function appHalfHtml(h, path, proto, between = '') {
-  const id = proto ? proto.toLowerCase() : 'all';
+// One action (h = appDraft or appDraft.udp, path = its JS path), the same rows for every action:
+// Route (Default | Proxy | Direct | Block), Via (the target picker) and Fallback ("If unavailable":
+// Default | Proxy | Direct | Block; Proxy = through a target of its own, an extra Via row under it).
+// Via and Fallback stay in place, dimmed and inert, unless Route is Proxy.
+const APP_LINK = '<svg class="aa-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+let appTab = 'tcp';
+// fallback value -> label: 'main' (the old "Main flow") is the Proxy button
+const APP_FALLBACKS = [['default', 'Default'], ['main', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
+function appHalfHtml(h, path, proto) {
+  const id = proto ? proto.toLowerCase() : 'all', own = h.act === 'proxy';
   const hint = { default: proto ? `No own route for ${proto}: it goes by the rules` : 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN',
     block: proto ? `${proto} is blocked while connected` : 'No network at all while connected' }[h.act];
+  const via = own ? targetRowHtml('Via', h.target, `t => { ${path}.target = t; renderAppAct(); }`)
+    : `<div class="set-row tgt-row aa-inert"><div class="set-label">Via</div><span class="tgt-val aa-dash">—</span></div>`;
+  const fb = `<div class="set-row aa-route aa-fb ${own ? '' : 'aa-inert'}"><div class="set-label">Fallback (if unavailable)</div>
+      <div class="seg3 wide" id="aa-fallback-${id}">${APP_FALLBACKS.map(([v, l]) =>
+        `<button class="${h.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${own ? '' : 'disabled'} onclick="${path}.fallback='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>`;
+  const fbVia = own && h.fallback === 'main'
+    ? targetRowHtml('Via', h.fallbackTarget, `t => { ${path}.fallbackTarget = t; renderAppAct(); }`).replace('tgt-row', 'tgt-row aa-fb-via') : '';
   return `<div class="aa-half" data-half="${id}">
-    ${proto ? `<div class="aa-proto">${proto}</div>` : ''}
-    <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${h.act === v ? 'on ' + v : ''}" onclick="${path}.act='${v}';renderAppAct()">${l}</button>`).join('')}</div>
-    ${between}
-    ${h.act === 'proxy' ? `<div class="set-group aa-group">
-      ${targetRowHtml('Via', h.target, `t => { ${path}.target = t; renderAppAct(); }`)}
-      ${h.target ? fallbackRowsHtml(h, path, 'renderAppAct', 'aa-fallback-' + id) : ''}
-    </div>` : `<div class="set-hint aa-hint">${hint}</div>`}</div>`;
+    <div class="set-group aa-group">
+      <div class="set-row aa-route"><div class="set-label">Route</div>
+        <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${h.act === v ? 'on ' + v : ''}" onclick="${path}.act='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>
+      ${via}${fb}${fbVia}
+    </div>${own ? '' : `<div class="set-hint aa-hint">${hint}</div>`}</div>`;
 }
 // The app has an own route unless every half is Default.
 const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default') ? 'default' : 'own';
+const appTabHalf = () => appTab === 'udp' ? ['appDraft.udp', 'UDP', appDraft.udp] : ['appDraft', 'TCP', appDraft];
 function renderAppAct() {
   const d = appDraft;
-  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row"><div class="set-label">Split TCP / UDP<button class="help-btn" onclick="openHelp('apps')" title="What is this?">?</button></div>
+  if (!d.split) appTab = 'tcp';
+  const toggle = `<div class="set-group aa-group aa-split"><div class="set-row">${APP_LINK}<div class="set-label">Split TCP / UDP<button class="help-btn" onclick="openHelp('apps')" title="What is this?">?</button></div>
       <div class="mini-toggle ${d.split ? 'on' : ''}" id="aa-split" onclick="appDraft.split=!appDraft.split;renderAppAct()"><div class="mini-toggle-thumb"></div></div></div></div>`;
-  document.getElementById('aa-body').innerHTML = toggle + (d.split
-    ? appHalfHtml(d, 'appDraft', 'TCP') + appHalfHtml(d.udp, 'appDraft.udp', 'UDP')
-    : appHalfHtml(d, 'appDraft', '')) + appSvcNote(appEditing, appDraftAct(d));
+  // the tabs look and swipe like Nodes' Simple / Profiles (swipe: segSwipeStart, as the Fastest / Priority switch)
+  const tabs = d.split ? `<div class="nodes-tabs aa-tabs" id="aa-tabs">
+      <button class="nodes-tab ${appTab === 'tcp' ? 'active' : ''}" data-tab="tcp" onclick="setAppTab('tcp')">TCP</button>
+      <button class="nodes-tab ${appTab === 'udp' ? 'active' : ''}" data-tab="udp" onclick="setAppTab('udp')">UDP</button>
+      <div class="nodes-tab-ink" id="aa-tab-ink" style="transform:translateX(${appTab === 'udp' ? 100 : 0}%)"></div></div>` : '';
+  const [path, proto, h] = appTabHalf();
+  document.getElementById('aa-body').innerHTML = toggle + tabs + `<div id="aa-card">${appHalfHtml(h, path, d.split ? proto : '')}</div>` + appSvcNote(appEditing, appDraftAct(d));
 }
+// Slides the pill and swaps the card without redrawing the tabs.
+function setAppTab(tab) {
+  if (tab === appTab || !appDraft.split) return;
+  appTab = tab;
+  document.getElementById('aa-tab-ink').style.transform = `translateX(${tab === 'udp' ? 100 : 0}%)`;
+  document.querySelectorAll('#aa-tabs .nodes-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  const [path, proto, h] = appTabHalf();
+  document.getElementById('aa-card').innerHTML = appHalfHtml(h, path, proto);
+}
+// segSwipeStart reports a right swipe as 'priority' and a left one as 'fastest': back to TCP / on to UDP.
+function appSwipeTab(m) { setAppTab(m === 'priority' ? 'tcp' : 'udp'); }
 // The service with the same app: what it does, and who wins.
 function appSvcNote(pkg, act) {
   const svc = serviceOfApp(pkg), sv = svc && quickCfg.services[svc[0]];
@@ -7150,7 +7184,6 @@ function tpToggle(t) {
   renderTargetPicker();
 }
 
-const TP_CHECK = '<svg class="tp-check" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 const TP_CHEVRON = open => `<svg class="src-chevron tp-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="${open ? 'transform:rotate(180deg)' : ''}"><polyline points="6 9 12 15 18 9"/></svg>`;
 
 // opts.rows (a list of {sid, node}) makes the card unfoldable; opts.id = its source / profile id.
@@ -7162,7 +7195,7 @@ function tpCardHtml(t, name, meta, below, opts = {}) {
         <div class="src-name">${fold ? `<button class="conn-state ${picked ? 'on' : ''}" onclick="event.stopPropagation();pickTarget('${t}')" title="Use the whole item as the target">auto</button>` : ''}${name}${i.ok ? '' : '<span class="conn-tag off">off</span>'}</div>
         <div class="src-meta">${meta}</div>
       </div>
-      ${picked && !fold ? TP_CHECK : ''}${fold ? TP_CHEVRON(open) : ''}
+      ${fold ? TP_CHEVRON(open) : ''}
     </div>
     ${below}${open ? tpBodyHtml(t, opts.id, opts.rows) : ''}
   </div>`;
@@ -7177,7 +7210,7 @@ function tpBodyHtml(t, id, refs) {
     return `<div class="node-row ps-node on ${nt === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" data-t="${nt}" onclick="pickTarget('${nt}')">
       ${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
-      <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}${nt === tpCurrent ? TP_CHECK : ''}</div>`;
+      <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`;
   }).join('');
   const hint = priority ? 'Priority: the first working one from the top.' : 'Fastest: the quickest working one.';
   return `<div class="conn-body"><div class="seg-row"><div class="set-hint conn-hint conn-pick-hint">${hint}</div></div>
@@ -8309,7 +8342,7 @@ function setAutoCfg(key, val) {
 function setAutoThreshold(input) {
   const v = Number(input.value.trim());
   if (input.value.trim() !== '' && Number.isInteger(v) && v >= 0 && v <= AUTO_THRESHOLD_MAX) autoCfg.threshold = v;
-  else toast('Enter 0–' + AUTO_THRESHOLD_MAX + ' ms');
+  else toast(t('Enter 0–{#0} ms', AUTO_THRESHOLD_MAX));
   renderAutoMode();
 }
 // retryPause takes tenths (a comma too), the minutes whole numbers.
@@ -8648,7 +8681,7 @@ function toggleKillSwitch() {
   const close = "closeSheet('actions');";
   const what = vpn.blocking ? 'The internet is unblocked now: the system proxy is removed.'
     : vpn.down ? 'The VPN is down right now: ' + (connCfg.downProxy === 'keep' ? 'the proxy stays, but nothing guarantees it any more.' : 'the system proxy is removed and your traffic goes direct at once.')
-    : 'The connection stays, but if the VPN goes down, ' + (connCfg.downProxy === 'keep' ? 'nothing guarantees the block any more.' : 'your traffic goes direct (If the VPN cannot recover: Remove proxy).');
+    : 'The connection stays, but if the VPN goes down, ' + (connCfg.downProxy === 'keep' ? 'nothing guarantees the block any more.' : 'the system proxy is removed and your traffic goes direct.');
   openActions('Turn the kill switch off?', `<div class="menu-note">${what}</div>`
     + menuRow(ICON.check, 'Turn it off', close + 'connCfg.killSwitch=false;renderConnSettings()')
     + menuRow(ICON.close, 'Keep it on', close));
@@ -8717,7 +8750,7 @@ function renderConnSettings() {
           <div class="chip" id="conn-copy-socks" onclick="copyProxyUrl('socks5')">Copy SOCKS5</div>
           <div class="chip" id="conn-copy-http" onclick="copyProxyUrl('http')">Copy HTTP</div>
         </div></div>
-      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<div class="hint-stack">${hintStack(connCfg.proxyAuth, 'The port asks for this login. The system proxy uses its own port without one: Windows cannot send a password', 'Off: any program on this PC can use the port')}</div></div>
+      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<button class="help-btn" onclick="openHelp('proxyauth')" title="What is this?">?</button></div>
         ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
       ${connCfg.proxyAuth ? `
       <div class="set-row set-sub" data-key="proxyUser"><div class="set-label auth-lbl">Login</div>
@@ -8990,6 +9023,10 @@ const HELP = {
     ['ms', 'how fast the server answers. Tap it to check again.'],
     ['Hijack DNS', 'catches apps that ask their own DNS servers. Works in TUN mode only.'],
     ['FakeIP', 'answers at once with a stand-in address; faster, but some apps dislike it.'],
+  ] },
+  proxyauth: { title: 'Password on the port', items: [
+    ['On', 'the port asks for this login. The system proxy uses its own port without one: Windows cannot send a password'],
+    ['Off', 'any program on this PC can use the port'],
   ] },
   dnsauto: { title: 'Switch automatically', items: [
     ['On', 'a server that stops answering is replaced by the next one; the higher one takes over again when it recovers.'],

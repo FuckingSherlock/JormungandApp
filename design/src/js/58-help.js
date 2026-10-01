@@ -108,6 +108,10 @@ const HELP = {
     ['Hijack DNS', 'catches apps that ask their own DNS servers. Works in TUN mode only.'],
     ['FakeIP', 'answers at once with a stand-in address; faster, but some apps dislike it.'],
   ] },
+  proxyauth: { title: 'Password on the port', items: [
+    ['On', 'the port asks for this login. The system proxy uses its own port without one: Windows cannot send a password'],
+    ['Off', 'any program on this PC can use the port'],
+  ] },
   dnsauto: { title: 'Switch automatically', items: [
     ['On', 'a server that stops answering is replaced by the next one; the higher one takes over again when it recovers.'],
     ['Off', 'the first server stays in use even when it does not answer.'],
