@@ -52,6 +52,24 @@ class RuleNames {
   bool get isEmpty => _byText.isEmpty;
 }
 
+/// The rule a connection went by, for an event's data (`site/blocked`, `site/unreachable`):
+/// `{kind: user | app | service | quick | system, name, id?}` as [RuleNames] knows it; `{kind: final}`
+/// when no rule matched ([text] empty: the main flow); `{kind: unknown, text}` for a rule this cannot name.
+Map<String, dynamic> ruleEventData(RuleNames? names, String text) {
+  if (text.isEmpty) return {'kind': 'final'};
+  final o = names?.of(text);
+  if (o == null) return {'kind': 'unknown', 'text': text};
+  return {'kind': o.kind, 'name': o.name, if (o.id.isNotEmpty) 'id': o.id};
+}
+
+/// The app that made a request, for an event's data: `{name, path}` (the file name of the path);
+/// null = unknown.
+Map<String, dynamic>? processEventData(String path) {
+  if (path.isEmpty) return null;
+  final name = path.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).lastOrNull ?? path;
+  return {'name': name, 'path': path};
+}
+
 // Keys of a route rule that are not conditions: the action and its options.
 const _actionKeys = {
   'action', 'outbound', 'method', 'no_drop', 'server', 'strategy', 'disable_cache', 'rewrite_ttl', 'client_subnet',

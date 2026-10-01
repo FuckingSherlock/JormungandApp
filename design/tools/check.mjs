@@ -3211,6 +3211,129 @@ async function runChecks() {
     await p.close();
   });
 
+  // The "why" rows of the site cards (core: data.rule {kind, id, name} + data.process {name, path}): the rule's name, the app; a tap
+  // opens that rule / app dialog / service or quick rule place / Route; Back returns to the entry. No rule = the main flow.
+  await check('journal: site cards name the rule and the app (user rule, app, service, quick, main flow), a tap opens it, Back returns to the entry', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs'); await p.waitForTimeout(500);
+    const info = await p.evaluate(async () => {
+      const [a, b] = autoOrder(), base = (host, more) => ({ host, dest: host + ':443', entry: a, route: a, ...more });
+      const add = (type, host, more) => mockEventAdd('site', type, 'warn', base(host, more), { raw: host + ':443 does not open' });
+      const evs = {
+        user: add('blocked', 'why-user.example.com', { via: b, rule: { kind: 'user', id: 'r2', name: 'old name' }, process: { name: 'curl.exe', path: 'C:\\x\\curl.exe' } }),
+        gone: add('blocked', 'why-gone.example.com', { via: b, rule: { kind: 'user', id: 'r99', name: 'Deleted rule' } }),
+        app: add('unreachable', 'why-app.example.com', { tried: [], rule: { kind: 'app', id: 'com.discord', name: 'Discord' }, process: { name: 'Discord.exe' } }),
+        service: add('blocked', 'why-svc.example.com', { via: b, rule: { kind: 'service', id: 'telegram', name: 'Telegram' } }),
+        quick: add('unreachable', 'why-quick.example.com', { tried: [{ entry: b }], rule: { kind: 'quick', id: 'ads', name: 'Block ads' } }),
+        final: add('unreachable', 'why-final.example.com', { tried: [{ entry: b }], rule: { kind: 'final' }, process: { name: 'Telegram.exe' } }),
+        unknown: add('blocked', 'why-raw.example.com', { via: b, rule: { kind: 'unknown', text: 'domain_suffix=raw.example' } }),
+        none: add('blocked', 'why-none.example.com', { via: b }),
+      };
+      await pollEvents();
+      const rowOf = e => [...document.querySelectorAll('#evList .ev-row.cat-site')].find(r => r.dataset.ids.split(',').includes(String(e.id)));
+      const read = e => { const r = rowOf(e); return { rows: [...r.querySelectorAll('.ev-why')].map(x => [x.querySelector('.ev-why-k').textContent, x.querySelector('.ev-via-name').textContent, x.classList.contains('go')]),
+        first: r.querySelector('.ev-vias > .ev-via').classList.contains('ev-why'), more: r.querySelector('.ev-more').textContent }; };
+      const out = { ids: Object.fromEntries(Object.entries(evs).map(([k, e]) => [k, e.id])) };
+      Object.keys(evs).forEach(k => { out[k] = read(evs[k]); });
+      out.text = evText(evs.user); out.textFinal = evText(evs.final);
+      return out;
+    });
+    const row = k => JSON.stringify(info[k].rows);
+    expect(row('user') === JSON.stringify([['Rule', 'Discord voice', true], ['App', 'curl.exe', false]]) && info.user.first, 'user rule row (the live name, not the stored one) + app ' + row('user'));
+    expect(row('gone') === JSON.stringify([['Rule', 'Deleted rule', false]]), 'a deleted rule is named but not a link ' + row('gone'));
+    expect(row('app') === JSON.stringify([['App', 'Discord', true]]), 'a per-app rule: one App row, no process row ' + row('app'));
+    expect(row('service') === JSON.stringify([['Service', 'Telegram', true]]) && row('quick') === JSON.stringify([['Rule', 'Block ads', true]]), 'service / quick rows ' + row('service') + row('quick'));
+    expect(row('final') === JSON.stringify([['Rule', 'None — main flow', true], ['App', 'Telegram', true]]), 'no rule = the main flow ' + row('final'));
+    expect(row('unknown') === JSON.stringify([['Rule', 'domain_suffix=raw.example', false]]) && info.none.rows.length === 0, 'unknown rule shows its text, an event without the data has no row ' + row('unknown'));
+    expect(info.user.more.includes('Discord voice') && info.user.more.includes('curl.exe') && !info.user.more.includes('{') && !info.user.more.includes('[object'), 'fields in words ' + info.user.more);
+    expect(info.text.includes('Rule Discord voice') && info.text.includes('App curl.exe') && info.textFinal.includes('No rule, main flow'), 'notification / export text ' + info.text + ' | ' + info.textFinal);
+    const inView = id => p.evaluate(id => {
+      const row = [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id)));
+      const b = row && row.getBoundingClientRect(), s = document.getElementById('evScroll').getBoundingClientRect();
+      return !!row && logsOpen() && logTab === 'events' && row.classList.contains('open') && b.top >= s.top - 1 && b.bottom <= s.bottom + 1;
+    }, id);
+    const tapFirst = id => p.evaluate(id => { const r = [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id))); r.querySelector('.ev-why.go').click(); }, id);
+    const open = sheet => p.evaluate(s => document.getElementById('sh-' + s).classList.contains('open'), sheet);
+    const cases = [
+      ['user', async () => (await open('ruleform')) && await p.evaluate(() => ruleEditing === 'r2'), 'the rule form of that rule'],
+      ['app', async () => (await open('appact')) && await p.evaluate(() => appEditing === 'com.discord'), 'the per-app dialog'],
+      ['service', async () => (await open('rules')) && await p.evaluate(() => !!document.querySelector('#rules-body .svc-row[data-svc="telegram"]')), 'Rules with the service row'],
+      ['quick', async () => (await open('rules')) && await p.evaluate(() => !!document.querySelector('#rules-body [data-quick="ads"]')), 'Rules with the quick rule'],
+      ['final', async () => await open('profiles'), 'Route'],
+    ];
+    for (const [k, ok, what] of cases) {
+      await p.evaluate(() => { const r = document.querySelector('#evList .ev-row.open'); if (r) r.classList.remove('open'); evState.open.clear(); });
+      await tapFirst(info.ids[k]); await p.waitForTimeout(500);
+      expect(await ok(), k + ': a tap opens ' + what);
+      await backAndSettle(p);
+      expect(await inView(info.ids[k]), k + ': Back returns to the entry');
+    }
+    await p.evaluate(() => { evState.open.clear(); });
+    expect(!p.errors.length, p.errors.join(' | '));
+    await p.close();
+  });
+
+  // A conflict in the "why" block: an app with its own route and a rule that both could send the site. The side sing-box applied says
+  // "applied", the other is muted "overridden by …"; both keep their links. Judged with today's settings (evWhyRows, rulesCatching).
+  await check('journal: why block shows both sides of an app / rule conflict (applied, overridden by rule / by app), both link, a plain app has no mark, Back returns', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs'); await p.waitForTimeout(500);
+    const info = await p.evaluate(async () => {
+      const [a, b] = autoOrder(), base = (host, more) => ({ host, dest: host + ':443', entry: a, route: a, ...more });
+      const add = (host, more) => mockEventAdd('site', 'blocked', 'warn', base(host, { via: b, ...more }), { raw: host + ':443 does not open' });
+      const evs = {
+        byRule: add('why-ovr.example.com', { rule: { kind: 'user', id: 'r2', name: 'Discord voice' }, process: { name: 'Telegram.exe', path: 'C:\\t\\Telegram.exe' } }),
+        byApp: add('wiki.corp.local', { rule: { kind: 'app', id: 'com.discord', name: 'Discord' }, process: { name: 'Discord.exe' } }),
+        svc: add('t.me', { rule: { kind: 'app', id: 'com.discord', name: 'Discord' }, process: { name: 'Discord.exe' } }),
+        clean: add('unrelated.example', { rule: { kind: 'app', id: 'com.discord', name: 'Discord' }, process: { name: 'Discord.exe' } }),
+        plain: add('why-plain.example.com', { rule: { kind: 'user', id: 'r1', name: 'Work network' }, process: { name: 'Spotify.exe' } }),
+        unlisted: add('why-unl.example.com', { rule: { kind: 'user', id: 'r1', name: 'Work network' }, process: { name: 'curl.exe' } }),
+      };
+      await pollEvents();
+      const rowOf = e => [...document.querySelectorAll('#evList .ev-row.cat-site')].find(r => r.dataset.ids.split(',').includes(String(e.id)));
+      const read = e => [...rowOf(e).querySelectorAll('.ev-why')].map(x => ({ k: x.querySelector('.ev-why-k').textContent, n: x.querySelector('.ev-via-name').textContent,
+        sub: (x.querySelector('.ev-why-sub') || {}).textContent || '', dim: x.classList.contains('dim'), go: x.classList.contains('go') }));
+      const out = { ids: Object.fromEntries(Object.entries(evs).map(([k, e]) => [k, e.id])) };
+      Object.keys(evs).forEach(k => { out[k] = read(evs[k]); });
+      out.catching = JSON.stringify(rulesCatching('wiki.corp.local', 443)) + JSON.stringify(rulesCatching('discord.gg', 443)) + JSON.stringify(rulesCatching('10.1.2.3', 443));
+      return out;
+    });
+    const j = o => JSON.stringify(o);
+    const br = info.byRule;
+    expect(br.length === 2 && br[0].n === 'Discord voice' && /applied/.test(br[0].sub) && !br[0].dim && br[1].k === 'App' && br[1].n === 'Telegram' && br[1].dim && br[1].go
+      && /^Proxy · overridden by rule$/.test(br[1].sub), 'app overridden by the rule ' + j(br));
+    const ba = info.byApp;
+    expect(ba.length === 2 && ba[0].k === 'App' && ba[0].n === 'Discord' && /applied/.test(ba[0].sub) && ba[1].k === 'Rule' && ba[1].n === 'Work network' && ba[1].dim && ba[1].go
+      && /^Direct · overridden by app$/.test(ba[1].sub), 'rule overridden by the app ' + j(ba));
+    expect(info.svc.length === 2 && info.svc[1].k === 'Service' && info.svc[1].n === 'Telegram' && info.svc[1].sub === 'VPN · overridden by app', 'service overridden by the app ' + j(info.svc));
+    expect(info.clean.length === 1 && !info.clean[0].sub.includes('applied'), 'no other rule matches: no conflict, no marks ' + j(info.clean));
+    expect(info.plain.length === 2 && info.plain[1].n === 'Spotify' && !info.plain[1].dim && !/overridden|applied/.test(info.plain[0].sub + info.plain[1].sub), 'an app with no route of its own: no mark ' + j(info.plain));
+    expect(info.unlisted.length === 2 && info.unlisted[1].n === 'curl.exe' && !info.unlisted[1].go, 'an app not in the list is just named ' + j(info.unlisted));
+    expect(info.catching === '[{"kind":"user","id":"r1"}][][]', 'rulesCatching: judges names, skips what it cannot (a network rule, an IP) ' + info.catching);
+    const inView = id => p.evaluate(id => {
+      const row = [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id)));
+      const b = row && row.getBoundingClientRect(), s = document.getElementById('evScroll').getBoundingClientRect();
+      return !!row && logsOpen() && logTab === 'events' && row.classList.contains('open') && b.top >= s.top - 1 && b.bottom <= s.bottom + 1;
+    }, id);
+    const tap = (id, i) => p.evaluate(([id, i]) => { const r = [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id))); r.querySelectorAll('.ev-why')[i].click(); }, [id, i]);
+    const open = sheet => p.evaluate(s => document.getElementById('sh-' + s).classList.contains('open'), sheet);
+    for (const [k, i, ok, what] of [
+      ['byRule', 1, async () => (await open('appact')) && await p.evaluate(() => appEditing === 'org.telegram.messenger'), 'the app dialog of the overridden app'],
+      ['byRule', 0, async () => (await open('ruleform')) && await p.evaluate(() => ruleEditing === 'r2'), 'the applied rule'],
+      ['byApp', 1, async () => (await open('ruleform')) && await p.evaluate(() => ruleEditing === 'r1'), 'the rule that lost'],
+      ['svc', 1, async () => (await open('rules')) && await p.evaluate(() => !!document.querySelector('#rules-body .svc-row[data-svc="telegram"]')), 'Rules at the service that lost'],
+    ]) {
+      await p.evaluate(() => { const r = document.querySelector('#evList .ev-row.open'); if (r) r.classList.remove('open'); evState.open.clear(); });
+      await tap(info.ids[k], i); await p.waitForTimeout(500);
+      expect(await ok(), k + ' #' + i + ': a tap opens ' + what);
+      await backAndSettle(p);
+      expect(await inView(info.ids[k]), k + ' #' + i + ': Back returns to the entry');
+    }
+    await p.evaluate(() => { evState.open.clear(); });
+    expect(!p.errors.length, p.errors.join(' | '));
+    await p.close();
+  });
+
   // The journal drives the background notifications (47-events.js → 58-notif.js): only events newer than the page's first look, not own, with their toggle on.
   await check('events → notifications: history never, a new one yes (toggle on, not own), a Rule button on a blocked site, a tap opens Logs at the event; sub/dead is posted by the UI', async () => {
     const p = await openPage(browser);

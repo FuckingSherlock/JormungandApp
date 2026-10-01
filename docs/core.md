@@ -596,8 +596,8 @@ Raw). Событие:
 | `auto/switched` info | Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
 | `auto/fastest` info | Fastest сам сменил сервер (urltest внутри sing-box) | `{route, from, to}` |
 | `auto/unstable` warn | маршрут падает снова и снова (flap guard) | `{id, strikes, holdMs}` |
-| `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Create rule); другие отвечающие маршруты пробуются по порядку Auto до первого, где открылся (не больше `siteRetry`), он и есть `via` | `{host, port?, entry, server, dest, via, viaServer}` |
-| `site/unreachable` warn | сайт не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); пара маршрут + сайт раз в час, как у `blocked` | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off'}` — `tried` пуст: нет другого рабочего маршрута, при `retries: 'off'` — повторы выключены (`siteRetry`) |
+| `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Create rule); другие отвечающие маршруты пробуются по порядку Auto до первого, где открылся (не больше `siteRetry`), он и есть `via` | `{host, port?, entry, server, dest, via, viaServer, rule, process?}` — `rule` и `process`: см. ниже |
+| `site/unreachable` warn | сайт не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); пара маршрут + сайт раз в час, как у `blocked` | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?}` — `rule` и `process`: см. ниже; `tried` пуст: нет другого рабочего маршрута, при `retries: 'off'` — повторы выключены (`siteRetry`) |
 | `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
 | `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'\|<id of the fallback target>}` — `target`: the cause (`proxy` = the main flow); `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |
@@ -611,6 +611,15 @@ Raw). Событие:
 | `core/restartFailed` error | попытка перезапуска не удалась (только первые три) | `{attempt, error}` |
 | `core/sysProxy` info / warn | системный прокси включён / возвращён (`own: true` при команде пользователя); при остановке jormd тоже; `warn` — не вышло. Прокси, оставленный kill switch'ем, события не пишет | `{on, by?, error?}`, `on` — что хотели получить; `by: 'user'` — кнопка Remove / Disable sys proxy (`POST /api/sysproxy/release`) |
 | `core/deprecated` warn | sing-box сообщил, что конфиг перестанет работать в новой версии; каждый текст — раз за запуск демона (в сыром логе — при каждом подключении) | `{text}` |
+
+**`rule` и `process` у `site/blocked` / `site/unreachable`** — почему запрос пошёл этим маршрутом и кто его
+послал: sing-box присылает в закрытом соединении текст сработавшего правила (`rule`, как в Live
+connections) и путь приложения; ядро хранит их рядом с адресом упавшего запроса (`_failDests`) и
+переводит текст в имя тем же `RuleNames`, что и `/api/traffic` (`ruleEventData`, rulenames.dart).
+`rule: {kind, name?, id?, text?}` — `kind`: `user` (id правила), `app` (id приложения), `service`
+(ключ), `quick` (`ads` / `region`), `system` (`private` и служебные), `final` (правило не сработало:
+основной поток, `name` нет), `unknown` (имя не удалось определить — `text` сырой текст). `process?:
+{name, path}` — имя файла и полный путь; нет, если sing-box не знает приложение.
 
 Не пишет ядро (нет данных или это знает только UI): `sub/removed`, `sub/back`, `sub/dead` (модель
 серверов и пинги живут в UI; UI шлёт их `POST /api/events`), `user/*` (действия пользователя — тоже

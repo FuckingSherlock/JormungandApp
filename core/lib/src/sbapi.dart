@@ -25,7 +25,8 @@ export 'sbapi/started_service.pbenum.dart' show ConnectionEventType;
 
 /// A connection sing-box closed, as the core judges request failures by it.
 class ClosedConnection {
-  const ClosedConnection({required this.outbound, required this.chain, required this.destination, required this.up, required this.down});
+  const ClosedConnection(
+      {required this.outbound, required this.chain, required this.destination, required this.up, required this.down, this.rule = '', this.process = ''});
 
   /// The server's outbound tag (the leaf, e.g. `route0/<key>`); [chain] = leaf … `proxy`.
   final String outbound;
@@ -33,12 +34,18 @@ class ClosedConnection {
   final String destination; // host:port (the domain when there is one)
   final int up, down; // bytes in total
 
+  /// The rule sing-box matched, as it reports it (see rulenames.dart; '' = none, the final route) and
+  /// the path of the app that made the request ('' = unknown).
+  final String rule, process;
+
   factory ClosedConnection.of(Connection c) => ClosedConnection(
         outbound: c.outbound,
         chain: List.of(c.chainList),
         destination: _dest(c),
         up: c.uplinkTotal.toInt(),
         down: c.downlinkTotal.toInt(),
+        rule: c.rule,
+        process: c.hasProcessInfo() ? c.processInfo.processPath : '',
       );
 }
 
@@ -189,7 +196,7 @@ class SingBoxApi implements BoxControl {
           if (e.hasConnection()) {
             _closedCtl.add(ClosedConnection.of(e.connection));
           } else if (c != null) {
-            _closedCtl.add(ClosedConnection(outbound: c.outbound, chain: c.chain, destination: _dest(c.c), up: c.up, down: c.down));
+            _closedCtl.add(ClosedConnection(outbound: c.outbound, chain: c.chain, destination: _dest(c.c), up: c.up, down: c.down, rule: c.rule, process: c.process));
           }
         default:
       }

@@ -225,7 +225,20 @@ const ruleTitle = r => r.name || ruleSummary(r);
 
 /* ── Rules sheet ── */
 let ruleQuery = '';
-function openRules() { ruleQuery = ''; document.getElementById('rules-search').value = ''; renderRules(); openSheet('rules'); }
+// focus = a selector of a row to scroll to and flash (the journal's "why" link to a service / quick rule).
+function openRules(focus) {
+  ruleQuery = ''; document.getElementById('rules-search').value = '';
+  if (typeof focus === 'string' && focus.includes('data-svc')) svcOpen = true;   // a service row lives in the dropdown
+  renderRules(); openSheet('rules');
+  if (typeof focus !== 'string') return;
+  requestAnimationFrame(() => {
+    const row = document.querySelector('#rules-body ' + focus);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center' });
+    row.classList.add('hit');
+    setTimeout(() => row.classList.remove('hit'), 2600);
+  });
+}
 function setRuleQuery(q) { ruleQuery = q.trim().toLowerCase(); renderRules(); }
 
 function renderRules() {
@@ -277,8 +290,8 @@ function renderRules() {
     <div class="rules-label">Quick rules</div>
     <div class="set-group">
       ${hit('local networks') ? `<div class="set-row" id="qr-lan"><div class="set-label">Local networks direct<div class="set-hint">Always, in Global too · 192.168.x.x, 10.x.x.x, .local, printers, NAS</div></div><span class="order-act">Always</span></div>` : ''}
-      ${hit('ads block') ? `<div class="set-row"><div class="set-label">Block ads<div class="set-hint">Known ad and tracker domains</div></div>${toggle(quickCfg.ads, 'quickCfg.ads=!quickCfg.ads;renderRules()')}</div>` : ''}
-      ${hit('region direct') ? `<div class="set-row"><div class="set-label">My region direct<div class="set-hint">Its sites and IPs skip the VPN</div></div>${quickCfg.regionOn ? regionSel : ''}${toggle(quickCfg.regionOn, 'quickCfg.regionOn=!quickCfg.regionOn;renderRules()')}</div>` : ''}
+      ${hit('ads block') ? `<div class="set-row" data-quick="ads"><div class="set-label">Block ads<div class="set-hint">Known ad and tracker domains</div></div>${toggle(quickCfg.ads, 'quickCfg.ads=!quickCfg.ads;renderRules()')}</div>` : ''}
+      ${hit('region direct') ? `<div class="set-row" data-quick="region"><div class="set-label">My region direct<div class="set-hint">Its sites and IPs skip the VPN</div></div>${quickCfg.regionOn ? regionSel : ''}${toggle(quickCfg.regionOn, 'quickCfg.regionOn=!quickCfg.regionOn;renderRules()')}</div>` : ''}
     </div>
     ${svcBlock}
 
@@ -375,6 +388,32 @@ function testAddress(raw) {
   const reg = REGIONS.find(([c]) => c === quickCfg.region);
   if (quickCfg.regionOn && !t.ip && reg[2].some(tld => host.endsWith('.' + tld))) return { rule: 'My region direct (' + reg[0] + ')', to: 'Direct' };
   return { rule: 'Everything else', to: { proxy: 'Proxy', direct: 'Direct', block: 'Block' }[quickCfg.final] };
+}
+/* The rules that would catch a site (host, port), each { kind, id } as the journal's data.rule: the enabled own rules, Block ads,
+   the services and My region direct. A light judge with today's settings, for "overridden by app" in the journal (47-events.js).
+   It reads domains (domain / suffix / keyword / regex / geosite), IPs and ports; a rule it cannot judge from
+   host:port alone (a rule set, GeoIP, local networks on a name, an IP rule on a name or a domain rule on an IP,
+   network / protocol, source, process, JSON composites) is left out — so it can miss a rule, never invents one. */
+function rulesCatching(host, port) {
+  host = String(host).toLowerCase();
+  const t = { host, port: +port || 443, ip: isIp4(host) }, out = [];
+  const judge = ([k, d]) => {   // true / false / null (cannot tell)
+    if (k === 'domain' && t.ip || k === 'ip' && !t.ip || !['domain', 'ip', 'port'].includes(k)) return null;
+    if (Object.keys(d.v).some(f => (f === 'rule_set' || f === 'geoip') && d.v[f].length)) return null;
+    if (d.flag && !t.ip) return null;
+    return groupMatches(k, d, t);
+  };
+  ruleOrder.forEach(id => {
+    const r = rulesData[id], gs = Object.entries(r.groups);
+    if (!r.enabled || r.composite || !gs.length) return;
+    const js = gs.map(judge);
+    if (js.every(j => j === true)) out.push({ kind: 'user', id });
+  });
+  if (quickCfg.ads && ADS.some(d => onDomain(host, d))) out.push({ kind: 'quick', id: 'ads' });
+  SERVICES.forEach(([k, , ds]) => { if (quickCfg.services[k] !== 'default' && [...ds, ...(SERVICE_MORE[k] || [])].some(d => onDomain(host, d))) out.push({ kind: 'service', id: k }); });
+  const reg = REGIONS.find(([c]) => c === quickCfg.region);
+  if (quickCfg.regionOn && !t.ip && reg && reg[2].some(tld => host.endsWith('.' + tld))) out.push({ kind: 'quick', id: 'region' });
+  return out;
 }
 function openRuleTest() {
   document.getElementById('rt-result').innerHTML = '';

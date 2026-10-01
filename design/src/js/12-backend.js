@@ -272,15 +272,17 @@ function mockEvSeed() {
   const Y = h => d0 - h * 36e5, M = m => Math.max(d0 + 1000, now - m * 6e4);
   const total = (s.nodes || []).length || 12;
   const bn = sourcesData[b] && sourcesData[b].nodes && sourcesData[b].nodes[0];
-  const blocked = { host: 'rutracker.org', dest: 'rutracker.org:443', entry: a, server: key(0), route: a, via: b, viaServer: bn ? b + '::' + bn.id : undefined };
+  const blocked = { host: 'rutracker.org', dest: 'rutracker.org:443', entry: a, server: key(0), route: a, via: b, viaServer: bn ? b + '::' + bn.id : undefined,
+    rule: { kind: 'user', id: 'r2', name: 'Discord voice' }, process: { name: 'chrome.exe', path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' } };
   // no route opens it: the entry in use and the routes tried through (the setting: Auto mode → Retry a failed site)
-  const unreachable = { host: 'banking.example', dest: 'banking.example:443', entry: a, server: key(0), route: a, tried: [{ entry: b, server: bn ? b + '::' + bn.id : undefined }] };
+  const unreachable = { host: 'banking.example', dest: 'banking.example:443', entry: a, server: key(0), route: a, tried: [{ entry: b, server: bn ? b + '::' + bn.id : undefined }],
+    rule: { kind: 'final' }, process: { name: 'Telegram.exe', path: 'C:\\Users\\me\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe' } };
   const list = [
     [Y(15.5), 'user', 'connect', 'info', { action: 'connect', entry: a }, 1],
     [Y(15.5) + 500, 'conn', 'connected', 'info', { entry: a, mode: 'tun', route: 'rules' }],
     [Y(14), 'auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }],
     [Y(13.9), 'site', 'blocked', 'warn', blocked], [Y(13.85), 'site', 'blocked', 'warn', blocked], [Y(13.8), 'site', 'blocked', 'warn', blocked],
-    [Y(13), 'site', 'unreachable', 'warn', unreachable, 0, warn && warn.n], [Y(12.5), 'site', 'unreachable', 'warn', { host: 'intranet.example', dest: 'intranet.example:443', entry: a, server: key(0), route: a, tried: [] }, 0, warn && warn.n],
+    [Y(13), 'site', 'unreachable', 'warn', unreachable, 0, warn && warn.n], [Y(12.5), 'site', 'unreachable', 'warn', { host: 'intranet.example', dest: 'intranet.example:443', entry: a, server: key(0), route: a, tried: [], rule: { kind: 'app', id: 'com.discord', name: 'Discord' } }, 0, warn && warn.n],
     [Y(12), 'sub', 'updated', 'info', { source: sid, name: s.name, added: 2, removed: 0, total }],
     [Y(9), 'conn', 'lost', 'warn', {}], [Y(8.9), 'conn', 'restored', 'info', { downMs: 41000 }],
     [Y(6), 'sub', 'failed', 'error', { source: sid, name: s.name, error: 'Connection timed out (15 s)' }],
@@ -312,7 +314,7 @@ function mockEventsGet(since) {
     mockEv.lastRand = Date.now();
     const ids = visibleOrder(), a = ids[0], b = ids[1] || a, r = Math.random();
     if (r < .4) mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }, { raw: 'Auto: switched ' + entryLabel(a) + ' → ' + entryLabel(b) });
-    else if (r < .7) mockEventAdd('site', 'blocked', 'warn', { host: 'discord.com', dest: 'discord.com:443', entry: a, route: a, via: b }, { raw: 'discord.com:443 does not open via ' + entryLabel(a) });
+    else if (r < .7) mockEventAdd('site', 'blocked', 'warn', { host: 'discord.com', dest: 'discord.com:443', entry: a, route: a, via: b, rule: { kind: 'service', id: 'discord', name: 'Discord' } }, { raw: 'discord.com:443 does not open via ' + entryLabel(a) });
     else mockEventAdd('auto', 'unstable', 'warn', { id: a, strikes: 2, holdMs: 120000 }, { raw: entryLabel(a) + ' is unstable' });
   }
   const events = since == null ? mockEv.list.slice(-200) : mockEv.list.filter(e => e.id >= since);

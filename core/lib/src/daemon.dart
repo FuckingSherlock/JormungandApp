@@ -295,6 +295,8 @@ class Daemon {
         'dest': b.dest,
         'via': b.via,
         'viaServer': b.viaServer,
+        'rule': ruleEventData(_ruleNames, b.rule),
+        'process': ?processEventData(b.process),
       });
     });
     auto.unreachable.listen((u) {
@@ -307,6 +309,8 @@ class Daemon {
         'dest': u.dest,
         'tried': [for (final t in u.tried) {'entry': t.route, 'server': t.server}],
         if (u.retriesOff) 'retries': 'off',
+        'rule': ruleEventData(_ruleNames, u.rule),
+        'process': ?processEventData(u.process),
       });
     });
     auto.net.listen((n) {

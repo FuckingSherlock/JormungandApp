@@ -82,8 +82,64 @@ function evReason(d) {
 }
 // why a site that opens nowhere lists no other route: the setting is off, or none answers
 const evNoRoute = d => d.retries === 'off' ? 'Retries through other routes are off' : 'No other working route to try';
+// Why the failed request went that way: what routing decided it (data.rule: {kind: user | app | service |
+// quick | system | final | unknown, id?, name?, text?}) and where to look at it; null = an event without it.
+// go: what a tap opens ('' = nothing: the rule is gone or is the core's own).
+function evWhy(d) {
+  const r = d.rule && typeof d.rule === 'object' ? d.rule : null, id = r && r.id || '';
+  if (!r) return null;
+  if (r.kind === 'final') return { key: 'Rule', name: 'None — main flow', go: 'route' };
+  if (r.kind === 'user') { const x = rulesData[id]; return { key: 'Rule', name: x ? ruleTitle(x) : r.name || id, go: x ? 'user' : '', id }; }
+  if (r.kind === 'app') { const a = APPS.find(x => x.pkg === id); return { key: 'App', name: a ? a.name : r.name || id, go: a ? 'app' : '', id }; }
+  if (r.kind === 'service') { const s = SERVICES.find(x => x[0] === id); return { key: 'Service', name: s ? s[1] : r.name || id, go: 'rules', id, at: `[data-svc="${id}"]` }; }
+  if (r.kind === 'quick') return { key: 'Rule', name: r.name || id, go: 'rules', id, at: `[data-quick="${id}"]` };
+  if (r.kind === 'system' && id === 'private') return { key: 'Rule', name: r.name || id, go: 'rules', id, at: '#qr-lan' };
+  return { key: 'Rule', name: r.name || r.text || String(r.kind || ''), go: '' };
+}
+const evProcess = d => (d.process && typeof d.process === 'object' ? d.process.name || d.process.path : '') || '';
+// The line of the notification and the export
+function evWhyText(d) {
+  const w = evWhy(d), p = evProcess(d);
+  return [w && (w.go === 'route' ? 'No rule, main flow' : `${w.key} ${w.name}`), p && `App ${p}`].filter(Boolean).join('   ');
+}
+// The app of the event's process in the per-app list (Telegram.exe → Telegram, or its package); '' = not in the list.
+function evAppPkg(d) {
+  const p = d.process && typeof d.process === 'object' ? d.process : null, n = p ? String(p.name || '').toLowerCase().replace(/\.exe$/, '') : '';
+  const a = n && APPS.find(x => x.name.toLowerCase() === n || x.pkg.toLowerCase() === n || x.pkg.split('.').pop().toLowerCase() === n);
+  return a ? a.pkg : '';
+}
+// Where a rule (the data.rule shape) leads now: "→ Chain X", Proxy, Direct, Block; '' = not known.
+function evRuleTo(r) {
+  const id = r.id || '';
+  if (r.kind === 'user') return rulesData[id] ? ruleTargetText(rulesData[id]) : '';
+  if (r.kind === 'app') return appRules[id] ? appActText(appNormalize(appRules[id])) : '';
+  if (r.kind === 'service') return svcState(quickCfg.services[id]);
+  if (r.kind === 'quick') return id === 'ads' ? 'Block' : id === 'region' ? 'Direct' : '';
+  if (r.kind === 'system') return id === 'private' ? 'Direct' : '';
+  return r.kind === 'final' ? { proxy: 'Proxy', direct: 'Direct', block: 'Block' }[quickCfg.final] || '' : '';
+}
+// The rows of the "why" block, each evWhy + to (where it leads now) + mark / dim: what routing applied, the app,
+// and the other side of a conflict — an app's own route that the matched rule overrode ("overridden by rule"), or
+// the rules that would have caught the site but lost to the app's route ("overridden by app"; rulesCatching in
+// 40-rules.js, a light judge). With such a row the applied one says "applied". All with today's settings, not those
+// of the event's time.
+function evWhyRows(d) {
+  const rows = [], w = evWhy(d), proc = evProcess(d), pkg = evAppPkg(d), byApp = !!(d.rule && d.rule.kind === 'app');
+  if (w) rows.push({ ...w, to: evRuleTo(d.rule) });
+  if (proc && !byApp) {
+    const own = pkg && appRules[pkg] && appDraftAct(appNormalize(appRules[pkg])) !== 'default' ? appNormalize(appRules[pkg]) : null;
+    rows.push({ key: 'App', name: pkg ? APPS.find(x => x.pkg === pkg).name : proc, go: pkg ? 'app' : '', id: pkg, to: own ? appActText(own) : '',
+      ...(own ? { mark: d.rule && d.rule.kind === 'final' ? 'not applied' : 'overridden by rule', dim: true } : {}) });
+  }
+  if (byApp) {
+    const dest = String(d.dest || ''), host = d.host || destHost(dest);
+    rulesCatching(host, d.port || dest.split(':').pop()).forEach(x => rows.push({ ...evWhy({ rule: x }), to: evRuleTo(x), mark: 'overridden by app', dim: true }));
+  }
+  if (w && rows.some(r => r.dim)) rows[0].mark = 'applied';
+  return rows;
+}
 const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
-const evDns = id => (dnsServers[id] && dnsServers[id].name) || String(id);
+const evDns =id => (dnsServers[id] && dnsServers[id].name) || String(id);
 // "Rule Streaming and 2 more"; an app when no rule is involved: "App Telegram"
 const evRules = d => (d.rule ? `Rule ${d.rule}` : `App ${d.app}`) + (d.more ? ` and ${evPlural(d.more, 'more', 'more')}` : '');
 const evTarget = t => t === 'proxy' ? 'Main flow' : targetName(t);
@@ -103,12 +159,12 @@ const EV_TEXT = {
   'site/blocked': d => {
     const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route;
     // the row shows the two entries as a card (evBlockedHtml); this line is the notification's and the export's
-    return [`${host} does not open`, [entry && `⚠️ ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}`, d.via && `✅ ${evEntry(d.via)}${d.viaServer ? ' (' + evServer(d.viaServer) + ')' : ''}`].filter(Boolean).join('   ')];
+    return [`${host} does not open`, [entry && `⚠️ ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}`, d.via && `✅ ${evEntry(d.via)}${d.viaServer ? ' (' + evServer(d.viaServer) + ')' : ''}`, evWhyText(d)].filter(Boolean).join('   ')];
   },
   'site/unreachable': d => {
     const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route, tried = d.tried || [];
     const at = (id, srv) => `⚠️ ${evEntry(id)}${srv ? ' (' + evServer(srv) + ')' : ''}`;
-    return [`${host} does not open`, [entry && at(entry, d.server), ...tried.map(x => at(x.entry, x.server)), !tried.length && evNoRoute(d)].filter(Boolean).join('   ')];
+    return [`${host} does not open`, [entry && at(entry, d.server), ...tried.map(x => at(x.entry, x.server)), !tried.length && evNoRoute(d), evWhyText(d)].filter(Boolean).join('   ')];
   },
   'sub/updated': d => [`${evSource(d.source, d.name)} updated`, [evPlural(d.total, 'server', 'servers'), d.added ? d.added + ' new' : '', d.removed ? d.removed + ' removed' : ''].filter(Boolean).join(' · ')],
   'sub/failed': d => [`${evSource(d.source, d.name)}: update failed`, d.error || ''],
@@ -148,7 +204,7 @@ function evText(e) { const d = evDescribe(e); return d.title + (d.detail ? ' —
 // The expanded row: every field of the event in words.
 const EV_FIELD = { entry: 'Entry', server: 'Server', mode: 'Mode', route: 'Route', from: 'From', to: 'To', reason: 'Reason', by: 'By', host: 'Site', dest: 'Address', via: 'Opens via',
   source: 'Subscription', name: 'Name', added: 'New servers', removed: 'Removed', total: 'Servers', count: 'Servers', error: 'Error', tag: 'Rule set', url: 'URL', code: 'Exit code',
-  rule: 'Rule', app: 'App', target: 'Target', more: 'More rules and apps', tried: 'Also tried', retries: 'Retries through other routes',
+  rule: 'Rule', app: 'App', process: 'App', target: 'Target', more: 'More rules and apps', tried: 'Also tried', retries: 'Retries through other routes',
   attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
 function evValue(k, v, e) {
   if (e && e.cat === 'dns') {
@@ -160,6 +216,8 @@ function evValue(k, v, e) {
     if (k === 'to') return { block: 'Block', direct: 'Direct', main: 'Main flow' }[v] || String(v);
   }
   if (k === 'tried' && Array.isArray(v)) return v.length ? v.map(x => evEntry(x.entry) + (x.server ? ' (' + evServer(x.server) + ')' : '')).join(', ') : evNoRoute((e && e.data) || {});
+  if (k === 'rule' && v && typeof v === 'object') { const w = evWhy({ rule: v }); return w.key === 'Rule' ? w.name : `${w.key} · ${w.name}`; }
+  if (k === 'process' && v && typeof v === 'object') return v.path && v.path !== v.name ? `${v.name} (${v.path})` : String(v.name || '');
   if (k === 'retries') return v === 'off' ? 'Off' : String(v);
   if (typeof v === 'boolean') return k === 'on' ? (v ? 'On' : 'Off') : v ? 'Yes' : 'No';
   if (k === 'downMs' || k === 'holdMs') return evDuration(v);
@@ -272,15 +330,33 @@ function evAct(key, id, target) {
 // "<host> does not open": the entry that fails and the one that works, each a menu-like row
 // (icon, name, its server small, Open); without a working alternative only the first.
 const evViaRow = (e, ico, id, server) => `<div class="ev-via"><span class="ev-via-ico">${ico}</span><div class="ev-via-name">${esc(evEntry(id))}${server ? `<small>${esc(evServer(server))}</small>` : ''}</div>${connectEntry(id) ? `<button class="ev-act" data-t="${esc(id)}" onclick="event.stopPropagation();evAct('open',${e.id},this.dataset.t)">Open</button>` : ''}</div>`;
+// The "why" rows above the entries: the rule routing matched (a menu-like row: tap opens it) and the app
+// that sent the request when known. Back returns to the entry (evLeave).
+function evWhyHtml(e) {
+  // an app's own rule already names the app; a conflict adds the overridden side, muted (evWhyRows)
+  const row = r => {
+    const sub = [r.to, r.mark].filter(Boolean).join(' · ');
+    return `<div class="ev-via ev-why${r.go ? ' go' : ''}${r.dim ? ' dim' : ''}"${r.go ? ` data-g="${esc(r.go)}" data-i="${esc(r.id || '')}" data-at="${esc(r.at || '')}" onclick="event.stopPropagation();evWhyOpen(${e.id},this.dataset.g,this.dataset.i,this.dataset.at)"` : ''}><span class="ev-why-k">${r.key}</span><div class="ev-why-body"><div class="ev-via-name">${esc(r.name)}</div>${sub ? `<small class="ev-why-sub">${esc(sub)}</small>` : ''}</div>${r.go ? CHEVRON_R : ''}</div>`;
+  };
+  return evWhyRows(e.data || {}).map(row).join('');
+}
+function evWhyOpen(id, go, rid, at) {
+  if (go === 'user') openRuleForm(rid);
+  else if (go === 'app') openAppAct(rid);
+  else if (go === 'rules') openRules(at);
+  else if (go === 'route') openProfiles();   // Route: the main flow
+  else return;
+  evLeave(id);
+}
 function evBlockedHtml(e) {
   const d = e.data || {}, entry = d.entry || d.route;
-  return `<div class="ev-vias">${entry ? evViaRow(e, '⚠️', entry, d.server) : ''}${d.via ? evViaRow(e, '✅', d.via, d.viaServer) : ''}</div>`;
+  return `<div class="ev-vias">${evWhyHtml(e)}${entry ? evViaRow(e, '⚠️', entry, d.server) : ''}${d.via ? evViaRow(e, '✅', d.via, d.viaServer) : ''}</div>`;
 }
 // "<host> does not open" with no route that opens it: the entry in use and every route tried, all ⚠️;
 // no other route tried — a muted line says why (none answers / the retries are off).
 function evUnreachableHtml(e) {
   const d = e.data || {}, entry = d.entry || d.route, tried = d.tried || [];
-  return `<div class="ev-vias">${entry ? evViaRow(e, '⚠️', entry, d.server) : ''}${tried.map(x => evViaRow(e, '⚠️', x.entry, x.server)).join('')}${tried.length ? '' : `<div class="ev-via-note">${evNoRoute(d)}</div>`}</div>`;
+  return `<div class="ev-vias">${evWhyHtml(e)}${entry ? evViaRow(e, '⚠️', entry, d.server) : ''}${tried.map(x => evViaRow(e, '⚠️', x.entry, x.server)).join('')}${tried.length ? '' : `<div class="ev-via-note">${evNoRoute(d)}</div>`}</div>`;
 }
 
 function evRowHtml(g) {

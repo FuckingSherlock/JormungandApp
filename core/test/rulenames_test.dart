@@ -151,6 +151,20 @@ void main() {
       expect(n.of(''), isNull);
     });
 
+    test('event data: the rule (named, final, unknown) and the app of a failed request', () {
+      final n = _names(routing);
+      expect(ruleEventData(n, 'domain_suffix=[corp.example corp.test]'), {'kind': 'user', 'name': 'Work sites', 'id': 'r1'});
+      expect(ruleEventData(n, 'process_name=chrome.exe'), {'kind': 'app', 'name': 'Chrome', 'id': 'chrome.exe'});
+      expect(ruleEventData(n, 'domain_suffix=[telegram.org t.me telegram.me...]'), {'kind': 'service', 'name': 'Telegram', 'id': 'telegram'});
+      expect(ruleEventData(n, 'domain_suffix=[doubleclick.net googlesyndication.com googleadservices.com...]'), {'kind': 'quick', 'name': 'Block ads', 'id': 'ads'});
+      expect(ruleEventData(n, ''), {'kind': 'final'}, reason: 'no rule matched: the main flow');
+      expect(ruleEventData(n, 'domain_suffix=nothing.example'), {'kind': 'unknown', 'text': 'domain_suffix=nothing.example'});
+      expect(ruleEventData(null, 'port=1'), {'kind': 'unknown', 'text': 'port=1'});
+      expect(processEventData(r'C:\Apps\Discord\Discord.exe'), {'name': 'Discord.exe', 'path': r'C:\Apps\Discord\Discord.exe'});
+      expect(processEventData('/usr/bin/tg')!['name'], 'tg');
+      expect(processEventData(''), isNull);
+    });
+
     test('Global keeps the private-networks rule only', () {
       final info = RoutingInfo();
       buildConfig({'kind': 'unit', 'main': _grp([_node]), 'global': true, 'routing': routing}, info: info);

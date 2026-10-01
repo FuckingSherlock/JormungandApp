@@ -656,8 +656,8 @@ void main() {
   });
 
   group('onClosed: requests that got nothing back', () {
-    ClosedConnection cc({String outbound = 'route0/s::a', List<String> chain = const ['route0/s::a', 'route0', 'proxy'], String dest = 'blocked.example:443', int up = 120, int down = 0}) =>
-        ClosedConnection(outbound: outbound, chain: chain, destination: dest, up: up, down: down);
+    ClosedConnection cc({String outbound = 'route0/s::a', List<String> chain = const ['route0/s::a', 'route0', 'proxy'], String dest = 'blocked.example:443', int up = 120, int down = 0, String rule = '', String process = ''}) =>
+        ClosedConnection(outbound: outbound, chain: chain, destination: dest, up: up, down: down, rule: rule, process: process);
 
     test('ignored: down > 0 (the request did get something back)', () async {
       final p = plan([unit('A', ['s::a'])]);
@@ -740,7 +740,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(auto.blockedCount, 1);
-      expect(auto.lastBlocked?.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'B', 'viaServer': 's::b', 'at': 0});
+      expect(auto.lastBlocked?.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'B', 'viaServer': 's::b', 'rule': '', 'process': '', 'at': 0});
       expect(events.length, 1);
 
       // the same route + site again, still within the hour: not reported again
@@ -785,7 +785,7 @@ void main() {
       await fail(auto);
       expect(asked.map((a) => a.$1), ['route0/s::a', 'route1/s::b', 'route2/s::c']);
       expect(blocked.length, 1);
-      expect(blocked.single.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'C', 'viaServer': 's::c', 'at': 0});
+      expect(blocked.single.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'C', 'viaServer': 's::c', 'rule': '', 'process': '', 'at': 0});
       expect(gone, isEmpty);
     });
 
@@ -808,6 +808,8 @@ void main() {
           {'route': 'D', 'server': 's::d'},
         ],
         'retriesOff': false,
+        'rule': '',
+        'process': '',
         'at': 0,
       });
       expect(notes.any((n) => n.contains('down or blocked everywhere')), isTrue);
@@ -840,6 +842,36 @@ void main() {
       expect(gone.length, 1);
       expect(gone.single.tried, isEmpty);
       expect(gone.single.retriesOff, isFalse);
+    });
+
+    test('both events carry the rule sing-box matched and the app of the failed request; no rule = ""', () async {
+      // blocked: the site opens through B only
+      final (auto, _, _, blocked, _, _) = five((tag, dest) async => tag == 'route1/s::b');
+      await auto.check();
+      auto.onClosed(cc(rule: 'domain_suffix=blocked.example', process: r'C:\Apps\Discord\Discord.exe'));
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(blocked.single.rule, 'domain_suffix=blocked.example');
+      expect(blocked.single.process, r'C:\Apps\Discord\Discord.exe');
+      expect(auto.lastBlocked!.toJson()['rule'], 'domain_suffix=blocked.example');
+
+      // unreachable: two sites in one window, each keeps its own rule / app (the second has none)
+      final (auto2, _, _, _, gone, _) = five((tag, dest) async => false);
+      await auto2.check();
+      auto2.onClosed(cc(dest: 'a.example:443', rule: 'process_name=tg.exe', process: '/usr/bin/tg.exe'));
+      auto2.onClosed(cc(dest: 'a.example:443', rule: 'process_name=tg.exe', process: '/usr/bin/tg.exe'));
+      await auto2.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(gone.single.dest, 'a.example:443');
+      expect(gone.single.rule, 'process_name=tg.exe');
+      expect(gone.single.process, '/usr/bin/tg.exe');
+      expect(gone.single.toJson()['process'], '/usr/bin/tg.exe');
+
+      final (auto3, _, _, _, gone3, _) = five((tag, dest) async => false);
+      await auto3.check();
+      await fail(auto3);
+      expect(gone3.single.rule, '');
+      expect(gone3.single.process, '');
     });
 
     test('siteRetry: off — no request through other routes, AutoUnreachable says the retries are off; all — every route up to the first that opens', () async {
