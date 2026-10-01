@@ -531,22 +531,25 @@ function updateMainConnectCard() {
   const none = !e && nothingInAuto(), empty = !e && catalogEmpty();   // empty: 50-home.js dockTap
   document.getElementById('profCardName').textContent = e ? e.name : none ? 'Nothing in Auto'
     : empty ? (simpleMode() ? 'No servers yet' : 'No profiles yet') : '—';
-  document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
-    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Simple' : 'Profiles';
+  // the kind, short and never translated (the label has data-notr)
+  document.getElementById('profCardLabel').textContent = chainsData[id] ? 'chain' : profilesData[id] ? 'profile'
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'sub' : 'set') : simpleMode() ? 'simple' : 'profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
+  // the protocol of the server traffic leaves through (a chain: its exit), between the badge and the route
+  const proto = n => n ? `<span class="node-proto dock-proto">${protoLabel(n)}</span>` : '';
   let lat = null;
   if (!e) detail.innerHTML = none ? '<span class="dock-node none">turn on Use in Auto in Route</span>'
     : empty ? `<span class="dock-node none">${simpleMode() ? 'Add in Nodes' : 'Create one in Nodes'}</span>` : '';
   else if (chainsData[id]) {
     const c = chainsData[id], a = chainEntryNode(c), b = chainExitNode(c);
-    detail.innerHTML = nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);
+    detail.innerHTML = proto(b) + nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);
     if (ms(a) != null && ms(b) != null) lat = ms(a) + ms(b);
   } else {
     const n = unitNode(id), ref = unitRefs(id).find(r => r.node === n);
-    detail.innerHTML = (profilesData[id] && ref ? `<span class="dock-src">${esc(sourcesData[ref.sid].name)}</span><span class="dock-sep">›</span>` : '') + nodeHtml(n);
+    detail.innerHTML = proto(n) + (profilesData[id] && ref ? `<span class="dock-src">${esc(sourcesData[ref.sid].name)}</span><span class="dock-sep">›</span>` : '') + nodeHtml(n);
     lat = ms(n);
   }
   document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;

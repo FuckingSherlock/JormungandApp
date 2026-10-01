@@ -17,6 +17,10 @@
      'never' (not until a reconnect);
    - flapGuard: an entry that keeps dropping waits 1, 2, 4 … flapMax minutes of answers
      before Auto goes back to it; flapReset minutes of stable work forget the drops;
+   - siteRetry: a site that failed through a node that still answers is tried through the
+     other answering entries (Auto's order) to tell "blocked here" from "down everywhere" —
+     'off' (never: no requests to the user's site through entries they did not pick), '3'
+     (up to three entries, default), 'all'; none opens it → the site/unreachable event;
    - pauseScreenOff: no checks while the screen is off (mobile battery);
    - subsEvery: the global subscription update period; a subscription's own period
      (Nodes → Edit subscription) wins, its default 'auto' follows this one (seconds, 0 = off).
@@ -25,13 +29,14 @@
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
 const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, standby: 2, warmEvery: 60, retryPause: 0.5, returnTo: 'always',
-  flapGuard: true, flapMax: 30, flapReset: 15, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
+  flapGuard: true, flapMax: 30, flapReset: 15, siteRetry: '3', pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
 const AUTO_THRESHOLD_MAX = 1000;
 const AUTO_FAIL_AFTER = [1, 5];
 const AUTO_STANDBY_MAX = 20;
 // Typed numbers of the sheet: [min, max, unit]; a value outside puts the old one back.
 const AUTO_NUMS = { retryPause: [0.1, 10, 's'], flapMax: [1, 60, 'min'], flapReset: [5, 60, 'min'] };
 const AUTO_RETURN = [['always', 'Always'], ['faster', 'If faster'], ['never', 'Never']];
+const AUTO_SITE_RETRY = [['off', 'Off'], ['3', 'Up to 3'], ['all', 'All']];
 const CHEVRON_R = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
 // A period in seconds, in the largest unit that divides it: 90 s, 5 min, 12 h, 2 d.
@@ -132,6 +137,8 @@ function renderAutoMode() {
       <div class="set-row"><div class="set-label" style="flex:1">Retry pause<div class="set-hint">After a missed check, before the next try</div></div>
         ${num('retryPause', 'am-retry')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Speed test on failures<div class="set-hint">When requests fail, also measure the server’s speed</div></div>${toggle(autoCfg.speedOnFail, "setAutoCfg('speedOnFail',!autoCfg.speedOnFail)")}</div>
+      <div class="set-row" id="am-siteretry"><div class="set-label" style="flex:1">Retry a failed site through other routes<div class="set-hint">Tells a blocked site from a dead one. Turn off if a service distrusts one client coming from many addresses</div></div>
+        <select class="set-select" id="am-siteretry-sel" onchange="setAutoCfg('siteRetry',this.value)">${AUTO_SITE_RETRY.map(([v, l]) => `<option value="${v}" ${v === autoCfg.siteRetry ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="set-row"><div class="set-label" style="flex:1">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
     </div>
 

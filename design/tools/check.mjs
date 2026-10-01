@@ -190,6 +190,8 @@ const SHOTS = {
   'logs-event-open': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { const r = document.querySelector('#evList .ev-row.cat-site'); evToggle(+r.dataset.key); r.scrollIntoView({ block: 'center' }); }); await settle(p); },
   // "does not open": the failing entry and the working one as two rows with Open, Create rule / In raw log below
   'logs-blocked': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { const r = document.querySelector('#evList .ev-row.cat-site'); r.scrollIntoView({ block: 'center' }); }); await settle(p); },
+  // "does not open" on every route: the entry in use and the route tried as ⚠️ rows, then the same with the muted "No other working route to try"
+  'logs-unreachable': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { const e = evState.list.find(x => x.type === 'unreachable' && (x.data.tried || []).length); const r = [...document.querySelectorAll('#evList .ev-row')].find(x => x.dataset.ids.split(',').includes(String(e.id))); r.scrollIntoView({ block: 'start' }); }); await settle(p); },
   // scrolled up, two events arrive: the view stays, the pill counts them
   'logs-new-below': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { document.getElementById('evScroll').scrollTop = 0; }); await p.waitForTimeout(200);
     await p.evaluate(() => { const [a, b] = visibleOrder(); mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }); mockEventAdd('site', 'blocked', 'warn', { host: 'discord.com', dest: 'discord.com:443', entry: a, via: b }); return pollEvents(); }); await p.waitForTimeout(400); },
@@ -1731,7 +1733,7 @@ async function runChecks() {
     await page.click('#routeModes button[data-mode=profiles]'); await settle(page);
     const ids = await page.$$eval('.conn-row', r => r.map(el => el.dataset.id));
     expect(ids.includes('default') && ids.includes('cpdefault') && !ids.includes('src1'), ids.join());
-    expect(/Profiles/.test(await page.textContent('#routeModes .on')) && /Profile|Chain/.test(await page.textContent('#profCardLabel')), 'titles');
+    expect(/Profiles/.test(await page.textContent('#routeModes .on')) && /profile|chain/.test(await page.textContent('#profCardLabel')), 'titles');
   });
 
   await check('profiles: conn-state sets Manual (sheet stays), second tap / badge back to Auto', async () => {
@@ -1962,13 +1964,14 @@ async function runChecks() {
     const r = await page.evaluate(() => {
       const out = {}, was = autoConnect, det = () => document.getElementById('profModeDetail');
       setConnectMode('simple'); autoConnect = false; activeConnectId = 'src1'; updateMainConnectCard();
-      out.src = document.getElementById('profCardLabel').textContent === 'Sub' && !!det().querySelector('.dock-node') && !det().querySelector('.dock-src');
+      out.src = document.getElementById('profCardLabel').textContent === 'sub' && !!det().querySelector('.dock-node') && !det().querySelector('.dock-src')
+        && det().firstElementChild.classList.contains('dock-proto') && /\S/.test(det().firstElementChild.textContent);   // protocol first
       chainsData.tc3 = { id:'tc3', name:'t3', inId:'src2', outId:'src1', inAuto:true, inOff:[], outOff:[], exitMode:'fastest', exitOrder:[] };
       catalogOrder.simple.push('tc3'); syncCatalog(); activeConnectId = 'tc3'; updateMainConnectCard();
-      out.chain = document.getElementById('profCardLabel').textContent === 'Chain' && det().querySelectorAll('.dock-node').length === 2 && !!det().querySelector('.dock-arrow');
+      out.chain = document.getElementById('profCardLabel').textContent === 'chain' && det().querySelectorAll('.dock-node').length === 2 && !!det().querySelector('.dock-arrow');
       delete chainsData.tc3; connectOrder = connectOrder.filter(x => x !== 'tc3'); activeConnectId = 'src1'; autoConnect = was;
       setConnectMode('profiles'); const pw = autoConnect; autoConnect = false; activeConnectId = 'default'; updateMainConnectCard();
-      out.profile = document.getElementById('profCardLabel').textContent === 'Profile' && !!det().querySelector('.dock-src');
+      out.profile = document.getElementById('profCardLabel').textContent === 'profile' && !!det().querySelector('.dock-src');
       autoConnect = pw; setConnectMode('simple'); updateMainConnectCard();
       return out;
     });
@@ -2255,6 +2258,13 @@ async function runChecks() {
       ret.value = 'faster'; ret.dispatchEvent(new Event('change'));
       out.returnFaster = autoCfg.returnTo === 'faster' && planAuto().returnTo === 'faster' && document.getElementById('am-return').value === 'faster';
       setAutoCfg('returnTo', 'always');
+      // Retry a failed site through other routes: Off | Up to 3 | All, in the plan as siteRetry, saved with autoCfg
+      const sr = document.getElementById('am-siteretry-sel');
+      out.siteDefault = sr.value === '3' && planAuto().siteRetry === '3' && sr.options.length === 3 && !!document.querySelector('#am-siteretry .set-hint');
+      sr.value = 'off'; sr.dispatchEvent(new Event('change'));
+      out.siteOff = autoCfg.siteRetry === 'off' && planAuto().siteRetry === 'off' && document.getElementById('am-siteretry-sel').value === 'off' && liveSnapshot().autoCfg.siteRetry === 'off';
+      setAutoCfg('siteRetry', 'all'); out.siteAll = planAuto().siteRetry === 'all' && document.getElementById('am-siteretry-sel').value === 'all';
+      setAutoCfg('siteRetry', '3');
       out.flapDefault = autoCfg.flapGuard && document.getElementById('am-flapmax').value === '30' && document.getElementById('am-flapreset').value === '15';
       num('am-flapmax', '61'); num('am-flapreset', '4'); out.flapBounds = autoCfg.flapMax === 30 && autoCfg.flapReset === 15;
       num('am-flapmax', '60'); num('am-flapreset', '5'); out.flapSet = autoCfg.flapMax === 60 && autoCfg.flapReset === 5 && planAuto().flapMax === 60 && planAuto().flapReset === 5;
@@ -3162,6 +3172,42 @@ async function runChecks() {
     await p.evaluate(() => { evState.open.clear(); });
     await backAndSettle(p);
     expect(await p.evaluate(() => activeTab() === 'home'), 'a second Back goes Home');
+    await p.close();
+  });
+
+  // The unreachable-site card: the entry in use and every route tried as named ⚠️ rows; a muted line when none was tried; no Create rule; In raw log → Back returns.
+  await check('journal: unreachable card (named rows, a muted line when no route was tried, no Create rule), In raw log → Back returns to the event', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs'); await p.waitForTimeout(500);
+    const info = await p.evaluate(async () => {
+      const [a, b] = autoOrder(), data = (host, more) => ({ host, dest: host + ':443', entry: a, route: a, ...more });
+      const e1 = mockEventAdd('site', 'unreachable', 'warn', data('dead.example.com', { tried: [{ entry: b }, { entry: a }] }), { raw: 'dead.example.com:443 does not open through any route' });
+      const e0 = mockEventAdd('site', 'unreachable', 'warn', data('none.example.com', { tried: [] }), { raw: 'none.example.com:443 does not open' });
+      const eo = mockEventAdd('site', 'unreachable', 'warn', data('off.example.com', { tried: [], retries: 'off' }), { raw: 'off.example.com:443 does not open' });
+      await pollEvents();
+      const rowOf = e => [...document.querySelectorAll('#evList .ev-row.cat-site')].find(r => r.dataset.ids.split(',').includes(String(e.id)));
+      const read = e => { const r = rowOf(e); return { rows: [...r.querySelectorAll('.ev-via')].map(x => x.querySelector('.ev-via-name').firstChild.textContent), ico: [...r.querySelectorAll('.ev-via-ico')].map(x => x.textContent).join(''),
+        opens: [...r.querySelectorAll('.ev-via')].every(x => !!x.querySelector('.ev-act')), note: (r.querySelector('.ev-via-note') || {}).textContent || null,
+        btns: [...r.querySelectorAll('.ev-acts .ev-act')].map(x => x.textContent), title: r.querySelector('.ev-title').textContent, more: r.querySelector('.ev-more').textContent }; };
+      return { id: e1.id, a: connectEntry(a).name, b: connectEntry(b).name, one: read(e1), none: read(e0), off: read(eo), text: evText(e1), textNone: evText(e0), ids: [a, b] };
+    });
+    const { one, none, off } = info;
+    expect(one.rows.length === 3 && one.rows[0] === info.a && one.rows[1] === info.b && one.ico === '⚠️⚠️⚠️' && one.opens && one.note === null, 'rows ' + JSON.stringify(one));
+    expect(one.title === 'dead.example.com does not open' && one.btns.join() === 'In raw log', 'title / buttons ' + one.title + ' | ' + one.btns.join());
+    expect(!one.more.includes('{') && one.more.includes('Also tried') && one.more.includes(info.b), 'fields in words ' + one.more);
+    expect(none.rows.length === 1 && none.note === 'No other working route to try' && off.note === 'Retries through other routes are off', 'muted lines ' + none.note + ' | ' + off.note);
+    expect(info.text.includes('dead.example.com does not open') && info.text.includes('⚠️ ' + info.b) && info.textNone.includes('No other working route to try'), 'notification / export text ' + info.text);
+    const inView = id => p.evaluate(id => {
+      const row = [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id)));
+      const b = row && row.getBoundingClientRect(), s = document.getElementById('evScroll').getBoundingClientRect();
+      return !!row && logsOpen() && logTab === 'events' && row.classList.contains('open') && b.top >= s.top - 1 && b.bottom <= s.bottom + 1;
+    }, id);
+    await p.evaluate(id => [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id))).querySelector('.ev-acts .ev-act:last-child').click(), info.id);
+    await p.waitForTimeout(700);
+    expect(await p.evaluate(() => logTab === 'raw'), 'In raw log shows Raw');
+    await backAndSettle(p);
+    expect(await inView(info.id), 'In raw log → Back returns to the event');
+    await p.evaluate(() => { evState.open.clear(); });
     await p.close();
   });
 

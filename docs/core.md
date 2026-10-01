@@ -74,7 +74,8 @@ Auto, которая может работать; в Manual — закреплё
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
              url: connCfg.testUrl /* нет — gstatic; им же проверяет AutoService */ },
   auto: { failAfter, threshold, checkEvery, standby, warmEvery,
-          retryPause /*с*/, returnTo: 'always' | 'faster' | 'never', flapGuard, flapMax /*мин*/, flapReset /*мин*/ },
+          retryPause /*с*/, returnTo: 'always' | 'faster' | 'never', flapGuard, flapMax /*мин*/, flapReset /*мин*/,
+          siteRetry: 'off' | '3' | 'all' /* сколько других маршрутов пробовать для упавшего сайта, по умолчанию 3 */ },
   routing: Routing }       // правила, приложения, быстрые правила, DNS — ниже
 Route = { id, kind: 'unit' | 'chain', main: Group, entry?: Group }   // entry — вход цепочки, выход идёт через него (detour)
 Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true, nodes: [{ key: 'sid::nid', outbound }] }
@@ -202,8 +203,11 @@ probe.dart; `plan.auto.checkers`, иначе `urlTest.checkers`, нет поля
 Упавшие запросы (`onClosed`): демон подписан на поток закрытых соединений API service
 (ниже); соединение через текущий маршрут без единого байта ответа → проверка сразу (одна на
 `failWindow` 10 с). Нода живая → сайты таких запросов проверяются `reach` (`probeReach`: TLS на
-443, HEAD на 80) через неё и через другой отвечающий маршрут → событие `blocked`
-(`AutoBlocked {route, server, dest, via}`, пара маршрут + сайт раз в час). `onLog`: строка
+443, HEAD на 80) через неё и через другие отвечающие маршруты по порядку Auto (до первого,
+где открылся; число — `AutoSettings.siteAlternates` из `plan.auto.siteRetry`: 0 / 3 / все) →
+событие `blocked` (`AutoBlocked {route, server, dest, via, viaServer}`); не открылся нигде или
+другого маршрута нет → `unreachable` (`AutoUnreachable {route, server, dest, tried, retriesOff}`);
+оба — пара маршрут + сайт раз в час. Ответ `reach` «не знаю» (null) не считается пробой. `onLog`: строка
 sing-box `missing default interface` → `offline` (раунды ничего не меряют, как `noNet`),
 `updated default interface` → снова в сети, проверка сразу.
 
@@ -592,7 +596,8 @@ Raw). Событие:
 | `auto/switched` info | Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
 | `auto/fastest` info | Fastest сам сменил сервер (urltest внутри sing-box) | `{route, from, to}` |
 | `auto/unstable` warn | маршрут падает снова и снова (flap guard) | `{id, strikes, holdMs}` |
-| `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Create rule) | `{host, port?, entry, server, dest, via, viaServer}` |
+| `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Create rule); другие отвечающие маршруты пробуются по порядку Auto до первого, где открылся (не больше `siteRetry`), он и есть `via` | `{host, port?, entry, server, dest, via, viaServer}` |
+| `site/unreachable` warn | сайт не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); пара маршрут + сайт раз в час, как у `blocked` | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off'}` — `tried` пуст: нет другого рабочего маршрута, при `retries: 'off'` — повторы выключены (`siteRetry`) |
 | `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
 | `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'\|<id of the fallback target>}` — `target`: the cause (`proxy` = the main flow); `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |

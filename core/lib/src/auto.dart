@@ -78,11 +78,13 @@ class AutoSettings {
     this.stallAfter = const Duration(seconds: 10),
     this.batch = 10,
     this.failWindow = const Duration(seconds: 10),
+    this.siteAlternates = 3,
   });
 
   /// From a plan: `auto` = {failAfter, threshold (ms), checkEvery (s), standby, warmEvery (s),
   /// retryPause (s, 0.1–10), returnTo ('always' | 'faster' | 'never'), flapGuard, flapMax
-  /// (min, 1–60), flapReset (min, 5–60)} (the UI's autoCfg), the test URL from `urlTest`.
+  /// (min, 1–60), flapReset (min, 5–60), siteRetry ('off' | '3' | 'all')} (the UI's autoCfg),
+  /// the test URL from `urlTest`.
   /// Missing fields = the defaults (an older plan: `returnTo` always); an older plan's
   /// `keepWarm: false` = standby 0.
   factory AutoSettings.fromPlan(Map<String, dynamic> plan) {
@@ -103,6 +105,7 @@ class AutoSettings {
       flapGuard: a['flapGuard'] != false,
       flapMax: Duration(minutes: n(a['flapMax'], 30).clamp(1, 60)),
       flapReset: Duration(minutes: n(a['flapReset'], 15).clamp(5, 60)),
+      siteAlternates: switch (a['siteRetry']) { 'off' => 0, 'all' => allSiteAlternates, _ => 3 },
     );
   }
 
@@ -124,6 +127,11 @@ class AutoSettings {
   final Duration stallAfter; // a connection left on a dead route with no bytes this long is closed
   final int batch; // routes / servers tested at once when looking for one that answers
   final Duration failWindow; // failed requests of the current route within it = one check
+
+  /// How many of the other answering routes (in Auto's order) a failed site is tried through
+  /// before it counts as unreachable: 0 = none, [allSiteAlternates] = every one.
+  final int siteAlternates;
+  static const allSiteAlternates = 1 << 20;
 
   /// How old a probe-pool answer (pool.dart) may be and still stand for a test of a server
   /// the module has results for: a third of a check interval, at most 20 s. Misses are never
@@ -212,6 +220,27 @@ class AutoBlocked {
   final String route, server, dest, via, viaServer;
   final int at;
   Map<String, dynamic> toJson() => {'route': route, 'server': server, 'dest': dest, 'via': via, 'viaServer': viaServer, 'at': at};
+}
+
+/// A site ([dest], `host:port`) that does not open through [route]'s server [server] while
+/// the node passes traffic, nor through any of the other answering routes [tried] (entry id
+/// and current server each; empty = no other route answers): the user may simply have no
+/// node that suits the site. [retriesOff]: the other routes were not tried because the
+/// setting is off (so [tried] is empty for that reason, not for lack of routes).
+class AutoUnreachable {
+  const AutoUnreachable({required this.route, required this.server, required this.dest, required this.tried, required this.at, this.retriesOff = false});
+  final String route, server, dest;
+  final List<({String route, String server})> tried;
+  final bool retriesOff;
+  final int at;
+  Map<String, dynamic> toJson() => {
+        'route': route,
+        'server': server,
+        'dest': dest,
+        'tried': [for (final t in tried) {'route': t.route, 'server': t.server}],
+        'retriesOff': retriesOff,
+        'at': at,
+      };
 }
 
 /// The network came or went: [kind] `lost` (no route answers) / `restored`, `offline` (the
@@ -342,6 +371,10 @@ class AutoService {
   int blockedCount = 0;
   AutoBlocked? lastBlocked;
 
+  /// Sites that open through no route that was tried (as on [unreachable]) and the last.
+  int unreachableCount = 0;
+  AutoUnreachable? lastUnreachable;
+
   /// Connections closed as stalled on a route / server left for a dead one.
   int stalledClosed = 0;
   int? checkedAt;
@@ -350,6 +383,7 @@ class AutoService {
   final _switches = StreamController<AutoSwitch>.broadcast();
   final _unstable = StreamController<AutoUnstable>.broadcast();
   final _blocked = StreamController<AutoBlocked>.broadcast();
+  final _unreachable = StreamController<AutoUnreachable>.broadcast();
   final _net = StreamController<AutoNet>.broadcast();
   int? _lostAt, _offlineAt; // since when: no route answers / the OS has no network
   Timer? _timer;
@@ -361,6 +395,7 @@ class AutoService {
   int? _failAt; // the first failed request of the current window
   final _failDests = <String, String>{}; // sites that got nothing back → the server's outbound tag
   final _blockedAt = <String, int>{}; // 'route site' → when it was reported
+  final _unreachableAt = <String, int>{}; // the same for unreachable sites
   int? _warmedAt; // when the spares were tested last
   bool _directOk = false; // no route answers, but the direct path does (see _decide)
 
@@ -372,6 +407,9 @@ class AutoService {
 
   /// A site that does not open through the current node but does through another route.
   Stream<AutoBlocked> get blocked => _blocked.stream;
+
+  /// A site that does not open through the current node nor through the other routes tried.
+  Stream<AutoUnreachable> get unreachable => _unreachable.stream;
 
   /// No route answers, and answers again; the OS offline and back.
   Stream<AutoNet> get net => _net.stream;
@@ -397,6 +435,7 @@ class AutoService {
     _switches.close();
     _unstable.close();
     _blocked.close();
+    _unreachable.close();
     _net.close();
   }
 
@@ -528,32 +567,60 @@ class AutoService {
   }
 
   // The node passes traffic, yet requests through it got nothing back: each site again
-  // through it; opens now — one-off; not — through another route that answers: opens
-  // there — the site is blocked on this node ([blocked], once an hour per site and route);
-  // not there either — the site is down (a log line).
+  // through it; opens now — one-off; not — through the other routes that answer, in Auto's
+  // order, at most [siteAlternates] of them, up to the first that opens it: there — the site
+  // is blocked on this node ([blocked], once an hour per site and route); nowhere — the
+  // site is down, or no route suits it ([unreachable], the same dedupe; empty `tried` = no
+  // other route answers). Both also get a log line.
   Future<void> _sites(_Route cur) async {
     final dests = Map.of(_failDests);
     _failDests.clear();
     if (reach == null || dests.isEmpty) return;
-    final alt = [for (var i = 0; i < _routes.length; i++) if (i != index && _routes[i].health.answered) _routes[i]].firstOrNull;
+    // each try is a request to the user's real site through a server they did not pick:
+    // how many is the setting ([AutoSettings.siteAlternates], 0 = none)
+    final alts = [for (var i = 0; i < _routes.length; i++) if (i != index && _routes[i].health.answered) _routes[i]].take(settings.siteAlternates).toList();
+    final off = settings.siteAlternates == 0;
     for (final MapEntry(key: dest, value: tag) in dests.entries) {
       if (_stopped) return;
       final here = await reach!(tag, dest);
       if (here != false) continue; // opens now, or cannot be told
-      final altTag = alt?.main.member(alt.main.current);
-      final there = altTag == null ? null : await reach!(altTag, dest);
-      if (there != true) {
-        note?.call('auto: $dest does not open through ${cur.id}${alt == null ? '' : ' nor ${alt.id}'}: the site is down or blocked everywhere');
-        continue;
+      _Route? via;
+      var unsure = false; // an alternate that could not be tried tells nothing
+      final tried = <({String route, String server})>[];
+      for (final alt in alts) {
+        if (_stopped) return;
+        final there = await reach!(alt.main.member(alt.main.current), dest);
+        if (there == true) {
+          via = alt;
+          break;
+        }
+        if (there == false) {
+          tried.add((route: alt.id, server: alt.main.current));
+        } else {
+          unsure = true;
+        }
       }
       final key = '${cur.id} $dest', now = _clock();
-      if (now - (_blockedAt[key] ?? -3600000) < 3600000) continue;
-      _blockedAt[key] = now;
-      final b = AutoBlocked(route: cur.id, server: cur.main.current, dest: dest, via: alt!.id, viaServer: alt.main.current, at: now);
-      blockedCount++;
-      lastBlocked = b;
-      note?.call('auto: $dest does not open through ${cur.id}, opens through ${alt.id}');
-      if (!_blocked.isClosed) _blocked.add(b);
+      if (via != null) {
+        if (now - (_blockedAt[key] ?? -3600000) < 3600000) continue;
+        _blockedAt[key] = now;
+        final b = AutoBlocked(route: cur.id, server: cur.main.current, dest: dest, via: via.id, viaServer: via.main.current, at: now);
+        blockedCount++;
+        lastBlocked = b;
+        note?.call('auto: $dest does not open through ${cur.id}, opens through ${via.id}');
+        if (!_blocked.isClosed) _blocked.add(b);
+        continue;
+      }
+      note?.call(off
+          ? 'auto: $dest does not open through ${cur.id}: retries through other routes are off'
+          : 'auto: $dest does not open through ${cur.id}${tried.isEmpty ? '' : ' nor ${tried.map((t) => t.route).join(', ')}'}: the site is down or blocked everywhere');
+      if (unsure && tried.isEmpty) continue; // nothing was told for sure: no claim to the user
+      if (now - (_unreachableAt[key] ?? -3600000) < 3600000) continue;
+      _unreachableAt[key] = now;
+      final u = AutoUnreachable(route: cur.id, server: cur.main.current, dest: dest, tried: tried, retriesOff: off, at: now);
+      unreachableCount++;
+      lastUnreachable = u;
+      if (!_unreachable.isClosed) _unreachable.add(u);
     }
   }
 
@@ -872,6 +939,8 @@ class AutoService {
       'lastRequestFail': lastRequestFail,
       'blocked': blockedCount,
       'lastBlocked': lastBlocked?.toJson(),
+      'unreachable': unreachableCount,
+      'lastUnreachable': lastUnreachable?.toJson(),
       'stalledClosed': stalledClosed,
       'checkedAt': checkedAt,
     };

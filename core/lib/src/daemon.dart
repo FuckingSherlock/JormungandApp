@@ -297,6 +297,18 @@ class Daemon {
         'viaServer': b.viaServer,
       });
     });
+    auto.unreachable.listen((u) {
+      final at = u.dest.lastIndexOf(':'), port = at < 0 ? null : int.tryParse(u.dest.substring(at + 1));
+      events.add('site', 'unreachable', 'warn', data: {
+        'host': port == null ? u.dest : u.dest.substring(0, at),
+        'port': ?port,
+        'entry': u.route,
+        'server': u.server,
+        'dest': u.dest,
+        'tried': [for (final t in u.tried) {'entry': t.route, 'server': t.server}],
+        if (u.retriesOff) 'retries': 'off',
+      });
+    });
     auto.net.listen((n) {
       final (type, level) = switch (n.kind) {
         'lost' => ('lost', 'warn'),

@@ -11,7 +11,7 @@ const notifCfg = {
   unstable: true,       // an entry is unstable (flap guard)
   connLost: true,       // connection lost / restored
   coreCrash: false,     // sing-box stopped / started again: background restarts are silent
-  blocked: true,        // a site does not open through the current entry (Rule button)
+  blocked: true,        // a site does not open through the current entry (Rule button when another entry opens it)
   subUpdated: false,    // a subscription updated in the background
   subFailed: true,      // background update failed; provider removed / brought back servers; servers do not respond
   ruleSets: true,       // rule sets could not be downloaded
@@ -26,7 +26,7 @@ const NOTIF_GROUPS = [
     ['unstable', 'Unstable entry', 'An entry keeps dropping and waits before it gets the traffic back'],
     ['connLost', 'Connection lost', 'No network or no server answers, and when it is back'],
     ['coreCrash', 'sing-box stopped', 'Background restarts are silent; this shows them'],
-    ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Create rule button)'],
+    ['blocked', 'Site does not open', 'It does not open through the current entry: another one opens it (with a Create rule button), or none does'],
   ]],
   ['Subscriptions and rules', [
     ['subUpdated', 'Subscription updated', 'A background update finished: name and number of servers'],

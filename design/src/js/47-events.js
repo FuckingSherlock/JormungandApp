@@ -24,7 +24,7 @@ const EV_REPEAT_MS = 10 * 60 * 1000;
 const EV_CATS = [
   ['conn', 'Connection', [['connected', 'Connected'], ['disconnected', 'Disconnected'], ['connectFailed', 'Connect failed'], ['lost', 'Connection lost'], ['restored', 'Connection restored'], ['offline', 'No network'], ['online', 'Network back']]],
   ['auto', 'Auto', [['switched', 'Entry or server switched'], ['fastest', 'Fastest moved'], ['unstable', 'Unstable entry']]],
-  ['site', 'Sites', [['blocked', 'Site does not open']]],
+  ['site', 'Sites', [['blocked', 'Site does not open'], ['unreachable', 'Site does not open on any route']]],
   ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
   ['rules', 'Rules', [['fallback', 'Rule target unavailable'], ['targetBack', 'Rule target back'], ['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
   ['dns', 'DNS', [['switched', 'DNS server switched']]],
@@ -47,7 +47,7 @@ const EV_NOTIF = {
   'conn/lost': 'connLost', 'conn/restored': 'connLost', 'conn/offline': 'connLost', 'conn/online': 'connLost',
   'core/crashed': 'coreCrash', 'core/restarted': 'coreCrash', 'core/restartFailed': 'coreCrash',
   'core/down': 'connLost',
-  'site/blocked': 'blocked', 'sub/updated': 'subUpdated',
+  'site/blocked': 'blocked', 'site/unreachable': 'blocked', 'sub/updated': 'subUpdated',
   'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
   'rules/ruleSetFailed': 'ruleSets',
   'rules/fallback': 'autoSwitch', 'rules/targetBack': 'autoSwitch', 'dns/switched': 'autoSwitch',
@@ -80,6 +80,8 @@ function evReason(d) {
   if (d.reason === 'fastest') return `${to} is faster`;
   return d.reason ? String(d.reason) : '';
 }
+// why a site that opens nowhere lists no other route: the setting is off, or none answers
+const evNoRoute = d => d.retries === 'off' ? 'Retries through other routes are off' : 'No other working route to try';
 const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 const evDns = id => (dnsServers[id] && dnsServers[id].name) || String(id);
 // "Rule Streaming and 2 more"; an app when no rule is involved: "App Telegram"
@@ -102,6 +104,11 @@ const EV_TEXT = {
     const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route;
     // the row shows the two entries as a card (evBlockedHtml); this line is the notification's and the export's
     return [`${host} does not open`, [entry && `⚠️ ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}`, d.via && `✅ ${evEntry(d.via)}${d.viaServer ? ' (' + evServer(d.viaServer) + ')' : ''}`].filter(Boolean).join('   ')];
+  },
+  'site/unreachable': d => {
+    const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route, tried = d.tried || [];
+    const at = (id, srv) => `⚠️ ${evEntry(id)}${srv ? ' (' + evServer(srv) + ')' : ''}`;
+    return [`${host} does not open`, [entry && at(entry, d.server), ...tried.map(x => at(x.entry, x.server)), !tried.length && evNoRoute(d)].filter(Boolean).join('   ')];
   },
   'sub/updated': d => [`${evSource(d.source, d.name)} updated`, [evPlural(d.total, 'server', 'servers'), d.added ? d.added + ' new' : '', d.removed ? d.removed + ' removed' : ''].filter(Boolean).join(' · ')],
   'sub/failed': d => [`${evSource(d.source, d.name)}: update failed`, d.error || ''],
@@ -141,7 +148,7 @@ function evText(e) { const d = evDescribe(e); return d.title + (d.detail ? ' —
 // The expanded row: every field of the event in words.
 const EV_FIELD = { entry: 'Entry', server: 'Server', mode: 'Mode', route: 'Route', from: 'From', to: 'To', reason: 'Reason', by: 'By', host: 'Site', dest: 'Address', via: 'Opens via',
   source: 'Subscription', name: 'Name', added: 'New servers', removed: 'Removed', total: 'Servers', count: 'Servers', error: 'Error', tag: 'Rule set', url: 'URL', code: 'Exit code',
-  rule: 'Rule', app: 'App', target: 'Target', more: 'More rules and apps',
+  rule: 'Rule', app: 'App', target: 'Target', more: 'More rules and apps', tried: 'Also tried', retries: 'Retries through other routes',
   attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
 function evValue(k, v, e) {
   if (e && e.cat === 'dns') {
@@ -152,6 +159,8 @@ function evValue(k, v, e) {
     if (k === 'target') return targetName(v);
     if (k === 'to') return { block: 'Block', direct: 'Direct', main: 'Main flow' }[v] || String(v);
   }
+  if (k === 'tried' && Array.isArray(v)) return v.length ? v.map(x => evEntry(x.entry) + (x.server ? ' (' + evServer(x.server) + ')' : '')).join(', ') : evNoRoute((e && e.data) || {});
+  if (k === 'retries') return v === 'off' ? 'Off' : String(v);
   if (typeof v === 'boolean') return k === 'on' ? (v ? 'On' : 'Off') : v ? 'Yes' : 'No';
   if (k === 'downMs' || k === 'holdMs') return evDuration(v);
   if (k === 'mode') return v === 'tun' ? 'TUN' : v === 'proxy' ? 'Proxy' : String(v);
@@ -173,7 +182,7 @@ function evFieldsHtml(g) {
 
 /* ── Rows: repeats folded, day separators, actions ── */
 
-const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/fallback': ['target', 'to'], 'rules/targetBack': ['target'], 'dns/switched': ['from', 'to'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
+const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'site/unreachable': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/fallback': ['target', 'to'], 'rules/targetBack': ['target'], 'dns/switched': ['from', 'to'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
 function evKey(e) {
   const t = e.cat + '/' + e.type, d = e.data || {}, f = EV_KEYF[t] || (e.cat === 'sub' ? ['source'] : null);
   return t + '|' + (f ? f.map(k => d[k]).join('|') : e.cat === 'user' ? JSON.stringify(d) : '');
@@ -203,7 +212,7 @@ function evActions(e) {
   const d = e.data || {}, a = [];
   if (e.cat === 'site' && e.type === 'blocked' && d.via) a.push(['rule', 'Create rule']);
   if (e.cat === 'sub' && e.type === 'failed' && sourcesData[d.source] && sourcesData[d.source].kind === 'sub') a.push(['retry', 'Retry']);
-  if (evOpenTarget(e) && !(e.cat === 'site' && e.type === 'blocked')) a.push(['open', 'Open']);   // the blocked card has its own Open per entry
+  if (evOpenTarget(e) && e.cat !== 'site') a.push(['open', 'Open']);   // the site cards have their own Open per entry
   if (e.log != null) a.push(['raw', 'In raw log']);
   return a;
 }
@@ -262,10 +271,16 @@ function evAct(key, id, target) {
 
 // "<host> does not open": the entry that fails and the one that works, each a menu-like row
 // (icon, name, its server small, Open); without a working alternative only the first.
+const evViaRow = (e, ico, id, server) => `<div class="ev-via"><span class="ev-via-ico">${ico}</span><div class="ev-via-name">${esc(evEntry(id))}${server ? `<small>${esc(evServer(server))}</small>` : ''}</div>${connectEntry(id) ? `<button class="ev-act" data-t="${esc(id)}" onclick="event.stopPropagation();evAct('open',${e.id},this.dataset.t)">Open</button>` : ''}</div>`;
 function evBlockedHtml(e) {
   const d = e.data || {}, entry = d.entry || d.route;
-  const row = (ico, id, server) => `<div class="ev-via"><span class="ev-via-ico">${ico}</span><div class="ev-via-name">${esc(evEntry(id))}${server ? `<small>${esc(evServer(server))}</small>` : ''}</div>${connectEntry(id) ? `<button class="ev-act" data-t="${esc(id)}" onclick="event.stopPropagation();evAct('open',${e.id},this.dataset.t)">Open</button>` : ''}</div>`;
-  return `<div class="ev-vias">${entry ? row('⚠️', entry, d.server) : ''}${d.via ? row('✅', d.via, d.viaServer) : ''}</div>`;
+  return `<div class="ev-vias">${entry ? evViaRow(e, '⚠️', entry, d.server) : ''}${d.via ? evViaRow(e, '✅', d.via, d.viaServer) : ''}</div>`;
+}
+// "<host> does not open" with no route that opens it: the entry in use and every route tried, all ⚠️;
+// no other route tried — a muted line says why (none answers / the retries are off).
+function evUnreachableHtml(e) {
+  const d = e.data || {}, entry = d.entry || d.route, tried = d.tried || [];
+  return `<div class="ev-vias">${entry ? evViaRow(e, '⚠️', entry, d.server) : ''}${tried.map(x => evViaRow(e, '⚠️', x.entry, x.server)).join('')}${tried.length ? '' : `<div class="ev-via-note">${evNoRoute(d)}</div>`}</div>`;
 }
 
 function evRowHtml(g) {
@@ -278,7 +293,7 @@ function evRowHtml(g) {
     <div class="ev-ico">${EV_ICON[e.cat] || ''}</div>
     <div class="ev-body">
       ${top}
-      ${e.cat === 'site' && e.type === 'blocked' ? evBlockedHtml(e) : d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
+      ${e.cat === 'site' && e.type === 'blocked' ? evBlockedHtml(e) : e.cat === 'site' && e.type === 'unreachable' ? evUnreachableHtml(e) : d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
       ${acts.length ? `<div class="ev-acts">${acts.map(([k, l]) => `<button class="ev-act" onclick="event.stopPropagation();evAct('${k}',${e.id})">${l}</button>`).join('')}</div>` : ''}
       <div class="ev-more">${evFieldsHtml(g)}</div>
     </div></div>`;

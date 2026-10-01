@@ -47,7 +47,7 @@ const autoOrder = () => visibleOrder().filter(id => connectEntry(id).inAuto);
 // Settings → Auto mode as the core reads it (auto.dart → AutoSettings.fromPlan).
 const planAuto = () => ({ failAfter: autoCfg.failAfter, threshold: autoCfg.threshold, checkEvery: autoCfg.checkEvery,
   standby: autoCfg.standby, warmEvery: autoCfg.warmEvery, retryPause: autoCfg.retryPause, returnTo: autoCfg.returnTo,
-  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset,
+  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset, siteRetry: autoCfg.siteRetry,
   checkers: connCfg.checkers });   // Settings → Connection → Backup checks, taken live too
 
 /* Which anchor the running plan is compared with (liveMaybeReconnect): in Auto the one it

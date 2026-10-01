@@ -7,7 +7,7 @@
 ///   mixedAuth: { user, pass },   // optional: the user port asks for this login / password
 ///   urlTest: { url, interval /*s*/, tolerance /*ms*/ },
 ///   auto: { failAfter, threshold, checkEvery, standby, warmEvery, retryPause,
-///           returnTo, flapGuard, flapMax, flapReset } }   // auto.dart
+///           returnTo, flapGuard, flapMax, flapReset, siteRetry } }   // auto.dart
 /// Route = { id, kind: 'unit' | 'chain',
 ///   main:  Group,          // the unit, or the chain's exit
 ///   entry: Group }         // chain only: the exit dials through it

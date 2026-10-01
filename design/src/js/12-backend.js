@@ -273,11 +273,14 @@ function mockEvSeed() {
   const total = (s.nodes || []).length || 12;
   const bn = sourcesData[b] && sourcesData[b].nodes && sourcesData[b].nodes[0];
   const blocked = { host: 'rutracker.org', dest: 'rutracker.org:443', entry: a, server: key(0), route: a, via: b, viaServer: bn ? b + '::' + bn.id : undefined };
+  // no route opens it: the entry in use and the routes tried through (the setting: Auto mode → Retry a failed site)
+  const unreachable = { host: 'banking.example', dest: 'banking.example:443', entry: a, server: key(0), route: a, tried: [{ entry: b, server: bn ? b + '::' + bn.id : undefined }] };
   const list = [
     [Y(15.5), 'user', 'connect', 'info', { action: 'connect', entry: a }, 1],
     [Y(15.5) + 500, 'conn', 'connected', 'info', { entry: a, mode: 'tun', route: 'rules' }],
     [Y(14), 'auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }],
     [Y(13.9), 'site', 'blocked', 'warn', blocked], [Y(13.85), 'site', 'blocked', 'warn', blocked], [Y(13.8), 'site', 'blocked', 'warn', blocked],
+    [Y(13), 'site', 'unreachable', 'warn', unreachable, 0, warn && warn.n], [Y(12.5), 'site', 'unreachable', 'warn', { host: 'intranet.example', dest: 'intranet.example:443', entry: a, server: key(0), route: a, tried: [] }, 0, warn && warn.n],
     [Y(12), 'sub', 'updated', 'info', { source: sid, name: s.name, added: 2, removed: 0, total }],
     [Y(9), 'conn', 'lost', 'warn', {}], [Y(8.9), 'conn', 'restored', 'info', { downMs: 41000 }],
     [Y(6), 'sub', 'failed', 'error', { source: sid, name: s.name, error: 'Connection timed out (15 s)' }],

@@ -910,6 +910,7 @@ body {
 .ev-via + .ev-via{border-top:1px solid var(--border)}
 .ev-via-ico{flex-shrink:0;width:20px;text-align:center;font-size:14px;line-height:1}
 .ev-via-name{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--t1);overflow-wrap:anywhere}
+.ev-via-note{padding:6px 8px;border-top:1px solid var(--border);font-size:12px;color:var(--t3)}
 .ev-via-name small{display:block;margin-top:1px;font-size:11.5px;font-weight:400;color:var(--t3)}
 .ev-more{display:none;margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.035);font-size:12px}
 .ev-row.open .ev-more{display:block}
@@ -1466,7 +1467,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
     <div class="dock-profile" onclick="dockTap()">
       <div class="profiles-main">
         <div class="profiles-top">
-          <span class="card-label" style="margin-bottom:0" id="profCardLabel">Simple</span>
+          <span class="card-label" style="margin-bottom:0" id="profCardLabel" data-notr>Simple</span>
           <span class="profiles-name" id="profCardName">default</span>
         </div>
         <div class="profiles-sub">
@@ -3149,7 +3150,6 @@ Object.assign(I18N, { ru: {
   "Stopped": "Остановлено",
   "Stopped — no working pair found yet.": "Остановлено — рабочая пара пока не найдена.",
   "Strict": "Строгий",
-  "Sub": "Подп.",
   "Subscription": "Подписка",
   "Subscription problems": "Проблемы с подписками",
   "Subscription updated": "Подписка обновлена",
@@ -3313,7 +3313,7 @@ Object.assign(I18N, { ru: {
   "Internet stays blocked until you connect again or tap Remove on Home": "Интернет останется заблокированным, пока вы не подключитесь снова или не нажмёте «Убрать» на «Главной»",
   "IP conditions (IP, CIDR, local networks, GeoIP) match a site opened by name only in TUN": "IP-условия (IP, CIDR, локальные сети, GeoIP) срабатывают для сайта, открытого по имени, только в TUN",
   "is left with no servers — won't connect until you select another": "остался без узлов — не подключится, пока вы не выберете другой",
-  "It does not open through the current entry but does through another (with a Create rule button)": "Не открывается через текущий пункт, но открывается через другой (есть кнопка «Создать правило»)",
+  "It does not open through the current entry: another one opens it (with a Create rule button), or none does": "Не открывается через текущий пункт: другой его открывает (есть кнопка «Создать правило») или не открывает никакой",
   "its menu: ping, copy, switch off, delete. Tap the ms to ping it.": "его меню: пинг, копировать, выключить, удалить. Нажмите на мс, чтобы пингнуть.",
   "keep only servers whose name matches this regular expression, e.g. DE|NL or 🇩🇪.": "оставить только узлы, чьё имя подходит под это регулярное выражение, например DE|NL или 🇩🇪.",
   "Keeping the proxy while the app is closed only makes sense if the app starts with the computer and connects by itself: otherwise the internet stays blocked until you start it by hand. Turn on": "Сохранять sys proxy при закрытом приложении имеет смысл, только если оно запускается вместе с компьютером и само подключается: иначе интернет останется заблокированным, пока вы не запустите его вручную. Включите",
@@ -3513,6 +3513,14 @@ Object.assign(I18N, { ru: {
   "{0} is faster": "{0} быстрее",
   "{0} does not open": "{0} не открывается",
   "Create rule": "Создать правило",
+  "No other working route to try": "Других рабочих маршрутов для проверки нет",
+  "Retries through other routes are off": "Повторы через другие маршруты выключены",
+  "Site does not open on any route": "Сайт не открывается ни через один маршрут",
+  "Also tried": "Также пробовали",
+  "Retries through other routes": "Повторы через другие маршруты",
+  "Retry a failed site through other routes": "Повторять недоступный сайт через другие маршруты",
+  "Tells a blocked site from a dead one. Turn off if a service distrusts one client coming from many addresses": "Отличает заблокированный сайт от упавшего. Выключите, если сервис с меньшим доверием относится к клиенту, заходящему с разных адресов",
+  "Up to 3": "До 3",
   "{0} updated": "{0}: обновлено",
   "{0}: update failed": "{0}: не удалось обновить",
   "{0}: the provider removed {#1} server": "{0}: провайдер удалил {1} узел",
@@ -4260,11 +4268,14 @@ function mockEvSeed() {
   const total = (s.nodes || []).length || 12;
   const bn = sourcesData[b] && sourcesData[b].nodes && sourcesData[b].nodes[0];
   const blocked = { host: 'rutracker.org', dest: 'rutracker.org:443', entry: a, server: key(0), route: a, via: b, viaServer: bn ? b + '::' + bn.id : undefined };
+  // no route opens it: the entry in use and the routes tried through (the setting: Auto mode → Retry a failed site)
+  const unreachable = { host: 'banking.example', dest: 'banking.example:443', entry: a, server: key(0), route: a, tried: [{ entry: b, server: bn ? b + '::' + bn.id : undefined }] };
   const list = [
     [Y(15.5), 'user', 'connect', 'info', { action: 'connect', entry: a }, 1],
     [Y(15.5) + 500, 'conn', 'connected', 'info', { entry: a, mode: 'tun', route: 'rules' }],
     [Y(14), 'auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }],
     [Y(13.9), 'site', 'blocked', 'warn', blocked], [Y(13.85), 'site', 'blocked', 'warn', blocked], [Y(13.8), 'site', 'blocked', 'warn', blocked],
+    [Y(13), 'site', 'unreachable', 'warn', unreachable, 0, warn && warn.n], [Y(12.5), 'site', 'unreachable', 'warn', { host: 'intranet.example', dest: 'intranet.example:443', entry: a, server: key(0), route: a, tried: [] }, 0, warn && warn.n],
     [Y(12), 'sub', 'updated', 'info', { source: sid, name: s.name, added: 2, removed: 0, total }],
     [Y(9), 'conn', 'lost', 'warn', {}], [Y(8.9), 'conn', 'restored', 'info', { downMs: 41000 }],
     [Y(6), 'sub', 'failed', 'error', { source: sid, name: s.name, error: 'Connection timed out (15 s)' }],
@@ -4923,22 +4934,25 @@ function updateMainConnectCard() {
   const none = !e && nothingInAuto(), empty = !e && catalogEmpty();   // empty: 50-home.js dockTap
   document.getElementById('profCardName').textContent = e ? e.name : none ? 'Nothing in Auto'
     : empty ? (simpleMode() ? 'No servers yet' : 'No profiles yet') : '—';
-  document.getElementById('profCardLabel').textContent = chainsData[id] ? 'Chain' : profilesData[id] ? 'Profile'
-    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'Sub' : 'Servers') : simpleMode() ? 'Simple' : 'Profiles';
+  // the kind, short and never translated (the label has data-notr)
+  document.getElementById('profCardLabel').textContent = chainsData[id] ? 'chain' : profilesData[id] ? 'profile'
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'sub' : 'set') : simpleMode() ? 'simple' : 'profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
 
+  // the protocol of the server traffic leaves through (a chain: its exit), between the badge and the route
+  const proto = n => n ? `<span class="node-proto dock-proto">${protoLabel(n)}</span>` : '';
   let lat = null;
   if (!e) detail.innerHTML = none ? '<span class="dock-node none">turn on Use in Auto in Route</span>'
     : empty ? `<span class="dock-node none">${simpleMode() ? 'Add in Nodes' : 'Create one in Nodes'}</span>` : '';
   else if (chainsData[id]) {
     const c = chainsData[id], a = chainEntryNode(c), b = chainExitNode(c);
-    detail.innerHTML = nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);
+    detail.innerHTML = proto(b) + nodeHtml(a) + '<span class="dock-arrow">→</span>' + nodeHtml(b);
     if (ms(a) != null && ms(b) != null) lat = ms(a) + ms(b);
   } else {
     const n = unitNode(id), ref = unitRefs(id).find(r => r.node === n);
-    detail.innerHTML = (profilesData[id] && ref ? `<span class="dock-src">${esc(sourcesData[ref.sid].name)}</span><span class="dock-sep">›</span>` : '') + nodeHtml(n);
+    detail.innerHTML = proto(n) + (profilesData[id] && ref ? `<span class="dock-src">${esc(sourcesData[ref.sid].name)}</span><span class="dock-sep">›</span>` : '') + nodeHtml(n);
     lat = ms(n);
   }
   document.getElementById('profMetaCount').textContent = lat == null ? '—' : lat;
@@ -7621,7 +7635,7 @@ const EV_REPEAT_MS = 10 * 60 * 1000;
 const EV_CATS = [
   ['conn', 'Connection', [['connected', 'Connected'], ['disconnected', 'Disconnected'], ['connectFailed', 'Connect failed'], ['lost', 'Connection lost'], ['restored', 'Connection restored'], ['offline', 'No network'], ['online', 'Network back']]],
   ['auto', 'Auto', [['switched', 'Entry or server switched'], ['fastest', 'Fastest moved'], ['unstable', 'Unstable entry']]],
-  ['site', 'Sites', [['blocked', 'Site does not open']]],
+  ['site', 'Sites', [['blocked', 'Site does not open'], ['unreachable', 'Site does not open on any route']]],
   ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
   ['rules', 'Rules', [['fallback', 'Rule target unavailable'], ['targetBack', 'Rule target back'], ['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
   ['dns', 'DNS', [['switched', 'DNS server switched']]],
@@ -7644,7 +7658,7 @@ const EV_NOTIF = {
   'conn/lost': 'connLost', 'conn/restored': 'connLost', 'conn/offline': 'connLost', 'conn/online': 'connLost',
   'core/crashed': 'coreCrash', 'core/restarted': 'coreCrash', 'core/restartFailed': 'coreCrash',
   'core/down': 'connLost',
-  'site/blocked': 'blocked', 'sub/updated': 'subUpdated',
+  'site/blocked': 'blocked', 'site/unreachable': 'blocked', 'sub/updated': 'subUpdated',
   'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
   'rules/ruleSetFailed': 'ruleSets',
   'rules/fallback': 'autoSwitch', 'rules/targetBack': 'autoSwitch', 'dns/switched': 'autoSwitch',
@@ -7677,6 +7691,8 @@ function evReason(d) {
   if (d.reason === 'fastest') return `${to} is faster`;
   return d.reason ? String(d.reason) : '';
 }
+// why a site that opens nowhere lists no other route: the setting is off, or none answers
+const evNoRoute = d => d.retries === 'off' ? 'Retries through other routes are off' : 'No other working route to try';
 const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 const evDns = id => (dnsServers[id] && dnsServers[id].name) || String(id);
 // "Rule Streaming and 2 more"; an app when no rule is involved: "App Telegram"
@@ -7699,6 +7715,11 @@ const EV_TEXT = {
     const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route;
     // the row shows the two entries as a card (evBlockedHtml); this line is the notification's and the export's
     return [`${host} does not open`, [entry && `⚠️ ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}`, d.via && `✅ ${evEntry(d.via)}${d.viaServer ? ' (' + evServer(d.viaServer) + ')' : ''}`].filter(Boolean).join('   ')];
+  },
+  'site/unreachable': d => {
+    const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route, tried = d.tried || [];
+    const at = (id, srv) => `⚠️ ${evEntry(id)}${srv ? ' (' + evServer(srv) + ')' : ''}`;
+    return [`${host} does not open`, [entry && at(entry, d.server), ...tried.map(x => at(x.entry, x.server)), !tried.length && evNoRoute(d)].filter(Boolean).join('   ')];
   },
   'sub/updated': d => [`${evSource(d.source, d.name)} updated`, [evPlural(d.total, 'server', 'servers'), d.added ? d.added + ' new' : '', d.removed ? d.removed + ' removed' : ''].filter(Boolean).join(' · ')],
   'sub/failed': d => [`${evSource(d.source, d.name)}: update failed`, d.error || ''],
@@ -7738,7 +7759,7 @@ function evText(e) { const d = evDescribe(e); return d.title + (d.detail ? ' —
 // The expanded row: every field of the event in words.
 const EV_FIELD = { entry: 'Entry', server: 'Server', mode: 'Mode', route: 'Route', from: 'From', to: 'To', reason: 'Reason', by: 'By', host: 'Site', dest: 'Address', via: 'Opens via',
   source: 'Subscription', name: 'Name', added: 'New servers', removed: 'Removed', total: 'Servers', count: 'Servers', error: 'Error', tag: 'Rule set', url: 'URL', code: 'Exit code',
-  rule: 'Rule', app: 'App', target: 'Target', more: 'More rules and apps',
+  rule: 'Rule', app: 'App', target: 'Target', more: 'More rules and apps', tried: 'Also tried', retries: 'Retries through other routes',
   attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
 function evValue(k, v, e) {
   if (e && e.cat === 'dns') {
@@ -7749,6 +7770,8 @@ function evValue(k, v, e) {
     if (k === 'target') return targetName(v);
     if (k === 'to') return { block: 'Block', direct: 'Direct', main: 'Main flow' }[v] || String(v);
   }
+  if (k === 'tried' && Array.isArray(v)) return v.length ? v.map(x => evEntry(x.entry) + (x.server ? ' (' + evServer(x.server) + ')' : '')).join(', ') : evNoRoute((e && e.data) || {});
+  if (k === 'retries') return v === 'off' ? 'Off' : String(v);
   if (typeof v === 'boolean') return k === 'on' ? (v ? 'On' : 'Off') : v ? 'Yes' : 'No';
   if (k === 'downMs' || k === 'holdMs') return evDuration(v);
   if (k === 'mode') return v === 'tun' ? 'TUN' : v === 'proxy' ? 'Proxy' : String(v);
@@ -7770,7 +7793,7 @@ function evFieldsHtml(g) {
 
 /* ── Rows: repeats folded, day separators, actions ── */
 
-const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/fallback': ['target', 'to'], 'rules/targetBack': ['target'], 'dns/switched': ['from', 'to'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
+const EV_KEYF = { 'site/blocked': ['host', 'entry'], 'site/unreachable': ['host', 'entry'], 'auto/switched': ['route', 'from', 'to'], 'auto/fastest': ['route', 'from', 'to'], 'auto/unstable': ['id'], 'rules/fallback': ['target', 'to'], 'rules/targetBack': ['target'], 'dns/switched': ['from', 'to'], 'rules/ruleSetFailed': ['tag'], 'rules/ruleSetUpdated': ['tag'] };
 function evKey(e) {
   const t = e.cat + '/' + e.type, d = e.data || {}, f = EV_KEYF[t] || (e.cat === 'sub' ? ['source'] : null);
   return t + '|' + (f ? f.map(k => d[k]).join('|') : e.cat === 'user' ? JSON.stringify(d) : '');
@@ -7800,7 +7823,7 @@ function evActions(e) {
   const d = e.data || {}, a = [];
   if (e.cat === 'site' && e.type === 'blocked' && d.via) a.push(['rule', 'Create rule']);
   if (e.cat === 'sub' && e.type === 'failed' && sourcesData[d.source] && sourcesData[d.source].kind === 'sub') a.push(['retry', 'Retry']);
-  if (evOpenTarget(e) && !(e.cat === 'site' && e.type === 'blocked')) a.push(['open', 'Open']);   // the blocked card has its own Open per entry
+  if (evOpenTarget(e) && e.cat !== 'site') a.push(['open', 'Open']);   // the site cards have their own Open per entry
   if (e.log != null) a.push(['raw', 'In raw log']);
   return a;
 }
@@ -7859,10 +7882,16 @@ function evAct(key, id, target) {
 
 // "<host> does not open": the entry that fails and the one that works, each a menu-like row
 // (icon, name, its server small, Open); without a working alternative only the first.
+const evViaRow = (e, ico, id, server) => `<div class="ev-via"><span class="ev-via-ico">${ico}</span><div class="ev-via-name">${esc(evEntry(id))}${server ? `<small>${esc(evServer(server))}</small>` : ''}</div>${connectEntry(id) ? `<button class="ev-act" data-t="${esc(id)}" onclick="event.stopPropagation();evAct('open',${e.id},this.dataset.t)">Open</button>` : ''}</div>`;
 function evBlockedHtml(e) {
   const d = e.data || {}, entry = d.entry || d.route;
-  const row = (ico, id, server) => `<div class="ev-via"><span class="ev-via-ico">${ico}</span><div class="ev-via-name">${esc(evEntry(id))}${server ? `<small>${esc(evServer(server))}</small>` : ''}</div>${connectEntry(id) ? `<button class="ev-act" data-t="${esc(id)}" onclick="event.stopPropagation();evAct('open',${e.id},this.dataset.t)">Open</button>` : ''}</div>`;
-  return `<div class="ev-vias">${entry ? row('⚠️', entry, d.server) : ''}${d.via ? row('✅', d.via, d.viaServer) : ''}</div>`;
+  return `<div class="ev-vias">${entry ? evViaRow(e, '⚠️', entry, d.server) : ''}${d.via ? evViaRow(e, '✅', d.via, d.viaServer) : ''}</div>`;
+}
+// "<host> does not open" with no route that opens it: the entry in use and every route tried, all ⚠️;
+// no other route tried — a muted line says why (none answers / the retries are off).
+function evUnreachableHtml(e) {
+  const d = e.data || {}, entry = d.entry || d.route, tried = d.tried || [];
+  return `<div class="ev-vias">${entry ? evViaRow(e, '⚠️', entry, d.server) : ''}${tried.map(x => evViaRow(e, '⚠️', x.entry, x.server)).join('')}${tried.length ? '' : `<div class="ev-via-note">${evNoRoute(d)}</div>`}</div>`;
 }
 
 function evRowHtml(g) {
@@ -7875,7 +7904,7 @@ function evRowHtml(g) {
     <div class="ev-ico">${EV_ICON[e.cat] || ''}</div>
     <div class="ev-body">
       ${top}
-      ${e.cat === 'site' && e.type === 'blocked' ? evBlockedHtml(e) : d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
+      ${e.cat === 'site' && e.type === 'blocked' ? evBlockedHtml(e) : e.cat === 'site' && e.type === 'unreachable' ? evUnreachableHtml(e) : d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
       ${acts.length ? `<div class="ev-acts">${acts.map(([k, l]) => `<button class="ev-act" onclick="event.stopPropagation();evAct('${k}',${e.id})">${l}</button>`).join('')}</div>` : ''}
       <div class="ev-more">${evFieldsHtml(g)}</div>
     </div></div>`;
@@ -8367,6 +8396,10 @@ setInterval(() => {
      'never' (not until a reconnect);
    - flapGuard: an entry that keeps dropping waits 1, 2, 4 … flapMax minutes of answers
      before Auto goes back to it; flapReset minutes of stable work forget the drops;
+   - siteRetry: a site that failed through a node that still answers is tried through the
+     other answering entries (Auto's order) to tell "blocked here" from "down everywhere" —
+     'off' (never: no requests to the user's site through entries they did not pick), '3'
+     (up to three entries, default), 'all'; none opens it → the site/unreachable event;
    - pauseScreenOff: no checks while the screen is off (mobile battery);
    - subsEvery: the global subscription update period; a subscription's own period
      (Nodes → Edit subscription) wins, its default 'auto' follows this one (seconds, 0 = off).
@@ -8375,13 +8408,14 @@ setInterval(() => {
    Flutter: AutoService (timer + PingService), settings in one AutoConfig. */
 
 const autoCfg = { threshold: 50, checkEvery: 60, failAfter: 2, standby: 2, warmEvery: 60, retryPause: 0.5, returnTo: 'always',
-  flapGuard: true, flapMax: 30, flapReset: 15, pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
+  flapGuard: true, flapMax: 30, flapReset: 15, siteRetry: '3', pauseScreenOff: true, speedOnFail: false, subsEvery: 12 * 3600 };
 const AUTO_THRESHOLD_MAX = 1000;
 const AUTO_FAIL_AFTER = [1, 5];
 const AUTO_STANDBY_MAX = 20;
 // Typed numbers of the sheet: [min, max, unit]; a value outside puts the old one back.
 const AUTO_NUMS = { retryPause: [0.1, 10, 's'], flapMax: [1, 60, 'min'], flapReset: [5, 60, 'min'] };
 const AUTO_RETURN = [['always', 'Always'], ['faster', 'If faster'], ['never', 'Never']];
+const AUTO_SITE_RETRY = [['off', 'Off'], ['3', 'Up to 3'], ['all', 'All']];
 const CHEVRON_R = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
 // A period in seconds, in the largest unit that divides it: 90 s, 5 min, 12 h, 2 d.
@@ -8482,6 +8516,8 @@ function renderAutoMode() {
       <div class="set-row"><div class="set-label" style="flex:1">Retry pause<div class="set-hint">After a missed check, before the next try</div></div>
         ${num('retryPause', 'am-retry')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Speed test on failures<div class="set-hint">When requests fail, also measure the server’s speed</div></div>${toggle(autoCfg.speedOnFail, "setAutoCfg('speedOnFail',!autoCfg.speedOnFail)")}</div>
+      <div class="set-row" id="am-siteretry"><div class="set-label" style="flex:1">Retry a failed site through other routes<div class="set-hint">Tells a blocked site from a dead one. Turn off if a service distrusts one client coming from many addresses</div></div>
+        <select class="set-select" id="am-siteretry-sel" onchange="setAutoCfg('siteRetry',this.value)">${AUTO_SITE_RETRY.map(([v, l]) => `<option value="${v}" ${v === autoCfg.siteRetry ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="set-row"><div class="set-label" style="flex:1">Pause checks with the screen off<div class="set-hint">Saves battery; checks again on wake</div></div>${toggle(autoCfg.pauseScreenOff, "setAutoCfg('pauseScreenOff',!autoCfg.pauseScreenOff)")}</div>
     </div>
 
@@ -9144,7 +9180,7 @@ const notifCfg = {
   unstable: true,       // an entry is unstable (flap guard)
   connLost: true,       // connection lost / restored
   coreCrash: false,     // sing-box stopped / started again: background restarts are silent
-  blocked: true,        // a site does not open through the current entry (Rule button)
+  blocked: true,        // a site does not open through the current entry (Rule button when another entry opens it)
   subUpdated: false,    // a subscription updated in the background
   subFailed: true,      // background update failed; provider removed / brought back servers; servers do not respond
   ruleSets: true,       // rule sets could not be downloaded
@@ -9159,7 +9195,7 @@ const NOTIF_GROUPS = [
     ['unstable', 'Unstable entry', 'An entry keeps dropping and waits before it gets the traffic back'],
     ['connLost', 'Connection lost', 'No network or no server answers, and when it is back'],
     ['coreCrash', 'sing-box stopped', 'Background restarts are silent; this shows them'],
-    ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Create rule button)'],
+    ['blocked', 'Site does not open', 'It does not open through the current entry: another one opens it (with a Create rule button), or none does'],
   ]],
   ['Subscriptions and rules', [
     ['subUpdated', 'Subscription updated', 'A background update finished: name and number of servers'],
@@ -11170,7 +11206,7 @@ const autoOrder = () => visibleOrder().filter(id => connectEntry(id).inAuto);
 // Settings → Auto mode as the core reads it (auto.dart → AutoSettings.fromPlan).
 const planAuto = () => ({ failAfter: autoCfg.failAfter, threshold: autoCfg.threshold, checkEvery: autoCfg.checkEvery,
   standby: autoCfg.standby, warmEvery: autoCfg.warmEvery, retryPause: autoCfg.retryPause, returnTo: autoCfg.returnTo,
-  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset,
+  flapGuard: autoCfg.flapGuard, flapMax: autoCfg.flapMax, flapReset: autoCfg.flapReset, siteRetry: autoCfg.siteRetry,
   checkers: connCfg.checkers });   // Settings → Connection → Backup checks, taken live too
 
 /* Which anchor the running plan is compared with (liveMaybeReconnect): in Auto the one it
