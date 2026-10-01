@@ -14,7 +14,7 @@
      'profile:<id>', 'chain:<id>'.
    Picked in the target picker (44-target-picker.js). A target is unavailable when it is
    switched off in Nodes, has no server left, or was deleted (the reference is kept, so the
-   rule shows it); the traffic then goes by the rule's "If unavailable": Default (the global
+   rule shows it); the traffic then goes by the rule's Fallback: Default (the global
    setting in Rules), Main flow, Block or Direct. Apps always use the global setting. */
 // A catalog entry's own id (what the core names in events and plans: a profile, chain or source id,
 // no prefix) -> the rule target of it; '' when no such entry exists.
@@ -60,13 +60,20 @@ const FALLBACKS = [['main', 'Main flow'], ['block', 'Block'], ['direct', 'Direct
 const fallbackName = v => (FALLBACKS.find(f => f[0] === v) || [, ''])[1];
 const ruleFallback = r => r.fallback && r.fallback !== 'default' ? r.fallback : quickCfg.fallback;
 const fallbackText = v => ({ main: 'through the main flow', block: 'nowhere (blocked)', direct: 'direct' })[v];
-// The "If unavailable" rows under a proxy target, shared by the rule form and an app's dialog.
-// d: { fallback }; path: JS path of d (e.g. 'ruleDraft'); render: name of the re-render function.
-function fallbackRowsHtml(d, path, render, segId) {
-  return `<div class="set-row rf-fallback"><div class="set-label">If unavailable<div class="set-hint">${d.fallback === 'default'
-      ? 'Default: ' + fallbackName(quickCfg.fallback) + ' (Rules → Target unavailable)' : 'Off in Nodes, no working server or deleted'}</div></div></div>
-    <div class="set-row"><div class="seg3 wide" id="${segId}">${[['default', 'Default'], ['main', 'Main'], ['block', 'Block'], ['direct', 'Direct']].map(([v, l]) =>
-      `<button class="${d.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" onclick="${path}.fallback='${v}';${render}()">${l}</button>`).join('')}</div></div>`;
+// fallback value -> label: 'main' is the Proxy button (through a target of its own, fallbackTarget; '' = Main flow)
+const APP_FALLBACKS = [['default', 'Default'], ['main', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
+// The Fallback rows (segment + its Via), shared by the rule form and an app's dialog.
+// d: { fallback, fallbackTarget }; path: JS path of d (e.g. 'ruleDraft'); render: name of the re-render function;
+// segId: id of the segment; on: Fallback can be set (else dimmed and inert, in place); own: the Via target to
+// leave out of the picker ('' = none). The Via row is always in place, inert unless Fallback = Proxy.
+function fallbackRowsHtml(d, path, render, segId, on, own = '') {
+  const viaOn = on && d.fallback === 'main';
+  const fb = `<div class="set-row aa-route aa-fb ${on ? '' : 'aa-inert'}"><div class="set-label">Fallback</div>
+      <div class="seg3 wide" id="${segId}">${APP_FALLBACKS.map(([v, l]) =>
+        `<button class="${d.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${on ? '' : 'disabled'} onclick="${path}.fallback='${v}';${render}()">${l}</button>`).join('')}</div></div>`;
+  const via = targetRowHtml('Via', d.fallbackTarget || '', `t => { ${path}.fallbackTarget = t; ${render}(); }`, own)
+    .replace('tgt-row', 'tgt-row aa-fb-via' + (viaOn ? '' : ' aa-inert'));
+  return fb + via;
 }
 
 // Rules and apps whose target a deletion removes (gone: target -> bool), for the delete dialog.
@@ -232,7 +239,7 @@ function renderRules() {
     return `<div class="rule-row ${r.enabled ? '' : 'dimmed'}" data-id="${id}" onclick="openRuleForm('${id}')">
       ${q ? '<span class="cc-rank"></span>' : `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startRuleDrag(event,'${id}')">${GRIP_SVG}</div>`}
       <span class="cc-rank">${i}</span>
-      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.action === 'proxy' && r.target && !targetInfo(r.target).ok ? `<span class="conn-tag warn">down → ${fallbackName(ruleFallback(r))}</span>` : ''}</div>
+      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.action === 'proxy' && r.target && !targetInfo(r.target).ok ? `<span class="conn-tag warn">down → ${r.fallback === 'main' && r.fallbackTarget ? esc(targetName(r.fallbackTarget)) : fallbackName(ruleFallback(r))}</span>` : ''}</div>
         ${r.name ? `<div class="rule-sub">${esc(ruleSummary(r))}</div>` : ''}</div>
       <span class="rule-action-badge ${cls}">${esc(ruleTargetText(r))}</span>
       ${toggle(r.enabled, `toggleRuleEnabled('${id}')`)}
@@ -438,7 +445,7 @@ function parseClash(text) {
     return newRule({ groups: { [g.key]: { not: false, v: { [f]: [value] } } }, action: P === 'DIRECT' ? 'direct' : P === 'REJECT' ? 'block' : 'proxy' });
   });
 }
-const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: '', block: 'drop', fallback: 'default', dns: 'auto', groups: {} }, o);
+const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: '', block: 'drop', fallback: 'default', fallbackTarget: '', dns: 'auto', groups: {} }, o);
 
 /* ── Rule sets: built-in geo lists + remote ones ── */
 function openRuleSets() { renderRuleSets(); openSheet('rulesets'); }

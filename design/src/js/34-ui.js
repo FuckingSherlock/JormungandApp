@@ -40,8 +40,10 @@ function hideToast() {
 
 /* ── Tabs ── */
 
+let evReturn = null;   // {id, sheet}: where Back returns after a journal action left it (47-events.js)
 // The nav is always visible, so a tab tap also closes whatever sheets are open over the view.
 function switchTab(name) {
+  evReturn = null;   // the journal return is set after the jump (evLeave, 47-events.js)
   document.querySelectorAll('.sheet.open').forEach(el => closeSheet(el.id.slice(3)));
   justClosed = [];
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));

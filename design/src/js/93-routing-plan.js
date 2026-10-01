@@ -28,10 +28,10 @@ function routingTarget(t) {
 
 function routingPlan() {
   const rules = ruleOrder.map(id => rulesData[id]).filter(r => r.enabled).map(r => {
-    // a rule's "If unavailable" only means something with a target of its own (the main flow
-    // has none for rules: a value left from an earlier target is not sent)
+    // a rule's Fallback only means something for Proxy (a target of its own or the main flow);
+    // "Proxy via X" (fallback 'main' + fallbackTarget) goes as the target id X
     const o = { id: r.id, name: r.name, action: r.action, target: r.target || '',
-      fallback: r.target && r.fallback === 'main' && r.fallbackTarget ? r.fallbackTarget : r.target && r.fallback || 'default',
+      fallback: r.action === 'proxy' ? (r.fallback === 'main' && r.fallbackTarget ? r.fallbackTarget : r.fallback || 'default') : 'default',
       block: r.block, dns: r.dns || 'auto', groups: r.groups };
     if (r.composite) {
       const { action, outbound, method, ...match } = r.composite;
@@ -56,7 +56,7 @@ function routingPlan() {
   const named = new Set();
   // a fallback that is not a keyword is a target: its group(s) must exist in the config too
   const addFb = f => { if (f && !['default', 'main', 'block', 'direct'].includes(f)) named.add(f); };
-  rules.forEach(r => { if (r.action === 'proxy' && r.target) { named.add(r.target); addFb(r.fallback); } });
+  rules.forEach(r => { if (r.action === 'proxy') { if (r.target) named.add(r.target); addFb(r.fallback); } });
   apps.forEach(a => [a, ...(a.split ? [a.udp] : [])].forEach(h => {
     if (h.act === 'proxy' && h.target) named.add(h.target);
     if (h.act === 'proxy' || h.act === 'default') addFb(h.fallback);

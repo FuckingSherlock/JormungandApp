@@ -87,6 +87,10 @@
 .node-add.rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}
 .rf-then .seg3{margin:4px 18px 8px}
 .rf-then .set-group{margin-top:0}
+.rf-then .rf-fbgroup{container-type:inline-size}
+.rf-then .rf-fbgroup + .set-group{margin-top:10px}
+.rf-then .set-row .seg3{margin:0}
+.rf-fb-hint{padding:6px 18px 8px;line-height:1.4;min-height:calc(2.8em + 14px)}   /* two lines reserved: the form keeps its height */
 
 /* ChipInput: values as chips + a free input; red = invalid */
 .chip-input{display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:40px;padding:5px 6px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.05);cursor:text}

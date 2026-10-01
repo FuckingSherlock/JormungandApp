@@ -22,11 +22,11 @@ const NOTIF_GROUPS = [
     ['status', 'Status notification', 'Android: shows the entry, server and speed while connected'],
   ]],
   ['Connection', [
-    ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server; a rule went to its "If unavailable" or a DNS server was replaced'],
+    ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server; a rule went to its Fallback or a DNS server was replaced'],
     ['unstable', 'Unstable entry', 'An entry keeps dropping and waits before it gets the traffic back'],
     ['connLost', 'Connection lost', 'No network or no server answers, and when it is back'],
     ['coreCrash', 'sing-box stopped', 'Background restarts are silent; this shows them'],
-    ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Rule button)'],
+    ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Create rule button)'],
   ]],
   ['Subscriptions and rules', [
     ['subUpdated', 'Subscription updated', 'A background update finished: name and number of servers'],

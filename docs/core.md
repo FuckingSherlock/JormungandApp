@@ -592,7 +592,7 @@ Raw). Событие:
 | `auto/switched` info | Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
 | `auto/fastest` info | Fastest сам сменил сервер (urltest внутри sing-box) | `{route, from, to}` |
 | `auto/unstable` warn | маршрут падает снова и снова (flap guard) | `{id, strikes, holdMs}` |
-| `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Rule) | `{host, port?, entry, server, dest, via}` |
+| `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Create rule) | `{host, port?, entry, server, dest, via}` |
 | `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
 | `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'\|<id of the fallback target>}` — `target`: the cause (`proxy` = the main flow); `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |

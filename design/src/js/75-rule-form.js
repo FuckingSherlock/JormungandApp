@@ -5,8 +5,10 @@
    comma or a pasted column); a bad value turns red and blocks Save. A field is on its card when its
    key is in group.v (an empty list = added, not filled yet); Local networks when group.flag is set.
    Action: Proxy (main flow or a target — stub picker), Direct, Block (drop / reject).
-   If unavailable (with a target): Default / Main / Block / Direct when the target is off,
-   empty or deleted (docs/rules.md §0).
+   Fallback (Then = Proxy, with a target or the main flow; same block as the per-app dialog,
+   fallbackRowsHtml): Default | Proxy | Direct | Block + its own Via (Main flow or a target, not the
+   rule's Via), for when the target is off, empty or deleted / the main flow is down; always in
+   place, dimmed and inert on Direct / Block (docs/rules.md §0). rule.fallbackTarget goes with 'main'.
    DNS: Auto (first ticked server with the matching route) or a server from Settings → DNS.
    IP block (only with an IP / GeoIP / local-networks condition): "IP conditions only in TUN"
    (rule.ipTunOnly: the core adds no `resolve` for this rule) with a (?) that explains it and shows
@@ -46,7 +48,7 @@ function renderRuleForm() {
   if (rfTab === 'json') {
     el.innerHTML = `<div class="form-group"><textarea class="form-input code-area tall" id="rf-json" spellcheck="false" oninput="rfCheckJson()">${esc(JSON.stringify(ruleJson(ruleDraft), null, 2))}</textarea>
       <div class="set-hint warn" id="rf-json-err"></div>
-      <div class="set-hint">The sing-box route rule. Name, If unavailable, DNS and "IP conditions only in TUN" live in the form.</div></div>`;
+      <div class="set-hint">The sing-box route rule. Name, Fallback, DNS and "IP conditions only in TUN" live in the form.</div></div>`;
     return;
   }
   const d = ruleDraft;
@@ -71,9 +73,14 @@ function renderRuleForm() {
     <div class="rf-label">Then</div>
     <div class="rf-then">
       <div class="seg3 wide">${acts.map(([v, l]) => `<button class="${d.action === v ? 'on ' + v : ''}" onclick="ruleDraft.action='${v}';renderRuleForm()">${l}</button>`).join('')}</div>
+      <div class="set-group rf-fbgroup">
+        ${d.action === 'proxy' ? targetRowHtml('Via', d.target, 't => { ruleDraft.target = t; renderRuleForm(); }')
+          : `<div class="set-row tgt-row aa-inert"><div class="set-label">Via</div><span class="tgt-val aa-dash">—</span></div>`}
+        ${fallbackRowsHtml(d, 'ruleDraft', 'renderRuleForm', 'rf-fallback', d.action === 'proxy', d.target)}
+        <div class="set-hint rf-fb-hint">${d.action !== 'proxy' ? 'Fallback applies to Proxy only' : d.fallback === 'default'
+          ? 'Default: ' + fallbackName(quickCfg.fallback) + ' (Rules → Target unavailable)'
+          : d.target ? 'If the Via target is unavailable' : 'If the main flow is down'}</div></div>
       <div class="set-group">
-        ${d.action === 'proxy' ? targetRowHtml('Via', d.target, 't => { ruleDraft.target = t; renderRuleForm(); }') : ''}
-        ${d.action === 'proxy' && d.target ? fallbackRowsHtml(d, 'ruleDraft', 'renderRuleForm', 'rf-fallback') : ''}
         ${d.action === 'block' ? `<div class="set-row"><div class="set-label">How</div><div class="chip-row">${[['drop', 'Drop silently'], ['reject', 'Reject']].map(([v, l]) =>
           `<div class="chip ${d.block === v ? 'active' : ''}" onclick="ruleDraft.block='${v}';renderRuleForm()">${l}</div>`).join('')}</div></div>` : ''}
         ${d.action !== 'block' ? `<div class="set-row"><div class="set-label">DNS</div><select class="set-select" id="rf-dns" onchange="ruleDraft.dns=this.value">${dnsOpts.map(([v, l]) =>
@@ -323,12 +330,12 @@ function rfCheckJson() {
   document.getElementById('rf-json-err').textContent = msg;
   return !msg;
 }
-// JSON tab → draft (keeps name, If unavailable, DNS, enabled). false if the JSON is invalid.
+// JSON tab → draft (keeps name, Fallback, DNS, enabled). false if the JSON is invalid.
 function rfApplyJson() {
   if (rfTab !== 'json') return true;
   if (!rfCheckJson()) { toast('Fix the JSON first'); return false; }
   const r = ruleFromJson(JSON.parse(document.getElementById('rf-json').value));
-  ['id', 'name', 'enabled', 'fallback', 'dns', 'ipTunOnly'].forEach(k => r[k] = ruleDraft[k]);
+  ['id', 'name', 'enabled', 'fallback', 'fallbackTarget', 'dns', 'ipTunOnly'].forEach(k => r[k] = ruleDraft[k]);
   if (r.action !== 'proxy') r.target = ruleDraft.target;   // the JSON has no place for what the action does not use
   if (r.action !== 'block') r.block = ruleDraft.block;
   // cards and fields not filled yet are not in the JSON: keep them as the form had them
@@ -355,7 +362,8 @@ function saveRuleForm() {
     Object.keys(d.groups).forEach(k => { const g = d.groups[k]; if (!Object.keys(g.v).length && !g.flag) delete d.groups[k]; });
     if (!Object.keys(d.groups).length) { toast('Add at least one condition'); renderRuleForm(); return; }
   }
-  if (!(d.action === 'proxy' && d.target)) d.fallback = 'default';
+  if (d.action !== 'proxy') d.fallback = 'default';   // Fallback only means something for Proxy (a target or the main flow)
+  if (d.fallback !== 'main' || d.fallbackTarget === d.target) d.fallbackTarget = '';
   if (!ruleHasIpCondition(d) || !d.ipTunOnly) delete d.ipTunOnly;
   if (ruleEditing) rulesData[ruleEditing] = Object.assign(d, { id: ruleEditing });
   else { d.id = 'r' + (ruleSeq++); rulesData[d.id] = d; ruleOrder.push(d.id); }

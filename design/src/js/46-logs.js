@@ -22,7 +22,8 @@ function openLogs(tab) {
 
 function setLogTab(tab) {
   logTab = tab;
-  const ev = tab === 'events', on = id => document.getElementById(id);
+  evReturn = null;   // a hand-made tab change forgets the journal return (47-events.js)
+  const ev =tab === 'events', on = id => document.getElementById(id);
   on('evScroll').style.display = ev ? '' : 'none';
   on('logScroll').style.display = ev ? 'none' : '';
   on('evActions').style.display = ev ? '' : 'none';

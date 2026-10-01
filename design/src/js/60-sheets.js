@@ -34,6 +34,7 @@ function openSheetOver(open) {
 // A sheet may clean up on close (any way: ×, overlay, swipe, Done, back).
 const sheetCloseHooks = {};
 function closeSheet(name) {
+  if (evReturn && evReturn.sheet === name && !evReturn.back) evReturn = null;   // closed by hand, not by Back
   if (sheetCloseHooks[name]) sheetCloseHooks[name]();
   if (sheetUnder[name]) {   // raised again once it has slid away
     const lowered = sheetUnder[name];
@@ -97,8 +98,15 @@ function sheetView(name, v) {
 }
 function goBack() {
   const top = sheetStack[sheetStack.length - 1];
-  if (!top) { if (activeTab() !== 'home') switchTab('home'); return; }
+  if (!top) {
+    if (evReturn) evReturnNow();   // left the journal by Open / In raw log: back to that event
+    else if (activeTab() !== 'home') switchTab('home');
+    return;
+  }
+  const ret = evReturn && evReturn.sheet === top.name;
+  if (ret) evReturn.back = true;
   closeSheet(top.name);
+  if (ret) { evReturnNow(); return; }
   justClosed = [];
   top.prev.slice().reverse().forEach(p => {
     if (p.name === top.name) sheetView(p.name, p.view);

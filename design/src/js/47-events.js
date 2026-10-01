@@ -100,7 +100,8 @@ const EV_TEXT = {
   'auto/unstable': d => [`${evEntry(d.id)} is unstable`, `Dropped ${d.strikes}× — back to it after ${Math.max(1, Math.round(d.holdMs / 60000))} min without drops`],
   'site/blocked': d => {
     const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route;
-    return [`${host} does not open`, (entry ? `Not via ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}` : '') + (d.via ? `${entry ? ' — it does' : 'It does'} via ${evEntry(d.via)}` : '')];
+    // the row shows the two entries as a card (evBlockedHtml); this line is the notification's and the export's
+    return [`${host} does not open`, [entry && `⚠️ ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}`, d.via && `✅ ${evEntry(d.via)}${d.viaServer ? ' (' + evServer(d.viaServer) + ')' : ''}`].filter(Boolean).join('   ')];
   },
   'sub/updated': d => [`${evSource(d.source, d.name)} updated`, [evPlural(d.total, 'server', 'servers'), d.added ? d.added + ' new' : '', d.removed ? d.removed + ' removed' : ''].filter(Boolean).join(' · ')],
   'sub/failed': d => [`${evSource(d.source, d.name)}: update failed`, d.error || ''],
@@ -200,9 +201,9 @@ const evClock = t => logTime(t).slice(0, 5);
 
 function evActions(e) {
   const d = e.data || {}, a = [];
-  if (e.cat === 'site' && e.type === 'blocked' && d.via) a.push(['rule', 'Rule']);
+  if (e.cat === 'site' && e.type === 'blocked' && d.via) a.push(['rule', 'Create rule']);
   if (e.cat === 'sub' && e.type === 'failed' && sourcesData[d.source] && sourcesData[d.source].kind === 'sub') a.push(['retry', 'Retry']);
-  if (evOpenTarget(e)) a.push(['open', 'Open']);
+  if (evOpenTarget(e) && !(e.cat === 'site' && e.type === 'blocked')) a.push(['open', 'Open']);   // the blocked card has its own Open per entry
   if (e.log != null) a.push(['raw', 'In raw log']);
   return a;
 }
@@ -215,23 +216,56 @@ function evOpenTarget(e) {
   if (e.cat === 'dns') return 'dns';
   return null;
 }
-function evAct(key, id) {
+/* An action that leaves the journal (Open, In raw log) remembers the event: Back returns to
+   Logs → Events with its row in view, unfolded and lit for a moment (goBack, 60-sheets.js).
+   For a sheet opened over the journal the return waits for Back to close that sheet. */
+function evReturnNow() {
+  const r = evReturn;
+  evReturn = null;
+  if (!r) return;
+  if (activeTab() !== 'logs') switchTab('logs');
+  if (logTab !== 'events') setLogTab('events');
+  const ev = evState.list.find(x => x.id === r.id);
+  if (ev && !evVisible(ev)) evResetFilter();
+  const show = () => {
+    const row = [...document.querySelectorAll('#evList .ev-row')].find(x => x.dataset.ids.split(',').includes(String(r.id)));
+    if (!row) return;
+    evState.open.add(+row.dataset.key); row.classList.add('open');
+    row.scrollIntoView({ block: 'center' });
+    row.classList.remove('hit'); void row.offsetWidth; row.classList.add('hit');
+    setTimeout(() => row.classList.remove('hit'), 2700);
+    evState.follow = false; evScrolled();
+  };
+  show();
+  requestAnimationFrame(show);
+}
+function evLeave(id) { evReturn = { id, sheet: (sheetStack[sheetStack.length - 1] || {}).name || null }; }
+function evAct(key, id, target) {
   const e = evState.list.find(x => x.id === id), d = e && e.data || {};
   if (!e) return;
   if (key === 'rule') openBlockedRule({ dest: d.dest || d.host, via: d.via });
   else if (key === 'retry') updateSource(d.source);
-  else if (key === 'raw') showRawLine(e.log);
+  else if (key === 'raw') { showRawLine(e.log); evLeave(id); }
   else if (key === 'open') {
-    const t = evOpenTarget(e);
-    if (t === 'rules') { openRuleSets(); return; }
-    if (t === 'rulelist') { openRules(); return; }
-    if (t === 'dns') { openDnsSettings(); return; }
+    const t = target || evOpenTarget(e);
+    if (t === 'rules') { openRuleSets(); evLeave(id); return; }
+    if (t === 'rulelist') { openRules(); evLeave(id); return; }
+    if (t === 'dns') { openDnsSettings(); evLeave(id); return; }
     switchTab('nodes');
     setNodesTab(catalogOrder.simple.includes(t) ? 'simple' : 'profiles');
     expandState[t] = true;
     renderNodes();
     requestAnimationFrame(() => { const c = document.querySelector('#view-nodes .src-card[data-id="' + t + '"]'); if (c) c.scrollIntoView({ block: 'center' }); });
+    evLeave(id);
   }
+}
+
+// "<host> does not open": the entry that fails and the one that works, each a menu-like row
+// (icon, name, its server small, Open); without a working alternative only the first.
+function evBlockedHtml(e) {
+  const d = e.data || {}, entry = d.entry || d.route;
+  const row = (ico, id, server) => `<div class="ev-via"><span class="ev-via-ico">${ico}</span><div class="ev-via-name">${esc(evEntry(id))}${server ? `<small>${esc(evServer(server))}</small>` : ''}</div>${connectEntry(id) ? `<button class="ev-act" data-t="${esc(id)}" onclick="event.stopPropagation();evAct('open',${e.id},this.dataset.t)">Open</button>` : ''}</div>`;
+  return `<div class="ev-vias">${entry ? row('⚠️', entry, d.server) : ''}${d.via ? row('✅', d.via, d.viaServer) : ''}</div>`;
 }
 
 function evRowHtml(g) {
@@ -244,7 +278,7 @@ function evRowHtml(g) {
     <div class="ev-ico">${EV_ICON[e.cat] || ''}</div>
     <div class="ev-body">
       ${top}
-      ${d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
+      ${e.cat === 'site' && e.type === 'blocked' ? evBlockedHtml(e) : d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
       ${acts.length ? `<div class="ev-acts">${acts.map(([k, l]) => `<button class="ev-act" onclick="event.stopPropagation();evAct('${k}',${e.id})">${l}</button>`).join('')}</div>` : ''}
       <div class="ev-more">${evFieldsHtml(g)}</div>
     </div></div>`;
@@ -450,7 +484,7 @@ function evAfterNew(fresh, first) {
 function evNotify(e) {
   const kind = EV_NOTIF[evTypeKey(e)];
   if (!kind) return;
-  notify(kind, evText(e), e.cat === 'site' && e.data && e.data.via ? { label: 'Rule', fn: () => evAct('rule', e.id) } : null, e.id);
+  notify(kind, evText(e), e.cat === 'site' && e.data && e.data.via ? { label: 'Create rule', fn: () => evAct('rule', e.id) } : null, e.id);
 }
 let evTick = 0;
 setInterval(() => { if (!document.hidden && (logsOpen() && logTab === 'events' || (++evTick) % 3 === 0)) pollEvents(); }, 1000);

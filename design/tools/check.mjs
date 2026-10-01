@@ -188,6 +188,8 @@ const SHOTS = {
   'logs-filter': async p => { await tab(p, 'logs'); await p.waitForTimeout(400); await p.evaluate(() => { openEvFilter(); evFilterFold('auto'); evFilterFold('sub'); evToggleType('auto/fastest'); evToggleType('sub/updated'); setEvProblems(true); logCfg.showOwn = true; renderEvFilter(); }); await settle(p); },
   // a folded row (×3 repeats) opened: its times and every field
   'logs-event-open': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { const r = document.querySelector('#evList .ev-row.cat-site'); evToggle(+r.dataset.key); r.scrollIntoView({ block: 'center' }); }); await settle(p); },
+  // "does not open": the failing entry and the working one as two rows with Open, Create rule / In raw log below
+  'logs-blocked': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { const r = document.querySelector('#evList .ev-row.cat-site'); r.scrollIntoView({ block: 'center' }); }); await settle(p); },
   // scrolled up, two events arrive: the view stays, the pill counts them
   'logs-new-below': async p => { await tab(p, 'logs'); await p.waitForTimeout(500); await p.evaluate(() => { document.getElementById('evScroll').scrollTop = 0; }); await p.waitForTimeout(200);
     await p.evaluate(() => { const [a, b] = visibleOrder(); mockEventAdd('auto', 'switched', 'info', { from: a, to: b, reason: 'failover', fails: 3 }); mockEventAdd('site', 'blocked', 'warn', { host: 'discord.com', dest: 'discord.com:443', entry: a, via: b }); return pollEvents(); }); await p.waitForTimeout(400); },
@@ -2806,6 +2808,43 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
+  await check('rule form: Fallback block (like the app dialog) on Proxy with the main flow, inert on Direct, own Via, stable height, JSON keeps fallbackTarget, plan emits the target id', async () => {
+    const r = await page.evaluate(() => {
+      const out = {}, body = () => document.getElementById('rf-body'), h = () => body().scrollHeight, q = s => body().querySelector(s);
+      openRules(); openRuleForm('r1'); ruleDraft.action = 'proxy'; ruleDraft.target = ''; ruleDraft.fallback = 'default'; renderRuleForm();
+      out.present = !!q('#rf-fallback') && [...body().querySelectorAll('#rf-fallback button')].map(b => b.textContent).join() === 'Default,Proxy,Direct,Block'
+        && !q('.aa-fb').classList.contains('aa-inert') && !!q('.rf-fb-hint');
+      out.viaInert = q('.aa-fb-via').classList.contains('aa-inert');
+      const h0 = h();
+      [...body().querySelectorAll('#rf-fallback button')][1].click();
+      out.viaOn = !q('.aa-fb-via').classList.contains('aa-inert') && /Main flow/.test(q('.aa-fb-via').textContent) && ruleDraft.fallback === 'main';
+      out.sameH1 = h() === h0;
+      q('.aa-fb-via').click();   // picker: Main flow first, the rule's own Via left out
+      out.picker = document.getElementById('sh-target').classList.contains('open') && !!document.querySelector('#tp-body .tp-card');
+      document.querySelector('#tp-body .tp-card[data-t="src:src2"] .src-head .conn-state').click();
+      document.querySelector('#tp-save button').click();
+      out.picked = ruleDraft.fallbackTarget === 'src:src2' && /src:src2|\S/.test(q('.aa-fb-via').textContent) && q('.aa-fb-via').textContent.indexOf('Main flow') < 0;
+      out.sameH2 = h() === h0;
+      // JSON round-trip keeps fallbackTarget
+      setRfTab('json'); setRfTab('form');
+      out.json = ruleDraft.fallback === 'main' && ruleDraft.fallbackTarget === 'src:src2';
+      // the plan: a main-flow rule sends the target id and names the target
+      const keep = JSON.stringify(rulesData.r1);
+      saveRuleForm();
+      const pr = routingPlan().rules.find(x => x.id === 'r1');
+      out.plan = !!pr && pr.target === '' && pr.fallback === 'src:src2' && 'src:src2' in routingPlan().targets;
+      // Direct: the block stays in place, dimmed and inert
+      openRuleForm('r1'); ruleDraft.action = 'direct'; renderRuleForm();
+      out.inert = q('.aa-fb').classList.contains('aa-inert') && q('.aa-fb-via').classList.contains('aa-inert') && [...body().querySelectorAll('#rf-fallback button')].every(b => b.disabled);
+      out.sameH3 = Math.abs(h() - h0) <= 2;
+      saveRuleForm();
+      out.reset = rulesData.r1.fallback === 'default' && rulesData.r1.fallbackTarget === '';
+      rulesData.r1 = JSON.parse(keep); renderRules(); closeSheet('rules');
+      return out;
+    });
+    expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
   await check('rules: services are a dropdown — add from the built-in list, switch VPN / Direct, remove', async () => {
     const r = await page.evaluate(() => {
       const out = {}, rows = () => [...document.querySelectorAll('.svc-row')].map(e => e.dataset.svc);
@@ -3086,6 +3125,46 @@ async function runChecks() {
     await p.close();
   });
 
+  // The blocked-site card: two named rows (no raw ids), Create rule prefilled; Open / In raw log leave the journal and Back returns to the event.
+  await check('journal: blocked card (two rows, names), Create rule, Open → Back and In raw log → Back return to Logs → Events at the entry', async () => {
+    const p = await openPage(browser);
+    await tab(p, 'logs'); await p.waitForTimeout(500);
+    const info = await p.evaluate(async () => {
+      const [a, b] = autoOrder(), e = mockEventAdd('site', 'blocked', 'warn', { host: 'card.example.com', dest: 'card.example.com:443', entry: a, via: b }, { raw: 'card.example.com:443 does not open' });
+      await pollEvents();
+      const row = [...document.querySelectorAll('#evList .ev-row.cat-site')].find(r => r.dataset.ids.split(',').includes(String(e.id)));
+      const rows = row ? [...row.querySelectorAll('.ev-via')] : [];
+      return { id: e.id, n: rows.length, names: rows.map(r => r.querySelector('.ev-via-name').firstChild.textContent), opens: rows.map(r => !!r.querySelector('.ev-act')),
+        want: [connectEntry(a).name, connectEntry(b).name], btns: [...row.querySelectorAll('.ev-acts .ev-act')].map(x => x.textContent) };
+    });
+    expect(info.n === 2 && info.names.join() === info.want.join() && info.opens.every(Boolean), 'two rows with names ' + JSON.stringify(info));
+    expect(info.btns.join() === 'Create rule,In raw log', 'buttons ' + info.btns.join());
+    await p.evaluate(id => evAct('rule', id), info.id); await p.waitForTimeout(300);
+    expect(await p.evaluate(() => document.getElementById('sh-ruleform').classList.contains('open') && ruleDraft.groups.domain && JSON.stringify(ruleDraft.groups.domain.v.domain) === '["card.example.com"]'), 'Create rule prefilled');
+    await p.evaluate(() => closeSheet('ruleform')); await p.waitForTimeout(400);
+    const inView = id => p.evaluate(id => {
+      const row = [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id)));
+      const b = row && row.getBoundingClientRect(), s = document.getElementById('evScroll').getBoundingClientRect();
+      return !!row && logsOpen() && logTab === 'events' && row.classList.contains('open') && b.top >= s.top - 1 && b.bottom <= s.bottom + 1;
+    }, id);
+    // Open on the via row → Nodes; Back → the journal at the event
+    await p.evaluate(id => { [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id))).querySelectorAll('.ev-via .ev-act')[1].click(); }, info.id);
+    await p.waitForTimeout(400);
+    expect(await p.evaluate(() => activeTab() === 'nodes'), 'Open goes to Nodes');
+    await backAndSettle(p);
+    expect(await inView(info.id), 'Open → Back returns to the event');
+    await p.evaluate(() => { const r = document.querySelector('#evList .ev-row.open'); if (r) r.classList.remove('open'); });
+    await p.evaluate(id => [...document.querySelectorAll('#evList .ev-row')].find(r => r.dataset.ids.split(',').includes(String(id))).querySelector('.ev-acts .ev-act:last-child').click(), info.id);
+    await p.waitForTimeout(700);
+    expect(await p.evaluate(() => logTab === 'raw'), 'In raw log shows Raw');
+    await backAndSettle(p);
+    expect(await inView(info.id), 'In raw log → Back returns to the event');
+    await p.evaluate(() => { evState.open.clear(); });
+    await backAndSettle(p);
+    expect(await p.evaluate(() => activeTab() === 'home'), 'a second Back goes Home');
+    await p.close();
+  });
+
   // The journal drives the background notifications (47-events.js → 58-notif.js): only events newer than the page's first look, not own, with their toggle on.
   await check('events → notifications: history never, a new one yes (toggle on, not own), a Rule button on a blocked site, a tap opens Logs at the event; sub/dead is posted by the UI', async () => {
     const p = await openPage(browser);
@@ -3096,7 +3175,7 @@ async function runChecks() {
       await pollEvents();
       const out = { history: !toasts.length && evState.list.length > 20 };   // the seeded history holds warnings and errors: silent
       await add('site', 'blocked', 'warn', { host: 'chat.example.com', dest: 'chat.example.com:443', entry: a, via: b });
-      out.toast = toasts.length === 1 && toasts[0].m.includes('chat.example.com') && toasts[0].act && toasts[0].act.label === 'Rule' && typeof toasts[0].tap === 'function';
+      out.toast = toasts.length === 1 && toasts[0].m.includes('chat.example.com') && toasts[0].act && toasts[0].act.label === 'Create rule' && typeof toasts[0].tap === 'function';
       toasts[0].act.fn();
       // the core's `via` is a bare entry id: the rule's target is the prefixed one, resolves to a live entry (never "deleted …"), the host is an exact Domain
       out.rule = document.getElementById('sh-ruleform').classList.contains('open') && ruleDraft.action === 'proxy'
@@ -3265,7 +3344,7 @@ async function runChecks() {
       out.noOwn = !document.querySelector('#evList .ev-row.cat-user');
       out.names = [...document.querySelectorAll('#evList .ev-title')].every(t => !/\bsrc\d/.test(t.textContent)) && /^Auto: .+ → .+/.test(document.querySelector('#evList .ev-row.cat-auto .ev-title').textContent);
       const site = document.querySelector('#evList .ev-row.cat-site');
-      out.acts = [...site.querySelectorAll('.ev-act')].map(x => x.textContent).join() === 'Rule,Open';
+      out.acts = /^Open,Open,Create rule/.test([...site.querySelectorAll('.ev-act')].map(x => x.textContent).join());
       site.click();
       out.open = site.classList.contains('open') && getComputedStyle(site.querySelector('.ev-more')).display !== 'none' && /Times/.test(site.querySelector('.ev-more').textContent);
       site.click();

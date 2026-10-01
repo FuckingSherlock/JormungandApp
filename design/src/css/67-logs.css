@@ -74,6 +74,12 @@
 .ev-detail{margin-top:1px;font-size:12.5px;line-height:1.4;color:var(--t2);overflow-wrap:anywhere}
 .ev-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .ev-act{background:rgba(var(--accent-rgb),.13);border:none;border-radius:8px;color:var(--accent);font:inherit;font-size:12.5px;font-weight:600;padding:4px 10px;cursor:pointer}
+.ev-vias{margin-top:4px;border-radius:8px;background:rgba(255,255,255,.035)}
+.ev-via{display:flex;align-items:center;gap:8px;padding:6px 8px}
+.ev-via + .ev-via{border-top:1px solid var(--border)}
+.ev-via-ico{flex-shrink:0;width:20px;text-align:center;font-size:14px;line-height:1}
+.ev-via-name{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--t1);overflow-wrap:anywhere}
+.ev-via-name small{display:block;margin-top:1px;font-size:11.5px;font-weight:400;color:var(--t3)}
 .ev-more{display:none;margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.035);font-size:12px}
 .ev-row.open .ev-more{display:block}
 .ev-f{display:flex;gap:10px;padding:2px 0}

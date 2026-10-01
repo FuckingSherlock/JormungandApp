@@ -764,6 +764,10 @@ body {
 .node-add.rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}
 .rf-then .seg3{margin:4px 18px 8px}
 .rf-then .set-group{margin-top:0}
+.rf-then .rf-fbgroup{container-type:inline-size}
+.rf-then .rf-fbgroup + .set-group{margin-top:10px}
+.rf-then .set-row .seg3{margin:0}
+.rf-fb-hint{padding:6px 18px 8px;line-height:1.4;min-height:calc(2.8em + 14px)}   /* two lines reserved: the form keeps its height */
 
 /* ChipInput: values as chips + a free input; red = invalid */
 .chip-input{display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:40px;padding:5px 6px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.05);cursor:text}
@@ -901,6 +905,12 @@ body {
 .ev-detail{margin-top:1px;font-size:12.5px;line-height:1.4;color:var(--t2);overflow-wrap:anywhere}
 .ev-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .ev-act{background:rgba(var(--accent-rgb),.13);border:none;border-radius:8px;color:var(--accent);font:inherit;font-size:12.5px;font-weight:600;padding:4px 10px;cursor:pointer}
+.ev-vias{margin-top:4px;border-radius:8px;background:rgba(255,255,255,.035)}
+.ev-via{display:flex;align-items:center;gap:8px;padding:6px 8px}
+.ev-via + .ev-via{border-top:1px solid var(--border)}
+.ev-via-ico{flex-shrink:0;width:20px;text-align:center;font-size:14px;line-height:1}
+.ev-via-name{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--t1);overflow-wrap:anywhere}
+.ev-via-name small{display:block;margin-top:1px;font-size:11.5px;font-weight:400;color:var(--t3)}
 .ev-more{display:none;margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.035);font-size:12px}
 .ev-row.open .ev-more{display:block}
 .ev-f{display:flex;gap:10px;padding:2px 0}
@@ -2854,7 +2864,6 @@ Object.assign(I18N, { ru: {
   "How": "Как",
   "If": "Если",
   "If faster": "Если быстрее",
-  "If unavailable": "Если недоступно",
   "Import": "Импорт",
   "Import / export": "Импорт / экспорт",
   "Import config file": "Импорт файла конфигурации",
@@ -3012,7 +3021,7 @@ Object.assign(I18N, { ru: {
   "Pairs": "Пары",
   "Password": "Пароль",
   "Proxy password": "Пароль прокси",
-  "Through the Via target; Fallback if it is unavailable": "Через узел из «Через»; Fallback, если он недоступен",
+  "Through the Via target; Fallback if it is unavailable": "Через выбранную цель; если она недоступна — Fallback",
   "{0}: by the rules; Fallback if the main flow is down": "{0}: по правилам; Fallback, если основной поток не работает",
   "Goes by the rules; Fallback if the main flow is down": "Идёт по правилам; Fallback, если основной поток не работает",
   "Paste a subscription URL": "Вставьте URL подписки",
@@ -3201,7 +3210,7 @@ Object.assign(I18N, { ru: {
   "The test ended without a result": "Тест завершился без результата",
   "The VPN is down right now:": "VPN сейчас не работает:",
   "the whole list as the engine sees it.": "весь список так, как его видит движок.",
-  "Then": "Затем",
+  "Then": "Действие",
   "These servers are already in the group": "Эти узлы уже в группе",
   "This long of stable work on the entry": "Столько стабильной работы пункта",
   "This query leaves outside the tunnel": "Этот запрос уходит вне туннеля",
@@ -3304,7 +3313,7 @@ Object.assign(I18N, { ru: {
   "Internet stays blocked until you connect again or tap Remove on Home": "Интернет останется заблокированным, пока вы не подключитесь снова или не нажмёте «Убрать» на «Главной»",
   "IP conditions (IP, CIDR, local networks, GeoIP) match a site opened by name only in TUN": "IP-условия (IP, CIDR, локальные сети, GeoIP) срабатывают для сайта, открытого по имени, только в TUN",
   "is left with no servers — won't connect until you select another": "остался без узлов — не подключится, пока вы не выберете другой",
-  "It does not open through the current entry but does through another (with a Rule button)": "Не открывается через текущий пункт, но открывается через другой (есть кнопка «Правило»)",
+  "It does not open through the current entry but does through another (with a Create rule button)": "Не открывается через текущий пункт, но открывается через другой (есть кнопка «Создать правило»)",
   "its menu: ping, copy, switch off, delete. Tap the ms to ping it.": "его меню: пинг, копировать, выключить, удалить. Нажмите на мс, чтобы пингнуть.",
   "keep only servers whose name matches this regular expression, e.g. DE|NL or 🇩🇪.": "оставить только узлы, чьё имя подходит под это регулярное выражение, например DE|NL или 🇩🇪.",
   "Keeping the proxy while the app is closed only makes sense if the app starts with the computer and connects by itself: otherwise the internet stays blocked until you start it by hand. Turn on": "Сохранять sys proxy при закрытом приложении имеет смысл, только если оно запускается вместе с компьютером и само подключается: иначе интернет останется заблокированным, пока вы не запустите его вручную. Включите",
@@ -3332,7 +3341,9 @@ Object.assign(I18N, { ru: {
   "Nothing left in Auto — the connection stays until you disconnect": "В Auto ничего не осталось — соединение сохранится, пока вы не отключитесь",
   "Nothing picked — goes through the main flow.": "Ничего не выбрано — идёт через основной поток.",
   "Nothing to connect — add a subscription in Nodes": "Нечего подключать — добавьте подписку в «Узлах»",
-  "Off in Nodes, no working server or deleted": "Выключен в «Узлах», нет рабочего узла или удалён",
+  "Fallback applies to Proxy only": "Fallback работает только с Proxy",
+  "If the Via target is unavailable": "Если выбранная цель недоступна",
+  "If the main flow is down": "Если основной поток недоступен",
   "any program on this PC can use the port": "порт может использовать любая программа на этом ПК",
   "Password on the port": "Пароль на порту",
   "Off: the app stays silent in the background": "Выкл.: в фоне приложение молчит",
@@ -3394,7 +3405,7 @@ Object.assign(I18N, { ru: {
   "the query goes through the VPN or directly. Rules with DNS Auto pick by this.": "запрос идёт через VPN или Direct. По этому выбирают правила с DNS Auto.",
   "the same rule in sing-box format, for anything the form cannot show.": "то же правило в формате sing-box — для всего, что не умеет показать форма.",
   "The server may be down right now. Ping it or try again later.": "Возможно, узел сейчас не работает. Пингните его или повторите позже.",
-  "The sing-box route rule. Name, If unavailable, DNS and \"IP conditions only in TUN\" live in the form.": "Маршрутное правило sing-box. Имя, «Если недоступно», DNS и «IP-условия только в TUN» — в форме.",
+  "The sing-box route rule. Name, Fallback, DNS and \"IP conditions only in TUN\" live in the form.": "Маршрутное правило sing-box. Имя, Fallback, DNS и «IP-условия только в TUN» — в форме.",
   "The system proxy is kept so nothing leaks.": "Sys proxy сохранён, чтобы ничего не утекло.",
   "the system proxy is removed and your traffic goes direct at once.": "Sys proxy убирается, и ваш трафик сразу идёт Direct.",
   "this rule never makes the core resolve a name: through the proxy port it matches only when the address is already known.": "это правило никогда не заставляет ядро разрешать имя: через порт прокси оно срабатывает, только если адрес уже известен.",
@@ -3501,9 +3512,7 @@ Object.assign(I18N, { ru: {
   "{0} is back — returned to it": "{0} снова работает — вернулись на него",
   "{0} is faster": "{0} быстрее",
   "{0} does not open": "{0} не открывается",
-  "Not via {0}": "Не через {0}",
-  "Not via {0} — it does via {1}": "Не через {0} — через {1} открывается",
-  "It does via {0}": "Через {0} открывается",
+  "Create rule": "Создать правило",
   "{0} updated": "{0}: обновлено",
   "{0}: update failed": "{0}: не удалось обновить",
   "{0}: the provider removed {#1} server": "{0}: провайдер удалил {1} узел",
@@ -3581,7 +3590,7 @@ Object.assign(I18N, { ru: {
   "after a missed check the server is tried again this soon; “Leave a server after” misses in a row and Auto moves on.": "после пропущенной проверки узел пробуют снова через это время; после стольких промахов подряд, сколько задано в «Покидать узел после», Auto переходит дальше.",
   "answers at once with a stand-in address; faster, but some apps dislike it.": "сразу отвечает подставным адресом; быстрее, но некоторым приложениям это не нравится.",
   "Any address that answers fast over HTTP(S); the time to its reply is the ping. Pick one that works in your country.": "Любой адрес, который быстро отвечает по HTTP(S); время до ответа — это пинг. Выберите тот, что работает в вашей стране.",
-  "Auto moved to another entry or server; a rule went to its \"If unavailable\" or a DNS server was replaced": "Auto перешёл на другой пункт или узел; правило перешло на «Если недоступно» или заменён DNS-сервер",
+  "Auto moved to another entry or server; a rule went to its Fallback or a DNS server was replaced": "Auto перешёл на другой пункт или узел; правило перешло на Fallback или заменён DNS-сервер",
   "Background restarts are silent; this shows them": "Фоновые перезапуски проходят молча; этот переключатель их показывает",
   "Blocks traffic when the VPN is down. Works for apps that use the system proxy; full block needs TUN.": "Блокирует трафик, когда VPN не работает. Действует для приложений, которые используют sys proxy; полная блокировка требует TUN.",
   "Checked top to bottom; the first match wins. Change it in the Rules screen.": "Проверяется сверху вниз; побеждает первое совпадение. Меняется на экране «Правила».",
@@ -5997,8 +6006,10 @@ function hideToast() {
 
 /* ── Tabs ── */
 
+let evReturn = null;   // {id, sheet}: where Back returns after a journal action left it (47-events.js)
 // The nav is always visible, so a tab tap also closes whatever sheets are open over the view.
 function switchTab(name) {
+  evReturn = null;   // the journal return is set after the jump (evLeave, 47-events.js)
   document.querySelectorAll('.sheet.open').forEach(el => closeSheet(el.id.slice(3)));
   justClosed = [];
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
@@ -6538,7 +6549,7 @@ function paintSpeed(run) {
      'profile:<id>', 'chain:<id>'.
    Picked in the target picker (44-target-picker.js). A target is unavailable when it is
    switched off in Nodes, has no server left, or was deleted (the reference is kept, so the
-   rule shows it); the traffic then goes by the rule's "If unavailable": Default (the global
+   rule shows it); the traffic then goes by the rule's Fallback: Default (the global
    setting in Rules), Main flow, Block or Direct. Apps always use the global setting. */
 // A catalog entry's own id (what the core names in events and plans: a profile, chain or source id,
 // no prefix) -> the rule target of it; '' when no such entry exists.
@@ -6584,13 +6595,20 @@ const FALLBACKS = [['main', 'Main flow'], ['block', 'Block'], ['direct', 'Direct
 const fallbackName = v => (FALLBACKS.find(f => f[0] === v) || [, ''])[1];
 const ruleFallback = r => r.fallback && r.fallback !== 'default' ? r.fallback : quickCfg.fallback;
 const fallbackText = v => ({ main: 'through the main flow', block: 'nowhere (blocked)', direct: 'direct' })[v];
-// The "If unavailable" rows under a proxy target, shared by the rule form and an app's dialog.
-// d: { fallback }; path: JS path of d (e.g. 'ruleDraft'); render: name of the re-render function.
-function fallbackRowsHtml(d, path, render, segId) {
-  return `<div class="set-row rf-fallback"><div class="set-label">If unavailable<div class="set-hint">${d.fallback === 'default'
-      ? 'Default: ' + fallbackName(quickCfg.fallback) + ' (Rules → Target unavailable)' : 'Off in Nodes, no working server or deleted'}</div></div></div>
-    <div class="set-row"><div class="seg3 wide" id="${segId}">${[['default', 'Default'], ['main', 'Main'], ['block', 'Block'], ['direct', 'Direct']].map(([v, l]) =>
-      `<button class="${d.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" onclick="${path}.fallback='${v}';${render}()">${l}</button>`).join('')}</div></div>`;
+// fallback value -> label: 'main' is the Proxy button (through a target of its own, fallbackTarget; '' = Main flow)
+const APP_FALLBACKS = [['default', 'Default'], ['main', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
+// The Fallback rows (segment + its Via), shared by the rule form and an app's dialog.
+// d: { fallback, fallbackTarget }; path: JS path of d (e.g. 'ruleDraft'); render: name of the re-render function;
+// segId: id of the segment; on: Fallback can be set (else dimmed and inert, in place); own: the Via target to
+// leave out of the picker ('' = none). The Via row is always in place, inert unless Fallback = Proxy.
+function fallbackRowsHtml(d, path, render, segId, on, own = '') {
+  const viaOn = on && d.fallback === 'main';
+  const fb = `<div class="set-row aa-route aa-fb ${on ? '' : 'aa-inert'}"><div class="set-label">Fallback</div>
+      <div class="seg3 wide" id="${segId}">${APP_FALLBACKS.map(([v, l]) =>
+        `<button class="${d.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${on ? '' : 'disabled'} onclick="${path}.fallback='${v}';${render}()">${l}</button>`).join('')}</div></div>`;
+  const via = targetRowHtml('Via', d.fallbackTarget || '', `t => { ${path}.fallbackTarget = t; ${render}(); }`, own)
+    .replace('tgt-row', 'tgt-row aa-fb-via' + (viaOn ? '' : ' aa-inert'));
+  return fb + via;
 }
 
 // Rules and apps whose target a deletion removes (gone: target -> bool), for the delete dialog.
@@ -6756,7 +6774,7 @@ function renderRules() {
     return `<div class="rule-row ${r.enabled ? '' : 'dimmed'}" data-id="${id}" onclick="openRuleForm('${id}')">
       ${q ? '<span class="cc-rank"></span>' : `<div class="drag-handle cc-grip" onclick="event.stopPropagation()" onpointerdown="startRuleDrag(event,'${id}')">${GRIP_SVG}</div>`}
       <span class="cc-rank">${i}</span>
-      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.action === 'proxy' && r.target && !targetInfo(r.target).ok ? `<span class="conn-tag warn">down → ${fallbackName(ruleFallback(r))}</span>` : ''}</div>
+      <div class="rule-main"><div class="rule-name">${esc(ruleTitle(r))}${r.composite ? '<span class="conn-tag muted">JSON</span>' : ''}${r.action === 'proxy' && r.target && !targetInfo(r.target).ok ? `<span class="conn-tag warn">down → ${r.fallback === 'main' && r.fallbackTarget ? esc(targetName(r.fallbackTarget)) : fallbackName(ruleFallback(r))}</span>` : ''}</div>
         ${r.name ? `<div class="rule-sub">${esc(ruleSummary(r))}</div>` : ''}</div>
       <span class="rule-action-badge ${cls}">${esc(ruleTargetText(r))}</span>
       ${toggle(r.enabled, `toggleRuleEnabled('${id}')`)}
@@ -6962,7 +6980,7 @@ function parseClash(text) {
     return newRule({ groups: { [g.key]: { not: false, v: { [f]: [value] } } }, action: P === 'DIRECT' ? 'direct' : P === 'REJECT' ? 'block' : 'proxy' });
   });
 }
-const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: '', block: 'drop', fallback: 'default', dns: 'auto', groups: {} }, o);
+const newRule = o => Object.assign({ id: '', name: '', enabled: true, action: 'proxy', target: '', block: 'drop', fallback: 'default', fallbackTarget: '', dns: 'auto', groups: {} }, o);
 
 /* ── Rule sets: built-in geo lists + remote ones ── */
 function openRuleSets() { renderRuleSets(); openSheet('rulesets'); }
@@ -7107,28 +7125,22 @@ function openAppAct(pkg) {
 const APP_LINK = '<svg class="aa-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
 const LOCK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 let appTab = 'tcp';
-// fallback value -> label: 'main' (the old "Main flow") is the Proxy button
-const APP_FALLBACKS = [['default', 'Default'], ['main', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
 function appHalfHtml(h, path, proto) {
   const id = proto ? proto.toLowerCase() : 'all', own = h.act === 'proxy';
-  const fbOn = own || h.act === 'default', fbViaOn = fbOn && h.fallback === 'main';   // Fallback: Route Proxy / Default (Direct and Block have nothing to fall back from); its Via: Fallback = Proxy
+  const fbOn = own || h.act === 'default';   // Fallback: Route Proxy / Default (Direct and Block have nothing to fall back from)
   const hint = { default: proto ? `${proto}: by the rules; Fallback if the main flow is down` : 'Goes by the rules; Fallback if the main flow is down',
     proxy: 'Through the Via target; Fallback if it is unavailable', direct: 'Always bypasses the VPN',
     block: proto ? `${proto} is blocked while connected` : 'No network at all while connected' }[h.act];
   const via = own ? targetRowHtml('Via', h.target, `t => { ${path}.target = t; renderAppAct(); }`)
     : h.act === 'default' ? `<div class="set-row tgt-row aa-fixed"><div class="set-label">Via</div><span class="tgt-val">Main flow</span>${LOCK_ICON}</div>`   // the real value, just not changeable
     : `<div class="set-row tgt-row aa-inert"><div class="set-label">Via</div><span class="tgt-val aa-dash">—</span></div>`;
-  const fb = `<div class="set-row aa-route aa-fb ${fbOn ? '' : 'aa-inert'}"><div class="set-label">Fallback</div>
-      <div class="seg3 wide" id="aa-fallback-${id}">${APP_FALLBACKS.map(([v, l]) =>
-        `<button class="${h.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${fbOn ? '' : 'disabled'} onclick="${path}.fallback='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>`;
-  // always in place; dimmed and inert unless Fallback = Proxy. '' = Main flow; not the Route's own Via.
-  const fbVia = targetRowHtml('Via', h.fallbackTarget, `t => { ${path}.fallbackTarget = t; renderAppAct(); }`, own ? h.target : '')
-    .replace('tgt-row', 'tgt-row aa-fb-via' + (fbViaOn ? '' : ' aa-inert'));
+  // the Fallback Via: always in place; dimmed and inert unless Fallback = Proxy. '' = Main flow; not the Route's own Via.
+  const fb = fallbackRowsHtml(h, path, 'renderAppAct', 'aa-fallback-' + id, fbOn, own ? h.target : '');
   return `<div class="aa-half" data-half="${id}">
     <div class="set-group aa-group">
       <div class="set-row aa-route"><div class="set-label">Route</div>
         <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${h.act === v ? 'on ' + v : ''}" onclick="${path}.act='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>
-      ${via}${fb}${fbVia}
+      ${via}${fb}
     </div><div class="set-hint aa-hint">${hint}</div></div>`;
 }
 // The app has an own route unless every half is Default.
@@ -7324,7 +7336,8 @@ function openLogs(tab) {
 
 function setLogTab(tab) {
   logTab = tab;
-  const ev = tab === 'events', on = id => document.getElementById(id);
+  evReturn = null;   // a hand-made tab change forgets the journal return (47-events.js)
+  const ev =tab === 'events', on = id => document.getElementById(id);
   on('evScroll').style.display = ev ? '' : 'none';
   on('logScroll').style.display = ev ? 'none' : '';
   on('evActions').style.display = ev ? '' : 'none';
@@ -7683,7 +7696,8 @@ const EV_TEXT = {
   'auto/unstable': d => [`${evEntry(d.id)} is unstable`, `Dropped ${d.strikes}× — back to it after ${Math.max(1, Math.round(d.holdMs / 60000))} min without drops`],
   'site/blocked': d => {
     const host = d.host || destHost(String(d.dest || '')), entry = d.entry || d.route;
-    return [`${host} does not open`, (entry ? `Not via ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}` : '') + (d.via ? `${entry ? ' — it does' : 'It does'} via ${evEntry(d.via)}` : '')];
+    // the row shows the two entries as a card (evBlockedHtml); this line is the notification's and the export's
+    return [`${host} does not open`, [entry && `⚠️ ${evEntry(entry)}${d.server ? ' (' + evServer(d.server) + ')' : ''}`, d.via && `✅ ${evEntry(d.via)}${d.viaServer ? ' (' + evServer(d.viaServer) + ')' : ''}`].filter(Boolean).join('   ')];
   },
   'sub/updated': d => [`${evSource(d.source, d.name)} updated`, [evPlural(d.total, 'server', 'servers'), d.added ? d.added + ' new' : '', d.removed ? d.removed + ' removed' : ''].filter(Boolean).join(' · ')],
   'sub/failed': d => [`${evSource(d.source, d.name)}: update failed`, d.error || ''],
@@ -7783,9 +7797,9 @@ const evClock = t => logTime(t).slice(0, 5);
 
 function evActions(e) {
   const d = e.data || {}, a = [];
-  if (e.cat === 'site' && e.type === 'blocked' && d.via) a.push(['rule', 'Rule']);
+  if (e.cat === 'site' && e.type === 'blocked' && d.via) a.push(['rule', 'Create rule']);
   if (e.cat === 'sub' && e.type === 'failed' && sourcesData[d.source] && sourcesData[d.source].kind === 'sub') a.push(['retry', 'Retry']);
-  if (evOpenTarget(e)) a.push(['open', 'Open']);
+  if (evOpenTarget(e) && !(e.cat === 'site' && e.type === 'blocked')) a.push(['open', 'Open']);   // the blocked card has its own Open per entry
   if (e.log != null) a.push(['raw', 'In raw log']);
   return a;
 }
@@ -7798,23 +7812,56 @@ function evOpenTarget(e) {
   if (e.cat === 'dns') return 'dns';
   return null;
 }
-function evAct(key, id) {
+/* An action that leaves the journal (Open, In raw log) remembers the event: Back returns to
+   Logs → Events with its row in view, unfolded and lit for a moment (goBack, 60-sheets.js).
+   For a sheet opened over the journal the return waits for Back to close that sheet. */
+function evReturnNow() {
+  const r = evReturn;
+  evReturn = null;
+  if (!r) return;
+  if (activeTab() !== 'logs') switchTab('logs');
+  if (logTab !== 'events') setLogTab('events');
+  const ev = evState.list.find(x => x.id === r.id);
+  if (ev && !evVisible(ev)) evResetFilter();
+  const show = () => {
+    const row = [...document.querySelectorAll('#evList .ev-row')].find(x => x.dataset.ids.split(',').includes(String(r.id)));
+    if (!row) return;
+    evState.open.add(+row.dataset.key); row.classList.add('open');
+    row.scrollIntoView({ block: 'center' });
+    row.classList.remove('hit'); void row.offsetWidth; row.classList.add('hit');
+    setTimeout(() => row.classList.remove('hit'), 2700);
+    evState.follow = false; evScrolled();
+  };
+  show();
+  requestAnimationFrame(show);
+}
+function evLeave(id) { evReturn = { id, sheet: (sheetStack[sheetStack.length - 1] || {}).name || null }; }
+function evAct(key, id, target) {
   const e = evState.list.find(x => x.id === id), d = e && e.data || {};
   if (!e) return;
   if (key === 'rule') openBlockedRule({ dest: d.dest || d.host, via: d.via });
   else if (key === 'retry') updateSource(d.source);
-  else if (key === 'raw') showRawLine(e.log);
+  else if (key === 'raw') { showRawLine(e.log); evLeave(id); }
   else if (key === 'open') {
-    const t = evOpenTarget(e);
-    if (t === 'rules') { openRuleSets(); return; }
-    if (t === 'rulelist') { openRules(); return; }
-    if (t === 'dns') { openDnsSettings(); return; }
+    const t = target || evOpenTarget(e);
+    if (t === 'rules') { openRuleSets(); evLeave(id); return; }
+    if (t === 'rulelist') { openRules(); evLeave(id); return; }
+    if (t === 'dns') { openDnsSettings(); evLeave(id); return; }
     switchTab('nodes');
     setNodesTab(catalogOrder.simple.includes(t) ? 'simple' : 'profiles');
     expandState[t] = true;
     renderNodes();
     requestAnimationFrame(() => { const c = document.querySelector('#view-nodes .src-card[data-id="' + t + '"]'); if (c) c.scrollIntoView({ block: 'center' }); });
+    evLeave(id);
   }
+}
+
+// "<host> does not open": the entry that fails and the one that works, each a menu-like row
+// (icon, name, its server small, Open); without a working alternative only the first.
+function evBlockedHtml(e) {
+  const d = e.data || {}, entry = d.entry || d.route;
+  const row = (ico, id, server) => `<div class="ev-via"><span class="ev-via-ico">${ico}</span><div class="ev-via-name">${esc(evEntry(id))}${server ? `<small>${esc(evServer(server))}</small>` : ''}</div>${connectEntry(id) ? `<button class="ev-act" data-t="${esc(id)}" onclick="event.stopPropagation();evAct('open',${e.id},this.dataset.t)">Open</button>` : ''}</div>`;
+  return `<div class="ev-vias">${entry ? row('⚠️', entry, d.server) : ''}${d.via ? row('✅', d.via, d.viaServer) : ''}</div>`;
 }
 
 function evRowHtml(g) {
@@ -7827,7 +7874,7 @@ function evRowHtml(g) {
     <div class="ev-ico">${EV_ICON[e.cat] || ''}</div>
     <div class="ev-body">
       ${top}
-      ${d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
+      ${e.cat === 'site' && e.type === 'blocked' ? evBlockedHtml(e) : d.detail ? `<div class="ev-detail">${esc(d.detail)}</div>` : ''}
       ${acts.length ? `<div class="ev-acts">${acts.map(([k, l]) => `<button class="ev-act" onclick="event.stopPropagation();evAct('${k}',${e.id})">${l}</button>`).join('')}</div>` : ''}
       <div class="ev-more">${evFieldsHtml(g)}</div>
     </div></div>`;
@@ -8033,7 +8080,7 @@ function evAfterNew(fresh, first) {
 function evNotify(e) {
   const kind = EV_NOTIF[evTypeKey(e)];
   if (!kind) return;
-  notify(kind, evText(e), e.cat === 'site' && e.data && e.data.via ? { label: 'Rule', fn: () => evAct('rule', e.id) } : null, e.id);
+  notify(kind, evText(e), e.cat === 'site' && e.data && e.data.via ? { label: 'Create rule', fn: () => evAct('rule', e.id) } : null, e.id);
 }
 let evTick = 0;
 setInterval(() => { if (!document.hidden && (logsOpen() && logTab === 'events' || (++evTick) % 3 === 0)) pollEvents(); }, 1000);
@@ -9107,11 +9154,11 @@ const NOTIF_GROUPS = [
     ['status', 'Status notification', 'Android: shows the entry, server and speed while connected'],
   ]],
   ['Connection', [
-    ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server; a rule went to its "If unavailable" or a DNS server was replaced'],
+    ['autoSwitch', 'When Auto switches', 'Auto moved to another entry or server; a rule went to its Fallback or a DNS server was replaced'],
     ['unstable', 'Unstable entry', 'An entry keeps dropping and waits before it gets the traffic back'],
     ['connLost', 'Connection lost', 'No network or no server answers, and when it is back'],
     ['coreCrash', 'sing-box stopped', 'Background restarts are silent; this shows them'],
-    ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Rule button)'],
+    ['blocked', 'Site does not open', 'It does not open through the current entry but does through another (with a Create rule button)'],
   ]],
   ['Subscriptions and rules', [
     ['subUpdated', 'Subscription updated', 'A background update finished: name and number of servers'],
@@ -9375,6 +9422,7 @@ function openSheetOver(open) {
 // A sheet may clean up on close (any way: ×, overlay, swipe, Done, back).
 const sheetCloseHooks = {};
 function closeSheet(name) {
+  if (evReturn && evReturn.sheet === name && !evReturn.back) evReturn = null;   // closed by hand, not by Back
   if (sheetCloseHooks[name]) sheetCloseHooks[name]();
   if (sheetUnder[name]) {   // raised again once it has slid away
     const lowered = sheetUnder[name];
@@ -9438,8 +9486,15 @@ function sheetView(name, v) {
 }
 function goBack() {
   const top = sheetStack[sheetStack.length - 1];
-  if (!top) { if (activeTab() !== 'home') switchTab('home'); return; }
+  if (!top) {
+    if (evReturn) evReturnNow();   // left the journal by Open / In raw log: back to that event
+    else if (activeTab() !== 'home') switchTab('home');
+    return;
+  }
+  const ret = evReturn && evReturn.sheet === top.name;
+  if (ret) evReturn.back = true;
   closeSheet(top.name);
+  if (ret) { evReturnNow(); return; }
   justClosed = [];
   top.prev.slice().reverse().forEach(p => {
     if (p.name === top.name) sheetView(p.name, p.view);
@@ -10145,8 +10200,10 @@ sourceViewHooks.push(() => {
    comma or a pasted column); a bad value turns red and blocks Save. A field is on its card when its
    key is in group.v (an empty list = added, not filled yet); Local networks when group.flag is set.
    Action: Proxy (main flow or a target — stub picker), Direct, Block (drop / reject).
-   If unavailable (with a target): Default / Main / Block / Direct when the target is off,
-   empty or deleted (docs/rules.md §0).
+   Fallback (Then = Proxy, with a target or the main flow; same block as the per-app dialog,
+   fallbackRowsHtml): Default | Proxy | Direct | Block + its own Via (Main flow or a target, not the
+   rule's Via), for when the target is off, empty or deleted / the main flow is down; always in
+   place, dimmed and inert on Direct / Block (docs/rules.md §0). rule.fallbackTarget goes with 'main'.
    DNS: Auto (first ticked server with the matching route) or a server from Settings → DNS.
    IP block (only with an IP / GeoIP / local-networks condition): "IP conditions only in TUN"
    (rule.ipTunOnly: the core adds no `resolve` for this rule) with a (?) that explains it and shows
@@ -10186,7 +10243,7 @@ function renderRuleForm() {
   if (rfTab === 'json') {
     el.innerHTML = `<div class="form-group"><textarea class="form-input code-area tall" id="rf-json" spellcheck="false" oninput="rfCheckJson()">${esc(JSON.stringify(ruleJson(ruleDraft), null, 2))}</textarea>
       <div class="set-hint warn" id="rf-json-err"></div>
-      <div class="set-hint">The sing-box route rule. Name, If unavailable, DNS and "IP conditions only in TUN" live in the form.</div></div>`;
+      <div class="set-hint">The sing-box route rule. Name, Fallback, DNS and "IP conditions only in TUN" live in the form.</div></div>`;
     return;
   }
   const d = ruleDraft;
@@ -10211,9 +10268,14 @@ function renderRuleForm() {
     <div class="rf-label">Then</div>
     <div class="rf-then">
       <div class="seg3 wide">${acts.map(([v, l]) => `<button class="${d.action === v ? 'on ' + v : ''}" onclick="ruleDraft.action='${v}';renderRuleForm()">${l}</button>`).join('')}</div>
+      <div class="set-group rf-fbgroup">
+        ${d.action === 'proxy' ? targetRowHtml('Via', d.target, 't => { ruleDraft.target = t; renderRuleForm(); }')
+          : `<div class="set-row tgt-row aa-inert"><div class="set-label">Via</div><span class="tgt-val aa-dash">—</span></div>`}
+        ${fallbackRowsHtml(d, 'ruleDraft', 'renderRuleForm', 'rf-fallback', d.action === 'proxy', d.target)}
+        <div class="set-hint rf-fb-hint">${d.action !== 'proxy' ? 'Fallback applies to Proxy only' : d.fallback === 'default'
+          ? 'Default: ' + fallbackName(quickCfg.fallback) + ' (Rules → Target unavailable)'
+          : d.target ? 'If the Via target is unavailable' : 'If the main flow is down'}</div></div>
       <div class="set-group">
-        ${d.action === 'proxy' ? targetRowHtml('Via', d.target, 't => { ruleDraft.target = t; renderRuleForm(); }') : ''}
-        ${d.action === 'proxy' && d.target ? fallbackRowsHtml(d, 'ruleDraft', 'renderRuleForm', 'rf-fallback') : ''}
         ${d.action === 'block' ? `<div class="set-row"><div class="set-label">How</div><div class="chip-row">${[['drop', 'Drop silently'], ['reject', 'Reject']].map(([v, l]) =>
           `<div class="chip ${d.block === v ? 'active' : ''}" onclick="ruleDraft.block='${v}';renderRuleForm()">${l}</div>`).join('')}</div></div>` : ''}
         ${d.action !== 'block' ? `<div class="set-row"><div class="set-label">DNS</div><select class="set-select" id="rf-dns" onchange="ruleDraft.dns=this.value">${dnsOpts.map(([v, l]) =>
@@ -10463,12 +10525,12 @@ function rfCheckJson() {
   document.getElementById('rf-json-err').textContent = msg;
   return !msg;
 }
-// JSON tab → draft (keeps name, If unavailable, DNS, enabled). false if the JSON is invalid.
+// JSON tab → draft (keeps name, Fallback, DNS, enabled). false if the JSON is invalid.
 function rfApplyJson() {
   if (rfTab !== 'json') return true;
   if (!rfCheckJson()) { toast('Fix the JSON first'); return false; }
   const r = ruleFromJson(JSON.parse(document.getElementById('rf-json').value));
-  ['id', 'name', 'enabled', 'fallback', 'dns', 'ipTunOnly'].forEach(k => r[k] = ruleDraft[k]);
+  ['id', 'name', 'enabled', 'fallback', 'fallbackTarget', 'dns', 'ipTunOnly'].forEach(k => r[k] = ruleDraft[k]);
   if (r.action !== 'proxy') r.target = ruleDraft.target;   // the JSON has no place for what the action does not use
   if (r.action !== 'block') r.block = ruleDraft.block;
   // cards and fields not filled yet are not in the JSON: keep them as the form had them
@@ -10495,7 +10557,8 @@ function saveRuleForm() {
     Object.keys(d.groups).forEach(k => { const g = d.groups[k]; if (!Object.keys(g.v).length && !g.flag) delete d.groups[k]; });
     if (!Object.keys(d.groups).length) { toast('Add at least one condition'); renderRuleForm(); return; }
   }
-  if (!(d.action === 'proxy' && d.target)) d.fallback = 'default';
+  if (d.action !== 'proxy') d.fallback = 'default';   // Fallback only means something for Proxy (a target or the main flow)
+  if (d.fallback !== 'main' || d.fallbackTarget === d.target) d.fallbackTarget = '';
   if (!ruleHasIpCondition(d) || !d.ipTunOnly) delete d.ipTunOnly;
   if (ruleEditing) rulesData[ruleEditing] = Object.assign(d, { id: ruleEditing });
   else { d.id = 'r' + (ruleSeq++); rulesData[d.id] = d; ruleOrder.push(d.id); }
@@ -11011,10 +11074,10 @@ function routingTarget(t) {
 
 function routingPlan() {
   const rules = ruleOrder.map(id => rulesData[id]).filter(r => r.enabled).map(r => {
-    // a rule's "If unavailable" only means something with a target of its own (the main flow
-    // has none for rules: a value left from an earlier target is not sent)
+    // a rule's Fallback only means something for Proxy (a target of its own or the main flow);
+    // "Proxy via X" (fallback 'main' + fallbackTarget) goes as the target id X
     const o = { id: r.id, name: r.name, action: r.action, target: r.target || '',
-      fallback: r.target && r.fallback === 'main' && r.fallbackTarget ? r.fallbackTarget : r.target && r.fallback || 'default',
+      fallback: r.action === 'proxy' ? (r.fallback === 'main' && r.fallbackTarget ? r.fallbackTarget : r.fallback || 'default') : 'default',
       block: r.block, dns: r.dns || 'auto', groups: r.groups };
     if (r.composite) {
       const { action, outbound, method, ...match } = r.composite;
@@ -11039,7 +11102,7 @@ function routingPlan() {
   const named = new Set();
   // a fallback that is not a keyword is a target: its group(s) must exist in the config too
   const addFb = f => { if (f && !['default', 'main', 'block', 'direct'].includes(f)) named.add(f); };
-  rules.forEach(r => { if (r.action === 'proxy' && r.target) { named.add(r.target); addFb(r.fallback); } });
+  rules.forEach(r => { if (r.action === 'proxy') { if (r.target) named.add(r.target); addFb(r.fallback); } });
   apps.forEach(a => [a, ...(a.split ? [a.udp] : [])].forEach(h => {
     if (h.act === 'proxy' && h.target) named.add(h.target);
     if (h.act === 'proxy' || h.act === 'default') addFb(h.fallback);
