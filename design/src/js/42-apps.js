@@ -73,7 +73,7 @@ function appStateHtml(pkg) {
   if (r && r.split) return `<span class="app-state split" title="${esc(appActText(r))}">${appHalves(r).map(([p, h]) =>
     `<span class="${h.act}">${p} ${esc(appHalfText(h))}</span>`).join('')}</span>`;   // one line per protocol
   if (r) return `<span class="app-state ${appStateClass(r)}" title="${esc(appActText(r))}">${esc(appActText(r))}</span>`;
-  if (sv && sv !== 'default') return `<span class="app-state svc ${sv === 'vpn' ? 'proxy' : 'direct'}" title="Set by the ${esc(svc[1])} service">${svcState(sv)} · service</span>`;
+  if (sv && sv !== 'default') return `<span class="app-state svc ${sv === 'vpn' ? 'proxy' : 'direct'}" title="${esc(t('Set by the {0} service', svc[1]))}">${svcState(sv)} · service</span>`;
   return '<span class="app-state">—</span>';
 }
 
@@ -91,29 +91,34 @@ function openAppAct(pkg) {
 // Default | Proxy | Direct | Block; Proxy = through a target of its own, an extra Via row under it).
 // Via and Fallback stay in place, dimmed and inert, unless Route is Proxy.
 const APP_LINK = '<svg class="aa-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+const LOCK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 let appTab = 'tcp';
 // fallback value -> label: 'main' (the old "Main flow") is the Proxy button
 const APP_FALLBACKS = [['default', 'Default'], ['main', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
 function appHalfHtml(h, path, proto) {
   const id = proto ? proto.toLowerCase() : 'all', own = h.act === 'proxy';
-  const hint = { default: proto ? `No own route for ${proto}: it goes by the rules` : 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN',
+  const fbOn = own || h.act === 'default', fbViaOn = fbOn && h.fallback === 'main';   // Fallback: Route Proxy / Default (Direct and Block have nothing to fall back from); its Via: Fallback = Proxy
+  const hint = { default: proto ? `${proto}: by the rules; Fallback if the main flow is down` : 'Goes by the rules; Fallback if the main flow is down',
+    proxy: 'Through the Via target; Fallback if it is unavailable', direct: 'Always bypasses the VPN',
     block: proto ? `${proto} is blocked while connected` : 'No network at all while connected' }[h.act];
   const via = own ? targetRowHtml('Via', h.target, `t => { ${path}.target = t; renderAppAct(); }`)
+    : h.act === 'default' ? `<div class="set-row tgt-row aa-fixed"><div class="set-label">Via</div><span class="tgt-val">Main flow</span>${LOCK_ICON}</div>`   // the real value, just not changeable
     : `<div class="set-row tgt-row aa-inert"><div class="set-label">Via</div><span class="tgt-val aa-dash">—</span></div>`;
-  const fb = `<div class="set-row aa-route aa-fb ${own ? '' : 'aa-inert'}"><div class="set-label">Fallback (if unavailable)</div>
+  const fb = `<div class="set-row aa-route aa-fb ${fbOn ? '' : 'aa-inert'}"><div class="set-label">Fallback</div>
       <div class="seg3 wide" id="aa-fallback-${id}">${APP_FALLBACKS.map(([v, l]) =>
-        `<button class="${h.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${own ? '' : 'disabled'} onclick="${path}.fallback='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>`;
-  const fbVia = own && h.fallback === 'main'
-    ? targetRowHtml('Via', h.fallbackTarget, `t => { ${path}.fallbackTarget = t; renderAppAct(); }`).replace('tgt-row', 'tgt-row aa-fb-via') : '';
+        `<button class="${h.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${fbOn ? '' : 'disabled'} onclick="${path}.fallback='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>`;
+  // always in place; dimmed and inert unless Fallback = Proxy. '' = Main flow; not the Route's own Via.
+  const fbVia = targetRowHtml('Via', h.fallbackTarget, `t => { ${path}.fallbackTarget = t; renderAppAct(); }`, own ? h.target : '')
+    .replace('tgt-row', 'tgt-row aa-fb-via' + (fbViaOn ? '' : ' aa-inert'));
   return `<div class="aa-half" data-half="${id}">
     <div class="set-group aa-group">
       <div class="set-row aa-route"><div class="set-label">Route</div>
         <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${h.act === v ? 'on ' + v : ''}" onclick="${path}.act='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>
       ${via}${fb}${fbVia}
-    </div>${own ? '' : `<div class="set-hint aa-hint">${hint}</div>`}</div>`;
+    </div><div class="set-hint aa-hint">${hint}</div></div>`;
 }
 // The app has an own route unless every half is Default.
-const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default') ? 'default' : 'own';
+const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default' && h.fallback === 'default') ? 'default' : 'own';   // Default + a Fallback is still an own rule
 const appTabHalf = () => appTab === 'udp' ? ['appDraft.udp', 'UDP', appDraft.udp] : ['appDraft', 'TCP', appDraft];
 function renderAppAct() {
   const d = appDraft;

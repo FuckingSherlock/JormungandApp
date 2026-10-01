@@ -16,6 +16,7 @@ import 'manual.dart';
 import 'node.dart';
 import 'parse/links.dart';
 import 'plan.dart';
+import 'pool.dart';
 import 'probe.dart';
 import 'routing.dart';
 import 'rulenames.dart';
@@ -104,6 +105,11 @@ class Daemon {
   // port: it may ask for a password.
   int? get _innerPort => main.running ? _tunnelPort ?? _mixedPort : null;
   Probe? _probe; // probe-in: Auto's latency tests (probe.dart)
+
+  /// Every server test of the core's modules and of the UI's pings (pool.dart), and the
+  /// network status they share. `direct` = the direct path through the main sing-box's probe
+  /// inbound (only asked while Auto runs, so while it is up).
+  late final pool = ProbePool(direct: (url, t) async => _probe == null ? -1 : _probe!.delay('direct', url, timeoutMs: t));
   StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto
   int _connectSeq = 0;
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
@@ -258,7 +264,9 @@ class Daemon {
     _stopAuto();
     final api = main.api;
     if (api == null) return; // no API service (a test's fake process)
+    pool.resetNetwork(); // a new sing-box: the network is presumed up again
     final auto = _auto = AutoService(api, plan,
+        pool: pool,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         note: main.note);
@@ -309,7 +317,8 @@ class Daemon {
     final fb = _fallback = FallbackService(api, _fallbacks,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         settings: auto.settings,
-        networkUncertain: () => auto.networkUncertain,
+        pool: pool,
+        mainIdentity: auto.identityOf,
         note: main.note);
     fb.changes.listen((c) {
       // the journal names the first rule (else the first app) and counts the rest
@@ -340,7 +349,7 @@ class Daemon {
         query: (tag, name, t) => probeDns(probe, tag, name, timeoutMs: t),
         settings: auto.settings,
         auto: _dnsAuto,
-        networkUncertain: () => auto.networkUncertain,
+        pool: pool,
         note: main.note);
     dns.switches.listen((s) => _event('dns', 'switched', 'info', {'from': s.from, 'to': s.to, 'reason': s.reason}, own: s.reason == 'off'));
     dns.start();
@@ -355,6 +364,7 @@ class Daemon {
     _fallback = null;
     _dns?.stop();
     _dns = null;
+    pool.resetNetwork(); // no sing-box, no status to hold on to
   }
 
   /// sing-box stopped on its own. The system proxy is NOT touched: sing-box is started
@@ -657,6 +667,7 @@ class Daemon {
         'blocking': _blocking,
         'restarts': _restarts,
         'auto': await _autoState(),
+        'network': pool.toJson(),
         'dns': main.running ? _dns?.toJson() : null,
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
       };
@@ -1015,19 +1026,23 @@ class Daemon {
     res.bufferOutput = false;
     void line(Object o) => res.write('${jsonEncode(o)}\n');
     try {
+      var network = pool.status;
       if (nodes.isNotEmpty || pairs.isNotEmpty) {
-        await measureLatency(
+        final r = await measureLatency(
           binary: singBox,
           workDir: p.join(dataDir, 'run', 'ping-${_pingSeq++ % 8}'),
           nodes: nodes,
           pairs: pairs,
           url: (body['url'] as String?) ?? defaultTestUrl,
           checkers: planCheckers({'urlTest': body}),
+          pool: pool,
+          maxAge: Duration(milliseconds: (body['maxAgeMs'] as num?)?.toInt() ?? 0),
           // bufferOutput is off: every line leaves at once.
           onResult: (kind, key, ms) => line({'kind': kind, 'key': key, 'ms': ms}),
         );
+        network = r.network;
       }
-      line({'done': true});
+      line({'done': true, 'network': network.name});
     } catch (e) {
       line({'error': '$e'});
     }

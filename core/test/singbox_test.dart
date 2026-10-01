@@ -101,6 +101,7 @@ void main() {
       expect(await Probe(probe.port, 'wrong').delay('${routeTag(0)}/src::${node.id}', url, timeoutMs: 1500), -1);
       expect(await probe.delay('no-such-outbound', url, timeoutMs: 1500), -1);
 
+      final pool = ProbePool();
       final lat = await measureLatency(
         binary: _bin,
         workDir: p.join(tmp.path, 'ping'),
@@ -110,9 +111,37 @@ void main() {
         ],
         url: 'http://127.0.0.1:${target.port}/',
         timeoutMs: 1500,
+        pool: pool,
       );
       expect(lat.nodes['loop'], greaterThanOrEqualTo(0));
       expect(lat.nodes['dead'], -1);
+      expect(lat.network, NetStatus.up);
+      // the ping went into the pool under the servers' identities; a young answer is served,
+      // and when no server answers the direct path (loopback here) tells the network is up
+      final loopId = serverIdentity(node.outbound);
+      expect(pool.peek(loopId, url: 'http://127.0.0.1:${target.port}/')?.ms, lat.nodes['loop']);
+      final again = await measureLatency(
+        binary: _bin,
+        workDir: p.join(tmp.path, 'ping'),
+        nodes: [
+          {'key': 'loop', 'outbound': node.outbound},
+        ],
+        url: 'http://127.0.0.1:${target.port}/',
+        pool: pool,
+        maxAge: const Duration(minutes: 1),
+      );
+      expect(again.nodes['loop'], lat.nodes['loop'], reason: 'served from the pool');
+      final dead = await measureLatency(
+        binary: _bin,
+        workDir: p.join(tmp.path, 'ping'),
+        nodes: [
+          {'key': 'dead', 'outbound': {...node.outbound, 'server_port': await freePort()}},
+        ],
+        url: 'http://127.0.0.1:${target.port}/',
+        timeoutMs: 1500,
+        pool: pool,
+      );
+      expect([dead.nodes['dead'], dead.network], [-1, NetStatus.up], reason: 'the servers are dead, the network is not');
     } finally {
       await client.stop();
       await server.stop();

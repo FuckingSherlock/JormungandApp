@@ -291,6 +291,152 @@ void main() {
       expect(rules[3]['outbound'], 'direct');
     });
 
+    test('If unavailable → another target: selector [target, fallback target, main flow], both targets\' groups exist, a chain works as the fallback', () {
+      final targets = {
+        'src:a': {'kind': 'unit', 'main': _grp([_node, _node2], prefix: 'a')},
+        'src:b': {'kind': 'unit', 'main': _grp([_node2], prefix: 'b')},
+        'chain:c': {'kind': 'chain', 'entry': _grp([_node], prefix: 'in'), 'main': _grp([_node2], pick: 'priority', prefix: 'out')},
+      };
+      final info = RoutingInfo();
+      final w = <String>[];
+      final c = buildConfig(_plan({
+        'fallback': 'block',
+        'targets': targets,
+        'rules': [
+          {..._rule({'domain': _g({'domain_suffix': ['a.com']})}, target: 'src:a', fallback: 'src:b'), 'name': 'Video'},
+          _rule({'domain': _g({'domain_suffix': ['b.com']})}, target: 'src:a', fallback: 'chain:c', id: 'r2'),
+          _rule({'domain': _g({'domain_suffix': ['c.com']})}, target: 'src:a', fallback: 'src:b', id: 'r3'),
+        ],
+        'apps': [
+          {'id': 'com.x', 'kind': 'package', 'act': 'proxy', 'target': 'src:b', 'fallback': 'chain:c', 'split': true,
+            'udp': {'act': 'proxy', 'target': 'src:a', 'fallback': 'src:b'}},
+        ],
+      }), info: info, warnings: w);
+      expect(_out(c, 'src:a~src:b')!['outbounds'], ['src:a', 'src:b', 'proxy']);
+      expect(_out(c, 'src:a~src:b')!['default'], 'src:a');
+      expect(_out(c, 'src:a~chain:c')!['outbounds'], ['src:a', 'chain:c', 'proxy']);
+      expect(_out(c, 'src:b~chain:c')!['outbounds'], ['src:b', 'chain:c', 'proxy']);
+      for (final tag in ['src:a', 'src:b', 'chain:c', 'chain:c>entry']) {
+        expect(_out(c, tag), isNotNull, reason: 'the group $tag is in the config');
+      }
+      expect(_out(c, 'chain:c/out::0')!['detour'], 'chain:c>entry');
+      expect(_out(c, 'block'), isNull, reason: 'no Block fallback in use: no block outbound');
+      expect([for (final f in info.fallbacks) '${f.tag} ${f.target}>${f.fallbackTarget} to=${f.to} ${f.rules.join('/')}|${f.apps.join('/')}'], [
+        'src:b~chain:c src:b>chain:c to=chain:c |com.x',
+        'src:a~src:b src:a>src:b to=src:b Video/rule r3|com.x',
+        'src:a~chain:c src:a>chain:c to=chain:c rule r2|',
+      ]);
+      expect(info.fallbacks[1].fallbackSpec, same(targets['src:b']));
+      expect(w, isEmpty);
+    });
+
+    test('a fallback target equal to the target is the main flow; an empty one too; a global one that is a target is main', () {
+      final targets = {'src:a': {'kind': 'unit', 'main': _grp([_node], prefix: 'a')}};
+      final info = RoutingInfo();
+      final c = buildConfig(_plan({
+        'fallback': 'src:a',
+        'targets': targets,
+        'rules': [
+          _rule({'domain': _g({'domain_suffix': ['a.com']})}, target: 'src:a', fallback: 'src:a'),
+          _rule({'domain': _g({'domain_suffix': ['b.com']})}, target: 'src:a', fallback: '', id: 'r2'),
+          _rule({'domain': _g({'domain_suffix': ['c.com']})}, target: 'src:a', id: 'r3'),
+        ],
+      }), info: info);
+      expect(_out(c, 'src:a~proxy')!['outbounds'], ['src:a', 'proxy']);
+      expect(info.fallbacks.map((f) => f.tag), ['src:a~proxy'], reason: 'one selector, shared');
+      expect(info.fallbacks.single.fallbackTarget, isNull);
+    });
+
+    test('a fallback target that is gone / off: the default applies and a warning says so, with the target out now the fallback target is used straight', () {
+      final targets = {
+        'src:a': {'kind': 'unit', 'main': _grp([_node], prefix: 'a')},
+        'src:b': {'kind': 'unit', 'main': _grp([_node2], prefix: 'b')},
+        'src:off': null,
+      };
+      final info = RoutingInfo();
+      final w = <String>[];
+      final c = buildConfig(_plan({
+        'fallback': 'direct',
+        'targets': targets,
+        'rules': [
+          {..._rule({'domain': _g({'domain_suffix': ['a.com']})}, target: 'src:a', fallback: 'chain:deleted'), 'name': 'One'},
+          _rule({'domain': _g({'domain_suffix': ['b.com']})}, target: 'src:a', fallback: 'src:off', id: 'r2'),
+          // the target is out now, the fallback target answers: straight to it, with the main flow behind it
+          _rule({'domain': _g({'domain_suffix': ['c.com']})}, target: 'src:off', fallback: 'src:b', id: 'r3'),
+          // both out now: the default
+          _rule({'domain': _g({'domain_suffix': ['d.com']})}, target: 'src:off', fallback: 'chain:deleted', id: 'r4'),
+        ],
+      }), info: info, warnings: w);
+      expect(_rules(c).map((r) => r['outbound']), ['src:a~direct', 'src:a~direct', 'src:b~proxy', 'direct']);
+      expect(_out(c, 'src:a~direct')!['outbounds'], ['src:a', 'direct']);
+      expect(info.fallbacks.every((f) => f.fallbackTarget == null), isTrue);
+      expect(w, [
+        'One: "If unavailable" target chain:deleted is not available, the default applies',
+        'rule r2: "If unavailable" target src:off is not available, the default applies',
+        'rule r4: "If unavailable" target chain:deleted is not available, the default applies',
+      ]);
+    });
+
+    test('the main flow has "If unavailable" when an app asks for it explicitly: Default / Proxy with the main flow + block / direct / a target', () {
+      final targets = {
+        'src:b': {'kind': 'unit', 'main': _grp([_node2], prefix: 'b')},
+        'src:off': null,
+      };
+      final info = RoutingInfo();
+      final w = <String>[];
+      final plan = _plan({
+        'fallback': 'block', // the global one never reaches the main flow
+        'targets': targets,
+        'apps': [
+          {'id': 'a.exe', 'kind': 'process', 'name': 'A', 'act': 'default', 'fallback': 'block'},
+          {'id': 'b.exe', 'kind': 'process', 'act': 'default', 'fallback': 'direct'},
+          {'id': 'c.exe', 'kind': 'process', 'act': 'default', 'fallback': 'src:b'},
+          {'id': 'd.exe', 'kind': 'process', 'act': 'proxy', 'target': '', 'fallback': 'block'},
+          // asks for none: no rule (Default) / the main flow (Proxy)
+          {'id': 'e.exe', 'kind': 'process', 'act': 'default', 'fallback': 'default'},
+          {'id': 'f.exe', 'kind': 'process', 'act': 'default', 'fallback': 'main'},
+          {'id': 'g.exe', 'kind': 'process', 'act': 'proxy', 'target': '', 'fallback': 'default'},
+          // the fallback target is not available: no fallback, a warning; Default has no rule then
+          {'id': 'h.exe', 'kind': 'process', 'act': 'default', 'fallback': 'src:off'},
+          {'id': 'i.exe', 'kind': 'process', 'act': 'proxy', 'target': '', 'fallback': 'chain:gone'},
+          // TCP Default + a fallback, UDP Direct
+          {'id': 'j.exe', 'kind': 'process', 'act': 'default', 'fallback': 'block', 'split': true, 'udp': {'act': 'direct'}},
+        ],
+      });
+      final c = buildConfig(plan, info: info, warnings: w);
+      expect(_rules(c).map((r) => '${r['process_name']}${r['network'] ?? ''} ${r['outbound']}'), [
+        '[a.exe] proxy~block',
+        '[b.exe] proxy~direct',
+        '[c.exe] proxy~src:b',
+        '[d.exe] proxy~block',
+        '[g.exe] proxy',
+        '[i.exe] proxy',
+        '[j.exe][tcp] proxy~block',
+        '[j.exe][udp] direct',
+      ]);
+      expect(_out(c, 'proxy~block'), containsPair('outbounds', ['proxy', 'block']));
+      expect(_out(c, 'proxy~block'), containsPair('default', 'proxy'));
+      expect(_out(c, 'proxy~direct')!['outbounds'], ['proxy', 'direct']);
+      expect(_out(c, 'proxy~src:b')!['outbounds'], ['proxy', 'src:b'], reason: 'the main flow is the target: no third member');
+      expect(_out(c, 'src:b'), isNotNull);
+      expect([for (final f in info.fallbacks) '${f.tag} ${f.target}>${f.fallbackTarget} ${f.to} ${f.apps.join('/')}'], [
+        'proxy~block proxy>null block A/d.exe/j.exe',
+        'proxy~direct proxy>null direct b.exe',
+        'proxy~src:b proxy>src:b src:b c.exe',
+      ]);
+      expect(w, [
+        'h.exe: "If unavailable" target src:off is not available, the main flow has none',
+        'i.exe: "If unavailable" target chain:gone is not available, the main flow has none',
+      ]);
+      // the probe also tests 'direct' (to tell a dead main flow from a dead network), always
+      final probe = Probe(1081, 'x');
+      final users = (buildConfig(plan, probe: probe)['inbounds'] as List).cast<Map>().firstWhere((i) => i['tag'] == probeInboundTag)['users'] as List;
+      expect([for (final u in users) u['username']], contains('direct'));
+      final plain = buildConfig(_plan({'rules': [_rule({'domain': _g({'domain_suffix': ['a.com']})}, target: 'src:b')], 'targets': targets}), probe: probe);
+      expect(((plain['inbounds'] as List).cast<Map>().firstWhere((i) => i['tag'] == probeInboundTag)['users'] as List).map((u) => u['username']), contains('direct'),
+          reason: 'the probe pool\'s network check: always (pool.dart)');
+    });
+
     test('quick rules and everything else, in order after the own rules', () {
       final c = buildConfig(_plan({
         'rules': [_rule({'domain': _g({'domain_suffix': ['mine.com']})}, action: 'direct')],
@@ -574,6 +720,11 @@ void main() {
           {'id': 'com.discord', 'kind': 'package', 'act': 'proxy', 'target': 'src:a', 'split': true, 'udp': {'act': 'proxy', 'target': 'chain:c'}},
           {'id': 'chrome.exe', 'kind': 'process', 'act': 'direct'},
           {'id': r'C:\x\y.exe', 'kind': 'path', 'act': 'block'},
+          // a target as the fallback; the main flow with a fallback (block / direct / a target)
+          {'id': 'fb1.exe', 'kind': 'process', 'act': 'proxy', 'target': 'src:a', 'fallback': 'chain:c'},
+          {'id': 'fb2.exe', 'kind': 'process', 'act': 'default', 'fallback': 'block'},
+          {'id': 'fb3.exe', 'kind': 'process', 'act': 'default', 'fallback': 'direct'},
+          {'id': 'fb4.exe', 'kind': 'process', 'act': 'default', 'fallback': 'node:a::1'},
         ],
         'rules': [
           _rule({'domain': _g({'domain_suffix': ['a.com'], 'geosite': ['youtube'], 'rule_set': ['blocked']}), 'ip': _g({'ip_cidr': ['10.0.0.0/8'], 'geoip': ['ru']}, not: true, flag: true)},

@@ -335,7 +335,7 @@ function renderConnSettings() {
           <div class="chip" id="conn-copy-socks" onclick="copyProxyUrl('socks5')">Copy SOCKS5</div>
           <div class="chip" id="conn-copy-http" onclick="copyProxyUrl('http')">Copy HTTP</div>
         </div></div>
-      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<button class="help-btn" onclick="openHelp('proxyauth')" title="What is this?">?</button></div>
+      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Proxy password<button class="help-btn" onclick="openHelp('proxyauth')" title="What is this?">?</button></div>
         ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
       ${connCfg.proxyAuth ? `
       <div class="set-row set-sub" data-key="proxyUser"><div class="set-label auth-lbl">Login</div>

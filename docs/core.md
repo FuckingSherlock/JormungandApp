@@ -140,7 +140,64 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
 
 Замер (`_ping`) — тест-URL, не ответил — сразу все запасные проверки (`withCheckers`,
 probe.dart; `plan.auto.checkers`, иначе `urlTest.checkers`, нет поля — `defaultCheckers`):
-живой, если ответила хоть одна.
+живой, если ответила хоть одна. Идёт через пул замеров (следующий раздел): свежий ответ того же
+сервера (пинг UI, замер «If unavailable») засчитывается вместо нового теста — не старше
+`reuse` = min(`checkEvery`/3, 20 с); сервер, которого ещё не мерили в этом подключении, — не
+старше 2 мин (`startAge`, чтобы первый раунд начинался с пинга запуска).
+
+## Пул замеров и состояние сети (`pool.dart`)
+
+Все проверки серверов — Auto (`_ping`), «If unavailable» (`fallback.dart`), пинг каталога
+(`/api/ping`, пинг при запуске) — идут через один `ProbePool` (демон держит один на всё время
+работы; у модуля, запущенного отдельно / в тесте, свой приватный `ProbePool.solo()` — ничего не
+переиспользует, но склеивание и состояние работают). Так сервер не мерится тремя расписаниями.
+
+**Ключ** — что измерено, а не как sing-box это назвал: `serverIdentity(outbound)` — отпечаток
+(FNV-1a 64 бит от канонического JSON outbound без `tag` / `detour`, 16 hex), поэтому один и тот же
+узел — один ключ и как участник группы маршрута Auto (`route0/<key>`), и как лист группы цели
+правила, и как `t/<key>` в тестере. Выход цепочки — пара `pairIdentity(вход, выход)`
+(`<id входа>><id выхода>`, вход — тот сервер, что стоит сейчас); пара — свой ключ, отдельный от
+одиночного выхода. К ключу добавляются тест-URL и набор запасных проверок (без URL, по
+алфавиту): результат отвечает только на такой же тест. Прямой путь — `directIdentity`
+(`direct`). В ключ **не** входит тег sing-box, id источника и ключ UI — ключ ноды в UI
+(`src::<id>`) и тег группы в плане с этим не связаны.
+
+**Склеивание.** Запрос на ключ, который уже мерится, ждёт тот замер (один тест на любое число
+спрашивающих).
+
+**Свежесть задаёт вызывающий.** `maxAge` — насколько старый ответ годится (старше — меряется
+заново; без `maxAge` — всегда заново). Промах живёт отдельно: `missAge` (по умолчанию 0) — не
+выдаётся вообще, поэтому «вернулся ли сервер?» — всегда настоящий тест, и закешированный промах
+не скроет восстановление и не задержит возврат на сервер; потолок любого `missAge` — `missCap`
+3 с (пачка параллельных спрашивающих получит один результат, не больше). `maxAge` Auto —
+`reuse` / `startAge` (см. выше), «If unavailable» — `reuse`, пинг UI — 0 («Ping all» всегда
+меряет), пинг запуска — `maxAgeMs` в теле `/api/ping`. UI-пинг пишет результат в пул
+(`record`), поэтому Auto и «If unavailable» стартуют с него; в самом ядре пул живёт в памяти,
+сохраняемые данные пинга — по-прежнему в снимке UI (пул их питает, не заменяет: после
+перезапуска демона пул пуст).
+
+**Состояние сети** `ProbePool.status`: `up` | `down` | `unknown`, в `status.network` (`GET
+/api/status`): `{status, since (мс), lastAnswer (мс), offline, silent, doubt}`.
+- Любой ответивший замер любого модуля (`record` / `probe` с `ms >= 0`: прямой путь, сервер,
+  запасная цель, пинг UI) → `up` сразу и снимает все признаки ниже. Ответ локального резолвера
+  DNS в `answered` не идёт: он ничего не доказывает про интернет.
+- `down` — только по верному признаку: ОС без сети (`missing default interface`, `offline`), или
+  ни один маршрут Auto не ответил **и** прямой путь тоже молчит (`silent`; Auto мерит `direct`
+  через пул — probe inbound всегда содержит пользователя `direct`).
+- Сомнение — `unknown` (`doubt`): промах у текущего маршрута Auto, или ни один маршрут не
+  ответил, а прямой путь проверить нечем. Переключения ждут, замеры продолжаются.
+- Нет данных — `up` (как предполагали модули раньше); новое подключение / отключение
+  (`resetNetwork`) начинает с чистого листа.
+
+Кто что читает: Auto пишет признаки (`doubt`, `offline`, `silent`); «If unavailable» судит
+обычные цели только при `up`, цель Main flow — пока не `down` (мёртвый Main flow Auto видит как
+сомнение, а `fallback.dart` отличает его от мёртвой сети своими замерами `direct` и запасных
+целей: ответ любого из них делает статус `up`); `DnsFailover` — только при `up`. `/api/ping`:
+если не ответил ни один сервер, тестер мерит ещё и `direct`; ответил — `up` (серверы мертвы,
+сеть нет), молчит — `down` (статус пишется в пул, снимается любым ответом). Итог — поле
+`network` (`up` | `down` | `unknown`) последней строки `{done:true, network}`; UI может
+показать «нет сети» вместо «все мертвы» (UI позже). Тестер запускается лениво: если всё
+отдаётся из пула по `maxAgeMs`, sing-box не стартует.
 
 Упавшие запросы (`onClosed`): демон подписан на поток закрытых соединений API service
 (ниже); соединение через текущий маршрут без единого байта ответа → проверка сразу (одна на
@@ -294,6 +351,9 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 ```
 { apps:  [{ id, kind: 'package'|'process'|'path', name, act: 'default'|'proxy'|'direct'|'block', target,
             fallback, split, udp: { act, target, fallback } }],   // split: act… = TCP, udp = UDP
+            // fallback: 'default'|'main'|'block'|'direct'|<target id> (a key of `targets`); a rule's
+            // and an app's. On act 'default' / 'proxy' with no target an explicit block / direct /
+            // target id is the main flow's own "If unavailable" (selector `proxy~…`, rules.md §0)
   rules: [{ id, name, action, target, fallback, block, dns, groups, composite?, extra?,
             ipTunOnly? }],                          // ipTunOnly: его IP-условия не требуют resolve
   quick: { ads, region: 'RU'|…|null, services: { telegram: 'vpn'|'direct', … }, final },
@@ -349,15 +409,26 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
   цели (цепочка — выход через вход); молчит `failAfter` раундов подряд → `SelectOutbound`
   на запасной, тем же путём назад после `failAfter` ответов и паузы flap guard
   (`Watched`, общий с DNS). Fastest-группа при промахе сначала перетестируется
-  (`URLTest` + повтор), Priority не двигается. Не судит, пока `AutoService.networkUncertain`
-  (нет сети / у текущего маршрута промахи). Уход на запасной выход закрывает зависшие
+  (`URLTest` + повтор), Priority не двигается. Замеры — через пул (`pool.dart`, ключ — сервер
+  и тест; свежий ответ Auto или пинга UI берётся вместо нового теста). Не судит, пока статус
+  сети пула не `up` (нет сети / у текущего маршрута Auto промахи). Уход на запасной выход закрывает зависшие
   соединения через цель (`StallSweeper`, общий с Auto: байты стоят `stallAfter`). Выбор в
   начале раунда читается из `api.selected` (после рестарта `cache_file` мог оставить
   запасной). Группы целей по-прежнему не ведёт AutoService.
+  Запасной выход — цель каталога: selector `<цель>~<запасная цель>` = `[цель, запасная цель,
+  proxy]` (`TargetFallback.fallbackTarget` / `fallbackSpec`), запасная цель наблюдается тем
+  же кодом; оба упали → `proxy` (`to: main`), решения принимаются за раунд целиком (`_decide`
+  выставляет флаги всех целей, потом `_flip` двигает selector'ы один раз). Основной поток
+  как цель: `proxy~<запасной>` = `[proxy, запасной]`, цель в сервисе — `_Target.mainFlow`: тест
+  через лист `proxy` → маршрут → сервер (ключ пула листа даёт `AutoService.identityOf`);
+  промах считается, только если ответил `direct` (он всегда в probe inbound) или запасная цель;
+  судится при `up` и `unknown`, но не при `down` (статус пула: ОС без сети или прямой путь
+  тоже молчит). Подробности — rules.md §0.
 - **Переключение DNS** (`dns_failover.dart`, `DnsFailover`). При двух и более отмеченных
   серверах у каждого `dns-<id>` DNS-правило `clash_mode: "dns-<id>"` (после остальных
   DNS-правил, `routing.dart` `_dnsModes`); `dns.final` — первый отмеченный, стартовый режим
-  `Rule` ему же и равен. Проверка сервера — `probeDns` (`probe.dart`): SOCKS-запрос в probe
+  `Rule` ему же и равен. Не судит, пока статус сети пула не `up`; ответы DNS статус не питают.
+  Проверка сервера — `probeDns` (`probe.dart`): SOCKS-запрос в probe
   inbound с пользователем `dns-check/<тег>`; для него в конфиге правило `resolve` с явным
   `server` (`disable_cache`, `ipv4_only`) и следом `route` в `direct` с `override_address`
   на сам probe inbound, поэтому успех SOCKS-ответа = имя разрешилось именно этим сервером
@@ -388,7 +459,7 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
 | `POST /api/auto` | `{auto}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения → status |
-| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, sourcesRev}` — `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
+| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, network, dns, sourcesRev}` — `network: {status: 'up'\|'down'\|'unknown', since, lastAnswer, offline, silent, doubt}` — общее состояние сети пула замеров (см. «Пул замеров»); `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
 | `GET /api/events?since=N` | `{events:[…], next, first}` — журнал событий (ниже): события с `id ≥ N`, старые первыми; без `since` — последние 200. `next` — id следующего события, `first` — id самого старого из хранимых (пропуск между своим `next` и `first` = журнал обрезан или очищен). `POST /api/events` `{cat, type, level, own?, data?}` → `{id}` — событие, которое первым узнал UI (400 с причиной, если форма не та: неизвестные `cat` / `level`, `type` не `[A-Za-z][A-Za-z0-9_]{0,47}`, `own` не bool, `data` не объект или больше 4096 знаков JSON); к такому событию `log` не привязывается. `DELETE /api/events` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
@@ -398,7 +469,7 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 | `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, ruleName, ruleKind, ruleId?, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
 | `POST /api/speedtest` | `{node:{key, outbound}}` или `{pair:{key, entry, exit}}`, `configUrl?` → поток NDJSON по ходу замера: `{phase (0 задержка, 1 загрузка, 2 отдача, 3 готово), down, up (бит/с), downRpm, upRpm, latency (мс), elapsed, final}`, последняя строка `final: true` (при сбое с `error`). Отдельный sing-box с одним сервером, network quality test sing-box (серверы Apple mensura, если не задан `configUrl`); закрыли страницу/лист — замер останавливается |
-| `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}]}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true}` или `{error}`. Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
+| `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}], url?, maxAgeMs?, …checkers}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true, network:"up"\|"down"\|"unknown"}` или `{error}`. Замеры идут через пул (см. «Пул замеров»): результат пишется в него, `maxAgeMs` > 0 отдаёт ответ пула не старше этого вместо замера (пинг запуска; по умолчанию 0 — меряет всегда); `network` — состояние сети (`down`: ни один сервер не ответил и прямой путь молчит — UI может сказать «нет сети»). Замеры идут в порядке списка (32 параллельно); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
 
 `status.auto` (пока подключено; `null` — нет): `{now: id маршрута, index, server, entryServer
 (цепочка), routes: [{id, ms, fails, oks, at, strikes, holdUntil}], members: [{key, ms, fails, oks,
@@ -524,7 +595,7 @@ Raw). Событие:
 | `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Rule) | `{host, port?, entry, server, dest, via}` |
 | `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
-| `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'}` — `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |
+| `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'\|<id of the fallback target>}` — `target`: the cause (`proxy` = the main flow); `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |
 | `rules/targetBack` info | цель снова отвечает, трафик вернулся | `{rule?, app?, more?, target}` |
 | `dns/switched` info | DNS-сервер в работе сменился (Switch automatically); `own: true` при `reason: 'off'` | `{from, to, reason: 'failover'\|'back'\|'off'}` — id серверов из UI |
 | `rules/ruleSetFailed` warn | скачивание списка не удалось (не чаще, чем раз в `retryAfter` = 5 мин на список) | `{tag, url, error}` — `url` последний из пробованных |

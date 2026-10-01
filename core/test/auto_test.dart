@@ -126,7 +126,7 @@ LiveConnection _conn(String id, List<String> chain, {int up = 0, int down = 0}) 
 
 Map<String, dynamic> _node(String key) => {
       'key': key,
-      'outbound': {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'},
+      'outbound': {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': 1, 'method': 'aes-128-gcm', 'password': key}, // the key in it: servers of one test are not one server (pool.dart identity)
     };
 
 Map<String, dynamic> _grp(List<String> keys, {String pick = 'fastest', String? chosen, bool pinned = false}) =>

@@ -116,8 +116,9 @@ const destHost = d => d.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
 function openBlockedRule(b) {
   const host = destHost(b.dest);
   openRuleForm();
-  ruleDraft = newRule({ name: host + ' via ' + entryLabel(b.via), action: 'proxy', target: b.via,
-    groups: { domain: { not: false, v: { domain_suffix: [host] } } } });
+  // b.via is an entry id (the core's), a rule target is 'profile:' / 'chain:' / 'src:' + id
+  ruleDraft = newRule({ name: host + ' via ' + entryLabel(b.via), action: 'proxy', target: entryTarget(b.via),
+    groups: hostGroup(host) });
   renderRuleForm();
 }
 

@@ -126,7 +126,7 @@ function rfGroupHtml(g, d) {
     return `<div class="rf-field"><div class="rf-fhead"><div class="rf-flabel">${label}</div>${rfXBtn(g.key, f)}</div>
       <div class="chip-input" onclick="if (event.target === this) this.querySelector('input').focus()">${vals.map((v, i) => {
         const ok = validVal(kind, v);
-        return `<span class="vchip ${ok ? '' : 'bad'}" ${ok ? '' : `title="${esc(VAL_HINT[kind])}"`}>${esc(v)}<b onclick="rfRemoveVal('${g.key}','${f}',${i})">×</b></span>`;
+        return `<span class="vchip ${ok ? '' : 'bad'}" ${ok ? '' : `title="${esc(VAL_HINT[kind])}"`}><span class="vchip-t" onclick="rfEditVal(this,'${g.key}','${f}',${i})">${esc(v)}</span><b onclick="rfRemoveVal('${g.key}','${f}',${i})">×</b></span>`;
       }).join('')}<input data-g="${g.key}" data-f="${f}" placeholder="${vals.length ? '' : esc(ph)}" onkeydown="rfKey(event,this)" onpaste="rfPaste(event,this)" onblur="rfCommit(this)"></div>
       ${vals.some(v => !validVal(kind, v)) ? `<div class="set-hint warn">Red: ${esc(VAL_HINT[kind])}</div>` : ''}</div>`;
   }).join('');
@@ -160,6 +160,42 @@ function rfRemoveField(g, f) {
 }
 function rfRemoveGroup(key) { delete ruleDraft.groups[key]; renderRuleForm(); }
 function rfRemoveVal(g, f, i) { ruleDraft.groups[g].v[f].splice(i, 1); renderRuleForm(); }
+/* A chip's text taps into an inline input (caret at the end). Enter / blur commits: a changed value
+   replaces the chip (a list with commas / newlines replaces it with those values), an empty one removes
+   it, an invalid one (the field's own validator, as the red chips) stays in edit, red, with its hint;
+   Esc cancels. The edit lives in the DOM only: a re-render ends it. */
+function rfEditVal(el, g, f, i) {
+  const chip = el.closest('.vchip'), old = ruleDraft.groups[g].v[f][i], kind = GROUP[g].fields.find(x => x[0] === f)[3];
+  if (!chip || chip.querySelector('input')) return;
+  const input = document.createElement('input');
+  input.value = old; input.className = 'vchip-edit'; input.spellcheck = false;
+  const fit = () => { input.style.width = Math.min(Math.max(input.value.length, 3) + 1, 40) + 'ch'; };
+  const hint = bad => {
+    const field = chip.closest('.rf-field');
+    let h = field.querySelector('.rf-edit-hint');
+    input.classList.toggle('bad', bad);
+    if (bad && !h) { h = document.createElement('div'); h.className = 'set-hint warn rf-edit-hint'; field.appendChild(h); }
+    if (h) { if (bad) h.textContent = 'Red: ' + VAL_HINT[kind]; else h.remove(); }
+  };
+  const commit = () => {
+    if (input.dataset.done) return;
+    const parts = input.value.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+    if (parts.some(v => !validVal(kind, v))) { hint(true); return; }
+    input.dataset.done = '1';
+    const list = ruleDraft.groups[g].v[f];
+    list.splice(i, 1, ...parts.filter(v => !list.includes(v) || v === old));
+    ruleDraft.groups[g].v[f] = list.filter((v, k) => list.indexOf(v) === k);
+    renderRuleForm();
+  };
+  input.addEventListener('input', () => { fit(); hint(false); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); input.dataset.done = '1'; renderRuleForm(); }
+  });
+  input.addEventListener('blur', commit);
+  el.replaceWith(input);
+  fit(); input.focus(); input.setSelectionRange(old.length, old.length);
+}
 function rfToggleChoice(g, f, o) {
   const list = ruleDraft.groups[g].v[f] = ruleDraft.groups[g].v[f] || [];
   list.includes(o) ? list.splice(list.indexOf(o), 1) : list.push(o);

@@ -20,6 +20,7 @@ export 'src/parse/clash.dart';
 export 'src/parse/links.dart';
 export 'src/parse/subscription.dart';
 export 'src/plan.dart';
+export 'src/pool.dart';
 export 'src/probe.dart';
 export 'src/routing.dart';
 export 'src/rulenames.dart';

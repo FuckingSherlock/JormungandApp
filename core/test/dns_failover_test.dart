@@ -5,7 +5,8 @@ import 'package:jormungand_core/jormungand_core.dart';
 import 'package:test/test.dart';
 
 class _Rig {
-  _Rig(List<String> ids, {AutoSettings? settings, bool auto = true, this.uncertain = false, int Function()? clock, this.refuseMode = false}) {
+  _Rig(List<String> ids, {AutoSettings? settings, bool auto = true, bool uncertain = false, int Function()? clock, this.refuseMode = false}) {
+    this.uncertain = uncertain;
     alive = {for (final id in ids) 'dns-$id': 20};
     svc = DnsFailover(
       [for (final id in ids) (id: id, tag: 'dns-$id')],
@@ -20,7 +21,7 @@ class _Rig {
       },
       settings: settings ?? const AutoSettings(failAfter: 2, flapGuard: false),
       auto: auto,
-      networkUncertain: () => uncertain,
+      pool: pool,
       clock: clock,
     );
     svc.switches.listen(switches.add);
@@ -31,7 +32,9 @@ class _Rig {
   final modes = <String>[];
   final asked = <String>[];
   final switches = <DnsSwitch>[];
-  bool uncertain, refuseMode;
+  bool refuseMode;
+  final pool = ProbePool.solo();
+  set uncertain(bool v) => pool.doubt(v); // Auto doubting the network: the status is `unknown`
 
   Future<List<String>> log() async {
     await Future<void>.delayed(Duration.zero);

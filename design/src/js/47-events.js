@@ -84,6 +84,7 @@ const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 const evDns = id => (dnsServers[id] && dnsServers[id].name) || String(id);
 // "Rule Streaming and 2 more"; an app when no rule is involved: "App Telegram"
 const evRules = d => (d.rule ? `Rule ${d.rule}` : `App ${d.app}`) + (d.more ? ` and ${evPlural(d.more, 'more', 'more')}` : '');
+const evTarget = t => t === 'proxy' ? 'Main flow' : targetName(t);
 const EV_FALLBACK = { block: 'blocked while it is down', direct: 'goes direct', main: 'goes through the main flow' };
 const EV_TEXT = {
   'conn/connected': d => ['Connected' + (d.entry ? ': ' + evEntry(d.entry) : ''),
@@ -108,8 +109,9 @@ const EV_TEXT = {
   'sub/dead': d => [`${evSource(d.source, d.name)}: its servers do not respond`, "Contact the subscription provider's support"],
   'rules/ruleSetFailed': d => [`Rule set ${d.tag} not downloaded`, [d.error, 'the last copy is used'].filter(Boolean).join(' — ')],
   'rules/ruleSetUpdated': d => [`Rule set ${d.tag} updated`, ''],
-  'rules/fallback': d => [`${targetName(d.target)} does not answer`, `${evRules(d)} ${EV_FALLBACK[d.to] || d.to}`],
-  'rules/targetBack': d => [`${targetName(d.target)} answers again`, `${evRules(d)} back through it`],
+  // target: 'proxy' = the main flow; to: block / direct / main, or a target id (the fallback's own target)
+  'rules/fallback': d => [`${evTarget(d.target)} does not answer`, `${evRules(d)} ${EV_FALLBACK[d.to] || (d.to && d.to.includes(':') ? 'goes through ' + targetName(d.to) : d.to)}`],
+  'rules/targetBack': d => [`${evTarget(d.target)} answers again`, `${evRules(d)} back through it`],
   'dns/switched': d => [`DNS: ${evDns(d.from)} → ${evDns(d.to)}`,
     d.reason === 'failover' ? `${evDns(d.from)} does not answer` : d.reason === 'back' ? `${evDns(d.to)} answers again — returned to it` : 'Switch automatically is off: the first server is back'],
   'core/crashed': d => ['sing-box stopped', (d.code != null ? 'Exit code ' + d.code + ' — ' : '') + 'starting it again'],

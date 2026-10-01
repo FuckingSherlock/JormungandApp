@@ -702,11 +702,12 @@ async function runChecks() {
     const a = await box();
     const out = { centred: Math.abs((a.t + a.b) / 2 - a.h / 2) <= 2 };
     out.noTabs = await p.evaluate(() => !document.getElementById('aa-tabs') && document.querySelectorAll('#aa-body .aa-route .seg3 button').length === 8);
-    out.inertDefault = await p.evaluate(() => document.querySelectorAll('#aa-body .aa-inert').length === 2 && /—/.test(document.querySelector('#aa-body .aa-inert').textContent));
+    out.inertDefault = await p.evaluate(() => document.querySelectorAll('#aa-body .aa-inert').length === 1 && !!document.querySelector('#aa-body .aa-fb-via.aa-inert')   // Default: only the Fallback Via is dimmed
+      && !!document.querySelector('#aa-body .aa-fixed svg') && /Main flow/.test(document.querySelector('#aa-body .aa-fixed').textContent) && !document.querySelector('#aa-body .aa-fb.aa-inert'));
     await p.evaluate(() => { appDraft.act = 'direct'; renderAppAct(); });
-    out.inertDirect = await p.evaluate(() => { document.querySelector('#aa-body .aa-inert').click(); return document.querySelectorAll('#aa-body .aa-inert').length === 2 && !document.getElementById('sh-target').classList.contains('open'); });
+    out.inertDirect = await p.evaluate(() => { document.querySelector('#aa-body .aa-inert').click(); return document.querySelectorAll('#aa-body .aa-inert').length === 3 && !!document.querySelector('#aa-body .aa-fb.aa-inert') && !document.getElementById('sh-target').classList.contains('open'); });
     await p.evaluate(() => { appDraft.act = 'proxy'; appDraft.target = 'src:src1'; renderAppAct(); });
-    out.proxyLive = await p.evaluate(() => !document.querySelector('#aa-body .aa-inert') && document.querySelectorAll('#aa-body .tgt-row').length === 1 && !document.querySelector('#aa-body .aa-fb-via'));
+    out.proxyLive = await p.evaluate(() => document.querySelectorAll('#aa-body .aa-inert').length === 1 && !!document.querySelector('#aa-body .aa-fb-via.aa-inert') && document.querySelectorAll('#aa-body .tgt-row').length === 2);
     await p.evaluate(() => document.getElementById('aa-split').click());
     out.tabs = await p.evaluate(() => !!document.getElementById('aa-tabs') && document.querySelector('#aa-tabs .nodes-tab.active').dataset.tab === 'tcp');
     const bb = await p.evaluate(() => document.getElementById('aa-body').getBoundingClientRect());
@@ -1252,7 +1253,7 @@ async function runChecks() {
     expect(await page.locator('.live-conn-detail .chip:has-text("Rule for this app")').count() === 0, 'no app, no app rule');
     await page.evaluate(() => { connOpen = '224.0.0.251/udp'; renderLiveConns(); });
     await page.click('.live-conn-detail .chip:has-text("Rule for this address")'); await page.waitForTimeout(300);
-    expect(/ip_cidr":\["224.0.0.251"\]/.test(await page.evaluate(() => JSON.stringify(ruleDraft.groups))), 'ip prefill');
+    expect(/ip_cidr":\["224.0.0.251\/32"\]/.test(await page.evaluate(() => JSON.stringify(ruleDraft.groups))), 'ip prefill');
     await page.evaluate(() => { ruleDraft = newRule({}); renderRuleForm(); closeSheet('ruleform'); mockClosed.clear(); closeSheet('connections'); });
   });
 
@@ -2446,6 +2447,44 @@ async function runChecks() {
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
   });
 
+  await check('rule form: a chip edits in place (Enter / blur commit, invalid stays red, Esc cancels, empty removes, JSON follows); + Condition keeps all four dashed edges at 100% and 120%', async () => {
+    await page.evaluate(() => { openRules(); openRuleForm(); ruleDraft.groups = { domain: { not: false, v: { domain_suffix: ['a.org', 'b.org', 'c.org'] } } }; renderRuleForm(); });
+    const vals = () => page.evaluate(() => ruleDraft.groups.domain && ruleDraft.groups.domain.v.domain_suffix || []);
+    const edit = async i => { await page.click(`#rf-body .vchip:nth-child(${i + 1}) .vchip-t`); await page.waitForTimeout(50); };
+    // tap -> input with the value, focused, caret at the end
+    await edit(1);
+    const st = await page.evaluate(() => { const i = document.activeElement; return { on: i && i.classList.contains('vchip-edit'), v: i && i.value, end: i && i.selectionStart === i.value.length && i.selectionEnd === i.value.length }; });
+    expect(st.on && st.v === 'b.org' && st.end, 'edit input: ' + JSON.stringify(st));
+    await page.keyboard.press('Control+A'); await page.keyboard.type('bad value'); await page.keyboard.press('Enter');
+    expect(await page.evaluate(() => { const i = document.querySelector('#rf-body .vchip-edit'); return !!i && i.classList.contains('bad') && !!document.querySelector('#rf-body .rf-edit-hint'); }) && (await vals()).join() === 'a.org,b.org,c.org', 'invalid stays in edit, red, draft untouched');
+    await page.keyboard.press('Control+A'); await page.keyboard.type('b2.org'); await page.keyboard.press('Enter');
+    expect((await vals()).join() === 'a.org,b2.org,c.org' && !await page.locator('#rf-body .vchip-edit').count(), 'Enter commits: ' + (await vals()).join());
+    await edit(0); await page.keyboard.type('x'); await page.keyboard.press('Escape');
+    expect((await vals()).join() === 'a.org,b2.org,c.org' && !await page.locator('#rf-body .vchip-edit').count(), 'Esc cancels');
+    await edit(2); await page.keyboard.press('Control+A'); await page.keyboard.type('c2.org'); await page.click('#rf-body .rf-flabel');   // blur commits
+    expect((await vals()).join() === 'a.org,b2.org,c2.org', 'blur commits: ' + (await vals()).join());
+    // JSON tab and back keep the edit
+    const js = await page.evaluate(() => { setRfTab('json'); const j = JSON.parse(document.getElementById('rf-json').value); setRfTab('form'); return j.domain_suffix; });
+    expect(js.join() === 'a.org,b2.org,c2.org' && (await vals()).join() === 'a.org,b2.org,c2.org', 'json round-trip: ' + js);
+    await edit(0); await page.keyboard.press('Control+A'); await page.keyboard.press('Backspace'); await page.keyboard.press('Enter');
+    expect((await vals()).join() === 'b2.org,c2.org', 'empty removes: ' + (await vals()).join());
+    // the × still removes
+    await page.click('#rf-body .vchip:nth-child(1) b'); expect((await vals()).join() === 'c2.org', '× removes');
+    // + Condition: a dashed 1px border on every edge, its top edge inside the scroll box and clear of the card above
+    for (const scale of [1, 1.2]) {
+      const r = await page.evaluate(scale => {
+        applyScale(scale); renderRuleForm();
+        const b = document.querySelector('#rf-body .rf-add-btn'), cs = getComputedStyle(b), box = b.getBoundingClientRect(), sc = document.getElementById('rf-body').getBoundingClientRect();
+        b.scrollIntoView({ block: 'nearest' });
+        const prev = b.previousElementSibling.getBoundingClientRect(), after = b.getBoundingClientRect();
+        const top = document.elementFromPoint(after.left + after.width / 2, after.top + .5);
+        return { styles: ['Top', 'Right', 'Bottom', 'Left'].map(s => cs['border' + s + 'Style'] + (parseFloat(cs['border' + s + 'Width']) > .5 ? '' : ' thin')).join(), clear: prev.bottom <= after.top + .01, inside: after.top >= sc.top - .01 && after.bottom <= sc.bottom + .01, topHit: top === b || b.contains(top) };
+      }, scale);
+      expect(r.styles === Array(4).fill('dashed').join() && r.clear && r.inside && r.topHit, 'dashed + Condition at ' + scale + ': ' + JSON.stringify(r));
+    }
+    await page.evaluate(() => { applyScale(1); closeSheet('ruleform'); });
+  });
+
   await check('rule form: + Condition offers every field; a field × (the last takes the card); no links inside cards', async () => {
     const r = await page.evaluate(() => {
       const out = {};
@@ -2556,8 +2595,8 @@ async function runChecks() {
       closeSheet('rsform'); closeSheet('rulesets');
       openApps(); openAppAct('com.whatsapp');
       appDraft.act = 'proxy'; appDraft.split = true; appDraft.udp.act = 'proxy'; appDraft.udp.target = 'profile:work'; renderAppAct();
-      out.twoTargets = document.querySelectorAll('#aa-body .tgt-row').length === 1;   // Via of the TCP tab
-      setAppTab('udp'); out.udpTab = document.querySelectorAll('#aa-body .tgt-row').length === 1 && !!document.querySelector('#aa-card .aa-half[data-half="udp"]');
+      out.twoTargets = document.querySelectorAll('#aa-body .tgt-row').length === 2;   // Via and Fallback Via of the TCP tab
+      setAppTab('udp'); out.udpTab = document.querySelectorAll('#aa-body .tgt-row').length === 2 && !!document.querySelector('#aa-card .aa-half[data-half="udp"]');
       saveAppAct();
       out.saved = appRules['com.whatsapp'].split && /UDP/.test(document.querySelector('.app-row[data-pkg="com.whatsapp"] .app-state').textContent);
       openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.udp.act = 'default'; saveAppAct();
@@ -2566,6 +2605,26 @@ async function runChecks() {
       return out;
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
+  });
+
+  await check('per-app dialog: height stable across Route / Fallback, no segment clipped (320 at 120%, 280, wide)', async () => {
+    for (const [width, scale] of [[320, true], [280, true], [280, false], [420, false]]) {
+      const p = await openPage(browser, { width });
+      await p.evaluate(s => { if (s) applyScale(UI_SCALE_MAX); openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.target = 'src:src1'; }, scale);
+      await p.waitForTimeout(400);
+      const r = await p.evaluate(() => {
+        const hs = new Set(), clipped = [];
+        for (const act of ['default', 'proxy', 'direct', 'block']) for (const fb of ['default', 'main', 'direct', 'block']) {
+          appDraft.act = act; appDraft.fallback = fb; renderAppAct();
+          hs.add(Math.round(document.getElementById('sh-appact').getBoundingClientRect().height));
+          const card = document.querySelector('#aa-card .aa-group').getBoundingClientRect();
+          document.querySelectorAll('#aa-card .seg3 button').forEach(b => { const r = b.getBoundingClientRect(); if (r.right > card.right + 1 || r.left < card.left - 1 || b.scrollWidth > b.clientWidth + 1) clipped.push(act + '/' + fb + ':' + b.textContent); });
+        }
+        return { heights: [...hs], clipped };
+      });
+      expect(r.heights.length === 1 && r.clipped.length === 0, `${width}px scale=${scale}: ${JSON.stringify(r)}`);
+      await p.close();
+    }
   });
 
   await check('per-app routing: action order, If unavailable, split on any action, old shape migrates', async () => {
@@ -2580,13 +2639,30 @@ async function runChecks() {
       out.toggleFirst = first.classList.contains('aa-split') && !!document.getElementById('aa-split') && !!first.querySelector('.help-btn') && !first.querySelector('.set-hint');
       // If unavailable: only for a proxy half with a target, saved with the app
       appDraft.act = 'direct'; renderAppAct();
-      out.noFallbackMain = !!document.querySelector("#aa-body .aa-fb.aa-inert") && [...document.querySelectorAll("#aa-fallback-all button")].every(b => b.disabled) && !document.querySelector("#aa-body .aa-fb-via");
+      appDraft.act = 'default'; renderAppAct();
+      out.fallbackOnDefault =!document.querySelector("#aa-body .aa-fb.aa-inert") && [...document.querySelectorAll("#aa-fallback-all button")].every(b => !b.disabled) && !!document.querySelector("#aa-body .aa-fb-via.aa-inert");
+      appDraft.fallback = 'main'; renderAppAct();
+      out.defaultFbVia = !document.querySelector("#aa-body .aa-fb-via.aa-inert"); appDraft.fallback = 'default';
+      appDraft.act = 'direct'; renderAppAct();
+      out.noFallbackDirect = !!document.querySelector("#aa-body .aa-fb.aa-inert") && [...document.querySelectorAll("#aa-fallback-all button")].every(b => b.disabled);
+      appDraft.act = 'block'; renderAppAct();
+      out.noFallbackBlock = !!document.querySelector("#aa-body .aa-fb.aa-inert") && [...document.querySelectorAll("#aa-fallback-all button")].every(b => b.disabled);
+      out.fbLabel = document.querySelector("#aa-body .aa-fb .set-label").textContent === 'Fallback';
       appDraft.act = 'proxy'; appDraft.target = 'src:src1'; renderAppAct();
-      out.fallbackRow = !!document.querySelector("#aa-fallback-all") && [...document.querySelectorAll("#aa-fallback-all button")].map(b => b.textContent).join() === "Default,Proxy,Direct,Block" && !document.querySelector("#aa-body .aa-fb-via");
-      document.querySelectorAll("#aa-fallback-all button")[1].click(); out.fbVia = document.querySelectorAll("#aa-body .aa-fb-via").length === 1; document.querySelectorAll("#aa-fallback-all button")[3].click();
-      out.fallbackSet = appDraft.fallback === "block" && !document.querySelector("#aa-body .aa-fb-via");
+      out.fallbackRow = !!document.querySelector("#aa-fallback-all") && [...document.querySelectorAll("#aa-fallback-all button")].map(b => b.textContent).join() === "Default,Proxy,Direct,Block" && document.querySelectorAll("#aa-body .aa-fb-via").length === 1 && document.querySelector("#aa-body .aa-fb-via").classList.contains('aa-inert');
+      document.querySelectorAll("#aa-fallback-all button")[1].click(); out.fbVia = document.querySelectorAll("#aa-body .aa-fb-via").length === 1 && !document.querySelector("#aa-body .aa-fb-via").classList.contains('aa-inert') && /Main flow/.test(document.querySelector("#aa-body .aa-fb-via").textContent);
+      // the Route's Via can't be picked as the fallback target
+      document.querySelector("#aa-body .aa-fb-via").click(); pickTarget('src:src1'); out.excluded = tpCurrent === ''; closeSheet('target');
+      document.querySelectorAll("#aa-fallback-all button")[3].click();
+      out.fallbackSet = appDraft.fallback === "block" && document.querySelectorAll("#aa-body .aa-fb-via").length === 1 && document.querySelector("#aa-body .aa-fb-via").classList.contains('aa-inert');
       saveAppAct();
       out.fallbackSaved = appRules['com.whatsapp'].fallback === 'block' && routingPlan().apps.find(a => a.id === 'com.whatsapp').fallback === 'block';
+      // Default + a Fallback is an own rule (kept, configured); Default + Default is not
+      openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.fallback = 'block'; saveAppAct();
+      out.defFbKept = !!appRules['com.whatsapp'] && appRules['com.whatsapp'].fallback === 'block';
+      openAppAct('com.whatsapp'); appDraft.fallback = 'default'; saveAppAct();
+      out.defFbDropped = !appRules['com.whatsapp'];
+      out.evFallback = EV_TEXT['rules/fallback']({ target: 'proxy', app: 'WhatsApp', to: 'src:src1' }).join(' | ') === 'Main flow does not answer | App WhatsApp goes through ' + targetName('src:src1');
       // Split on Block: TCP Default + UDP Block = one udp reject rule in the plan, nothing for TCP
       openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.split = true; appDraft.udp.act = 'block'; renderAppAct();
       out.twoBlocks = document.querySelectorAll('#aa-body .aa-half').length === 1 && [...document.querySelectorAll('#aa-tabs .nodes-tab')].map(e => e.textContent).join() === 'TCP,UDP';
@@ -2605,7 +2681,7 @@ async function runChecks() {
       out.named = 'src:src1' in routingPlan().targets && w2.name === 'WhatsApp';
       out.impact = targetImpact(t => t === 'src:src1').some(l => l[0] === 'WhatsApp' && /UDP/.test(l[1]) && /direct/.test(l[2]));
       // both halves Default: no own route
-      openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.udp.act = 'default'; saveAppAct();
+      openAppAct('com.whatsapp'); appDraft.act = 'default'; appDraft.udp.act = 'default'; appDraft.fallback = appDraft.udp.fallback = 'default'; saveAppAct();
       out.none = !appRules['com.whatsapp'] && !routingPlan().apps.some(a => a.id === 'com.whatsapp');
       // switching Split off drops the UDP half
       openAppAct('org.telegram.messenger'); appDraft.split = true; appDraft.udp.act = 'block'; appDraft.split = false; saveAppAct();
@@ -3022,8 +3098,13 @@ async function runChecks() {
       await add('site', 'blocked', 'warn', { host: 'chat.example.com', dest: 'chat.example.com:443', entry: a, via: b });
       out.toast = toasts.length === 1 && toasts[0].m.includes('chat.example.com') && toasts[0].act && toasts[0].act.label === 'Rule' && typeof toasts[0].tap === 'function';
       toasts[0].act.fn();
-      out.rule = document.getElementById('sh-ruleform').classList.contains('open') && ruleDraft.target === b && ruleDraft.action === 'proxy'
-        && JSON.stringify(ruleDraft.groups.domain.v.domain_suffix) === '["chat.example.com"]';
+      // the core's `via` is a bare entry id: the rule's target is the prefixed one, resolves to a live entry (never "deleted …"), the host is an exact Domain
+      out.rule = document.getElementById('sh-ruleform').classList.contains('open') && ruleDraft.action === 'proxy'
+        && ruleDraft.target === entryTarget(b) && /^(profile|chain|src):/.test(ruleDraft.target)
+        && !targetInfo(ruleDraft.target).gone && targetName(ruleDraft.target) === entryLabel(b)
+        && JSON.stringify(ruleDraft.groups) === '{"domain":{"not":false,"v":{"domain":["chat.example.com"]}}}';
+      out.targetRow = !/deleted/.test(document.getElementById('sh-ruleform').textContent);
+      out.hostGroup = JSON.stringify([hostGroup('1.2.3.4').ip.v.ip_cidr, hostGroup('2001:db8::1').ip.v.ip_cidr, hostGroup('a.b.c').domain.v.domain]) === '[["1.2.3.4/32"],["2001:db8::1/128"],["a.b.c"]]';
       closeSheet('ruleform');
       notifCfg.blocked = false; toasts.length = 0;
       await add('site', 'blocked', 'warn', { host: 'x.test', dest: 'x.test:443', entry: a, via: b });

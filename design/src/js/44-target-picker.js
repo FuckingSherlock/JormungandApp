@@ -11,11 +11,13 @@
    stay pickable, marked unavailable (the rule then follows its "If unavailable"). */
 
 let tpCurrent = '', tpOrig = '', tpApply = null;   // tpCurrent = the selection so far, tpOrig = what the picker opened with
+let tpExclude = '';   // a target that can't be picked here (the fallback must differ from the route's Via)
 const tpOpen = new Set();   // unfolded cards, by target id ('src:<id>', 'profile:<id>')
 
-function openTargetPicker(t, apply) {
+function openTargetPicker(t, apply, exclude) {
   tpCurrent = tpOrig = t || '';
   tpApply = apply;
+  tpExclude = exclude || '';
   tpOpen.clear();
   if (tpCurrent.startsWith('node:')) tpOpen.add('src:' + tpCurrent.slice(5).split('::')[0]);
   document.getElementById('tp-search').value = '';
@@ -27,6 +29,7 @@ function openTargetPicker(t, apply) {
    target, Save applies and closes, closing any other way applies nothing. Tapping the
    selected item again deselects it: the target is then '' = the main flow. */
 function pickTarget(t) {
+  if (tpExclude && t === tpExclude) return;
   tpCurrent = t === tpCurrent ? '' : t;
   renderTargetPicker();
 }
@@ -45,7 +48,7 @@ const TP_CHEVRON = open => `<svg class="src-chevron tp-chevron" width="14" heigh
 // opts.rows (a list of {sid, node}) makes the card unfoldable; opts.id = its source / profile id.
 function tpCardHtml(t, name, meta, below, opts = {}) {
   const i = targetInfo(t), picked = t === tpCurrent, fold = opts.rows !== undefined, open = fold && opts.open;
-  return `<div class="src-card tp-card ${picked ? 'picked' : ''} ${i.ok ? '' : 'down'} ${open ? 'open' : ''}" data-t="${t}">
+  return `<div class="src-card tp-card ${picked ? 'picked' : ''} ${i.ok ? '' : 'down'} ${open ? 'open' : ''} ${tpExclude && t === tpExclude ? 'tp-excluded' : ''}" data-t="${t}">
     <div class="src-head" onclick="${fold ? `tpToggle('${t}')` : `pickTarget('${t}')`}">
       <div class="src-main">
         <div class="src-name">${fold ? `<button class="conn-state ${picked ? 'on' : ''}" onclick="event.stopPropagation();pickTarget('${t}')" title="Use the whole item as the target">auto</button>` : ''}${name}${i.ok ? '' : '<span class="conn-tag off">off</span>'}</div>
@@ -63,7 +66,7 @@ function tpBodyHtml(t, id, refs) {
   let rank = 0;
   const rows = refs.map(r => {
     const nt = 'node:' + r.sid + '::' + r.node.id, off = isNodeDisabled(sourcesData[r.sid], r.node.id);
-    return `<div class="node-row ps-node on ${nt === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" data-t="${nt}" onclick="pickTarget('${nt}')">
+    return `<div class="node-row ps-node on ${nt === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''} ${tpExclude && nt === tpExclude ? 'tp-excluded' : ''}" data-t="${nt}" onclick="pickTarget('${nt}')">
       ${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`;

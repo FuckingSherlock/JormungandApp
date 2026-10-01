@@ -83,7 +83,8 @@
 .rf-fhead .rf-flabel{flex:1}
 .rf-field .rf-x{font-size:17px;margin-bottom:4px}
 .rf-flag .rf-x{margin:0 0 0 8px}
-.rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}
+/* .node-add (70-nodes.css, later in the bundle) has its own border-top: the extra class keeps the dashed top edge */
+.node-add.rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}
 .rf-then .seg3{margin:4px 18px 8px}
 .rf-then .set-group{margin-top:0}
 
@@ -93,6 +94,11 @@
 .chip-input input{flex:1;min-width:90px;background:none;border:none;outline:none;color:var(--t1);font-family:var(--mono);font-size:13px;padding:4px}
 .chip-input input::placeholder{color:var(--t3);font-family:inherit}
 .vchip{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 8px;border-radius:6px;background:rgba(var(--accent-rgb),.14);color:var(--t1);font-family:var(--mono);font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.vchip-t{min-width:0;overflow:hidden;text-overflow:ellipsis;cursor:text}
+.chip-input .vchip input{flex:none;min-width:3ch;max-width:100%;padding:0;background:none;border:none;outline:none;color:var(--t1);font:inherit}
+.chip-input .vchip input.bad{color:var(--warn)}
+.vchip:has(input){box-shadow:inset 0 0 0 1px var(--accent)}
+.vchip:has(input.bad){box-shadow:inset 0 0 0 1px var(--warn)}
 .vchip b{font-weight:400;color:var(--t3);cursor:pointer;padding:0 3px;font-size:14px;line-height:1}
 .vchip.bad{background:rgba(var(--muted-rgb),.15);color:var(--muted);box-shadow:inset 0 0 0 1px rgba(var(--muted-rgb),.5)}
 
@@ -116,12 +122,21 @@
 #aa-body .aa-ico{color:var(--t3);flex-shrink:0}
 .aa-route{flex-wrap:wrap;row-gap:8px}
 .aa-route .set-label{flex:0 0 auto}
-.aa-route .seg3{flex:1 1 190px;min-width:0}
+/* the segment sits beside the label while it fits (its natural width), else wraps under it, full width */
+.aa-route .seg3{flex:1 1 max-content;min-width:min-content}
+.aa-route .seg3 button{white-space:nowrap}
+.aa-group{container-type:inline-size}
+@container (max-width:260px){.aa-route .seg3 button{font-size:12px;padding:8px 2px}}
+.tp-excluded{opacity:.45}
+.aa-fixed{cursor:default}
+.aa-fixed .tgt-val{margin-left:auto}
+.aa-fixed svg{opacity:.7}
 .aa-inert{cursor:default;opacity:.5;pointer-events:none}
 .aa-dash{color:var(--t3);margin-left:auto}
 #aa-body .aa-group{margin:0 0 10px}
 #aa-body .set-row .seg3{margin:0}
-.aa-hint{padding:4px 2px}
+.aa-hint{padding:4px 2px;line-height:1.4;min-height:calc(2.8em + 8px)}   /* two lines reserved: the dialog keeps its height */
+.aa-svc.aa-hint{min-height:calc(5.6em + 8px)}
 
 .mono{font-family:var(--mono)}
 .tgt-row .set-label{white-space:nowrap}

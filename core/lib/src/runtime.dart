@@ -7,6 +7,7 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 
 import 'config.dart';
+import 'pool.dart';
 import 'probe.dart';
 import 'sbapi.dart';
 
@@ -174,7 +175,19 @@ final _ports = Random();
 
 /// Measures latency through each node (and each entry → exit pair) with a throwaway
 /// sing-box, one round trip on an open connection each (probe.dart). Results: ms, or -1 = no answer.
-Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
+///
+/// Through the probe pool ([pool], pool.dart; without one, a private pool that reuses
+/// nothing): every result is written into it, under the server's identity, so Auto and the
+/// fallback service start from it; [maxAge] > 0 serves a pool answer younger than that
+/// instead of measuring (the launch ping), a server being measured elsewhere is joined. The
+/// throwaway sing-box starts only when something has to be measured.
+///
+/// `network`: when no server answered (and there were some), the direct path is tested too
+/// through the same sing-box: it answers → `up` (the servers are dead, the network is not),
+/// it does not → `down` (no network; also written to the pool as a silent network, any
+/// answer anywhere takes it back); otherwise (something answered, or nothing was asked)
+/// the pool's status as it is.
+Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> measureLatency({
   required String binary,
   required String workDir,
   required List<Map> nodes,
@@ -183,32 +196,61 @@ Future<({Map<String, int> nodes, Map<String, int> pairs})> measureLatency({
   List<String> checkers = const [],
   int timeoutMs = 5000,
   int parallel = 32,
+  ProbePool? pool,
+  Duration maxAge = Duration.zero,
   void Function(String kind, String key, int ms)? onResult,
 }) async {
-  final probe = Probe(await freePort());
-  final sb = SingBoxProcess(binary, workDir);
-  await sb.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: probe));
+  final pl = pool ?? ProbePool.solo();
+  final jobs = <(String, String, String)>[ // kind, key, pool identity
+    for (final n in nodes) ('n', '${n['key']}', serverIdentity(n['outbound'] as Map)),
+    for (final pr in pairs)
+      (
+        'p',
+        '${pr['key']}',
+        pairIdentity(serverIdentity((pr['entry'] as Map)['outbound'] as Map), serverIdentity((pr['exit'] as Map)['outbound'] as Map))
+      ),
+  ];
+  SingBoxProcess? sb;
+  Future<Probe>? starting;
+  Future<Probe> ensure() => starting ??= () async {
+        final pr = Probe(await freePort());
+        final box = SingBoxProcess(binary, workDir);
+        sb = box;
+        await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr));
+        return pr;
+      }();
   try {
-    final jobs = <(String, String)>[
-      for (final n in nodes) ('n', '${n['key']}'),
-      for (final pr in pairs) ('p', '${pr['key']}'),
-    ];
+    // a sing-box that cannot start is an error of the call, not a pool full of misses
+    if (jobs.any((j) => !pl.fresh(j.$3, url: url, checkers: checkers, maxAge: maxAge))) await ensure();
     final res = (nodes: <String, int>{}, pairs: <String, int>{});
     var next = 0;
     Future<void> worker() async {
       while (next < jobs.length) {
-        final (kind, key) = jobs[next++];
+        final (kind, key, id) = jobs[next++];
         final tag = '${kind == 'n' ? 't' : 'p'}/$key';
-        final ms = await withCheckers((u) => probe.delay(tag, u, timeoutMs: timeoutMs), url, checkers);
+        final ms = await pl.probe(id, (u) async => (await ensure()).delay(tag, u, timeoutMs: timeoutMs),
+            url: url, checkers: checkers, maxAge: maxAge);
         (kind == 'n' ? res.nodes : res.pairs)[key] = ms;
         onResult?.call(kind, key, ms);
       }
     }
 
     await Future.wait(List.generate(parallel, (_) => worker()));
-    return res;
+    var network = pl.status;
+    final all = [...res.nodes.values, ...res.pairs.values];
+    if (all.isNotEmpty && all.every((ms) => ms < 0)) {
+      final up = await pl.directAnswers(
+        url: url,
+        checkers: checkers,
+        timeoutMs: timeoutMs,
+        runner: (u) async => (await ensure()).delay('direct', u, timeoutMs: timeoutMs),
+      );
+      if (up == false) pl.silent(true);
+      network = pl.status;
+    }
+    return (nodes: res.nodes, pairs: res.pairs, network: network);
   } finally {
-    await sb.stop();
+    await sb?.stop();
   }
 }
 

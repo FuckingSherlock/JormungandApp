@@ -340,6 +340,7 @@ void main() {
       });
       expect(st['connected'], isTrue);
       expect((st['dns'] as Map)['active'], 'a');
+      expect((st['network'] as Map)['status'], 'up', reason: 'the probe pool\'s network status is in /api/status');
       List<Map> fell = [], moved = [];
       for (var i = 0; i < 100 && (fell.isEmpty || moved.isEmpty); i++) {
         await Future<void>.delayed(const Duration(milliseconds: 300));

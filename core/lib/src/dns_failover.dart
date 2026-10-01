@@ -12,7 +12,9 @@
 /// row plus, once it dropped, the flap guard's hold (auto.dart, watched.dart). The one in use
 /// down → the highest-priority server that answers; a higher one back → it again.
 ///
-/// Nothing is judged while the network may be down ([networkUncertain]). With [auto] off
+/// Nothing is judged unless the probe pool's network status is `up` ([pool], pool.dart: the
+/// status Auto, the fallback service and the UI's pings share; a name resolved by a local
+/// resolver proves nothing about the internet, so DNS answers do not feed it). With [auto] off
 /// the checks still run (Settings → DNS shows which server fails) but nothing is switched,
 /// and the first server in use answers again.
 library;
@@ -20,6 +22,7 @@ library;
 import 'dart:async';
 
 import 'auto.dart' show AutoSettings;
+import 'pool.dart' show NetStatus, ProbePool;
 import 'probe.dart' show withCheckers;
 import 'routing.dart' show DnsEntry, dnsModeOf;
 import 'watched.dart';
@@ -55,7 +58,7 @@ class DnsFailover {
     required this.settings,
     this.auto = true,
     String? active,
-    this.networkUncertain,
+    this.pool,
     int Function()? clock,
     this.note,
   }) : _clock = clock ?? _wallClock {
@@ -74,7 +77,7 @@ class DnsFailover {
 
   /// Settings → DNS → Switch automatically (`POST /api/dns/auto`, takes effect at once).
   bool auto;
-  final bool Function()? networkUncertain;
+  final ProbePool? pool;
   final void Function(String line)? note;
   final int Function() _clock;
   late final List<_Server> _servers;
@@ -122,7 +125,7 @@ class DnsFailover {
     if (_busy || _stopped) return;
     _busy = true;
     try {
-      if (networkUncertain?.call() == true) return;
+      if (pool != null && pool!.status != NetStatus.up) return;
       await Future.wait(_servers.map(_test));
       if (_stopped) return;
       await _decide();

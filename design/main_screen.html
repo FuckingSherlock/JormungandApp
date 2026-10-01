@@ -760,7 +760,8 @@ body {
 .rf-fhead .rf-flabel{flex:1}
 .rf-field .rf-x{font-size:17px;margin-bottom:4px}
 .rf-flag .rf-x{margin:0 0 0 8px}
-.rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}
+/* .node-add (70-nodes.css, later in the bundle) has its own border-top: the extra class keeps the dashed top edge */
+.node-add.rf-add-btn{margin:0 18px 6px;border:1px dashed var(--border-hi);border-radius:12px;justify-content:center}
 .rf-then .seg3{margin:4px 18px 8px}
 .rf-then .set-group{margin-top:0}
 
@@ -770,6 +771,11 @@ body {
 .chip-input input{flex:1;min-width:90px;background:none;border:none;outline:none;color:var(--t1);font-family:var(--mono);font-size:13px;padding:4px}
 .chip-input input::placeholder{color:var(--t3);font-family:inherit}
 .vchip{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 8px;border-radius:6px;background:rgba(var(--accent-rgb),.14);color:var(--t1);font-family:var(--mono);font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.vchip-t{min-width:0;overflow:hidden;text-overflow:ellipsis;cursor:text}
+.chip-input .vchip input{flex:none;min-width:3ch;max-width:100%;padding:0;background:none;border:none;outline:none;color:var(--t1);font:inherit}
+.chip-input .vchip input.bad{color:var(--warn)}
+.vchip:has(input){box-shadow:inset 0 0 0 1px var(--accent)}
+.vchip:has(input.bad){box-shadow:inset 0 0 0 1px var(--warn)}
 .vchip b{font-weight:400;color:var(--t3);cursor:pointer;padding:0 3px;font-size:14px;line-height:1}
 .vchip.bad{background:rgba(var(--muted-rgb),.15);color:var(--muted);box-shadow:inset 0 0 0 1px rgba(var(--muted-rgb),.5)}
 
@@ -793,12 +799,21 @@ body {
 #aa-body .aa-ico{color:var(--t3);flex-shrink:0}
 .aa-route{flex-wrap:wrap;row-gap:8px}
 .aa-route .set-label{flex:0 0 auto}
-.aa-route .seg3{flex:1 1 190px;min-width:0}
+/* the segment sits beside the label while it fits (its natural width), else wraps under it, full width */
+.aa-route .seg3{flex:1 1 max-content;min-width:min-content}
+.aa-route .seg3 button{white-space:nowrap}
+.aa-group{container-type:inline-size}
+@container (max-width:260px){.aa-route .seg3 button{font-size:12px;padding:8px 2px}}
+.tp-excluded{opacity:.45}
+.aa-fixed{cursor:default}
+.aa-fixed .tgt-val{margin-left:auto}
+.aa-fixed svg{opacity:.7}
 .aa-inert{cursor:default;opacity:.5;pointer-events:none}
 .aa-dash{color:var(--t3);margin-left:auto}
 #aa-body .aa-group{margin:0 0 10px}
 #aa-body .set-row .seg3{margin:0}
-.aa-hint{padding:4px 2px}
+.aa-hint{padding:4px 2px;line-height:1.4;min-height:calc(2.8em + 8px)}   /* two lines reserved: the dialog keeps its height */
+.aa-svc.aa-hint{min-height:calc(5.6em + 8px)}
 
 .mono{font-family:var(--mono)}
 .tgt-row .set-label{white-space:nowrap}
@@ -2996,7 +3011,10 @@ Object.assign(I18N, { ru: {
   "Own priority order": "Свой порядок приоритета",
   "Pairs": "Пары",
   "Password": "Пароль",
-  "Fallback (if unavailable)": "Запасной вариант (если недоступно)",
+  "Proxy password": "Пароль прокси",
+  "Through the Via target; Fallback if it is unavailable": "Через узел из «Через»; Fallback, если он недоступен",
+  "{0}: by the rules; Fallback if the main flow is down": "{0}: по правилам; Fallback, если основной поток не работает",
+  "Goes by the rules; Fallback if the main flow is down": "Идёт по правилам; Fallback, если основной поток не работает",
   "Paste a subscription URL": "Вставьте URL подписки",
   "Paste a subscription URL first": "Сначала вставьте URL подписки",
   "Pause checks with the screen off": "Не проверять при выключенном экране",
@@ -3501,6 +3519,8 @@ Object.assign(I18N, { ru: {
   "Rule {0} blocked while it is down": "Правило {0}: блокируется, пока цель недоступна",
   "Rule {0} goes direct": "Правило {0}: идёт Direct",
   "Rule {0} goes through the main flow": "Правило {0}: идёт через основной поток",
+  "Rule {0} goes through {1}": "Правило {0}: идёт через {1}",
+  "App {0} goes through {1}": "Приложение {0}: идёт через {1}",
   "Rule {0} back through it": "Правило {0}: снова идёт через неё",
   "App {0} blocked while it is down": "Приложение {0}: блокируется, пока цель недоступна",
   "App {0} goes direct": "Приложение {0}: идёт Direct",
@@ -6520,7 +6540,18 @@ function paintSpeed(run) {
    switched off in Nodes, has no server left, or was deleted (the reference is kept, so the
    rule shows it); the traffic then goes by the rule's "If unavailable": Default (the global
    setting in Rules), Main flow, Block or Direct. Apps always use the global setting. */
+// A catalog entry's own id (what the core names in events and plans: a profile, chain or source id,
+// no prefix) -> the rule target of it; '' when no such entry exists.
+const entryTarget = id => profilesData[id] ? 'profile:' + id : chainsData[id] ? 'chain:' + id : sourcesData[id] ? 'src:' + id : '';
+// The one condition group a rule gets from a host seen in the app (an event, a connection): an IP is an
+// IP / CIDR (/32, /128), a name is the exact Domain, never the whole Suffix.
+function hostGroup(host) {
+  const h = String(host).replace(/^\[|\]$/g, ''), v6 = h.includes(':');
+  return v6 || /^\d+(\.\d+){3}$/.test(h) ? { ip: { not: false, v: { ip_cidr: [h.includes('/') ? h : h + (v6 ? '/128' : '/32')] } } }
+    : { domain: { not: false, v: { domain: [h] } } };
+}
 function targetInfo(t) {
+  if (t && !t.includes(':')) t = entryTarget(t) || t;
   if (!t) return { kind: 'main', name: 'Main flow', ok: true };
   const at = t.indexOf(':'), kind = t.slice(0, at), ref = t.slice(at + 1);
   if (kind === 'src') {
@@ -6543,9 +6574,9 @@ function allTargets() {
     getProfileIds().map(id => 'profile:' + id), Object.keys(chainsData).map(id => 'chain:' + id));
 }
 // apply: JS source of a function taking the picked target, e.g. 't => { ruleDraft.target = t; renderRuleForm(); }'.
-function targetRowHtml(label, t, apply) {
+function targetRowHtml(label, t, apply, exclude = '') {
   const i = targetInfo(t);
-  return `<div class="set-row tgt-row" onclick="openTargetPicker('${t}', ${apply})"><div class="set-label">${label}</div>
+  return `<div class="set-row tgt-row" onclick="openTargetPicker('${t}', ${apply}, '${exclude}')"><div class="set-label">${label}</div>
     <span class="tgt-val">${i.flag ? i.flag + ' ' : ''}${esc(targetName(t))}${t ? `<span class="tgt-kind">${i.kind}</span>` : ''}${i.ok ? '' : '<span class="conn-tag warn">unavailable</span>'}</span>${CHEVRON_R}</div>`;
 }
 
@@ -7056,7 +7087,7 @@ function appStateHtml(pkg) {
   if (r && r.split) return `<span class="app-state split" title="${esc(appActText(r))}">${appHalves(r).map(([p, h]) =>
     `<span class="${h.act}">${p} ${esc(appHalfText(h))}</span>`).join('')}</span>`;   // one line per protocol
   if (r) return `<span class="app-state ${appStateClass(r)}" title="${esc(appActText(r))}">${esc(appActText(r))}</span>`;
-  if (sv && sv !== 'default') return `<span class="app-state svc ${sv === 'vpn' ? 'proxy' : 'direct'}" title="Set by the ${esc(svc[1])} service">${svcState(sv)} · service</span>`;
+  if (sv && sv !== 'default') return `<span class="app-state svc ${sv === 'vpn' ? 'proxy' : 'direct'}" title="${esc(t('Set by the {0} service', svc[1]))}">${svcState(sv)} · service</span>`;
   return '<span class="app-state">—</span>';
 }
 
@@ -7074,29 +7105,34 @@ function openAppAct(pkg) {
 // Default | Proxy | Direct | Block; Proxy = through a target of its own, an extra Via row under it).
 // Via and Fallback stay in place, dimmed and inert, unless Route is Proxy.
 const APP_LINK = '<svg class="aa-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+const LOCK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 let appTab = 'tcp';
 // fallback value -> label: 'main' (the old "Main flow") is the Proxy button
 const APP_FALLBACKS = [['default', 'Default'], ['main', 'Proxy'], ['direct', 'Direct'], ['block', 'Block']];
 function appHalfHtml(h, path, proto) {
   const id = proto ? proto.toLowerCase() : 'all', own = h.act === 'proxy';
-  const hint = { default: proto ? `No own route for ${proto}: it goes by the rules` : 'Goes by the rules like any other traffic', direct: 'Always bypasses the VPN',
+  const fbOn = own || h.act === 'default', fbViaOn = fbOn && h.fallback === 'main';   // Fallback: Route Proxy / Default (Direct and Block have nothing to fall back from); its Via: Fallback = Proxy
+  const hint = { default: proto ? `${proto}: by the rules; Fallback if the main flow is down` : 'Goes by the rules; Fallback if the main flow is down',
+    proxy: 'Through the Via target; Fallback if it is unavailable', direct: 'Always bypasses the VPN',
     block: proto ? `${proto} is blocked while connected` : 'No network at all while connected' }[h.act];
   const via = own ? targetRowHtml('Via', h.target, `t => { ${path}.target = t; renderAppAct(); }`)
+    : h.act === 'default' ? `<div class="set-row tgt-row aa-fixed"><div class="set-label">Via</div><span class="tgt-val">Main flow</span>${LOCK_ICON}</div>`   // the real value, just not changeable
     : `<div class="set-row tgt-row aa-inert"><div class="set-label">Via</div><span class="tgt-val aa-dash">—</span></div>`;
-  const fb = `<div class="set-row aa-route aa-fb ${own ? '' : 'aa-inert'}"><div class="set-label">Fallback (if unavailable)</div>
+  const fb = `<div class="set-row aa-route aa-fb ${fbOn ? '' : 'aa-inert'}"><div class="set-label">Fallback</div>
       <div class="seg3 wide" id="aa-fallback-${id}">${APP_FALLBACKS.map(([v, l]) =>
-        `<button class="${h.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${own ? '' : 'disabled'} onclick="${path}.fallback='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>`;
-  const fbVia = own && h.fallback === 'main'
-    ? targetRowHtml('Via', h.fallbackTarget, `t => { ${path}.fallbackTarget = t; renderAppAct(); }`).replace('tgt-row', 'tgt-row aa-fb-via') : '';
+        `<button class="${h.fallback === v ? 'on ' + (v === 'main' ? 'proxy' : v) : ''}" ${fbOn ? '' : 'disabled'} onclick="${path}.fallback='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>`;
+  // always in place; dimmed and inert unless Fallback = Proxy. '' = Main flow; not the Route's own Via.
+  const fbVia = targetRowHtml('Via', h.fallbackTarget, `t => { ${path}.fallbackTarget = t; renderAppAct(); }`, own ? h.target : '')
+    .replace('tgt-row', 'tgt-row aa-fb-via' + (fbViaOn ? '' : ' aa-inert'));
   return `<div class="aa-half" data-half="${id}">
     <div class="set-group aa-group">
       <div class="set-row aa-route"><div class="set-label">Route</div>
         <div class="seg3 wide">${APP_ACTS.map(([v, l]) => `<button class="${h.act === v ? 'on ' + v : ''}" onclick="${path}.act='${v}';renderAppAct()">${l}</button>`).join('')}</div></div>
       ${via}${fb}${fbVia}
-    </div>${own ? '' : `<div class="set-hint aa-hint">${hint}</div>`}</div>`;
+    </div><div class="set-hint aa-hint">${hint}</div></div>`;
 }
 // The app has an own route unless every half is Default.
-const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default') ? 'default' : 'own';
+const appDraftAct = d => appHalves(d).every(([, h]) => h.act === 'default' && h.fallback === 'default') ? 'default' : 'own';   // Default + a Fallback is still an own rule
 const appTabHalf = () => appTab === 'udp' ? ['appDraft.udp', 'UDP', appDraft.udp] : ['appDraft', 'TCP', appDraft];
 function renderAppAct() {
   const d = appDraft;
@@ -7155,11 +7191,13 @@ function saveAppAct() {
    stay pickable, marked unavailable (the rule then follows its "If unavailable"). */
 
 let tpCurrent = '', tpOrig = '', tpApply = null;   // tpCurrent = the selection so far, tpOrig = what the picker opened with
+let tpExclude = '';   // a target that can't be picked here (the fallback must differ from the route's Via)
 const tpOpen = new Set();   // unfolded cards, by target id ('src:<id>', 'profile:<id>')
 
-function openTargetPicker(t, apply) {
+function openTargetPicker(t, apply, exclude) {
   tpCurrent = tpOrig = t || '';
   tpApply = apply;
+  tpExclude = exclude || '';
   tpOpen.clear();
   if (tpCurrent.startsWith('node:')) tpOpen.add('src:' + tpCurrent.slice(5).split('::')[0]);
   document.getElementById('tp-search').value = '';
@@ -7171,6 +7209,7 @@ function openTargetPicker(t, apply) {
    target, Save applies and closes, closing any other way applies nothing. Tapping the
    selected item again deselects it: the target is then '' = the main flow. */
 function pickTarget(t) {
+  if (tpExclude && t === tpExclude) return;
   tpCurrent = t === tpCurrent ? '' : t;
   renderTargetPicker();
 }
@@ -7189,7 +7228,7 @@ const TP_CHEVRON = open => `<svg class="src-chevron tp-chevron" width="14" heigh
 // opts.rows (a list of {sid, node}) makes the card unfoldable; opts.id = its source / profile id.
 function tpCardHtml(t, name, meta, below, opts = {}) {
   const i = targetInfo(t), picked = t === tpCurrent, fold = opts.rows !== undefined, open = fold && opts.open;
-  return `<div class="src-card tp-card ${picked ? 'picked' : ''} ${i.ok ? '' : 'down'} ${open ? 'open' : ''}" data-t="${t}">
+  return `<div class="src-card tp-card ${picked ? 'picked' : ''} ${i.ok ? '' : 'down'} ${open ? 'open' : ''} ${tpExclude && t === tpExclude ? 'tp-excluded' : ''}" data-t="${t}">
     <div class="src-head" onclick="${fold ? `tpToggle('${t}')` : `pickTarget('${t}')`}">
       <div class="src-main">
         <div class="src-name">${fold ? `<button class="conn-state ${picked ? 'on' : ''}" onclick="event.stopPropagation();pickTarget('${t}')" title="Use the whole item as the target">auto</button>` : ''}${name}${i.ok ? '' : '<span class="conn-tag off">off</span>'}</div>
@@ -7207,7 +7246,7 @@ function tpBodyHtml(t, id, refs) {
   let rank = 0;
   const rows = refs.map(r => {
     const nt = 'node:' + r.sid + '::' + r.node.id, off = isNodeDisabled(sourcesData[r.sid], r.node.id);
-    return `<div class="node-row ps-node on ${nt === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''}" data-t="${nt}" onclick="pickTarget('${nt}')">
+    return `<div class="node-row ps-node on ${nt === tpCurrent ? 'picked' : ''} ${off ? 'disabled' : ''} ${tpExclude && nt === tpExclude ? 'tp-excluded' : ''}" data-t="${nt}" onclick="pickTarget('${nt}')">
       ${priority ? `<span class="cc-rank">${++rank}</span>` : ''}
       <span class="node-name"><span class="node-flag">${r.node.flag}</span>${esc(r.node.name)}</span>
       <span class="node-proto">${protoLabel(r.node)}</span>${latHtml(r.node)}</div>`;
@@ -7628,6 +7667,7 @@ const evPlural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 const evDns = id => (dnsServers[id] && dnsServers[id].name) || String(id);
 // "Rule Streaming and 2 more"; an app when no rule is involved: "App Telegram"
 const evRules = d => (d.rule ? `Rule ${d.rule}` : `App ${d.app}`) + (d.more ? ` and ${evPlural(d.more, 'more', 'more')}` : '');
+const evTarget = t => t === 'proxy' ? 'Main flow' : targetName(t);
 const EV_FALLBACK = { block: 'blocked while it is down', direct: 'goes direct', main: 'goes through the main flow' };
 const EV_TEXT = {
   'conn/connected': d => ['Connected' + (d.entry ? ': ' + evEntry(d.entry) : ''),
@@ -7652,8 +7692,9 @@ const EV_TEXT = {
   'sub/dead': d => [`${evSource(d.source, d.name)}: its servers do not respond`, "Contact the subscription provider's support"],
   'rules/ruleSetFailed': d => [`Rule set ${d.tag} not downloaded`, [d.error, 'the last copy is used'].filter(Boolean).join(' — ')],
   'rules/ruleSetUpdated': d => [`Rule set ${d.tag} updated`, ''],
-  'rules/fallback': d => [`${targetName(d.target)} does not answer`, `${evRules(d)} ${EV_FALLBACK[d.to] || d.to}`],
-  'rules/targetBack': d => [`${targetName(d.target)} answers again`, `${evRules(d)} back through it`],
+  // target: 'proxy' = the main flow; to: block / direct / main, or a target id (the fallback's own target)
+  'rules/fallback': d => [`${evTarget(d.target)} does not answer`, `${evRules(d)} ${EV_FALLBACK[d.to] || (d.to && d.to.includes(':') ? 'goes through ' + targetName(d.to) : d.to)}`],
+  'rules/targetBack': d => [`${evTarget(d.target)} answers again`, `${evRules(d)} back through it`],
   'dns/switched': d => [`DNS: ${evDns(d.from)} → ${evDns(d.to)}`,
     d.reason === 'failover' ? `${evDns(d.from)} does not answer` : d.reason === 'back' ? `${evDns(d.to)} answers again — returned to it` : 'Switch automatically is off: the first server is back'],
   'core/crashed': d => ['sing-box stopped', (d.code != null ? 'Exit code ' + d.code + ' — ' : '') + 'starting it again'],
@@ -8750,7 +8791,7 @@ function renderConnSettings() {
           <div class="chip" id="conn-copy-socks" onclick="copyProxyUrl('socks5')">Copy SOCKS5</div>
           <div class="chip" id="conn-copy-http" onclick="copyProxyUrl('http')">Copy HTTP</div>
         </div></div>
-      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Password<button class="help-btn" onclick="openHelp('proxyauth')" title="What is this?">?</button></div>
+      <div class="set-row" data-key="proxyAuth"><div class="set-label" style="flex:1">Proxy password<button class="help-btn" onclick="openHelp('proxyauth')" title="What is this?">?</button></div>
         ${toggle(connCfg.proxyAuth, 'toggleProxyAuth()')}</div>
       ${connCfg.proxyAuth ? `
       <div class="set-row set-sub" data-key="proxyUser"><div class="set-label auth-lbl">Login</div>
@@ -10225,7 +10266,7 @@ function rfGroupHtml(g, d) {
     return `<div class="rf-field"><div class="rf-fhead"><div class="rf-flabel">${label}</div>${rfXBtn(g.key, f)}</div>
       <div class="chip-input" onclick="if (event.target === this) this.querySelector('input').focus()">${vals.map((v, i) => {
         const ok = validVal(kind, v);
-        return `<span class="vchip ${ok ? '' : 'bad'}" ${ok ? '' : `title="${esc(VAL_HINT[kind])}"`}>${esc(v)}<b onclick="rfRemoveVal('${g.key}','${f}',${i})">×</b></span>`;
+        return `<span class="vchip ${ok ? '' : 'bad'}" ${ok ? '' : `title="${esc(VAL_HINT[kind])}"`}><span class="vchip-t" onclick="rfEditVal(this,'${g.key}','${f}',${i})">${esc(v)}</span><b onclick="rfRemoveVal('${g.key}','${f}',${i})">×</b></span>`;
       }).join('')}<input data-g="${g.key}" data-f="${f}" placeholder="${vals.length ? '' : esc(ph)}" onkeydown="rfKey(event,this)" onpaste="rfPaste(event,this)" onblur="rfCommit(this)"></div>
       ${vals.some(v => !validVal(kind, v)) ? `<div class="set-hint warn">Red: ${esc(VAL_HINT[kind])}</div>` : ''}</div>`;
   }).join('');
@@ -10259,6 +10300,42 @@ function rfRemoveField(g, f) {
 }
 function rfRemoveGroup(key) { delete ruleDraft.groups[key]; renderRuleForm(); }
 function rfRemoveVal(g, f, i) { ruleDraft.groups[g].v[f].splice(i, 1); renderRuleForm(); }
+/* A chip's text taps into an inline input (caret at the end). Enter / blur commits: a changed value
+   replaces the chip (a list with commas / newlines replaces it with those values), an empty one removes
+   it, an invalid one (the field's own validator, as the red chips) stays in edit, red, with its hint;
+   Esc cancels. The edit lives in the DOM only: a re-render ends it. */
+function rfEditVal(el, g, f, i) {
+  const chip = el.closest('.vchip'), old = ruleDraft.groups[g].v[f][i], kind = GROUP[g].fields.find(x => x[0] === f)[3];
+  if (!chip || chip.querySelector('input')) return;
+  const input = document.createElement('input');
+  input.value = old; input.className = 'vchip-edit'; input.spellcheck = false;
+  const fit = () => { input.style.width = Math.min(Math.max(input.value.length, 3) + 1, 40) + 'ch'; };
+  const hint = bad => {
+    const field = chip.closest('.rf-field');
+    let h = field.querySelector('.rf-edit-hint');
+    input.classList.toggle('bad', bad);
+    if (bad && !h) { h = document.createElement('div'); h.className = 'set-hint warn rf-edit-hint'; field.appendChild(h); }
+    if (h) { if (bad) h.textContent = 'Red: ' + VAL_HINT[kind]; else h.remove(); }
+  };
+  const commit = () => {
+    if (input.dataset.done) return;
+    const parts = input.value.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+    if (parts.some(v => !validVal(kind, v))) { hint(true); return; }
+    input.dataset.done = '1';
+    const list = ruleDraft.groups[g].v[f];
+    list.splice(i, 1, ...parts.filter(v => !list.includes(v) || v === old));
+    ruleDraft.groups[g].v[f] = list.filter((v, k) => list.indexOf(v) === k);
+    renderRuleForm();
+  };
+  input.addEventListener('input', () => { fit(); hint(false); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); input.dataset.done = '1'; renderRuleForm(); }
+  });
+  input.addEventListener('blur', commit);
+  el.replaceWith(input);
+  fit(); input.focus(); input.setSelectionRange(old.length, old.length);
+}
 function rfToggleChoice(g, f, o) {
   const list = ruleDraft.groups[g].v[f] = ruleDraft.groups[g].v[f] || [];
   list.includes(o) ? list.splice(list.indexOf(o), 1) : list.push(o);
@@ -10648,8 +10725,7 @@ function connCopyShown() {
 function connRuleFor(what, id) {
   const c = connById(id); if (!c) return;
   const g = what === 'app' ? { process: { not: false, v: { process: [connApp(c)] } } }
-    : /^[\d.]+$/.test(c.host) || c.host.includes(':') ? { ip: { not: false, v: { ip_cidr: [c.host] } } }
-    : { domain: { not: false, v: { domain: [c.host] } } };
+    : hostGroup(c.host);
   openRuleForm();
   ruleDraft = newRule({ name: what === 'app' ? connApp(c) : c.host, groups: g });
   renderRuleForm();
@@ -10935,7 +11011,10 @@ function routingTarget(t) {
 
 function routingPlan() {
   const rules = ruleOrder.map(id => rulesData[id]).filter(r => r.enabled).map(r => {
-    const o = { id: r.id, name: r.name, action: r.action, target: r.target || '', fallback: r.fallback || 'default',
+    // a rule's "If unavailable" only means something with a target of its own (the main flow
+    // has none for rules: a value left from an earlier target is not sent)
+    const o = { id: r.id, name: r.name, action: r.action, target: r.target || '',
+      fallback: r.target && r.fallback === 'main' && r.fallbackTarget ? r.fallbackTarget : r.target && r.fallback || 'default',
       block: r.block, dns: r.dns || 'auto', groups: r.groups };
     if (r.composite) {
       const { action, outbound, method, ...match } = r.composite;
@@ -10946,14 +11025,25 @@ function routingPlan() {
     return o;
   });
   // an app: the top-level fields are all its traffic (TCP when split), udp the other half
-  const half = h => ({ act: h.act || 'default', target: h.act === 'proxy' ? h.target || '' : '', fallback: h.fallback || 'default' });
+  // "If unavailable → Proxy via X" (fallback 'main' + fallbackTarget) goes as the target id X;
+  // 'main' alone = no fallback. Only Proxy and Default (= the main flow) have one: on Default or
+  // Proxy with the main flow an explicit block / direct / target id gives the main flow its own
+  // "If unavailable"; 'default' / 'main' there = none (Default without one has no rule)
+  const fb = h => h.fallback === 'main' && h.fallbackTarget ? h.fallbackTarget : h.fallback || 'default';
+  const half = h => ({ act: h.act || 'default', target: h.act === 'proxy' ? h.target || '' : '',
+    fallback: h.act === 'proxy' || !h.act || h.act === 'default' ? fb(h) : 'default' });
   const apps = Object.entries(appRules).map(([pkg, a]) => {
     const app = APPS.find(x => x.pkg === pkg) || {};
     return { id: pkg, kind: app.kind || 'package', name: app.name || pkg, ...half(a), split: !!a.split, udp: half(a.udp || {}) };
   });
   const named = new Set();
-  rules.forEach(r => { if (r.action === 'proxy' && r.target) named.add(r.target); });
-  apps.forEach(a => [a, ...(a.split ? [a.udp] : [])].forEach(h => { if (h.act === 'proxy' && h.target) named.add(h.target); }));
+  // a fallback that is not a keyword is a target: its group(s) must exist in the config too
+  const addFb = f => { if (f && !['default', 'main', 'block', 'direct'].includes(f)) named.add(f); };
+  rules.forEach(r => { if (r.action === 'proxy' && r.target) { named.add(r.target); addFb(r.fallback); } });
+  apps.forEach(a => [a, ...(a.split ? [a.udp] : [])].forEach(h => {
+    if (h.act === 'proxy' && h.target) named.add(h.target);
+    if (h.act === 'proxy' || h.act === 'default') addFb(h.fallback);
+  }));
   const geo = id => { const s = ruleSets.find(x => x.id === id) || {}; return { via: s.via || 'vpn', every: s.every || 7 * 86400 }; };
   return {
     apps, rules,
@@ -11085,8 +11175,9 @@ const destHost = d => d.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
 function openBlockedRule(b) {
   const host = destHost(b.dest);
   openRuleForm();
-  ruleDraft = newRule({ name: host + ' via ' + entryLabel(b.via), action: 'proxy', target: b.via,
-    groups: { domain: { not: false, v: { domain_suffix: [host] } } } });
+  // b.via is an entry id (the core's), a rule target is 'profile:' / 'chain:' / 'src:' + id
+  ruleDraft = newRule({ name: host + ' via ' + entryLabel(b.via), action: 'proxy', target: entryTarget(b.via),
+    groups: hostGroup(host) });
   renderRuleForm();
 }
 

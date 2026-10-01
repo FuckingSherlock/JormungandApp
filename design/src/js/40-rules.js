@@ -16,7 +16,18 @@
    switched off in Nodes, has no server left, or was deleted (the reference is kept, so the
    rule shows it); the traffic then goes by the rule's "If unavailable": Default (the global
    setting in Rules), Main flow, Block or Direct. Apps always use the global setting. */
+// A catalog entry's own id (what the core names in events and plans: a profile, chain or source id,
+// no prefix) -> the rule target of it; '' when no such entry exists.
+const entryTarget = id => profilesData[id] ? 'profile:' + id : chainsData[id] ? 'chain:' + id : sourcesData[id] ? 'src:' + id : '';
+// The one condition group a rule gets from a host seen in the app (an event, a connection): an IP is an
+// IP / CIDR (/32, /128), a name is the exact Domain, never the whole Suffix.
+function hostGroup(host) {
+  const h = String(host).replace(/^\[|\]$/g, ''), v6 = h.includes(':');
+  return v6 || /^\d+(\.\d+){3}$/.test(h) ? { ip: { not: false, v: { ip_cidr: [h.includes('/') ? h : h + (v6 ? '/128' : '/32')] } } }
+    : { domain: { not: false, v: { domain: [h] } } };
+}
 function targetInfo(t) {
+  if (t && !t.includes(':')) t = entryTarget(t) || t;
   if (!t) return { kind: 'main', name: 'Main flow', ok: true };
   const at = t.indexOf(':'), kind = t.slice(0, at), ref = t.slice(at + 1);
   if (kind === 'src') {
@@ -39,9 +50,9 @@ function allTargets() {
     getProfileIds().map(id => 'profile:' + id), Object.keys(chainsData).map(id => 'chain:' + id));
 }
 // apply: JS source of a function taking the picked target, e.g. 't => { ruleDraft.target = t; renderRuleForm(); }'.
-function targetRowHtml(label, t, apply) {
+function targetRowHtml(label, t, apply, exclude = '') {
   const i = targetInfo(t);
-  return `<div class="set-row tgt-row" onclick="openTargetPicker('${t}', ${apply})"><div class="set-label">${label}</div>
+  return `<div class="set-row tgt-row" onclick="openTargetPicker('${t}', ${apply}, '${exclude}')"><div class="set-label">${label}</div>
     <span class="tgt-val">${i.flag ? i.flag + ' ' : ''}${esc(targetName(t))}${t ? `<span class="tgt-kind">${i.kind}</span>` : ''}${i.ok ? '' : '<span class="conn-tag warn">unavailable</span>'}</span>${CHEVRON_R}</div>`;
 }
 

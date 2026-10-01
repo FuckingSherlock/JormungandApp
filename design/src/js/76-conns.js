@@ -215,8 +215,7 @@ function connCopyShown() {
 function connRuleFor(what, id) {
   const c = connById(id); if (!c) return;
   const g = what === 'app' ? { process: { not: false, v: { process: [connApp(c)] } } }
-    : /^[\d.]+$/.test(c.host) || c.host.includes(':') ? { ip: { not: false, v: { ip_cidr: [c.host] } } }
-    : { domain: { not: false, v: { domain: [c.host] } } };
+    : hostGroup(c.host);
   openRuleForm();
   ruleDraft = newRule({ name: what === 'app' ? connApp(c) : c.host, groups: g });
   renderRuleForm();

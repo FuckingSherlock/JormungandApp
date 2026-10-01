@@ -5,10 +5,10 @@
 /// ```
 /// routing: {
 ///   apps:   [{ id, kind: 'package'|'process'|'path', name, act: 'default'|'direct'|'proxy'|'block',
-///              target, fallback: 'default'|'main'|'block'|'direct',      // as a rule's
+///              target, fallback: 'default'|'main'|'block'|'direct'|<target id>,  // as a rule's
 ///              split, udp: { act, target, fallback } }], // split: the fields above = TCP, udp = UDP
 ///   rules:  [{ id, name, action: 'proxy'|'direct'|'block', target, fallback:
-///              'default'|'main'|'block'|'direct', block: 'drop'|'reject', dns: 'auto'|<dns id>,
+///              'default'|'main'|'block'|'direct'|<target id>, block: 'drop'|'reject', dns: 'auto'|<dns id>,
 ///              ipTunOnly?: true,                 // IP conditions do not force a `resolve`
 ///              groups: { domain|ip|port|source|network|process: { not, v: {field: [..]}, flag } },
 ///              composite?, extra? }],             // enabled ones, in order
@@ -25,10 +25,23 @@
 /// A target missing from `targets` is unavailable now (off in Nodes, no usable server,
 /// deleted): its rules take their "If unavailable" when the config is built.
 ///
+/// A rule's / app's `fallback` is a keyword or a real target of the catalog (an id of
+/// `targets`: any string that is not a keyword): "If unavailable → go through that target".
+/// A fallback target equal to the target, or empty, is the main flow; one that is unavailable
+/// now (not in `targets`, or null there) is `default` (the global `fallback`) and a warning
+/// says so. The global `fallback` is a keyword only (anything else = main).
+///
+/// The main flow has "If unavailable" too, only when asked for explicitly (never the global
+/// one): an app whose act is `default` or `proxy` with no target and a `fallback` of `block`,
+/// `direct` or a target id goes through a selector `proxy~<fallback>` = `[proxy, fallback]`;
+/// `default` / `main` (empty) = none. An act `default` with none has no rule, as before. A
+/// rule with an empty target does the same, but the UI sends `default` for it.
+///
 /// A target that is available goes through a selector `<target>~<fallback>` =
-/// `[target, fallback]` ([TargetFallback], listed in [RoutingInfo]), so the core can move its
-/// traffic to the fallback and back with no restart when the target stops answering
-/// (fallback.dart). With two or more DNS servers in use each also has a DNS rule for its own
+/// `[target, fallback]` (with a target as the fallback: `[target, fallback target, main
+/// flow]`, the last for both being down; [TargetFallback], listed in [RoutingInfo]), so the
+/// core can move its traffic to the fallback and back with no restart when the target stops
+/// answering (fallback.dart). With two or more DNS servers in use each also has a DNS rule for its own
 /// clash mode, for the DNS failover (dns_failover.dart).
 library;
 
@@ -174,7 +187,7 @@ List<RuleSetSource> ruleSetsNeeded(Map plan) {
 /// flips it while sing-box runs (fallback.dart): the target stops answering → [fallbackTag],
 /// answers again → the target.
 class TargetFallback {
-  TargetFallback(this.tag, this.target, this.spec, this.fallbackTag);
+  TargetFallback(this.tag, this.target, this.spec, this.fallbackTag, {this.fallbackTarget, this.fallbackSpec});
 
   final String tag;
 
@@ -185,15 +198,23 @@ class TargetFallback {
   /// `target`, and `target>entry` for a chain).
   final Map spec;
 
-  /// `proxy` (the main flow), `direct` / `direct@dns-<id>`, or `block`.
+  /// `proxy` (the main flow), `direct` / `direct@dns-<id>`, or `block`; for a target as the
+  /// fallback, that target's group (= its id).
   final String fallbackTag;
+
+  /// The UI's id of the fallback when it is a target of the catalog (null for the keywords),
+  /// with its `targets` entry. The selector then also holds the main flow, where traffic goes
+  /// while both the target and this one are down.
+  final String? fallbackTarget;
+  final Map? fallbackSpec;
 
   /// The rules and the apps that route here (their names, for the journal).
   final rules = <String>[];
   final apps = <String>[];
 
-  /// The fallback as the journal names it.
-  String get to => fallbackTag == 'block' ? 'block' : (fallbackTag == topTag ? 'main' : 'direct');
+  /// The fallback as the journal names it: 'block' | 'direct' | 'main', or the fallback
+  /// target's id.
+  String get to => fallbackTarget ?? (fallbackTag == 'block' ? 'block' : (fallbackTag == topTag ? 'main' : 'direct'));
 }
 
 /// A DNS server in use ([id] = the UI's, [tag] = `dns-<id>` in the config) — the core
@@ -393,26 +414,67 @@ class _Builder {
   Map<String, dynamic> _reject({bool drop = false}) => {'action': 'reject', if (drop) 'method': 'drop'};
   Map<String, dynamic> _route(String outbound) => {'action': 'route', 'outbound': outbound};
 
-  /// Proxy through [target]; unavailable → [fallback] (main / block / direct). Unavailable
-  /// now = the config's choice; a target that goes down later is the core's
-  /// (fallback.dart): the route leads to a selector [target, fallback outbound] it flips.
-  /// [label] names the rule / app ([app]) in the journal.
+  static const _keywords = {'main', 'block', 'direct'};
+
+  /// Proxy through [target]; unavailable → [fallback] (default / main / block / direct, or
+  /// another target: see the library comment). Unavailable now = the config's choice; a target
+  /// that goes down later is the core's (fallback.dart): the route leads to a selector
+  /// [target, fallback outbound] it flips. [label] names the rule / app ([app]) in the journal.
   ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String? dns, String label, {bool app = false}) {
     final tag = _target(target);
-    if (tag == topTag) return (action: _route(topTag), direct: false); // the main flow has no fallback
+    if (tag == topTag) return (action: _mainFlowAction(fallback, dns, label, app), direct: false);
+    // default = the global one; a target that is not usable now = the global one too; the
+    // target itself (a fallback to itself) or empty = the main flow
+    String? fbTarget;
+    if (fallback.isEmpty || fallback == 'default') {
+      fallback = _fallback;
+    } else if (!_keywords.contains(fallback)) {
+      if (fallback == target) {
+        fallback = 'main';
+      } else if (_target(fallback) != null) {
+        fbTarget = fallback;
+      } else {
+        out.warnings.add('$label: "If unavailable" target $fallback is not available, the default applies');
+        fallback = _fallback;
+      }
+    }
+    if (tag == null && fbTarget != null) {
+      // the target is out now: straight to the fallback target (the main flow behind it)
+      return _proxyAction(fbTarget, 'main', dns, label, app: app);
+    }
     if (tag != null) {
-      final fb = switch (fallback) {
-        'block' => _blockOutbound(),
-        'direct' => _directVia(_dnsFor(dns, direct: true)),
-        _ => topTag,
-      };
-      return (action: _route(_fallbackSelector(target, fb, label, app)), direct: false);
+      final fb = fbTarget ??
+          switch (fallback) {
+            'block' => _blockOutbound(),
+            'direct' => _directVia(_dnsFor(dns, direct: true)),
+            _ => topTag,
+          };
+      return (action: _route(_fallbackSelector(target, fb, label, app, fbTarget: fbTarget)), direct: false);
     }
     return switch (fallback) {
       'block' => (action: _reject(), direct: false),
       'direct' => (action: _route(_directVia(_dnsFor(dns, direct: true))), direct: true),
       _ => (action: _route(topTag), direct: false),
     };
+  }
+
+  /// Through the main flow. It has "If unavailable" only when one is asked for explicitly
+  /// (never the global default; `default` / `main` / empty / a target that is not available
+  /// = none, the last with a warning): `block`, `direct` or a target of the catalog, as a
+  /// selector [main flow, fallback] the core flips when the main flow dies (fallback.dart).
+  Map<String, dynamic> _mainFlowAction(String fallback, String? dns, String label, bool app) {
+    switch (fallback) {
+      case '' || 'default' || 'main':
+        break;
+      case 'block':
+        return _route(_fallbackSelector('', _blockOutbound(), label, app));
+      case 'direct':
+        return _route(_fallbackSelector('', _directVia(_dnsFor(dns, direct: true)), label, app));
+      default:
+        if (_target(fallback) != null) return _route(_fallbackSelector('', fallback, label, app, fbTarget: fallback));
+        out.warnings.add('$label: "If unavailable" target $fallback is not available, the main flow has none');
+    }
+    return _route(topTag);
   }
 
   /// Block as an outbound: only a selector can hold it (a rule blocks with `reject`).
@@ -422,18 +484,24 @@ class _Builder {
     return 'block';
   }
 
-  /// The selector [target, fallbackTag] for [target] (once per pair): the config's
-  /// `default` is the target, the core moves it.
-  String _fallbackSelector(String target, String fallbackTag, String label, bool app) {
+  /// The selector [target, fallbackTag] for [target] (once per pair; '' = the main flow, as
+  /// [topTag]): the config's `default` is the target, the core moves it. With a [fbTarget] (a
+  /// catalog target as the fallback) a catalog target also has the main flow as the third
+  /// member: both down.
+  String _fallbackSelector(String target, String fallbackTag, String label, bool app, {String? fbTarget}) {
+    final main = target.isEmpty;
+    if (main) target = topTag;
     final tag = '$target~$fallbackTag';
     var f = out.fallbacks.where((x) => x.tag == tag).firstOrNull;
     if (f == null) {
-      f = TargetFallback(tag, target, (r['targets'] as Map)[target] as Map, fallbackTag);
+      final targets = r['targets'] as Map;
+      f = TargetFallback(tag, target, main ? const {} : targets[target] as Map, fallbackTag,
+          fallbackTarget: fbTarget, fallbackSpec: fbTarget == null ? null : targets[fbTarget] as Map);
       out.fallbacks.add(f);
       out.outbounds.add({
         'type': 'selector',
         'tag': tag,
-        'outbounds': [target, fallbackTag],
+        'outbounds': [target, fallbackTag, if (fbTarget != null && !main) topTag],
         'default': target,
         // a switch keeps the open connections; the core closes the stalled ones (stall.dart)
         'interrupt_exist_connections': false,
@@ -444,7 +512,8 @@ class _Builder {
     return tag;
   }
 
-  String get _fallback => '${r['fallback'] ?? 'main'}';
+  /// The global "If unavailable": a keyword only.
+  String get _fallback => _keywords.contains('${r['fallback']}') ? '${r['fallback']}' : 'main';
 
   /* ── Apps: first in the order ── */
 
@@ -459,12 +528,14 @@ class _Builder {
       final match = <String, dynamic>{field: [id]};
       final label = '${a['name'] ?? ''}'.isNotEmpty ? '${a['name']}' : id;
       void half(Map h, List<String>? network) {
-        final fallback = h['fallback'] == null || h['fallback'] == 'default' ? _fallback : '${h['fallback']}';
+        final fallback = '${h['fallback'] ?? 'default'}';
         final act = switch (h['act']) {
           'block' => _reject(),
           'direct' => _route('direct'),
           'proxy' => _proxyAction('${h['target'] ?? ''}', fallback, null, label, app: true).action,
-          _ => null,
+          // Default has a rule only to give the main flow an "If unavailable" (it then goes by
+          // the selector, not by the rules below); none asked for = by the rules below
+          _ => switch (_mainFlowAction(fallback, null, label, true)) { {'outbound': topTag} => null, final a => a },
         };
         final name = network == null ? label : '$label (${network.first.toUpperCase()})';
         if (act != null) out._add({...match, 'network': ?network, ...act}, RuleOrigin('app', name, id: id));
@@ -494,7 +565,7 @@ class _Builder {
       final built = rule['composite'] is Map ? _composite(rule['composite'] as Map, title) : _conditions(rule, title);
       if (built == null) continue;
       final action = '${rule['action'] ?? 'proxy'}';
-      final fallback = rule['fallback'] == null || rule['fallback'] == 'default' ? _fallback : '${rule['fallback']}';
+      final fallback = '${rule['fallback'] ?? 'default'}';
       final dns = rule['dns']?.toString();
       late final Map<String, dynamic> act;
       var direct = false;

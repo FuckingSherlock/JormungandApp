@@ -34,7 +34,13 @@
 /// but the current one are put back as they were.
 ///
 /// A test is [delay] (see [_ping]): one round trip on an open connection through the
-/// config's probe inbound (probe.dart), what the catalog shows.
+/// config's probe inbound (probe.dart), what the catalog shows. It goes through the probe
+/// pool (pool.dart): an answer another module or the UI's ping got a moment ago
+/// ([AutoSettings.reuse]; for a server not tested yet [AutoSettings.startAge]) stands for
+/// the test, a miss never does, and the same server asked twice at once is tested once.
+/// The network status the other modules judge by is kept in the pool: an OS without a
+/// network, no route answering and the direct path silent too (`down`), the route in use
+/// missing (`unknown`); any answer is `up`.
 ///
 /// Pure Dart with no UI in it: the app reads [toJson] and listens to [switches] and
 /// [unstable] (jormd serves them through /api/status; Flutter will call it directly).
@@ -45,7 +51,7 @@ import 'dart:math';
 
 import 'config.dart' show defaultTestUrl, planCheckers;
 import 'plan.dart';
-import 'probe.dart' show withCheckers;
+import 'pool.dart';
 import 'sbapi.dart' show BoxControl, ClosedConnection;
 import 'stall.dart';
 
@@ -118,6 +124,18 @@ class AutoSettings {
   final Duration stallAfter; // a connection left on a dead route with no bytes this long is closed
   final int batch; // routes / servers tested at once when looking for one that answers
   final Duration failWindow; // failed requests of the current route within it = one check
+
+  /// How old a probe-pool answer (pool.dart) may be and still stand for a test of a server
+  /// the module has results for: a third of a check interval, at most 20 s. Misses are never
+  /// reused. For a server not tested yet by the module see [startAge].
+  Duration get reuse => Duration(milliseconds: min(checkEvery.inMilliseconds ~/ 3, 20000));
+
+  /// The same for a server the module has not tested yet (the first round after a
+  /// connect starts from the UI's ping): 2 minutes.
+  Duration get startAge => const Duration(minutes: 2);
+
+  /// The pool answer age a test of a server with [h] accepts.
+  Duration reuseFor(Health h) => h.ms == -2 ? startAge : reuse;
 
   /// The hold after [strikes] drops: 1, 2, 4 … minutes, up to [flapMax].
   Duration hold(int strikes) {
@@ -207,17 +225,23 @@ class AutoNet {
 }
 
 class _Group {
-  _Group(this.tag, Map g, {this.pair = false})
+  _Group(this.tag, Map g, {this.entry})
       : priority = g['pick'] == 'priority',
         pinned = g['pinned'] == true,
         keys = {for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) '${n['key']}'}.toList() {
     if (priority && keys.contains(g['chosen'])) now = g['chosen'] as String;
+    for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
+      final o = n['outbound'];
+      ids['${n['key']}'] = o is Map ? serverIdentity(o) : '$tag/${n['key']}'; // no outbound: nothing to share
+    }
   }
 
   final String tag;
   final bool priority, pinned;
-  final bool pair; // its servers dial through another group: a result is the whole chain's
+  final _Group? entry; // its servers dial through this group: a result is the whole chain's
+  bool get pair => entry != null;
   final List<String> keys;
+  final ids = <String, String>{}; // key → the server's pool identity (pool.dart)
   final health = <String, Health>{};
   String? now; // the server in use (key)
 
@@ -231,12 +255,13 @@ class _Route {
   _Route(int i, Map<String, dynamic> r)
       : id = '${r['id'] ?? routeTag(i)}',
         tag = routeTag(i),
-        entry = r['kind'] == 'chain' ? _Group(routeEntryTag(i), r['entry'] as Map) : null,
-        main = _Group(routeTag(i), r['main'] as Map, pair: r['kind'] == 'chain');
+        entry = r['kind'] == 'chain' ? _Group(routeEntryTag(i), r['entry'] as Map) : null {
+    main = _Group(routeTag(i), r['main'] as Map, entry: entry);
+  }
 
   final String id, tag;
   final _Group? entry;
-  final _Group main;
+  late final _Group main;
   final health = Health();
   bool checked = false; // tested in the running round
   bool up = false; // answered since its last strike: a drop from here is a strike
@@ -252,8 +277,10 @@ int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 typedef DelayTest = Future<int> Function(String tag, String url, int timeoutMs);
 
 class AutoService {
-  AutoService(this.api, Map<String, dynamic> plan, {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note})
+  AutoService(this.api, Map<String, dynamic> plan,
+      {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, ProbePool? pool})
       : settings = settings ?? AutoSettings.fromPlan(plan),
+        pool = pool ?? ProbePool.solo(),
         _clock = clock ?? _wallClock {
     final rs = planRoutes(plan);
     _routes = [for (var i = 0; i < rs.length; i++) _Route(i, rs[i])];
@@ -263,6 +290,13 @@ class AutoService {
 
   final BoxControl api;
   final DelayTest delay;
+
+  /// The probe pool (pool.dart): every test of a server goes through it, so what the other
+  /// modules or the UI's ping measured recently is not measured again, and the network
+  /// status Auto knows of (the OS offline, no route answering, the route in use missing)
+  /// goes into it for all of them. Without one given the service has its own, which reuses
+  /// nothing.
+  final ProbePool pool;
 
   /// Whether a site (`host:port`) opens through an outbound tag (probe.dart probeReach);
   /// null = cannot be told. Without it the sites of failed requests are not tried again.
@@ -300,10 +334,6 @@ class AutoService {
   /// is tested, moved or marked until it is back.
   bool offline = false;
 
-  /// The network may be down right now (offline, no route answers, the current one just
-  /// missed): what other checkers (fallback.dart, dns_failover.dart) must not judge in.
-  bool get networkUncertain => noNet || offline || _routes[index].health.fails > 0;
-
   /// Requests through the current route that could not open (see [onLog]) and the last.
   int requestFails = 0;
   Map<String, dynamic>? lastRequestFail;
@@ -332,6 +362,7 @@ class AutoService {
   final _failDests = <String, String>{}; // sites that got nothing back → the server's outbound tag
   final _blockedAt = <String, int>{}; // 'route site' → when it was reported
   int? _warmedAt; // when the spares were tested last
+  bool _directOk = false; // no route answers, but the direct path does (see _decide)
 
   /// Every move between routes and between Priority servers.
   Stream<AutoSwitch> get switches => _switches.stream;
@@ -417,6 +448,7 @@ class AutoService {
         saved.forEach((h, s) => h._load(s));
       } else {
         noNet = false;
+        _directOk = false;
         if (_lostAt != null) {
           final since = _lostAt;
           _lostAt = null;
@@ -436,6 +468,9 @@ class AutoService {
     } finally {
       _busy = false;
       final f = _routes[index].health.fails;
+      // the route in use missing is a doubt about the network until something answers
+      // (no route answering is one too, unless the direct path answers: the routes are at fault)
+      if (!_stopped && !offline) pool.doubt(noNet ? !_directOk : f > 0);
       _schedule(_kick
           ? Duration.zero
           : noNet
@@ -459,8 +494,10 @@ class AutoService {
         _emitNet('offline', null);
       }
       offline = true;
+      pool.offline(true);
     } else if (line.contains('updated default interface') && offline) {
       offline = false;
+      pool.offline(false);
       note?.call('auto: the system network is back: checking');
       _emitNet('online', _offlineAt);
       _offlineAt = null;
@@ -591,10 +628,30 @@ class AutoService {
     return ms >= 0 ? ms : _heal(g, key);
   }
 
+  /// The pool identity of a server (pool.dart): its outbound's fingerprint; a chain's exit is
+  /// measured through the entry server in use, so it is that pair's.
+  String _identity(_Group g, String key) {
+    final own = g.ids[key]!, e = g.entry;
+    return e == null ? own : pairIdentity(e.ids[e.current]!, own);
+  }
+
+  /// The pool identity of a member / group outbound tag of a route (`route0/key`), for the
+  /// other modules that test the same servers (fallback.dart's main flow); null = not ours.
+  String? identityOf(String tag) {
+    for (final r in _routes) {
+      for (final g in r.groups) {
+        final k = g.keyOf(tag);
+        if (k != null && g.ids.containsKey(k)) return _identity(g, k);
+      }
+    }
+    return null;
+  }
+
   /// The one test of a server: ms through the group member [key], -1 = no answer. The
   /// test URL, then the backup checks at once (withCheckers): it passes traffic when any
-  /// answers.
-  Future<int> _ping(_Group g, String key) => withCheckers((url) => _pingUrl(g.member(key), url), settings.url, settings.checkers);
+  /// answers. Through the pool: a fresh enough answer of the same server is the result.
+  Future<int> _ping(_Group g, String key) => pool.probe(_identity(g, key), (url) => _pingUrl(g.member(key), url),
+      url: settings.url, checkers: settings.checkers, maxAge: settings.reuseFor(g.of(key)));
 
   Future<int> _pingUrl(String tag, String url) => delay(tag, url, settings.timeoutMs);
 
@@ -727,6 +784,12 @@ class AutoService {
           note?.call('auto: no route answers: nothing is moved until one does');
           _emitNet('lost', null);
         }
+        // down for the others only when the direct path is silent too (an answer there is `up`:
+        // the network is fine, the routes are not); the direct path that cannot be tested
+        // proves nothing: a doubt (`unknown`), not `down`
+        final direct = await pool.directAnswers(url: settings.url, checkers: settings.checkers, timeoutMs: settings.timeoutMs);
+        _directOk = direct == true;
+        if (!_stopped && direct == false) pool.silent(true);
         return;
       }
       final old = cur.tag;

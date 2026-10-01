@@ -42,20 +42,23 @@ Map<String, dynamic> _plan(List<Map<String, dynamic>> rules, {Map<String, Map<St
     };
 
 class _Rig {
-  _Rig(Map<String, dynamic> plan, Map<String, int> alive, {AutoSettings? settings, this.uncertain = false, int Function()? clock}) {
+  _Rig(Map<String, dynamic> plan, Map<String, int> alive, {AutoSettings? settings, bool uncertain = false, int Function()? clock}) {
     final info = RoutingInfo();
     fake = FakeBox(buildConfig(plan, info: info), alive);
+    this.uncertain = uncertain;
     svc = FallbackService(fake, info.fallbacks,
         delay: fake.delayTest,
         settings: settings ?? const AutoSettings(failAfter: 2, flapGuard: false, stallAfter: Duration(milliseconds: 30)),
-        networkUncertain: () => uncertain,
+        pool: pool,
         clock: clock);
     svc.changes.listen(changes.add);
   }
 
   late final FakeBox fake;
   late final FallbackService svc;
-  bool uncertain;
+  final pool = ProbePool.solo(); // the network status Auto would write: a doubt / the OS offline
+  set uncertain(bool v) => pool.doubt(v);
+  set offline(bool v) => pool.offline(v);
   final changes = <FallbackChange>[];
 
   String on(String selector) => fake.groups[selector]!.now!;
@@ -212,9 +215,181 @@ void main() {
 
   test('a config with no target to fall back from has nothing to watch', () {
     final info = RoutingInfo();
-    buildConfig(_plan([_rule('r1', '', 'block')]), info: info);
+    buildConfig(_plan([_rule('r1', '', 'default')]), info: info);
     expect(info.fallbacks, isEmpty);
     final svc = FallbackService(FakeBox(buildConfig(_plan([])), {}), info.fallbacks, delay: (a, b, c) async => 0, settings: const AutoSettings());
     expect(svc.isEmpty, isTrue);
+  });
+
+  group('a target as the fallback', () {
+    Map<String, dynamic> two(List<Map<String, dynamic>> rules) => _plan(rules, targets: {
+          'src:a': unit('src:a', ['s::a1']),
+          'src:b': unit('src:b', ['s::b1']),
+        });
+    Map<String, int> alive() => {'s::a1': 20, 's::b1': 30};
+    String sel(_Rig r) => r.on('src:a~src:b');
+
+    test('config: [target, fallback target, main flow]; the fallback target is watched too', () async {
+      final r = _Rig(two([_rule('r1', 'src:a', 'src:b', name: 'Video')]), alive());
+      expect(r.fake.groups['src:a~src:b']!.all, ['src:a', 'src:b', 'proxy']);
+      await r.svc.check();
+      expect(r.fake.tested, containsAll(['src:a/s::a1', 'src:b/s::b1']));
+      expect([for (final t in r.svc.toJson()['targets'] as List) (t as Map)['target']], ['src:a', 'src:b']);
+    });
+
+    test('the target down: the fallback target; both down: the main flow; back step by step, journalled', () async {
+      final r = _Rig(two([_rule('r1', 'src:a', 'src:b', name: 'Video')]), alive());
+      await r.svc.check();
+      r.fake.alive.remove('s::a1');
+      await r.svc.check();
+      await r.svc.check();
+      expect(sel(r), 'src:b');
+      r.fake.alive.remove('s::b1');
+      await r.svc.check();
+      expect(sel(r), 'src:b', reason: 'one miss is not enough');
+      await r.svc.check();
+      expect(sel(r), 'proxy', reason: 'both down: the main flow');
+      expect([r.svc.isDown('src:a'), r.svc.isDown('src:b')], [true, true]);
+      // the fallback target answers again: it takes the traffic from the main flow
+      r.fake.alive['s::b1'] = 30;
+      await r.svc.check();
+      await r.svc.check();
+      expect(sel(r), 'src:b');
+      // the target answers again: back to it
+      r.fake.alive['s::a1'] = 20;
+      await r.svc.check();
+      await r.svc.check();
+      expect(sel(r), 'src:a');
+      await Future<void>.delayed(Duration.zero);
+      expect([for (final c in r.changes) '${c.target}>${c.to} ${c.rules.join('/')} ${c.back}'],
+          ['src:a>src:b Video false', 'src:a>main Video false', 'src:a>src:b Video true']);
+    });
+
+    test('both die in one round: one move, straight to the main flow', () async {
+      final r = _Rig(two([_rule('r1', 'src:a', 'src:b')]), alive());
+      await r.svc.check();
+      r.fake.alive.clear();
+      await r.svc.check();
+      await r.svc.check();
+      expect(sel(r), 'proxy');
+      await Future<void>.delayed(Duration.zero);
+      expect([for (final c in r.changes) '${c.to} ${c.back}'], ['main false']);
+    });
+
+    test('the target answers again while the fallback target is down: straight back, from the main flow', () async {
+      final r = _Rig(two([_rule('r1', 'src:a', 'src:b')]), {});
+      await r.svc.check();
+      await r.svc.check();
+      expect(sel(r), 'proxy');
+      r.fake.alive['s::a1'] = 20;
+      await r.svc.check();
+      await r.svc.check();
+      expect(sel(r), 'src:a');
+      await Future<void>.delayed(Duration.zero);
+      expect([for (final c in r.changes) '${c.to} ${c.back}'], ['main false', 'main true']);
+    });
+
+    test('a chain as the fallback target is tested at its exit through its entry', () async {
+      final r = _Rig(
+          _plan([_rule('r1', 'src:a', 'chain:c')], targets: {
+            'src:a': unit('src:a', ['s::a1']),
+            'chain:c': chain('chain:c', ['s::e'], ['s::t']),
+          }),
+          {'s::a1': 20, 's::e': 10, 's::t': 15});
+      await r.svc.check();
+      expect(r.fake.tested, contains('chain:c/s::t'));
+      r.fake.alive.remove('s::a1');
+      await r.svc.check();
+      await r.svc.check();
+      expect(r.on('src:a~chain:c'), 'chain:c');
+    });
+  });
+
+  group('the main flow as the target', () {
+    Map<String, dynamic> app(String fallback) => {
+          'routes': [unit('A', ['s::a'])],
+          'current': 0,
+          'auto': {'failAfter': 2, 'checkEvery': 60, 'flapGuard': false},
+          'routing': {
+            'fallback': 'main',
+            'targets': {'src:b': unit('src:b', ['s::b1'])},
+            'apps': [
+              {'id': 'com.x', 'kind': 'package', 'name': 'X', 'act': 'default', 'fallback': fallback},
+            ],
+          },
+        };
+    Map<String, int> alive() => {'s::a': 20, 's::b1': 30, 'direct': 5};
+
+    test('config: the selector [proxy, fallback target], the main flow its default; the fallback target is watched', () async {
+      final r = _Rig(app('src:b'), alive());
+      expect(r.fake.groups['proxy~src:b']!.all, ['proxy', 'src:b']);
+      expect(r.on('proxy~src:b'), 'proxy');
+      await r.svc.check();
+      expect(r.fake.tested.where((t) => t.endsWith('s::a')), isNotEmpty, reason: 'the main flow is tested at its server');
+      expect(r.fake.tested, contains('src:b/s::b1'));
+    });
+
+    test('the main flow dies while the network is up (direct answers): the fallback; Auto doubting the network does not stop it', () async {
+      final r = _Rig(app('block'), alive(), uncertain: true);
+      await r.svc.check();
+      r.fake.alive.remove('s::a');
+      await r.svc.check();
+      expect(r.on('proxy~block'), 'proxy', reason: 'one miss is not enough');
+      await r.svc.check();
+      expect(r.on('proxy~block'), 'block');
+      expect(r.svc.isDown('proxy'), isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect([for (final c in r.changes) '${c.target}>${c.to} ${c.rules}|${c.apps} ${c.back}'], ['proxy>block []|[X] false']);
+      r.fake.alive['s::a'] = 20;
+      await r.svc.check();
+      await r.svc.check();
+      expect(r.on('proxy~block'), 'proxy');
+      await Future<void>.delayed(Duration.zero);
+      expect(r.changes.last.back, isTrue);
+    });
+
+    test('a dead network is not a dead main flow: nothing answers, nothing is judged; neither is an offline OS', () async {
+      final r = _Rig(app('block'), alive(), uncertain: true);
+      await r.svc.check();
+      r.fake.alive.clear();
+      for (var i = 0; i < 4; i++) {
+        await r.svc.check();
+      }
+      expect(r.on('proxy~block'), 'proxy');
+      expect(r.svc.isDown('proxy'), isFalse);
+      r.fake.alive['direct'] = 5;
+      r.offline = true;
+      for (var i = 0; i < 4; i++) {
+        await r.svc.check();
+      }
+      expect(r.on('proxy~block'), 'proxy', reason: 'offline');
+      r.offline = false;
+      await r.svc.check();
+      await r.svc.check();
+      expect(r.on('proxy~block'), 'block', reason: 'online again, only the main flow is dead');
+    });
+
+    test('a fallback target answering tells a dead main flow from a dead network even with direct down', () async {
+      final r = _Rig(app('src:b'), {'s::a': 20, 's::b1': 30});
+      await r.svc.check();
+      r.fake.alive.remove('s::a');
+      await r.svc.check();
+      await r.svc.check();
+      expect(r.on('proxy~src:b'), 'src:b');
+    });
+
+    test('with the fallback target down too the selector stays on it (nothing is better)', () async {
+      final r = _Rig(app('src:b'), alive());
+      await r.svc.check();
+      r.fake.alive.remove('s::a');
+      await r.svc.check();
+      await r.svc.check();
+      expect(r.on('proxy~src:b'), 'src:b');
+      r.fake.alive.remove('s::b1');
+      for (var i = 0; i < 3; i++) {
+        await r.svc.check();
+      }
+      expect(r.on('proxy~src:b'), 'src:b');
+    });
   });
 }
