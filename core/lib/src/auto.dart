@@ -205,13 +205,13 @@ class AutoUnstable {
 }
 
 /// A site ([dest], `host:port`) that does not open through [route]'s server [server]
-/// while the node passes traffic, and opens through the route [via]: the app offers a
-/// rule (the site → [via]).
+/// while the node passes traffic, and opens through the route [via] (its server
+/// [viaServer]): the app offers a rule (the site → [via]).
 class AutoBlocked {
-  const AutoBlocked({required this.route, required this.server, required this.dest, required this.via, required this.at});
-  final String route, server, dest, via;
+  const AutoBlocked({required this.route, required this.server, required this.dest, required this.via, required this.viaServer, required this.at});
+  final String route, server, dest, via, viaServer;
   final int at;
-  Map<String, dynamic> toJson() => {'route': route, 'server': server, 'dest': dest, 'via': via, 'at': at};
+  Map<String, dynamic> toJson() => {'route': route, 'server': server, 'dest': dest, 'via': via, 'viaServer': viaServer, 'at': at};
 }
 
 /// The network came or went: [kind] `lost` (no route answers) / `restored`, `offline` (the
@@ -549,7 +549,7 @@ class AutoService {
       final key = '${cur.id} $dest', now = _clock();
       if (now - (_blockedAt[key] ?? -3600000) < 3600000) continue;
       _blockedAt[key] = now;
-      final b = AutoBlocked(route: cur.id, server: cur.main.current, dest: dest, via: alt!.id, at: now);
+      final b = AutoBlocked(route: cur.id, server: cur.main.current, dest: dest, via: alt!.id, viaServer: alt.main.current, at: now);
       blockedCount++;
       lastBlocked = b;
       note?.call('auto: $dest does not open through ${cur.id}, opens through ${alt.id}');

@@ -271,7 +271,8 @@ function mockEvSeed() {
   const warn = mockLog.lines.find(l => l.lvl === 'warn'), n0 = mockLog.lines[0];
   const Y = h => d0 - h * 36e5, M = m => Math.max(d0 + 1000, now - m * 6e4);
   const total = (s.nodes || []).length || 12;
-  const blocked = { host: 'rutracker.org', dest: 'rutracker.org:443', entry: a, server: key(0), route: a, via: b };
+  const bn = sourcesData[b] && sourcesData[b].nodes && sourcesData[b].nodes[0];
+  const blocked = { host: 'rutracker.org', dest: 'rutracker.org:443', entry: a, server: key(0), route: a, via: b, viaServer: bn ? b + '::' + bn.id : undefined };
   const list = [
     [Y(15.5), 'user', 'connect', 'info', { action: 'connect', entry: a }, 1],
     [Y(15.5) + 500, 'conn', 'connected', 'info', { entry: a, mode: 'tun', route: 'rules' }],

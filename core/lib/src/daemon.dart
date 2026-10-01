@@ -294,6 +294,7 @@ class Daemon {
         'server': b.server,
         'dest': b.dest,
         'via': b.via,
+        'viaServer': b.viaServer,
       });
     });
     auto.net.listen((n) {
