@@ -300,6 +300,11 @@ const liveBackend = {
   addEvent(ev) { return api('/api/events', { cat: ev.cat, type: ev.type, level: ev.level || 'info', own: !!ev.own, data: ev.data || {} }); },
   clearEvents() { return api('/api/events', null, 'DELETE'); },
   version() { return api('/api/version'); },
+  // App updates: the core has AppUpdater (appupdate.dart), but jormd has no /api/update yet (it waits for
+  // CoreService), so the page says so instead of showing the mock's fake release.
+  updateCheck() { return Promise.reject(Object.assign(new Error('notWired'), { code: 'notWired' })); },
+  updateDownload() { return Promise.reject(Object.assign(new Error('notWired'), { code: 'notWired' })); },
+  updateInstall() { return Promise.reject(Object.assign(new Error('notWired'), { code: 'notWired' })); },
   autoSettings(auto) { return api('/api/auto', { auto }); },
   closeConn(id) { return api('/api/connections' + (id ? '/' + encodeURIComponent(id) : ''), null, 'DELETE'); },
   // Backup = the snapshot the core stores; a restore replaces it and loads it at once.

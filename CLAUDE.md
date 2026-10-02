@@ -23,7 +23,7 @@ closes the top sheet and reopens the one it replaced (Add → Subscription), the
 Nodes edit mode: ✎ sits left of the Simple / Profiles tabs, ✓ while editing;
 the header never changes (search, ⚡, ⋮, + stay available in edit mode).
 
-Also: Logs tab (Events journal with filter, dots on the tab and notifications driven by it; Raw = sing-box + core lines, filter, search, follow), Settings → Data (backup,
+Also: Logs tab (Events journal with filter, dots on the tab and notifications driven by it; Raw = sing-box + core lines, filter, search, follow), Settings → Data (App updates block — `docs/updates.md`, mock feed only; backup,
 restore, about), Copy URL / share link, QR and Speed test in the Nodes ⋮ menus (QR encoder vendored in
 `36-qr.js`), the source error strip with Retry, filter / close in Live connections.
 
@@ -85,7 +85,8 @@ rules, rules-more, rules-services, rule-form, rule-new, rule-ip-resolve, rule-js
 rule-sets, apps, app-act, app-split, settings-dns, dns-resolve, dns-form, dns-failover, settings-conn, conn-proxy-auth, kill-on, kill-off-confirm, core-down-kept, core-down-direct, kill-blocking, core-recovering, settings-notif, text-large, text-large-rule,
 connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-raw, logs-search, logs-warn, logs-filter, logs-event-open, logs-new-below, nav-dots, toast-fly,
 qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, conn-sort, conn-menu, conn-filter-sheet, conn-open, conn-paused, source-error, tun-stack,
-dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test, speed-done, speed-fail.
+dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test, speed-done, speed-fail,
+update-available, update-progress, update-ready, update-error, update-uptodate (+ ru-update-available).
 Russian: `ru-<preset>` opens the preset in ru (ru-home, ru-nodes, ru-route, ru-settings, ru-rules, ru-rule-form,
 ru-logs, ru-profiles, ru-settings-auto, ru-settings-dns, ru-dock, ru-connections, ru-help; `all` skips them), or
 `--lang ru` on any preset. `node design/tools/check.mjs audit-ru [presets|all]` lists Latin text left on the page

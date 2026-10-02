@@ -1184,6 +1184,24 @@ textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:bre
 .testurl-custom .btn-primary{width:auto;padding:0 16px;font-size:15px}
 .testurl-hint{padding:6px 20px 12px}
 
+/* ── App updates (59-data.js renderUpdates) ── */
+#data-settings .set-row .btn-secondary{margin-left:8px}
+.upd-card{padding:12px 14px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.upd-head{display:flex;align-items:baseline;gap:8px}
+.upd-title{flex:1;min-width:0;font-size:15px;font-weight:600;color:var(--t1)}
+.upd-beta{margin-left:4px;padding:1px 6px;border-radius:6px;background:rgba(var(--warn-rgb),.15);color:var(--warn);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.upd-size{flex-shrink:0;font-size:13px;color:var(--t2)}
+.upd-notes-cap{font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--t3)}
+.upd-notes{font-size:13px;line-height:1.45;color:var(--t2);white-space:pre-line;overflow-wrap:anywhere}
+.upd-card .btn-primary{padding:11px;font-size:15px}
+.upd-bar{height:6px;border-radius:3px;background:rgba(var(--accent-rgb),.15);overflow:hidden}
+.upd-bar div{height:100%;background:var(--accent);transition:width .15s}
+.upd-line{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--t2)}
+.upd-line span{flex:1;min-width:0}
+.upd-line.ok{color:var(--active)}
+.upd-line.warn{color:var(--warn);overflow-wrap:anywhere}
+.upd-cancel{flex-shrink:0;background:none;border:none;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:4px 0}
+
 /* ── SpeedCard (38-speed.js) ── */
 .speed-card{padding:0 16px 14px;display:flex;flex-direction:column;align-items:stretch;gap:12px}
 .speed-node{display:flex;align-items:center;justify-content:center;gap:6px;min-width:0;font-size:13px;color:var(--t2)}
@@ -1550,7 +1568,7 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="settings-row" data-sheet="setnotif" onclick="openSheet('setnotif')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg></div><div style="flex:1"><div class="settings-label">Notifications</div><div class="settings-sub" id="setNotifSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setconn" onclick="openSheet('setconn')"><div class="set-ico" style="color:var(--warn);background:rgba(var(--warn-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><div style="flex:1"><div class="settings-label">Connection</div><div class="settings-sub">System proxy, kill switch, TUN</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
         <div class="settings-row" data-sheet="setdns" onclick="openDnsSettings()"><div class="set-ico" style="color:var(--active);background:rgba(var(--active-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><div style="flex:1"><div class="settings-label">DNS</div><div class="settings-sub" id="setDnsSub"></div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
-        <div class="settings-row" data-sheet="setdata" onclick="openDataSettings()"><div class="set-ico" style="color:var(--purple);background:rgba(var(--purple-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div style="flex:1"><div class="settings-label">Data</div><div class="settings-sub">Backup, about</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        <div class="settings-row" data-sheet="setdata" onclick="openDataSettings()"><div class="set-ico" style="color:var(--purple);background:rgba(var(--purple-rgb),.12)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div style="flex:1"><div class="settings-label">Data</div><div class="settings-sub">Updates, backup, about</div></div><svg class="settings-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
       </div>
     </div>
   </div><!-- /view-settings -->
@@ -3884,6 +3902,44 @@ Object.assign(I18N, { ru: {
   "https:// (DoH) · tls:// (DoT) · quic:// (DoQ) · udp:// or an IP · system": "https:// (DoH) · tls:// (DoT) · quic:// (DoQ) · udp:// или IP · system",
   "Disable sys proxy": "Отключить sys proxy",
   "Enter 0–{#0} ms": "Введите 0–{0} мс",
+
+  // ── App updates (Settings → Data, docs/updates.md) ──
+  "App updates": "Обновления приложения",
+  "Updates, backup, about": "Обновления, копия, о приложении",
+  "Version": "Версия",
+  "Check now": "Проверить",
+  "Not checked yet": "Ещё не проверялось",
+  "Checked at {0}": "Проверено в {0}",
+  "You are up to date": "Установлена последняя версия",
+  "A new version is out": "Вышла новая версия",
+  "Downloading…": "Скачивание…",
+  "Ready to install": "Готово к установке",
+  "Download failed": "Не удалось скачать",
+  "Update {0} available": "Доступна версия {0}",
+  "What's new": "Что нового",
+  "Download & install": "Скачать и установить",
+  "Downloading {#0}% · {1} of {2}": "Скачивание {0}% · {1} из {2}",
+  "Downloaded and checked": "Скачано и проверено",
+  "Install": "Установить",
+  "Installing the update — the app restarts when it is done": "Устанавливаю обновление — приложение перезапустится по окончании",
+  "Auto-check": "Автопроверка",
+  "On launch and once a day. Nothing is installed without asking": "При запуске и раз в сутки. Без вашего согласия ничего не устанавливается",
+  "Channel": "Канал",
+  "Beta gets new versions earlier": "Бета получает новые версии раньше",
+  "Update channel": "Канал обновлений",
+  "Stable": "Стабильный",
+  "Beta": "Бета",
+  "beta": "бета",
+  "Tested releases": "Проверенные релизы",
+  "Early builds: new things first, more bugs": "Ранние сборки: новое раньше, ошибок больше",
+  "No update server answered. Connect to the VPN and try again": "Ни один сервер обновлений не ответил. Подключитесь к VPN и повторите",
+  "The update information could not be verified": "Не удалось проверить подлинность данных об обновлении",
+  "The downloaded file is damaged": "Скачанный файл повреждён",
+  "Cannot save the file: check the free space": "Не удалось сохранить файл: проверьте свободное место",
+  "There is no file for this device": "Для этого устройства файла нет",
+  "This version has to be downloaded by hand": "Эту версию нужно скачать вручную",
+  "Update checks are not available in this build yet": "Проверка обновлений в этой сборке пока недоступна",
+  "Something went wrong": "Что-то пошло не так",
 } });
 /* ══════════════════════ DATA MODEL ══════════════════════ */
 
@@ -4037,6 +4093,18 @@ function profileNodeCount(p) { return profileNodeRefs(p).length; }
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 let mockKill = null;   // the last kill switch settings the mock "core" got
+// The mock update feed (docs/updates.md; core: appupdate.dart, not wired to jormd until CoreService
+// exists). find: a newer version is out; checkFails / downloadFails: an error code of the core
+// (network, badSignature, hash, size, disk, noAsset, schema); pauseAt: the download stands at this %.
+const mockUpdate = { find: true, checkFails: null, downloadFails: null, pauseAt: null, tick: 140, step: 9 };
+const mockRelease = ch => ({
+  version: ch === 'beta' ? '0.3.0-beta.1' : '0.2.0', build: ch === 'beta' ? 14 : 12, channel: ch, forced: false, size: 58.4 * 1048576,
+  file: 'jormungand-0.2.0-arm64-v8a.apk', via: 'direct',
+  notes: ch === 'beta'
+    ? { en: 'New: rule sets update in the background.\nAuto mode: faster return to the first route.', ru: 'Новое: наборы правил обновляются в фоне.\nРежим Auto: быстрее возврат на первый маршрут.' }
+    : { en: 'Auto mode switches faster after a dead server.\nNew: Settings → Data → App updates.\nFixed: the rules list no longer jumps when a rule is added.', ru: 'Режим Auto быстрее переключается после упавшего узла.\nНовое: Настройки → Данные → Обновления приложения.\nИсправлено: список правил больше не прыгает при добавлении правила.' },
+});
+const mockUpdateError = code => Object.assign(new Error(code), { code });
 let backend = {
   live: false,
   // First fetch of a new subscription: fills s.nodes (and usage / expire).
@@ -4203,6 +4271,30 @@ let backend = {
   clearEvents() { mockEvSeed(); mockEv.list = []; return Promise.resolve(); },
   // Settings → Data → About: versions and where the core keeps its data (mock: no core).
   version() { return Promise.resolve({ core: null, singBox: null, dataDir: null }); },
+  // App updates (docs/updates.md → API). Check: {phase: 'available', offer} | {phase: 'upToDate'}, or a
+  // rejection with .code. Download: resolves when the file is verified; onProgress(received bytes);
+  // ctl.cancelled stops it (code 'cancelled'). Install: the platform side takes the file over.
+  updateCheck(channel) {
+    return wait(1100).then(() => {
+      if (mockUpdate.checkFails) throw mockUpdateError(mockUpdate.checkFails);
+      return mockUpdate.find ? { phase: 'available', offer: mockRelease(channel) } : { phase: 'upToDate' };
+    });
+  },
+  updateDownload(offer, onProgress, ctl) {
+    return new Promise((resolve, reject) => {
+      let pct = 0;
+      const tick = () => {
+        if (ctl && ctl.cancelled) return reject(mockUpdateError('cancelled'));
+        pct = Math.min(100, pct + mockUpdate.step, mockUpdate.pauseAt == null ? 100 : Math.max(pct, mockUpdate.pauseAt));
+        onProgress(offer.size * pct / 100);
+        if (mockUpdate.downloadFails && pct >= 40) return reject(mockUpdateError(mockUpdate.downloadFails));
+        if (pct >= 100) return resolve({ file: offer.file });
+        setTimeout(tick, mockUpdate.tick);
+      };
+      setTimeout(tick, mockUpdate.tick);
+    });
+  },
+  updateInstall(offer) { return wait(300); },
   // Backup: the state snapshot the core stores (95-live.js liveSnapshot), and back.
   exportState() { return Promise.resolve(liveSnapshot()); },
   importState(snap) { liveApply(snap); return Promise.resolve(); },
@@ -9098,7 +9190,8 @@ const genCfg = {
   connectOnLaunch: false, // connect as soon as the app opens
   pingOnLaunch: true,     // ping the top Auto entries by priority and the rules' targets on open
   clipboard: true,        // offer to import a subscription / server link found in the clipboard
-  updates: true,          // check for app updates
+  updates: true,          // Auto-check for app updates (Settings → Data → App updates, 59-data.js)
+  updChannel: 'stable',   // 'stable' | 'beta' (docs/updates.md)
   nodeSort: 'order',      // Nodes ⋮ → Sort nodes (30-nodes.js), kept between launches
 };
 const LANGS = { en: 'English', ru: 'Русский' };
@@ -9122,7 +9215,6 @@ function renderGeneral() {
     <div class="set-caption">Other</div>
     <div class="set-group">
       ${row('clipboard', 'Links in the clipboard', 'On open, offer to add a subscription or server link you copied')}
-      ${row('updates', 'Check for app updates', 'Once a day; nothing is installed without asking')}
     </div>`;
   const sub = document.getElementById('setGeneralSub');
   if (sub) sub.textContent = LANGS[genCfg.lang] + (genCfg.connectOnLaunch ? ' · connects on launch' : '');
@@ -9132,6 +9224,7 @@ function setGenCfg(key, v) {
   if (key === 'lang') {
     I18N.setLang(v);   // every text of the page is translated in place (03-i18n.js)
     renderEvents();    // dates in the rows are made by the locale
+    renderUpdates();   // release notes follow the language
   }
   renderGeneral(); renderConnSettings();
 }   // Kill switch → while the app is closed depends on two of them
@@ -9425,7 +9518,7 @@ function renderNotif() {
 }
 function setNotifCfg(key, v) { notifCfg[key] = v; renderNotif(); }
 /* ══════════════════════ SETTINGS → DATA, LATENCY TEST URL ══════════════════════
-   Data: Backup (the state snapshot the core keeps as one JSON file: sources with their
+   Data: App updates (below), Backup (the state snapshot the core keeps as one JSON file: sources with their
    servers, profiles, chains, Route order, settings), Restore (a file → confirm → it
    replaces everything), About (versions, the data folder).
    Latency test URL (Settings → Connection): what ping and Fastest measure against; sent
@@ -9449,6 +9542,7 @@ function renderDataSettings(v) {
   const wait = '<span class="settings-value">…</span>';
   const noCore = v && !backend.live;
   document.getElementById('data-settings').innerHTML = `
+    <div id="upd-block"></div>
     <div class="set-caption">Backup</div>
     <div class="set-group">
       <div class="set-row tap" id="data-export" onclick="exportBackup()"><div class="set-label" style="flex:1">Export backup<div class="set-hint">Sources with their servers, profiles, chains, Route order, rules, DNS and settings — one JSON file</div></div>${CLOUD_ICON.down}</div>
@@ -9460,6 +9554,124 @@ function renderDataSettings(v) {
       <div class="set-row"><div class="set-label" style="flex:1">Core</div>${!v ? wait : noCore ? val('', 'not connected') : val(v.core, '—')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">sing-box</div>${!v ? wait : noCore ? val('', '—') : val(v.singBox, 'not found')}</div>
       ${v && v.dataDir ? `<div class="set-row"><div class="set-label" style="flex:1;min-width:0">Data folder<div class="set-hint data-dir">${esc(v.dataDir)}</div></div></div>` : ''}
+    </div>`;
+  renderUpdates();
+}
+
+/* ── App updates (docs/updates.md) ──
+   The block at the top of Settings → Data. `upd` is the status the core's AppUpdater reports
+   (phase idle / checking / upToDate / available / downloading / ready / failed, the offer, the
+   bytes received); it is not saved. Auto-check and Channel are genCfg.updates / updChannel (backup).
+   (Flutter: AppUpdateTile over the core's AppUpdater; install = the platform's UpdateInstaller.) */
+
+const upd = { phase: 'idle', offer: null, received: 0, error: null, stage: null, checkedAt: null, file: false, ctl: null };
+const UPD_ERRORS = {
+  network: 'No update server answered. Connect to the VPN and try again',
+  badSignature: 'The update information could not be verified',
+  hash: 'The downloaded file is damaged',
+  size: 'The downloaded file is damaged',
+  disk: 'Cannot save the file: check the free space',
+  noAsset: 'There is no file for this device',
+  schema: 'This version has to be downloaded by hand',
+  notWired: 'Update checks are not available in this build yet',
+};
+const updErrorText = e => UPD_ERRORS[e && e.code] || (e && e.message) || 'Something went wrong';
+
+function updCheck() {
+  if (upd.phase === 'checking' || upd.phase === 'downloading') return;
+  const had = upd.file && upd.offer ? upd.offer.version : null;   // a downloaded file is not lost by another check
+  upd.phase = 'checking'; upd.error = null;
+  renderUpdates();
+  backend.updateCheck(genCfg.updChannel).then(r => {
+    upd.checkedAt = Date.now();
+    if (r.phase === 'available') {
+      upd.offer = r.offer;
+      upd.file = had === r.offer.version;
+      upd.phase = upd.file ? 'ready' : 'available';
+    } else {
+      upd.offer = null; upd.file = false; upd.phase = 'upToDate';
+    }
+  }, e => { upd.offer = null; upd.file = false; upd.phase = 'failed'; upd.stage = 'check'; upd.error = updErrorText(e); }).then(renderUpdates);
+}
+
+function updDownload() {
+  if (!upd.offer || upd.phase === 'downloading') return;
+  upd.phase = 'downloading'; upd.received = 0; upd.error = null; upd.ctl = { cancelled: false };
+  const ctl = upd.ctl;
+  renderUpdates();
+  backend.updateDownload(upd.offer, n => { upd.received = n; renderUpdates(); }, ctl).then(() => {
+    upd.file = true; upd.phase = 'ready';
+  }, e => {
+    if (e && e.code === 'cancelled') { upd.phase = 'available'; return; }   // the partial file stays for a resume
+    upd.phase = 'failed'; upd.stage = 'download'; upd.error = updErrorText(e);
+  }).then(renderUpdates);
+}
+
+function updCancel() { if (upd.ctl) upd.ctl.cancelled = true; }
+
+function updInstall() {
+  if (!upd.offer || !upd.file) return;
+  backend.updateInstall(upd.offer).then(() => toast('Installing the update — the app restarts when it is done'), e => toast(updErrorText(e)));
+}
+
+function setUpdCfg(key, v) {
+  genCfg[key] = v;
+  liveSave();
+  renderUpdates();
+}
+
+const UPD_CHANNELS = { stable: ['Stable', 'Tested releases'], beta: ['Beta', 'Early builds: new things first, more bugs'] };
+function openUpdChannel() {
+  openActions('Update channel', Object.entries(UPD_CHANNELS).map(([k, [name, hint]]) =>
+    menuRow(genCfg.updChannel === k ? ICON.check : '<span class="menu-ico-gap"></span>', `${name}<div class="menu-sub">${hint}</div>`, `closeSheet('actions');setUpdChannel('${k}')`)).join(''));
+}
+function setUpdChannel(k) {
+  if (genCfg.updChannel === k) return;
+  setUpdCfg('updChannel', k);
+  // an offer belongs to the channel it was found on; a download in progress is left alone
+  if (upd.phase !== 'downloading' && upd.phase !== 'checking') { upd.phase = 'idle'; upd.offer = null; upd.file = false; upd.error = null; renderUpdates(); }
+}
+
+function renderUpdates() {
+  const el = document.getElementById('upd-block');
+  if (!el) return;
+  const p = upd.phase, o = upd.offer, busy = p === 'checking' || p === 'downloading';
+  const at = upd.checkedAt ? t('Checked at {0}', new Date(upd.checkedAt).toLocaleTimeString(I18N.locale(), { hour: '2-digit', minute: '2-digit' })) : 'Not checked yet';
+  const checkFailed = p === 'failed' && upd.stage === 'check';
+  const hint = {
+    idle: at,
+    checking: 'Checking…',
+    upToDate: `You are up to date · ${at}`,
+    available: 'A new version is out',
+    downloading: 'Downloading…',
+    ready: 'Ready to install',
+    failed: checkFailed ? esc(upd.error) : 'Download failed',
+  }[p];
+  const btn = checkFailed ? 'Retry' : 'Check now';
+  const notes = o ? esc(o.notes[genCfg.lang] || o.notes.en || '') : '';
+  const pct = o ? Math.round(upd.received / o.size * 100) : 0;
+  const card = !o || p === 'checking' ? '' : `
+    <div class="upd-card" id="upd-card">
+      <div class="upd-head"><div class="upd-title">${t('Update {0} available', esc(o.version))}${o.channel === 'beta' ? ' <span class="upd-beta">beta</span>' : ''}</div><div class="upd-size mono">${fmtBytes(o.size)}</div></div>
+      <div class="upd-notes-cap">What's new</div>
+      <div class="upd-notes" data-notr>${notes}</div>
+      ${p === 'available' ? '<button class="btn-primary" id="upd-download" onclick="updDownload()">Download &amp; install</button>' : ''}
+      ${p === 'downloading' ? `<div class="upd-bar"><div style="width:${pct}%"></div></div>
+        <div class="upd-line"><span id="upd-pct">${t('Downloading {0}% · {1} of {2}', pct, fmtBytes(upd.received), fmtBytes(o.size))}</span><button class="upd-cancel" onclick="updCancel()">Cancel</button></div>` : ''}
+      ${p === 'ready' ? '<div class="upd-line ok">Downloaded and checked</div><button class="btn-primary" id="upd-install" onclick="updInstall()">Install</button>' : ''}
+      ${p === 'failed' ? `<div class="upd-line warn">${esc(upd.error)}</div><button class="btn-primary" id="upd-retry" onclick="updDownload()">Retry</button>` : ''}
+    </div>`;
+  const toggle = `<div class="mini-toggle ${genCfg.updates ? 'on' : ''}" id="upd-auto" onclick="setUpdCfg('updates',!genCfg.updates)"><div class="mini-toggle-thumb"></div></div>`;
+  el.innerHTML = `
+    <div class="set-caption">App updates</div>
+    <div class="set-group">
+      <div class="set-row"><div class="set-label" style="flex:1;min-width:0">Version <span class="mono">${esc(APP_VERSION)}</span>
+        <div class="set-hint${p === 'failed' ? ' warn' : ''}" id="upd-status">${hint}</div></div>
+        <button class="btn-secondary" id="upd-check" onclick="updCheck()" ${busy ? 'disabled' : ''}>${btn}</button></div>
+      ${card}
+      <div class="set-row" data-key="updates"><div class="set-label" style="flex:1">Auto-check<div class="set-hint">On launch and once a day. Nothing is installed without asking</div></div>${toggle}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">Channel<div class="set-hint">Beta gets new versions earlier</div></div>
+        <button class="set-value" id="upd-channel" onclick="openUpdChannel()">${UPD_CHANNELS[genCfg.updChannel][0]}${CHEVRON_R}</button></div>
     </div>`;
 }
 
@@ -11787,6 +11999,11 @@ const liveBackend = {
   addEvent(ev) { return api('/api/events', { cat: ev.cat, type: ev.type, level: ev.level || 'info', own: !!ev.own, data: ev.data || {} }); },
   clearEvents() { return api('/api/events', null, 'DELETE'); },
   version() { return api('/api/version'); },
+  // App updates: the core has AppUpdater (appupdate.dart), but jormd has no /api/update yet (it waits for
+  // CoreService), so the page says so instead of showing the mock's fake release.
+  updateCheck() { return Promise.reject(Object.assign(new Error('notWired'), { code: 'notWired' })); },
+  updateDownload() { return Promise.reject(Object.assign(new Error('notWired'), { code: 'notWired' })); },
+  updateInstall() { return Promise.reject(Object.assign(new Error('notWired'), { code: 'notWired' })); },
   autoSettings(auto) { return api('/api/auto', { auto }); },
   closeConn(id) { return api('/api/connections' + (id ? '/' + encodeURIComponent(id) : ''), null, 'DELETE'); },
   // Backup = the snapshot the core stores; a restore replaces it and loads it at once.

@@ -19,7 +19,7 @@
 ///   ruleSets: [{ name, url, format: 'srs'|'json', via, every /*s*/ }],   // the user's lists
 ///   geo: { geosite: {via, every}, geoip: {via, every} },  // the built-in lists
 ///   dns: { servers: [{ id, addr, via: 'direct'|'vpn', on }],            // in priority order
-///          resolve: 'auto'|'off'|<dns id>,    // `resolve` before IP rules (proxy port only); default 'auto'
+///          resolve: 'auto'|'off'|<dns id>,    // `resolve` before IP rules (proxy ports only, also in TUN); default 'auto'
 ///          hijack?: bool }                    // TUN: the core answers every DNS query; default on (config.dart)
 /// }
 /// ```
@@ -495,9 +495,11 @@ class _Builder {
     final tag = '$target~$fallbackTag';
     var f = out.fallbacks.where((x) => x.tag == tag).firstOrNull;
     if (f == null) {
-      final targets = r['targets'] as Map;
-      f = TargetFallback(tag, target, main ? const {} : targets[target] as Map, fallbackTag,
-          fallbackTarget: fbTarget, fallbackSpec: fbTarget == null ? null : targets[fbTarget] as Map);
+      // no `targets` key = an empty catalog: only the main flow has a selector then (a catalog
+      // target that is not there never gets here, [_target] said null)
+      final targets = (r['targets'] as Map?) ?? const {};
+      f = TargetFallback(tag, target, main ? const {} : (targets[target] as Map?) ?? const {}, fallbackTag,
+          fallbackTarget: fbTarget, fallbackSpec: fbTarget == null ? null : (targets[fbTarget] as Map?) ?? const {});
       out.fallbacks.add(f);
       out.outbounds.add({
         'type': 'selector',
@@ -584,11 +586,12 @@ class _Builder {
       // IP conditions need the destination's IP: resolve it once, before the first such rule
       // that has not asked to see IPs only when known (`ipTunOnly`). Later rules see the
       // resolved address whatever their flag says (sing-box resolves once).
-      // In TUN the destination IP arrives as it is: no step ("Resolve for IP rules" is for the proxy port).
-      if (plan['mode'] != 'tun' && !resolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
+      // In TUN the destination IP of tun-in traffic arrives as it is: no step for it; the proxy
+      // ports (mixed-in, sys-in) stay open in TUN and bring domains, so the step is limited to them.
+      if (!resolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
         resolved = true;
         final step = _resolveAction();
-        if (step != null) out._add(step);
+        if (step != null) out._add({if (plan['mode'] == 'tun') 'inbound': const ['mixed-in', 'sys-in'], ...step});
       }
       out._add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()},
           RuleOrigin('user', '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}', id: '${rule['id'] ?? ''}'));

@@ -291,6 +291,28 @@ void main() {
       expect(rules[3]['outbound'], 'direct');
     });
 
+    test('no `targets` key at all: the main flow keeps its "If unavailable", a catalog target is simply unavailable (no crash)', () {
+      final c = buildConfig(_plan({
+        'fallback': 'direct',
+        'rules': [
+          _rule({'domain': _g({'domain_suffix': ['a.com']})}, target: 'src:a', fallback: 'block'),
+          _rule({'domain': _g({'domain_suffix': ['b.com']})}, target: 'src:a', fallback: 'chain:c', id: 'r2'),
+          _rule({'domain': _g({'domain_suffix': ['c.com']})}, fallback: 'block', id: 'r3'),
+        ],
+        'apps': [
+          {'id': 'a.exe', 'kind': 'process', 'act': 'default', 'fallback': 'block'},
+          {'id': 'b.exe', 'kind': 'process', 'act': 'proxy', 'target': 'src:a', 'fallback': 'direct'},
+        ],
+      }));
+      final rules = _rules(c);
+      expect(rules[0], {'process_name': ['a.exe'], 'action': 'route', 'outbound': 'proxy~block'});
+      expect(rules[1], {'process_name': ['b.exe'], 'action': 'route', 'outbound': 'direct'}, reason: 'unavailable target → its If unavailable');
+      expect(rules[2], {'domain_suffix': ['a.com'], 'action': 'reject'});
+      expect(rules[3], {'domain_suffix': ['b.com'], 'action': 'route', 'outbound': 'direct'}, reason: 'the fallback target is unavailable too → the global default');
+      expect(rules[4], {'domain_suffix': ['c.com'], 'action': 'route', 'outbound': 'proxy~block'});
+      expect(_out(c, 'proxy~block'), isNotNull);
+    });
+
     test('If unavailable → another target: selector [target, fallback target, main flow], both targets\' groups exist, a chain works as the fallback', () {
       final targets = {
         'src:a': {'kind': 'unit', 'main': _grp([_node, _node2], prefix: 'a')},

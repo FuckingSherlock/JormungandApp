@@ -1,5 +1,5 @@
 /* ══════════════════════ SETTINGS → DATA, LATENCY TEST URL ══════════════════════
-   Data: Backup (the state snapshot the core keeps as one JSON file: sources with their
+   Data: App updates (below), Backup (the state snapshot the core keeps as one JSON file: sources with their
    servers, profiles, chains, Route order, settings), Restore (a file → confirm → it
    replaces everything), About (versions, the data folder).
    Latency test URL (Settings → Connection): what ping and Fastest measure against; sent
@@ -23,6 +23,7 @@ function renderDataSettings(v) {
   const wait = '<span class="settings-value">…</span>';
   const noCore = v && !backend.live;
   document.getElementById('data-settings').innerHTML = `
+    <div id="upd-block"></div>
     <div class="set-caption">Backup</div>
     <div class="set-group">
       <div class="set-row tap" id="data-export" onclick="exportBackup()"><div class="set-label" style="flex:1">Export backup<div class="set-hint">Sources with their servers, profiles, chains, Route order, rules, DNS and settings — one JSON file</div></div>${CLOUD_ICON.down}</div>
@@ -34,6 +35,124 @@ function renderDataSettings(v) {
       <div class="set-row"><div class="set-label" style="flex:1">Core</div>${!v ? wait : noCore ? val('', 'not connected') : val(v.core, '—')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">sing-box</div>${!v ? wait : noCore ? val('', '—') : val(v.singBox, 'not found')}</div>
       ${v && v.dataDir ? `<div class="set-row"><div class="set-label" style="flex:1;min-width:0">Data folder<div class="set-hint data-dir">${esc(v.dataDir)}</div></div></div>` : ''}
+    </div>`;
+  renderUpdates();
+}
+
+/* ── App updates (docs/updates.md) ──
+   The block at the top of Settings → Data. `upd` is the status the core's AppUpdater reports
+   (phase idle / checking / upToDate / available / downloading / ready / failed, the offer, the
+   bytes received); it is not saved. Auto-check and Channel are genCfg.updates / updChannel (backup).
+   (Flutter: AppUpdateTile over the core's AppUpdater; install = the platform's UpdateInstaller.) */
+
+const upd = { phase: 'idle', offer: null, received: 0, error: null, stage: null, checkedAt: null, file: false, ctl: null };
+const UPD_ERRORS = {
+  network: 'No update server answered. Connect to the VPN and try again',
+  badSignature: 'The update information could not be verified',
+  hash: 'The downloaded file is damaged',
+  size: 'The downloaded file is damaged',
+  disk: 'Cannot save the file: check the free space',
+  noAsset: 'There is no file for this device',
+  schema: 'This version has to be downloaded by hand',
+  notWired: 'Update checks are not available in this build yet',
+};
+const updErrorText = e => UPD_ERRORS[e && e.code] || (e && e.message) || 'Something went wrong';
+
+function updCheck() {
+  if (upd.phase === 'checking' || upd.phase === 'downloading') return;
+  const had = upd.file && upd.offer ? upd.offer.version : null;   // a downloaded file is not lost by another check
+  upd.phase = 'checking'; upd.error = null;
+  renderUpdates();
+  backend.updateCheck(genCfg.updChannel).then(r => {
+    upd.checkedAt = Date.now();
+    if (r.phase === 'available') {
+      upd.offer = r.offer;
+      upd.file = had === r.offer.version;
+      upd.phase = upd.file ? 'ready' : 'available';
+    } else {
+      upd.offer = null; upd.file = false; upd.phase = 'upToDate';
+    }
+  }, e => { upd.offer = null; upd.file = false; upd.phase = 'failed'; upd.stage = 'check'; upd.error = updErrorText(e); }).then(renderUpdates);
+}
+
+function updDownload() {
+  if (!upd.offer || upd.phase === 'downloading') return;
+  upd.phase = 'downloading'; upd.received = 0; upd.error = null; upd.ctl = { cancelled: false };
+  const ctl = upd.ctl;
+  renderUpdates();
+  backend.updateDownload(upd.offer, n => { upd.received = n; renderUpdates(); }, ctl).then(() => {
+    upd.file = true; upd.phase = 'ready';
+  }, e => {
+    if (e && e.code === 'cancelled') { upd.phase = 'available'; return; }   // the partial file stays for a resume
+    upd.phase = 'failed'; upd.stage = 'download'; upd.error = updErrorText(e);
+  }).then(renderUpdates);
+}
+
+function updCancel() { if (upd.ctl) upd.ctl.cancelled = true; }
+
+function updInstall() {
+  if (!upd.offer || !upd.file) return;
+  backend.updateInstall(upd.offer).then(() => toast('Installing the update — the app restarts when it is done'), e => toast(updErrorText(e)));
+}
+
+function setUpdCfg(key, v) {
+  genCfg[key] = v;
+  liveSave();
+  renderUpdates();
+}
+
+const UPD_CHANNELS = { stable: ['Stable', 'Tested releases'], beta: ['Beta', 'Early builds: new things first, more bugs'] };
+function openUpdChannel() {
+  openActions('Update channel', Object.entries(UPD_CHANNELS).map(([k, [name, hint]]) =>
+    menuRow(genCfg.updChannel === k ? ICON.check : '<span class="menu-ico-gap"></span>', `${name}<div class="menu-sub">${hint}</div>`, `closeSheet('actions');setUpdChannel('${k}')`)).join(''));
+}
+function setUpdChannel(k) {
+  if (genCfg.updChannel === k) return;
+  setUpdCfg('updChannel', k);
+  // an offer belongs to the channel it was found on; a download in progress is left alone
+  if (upd.phase !== 'downloading' && upd.phase !== 'checking') { upd.phase = 'idle'; upd.offer = null; upd.file = false; upd.error = null; renderUpdates(); }
+}
+
+function renderUpdates() {
+  const el = document.getElementById('upd-block');
+  if (!el) return;
+  const p = upd.phase, o = upd.offer, busy = p === 'checking' || p === 'downloading';
+  const at = upd.checkedAt ? t('Checked at {0}', new Date(upd.checkedAt).toLocaleTimeString(I18N.locale(), { hour: '2-digit', minute: '2-digit' })) : 'Not checked yet';
+  const checkFailed = p === 'failed' && upd.stage === 'check';
+  const hint = {
+    idle: at,
+    checking: 'Checking…',
+    upToDate: `You are up to date · ${at}`,
+    available: 'A new version is out',
+    downloading: 'Downloading…',
+    ready: 'Ready to install',
+    failed: checkFailed ? esc(upd.error) : 'Download failed',
+  }[p];
+  const btn = checkFailed ? 'Retry' : 'Check now';
+  const notes = o ? esc(o.notes[genCfg.lang] || o.notes.en || '') : '';
+  const pct = o ? Math.round(upd.received / o.size * 100) : 0;
+  const card = !o || p === 'checking' ? '' : `
+    <div class="upd-card" id="upd-card">
+      <div class="upd-head"><div class="upd-title">${t('Update {0} available', esc(o.version))}${o.channel === 'beta' ? ' <span class="upd-beta">beta</span>' : ''}</div><div class="upd-size mono">${fmtBytes(o.size)}</div></div>
+      <div class="upd-notes-cap">What's new</div>
+      <div class="upd-notes" data-notr>${notes}</div>
+      ${p === 'available' ? '<button class="btn-primary" id="upd-download" onclick="updDownload()">Download &amp; install</button>' : ''}
+      ${p === 'downloading' ? `<div class="upd-bar"><div style="width:${pct}%"></div></div>
+        <div class="upd-line"><span id="upd-pct">${t('Downloading {0}% · {1} of {2}', pct, fmtBytes(upd.received), fmtBytes(o.size))}</span><button class="upd-cancel" onclick="updCancel()">Cancel</button></div>` : ''}
+      ${p === 'ready' ? '<div class="upd-line ok">Downloaded and checked</div><button class="btn-primary" id="upd-install" onclick="updInstall()">Install</button>' : ''}
+      ${p === 'failed' ? `<div class="upd-line warn">${esc(upd.error)}</div><button class="btn-primary" id="upd-retry" onclick="updDownload()">Retry</button>` : ''}
+    </div>`;
+  const toggle = `<div class="mini-toggle ${genCfg.updates ? 'on' : ''}" id="upd-auto" onclick="setUpdCfg('updates',!genCfg.updates)"><div class="mini-toggle-thumb"></div></div>`;
+  el.innerHTML = `
+    <div class="set-caption">App updates</div>
+    <div class="set-group">
+      <div class="set-row"><div class="set-label" style="flex:1;min-width:0">Version <span class="mono">${esc(APP_VERSION)}</span>
+        <div class="set-hint${p === 'failed' ? ' warn' : ''}" id="upd-status">${hint}</div></div>
+        <button class="btn-secondary" id="upd-check" onclick="updCheck()" ${busy ? 'disabled' : ''}>${btn}</button></div>
+      ${card}
+      <div class="set-row" data-key="updates"><div class="set-label" style="flex:1">Auto-check<div class="set-hint">On launch and once a day. Nothing is installed without asking</div></div>${toggle}</div>
+      <div class="set-row"><div class="set-label" style="flex:1">Channel<div class="set-hint">Beta gets new versions earlier</div></div>
+        <button class="set-value" id="upd-channel" onclick="openUpdChannel()">${UPD_CHANNELS[genCfg.updChannel][0]}${CHEVRON_R}</button></div>
     </div>`;
 }
 

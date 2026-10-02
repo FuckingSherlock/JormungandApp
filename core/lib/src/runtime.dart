@@ -19,8 +19,40 @@ class SingBoxError implements Exception {
   String toString() => message;
 }
 
-/// One sing-box process (Flutter on mobile: libbox instead of a process).
-class SingBoxProcess {
+/// One running sing-box, as the core sees it: the seam where a platform plugs in its own way
+/// to run it (a process on desktop, [SingBoxProcess]; libbox inside the app on Android).
+/// The core starts it with a finished config, listens to its lines and its exit, and talks
+/// to it only through [api] (sbapi.dart).
+abstract interface class BoxRunner {
+  bool get running;
+
+  /// The process id, null when there is none (libbox runs in the app's own process).
+  int? get pid;
+
+  /// sing-box's API service while it runs, its streams open.
+  SingBoxApi? get api;
+
+  /// Every line sing-box writes, as it comes.
+  void Function(String line)? onLog;
+
+  /// sing-box stopped on its own after it had come up (not called for [stop] or a failed start).
+  void Function(int code)? onExit;
+
+  /// A line of the core's own in the log, next to sing-box's.
+  void note(String line);
+
+  /// Starts it with [config] (the runner adds the API service) and waits until it is up;
+  /// throws [SingBoxError] with the reason when it is not.
+  Future<void> start(Map<String, dynamic> config);
+
+  Future<void> stop();
+}
+
+/// Makes a runner for a throwaway sing-box (latency tests, Speed Test) working in [workDir].
+typedef BoxFactory = BoxRunner Function(String workDir);
+
+/// One sing-box process: the desktop [BoxRunner].
+class SingBoxProcess implements BoxRunner {
   SingBoxProcess(this.binary, this.workDir);
 
   final String binary;
@@ -31,9 +63,11 @@ class SingBoxProcess {
 
   /// sing-box's API service (sbapi.dart, the core's only line to it) while it runs, its
   /// streams open.
+  @override
   SingBoxApi? api;
 
   /// Every line sing-box writes, as it comes (jormd's Logs tab).
+  @override
   void Function(String line)? onLog;
 
   /// The API service's secret: new and random on every start, put into the config and
@@ -42,9 +76,12 @@ class SingBoxProcess {
 
   /// sing-box stopped on its own (crash, killed from outside) after it had come up;
   /// never called for stop() or for a start that failed.
+  @override
   void Function(int code)? onExit;
 
+  @override
   bool get running => _proc != null;
+  @override
   int? get pid => _proc?.pid;
 
   void _log(String line) {
@@ -56,10 +93,12 @@ class SingBoxProcess {
   }
 
   /// A line of the core's own in the log (`[jormd] …`), next to sing-box's.
+  @override
   void note(String line) => _log('[jormd] $line');
 
   /// Writes [config] (plus the API service on a free port), has sing-box check it, runs it
   /// and waits until the service says it started — or failed, with its reason.
+  @override
   Future<void> start(Map<String, dynamic> config) async {
     await stop();
     await Directory(workDir).create(recursive: true);
@@ -118,6 +157,7 @@ class SingBoxProcess {
     throw SingBoxError('sing-box did not come up in 8 s');
   }
 
+  @override
   Future<void> stop() async {
     final proc = _proc;
     _up = null;
@@ -202,6 +242,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
   ProbePool? pool,
   Duration maxAge = Duration.zero,
   void Function(String kind, String key, int ms)? onResult,
+  BoxFactory? boxFactory,
 }) async {
   final pl = pool ?? ProbePool.solo();
   final jobs = <(String, String, String)>[ // kind, key, pool identity
@@ -213,11 +254,11 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
         pairIdentity(serverIdentity((pr['entry'] as Map)['outbound'] as Map), serverIdentity((pr['exit'] as Map)['outbound'] as Map))
       ),
   ];
-  SingBoxProcess? sb;
+  BoxRunner? sb;
   Future<Probe>? starting;
   Future<Probe> ensure() => starting ??= () async {
         final pr = Probe(await freePort());
-        final box = SingBoxProcess(binary, workDir);
+        final box = boxFactory != null ? boxFactory(workDir) : SingBoxProcess(binary, workDir);
         sb = box;
         await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr));
         return pr;
@@ -269,8 +310,9 @@ Future<void> speedTest({
   String configUrl = '',
   required void Function(NetworkQualityTestProgress p) onProgress,
   Future<void>? cancel,
+  BoxFactory? boxFactory,
 }) async {
-  final sb = SingBoxProcess(binary, workDir);
+  final sb = boxFactory != null ? boxFactory(workDir) : SingBoxProcess(binary, workDir);
   await sb.start(buildTesterConfig(nodes: [?node], pairs: [?pair]));
   try {
     final tag = node != null ? 't/${node['key']}' : 'p/${pair!['key']}';

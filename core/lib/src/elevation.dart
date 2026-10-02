@@ -2,11 +2,10 @@
 /// The core only checks and says so clearly; relaunching elevated is the app's job.
 library;
 
-import 'dart:ffi';
 import 'dart:io';
 
-import 'package:ffi/ffi.dart';
-import 'package:win32/win32.dart';
+// The win32 code lives in elevation_win.dart and runs only behind Platform.isWindows below.
+import 'elevation_win.dart';
 
 /// TUN cannot start: the process is not elevated (checked before sing-box starts), or sing-box
 /// itself failed on a permission ([detail] = its words). The daemon turns it into the journal
@@ -28,30 +27,10 @@ class TunNeedsAdmin implements Exception {
 /// than a TUN that half starts.
 bool processIsElevated() {
   try {
-    if (Platform.isWindows) return _windowsElevated();
+    if (Platform.isWindows) return windowsElevated();
     return '${Process.runSync('id', ['-u']).stdout}'.trim() == '0';
   } catch (_) {
     return false;
-  }
-}
-
-bool _windowsElevated() {
-  final token = calloc<Pointer>();
-  final info = calloc<Uint32>();
-  final size = calloc<Uint32>();
-  try {
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, token).value) return false;
-    final h = HANDLE(token.value);
-    try {
-      final r = GetTokenInformation(h, TokenElevation, info, sizeOf<Uint32>(), size);
-      return r.value && info.value != 0;
-    } finally {
-      CloseHandle(h);
-    }
-  } finally {
-    calloc.free(token);
-    calloc.free(info);
-    calloc.free(size);
   }
 }
 

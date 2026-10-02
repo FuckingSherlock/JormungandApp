@@ -1,0 +1,629 @@
+/// The catalog model of the app: sources, profiles, chains, the Route order, Auto / Manual,
+/// off / disabled servers and the settings the connect plan reads — the Dart port of the
+/// mockup's catalog logic (design/src/js/20-profiles.js, 30-nodes.js, 31-catalog.js,
+/// 94-live-auto.js, 95-live.js, 93-routing-plan.js). Pure Dart, no IO, no UI; the Flutter
+/// app keeps one [Catalog] and asks it what to connect through.
+///
+/// State = the mockup's snapshot (`liveSnapshot()`, saved by the core as `ui-state.json`):
+/// [Catalog.fromJson] / [Catalog.toJson] read and write the same JSON, unknown keys
+/// untouched. This file holds the state and the "which servers / which entry" decisions;
+/// the plan the core takes is in plan_builder.dart, validation in validate.dart, delete
+/// impact in impact.dart, state changes (select, pin, delete, sync…) in ops.dart.
+///
+/// Names follow the mockup (`unitRefs`, `brokenBy`, `effectiveConnectId`…) so the two can be
+/// read side by side. Not ported (UI-only): rendering, sheets / toasts, drag gestures,
+/// edit modes, expanded rows, node sort, logs / events / notification settings, the
+/// ping mock, `refreshSourceViews`, `sourcesDown` (posts a UI event), kill-switch plan
+/// (`killPlan`, it goes in the connect body, not the plan).
+library;
+
+import '../routing.dart' show services;
+import 'json_util.dart';
+import 'models.dart';
+import 'ping_book.dart';
+import 'rules_model.dart';
+import 'settings.dart';
+
+/// What the core's Auto reports it stands on (`status.auto`: `{now, server, entryServer}`).
+/// The dock and Route show it instead of the catalog's own guess ([Catalog.coreRoute]).
+class CoreRoute {
+  const CoreRoute({required this.id, this.server, this.entryServer});
+
+  /// The Route entry the core is on.
+  final String id;
+
+  /// `sid::nid`: the unit's server, or a chain's exit server.
+  final String? server;
+
+  /// `sid::nid`: a chain's entry server.
+  final String? entryServer;
+}
+
+/// Why a plan, or a connect, cannot be made. [message] is the mockup's text (English); the
+/// app localises by [code]: `nothingInAuto`, `nothingToConnect`, `noUsableServer`.
+class CatalogException implements Exception {
+  CatalogException(this.code, this.message);
+  final String code;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// An app of the installed list (the mockup's `APPS`): the plan names apps by it.
+typedef AppInfo = ({String name, String kind});
+
+class Catalog {
+  Catalog({int Function()? now}) : pings = PingBook(now: now) {
+    _loadDefaults();
+  }
+
+  /// [s] = the snapshot, or null on a first run (nothing added yet; `liveApply(null)`).
+  factory Catalog.fromJson(Json? s, {int Function()? now}) {
+    final c = Catalog(now: now);
+    if (s != null) c._load(s);
+    return c;
+  }
+
+  // ───────────────────────────── state (the snapshot) ─────────────────────────────
+
+  Map<String, Source> sourcesData = {};
+  List<String> sourceOrder = [];
+  int sourceSeq = 1;
+
+  /// `simple` | `profiles`: which Nodes tab the Route list uses.
+  String connectMode = 'simple';
+
+  /// The priority list of the active mode (entries and chains together).
+  List<String> connectOrder = [];
+  String? activeConnectId;
+  bool autoConnect = true;
+
+  /// Manual on one server: `sid::nid` of a server of the pinned entry (Manual only).
+  String? pinnedNode;
+
+  /// The Route state of the mode that is not active (and a stale copy of the other).
+  Map<String, ModeSlot> modeState = {};
+  Map<String, Profile> profilesData = {};
+  int profileSeq = 1;
+  Map<String, Chain> chainsData = {};
+  int chainSeq = 1;
+
+  /// What each Nodes tab lists, in the user's order: `simple` (sources + chains of sources),
+  /// `profiles` (profiles + chains of profiles).
+  Map<String, List<String>> catalogOrder = {'simple': [], 'profiles': []};
+
+  /// The mode's Route list has its own order (dragged in Route), apart from Nodes.
+  Map<String, bool> routeCustom = {'simple': false, 'profiles': false};
+  late SegState segState;
+  late ConnCfg connCfg;
+  late AutoCfg autoCfg;
+
+  Map<String, UserRule> rulesData = {};
+  List<String> ruleOrder = [];
+  int ruleSeq = 1;
+  late QuickCfg quickCfg;
+  Map<String, AppRule> appRules = {};
+  late List<RuleSetCfg> ruleSets;
+  int rsSeq = 1;
+  late Map<String, DnsServerCfg> dnsServers;
+  late List<String> dnsOrder;
+  int dnsSeq = 1;
+  late DnsCfg dnsCfg;
+
+  /// Measured pings (`snapshot.pings`).
+  final PingBook pings;
+
+  /// Keys of the snapshot this model does not know (`genCfg`, `notifCfg`, `logCfg`…):
+  /// written back as they were.
+  Json unknown = {};
+
+  // ───────────────────────────── runtime (not in the snapshot) ─────────────────────────────
+
+  /// Where the core's Auto really is (null = not connected / unknown). While set,
+  /// [effectiveConnectId] and [unitNode] show it instead of their own guess.
+  CoreRoute? coreRoute;
+
+  /// The anchor the running plan was built on (`live.anchor`): [liveSigAnchor] keeps it
+  /// while it is still an Auto entry.
+  String? liveAnchor;
+
+  /// Delete preview (`simExclude`): while set, units act as if these servers were gone.
+  bool Function(NodeRef)? simExclude;
+
+  /// The installed apps (name, kind) for the plan and the delete dialog; the host sets it.
+  AppInfo? Function(String pkg)? appInfo;
+
+  int get now => pings.now;
+
+  // ───────────────────────────── JSON ─────────────────────────────
+
+  static const _known = {
+    'sourcesData', 'sourceOrder', 'sourceSeq', 'connectMode', 'connectOrder', 'activeConnectId', 'autoConnect', 'pinnedNode', //
+    'modeState', 'profilesData', 'profileSeq', 'chainsData', 'chainSeq', 'catalogOrder', 'routeCustom', 'segState', 'connCfg', 'autoCfg',
+    'rulesData', 'ruleOrder', 'ruleSeq', 'quickCfg', 'appRules', 'ruleSets', 'rsSeq', 'dnsServers', 'dnsOrder', 'dnsSeq', 'dnsCfg', 'pings',
+  };
+
+  void _loadDefaults() {
+    segState = SegState();
+    connCfg = ConnCfg();
+    autoCfg = AutoCfg();
+    quickCfg = QuickCfg();
+    ruleSets = [
+      for (final id in ['geosite', 'geoip'])
+        RuleSetCfg.fromJson({
+          'id': id,
+          'name': id,
+          'builtin': true,
+          'url': 'built-in',
+          'format': 'srs',
+          'via': 'vpn',
+          'every': 7 * 86400,
+          'updated': 'with the first connect',
+        }),
+    ];
+    dnsServers = {
+      'remote': DnsServerCfg(id: 'remote', name: 'Cloudflare', addr: 'https://1.1.1.1/dns-query'),
+      'local': DnsServerCfg(id: 'local', name: 'Local', addr: 'system', via: 'direct'),
+      'google': DnsServerCfg(id: 'google', name: 'Google', addr: 'tls://8.8.8.8', on: false),
+    };
+    dnsOrder = ['remote', 'local', 'google'];
+    dnsCfg = DnsCfg();
+    modeState = {'profiles': ModeSlot()};
+  }
+
+  // `liveApply` (95-live.js) for the parts that decide the plan.
+  void _load(Json s) {
+    Map<String, T> mapOf<T>(Object? m, T Function(Json) f) =>
+        m is Map ? {for (final e in m.entries) '${e.key}': f(asJson(e.value))} : <String, T>{};
+    int seq(Object? v) => v is num && v != 0 ? v.toInt() : 1;
+
+    sourcesData = mapOf(s['sourcesData'], Source.fromJson);
+    sourceOrder = strList(s['sourceOrder']);
+    sourceSeq = seq(s['sourceSeq']);
+    connectMode = truthy(s['connectMode']) ? '${s['connectMode']}' : 'simple';
+    connectOrder = strList(s['connectOrder']);
+    activeConnectId = truthy(s['activeConnectId']) ? '${s['activeConnectId']}' : null;
+    autoConnect = s['autoConnect'] != false;
+    pinnedNode = truthy(s['pinnedNode']) ? '${s['pinnedNode']}' : null;
+    profilesData = mapOf(s['profilesData'], Profile.fromJson);
+    profileSeq = seq(s['profileSeq']);
+    chainsData = mapOf(s['chainsData'], Chain.fromJson);
+    chainSeq = seq(s['chainSeq']);
+    if (s['modeState'] is Map) modeState = mapOf(s['modeState'], ModeSlot.fromJson);
+    if (s['catalogOrder'] is Map) {
+      final co = asJson(s['catalogOrder']);
+      catalogOrder = {for (final e in co.entries) e.key: strList(e.value)};
+    }
+    for (final m in const ['simple', 'profiles']) {
+      catalogOrder.putIfAbsent(m, () => []);
+    }
+    if (s['routeCustom'] is Map) {
+      final rc = asJson(s['routeCustom']);
+      routeCustom = {for (final e in rc.entries) e.key: truthy(e.value)};
+    }
+    for (final m in const ['simple', 'profiles']) {
+      routeCustom.putIfAbsent(m, () => false);
+    }
+    if (s['segState'] is Map) segState = SegState.fromJson(asJson(s['segState']));
+    if (s['connCfg'] is Map) connCfg = ConnCfg.fromJson(asJson(s['connCfg']));
+    if (s['autoCfg'] is Map) autoCfg = AutoCfg.fromJson(asJson(s['autoCfg']));
+    rulesData = mapOf(s['rulesData'], UserRule.fromJson);
+    ruleOrder = strList(s['ruleOrder']);
+    ruleSeq = seq(s['ruleSeq']);
+    quickCfg = QuickCfg.fromJson(asJson(s['quickCfg']));
+    appRules = mapOf(s['appRules'], AppRule.fromJson);
+    if (s['ruleSets'] is List) {
+      ruleSets = [for (final x in s['ruleSets'] as List) RuleSetCfg.fromJson(asJson(x))];
+    }
+    rsSeq = seq(s['rsSeq']);
+    if (s['dnsServers'] is Map) {
+      dnsServers = mapOf(s['dnsServers'], DnsServerCfg.fromJson);
+      dnsOrder = s['dnsOrder'] is List ? strList(s['dnsOrder']) : dnsServers.keys.toList();
+      dnsSeq = seq(s['dnsSeq']);
+    }
+    if (s['dnsCfg'] is Map) dnsCfg = DnsCfg.fromJson(asJson(s['dnsCfg']));
+    pings.restore(s['pings'], [for (final x in sourcesData.values) ...[...x.nodes, ...x.gone]]);
+    unknown = {for (final e in s.entries) if (!_known.contains(e.key)) e.key: deepCopy(e.value)};
+  }
+
+  /// The snapshot, as `liveSnapshot()` writes it.
+  Json toJson() => {
+        'sourcesData': {for (final e in sourcesData.entries) e.key: e.value.toJson()},
+        'sourceOrder': [...sourceOrder],
+        'sourceSeq': sourceSeq,
+        'connectMode': connectMode,
+        'connectOrder': [...connectOrder],
+        'activeConnectId': activeConnectId,
+        'autoConnect': autoConnect,
+        'pinnedNode': pinnedNode,
+        'modeState': {for (final e in modeState.entries) e.key: e.value.toJson()},
+        'profilesData': {for (final e in profilesData.entries) e.key: e.value.toJson()},
+        'profileSeq': profileSeq,
+        'chainsData': {for (final e in chainsData.entries) e.key: e.value.toJson()},
+        'chainSeq': chainSeq,
+        'catalogOrder': {for (final e in catalogOrder.entries) e.key: [...e.value]},
+        'routeCustom': {...routeCustom},
+        'segState': segState.toJson(),
+        'connCfg': connCfg.toJson(),
+        'autoCfg': autoCfg.toJson(),
+        'rulesData': {for (final e in rulesData.entries) e.key: e.value.toJson()},
+        'ruleOrder': [...ruleOrder],
+        'ruleSeq': ruleSeq,
+        'quickCfg': quickCfg.toJson(),
+        'appRules': {for (final e in appRules.entries) e.key: e.value.toJson()},
+        'ruleSets': [for (final r in ruleSets) r.toJson()],
+        'rsSeq': rsSeq,
+        'dnsServers': {for (final e in dnsServers.entries) e.key: e.value.toJson()},
+        'dnsOrder': [...dnsOrder],
+        'dnsSeq': dnsSeq,
+        'dnsCfg': dnsCfg.toJson(),
+        'pings': pings.toJson(),
+        ...deepCopy(unknown) as Json,
+      };
+
+  /// The built-in services of the quick rules, in the UI's order.
+  static List<String> get serviceKeys => services.keys.toList();
+
+  // ───────────────────────────── entries and units ─────────────────────────────
+
+  bool get simpleMode => connectMode == 'simple';
+
+  /// A Route entry or a chain end by id: profile, chain or source (`connectEntry`).
+  Entry? connectEntry(String? id) => id == null ? null : profilesData[id] ?? chainsData[id] ?? sourcesData[id];
+
+  bool isChain(String? id) => id != null && chainsData.containsKey(id);
+
+  /// Profile ids in catalog order (`getProfileIds`).
+  List<String> getProfileIds() => catalogOrder['profiles']!.where(profilesData.containsKey).toList();
+
+  /// Chain-able entries of a mode in catalog order: enabled sources, or profiles
+  /// (`unitIdsOf`).
+  List<String> unitIdsOf(String mode) => catalogOrder[mode]!
+      .where((id) => mode == 'simple' ? (sourcesData[id]?.enabled ?? false) : profilesData.containsKey(id))
+      .toList();
+
+  /// Which Nodes tab (= connect mode) an entry belongs to (`modeOf`).
+  String? modeOf(String id) => catalogOrder['simple']!.contains(id)
+      ? 'simple'
+      : catalogOrder['profiles']!.contains(id)
+          ? 'profiles'
+          : null;
+
+  /// The priority list of either mode (the active one lives in [connectOrder]).
+  List<String> modeOrder(String mode) => mode == connectMode ? connectOrder : modeSlot(mode).order;
+  void setModeOrder(String mode, List<String> order) {
+    if (mode == connectMode) {
+      connectOrder = order;
+    } else {
+      modeSlot(mode).order = order;
+    }
+  }
+
+  /// The stored state of a mode that is not active; made when missing.
+  ModeSlot modeSlot(String mode) => modeState.putIfAbsent(mode, () => ModeSlot());
+
+  bool isNodeDisabled(Source s, String nid) => s.disabledNodes.contains(nid);
+
+  /// The servers the rest of the app sees (`liveNodes`).
+  List<CatalogNode> liveNodes(Source s) => s.nodes.where((n) => !isNodeDisabled(s, n.id)).toList();
+
+  bool isNodeOff(Source s, String nid) => s.offNodes.contains(nid);
+  int offCount(Source s) => liveNodes(s).where((n) => isNodeOff(s, n.id)).length;
+
+  /// A server by its `sid::nid` key (`nodeOfKey`).
+  CatalogNode? nodeOfKey(String key) {
+    final i = key.indexOf('::');
+    final s = i > 0 ? sourcesData[key.substring(0, i)] : null;
+    if (s == null) return null;
+    final nid = key.substring(i + 2);
+    for (final n in s.nodes) {
+      if (n.id == nid) return n;
+    }
+    return null;
+  }
+
+  bool simKeep(NodeRef r) => simExclude == null || !simExclude!(r);
+
+  /// The servers a profile can use now (enabled sources, live servers), `{sid, node}`;
+  /// [withOff] also counts what is switched off in Nodes (to tell why a profile has none).
+  List<NodeRef> profileNodeRefs(Profile p, {bool withOff = false}) => profileRefsOf(p.sources, p.nodes, withOff: withOff);
+
+  /// [profileNodeRefs] for a draft: whole [sources] and single [nodes] (`sid::nid`).
+  List<NodeRef> profileRefsOf(List<String> sources, List<String> nodes, {bool withOff = false}) {
+    final refs = <NodeRef>[];
+    for (final sid in sourceOrder) {
+      final s = sourcesData[sid];
+      if (s == null || !(s.enabled || withOff)) continue;
+      final whole = sources.contains(sid);
+      for (final n in withOff ? s.nodes : liveNodes(s)) {
+        if (whole || nodes.contains('$sid::${n.id}')) refs.add(NodeRef(sid, n));
+      }
+    }
+    return refs.where(simKeep).toList();
+  }
+
+  /// A unit's servers: a profile's, or a source's own entry (live servers minus the ones
+  /// switched off for it) (`unitRefs`).
+  List<NodeRef> unitRefs(String? id, {bool withOff = false}) {
+    if (id == null) return [];
+    final p = profilesData[id];
+    if (p != null) return profileNodeRefs(p, withOff: withOff);
+    final s = sourcesData[id];
+    if (s == null || !(s.enabled || withOff)) return [];
+    return [
+      for (final n in withOff ? s.nodes : liveNodes(s))
+        if (!isNodeOff(s, n.id)) NodeRef(id, n),
+    ].where(simKeep).toList();
+  }
+
+  /// Servers of a unit the provider dropped (`s.gone`) — "Unavailable" with their kept
+  /// settings. Disabled sources show nothing.
+  List<NodeRef> unitGoneRefs(String id) {
+    final p = profilesData[id];
+    final sids = p != null ? sourceOrder : [id];
+    final refs = <NodeRef>[];
+    for (final sid in sids) {
+      final s = sourcesData[sid];
+      if (s == null || !s.enabled) continue;
+      for (final node in s.gone) {
+        if (p == null || p.sources.contains(sid) || p.nodes.contains('$sid::${node.id}')) refs.add(NodeRef(sid, node));
+      }
+    }
+    return refs;
+  }
+
+  List<NodeRef> goneRefs(String sid) => [for (final n in sourcesData[sid]?.gone ?? <CatalogNode>[]) NodeRef(sid, n)];
+
+  // ───────────────────────────── off in Nodes: "broken" entries ─────────────────────────────
+
+  /// What to switch back on for these refs (a whole source, or one server).
+  List<OffReason> offReasons(Iterable<NodeRef> allRefs) {
+    final m = <String, OffReason>{};
+    for (final r in allRefs) {
+      final s = sourcesData[r.sid];
+      if (s == null) continue;
+      if (!s.enabled) {
+        m[r.sid] = OffReason(r.sid);
+      } else if (isNodeDisabled(s, r.node.id)) {
+        m[r.key] = OffReason(r.sid, r.node.id);
+      }
+    }
+    return m.values.toList();
+  }
+
+  /// A side that has no live server, but would with everything in Nodes switched on.
+  List<OffReason> sideReasons(List<NodeRef> live, List<NodeRef> all) => live.isNotEmpty ? [] : offReasons(all);
+
+  /// What to switch on for an entry that has nothing left to connect through; [] = it
+  /// works (`brokenBy`).
+  List<OffReason> brokenBy(String id) {
+    final c = chainsData[id];
+    if (c != null) {
+      final seen = <String>{};
+      return [
+        ...sideReasons(chainEntryRefs(c), chainEntryRefs(c, withOff: true)),
+        ...sideReasons(chainExitRefs(c), chainExitRefs(c, withOff: true)),
+      ].where((r) => seen.add('${r.sid}::${r.nid ?? ''}')).toList();
+    }
+    return connectEntry(id) != null ? sideReasons(unitRefs(id), unitRefs(id, withOff: true)) : [];
+  }
+
+  String reasonLabel(OffReason r) {
+    if (r.nid == null) return sourcesData[r.sid]?.name ?? r.sid;
+    CatalogNode? n;
+    for (final x in sourcesData[r.sid]?.nodes ?? <CatalogNode>[]) {
+      if (x.id == r.nid) n = x;
+    }
+    return n == null ? r.nid! : '${n.flag} ${n.name}';
+  }
+
+  /// "Remnawave is off in Nodes" / "🇩🇪 Frankfurt 01, … are off in Nodes" (up to 3 named).
+  String reasonsText(List<OffReason> rs) {
+    final names = rs.take(3).map(reasonLabel).join(', ') + (rs.length > 3 ? ' +${rs.length - 3}' : '');
+    return '$names${rs.length > 1 ? ' are' : ' is'} off in Nodes';
+  }
+
+  bool isBroken(String id) => brokenBy(id).isNotEmpty;
+
+  /// A switched-off source's own entry is hidden (`entryVisible`).
+  bool entryVisible(String? id) {
+    final s = id == null ? null : sourcesData[id];
+    return !(s != null && !s.enabled);
+  }
+
+  /// The Route list as shown: working entries in priority order (`visibleOrder`).
+  List<String> visibleOrder() => connectOrder.where((id) => entryVisible(id) && !isBroken(id)).toList();
+
+  /// Broken entries, shown below the list (`brokenOrder`).
+  List<String> brokenOrder() => connectOrder.where((id) => entryVisible(id) && isBroken(id)).toList();
+
+  /// First run or everything deleted: nothing in this mode to connect (`catalogEmpty`).
+  bool catalogEmpty() => !connectOrder.any(entryVisible);
+
+  String unitName(String? id) {
+    final u = id == null ? null : profilesData[id] ?? sourcesData[id];
+    return u?.name ?? '—';
+  }
+
+  // ───────────────────────────── which server a unit connects through ─────────────────────────────
+
+  Unit? unitOwner(String? id) => id == null ? null : profilesData[id] ?? sourcesData[id];
+  bool unitPriority(String? id) => unitOwner(id)?.pickMode == 'priority';
+
+  /// The unit's servers in the order it picks them: Priority by `pickOrder`
+  /// (`unitPickRefs`).
+  List<NodeRef> unitPickRefs(String? id, {bool withOff = false}) {
+    final refs = unitRefs(id, withOff: withOff);
+    return unitPriority(id) ? orderRefs(refs, unitOwner(id)!.pickOrder) : refs;
+  }
+
+  /// Refs sorted by a list of `sid::nid` keys; the ones missing from it follow in their own
+  /// order (`orderRefs`).
+  List<NodeRef> orderRefs(List<NodeRef> refs, List<String>? order) {
+    order ??= const [];
+    num pos(NodeRef r) {
+      final i = order!.indexOf(r.key);
+      return i < 0 ? double.infinity : i;
+    }
+
+    return stableSorted(refs, pos);
+  }
+
+  /// The pinned server of the pinned entry, while it is still one of the entry's servers
+  /// (`pinnedRef`).
+  NodeRef? pinnedRef(String? id) {
+    if (autoConnect || id != activeConnectId || pinnedNode == null) return null;
+    for (final r in unitRefs(id)) {
+      if (r.key == pinnedNode) return r;
+    }
+    return null;
+  }
+
+  /// The server the core's Auto is on, when it is one of [refs] (`coreNode`).
+  /// [which]: `server` or `entryServer`.
+  CatalogNode? coreNode(String? id, String which, List<NodeRef> refs) {
+    final c = coreRoute;
+    if (c == null || c.id != id) return null;
+    final key = which == 'server' ? c.server : c.entryServer;
+    if (key == null) return null;
+    for (final r in refs) {
+      if (r.key == key) return r.node;
+    }
+    return null;
+  }
+
+  /// The fastest alive server (first wins on a tie) (`bestAlive`).
+  CatalogNode? bestAlive(Iterable<CatalogNode> nodes) {
+    CatalogNode? best;
+    for (final n in nodes) {
+      if (pings.isAlive(n) && (best == null || pings.ping(n)! < pings.ping(best)!)) best = n;
+    }
+    return best;
+  }
+
+  CatalogNode? _firstAlive(Iterable<CatalogNode> nodes) {
+    for (final n in nodes) {
+      if (pings.isAlive(n)) return n;
+    }
+    return null;
+  }
+
+  /// The server a unit connects through now: the pinned one (answering or not), the one
+  /// the core is on, else by Fastest / Priority (`unitNode`).
+  CatalogNode? unitNode(String? id) {
+    final pin = pinnedRef(id);
+    if (pin != null) return pin.node;
+    final refs = unitPickRefs(id);
+    final core = coreNode(id, 'server', refs);
+    if (core != null) return core;
+    final nodes = [for (final r in refs) r.node];
+    return unitPriority(id) ? _firstAlive(nodes) : bestAlive(nodes);
+  }
+
+  CatalogNode? profileNode(Profile? p) => p == null ? null : unitNode(p.id);
+
+  // ───────────────────────────── chains ─────────────────────────────
+
+  List<NodeRef> chainEntryRefs(Chain c, {bool withOff = false}) =>
+      unitRefs(c.inId, withOff: withOff).where((r) => !c.inOff.contains(r.key)).toList();
+
+  /// Every exit server in priority order, unticked ones included (`chainExitOrder`).
+  List<NodeRef> chainExitOrder(Chain c, {bool withOff = false}) => orderRefs(unitRefs(c.outId, withOff: withOff), c.exitOrder);
+
+  List<NodeRef> chainExitRefs(Chain c, {bool withOff = false}) =>
+      chainExitOrder(c, withOff: withOff).where((r) => !c.outOff.contains(r.key)).toList();
+
+  CatalogNode? chainEntryNode(Chain c) {
+    final refs = chainEntryRefs(c);
+    return coreNode(c.id, 'entryServer', refs) ?? bestAlive([for (final r in refs) r.node]);
+  }
+
+  CatalogNode? chainExitNode(Chain c) {
+    final refs = chainExitRefs(c);
+    final core = coreNode(c.id, 'server', refs);
+    if (core != null) return core;
+    final exits = [for (final r in refs) r.node];
+    return c.exitMode == 'priority' ? _firstAlive(exits) : bestAlive(exits);
+  }
+
+  /// The entry has a server to connect through and it answers (`isUsable`).
+  bool isUsable(String id) {
+    final c = chainsData[id];
+    if (c != null) return chainEntryNode(c) != null && chainExitNode(c) != null;
+    final n = unitNode(id);
+    return n != null && pings.isAlive(n);
+  }
+
+  // ───────────────────────────── Auto / Manual: which entry ─────────────────────────────
+
+  /// Known not to work: silent `failAfter` times in a row, the last time within
+  /// [pingFreshMs] (a result being re-measured keeps counting until the new one is in).
+  /// Servers not measured yet, or measured long ago, still count as working (`knownDead`).
+  bool knownDead(CatalogNode n) {
+    final e = pings.entry(n);
+    if (e == null) return false;
+    final missed = e.testing || (e.ms != null && e.ms! < 0);
+    return missed && e.fails >= autoCfg.failAfter && pings.now - e.at < pingFreshMs;
+  }
+
+  /// Auto passes over an entry only when it is known not to work (`mayWork`): some server
+  /// not known dead; for a chain, on both ends.
+  bool mayWork(String id) {
+    final c = chainsData[id];
+    if (c != null) {
+      return chainEntryRefs(c).any((r) => !knownDead(r.node)) && chainExitRefs(c).any((r) => !knownDead(r.node));
+    }
+    return unitPickRefs(id).any((r) => !knownDead(r.node));
+  }
+
+  /// The Auto entries in priority order (`autoOrder`).
+  List<String> autoOrder() => visibleOrder().where((id) => connectEntry(id)!.inAuto).toList();
+
+  /// What is connected: the pinned entry, or Auto's pick. Connected, the entry the core's
+  /// Auto is really on; [ownGuess] = the catalog's own pick regardless (to build a plan)
+  /// (`effectiveConnectId`). Null: nothing to connect through.
+  String? effectiveConnectId([bool ownGuess = false]) {
+    final active = activeConnectId;
+    if (!autoConnect && entryVisible(active) && (active == null || !isBroken(active))) return active;
+    final order = visibleOrder();
+    final c = coreRoute;
+    if (!ownGuess && c != null && order.contains(c.id) && connectEntry(c.id)!.inAuto) return c.id;
+    for (final id in order) {
+      if (connectEntry(id)!.inAuto && mayWork(id)) return id;
+    }
+    for (final id in order) {
+      if (connectEntry(id)!.inAuto) return id; // every entry silent: still the first one in Auto
+    }
+    return null;
+  }
+
+  /// What Auto would pick, whatever the current mode (`effectiveConnectIdWhenAuto`).
+  String? effectiveConnectIdWhenAuto() {
+    final was = autoConnect;
+    autoConnect = true;
+    try {
+      return effectiveConnectId();
+    } finally {
+      autoConnect = was;
+    }
+  }
+
+  /// Auto with every Route entry switched off Auto: nothing to connect through.
+  bool nothingInAuto() {
+    final v = visibleOrder();
+    return autoConnect && v.isNotEmpty && !v.any((id) => connectEntry(id)!.inAuto);
+  }
+
+  /// `f()` on the catalog's own picks: [coreRoute] off meanwhile (a plan is the catalog's
+  /// guess; the core then moves inside it by itself) (`withoutCore`).
+  T withoutCore<T>(T Function() f) {
+    final c = coreRoute;
+    coreRoute = null;
+    try {
+      return f();
+    } finally {
+      coreRoute = c;
+    }
+  }
+}

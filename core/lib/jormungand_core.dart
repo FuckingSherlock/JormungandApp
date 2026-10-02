@@ -2,7 +2,10 @@
 /// Pure Dart, so the Flutter app can depend on it as it is.
 library;
 
+export 'src/api.dart';
+export 'src/appupdate.dart';
 export 'src/auto.dart';
+export 'src/catalog/catalog_lib.dart';
 export 'src/config.dart';
 export 'src/daemon.dart';
 export 'src/device.dart';
@@ -29,6 +32,7 @@ export 'src/rulenames.dart';
 export 'src/rulesets.dart';
 export 'src/runtime.dart';
 export 'src/sbapi.dart';
+export 'src/service.dart';
 export 'src/share.dart';
 export 'src/state.dart';
 export 'src/sysproxy.dart';

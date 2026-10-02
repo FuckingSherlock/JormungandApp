@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 
@@ -42,10 +43,22 @@ class LogBook {
   void note(String level, String text) => _add('core', level, text);
 
   void _add(String src, String level, String text) {
-    _lines.add({'n': _next++, 't': DateTime.now().millisecondsSinceEpoch, 'src': src, 'lvl': level, 'msg': text});
+    final line = <String, Object>{'n': _next++, 't': DateTime.now().millisecondsSinceEpoch, 'src': src, 'lvl': level, 'msg': text};
+    _lines.add(line);
     while (_lines.length > cap) {
       _lines.removeFirst();
     }
+    if (!_added.isClosed) _added.add(line);
+  }
+
+  final _added = StreamController<Map<String, Object>>.broadcast();
+
+  /// Every line as it is written (the app's live Logs view, instead of polling [since]).
+  Stream<Map<String, Object>> get stream => _added.stream;
+
+  /// Ends [stream]; lines written later are still kept.
+  void close() {
+    if (!_added.isClosed) unawaited(_added.close());
   }
 
   static String _level(String l) => switch (l) {

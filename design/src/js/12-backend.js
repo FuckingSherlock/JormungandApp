@@ -7,6 +7,18 @@
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 let mockKill = null;   // the last kill switch settings the mock "core" got
+// The mock update feed (docs/updates.md; core: appupdate.dart, not wired to jormd until CoreService
+// exists). find: a newer version is out; checkFails / downloadFails: an error code of the core
+// (network, badSignature, hash, size, disk, noAsset, schema); pauseAt: the download stands at this %.
+const mockUpdate = { find: true, checkFails: null, downloadFails: null, pauseAt: null, tick: 140, step: 9 };
+const mockRelease = ch => ({
+  version: ch === 'beta' ? '0.3.0-beta.1' : '0.2.0', build: ch === 'beta' ? 14 : 12, channel: ch, forced: false, size: 58.4 * 1048576,
+  file: 'jormungand-0.2.0-arm64-v8a.apk', via: 'direct',
+  notes: ch === 'beta'
+    ? { en: 'New: rule sets update in the background.\nAuto mode: faster return to the first route.', ru: 'Новое: наборы правил обновляются в фоне.\nРежим Auto: быстрее возврат на первый маршрут.' }
+    : { en: 'Auto mode switches faster after a dead server.\nNew: Settings → Data → App updates.\nFixed: the rules list no longer jumps when a rule is added.', ru: 'Режим Auto быстрее переключается после упавшего узла.\nНовое: Настройки → Данные → Обновления приложения.\nИсправлено: список правил больше не прыгает при добавлении правила.' },
+});
+const mockUpdateError = code => Object.assign(new Error(code), { code });
 let backend = {
   live: false,
   // First fetch of a new subscription: fills s.nodes (and usage / expire).
@@ -173,6 +185,30 @@ let backend = {
   clearEvents() { mockEvSeed(); mockEv.list = []; return Promise.resolve(); },
   // Settings → Data → About: versions and where the core keeps its data (mock: no core).
   version() { return Promise.resolve({ core: null, singBox: null, dataDir: null }); },
+  // App updates (docs/updates.md → API). Check: {phase: 'available', offer} | {phase: 'upToDate'}, or a
+  // rejection with .code. Download: resolves when the file is verified; onProgress(received bytes);
+  // ctl.cancelled stops it (code 'cancelled'). Install: the platform side takes the file over.
+  updateCheck(channel) {
+    return wait(1100).then(() => {
+      if (mockUpdate.checkFails) throw mockUpdateError(mockUpdate.checkFails);
+      return mockUpdate.find ? { phase: 'available', offer: mockRelease(channel) } : { phase: 'upToDate' };
+    });
+  },
+  updateDownload(offer, onProgress, ctl) {
+    return new Promise((resolve, reject) => {
+      let pct = 0;
+      const tick = () => {
+        if (ctl && ctl.cancelled) return reject(mockUpdateError('cancelled'));
+        pct = Math.min(100, pct + mockUpdate.step, mockUpdate.pauseAt == null ? 100 : Math.max(pct, mockUpdate.pauseAt));
+        onProgress(offer.size * pct / 100);
+        if (mockUpdate.downloadFails && pct >= 40) return reject(mockUpdateError(mockUpdate.downloadFails));
+        if (pct >= 100) return resolve({ file: offer.file });
+        setTimeout(tick, mockUpdate.tick);
+      };
+      setTimeout(tick, mockUpdate.tick);
+    });
+  },
+  updateInstall(offer) { return wait(300); },
   // Backup: the state snapshot the core stores (95-live.js liveSnapshot), and back.
   exportState() { return Promise.resolve(liveSnapshot()); },
   importState(snap) { liveApply(snap); return Promise.resolve(); },

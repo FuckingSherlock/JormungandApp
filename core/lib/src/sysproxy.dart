@@ -3,13 +3,39 @@ import 'dart:io';
 
 import 'durable.dart';
 
+/// Where the OS-wide proxy is set and put back: the seam for platforms (Windows registry,
+/// [SystemProxy]; [NoSystemProxy] where there is no such thing, e.g. Android, which uses TUN).
+abstract interface class SystemProxyBackend {
+  /// Whether the core has set the proxy and not yet put the previous one back.
+  bool get isSet;
+
+  /// Points the system proxy at 127.0.0.1:[port] (the previous values saved first); a warning
+  /// to show the user, or null.
+  Future<String?> enable(int port);
+
+  /// Puts the previous system proxy back; nothing to do when [isSet] is false.
+  Future<void> restore();
+}
+
+/// For platforms without a system proxy: never set, so nothing to restore.
+class NoSystemProxy implements SystemProxyBackend {
+  @override
+  bool get isSet => false;
+
+  @override
+  Future<String?> enable(int port) async => 'System proxy is not available on this platform';
+
+  @override
+  Future<void> restore() async {}
+}
+
 /// Windows system proxy (WinINet, per user) pointed at the mixed inbound.
 ///
 /// Set by the core, not by sing-box's `set_system_proxy`: sing-box undoes it only on a
 /// graceful exit, and a killed process would leave the user without internet. The
 /// previous values are saved to [stateFile] first and put back by [restore] — also on
 /// the next start after a crash.
-class SystemProxy {
+class SystemProxy implements SystemProxyBackend {
   SystemProxy(this.stateFile);
 
   final File stateFile;
@@ -17,10 +43,12 @@ class SystemProxy {
   static const _names = ['ProxyEnable', 'ProxyServer', 'ProxyOverride'];
   static final _bypass = ['localhost', '127.*', '10.*', for (var i = 16; i < 32; i++) '172.$i.*', '192.168.*', '<local>'].join(';');
 
+  @override
   bool get isSet => stateFile.existsSync();
 
   /// Returns a warning when a PAC script (AutoConfigURL, typical for corporate
   /// networks) is configured: Windows asks it before the manual proxy.
+  @override
   Future<String?> enable(int port) async {
     if (!Platform.isWindows) throw UnsupportedError('System proxy is only done on Windows for now');
     if (!isSet) {
@@ -35,6 +63,7 @@ class SystemProxy {
     return pac == null ? null : 'A PAC script is set (${pac['value']}) — it may take priority over the system proxy';
   }
 
+  @override
   Future<void> restore() async {
     if (!isSet || !Platform.isWindows) return;
     Map<String, dynamic> saved;

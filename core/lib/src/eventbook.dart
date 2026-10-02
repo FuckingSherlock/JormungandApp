@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
@@ -106,7 +107,18 @@ class EventBook {
     } else {
       _append(e);
     }
+    if (!_added.isClosed) _added.add(e);
     return e['id'] as int;
+  }
+
+  final _added = StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Every event as it is written (notifications, the live Events view, instead of polling [since]).
+  Stream<Map<String, dynamic>> get stream => _added.stream;
+
+  /// Ends [stream]; events written later are still kept.
+  void close() {
+    if (!_added.isClosed) unawaited(_added.close());
   }
 
   /// `{events (oldest first, ids from [from]; the last [tail] without it), next (the id the

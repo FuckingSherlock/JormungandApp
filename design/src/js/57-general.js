@@ -8,7 +8,8 @@ const genCfg = {
   connectOnLaunch: false, // connect as soon as the app opens
   pingOnLaunch: true,     // ping the top Auto entries by priority and the rules' targets on open
   clipboard: true,        // offer to import a subscription / server link found in the clipboard
-  updates: true,          // check for app updates
+  updates: true,          // Auto-check for app updates (Settings → Data → App updates, 59-data.js)
+  updChannel: 'stable',   // 'stable' | 'beta' (docs/updates.md)
   nodeSort: 'order',      // Nodes ⋮ → Sort nodes (30-nodes.js), kept between launches
 };
 const LANGS = { en: 'English', ru: 'Русский' };
@@ -32,7 +33,6 @@ function renderGeneral() {
     <div class="set-caption">Other</div>
     <div class="set-group">
       ${row('clipboard', 'Links in the clipboard', 'On open, offer to add a subscription or server link you copied')}
-      ${row('updates', 'Check for app updates', 'Once a day; nothing is installed without asking')}
     </div>`;
   const sub = document.getElementById('setGeneralSub');
   if (sub) sub.textContent = LANGS[genCfg.lang] + (genCfg.connectOnLaunch ? ' · connects on launch' : '');
@@ -42,6 +42,7 @@ function setGenCfg(key, v) {
   if (key === 'lang') {
     I18N.setLang(v);   // every text of the page is translated in place (03-i18n.js)
     renderEvents();    // dates in the rows are made by the locale
+    renderUpdates();   // release notes follow the language
   }
   renderGeneral(); renderConnSettings();
 }   // Kill switch → while the app is closed depends on two of them

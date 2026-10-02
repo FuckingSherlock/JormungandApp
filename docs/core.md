@@ -37,6 +37,11 @@ sing-box привязан к процессу ядра (`killjob.dart`, Windows)
 убитые pid пишутся в лог. Flutter-приложение получит то же само, ядро в нём работает в
 том же процессе. Тест: `killjob_test.dart` (вспомогательный процесс `killjob_helper.dart`
 поднимает sing-box, тест убивает его жёстко и ждёт, что sing-box исчез).
+Весь код `package:win32` вынесен в `killjob_win.dart` и `elevation_win.dart`; `killjob.dart` /
+`elevation.dart` вызывают его только за `Platform.isWindows`. win32 6.x привязывает функции
+лениво (top-level `final _X = _kernel32.lookupFunction(...)` — Dart инициализирует их при первом
+обращении), поэтому на Android (где `dart.library.ffi` тоже true) подключение пакета не открывает
+библиотек и не ищет символов: сборка и запуск безопасны, а tree-shaking Flutter выкидывает код.
 
 Прокси: mixed (HTTP + SOCKS5) на `127.0.0.1:<mixedPort>` (Settings → Connection → Proxy port, по умолчанию 2080). С sing-box ядро говорит только
 через его API service (gRPC, свободный порт loopback, см. ниже); Clash API не включается.
@@ -57,9 +62,95 @@ sing-box привязан к процессу ядра (`killjob.dart`, Windows)
 | Ссылка сервера (Copy share link, QR) | просит | `share.dart` |
 | Сервер вручную (форма без ссылки, правка) | поля формы | `manual.dart` |
 | Лог (вкладка Logs) | фильтр, поиск, копирование | `logbook.dart` |
+| Самообновление приложения (манифест, подпись Ed25519, ленты, загрузка) | блок App updates в Settings → Data | `appupdate.dart`, `updates.md` (ещё не в `/api` и не в `CoreService`) |
 
-Во Flutter-приложении колонка «Мокап» станет Dart-кодом приложения, API уйдёт — сервисы
-будут вызывать ядро напрямую.
+Во Flutter-приложении колонка «Мокап» станет Dart-кодом приложения, а HTTP уйдёт: приложение
+создаёт `CoreService` (ниже) в своём процессе и вызывает его методы напрямую, без `jormd` и
+без `/api`. `jormd` остаётся только для мокапа.
+
+## Модель каталога (Dart)
+
+`core/lib/src/catalog/` (`catalog_lib.dart`, экспортируется из `jormungand_core.dart`) — колонка
+«Мокап» из таблицы выше, портированная в чистый Dart: приложение держит один `Catalog` вместо
+JS мокапа. Без Flutter, без IO, без таймеров; время — `now:` (как `now` у `CoreService`).
+
+- **Состояние** = снимок мокапа (`liveSnapshot()`): `Catalog.fromJson(снимок)` / `toJson()` читают и
+  пишут тот же JSON, что лежит в `ui-state.json`. Ключи, которых модель не знает (`genCfg`,
+  `notifCfg`, `logCfg`, `userAgent` / `usage` подписки, поля нод…), возвращаются как были; ключ,
+  которого во входе не было, не дописывается, пока значение дефолтное. Загрузка повторяет `liveApply`
+  (`autoConnect !== false`, дефолты настроек, `appNormalize`, встроенные rule sets и DNS-серверы, ключи
+  пингов `proto://addr:port` без `#id`). Типы: `Source`, `Profile`, `Chain`, `ModeSlot`, `CatalogNode`,
+  `ConnCfg`, `AutoCfg`, `SegState`, `UserRule`, `AppRule`, `QuickCfg`, `RuleSetCfg`, `DnsServerCfg`,
+  `DnsCfg`; `PingBook` — единственное хранилище замеров (ключ `proto://addr:port#id`).
+- **Решения** (имена как в JS): `effectiveConnectId` (Auto / Manual, `coreRoute` ядра, `ownGuess`),
+  `unitNode` / `chainEntryNode` / `chainExitNode`, `knownDead` / `mayWork`, `brokenBy` / `visibleOrder`
+  (выключенное в Nodes), `unitRefs` / `profileRefsOf` / `chainEntryRefs` / `chainExitRefs`.
+- **План** (`plan_builder.dart`): `livePlan([anchor])` → тот же JSON, что мокап шлёт в `/api/connect`
+  (`routes`, `current`, `routing`, `auto`, `urlTest`, `mixedAuth`…; порядок ключей тоже), `planSigOf` /
+  `planSig` — строка-подпись, не меняющаяся от порядка пингов и ходов Auto, `routingPlan`,
+  `routingTarget`, `targetInfo`. Нет чем подключаться — `CatalogException` с `code`
+  (`nothingInAuto` | `nothingToConnect` | `noUsableServer`) и английским текстом мокапа.
+- **Проверки и удаление**: `checkBeforeConnect`, `profileProblem`, `chainProblems`; `deleteSourceImpact` /
+  `deleteNodeImpact` / `deleteEntryImpact` (список «This will affect» в виде `ImpactLine`).
+- **Операции** (`ops.dart`): `syncCatalog` (звать после любой правки), `selectConnect`,
+  `setAutoConnect`, `pinRouteNode`, `toggleEntryAuto`, `setConnectMode`, `reorderRoute`,
+  `addSource`, `deleteSource` / `deleteNode` / `deleteProfile` / `deleteChain`, `forgetGone`,
+  `purgeExpiredGone`, включение / выключение источников и серверов. Каждая меняет `Catalog` и ничего
+  не рисует; что показать пользователю (тост «Nothing left in Auto…»), решает вызывающий по результату.
+- **Не портировано** (только UI): отрисовка, листы и тосты, drag-жесты (вместо них `reorder*` с новым
+  порядком), режимы правки и развёрнутые строки, сортировка нод, журнал событий и настройки
+  уведомлений / логов, замер пингов и их расписание, `sourcesDown`, `killPlan`, вызовы `backend` / `api`,
+  слияние ответа `fetchSource` в подписку (это `state.dart` ядра).
+- **Проверка на мокапе**: `core/tool/catalog_golden.mjs` гоняет настоящий `main_screen.html`
+  (Playwright, фиксированные `Math.random` / `Date.now`) по ~65 сценариям и пишет
+  `core/test/golden/catalog.json`: снимок и ответы JS (кто подключён, план, подпись, цели, импакт
+  удаления, снимок после операции). `core/test/catalog_golden_test.dart` даёт ту же загрузку Dart-модели
+  и сверяет всё. Поменяли логику мокапа — `npm run build`, `node core/tool/catalog_golden.mjs`,
+  `dart test test/catalog_golden_test.dart`; расхождение значит, что Dart-порт отстал (или мокап поменяли
+  намеренно — тогда доки и порт вместе).
+
+## CoreService, CoreApi и платформенные швы
+
+Вся логика ядра (подключение, перезапуск sing-box, kill switch, системный прокси, Auto,
+журнал, снимок UI, подписки по таймеру, проверка выхода, пинг, Speed Test) живёт в
+`service.dart` — `CoreService`: чистый Dart, без `HttpServer` / `HttpRequest`. `daemon.dart`
+(`Daemon`) — только HTTP-адаптер над ним: маршруты, JSON, заголовок `X-Jorm`, проверка Host,
+отдача мокапа; те же маршруты и тот же JSON, что описаны в «API (`jormd`)». Один метод
+`CoreService` = один маршрут: `state / saveState / status / traffic / log / events / postEvent /
+version / manualNode / share / fetchSource / parse / connect / disconnect / releaseSysProxy /
+retry / killSwitchSettings / autoSettings / dnsAutoSetting / recheckExit / ping / speedTest /
+closeConnections`. Тела и ответы — те же карты (`Map<String, dynamic>`), что в HTTP;
+`FormatException` — сообщение для пользователя (в HTTP это 400), любая другая ошибка — сбой ядра
+(500). `ping` и `speedTest` возвращают `Stream` строк (в HTTP это NDJSON); отмена подписки на
+`speedTest` останавливает замер, `ping` досчитывает (результаты нужны пулу).
+
+`CoreApi` (`api.dart`) — абстрактный интерфейс, который `CoreService` реализует: через него приложение
+(и адаптер) говорят с ядром. Удалённая реализация (HTTP / IPC к фоновому движку или службе Windows)
+сможет реализовать тот же интерфейс; пока есть только внутрипроцессная.
+
+Вместо опроса — потоки (broadcast): `statusChanges` (статус при каждом изменении состояния —
+подключение, падение, Auto, проверка выхода — и раз в 4 с, пока есть слушатель, ради замеров внутри
+`status.auto`; одинаковый статус подряд не повторяется), `eventStream` (каждое событие журнала),
+`logStream` (каждая строка лога). Опрос `status()` / `events(since)` / `log(since)` остаётся.
+
+Жизненный цикл: `init()` — каталог данных, журнал, снимок, прокси, оставшийся от прошлого запуска,
+таймер подписок; `dispose()` — штатная остановка: sing-box остановлен, системный прокси возвращён по
+правилам kill switch (`killWhileClosed`), потоки закрыты (в `jormd` это `shutdown`).
+
+Платформенные швы — интерфейсы с текущей реализацией по умолчанию, подставляются в конструктор
+`CoreService`:
+
+| шов | интерфейс | по умолчанию | зачем подменять |
+|---|---|---|---|
+| запуск sing-box | `BoxRunner` (`runtime.dart`; `runner:` — главный, `boxFactory:` — одноразовые для пинга и Speed Test) | `SingBoxProcess` (процесс + `-D`, Job Object) | Android: libbox в процессе приложения; тесты: фейк |
+| системный прокси | `SystemProxyBackend` (`sysproxy.dart`) | `SystemProxy` (реестр Windows); на Android / iOS — `NoSystemProxy` | платформа без системного прокси: `enable` ничего не ставит, возвращает предупреждение |
+| права для TUN | `isElevated: bool Function()` | `processIsElevated` | Android: TUN даёт `VpnService`, права не нужны |
+| проверка выхода, таймеры, часы | `exitCheck`, `timer`, `now` | `checkExitIp`, `Timer.new`, `DateTime.now` | тесты |
+
+`BoxRunner.api` по-прежнему `SingBoxApi` (gRPC API service sing-box): Auto, трафик и Speed Test говорят
+с sing-box только через него, поэтому другой раннер должен отдавать тот же API (или адаптер к нему).
+`singBox` (путь к бинарнику) нужен `CoreService` для версии, списка программ «напрямую» в TUN и
+запасного `boxFactory`. Android в этих швах пока не реализован.
 
 ## Нода
 
@@ -383,7 +474,7 @@ sing-box сам создаёт интерфейс (wintun встроен в би
 **Правила пользователя в TUN** работают при Rules так же, как через порт: порядок и состав те же
 (`rules.md` §1: приложения → свои → быстрые → final), включая приложения Direct / Block / Proxy
 (+ «If unavailable»), исключения, сервисы. Приходят настоящие IP: IP-условия срабатывают без
-`resolve` (его в TUN нет), правила «IP conditions only in TUN» работают полностью. При Global всё
+`resolve` (для `tun-in` его нет; для `mixed-in` / `sys-in` он остаётся), правила «IP conditions only in TUN» работают полностью. При Global всё
 из TUN уходит в `proxy`, правил пользователя нет (остаются системные и `Private networks`).
 
 **Системные правила** (идут раньше правил пользователя, в обоих режимах, названы `RuleOrigin
@@ -448,7 +539,7 @@ Global, hijack вкл / выкл, системные правила первым
   ruleSets: [{ name, url, format, via, every }],
   geo: { geosite: { via, every }, geoip: { via, every } },
   dns: { servers: [{ id, addr, via, on }],
-         resolve?: 'auto'|'off'|'<id сервера>',   // «Resolve for IP rules» (только порт), по умолчанию 'auto'
+         resolve?: 'auto'|'off'|'<id сервера>',   // «Resolve for IP rules» (только порты, в TUN тоже), по умолчанию 'auto'
          hijack?: bool } }                         // Hijack DNS (только TUN), по умолчанию true
 ```
 
@@ -458,7 +549,7 @@ Global, hijack вкл / выкл, системные правила первым
   AND/OR, CIDR, порты, DNS-серверы, списки — строит ядро.
 - Порядок route: `sniff` → (TUN: hijack-dns, «TUN») → `tunnel-in` → программы ядра напрямую («TUN») →
   `Private networks` → приложения → свои правила (перед первым с IP-условиями
-  и без `ipTunOnly` — `resolve`, кроме TUN) → быстрые → `final`. Группы целей — теги целей
+  и без `ipTunOnly` — `resolve`; в TUN только для `mixed-in` / `sys-in`) → быстрые → `final`. Группы целей — теги целей
   (`src:…`, `chain:…` + `chain:…>entry`).
 - **`resolve` перед IP-правилами** (`routing.dart` `_resolveAction`, `rules.md` §4). Через
   proxy-порт приложение шлёт домен, IP-условия его не видят — поэтому один `resolve` ставится
@@ -472,9 +563,10 @@ Global, hijack вкл / выкл, системные правила первым
   DNS-правила и `dns.final`) и предупреждение о возможной утечке. Один `resolve` на конфиг:
   правило с `ipTunOnly` ниже него всё равно видит уже полученный адрес. Собственные rule-sets
   IP-условием не считаются (по .srs не видно, что внутри). Быстрые правила не резолвят. В TUN
-  (`plan.mode: 'tun'`) шага нет совсем: адрес приходит как есть, правила с `ipTunOnly` работают
-  как обычные (и предупреждения про DNS «через VPN» от этого шага нет). Следствие: соединение,
-  пришедшее в TUN-режиме на сам `mixed-in` доменом, IP-условия не видит.
+  (`plan.mode: 'tun'`) шаг ограничен входами порта: `{inbound: [mixed-in, sys-in], action: resolve, …}`.
+  Трафик `tun-in` идёт без шага (адрес приходит как есть, правила с `ipTunOnly` работают как
+  обычные), а соединение на открытый в TUN `mixed-in` / `sys-in` доменом получает IP-условия,
+  как в режиме прокси (и предупреждение про DNS «через VPN» от этого шага то же, что в прокси).
 - `tunnel-in` — второй mixed-вход на свободном порту loopback, всегда в `proxy` мимо правил:
   через него проверка выходного IP (российский сервис проверки иначе ушёл бы напрямую по
   правилу региона) и списки «через VPN».

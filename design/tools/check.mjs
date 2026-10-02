@@ -208,6 +208,14 @@ const SHOTS = {
   'speed-fail': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const n = sourcesData.src1.nodes.find(x => truthOf(x) < 0) || sourcesData.src1.nodes[0]; const m = truthOf; truthOf = x => x.id === n.id ? -1 : m(x); openSpeedTest('src1', n.id); }); await p.waitForTimeout(1900); },
   'qr-sub':   async p => { await tab(p, 'nodes'); await p.evaluate(() => showSourceQr('src1')); await settle(p); },
   'settings-data': async p => { await tab(p, 'settings'); await p.evaluate(() => openDataSettings()); await settle(p); },
+  // Settings → Data → App updates (59-data.js) against the mock feed (mockUpdate, 12-backend.js)
+  'update-available': async p => { await tab(p, 'settings'); await p.evaluate(() => { openDataSettings(); updCheck(); }); await p.waitForFunction(() => upd.phase === 'available'); await settle(p); },
+  'update-progress': async p => { await tab(p, 'settings'); await p.evaluate(() => { mockUpdate.pauseAt = 45; openDataSettings(); updCheck(); });
+    await p.waitForFunction(() => upd.phase === 'available'); await p.evaluate(() => updDownload()); await p.waitForFunction(() => upd.received >= upd.offer.size * .45 - 1); await settle(p); },
+  'update-ready': async p => { await tab(p, 'settings'); await p.evaluate(() => { openDataSettings(); updCheck(); });
+    await p.waitForFunction(() => upd.phase === 'available'); await p.evaluate(() => updDownload()); await p.waitForFunction(() => upd.phase === 'ready'); await settle(p); },
+  'update-error': async p => { await tab(p, 'settings'); await p.evaluate(() => { mockUpdate.checkFails = 'network'; openDataSettings(); updCheck(); }); await p.waitForFunction(() => upd.phase === 'failed'); await settle(p); },
+  'update-uptodate': async p => { await tab(p, 'settings'); await p.evaluate(() => { mockUpdate.find = false; openDataSettings(); updCheck(); }); await p.waitForFunction(() => upd.phase === 'upToDate'); await settle(p); },
   'restore-confirm': async p => { await tab(p, 'settings'); await p.evaluate(() => { openDataSettings(); confirmRestore(liveSnapshot(), '2026-09-20T18:30:00Z', 'jormungand-backup-2026-09-20.json'); }); await settle(p); },
   'checkers': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openCheckersPicker(); }); await settle(p); },
   'blocked-toast': async p => { await p.evaluate(() => { const id = autoOrder()[0], via = autoOrder()[1] || id;
@@ -228,7 +236,7 @@ const SHOTS = {
   'nodeform-edit': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const g = manualGroups()[0]; openNodeForm(g, sourcesData[g].nodes[0].id); }); await settle(p); },
 };
 // ru-<preset>: the same preset with the language set to Russian (docs/i18n.md); `all` skips them.
-for (const n of ['home', 'nodes', 'route', 'settings', 'rules', 'rule-form', 'logs', 'profiles', 'settings-auto', 'settings-dns', 'dock', 'connections', 'help']) if (SHOTS[n]) SHOTS['ru-' + n] = SHOTS[n];
+for (const n of ['home', 'nodes', 'route', 'settings', 'rules', 'rule-form', 'logs', 'profiles', 'settings-auto', 'settings-dns', 'dock', 'connections', 'help', 'update-available']) if (SHOTS[n]) SHOTS['ru-' + n] = SHOTS[n];
 // Links the manual server form must read without a core: vmess base64, legacy ss, IPv6, anytls.
 const SAMPLE_LINKS = [
   'vmess://' + Buffer.from(JSON.stringify({ v: '2', ps: '🇳🇱 Amsterdam VM', add: 'nl1.example.net', port: '443', id: '11111111-2222-3333-4444-555555555555', aid: '0', net: 'ws', tls: 'tls' })).toString('base64'),
@@ -856,6 +864,9 @@ async function runChecks() {
       () => { closeSheet('setlook'); openSheet('setauto'); },
       () => { closeSheet('setauto'); openSheet('setnotif'); },
       () => { closeSheet('setnotif'); openDataSettings(); },
+      () => { upd.phase = 'downloading'; upd.offer = mockRelease('beta'); upd.received = upd.offer.size * .45; renderUpdates(); },   // App updates: the tallest state
+      () => { upd.phase = 'failed'; upd.stage = 'download'; upd.error = updErrorText({ code: 'network' }); renderUpdates(); },
+      () => { upd.phase = 'idle'; upd.offer = null; upd.error = null; renderUpdates(); },
       () => { closeSheet('setdata'); showSourceQr('src1'); },
       () => { closeSheet('actions'); connCfg.killSwitch = true; openSheet('setconn'); renderConnSettings(); },
       () => { connCfg.killSwitch = false; renderConnSettings(); },
@@ -1458,6 +1469,79 @@ async function runChecks() {
     await page.setInputFiles('#restoreFile', { name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('{"a":1}') });
     await page.waitForTimeout(200);
     expect(/Cannot restore/.test(await toastText(page)), 'toast: ' + await toastText(page));
+  });
+  await check('settings: Data — App updates: check, notes, download with progress and cancel, failure and retry, install, channel, auto-check, up to date, ru', async () => {
+    const waitPhase = ph => page.waitForFunction(x => upd.phase === x, ph);
+    const text = sel => page.textContent(sel);
+    await page.evaluate(() => { Object.assign(mockUpdate, { find: true, checkFails: null, downloadFails: null, pauseAt: null }); Object.assign(upd, { phase: 'idle', offer: null, file: false, error: null, checkedAt: null }); genCfg.updChannel = 'stable'; genCfg.updates = true; openDataSettings(); });
+    await page.waitForTimeout(300);
+    let r = await page.evaluate(() => ({ t: document.getElementById('upd-block').textContent, ch: document.getElementById('upd-channel').textContent.trim(), on: document.getElementById('upd-auto').classList.contains('on'), card: !!document.getElementById('upd-card') }));
+    expect(/0\.1\.0/.test(r.t) && /Not checked yet/.test(r.t) && r.ch === 'Stable' && r.on && !r.card, 'start: ' + JSON.stringify(r));
+    expect(!/Check for app updates/.test(await page.textContent('#general-settings')), 'the General row moved to Data');
+    // check: busy, then the offer with notes and the size
+    await page.click('#upd-check');
+    expect(/Checking/.test(await text('#upd-status')) && await page.isDisabled('#upd-check'), 'checking: ' + await text('#upd-status'));
+    await waitPhase('available');
+    r = await page.evaluate(() => ({ title: document.querySelector('.upd-title').textContent, notes: document.querySelector('.upd-notes').textContent, size: document.querySelector('.upd-size').textContent, btn: document.getElementById('upd-download').textContent }));
+    expect(/Update 0\.2\.0 available/.test(r.title) && /switches faster/.test(r.notes) && /58/.test(r.size) && /Download & install/.test(r.btn), 'offer: ' + JSON.stringify(r));
+    // download: progress stands at 50 %, Cancel keeps the offer
+    await page.evaluate(() => { mockUpdate.pauseAt = 50; });
+    await page.click('#upd-download');
+    await page.waitForFunction(() => upd.received >= upd.offer.size * .5 - 1);
+    r = await page.evaluate(() => ({ w: document.querySelector('.upd-bar div').style.width, line: document.getElementById('upd-pct').textContent, dis: document.getElementById('upd-check').disabled }));
+    expect(r.w === '50%' && /50%/.test(r.line) && r.dis, 'progress: ' + JSON.stringify(r));
+    await page.click('.upd-cancel');
+    await waitPhase('available');
+    expect(await page.isVisible('#upd-download'), 'cancel: back to Download & install');
+    // a damaged file: error, Retry downloads again and gets through
+    await page.evaluate(() => { mockUpdate.pauseAt = null; mockUpdate.downloadFails = 'hash'; });
+    await page.click('#upd-download');
+    await waitPhase('failed');
+    r = await page.evaluate(() => ({ hint: document.getElementById('upd-status').textContent, line: document.querySelector('.upd-line.warn').textContent }));
+    expect(/Download failed/.test(r.hint) && /damaged/.test(r.line) && await page.isVisible('#upd-retry'), 'failed: ' + JSON.stringify(r));
+    await page.evaluate(() => { mockUpdate.downloadFails = null; });
+    await page.click('#upd-retry');
+    await waitPhase('ready');
+    expect(/Ready to install/.test(await text('#upd-status')) && await page.isVisible('#upd-install'), 'ready');
+    await page.click('#upd-install');
+    await page.waitForTimeout(500);
+    expect(/Installing the update/.test(await toastText(page)), 'install toast: ' + await toastText(page));
+    // another check does not lose the downloaded file
+    await page.click('#upd-check');
+    await waitPhase('ready');
+    // channel: Beta finds the beta build and drops the stable offer first
+    await page.click('#upd-channel');
+    await page.locator('#actions-body .menu-row').nth(1).click();
+    await page.waitForTimeout(200);
+    r = await page.evaluate(() => ({ ch: genCfg.updChannel, phase: upd.phase, card: !!document.getElementById('upd-card'), btn: document.getElementById('upd-channel').textContent.trim() }));
+    expect(r.ch === 'beta' && r.phase === 'idle' && !r.card && r.btn === 'Beta', 'channel: ' + JSON.stringify(r));
+    await page.click('#upd-check');
+    await waitPhase('available');
+    expect(/Update 0\.3\.0-beta\.1 available/.test(await text('.upd-title')) && /beta/i.test(await text('.upd-beta')), 'beta offer: ' + await text('.upd-title'));
+    // auto-check
+    await page.click('#upd-auto');
+    expect(await page.evaluate(() => genCfg.updates === false && !document.getElementById('upd-auto').classList.contains('on')), 'auto-check off');
+    await page.click('#upd-auto');
+    expect(await page.evaluate(() => genCfg.updates === true), 'auto-check on');
+    // up to date, a failed check with Retry
+    await page.evaluate(() => { genCfg.updChannel = 'stable'; mockUpdate.find = false; });
+    await page.click('#upd-check');
+    await waitPhase('upToDate');
+    expect(/up to date/i.test(await text('#upd-status')) && !await page.isVisible('#upd-card'), 'up to date: ' + await text('#upd-status'));
+    await page.evaluate(() => { mockUpdate.checkFails = 'network'; });
+    await page.click('#upd-check');
+    await waitPhase('failed');
+    r = await page.evaluate(() => ({ hint: document.getElementById('upd-status').textContent, warn: document.getElementById('upd-status').classList.contains('warn'), btn: document.getElementById('upd-check').textContent.trim() }));
+    expect(/No update server answered/.test(r.hint) && r.warn && r.btn === 'Retry', 'check failed: ' + JSON.stringify(r));
+    // Russian: the block, the notes in the manifest's own Russian
+    await page.evaluate(() => { mockUpdate.checkFails = null; mockUpdate.find = true; });
+    await page.click('#upd-check');
+    await waitPhase('available');
+    await page.evaluate(() => setGenCfg('lang', 'ru'));
+    await page.waitForTimeout(200);
+    r = await page.evaluate(() => ({ cap: document.querySelector('#upd-block .set-caption').textContent, title: document.querySelector('.upd-title').textContent, notes: document.querySelector('.upd-notes').textContent, btn: document.getElementById('upd-download').textContent, ch: document.getElementById('upd-channel').textContent.trim() }));
+    expect(r.cap === 'Обновления приложения' && /Доступна версия 0\.2\.0/.test(r.title) && /Режим Auto быстрее/.test(r.notes) && r.btn === 'Скачать и установить' && r.ch === 'Стабильный', 'ru: ' + JSON.stringify(r));
+    await page.evaluate(() => { setGenCfg('lang', 'en'); Object.assign(mockUpdate, { find: true, checkFails: null, downloadFails: null, pauseAt: null }); Object.assign(upd, { phase: 'idle', offer: null, file: false, error: null, checkedAt: null }); genCfg.updChannel = 'stable'; renderUpdates(); });
   });
   await check('settings: Data — state put back for the next checks', () => page.evaluate(s => { liveApply(JSON.parse(s)); renderAfterRestore(); closeSheet('setdata'); }, stateBefore));
 
@@ -2202,7 +2286,7 @@ async function runChecks() {
       out.onlyThose = testing.length > 0 && testing.every(k => keys.has(k));
       await p;
       switchTab('settings'); openSheet('setgeneral');
-      out.rows = document.querySelectorAll('#general-settings .set-row').length >= 7;
+      out.rows = document.querySelectorAll('#general-settings .set-row').length >= 6;   // the update rows live in Settings → Data now
       document.querySelector('#general-settings [data-key=connectOnLaunch] .mini-toggle').click();
       out.toggled = genCfg.connectOnLaunch && /connects on launch/.test(document.getElementById('setGeneralSub').textContent);
       document.querySelector('#general-settings [data-key=connectOnLaunch] .mini-toggle').click();

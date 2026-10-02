@@ -93,6 +93,24 @@ textarea.nf-link{min-height:44px;max-height:132px;overflow-y:auto;word-break:bre
 .testurl-custom .btn-primary{width:auto;padding:0 16px;font-size:15px}
 .testurl-hint{padding:6px 20px 12px}
 
+/* ── App updates (59-data.js renderUpdates) ── */
+#data-settings .set-row .btn-secondary{margin-left:8px}
+.upd-card{padding:12px 14px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.upd-head{display:flex;align-items:baseline;gap:8px}
+.upd-title{flex:1;min-width:0;font-size:15px;font-weight:600;color:var(--t1)}
+.upd-beta{margin-left:4px;padding:1px 6px;border-radius:6px;background:rgba(var(--warn-rgb),.15);color:var(--warn);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.upd-size{flex-shrink:0;font-size:13px;color:var(--t2)}
+.upd-notes-cap{font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--t3)}
+.upd-notes{font-size:13px;line-height:1.45;color:var(--t2);white-space:pre-line;overflow-wrap:anywhere}
+.upd-card .btn-primary{padding:11px;font-size:15px}
+.upd-bar{height:6px;border-radius:3px;background:rgba(var(--accent-rgb),.15);overflow:hidden}
+.upd-bar div{height:100%;background:var(--accent);transition:width .15s}
+.upd-line{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--t2)}
+.upd-line span{flex:1;min-width:0}
+.upd-line.ok{color:var(--active)}
+.upd-line.warn{color:var(--warn);overflow-wrap:anywhere}
+.upd-cancel{flex-shrink:0;background:none;border:none;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:4px 0}
+
 /* ── SpeedCard (38-speed.js) ── */
 .speed-card{padding:0 16px 14px;display:flex;flex-direction:column;align-items:stretch;gap:12px}
 .speed-node{display:flex;align-items:center;justify-content:center;gap:6px;min-width:0;font-size:13px;color:var(--t2)}
