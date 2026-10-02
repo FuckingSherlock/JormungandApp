@@ -7,13 +7,12 @@ import 'shell/home_shell.dart';
 import 'state/app_settings.dart';
 import 'theme/app_colors.g.dart';
 
-/// Root widget: owns the two app-wide stores ([AppSettings], [CoreHost]), applies the theme,
-/// locale and text-scale policy.
+/// Root widget: owns the app-wide [AppSettings], shares the [CoreHost] it is given (built in
+/// main.dart by `openCoreHost`, a fake in tests), applies the theme, locale and text-scale policy.
 class JormungandApp extends StatefulWidget {
-  /// [coreHost] defaults to [IdleCoreHost] until the real host exists.
-  const JormungandApp({super.key, this.coreHost});
+  const JormungandApp({super.key, required this.coreHost});
 
-  final CoreHost? coreHost;
+  final CoreHost coreHost;
 
   @override
   State<JormungandApp> createState() => _JormungandAppState();
@@ -21,18 +20,29 @@ class JormungandApp extends StatefulWidget {
 
 class _JormungandAppState extends State<JormungandApp> {
   final AppSettings _settings = AppSettings();
-  late final CoreHost _core = widget.coreHost ?? IdleCoreHost();
+  late final AppLifecycleListener _lifecycle;
+
+  CoreHost get _core => widget.coreHost;
 
   @override
   void initState() {
     super.initState();
     _core.init();
+    // Desktop: the window is closing - stop sing-box, put the system proxy back (or keep it by
+    // the kill switch) and save. Android's process just ends; the state is saved as it changes.
+    _lifecycle = AppLifecycleListener(
+      onExitRequested: () async {
+        await _core.shutdown();
+        return AppExitResponse.exit;
+      },
+      onDetach: _core.shutdown,
+    );
   }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _settings.dispose();
-    if (widget.coreHost == null) _core.dispose();
     super.dispose();
   }
 

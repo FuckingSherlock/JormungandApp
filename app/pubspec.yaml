@@ -13,6 +13,7 @@ dependencies:
     sdk: flutter
   # the version is pinned by flutter_localizations; `any` is what the Flutter l10n guide uses
   intl: any
+  path_provider: ^2.1.5 # the core's data dir (application support directory)
   jormungand_core:
     path: ../core
 

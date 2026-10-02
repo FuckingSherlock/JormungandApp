@@ -1,1 +1,4 @@
-{}
+{
+  "VPN permission was not granted": "Разрешение на VPN не выдано",
+  "Could not save the state: {0}": "Не удалось сохранить состояние: {0}"
+}

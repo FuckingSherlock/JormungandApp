@@ -4,9 +4,11 @@ import 'package:jormungand/app.dart';
 import 'package:jormungand/shell/home_shell.dart';
 import 'package:jormungand/state/app_settings.dart';
 
+import 'fake_core_host.dart';
+
 void main() {
   testWidgets('shell opens on Home and switches tabs', (tester) async {
-    await tester.pumpWidget(const JormungandApp());
+    await tester.pumpWidget(JormungandApp(coreHost: FakeCoreHost()));
     await tester.pumpAndSettle();
 
     expect(find.text('Jormungand'), findsOneWidget);

@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/core_host.dart';
 import '../l10n/l10n.dart';
 import '../pages/home_page.dart';
 import '../pages/logs_page.dart';
 import '../pages/nodes_page.dart';
 import '../pages/settings_page.dart';
 import '../theme/app_colors.g.dart';
+import '../widgets/add_subscription_dialog.dart';
 
 /// The bottom-nav tabs, in the mockup's order (markup/40-bottomnav.html).
 enum AppTab {
@@ -40,6 +44,48 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   AppTab _tab = AppTab.home;
+  StreamSubscription<HostNotice>? _notices;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // the host's short messages (a connect that failed, a subscription that did not load...)
+    // are toasts on whatever tab is open
+    _notices ??= CoreHostScope.read(context).notices.listen(_toast);
+  }
+
+  @override
+  void dispose() {
+    _notices?.cancel();
+    super.dispose();
+  }
+
+  void _toast(HostNotice n) {
+    if (!mounted) return;
+    final l10n = context.l10n;
+    final text = switch (n.code) {
+      'subFailed' when n.args.length == 2 => l10n.couldNotLoad2(
+        n.args[0],
+        n.args[1],
+      ),
+      'initFailed' => l10n.coreNotReachable(n.text),
+      'vpnDenied' => l10n.vpnPermissionWasNotGranted,
+      'notSaved' => l10n.couldNotSaveTheState(n.text),
+      _ => n.text,
+    };
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// Home with nothing to connect through (mockup `dockTap`): Nodes, and its "+" - for now the
+  /// minimal Add subscription form.
+  void _openNodesAdd() {
+    setState(() => _tab = AppTab.nodes);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showAddSubscriptionDialog(context);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,11 +106,11 @@ class _HomeShellState extends State<HomeShell> {
         child: Scaffold(
           body: IndexedStack(
             index: _tab.index,
-            children: const [
-              HomePage(),
-              NodesPage(),
-              LogsPage(),
-              SettingsPage(),
+            children: [
+              HomePage(onOpenNodes: _openNodesAdd),
+              const NodesPage(),
+              const LogsPage(),
+              const SettingsPage(),
             ],
           ),
           bottomNavigationBar: DecoratedBox(

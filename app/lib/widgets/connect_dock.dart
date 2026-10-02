@@ -4,6 +4,7 @@ import '../core/core_host.dart';
 import '../l10n/l10n.dart';
 import '../theme/app_colors.g.dart';
 import 'dock_paths.g.dart';
+import 'dock_profile.dart';
 
 /// Colour of the power button / connection badge per phase: connected = active, busy = accent,
 /// down = danger, off = grey (`.power-tab.on / .busy / .down` in css/50-dock.css).
@@ -14,20 +15,29 @@ Color phaseTone(AppColors c, ConnectionPhase phase) => switch (phase) {
   ConnectionPhase.disconnected => c.t2,
 };
 
-/// Bottom dock of Home: the power tab rising out of the top edge + the active profile row.
+/// Bottom dock of Home: the power tab rising out of the top edge + the active profile row
+/// (and, while the VPN is down, the red "VPN is down · 3 min · retrying" line above it).
 ///
 /// The tab is 200 x 52 and overhangs the dock by 50 px, so the dock is laid out 50 px taller than
-/// its visible body (the transparent top part lets touches through to the page behind). Home's
-/// scroll area keeps a 60 px bottom padding for it, like `#view-home > .scroll`.
+/// its visible body (the transparent top part lets touches through to the page behind). Home
+/// measures the dock and keeps that much (plus a gap) as the bottom padding of its scroll area,
+/// like `#view-home > .scroll`.
 class ConnectDock extends StatelessWidget {
-  const ConnectDock({super.key});
+  const ConnectDock({super.key, required this.onPower, this.onRowTap});
 
   static const double tabOverhang = 50;
+
+  /// The power tab: connect / disconnect (the page handles what comes of it).
+  final VoidCallback onPower;
+
+  /// The profile row: Route (a non-empty dock) or Nodes -> + (an empty one).
+  final VoidCallback? onRowTap;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final host = CoreHostScope.of(context);
+    final down = host.down;
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -38,7 +48,14 @@ class ConnectDock extends StatelessWidget {
               color: c.surface,
               border: Border(top: BorderSide(color: c.border)),
             ),
-            child: const DockProfile(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (down != null) DockDownLine(since: down.since),
+                DockProfile(summary: host.dock, onTap: onRowTap),
+              ],
+            ),
           ),
         ),
         Positioned(
@@ -46,11 +63,7 @@ class ConnectDock extends StatelessWidget {
           left: 0,
           right: 0,
           child: Center(
-            child: PowerTab(
-              phase: host.phase,
-              onPressed: () =>
-                  host.isConnected ? host.disconnect() : host.connect(),
-            ),
+            child: PowerTab(phase: host.phase, onPressed: onPower),
           ),
         ),
       ],
@@ -140,47 +153,4 @@ class _DockShapePainter extends CustomPainter {
   @override
   bool shouldRepaint(_DockShapePainter old) =>
       old.colors != colors || old.phase != phase;
-}
-
-/// Active profile line of the dock (mockup `.dock-profile`: Simple / Profiles label, name, mode
-/// badge, node count). Stub.
-class DockProfile extends StatelessWidget {
-  const DockProfile({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // TODO(core-api): the active entry (Simple / Profile / Chain) and its mode from the core.
-                Text(
-                  context.l10n.simple.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: .6,
-                    color: c.t3,
-                  ),
-                ),
-                Text(
-                  '-',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: c.t1,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

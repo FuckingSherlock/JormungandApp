@@ -2751,5 +2751,77 @@
         "type": "num"
       }
     }
+  },
+  "appUpdates": "App updates",
+  "updatesBackupAbout": "Updates, backup, about",
+  "version": "Version",
+  "checkNow": "Check now",
+  "notCheckedYet": "Not checked yet",
+  "checkedAt": "Checked at {s0}",
+  "@checkedAt": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "youAreUpToDate": "You are up to date",
+  "aNewVersionIsOut": "A new version is out",
+  "downloading": "Downloading…",
+  "readyToInstall": "Ready to install",
+  "downloadFailed2": "Download failed",
+  "updateAvailable": "Update {s0} available",
+  "@updateAvailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "whatSNew": "What's new",
+  "downloadInstall": "Download & install",
+  "downloadingOf": "Downloading {n0}% · {s1} of {s2}",
+  "@downloadingOf": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "downloadedAndChecked": "Downloaded and checked",
+  "install": "Install",
+  "installingTheUpdateTheAppRestarts": "Installing the update — the app restarts when it is done",
+  "autoCheck": "Auto-check",
+  "onLaunchAndOnceADay": "On launch and once a day. Nothing is installed without asking",
+  "channel": "Channel",
+  "betaGetsNewVersionsEarlier": "Beta gets new versions earlier",
+  "updateChannel": "Update channel",
+  "stable": "Stable",
+  "beta": "Beta",
+  "beta2": "beta",
+  "testedReleases": "Tested releases",
+  "earlyBuildsNewThingsFirstMore": "Early builds: new things first, more bugs",
+  "noUpdateServerAnsweredConnectTo": "No update server answered. Connect to the VPN and try again",
+  "theUpdateInformationCouldNotBe": "The update information could not be verified",
+  "theDownloadedFileIsDamaged": "The downloaded file is damaged",
+  "cannotSaveTheFileCheckThe": "Cannot save the file: check the free space",
+  "thereIsNoFileForThis": "There is no file for this device",
+  "thisVersionHasToBeDownloaded": "This version has to be downloaded by hand",
+  "updateChecksAreNotAvailableIn": "Update checks are not available in this build yet",
+  "somethingWentWrong": "Something went wrong",
+  "vpnPermissionWasNotGranted": "VPN permission was not granted",
+  "couldNotSaveTheState": "Could not save the state: {s0}",
+  "@couldNotSaveTheState": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
   }
 }

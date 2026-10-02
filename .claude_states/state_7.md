@@ -47,6 +47,19 @@ CLAUDE.md «Working method». Этот файл: что сделано посл�
 - Ресурсы мокапа → Flutter: темы → ThemeExtension, `04-i18n-ru.js` → ARB, `geometry.mjs` → Path,
   Twemoji-шрифт ассетом, QR пакетом.
 
+## Сделано позже (03.10)
+- Proxy — режим по умолчанию. `f42281d`.
+- `app/` — каркас Flutter (не компилировался). `0f89828`. Сборка: `app/README.md`.
+- `7b19108`: CoreService / CoreApi (daemon.dart — тонкий HTTP), модель каталога на Dart
+  (`core/lib/src/catalog/`, golden-тесты против мокапа: `core/tool/catalog_golden.mjs`),
+  обновления в приложении (`docs/updates.md`, `appupdate.dart`, блок в Settings → Data),
+  правки routing, Windows-код отделён для Android. Тесты ядра 510, мокап 153.
+- Ждут ответа юзера по обновлениям: хостинг фидов (предложено: публичный репо релизов + Cloudflare
+  R2), хранение приватного ключа, формат Windows (zip + апдейтер), обязательное обновление не
+  блокирует Connect. Также: ставить ли WinDbg для разбора дампов BSOD.
+- Мелочи из отчётов: `42-apps.js` targetImpact падает на неизвестном пакете; сид мокапа quickCfg
+  (сервисы на vpn) ≠ первый запуск liveApply (default).
+
 ## Дальше
 - Принять работу агентов TUN и TUN stack, закоммитить.
 - Ответы юзера по Flutter (репо, тулчейн, устройство) → старт: тулчейн, libbox.aar, CoreService,

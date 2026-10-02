@@ -4,9 +4,12 @@
 потом Windows. Макет (`design/`) остаётся образцом: виджеты названы так же (ConnectDock, PowerTab,
 SourceCard, NodeRow), цвета и геометрия генерируются из него.
 
-Состояние: каркас. Есть оболочка (4 вкладки, темы, масштаб текста 90–120 %, en/ru), заглушки
-страниц, заглушка `VpnService` + `MethodChannel`. Флаттера на момент написания на машине не было —
-код ни разу не компилировался, первая сборка потребует правок.
+Состояние: каркас + Home на настоящем ядре. Есть оболочка (4 вкладки, темы, масштаб текста
+90–120 %, en/ru), страница Home (статистика, сегменты режимов, VpnAlert, ConnectDock) поверх
+`CoreService` + каталога из `jormungand_core`, остальные страницы — заглушки, заглушка `VpnService` +
+`MethodChannel`. Флаттера на момент написания на машине не было — код ни разу не компилировался,
+первая сборка потребует правок (`LiveCoreHost` проверен отдельно на голом Dart: стабы `flutter` +
+настоящий `CoreService` с фальшивым `BoxRunner`, тот же `test/live_core_host_test.dart`).
 
 ## Раскладка
 
@@ -15,19 +18,22 @@ app/
   pubspec.yaml, l10n.yaml, analysis_options.yaml
   lib/
     main.dart, app.dart          MaterialApp: тема, локаль, политика масштаба текста
-    core/core_host.dart          CoreHost (интерфейс) + IdleCoreHost (заглушка) + CoreHostScope
+    core/core_host.dart          CoreHost (интерфейс для UI) + значения (DockSummary, ExitState…) + CoreHostScope
+    core/live_core_host.dart     LiveCoreHost: CoreService + Catalog; connect = checkBeforeConnect -> livePlan -> api.connect
+    core/platform_seams.dart     openCoreHost(): BoxRunner / SystemProxyBackend / каталог данных по платформе; LibboxRunner (заглушка)
+    core/format.dart             fmtRate / fmtBytes / длительность / флаг
     state/app_settings.dart      тема / масштаб / язык (ChangeNotifier + InheritedNotifier)
     platform/vpn_channel.dart    MethodChannel `jormungand/vpn`: prepare / start / stop
     shell/home_shell.dart        нижняя навигация Home · Nodes · Logs · Settings, Back -> Home
     pages/                       home, nodes, logs, settings (Settings: Appearance + Language рабочие)
-    widgets/                     AppView, ConnectDock + PowerTab, ConnBadge, SourceCard, NodeRow, SettingsRow
+    widgets/                     AppView, ConnectDock + PowerTab + DockProfile, ConnBadge, StatCards, SegmentsCard, VpnAlert, AddSubscriptionDialog, SourceCard, NodeRow, SettingsRow
     theme/app_colors.g.dart      GENERATED: AppColors (ThemeExtension), 3 темы, ThemeData
     widgets/dock_paths.g.dart    GENERATED: фигуры дока из design/tools/geometry.mjs
     l10n/app_{en,ru}.arb         GENERATED из словаря макета; l10n/l10n.dart — `context.l10n`
   assets/fonts/                  Twemoji-флаги (TTF, сконвертирован из woff2 макета)
   android_overlay/               рукописные части android/ (манифест, Kotlin-шаблоны)
   tool/                          генераторы и скрипт наложения Android
-  test/shell_test.dart
+  test/                          shell_test, home_test (FakeCoreHost), live_core_host_test (настоящий CoreService, фальшивый BoxRunner)
 ```
 
 Цвета в виджетах — только `context.colors.<name>` (`AppColors`); `rgba(var(--x-rgb), a)` из CSS это
@@ -85,10 +91,13 @@ Dart-ядро; сервис только открывает tun.
 
 ## Заглушки и TODO
 
-- [ ] `CoreHost`: настоящая реализация поверх `CoreService` / `CoreApi` (их выделяют из `core/lib/src/daemon.dart`); потоки трафика, соединений, событий, логов; подключение = `VpnChannel.prepare` -> конфиг ядра -> `VpnChannel.start`.
+- [x] `CoreHost`: `LiveCoreHost` поверх `CoreService`; статус, трафик, события, каталог (сохранение с задержкой 400 мс), переподключение при смене плана, добавление подписки. Не сделано: пинг-тесты по запросу (только после добавления подписки), `pingOnLaunch` / `connectOnLaunch`, `appInfo` каталога (список установленных приложений), поток логов в UI.
+- [ ] Android: `LibboxRunner` (`core/platform_seams.dart`) пока отвечает «libbox is not integrated yet»; когда libbox будет — `start` отдаёт конфиг в `VpnChannel.start`, `api` = SingBoxApi на clash-порту libbox.
+- [ ] Home: NavCards (Auto mode, Rules, DNS, Speed Test) и листы под ними; Route по нажатию на строку дока / «Open Route» (сейчас не делает ничего); лист Live connections; пинг верхних серверов по нажатию на рамку задержки.
+- [ ] Nodes: сейчас только «+» с минимальной формой подписки (`AddSubscriptionDialog`) — заменить листом Add и формой источника.
 - [ ] Android: libbox (см. выше), `PlatformInterface`, события сервиса в Dart (`onRevoke`, up / down), запрос `POST_NOTIFICATIONS`, строки уведомления в `strings.xml`, иконка уведомления (монохромная), действие «Отключить».
 - [ ] Android: самообновление (`REQUEST_INSTALL_PACKAGES` в манифесте уже есть) — загрузка APK, проверка подписи / хеша, установка через `PackageInstaller`.
-- [ ] Страницы: Home (StatCards, сегменты режимов, VpnAlert), Nodes (SourceCard / NodeRow, вкладки Simple / Profiles, редактирование), Logs (Events / Raw), остальной Settings, листы (Route, Rules, Add, …) со стеком «Назад закрывает верхний лист».
+- [ ] Страницы: Nodes (SourceCard / NodeRow, вкладки Simple / Profiles, редактирование), Logs (Events / Raw), остальной Settings, листы (Route, Rules, Add, …) со стеком «Назад закрывает верхний лист».
 - [ ] Иконки нижней навигации сейчас Material (`Icons.*`), в макете — свои SVG; точки непрочитанных ошибок / предупреждений на Logs.
 - [ ] Анимации дока (смена цвета 0.7 с, свечение, пульс при `connecting`); сейчас рисуется статично.
 - [ ] Сохранение `AppSettings` (тема, масштаб, язык) вместе с остальным состоянием.
