@@ -252,10 +252,13 @@ function syncKillSettings() {
   // connected / down, or a block after disconnect / while closed: turning its setting off lifts it
   if (connected || vpn.blocking) backend.killSettings(killPlan()).catch(e => toast(e.message));
 }
-function offerClosedKill() {
+/* "Also while the app is closed" is only ever turned on through this one sheet (turning it off is immediate).
+   With autostart / autoconnect missing, the same sheet also turns those two on. */
+function confirmClosedKill() {
   const close = "closeSheet('actions');";
-  openActions('Also while the app is closed', `<div class="menu-note">Keeping the proxy while the app is closed only makes sense if the app starts with the computer and connects by itself: otherwise the internet stays blocked until you start it by hand. Turn on <b>Launch at startup</b> and <b>Connect on launch</b>?</div>`
-    + menuRow(ICON.check, 'Turn them on', close + "genCfg.launchAtStartup=genCfg.connectOnLaunch=true;connCfg.killWhileClosed=true;renderConnSettings();renderGeneral()")
+  const need = !killClosedOk();
+  openActions('Keep blocking while closed?', `${need ? '<div class="menu-note">It only makes sense if the app starts with the computer and connects by itself, so Launch at startup and Connect on launch will be turned on too.</div>' : ''}<div class="menu-note">If the app doesn\'t start again or is removed, the internet stays blocked. To unblock by hand: Windows Settings → Network &amp; internet → Proxy → turn off "Use a proxy server".</div>`
+    + menuRow(ICON.check, 'Turn on', close + (need ? 'genCfg.launchAtStartup=genCfg.connectOnLaunch=true;' : '') + 'connCfg.killWhileClosed=true;renderConnSettings();renderGeneral()')
     + menuRow(ICON.close, 'Cancel', close));
 }
 /* Turning the kill switch off while it protects something (connected, down, or a block after
@@ -348,8 +351,8 @@ function renderConnSettings() {
       ${connCfg.killSwitch ? `
       <div class="set-row set-sub" data-key="killOnDisconnect"><div class="set-label" style="flex:1">Also after I disconnect<div class="set-hint">Internet stays blocked until you connect again or tap Remove on Home</div></div>
         ${toggle(connCfg.killOnDisconnect, 'connCfg.killOnDisconnect=!connCfg.killOnDisconnect;renderConnSettings()')}</div>
-      <div class="set-row set-sub ${closedOk ? '' : 'dim'}" data-key="killWhileClosed"${closedOk ? '' : ' onclick="offerClosedKill()"'}><div class="set-label" style="flex:1">Also while the app is closed<div class="set-hint">${closedOk ? 'The proxy stays set when the app is closed, so nothing leaks before it starts again' : 'Needs Launch at startup and Connect on launch — tap to turn them on'}</div></div>
-        ${toggle(closedOk && connCfg.killWhileClosed, closedOk ? 'connCfg.killWhileClosed=!connCfg.killWhileClosed;renderConnSettings()' : '')}</div>`
+      <div class="set-row set-sub ${closedOk ? '' : 'dim'}" data-key="killWhileClosed"${closedOk ? '' : ' onclick="confirmClosedKill()"'}><div class="set-label" style="flex:1">Also while the app is closed<div class="set-hint">${closedOk ? 'The proxy stays set when the app is closed, so nothing leaks before it starts again' : 'Needs Launch at startup and Connect on launch — tap to turn them on'}</div></div>
+        ${toggle(closedOk && connCfg.killWhileClosed, closedOk ? 'if(connCfg.killWhileClosed){connCfg.killWhileClosed=false;renderConnSettings()}else confirmClosedKill()' : '')}</div>`
       : `
       <div class="set-row" data-key="downProxy"><div class="set-label" style="flex:1">Remove the proxy if the VPN cannot recover<div class="hint-stack">${hintStack(connCfg.downProxy !== 'keep', 'On: the system proxy is removed and traffic goes direct until the VPN is back', 'Off: the proxy stays set, so apps that use it have no internet until the VPN is back')}</div></div>
         ${toggle(connCfg.downProxy !== 'keep', "connCfg.downProxy=connCfg.downProxy==='keep'?'remove':'keep';renderConnSettings()")}</div>`}

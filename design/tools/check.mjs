@@ -154,6 +154,7 @@ const SHOTS = {
   'dns-failover': async p => { await p.evaluate(async () => { openDnsSettings(); await wait(1200); dnsPing.remote = -1; dnsPing.local = 12; dnsPing.google = 30; renderDns(); }); await settle(p); },
   'dns-form': async p => { await p.evaluate(() => { openDnsSettings(); openDnsForm(); }); await settle(p); },
   'settings-conn': async p => { await p.evaluate(() => { switchTab('settings'); openSheet('setconn'); }); await settle(p); },
+  'kill-closed-confirm': async p => { await p.evaluate(() => { connCfg.killSwitch = true; genCfg.launchAtStartup = genCfg.connectOnLaunch = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); confirmClosedKill(); }); await settle(p); },
   'kill-off-confirm': async p => { await p.evaluate(() => { connCfg.killSwitch = true; connected = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); toggleKillSwitch(); }); await settle(p); },
   // password on the proxy port: a login and password shown, copy buttons (fixed values: the shot must not change)
   'conn-proxy-auth': async p => { await p.evaluate(() => { connCfg.sysProxy = true; connCfg.proxyAuth = true; connCfg.proxyUser = 'k7m2xq9d'; connCfg.proxyPass = 'Kq7mT2vXp9Rd4WzN8sYb'; switchTab('settings'); openSheet('setconn'); renderConnSettings(); }); await settle(p); },
@@ -3430,11 +3431,24 @@ async function runChecks() {
       const wc = () => document.querySelector('#conn-settings [data-key="killWhileClosed"]');
       out.dim = wc().classList.contains('dim') && !wc().querySelector('.mini-toggle.on');
       wc().click(); await wait(50);
-      out.offer = document.getElementById('sh-actions').classList.contains('open') && !connCfg.killWhileClosed;
-      genCfg.launchAtStartup = genCfg.connectOnLaunch = true; closeSheet('actions'); renderConnSettings();
+      const sheetOpen = () => document.getElementById('sh-actions').classList.contains('open');
+      const act = t => [...document.querySelectorAll('#sh-actions .menu-row')].find(e => e.textContent.trim() === t);
+      out.offer = sheetOpen() && !connCfg.killWhileClosed && /Keep blocking while closed/.test(document.getElementById('sh-actions').textContent);
+      act('Turn on').click(); await wait(50);
+      out.offerAll = !sheetOpen() && connCfg.killWhileClosed === true && genCfg.launchAtStartup === true && genCfg.connectOnLaunch === true;
+      connCfg.killWhileClosed = false; renderConnSettings();
       out.enabled = !wc().classList.contains('dim');
-      wc().querySelector('.mini-toggle').click();
-      out.toggled = connCfg.killWhileClosed === true && !!wc().querySelector('.mini-toggle.on');
+      wc().querySelector('.mini-toggle').click(); await wait(50);
+      out.confirmOpen = sheetOpen() && !connCfg.killWhileClosed && !!act('Turn on') && !/Launch at startup/.test(document.getElementById('sh-actions').textContent);
+      act('Cancel').click(); await wait(50);
+      out.cancelled = !sheetOpen() && !connCfg.killWhileClosed && !wc().querySelector('.mini-toggle.on');
+      wc().querySelector('.mini-toggle').click(); await wait(50);
+      act('Turn on').click(); await wait(50);
+      out.confirmed = !sheetOpen() && connCfg.killWhileClosed === true && !!wc().querySelector('.mini-toggle.on');
+      wc().querySelector('.mini-toggle').click(); await wait(50);
+      out.offNoSheet = !sheetOpen() && connCfg.killWhileClosed === false;
+      connCfg.killWhileClosed = true; renderConnSettings();
+      out.toggled = out.offerAll && out.confirmed && out.offNoSheet;
       genCfg.connectOnLaunch = false; setGenCfg('launchAtStartup', true);
       out.dimAgain = wc().classList.contains('dim');
       out.saved = ['killSwitch', 'killOnDisconnect', 'killWhileClosed', 'downProxy'].every(k => k in liveSnapshot().connCfg);

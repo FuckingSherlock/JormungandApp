@@ -3243,7 +3243,10 @@ Object.assign(I18N, { ru: {
   "Turn it off": "Выключить",
   "turn on Use in Auto in Route": "включите «В Auto» в «Маршруте»",
   "Turn the kill switch off?": "Выключить kill switch?",
-  "Turn them on": "Включить их",
+  "Turn on": "Включить",
+  "Keep blocking while closed?": "Блокировать и при закрытом приложении?",
+  "If the app doesn't start again or is removed, the internet stays blocked. To unblock by hand: Windows Settings → Network & internet → Proxy → turn off \"Use a proxy server\".": "Если приложение не запустится или будет удалено, интернет останется заблокированным. Снять вручную: Параметры Windows → Сеть и Интернет → Прокси-сервер → выключить «Использовать прокси-сервер».",
+  "It only makes sense if the app starts with the computer and connects by itself, so Launch at startup and Connect on launch will be turned on too.": "Это имеет смысл, только если приложение запускается вместе с компьютером и само подключается, поэтому «Запускать при старте системы» и «Подключаться при запуске» тоже будут включены.",
   "Unavailable": "Недоступные",
   "Unseen errors": "Непросмотренные ошибки",
   "Unseen warnings": "Непросмотренные предупреждения",
@@ -3326,7 +3329,6 @@ Object.assign(I18N, { ru: {
   "It does not open through the current entry: another one opens it (with a Create rule button), or none does": "Не открывается через текущий пункт: другой его открывает (есть кнопка «Создать правило») или не открывает никакой",
   "its menu: ping, copy, switch off, delete. Tap the ms to ping it.": "его меню: пинг, копировать, выключить, удалить. Нажмите на мс, чтобы пингнуть.",
   "keep only servers whose name matches this regular expression, e.g. DE|NL or 🇩🇪.": "оставить только узлы, чьё имя подходит под это регулярное выражение, например DE|NL или 🇩🇪.",
-  "Keeping the proxy while the app is closed only makes sense if the app starts with the computer and connects by itself: otherwise the internet stays blocked until you start it by hand. Turn on": "Сохранять sys proxy при закрытом приложении имеет смысл, только если оно запускается вместе с компьютером и само подключается: иначе интернет останется заблокированным, пока вы не запустите его вручную. Включите",
   "keeps you connected: when the server stops answering, it moves to the next working entry in the list.": "поддерживает соединение: когда узел перестаёт отвечать, переходит к следующему рабочему пункту списка.",
   "Kill switch: internet is blocked until you connect": "Kill switch: интернет заблокирован, пока вы не подключитесь",
   "lets Auto pick the entry or not. Outside ✎ its place holds ⚡ — ping the entry’s servers.": "разрешает Auto выбирать пункт или нет. Вне ✎ на его месте ⚡ — пинг узлов пункта.",
@@ -8945,10 +8947,13 @@ function syncKillSettings() {
   // connected / down, or a block after disconnect / while closed: turning its setting off lifts it
   if (connected || vpn.blocking) backend.killSettings(killPlan()).catch(e => toast(e.message));
 }
-function offerClosedKill() {
+/* "Also while the app is closed" is only ever turned on through this one sheet (turning it off is immediate).
+   With autostart / autoconnect missing, the same sheet also turns those two on. */
+function confirmClosedKill() {
   const close = "closeSheet('actions');";
-  openActions('Also while the app is closed', `<div class="menu-note">Keeping the proxy while the app is closed only makes sense if the app starts with the computer and connects by itself: otherwise the internet stays blocked until you start it by hand. Turn on <b>Launch at startup</b> and <b>Connect on launch</b>?</div>`
-    + menuRow(ICON.check, 'Turn them on', close + "genCfg.launchAtStartup=genCfg.connectOnLaunch=true;connCfg.killWhileClosed=true;renderConnSettings();renderGeneral()")
+  const need = !killClosedOk();
+  openActions('Keep blocking while closed?', `${need ? '<div class="menu-note">It only makes sense if the app starts with the computer and connects by itself, so Launch at startup and Connect on launch will be turned on too.</div>' : ''}<div class="menu-note">If the app doesn\'t start again or is removed, the internet stays blocked. To unblock by hand: Windows Settings → Network &amp; internet → Proxy → turn off "Use a proxy server".</div>`
+    + menuRow(ICON.check, 'Turn on', close + (need ? 'genCfg.launchAtStartup=genCfg.connectOnLaunch=true;' : '') + 'connCfg.killWhileClosed=true;renderConnSettings();renderGeneral()')
     + menuRow(ICON.close, 'Cancel', close));
 }
 /* Turning the kill switch off while it protects something (connected, down, or a block after
@@ -9041,8 +9046,8 @@ function renderConnSettings() {
       ${connCfg.killSwitch ? `
       <div class="set-row set-sub" data-key="killOnDisconnect"><div class="set-label" style="flex:1">Also after I disconnect<div class="set-hint">Internet stays blocked until you connect again or tap Remove on Home</div></div>
         ${toggle(connCfg.killOnDisconnect, 'connCfg.killOnDisconnect=!connCfg.killOnDisconnect;renderConnSettings()')}</div>
-      <div class="set-row set-sub ${closedOk ? '' : 'dim'}" data-key="killWhileClosed"${closedOk ? '' : ' onclick="offerClosedKill()"'}><div class="set-label" style="flex:1">Also while the app is closed<div class="set-hint">${closedOk ? 'The proxy stays set when the app is closed, so nothing leaks before it starts again' : 'Needs Launch at startup and Connect on launch — tap to turn them on'}</div></div>
-        ${toggle(closedOk && connCfg.killWhileClosed, closedOk ? 'connCfg.killWhileClosed=!connCfg.killWhileClosed;renderConnSettings()' : '')}</div>`
+      <div class="set-row set-sub ${closedOk ? '' : 'dim'}" data-key="killWhileClosed"${closedOk ? '' : ' onclick="confirmClosedKill()"'}><div class="set-label" style="flex:1">Also while the app is closed<div class="set-hint">${closedOk ? 'The proxy stays set when the app is closed, so nothing leaks before it starts again' : 'Needs Launch at startup and Connect on launch — tap to turn them on'}</div></div>
+        ${toggle(closedOk && connCfg.killWhileClosed, closedOk ? 'if(connCfg.killWhileClosed){connCfg.killWhileClosed=false;renderConnSettings()}else confirmClosedKill()' : '')}</div>`
       : `
       <div class="set-row" data-key="downProxy"><div class="set-label" style="flex:1">Remove the proxy if the VPN cannot recover<div class="hint-stack">${hintStack(connCfg.downProxy !== 'keep', 'On: the system proxy is removed and traffic goes direct until the VPN is back', 'Off: the proxy stays set, so apps that use it have no internet until the VPN is back')}</div></div>
         ${toggle(connCfg.downProxy !== 'keep', "connCfg.downProxy=connCfg.downProxy==='keep'?'remove':'keep';renderConnSettings()")}</div>`}
