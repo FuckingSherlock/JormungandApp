@@ -1,0 +1,69 @@
+package __APP_ID__
+
+import android.app.Activity
+import android.content.Intent
+import android.net.VpnService
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+
+/**
+ * MethodChannel `jormungand/vpn` (Dart side: lib/platform/vpn_channel.dart).
+ *
+ *  prepare -> Boolean   VPN consent: true when the app may start the VPN (asks the system dialog if needed)
+ *  start   -> null      args {config: String?}: starts JormungandVpnService as a foreground service
+ *  stop    -> null      stops it
+ *
+ * TODO: an EventChannel (or a second MethodChannel direction) for service events: tunnel up / down,
+ *  onRevoke (the user turned the VPN off in system settings), errors.
+ * TODO: request POST_NOTIFICATIONS (Android 13+) before the first start.
+ */
+class VpnChannel(private val activity: Activity) {
+    companion object {
+        const val NAME = "jormungand/vpn"
+        private const val REQUEST_PREPARE = 0x4A4D // "JM"
+    }
+
+    private var pendingPrepare: MethodChannel.Result? = null
+
+    fun register(messenger: BinaryMessenger) {
+        MethodChannel(messenger, NAME).setMethodCallHandler(::onCall)
+    }
+
+    private fun onCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "prepare" -> prepare(result)
+            "start" -> {
+                val intent = Intent(activity, JormungandVpnService::class.java)
+                    .setAction(JormungandVpnService.ACTION_START)
+                    .putExtra(JormungandVpnService.EXTRA_CONFIG, call.argument<String>("config"))
+                activity.startForegroundService(intent) // minSdk 26
+                result.success(null)
+            }
+            "stop" -> {
+                activity.stopService(Intent(activity, JormungandVpnService::class.java))
+                result.success(null)
+            }
+            else -> result.notImplemented()
+        }
+    }
+
+    private fun prepare(result: MethodChannel.Result) {
+        val consent = VpnService.prepare(activity)
+        if (consent == null) {
+            result.success(true) // already granted
+            return
+        }
+        pendingPrepare?.success(false) // a second ask replaces the first
+        pendingPrepare = result
+        activity.startActivityForResult(consent, REQUEST_PREPARE)
+    }
+
+    /** Called from MainActivity.onActivityResult; true when the request code was ours. */
+    fun onActivityResult(requestCode: Int, resultCode: Int): Boolean {
+        if (requestCode != REQUEST_PREPARE) return false
+        pendingPrepare?.success(resultCode == Activity.RESULT_OK)
+        pendingPrepare = null
+        return true
+    }
+}

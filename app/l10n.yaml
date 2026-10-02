@@ -1,0 +1,7 @@
+# gen-l10n config. The ARB files are generated: node app/tool/gen_i18n.mjs (see docs/i18n.md).
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+output-dir: lib/l10n/gen
+nullable-getter: false

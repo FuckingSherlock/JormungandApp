@@ -56,6 +56,9 @@ restore, about), Copy URL / share link, QR and Speed test in the Nodes ⋮ menus
 - `core/` — Dart package `jormungand_core` (parsers, sing-box config, runtime, `bin/jormd.dart`,
   `tool/fake_sub.dart` = loopback test subscription). sing-box binary in `core/tool/bin/`
   (not in git). Design and API: `docs/core.md`.
+- `app/` — the Flutter app (Android first, then Windows) over `core/` via `CoreService`.
+  Theme / ARB / dock paths / flag font are generated from the mockup: `node app/tool/gen_all.mjs`.
+  First build and TODOs: `app/README.md`.
 
 ## Workflow
 

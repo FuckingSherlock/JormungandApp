@@ -1,0 +1,2755 @@
+{
+  "@@locale": "en",
+  "add": "+ Add",
+  "addService": "+ Add service",
+  "condition": "+ Condition",
+  "newGroup": "+ New group",
+  "pingItsServers": "= ping its servers",
+  "belarus": "🇧🇾 Belarus",
+  "china": "🇨🇳 China",
+  "iran": "🇮🇷 Iran",
+  "kazakhstan": "🇰🇿 Kazakhstan",
+  "russia": "🇷🇺 Russia",
+  "ukraine": "🇺🇦 Ukraine",
+  "n0Off": "0 = off",
+  "n0OffOnlyWhenYouTap": "0 = off (only when you tap Update) · from 10 seconds to 30 days",
+  "n165535OrARangeLike": "1–65535 or a range like 8000-9000",
+  "n124MinutesUpTo": "1, 2, 4 … minutes, up to this",
+  "justNow": "just now",
+  "today": "Today",
+  "yesterday": "Yesterday",
+  "aDomainSuffixEGGoogle": "a domain suffix, e.g. google.com",
+  "aDomainAnIpWithPort": "A domain, an IP (with :port) or an app name",
+  "aDomainEGExampleCom": "a domain, e.g. example.com or *.example.com",
+  "anIpCidr1000": "an IP, CIDR (10.0.0.0/8) or range (1.1.1.1-1.1.1.9)",
+  "aHigherServerAnswersAgain": "A higher server answers again",
+  "aRuleMustBeAJson": "A rule must be a JSON object",
+  "aRuleSetCouldNotBe": "A rule set could not be downloaded",
+  "aRuleSetWithThisName": "A rule set with this name exists",
+  "aBackgroundUpdateFailedTheProvider": "A background update failed, the provider removed or brought back servers, its servers do not respond",
+  "aBackgroundUpdateFinishedNameAnd": "A background update finished: name and number of servers",
+  "aChainNeedsTwoProfilesCreate": "A chain needs two profiles — create another profile first",
+  "aChainNeedsTwoSubscriptionsOr": "A chain needs two subscriptions or server groups — add one in Nodes",
+  "aSubscriptionCanHaveItsOwn": "a subscription can have its own (Nodes → ⋮ → Edit → Update every). Then this setting doesn’t apply to it.",
+  "aSubscriptionLeftOnAutoFollows": "a subscription left on auto follows the period its provider sends, if it sends one.",
+  "addItInRulesServicesTo": "add it in Rules → Services to route its sites from any app",
+  "about": "About",
+  "action": "Action",
+  "add2": "Add",
+  "addACondition": "Add a condition",
+  "addASubscriptionOrAServer": "Add a subscription or a server first",
+  "addAtLeastOneCondition": "Add at least one condition",
+  "addDnsServer": "Add DNS server",
+  "addInNodes": "Add in Nodes",
+  "addRuleSet": "Add rule set",
+  "addServer": "Add server",
+  "addSubscription": "Add subscription",
+  "added": "Added",
+  "address": "Address",
+  "addressIsRequired": "Address is required",
+  "addressHttpsTlsQuicUdpAn": "Address: https://…, tls://…, quic://…, udp://…, an IP or system",
+  "ads": "Ads",
+  "adsBlock": "ads block",
+  "advanced": "Advanced",
+  "afterAMissedCheckBeforeThe": "After a missed check, before the next try",
+  "afterFailedRequestsAlsoChecksHow": "after failed requests, also checks how fast the server is.",
+  "all": "All",
+  "allConnectionsClosed": "All connections closed",
+  "allDnsQueriesGoToThe": "All DNS queries go to the servers above, even hard-coded ones",
+  "allOff": "All off",
+  "allOn": "All on",
+  "allServicesAdded": "All services added",
+  "alreadyThere": "already there",
+  "alsoAfterIDisconnect": "Also after I disconnect",
+  "alsoWhileTheAppIsClosed": "Also while the app is closed",
+  "always": "Always",
+  "alwaysBypassesTheVpn": "Always bypasses the VPN",
+  "alwaysFirstInGlobalToo": "always first, in Global too",
+  "alwaysItsFastestSelectedServer": "always its fastest selected server.",
+  "alwaysInGlobalToo192168": "Always, in Global too · 192.168.x.x, 10.x.x.x, .local, printers, NAS",
+  "anEntryKeepsDroppingAndWaits": "An entry keeps dropping and waits before it gets the traffic back",
+  "anEntryThatKeepsDroppingWaits": "An entry that keeps dropping waits longer each time before it gets the traffic back",
+  "anError": "An error",
+  "androidShowsTheEntryServerAnd": "Android: shows the entry, server and speed while connected",
+  "app": "App",
+  "appearance": "Appearance",
+  "apps": "Apps",
+  "apps2": "Apps →",
+  "appsThatFollowTheOsProxy": "Apps that follow the OS proxy setting go through the core. Also on Home",
+  "appsWithTheirOwnRoute": "apps with their own route",
+  "areRemoved": "are removed",
+  "asInSource": "As in source",
+  "asksAsSingBoxMihomoAnd": "Asks as sing-box, mihomo and Clash again and merges what each gives",
+  "atLeast1ServerIsNeeded": "At least 1 server is needed — previous selection kept",
+  "atLeastOneDnsServerMust": "At least one DNS server must stay on",
+  "attempt": "Attempt",
+  "auto": "auto ·",
+  "autoAsksTheServerAsSing": "Auto asks the server as sing-box and mihomo and merges the results",
+  "autoMayConnectThisChainIn": "Auto may connect this chain, in list order",
+  "autoMayConnectThisEntryIn": "Auto may connect this entry, in list order",
+  "autoMayConnectThisProfileIn": "Auto may connect this profile, in list order",
+  "autoMayPickThisEntryOff": "Auto may pick this entry. Off = only when you tap it.",
+  "autoMayPickThisProfileOff": "Auto may pick this profile. Off = only when you tap it.",
+  "autoMode": "Auto mode",
+  "autoFirstWorkingEntryInList": "Auto: first working entry in list order · Manual: the entry you tapped",
+  "autoSwitched": "Auto: switched",
+  "backToAuto": "Back to Auto",
+  "backup": "Backup",
+  "backupChecks": "Backup checks",
+  "backupRestored": "Backup restored",
+  "backupAbout": "Backup, about",
+  "blockedWhileItIsDown": "blocked while it is down",
+  "by": "By",
+  "byDefaultTheOrderIsThe": "by default the order is the one in Nodes. Drag here and the route keeps its own — “Follow Nodes order” goes back.",
+  "byEntry": "By entry",
+  "byExit": "By exit",
+  "byLatency": "By latency",
+  "byName": "By name",
+  "byRules": "By rules",
+  "byTheService": "by the service",
+  "cancel": "Cancel",
+  "cannotContainSpaces": "cannot contain spaces",
+  "categories": "Categories",
+  "chain": "Chain",
+  "chains": "Chains",
+  "catchesAppsThatAskTheirOwn": "catches apps that ask their own DNS servers. Works in TUN mode only.",
+  "checkAgain": "Check again",
+  "checkEvery": "Check every",
+  "checkForAppUpdates": "Check for app updates",
+  "checkRoute": "Check route",
+  "checkServersOnLaunch": "Check servers on launch",
+  "checkTheConnectionEvery": "Check the connection every",
+  "checkedTopToBottomAppsYour": "checked top to bottom: apps, your rules, quick rules, then Everything else. The first match wins.",
+  "checking": "Checking…",
+  "chosenSubscriptionsOrSingleServersUses": "Chosen subscriptions or single servers — uses the fastest",
+  "clashRules": "Clash rules",
+  "clear": "Clear",
+  "clearEvents": "Clear events",
+  "clearEvents2": "Clear events?",
+  "clipboardIsNotReadableHere": "Clipboard is not readable here",
+  "close": "Close",
+  "closeAll": "Close all",
+  "closeConnection": "Close connection",
+  "closeSearch": "Close search",
+  "collapseAll": "Collapse all",
+  "compositeRule": "composite rule",
+  "conditions": "Conditions",
+  "configured": "Configured",
+  "connectDisconnect": "Connect / disconnect",
+  "connectFailed": "Connect failed",
+  "connectOnLaunch": "Connect on launch",
+  "connectThrough": "Connect through",
+  "connected": "Connected",
+  "connecting": "Connecting…",
+  "connection": "Connection",
+  "connectionLost": "Connection lost",
+  "connectionRestored": "Connection restored",
+  "connectionTimedOut15S": "Connection timed out (15 s)",
+  "connections": "Connections",
+  "connectsTheFirstWorkingEntryFrom": "connects the first working entry from the top. If it fails, Auto moves to the next one.",
+  "connectsThroughTheQuickestWorkingServer": "connects through the quickest working server.",
+  "connectsThroughTheFastestOfThem": "Connects through the fastest of them.",
+  "contactTheSubscriptionProviderSSupport": "Contact the subscription provider's support",
+  "copied": "Copied",
+  "copy": "Copy",
+  "copyAll": "Copy all",
+  "copyHttp": "Copy HTTP",
+  "copyIsBlockedHereSelectThe": "Copy is blocked here — select the text and copy it",
+  "copyShareLink": "Copy share link",
+  "copySocks5": "Copy SOCKS5",
+  "copyUrl": "Copy URL",
+  "core": "Core",
+  "coreConnected": "Core connected",
+  "coreConnectedAddASubscriptionIn": "Core connected — add a subscription in Nodes",
+  "couldNotConnect": "Could not connect",
+  "couldNotLoad": "Could not load",
+  "couldNotStartAgain": "Could not start again",
+  "create": "Create",
+  "createAProfileFirst": "Create a profile first",
+  "createChain": "Create chain",
+  "createOneInNodes": "Create one in Nodes",
+  "createProfile": "Create profile",
+  "currentConnection": "Current connection",
+  "custom": "Custom",
+  "data": "Data",
+  "dataFolder": "Data folder",
+  "decryptPassword": "Decrypt password",
+  "delete": "Delete",
+  "deleteChain": "Delete chain",
+  "deleteProfile": "Delete profile",
+  "deleteRule": "Delete rule",
+  "deleteRuleSet": "Delete rule set",
+  "deleteServer": "Delete server",
+  "deprecatedSetting": "Deprecated setting",
+  "savedDataRestored": "Saved data restored",
+  "savedDataLost": "Saved data lost",
+  "desktopOpenInTheTrayNot": "Desktop: open in the tray, not as a window",
+  "direct": "DIRECT",
+  "directProxyBlock": "Direct / Proxy / Block",
+  "directFirst": "Direct first",
+  "directIp": "Direct IP",
+  "disconnected": "Disconnected",
+  "discordVoice": "Discord voice",
+  "dnsServerSwitched": "DNS server switched",
+  "domains": "Domains",
+  "done": "Done",
+  "downFor": "Down for",
+  "download": "Download",
+  "downloadFailed": "download failed",
+  "downloadVia": "Download via",
+  "downloadUploadAndLatencyThroughThis": "Download, upload and latency through this server",
+  "downloads": "Downloads",
+  "dragToOrder": "Drag ⋮⋮ to order.",
+  "dragHereToOverrideIt": "drag here to override it",
+  "dragToReorder": "Drag to reorder",
+  "dragToSetAutoPriority": "Drag to set Auto priority",
+  "dragToReorderSwitchSubscriptionsOn": "drag ⋮⋮ to reorder, switch subscriptions on / off, tap servers to switch them off.",
+  "dragToReorderTapOneTo": "drag ⋮⋮ to reorder, tap one to edit, the switch turns it off without deleting.",
+  "dropSilently": "Drop silently",
+  "drops": "Drops",
+  "dropsItAndItsSettingsEverywhere": "Drops it and its settings everywhere",
+  "eachDropOfAnEntryDoubles": "each drop of an entry doubles the wait before Auto goes back to it: 1, 2, 4 … minutes, up to “Longest wait”.",
+  "edit": "Edit",
+  "editChain": "Edit chain",
+  "editDnsServer": "Edit DNS server",
+  "editProfile": "Edit profile",
+  "editServer": "Edit server",
+  "editSubscription": "Edit subscription",
+  "editPriorityOrderFastestPriority": "Edit: priority order, Fastest / Priority",
+  "editReorderSwitchSourcesAndServers": "Edit: reorder, switch sources and servers on / off",
+  "emptyAutoTheProviderSPeriod": "Empty = auto: the provider’s period, else the one in Auto mode · 0 = never",
+  "english": "English",
+  "enterAPort102465535": "Enter a port 1024–65535",
+  "enterAValidAddressFirst": "Enter a valid address first",
+  "enterAnHttpOrHttpsAddress": "Enter an http:// or https:// address",
+  "enterThroughOneProfileExitThrough": "Enter through one profile, exit through another",
+  "enterThroughOneSubscriptionOrGroup": "Enter through one subscription or group, exit through another",
+  "entry": "Entry",
+  "entryFirstHop": "Entry — first hop",
+  "entryAndExitMustBeDifferent": "Entry and exit must be different",
+  "entryOrServerSwitched": "Entry or server switched",
+  "error": "Error",
+  "event": "Event",
+  "events": "Events",
+  "everyEntryInRouteIsSwitched": "Every entry in Route is switched off Auto, so Auto has nothing to connect through. Turn",
+  "everythingElse": "Everything else",
+  "everythingTrafficCanGoThroughCreate": "everything traffic can go through. Create, edit and delete it here.",
+  "exactDomain": "Exact domain",
+  "except": "Except",
+  "exit": "Exit",
+  "exitWhereTrafficLeaves": "Exit — where traffic leaves",
+  "exitByPriority": "exit by priority",
+  "exitCode": "Exit code",
+  "exitIp": "Exit IP",
+  "expandAll": "Expand all",
+  "exportText": "Export",
+  "exportBackup": "Export backup",
+  "exportBothLogs": "Export both logs",
+  "failedChecks": "Failed checks",
+  "failoverChecksSubscriptionUpdates": "Failover, checks, subscription updates",
+  "fastestMoved": "Fastest moved",
+  "fastestTheQuickestWorkingOne": "Fastest: the quickest working one.",
+  "fastestOrPriorityTheFirstWorking": "Fastest, or Priority — the first working server from the top (drag ⋮⋮).",
+  "fillInAddressPortAndKey": "Fill in address, port and key",
+  "filter": "Filter",
+  "filterEvents": "Filter events",
+  "filterIsNotAValidRegular": "Filter is not a valid regular expression",
+  "finalOrder": "Final order",
+  "firstMatchWins": "first match wins",
+  "fixTheJsonFirst": "Fix the JSON first",
+  "fixTheValuesInRed": "Fix the values in red",
+  "fixedNodeNotSet": "Fixed node not set",
+  "flapProtection": "Flap protection",
+  "followNodesOrder": "Follow Nodes order",
+  "forgetAll": "Forget all",
+  "forgetDropsAfter": "Forget drops after",
+  "forgetNow": "Forget now",
+  "form": "Form",
+  "format": "Format",
+  "framed": "Framed",
+  "from": "From",
+  "from10MinutesTo30Days": "From 10 minutes to 30 days",
+  "from10STo60Min": "From 10 s to 60 min",
+  "fromASubscription": "From a subscription",
+  "fromClipboard": "From clipboard",
+  "fromPort": "from port",
+  "general": "General",
+  "geositeGeoip": "geosite + geoip",
+  "githubDarkPalette": "GitHub Dark palette",
+  "global": "Global",
+  "globalDns": "Global DNS",
+  "goesByTheRulesBelow": "goes by the rules below",
+  "goesDirect": "goes direct",
+  "goesThroughTheMainFlow": "goes through the main flow",
+  "goingBackUp": "Going back up",
+  "goneFromTheSubscription": "gone from the subscription",
+  "greyedOutBelow": "Greyed out below",
+  "group": "Group",
+  "hiddenEverywhereItsSettingsKept": "Hidden everywhere, its settings kept",
+  "high": "High",
+  "hijackDns": "Hijack DNS",
+  "home": "Home",
+  "hostAppRuleServer": "Host, app, rule, server",
+  "how": "How",
+  "ifText": "If",
+  "ifFaster": "If faster",
+  "importText": "Import",
+  "importExport": "Import / export",
+  "importConfigFile": "Import config file",
+  "imported": "Imported",
+  "inRawLog": "In raw log",
+  "inTunMode": "In TUN mode",
+  "inUse": "In use",
+  "ipCidrRange": "IP / CIDR / range",
+  "ipConditionsOnlyInTun": "IP conditions only in TUN",
+  "isDeletedWithIt": "is deleted with it",
+  "isTakenByTheApp": "is taken by the app",
+  "isUnstable": "is unstable",
+  "itDoes": "It does",
+  "itStoppedAnswering": "It stopped answering",
+  "itsChecks": "its checks",
+  "itsSitesAndIpsSkipThe": "Its sites and IPs skip the VPN",
+  "jsonSource": "JSON (source)",
+  "keepItOn": "Keep it on",
+  "keepProviderRules": "Keep provider rules",
+  "keptWithYourSettings": "Kept with your settings",
+  "keyword": "Keyword",
+  "killSwitch": "Kill switch",
+  "knownAdAndTrackerDomains": "Known ad and tracker domains",
+  "language": "Language",
+  "languageStartup": "Language, startup",
+  "latency": "Latency",
+  "latencyTestUrl": "Latency test URL",
+  "launchAtStartup": "Launch at startup",
+  "leaveAServerAfter": "Leave a server after",
+  "lettersDigitsAnd": "letters, digits, - and _",
+  "line": "Line",
+  "link": "Link",
+  "linksInTheClipboard": "Links in the clipboard",
+  "liveConnections": "Live connections",
+  "local": "Local",
+  "localNetworks": "local networks",
+  "localNetworks2": "Local networks",
+  "localNetworksAlways": "Local networks (always)",
+  "localNetworksDirect": "Local networks direct",
+  "locationUnknown": "Location unknown",
+  "login": "Login",
+  "loginCannotContain": "Login cannot contain ':'",
+  "logs": "Logs",
+  "longestWait": "Longest wait",
+  "losesItsTargetTrafficGoes": "loses its target — traffic goes",
+  "low": "Low",
+  "mainFlow": "main flow",
+  "mainFlow2": "Main flow",
+  "manual": "Manual",
+  "manual2": "MANUAL",
+  "manualServer": "Manual server",
+  "manualOnlyTheHighlightedServer": "Manual: only the highlighted server.",
+  "measuringLatency": "Measuring latency…",
+  "measuringSpeed": "Measuring speed…",
+  "medium": "Medium",
+  "mode": "Mode",
+  "more": "More",
+  "moreRulesAndApps": "More rules and apps",
+  "mustNotBeEmpty": "must not be empty",
+  "myRegionDirect": "My region direct",
+  "myRules": "My rules",
+  "name": "Name",
+  "nameOrPath": "Name or path",
+  "nameLettersDigitsAnd": "Name: letters, digits, - and _",
+  "navyBlueAccent": "Navy, blue accent",
+  "needsAtLeastTwoProfiles": "Needs at least two profiles",
+  "network": "Network",
+  "networkBack": "Network back",
+  "networkIsBack": "Network is back",
+  "neutralGreyBlueAccent": "Neutral grey, blue accent",
+  "never": "Never",
+  "newChain": "New chain",
+  "newPassword": "New password",
+  "newProfile": "New profile",
+  "newRule": "New rule",
+  "newServers": "New servers",
+  "newSubscription": "New subscription",
+  "no": "No",
+  "noAnswer": "no answer",
+  "noAnswer2": "No answer",
+  "noAnswerTimeout": "No answer (timeout)",
+  "noAppRuleFor": "No app rule for",
+  "noApps": "No apps",
+  "noAppsSet": "No apps set",
+  "noClipboard": "no clipboard",
+  "noConditions": "no conditions",
+  "noDrop": "No drop",
+  "noEnabledNodes": "No enabled nodes",
+  "noEventsMatchTheFilter": "No events match the filter",
+  "noEventsYet": "No events yet",
+  "noExpiry": "no expiry",
+  "noHijack": "no hijack",
+  "noJormungandBackupInIt": "no Jormungand backup in it",
+  "noLinesToCopy": "No lines to copy",
+  "noLinesYet": "No lines yet",
+  "noNetwork": "No network",
+  "noNetworkAtAllWhileConnected": "No network at all while connected",
+  "noOpenConnections": "No open connections",
+  "noProfilesYet": "No profiles yet",
+  "noProfilesYet2": "No profiles yet.",
+  "noRuleSetWithThisName": "no rule set with this name (Rule sets)",
+  "noRulesMatch": "No rules match",
+  "noRulesYet": "No rules yet",
+  "noServerHereTheCoreCan": "No server here the core can use",
+  "noServers": "No servers",
+  "noServersYet": "No servers yet",
+  "noSpaces": "no spaces",
+  "noSubscriptionsOrServersYet": "No subscriptions or servers yet.",
+  "noVpnServer": "no VPN server",
+  "noWorkingNode": "no working node",
+  "noWorkingNodes": "No working nodes",
+  "noWorkingServer": "no working server",
+  "noWorkingServers": "No working servers",
+  "nodes": "Nodes",
+  "none": "None",
+  "noneAdded": "None added",
+  "noneMainFlow": "None — main flow",
+  "not": "Not",
+  "notAJsonFile": "not a JSON file",
+  "notAValidRegularExpression": "not a valid regular expression",
+  "notConnected": "not connected",
+  "notConnected2": "Not connected",
+  "notFound": "not found",
+  "notInAuto": "not in Auto",
+  "notTicked": "not ticked",
+  "notTicked2": "Not ticked",
+  "nothingGuaranteesTheBlockAnyMore": "nothing guarantees the block any more.",
+  "nothingInAuto": "Nothing in Auto",
+  "nothingMatches": "Nothing matches",
+  "nothingToImport": "Nothing to import",
+  "notifications": "Notifications",
+  "now": "Now",
+  "nowhereBlocked": "nowhere (blocked)",
+  "off": "Off",
+  "offInNodes": "off in Nodes",
+  "offInNodes2": "Off in Nodes",
+  "onText": "On",
+  "onOff": "On / off",
+  "oneServer": "One server",
+  "onlyProblems": "only problems",
+  "onlyProblems2": "Only problems",
+  "open": "Open",
+  "openDnsSettings": "Open DNS settings ›",
+  "openItTapServers": "Open it, tap servers",
+  "openRoute": "Open Route",
+  "openWebsite": "Open website",
+  "opens": "Opens",
+  "opensVia": "Opens via",
+  "order": "Order",
+  "original": "Original",
+  "other": "Other",
+  "ownOrder": "Own order",
+  "ownPeriod": "Own period",
+  "ownPopUps": "Own pop-ups",
+  "ownPriorityOrder": "Own priority order",
+  "pairs": "Pairs",
+  "password": "Password",
+  "proxyPassword": "Proxy password",
+  "throughTheViaTargetFallbackIf": "Through the Via target; Fallback if it is unavailable",
+  "byTheRulesFallbackIfThe": "{s0}: by the rules; Fallback if the main flow is down",
+  "@byTheRulesFallbackIfThe": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "goesByTheRulesFallbackIf": "Goes by the rules; Fallback if the main flow is down",
+  "pasteASubscriptionUrl": "Paste a subscription URL",
+  "pasteASubscriptionUrlFirst": "Paste a subscription URL first",
+  "pauseChecksWithTheScreenOff": "Pause checks with the screen off",
+  "perAppRouting": "Per-app routing",
+  "pickServersAbove": "Pick servers above",
+  "ping": "Ping",
+  "pingAll": "Ping all",
+  "pingItsServers2": "Ping its servers",
+  "pingTheSparesEvery": "Ping the spares every",
+  "pingTheTopServers": "Ping the top servers",
+  "pinging": "Pinging…",
+  "popUpsOnPc": "Pop-ups on PC",
+  "port": "Port",
+  "ports": "Ports",
+  "portsAndRanges": "Ports and ranges",
+  "previousSettingsRestored": "Previous settings restored",
+  "priority": "Priority",
+  "process": "Process",
+  "profile": "Profile",
+  "profiles": "Profiles",
+  "protocol": "Protocol",
+  "protocolSniffed": "Protocol (sniffed)",
+  "providerSPeriod": "Provider’s period",
+  "proxy": "PROXY",
+  "proxyFirst": "Proxy first",
+  "proxyPort": "Proxy port",
+  "quickRule": "quick rule",
+  "quickRules": "Quick rules",
+  "raw": "Raw",
+  "realAnswersFor": "Real answers for",
+  "reason": "Reason",
+  "reconnectAfterUpdate": "Reconnect after update",
+  "regex": "Regex",
+  "regexEGDeNl": "regex, e.g. DE|NL",
+  "region": "Region",
+  "regionDirect": "region direct",
+  "reject": "Reject",
+  "reject2": "REJECT",
+  "remove": "Remove",
+  "removeThisField": "Remove this field",
+  "removed": "Removed",
+  "removedByTheProviderSettingsKept": "removed by the provider, settings kept",
+  "renameGroup": "Rename group",
+  "reset": "Reset",
+  "resetTheFilter": "Reset the filter",
+  "resolveForIpRules": "Resolve for IP rules",
+  "responsiveness": "Responsiveness",
+  "restore": "Restore",
+  "restoreBackup": "Restore backup?",
+  "restoreFromFile": "Restore from file",
+  "retry": "Retry",
+  "retryPause": "Retry pause",
+  "returnToAHigherEntry": "Return to a higher entry",
+  "route": "Route",
+  "routeAKnownAppOrSite": "Route a known app or site by name",
+  "routeCheck": "Route check",
+  "routeSettings": "Route settings",
+  "rule": "Rule",
+  "ruleSet": "Rule set",
+  "ruleSetNotDownloaded": "Rule set not downloaded",
+  "ruleSetUpdated": "Rule set updated",
+  "ruleSets": "Rule sets",
+  "ruleTargetBack": "Rule target back",
+  "ruleTargetUnavailable": "Rule target unavailable",
+  "rules": "Rules",
+  "runAgain": "Run again",
+  "save": "Save",
+  "saveChanges": "Save changes",
+  "scanQrCode": "Scan QR code",
+  "search": "Search",
+  "searchApps": "Search apps",
+  "searchEvents": "Search events",
+  "searchNodes": "Search nodes",
+  "searchProfilesChainsServers": "Search profiles, chains, servers",
+  "searchRulesAndServices": "Search rules and services",
+  "searchTheLog": "Search the log",
+  "sendThrough": "Send through",
+  "sendXHwid": "Send X-HWID",
+  "server": "Server",
+  "servers": "Servers",
+  "serversBack": "Servers back",
+  "serversDoNotRespond": "Servers do not respond",
+  "serversOfThisEntry": "Servers of this entry",
+  "serversRemoved": "Servers removed",
+  "service": "Service",
+  "services": "Services",
+  "settings": "Settings",
+  "shareLink": "Share link",
+  "showAll": "Show all",
+  "showMyActions": "Show my actions",
+  "showNodes": "Show nodes",
+  "showQrCode": "Show QR code",
+  "showTop": "Show top",
+  "simple": "Simple",
+  "simpleProfiles": "Simple / Profiles",
+  "singBoxJson": "sing-box JSON",
+  "singBoxJsonClashRules": "sing-box JSON, Clash rules",
+  "singBoxJsonClashYaml": "sing-box JSON, Clash YAML",
+  "singBoxADeprecatedSetting": "sing-box: a deprecated setting",
+  "site": "Site",
+  "siteDoesNotOpen": "Site does not open",
+  "sites": "Sites",
+  "soThisAppGoes": "so this app goes",
+  "sortNodes": "Sort nodes",
+  "source": "Source",
+  "sourceIpCidr": "Source IP / CIDR",
+  "sourcePorts": "Source ports",
+  "sourcesAndServers": "sources and servers",
+  "spareServers": "Spare servers",
+  "speed": "Speed",
+  "speedTest": "Speed test",
+  "speedTest2": "Speed Test",
+  "speedTestOnFailures": "Speed test on failures",
+  "splitTcpUdp": "Split TCP / UDP",
+  "startMinimized": "Start minimized",
+  "startingItAgain": "starting it again",
+  "startup": "Startup",
+  "state": "State",
+  "status": "Status",
+  "statusNotification": "Status notification",
+  "stop": "Stop",
+  "stopped": "Stopped",
+  "stoppedNoWorkingPairFoundYet": "Stopped — no working pair found yet.",
+  "strict": "Strict",
+  "subscription": "Subscription",
+  "subscriptionProblems": "Subscription problems",
+  "subscriptionUpdated": "Subscription updated",
+  "subscriptionUpdates": "Subscription updates",
+  "subscriptionUrl": "Subscription URL",
+  "subscriptionUrlFoundInClipboard": "Subscription URL found in clipboard",
+  "subscriptions": "Subscriptions",
+  "subscriptionsServers": "Subscriptions & servers",
+  "subscriptionsAndRules": "Subscriptions and rules",
+  "suffix": "Suffix",
+  "support": "Support",
+  "switchIn": "Switch (in ✎)",
+  "switchAutomatically": "Switch automatically",
+  "switchAutomaticallyTurnedOff": "Switch automatically turned off",
+  "switchOff": "Switch off",
+  "switchOn": "Switch on",
+  "switchToAFasterServer": "Switch to a faster server",
+  "system": "System",
+  "systemNotifications": "System notifications",
+  "systemProxy": "System proxy",
+  "systemProxyKillSwitchTun": "System proxy, kill switch, TUN",
+  "systemUi": "System UI",
+  "takenFromTheSubscriptionIfEmpty": "Taken from the subscription if empty",
+  "tap": "Tap",
+  "tapAServer": "Tap a server",
+  "tapTheBoxToDropIt": "tap the box to drop it",
+  "tapToCheckAgain": "Tap to check again",
+  "tapToConnect": "Tap to connect",
+  "tapToPing": "Tap to ping",
+  "tapToRetry": "Tap to retry",
+  "tapMenu": "Tap: menu",
+  "tapOnOff": "Tap: on / off",
+  "tapOnOffInThisChain": "Tap: on / off in this chain",
+  "target": "Target",
+  "targetUnavailable": "Target unavailable",
+  "test": "Test",
+  "testFailed": "Test failed",
+  "testLatency": "Test latency",
+  "testLatencyAfterUpdate": "Test latency after update",
+  "testLatencyOfAllItsServers": "Test latency of all its servers",
+  "testLatencyOfTheExitServers": "Test latency of the exit servers",
+  "text": "Text",
+  "textSize": "Text size",
+  "thatLineIsNoLongerIn": "That line is no longer in the raw log",
+  "theAppIsInEnglishFor": "The app is in English for now",
+  "theConnectionDropped": "The connection dropped",
+  "theFirstWorkingOneFromThe": "The first working one from the top.",
+  "theLastCopyIsUsed": "the last copy is used",
+  "theRouteUsesThisTabNow": "The route uses this tab now",
+  "theServerAddressDoesNotResolve": "The server address does not resolve",
+  "theServerDidNotAnswerIn": "The server did not answer in time",
+  "theServerDroppedTheConnection": "The server dropped the connection",
+  "theServerRefusedTheConnection": "The server refused the connection",
+  "theSubscriptionUrlIsEmpty": "The subscription URL is empty",
+  "theSystemProxy": "the system proxy",
+  "theSystemReportsNoConnection": "The system reports no connection",
+  "theTestCouldNotFinish": "The test could not finish",
+  "theTestEndedWithoutAResult": "The test ended without a result",
+  "theVpnIsDownRightNow": "The VPN is down right now:",
+  "theWholeListAsTheEngine": "the whole list as the engine sees it.",
+  "then": "Then",
+  "theseServersAreAlreadyInThe": "These servers are already in the group",
+  "thisLongOfStableWorkOn": "This long of stable work on the entry",
+  "thisQueryLeavesOutsideTheTunnel": "This query leaves outside the tunnel",
+  "thisServerIsAlreadyInThe": "This server is already in the group",
+  "thisSession": "This session",
+  "thisWillAffect": "This will affect",
+  "throughTheMainFlow": "through the main flow",
+  "tickASubscription": "Tick a subscription",
+  "ticked": "Ticked",
+  "time": "Time",
+  "timeoutsInARowBeforeAuto": "Timeouts in a row before Auto moves on",
+  "times": "Times",
+  "to": "To",
+  "toAddOne": "to add one.",
+  "toGroupServersIntoOne": "to group servers into one.",
+  "tooLongForAQrCode": "Too long for a QR code",
+  "trackers": "Trackers",
+  "trafficGoesDirectStillTrying": "Traffic goes direct — still trying",
+  "tunStack": "TUN stack",
+  "tcpThroughTheSystemStackUdp": "TCP through the system stack, UDP through gVisor — works almost everywhere",
+  "fastestMayClashWithSomeFirewalls": "Fastest; may clash with some firewalls or antivirus",
+  "mostCompatibleUsesMoreCpu": "Most compatible, uses more CPU",
+  "turnItOff": "Turn it off",
+  "turnOnUseInAutoIn": "turn on Use in Auto in Route",
+  "turnTheKillSwitchOff": "Turn the kill switch off?",
+  "turnOn": "Turn on",
+  "keepBlockingWhileClosed": "Keep blocking while closed?",
+  "ifTheAppDoesnTStart": "If the app doesn't start again or is removed, the internet stays blocked. To unblock by hand: Windows Settings → Network & internet → Proxy → turn off \"Use a proxy server\".",
+  "itOnlyMakesSenseIfThe": "It only makes sense if the app starts with the computer and connects by itself, so Launch at startup and Connect on launch will be turned on too.",
+  "unavailable": "Unavailable",
+  "unseenErrors": "Unseen errors",
+  "unseenWarnings": "Unseen warnings",
+  "unstableEntry": "Unstable entry",
+  "update": "Update",
+  "updateAllSubscriptions": "Update all subscriptions",
+  "updateAllSubscriptionsEvery": "Update all subscriptions every",
+  "updateEvery": "Update every",
+  "updateFailed": "Update failed",
+  "updateTheRuleSetEvery": "Update the rule set every",
+  "updateWithAllUserAgents": "Update with all user agents",
+  "updated": "Updated",
+  "updates": "Updates",
+  "upload": "Upload",
+  "urlHttps": "URL: https://…",
+  "use": "Use",
+  "useInAuto": "Use in Auto",
+  "useInAutoAutoMayPick": "Use in Auto: Auto may pick it",
+  "useOnlyThisOneManual": "Use only this one (Manual)",
+  "useOnlyThisServerManual": "Use only this server (Manual)",
+  "useTheWholeItemAsThe": "Use the whole item as the target",
+  "useThisSource": "Use this source",
+  "usedAsEntryTapToSwap": "used as entry · tap to swap",
+  "usedAsExitTapToSwap": "used as exit · tap to swap",
+  "usedInRule": "Used in rule",
+  "usedInRulesDomainsRuleSet": "Used in rules: Domains → Rule set",
+  "user": "User",
+  "userPasswordOptional": "User:password (optional)",
+  "uuidPassword": "UUID / Password",
+  "value": "Value",
+  "values": "Values",
+  "valuesInAFieldAnyGroups": "values in a field: any · groups: all",
+  "via": "Via",
+  "vpn": "VPN",
+  "vpnIsDown": "VPN is down",
+  "vpnIsDownInternetIsBlocked": "VPN is down — internet is blocked",
+  "vpnIsDownTrafficGoesDirect": "VPN is down — traffic goes direct",
+  "waits": "Waits",
+  "warningsErrors": "Warnings & errors",
+  "warningsAndErrors": "Warnings and errors",
+  "wasDown": "was down",
+  "website": "Website",
+  "whatIsThis": "What is this?",
+  "whenAutoSwitches": "When Auto switches",
+  "whereDoesItGo": "Where does it go?",
+  "whereTheyShow": "Where they show",
+  "whichRuleCatchesAnAddress": "Which rule catches an address",
+  "whichTabOfNodesTheRoute": "Which tab of Nodes the route uses",
+  "why": "Why",
+  "withTheFirstConnect": "with the first connect",
+  "withoutTun": "Without TUN",
+  "worksOnlyInTunTunIs": "Works only in TUN — TUN is off now",
+  "yes": "Yes",
+  "you": "You",
+  "youConnected": "You connected",
+  "youDisconnected": "You disconnected",
+  "youPinned": "You pinned",
+  "youUnpinnedTheServer": "You unpinned the server",
+  "yourOwn": "Your own",
+  "framedServersAreUsedTheFirst": "Framed servers are used, the first working one from the top. Drag ⋮⋮ to order, tap a server to leave it out.",
+  "from10STo60Min2": "From 10 s to 60 min · at a connection check, never more often",
+  "fromTheVpnIsDownKill": "From the VPN is down / Kill switch notice",
+  "goBackOnlyIfTheHigher": "go back only if the higher entry is faster by at least “Switch to a faster server”.",
+  "goBackToAHigherEntry": "go back to a higher entry once it works and is not much slower than the current one.",
+  "goesByTheRulesLikeAny": "Goes by the rules like any other traffic",
+  "goesThroughItWillReconnectThrough": "goes through it — will reconnect through the next entry",
+  "goesThroughItWillReconnectThrough2": "goes through it — will reconnect through the next working server",
+  "hiddenEverywhereSettingsKeptSwitchIt": "hidden everywhere, settings kept — switch it back on and it is where it was.",
+  "howFastTheServerAnswersTap": "how fast the server answers. Tap it to check again.",
+  "howManyMissedChecksInA": "how many missed checks in a row count as “down”.",
+  "howOftenTheServerListsAre": "how often the server lists are downloaded again from the providers.",
+  "httpSocks5On12700": "HTTP + SOCKS5 on 127.0.0.1 — set it by hand in other apps",
+  "ifNoEntryAnswersAtAll": "if no entry answers at all, nothing is switched or counted as a drop: Auto waits for the network to come back.",
+  "ifThatTargetIsDownThe": "if that target is down, the traffic is dropped instead of taking the main flow.",
+  "internetIsBlockedTheSystemProxy": "Internet is blocked (the system proxy is kept) — still trying",
+  "internetStaysBlockedUntilYouConnect": "Internet stays blocked until you connect again or tap Remove on Home",
+  "ipConditionsIpCidrLocalNetworks": "IP conditions (IP, CIDR, local networks, GeoIP) match a site opened by name only in TUN",
+  "isLeftWithNoServersWon": "is left with no servers — won't connect until you select another",
+  "itDoesNotOpenThroughThe": "It does not open through the current entry: another one opens it (with a Create rule button), or none does",
+  "itsMenuPingCopySwitchOff": "its menu: ping, copy, switch off, delete. Tap the ms to ping it.",
+  "keepOnlyServersWhoseNameMatches": "keep only servers whose name matches this regular expression, e.g. DE|NL or 🇩🇪.",
+  "keepsYouConnectedWhenTheServer": "keeps you connected: when the server stops answering, it moves to the next working entry in the list.",
+  "killSwitchInternetIsBlockedUntil": "Kill switch: internet is blocked until you connect",
+  "letsAutoPickTheEntryOr": "lets Auto pick the entry or not. Outside ✎ its place holds ⚡ — ping the entry’s servers.",
+  "listsAreUpdatedOnlyWhenYou": "lists are updated only when you tap Update.",
+  "maintenanceOnOct30200": "Maintenance on Oct 3, 02:00–04:00 UTC: servers may drop for a few minutes.",
+  "movesOnlyWhenTheGainIs": "moves only when the gain is worth it, so it doesn’t jump back and forth.",
+  "needsLaunchAtStartupAndConnect": "Needs Launch at startup and Connect on launch — tap to turn them on",
+  "newPasswordSetProgramsUsingThe": "New password set — programs using the old one need it",
+  "nextEntriesByPriorityPingedAhead": "Next entries by priority pinged ahead — failover goes straight to a working one. 0 = off",
+  "noEnabledSubscriptionsOrServersAdd": "No enabled subscriptions or servers — add or switch one on in Nodes",
+  "noExitNodeAnswersThroughAny": "No exit node answers through any entry node — this chain will not connect.",
+  "noLinesYetSingBoxWrites": "No lines yet — sing-box writes here once it runs",
+  "noNetworkOrNoServerAnswers": "No network or no server answers, and when it is back",
+  "noPairThroughTheFirstEntries": "No pair through the first entries — re-pinging entry nodes…",
+  "noRouteAnswersWaitingForThe": "No route answers — waiting for the network",
+  "noServerLinkRecognisedVlessVmess": "No server link recognised (vless://, vmess://, trojan://, ss://, hy2://, tuic://, anytls://, socks://)",
+  "noSubscriptionUrlOrServerLink": "No subscription URL or server link in the clipboard",
+  "noWorkingProfilesCreateOneIn": "No working profiles — create one in Nodes → Profiles",
+  "notMoreOftenThanTheConnection": "Not more often than the connection check",
+  "notUsedInAnyProfileChain": "Not used in any profile, chain, rule or app.",
+  "nothingInAutoTurnOnUse": "Nothing in Auto — turn on Use in Auto in Route",
+  "nothingLeftInAutoTheConnection": "Nothing left in Auto — the connection stays until you disconnect",
+  "nothingPickedGoesThroughTheMain": "Nothing picked — goes through the main flow.",
+  "nothingToConnectAddASubscription": "Nothing to connect — add a subscription in Nodes",
+  "fallbackAppliesToProxyOnly": "Fallback applies to Proxy only",
+  "ifTheViaTargetIsUnavailable": "If the Via target is unavailable",
+  "ifTheMainFlowIsDown": "If the main flow is down",
+  "anyProgramOnThisPcCan": "any program on this PC can use the port",
+  "passwordOnThePort": "Password on the port",
+  "offTheAppStaysSilentIn": "Off: the app stays silent in the background",
+  "offTheProxyStaysSetSo": "Off: the proxy stays set, so apps that use it have no internet until the VPN is back",
+  "onForAtLeastOneEntry": "on for at least one entry, or pick one yourself with MANUAL.",
+  "onOpenOfferToAddA": "On open, offer to add a subscription or server link you copied",
+  "onTheSystemProxyIsRemoved": "On: the system proxy is removed and traffic goes direct until the VPN is back",
+  "onlyForSubscriptionsTheProviderEncrypted": "only for subscriptions the provider encrypted.",
+  "onlyIfItIsFasterThan": "Only if it is faster than the current one by at least this",
+  "pingsTheCurrentServerAndThe": "Pings the current server and the ones above it. Failed requests trigger a check at once",
+  "pingsTheCurrentServerOnA": "pings the current server on a timer. If requests start failing, it is pinged right away, without waiting.",
+  "priorityTheFirstWorkingOneFrom": "Priority: the first working one from the top.",
+  "readyMadeLocalNetworkAdsYour": "ready-made: local network, ads, your region, popular services.",
+  "removeTheProxyIfTheVpn": "Remove the proxy if the VPN cannot recover",
+  "removedByTheProviderKept15": "removed by the provider. Kept 15 days in case they come back.",
+  "removedByTheProviderSettingsKept2": "removed by the provider. Settings kept 15 days per server, then forgotten.",
+  "rulesShippedInAClashYaml": "Rules shipped in a Clash YAML subscription",
+  "seeUnavailableInNodesTheirSettings": "See Unavailable in Nodes — their settings are kept",
+  "selectAtLeast1ServerA": "Select at least 1 server — a profile with none can’t connect",
+  "selectAtLeast1ServerOtherwise": "Select at least 1 server — otherwise the previous selection is kept",
+  "sendsADeviceIdRandomMade": "sends a device ID (random, made once) with the device model and OS. Some providers limit devices by it.",
+  "serversEachIsAddedWithThe": "servers — each is added with the name from its link",
+  "serversItUsesAsARoute": "Servers it uses as a route entry, Fastest / Priority, in Auto",
+  "serversTheChainMayUseTap": "servers the chain may use. Tap one to keep the chain off it.",
+  "servicesOfDifferentOwnersOneBlocked": "Services of different owners: one blocked service must not make a working server look dead. Tried only after the test URL missed.",
+  "showsDragThemToChangeThe": "shows ⋮⋮: drag them to change the order Auto tries entries in, and the Use in Auto switches. In an unfolded entry it also shows Fastest / Priority and the order of its servers.",
+  "sitesOpenedByNameAreResolved": "Sites opened by name are resolved here so IP conditions see the address. System proxy only, TUN has it already",
+  "somethingItNeedsIsSwitchedOff": "something it needs is switched off in Nodes. Tap it to see what.",
+  "sourcesWithTheirServersProfilesChains": "Sources with their servers, profiles, chains, Route order, rules, DNS and settings — one JSON file",
+  "startWithTheSystemAndroidAfter": "Start with the system (Android: after reboot)",
+  "stayOnTheEntryAutoMoved": "stay on the entry Auto moved to until you reconnect.",
+  "subscriptionUrlOrVlessHy2Link": "Subscription URL or vless:// / hy2:// … link",
+  "switchAutomaticallyIsOffTheFirst": "Switch automatically is off: the first server is back",
+  "switchingNeverCutsWhatIsAlready": "switching never cuts what is already open. After leaving a dead entry, only the connections that stopped moving are closed.",
+  "takeAllItsServersNewOnes": "take all its servers, new ones too after an update.",
+  "takeOnlyThoseFramed": "take only those (framed).",
+  "tapAServerOfAnUnfolded": "tap a server of an unfolded entry to use only it (Manual). Tap it again to let the entry pick.",
+  "testsWhichPairsWorkAndHow": "tests which pairs work and how fast. It changes nothing.",
+  "theAppAlwaysGoesThisWay": "the app always goes this way, before any other rule.",
+  "theAppGoesByTheRules": "the app goes by the rules like everything else.",
+  "theAutoBadgeInTheSimple": "the Auto badge in the Simple / Profiles list. Off = Manual: stays on the entry you tapped.",
+  "theConnectionRestartsWithTheRestored": "The connection restarts with the restored state.",
+  "theConnectionStaysButIfThe": "The connection stays, but if the VPN goes down,",
+  "theCoreResolvesNamesForThis": "the core resolves names for this rule, as set in Settings → DNS → Resolve for IP rules.",
+  "theEventsListIsEmptiedThe": "The events list is emptied. The raw log stays as it is.",
+  "theFastestSelectedServerOfThe": "The fastest selected server of the exit is used. Expand and tap servers to leave them out.",
+  "theFirstServerStaysInUse": "the first server stays in use even when it does not answer.",
+  "theFirstWorkingServerFromThe": "The first working server from the top is used. Expand the exit, drag ⋮⋮ to order, tap a server to skip it.",
+  "theFirstWorkingServerFromThe2": "the first working server from the top. Drag ⋮⋮ to set the order.",
+  "theInternetIsUnblockedNowThe": "The internet is unblocked now: the system proxy is removed.",
+  "theListExactlyAsTheEngine": "The list exactly as the engine checks it",
+  "theNextEntriesArePingedAhead": "the next entries are pinged ahead (on their own period), so a switch lands on one that is known to work. 0 = fewer pings, slower failover.",
+  "theOrderAutoTriesEntriesIn": "the order Auto tries entries in — drag ⋮⋮ in that list.",
+  "theOrderHereIsTheRoute": "the order here is the route’s priority, unless the Route sheet has its own.",
+  "thePortAsksForThisLogin": "the port asks for this login. The system proxy uses its own port without one: Windows cannot send a password",
+  "theProfileConnectsThroughTheFastest": "The profile connects through the fastest of its servers.",
+  "theProxyStaysSetWhenThe": "The proxy stays set when the app is closed, so nothing leaks before it starts again",
+  "theProxyStaysButNothingGuarantees": "the proxy stays, but nothing guarantees it any more.",
+  "theQueryGoesThroughTheVpn": "the query goes through the VPN or directly. Rules with DNS Auto pick by this.",
+  "theSameRuleInSingBox": "the same rule in sing-box format, for anything the form cannot show.",
+  "theServerMayBeDownRight": "The server may be down right now. Ping it or try again later.",
+  "theSingBoxRouteRuleName": "The sing-box route rule. Name, Fallback, DNS and \"IP conditions only in TUN\" live in the form.",
+  "theSystemProxyIsKeptSo": "The system proxy is kept so nothing leaks.",
+  "theSystemProxyIsRemovedAnd": "the system proxy is removed and your traffic goes direct at once.",
+  "thisRuleNeverMakesTheCore": "this rule never makes the core resolve a name: through the proxy port it matches only when the address is already known.",
+  "thisServerCannotBeTestedNo": "This server cannot be tested (no sing-box outbound)",
+  "throughTheProxyPortAnApp": "through the proxy port an app sends a site name, not an address, so an IP condition matches only if the core resolves the name first. In TUN mode the address is always known.",
+  "tickASubscriptionToTakeAll": "Tick a subscription to take all its nodes (new ones too after an update), or open it and tap single servers — framed ones are used.",
+  "tickAtLeast1ServerA": "Tick at least 1 server — a profile with none can’t connect",
+  "trafficGoesThroughTwoServersThe": "traffic goes through two servers: the entry, then the exit.",
+  "triesEveryExitNodeThroughThe": "Tries every exit node through the entry nodes, fastest entries first.",
+  "tunIsNotInTheCore": "TUN is not in the core yet — proxy on 127.0.0.1:",
+  "turnTheVpnOnAsSoon": "Turn the VPN on as soon as the app opens",
+  "turnsABlockAroundEverythingBut": "turns a block around: everything but these values.",
+  "twoRoutesForOneAppE": "two routes for one app, e.g. Discord voice apart from chat, or block UDP (QUIC) so the app falls back to TCP.",
+  "twoTabsSwipeBetweenThemSubscriptions": "two tabs, swipe between them: subscriptions and servers with their chains, or profiles with theirs.",
+  "typeASiteAnIpOr": "type a site, an IP or an app and see which rule catches it.",
+  "useRoutingRulesShippedInThe": "Use routing rules shipped in the subscription",
+  "useTheRoutingRulesThatCome": "use the routing rules that come with the subscription.",
+  "whatHomeConnectsThroughFollowsRoute": "What Home connects through · follows Route",
+  "whenARuleSProfileChain": "When a rule’s profile, chain, subscription or server is off in Nodes, has no working server or was deleted",
+  "whenAnEntryAboveTheCurrent": "When an entry above the current one works again",
+  "whenRequestsFailAlsoMeasureThe": "When requests fail, also measure the server’s speed",
+  "whereMatchingTrafficGoesTheMain": "where matching traffic goes: the main flow or a chosen profile, chain, subscription or node.",
+  "whichTabOfNodesTheRoute2": "which tab of Nodes the route uses. Everything is created and edited in Nodes.",
+  "yourOwnSetOfServersFrom": "your own set of servers, from any subscriptions.",
+  "theSystemProxyIsRemovedAnd2": "the system proxy is removed and your traffic goes direct.",
+  "yourTrafficGoesToTheEntry": "your traffic goes to the entry server first, then out through the exit. Sites see the exit’s address.",
+  "s": "{n0} s",
+  "@s": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "ms": "{n0} ms",
+  "@ms": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "min": "{n0} min",
+  "@min": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "h": "{n0} h",
+  "@h": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "hMin": "{n0} h {n1} min",
+  "@hMin": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "d": "{n0} d",
+  "@d": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "dLeft": "{n0} d left",
+  "@dLeft": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "sAgo": "{n0} s ago",
+  "@sAgo": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "minAgo": "{n0} min ago",
+  "@minAgo": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "hAgo": "{n0} h ago",
+  "@hAgo": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "dAgoPlural": "{n0, plural, other{{n0} d ago}}",
+  "@dAgoPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "daysPlural": "{n0, plural, one{{n0} day} other{{n0} days}}",
+  "@daysPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "serversPlural": "{n0, plural, one{{n0} server} other{{n0} servers}}",
+  "@serversPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "nodesPlural": "{n0, plural, one{{n0} node} other{{n0} nodes}}",
+  "@nodesPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "profilesPlural": "{n0, plural, one{{n0} profile} other{{n0} profiles}}",
+  "@profilesPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "rulesPlural": "{n0, plural, one{{n0} rule} other{{n0} rules}}",
+  "@rulesPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "appsPlural": "{n0, plural, one{{n0} app} other{{n0} apps}}",
+  "@appsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "chainsPlural": "{n0, plural, one{{n0} chain} other{{n0} chains}}",
+  "@chainsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "entriesPlural": "{n0, plural, one{{n0} entry} other{{n0} entries}}",
+  "@entriesPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "sourcesPlural": "{n0, plural, one{{n0} source} other{{n0} sources}}",
+  "@sourcesPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "newText": "{n0} new",
+  "@newText": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "removed2": "{n0} removed",
+  "@removed2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "more2": "{n0} more",
+  "@more2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "andMore": "{s0} and {n1} more",
+  "@andMore": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "ofText": "{n0} of {n1}",
+  "@ofText": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "ofNodes": "{n0} of {n1} nodes",
+  "@ofNodes": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "ofSelected": "{n0} of {n1} selected",
+  "@ofSelected": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "ofOn": "{n0} of {n1} on",
+  "@ofOn": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "off3": "{s0} off",
+  "@off3": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "nodesPlural2": "{n0, plural, other{{n0} nodes}}",
+  "@nodesPlural2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "alive": "{s0} alive",
+  "@alive": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "unavailable2": "{s0} unavailable",
+  "@unavailable2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "service3": "{s0} · service",
+  "@service3": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "gb": "{s0} / {s1} GB",
+  "@gb": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "gbUnlimited": "{s0} GB · unlimited",
+  "@gbUnlimited": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "until": "until {s0}",
+  "@until": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "updated2": "Updated {s0}",
+  "@updated2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "removed3": "Removed {s0}",
+  "@removed3": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "unavailable3": "Unavailable · {s0}",
+  "@unavailable3": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "nothingMatches2": "Nothing matches “{s0}”.",
+  "@nothingMatches2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "filtered2": "Filtered: {s0}",
+  "@filtered2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "no2": "no {s0}",
+  "@no2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "enter": "Enter {n0}–{n1} {s2}",
+  "@enter": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "loginIsTooLongMax": "Login is too long (max {n0})",
+  "@loginIsTooLongMax": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "passwordIsTooLongMax": "Password is too long (max {n0})",
+  "@passwordIsTooLongMax": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "passwordIsTooShortMin": "Password is too short (min {n0})",
+  "@passwordIsTooShortMin": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "backupFailed": "Backup failed: {s0}",
+  "@backupFailed": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "backupSaved2": "Backup saved: {s0}",
+  "@backupSaved2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "cannotRestore": "Cannot restore: {s0}",
+  "@cannotRestore": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "notRestored": "Not restored: {s0}",
+  "@notRestored": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "notSaved": "Not saved: {s0}",
+  "@notSaved": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "notCleared": "Not cleared: {s0}",
+  "@notCleared": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "notClosed": "Not closed: {s0}",
+  "@notClosed": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "exportFailed": "Export failed: {s0}",
+  "@exportFailed": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "logsSaved": "Logs saved: {s0}",
+  "@logsSaved": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "pingFailed": "Ping failed: {s0}",
+  "@pingFailed": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "coreNotReachable": "Core not reachable: {s0}",
+  "@coreNotReachable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "latencyTest": "Latency test: {s0}",
+  "@latencyTest": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "noShareLink": "No share link: {s0}",
+  "@noShareLink": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "connected2": "Connected: {s0}",
+  "@connected2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "downFor2": "Down for {s0}",
+  "@downFor2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "isNowTheFastest": "{s0} is now the fastest",
+  "@isNowTheFastest": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "isUnstable2": "{s0} is unstable",
+  "@isUnstable2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "droppedBackToItAfterMin": "Dropped {n0}× — back to it after {n1} min without drops",
+  "@droppedBackToItAfterMin": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "failedChecksPlural": "{n1, plural, other{{s0} failed {n1} checks}}",
+  "@failedChecksPlural": {
+    "placeholders": {
+      "n1": {
+        "type": "num"
+      },
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "failedItsChecks": "{s0} failed its checks",
+  "@failedItsChecks": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "isBackReturnedToIt": "{s0} is back — returned to it",
+  "@isBackReturnedToIt": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "isFaster": "{s0} is faster",
+  "@isFaster": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "doesNotOpen": "{s0} does not open",
+  "@doesNotOpen": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "createRule": "Create rule",
+  "applied": "applied",
+  "overriddenByRule": "overridden by rule",
+  "overriddenByApp": "overridden by app",
+  "notApplied": "not applied",
+  "noOtherWorkingRouteToTry": "No other working route to try",
+  "retriesThroughOtherRoutesAreOff": "Retries through other routes are off",
+  "siteDoesNotOpenOnAny": "Site does not open on any route",
+  "alsoTried": "Also tried",
+  "retriesThroughOtherRoutes": "Retries through other routes",
+  "retryAFailedSiteThroughOther": "Retry a failed site through other routes",
+  "tellsABlockedSiteFromA": "Tells a blocked site from a dead one. Turn off if a service distrusts one client coming from many addresses",
+  "upTo3": "Up to 3",
+  "updated3": "{s0} updated",
+  "@updated3": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "updateFailed2": "{s0}: update failed",
+  "@updateFailed2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "theProviderRemovedServersPlural": "{n1, plural, one{{s0}: the provider removed {n1} server} other{{s0}: the provider removed {n1} servers}}",
+  "@theProviderRemovedServersPlural": {
+    "placeholders": {
+      "n1": {
+        "type": "num"
+      },
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "serversAreBackPlural": "{n1, plural, one{{s0}: {n1} server is back} other{{s0}: {n1} servers are back}}",
+  "@serversAreBackPlural": {
+    "placeholders": {
+      "n1": {
+        "type": "num"
+      },
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "itsServersDoNotRespond": "{s0}: its servers do not respond",
+  "@itsServersDoNotRespond": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleSetNotDownloaded2": "Rule set {s0} not downloaded",
+  "@ruleSetNotDownloaded2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleSetUpdated2": "Rule set {s0} updated",
+  "@ruleSetUpdated2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "doesNotAnswer": "{s0} does not answer",
+  "@doesNotAnswer": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "answersAgain": "{s0} answers again",
+  "@answersAgain": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "answersAgainReturnedToIt": "{s0} answers again — returned to it",
+  "@answersAgainReturnedToIt": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleBlockedWhileItIsDown": "Rule {s0} blocked while it is down",
+  "@ruleBlockedWhileItIsDown": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleGoesDirect": "Rule {s0} goes direct",
+  "@ruleGoesDirect": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleGoesThroughTheMainFlow": "Rule {s0} goes through the main flow",
+  "@ruleGoesThroughTheMainFlow": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleGoesThrough": "Rule {s0} goes through {s1}",
+  "@ruleGoesThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "appGoesThrough": "App {s0} goes through {s1}",
+  "@appGoesThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleBackThroughIt": "Rule {s0} back through it",
+  "@ruleBackThroughIt": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appBlockedWhileItIsDown": "App {s0} blocked while it is down",
+  "@appBlockedWhileItIsDown": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appGoesDirect": "App {s0} goes direct",
+  "@appGoesDirect": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appGoesThroughTheMainFlow": "App {s0} goes through the main flow",
+  "@appGoesThroughTheMainFlow": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appBackThroughIt": "App {s0} back through it",
+  "@appBackThroughIt": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "dns": "DNS: {s0} → {s1}",
+  "@dns": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "exitCodeStartingItAgain": "Exit code {n0} — starting it again",
+  "@exitCodeStartingItAgain": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "singBoxStopped": "sing-box stopped",
+  "singBoxStartedAgain": "sing-box started again",
+  "singBoxCouldNotStartAgain": "sing-box could not start again",
+  "tunNeedsAdministratorRights": "TUN needs administrator rights",
+  "runTheAppAsAdministratorOr": "Run the app as administrator, or switch to Proxy mode",
+  "attempt2": "Attempt {n0}",
+  "@attempt2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "wasDown2": "was down {s0}",
+  "@wasDown2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "savedDataWasDamagedRestoredFrom": "Saved data was damaged: restored from a backup",
+  "savedDataWasDamagedAndCould": "Saved data was damaged and could not be restored",
+  "backupFromLaterChangesAreLost": "Backup from {s0}; later changes are lost",
+  "@backupFromLaterChangesAreLost": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "laterChangesAreLost": "Later changes are lost",
+  "startingEmptyTheDamagedFileIs": "Starting empty; the damaged file is kept next to it",
+  "backupSaved": "Backup saved",
+  "damagedFileKeptAs": "Damaged file kept as",
+  "lastBackup": "Last backup",
+  "olderBackup": "Older backup",
+  "theFileWasEmptyAPower": "The file was empty (a power cut)",
+  "theFileWasEmpty": "The file was empty",
+  "theFileWasNotReadable": "The file was not readable",
+  "theFileCouldNotBeOpened": "The file could not be opened",
+  "theFileWasMissing": "The file was missing",
+  "systemProxyCouldNotBeSet": "System proxy could not be set",
+  "systemProxyCouldNotBeRestored": "System proxy could not be restored",
+  "systemProxyOn": "System proxy on",
+  "systemProxyOff": "System proxy off",
+  "youSetTheSystemProxy": "You set the system proxy",
+  "youRemovedTheSystemProxy": "You removed the system proxy",
+  "youPinned2": "You pinned {s0}",
+  "@youPinned2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "youSwitchedToTunMode": "You switched to TUN mode",
+  "youSwitchedToProxyMode": "You switched to Proxy mode",
+  "youSwitchedToGlobal": "You switched to Global",
+  "youSwitchedToByRules": "You switched to By rules",
+  "youTurnedTheSystemProxyOn": "You turned the system proxy on",
+  "youTurnedTheSystemProxyOff": "You turned the system proxy off",
+  "and": "and {s0}",
+  "@and": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "connectsOnLaunch": "· connects on launch",
+  "connectsOnLaunch2": "{s0} · connects on launch",
+  "@connectsOnLaunch2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "updateOfFailed": "Update of {s0} failed: {s1}",
+  "@updateOfFailed": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "couldNotLoad2": "Could not load {s0}: {s1}",
+  "@couldNotLoad2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "opens2": "Opens {s0}",
+  "@opens2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "forgotUnavailableServersPlural": "{n0, plural, one{Forgot {n0} unavailable server} other{Forgot {n0} unavailable servers}}",
+  "@forgotUnavailableServersPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "addedServersPlural": "{n0, plural, one{Added {n0} server} other{Added {n0} servers}}",
+  "@addedServersPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "addedServersAlreadyTherePlural": "{n0, plural, one{Added {n0} server, {n1} already there} other{Added {n0} servers, {n1} already there}}",
+  "@addedServersAlreadyTherePlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "copied2": "{s0} copied",
+  "@copied2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "importedRulesPlural": "{n0, plural, one{Imported {n0} rule} other{Imported {n0} rules}}",
+  "@importedRulesPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "usedInRuleRemoveItThere": "Used in rule {s0} — remove it there first",
+  "@usedInRuleRemoveItThere": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "portIsTakenByTheApp": "Port {n0} is taken by the app",
+  "@portIsTakenByTheApp": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "fastestUsesItFromTheNext": "Fastest uses it from the next connect",
+  "tunIsNotInTheCore2": "TUN is not in the core yet — proxy on 127.0.0.1:{n0}",
+  "@tunIsNotInTheCore2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "removedByTheProviderIfA": "Removed by the provider {s0}. If a subscription update brings it back within {s1}, its settings in profiles and chains come back with it; after that it is forgotten.",
+  "@removedByTheProviderIfA": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "isRemovedFromWithItsPlace": "{s0} {s1} is removed from {s2}, with its place in every profile and chain. This can’t be undone.",
+  "@isRemovedFromWithItsPlace": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "theSubscriptionAndItsServersArePlural": "{n0, plural, one{The subscription and its {n0} server are removed. This can’t be undone.} other{The subscription and its {n0} servers are removed. This can’t be undone.}}",
+  "@theSubscriptionAndItsServersArePlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "theGroupAndItsServersArePlural": "{n0, plural, one{The group and its {n0} server are removed. This can’t be undone.} other{The group and its {n0} servers are removed. This can’t be undone.}}",
+  "@theGroupAndItsServersArePlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "theIsRemovedFromNodesAnd": "The {s0} is removed from Nodes and from the route. This can’t be undone.",
+  "@theIsRemovedFromNodesAnd": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "serversAreBackPreviousSettingsRestoredPlural": "{n0, plural, one{{n0} server is back — previous settings restored} other{{n0} servers are back — previous settings restored}}",
+  "@serversAreBackPreviousSettingsRestoredPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "aRuleMatchesWhenEveryBlock": "a rule matches when every block matches; inside a block any value is enough.",
+  "aServerThatStopsAnsweringIs": "a server that stops answering is replaced by the next one; the higher one takes over again when it recovers.",
+  "afterAMissedCheckTheServer": "after a missed check the server is tried again this soon; “Leave a server after” misses in a row and Auto moves on.",
+  "answersAtOnceWithAStand": "answers at once with a stand-in address; faster, but some apps dislike it.",
+  "anyAddressThatAnswersFastOver": "Any address that answers fast over HTTP(S); the time to its reply is the ping. Pick one that works in your country.",
+  "autoMovedToAnotherEntryOr": "Auto moved to another entry or server; a rule went to its Fallback or a DNS server was replaced",
+  "backgroundRestartsAreSilentThisShows": "Background restarts are silent; this shows them",
+  "blocksTrafficWhenTheVpnIs": "Blocks traffic when the VPN is down. Works for apps that use the system proxy; full block needs TUN.",
+  "checkedTopToBottomTheFirst": "Checked top to bottom; the first match wins. Change it in the Rules screen.",
+  "connectDisconnectPinModeAndRoute": "Connect, disconnect, pin, mode and route switches, system proxy. The filter above is forgotten when the app restarts; this switch is not.",
+  "dropIsSilentRejectAnswersAt": "Drop is silent; Reject answers at once, so apps do not wait.",
+  "fasterNoDnsLeaksSomeApps": "Faster, no DNS leaks; some apps (banks, games) break — add them below",
+  "fetchTheSubscriptionDirectlyOrThrough": "fetch the subscription directly or through the VPN (if the provider’s site is blocked). “… first” tries the other way when it fails; with the VPN off it is always direct.",
+  "framedServersAreUsedTapTo": "Framed servers are used — tap to leave one out. It connects through the fastest of them; servers added by an update start selected.",
+  "howTheAppIntroducesItselfTo": "how the app introduces itself to the provider; the server list may depend on it. Auto is best.",
+  "listsAndMenusTitlesKeepTheir": "Lists and menus; titles keep their size",
+  "notListedHereYourChoicesFor": "not listed here; your choices for them are kept.",
+  "onThePhoneTheseComeAs": "On the phone these come as system notifications; in the app, as a toast at the bottom (tap it to see the event). What you start yourself (Update, Add, Ping) is always shown.",
+  "onceADayNothingIsInstalled": "Once a day; nothing is installed without asking",
+  "ownPopUpsShowEvenWhen": "Own pop-ups show even when Windows notifications are muted; they appear in the corner while the app is closed to the tray. System notifications go through the Windows notification centre.",
+  "pingsTheTopAutoEntryAnd": "Pings the top Auto entry and the next {s0} by priority (Spare servers in Auto mode), and the targets of your rules",
+  "@pingsTheTopAutoEntryAnd": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "replacesEverythingHereWithTheBackup": "Replaces everything here with the backup; asks first",
+  "savesBatteryChecksAgainOnWake": "Saves battery; checks again on wake",
+  "serversThisEntryMayUseTap": "servers this entry may use. Tap one to leave it out; at least one must stay.",
+  "tapManualOnAnEntryTo": "tap MANUAL on an entry to use only it; tap it again (or the Auto badge) to go back.",
+  "theAddressPingAndFastestTime": "The address ping and Fastest time; pick one that answers fast from here",
+  "theFirstTickedServerFromThe": "the first ticked server from the top answers; if it fails, the next one does. Drag ⋮⋮ to reorder.",
+  "theFirstWorkingServerFromThe3": "The first working server from the top is used. Drag ⋮⋮ to order; pick servers above.",
+  "theProviderRemovedServersSeeUnavailable": "The provider removed {s0} servers — see Unavailable, settings kept",
+  "@theProviderRemovedServersSeeUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "thisAppSOwnRouteWins": "this app’s own route wins for the app; the service still covers its sites in other apps",
+  "typeAndPressEnterOrComma": "type and press Enter or comma; paste a list to add many. Red = wrong format.",
+  "vlessFillsTheFieldsBelowOne": "vless://… — fills the fields below; one link per line adds them all",
+  "vlessReplacesThisServerKeepsIts": "vless://… — replaces this server, keeps its place",
+  "whenTheTestUrlDoesNot": "When the test URL does not answer through a server, these are tried; the server works if any answers",
+  "priorityFollowsTheOrderInNodes": "Priority follows the order in Nodes · ✎ to set its own",
+  "priorityFollowsTheOrderInNodes2": "Priority follows the order in Nodes ·",
+  "toSetItsOwn": "✎ to set its own",
+  "edit2": "✎ Edit",
+  "latest": "↓ Latest",
+  "orderSwitchInAuto": "⋮⋮ = order · switch = in Auto",
+  "expectedTypeValuePolicy": ": expected TYPE,value,POLICY",
+  "noDnsServerViaVpnIs": ": no DNS server via VPN is on, the first one in use resolves",
+  "throughADirectServer": ", through a direct server",
+  "desktop": "· desktop",
+  "retrying": "· retrying",
+  "tapToRemove": "· tap to remove",
+  "isNotInSingBox": "({s0} is not in sing-box)",
+  "@isNotInSingBox": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "outOfItsPriorityOrder": "(out of its priority order)",
+  "stoppedEarly": "(stopped early)",
+  "yours": "(yours)",
+  "rulesTargetUnavailable": "(Rules → Target unavailable)",
+  "core2": "[core]",
+  "you2": "[you]",
+  "hasNoSelectedWorkingNodes": "{s0} has no selected working nodes.",
+  "@hasNoSelectedWorkingNodes": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "entryHasNoSelectedWorkingNodes": "Entry has no selected working nodes.",
+  "exitHasNoSelectedWorkingNodes": "Exit has no selected working nodes.",
+  "isBlockedWhileConnected": "{s0} is blocked while connected",
+  "@isBlockedWhileConnected": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "udpIsBlockedWhileConnected": "UDP is blocked while connected",
+  "tcpIsBlockedWhileConnected": "TCP is blocked while connected",
+  "noOwnRouteForItGoes": "No own route for {s0}: it goes by the rules",
+  "@noOwnRouteForItGoes": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "serviceNotAdded": "{s0} service: not added",
+  "@serviceNotAdded": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "service4": "{s0} service: {s1}",
+  "@service4": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "setByTheService": "Set by the {s0} service",
+  "@setByTheService": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appItsOwnRouteWinsIn": "App: {s0} — its own route wins in the app",
+  "@appItsOwnRouteWinsIn": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "down2": "down → {s0}",
+  "@down2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "defaultRulesTargetUnavailable": "Default: {s0} (Rules → Target unavailable)",
+  "@defaultRulesTargetUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "listsGeositeGeoipYourOwn": "{n0} lists · geosite, geoip, your own",
+  "@listsGeositeGeoipYourOwn": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "compositeRuleOfEditItIn": "Composite rule ({s0} of {n1}) — edit it in JSON",
+  "@compositeRuleOfEditItIn": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "extraFieldsEditThemInJson": "Extra fields: {s0} — edit them in JSON",
+  "@extraFieldsEditThemInJson": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "red": "Red: {s0}",
+  "@red": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "thisRuleIsResolveForIp": "this rule is {s0}; Resolve for IP rules is {s1}.",
+  "@thisRuleIsResolveForIp": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "thisRuleIsResolveForIp2": "this rule is {s0}; Resolve for IP rules is {s1}, so the rule works in TUN only.",
+  "@thisRuleIsResolveForIp2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "ticked2": "ticked",
+  "off2": "off",
+  "via2": "via {s0}",
+  "@via2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "entryOfExits": "Entry {s0} of {n1}: {s2} → {n3} exits",
+  "@entryOfExits": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      },
+      "s2": {
+        "type": "String"
+      },
+      "n3": {
+        "type": "num"
+      }
+    }
+  },
+  "pingingEntryNodes": "Pinging {n0} entry nodes…",
+  "@pingingEntryNodes": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "workingPairsPlural": "{n0, plural, one{{n0} working pair} other{{n0} working pairs}}",
+  "@workingPairsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "workingPairsBestMsPlural": "{n0, plural, one{{n0} working pair · best {n1} ms} other{{n0} working pairs · best {n1} ms}}",
+  "@workingPairsBestMsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "workingPairsStoppedEarlyBestMsPlural": "{n0, plural, one{{n0} working pair (stopped early) · best {n1} ms} other{{n0} working pairs (stopped early) · best {n1} ms}}",
+  "@workingPairsStoppedEarlyBestMsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "showAll2": "Show all {n0}",
+  "@showAll2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "theProfileIsRemovedFromNodes": "The profile is removed from Nodes and from the route. This can’t be undone.",
+  "theChainIsRemovedFromNodes": "The chain is removed from Nodes and from the route. This can’t be undone.",
+  "delete2": "Delete {s0}?",
+  "@delete2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteSubscription": "Delete subscription",
+  "tryingAgainInTheBackground": "Trying again in the background",
+  "theSystemProxyIsKeptSo2": "The system proxy is kept so nothing leaks. Trying again in the background",
+  "theConnectionStaysButIfThe2": "The connection stays, but if the VPN goes down, the system proxy is removed and your traffic goes direct.",
+  "thisQueryLeavesOutsideTheTunnel2": "This query leaves outside the tunnel, through a direct server",
+  "vpnIsDownRetrying": "VPN is down · {s0} · retrying",
+  "@vpnIsDownRetrying": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "removedByTheProviderIfA2": "Removed by the provider {s0}. If a subscription update brings it back within",
+  "@removedByTheProviderIfA2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "itsSettingsInProfilesAndChains": ", its settings in profiles and chains come back with it; after that it is forgotten.",
+  "everythingHereIsReplacedSourcesProfiles": "Everything here is replaced: sources, profiles, chains, Route and settings.",
+  "everythingHereIsReplacedSourcesProfiles2": "Everything here is replaced: sources, profiles, chains, Route and settings. The connection restarts with the restored state.",
+  "region2": "Region {s0}",
+  "@region2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "switchOnThereOrSelectAnother": "{s0} — switch {s1} on there or select another server",
+  "@switchOnThereOrSelectAnother": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "rule4": "Rule #{n0}",
+  "@rule4": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "rule5": "rule #{n0}",
+  "@rule5": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "rule2": "rule #",
+  "rule3": "Rule #",
+  "last": "Last: {s0}",
+  "@last": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "newText2": "↓ {n0} new",
+  "@newText2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "picked": "{n0} picked",
+  "@picked": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "goneFromTheSubscription2": "{n0} gone from the subscription",
+  "@goneFromTheSubscription2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "onHijack": "{n0} on · hijack",
+  "@onHijack": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "appsWithTheirOwnRoute2": "{n0} apps with their own route",
+  "@appsWithTheirOwnRoute2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "rulesRegion": "{n0} rules · {s1} region",
+  "@rulesRegion": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "added2": "{n0} added",
+  "@added2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "addServers": "Add {n0} servers",
+  "@addServers": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "addServer2": "Add {n0} server",
+  "@addServer2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "eventsPlural": "{n0, plural, one{{n0} event} other{{n0} events}}",
+  "@eventsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "ofEvents": "{n0} of {n1} events",
+  "@ofEvents": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "linesPlural": "{n0, plural, one{{n0} line} other{{n0} lines}}",
+  "@linesPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "errorsPlural": "{n0, plural, one{{n0} error} other{{n0} errors}}",
+  "@errorsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "warningsPlural": "{n0, plural, one{{n0} warning} other{{n0} warnings}}",
+  "@warningsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "thisServerHasNoShareLink": "This server has no share link ({s0})",
+  "@thisServerHasNoShareLink": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "itsEntryMovesTo": "its entry moves to {s0}",
+  "@itsEntryMovesTo": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "itsExitMovesTo": "its exit moves to {s0}",
+  "@itsExitMovesTo": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "theSwitchItOnThereOr": "The {s0}: {s1} — switch it on there or select another server",
+  "@theSwitchItOnThereOr": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "itDoesVia": "it does via {s0}",
+  "@itDoesVia": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "checkEvery2": "Check every {s0}",
+  "@checkEvery2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "every": "every {s0}",
+  "@every": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "filtered": "Filtered:",
+  "priorityFollowsTheOrderInNodes3": "Priority follows the order in Nodes",
+  "eachIsAddedWithTheName": "each is added with the name from its link",
+  "noRouteAnswers": "No route answers",
+  "waitingForTheNetwork": "waiting for the network",
+  "isOffInNodes": "{s0} is off in Nodes",
+  "@isOffInNodes": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "areOffInNodes": "{s0} are off in Nodes",
+  "@areOffInNodes": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "switchItOnThereOrSelect": "switch it on there or select another server",
+  "selectAtLeast1ServerOf": "Select at least 1 server of the {s0}",
+  "@selectAtLeast1ServerOf": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "chain2": "chain",
+  "profile2": "profile",
+  "entry2": "entry",
+  "subscription2": "subscription",
+  "service2": "service",
+  "priority2": "priority",
+  "fastest": "fastest",
+  "manual3": "manual",
+  "none2": "none",
+  "optional": "optional",
+  "now2": "now",
+  "soon": "soon",
+  "builtIn": "built-in",
+  "seconds": "seconds",
+  "minutes": "minutes",
+  "hours": "hours",
+  "days": "days",
+  "autoMayPickThisEntryOff2": "— Auto may pick this entry. Off = only when you tap it.",
+  "connectsThroughTheQuickestWorkingServer2": "— connects through the quickest working server.",
+  "notListedHereYourChoicesFor2": "— not listed here; your choices for them are kept.",
+  "removedByTheProviderKept152": "— removed by the provider. Kept 15 days in case they come back.",
+  "serversThisEntryMayUseTap2": "— servers this entry may use. Tap one to leave it out; at least one must stay.",
+  "theFirstWorkingServerFromThe4": "— the first working server from the top. Drag ⋮⋮ to set the order.",
+  "next": "next {n0}",
+  "@next": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "h2": "{n0}h",
+  "@h2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "d2": "{n0}d",
+  "@d2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "newest": "Newest",
+  "thisHasNothingToConnectThrough": "This {s0} has nothing to connect through: the",
+  "@thisHasNothingToConnectThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "sourceItUsesIs": "source it uses is",
+  "sourcesItUsesAre": "sources it uses are",
+  "serverItUsesIs": "server it uses is",
+  "serversItUsesAre": "servers it uses are",
+  "sourcesAndServersItUsesAre": "sources and servers it uses are",
+  "switchedOffInNodes": "switched off in Nodes.",
+  "switchOnOrSelectAnotherServer": "Switch {s0} on, or select another server in the {s1}. Its settings are kept either way.",
+  "@switchOnOrSelectAnotherServer": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "losesItsTargetTrafficGoesThrough": "loses its target — traffic goes through the main flow",
+  "losesItsTargetTrafficGoesNowhere": "loses its target — traffic goes nowhere (blocked)",
+  "losesItsTargetTrafficGoesDirect": "loses its target — traffic goes direct",
+  "itsEntryIsLeftWithNo": "its entry is left with no servers — won't connect until you select another",
+  "itsExitIsLeftWithNo": "its exit is left with no servers — won't connect until you select another",
+  "entryLosesServersPlural": "{n0, plural, one{entry loses {n0} server} other{entry loses {n0} servers}}",
+  "@entryLosesServersPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "exitLosesServersPlural": "{n0, plural, one{exit loses {n0} server} other{exit loses {n0} servers}}",
+  "@exitLosesServersPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "exitLosesServersOutOfItsPlural": "{n0, plural, one{exit loses {n0} server (out of its priority order)} other{exit loses {n0} servers (out of its priority order)}}",
+  "@exitLosesServersOutOfItsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "losesServersOfPlural": "{n0, plural, one{loses {n0} server of {n1}} other{loses {n0} servers of {n1}}}",
+  "@losesServersOfPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "theSubscriptionAndItsServersArePlural2": "{n0, plural, one{The subscription and its {n0} server are removed} other{The subscription and its {n0} servers are removed}}",
+  "@theSubscriptionAndItsServersArePlural2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "theGroupAndItsServersArePlural2": "{n0, plural, one{The group and its {n0} server are removed} other{The group and its {n0} servers are removed}}",
+  "@theGroupAndItsServersArePlural2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "thisCanTBeUndone": ". This can’t be undone.",
+  "withUnavailableOneKeptForTheir": ", with {n0} unavailable one kept for their settings",
+  "@withUnavailableOneKeptForTheir": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "withUnavailableOnesKeptForTheir": ", with {n0} unavailable ones kept for their settings",
+  "@withUnavailableOnesKeptForTheir": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "sort": "Sort",
+  "sortConnections": "Sort connections",
+  "downloadSpeed": "Download speed",
+  "uploadSpeed": "Upload speed",
+  "downloaded": "Downloaded",
+  "uploaded": "Uploaded",
+  "duration": "Duration",
+  "longest": "Longest",
+  "speed2": "↓ speed",
+  "speed3": "↑ speed",
+  "total": "↓ total",
+  "total2": "↑ total",
+  "pause": "Pause",
+  "resume": "Resume",
+  "freezesTheListTheCardsOn": "Freezes the list, the cards on Home keep counting",
+  "theShownListAsText": "The shown list as text",
+  "filterByExit": "Filter by exit…",
+  "filterByExit2": "Filter by exit",
+  "closeShown": "Close {n0} shown",
+  "@closeShown": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "pausedNewConnection": "Paused · {n0} new connection",
+  "@pausedNewConnection": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "pausedNewConnections": "Paused · {n0} new connections",
+  "@pausedNewConnections": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "unknown": "Unknown",
+  "defaultFinal": "Default / final",
+  "selected": "{n0} selected",
+  "@selected": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "started": "Started",
+  "down": "↓ Down",
+  "up": "↑ Up",
+  "ruleForThisHost": "Rule for this host…",
+  "ruleForThisAddress": "Rule for this address…",
+  "ruleForThisApp": "Rule for this app…",
+  "nothingToCopy": "Nothing to copy",
+  "connectionsPlural": "{n0, plural, one{{n0} connection} other{{n0} connections}}",
+  "@connectionsPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "connectionClosed": "{n0} connection closed",
+  "@connectionClosed": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "connectionsClosed": "{n0} connections closed",
+  "@connectionsClosed": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "findAValue": "Find a value",
+  "clearAll": "Clear all",
+  "apply": "Apply",
+  "s2": "{n0}s",
+  "@s2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "m": "{n0}m",
+  "@m": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "sortAndGroup": "Sort and group",
+  "groupBy": "Group by",
+  "closeGroup": "Close group",
+  "openRule": "Open rule",
+  "connectionClosed2": "{s0}: {n1} connection closed",
+  "@connectionClosed2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "connectionsClosed2": "{s0}: {n1} connections closed",
+  "@connectionsClosed2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "privateNetworks": "Private networks",
+  "coreChecks": "Core checks",
+  "latencyCheck": "Latency check",
+  "dnsCheck": "DNS check",
+  "rulesOnDefaultAndApps": "rules on Default, and apps",
+  "httpsDohTlsDotQuicDoq": "https:// (DoH) · tls:// (DoT) · quic:// (DoQ) · udp:// or an IP · system",
+  "disableSysProxy": "Disable sys proxy",
+  "enter0Ms": "Enter 0–{n0} ms",
+  "@enter0Ms": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  }
+}

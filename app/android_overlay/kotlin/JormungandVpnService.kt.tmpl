@@ -1,0 +1,82 @@
+package __APP_ID__
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.net.VpnService
+import android.os.Build
+import android.os.ParcelFileDescriptor
+
+/**
+ * The tunnel. STUB: goes foreground and keeps the lifecycle, does not carry traffic yet.
+ *
+ * TODO(libbox): put libbox.aar into android/app/libs/ (README), then in [startTunnel]:
+ *   - Libbox.setup(...) once, parse EXTRA_CONFIG (sing-box JSON built by the Dart core),
+ *   - implement libbox's PlatformInterface: openTun(options) = a VpnService.Builder filled from the
+ *     TunOptions (addresses, routes, DNS, MTU, per-app include / exclude) -> establish().detachFd(),
+ *     protect(fd) = VpnService.protect, plus the connection-owner / interface-monitor hooks,
+ *   - Libbox.newService(config, platform).start(); on stop: close it, close the tun descriptor.
+ *  The Dart core stays the owner of the config (routing plan, rules, DNS); this class only opens
+ *  the tun for it. On Windows there is no such class (the core runs sing-box itself).
+ * TODO: notification text through strings.xml (en / ru), action "Disconnect", tap opens the app,
+ *  live speed in the text while connected.
+ */
+class JormungandVpnService : VpnService() {
+    companion object {
+        const val ACTION_START = "__APP_ID__.vpn.START"
+        const val EXTRA_CONFIG = "config"
+        private const val CHANNEL_ID = "vpn"
+        private const val NOTIFICATION_ID = 1
+    }
+
+    private var tun: ParcelFileDescriptor? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        enterForeground()
+        startTunnel(intent?.getStringExtra(EXTRA_CONFIG))
+        // Not sticky: a restart without the Dart side could not rebuild the config.
+        return START_NOT_STICKY
+    }
+
+    override fun onRevoke() {
+        // The user (or another VPN app) took the VPN away in system settings.
+        // TODO: tell Dart (CoreHost -> ConnectionPhase.down / disconnected).
+        stopTunnel()
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        stopTunnel()
+        super.onDestroy()
+    }
+
+    private fun enterForeground() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "VPN", NotificationManager.IMPORTANCE_LOW)
+        )
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("Jormungand")
+            .setContentText("VPN is on")
+            .setSmallIcon(applicationInfo.icon)
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun startTunnel(@Suppress("UNUSED_PARAMETER") configJson: String?) {
+        // TODO(libbox): see the class comment. Nothing is established yet, so no key icon appears.
+    }
+
+    private fun stopTunnel() {
+        // TODO(libbox): stop the libbox service first.
+        tun?.close()
+        tun = null
+    }
+}

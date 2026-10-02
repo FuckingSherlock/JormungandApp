@@ -1,0 +1,31 @@
+name: jormungand
+description: Jormungand - VPN / proxy client over the sing-box core (Flutter, Android first).
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  # the version is pinned by flutter_localizations; `any` is what the Flutter l10n guide uses
+  intl: any
+  jormungand_core:
+    path: ../core
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true # gen-l10n from l10n.yaml -> lib/l10n/gen/ (runs on `flutter pub get` / build)
+  fonts:
+    # Twemoji flags (CC-BY 4.0), a fallback family for flag emoji (see lib/theme/app_colors.g.dart)
+    - family: Flags
+      fonts:
+        - asset: assets/fonts/TwemojiCountryFlags.ttf
