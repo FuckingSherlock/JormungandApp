@@ -11,6 +11,7 @@ export 'src/eventbook.dart';
 export 'src/exitip.dart';
 export 'src/fallback.dart';
 export 'src/fetch.dart';
+export 'src/killjob.dart' show killOrphans;
 export 'src/logbook.dart';
 export 'src/manual.dart';
 export 'src/merge.dart';

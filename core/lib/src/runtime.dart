@@ -7,6 +7,7 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 
 import 'config.dart';
+import 'killjob.dart';
 import 'pool.dart';
 import 'probe.dart';
 import 'sbapi.dart';
@@ -74,6 +75,8 @@ class SingBoxProcess {
 
     final proc = await Process.start(binary, ['run', '-c', file.path, '-D', workDir, '--disable-color']);
     _proc = proc;
+    final unbound = bindToUs(proc.pid); // dies with us, however we die
+    if (unbound != null) _log('[jormd] sing-box is not tied to the core ($unbound)');
     for (final s in [proc.stdout, proc.stderr]) {
       s.transform(const Utf8Decoder(allowMalformed: true)).transform(const LineSplitter()).listen(_log);
     }

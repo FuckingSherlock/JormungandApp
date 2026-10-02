@@ -30,13 +30,20 @@ Future<void> main(List<String> args) async {
           for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4))
             for (final a in i.addresses) a.address,
         ];
+  final singBox = opt('sing-box') ?? (File(bundled).existsSync() ? bundled : exe);
+  final orphans = await killOrphans(singBox); // our sing-box left by an older run (killed jormd)
   final daemon = Daemon(
-    singBox: opt('sing-box') ?? (File(bundled).existsSync() ? bundled : exe),
+    singBox: singBox,
     dataDir: p.absolute(opt('data') ?? p.join(home, 'Jormungand')), // sing-box runs with -D, a relative path would miss
     uiFile: opt('ui') ?? p.normalize(p.join(root, '..', 'design', 'main_screen.html')),
     lanHosts: lanIps.toSet(),
   );
   await daemon.init();
+  if (orphans.isNotEmpty) {
+    final msg = 'killed leftover sing-box from an older run (pid ${orphans.join(', ')})';
+    stdout.writeln('jormd: $msg');
+    daemon.main.note(msg);
+  }
 
   final port = int.parse(opt('port') ?? '7788');
   final server = await HttpServer.bind(lan ? InternetAddress.anyIPv4 : InternetAddress.loopbackIPv4, port);
