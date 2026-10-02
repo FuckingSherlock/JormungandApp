@@ -8,6 +8,7 @@ import 'auto.dart';
 import 'config.dart';
 import 'device.dart';
 import 'dns_failover.dart';
+import 'durable.dart';
 import 'eventbook.dart';
 import 'exitip.dart';
 import 'fallback.dart';
@@ -83,7 +84,8 @@ class Daemon {
   late final events = EventBook(File(p.join(dataDir, 'events.jsonl')), log: log);
 
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
-  late final store = SnapshotStore(_snapshot);
+  // A damaged ui-state.json is replaced by its backup (or the state starts empty): the journal says so.
+  late final store = SnapshotStore(_snapshot, onRecovery: (type, level, data, note) => _event('core', type, level, data, note: note));
   // Subscriptions update themselves on their periods, also with the UI closed.
   late final updater = SubscriptionUpdater(
     store: store,
@@ -164,6 +166,7 @@ class Daemon {
   Future<void> init() async {
     await Directory(dataDir).create(recursive: true);
     events.load(); // trims an old journal at start
+    await store.read(); // a damaged snapshot is recovered (and journaled) now, not at the UI's first request
     final m = _readKillMarker();
     if (m != null && m['keepWhileClosed'] == true && sysProxy.isSet) {
       // left on purpose (kill switch while the app is closed): internet stays blocked
@@ -208,7 +211,7 @@ class Daemon {
       final f = _killFile;
       if (_killSwitch && _killWhileClosed) {
         f.parent.createSync(recursive: true);
-        f.writeAsStringSync(jsonEncode({'keepWhileClosed': true, 'since': _now().millisecondsSinceEpoch}));
+        writeFileDurableSync(f, jsonEncode({'keepWhileClosed': true, 'since': _now().millisecondsSinceEpoch}));
       } else if (f.existsSync()) {
         f.deleteSync();
       }
@@ -790,7 +793,7 @@ class Daemon {
     final port = await freePort(exclude: taken);
     try {
       f.parent.createSync(recursive: true);
-      f.writeAsStringSync(jsonEncode({'port': port}));
+      writeFileDurableSync(f, jsonEncode({'port': port}));
     } catch (_) {} // not kept: the next connect picks again
     return port;
   }

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'durable.dart';
+
 /// Windows system proxy (WinINet, per user) pointed at the mixed inbound.
 ///
 /// Set by the core, not by sing-box's `set_system_proxy`: sing-box undoes it only on a
@@ -24,7 +26,7 @@ class SystemProxy {
     if (!isSet) {
       final saved = {for (final n in _names) n: await _query(n)};
       await stateFile.parent.create(recursive: true);
-      await stateFile.writeAsString(jsonEncode(saved));
+      await writeFileDurable(stateFile, jsonEncode(saved));
     }
     await _set('ProxyServer', 'REG_SZ', '127.0.0.1:$port');
     await _set('ProxyOverride', 'REG_SZ', _bypass);
@@ -35,7 +37,16 @@ class SystemProxy {
 
   Future<void> restore() async {
     if (!isSet || !Platform.isWindows) return;
-    final saved = (jsonDecode(await stateFile.readAsString()) as Map).cast<String, dynamic>();
+    Map<String, dynamic> saved;
+    try {
+      saved = (jsonDecode(await stateFile.readAsString()) as Map).cast<String, dynamic>();
+    } catch (_) {
+      // The saved values are unreadable (a power cut before they reached the disk): the
+      // previous ones are lost. The registry is left as it is — whose proxy is set there now
+      // cannot be told (another client may own it), and switching it off would break that.
+      await stateFile.delete();
+      return;
+    }
     for (final n in _names) {
       final v = saved[n] as Map?;
       if (v == null) {

@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
+import 'durable.dart';
 import 'logbook.dart';
 
 /// The events journal: what happened, as structured records (the Logs → Events tab and
@@ -148,7 +149,7 @@ class EventBook {
     if (f == null) return;
     try {
       f.parent.createSync(recursive: true);
-      f.writeAsStringSync('${jsonEncode(e)}\n', mode: FileMode.append);
+      f.writeAsStringSync('${jsonEncode(e)}\n', mode: FileMode.append, flush: true);
     } on FileSystemException {
       // memory keeps it
     }
@@ -159,9 +160,7 @@ class EventBook {
     if (f == null) return;
     try {
       f.parent.createSync(recursive: true);
-      final tmp = File('${f.path}.tmp');
-      tmp.writeAsStringSync('${jsonEncode({'seq': _next})}\n${[for (final e in _events) '${jsonEncode(e)}\n'].join()}');
-      tmp.renameSync(f.path);
+      writeFileDurableSync(f, '${jsonEncode({'seq': _next})}\n${[for (final e in _events) '${jsonEncode(e)}\n'].join()}');
     } on FileSystemException {
       // the old file stays; the next rewrite tries again
     }

@@ -28,7 +28,7 @@ const EV_CATS = [
   ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
   ['rules', 'Rules', [['fallback', 'Rule target unavailable'], ['targetBack', 'Rule target back'], ['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
   ['dns', 'DNS', [['switched', 'DNS server switched']]],
-  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting']]],
+  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting'], ['stateRestored', 'Saved data restored'], ['stateLost', 'Saved data lost']]],
 ];
 const svgI = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const EV_ICON = {
@@ -184,6 +184,9 @@ const EV_TEXT = {
   'core/restartFailed': d => ['sing-box could not start again', [d.attempt && 'Attempt ' + d.attempt, d.error].filter(Boolean).join(' · ')],
   'core/sysProxy': d => d.by === 'user' ? ['You ' + (d.on ? 'set' : 'removed') + ' the system proxy', 'From the VPN is down / Kill switch notice'] : [d.error ?'System proxy could not be ' + (d.on ? 'set' : 'restored') : 'System proxy ' + (d.on ? 'on' : 'off'), d.error || ''],
   'core/deprecated': d => ['sing-box: a deprecated setting', d.text || ''],
+  // the core found its saved app data damaged (a power cut) at start; from: bak | bak2
+  'core/stateRestored': d => ['Saved data was damaged: restored from a backup', d.savedAt ? `Backup from ${evStamp(d.savedAt)}; later changes are lost` : 'Later changes are lost'],
+  'core/stateLost': () => ['Saved data was damaged and could not be restored', 'Starting empty; the damaged file is kept next to it'],
 };
 const EV_USER = {
   connect: d => ['You connected', evEntry(d.entry)],
@@ -205,7 +208,7 @@ function evText(e) { const d = evDescribe(e); return d.title + (d.detail ? ' —
 const EV_FIELD = { entry: 'Entry', server: 'Server', mode: 'Mode', route: 'Route', from: 'From', to: 'To', reason: 'Reason', by: 'By', host: 'Site', dest: 'Address', via: 'Opens via',
   source: 'Subscription', name: 'Name', added: 'New servers', removed: 'Removed', total: 'Servers', count: 'Servers', error: 'Error', tag: 'Rule set', url: 'URL', code: 'Exit code',
   rule: 'Rule', app: 'App', process: 'App', target: 'Target', more: 'More rules and apps', tried: 'Also tried', retries: 'Retries through other routes',
-  attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
+  savedAt: 'Backup saved', kept: 'Damaged file kept as', attempt: 'Attempt', downMs: 'Down for', holdMs: 'Waits', strikes: 'Drops', fails: 'Failed checks', id: 'Entry', on: 'State', action: 'Action', value: 'Value', text: 'Text' };
 function evValue(k, v, e) {
   if (e && e.cat === 'dns') {
     if (k === 'from' || k === 'to') return evDns(v);
@@ -214,6 +217,11 @@ function evValue(k, v, e) {
   if (e && e.cat === 'rules') {
     if (k === 'target') return targetName(v);
     if (k === 'to') return { block: 'Block', direct: 'Direct', main: 'Main flow' }[v] || String(v);
+  }
+  if (e && e.cat === 'core' && (e.type === 'stateRestored' || e.type === 'stateLost')) {
+    if (k === 'from') return { bak: 'Last backup', bak2: 'Older backup' }[v] || String(v);
+    if (k === 'reason') return { nul: 'The file was empty (a power cut)', empty: 'The file was empty', invalid: 'The file was not readable', notObject: 'The file was not readable', unreadable: 'The file could not be opened', missing: 'The file was missing' }[v] || String(v);
+    if (k === 'savedAt') return evStamp(v);
   }
   if (k === 'tried' && Array.isArray(v)) return v.length ? v.map(x => evEntry(x.entry) + (x.server ? ' (' + evServer(x.server) + ')' : '')).join(', ') : evNoRoute((e && e.data) || {});
   if (k === 'rule' && v && typeof v === 'object') { const w = evWhy({ rule: v }); return w.key === 'Rule' ? w.name : `${w.key} · ${w.name}`; }

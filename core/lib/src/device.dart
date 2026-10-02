@@ -4,6 +4,8 @@ import 'dart:math';
 
 import 'package:path/path.dart' as p;
 
+import 'durable.dart';
+
 /// What a subscription with "Send X-HWID" on tells the provider about this device, as
 /// Remnawave reads it: `x-hwid`, `x-device-os`, `x-ver-os`, `x-device-model` (panels limit
 /// devices per user by the id). The id is random, made once and kept in
@@ -19,7 +21,7 @@ Future<Map<String, String>> deviceHeaders(String dataDir) async {
     final r = Random.secure();
     id = [for (var i = 0; i < 16; i++) r.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
     await f.parent.create(recursive: true);
-    await f.writeAsString(jsonEncode({'id': id}));
+    await writeFileDurable(f, jsonEncode({'id': id}));
   }
   return {
     'x-hwid': id,
