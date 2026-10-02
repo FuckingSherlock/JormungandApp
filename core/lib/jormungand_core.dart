@@ -7,6 +7,7 @@ export 'src/config.dart';
 export 'src/daemon.dart';
 export 'src/device.dart';
 export 'src/dns_failover.dart';
+export 'src/elevation.dart';
 export 'src/eventbook.dart';
 export 'src/exitip.dart';
 export 'src/fallback.dart';

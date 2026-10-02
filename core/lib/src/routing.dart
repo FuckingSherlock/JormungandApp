@@ -19,7 +19,8 @@
 ///   ruleSets: [{ name, url, format: 'srs'|'json', via, every /*s*/ }],   // the user's lists
 ///   geo: { geosite: {via, every}, geoip: {via, every} },  // the built-in lists
 ///   dns: { servers: [{ id, addr, via: 'direct'|'vpn', on }],            // in priority order
-///          resolve: 'auto'|'off'|<dns id> }   // `resolve` before IP rules; default 'auto'
+///          resolve: 'auto'|'off'|<dns id>,    // `resolve` before IP rules (proxy port only); default 'auto'
+///          hijack?: bool }                    // TUN: the core answers every DNS query; default on (config.dart)
 /// }
 /// ```
 /// A target missing from `targets` is unavailable now (off in Nodes, no usable server,
@@ -583,7 +584,8 @@ class _Builder {
       // IP conditions need the destination's IP: resolve it once, before the first such rule
       // that has not asked to see IPs only when known (`ipTunOnly`). Later rules see the
       // resolved address whatever their flag says (sing-box resolves once).
-      if (!resolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
+      // In TUN the destination IP arrives as it is: no step ("Resolve for IP rules" is for the proxy port).
+      if (plan['mode'] != 'tun' && !resolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
         resolved = true;
         final step = _resolveAction();
         if (step != null) out._add(step);

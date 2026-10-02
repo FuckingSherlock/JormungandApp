@@ -9,6 +9,7 @@ import 'config.dart';
 import 'device.dart';
 import 'dns_failover.dart';
 import 'durable.dart';
+import 'elevation.dart';
 import 'eventbook.dart';
 import 'exitip.dart';
 import 'fallback.dart';
@@ -39,9 +40,10 @@ import 'updater.dart';
 /// which this server never grants, so other web pages cannot drive it) and a loopback
 /// Host (against DNS rebinding); with `--lan` the machine's own LAN addresses count too.
 class Daemon {
-  /// [exitCheck], [sysProxy], [process], [timer] and [now] are for tests (no probes past
-  /// loopback; a fake system proxy, so a test never touches the real registry; a fake
-  /// sing-box process; the restart waits and the clock under the test's control).
+  /// [exitCheck], [sysProxy], [process], [timer], [now] and [isElevated] are for tests (no
+  /// probes past loopback; a fake system proxy, so a test never touches the real registry; a
+  /// fake sing-box process; the restart waits and the clock under the test's control; whether
+  /// the process counts as elevated, which TUN needs).
   Daemon({
     required this.singBox,
     required this.dataDir,
@@ -52,8 +54,10 @@ class Daemon {
     SingBoxProcess? process,
     Timer Function(Duration, void Function())? timer,
     DateTime Function()? now,
+    bool Function()? isElevated,
   })
       : main = process ?? SingBoxProcess(singBox, p.join(dataDir, 'run', 'main')),
+        _isElevated = isElevated ?? processIsElevated,
         _timer = timer ?? Timer.new,
         _now = now ?? DateTime.now,
         sysProxy = sysProxy ?? SystemProxy(File(p.join(dataDir, 'sysproxy.saved.json'))),
@@ -71,6 +75,9 @@ class Daemon {
   final String singBox;
   final String dataDir;
   final String uiFile;
+  final bool Function() _isElevated;
+  // the programs that go direct in TUN: this process and the sing-box binary (config.dart)
+  late final List<String> _selfPaths = selfProcessPaths(singBox);
   final Set<String> lanHosts;
   final SingBoxProcess main;
   final SystemProxy sysProxy;
@@ -675,6 +682,8 @@ class Daemon {
   /// left on by the kill switch; `auto` = what Auto really uses and measured (auto.dart → toJson).
   Future<Map<String, dynamic>> _status() async => {
         'connected': main.running || _recovering != null,
+        // what the connection runs as: 'tun' | 'proxy'; null = not connected
+        'mode': main.running || _recovering != null ? (_plan != null && planTun(_plan!) ? 'tun' : 'proxy') : null,
         'systemProxy': sysProxy.isSet,
         'sysPort': main.running || _recovering != null ? _sysPort : null,
         'error': _error,
@@ -752,6 +761,8 @@ class Daemon {
   /// the config's warnings. [sys]: the system proxy is asked for; with a password on the
   /// user port it needs its own open inbound (`sys-in`, [_sysInPort]).
   Future<(RuleSetFetch, List<String>)> _startSingBox(Map<String, dynamic> plan, {required bool sys}) async {
+    // TUN needs administrator rights: said before anything starts (a connect and a restart alike)
+    if (planTun(plan) && !_isElevated()) throw TunNeedsAdmin();
     final lists = await ruleSets.ensureFor(plan, proxyPort: main.running ? _tunnelPort : null);
     final warnings = <String>[];
     final mixed = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
@@ -760,8 +771,20 @@ class Daemon {
     final sysPort = sys && plan['mixedAuth'] != null ? await _sysInPort({mixed, tunnelPort, probePort}) : null;
     final probe = Probe(probePort);
     final info = RoutingInfo();
-    await main.start(buildConfig(plan,
-        tunnelPort: tunnelPort, sysPort: sysPort, probe: probe, ruleSetFiles: lists.files, warnings: warnings, info: info));
+    try {
+      await main.start(buildConfig(plan,
+          tunnelPort: tunnelPort,
+          sysPort: sysPort,
+          probe: probe,
+          ruleSetFiles: lists.files,
+          warnings: warnings,
+          info: info,
+          selfPaths: _selfPaths));
+    } on SingBoxError catch (e) {
+      // sing-box refused the TUN for a missing permission: the same advice as not being elevated
+      if (planTun(plan) && tunAccessDenied(e.message)) throw TunNeedsAdmin(e.message);
+      rethrow;
+    }
     _sysPort = sysPort;
     // what a later sing-box will no longer take in this config
     try {
@@ -843,14 +866,20 @@ class Daemon {
           await _sysOff(own: own);
         }
         _warning = joinWarnings(warnings);
-        log.note('info', 'Connected: ${plan['kind']}, proxy on 127.0.0.1:$_mixedPort${_sysWanted ? ', system proxy on' : ''}');
+        log.note('info', 'Connected: ${plan['kind']}, ${planTun(plan) ? 'TUN (${planTunStack(plan)}), ' : ''}proxy on 127.0.0.1:$_mixedPort${_sysWanted ? ', system proxy on' : ''}');
         if (_warning != null) log.note('warn', _warning!);
         _refreshLists(seq, plan, lists);
         events.add('conn', 'connected', 'info', own: own, data: _connectedData(plan));
       } catch (e) {
         _error = '$e';
         log.note('error', 'Connect failed: $e');
-        events.add('conn', 'connectFailed', 'error', own: own, data: {'reason': '$e'});
+        if (e is TunNeedsAdmin) {
+          await main.stop(); // refused before the old sing-box (a connect that switches modes) was stopped: a failed connect = not connected
+          // stage: `check` = the core is not elevated (nothing started), `start` = sing-box refused
+          events.add('core', 'tunNeedsAdmin', 'error', own: own, data: {'stage': e.detail == null ? 'check' : 'start', 'error': ?e.detail});
+        } else {
+          events.add('conn', 'connectFailed', 'error', own: own, data: {'reason': '$e'});
+        }
         if (wasBlocking != null && _killSwitch && sysProxy.isSet) {
           _blocking = wasBlocking; // still blocked: only a connect that works, or Remove, ends it
         } else {
@@ -863,7 +892,7 @@ class Daemon {
   }
 
   // conn/connected: the entry Auto starts on and its server when known (a Fastest group
-  // has none until urltest picked), the mode (TUN is not built yet) and the routing.
+  // has none until urltest picked), the mode (tun / proxy) and the routing.
   Map<String, dynamic> _connectedData(Map<String, dynamic> plan) {
     final routes = planRoutes(plan);
     final i = planCurrent(plan, routes.length);
@@ -871,7 +900,7 @@ class Daemon {
     return {
       'entry': '${routes[i]['id'] ?? routeTag(i)}',
       'server': ?server,
-      'mode': plan['mode'] == 'tun' ? 'tun' : 'proxy',
+      'mode': planTun(plan) ? 'tun' : 'proxy',
       'route': plan['global'] == true ? 'global' : 'rules',
     };
   }

@@ -325,6 +325,25 @@ function setProxyCred(which, input) {
 const proxyUrl = scheme => scheme + '://' + (connCfg.proxyAuth ? encodeURIComponent(connCfg.proxyUser) + ':' + encodeURIComponent(connCfg.proxyPass) + '@' : '') + '127.0.0.1:' + connCfg.port;
 const copyProxyUrl = scheme => copyText(proxyUrl(scheme), scheme === 'socks5' ? 'SOCKS5 address' : 'HTTP address');
 
+/* TUN stack (sing-box tun.stack): mixed is the default. Only TUN uses it; connected in TUN mode a change
+   reconnects (it is in the plan signature, 95-live.js), in proxy mode it just saves. */
+const TUN_STACKS = [
+  { id: 'mixed', name: 'Mixed', hint: 'TCP through the system stack, UDP through gVisor — works almost everywhere' },
+  { id: 'system', name: 'System', hint: 'Fastest; may clash with some firewalls or antivirus' },
+  { id: 'gvisor', name: 'gVisor', hint: 'Most compatible, uses more CPU' },
+];
+const tunStackOpt = () => TUN_STACKS.find(o => o.id === connCfg.tunStack) || TUN_STACKS[0];
+function openTunStackPicker() {
+  const cur = tunStackOpt().id;
+  openActions('TUN stack', TUN_STACKS.map(o => menuRow(o.id === cur ? ICON.check : '<span class="menu-ico-gap"></span>',
+    `<span data-notr>${o.name}</span><div class="menu-sub">${o.hint}</div>`, `closeSheet('actions');setTunStack('${o.id}')`)).join(''));
+}
+function setTunStack(id) {
+  if (tunStackOpt().id === id) return;
+  connCfg.tunStack = id;
+  renderConnSettings();
+}
+
 function renderConnSettings() {
   const closedOk = killClosedOk();
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
@@ -358,7 +377,8 @@ function renderConnSettings() {
         ${toggle(connCfg.downProxy !== 'keep', "connCfg.downProxy=connCfg.downProxy==='keep'?'remove':'keep';renderConnSettings()")}</div>`}
     </div>
     <div class="set-group">
-      <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
+      <div class="set-row" data-key="tunStack"><div class="set-label" style="flex:1">TUN stack<div class="set-hint">${tunStackOpt().hint}</div></div>
+        <button class="set-value" id="conn-tunstack" onclick="openTunStackPicker()"><span data-notr>${tunStackOpt().name}</span>${CHEVRON_R}</button></div>
       <div class="set-row"><div class="set-label" style="flex:1">Latency test URL<div class="set-hint">The address ping and Fastest time; pick one that answers fast from here</div></div>
         <button class="set-value" id="conn-testurl" onclick="openTestUrlPicker()">${testUrlLabel()}${CHEVRON_R}</button></div>
       <div class="set-row"><div class="set-label" style="flex:1">Backup checks<div class="set-hint">When the test URL does not answer through a server, these are tried; the server works if any answers</div></div>

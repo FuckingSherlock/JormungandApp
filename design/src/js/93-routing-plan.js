@@ -71,6 +71,7 @@ function routingPlan() {
     ruleSets: ruleSets.filter(s => !s.builtin).map(s => ({ name: s.name, url: s.url, format: s.format, via: s.via, every: s.every })),
     geo: { geosite: geo('geosite'), geoip: geo('geoip') },
     dns: { servers: dnsOrder.map(id => dnsServers[id]).map(s => ({ id: s.id, addr: s.addr, via: s.via, on: s.on })),
-      resolve: dnsCfg.resolve },   // 'auto' | 'off' | a server id: the `resolve` step before IP rules
+      resolve: dnsCfg.resolve,   // 'auto' | 'off' | a server id: the `resolve` step before IP rules
+      hijack: dnsCfg.hijack !== false },   // TUN only: the core answers every DNS query
   };
 }

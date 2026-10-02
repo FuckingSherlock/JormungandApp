@@ -39,9 +39,17 @@
 ///
 /// [info] receives what the services beside sing-box need to know about the routing: the
 /// "If unavailable" selectors (fallback.dart) and the DNS servers in use (dns_failover.dart).
+///
+/// TUN: with `plan.mode == 'tun'` a `tun-in` inbound is added (docs/core.md → «TUN»); the user's
+/// rules, apps and quick rules apply to its traffic as to the proxy port's (Global: everything
+/// goes to the main flow). [selfPaths] = the executables of the core itself and of the sing-box
+/// instances it starts (ping, speed test): their connections go direct, ahead of the user's
+/// rules — through the tunnel they would loop. Behind `tunnel-in`'s rule, so what the core
+/// sends through that inbound still goes into the tunnel.
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 
@@ -51,6 +59,43 @@ import 'routing.dart';
 import 'rulenames.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
+
+/// The TUN's own addresses; the second of each is the "gateway" the system's DNS points at.
+const tunAddress = ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'];
+const tunDnsAddress = ['172.19.0.2/32', 'fdfe:dcba:9876::2/128'];
+
+/// Local networks stay out of the tunnel (the same ground as the `Private networks` rule):
+/// private, link-local, multicast and broadcast, IPv4 and IPv6.
+const tunBypass = [
+  '10.0.0.0/8',
+  '172.16.0.0/12',
+  '192.168.0.0/16',
+  '169.254.0.0/16',
+  '224.0.0.0/4',
+  '255.255.255.255/32',
+  'fc00::/7',
+  'fe80::/10',
+  'ff00::/8',
+];
+
+/// The executables whose connections must never enter the tunnel: this process (the dart VM
+/// for jormd, the app later) and the sing-box binary (ping / speed-test instances are separate
+/// processes). Resolved to real paths; a sing-box that is not a file (looked up on PATH) is left out.
+List<String> selfProcessPaths(String singBox) {
+  final out = <String>{Platform.resolvedExecutable};
+  try {
+    final f = File(singBox);
+    if (f.existsSync()) out.add(f.resolveSymbolicLinksSync());
+  } catch (_) {}
+  return out.toList();
+}
+
+/// "These programs go direct": Windows compares paths without case, so a regex there.
+Map<String, dynamic> selfProcessRule(List<String> paths) => {
+      if (Platform.isWindows) 'process_path_regex': [for (final p in paths) globToRegex(p)] else 'process_path': paths,
+      'action': 'route',
+      'outbound': 'direct',
+    };
 
 /// Backup checks (Settings → Connection): services of different owners tried when the
 /// test URL does not answer through a node; the node passes traffic when any answers.
@@ -87,8 +132,10 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     Probe? probe,
     Map<String, String> ruleSetFiles = const {},
     List<String>? warnings,
-    RoutingInfo? info}) {
+    RoutingInfo? info,
+    List<String> selfPaths = const []}) {
   final outs = <Map<String, dynamic>>[];
+  final tun = planTun(plan);
   final test = (plan['urlTest'] as Map?) ?? const {};
   final auth = mixedAuthUser(plan);
 
@@ -158,13 +205,28 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   // dead network from dead routes by the direct path answering
   final pr = probe?.inbound([..._servers(outs), 'direct'], dnsServers: [for (final s in routing.dnsEnabled) s.tag]);
   final Map<String, dynamic>? tunnelRule = tunnelPort == null ? null : {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag};
+  // TUN: DNS the core answers itself. Aimed at the tunnel's own resolver (what the system's DNS
+  // points at on the TUN interface) it always does — nothing else could answer it; with Hijack
+  // DNS on, any DNS query does, even one for a hard-coded server (by port and by sniffed protocol).
+  final hijack = <Map<String, dynamic>>[
+    if (tun && planHijackDns(plan)) ...[
+      {'inbound': [tunTag], 'port': [53], 'action': 'hijack-dns'},
+      {'inbound': [tunTag], 'protocol': ['dns'], 'action': 'hijack-dns'},
+    ] else if (tun)
+      {'inbound': [tunTag], 'ip_cidr': tunDnsAddress, 'port': [53], 'action': 'hijack-dns'},
+  ];
+  final selfRule = selfPaths.isEmpty ? null : selfProcessRule(selfPaths);
   if (info != null) {
     // the route rules in the config's order, named for Live connections (rulenames.dart)
     for (final r in pr?.rules ?? const <Map<String, dynamic>>[]) {
       final dns = r.containsKey('server') || r.containsKey('override_address');
       info.ruleNames.add(r, dns ? const RuleOrigin('system', 'DNS check', id: 'dns-check') : const RuleOrigin('system', 'Latency check', id: 'probe'));
     }
+    for (final r in hijack) {
+      info.ruleNames.add(r, const RuleOrigin('system', 'DNS hijack', id: 'dns-hijack'));
+    }
     if (tunnelRule != null) info.ruleNames.add(tunnelRule, const RuleOrigin('system', 'Core checks', id: 'tunnel'));
+    if (selfRule != null) info.ruleNames.add(selfRule, const RuleOrigin('system', 'Core and speed tests', id: 'core'));
     for (var i = 0; i < routing.rules.length; i++) {
       final o = routing.origins[i];
       if (o != null) info.ruleNames.add(routing.rules[i], o);
@@ -188,6 +250,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       },
       if (sysPort != null) {'type': 'mixed', 'tag': 'sys-in', 'listen': '127.0.0.1', 'listen_port': sysPort},
       if (tunnelPort != null) {'type': 'mixed', 'tag': 'tunnel-in', 'listen': '127.0.0.1', 'listen_port': tunnelPort},
+      if (tun) _tunInbound(plan),
       ?pr?.inbound,
     ],
     'outbounds': outs,
@@ -195,7 +258,9 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       'rules': [
         ...?pr?.rules,
         {'action': 'sniff'},
+        ...hijack,
         ?tunnelRule,
+        ?selfRule,
         ...routing.rules,
       ],
       if (routing.ruleSets.isNotEmpty) 'rule_set': routing.ruleSets,
@@ -213,6 +278,23 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     },
   };
 }
+
+const tunTag = 'tun-in';
+
+/// The TUN inbound: dual stack, strict routes (no leaks past the tunnel on the other
+/// interfaces), local networks excluded ([tunBypass]), the stack from the plan. sing-box's
+/// own outbounds bind to the real interface (`route.auto_detect_interface`), so they
+/// do not loop back into it.
+Map<String, dynamic> _tunInbound(Map<String, dynamic> plan) => {
+      'type': 'tun',
+      'tag': tunTag,
+      'address': tunAddress,
+      'mtu': 9000,
+      'auto_route': true,
+      'strict_route': true,
+      'stack': planTunStack(plan),
+      'route_exclude_address': tunBypass,
+    };
 
 /// A config that only exists to measure latency (through its probe inbound, probe.dart):
 /// every node as `t/<key>`, every entry → exit pair as `p/<key>` (the exit dialing

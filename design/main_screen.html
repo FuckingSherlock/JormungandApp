@@ -3240,6 +3240,9 @@ Object.assign(I18N, { ru: {
   "Trackers": "Трекеры",
   "Traffic goes direct — still trying": "Трафик идёт Direct — попытки продолжаются",
   "TUN stack": "Стек TUN",
+  "TCP through the system stack, UDP through gVisor — works almost everywhere": "TCP через системный стек, UDP через gVisor — работает почти везде",
+  "Fastest; may clash with some firewalls or antivirus": "Самый быстрый; может конфликтовать с некоторыми файрволами и антивирусами",
+  "Most compatible, uses more CPU": "Максимальная совместимость, но сильнее нагружает процессор",
   "Turn it off": "Выключить",
   "turn on Use in Auto in Route": "включите «В Auto» в «Маршруте»",
   "Turn the kill switch off?": "Выключить kill switch?",
@@ -3564,6 +3567,8 @@ Object.assign(I18N, { ru: {
   "sing-box stopped": "sing-box остановлен",
   "sing-box started again": "sing-box запущен снова",
   "sing-box could not start again": "sing-box не удалось запустить снова",
+  "TUN needs administrator rights": "TUN требует прав администратора",
+  "Run the app as administrator, or switch to Proxy mode": "Запустите приложение от имени администратора или переключитесь в режим Proxy",
   "Attempt {#0}": "Попытка {0}",
   "was down {0}": "не работал {0}",
   "Saved data was damaged: restored from a backup": "Сохранённые данные повреждены: восстановлены из резервной копии",
@@ -7710,7 +7715,7 @@ const EV_CATS = [
   ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
   ['rules', 'Rules', [['fallback', 'Rule target unavailable'], ['targetBack', 'Rule target back'], ['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
   ['dns', 'DNS', [['switched', 'DNS server switched']]],
-  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting'], ['stateRestored', 'Saved data restored'], ['stateLost', 'Saved data lost']]],
+  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['tunNeedsAdmin', 'TUN needs administrator rights'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting'], ['stateRestored', 'Saved data restored'], ['stateLost', 'Saved data lost']]],
 ];
 const svgI = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const EV_ICON = {
@@ -7863,6 +7868,7 @@ const EV_TEXT = {
   'core/crashed': d => ['sing-box stopped', (d.code != null ? 'Exit code ' + d.code + ' — ' : '') + 'starting it again'],
   'core/restarted': d => ['sing-box started again', [d.attempt && 'Attempt ' + d.attempt, d.downMs != null && 'was down ' + evDuration(d.downMs)].filter(Boolean).join(' · ')],
   'core/down': d => ['VPN is down', d.proxy === 'kept' ? 'Internet is blocked (the system proxy is kept) — still trying' : 'Traffic goes direct — still trying'],
+  'core/tunNeedsAdmin': d => ['TUN needs administrator rights', 'Run the app as administrator, or switch to Proxy mode'],
   'core/restartFailed': d => ['sing-box could not start again', [d.attempt && 'Attempt ' + d.attempt, d.error].filter(Boolean).join(' · ')],
   'core/sysProxy': d => d.by === 'user' ? ['You ' + (d.on ? 'set' : 'removed') + ' the system proxy', 'From the VPN is down / Kill switch notice'] : [d.error ?'System proxy could not be ' + (d.on ? 'set' : 'restored') : 'System proxy ' + (d.on ? 'on' : 'off'), d.error || ''],
   'core/deprecated': d => ['sing-box: a deprecated setting', d.text || ''],
@@ -8472,7 +8478,8 @@ const DEFAULT_CHECKERS = ['https://cp.cloudflare.com/generate_204', 'https://www
   'http://www.msftconnecttest.com/connecttest.txt', 'http://captive.apple.com/hotspot-detect.html'];
 // Kill switch (rules.md §7): killOnDisconnect / killWhileClosed only count with killSwitch on (the latter also
 // needs genCfg.launchAtStartup + connectOnLaunch); downProxy only with it off: the proxy when the VPN cannot recover.
-const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, proxyAuth: false, proxyUser: '', proxyPass: '', testUrl: '', checkers: DEFAULT_CHECKERS.slice() };
+const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, proxyAuth: false, proxyUser: '', proxyPass: '', testUrl: '', checkers: DEFAULT_CHECKERS.slice(), tunStack: 'mixed' };
+// tunStack: sing-box's TUN network stack ('mixed' | 'system' | 'gvisor'); the plan carries it (95-live.js), only TUN reads it.
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());
@@ -9020,6 +9027,25 @@ function setProxyCred(which, input) {
 const proxyUrl = scheme => scheme + '://' + (connCfg.proxyAuth ? encodeURIComponent(connCfg.proxyUser) + ':' + encodeURIComponent(connCfg.proxyPass) + '@' : '') + '127.0.0.1:' + connCfg.port;
 const copyProxyUrl = scheme => copyText(proxyUrl(scheme), scheme === 'socks5' ? 'SOCKS5 address' : 'HTTP address');
 
+/* TUN stack (sing-box tun.stack): mixed is the default. Only TUN uses it; connected in TUN mode a change
+   reconnects (it is in the plan signature, 95-live.js), in proxy mode it just saves. */
+const TUN_STACKS = [
+  { id: 'mixed', name: 'Mixed', hint: 'TCP through the system stack, UDP through gVisor — works almost everywhere' },
+  { id: 'system', name: 'System', hint: 'Fastest; may clash with some firewalls or antivirus' },
+  { id: 'gvisor', name: 'gVisor', hint: 'Most compatible, uses more CPU' },
+];
+const tunStackOpt = () => TUN_STACKS.find(o => o.id === connCfg.tunStack) || TUN_STACKS[0];
+function openTunStackPicker() {
+  const cur = tunStackOpt().id;
+  openActions('TUN stack', TUN_STACKS.map(o => menuRow(o.id === cur ? ICON.check : '<span class="menu-ico-gap"></span>',
+    `<span data-notr>${o.name}</span><div class="menu-sub">${o.hint}</div>`, `closeSheet('actions');setTunStack('${o.id}')`)).join(''));
+}
+function setTunStack(id) {
+  if (tunStackOpt().id === id) return;
+  connCfg.tunStack = id;
+  renderConnSettings();
+}
+
 function renderConnSettings() {
   const closedOk = killClosedOk();
   const toggle = (on, click) => `<div class="mini-toggle ${on ? 'on' : ''}" onclick="${click}"><div class="mini-toggle-thumb"></div></div>`;
@@ -9053,7 +9079,8 @@ function renderConnSettings() {
         ${toggle(connCfg.downProxy !== 'keep', "connCfg.downProxy=connCfg.downProxy==='keep'?'remove':'keep';renderConnSettings()")}</div>`}
     </div>
     <div class="set-group">
-      <div class="set-row soon"><div class="set-label">TUN stack</div><span class="settings-value">gvisor</span><span class="soon-tag">soon</span></div>
+      <div class="set-row" data-key="tunStack"><div class="set-label" style="flex:1">TUN stack<div class="set-hint">${tunStackOpt().hint}</div></div>
+        <button class="set-value" id="conn-tunstack" onclick="openTunStackPicker()"><span data-notr>${tunStackOpt().name}</span>${CHEVRON_R}</button></div>
       <div class="set-row"><div class="set-label" style="flex:1">Latency test URL<div class="set-hint">The address ping and Fastest time; pick one that answers fast from here</div></div>
         <button class="set-value" id="conn-testurl" onclick="openTestUrlPicker()">${testUrlLabel()}${CHEVRON_R}</button></div>
       <div class="set-row"><div class="set-label" style="flex:1">Backup checks<div class="set-hint">When the test URL does not answer through a server, these are tried; the server works if any answers</div></div>
@@ -11312,7 +11339,8 @@ function routingPlan() {
     ruleSets: ruleSets.filter(s => !s.builtin).map(s => ({ name: s.name, url: s.url, format: s.format, via: s.via, every: s.every })),
     geo: { geosite: geo('geosite'), geoip: geo('geoip') },
     dns: { servers: dnsOrder.map(id => dnsServers[id]).map(s => ({ id: s.id, addr: s.addr, via: s.via, on: s.on })),
-      resolve: dnsCfg.resolve },   // 'auto' | 'off' | a server id: the `resolve` step before IP rules
+      resolve: dnsCfg.resolve,   // 'auto' | 'off' | a server id: the `resolve` step before IP rules
+      hijack: dnsCfg.hijack !== false },   // TUN only: the core answers every DNS query
   };
 }
 /* ══════════════════════ AUTO IN THE CORE (live) ══════════════════════
@@ -11595,7 +11623,7 @@ function livePlan(anchor) {
     const id = anchor || effectiveConnectId(true);
     if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
     // mixedAuth: the port asks for a login; with the system proxy on the core opens a second, open port for it (docs/core.md)
-    const base = { mixedPort: connCfg.port || 2080, mixedAuth: connCfg.proxyAuth ? { user: connCfg.proxyUser, pass: connCfg.proxyPass } : undefined, global: segState.route === 'global',
+    const base = { mode: segState.mode === 'tun' ? 'tun' : 'proxy', mixedPort: connCfg.port || 2080, tunStack: connCfg.tunStack || 'mixed', mixedAuth: connCfg.proxyAuth ? { user: connCfg.proxyUser, pass: connCfg.proxyPass } : undefined, global: segState.route === 'global',
       urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined }, auto: planAuto(), routing: routingPlan() };
     return Object.assign(base, planRoutes(id));
   });
@@ -11616,7 +11644,9 @@ function planSigOf(plan) {
   const routing = plan.routing && Object.assign({}, plan.routing,
     { targets: Object.fromEntries(Object.entries(plan.routing.targets || {}).map(([k, x]) => [k, r(x, gt)])) });
   // plan.auto is not in it: the running core takes Settings → Auto mode as it is (liveSyncAuto)
+  // tunStack only counts in TUN mode: in proxy mode changing it just saves
   return JSON.stringify(Object.assign({}, plan, { current: null, auto: null, routing, systemProxy: segState.sys === 'on',
+    tunStack: segState.mode === 'tun' ? plan.tunStack : null,
     routes: (plan.routes || []).map(x => r(x, g)) }));
 }
 const planSig = () => { try { return planSigOf(livePlan(liveSigAnchor())); } catch (e) { return null; } };
@@ -11787,7 +11817,6 @@ const liveBackend = {
   connect(anchor) {
     return Promise.resolve().then(() => {
       const plan = livePlan(anchor);
-      if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
       // Kill switch options as the core reads them (killswitch: rules.md §7); the sub-options only count with their conditions
       const ks = killPlan();
       killSig = JSON.stringify(ks);

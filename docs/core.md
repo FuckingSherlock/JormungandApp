@@ -40,7 +40,7 @@ sing-box привязан к процессу ядра (`killjob.dart`, Windows)
 
 Прокси: mixed (HTTP + SOCKS5) на `127.0.0.1:<mixedPort>` (Settings → Connection → Proxy port, по умолчанию 2080). С sing-box ядро говорит только
 через его API service (gRPC, свободный порт loopback, см. ниже); Clash API не включается.
-Пароль на порт — необязательный (`plan.mixedAuth`, см. «Входы sing-box»); по умолчанию порт открыт. TUN в MVP нет: переключатель TUN подключает как прокси с предупреждением.
+Пароль на порт — необязательный (`plan.mixedAuth`, см. «Входы sing-box»); по умолчанию порт открыт. Режим TUN (`plan.mode: 'tun'`) — см. «TUN»; порт остаётся открытым и в нём.
 
 ## Кто за что отвечает
 
@@ -82,7 +82,10 @@ Auto, которая может работать; в Manual — закреплё
 { routes: [Route],         // по приоритету Route
   current: 1,              // индекс якоря: с него стартует selector
   mixedPort: 2080, global: bool,
+  mode?: 'tun' | 'proxy',       // 'tun' — вход tun-in (см. «TUN»); нет / иное = только локальный порт
+  tunStack?: 'mixed' | 'system' | 'gvisor',   // стек TUN (по умолчанию и при неизвестном — mixed)
   mixedAuth?: { user, pass },   // пароль на пользовательский порт; нет = порт открыт
+  tunStack?: 'mixed' | 'system' | 'gvisor',   // стек TUN (connCfg.tunStack, по умолчанию mixed); читается только в TUN
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
              url: connCfg.testUrl /* нет — gstatic; им же проверяет AutoService */ },
   auto: { failAfter, threshold, checkEvery, standby, warmEvery,
@@ -280,7 +283,7 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 
 ## Kill switch
 
-Только системный прокси (TUN в MVP нет). Настройки приходят **верхнеуровневыми полями** тела
+Только системный прокси (в TUN — лишь `strict_route`, отдельного kill switch для него нет). Настройки приходят **верхнеуровневыми полями** тела
 `POST /api/connect` (не в `plan`); отсутствующее поле остаётся как было (демон при старте —
 всё выключено). Менять на ходу, без переподключения — `POST /api/killswitch` (те же поля).
 
@@ -324,7 +327,7 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 
 ## Входы sing-box
 
-Все — mixed (HTTP + SOCKS5), только `127.0.0.1`:
+Все — mixed (HTTP + SOCKS5), только `127.0.0.1` (плюс `tun-in` в режиме TUN, см. «TUN»):
 
 | тег | порт | пароль | зачем |
 |---|---|---|---|
@@ -360,6 +363,74 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
   открыт), `killswitch_test.dart` → «password on the user port» (порт `sys-in` в конфиге,
   в реестр, в status; тот же после падения, переподключения и нового jormd; занятый заменяется).
 
+## TUN (`config.dart`, `elevation.dart`)
+
+`plan.mode == 'tun'` добавляет к входам `tun-in` (остальные входы те же). Только desktop-вариант:
+sing-box сам создаёт интерфейс (wintun встроен в бинарник). Поля:
+
+| поле | значение |
+|---|---|
+| `address` | `172.19.0.1/30`, `fdfe:dcba:9876::1/126` (IPv6 включён) |
+| `mtu` | 9000 |
+| `auto_route`, `strict_route` | true, true |
+| `stack` | `plan.tunStack`: `mixed` (по умолчанию) / `system` / `gvisor`; неизвестное = `mixed` |
+| `route_exclude_address` | локальные сети мимо туннеля: `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `224/4`, `255.255.255.255/32`, `fc00::/7`, `fe80::/10`, `ff00::/8` (`tunBypass`) |
+
+Синтаксис 1.14 (`address`, правила-действия): sniff — правило `route` (`{action: sniff}` для всех
+входов), не поле входа; `route.auto_detect_interface: true` — свои исходящие sing-box привязаны к
+реальному интерфейсу и в туннель не попадают. Подсеть `172.19.0.0/30` лежит внутри исключённого
+`172.16.0.0/12`: интерфейсный маршрут /30 точнее, адрес DNS туннеля остаётся внутри.
+
+**Правила пользователя в TUN** работают при Rules так же, как через порт: порядок и состав те же
+(`rules.md` §1: приложения → свои → быстрые → final), включая приложения Direct / Block / Proxy
+(+ «If unavailable»), исключения, сервисы. Приходят настоящие IP: IP-условия срабатывают без
+`resolve` (его в TUN нет), правила «IP conditions only in TUN» работают полностью. При Global всё
+из TUN уходит в `proxy`, правил пользователя нет (остаются системные и `Private networks`).
+
+**Системные правила** (идут раньше правил пользователя, в обоих режимах, названы `RuleOrigin
+'system'` в `RoutingInfo.ruleNames`):
+1. `probe-in` (замеры) — как раньше, первыми; `sniff`.
+2. TUN: `DNS hijack` (`dns-hijack`) — см. ниже.
+3. `tunnel-in` → `proxy` (`Core checks`, `tunnel`) — как раньше.
+4. Программы ядра → `direct` (`Core and speed tests`, `core`): `process_path` (Windows —
+   `process_path_regex` `(?i)^…$`, без учёта регистра пути) из `selfProcessPaths(singBox)`: сам процесс ядра
+   (`Platform.resolvedExecutable`: для jormd — dart VM, потом exe Flutter) и бинарник sing-box
+   (замеры и Speed Test — отдельные процессы sing-box: через туннель они бы зациклились). Правило
+   стоит после `tunnel-in`, поэтому то, что ядро шлёт через `tunnel-in`, по-прежнему идёт в туннель.
+5. `Private networks` (`private`) — и так первое в `routing.rules`.
+Правила есть и в режиме прокси (там они ничего не ловят: ядро ходит через `tunnel-in`).
+
+**DNS.** `plan.routing.dns.hijack` (по умолчанию включено, UI шлёт `dnsCfg.hijack`): включён —
+`{inbound: tun-in, port: 53} → hijack-dns` и `{inbound: tun-in, protocol: dns} → hijack-dns`: любой
+DNS-запрос из TUN, даже к зашитому 8.8.8.8, отвечает DNS ядра (серверы, правила и `final` из
+«Правила в конфиге»). Выключен — запросы идут как обычный трафик по правилам, **кроме** запросов
+к собственному резолверу туннеля (`172.19.0.2`, `fdfe:dcba:9876::2`, порт 53; на Windows системный
+DNS интерфейса TUN смотрит именно туда, а ответить там некому, кроме ядра): они отвечаются всегда
+(`{inbound: tun-in, ip_cidr: [...], port: 53} → hijack-dns`). FakeIP не сделан.
+
+**Права администратора.** TUN поднимается только из процесса с правами (`processIsElevated`:
+Windows — `TokenIsElevated` токена, иначе `id -u` = 0; проверку можно подменить —
+`Daemon(isElevated:)`). Проверка идёт в `_startSingBox`, до скачивания списков и запуска, при
+connect и при перезапуске после падения. Нет прав → sing-box не стартует, connect отдаёт 500 с
+текстом `TUN needs administrator rights: run the app as administrator, or switch to Proxy mode`
+(`status.error`), прежний sing-box (connect при смене режима) останавливается — неудавшийся connect =
+не подключено, и пишется событие `core/tunNeedsAdmin` (error, `{stage: 'check'}`) вместо
+`conn/connectFailed`. Отказ самого sing-box по правам (`Access is denied`, `not permitted`,
+`privilege`… в тексте старта TUN) — то же событие и тот же текст, `{stage: 'start', error: <слова
+sing-box>}`; прочие сбои старта остаются `conn/connectFailed`. Перезапуск с правами — дело
+приложения (jormd сам не поднимает UAC).
+
+`status.mode`: `'tun'` | `'proxy'` у подключённого, `null` без подключения (также `conn/connected.mode`).
+
+**Android** (позже, libbox): TUN-дескриптор даёт `VpnService`, полей `tun-in` с адресами и маршрутами
+нет; вместо правила по процессу ядра приложение исключает **себя** из VPN
+(`addDisallowedApplication`), `package_name` — вместо `process_name` / `process_path`; пользовательский
+порт по умолчанию не открывается.
+
+**Проверка без сети**: `test/tun_test.dart` — конфиг (поля, диапазоны, стек, порядок и состав правил,
+Global, hijack вкл / выкл, системные правила первыми), `sing-box check` на конфигах всех стеков (check
+интерфейс не создаёт и права не требует), демон без прав. Живой TUN тесты не поднимают.
+
 ## Правила в конфиге
 
 `routing` (`js/93-routing-plan.js` → `core/lib/src/routing.dart`; логика — `rules.md`):
@@ -378,15 +449,17 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
   ruleSets: [{ name, url, format, via, every }],
   geo: { geosite: { via, every }, geoip: { via, every } },
   dns: { servers: [{ id, addr, via, on }],
-         resolve?: 'auto'|'off'|'<id сервера>' } }   // «Resolve for IP rules», по умолчанию 'auto'
+         resolve?: 'auto'|'off'|'<id сервера>',   // «Resolve for IP rules» (только порт), по умолчанию 'auto'
+         hijack?: bool } }                         // Hijack DNS (только TUN), по умолчанию true
 ```
 
 - UI шлёт свою модель: группы условий формы, `composite` (составное правило из JSON, без
   action), цели. Каталог живёт в UI, поэтому каждую названную цель UI сам разворачивает в
   группы (как `main`), `null` — цель недоступна (тогда её «If unavailable»). Всё остальное —
   AND/OR, CIDR, порты, DNS-серверы, списки — строит ядро.
-- Порядок route: `sniff` → `tunnel-in` → приложения → свои правила (перед первым с IP-условиями
-  и без `ipTunOnly` — `resolve`, см. ниже) → быстрые → `final`. Группы целей — теги целей
+- Порядок route: `sniff` → (TUN: hijack-dns, «TUN») → `tunnel-in` → программы ядра напрямую («TUN») →
+  `Private networks` → приложения → свои правила (перед первым с IP-условиями
+  и без `ipTunOnly` — `resolve`, кроме TUN) → быстрые → `final`. Группы целей — теги целей
   (`src:…`, `chain:…` + `chain:…>entry`).
 - **`resolve` перед IP-правилами** (`routing.dart` `_resolveAction`, `rules.md` §4). Через
   proxy-порт приложение шлёт домен, IP-условия его не видят — поэтому один `resolve` ставится
@@ -400,7 +473,9 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
   DNS-правила и `dns.final`) и предупреждение о возможной утечке. Один `resolve` на конфиг:
   правило с `ipTunOnly` ниже него всё равно видит уже полученный адрес. Собственные rule-sets
   IP-условием не считаются (по .srs не видно, что внутри). Быстрые правила не резолвят. В TUN
-  адрес известен, шаг ничего не меняет.
+  (`plan.mode: 'tun'`) шага нет совсем: адрес приходит как есть, правила с `ipTunOnly` работают
+  как обычные (и предупреждения про DNS «через VPN» от этого шага нет). Следствие: соединение,
+  пришедшее в TUN-режиме на сам `mixed-in` доменом, IP-условия не видит.
 - `tunnel-in` — второй mixed-вход на свободном порту loopback, всегда в `proxy` мимо правил:
   через него проверка выходного IP (российский сервис проверки иначе ушёл бы напрямую по
   правилу региона) и списки «через VPN».
@@ -475,7 +550,7 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
 | `POST /api/auto` | `{auto}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения → status |
-| `POST /api/disconnect`, `GET /api/status` | status: `{connected, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, network, dns, sourcesRev}` — `network: {status: 'up'\|'down'\|'unknown', since, lastAnswer, offline, silent, doubt}` — общее состояние сети пула замеров (см. «Пул замеров»); `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
+| `POST /api/disconnect`, `GET /api/status` | status: `{connected, mode: 'tun'\|'proxy'\|null, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, network, dns, sourcesRev}` — `network: {status: 'up'\|'down'\|'unknown', since, lastAnswer, offline, silent, doubt}` — общее состояние сети пула замеров (см. «Пул замеров»); `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые, последние 2000); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
 | `GET /api/events?since=N` | `{events:[…], next, first}` — журнал событий (ниже): события с `id ≥ N`, старые первыми; без `since` — последние 200. `next` — id следующего события, `first` — id самого старого из хранимых (пропуск между своим `next` и `first` = журнал обрезан или очищен). `POST /api/events` `{cat, type, level, own?, data?}` → `{id}` — событие, которое первым узнал UI (400 с причиной, если форма не та: неизвестные `cat` / `level`, `type` не `[A-Za-z][A-Za-z0-9_]{0,47}`, `own` не bool, `data` не объект или больше 4096 знаков JSON); к такому событию `log` не привязывается. `DELETE /api/events` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
@@ -599,7 +674,7 @@ Raw). Событие:
 
 | событие | когда | `data` |
 |---|---|---|
-| `conn/connected` info | подключились (`own: true`, если по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, mode: 'proxy', route: 'global'\|'rules'}` — `server` только если он уже известен (у Fastest его выбирает urltest позже); `mode: 'tun'`, когда TUN появится |
+| `conn/connected` info | подключились (`own: true`, если по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, mode: 'proxy'\|'tun', route: 'global'\|'rules'}` — `server` только если он уже известен (у Fastest его выбирает urltest позже) |
 | `conn/connectFailed` error | подключение не вышло | `{reason}` |
 | `conn/disconnected` info / error | `by: 'user'` — по команде (`own: true`, пишется, только если было подключено); `by: 'error'` — sing-box не поднялся после всех попыток | `{by, reason?}` |
 | `conn/lost` warn | Auto: ни один маршрут не отвечает (`noNet` стал true из-за проверок) | `{}` |
@@ -620,6 +695,7 @@ Raw). Событие:
 | `core/crashed` error | sing-box вышел сам (перезапуск идёт в фоне; уведомление — по решению UI) | `{code}` |
 | `core/down` error | перезапуск не удался за 30 с от падения (см. «Down») | `{proxy: 'kept'\|'removed'\|'released'}` |
 | `core/restarted` info | после падения запущен снова | `{attempt, downMs?}` — `downMs` (мс от падения) только если успел быть down |
+| `core/tunNeedsAdmin` error | TUN не поднялся: у процесса нет прав администратора (проверка до запуска) или sing-box отказал по правам. Вместо `conn/connectFailed`; `own: true` при connect по команде пользователя | `{stage: 'check'\|'start', error?}` — `error` только при `start`: слова sing-box |
 | `core/restartFailed` error | попытка перезапуска не удалась (только первые три) | `{attempt, error}` |
 | `core/sysProxy` info / warn | системный прокси включён / возвращён (`own: true` при команде пользователя); при остановке jormd тоже; `warn` — не вышло. Прокси, оставленный kill switch'ем, события не пишет | `{on, by?, error?}`, `on` — что хотели получить; `by: 'user'` — кнопка Remove / Disable sys proxy (`POST /api/sysproxy/release`) |
 | `core/deprecated` warn | sing-box сообщил, что конфиг перестанет работать в новой версии; каждый текст — раз за запуск демона (в сыром логе — при каждом подключении) | `{text}` |
@@ -686,7 +762,7 @@ NUL / не JSON / не объект → файл не удаляется, а п�
 
 ## Не сделано в MVP
 
-TUN (и kill switch для него; для системного прокси он есть, см. «Kill switch»); Hijack DNS / FakeIP; обновление гео-списков по таймеру; Decrypt
+Kill switch для TUN (есть только `strict_route`; для системного прокси kill switch есть, см. «Kill switch»); FakeIP; обновление гео-списков по таймеру; Decrypt
 password подписки (нет спецификации); автовыбор URL пинга (сейчас — выбор в Settings →
 Connection, по умолчанию gstatic).
 Auto: проверка по неудачным запросам, `speedOnFail`, пауза при выключенном экране; группы

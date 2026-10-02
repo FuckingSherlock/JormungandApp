@@ -136,7 +136,7 @@ function livePlan(anchor) {
     const id = anchor || effectiveConnectId(true);
     if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
     // mixedAuth: the port asks for a login; with the system proxy on the core opens a second, open port for it (docs/core.md)
-    const base = { mixedPort: connCfg.port || 2080, mixedAuth: connCfg.proxyAuth ? { user: connCfg.proxyUser, pass: connCfg.proxyPass } : undefined, global: segState.route === 'global',
+    const base = { mode: segState.mode === 'tun' ? 'tun' : 'proxy', mixedPort: connCfg.port || 2080, tunStack: connCfg.tunStack || 'mixed', mixedAuth: connCfg.proxyAuth ? { user: connCfg.proxyUser, pass: connCfg.proxyPass } : undefined, global: segState.route === 'global',
       urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined }, auto: planAuto(), routing: routingPlan() };
     return Object.assign(base, planRoutes(id));
   });
@@ -157,7 +157,9 @@ function planSigOf(plan) {
   const routing = plan.routing && Object.assign({}, plan.routing,
     { targets: Object.fromEntries(Object.entries(plan.routing.targets || {}).map(([k, x]) => [k, r(x, gt)])) });
   // plan.auto is not in it: the running core takes Settings → Auto mode as it is (liveSyncAuto)
+  // tunStack only counts in TUN mode: in proxy mode changing it just saves
   return JSON.stringify(Object.assign({}, plan, { current: null, auto: null, routing, systemProxy: segState.sys === 'on',
+    tunStack: segState.mode === 'tun' ? plan.tunStack : null,
     routes: (plan.routes || []).map(x => r(x, g)) }));
 }
 const planSig = () => { try { return planSigOf(livePlan(liveSigAnchor())); } catch (e) { return null; } };
@@ -328,7 +330,6 @@ const liveBackend = {
   connect(anchor) {
     return Promise.resolve().then(() => {
       const plan = livePlan(anchor);
-      if (segState.mode === 'tun') toast('TUN is not in the core yet — proxy on 127.0.0.1:' + (connCfg.port || 2080));
       // Kill switch options as the core reads them (killswitch: rules.md §7); the sub-options only count with their conditions
       const ks = killPlan();
       killSig = JSON.stringify(ks);

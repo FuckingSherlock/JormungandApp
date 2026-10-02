@@ -28,7 +28,7 @@ const EV_CATS = [
   ['sub', 'Subscriptions', [['updated', 'Updated'], ['failed', 'Update failed'], ['removed', 'Servers removed'], ['back', 'Servers back'], ['dead', 'Servers do not respond']]],
   ['rules', 'Rules', [['fallback', 'Rule target unavailable'], ['targetBack', 'Rule target back'], ['ruleSetFailed', 'Rule set not downloaded'], ['ruleSetUpdated', 'Rule set updated']]],
   ['dns', 'DNS', [['switched', 'DNS server switched']]],
-  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting'], ['stateRestored', 'Saved data restored'], ['stateLost', 'Saved data lost']]],
+  ['core', 'Core', [['crashed', 'sing-box stopped'], ['restarted', 'sing-box started again'], ['restartFailed', 'Could not start again'], ['tunNeedsAdmin', 'TUN needs administrator rights'], ['down', 'VPN is down'], ['sysProxy', 'System proxy'], ['deprecated', 'Deprecated setting'], ['stateRestored', 'Saved data restored'], ['stateLost', 'Saved data lost']]],
 ];
 const svgI = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const EV_ICON = {
@@ -181,6 +181,7 @@ const EV_TEXT = {
   'core/crashed': d => ['sing-box stopped', (d.code != null ? 'Exit code ' + d.code + ' — ' : '') + 'starting it again'],
   'core/restarted': d => ['sing-box started again', [d.attempt && 'Attempt ' + d.attempt, d.downMs != null && 'was down ' + evDuration(d.downMs)].filter(Boolean).join(' · ')],
   'core/down': d => ['VPN is down', d.proxy === 'kept' ? 'Internet is blocked (the system proxy is kept) — still trying' : 'Traffic goes direct — still trying'],
+  'core/tunNeedsAdmin': d => ['TUN needs administrator rights', 'Run the app as administrator, or switch to Proxy mode'],
   'core/restartFailed': d => ['sing-box could not start again', [d.attempt && 'Attempt ' + d.attempt, d.error].filter(Boolean).join(' · ')],
   'core/sysProxy': d => d.by === 'user' ? ['You ' + (d.on ? 'set' : 'removed') + ' the system proxy', 'From the VPN is down / Kill switch notice'] : [d.error ?'System proxy could not be ' + (d.on ? 'set' : 'restored') : 'System proxy ' + (d.on ? 'on' : 'off'), d.error || ''],
   'core/deprecated': d => ['sing-box: a deprecated setting', d.text || ''],

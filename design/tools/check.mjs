@@ -213,6 +213,7 @@ const SHOTS = {
   'blocked-toast': async p => { await p.evaluate(() => { const id = autoOrder()[0], via = autoOrder()[1] || id;
     mockEventAdd('site', 'blocked', 'warn', { host: 'chat.example.com', dest: 'chat.example.com:443', entry: id, route: id, via }); return pollEvents(); }); await p.waitForTimeout(300); },
   'test-url': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openTestUrlPicker(); }); await settle(p); },
+  'tun-stack': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setconn'); openTunStackPicker(); }); await settle(p); },
   'lang-soon': async p => { await tab(p, 'settings'); await p.evaluate(() => { openSheet('setgeneral'); openLangPicker(); }); await settle(p); },
   'conn-filter': async p => { await p.evaluate(() => backend.traffic().then(t => { traffic = t; openSheet('connections'); document.getElementById('connFilter').value = 'disc'; renderTraffic(); })); await settle(p); },
   'conn-sort': async p => { await connBase(p, () => { connSort = 'down'; renderLiveConns(); openConnSort(); }); },
@@ -1380,6 +1381,30 @@ async function runChecks() {
     await page.click('.testurl-custom .btn-primary');
     expect(await page.evaluate(() => connCfg.testUrl) === 'https://probe.example.org/204' && /probe\.example\.org/.test(await page.textContent('#conn-testurl')), 'custom: ' + await page.evaluate(() => connCfg.testUrl));
     await page.evaluate(() => { setTestUrl(''); closeSheet('setconn'); });
+  });
+
+  await check('settings: TUN stack — Mixed by default, a choice goes to connCfg, the snapshot and the plan; proxy mode keeps the plan signature', async () => {
+    const p = await openPage(browser);
+    await p.evaluate(() => Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = { type: 'socks', server: '127.0.0.1', server_port: 1 }; n.unsupported = false; })));
+    await tab(p, 'settings');
+    await p.evaluate(() => openSheet('setconn'));
+    const row = await p.evaluate(() => { const r = document.querySelector('[data-key=tunStack]'); return { soon: r.classList.contains('soon') || !!r.querySelector('.soon-tag'), btn: document.getElementById('conn-tunstack').textContent.trim(), hint: r.querySelector('.set-hint').textContent };
+    });
+    expect(!row.soon && row.btn === 'Mixed' && /TCP through the system stack/.test(row.hint), 'default row: ' + JSON.stringify(row));
+    expect(await p.evaluate(() => connCfg.tunStack === 'mixed' && livePlan().tunStack === 'mixed'), 'default mixed');
+    await p.click('#conn-tunstack');
+    expect(await p.locator('#actions-body .menu-row').count() === 3, 'three options');
+    await p.click('#actions-body .menu-row >> nth=1');   // System (the Mixed hint also says system)
+    const r = await p.evaluate(() => ({ cfg: connCfg.tunStack, snap: liveSnapshot().connCfg.tunStack, plan: livePlan().tunStack, btn: document.getElementById('conn-tunstack').textContent.trim(), hint: document.querySelector('[data-key=tunStack] .set-hint').textContent }));
+    expect(r.cfg === 'system' && r.snap === 'system' && r.plan === 'system' && r.btn === 'System' && /Fastest/.test(r.hint), JSON.stringify(r));
+    // TUN mode: the signature follows the stack; proxy mode: it does not
+    const sig = await p.evaluate(() => { const m = segState.mode, out = {};
+      segState.mode = 'tun'; connCfg.tunStack = 'system'; const a = planSig(); connCfg.tunStack = 'gvisor'; out.tunDiffers = planSig() !== a;
+      segState.mode = 'proxy'; connCfg.tunStack = 'system'; const b = planSig(); connCfg.tunStack = 'gvisor'; out.proxySame = planSig() === b;
+      segState.mode = m; connCfg.tunStack = 'mixed'; renderConnSettings(); return out; });
+    expect(sig.tunDiffers && sig.proxySame, JSON.stringify(sig));
+    await p.evaluate(() => closeSheet('setconn'));
+    await p.close();
   });
 
   await check('settings: backup checks — presets toggle, a custom address is added, bad ones are refused; they go with the Auto settings and every ping', async () => {
