@@ -83,7 +83,6 @@ Auto, которая может работать; в Manual — закреплё
   current: 1,              // индекс якоря: с него стартует selector
   mixedPort: 2080, global: bool,
   mode?: 'tun' | 'proxy',       // 'tun' — вход tun-in (см. «TUN»); нет / иное = только локальный порт
-  tunStack?: 'mixed' | 'system' | 'gvisor',   // стек TUN (по умолчанию и при неизвестном — mixed)
   mixedAuth?: { user, pass },   // пароль на пользовательский порт; нет = порт открыт
   tunStack?: 'mixed' | 'system' | 'gvisor',   // стек TUN (connCfg.tunStack, по умолчанию mixed); читается только в TUN
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,

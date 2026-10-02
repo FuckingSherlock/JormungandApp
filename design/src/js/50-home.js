@@ -107,7 +107,7 @@ function dockTap() {
 
 /* ══════════════════════ SEGMENTED CONTROLS ══════════════════════ */
 
-const segState = { mode: 'tun', route: 'rules', sys: 'off' };
+const segState = { mode: 'proxy', route: 'rules', sys: 'off' };
 const SEG_OPTS = { mode: ['tun', 'proxy'], route: ['global', 'rules'], sys: ['on', 'off'] };
 // Two options only, so a tap anywhere on the control flips it.
 function toggleSegment(group) {
