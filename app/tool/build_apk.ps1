@@ -19,7 +19,7 @@ param(
     [string]$BuildNumber,
     [string]$Root = 'G:\ANDROID_DEV',
     [switch]$RebuildLibbox,
-    [switch]$DebugBuild      # debug APK, debug key: no keystore / password needed
+    [switch]$DebugSigned     # release APKs signed with the debug key: no keystore / password needed (test only: a later real-key build needs a reinstall)
 )
 $ErrorActionPreference = 'Stop'
 
@@ -55,7 +55,7 @@ $env:PATH = "$flutterBin;$(Join-Path $javaHome 'bin');$env:PATH"
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'node not found (the overlay script)' }
 
 $pass = $env:JORM_ANDROID_KS_PASS
-if (-not $pass -and -not $DebugBuild) { Fail 'set JORM_ANDROID_KS_PASS (the release keystore password) in this shell first' }
+if (-not $pass -and -not $DebugSigned) { Fail 'set JORM_ANDROID_KS_PASS (the release keystore password) in this shell first' }
 
 # ── android/ project, first time ─────────────────────────────────────────────────────────
 if (-not (Test-Path (Join-Path $app 'android\app'))) {
@@ -83,7 +83,7 @@ Run 'node' @('tool/apply_android_overlay.mjs') $app
 $ksDir = Join-Path $env:USERPROFILE '.jormungand'
 $ks = Join-Path $ksDir 'android-release.jks'
 $alias = 'jormungand'
-if ($DebugBuild) { }
+if ($DebugSigned) { }
 elseif (-not (Test-Path $ks)) {
     New-Item -ItemType Directory -Force $ksDir | Out-Null
     Write-Host "no release keystore, generating $ks" -ForegroundColor Yellow
@@ -93,11 +93,11 @@ elseif (-not (Test-Path $ks)) {
 }
 $props = Join-Path $app 'android\key.properties'
 # forward slashes: a .properties file reads backslashes as escapes
-if (-not $DebugBuild) { @("storeFile=$($ks -replace '\\', '/')", "keyAlias=$alias") | Set-Content $props -Encoding ascii }
+if (-not $DebugSigned) { @("storeFile=$($ks -replace '\\', '/')", "keyAlias=$alias") | Set-Content $props -Encoding ascii }
 
 # ── build ────────────────────────────────────────────────────────────────────────────────
 Run (Join-Path $flutterBin 'flutter.bat') @('pub', 'get') $app
-$build = if ($DebugBuild) { @('build', 'apk', '--debug') } else { @('build', 'apk', '--release', '--split-per-abi') }
+$build = @('build', 'apk', '--release', '--split-per-abi')
 if ($BuildName) { $build += @('--build-name', $BuildName) }
 if ($BuildNumber) { $build += @('--build-number', $BuildNumber) }
 Run (Join-Path $flutterBin 'flutter.bat') $build $app
@@ -109,6 +109,6 @@ Get-ChildItem $outDir -Filter '*.apk' | ForEach-Object {
     $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
     Write-Host ("{0}  {1:N1} MB  sha256 {2}" -f $_.FullName, ($_.Length / 1MB), $h) -ForegroundColor Green
 }
-if ($DebugBuild) { exit 0 }
+if ($DebugSigned) { exit 0 }
 $cert = & keytool -list -v -keystore $ks -alias $alias -storepass $pass 2>$null | Select-String 'SHA256:'
 if ($cert) { Write-Host "signer $($cert.Line.Trim())  (-> the update manifest's android.signerSha256, lower-case hex without colons)" }
