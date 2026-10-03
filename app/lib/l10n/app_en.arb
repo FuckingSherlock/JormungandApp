@@ -809,7 +809,7 @@
   "serversTheChainMayUseTap": "servers the chain may use. Tap one to keep the chain off it.",
   "servicesOfDifferentOwnersOneBlocked": "Services of different owners: one blocked service must not make a working server look dead. Tried only after the test URL missed.",
   "showsDragThemToChangeThe": "shows ⋮⋮: drag them to change the order Auto tries entries in, and the Use in Auto switches. In an unfolded entry it also shows Fastest / Priority and the order of its servers.",
-  "sitesOpenedByNameAreResolved": "Sites opened by name are resolved here so IP conditions see the address. System proxy only, TUN has it already",
+  "sitesOpenedByNameAreResolved2": "Sites opened by name are resolved here so IP conditions see the address. For connections through the proxy port and system proxy",
   "somethingItNeedsIsSwitchedOff": "something it needs is switched off in Nodes. Tap it to see what.",
   "sourcesWithTheirServersProfilesChains": "Sources with their servers, profiles, chains, Route order, rules, DNS and settings — one JSON file",
   "startWithTheSystemAndroidAfter": "Start with the system (Android: after reboot)",

@@ -1324,5 +1324,6 @@
   "Checked at {0}": "checkedAt",
   "Update {0} available": "updateAvailable",
   "Downloading {#0}% · {1} of {2}": "downloadingOf",
-  "Could not save the state: {0}": "couldNotSaveTheState"
+  "Could not save the state: {0}": "couldNotSaveTheState",
+  "Sites opened by name are resolved here so IP conditions see the address. For connections through the proxy port and system proxy": "sitesOpenedByNameAreResolved2"
 }

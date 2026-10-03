@@ -151,7 +151,7 @@ function renderDns() {
   const resolveWarn = resolveEff === 'off' ? false : resolveEff === 'auto' ? !autoServer : dnsServers[resolveEff].via !== 'vpn';
   const resolveHint = resolveEff === 'off' ? 'IP conditions (IP, CIDR, local networks, GeoIP) match a site opened by name only in TUN'
     : resolveWarn ? 'This query leaves outside the tunnel' + (resolveEff === 'auto' ? ': no DNS server via VPN is on, the first one in use resolves' : ', through a direct server')
-    : 'Sites opened by name are resolved here so IP conditions see the address. System proxy only, TUN has it already';
+    : 'Sites opened by name are resolved here so IP conditions see the address. For connections through the proxy port and system proxy';
   el.innerHTML = `
     <div class="am-label">Global DNS<button class="help-btn" onclick="openHelp('dns')" title="What is this?">?</button>
       <button class="am-link" onclick="pingAllDns()">Ping all</button></div>
