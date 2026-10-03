@@ -18,10 +18,10 @@ import 'durable.dart';
 /// accepted when its signature verifies with any of them (more than one only while a key is
 /// being replaced, docs/updates.md -> "Смена ключа").
 ///
-/// TODO(release): paste the public key printed by `dart run tool/release_keys.dart <file>`.
-/// Until then no manifest can be verified and every check fails with [UpdateError.noKey]:
-/// better no updates than updates nobody has vouched for.
-const releasePublicKeys = <String>[];
+/// Key generated 2026-10-03; the private half: the publisher's machine
+/// (%USERPROFILE%\.jormungand\release-signing.key), GitHub Actions secret JORM_RELEASE_KEY,
+/// backup in secrets-mcp (docs/updates.md -> "Ключ").
+const releasePublicKeys = <String>['wNAvpxCr+EQCOFnwSmZtzkPgxLNc4akDBzFhhFBNRo4='];
 
 /// Where the manifests live, in the order tried (docs/updates.md -> "Ленты"). Each is a URL
 /// prefix: `<feed>/manifest-<channel>.json` and `.json.sig` are under it.
