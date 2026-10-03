@@ -10,7 +10,6 @@ import '../pages/logs_page.dart';
 import '../pages/nodes_page.dart';
 import '../pages/settings_page.dart';
 import '../theme/app_colors.g.dart';
-import '../widgets/add_subscription_dialog.dart';
 
 /// The bottom-nav tabs, in the mockup's order (markup/40-bottomnav.html).
 enum AppTab {
@@ -45,6 +44,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   AppTab _tab = AppTab.home;
   StreamSubscription<HostNotice>? _notices;
+  final _nodesKey = GlobalKey<NodesPageState>();
 
   @override
   void didChangeDependencies() {
@@ -68,6 +68,10 @@ class _HomeShellState extends State<HomeShell> {
         n.args[0],
         n.args[1],
       ),
+      'updateFailed' when n.args.length == 2 => l10n.updateOfFailed(
+        n.args[0],
+        n.args[1],
+      ),
       'initFailed' => l10n.coreNotReachable(n.text),
       'vpnDenied' => l10n.vpnPermissionWasNotGranted,
       'notSaved' => l10n.couldNotSaveTheState(n.text),
@@ -78,12 +82,14 @@ class _HomeShellState extends State<HomeShell> {
       ..showSnackBar(SnackBar(content: Text(text)));
   }
 
-  /// Home with nothing to connect through (mockup `dockTap`): Nodes, and its "+" - for now the
-  /// minimal Add subscription form.
+  /// Home with nothing to connect through (mockup `dockTap`): Nodes, and its "+".
   void _openNodesAdd() {
+    final empty = CoreHostScope.read(context).catalog.sourceOrder.isEmpty;
     setState(() => _tab = AppTab.nodes);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) showAddSubscriptionDialog(context);
+      if (mounted) {
+        _nodesKey.currentState?.openAdd(tab: empty ? 'simple' : null);
+      }
     });
   }
 
@@ -108,7 +114,7 @@ class _HomeShellState extends State<HomeShell> {
             index: _tab.index,
             children: [
               HomePage(onOpenNodes: _openNodesAdd),
-              const NodesPage(),
+              NodesPage(key: _nodesKey),
               const LogsPage(),
               const SettingsPage(),
             ],

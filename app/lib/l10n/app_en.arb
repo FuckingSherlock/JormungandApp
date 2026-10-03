@@ -2823,5 +2823,35 @@
         "type": "String"
       }
     }
-  }
+  },
+  "deleteGroup": "Delete group",
+  "app2": "app",
+  "notAvailableYet": "Not available yet",
+  "h3": "h",
+  "nodes2": "{s0}/{s1} nodes",
+  "@nodes2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "servers2": "{s0}/{s1} servers",
+  "@servers2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "groupName": "Group name",
+  "linkCopied": "Link copied",
+  "auto2": "auto",
+  "exit2": "exit"
 }

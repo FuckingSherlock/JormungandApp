@@ -134,6 +134,17 @@ class SingBoxApi implements BoxControl {
     throw StateError('sing-box is ${s.status.name}');
   }
 
+  /// sing-box's log, one line per message: what it kept since this run started (the first push),
+  /// then every new one. For a [BoxRunner] that has no process output to read (libbox). The
+  /// stream ends with an error when the channel is closed.
+  Stream<String> logLines() async* {
+    await for (final l in _c.subscribeLog(Empty())) {
+      for (final m in l.messages) {
+        yield m.message;
+      }
+    }
+  }
+
   /// What sing-box says will break in the config with a later release.
   Future<List<String>> deprecatedWarnings() async {
     final w = await _c.getDeprecatedWarnings(Empty()).timeout(const Duration(seconds: 2));

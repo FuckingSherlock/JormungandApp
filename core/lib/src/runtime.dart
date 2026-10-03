@@ -170,19 +170,28 @@ class SingBoxProcess implements BoxRunner {
     await proc.exitCode.timeout(const Duration(seconds: 3), onTimeout: () => -1);
   }
 
-  static String _newSecret() {
-    final r = Random.secure();
-    return [for (var i = 0; i < 16; i++) r.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
-  }
+  static String _newSecret() => newApiSecret();
 
-  static Map<String, dynamic> _withApi(Map<String, dynamic> config, String secret, int apiPort) => {
-        ...config,
-        'services': [
-          ...?(config['services'] as List?),
-          {'type': 'api', 'tag': 'api', 'listen': '127.0.0.1', 'listen_port': apiPort, 'secret': secret},
-        ],
-      };
+  static Map<String, dynamic> _withApi(Map<String, dynamic> config, String secret, int apiPort) =>
+      withApiService(config, secret, apiPort);
 }
+
+/// A new random secret for sing-box's API service (see [withApiService]).
+String newApiSecret() {
+  final r = Random.secure();
+  return [for (var i = 0; i < 16; i++) r.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
+}
+
+/// [config] plus sing-box's API service on loopback [apiPort] with [secret] (the core's line to
+/// a running sing-box, sbapi.dart). A [BoxRunner] that does not start a process (libbox on
+/// Android) puts the same service into the config, so [SingBoxApi] works on it unchanged.
+Map<String, dynamic> withApiService(Map<String, dynamic> config, String secret, int apiPort) => {
+      ...config,
+      'services': [
+        ...?(config['services'] as List?),
+        {'type': 'api', 'tag': 'api', 'listen': '127.0.0.1', 'listen_port': apiPort, 'secret': secret},
+      ],
+    };
 
 /// A free loopback port (for an inbound or the API service of a second sing-box), free
 /// for UDP and TCP both: an inbound listens on both. A random port below the dynamic range,

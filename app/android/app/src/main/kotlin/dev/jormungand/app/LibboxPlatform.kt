@@ -1,0 +1,214 @@
+package dev.jormungand.app
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Build
+import android.os.Process
+import android.system.OsConstants
+import android.util.Log
+import io.nekohasekai.libbox.BridgeOptions
+import io.nekohasekai.libbox.BridgeSession
+import io.nekohasekai.libbox.ConnectionOwner
+import io.nekohasekai.libbox.InterfaceUpdateListener
+import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.LocalDNSTransport
+import io.nekohasekai.libbox.NeighborUpdateListener
+import io.nekohasekai.libbox.NetworkInterfaceIterator
+import io.nekohasekai.libbox.Notification
+import io.nekohasekai.libbox.PlatformInterface
+import io.nekohasekai.libbox.PlatformUser
+import io.nekohasekai.libbox.ShellSession
+import io.nekohasekai.libbox.StringIterator
+import io.nekohasekai.libbox.TunOptions
+import io.nekohasekai.libbox.WIFIState
+import java.net.Inet6Address
+import java.net.InetSocketAddress
+import java.net.InterfaceAddress
+import java.net.NetworkInterface
+import java.util.Collections
+import io.nekohasekai.libbox.NetworkInterface as LibboxNetworkInterface
+
+/**
+ * What libbox asks of the platform (sing-box 1.14 `experimental/libbox/platform.go`), the
+ * part that needs no VPN: the default network and its interfaces, DNS, who owns a connection.
+ * A libbox that runs without a tunnel (the throwaway one for pings and Speed Test) uses this
+ * class as it is; the tunnel's [VpnPlatform] adds openTun and protect.
+ *
+ * Not supported on purpose (answers "no"): the platform shell / SSH, bridges, the neighbor table,
+ * WiFi state (needs the location permission), notifications from sing-box.
+ */
+open class LibboxPlatform(private val context: Context) : PlatformInterface {
+    private val connectivity: ConnectivityManager =
+        context.applicationContext.getSystemService(ConnectivityManager::class.java)
+
+    override fun localDNSTransport(): LocalDNSTransport? = LocalResolver
+
+    override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
+
+    /** The tunnel's platform protects the socket from the VPN; with no tunnel there is nothing to do. */
+    override fun autoDetectInterfaceControl(fd: Int) {}
+
+    override fun openTun(options: TunOptions): Int = error("android: this libbox has no tunnel")
+
+    override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+
+    override fun findConnectionOwner(
+        ipProtocol: Int,
+        sourceAddress: String,
+        sourcePort: Int,
+        destinationAddress: String,
+        destinationPort: Int,
+    ): ConnectionOwner {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) error("android: connection owner needs Android 10")
+        return ownerQ(ipProtocol, sourceAddress, sourcePort, destinationAddress, destinationPort)
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private fun ownerQ(
+        ipProtocol: Int,
+        sourceAddress: String,
+        sourcePort: Int,
+        destinationAddress: String,
+        destinationPort: Int,
+    ): ConnectionOwner {
+        val uid = connectivity.getConnectionOwnerUid(
+            ipProtocol,
+            InetSocketAddress(sourceAddress, sourcePort),
+            InetSocketAddress(destinationAddress, destinationPort),
+        )
+        if (uid == Process.INVALID_UID) error("android: connection owner not found")
+        val packages = context.packageManager.getPackagesForUid(uid)
+        val owner = ConnectionOwner()
+        owner.userId = uid
+        owner.userName = packages?.firstOrNull() ?: ""
+        owner.setAndroidPackageNames(Strings(packages?.toList() ?: emptyList()))
+        return owner
+    }
+
+    override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
+        DefaultNetworkMonitor.add(context, listener)
+    }
+
+    override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
+        DefaultNetworkMonitor.remove(listener)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun getInterfaces(): NetworkInterfaceIterator {
+        val javaInterfaces = Collections.list(NetworkInterface.getNetworkInterfaces() ?: Collections.emptyEnumeration())
+        val result = mutableListOf<LibboxNetworkInterface>()
+        for (network in connectivity.allNetworks) {
+            val link = connectivity.getLinkProperties(network) ?: continue
+            val caps = connectivity.getNetworkCapabilities(network) ?: continue
+            val name = link.interfaceName ?: continue
+            val jif = javaInterfaces.find { it.name == name } ?: continue
+            val box = LibboxNetworkInterface()
+            box.name = name
+            box.dnsServer = Strings(link.dnsServers.mapNotNull { it.hostAddress })
+            box.gateway = Strings(
+                link.routes
+                    .filter { it.destination.prefixLength == 0 }
+                    .mapNotNull { it.gateway }
+                    .filterNot { it.isAnyLocalAddress }
+                    .mapNotNull { it.hostAddress },
+            )
+            box.type = when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> Libbox.InterfaceTypeWIFI
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> Libbox.InterfaceTypeCellular
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> Libbox.InterfaceTypeEthernet
+                else -> Libbox.InterfaceTypeOther
+            }
+            box.index = jif.index
+            runCatching { box.mtu = jif.mtu }.onFailure { Log.w(TAG, "mtu of $name", it) }
+            box.addresses = Strings(jif.interfaceAddresses.map { it.toPrefix() })
+            var flags = 0
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                flags = OsConstants.IFF_UP or OsConstants.IFF_RUNNING
+            }
+            if (jif.isLoopback) flags = flags or OsConstants.IFF_LOOPBACK
+            if (jif.isPointToPoint) flags = flags or OsConstants.IFF_POINTOPOINT
+            if (jif.supportsMulticast()) flags = flags or OsConstants.IFF_MULTICAST
+            box.flags = flags
+            box.metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            result.add(box)
+        }
+        return Interfaces(result)
+    }
+
+    override fun underNetworkExtension(): Boolean = false
+
+    override fun includeAllNetworks(): Boolean = false
+
+    override fun readWIFIState(): WIFIState? = null
+
+    override fun clearDNSCache() {}
+
+    override fun sendNotification(notification: Notification) {}
+
+    override fun cancelNotification(identifier: String, typeID: Int) {}
+
+    override fun startNeighborMonitor(listener: NeighborUpdateListener) {}
+
+    override fun closeNeighborMonitor(listener: NeighborUpdateListener) {}
+
+    override fun registerMyInterface(name: String) {}
+
+    override fun usePlatformShell(): Boolean = false
+
+    override fun checkPlatformShell() {
+        error("not supported")
+    }
+
+    override fun openShellSession(
+        user: PlatformUser,
+        command: String,
+        environ: StringIterator,
+        term: String,
+        rows: Int,
+        cols: Int,
+    ): ShellSession = error("not supported")
+
+    override fun lookupUser(username: String): PlatformUser = error("not supported")
+
+    override fun lookupSFTPServer(): String = error("not supported")
+
+    override fun readSystemSSHHostKey(): String = error("not supported")
+
+    override fun tailscaleHostname(): String = Build.MODEL
+
+    override fun usePlatformBridge(): Boolean = false
+
+    override fun createBridge(options: BridgeOptions): BridgeSession = error("not supported")
+
+    companion object {
+        private const val TAG = "LibboxPlatform"
+    }
+
+    private fun InterfaceAddress.toPrefix(): String =
+        if (address is Inet6Address) {
+            "${Inet6Address.getByAddress(address.address).hostAddress}/$networkPrefixLength"
+        } else {
+            "${address.hostAddress}/$networkPrefixLength"
+        }
+}
+
+/** A list as libbox's StringIterator. */
+class Strings(items: List<String>) : StringIterator {
+    private val size = items.size
+    private val it = items.iterator()
+
+    override fun len(): Int = size
+
+    override fun hasNext(): Boolean = it.hasNext()
+
+    override fun next(): String = it.next()
+}
+
+private class Interfaces(items: List<LibboxNetworkInterface>) : NetworkInterfaceIterator {
+    private val it = items.iterator()
+
+    override fun hasNext(): Boolean = it.hasNext()
+
+    override fun next(): LibboxNetworkInterface = it.next()
+}

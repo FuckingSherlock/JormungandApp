@@ -1293,5 +1293,15 @@
   "updateChecksAreNotAvailableIn": "Проверка обновлений в этой сборке пока недоступна",
   "somethingWentWrong": "Что-то пошло не так",
   "vpnPermissionWasNotGranted": "Разрешение на VPN не выдано",
-  "couldNotSaveTheState": "Не удалось сохранить состояние: {s0}"
+  "couldNotSaveTheState": "Не удалось сохранить состояние: {s0}",
+  "deleteGroup": "Удалить группу",
+  "app2": "приложение",
+  "notAvailableYet": "Пока недоступно",
+  "h3": "ч",
+  "nodes2": "{s0}/{s1} узлов",
+  "servers2": "{s0}/{s1} серверов",
+  "groupName": "Название группы",
+  "linkCopied": "Ссылка скопирована",
+  "auto2": "авто",
+  "exit2": "выход"
 }

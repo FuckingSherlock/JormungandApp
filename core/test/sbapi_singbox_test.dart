@@ -154,6 +154,45 @@ void main() {
       await tmp.delete(recursive: true);
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('logLines: sing-box\'s log comes through the API (the way libbox, with no process output, gets it)', () async {
+    final tmp = await Directory.systemTemp.createTemp('jorm-sbapi-log');
+    final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
+    final client = SingBoxProcess(_bin, p.join(tmp.path, 'client'));
+    try {
+      final serverPort = await freePort(), mixed = await freePort();
+      await server.start(_server(serverPort));
+      await client.start({..._client(mixed, serverPort), 'log': {'level': 'debug'}});
+
+      final lines = <String>[];
+      final sub = client.api!.logLines().listen(lines.add, onError: (Object _) {});
+      addTearDown(sub.cancel);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await _get(mixed, 'http://blocked.example/');
+      final hit = await _waitFor(lines, (l) => l.contains('blocked.example'));
+      expect(hit, isNotEmpty);
+    } finally {
+      await client.stop();
+      await server.stop();
+      await tmp.delete(recursive: true);
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('withApiService keeps the config\'s own services and adds the API one', () {
+    final c = withApiService({
+      'services': [
+        {'type': 'x', 'tag': 'x'},
+      ],
+      'log': {'level': 'warn'},
+    }, 's3cret', 4242);
+    final s = (c['services'] as List).cast<Map>();
+    expect(s.map((e) => e['tag']), ['x', 'api']);
+    expect(s.last, containsPair('listen_port', 4242));
+    expect(s.last, containsPair('secret', 's3cret'));
+    expect(c['log'], {'level': 'warn'});
+    expect(newApiSecret(), isNot(newApiSecret()));
+    expect(newApiSecret(), hasLength(32));
+  });
 }
 
 Future<T> _waitFor<T>(List<T> list, bool Function(T) test, {Duration timeout = const Duration(seconds: 5)}) async {

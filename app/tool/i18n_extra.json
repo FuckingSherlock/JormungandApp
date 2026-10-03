@@ -1,4 +1,14 @@
 {
   "VPN permission was not granted": "Разрешение на VPN не выдано",
-  "Could not save the state: {0}": "Не удалось сохранить состояние: {0}"
+  "Could not save the state: {0}": "Не удалось сохранить состояние: {0}",
+  "Delete group": "Удалить группу",
+  "app": "приложение",
+  "Not available yet": "Пока недоступно",
+  "h": "ч",
+  "{0}/{1} nodes": "{0}/{1} узлов",
+  "{0}/{1} servers": "{0}/{1} серверов",
+  "Group name": "Название группы",
+  "Link copied": "Ссылка скопирована",
+  "auto": "авто",
+  "exit": "выход"
 }

@@ -1,3 +1,5 @@
+import 'dart:ui' show AppExitResponse;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -69,8 +71,9 @@ class _JormungandAppState extends State<JormungandApp> {
             // Headers and the nav bar keep the system size; pages scale their content with the
             // user's 90-120 % (ContentScale in widgets/app_view.dart).
             builder: (context, child) => MediaQuery(
-              data: MediaQuery.of(context)
-                  .copyWith(textScaler: TextScaler.noScaling),
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.noScaling),
               child: child!,
             ),
             home: const HomeShell(),

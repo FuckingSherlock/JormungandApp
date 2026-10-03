@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- libbox: the default network and its interfaces (CHANGE_NETWORK_STATE: requestNetwork on Android 9-11) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <!-- VPN service runs in the foreground; Android 14+ wants a type + its permission.
          specialUse (subtype "vpn", see the <property> below): sing-box-for-android does the same.
          Play Store would ask for a declaration; we ship the APK ourselves (self-update).

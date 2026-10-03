@@ -8,7 +8,12 @@
 // The application id lives HERE (APPLICATION_ID) and nowhere else: the script writes it into
 // android/app/build.gradle(.kts) (namespace + applicationId) and into the `package` line of the
 // Kotlin templates. Re-runnable (it also re-applies after `flutter create` regenerates files).
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, statSync } from 'node:fs';
+//
+// Also: android_overlay/app/** is copied into android/app/ (libs/libbox.aar from
+// core/tool/build_libbox.ps1, proguard rules; text files get __APP_ID__ replaced), and the gradle
+// file gets one managed block at its end (libbox dependency, release signing from
+// android/key.properties, see app/tool/build_apk.ps1).
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,20 +51,97 @@ for (const f of readdirSync(join(overlay, 'kotlin'))) {
   writeFileSync(join(target, f.replace(/\.tmpl$/, '')), text);
 }
 
-// 3. gradle: namespace, applicationId, minSdk (+ libbox.aar when it is there)
+// 2b. android_overlay/app/** -> android/app/**: libs/libbox.aar (binary), proguard rules (text)
+const overlayApp = join(overlay, 'app');
+const textExt = /\.(pro|txt|properties|xml|kts?|gradle)$/;
+(function copyTree(from, to) {
+  if (!existsSync(from)) return;
+  mkdirSync(to, { recursive: true });
+  for (const f of readdirSync(from)) {
+    const src = join(from, f), dst = join(to, f);
+    if (statSync(src).isDirectory()) copyTree(src, dst);
+    else if (textExt.test(f)) writeFileSync(dst, readFileSync(src, 'utf8').replaceAll('__APP_ID__', APPLICATION_ID));
+    else copyFileSync(src, dst);
+  }
+})(overlayApp, join(android, 'app'));
+const hasLibbox = existsSync(join(android, 'app/libs/libbox.aar'));
+
+// 3. gradle: namespace, applicationId, minSdk, then one managed block at the end
 const gradle = ['build.gradle.kts', 'build.gradle'].map(n => join(android, 'app', n)).find(existsSync);
 let g = readFileSync(gradle, 'utf8');
 const kts = gradle.endsWith('.kts');
+const MARK = '// >>> jormungand overlay';
+const cut = g.indexOf(MARK);
+if (cut >= 0) g = g.slice(0, cut).trimEnd() + '\n';
 g = g.replace(/(namespace\s*=?\s*)"[^"]*"/, `$1"${APPLICATION_ID}"`)
      .replace(/(applicationId\s*=?\s*)"[^"]*"/, `$1"${APPLICATION_ID}"`)
      .replace(/(minSdk(?:Version)?\s*=?\s*)(flutter\.minSdkVersion|\d+)/, `$1${MIN_SDK}`);
-if (existsSync(join(android, 'app/libs/libbox.aar')) && !g.includes('libbox.aar')) {
-  g += kts
-    ? '\ndependencies {\n    implementation(files("libs/libbox.aar"))\n}\n'
-    : '\ndependencies {\n    implementation files("libs/libbox.aar")\n}\n';
-}
+// Release signing: android/key.properties (storeFile, keyAlias; storePassword / keyPassword, or
+// the env JORM_ANDROID_KS_PASS when absent - app/tool/build_apk.ps1 writes the file without
+// passwords). Without the file a release build stays debug-signed (flutter's template).
+const managed = kts ? [
+  MARK + ' (app/tool/apply_android_overlay.mjs rewrites this block)',
+  ...(hasLibbox ? ['dependencies {', '    implementation(files("libs/libbox.aar"))', '}'] : []),
+  '// plain key=value parse: in a .kts body `java` is the java extension, so java.util.Properties does not resolve',
+  'val jormKeyProps: Map<String, String> = rootProject.file("key.properties").let { f ->',
+  '    if (!f.exists()) emptyMap() else f.readLines().mapNotNull { l ->',
+  '        l.split("=", limit = 2).takeIf { it.size == 2 && !l.trimStart().startsWith("#") }?.let { it[0].trim() to it[1].trim() }',
+  '    }.toMap()',
+  '}',
+  'if (jormKeyProps["storeFile"] != null) {',
+  '    android {',
+  '        signingConfigs {',
+  '            create("jormRelease") {',
+  '                val pass = jormKeyProps["storePassword"] ?: System.getenv("JORM_ANDROID_KS_PASS")',
+  '                storeFile = rootProject.file(jormKeyProps.getValue("storeFile"))',
+  '                storePassword = pass',
+  '                keyAlias = jormKeyProps["keyAlias"]',
+  '                keyPassword = jormKeyProps["keyPassword"] ?: pass',
+  '            }',
+  '        }',
+  '    }',
+  '    android {',
+  '        buildTypes {',
+  '            getByName("release") { signingConfig = signingConfigs.getByName("jormRelease") }',
+  '        }',
+  '    }',
+  '}',
+  'android {',
+  '    buildTypes {',
+  '        getByName("release") { proguardFiles("jormungand-proguard.pro") }',
+  '    }',
+  '}',
+] : [
+  MARK + ' (app/tool/apply_android_overlay.mjs rewrites this block)',
+  ...(hasLibbox ? ['dependencies {', '    implementation files("libs/libbox.aar")', '}'] : []),
+  'def jormKeyProps = new Properties()',
+  'def jormKeyFile = rootProject.file("key.properties")',
+  'if (jormKeyFile.exists()) { jormKeyFile.withInputStream { jormKeyProps.load(it) } }',
+  'if (jormKeyProps["storeFile"] != null) {',
+  '    android {',
+  '        signingConfigs {',
+  '            jormRelease {',
+  '                def pass = jormKeyProps["storePassword"] ?: System.getenv("JORM_ANDROID_KS_PASS")',
+  '                storeFile rootProject.file(jormKeyProps.getProperty("storeFile"))',
+  '                storePassword pass',
+  '                keyAlias jormKeyProps["keyAlias"]',
+  '                keyPassword jormKeyProps["keyPassword"] ?: pass',
+  '            }',
+  '        }',
+  '        buildTypes {',
+  '            release { signingConfig signingConfigs.jormRelease }',
+  '        }',
+  '    }',
+  '}',
+  'android {',
+  '    buildTypes {',
+  '        release { proguardFiles "jormungand-proguard.pro" }',
+  '    }',
+  '}',
+];
+g = g.trimEnd() + '\n\n' + managed.join('\n') + '\n';
 writeFileSync(gradle, g);
 
-console.log(`android overlay applied: applicationId ${APPLICATION_ID}, minSdk ${MIN_SDK}, ${gradle.replace(app, 'app')}`);
+console.log(`android overlay applied: applicationId ${APPLICATION_ID}, minSdk ${MIN_SDK}, libbox.aar ${hasLibbox ? "yes" : "NO (core/tool/build_libbox.ps1)"}, ${gradle.replace(app, "app")}`);
 if (!/applicationId\s*=?\s*"/.test(g) || !g.includes(`"${APPLICATION_ID}"`)) console.warn('  could not patch applicationId / namespace in the gradle file - set them by hand');
 if (!new RegExp(`minSdk(Version)?\\s*=?\\s*${MIN_SDK}`).test(g)) console.warn('  could not patch minSdk - set it by hand');

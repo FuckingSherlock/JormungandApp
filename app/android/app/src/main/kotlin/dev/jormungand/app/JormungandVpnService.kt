@@ -1,0 +1,263 @@
+package dev.jormungand.app
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Intent
+import android.content.pm.PackageManager.NameNotFoundException
+import android.content.pm.ServiceInfo
+import android.net.IpPrefix
+import android.net.VpnService
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import android.util.Log
+import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.RoutePrefix
+import io.nekohasekai.libbox.TunOptions
+import java.net.InetAddress
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+/**
+ * The tunnel: a foreground VpnService that runs libbox (sing-box) with the config the Dart core
+ * built. The core stays the owner of the config (routing plan, rules, DNS, the `tun` inbound with
+ * its addresses and routes); this class only opens the tun for libbox ([openTunInternal]) and
+ * keeps the process alive.
+ *
+ * Lifecycle: VpnChannel `start` leaves a request in [VpnBridge] and starts the service; the
+ * service starts libbox on its worker thread and answers the request (null = up, else the
+ * reason). A second `start` while it runs restarts libbox inside the same service. `stop`
+ * ([stopTunnel]) and the system revoking the VPN ([onRevoke]) close libbox, the tun and the
+ * service; the revoke is also reported to Dart (event `stopped`).
+ *
+ * The app itself is kept OUT of the VPN (addDisallowedApplication): sing-box's own sockets to the
+ * servers, and the core's direct requests (subscriptions), then bypass the tunnel without any
+ * routing trick, and the throwaway libbox of a latency test measures the real path.
+ *
+ * TODO: notification text through strings.xml (en / ru), action "Disconnect", tap opens the app,
+ *  live speed in the text while connected.
+ */
+class JormungandVpnService : VpnService() {
+    companion object {
+        const val ACTION_START = "dev.jormungand.app.vpn.START"
+        private const val TAG = "JormungandVpn"
+        private const val CHANNEL_ID = "vpn"
+        private const val NOTIFICATION_ID = 1
+
+        @Volatile
+        var instance: JormungandVpnService? = null
+            private set
+    }
+
+    private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+    private val lock = Any()
+    private var box: LibboxBox? = null
+
+    @Volatile
+    private var tunFd: ParcelFileDescriptor? = null
+
+    @Volatile
+    var isUp = false
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        enterForeground() // within 5 s of startForegroundService, whatever happens next
+        val request = VpnBridge.takePending()
+        if (request == null) {
+            leave() // started with nothing to do
+        } else {
+            worker.execute { startTunnel(request) }
+        }
+        // Not sticky: a restart without the Dart side could not rebuild the config.
+        return START_NOT_STICKY
+    }
+
+    override fun onRevoke() {
+        // The user (or another VPN app) took the VPN away.
+        worker.execute {
+            synchronized(lock) { closeBoxLocked() }
+            VpnBridge.emit(mapOf("type" to "stopped", "reason" to "revoked"))
+            leave()
+        }
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        worker.execute { synchronized(lock) { closeBoxLocked() } }
+        worker.shutdown()
+        super.onDestroy()
+    }
+
+    /** Closes libbox and the tun, ends the service; [done] runs after that (a worker thread). */
+    fun stopTunnel(done: () -> Unit) {
+        worker.execute {
+            synchronized(lock) { closeBoxLocked() }
+            leave()
+            done()
+        }
+    }
+
+    private fun startTunnel(request: VpnBridge.Pending) {
+        try {
+            synchronized(lock) {
+                closeBoxLocked()
+                val b = LibboxBox(applicationContext, VpnPlatform(this))
+                box = b
+                b.start(request.config)
+                isUp = true
+            }
+            request.done(null)
+        } catch (e: Throwable) {
+            Log.e(TAG, "start", e)
+            synchronized(lock) { closeBoxLocked() }
+            request.done(e.message ?: e.toString())
+            leave()
+        }
+    }
+
+    private fun closeBoxLocked() {
+        isUp = false
+        box?.stop()
+        box = null
+        runCatching { tunFd?.close() }
+        tunFd = null
+    }
+
+    private fun leave() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun enterForeground() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "VPN", NotificationManager.IMPORTANCE_LOW)
+        )
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("Jormungand")
+            .setContentText("VPN is on")
+            .setSmallIcon(applicationInfo.icon)
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    /** libbox's openTun: the `tun` inbound's options -> a VpnService.Builder -> the descriptor. */
+    internal fun openTunInternal(options: TunOptions): Int {
+        if (prepare(this) != null) error("android: missing vpn permission")
+
+        val builder = Builder()
+            .setSession("Jormungand")
+            .setMtu(options.mtu)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
+
+        for (a in options.inet4Address.all()) builder.addAddress(a.address(), a.prefix())
+        for (a in options.inet6Address.all()) builder.addAddress(a.address(), a.prefix())
+
+        if (options.autoRoute) {
+            if (options.dnsMode.value != Libbox.DNSModeDisabled) {
+                val dns = options.dnsServerAddress
+                while (dns.hasNext()) builder.addDnsServer(dns.next())
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // routes and exclusions as the config says
+                val v4 = options.inet4RouteAddress.all()
+                if (v4.isNotEmpty()) {
+                    for (r in v4) addRoute33(builder, r)
+                } else if (options.inet4Address.all().isNotEmpty()) {
+                    builder.addRoute("0.0.0.0", 0)
+                }
+                val v6 = options.inet6RouteAddress.all()
+                if (v6.isNotEmpty()) {
+                    for (r in v6) addRoute33(builder, r)
+                } else if (options.inet6Address.all().isNotEmpty()) {
+                    builder.addRoute("::", 0)
+                }
+                for (r in options.inet4RouteExcludeAddress.all()) excludeRoute33(builder, r)
+                for (r in options.inet6RouteExcludeAddress.all()) excludeRoute33(builder, r)
+            } else {
+                // before Android 13 there is no excludeRoute: libbox computes the ranges that remain
+                for (r in options.inet4RouteRange.all()) builder.addRoute(r.address(), r.prefix())
+                for (r in options.inet6RouteRange.all()) builder.addRoute(r.address(), r.prefix())
+            }
+
+            val include = options.includePackage.allStrings()
+            val exclude = options.excludePackage.allStrings()
+            try {
+                if (include.isNotEmpty()) {
+                    // only these apps; ours is not among them, so it stays outside
+                    for (p in include) allow(builder, p)
+                } else {
+                    for (p in exclude) disallow(builder, p)
+                    disallow(builder, packageName)
+                }
+            } catch (e: IllegalArgumentException) {
+                Log.e(TAG, "per-app lists", e)
+            }
+        } else {
+            disallow(builder, packageName)
+        }
+
+        val pfd = builder.establish() ?: error("android: the application is not prepared or is revoked")
+        runCatching { tunFd?.close() }
+        tunFd = pfd
+        return pfd.fd
+    }
+
+    private fun allow(builder: Builder, pkg: String) {
+        try {
+            builder.addAllowedApplication(pkg)
+        } catch (e: NameNotFoundException) {
+            Log.w(TAG, "addAllowedApplication $pkg", e)
+        }
+    }
+
+    private fun disallow(builder: Builder, pkg: String) {
+        try {
+            builder.addDisallowedApplication(pkg)
+        } catch (e: NameNotFoundException) {
+            Log.w(TAG, "addDisallowedApplication $pkg", e)
+        }
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.TIRAMISU)
+    private fun addRoute33(builder: Builder, r: RoutePrefix) {
+        builder.addRoute(IpPrefix(InetAddress.getByName(r.address()), r.prefix()))
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.TIRAMISU)
+    private fun excludeRoute33(builder: Builder, r: RoutePrefix) {
+        builder.excludeRoute(IpPrefix(InetAddress.getByName(r.address()), r.prefix()))
+    }
+}
+
+/** The tunnel's platform: [LibboxPlatform] plus the tun and socket protection from the service. */
+class VpnPlatform(private val service: JormungandVpnService) : LibboxPlatform(service) {
+    override fun autoDetectInterfaceControl(fd: Int) {
+        service.protect(fd)
+    }
+
+    override fun openTun(options: TunOptions): Int = service.openTunInternal(options)
+}
+
+private fun io.nekohasekai.libbox.RoutePrefixIterator.all(): List<RoutePrefix> {
+    val out = mutableListOf<RoutePrefix>()
+    while (hasNext()) out.add(next())
+    return out
+}
+
+private fun io.nekohasekai.libbox.StringIterator.allStrings(): List<String> {
+    val out = mutableListOf<String>()
+    while (hasNext()) out.add(next())
+    return out
+}

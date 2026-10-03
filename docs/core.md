@@ -150,7 +150,11 @@ closeConnections`. Тела и ответы — те же карты (`Map<Strin
 `BoxRunner.api` по-прежнему `SingBoxApi` (gRPC API service sing-box): Auto, трафик и Speed Test говорят
 с sing-box только через него, поэтому другой раннер должен отдавать тот же API (или адаптер к нему).
 `singBox` (путь к бинарнику) нужен `CoreService` для версии, списка программ «напрямую» в TUN и
-запасного `boxFactory`. Android в этих швах пока не реализован.
+запасного `boxFactory`. Android: `LibboxRunner` (`app/lib/core/libbox_runner.dart`) добавляет к конфигу
+службу `api` через `withApiService(config, newApiSecret(), port)` (`runtime.dart`), и `api` — тот же
+`SingBoxApi` на loopback; журнал sing-box идёт через `SingBoxApi.logLines()` (процесса с выводом нет).
+Платформенная сторона (libbox, `VpnService`) — `app/android_overlay/kotlin/`, шов к ней —
+`LibboxPort`. Код Kotlin ещё не собирался.
 
 ## Нода
 
@@ -512,8 +516,8 @@ sing-box>}`; прочие сбои старта остаются `conn/connectFa
 
 `status.mode`: `'tun'` | `'proxy'` у подключённого, `null` без подключения (также `conn/connected.mode`).
 
-**Android** (позже, libbox): TUN-дескриптор даёт `VpnService`, полей `tun-in` с адресами и маршрутами
-нет; вместо правила по процессу ядра приложение исключает **себя** из VPN
+**Android** (libbox): TUN-дескриптор даёт `VpnService` по `TunOptions` из конфига `tun-in` (адреса и
+маршруты берутся из него как есть); вместо правила по процессу ядра приложение исключает **себя** из VPN
 (`addDisallowedApplication`), `package_name` — вместо `process_name` / `process_path`; пользовательский
 порт по умолчанию не открывается.
 

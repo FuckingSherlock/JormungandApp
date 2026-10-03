@@ -1,48 +1,54 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../platform/vpn_channel.dart';
 import 'core_host.dart';
+import 'libbox_runner.dart';
 import 'live_core_host.dart';
 
-/// Android's [BoxRunner]: sing-box inside the app as libbox, behind the VpnService.
-///
-/// Not integrated yet: [start] says so, so Connect fails with a clear message instead of doing
-/// nothing. The rest of the app (catalog, plan, status, journal) already runs on the same core.
-// TODO(libbox): build libbox (gomobile) into the app, see app/README.md. Then: start() passes the
-// finished [config] to `VpnChannel().start(config: jsonEncode(config))`, the service hands it to
-// libbox with the TUN fd; `api` is a SingBoxApi on the clash API port libbox opens; `onLog` takes
-// libbox's log lines; `onExit` fires when libbox stops by itself; `stop()` ends the service.
-class LibboxRunner implements BoxRunner {
-  static const notIntegrated =
-      'libbox is not integrated yet, so the VPN cannot start on Android (see app/README.md)';
+/// [LibboxPort] over the Android MethodChannel (`VpnChannel`): [boxId] null = the tunnel (the
+/// VpnService with a `tun` inbound), else a throwaway libbox with no tunnel under that id.
+class ChannelLibboxPort implements LibboxPort {
+  ChannelLibboxPort(this._vpn, {this.boxId});
+
+  final VpnChannel _vpn;
+  final String? boxId;
+
+  /// libbox starts the tunnel before it answers; a hang is cut here.
+  static const startTimeout = Duration(seconds: 60);
 
   @override
-  bool get running => false;
+  Future<void> start(String config) async {
+    final id = boxId;
+    try {
+      await (id == null
+              ? _vpn.start(config: config)
+              : _vpn.startBox(id, config))
+          .timeout(startTimeout);
+    } on PlatformException catch (e) {
+      throw SingBoxError(e.message ?? e.code);
+    } on TimeoutException {
+      unawaited(stop());
+      throw SingBoxError(
+        'sing-box did not start in ${startTimeout.inSeconds} s',
+      );
+    }
+  }
 
   @override
-  int? get pid => null;
+  Future<void> stop() {
+    final id = boxId;
+    return id == null ? _vpn.stop() : _vpn.stopBox(id);
+  }
 
   @override
-  SingBoxApi? get api => null;
-
-  @override
-  void Function(String line)? onLog;
-
-  @override
-  void Function(int code)? onExit;
-
-  @override
-  void note(String line) => onLog?.call('[jormd] $line');
-
-  @override
-  Future<void> start(Map<String, dynamic> config) =>
-      Future.error(SingBoxError(notIntegrated));
-
-  @override
-  Future<void> stop() async {}
+  Stream<String> get stoppedOnItsOwn => boxId == null
+      ? _vpn.stopped.map((e) => e.reason)
+      : const Stream<String>.empty();
 }
 
 /// Where the desktop sing-box is: `JORMUNGAND_SINGBOX`, else next to the app's executable.
@@ -56,25 +62,28 @@ String desktopSingBoxPath() {
 
 /// Builds the host the app runs on: the in-process core (`CoreService`) with this platform's
 /// seams. Desktop: sing-box as a process (the binary bundled next to the executable), the
-/// Windows system proxy. Android: [LibboxRunner], no system proxy, always TUN through the
-/// VpnService.
+/// Windows system proxy. Android: [LibboxRunner] (libbox in the app, the tunnel through the
+/// VpnService; throwaway instances for latency tests and Speed Test), no system proxy, always TUN.
 Future<CoreHost> openCoreHost() async {
   final support = await getApplicationSupportDirectory();
   final dataDir = '${support.path}${Platform.pathSeparator}core';
   await Directory(dataDir).create(recursive: true);
   if (Platform.isAndroid) {
+    const vpn = VpnChannel();
+    var boxes = 0;
     return LiveCoreHost(
       api: CoreService(
         singBox: '',
         dataDir: dataDir,
-        runner: LibboxRunner(),
-        boxFactory: (_) => LibboxRunner(),
+        runner: LibboxRunner(ChannelLibboxPort(vpn)),
+        boxFactory: (_) =>
+            LibboxRunner(ChannelLibboxPort(vpn, boxId: 'box${boxes++}')),
         sysProxy: NoSystemProxy(),
         isElevated: () =>
             true, // TUN is the VpnService here, not an admin matter
       ),
       isAndroid: true,
-      vpn: const VpnChannel(),
+      vpn: vpn,
     );
   }
   final singBox = desktopSingBoxPath();

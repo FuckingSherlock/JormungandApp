@@ -1325,5 +1325,15 @@
   "Update {0} available": "updateAvailable",
   "Downloading {#0}% · {1} of {2}": "downloadingOf",
   "Could not save the state: {0}": "couldNotSaveTheState",
-  "Sites opened by name are resolved here so IP conditions see the address. For connections through the proxy port and system proxy": "sitesOpenedByNameAreResolved2"
+  "Sites opened by name are resolved here so IP conditions see the address. For connections through the proxy port and system proxy": "sitesOpenedByNameAreResolved2",
+  "Delete group": "deleteGroup",
+  "app": "app2",
+  "Not available yet": "notAvailableYet",
+  "h": "h3",
+  "Group name": "groupName",
+  "Link copied": "linkCopied",
+  "{0}/{1} nodes": "nodes2",
+  "{0}/{1} servers": "servers2",
+  "auto": "auto2",
+  "exit": "exit2"
 }

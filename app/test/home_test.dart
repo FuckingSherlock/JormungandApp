@@ -85,27 +85,28 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('first run: the dock says add something, a tap opens the form', (
-    tester,
-  ) async {
-    final host = FakeCoreHost(
-      catalogIsEmpty: true,
-      dock: const DockSummary(kind: DockKind.simple, none: DockNone.empty),
-    )..outcomeOverride = ConnectOutcome.catalogEmpty;
-    await pumpApp(tester, host);
+  testWidgets(
+    'first run: the dock says add something, a tap opens the Add menu',
+    (tester) async {
+      final host = FakeCoreHost(
+        catalogIsEmpty: true,
+        dock: const DockSummary(kind: DockKind.simple, none: DockNone.empty),
+      )..outcomeOverride = ConnectOutcome.catalogEmpty;
+      await pumpApp(tester, host);
 
-    expect(find.text('No servers yet'), findsOneWidget);
-    expect(find.text('Add in Nodes'), findsOneWidget);
-    expect(find.text('—'), findsOneWidget); // no latency
+      expect(find.text('No servers yet'), findsOneWidget);
+      expect(find.text('Add in Nodes'), findsOneWidget);
+      expect(find.text('—'), findsOneWidget); // no latency
 
-    await tester.tap(find.text('No servers yet'));
-    await tester.pumpAndSettle();
-    expect(find.text('Add subscription'), findsWidgets);
-    expect(find.text('Subscription URL'), findsOneWidget);
-    expect(find.byType(NavigationBar), findsOneWidget);
-    final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
-    expect(bar.selectedIndex, AppTab.nodes.index);
-  });
+      await tester.tap(find.text('No servers yet'));
+      await tester.pumpAndSettle();
+      expect(find.text('Subscription'), findsOneWidget); // the Add menu
+      expect(find.text('Manual server'), findsOneWidget);
+      expect(find.byType(NavigationBar), findsOneWidget);
+      final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(bar.selectedIndex, AppTab.nodes.index);
+    },
+  );
 
   testWidgets('VPN down: the alert, the dock line, the red tab', (
     tester,

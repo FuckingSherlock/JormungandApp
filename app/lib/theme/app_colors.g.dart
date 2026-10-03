@@ -322,7 +322,8 @@ ThemeData buildAppTheme(AppColors c) {
     dividerTheme: DividerThemeData(color: c.border, space: 1, thickness: 1),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: c.surface,
-      indicatorColor: Colors.transparent, // the mockup's .nav-btn: active = accent label, others dimmed
+      indicatorColor: Colors
+          .transparent, // the mockup's .nav-btn: active = accent label, others dimmed
       height: 62,
       iconTheme: WidgetStateProperty.resolveWith(
         (states) => IconThemeData(

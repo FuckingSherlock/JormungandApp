@@ -377,6 +377,15 @@ dart run tool/release_manifest.dart --key <файл> --version 0.2.0 --build 12 
    пойдёт на следующую).
 5. Проверить с чистой установки / устройства («Check now»).
 
+### Сборка и ключ Android APK
+
+`pwsh app/tool/build_apk.ps1` (подробности — `app/README.md`) собирает по одному релизному APK на ABI
+(`--split-per-abi`; `-BuildNumber` = `build` манифеста). Ключ подписи —
+`%USERPROFILE%\.jormungand\android-release.jks` (alias `jormungand`), пароль только в переменной
+`JORM_ANDROID_KS_PASS`; ключ создаётся при первой сборке и **должен быть сохранён**: другой ключ —
+другой подписант, и установка поверх невозможна. В конце скрипт печатает SHA-256 сертификата — его
+(hex в нижнем регистре, без двоеточий) кладут в `android.signerSha256` манифеста (`--signer-sha256`).
+
 ## 14. Ядро
 
 `core/lib/src/appupdate.dart` (экспортируется из `jormungand_core.dart`): `AppVersion`,

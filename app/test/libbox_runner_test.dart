@@ -1,0 +1,208 @@
+// LibboxRunner (the Android BoxRunner) with a desktop sing-box behind the port instead of libbox:
+// the config gets the API service, `api` talks to it, the log lines come through the API, a
+// restart replaces, "stopped on its own" reaches onExit. Loopback only; skipped when
+// core/tool/bin has no sing-box. Run from app/.
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jormungand/core/libbox_runner.dart';
+import 'package:jormungand_core/jormungand_core.dart';
+
+final _bin =
+    '../core/tool/bin/${Platform.isWindows ? 'sing-box.exe' : 'sing-box'}';
+final _skip = File(_bin).existsSync() ? false : 'no sing-box in core/tool/bin';
+
+/// What the Kotlin side does, with a sing-box process: runs the config it is given.
+class ProcessPort implements LibboxPort {
+  ProcessPort(this.dir);
+  final String dir;
+  Process? _proc;
+  int starts = 0, stops = 0;
+  Object? failWith;
+  final gone = StreamController<String>.broadcast();
+
+  @override
+  Future<void> start(String config) async {
+    starts++;
+    if (failWith != null) throw failWith!;
+    _proc?.kill();
+    final file = File('$dir/config$starts.json')..writeAsStringSync(config);
+    _proc = await Process.start(_bin, [
+      'run',
+      '-c',
+      file.path,
+      '-D',
+      dir,
+      '--disable-color',
+    ]);
+    _proc!.stdout.drain<void>();
+    _proc!.stderr.drain<void>();
+  }
+
+  @override
+  Future<void> stop() async {
+    stops++;
+    _proc?.kill();
+    _proc = null;
+  }
+
+  @override
+  Stream<String> get stoppedOnItsOwn => gone.stream;
+
+  /// The system takes the VPN away: sing-box is gone, the platform says so.
+  void revoke() {
+    _proc?.kill();
+    _proc = null;
+    gone.add('revoked');
+  }
+}
+
+Map<String, dynamic> _config(int mixed) => {
+  'log': {'level': 'debug'},
+  'inbounds': [
+    {
+      'type': 'mixed',
+      'tag': 'mixed-in',
+      'listen': '127.0.0.1',
+      'listen_port': mixed,
+    },
+  ],
+  'outbounds': [
+    {'type': 'direct', 'tag': 'direct'},
+  ],
+  'route': {'final': 'direct'},
+};
+
+Future<void> _get(int mixed, int target) async {
+  final http = HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:$mixed';
+  try {
+    final req = await http
+        .getUrl(Uri.parse('http://127.0.0.1:$target/'))
+        .timeout(const Duration(seconds: 3));
+    final res = await req.close().timeout(const Duration(seconds: 3));
+    await res.drain<void>();
+  } finally {
+    http.close(force: true);
+  }
+}
+
+void main() {
+  late Directory tmp;
+  late ProcessPort port;
+  late LibboxRunner runner;
+
+  setUp(() async {
+    tmp = await Directory.systemTemp.createTemp('jorm-libbox-runner');
+    port = ProcessPort(tmp.path);
+    runner = LibboxRunner(port, upTimeout: const Duration(seconds: 10));
+  });
+  tearDown(() async {
+    await port.stop();
+    await runner.stop();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await tmp.delete(recursive: true);
+  });
+
+  test(
+    'start: the port gets the config plus the API service; api and log lines work',
+    () async {
+      final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      target.listen(
+        (r) => r.response
+          ..write('ok')
+          ..close(),
+      );
+      addTearDown(() => target.close(force: true));
+      final mixed = await freePort();
+      final lines = <String>[];
+      runner.onLog = lines.add;
+
+      await runner.start(_config(mixed));
+
+      expect(runner.running, isTrue);
+      expect(runner.pid, isNull);
+      expect(runner.api, isNotNull);
+      final sent =
+          jsonDecode(File('${tmp.path}/config1.json').readAsStringSync())
+              as Map;
+      final api = (sent['services'] as List).cast<Map>().singleWhere(
+        (s) => s['type'] == 'api',
+      );
+      expect(api['listen'], '127.0.0.1');
+      expect(api['secret'], isNotEmpty);
+      expect(await runner.api!.serviceState(), isNull);
+
+      await _get(mixed, target.port);
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (!lines.any((l) => l.contains('${target.port}')) &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(
+        lines.any((l) => l.contains('${target.port}')),
+        isTrue,
+        reason: 'sing-box log through the API',
+      );
+    },
+    skip: _skip,
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+
+  test(
+    'a second start replaces the first (new API service, no stop in between)',
+    () async {
+      await runner.start(_config(await freePort()));
+      final first = runner.api;
+      await runner.start(_config(await freePort()));
+      expect(port.starts, 2);
+      expect(port.stops, 0);
+      expect(runner.api, isNot(same(first)));
+      expect(runner.running, isTrue);
+      expect(await runner.api!.serviceState(), isNull);
+    },
+    skip: _skip,
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+
+  test(
+    'stopped on its own: onExit fires once, running turns false, the api is dropped',
+    () async {
+      final codes = <int>[];
+      runner.onExit = codes.add;
+      await runner.start(_config(await freePort()));
+      port.revoke();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(codes, [0]);
+      expect(runner.running, isFalse);
+      expect(runner.api, isNull);
+      await runner.stop(); // nothing left on the platform side: no native stop
+      expect(port.stops, 0);
+    },
+    skip: _skip,
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+
+  test(
+    'stop: closes the platform side once; a failed start leaves nothing to stop',
+    () async {
+      await runner.start(_config(await freePort()));
+      await runner.stop();
+      await runner.stop();
+      expect(port.stops, 1);
+      expect(runner.running, isFalse);
+
+      port.failWith = SingBoxError('bad config');
+      await expectLater(
+        runner.start(_config(await freePort())),
+        throwsA(isA<SingBoxError>()),
+      );
+      expect(runner.running, isFalse);
+      await runner.stop();
+      expect(port.stops, 1);
+    },
+    skip: _skip,
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+}

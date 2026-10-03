@@ -7,3 +7,9 @@ design/.artifact/
 .claude/worktrees/
 
 .claude/agent-memory-local/
+
+# Android build: libbox built locally, release keystore config
+app/android_overlay/app/libs/
+app/android/key.properties
+*.jks
+*.keystore

@@ -1,0 +1,136 @@
+package __APP_ID__
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Log
+import io.nekohasekai.libbox.InterfaceUpdateListener
+import java.net.NetworkInterface
+
+/**
+ * The default (non-VPN) network, which libbox needs to bind its sockets to and to resolve DNS
+ * through. One monitor for every libbox in the process (the tunnel and the throwaway ones for
+ * pings): it listens to the system while at least one libbox listens to it.
+ *
+ * The request carries NOT_VPN (the Builder default), so the answer is the underlying network even
+ * while our own VPN is up. Follows sing-box-for-android's DefaultNetworkListener / Monitor.
+ */
+object DefaultNetworkMonitor {
+    private const val TAG = "DefaultNetwork"
+
+    @Volatile
+    var defaultNetwork: Network? = null
+        private set
+
+    private val lock = Any()
+    private val listeners = LinkedHashSet<InterfaceUpdateListener>()
+    private var connectivity: ConnectivityManager? = null
+    private var registered = false
+    private val handler: Handler by lazy {
+        Handler(HandlerThread("jorm-network").apply { start() }.looper)
+    }
+
+    private val callback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            defaultNetwork = network
+            publish(network)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            if (network == defaultNetwork) publish(network)
+        }
+
+        override fun onLost(network: Network) {
+            if (network == defaultNetwork) {
+                defaultNetwork = null
+                publish(null)
+            }
+        }
+    }
+
+    fun add(context: Context, listener: InterfaceUpdateListener) {
+        val network: Network?
+        synchronized(lock) {
+            val cm = connectivity ?: context.applicationContext
+                .getSystemService(ConnectivityManager::class.java).also { connectivity = it }
+            listeners.add(listener)
+            if (!registered) {
+                register(cm)
+                registered = true
+                // until the callback answers: the active network, when it is not our own VPN
+                if (defaultNetwork == null) defaultNetwork = underlyingActive(cm)
+            }
+            network = defaultNetwork
+        }
+        // the first answer to a new listener must not wait for the next change
+        if (network != null) publishTo(listener, network)
+    }
+
+    fun remove(listener: InterfaceUpdateListener) {
+        synchronized(lock) {
+            listeners.remove(listener)
+            if (listeners.isEmpty() && registered) {
+                runCatching { connectivity?.unregisterNetworkCallback(callback) }
+                registered = false
+                defaultNetwork = null
+            }
+        }
+    }
+
+    private fun underlyingActive(cm: ConnectivityManager): Network? {
+        val active = cm.activeNetwork ?: return null
+        val caps = cm.getNetworkCapabilities(active) ?: return null
+        return if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) null else active
+    }
+
+    private fun register(cm: ConnectivityManager) {
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+            .build()
+        when {
+            Build.VERSION.SDK_INT >= 31 -> registerBestMatching(cm, request)
+            // REQUEST, not LISTEN: only the network that is THE default (needs CHANGE_NETWORK_STATE)
+            Build.VERSION.SDK_INT >= 28 -> cm.requestNetwork(request, callback, handler)
+            else -> cm.registerDefaultNetworkCallback(callback, handler)
+        }
+    }
+
+    @android.annotation.TargetApi(31)
+    private fun registerBestMatching(cm: ConnectivityManager, request: NetworkRequest) {
+        cm.registerBestMatchingNetworkCallback(request, callback, handler)
+    }
+
+    private fun publish(network: Network?) {
+        val targets = synchronized(lock) { listeners.toList() }
+        for (l in targets) publishTo(l, network)
+    }
+
+    private fun publishTo(listener: InterfaceUpdateListener, network: Network?) {
+        if (network == null) {
+            listener.updateDefaultInterface("", -1, false, false)
+            return
+        }
+        val cm = connectivity ?: return
+        // the link properties lag behind onAvailable for a moment
+        for (attempt in 0 until 10) {
+            val name = cm.getLinkProperties(network)?.interfaceName
+            val index = try {
+                if (name == null) null else NetworkInterface.getByName(name)?.index
+            } catch (e: Exception) {
+                null
+            }
+            if (name != null && index != null) {
+                listener.updateDefaultInterface(name, index, false, false)
+                return
+            }
+            Thread.sleep(100)
+        }
+        Log.w(TAG, "no interface for the default network")
+    }
+}

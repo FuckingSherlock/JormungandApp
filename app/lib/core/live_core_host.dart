@@ -40,8 +40,9 @@ class LiveCoreHost extends CoreHost {
   final Duration trafficEvery;
   final DateTime Function() _now;
 
-  /// The app's state. Public for the pages that edit it (Nodes, Route, ...): they call
-  /// [changed] after an edit.
+  /// The app's state. Public for the pages that edit it (Route, ...): they call [changed] after
+  /// an edit; Nodes edits only through the methods below.
+  @override
   Catalog catalog = Catalog();
 
   Future<void>? _init;
@@ -791,9 +792,13 @@ class LiveCoreHost extends CoreHost {
   // ───────────────────────────── catalog actions ─────────────────────────────
 
   @override
+  bool isUpdating(String sid) => _updating.contains(sid);
+
+  @override
   Future<AddSourceResult> addSubscription(
     String url, {
     String name = '',
+    SubscriptionSettings? settings,
   }) async {
     final u = url.trim();
     if (u.isEmpty) return const AddSourceResult(AddSourceOutcome.emptyUrl);
@@ -805,6 +810,7 @@ class LiveCoreHost extends CoreHost {
     } catch (_) {}
     final given = name.trim();
     final shown = given.isNotEmpty ? given : host;
+    final form = settings ?? const SubscriptionSettings();
     catalog.addSource(
       Source.fromJson({
         'id': id,
@@ -822,23 +828,17 @@ class LiveCoreHost extends CoreHost {
         'updatedAt': _now().millisecondsSinceEpoch,
         'usage': {'used': 0, 'total': 0},
         'expire': null,
-        'updateInterval': 'auto',
-        'reloadAfterUpdate': true,
-        'testAfterUpdate': true,
-        'userAgent': 'Auto',
-        'channel': 'Direct first',
-        'hwid': false,
-        'keepRules': false,
-        'filter': '',
-        'password': '',
-        'website': '',
+        ...form.toJson(),
       }),
     );
     changed();
     _updating.add(id);
+    _notify();
+    var loaded = false;
     try {
       await _fetchInto(id);
       final s = catalog.sourcesData[id];
+      loaded = s != null;
       if (s != null) {
         s.unknown.remove('lastError');
         _journal('updated', {
@@ -876,14 +876,20 @@ class LiveCoreHost extends CoreHost {
       final s = catalog.sourcesData[id];
       if (s != null) s.count = s.nodes.length;
       changed();
+      if (loaded && s != null && s.unknown['testAfterUpdate'] != false) {
+        unawaited(_pingNodes(catalog.liveNodes(s)));
+      }
     }
   }
 
   /// Asks the core to fetch source [sid] with its own settings and applies the patch of the
-  /// fields the core owns (`liveFetch`). Throws what the fetch threw.
-  Future<void> _fetchInto(String sid) async {
-    final s = catalog.sourcesData[sid]!;
-    final j = s.toJson();
+  /// fields the core owns onto the source as it is *now* (`liveFetch`): what the user changed
+  /// while the fetch ran stays, and a source deleted meanwhile stays deleted. Throws what the
+  /// fetch threw. The caller pings the new servers.
+  Future<void> _fetchInto(String sid, {bool rediscover = false}) async {
+    final before = catalog.sourcesData[sid];
+    if (before == null) return;
+    final sent = before.toJson();
     final r = await api.fetchSource({
       'sid': sid,
       'source': {
@@ -898,13 +904,15 @@ class LiveCoreHost extends CoreHost {
           'filter',
           'channel',
         ])
-          k: j[k],
+          k: sent[k],
       },
-      'rediscover': false,
+      'rediscover': rediscover,
     });
+    final cur = catalog.sourcesData[sid];
+    if (cur == null) return;
     final patch = r['patch'];
     final next = Source.fromJson({
-      ...j,
+      ...cur.toJson(),
       if (patch is Map) ...Map<String, dynamic>.from(patch),
     });
     final title = r['title'];
@@ -918,9 +926,489 @@ class LiveCoreHost extends CoreHost {
     catalog.sourcesData[sid] = next;
     catalog.syncCatalog();
     if (r['notModified'] != true) _keepRunningIfNoReload(updated: [next]);
-    if (next.unknown['testAfterUpdate'] != false) {
-      unawaited(_pingNodes(catalog.liveNodes(next)));
+  }
+
+  @override
+  Future<void> updateSource(String sid, {bool rediscover = false}) async {
+    final s = catalog.sourcesData[sid];
+    if (s == null || s.kind != 'sub' || _updating.contains(sid) || !_ready) {
+      return;
     }
+    _updating.add(sid);
+    _notify();
+    final before = {for (final n in s.nodes) n.id};
+    final gone0 = s.gone.length;
+    var ok = false;
+    try {
+      await _fetchInto(sid, rediscover: rediscover);
+      final cur = catalog.sourcesData[sid];
+      if (cur != null) {
+        cur.count = cur.nodes.length;
+        cur.unknown.remove('lastError');
+      }
+      ok = cur != null;
+    } catch (e) {
+      final cur = catalog.sourcesData[sid];
+      final msg = e is FormatException ? e.message : '$e';
+      final shown = cur?.name ?? s.name;
+      cur?.unknown['lastError'] = {
+        'msg': msg,
+        'at': _now().millisecondsSinceEpoch,
+      };
+      _notice(
+        HostNotice(
+          'updateFailed',
+          'Update of $shown failed: $msg',
+          args: [shown, msg],
+        ),
+      );
+      _journal(
+        'failed',
+        {'source': sid, 'name': shown, 'error': msg},
+        cat: 'sub',
+        level: 'error',
+      );
+    } finally {
+      _updating.remove(sid);
+      catalog.purgeExpiredGone();
+      final cur = catalog.sourcesData[sid];
+      if (ok && cur != null) _subResultEvents(cur, before, gone0);
+      changed();
+      if (ok && cur != null && cur.unknown['testAfterUpdate'] != false) {
+        unawaited(_pingNodes(catalog.liveNodes(cur)));
+      }
+    }
+  }
+
+  /// The events of a finished update: updated (new / removed servers, total), and the provider
+  /// removing servers or bringing them back (`subResultEvents`).
+  void _subResultEvents(Source s, Set<String> before, int gone0) {
+    final now = {for (final n in s.nodes) n.id};
+    final data = {'source': s.id, 'name': s.name};
+    _journal('updated', {
+      'added': now.difference(before).length,
+      'removed': before.difference(now).length,
+      'total': s.nodes.length,
+      ...data,
+    }, cat: 'sub');
+    final g = s.gone.length;
+    if (g > gone0) {
+      _journal(
+        'removed',
+        {'count': g - gone0, ...data},
+        cat: 'sub',
+        level: 'warn',
+      );
+    } else if (g < gone0) {
+      _journal('back', {'count': gone0 - g, ...data}, cat: 'sub');
+    }
+  }
+
+  @override
+  Future<void> updateAll() => Future.wait([
+    for (final sid in [...catalog.sourceOrder])
+      if (catalog.sourcesData[sid]?.enabled == true) updateSource(sid),
+  ]);
+
+  @override
+  void saveSource(
+    String sid, {
+    String name = '',
+    String? url,
+    SubscriptionSettings? settings,
+  }) {
+    final s = catalog.sourcesData[sid];
+    if (s == null) return;
+    final given = name.trim();
+    if (given.isNotEmpty) s.name = given;
+    var refetch = false, rediscover = false;
+    final u = url?.trim() ?? '';
+    if (s.kind == 'sub' && settings != null && u.isNotEmpty) {
+      // Another address, User-Agent or HWID can mean another server list: forget the UA
+      // strategy and its ETags and ask again with every UA. A new filter needs a full read.
+      // Either way the list is fetched now (`saveSrcForm`).
+      final was = SubscriptionSettings.of(s);
+      rediscover =
+          s.url != u ||
+          was.userAgent != settings.userAgent ||
+          was.hwid != settings.hwid;
+      refetch = rediscover || was.filter != settings.filter;
+      s.url = u;
+      s.unknown.addAll(settings.toJson());
+      if (rediscover) {
+        s.unknown['uaStrategy'] = <Object>[];
+        s.unknown['discoveredAt'] = 0;
+      }
+    }
+    changed();
+    if (refetch) unawaited(updateSource(sid, rediscover: rediscover));
+  }
+
+  @override
+  void toggleSourceEnabled(String sid) {
+    catalog.toggleSourceEnabled(sid);
+    changed();
+  }
+
+  @override
+  void toggleNodeEnabled(String sid, String nid) {
+    catalog.toggleNodeEnabled(sid, nid);
+    changed();
+  }
+
+  @override
+  void reorderCatalog(String tab, List<String> order) {
+    catalog.reorderCatalog(tab, order);
+    changed();
+  }
+
+  @override
+  void deleteSource(String sid) {
+    catalog.deleteSource(sid);
+    _updating.remove(sid);
+    changed();
+  }
+
+  @override
+  void deleteNode(String sid, String nid) {
+    catalog.deleteNode(sid, nid);
+    changed();
+  }
+
+  @override
+  void deleteEntry(String id) {
+    if (catalog.profilesData.containsKey(id)) {
+      catalog.deleteProfile(id);
+    } else {
+      catalog.deleteChain(id);
+    }
+    changed();
+  }
+
+  @override
+  int forgetGone(String sid, [List<String>? only]) {
+    final n = catalog.forgetGone(sid, only);
+    changed();
+    return n;
+  }
+
+  @override
+  void toggleChainNode(String id, String side, String key) {
+    final c = catalog.chainsData[id];
+    if (c == null) return;
+    catalog.chainToggleNode(c, side, key);
+    changed();
+  }
+
+  @override
+  void setSourceOffNodes(String sid, List<String> off) {
+    final s = catalog.sourcesData[sid];
+    if (s == null) return;
+    s.offNodes = [...off];
+    changed();
+  }
+
+  @override
+  void setPickMode(String id, String mode) {
+    catalog.setEntryPickMode(id, mode);
+    changed();
+  }
+
+  @override
+  void setPickOrder(String id, List<String> order) {
+    catalog.setEntryPickOrder(id, order);
+    changed();
+  }
+
+  @override
+  void setEntryInAuto(String id, bool on) {
+    final e = catalog.connectEntry(id);
+    if (e == null || e.inAuto == on) return;
+    e.inAuto = on;
+    changed();
+    // the tunnel is not dropped under the user: it stays on its server until they disconnect
+    if (!on && _connected && catalog.nothingInAuto()) {
+      _notice(
+        const HostNotice(
+          'nothingInAuto',
+          'Nothing left in Auto — the connection stays until you disconnect',
+        ),
+      );
+    }
+  }
+
+  @override
+  String? saveProfile(ProfileDraft d) {
+    final err = catalog.saveProfile(
+      Profile(
+        id: d.id ?? 'draft',
+        name: d.name,
+        sources: [...d.sources],
+        nodes: [...d.nodes],
+        inAuto: d.inAuto,
+        pickMode: d.pickMode,
+        pickOrder: [...d.pickOrder],
+      ),
+      editId: d.id,
+    );
+    if (err == null) changed();
+    return err;
+  }
+
+  @override
+  String? saveChain(ChainDraft d) {
+    final err = catalog.saveChain(
+      Chain(
+        id: d.id ?? 'draft',
+        name: d.name,
+        inId: d.inId,
+        outId: d.outId,
+        inOff: [...d.inOff],
+        outOff: [...d.outOff],
+        exitMode: d.exitMode,
+        exitOrder: [...d.exitOrder],
+        inAuto: d.inAuto,
+      ),
+      editId: d.id,
+      mode: d.mode,
+    );
+    if (err == null) changed();
+    return err;
+  }
+
+  @override
+  String get nodeSort {
+    final g = catalog.unknown['genCfg'];
+    final v = g is Map ? g['nodeSort'] : null;
+    return v == 'latency' || v == 'name' ? v as String : 'order';
+  }
+
+  @override
+  void setNodeSort(String sort) {
+    final g = catalog.unknown['genCfg'];
+    if (g is Map) {
+      g['nodeSort'] = sort;
+    } else {
+      catalog.unknown['genCfg'] = <String, dynamic>{'nodeSort': sort};
+    }
+    changed();
+  }
+
+  // ── ping ──
+
+  @override
+  Future<void> pingNodes(Iterable<CatalogNode> nodes) =>
+      _pingNodes(nodes.toList());
+
+  @override
+  Future<void> pingSource(String sid) {
+    final s = catalog.sourcesData[sid];
+    return s == null ? Future.value() : _pingNodes(catalog.liveNodes(s));
+  }
+
+  /// Every enabled source, servers taken in turn from each (1st of each, 2nd of each ...), so
+  /// all the sets fill in together instead of one after another.
+  @override
+  Future<void> pingAll() {
+    final lists = [
+      for (final sid in catalog.sourceOrder)
+        if (catalog.sourcesData[sid]?.enabled == true)
+          catalog.liveNodes(catalog.sourcesData[sid]!),
+    ];
+    final nodes = <CatalogNode>[];
+    for (var i = 0; lists.any((l) => i < l.length); i++) {
+      for (final l in lists) {
+        if (i < l.length) nodes.add(l[i]);
+      }
+    }
+    return _pingNodes(nodes);
+  }
+
+  @override
+  Future<void> pingEntry(String id) {
+    final c = catalog.chainsData[id];
+    final refs = c != null
+        ? [...catalog.chainEntryRefs(c), ...catalog.chainExitRefs(c)]
+        : catalog.unitRefs(id);
+    return _pingNodes([for (final r in refs) r.node]);
+  }
+
+  // ── share, speed test, manual servers ──
+
+  @override
+  String? shareLink(CatalogNode n) {
+    if (n.outbound == null) return null;
+    try {
+      return api.share({
+        'outbound': n.outbound,
+        'name': n.name,
+        'flag': n.flag == '🌐' ? '' : n.flag,
+        'unsupported': n.unsupported,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Stream<Map<String, dynamic>> speedTest(CatalogNode n) {
+    if (n.outbound == null || !n.usable) {
+      return Stream.error(
+        const FormatException(
+          'This server cannot be tested (no sing-box outbound)',
+        ),
+      );
+    }
+    return api.speedTest({
+      'node': {'key': n.id, 'outbound': n.outbound},
+    });
+  }
+
+  @override
+  List<CatalogNode> parseLinks(String text) {
+    try {
+      final r = api.parse({'text': text});
+      return [
+        for (final n in (r['nodes'] as List? ?? const []))
+          CatalogNode.fromJson(Map<String, dynamic>.from(n as Map)),
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static const _linkForms =
+      'No server link recognised (vless://, vmess://, trojan://, ss://, hy2://, tuic://, anytls://, socks://)';
+
+  /// The servers a manual form makes: the links' (the core's parser), or the one the fields
+  /// describe (`backend.manualNodes`). An edit of the same protocol keeps the server's TLS /
+  /// transport (manual.dart).
+  List<CatalogNode> _formNodes(NodeFormInput f, CatalogNode? edit) {
+    final link = f.link.trim();
+    if (link.isNotEmpty) {
+      final r = api.parse({'text': link});
+      final nodes = [
+        for (final n in (r['nodes'] as List? ?? const []))
+          CatalogNode.fromJson(Map<String, dynamic>.from(n as Map)),
+      ];
+      if (nodes.isEmpty) throw const FormatException(_linkForms);
+      if (nodes.length == 1) nodes[0] = _typedName(nodes[0], f);
+      return edit != null ? nodes.sublist(0, 1) : nodes;
+    }
+    final same = edit != null && edit.protocol == f.protocol;
+    final name = f.name.isNotEmpty ? f.name : f.address;
+    final node = api.manualNode({
+      'protocol': f.protocol,
+      'address': f.address,
+      'port': f.port,
+      'secret': f.secret,
+      // no flag typed: an edited server keeps its own
+      'name': edit != null && edit.flag != '🌐' && splitFlag(name).$1 == '🌐'
+          ? '${edit.flag} $name'
+          : name,
+      'outbound': same ? edit.outbound : null,
+      'unsupported': same ? edit.unsupported : null,
+    });
+    return [CatalogNode.fromJson(node.toJson())];
+  }
+
+  /// The form's name when typed by hand (or with no link to name the server): a flag in it goes
+  /// to the server's flag like the core does; without one the server keeps its flag
+  /// (`typedName`).
+  static CatalogNode _typedName(CatalogNode n, NodeFormInput f) {
+    if (f.name.isEmpty || (f.link.trim().isNotEmpty && !f.nameTouched)) {
+      return n;
+    }
+    final (flag, clean) = splitFlag(f.name);
+    return CatalogNode.fromJson({
+      ...n.toJson(),
+      'name': clean,
+      if (flag != '🌐') 'flag': flag,
+    });
+  }
+
+  @override
+  Future<SaveNodeResult> saveManualNode(NodeFormInput input) async {
+    final f = NodeFormInput(
+      link: input.link.trim(),
+      protocol: input.protocol,
+      address: input.address.trim().replaceAll(RegExp(r'^\[|\]$'), ''),
+      port: input.port.trim().isEmpty ? '443' : input.port.trim(),
+      secret: input.secret.trim(),
+      name: input.name.trim(),
+      nameTouched: input.nameTouched,
+      editSid: input.editSid,
+      editNid: input.editNid,
+      group: input.group,
+    );
+    // a link carries its own address (vmess base64, legacy ss, IPv6: the core reads them)
+    if (f.link.isEmpty && f.address.isEmpty) {
+      return const SaveNodeResult(
+        SaveNodeOutcome.failed,
+        error: 'Address is required',
+      );
+    }
+    final editSource = f.editSid == null
+        ? null
+        : catalog.sourcesData[f.editSid];
+    CatalogNode? edit;
+    if (editSource != null && f.editNid != null) {
+      for (final n in editSource.nodes) {
+        if (n.id == f.editNid) edit = n;
+      }
+    }
+    final List<CatalogNode> nodes;
+    try {
+      nodes = _formNodes(f, edit);
+    } catch (e) {
+      return SaveNodeResult(
+        SaveNodeOutcome.failed,
+        error: e is FormatException ? e.message : '$e',
+      );
+    }
+    if (edit != null) {
+      // the id stays: profiles, chains and pins that name the server keep it
+      final at = editSource!.nodes.indexOf(edit);
+      editSource.nodes[at] = CatalogNode.fromJson({
+        ...nodes[0].toJson(),
+        'id': edit.id,
+      });
+      changed();
+      return const SaveNodeResult(SaveNodeOutcome.edited, added: 1);
+    }
+    // the same server twice gets the same id: once per group
+    var group = catalog.sourcesData[f.group];
+    final have = <String>{
+      if (group != null && group.kind == 'node')
+        ...group.nodes.map((n) => n.id),
+    };
+    final fresh = [
+      for (final n in nodes)
+        if (have.add(n.id)) n,
+    ];
+    final dup = nodes.length - fresh.length;
+    if (fresh.isEmpty) {
+      return SaveNodeResult(SaveNodeOutcome.duplicate, duplicates: dup);
+    }
+    if (group == null || group.kind != 'node') {
+      final manual = catalog.sourcesData.values
+          .where((s) => s.kind == 'node')
+          .length;
+      group = Source(
+        id: 'src${catalog.sourceSeq++}',
+        kind: 'node',
+        name: 'Manual ${manual + 1}',
+      );
+      catalog.addSource(group);
+    }
+    group.nodes.addAll(fresh);
+    group.count = group.nodes.length;
+    changed();
+    return SaveNodeResult(
+      SaveNodeOutcome.added,
+      added: fresh.length,
+      duplicates: dup,
+    );
   }
 
   /// Latency of [nodes] by the core, results into the ping book as they come (`backend.ping`).

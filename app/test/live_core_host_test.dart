@@ -92,8 +92,9 @@ void main() {
 
   Future<void> start({bool elevated = true, Map<String, dynamic>? snap}) async {
     dir = Directory.systemTemp.createTempSync('jorm_app_');
-    File('${dir.path}/ui-state.json')
-        .writeAsStringSync(jsonEncode(snap ?? snapshot()));
+    File(
+      '${dir.path}/ui-state.json',
+    ).writeAsStringSync(jsonEncode(snap ?? snapshot()));
     runner = FakeRunner();
     core = CoreService(
       singBox: '',

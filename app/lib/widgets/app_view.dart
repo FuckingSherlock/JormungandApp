@@ -78,8 +78,9 @@ class ContentScale extends StatelessWidget {
   Widget build(BuildContext context) {
     final scale = AppSettingsScope.of(context).textScale;
     return MediaQuery(
-      data: MediaQuery.of(context)
-          .copyWith(textScaler: TextScaler.linear(scale)),
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: TextScaler.linear(scale)),
       child: child,
     );
   }
