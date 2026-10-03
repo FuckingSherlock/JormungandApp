@@ -1,184 +1,126 @@
 # Jormungand
 
-VPN/proxy client (sing-box core), a reworked clone of Karing. Current stage: an
-interactive HTML mockup of the UI plus the pure-Dart core (`core/`, MVP) that the mockup
-drives as a web UI through the local daemon `jormd` (see `docs/core.md`). The real app
-will be Flutter over the same core — do not start the Flutter UI until the mockup is
-finished. The user talks Russian; reply in Russian.
+VPN/proxy client over sing-box, a reworked clone of Karing. The user talks Russian; reply in Russian.
 
-## Status
+Three products, one repo (how they fit together: **`docs/platforms.md`** — read it before any
+Flutter or build work):
+- **Mockup** `design/` — the spec of UI and behaviour; also the live desktop web UI through the
+  local daemon `jormd`. The user keeps designing here.
+- **Flutter app** `app/` — the real app, Android first, then Windows. Ported from the mockup screen
+  by screen; differences between platforms are listed in `docs/platforms.md`.
+- **Core** `core/` — Dart package `jormungand_core` shared by both (parsers, catalog, plan, sing-box
+  config and runtime, `CoreService`, updates). Design and API: `docs/core.md`.
 
-In the mockup: Home (modes incl. system proxy, connect dock), Nodes (the catalog: tabs
-Simple / Profiles, swipeable — sources, profiles, chains are created and edited only here),
-Route (main flow only: animated Simple / Profiles switch, Auto / Manual, always-on ⋮⋮ own
-priority over the Nodes order, AUTO / MANUAL button + Use in Auto on every row, a row unfolds to
-Fastest / Priority, ⚡ and its servers), Settings (Auto mode, Appearance with themes and
-text size 90–120%, General with startup / notifications and the launch ping, Connection, DNS), Rules (apps, own rules with form + JSON, target picker
-over the whole catalog, "If unavailable" + global default, quick rules, services dropdown
-linked to per-app routing, final order, address test, import/export, rule sets). All sheets
-open to the top of the screen, end above the bottom nav (always visible; a tab tap closes them)
-and close by swiping the header down. Back (phone / browser / Esc)
-closes the top sheet and reopens the one it replaced (Add → Subscription), then goes Home.
+Where things stand and what's next: the newest `.claude_states/state_N.md`.
 
-Nodes edit mode: ✎ sits left of the Simple / Profiles tabs, ✓ while editing;
-the header never changes (search, ⚡, ⋮, + stay available in edit mode).
+## Docs (Russian, the knowledge base — keep them current)
 
-Also: Logs tab (Events journal with filter, dots on the tab and notifications driven by it; Raw = sing-box + core lines, filter, search, follow), Settings → Data (App updates block — `docs/updates.md`, mock feed only; backup,
-restore, about), Copy URL / share link, QR and Speed test in the Nodes ⋮ menus (QR encoder vendored in
-`36-qr.js`), the source error strip with Retry, filter / close in Live connections.
+| File | What |
+|---|---|
+| `docs/platforms.md` | mockup ↔ Flutter Windows ↔ Flutter Android: platform differences, file mapping, sync procedure, generators, toolchain, builds |
+| `docs/core.md` | core design, CoreService / CoreApi, runtime, TUN, jormd HTTP API |
+| `docs/connect-model.md` | sources, profiles, chains, modes, Auto, node identity, delete impact, validation, ping, dock |
+| `docs/rules.md` | routing rules, targets and "If unavailable", apps, DNS, system proxy, kill switch, modes |
+| `docs/subscription-parsing.md` | formats, UA strategy, dedup, latency URL, region rules |
+| `docs/updates.md` | in-app updates: signed manifest, feeds, keys, Windows / Android install |
+| `docs/i18n.md` | translation mechanism and glossary |
+| `app/README.md` | Flutter app layout, conventions, TODO |
 
-## Layout
+A change that adds or alters behaviour updates the doc in the same commit (logic → doc → mockup →
+Flutter).
 
-- `docs/` — product logic for the real app (Russian): `subscription-parsing.md`
-  (formats, UA strategy, dedup, latency URL, region rules), `connect-model.md` (sources,
-  profiles, chains, modes, Auto settings, node identity and dropped nodes, servers off in
-  Nodes, delete impact, validation, ping, dock), `rules.md` (routing rules, apps,
-  DNS, system proxy, kill switch; rule targets and "If unavailable" in §0).
-  Keep them in step with the mockup: when a change adds or alters behaviour the Flutter
-  app must implement, update the doc in the same commit.
-- `design/main_screen.html` — **generated** mockup, the file the user opens.
-  Never edit it by hand; it is rebuilt from `design/src/`.
-- `design/src/index.html` — page skeleton with `@include` lines.
-- `design/src/css/`, `markup/`, `js/` — the mockup split by area; files are
-  concatenated in name order (numeric prefix = order, keep it when adding files).
-  All JS shares one global scope, so later files may use earlier ones.
-- `design/src/assets/` — binary files inlined by the build as base64 via
-  `{{asset:assets/name}}` (e.g. the Twemoji flag font; Windows has no flag emoji).
-  Never link fonts/images by outside URL: the app viewer blocks them.
-- `design/tools/geometry.mjs` — SVG paths for the Home connect dock (trapezoid tab,
-  hexagon power button, corner wedges). Change shapes here, not in markup; markup
-  uses `{{geo.name}}` placeholders.
-- `design/tools/check.mjs` — headless smoke tests and screenshot presets.
-- `design/src/js/12-backend.js` — the seam: every async ask of the core (fetch / update a
-  subscription, ping, connect) goes through `backend`; mocked there, swapped for the real
-  core by `95-live.js` when jormd serves the page (`window.JORMD`). New core calls go
-  through the seam, never straight to `fetch`.
-- `core/` — Dart package `jormungand_core` (parsers, sing-box config, runtime, `bin/jormd.dart`,
-  `tool/fake_sub.dart` = loopback test subscription). sing-box binary in `core/tool/bin/`
-  (not in git). Design and API: `docs/core.md`.
-- `app/` — the Flutter app (Android first, then Windows) over `core/` via `CoreService`.
-  Theme / ARB / dock paths / flag font are generated from the mockup: `node app/tool/gen_all.mjs`.
-  First build and TODOs: `app/README.md`.
+## Mockup
 
-## Workflow
+- `design/main_screen.html` is **generated** — never edit or read it; it is built from `design/src/`.
+- `design/src/index.html` — skeleton with `@include` lines; `css/`, `markup/`, `js/` are concatenated
+  in name order (keep the numeric prefix). All JS shares one global scope.
+- `design/src/assets/` — binaries inlined as base64 via `{{asset:assets/name}}`. Never link fonts or
+  images by outside URL (the viewer blocks them).
+- `design/tools/geometry.mjs` — SVG paths of the Home dock; markup uses `{{geo.name}}`.
+- `design/src/js/12-backend.js` — the seam: every async ask of the core goes through `backend`
+  (mocked there, swapped for the real core by `95-live.js` when jormd serves the page). Never call
+  `fetch` directly.
+- `design/tools/check.mjs` — headless smoke tests and screenshot presets. Add a preset / check there
+  for each new interaction instead of one-off Playwright scripts.
 
-After any change under `design/src/` or `design/tools/`, one command:
+Commands (repo root):
 
 ```sh
-npm run verify -- rules dns-form      # build + freshness + smoke tests, then one grid
-                                      # of the given presets -> design/.shots/grid.png
+npm run verify -- rules dns-form   # build + freshness + checks; one grid of the presets -> design/.shots/grid.png
+npm run shot -- list               # unknown name prints all preset names; ru-<preset> or --lang ru for Russian
+node design/tools/check.mjs audit-ru [presets|all]   # Latin text left in ru
+node design/tools/i18n-extract.mjs --missing         # UI strings without a Russian entry
 ```
 
-It prints only failures, the pass count and the grid path. Without presets it just
-builds and checks. Separate steps still exist: `npm run build`, `npm run check`,
-`npm run shot -- <presets> [--grid] [--theme github] [--scale 2]` (-> `design/.shots/*.png`).
-Hi-res set of every preset for the user: `npm run shot -- all --scale 2 --out design/.shots/<name> --files`,
-then `node design/tools/grid.mjs design/.shots/<name> 8` (-> `<name>/grids/grid-NN.png`).
+Hi-res set for the user: `npm run shot -- all --scale 2 --out design/.shots/<name> --files`, then
+`node design/tools/grid.mjs design/.shots/<name> 8`. Do not send `main_screen.html` unless asked.
 
-Presets: home, nodes, nodes-open, nodes-profiles, nodes-swipe, route, entry-delete,
-target-picker, target-picker-open, rule-fallback, settings, dock, dock-chain, dock-profile, dock-off,
-profiles, broken, profiles-full, source-entry, gone, nothing-ticked,
-simple-chain, chain-priority, profile-edit, chain-edit, chain-groups, drag-mid, addmenu,
-srcform, nodeform, actions, more, automode, node-off, broken-node, delete-confirm,
-nodes-edit, nodes-edit-chain, entry-priority, profile-priority, help, interval, settings-auto, settings-look,
-rules, rules-more, rules-services, rule-form, rule-new, rule-ip-resolve, rule-json, rule-add, rule-dns-over, rule-test, rule-order, rule-io,
-rule-sets, apps, app-act, app-split, settings-dns, dns-resolve, dns-form, dns-failover, settings-conn, conn-proxy-auth, kill-on, kill-off-confirm, core-down-kept, core-down-direct, kill-blocking, core-recovering, settings-notif, text-large, text-large-rule,
-connections, route-pin, sys-on, sys-off, no-auto, no-auto-dock, logs, logs-raw, logs-search, logs-warn, logs-filter, logs-event-open, logs-new-below, nav-dots, toast-fly,
-qr-node, qr-sub, settings-data, restore-confirm, test-url, lang-soon, conn-filter, conn-sort, conn-menu, conn-filter-sheet, conn-open, conn-paused, source-error, tun-stack,
-dock-empty, nodeform-many, nodeform-edit, checkers, blocked-toast, speed-test, speed-done, speed-fail,
-update-available, update-progress, update-ready, update-error, update-uptodate (+ ru-update-available).
-Russian: `ru-<preset>` opens the preset in ru (ru-home, ru-nodes, ru-route, ru-settings, ru-rules, ru-rule-form,
-ru-logs, ru-profiles, ru-settings-auto, ru-settings-dns, ru-dock, ru-connections, ru-help; `all` skips them), or
-`--lang ru` on any preset. `node design/tools/check.mjs audit-ru [presets|all]` lists Latin text left on the page
-in ru. New user-visible English text needs an entry in `js/04-i18n-ru.js` (`node design/tools/i18n-extract.mjs --missing`
-lists gaps); mechanism and glossary: `docs/i18n.md`.
-Add a preset in `check.mjs` rather than writing one-off Playwright scripts; add a check
-there for each new interaction.
+Design rules:
+- Colours only via CSS variables from `css/00-themes.css` (themes original / karing / github);
+  tints as `rgba(var(--accent-rgb), .15)`, never hex. Themes must not change layout.
+- One viewport tall: header and bottom nav fixed, only `.view > .scroll` scrolls; scrollbars hidden.
+- Text size 90–120 % zooms content via `--ui-zoom`, headers stay; new rows must fit 320 px at 120 %.
+- Sheets open to the top, end above the bottom nav, close by swiping the header down; Back closes the
+  top sheet and reopens the one it replaced, then goes Home.
+- Name things after Flutter widgets (SourceCard, NodeRow, ConnectDock, PowerTab).
+- Every new UI string gets a Russian entry in `js/04-i18n-ru.js` (rules in its header).
 
-Core: in `core/`, `dart analyze` + `dart test` (the sing-box tests run on loopback only).
-Live UI: `dart run bin/jormd.dart` → http://127.0.0.1:7788 (launch config `jormd`). After core changes
-restart the dev jormd yourself (standing permission): stop the old `dart … jormd.dart` process and
-its sing-box child (a force-killed jormd leaves it running, holding the ports), then preview_start `jormd`.
-Running, fixing and extending tests is the `tests` subagent's job (`.claude/agents/tests.md`).
-On Windows a sing-box started by a test outlives a killed / timed-out test process. After such
-a run (and before finishing), kill the orphans: ours only (path in this repo), parent gone —
-never the user's tunnel or jormd's live child:
+## Core
+
+In `core/`: `dart analyze` + `dart test` (sing-box tests run on loopback only; a couple are flaky
+under parallel load — rerun singly before concluding). sing-box binary in `core/tool/bin/` (not in
+git). Live UI: preview_start `jormd` → http://127.0.0.1:7788. After core changes restart the dev jormd
+yourself (standing permission): stop the old `dart … jormd.dart` and its sing-box child, then
+preview_start `jormd`. While the user is testing the live UI, don't drive it with browser tools.
+
+A sing-box started by a test outlives a killed test process on Windows. After such runs, kill our
+orphans only (path in this repo, parent gone) — never the user's tunnel or jormd's live child:
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name='sing-box.exe'" | Where-Object { $_.ExecutablePath -like '*JormungandApp*' -and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
-Network of this machine (home LAN is the user's own; never target the corporate network past it):
-user memory `user-home-network`. Exit checks through a tunnel: `dart run tool/exit_check.dart`.
+Never bring up a real TUN on this machine — the user tests TUN by hand. Network: the home LAN is the
+user's own; never target the corporate network past it (memory `user-home-network`). Exit checks
+through a tunnel: `dart run tool/exit_check.dart`.
 
-Commit `design/src`, `design/tools`, the rebuilt `design/main_screen.html`, `core/`, `docs/` and
-push (the push redeploys the Cloudflare site, see Deploy).
-Do not send `main_screen.html` as a file unless asked.
+## Flutter app
 
-## End of session
-
-Each session works on its own `claude/...` branch, so the default branch must receive
-the latest work. Before finishing a session: commit and push everything, then merge the
-working branch into the repo default branch (`git ls-remote --symref origin HEAD` shows
-it) and push it. A new session starts from the default branch, so this is how it picks
-up the latest state.
-
-## Token economy
-
-Every tool call re-reads the whole conversation, so the number of calls and the context
-size are what cost, not the code written.
-- Batch: make all edits for a step, then one `npm run verify -- <presets>`; look at the
-  grid, not separate screenshots.
-- Read only what is needed: `grep -n` for the function, then `sed -n 'a,bp'` / Read with
-  offset+limit. Never read `main_screen.html`; the JS files in `design/src/js` are big.
-- Plan and discuss in one session, implement in a fresh one pointed at `docs/`.
+Everything is in `docs/platforms.md` (mapping, sync from the mockup, generators, toolchain in
+`G:\ANDROID_DEV`, `build_libbox.ps1`, `build_apk.ps1`, adb install) and `app/README.md` (layout,
+conventions). Short version: change the mockup first; port by the mapping table; `node app/tool/gen_all.mjs`;
+in `app/` `flutter analyze --no-fatal-infos` + `flutter test`; `pwsh app/tool/build_apk.ps1 -DebugSigned`;
+`adb install -r`. Never port the mockup's demo data or stub services. Secrets (keystore password,
+release signing key) are never written to the repo or read by the agent.
 
 ## Working method (lead + agents)
 
-- The lead session plans, talks to the user, keeps the architecture, reviews diffs and grids,
-  commits. Implementation goes to background agents by brief: `coder-fast` (clear UI / feature
-  work), `coder-deep` (core logic, state, tricky bugs), `tests` / `test-runner` (running and
-  fixing checks), `general-purpose` for mixed jobs (e.g. translation). Agents always in background;
-  the lead stays available to the user meanwhile.
-- A brief states: goal, files / functions to start from (with line hints), constraints (no
-  commit, never read `main_screen.html`, CSS vars only, 320px / 120% fit), presets and checks to
-  add, docs to update, the exact `npm run verify -- …` to finish with, and "report briefly".
-- Independent tasks run as parallel agents. Tell each one which files others are editing at the
-  same time: small Edit-tool edits only, re-read the region before editing, never rewrite a
-  shared file (`check.mjs`, `04-i18n-ru.js`, `CLAUDE.md` are the usual shared ones).
-- Agents never commit. After an agent reports, the lead runs the full `npm run verify` (and
-  `dart analyze` / `dart test` for core work), looks at the grid, then commits, pushes and
-  fast-forwards the default branch: `git push origin claude/core-mvp:<default branch>`.
-  One commit may bundle several agents' work when their files overlap.
-- A failing check is investigated, not retried until green: find whether the app or the check
-  is wrong (timing, random base times and live pings made several checks flaky before).
-- Every new UI string needs its Russian entry in `design/src/js/04-i18n-ru.js` (rules and
-  glossary in its header and `docs/i18n.md`); `node design/tools/check.mjs audit-ru <presets>`
-  lists leftovers, `ru-<preset>` shoots in Russian.
-- While the user is testing the live UI, don't drive it with browser tools; ask or wait.
-- User decisions and the plan go into `.claude_states/state_N.md` ("Дальше"); a new session
-  starts from the newest state file.
+- The lead plans, talks to the user, keeps the architecture, reviews diffs and grids, commits.
+  Implementation goes to background agents by brief: `coder-fast` (clear UI work), `coder-deep` (core
+  logic, state, tricky bugs, screen ports), `tests` (`.claude/agents/tests.md`; runs, fixes and
+  extends checks), `general-purpose` for mixed jobs.
+- A brief states: goal, files to start from (with line hints), constraints (no commit, never read
+  `main_screen.html`, CSS vars / theme extension only, 320 px / 120 % fit, Russian for new strings),
+  checks to add, docs to update, the exact verify command, "report briefly".
+- Parallel agents get told which files the others edit; shared files (`check.mjs`, `04-i18n-ru.js`,
+  ARB files, `i18n_extra.json`, `core_host.dart`, `CLAUDE.md`) — small Edit-tool edits only, re-read
+  the region first, never rewrite.
+- After an agent reports, the lead runs the full checks (`npm run verify`; `dart analyze` / `dart test`
+  for core; `flutter analyze` / `flutter test` for app), looks at the grid, commits, pushes and
+  fast-forwards the default branch. A failing check is investigated (app or check wrong?), not
+  retried until green.
+- Token economy: batch edits, then one verify; grep first, then read only the needed lines; look at
+  the grid, not single screenshots.
+- User decisions and the plan go into `.claude_states/state_N.md` ("Дальше").
 
-## Deploy (Cloudflare Worker)
+## Git, end of session, deploy
 
-The mockup is served by the Worker `jormungand-design` (static assets only,
-config in `wrangler.jsonc`). Every push touching `design/` deploys it via
-`.github/workflows/deploy.yml`; CI fails if `main_screen.html` was not rebuilt.
-The workflow needs repo secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare
-Workers") and `CLOUDFLARE_ACCOUNT_ID`. Manual deploy: `npm run deploy` (runs
-wrangler 4 via npx; log in once with `npx wrangler login` or set the same env vars).
-URL: https://jormungand-design.slackerwarlock.workers.dev
+Commit `design/src`, `design/tools`, the rebuilt `design/main_screen.html`, `core/`, `app/`, `docs/`.
+Each session works on its own `claude/...` branch; after each commit push it and fast-forward the
+default branch (`git ls-remote --symref origin HEAD` shows it):
+`git push origin <branch>:<default branch>`. Before finishing a session everything is committed,
+pushed and merged into the default branch — a new session starts from it.
 
-## Design rules
-
-- Colours only via CSS variables from `css/00-themes.css`; three themes
-  (original = default navy, karing, github) switched in Settings → Appearance.
-  For tinted colours use `rgba(var(--accent-rgb), .15)`, never a hex literal.
-- Themes must not change layout (same font everywhere) — `check` verifies it.
-- Scrollbars are hidden globally; the app frame is one viewport tall (no fake status bar):
-  view header and bottom nav are fixed, only `.view > .scroll` scrolls.
-- Text size (Settings → Appearance, 90–120%) zooms `.view > .scroll`, `.nodes-page` and
-  `.sheet-body` via `--ui-zoom`; titles and headers stay fixed. New rows must fit at 120% on
-  a 320px screen (a check verifies it).
-- Name things after future Flutter widgets (SourceCard, NodeRow, ConnectDock,
-  PowerTab) so the port is a straight mapping.
+Every push touching `design/` redeploys the mockup to the Cloudflare Worker `jormungand-design`
+(`.github/workflows/deploy.yml`; CI fails if `main_screen.html` was not rebuilt). Manual:
+`npm run deploy`. URL: https://jormungand-design.slackerwarlock.workers.dev
