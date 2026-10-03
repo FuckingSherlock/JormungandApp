@@ -6870,7 +6870,8 @@ const ADS = ['doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
 const quickCfg = {
   regionOn: true, region: 'RU', ads: false, final: 'proxy',
   fallback: 'main',   // a rule's target is unavailable and the rule says Default; apps always
-  services: { telegram: 'vpn', youtube: 'vpn', discord: 'default', netflix: 'default', spotify: 'default', chatgpt: 'vpn', instagram: 'vpn', x: 'default' },
+  services: Object.fromEntries(SERVICES.map(s => [s[0], 'default'])),   // demo seed off for now (the user's call), same as a real first run:
+  // services: { telegram: 'vpn', youtube: 'vpn', discord: 'default', netflix: 'default', spotify: 'default', chatgpt: 'vpn', instagram: 'vpn', x: 'default' },
 };
 const SVC_STATES = [['default', 'Default'], ['vpn', 'VPN'], ['direct', 'Direct']];
 

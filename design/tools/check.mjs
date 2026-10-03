@@ -58,6 +58,12 @@ async function openPage(browser, { width = 400, height = 800, scale = 1, theme, 
 }
 
 const settle = page => page.waitForTimeout(400);
+// The mockup starts with no quick-rule services (a real first run); checks and shots that need some
+// set them up here: all others Default, a few on VPN, `over` on top ({ key: 'vpn' | 'direct' | 'default' }).
+const seedServices = (page, over = {}) => page.evaluate(over => {
+  SERVICES.forEach(([k]) => { quickCfg.services[k] = 'default'; });
+  Object.assign(quickCfg.services, { telegram: 'vpn', youtube: 'vpn', chatgpt: 'vpn', instagram: 'vpn' }, over);
+}, over);
 const tab = (page, name) => page.click(`.nav-btn[data-tab=${name}]`);
 // Raw open: scrolled up to the top, a few new lines (error, warnings, info) arrive below and stay unread.
 const logsRawUnread = async page => {
@@ -128,8 +134,8 @@ const SHOTS = {
   srcform:    async p => { await tab(p, 'nodes'); await p.evaluate(() => { openSrcForm(); toggleSrcAdvanced(true); }); await settle(p); },
   nodeform:   async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodeForm()); await settle(p); },
   actions:    async p => { await tab(p, 'nodes'); await p.click('.src-card >> nth=0 >> button[title=More]'); await settle(p); },
-  rules:      async p => { await p.evaluate(() => openRules()); await settle(p); },
-  'rules-more': async p => { await p.evaluate(() => { openRules(); document.getElementById('rules-body').scrollTop = 9999; }); await settle(p); },
+  rules:      async p => { await seedServices(p); await p.evaluate(() => openRules()); await settle(p); },
+  'rules-more': async p => { await seedServices(p); await p.evaluate(() => { openRules(); document.getElementById('rules-body').scrollTop = 9999; }); await settle(p); },
   'rule-form': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); }); await settle(p); },
   'rule-new':  async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddField('ip', 'ip_cidr'); rfAddValues('domain', 'domain_suffix', 'youtube.com, bad domain', false); }); await settle(p); },
   // a rule with an IP condition: the "IP conditions only in TUN" block, the state of Resolve for IP rules, the link
@@ -141,12 +147,12 @@ const SHOTS = {
   // Settings → DNS opened from the rule form's link: above the form
   'rule-dns-over': async p => { await p.evaluate(() => { openRules(); openRuleForm(); rfAddField('ip', 'ip_cidr'); rfAddValues('ip', 'ip_cidr', '10.0.0.0/8', false); rfOpenDnsResolve(); }); await p.waitForTimeout(700); },
   'rule-test': async p => { await p.evaluate(() => { openRules(); openRuleTest(); document.getElementById('rt-input').value = 'discord.com'; runRuleTest(); }); await settle(p); },
-  'rule-order': async p => { await p.evaluate(() => { openRules(); openRuleOrder(); }); await settle(p); },
-  'rule-io':   async p => { await p.evaluate(() => { openRules(); openRuleIO(); setRuleIO('export', 'clash'); }); await settle(p); },
+  'rule-order': async p => { await seedServices(p); await p.evaluate(() => { openRules(); openRuleOrder(); }); await settle(p); },
+  'rule-io':   async p => { await seedServices(p); await p.evaluate(() => { openRules(); openRuleIO(); setRuleIO('export', 'clash'); }); await settle(p); },
   'rule-sets': async p => { await p.evaluate(() => { openRules(); openRuleSets(); }); await settle(p); },
-  apps:       async p => { await p.evaluate(() => { openRules(); openApps(); }); await settle(p); },
-  'app-act':  async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.target = 'src:src1'; appDraft.fallback = 'block'; renderAppAct(); }); await settle(p); },
-  'app-split': async p => { await p.evaluate(() => { openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.split = true; appDraft.act = 'proxy'; appDraft.target = 'src:src1'; appDraft.fallback = 'block'; appDraft.udp.act = 'block'; renderAppAct(); }); await settle(p); },
+  apps:       async p => { await seedServices(p); await p.evaluate(() => { openRules(); openApps(); }); await settle(p); },
+  'app-act':  async p => { await seedServices(p); await p.evaluate(() => { openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.target = 'src:src1'; appDraft.fallback = 'block'; renderAppAct(); }); await settle(p); },
+  'app-split': async p => { await seedServices(p); await p.evaluate(() => { openRules(); openApps(); openAppAct('org.telegram.messenger'); appDraft.split = true; appDraft.act = 'proxy'; appDraft.target = 'src:src1'; appDraft.fallback = 'block'; appDraft.udp.act = 'block'; renderAppAct(); }); await settle(p); },
   'settings-dns': async p => { await p.evaluate(() => openDnsSettings()); await settle(p); },
   // Resolve for IP rules on a direct server (the leak warning), scrolled to and flashed as the rule form's link does
   'dns-resolve': async p => { await p.evaluate(() => { dnsCfg.resolve = 'local'; openDnsSettings('dnsResolve'); }); await settle(p); },
@@ -177,7 +183,7 @@ const SHOTS = {
   'target-picker': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.clear(); renderTargetPicker(); }); await settle(p); },
   'target-picker-open': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); openTargetPicker(rulesData.r2.target, () => {}); tpOpen.clear(); tpOpen.add('src:src2'); renderTargetPicker(); pickTarget('node:src2::' + sourcesData.src2.nodes[1].id); }); await settle(p); },
   'rule-fallback': async p => { await p.evaluate(() => { openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
-  'rules-services': async p => { await p.evaluate(() => { openRules(); svcOpen = true; svcAddOpen = true; renderRules(); document.querySelector('.svc-group').scrollIntoView(); }); await settle(p); },
+  'rules-services': async p => { await seedServices(p); await p.evaluate(() => { openRules(); svcOpen = true; svcAddOpen = true; renderRules(); document.querySelector('.svc-group').scrollIntoView(); }); await settle(p); },
   'text-large': async p => { await p.evaluate(() => { applyScale(UI_SCALE_MAX); openProfiles(); }); await settle(p); },
   'text-large-rule': async p => { await p.evaluate(() => { applyScale(UI_SCALE_MAX); openRules(); openRuleForm('r2'); document.querySelector('#sh-ruleform .sheet-body').scrollTop = 9999; }); await settle(p); },
   more:       async p => { await tab(p, 'nodes'); await p.evaluate(() => openNodesMore()); await settle(p); },
@@ -849,6 +855,7 @@ async function runChecks() {
       return bad;
     });
     const bad = [];
+    await seedServices(narrow);
     await narrow.evaluate(() => { sourcesData.src1.lastError = { msg: 'Connection timed out (15 s) while fetching the subscription', at: Date.now() }; renderNodes(); connected = true; vpn.down = { since: Date.now() - 65e3, attempt: 4, proxy: 'kept' }; renderConnState(); });
     for (const t of ['home', 'nodes', 'settings', 'logs']) { await tab(narrow, t); await narrow.waitForTimeout(t === 'logs' ? 300 : 0); if (t === 'logs') await narrow.evaluate(() => document.querySelectorAll('#evList .ev-row').forEach(r => r.classList.add('open'))); bad.push(...await over()); }
     const sheets = [
@@ -2966,6 +2973,7 @@ async function runChecks() {
   });
 
   await check('rules: services are a dropdown — add from the built-in list, switch VPN / Direct, remove', async () => {
+    await seedServices(page);
     const r = await page.evaluate(() => {
       const out = {}, rows = () => [...document.querySelectorAll('.svc-row')].map(e => e.dataset.svc);
       openRules(); svcOpen = false; renderRules();
@@ -2987,6 +2995,7 @@ async function runChecks() {
   });
 
   await check('services and per-app routing know about each other', async () => {
+    await seedServices(page);
     const r = await page.evaluate(() => {
       const out = {}, keepT = quickCfg.services.telegram, keepA = appRules['org.telegram.messenger'];
       quickCfg.services.telegram = 'vpn'; appRules['org.telegram.messenger'] = appNormalize({ act: 'direct' });
@@ -3325,6 +3334,7 @@ async function runChecks() {
   // opens that rule / app dialog / service or quick rule place / Route; Back returns to the entry. No rule = the main flow.
   await check('journal: site cards name the rule and the app (user rule, app, service, quick, main flow), a tap opens it, Back returns to the entry', async () => {
     const p = await openPage(browser);
+    await seedServices(p);
     await tab(p, 'logs'); await p.waitForTimeout(500);
     const info = await p.evaluate(async () => {
       const [a, b] = autoOrder(), base = (host, more) => ({ host, dest: host + ':443', entry: a, route: a, ...more });
@@ -3387,6 +3397,7 @@ async function runChecks() {
   // "applied", the other is muted "overridden by …"; both keep their links. Judged with today's settings (evWhyRows, rulesCatching).
   await check('journal: why block shows both sides of an app / rule conflict (applied, overridden by rule / by app), both link, a plain app has no mark, Back returns', async () => {
     const p = await openPage(browser);
+    await seedServices(p);
     await tab(p, 'logs'); await p.waitForTimeout(500);
     const info = await p.evaluate(async () => {
       const [a, b] = autoOrder(), base = (host, more) => ({ host, dest: host + ':443', entry: a, route: a, ...more });
@@ -4085,6 +4096,7 @@ async function runChecks() {
   // Rules, apps, quick rules and DNS reach the core as plan.routing (93-routing-plan.js).
   await check('routing plan: enabled rules, apps, targets as groups (null = unavailable), quick rules, DNS', async () => {
     const p = await openPage(browser);
+    await seedServices(p);
     const r = await p.evaluate(() => {
       // mock servers carry no sing-box outbound (a target of those alone is unusable = null)
       const out0 = routingPlan().targets['chain:sc1'] === null;

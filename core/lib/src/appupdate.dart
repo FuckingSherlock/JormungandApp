@@ -26,9 +26,9 @@ const releasePublicKeys = <String>[];
 /// Where the manifests live, in the order tried (docs/updates.md -> "Ленты"). Each is a URL
 /// prefix: `<feed>/manifest-<channel>.json` and `.json.sig` are under it.
 ///
-/// TODO(release): the real hosts, e.g. a GitHub Releases tag of the public releases repo
-/// and a Cloudflare Worker / R2 bucket.
-const releaseFeeds = <String>[];
+/// The public releases repo (the main repo is private): a release with the fixed tag `feed`
+/// holds the manifests; installers sit in the `v…` releases. More feeds (Cloudflare R2…) later.
+const releaseFeeds = <String>['https://github.com/FuckingSherlock/jormungand-releases/releases/download/feed'];
 
 const manifestSchema = 1;
 const manifestApp = 'jormungand';
