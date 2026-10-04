@@ -1,0 +1,183 @@
+# Builds the Android app (release APKs per ABI, signed with the release key) and publishes it to
+# the update feed, BETA channel only (docs/updates.md section 13): installers -> a release
+# `v<version>` of FuckingSherlock/jormungand-releases, then the signed manifest-beta.json(.sig) ->
+# the fixed release `feed`.
+#
+# Repo secrets: JORM_ANDROID_KEYSTORE_B64 (base64 of the release .jks), JORM_ANDROID_KS_PASS (its
+# store + key password), JORM_RELEASE_KEY (Ed25519 manifest-signing key file), JORM_RELEASES_TOKEN
+# (fine-grained PAT, contents:write on jormungand-releases). No artifacts are uploaded: the
+# keystore and the key live in $RUNNER_TEMP only and are deleted at the end.
+name: Release Android (beta)
+
+on:
+  push:
+    branches: [claude/karing-fork-environment-a45c2c]
+    paths: ['app/**', 'core/**', '.github/workflows/release-android.yml']
+  workflow_dispatch:
+
+concurrency: { group: release-android, cancel-in-progress: true }
+
+permissions:
+  contents: read
+
+env:
+  SING_BOX_VERSION: '1.14.2'      # keep equal to core/tool/bin/sing-box (the desktop core)
+  NDK_VERSION: '28.2.13676358'    # as in core/tool/build_libbox.ps1
+  FEED_REPO: FuckingSherlock/jormungand-releases
+  # versionCode = BUILD_OFFSET + run number; above every versionCode a local build has used (the
+  # old per-ABI offsets reached 2000 + n), and it must never go down (docs/updates.md section 5)
+  BUILD_OFFSET: '3000'
+  KEEP_BETAS: '10'
+
+jobs:
+  # Until the one-time secrets are set (docs/updates.md section 13) a push only notes it and
+  # stops, instead of failing every commit.
+  secrets-ready:
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.c.outputs.ok }}
+    steps:
+      - id: c
+        env:
+          A: ${{ secrets.JORM_ANDROID_KEYSTORE_B64 }}
+          B: ${{ secrets.JORM_ANDROID_KS_PASS }}
+          C: ${{ secrets.JORM_RELEASE_KEY }}
+          D: ${{ secrets.JORM_RELEASES_TOKEN }}
+        run: |
+          if [ -n "$A" ] && [ -n "$B" ] && [ -n "$C" ] && [ -n "$D" ]; then echo ok=true >> "$GITHUB_OUTPUT"
+          else echo "::notice::Release secrets not set yet - skipping the beta release"; echo ok=false >> "$GITHUB_OUTPUT"; fi
+
+  release:
+    needs: secrets-ready
+    if: needs.secrets-ready.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17', cache: gradle }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: '3.47.6', channel: stable, cache: true }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.26', cache: false }
+
+      - name: Android SDK components
+        run: |
+          sdkm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkm" --licenses > /dev/null || true
+          "$sdkm" --install "ndk;$NDK_VERSION" "platforms;android-36" "build-tools;36.1.0" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: libbox.aar cache
+        id: libbox
+        uses: actions/cache@v4
+        with:
+          path: app/android_overlay/app/libs
+          key: libbox-${{ env.SING_BOX_VERSION }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('core/tool/build_libbox.ps1') }}
+
+      - name: Build libbox.aar (cache miss)
+        if: steps.libbox.outputs.cache-hit != 'true'
+        run: pwsh core/tool/build_libbox.ps1 -Version "$SING_BOX_VERSION" -Root "$RUNNER_TEMP/android-dev"
+
+      - name: Version
+        run: |
+          base=$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' app/pubspec.yaml | head -n 1)
+          [ -n "$base" ] || { echo "::error::no version in app/pubspec.yaml"; exit 1; }
+          echo "VERSION=$base-beta.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "BUILD=$((BUILD_OFFSET + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
+      - name: Release keystore
+        env:
+          KS_B64: ${{ secrets.JORM_ANDROID_KEYSTORE_B64 }}
+        run: |
+          [ -n "$KS_B64" ] || { echo "::error::secret JORM_ANDROID_KEYSTORE_B64 is not set"; exit 1; }
+          ( umask 077; printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/jorm-release.jks" )
+          echo "JORM_KEYSTORE=$RUNNER_TEMP/jorm-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build APKs
+        env:
+          JORM_ANDROID_KS_PASS: ${{ secrets.JORM_ANDROID_KS_PASS }}
+        run: pwsh app/tool/build_apk.ps1 -BuildName "$VERSION" -BuildNumber "$BUILD" -KeystorePath "$JORM_KEYSTORE"
+
+      - name: Check the APKs and stage the files
+        env:
+          JORM_ANDROID_KS_PASS: ${{ secrets.JORM_ANDROID_KS_PASS }}
+        run: |
+          # SHA-256 of the signing certificate: lower-case hex, no colons (manifest android.signerSha256)
+          signer=$(keytool -list -v -keystore "$JORM_KEYSTORE" -alias jormungand -storepass:env JORM_ANDROID_KS_PASS \
+            | sed -n 's/^ *SHA256: *//p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')
+          [ "${#signer}" -eq 64 ] || { echo "::error::cannot read the keystore certificate"; exit 1; }
+          echo "SIGNER=$signer" >> "$GITHUB_ENV"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          mkdir -p "$RUNNER_TEMP/dist"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            src="app/build/app/outputs/flutter-apk/app-$abi-release.apk"
+            dst="$RUNNER_TEMP/dist/jormungand-$VERSION-$abi.apk"
+            cp "$src" "$dst"
+            # signed with the release key (not the debug fallback) and versionCode == build
+            got=$("$bt/apksigner" verify --print-certs "$dst" | sed -n 's/.*certificate SHA-256 digest: *//p' | head -n 1)
+            [ "$got" = "$signer" ] || { echo "::error::$abi APK is not signed with the release key"; exit 1; }
+            code=$("$bt/aapt2" dump badging "$dst" | sed -n "s/.* versionCode='\([0-9]*\)'.*/\1/p" | head -n 1)
+            [ "$code" = "$BUILD" ] || { echo "::error::$abi APK versionCode is '$code', expected $BUILD"; exit 1; }
+          done
+          ls -l "$RUNNER_TEMP/dist"
+
+      - name: Signed manifest
+        env:
+          JORM_RELEASE_KEY: ${{ secrets.JORM_RELEASE_KEY }}
+        run: |
+          [ -n "$JORM_RELEASE_KEY" ] || { echo "::error::secret JORM_RELEASE_KEY is not set"; exit 1; }
+          key="$RUNNER_TEMP/jorm-release-signing.key"   # outside the workspace: the tool refuses a key inside a git tree
+          ( umask 077; printf '%s\n' "$JORM_RELEASE_KEY" > "$key" )
+          dist="$RUNNER_TEMP/dist"
+          subject=$(git log -1 --format=%s | cut -c1-200)
+          printf 'Beta %s (build %s, commit %s)\n%s\n' "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$subject" > "$dist/notes.txt"
+          cd core
+          dart pub get
+          dart run tool/release_manifest.dart --key "$key" --version "$VERSION" --build "$BUILD" --channel beta --out "$dist" \
+            --asset "android-arm64-v8a=$dist/jormungand-$VERSION-arm64-v8a.apk" \
+            --asset "android-armeabi-v7a=$dist/jormungand-$VERSION-armeabi-v7a.apk" \
+            --asset "android-x86_64=$dist/jormungand-$VERSION-x86_64.apk" \
+            --url-base "https://github.com/$FEED_REPO/releases/download/v$VERSION" \
+            --signer-sha256 "$SIGNER" \
+            --page "https://github.com/$FEED_REPO/releases" \
+            --notes-en "$dist/notes.txt"
+          rm -f "$key"
+
+      - name: Publish to the feed repo
+        env:
+          GH_TOKEN: ${{ secrets.JORM_RELEASES_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::secret JORM_RELEASES_TOKEN is not set"; exit 1; }
+          cd "$RUNNER_TEMP/dist"
+          tag="v$VERSION"
+          # 1. the installers (a re-run of the same run number overwrites them)
+          if gh release view "$tag" --repo "$FEED_REPO" > /dev/null 2>&1; then
+            gh release upload "$tag" jormungand-*.apk --repo "$FEED_REPO" --clobber
+          else
+            gh release create "$tag" jormungand-*.apk --repo "$FEED_REPO" --prerelease \
+              --title "Jormungand $VERSION" --notes-file notes.txt
+          fi
+          # 2. the feed release (fixed tag) and, only after the APKs are up, the signed manifest
+          if ! gh release view feed --repo "$FEED_REPO" > /dev/null 2>&1; then
+            gh release create feed --repo "$FEED_REPO" --prerelease --title "Update feed" \
+              --notes "Update manifests (manifest-<channel>.json + .sig), overwritten on every release. Do not delete."
+          fi
+          gh release upload feed manifest-beta.json manifest-beta.json.sig --repo "$FEED_REPO" --clobber
+          # 3. keep the newest KEEP_BETAS beta releases; never `feed`, never a non-beta release
+          gh release list --repo "$FEED_REPO" --limit 200 --json tagName,createdAt,isPrerelease \
+            | jq -r --argjson keep "$KEEP_BETAS" --arg cur "$tag" \
+              '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$")) and .tagName != $cur)]
+               | sort_by(.createdAt) | reverse | .[($keep - 1):] | .[].tagName' \
+            | while read -r old; do
+                echo "deleting old beta $old"
+                gh release delete "$old" --repo "$FEED_REPO" --yes --cleanup-tag
+              done
+          echo "Published $VERSION (build $BUILD) to the beta channel" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the keystore and the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/jorm-release.jks" "$RUNNER_TEMP/jorm-release-signing.key" app/android/key.properties

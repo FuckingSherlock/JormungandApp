@@ -13,6 +13,8 @@
 # GOPATH, Android SDK (platform + NDK), git. NDK:
 #   <sdk>\cmdline-tools\latest\bin\sdkmanager.bat "ndk/28.2.13676358" "platforms/android-36"
 # (slash form: this sdkmanager rejects ';').
+# CI (ubuntu): pwsh core/tool/build_libbox.ps1 -Version <x.y.z> -Root <scratch dir> with JAVA_HOME,
+# ANDROID_HOME and ANDROID_NDK_HOME in the environment and go on PATH.
 #
 # Why not `go run ./cmd/internal/build_libbox`: it always builds a second, "legacy" (API 21)
 # variant, and hard-codes ':' in PATH and a gomobile path without .exe; here gomobile is called
@@ -27,6 +29,11 @@ param(
     [switch]$Force
 )
 $ErrorActionPreference = 'Stop'
+
+# Runs on Windows (local) and Linux (CI, .github/workflows/release-android.yml): forward slashes
+# in path segments (Windows takes them too), '.exe' only on Windows, the platform's PATH separator.
+$onWin = $env:OS -eq 'Windows_NT'
+$exe = if ($onWin) { '.exe' } else { '' }
 
 function Fail([string]$msg) { Write-Host "build_libbox: $msg" -ForegroundColor Red; exit 1 }
 function Run([string]$exe, [string[]]$arguments, [string]$dir = $null) {
@@ -61,12 +68,12 @@ function Pick([string]$envName, [string]$fallback) {
     return $fallback
 }
 
-$repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$out = Join-Path $repo 'app\android_overlay\app\libs\libbox.aar'
+$repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$out = Join-Path $repo 'app/android_overlay/app/libs/libbox.aar'
 
 # ── the sing-box version: the one the desktop core runs ─────────────────────────────────
 if (-not $Version) {
-    $bin = Join-Path $repo 'core\tool\bin\sing-box.exe'
+    $bin = Join-Path $repo "core/tool/bin/sing-box$exe"
     if (Test-Path $bin) {
         $m = [regex]::Match((& $bin version | Out-String), 'sing-box version (\d+\.\d+\.\d+\S*)')
         if ($m.Success) { $Version = $m.Groups[1].Value }
@@ -83,10 +90,10 @@ if (-not (Test-Path $sdk)) { $sdk = Pick 'ANDROID_SDK_ROOT' (Join-Path $Root 'an
 $goRoot = Pick 'GOROOT' (Join-Path $Root 'go')
 $goPath = Pick 'GOPATH' (Join-Path $Root 'gopath')
 New-Item -ItemType Directory -Force $goPath | Out-Null
-$srcDir = Join-Path $Root 'src\sing-box'
+$srcDir = Join-Path $Root 'src/sing-box'
 
-if (-not (Test-Path (Join-Path $javaHome 'bin\javac.exe'))) { Fail "JDK 17 not found (JAVA_HOME / $javaHome)" }
-if (-not (Test-Path (Join-Path $goRoot 'bin\go.exe'))) {
+if (-not (Test-Path (Join-Path $javaHome "bin/javac$exe"))) { Fail "JDK 17 not found (JAVA_HOME / $javaHome)" }
+if (-not (Test-Path (Join-Path $goRoot "bin/go$exe"))) {
     if (-not (Get-Command go -ErrorAction SilentlyContinue)) { Fail "Go not found (GOROOT / $goRoot)" }
 }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail 'git not found' }
@@ -119,11 +126,12 @@ $env:ANDROID_SDK_ROOT = $sdk
 $env:ANDROID_NDK_HOME = $ndk
 $env:GOPATH = $goPath
 $goBin = Join-Path $goPath 'bin'
-$env:PATH = "$(Join-Path $goRoot 'bin');$goBin;$(Join-Path $javaHome 'bin');$env:PATH"
+$sep = [IO.Path]::PathSeparator
+$env:PATH = (@((Join-Path $goRoot 'bin'), $goBin, (Join-Path $javaHome 'bin'), $env:PATH)) -join $sep
 $env:GOFLAGS = ''
 Write-Host "NDK $ndk"
 
-$javaOut = (& (Join-Path $javaHome 'bin\java.exe') -version 2>&1 | Out-String)
+$javaOut = (& (Join-Path $javaHome "bin/java$exe") -version 2>&1 | Out-String)
 if ($javaOut -notmatch '17\.') { Write-Host "warning: JDK is not 17: $($javaOut.Split("`n")[0])" -ForegroundColor Yellow }
 
 # ── sources ──────────────────────────────────────────────────────────────────────────────
@@ -146,7 +154,7 @@ if (-not $Force -and (Test-Path $out) -and (Test-Path $stamp) -and ((Get-Content
 
 # ── Go: the version sing-box's CI builds with (linkname tricks are version-sensitive) ────
 if (-not $LocalGo) {
-    $ci = Join-Path $srcDir '.github\workflows\build.yml'
+    $ci = Join-Path $srcDir '.github/workflows/build.yml'
     if (Test-Path $ci) {
         $m = [regex]::Match((Get-Content $ci -Raw), 'go-version:\s*([0-9][0-9.]*)')
         if ($m.Success) {
@@ -162,18 +170,18 @@ $m = [regex]::Match($mk, 'gomobile/cmd/gomobile@(v[0-9][0-9.]*)')
 if (-not $m.Success) { Fail 'cannot find the gomobile version in sing-box Makefile (lib_install)' }
 $gmVer = $m.Groups[1].Value
 $gmStamp = Join-Path $goBin '.gomobile-version'
-$haveGm = (Test-Path (Join-Path $goBin 'gomobile.exe')) -and (Test-Path (Join-Path $goBin 'gobind.exe')) -and
+$haveGm = (Test-Path (Join-Path $goBin "gomobile$exe")) -and (Test-Path (Join-Path $goBin "gobind$exe")) -and
     (Test-Path $gmStamp) -and ((Get-Content $gmStamp -Raw).Trim() -eq "$gmVer $env:GOTOOLCHAIN")
 if (-not $haveGm) {
     Run 'go' @('install', '-v', "github.com/sagernet/gomobile/cmd/gomobile@$gmVer")
     Run 'go' @('install', '-v', "github.com/sagernet/gomobile/cmd/gobind@$gmVer")
     "$gmVer $env:GOTOOLCHAIN" | Set-Content $gmStamp
-    try { & (Join-Path $goBin 'gomobile.exe') init } catch { Write-Host "gomobile init: $_ (not fatal)" -ForegroundColor Yellow }
+    try { & (Join-Path $goBin "gomobile$exe") init } catch { Write-Host "gomobile init: $_ (not fatal)" -ForegroundColor Yellow }
     if ($LASTEXITCODE -ne 0) { Write-Host 'gomobile init failed (not fatal: bind does not need it)' -ForegroundColor Yellow }
 }
 
 # ── tags and linker flags: as build_libbox does for the main Android variant ─────────────
-$mainGo = Get-Content (Join-Path $srcDir 'cmd\internal\build_libbox\main.go') -Raw
+$mainGo = Get-Content (Join-Path $srcDir 'cmd/internal/build_libbox/main.go') -Raw
 $tags = @()
 foreach ($mm in [regex]::Matches($mainGo, 'sharedTags\s*=\s*append\(sharedTags,\s*([^)]*)\)')) {
     $tags += [regex]::Matches($mm.Groups[1].Value, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
@@ -181,7 +189,7 @@ foreach ($mm in [regex]::Matches($mainGo, 'sharedTags\s*=\s*append\(sharedTags,\
 if ($tags.Count -lt 5 -or $tags -notcontains 'with_gvisor') {
     Fail "cannot read the build tags from build_libbox/main.go (found: $($tags -join ',')); the file changed, fix this script"
 }
-$ldBase = (Get-Content (Join-Path $srcDir 'release\LDFLAGS') -Raw).Trim()
+$ldBase = (Get-Content (Join-Path $srcDir 'release/LDFLAGS') -Raw).Trim()
 $ldflags = "-X github.com/sagernet/sing-box/constant.Version=$Version $ldBase -s -w -buildid="
 Write-Host "tags: $($tags -join ',')"
 
@@ -201,7 +209,7 @@ Write-Host 'building (this takes a while: three architectures)...'
 # gomobile writes its work tree into <src>\build and fails on files left by an interrupted run.
 $workDir = Join-Path $srcDir 'build'
 if (Test-Path $workDir) { Remove-Item -Recurse -Force $workDir }
-Run (Join-Path $goBin 'gomobile.exe') $gmArgs $srcDir
+Run (Join-Path $goBin "gomobile$exe") $gmArgs $srcDir
 
 if (-not (Test-Path $tmp)) { Fail 'gomobile finished but libbox.aar is missing' }
 New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null

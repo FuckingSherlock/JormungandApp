@@ -161,8 +161,8 @@ APK). Что **не** защищает: **заморозку** (хост мол�
   Beta `0.3.0-beta.1+14` → stable `0.3.0+15`.
 - Android: `versionCode` APK **равен** `build` манифеста для всех ABI. Flutter при
   `--split-per-abi` по умолчанию прибавляет к versionCode смещение ABI (+1000 / +2000 / +4000) —
-  его нужно отключить в `build.gradle`, иначе проверка `versionCode == build` на платформенной
-  стороне не сойдётся.
+  его отключает `build_apk.ps1` при `-BuildNumber` (`force-version-code-ignoring-abi=true`), иначе
+  проверка `versionCode == build` на платформенной стороне не сойдётся.
 
 ## 6. Проверка, расписание, состояния
 
@@ -367,7 +367,7 @@ dart run tool/release_manifest.dart --key <файл> --version 0.2.0 --build 12 
 по расширению), пишет `manifest-<канал>.json` и `.json.sig`, а перед записью **прогоняет те же
 проверки, что приложение** (разбор манифеста + проверка собственной подписи).
 
-Порядок выпуска (вручную, позже CI):
+Порядок выпуска (вручную; Android beta делает CI — ниже):
 
 1. Собрать APK (все ABI, `versionCode == build`) и zip для Windows.
 2. `release_manifest` → два файла.
@@ -385,6 +385,63 @@ dart run tool/release_manifest.dart --key <файл> --version 0.2.0 --build 12 
 `JORM_ANDROID_KS_PASS`; ключ создаётся при первой сборке и **должен быть сохранён**: другой ключ —
 другой подписант, и установка поверх невозможна. В конце скрипт печатает SHA-256 сертификата — его
 (hex в нижнем регистре, без двоеточий) кладут в `android.signerSha256` манифеста (`--signer-sha256`).
+С `-BuildNumber` скрипт передаёт Flutter `--android-project-arg force-version-code-ignoring-abi=true`:
+`versionCode` всех ABI равен `build` (раздел 5), без смещений `1000 × ABI`. Другой файл ключа —
+`-KeystorePath` / `JORM_ANDROID_KEYSTORE` (CI); явно названный и отсутствующий ключ — ошибка, а не
+повод создать новый.
+
+### CI: Android beta (`.github/workflows/release-android.yml`)
+
+Каждый push в основную ветку (`claude/karing-fork-environment-a45c2c`), затронувший `app/**`,
+`core/**` или сам workflow, плюс ручной запуск (`workflow_dispatch`) собирают приложение и публикуют
+его в канал **beta** (stable в CI нет). Параллельные запуски отменяются — идёт последний.
+
+Что делает (ubuntu-latest; JDK 17, Flutter 3.47.6, Go + gomobile + NDK 28.2.13676358 как в
+`core/tool/build_libbox.ps1`, который работает и на Linux под `pwsh`):
+
+1. `libbox.aar` — из кэша (ключ: версия sing-box, NDK, хеш `build_libbox.ps1`), при промахе собирается
+   (`SING_BOX_VERSION` в workflow — держать равной версии `core/tool/bin/sing-box`).
+2. Версия: `<версия из pubspec>-beta.<номер запуска>` (порядок — раздел 5: `0.1.0-beta.2` < `0.1.0`,
+   числа сравниваются числом); `build` = `3000 + номер запуска` (`BUILD_OFFSET`: выше любого
+   `versionCode`, который давали локальные сборки; растёт монотонно, общий счётчик на будущий
+   stable тоже должен быть выше).
+3. `build_apk.ps1 -BuildName … -BuildNumber … -KeystorePath …` — три APK, подпись релизным ключом.
+   Проверяется, что каждый APK подписан именно им (`apksigner`) и что `versionCode == build` (`aapt2`).
+4. `release_manifest.dart --channel beta` с `--signer-sha256` (SHA-256 сертификата из keytool),
+   `--url-base https://github.com/FuckingSherlock/jormungand-releases/releases/download/v<версия>`.
+5. Публикация через `gh` в **FuckingSherlock/jormungand-releases**: релиз `v<версия>` (prerelease) с
+   APK `jormungand-<версия>-<abi>.apk`; релиз `feed` создаётся, если его нет; **после** APK в `feed`
+   заливаются `manifest-beta.json` и `.sig` (`--clobber`); остаются 10 новейших beta-релизов
+   (`^v\d+\.\d+\.\d+-beta\.\d+$`), старые удаляются вместе с тегами — `feed` и всё, что не beta, не
+   трогается.
+
+Секреты основного репозитория (Settings → Secrets → Actions):
+
+| секрет | что |
+|---|---|
+| `JORM_ANDROID_KEYSTORE_B64` | base64 от `android-release.jks` (alias `jormungand`); в CI пишется во временный файл вне workspace и удаляется в конце |
+| `JORM_ANDROID_KS_PASS` | пароль хранилища и ключа (одинаковый) |
+| `JORM_RELEASE_KEY` | приватный ключ подписи манифеста (раздел 3; уже задан) |
+| `JORM_RELEASES_TOKEN` | fine-grained PAT, `Contents: write` на `FuckingSherlock/jormungand-releases` |
+
+Артефакты workflow не выкладываются. Один раз руками:
+
+```powershell
+# 1. хранилище ключа (если ещё нет %USERPROFILE%\.jormungand\android-release.jks); сделать копию вне репозитория!
+$env:JORM_ANDROID_KS_PASS = '<пароль>'
+pwsh app/tool/build_apk.ps1 -BuildName 0.1.0 -BuildNumber 1      # создаст хранилище и соберёт APK
+# 2. секреты
+$ks = "$env:USERPROFILE\.jormungand\android-release.jks"
+[Convert]::ToBase64String([IO.File]::ReadAllBytes($ks)) | gh secret set JORM_ANDROID_KEYSTORE_B64 --repo FuckingSherlock/JormungandApp
+$env:JORM_ANDROID_KS_PASS | gh secret set JORM_ANDROID_KS_PASS --repo FuckingSherlock/JormungandApp
+gh secret set JORM_RELEASES_TOKEN --repo FuckingSherlock/JormungandApp        # спросит значение токена
+```
+
+Получение beta на устройстве: Settings → Data → App updates → Channel = **Beta** (по умолчанию stable;
+бета-пользователь смотрит оба канала, раздел 5). Первую CI-сборку нужно поставить руками из релиза
+(другой подписант, чем у debug-сборок: сначала удалить старую). Сборка, собранная локально как
+`0.1.0` (без `-beta`), новее `0.1.0-beta.N` и бета-обновлений не получит, пока `version` в pubspec не
+поднята.
 
 ## 14. Ядро
 
