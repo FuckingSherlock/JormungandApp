@@ -91,16 +91,20 @@ Dart-ядро и передаёт в память процесса (`VpnBridge`,
 ## Релизная сборка APK
 
 ```sh
-$env:JORM_ANDROID_KS_PASS = '...'
-pwsh app/tool/build_apk.ps1 [-BuildName 0.1.0 -BuildNumber 2] [-RebuildLibbox]
+pwsh app/tool/build_apk.ps1 [-DryRun] [-BuildName 0.1.0 -BuildNumber 2] [-RebuildLibbox]
 ```
 
 Скрипт: `flutter create` (если нет `android/`) → libbox.aar (если нет) → overlay → ключ → `flutter build
-apk --release --split-per-abi`. Ключ — `%USERPROFILE%\.jormungand\android-release.jks` (alias
-`jormungand`), создаётся через `keytool`, если его нет; **сделать копию**: обновление поверх
-установленного приложения возможно только с тем же ключом. `android/key.properties` (путь и alias, в
-git не идёт) пишет скрипт; пароль — только переменная `JORM_ANDROID_KS_PASS`. В конце печатаются APK
-(по одному на ABI), их sha256 и SHA-256 сертификата подписи для манифеста обновлений.
+apk --release --split-per-abi`. **Всегда** подпись релизным ключом
+`%USERPROFILE%\.jormungand\android-release.jks` (alias `jormungand`; debug-режима нет); пароль —
+`JORM_ANDROID_KS_PASS`, иначе `%USERPROFILE%\.jormungand\android-release.pass`, не печатается.
+Отсутствующее хранилище — ошибка (новый ключ сломал бы обновления установленных приложений; создаёт
+только явный `-NewKeystore`, один раз); **сделать копию**. `android/key.properties` (путь и alias, в git
+не идёт) пишет скрипт. Без `-BuildName` / `-BuildNumber` версию выбирает скрипт по ленте обновлений:
+`versionCode` = последней CI-сборки, `versionName` = `<её версия>.dev` — ставится `adb install -r`
+поверх неё, следующий CI-релиз всё равно предлагается (`docs/updates.md` §5); `-DryRun` печатает
+выбор и источник подписи, ничего не собирая. В конце печатаются APK (по одному на ABI), их sha256 и
+SHA-256 сертификата подписи для манифеста обновлений.
 
 ## Генераторы
 

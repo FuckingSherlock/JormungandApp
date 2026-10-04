@@ -89,7 +89,7 @@ through a tunnel: `dart run tool/exit_check.dart`.
 Everything is in `docs/platforms.md` (mapping, sync from the mockup, generators, toolchain in
 `G:\ANDROID_DEV`, `build_libbox.ps1`, `build_apk.ps1`, adb install) and `app/README.md` (layout,
 conventions). Short version: change the mockup first; port by the mapping table; `node app/tool/gen_all.mjs`;
-in `app/` `flutter analyze --no-fatal-infos` + `flutter test`; `pwsh app/tool/build_apk.ps1 -DebugSigned`;
+in `app/` `flutter analyze --no-fatal-infos` + `flutter test`; `pwsh app/tool/build_apk.ps1` (always release-signed, version picked from the feed; `-DryRun` previews);
 `adb install -r`. Never port the mockup's demo data or stub services. Secrets (keystore password,
 release signing key) are never written to the repo or read by the agent.
 

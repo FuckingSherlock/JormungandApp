@@ -1,21 +1,37 @@
 # Builds the Android app (release APKs per ABI, signed with the release key) and publishes it to
-# the update feed, BETA channel only (docs/updates.md section 13): installers -> a release
-# `v<version>` of FuckingSherlock/jormungand-releases, then the signed manifest-beta.json(.sig) ->
-# the fixed release `feed`.
+# the update feed (docs/updates.md section 13), two channels from this one workflow:
+#   beta   - every push to the default branch (touching app/, core/ or this file) and a manual run;
+#            version <base>-beta.<run number>, a prerelease `v<version>` + manifest-beta.json(.sig).
+#   stable - a pushed tag `vX.Y.Z` (or a manual run with channel=stable on a tag / the default
+#            branch); version X.Y.Z, a normal release `vX.Y.Z` + manifest-stable.json(.sig).
+# Installers -> a release of FuckingSherlock/jormungand-releases, then the signed manifest -> the
+# fixed release `feed`.
 #
 # Repo secrets: JORM_ANDROID_KEYSTORE_B64 (base64 of the release .jks), JORM_ANDROID_KS_PASS (its
 # store + key password), JORM_RELEASE_KEY (Ed25519 manifest-signing key file), JORM_RELEASES_TOKEN
 # (fine-grained PAT, contents:write on jormungand-releases). No artifacts are uploaded: the
 # keystore and the key live in $RUNNER_TEMP only and are deleted at the end.
-name: Release Android (beta)
+name: Release Android
 
 on:
   push:
     branches: [claude/karing-fork-environment-a45c2c]
     paths: ['app/**', 'core/**', '.github/workflows/release-android.yml']
+    # path filters are not evaluated for tag pushes: a tag always builds the tagged commit
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Channel (stable: run it on a vX.Y.Z tag or the default branch)'
+        type: choice
+        options: [beta, stable]
+        default: beta
 
-concurrency: { group: release-android, cancel-in-progress: true }
+# a newer branch push cancels the older beta run of the same ref; a stable run (a tag, or a manual
+# run with channel=stable) has its own group and is never cancelled
+concurrency:
+  group: release-android-${{ github.ref }}-${{ inputs.channel || 'push' }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' && inputs.channel != 'stable' }}
 
 permissions:
   contents: read
@@ -24,8 +40,9 @@ env:
   SING_BOX_VERSION: '1.14.2'      # keep equal to core/tool/bin/sing-box (the desktop core)
   NDK_VERSION: '28.2.13676358'    # as in core/tool/build_libbox.ps1
   FEED_REPO: FuckingSherlock/jormungand-releases
-  # versionCode = BUILD_OFFSET + run number; above every versionCode a local build has used (the
-  # old per-ABI offsets reached 2000 + n), and it must never go down (docs/updates.md section 5)
+  # versionCode = BUILD_OFFSET + run number, for BOTH channels: one workflow, so one run counter
+  # that only grows. Above every versionCode a local build has used (the old per-ABI offsets
+  # reached 2000 + n), and it must never go down (docs/updates.md section 5)
   BUILD_OFFSET: '3000'
   KEEP_BETAS: '10'
 
@@ -45,7 +62,7 @@ jobs:
           D: ${{ secrets.JORM_RELEASES_TOKEN }}
         run: |
           if [ -n "$A" ] && [ -n "$B" ] && [ -n "$C" ] && [ -n "$D" ]; then echo ok=true >> "$GITHUB_OUTPUT"
-          else echo "::notice::Release secrets not set yet - skipping the beta release"; echo ok=false >> "$GITHUB_OUTPUT"; fi
+          else echo "::notice::Release secrets not set yet - skipping the release"; echo ok=false >> "$GITHUB_OUTPUT"; fi
 
   release:
     needs: secrets-ready
@@ -90,12 +107,68 @@ jobs:
           path: app/android_overlay/app/libs
           key: ${{ steps.libbox.outputs.cache-primary-key }}
 
-      - name: Version
+      # Channel, version, build. Rules (docs/updates.md section 5 and 13):
+      #  - channel: a tag push is stable, a manual run takes the input, a branch push is beta;
+      #  - stable: X.Y.Z of the tag, which must equal the pubspec X.Y.Z (a forgotten bump fails
+      #    here, not after the release); a manual run on the default branch takes the pubspec one;
+      #    it must be above the stable already in the feed (equal only on a re-run of the same run);
+      #  - beta: <base>-beta.<run>, base = the larger of the pubspec X.Y.Z and the newest published
+      #    stable with the patch + 1, so a beta always orders above the last stable (0.1.0 stable ->
+      #    betas are 0.1.1-beta.N, otherwise beta users would sit below the release forever);
+      #  - build (versionCode) = BUILD_OFFSET + run number, the same counter for both channels.
+      - name: Channel and version
+        env:
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          base=$(sed -n 's/^version: *\([0-9][0-9.]*\).*/\1/p' app/pubspec.yaml | head -n 1)
-          [ -n "$base" ] || { echo "::error::no version in app/pubspec.yaml"; exit 1; }
-          echo "VERSION=$base-beta.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          pub=$(sed -n 's/^version: *\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' app/pubspec.yaml | head -n 1)
+          [ -n "$pub" ] || { echo "::error::no X.Y.Z version in app/pubspec.yaml"; exit 1; }
+
+          if [ "$GITHUB_REF_TYPE" = tag ]; then channel=stable
+          elif [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then channel="${INPUT_CHANNEL:-beta}"
+          else channel=beta; fi
+
+          # newest published stable: empty when none (404); any other answer is an error, not "none"
+          stable=""
+          url="https://github.com/$FEED_REPO/releases/download/feed/manifest-stable.json"
+          code=$(curl -sSL -o "$RUNNER_TEMP/manifest-stable.json" -w '%{http_code}' "$url") || { echo "::error::cannot reach the feed"; exit 1; }
+          if [ "$code" = 200 ]; then
+            stable=$(jq -er '.version' "$RUNNER_TEMP/manifest-stable.json") || { echo "::error::bad manifest-stable.json in the feed"; exit 1; }
+            [[ "$stable" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::feed stable version '$stable' is not X.Y.Z"; exit 1; }
+          elif [ "$code" != 404 ]; then
+            echo "::error::feed answered HTTP $code for manifest-stable.json"; exit 1
+          fi
+          newest() { printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1; }
+
+          if [ "$channel" = stable ]; then
+            if [ "$GITHUB_REF_TYPE" = tag ]; then
+              version="${GITHUB_REF_NAME#v}"
+              [ "$version" = "$pub" ] || { echo "::error::tag $GITHUB_REF_NAME does not match app/pubspec.yaml version $pub - bump it, commit, move the tag"; exit 1; }
+            elif [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
+              version="$pub"
+            else
+              echo "::error::stable is built from a vX.Y.Z tag or the default branch, not from $GITHUB_REF"; exit 1
+            fi
+            if [ -n "$stable" ]; then
+              top=$(newest "$stable" "$version")
+              if [ "$top" != "$version" ] || { [ "$stable" = "$version" ] && [ "$RUN_ATTEMPT" = 1 ]; }; then
+                echo "::error::stable $version is not above the published stable $stable"; exit 1
+              fi
+            fi
+          else
+            base="$pub"
+            if [ -n "$stable" ]; then
+              IFS=. read -r a b c <<< "$stable"
+              base=$(newest "$pub" "$a.$b.$((c + 1))")
+            fi
+            version="$base-beta.$GITHUB_RUN_NUMBER"
+          fi
+
+          echo "CHANNEL=$channel" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "BUILD=$((BUILD_OFFSET + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "Channel $channel, version $version, build $((BUILD_OFFSET + GITHUB_RUN_NUMBER)) (pubspec $pub, published stable ${stable:-none})"
 
       - name: Release keystore
         env:
@@ -142,10 +215,11 @@ jobs:
           ( umask 077; printf '%s\n' "$JORM_RELEASE_KEY" > "$key" )
           dist="$RUNNER_TEMP/dist"
           subject=$(git log -1 --format=%s | cut -c1-200)
-          printf 'Beta %s (build %s, commit %s)\n%s\n' "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$subject" > "$dist/notes.txt"
+          label=$([ "$CHANNEL" = stable ] && echo Release || echo Beta)
+          printf '%s %s (build %s, commit %s)\n%s\n' "$label" "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$subject" > "$dist/notes.txt"
           cd core
           dart pub get
-          dart run tool/release_manifest.dart --key "$key" --version "$VERSION" --build "$BUILD" --channel beta --out "$dist" \
+          dart run tool/release_manifest.dart --key "$key" --version "$VERSION" --build "$BUILD" --channel "$CHANNEL" --out "$dist" \
             --asset "android-arm64-v8a=$dist/jormungand-$VERSION-arm64-v8a.apk" \
             --asset "android-armeabi-v7a=$dist/jormungand-$VERSION-armeabi-v7a.apk" \
             --asset "android-x86_64=$dist/jormungand-$VERSION-x86_64.apk" \
@@ -162,11 +236,12 @@ jobs:
           [ -n "$GH_TOKEN" ] || { echo "::error::secret JORM_RELEASES_TOKEN is not set"; exit 1; }
           cd "$RUNNER_TEMP/dist"
           tag="v$VERSION"
-          # 1. the installers (a re-run of the same run number overwrites them)
+          # 1. the installers (a re-run of the same run overwrites them); beta = prerelease, stable = a normal release
           if gh release view "$tag" --repo "$FEED_REPO" > /dev/null 2>&1; then
             gh release upload "$tag" jormungand-*.apk --repo "$FEED_REPO" --clobber
           else
-            gh release create "$tag" jormungand-*.apk --repo "$FEED_REPO" --prerelease \
+            kind=$([ "$CHANNEL" = beta ] && echo --prerelease || echo --latest)
+            gh release create "$tag" jormungand-*.apk --repo "$FEED_REPO" $kind \
               --title "Jormungand $VERSION" --notes-file notes.txt
           fi
           # 2. the feed release (fixed tag) and, only after the APKs are up, the signed manifest
@@ -174,17 +249,20 @@ jobs:
             gh release create feed --repo "$FEED_REPO" --prerelease --title "Update feed" \
               --notes "Update manifests (manifest-<channel>.json + .sig), overwritten on every release. Do not delete."
           fi
-          gh release upload feed manifest-beta.json manifest-beta.json.sig --repo "$FEED_REPO" --clobber
-          # 3. keep the newest KEEP_BETAS beta releases; never `feed`, never a non-beta release
-          gh release list --repo "$FEED_REPO" --limit 200 --json tagName,createdAt,isPrerelease \
-            | jq -r --argjson keep "$KEEP_BETAS" --arg cur "$tag" \
-              '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$")) and .tagName != $cur)]
-               | sort_by(.createdAt) | reverse | .[($keep - 1):] | .[].tagName' \
-            | while read -r old; do
-                echo "deleting old beta $old"
-                gh release delete "$old" --repo "$FEED_REPO" --yes --cleanup-tag
-              done
-          echo "Published $VERSION (build $BUILD) to the beta channel" >> "$GITHUB_STEP_SUMMARY"
+          gh release upload feed "manifest-$CHANNEL.json" "manifest-$CHANNEL.json.sig" --repo "$FEED_REPO" --clobber
+          # 3. beta only: keep the newest KEEP_BETAS beta releases; never `feed`, never a stable release
+          #    (stable releases are never pruned)
+          if [ "$CHANNEL" = beta ]; then
+            gh release list --repo "$FEED_REPO" --limit 200 --json tagName,createdAt,isPrerelease \
+              | jq -r --argjson keep "$KEEP_BETAS" --arg cur "$tag" \
+                '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$")) and .tagName != $cur)]
+                 | sort_by(.createdAt) | reverse | .[($keep - 1):] | .[].tagName' \
+              | while read -r old; do
+                  echo "deleting old beta $old"
+                  gh release delete "$old" --repo "$FEED_REPO" --yes --cleanup-tag
+                done
+          fi
+          echo "Published $VERSION (build $BUILD) to the $CHANNEL channel" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the keystore and the key
         if: always()

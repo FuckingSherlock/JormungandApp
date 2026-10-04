@@ -3,18 +3,30 @@
 #   when missing) -> overlay (node tool/apply_android_overlay.mjs) -> release keystore ->
 #   flutter build apk --release --split-per-abi
 #
-#   $env:JORM_ANDROID_KS_PASS = '...'     # keystore + key password; never committed, never written to disk
-#   pwsh app/tool/build_apk.ps1 [-BuildName 0.1.0 -BuildNumber 2] [-RebuildLibbox]
+#   pwsh app/tool/build_apk.ps1 [-DryRun] [-BuildName 0.1.0 -BuildNumber 2] [-RebuildLibbox]
 #
-# Release key: %USERPROFILE%\.jormungand\android-release.jks (alias `jormungand`), generated with
-# keytool when absent. KEEP A COPY: an update must be signed with the same key as the installed
-# app (the in-app updater compares the signer, docs/updates.md). The path / alias go to
-# android/key.properties (read by the overlay's build.gradle block); the password comes from the
-# environment variable only.
-# -KeystorePath (or env JORM_ANDROID_KEYSTORE) names another existing keystore (CI: the one decoded
-# from a secret); a keystore named this way is never generated - a missing one is an error.
-# -BuildNumber also sets versionCode = build for every ABI (docs/updates.md section 5: Flutter would
-# add 1000 * ABI to it with --split-per-abi); without it the pubspec build number + ABI offset stays.
+# EVERY build is signed with the release key, there is no debug-signed mode: an APK signed with
+# another key cannot be updated in place, so debug and release builds would not coexist on a phone.
+# Key: %USERPROFILE%\.jormungand\android-release.jks (alias `jormungand`). A missing keystore is an
+# error - a new key would break updates of every installed app; -NewKeystore (explicit) generates
+# one. KEEP A COPY. The path / alias go to android/key.properties (read by the overlay's
+# build.gradle block). Password: env JORM_ANDROID_KS_PASS, else the first line of
+# %USERPROFILE%\.jormungand\android-release.pass; it is never printed, never written to the repo.
+# -KeystorePath (or env JORM_ANDROID_KEYSTORE) names another keystore (CI: the one decoded from a
+# secret).
+#
+# Version. Without -BuildName / -BuildNumber the script picks a local one that (1) installs with
+# `adb install -r` over the newest CI build and (2) still gets the next CI update offered
+# (docs/updates.md section 5): it reads manifest-beta.json / manifest-stable.json from the public
+# feed, takes the newer release R and builds versionCode = R.build, versionName = `<R.version>.dev`
+# (R a beta of the base the next CI beta will have: 0.1.0-beta.4 -> 0.1.0-beta.4.dev) or
+# `<next beta base>-beta.0.dev` (R a stable, or the pubspec version was raised). Both order above R
+# and below the next CI beta (AppVersion, core/lib/src/appupdate.dart). Feed unreachable: pubspec
+# version `-beta.0.dev` and the pubspec build number (will NOT install over a CI build: downgrade).
+# With -BuildName / -BuildNumber (CI) they are used as given; -BuildNumber also sets versionCode =
+# build for every ABI (Flutter would add 1000 * ABI with --split-per-abi); alone -BuildName keeps
+# the pubspec build number + ABI offset.
+# -DryRun prints the chosen version and the signing source (no secrets), then stops.
 #
 # Toolchain: env vars win, G:\ANDROID_DEV\... is the fallback (JDK 17, Flutter, Android SDK).
 # Also runs on Linux (CI, .github/workflows/release-android.yml): JAVA_HOME, ANDROID_HOME and flutter
@@ -26,7 +38,8 @@ param(
     [string]$KeystorePath,
     [string]$Root = 'G:\ANDROID_DEV',
     [switch]$RebuildLibbox,
-    [switch]$DebugSigned     # release APKs signed with the debug key: no keystore / password needed (test only: a later real-key build needs a reinstall)
+    [switch]$NewKeystore,    # generate the keystore when it is missing (first setup only; needs the password)
+    [switch]$DryRun          # print the version / signing source and stop
 )
 $ErrorActionPreference = 'Stop'
 
@@ -71,8 +84,128 @@ $env:ANDROID_SDK_ROOT = $sdk
 $env:PATH = (@($flutterBin, (Join-Path $javaHome 'bin'), $env:PATH)) -join [IO.Path]::PathSeparator
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'node not found (the overlay script)' }
 
+# ── release key: keystore + password (never printed) ─────────────────────────────────────
+$ksDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.jormungand'
+$ks = Join-Path $ksDir 'android-release.jks'
+$passFile = Join-Path $ksDir 'android-release.pass'
+if (-not $KeystorePath) { $KeystorePath = $env:JORM_ANDROID_KEYSTORE }
+if ($KeystorePath) { $ks = $KeystorePath }
+$alias = 'jormungand'
 $pass = $env:JORM_ANDROID_KS_PASS
-if (-not $pass -and -not $DebugSigned) { Fail 'set JORM_ANDROID_KS_PASS (the release keystore password) in this shell first' }
+$passFrom = 'env JORM_ANDROID_KS_PASS'
+if (-not $pass -and (Test-Path $passFile)) {
+    $pass = (Get-Content $passFile -TotalCount 1)
+    if ($pass) { $pass = $pass.Trim() }
+    $passFrom = $passFile
+}
+if (-not $pass) { Fail "no keystore password: set JORM_ANDROID_KS_PASS or put it into $passFile" }
+$env:JORM_ANDROID_KS_PASS = $pass   # keytool (-storepass:env) and gradle (the overlay block) read it from here
+if (-not (Test-Path $ks)) {
+    if (-not $NewKeystore) {
+        Fail "release keystore not found: $ks`nA new key would break updates of every installed app: restore the keystore (docs/updates.md section 13) or, for a first setup only, pass -NewKeystore."
+    }
+    if ($DryRun) { Fail "dry run: -NewKeystore would generate $ks" }
+    New-Item -ItemType Directory -Force (Split-Path $ks) | Out-Null
+    Write-Host "generating the release keystore $ks" -ForegroundColor Yellow
+    Run 'keytool' @('-genkeypair', '-v', '-keystore', $ks, '-alias', $alias, '-keyalg', 'RSA', '-keysize', '4096',
+        '-validity', '10000', '-storepass:env', 'JORM_ANDROID_KS_PASS', '-keypass:env', 'JORM_ANDROID_KS_PASS', '-dname', 'CN=Jormungand, O=Jormungand')
+    Write-Host 'BACK THIS FILE UP together with its password: without the same key the app cannot be updated.' -ForegroundColor Yellow
+}
+elseif ($NewKeystore) { Fail "-NewKeystore: $ks already exists" }
+# opens with the password and has the alias? (a wrong password would otherwise fail minutes into the build)
+$certLines = & keytool -list -v -keystore $ks -alias $alias -storepass:env JORM_ANDROID_KS_PASS 2>&1
+if ($LASTEXITCODE -ne 0) { Fail "cannot open $ks with alias '$alias' (wrong password or alias?)" }
+$cert = $certLines | Select-String 'SHA256:' | Select-Object -First 1
+
+# ── version ──────────────────────────────────────────────────────────────────────────────
+# AppVersion rules (core/lib/src/appupdate.dart): semver precedence (a pre-release is below its
+# release, numeric identifiers as numbers, numeric below alphanumeric, longer wins on a common
+# prefix), then build.
+function ParseVer([string]$v, [int]$build = 0) {
+    if ($v -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?$') { throw "not a version: '$v'" }
+    [pscustomobject]@{
+        Triple = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+        Pre    = $(if ($Matches[4]) { @($Matches[4].Split('.')) } else { @() })
+        Build  = $build
+        Text   = $v
+    }
+}
+function CompareTriple($a, $b) {
+    for ($i = 0; $i -lt 3; $i++) { if ($a[$i] -ne $b[$i]) { return [Math]::Sign($a[$i] - $b[$i]) } }
+    return 0
+}
+function CompareVer($a, $b) {
+    $c = CompareTriple $a.Triple $b.Triple
+    if ($c -ne 0) { return $c }
+    if ($a.Pre.Count -eq 0 -or $b.Pre.Count -eq 0) {
+        if ($a.Pre.Count -ne $b.Pre.Count) { return $(if ($a.Pre.Count -eq 0) { 1 } else { -1 }) }
+    }
+    else {
+        for ($i = 0; $i -lt [Math]::Min($a.Pre.Count, $b.Pre.Count); $i++) {
+            $x = $a.Pre[$i]; $y = $b.Pre[$i]
+            $xn = $x -match '^\d+$'; $yn = $y -match '^\d+$'
+            if ($xn -and $yn) { $c = [Math]::Sign([long]$x - [long]$y) }
+            elseif ($xn) { $c = -1 }
+            elseif ($yn) { $c = 1 }
+            else { $c = [Math]::Sign([string]::CompareOrdinal($x, $y)) }
+            if ($c -ne 0) { return $c }
+        }
+        $c = [Math]::Sign($a.Pre.Count - $b.Pre.Count)
+        if ($c -ne 0) { return $c }
+    }
+    return [Math]::Sign($a.Build - $b.Build)
+}
+# The newest published manifest of a channel; $null = none published (404). Other failures throw.
+function FeedManifest([string]$channel) {
+    $url = "https://github.com/FuckingSherlock/jormungand-releases/releases/download/feed/manifest-$channel.json"
+    try { $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 20 -Headers @{ 'User-Agent' = 'Jormungand-build' } }
+    catch {
+        if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404) { return $null }
+        throw "$channel feed: $($_.Exception.Message)"
+    }
+    $text = if ($r.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($r.Content) } else { [string]$r.Content }
+    $j = $text | ConvertFrom-Json
+    if ($j.app -ne 'jormungand' -or $j.channel -ne $channel -or $j.build -lt 1) { throw "$channel feed: not a Jormungand $channel manifest" }
+    $v = ParseVer ([string]$j.version) ([int]$j.build)
+    $v | Add-Member -NotePropertyName Channel -NotePropertyValue $channel
+    $v
+}
+
+$versionSource = 'given'
+if (-not $BuildName -and -not $BuildNumber) {
+    $pubLine = Select-String -Path (Join-Path $app 'pubspec.yaml') -Pattern '^version:\s*(\d+\.\d+\.\d+)(?:\+(\d+))?' | Select-Object -First 1
+    if (-not $pubLine) { Fail 'no version in app/pubspec.yaml' }
+    $pub = ParseVer $pubLine.Matches[0].Groups[1].Value
+    $pubBuild = if ($pubLine.Matches[0].Groups[2].Success) { $pubLine.Matches[0].Groups[2].Value } else { '1' }
+    try {
+        $beta = FeedManifest 'beta'
+        $stable = FeedManifest 'stable'
+        $all = @($beta, $stable) | Where-Object { $_ }
+        if (-not $all) { throw 'the feed has no manifests yet' }
+        $latest = $all[0]
+        foreach ($m in $all) { if ((CompareVer $m $latest) -gt 0) { $latest = $m } }
+        # the base the next CI beta gets: the pubspec version, or one patch above the newest stable
+        $nextBase = $pub.Triple
+        if ($stable) {
+            $above = @($stable.Triple[0], $stable.Triple[1], ($stable.Triple[2] + 1))
+            if ((CompareTriple $above $nextBase) -gt 0) { $nextBase = $above }
+        }
+        if ($latest.Channel -eq 'beta' -and (CompareTriple $latest.Triple $nextBase) -eq 0) { $BuildName = "$($latest.Text).dev" }
+        else { $BuildName = "$($nextBase -join '.')-beta.0.dev" }
+        $BuildNumber = [string]$latest.Build
+        $versionSource = "feed: latest $($latest.Channel) $($latest.Text)+$($latest.Build)"
+    }
+    catch {
+        Write-Host "build_apk: feed unreachable or empty ($($_.Exception.Message)); the version comes from pubspec.yaml - this APK will NOT install over a CI build (versionCode below it), pass -BuildName / -BuildNumber if needed" -ForegroundColor Yellow
+        $BuildName = "$($pub.Triple -join '.')-beta.0.dev"
+        $BuildNumber = $pubBuild
+        $versionSource = 'offline fallback: pubspec.yaml'
+    }
+}
+if ($BuildNumber -and $BuildNumber -notmatch '^\d+$') { Fail "-BuildNumber must be a positive integer, got '$BuildNumber'" }
+Write-Host ("version: name {0}, versionCode {1}  [{2}]" -f $(if ($BuildName) { $BuildName } else { '(pubspec)' }), $(if ($BuildNumber) { $BuildNumber } else { '(pubspec + ABI offset)' }), $versionSource)
+Write-Host "signing: $ks (alias $alias), password from $passFrom$(if ($cert) { ', ' + $cert.Line.Trim() })"
+if ($DryRun) { Write-Host 'dry run: nothing built'; exit 0 }
 
 # ── android/ project, first time ─────────────────────────────────────────────────────────
 if (-not (Test-Path (Join-Path $app 'android/app'))) {
@@ -96,24 +229,10 @@ if ($RebuildLibbox -or -not (Test-Path $aar)) {
 # ── overlay (after libbox: the gradle block depends on the aar being there) ──────────────
 Run 'node' @('tool/apply_android_overlay.mjs') $app
 
-# ── release keystore ─────────────────────────────────────────────────────────────────────
-$ksDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.jormungand'
-$ks = Join-Path $ksDir 'android-release.jks'
-if (-not $KeystorePath) { $KeystorePath = $env:JORM_ANDROID_KEYSTORE }
-if ($KeystorePath) { $ks = $KeystorePath }
-$alias = 'jormungand'
-if ($DebugSigned) { }
-elseif ($KeystorePath -and -not (Test-Path $ks)) { Fail "keystore not found: $ks (an explicitly named keystore is never generated)" }
-elseif (-not (Test-Path $ks)) {
-    New-Item -ItemType Directory -Force $ksDir | Out-Null
-    Write-Host "no release keystore, generating $ks" -ForegroundColor Yellow
-    Run 'keytool' @('-genkeypair', '-v', '-keystore', $ks, '-alias', $alias, '-keyalg', 'RSA', '-keysize', '4096',
-        '-validity', '10000', '-storepass', $pass, '-keypass', $pass, '-dname', 'CN=Jormungand, O=Jormungand')
-    Write-Host "BACK THIS FILE UP together with its password: without the same key the app cannot be updated." -ForegroundColor Yellow
-}
+# ── key.properties (path and alias only; the password goes through the environment) ────
 $props = Join-Path $app 'android/key.properties'
 # forward slashes: a .properties file reads backslashes as escapes
-if (-not $DebugSigned) { @("storeFile=$($ks -replace '\\', '/')", "keyAlias=$alias") | Set-Content $props -Encoding ascii }
+@("storeFile=$($ks -replace '\\', '/')", "keyAlias=$alias") | Set-Content $props -Encoding ascii
 
 # ── build ────────────────────────────────────────────────────────────────────────────────
 Run $flutter @('pub', 'get') $app
@@ -130,6 +249,5 @@ Get-ChildItem $outDir -Filter '*.apk' | ForEach-Object {
     $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
     Write-Host ("{0}  {1:N1} MB  sha256 {2}" -f $_.FullName, ($_.Length / 1MB), $h) -ForegroundColor Green
 }
-if ($DebugSigned) { exit 0 }
-$cert = & keytool -list -v -keystore $ks -alias $alias -storepass $pass 2>$null | Select-String 'SHA256:'
+Write-Host "version: name $BuildName, versionCode $BuildNumber"
 if ($cert) { Write-Host "signer $($cert.Line.Trim())  (-> the update manifest's android.signerSha256, lower-case hex without colons)" }

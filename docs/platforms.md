@@ -111,15 +111,17 @@ Visual Studio с «Desktop development with C++» — пока не устано
 | Мокап | `npm run verify [-- presets]` | `design/main_screen.html`, деплой — push (CI) |
 | Живой UI на ядре | preview `jormd` (`dart run core/bin/jormd.dart`) | http://127.0.0.1:7788 |
 | libbox | `pwsh core/tool/build_libbox.ps1 [-Force]` | `app/android_overlay/app/libs/libbox.aar` (не в git; пропускается, если актуален) |
-| APK для теста | `pwsh app/tool/build_apk.ps1 -DebugSigned` | `app/build/app/outputs/flutter-apk/app-<abi>-release.apk`, подпись debug-ключом |
-| APK релиз | `$env:JORM_ANDROID_KS_PASS=…; pwsh app/tool/build_apk.ps1 -BuildName X.Y.Z -BuildNumber N` | то же, подпись `%USERPROFILE%\.jormungand\android-release.jks` |
+| APK для теста | `pwsh app/tool/build_apk.ps1` (`-DryRun` — только показать версию и источник подписи) | `app/build/app/outputs/flutter-apk/app-<abi>-release.apk`; **всегда** подпись релизным ключом `%USERPROFILE%\.jormungand\android-release.jks` (пароль — `JORM_ANDROID_KS_PASS` или `android-release.pass`); версия сама: `<версия CI>.dev`, versionCode = последней CI-сборки — встаёт `adb install -r` поверх неё, следующая CI-бета предлагается (`docs/updates.md` §5) |
+| APK с заданной версией | `pwsh app/tool/build_apk.ps1 -BuildName X.Y.Z -BuildNumber N` | то же, версия как задана (так вызывает CI) |
 | APK + публикация beta (CI) | push в основную ветку (`app/**`, `core/**`) или `workflow_dispatch` → `.github/workflows/release-android.yml` | релиз `v<версия>-beta.N` в `FuckingSherlock/jormungand-releases` + `manifest-beta.json(.sig)` в релизе `feed`; секреты и разовые шаги — `docs/updates.md` §13 |
+| APK + публикация stable (CI) | `git tag v0.1.0 && git push origin v0.1.0` (версия тега = `X.Y.Z` в `app/pubspec.yaml`) | обычный релиз `v0.1.0` в `jormungand-releases` + `manifest-stable.json(.sig)` в `feed`; beta после stable идёт выше него (`0.1.1-beta.N`), `docs/updates.md` §5, §13 |
 | Установка | `adb install -r <apk>` (`G:\ANDROID_DEV\android-sdk\platform-tools\adb.exe`) | телефон юзера: Galaxy Note20, arm64-v8a, Android 13 |
 | Flutter Windows | `flutter build windows` в `app/` | нужна VS C++ |
 
 `build_apk.ps1`: `flutter create` (если нет `android/`) → libbox (если нет aar) → `apply_android_overlay.mjs`
-→ ключ → `flutter build apk --release --split-per-abi`. APK, подписанный debug-ключом, не обновляется
-поверх релизного и наоборот — только удалением. Оба скрипта (`build_libbox.ps1`, `build_apk.ps1`)
+→ ключ → `flutter build apk --release --split-per-abi`. Debug-подписанных сборок нет: и локальные, и
+CI-сборки подписаны одним релизным ключом, поэтому они обновляют друг друга; отсутствующее
+хранилище — ошибка (новый ключ ломает обновления; создаёт только `-NewKeystore`). Оба скрипта (`build_libbox.ps1`, `build_apk.ps1`)
 работают и на Linux под `pwsh` (CI): пути берутся из `JAVA_HOME` / `ANDROID_HOME` / `ANDROID_NDK_HOME` /
 `PATH`, `-KeystorePath` задаёт чужое хранилище ключа.
 
