@@ -330,6 +330,24 @@ class EntryCard extends StatelessWidget {
   }
 }
 
+EntryCard _probe(String id) => EntryCard(
+  id: id,
+  open: false,
+  edit: false,
+  searching: false,
+  onToggleOpen: () {},
+  onEdit: () {},
+);
+
+/// The meta line of a profile / chain card, for the cards of the target picker.
+Widget entryMetaLine(BuildContext context, CoreHost host, String id) =>
+    _probe(id)._meta(context, host, host.catalog.chainsData[id]);
+
+/// The "server it would use now" line of a profile / chain card.
+Widget entryNowLine(BuildContext context, CoreHost host, String id) => _probe(
+  id,
+)._now(context, host, host.catalog.chainsData[id], host.catalog.isBroken(id));
+
 /// `.entry-empty`.
 class _EntryEmpty extends StatelessWidget {
   const _EntryEmpty();

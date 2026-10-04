@@ -2853,5 +2853,80 @@
   "groupName": "Group name",
   "linkCopied": "Link copied",
   "auto2": "auto",
-  "exit2": "exit"
+  "exit2": "exit",
+  "noRuleMainFlow": "No rule, main flow",
+  "blockAds": "Block ads",
+  "fallback": "Fallback",
+  "unavailable4": "unavailable",
+  "deleted": "deleted {s0}",
+  "@deleted": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "desktop2": "desktop",
+  "auto3": "Auto · {s0}",
+  "@auto3": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "lineExpectedTypeValuePolicy": "Line {s0}: expected TYPE,value,POLICY",
+  "@lineExpectedTypeValuePolicy": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "line2": "Line {s0}: {s1}",
+  "@line2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "youtubeCom1234": "youtube.com, 1.2.3.4:443, Telegram",
+  "mixed": "mixed",
+  "editEntry": "Edit entry",
+  "s3": "s",
+  "min2": "min",
+  "ms2": "ms",
+  "socks5Address": "SOCKS5 address",
+  "httpAddress": "HTTP address",
+  "onText2": "{n0} on",
+  "@onText2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "hijack": "hijack",
+  "proxyPortTunStackTestUrl": "Proxy port, TUN stack, test URL",
+  "direct2": "{s0} direct",
+  "@direct2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "noTestYet": "No test yet",
+  "lastMbps": "Last: {s0} Mbps",
+  "@lastMbps": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  }
 }

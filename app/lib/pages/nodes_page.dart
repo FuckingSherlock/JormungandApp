@@ -27,6 +27,9 @@ class NodesPage extends StatefulWidget {
   State<NodesPage> createState() => NodesPageState();
 }
 
+/// One key per card, so [NodesPageState.openEntry] can scroll to it.
+final _cardKeys = <String, GlobalKey>{};
+
 class NodesPageState extends State<NodesPage> {
   static const _tabs = ['simple', 'profiles'];
 
@@ -62,6 +65,31 @@ class NodesPageState extends State<NodesPage> {
   void openAdd({String? tab}) {
     if (tab != null) showTab(tab);
     showNodesAdd(context, tab: tab ?? _tab, onOpenCard: _openCard);
+  }
+
+  /// The card of a source / profile / chain, on its tab, unfolded and brought into view (Logs
+  /// "Open", the Route sheet's "Edit ...").
+  void openEntry(String id) {
+    final catalog = CoreHostScope.read(context).catalog;
+    if (catalog.connectEntry(id) == null) return;
+    setState(() {
+      _searching = false;
+      _query.clear();
+      _open[id] = true;
+    });
+    showTab(catalog.sourcesData[id] != null ? 'simple' : 'profiles');
+    for (final delay in const [60, 320]) {
+      Future.delayed(Duration(milliseconds: delay), () {
+        final ctx = _cardKeys[id]?.currentContext;
+        if (mounted && ctx != null && ctx.mounted) {
+          Scrollable.ensureVisible(
+            ctx,
+            alignment: .1,
+            duration: const Duration(milliseconds: 250),
+          );
+        }
+      });
+    }
   }
 
   void _openCard(String id) {
@@ -467,7 +495,9 @@ class _TabList extends StatelessWidget {
       return Padding(
         key: ValueKey(id),
         padding: const EdgeInsets.only(bottom: 10),
-        child: s != null
+        child: KeyedSubtree(
+          key: _cardKeys.putIfAbsent(id, () => GlobalKey()),
+          child: s != null
             ? SourceCard(
                 source: s,
                 nodes: shown[id] ?? s.nodes,
@@ -498,6 +528,7 @@ class _TabList extends StatelessWidget {
                     ? showChainEditor(context, id: id, tab: tab)
                     : showProfileEditor(context, id: id),
               ),
+        ),
       );
     }
 

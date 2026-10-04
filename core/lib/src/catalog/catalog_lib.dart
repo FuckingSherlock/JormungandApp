@@ -10,6 +10,7 @@ export 'models.dart';
 export 'ops.dart';
 export 'ping_book.dart';
 export 'plan_builder.dart';
+export 'rules_logic.dart';
 export 'rules_model.dart';
 export 'settings.dart';
 export 'validate.dart';

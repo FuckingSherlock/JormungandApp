@@ -284,17 +284,39 @@ const tunTag = 'tun-in';
 /// The TUN inbound: dual stack, strict routes (no leaks past the tunnel on the other
 /// interfaces), local networks excluded ([tunBypass]), the stack from the plan. sing-box's
 /// own outbounds bind to the real interface (`route.auto_detect_interface`), so they
-/// do not loop back into it.
-Map<String, dynamic> _tunInbound(Map<String, dynamic> plan) => {
-      'type': 'tun',
-      'tag': tunTag,
-      'address': tunAddress,
-      'mtu': 9000,
-      'auto_route': true,
-      'strict_route': true,
-      'stack': planTunStack(plan),
-      'route_exclude_address': tunBypass,
-    };
+/// do not loop back into it. Android: an app set to Direct as a whole (Rules → Per-app routing, not
+/// split, Rules mode) is left out of the VPN altogether (`exclude_package` →
+/// `VpnService.Builder.addDisallowedApplication`), so its traffic never enters the tunnel.
+Map<String, dynamic> _tunInbound(Map<String, dynamic> plan) {
+  final direct = tunDirectPackages(plan);
+  return {
+    'type': 'tun',
+    'tag': tunTag,
+    'address': tunAddress,
+    'mtu': 9000,
+    'auto_route': true,
+    'strict_route': true,
+    'stack': planTunStack(plan),
+    'route_exclude_address': tunBypass,
+    if (direct.isNotEmpty) 'exclude_package': direct,
+  };
+}
+
+/// The packages of the apps that go Direct whole: Direct on both halves when split. Empty in
+/// Global (rules and apps are ignored there) and for process / path apps (desktop).
+List<String> tunDirectPackages(Map<String, dynamic> plan) {
+  if (plan['global'] == true) return const [];
+  final apps = (plan['routing'] is Map ? (plan['routing'] as Map)['apps'] : null) as List? ?? const [];
+  return [
+    for (final a in apps)
+      if (a is Map &&
+          (a['kind'] ?? 'package') == 'package' &&
+          '${a['id'] ?? ''}'.isNotEmpty &&
+          a['act'] == 'direct' &&
+          (a['split'] != true || (a['udp'] is Map && (a['udp'] as Map)['act'] == 'direct')))
+        '${a['id']}',
+  ];
+}
 
 /// A config that only exists to measure latency (through its probe inbound, probe.dart):
 /// every node as `t/<key>`, every entry → exit pair as `p/<key>` (the exit dialing

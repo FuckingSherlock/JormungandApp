@@ -7,9 +7,17 @@ import '../core/core_host.dart';
 import '../l10n/l10n.dart';
 import '../pages/home_page.dart';
 import '../pages/logs_page.dart';
+import '../core/logs_controller.dart';
 import '../pages/nodes_page.dart';
+import '../pages/route_page.dart';
+import '../pages/rules_page.dart';
 import '../pages/settings_page.dart';
 import '../theme/app_colors.g.dart';
+import '../widgets/apps_sheet.dart';
+import '../widgets/rule_form.dart';
+import '../widgets/rules_extras.dart';
+import '../widgets/settings_dns.dart';
+import 'app_links.dart';
 
 /// The bottom-nav tabs, in the mockup's order (markup/40-bottomnav.html).
 enum AppTab {
@@ -46,19 +54,64 @@ class _HomeShellState extends State<HomeShell> {
   StreamSubscription<HostNotice>? _notices;
   final _nodesKey = GlobalKey<NodesPageState>();
 
+  LogsController? _logs;
+
+  /// A context under the [AppLinksScope] of [build]: the sheets the links open carry it over.
+  final _inner = GlobalKey();
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     // the host's short messages (a connect that failed, a subscription that did not load...)
     // are toasts on whatever tab is open
-    _notices ??= CoreHostScope.read(context).notices.listen(_toast);
+    final host = CoreHostScope.read(context);
+    _notices ??= host.notices.listen(_toast);
+    // one journal for the app: it runs on every tab (the dots on the Logs item come from it)
+    _logs ??= LogsController(host)
+      ..l10n = context.l10n
+      ..start();
   }
 
   @override
   void dispose() {
     _notices?.cancel();
+    _logs?.dispose();
     super.dispose();
   }
+
+  void _setTab(AppTab t) {
+    if (t == _tab) return;
+    setState(() => _tab = t);
+    _logs?.setOnScreen(t == AppTab.logs);
+    if (t == AppTab.logs) _logs?.open();
+  }
+
+  BuildContext get _ctx => _inner.currentContext ?? context;
+
+  void _afterTab(void Function() f) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) f();
+    });
+  }
+
+  late final AppLinks _links = AppLinks(
+    openNodesEntry: (id) {
+      _setTab(AppTab.nodes);
+      _afterTab(() => _nodesKey.currentState?.openEntry(id));
+    },
+    openRules: ([at]) => showRulesPage(_ctx, at: at),
+    openRuleForm: (id) => showRuleForm(_ctx, id: id),
+    openAppAct: (pkg) => showAppAct(_ctx, pkg),
+    openDns: () => showDnsSheet(_ctx),
+    openRuleSets: () => showRuleSets(_ctx),
+    newRuleFor: ({host, app, via}) =>
+        showRuleForm(_ctx, host: host, app: app, via: via),
+    openRoute: ({edit = false}) => showRouteSheet(_ctx, edit: edit),
+    openLogsEvent: (id) {
+      _setTab(AppTab.logs);
+      _logs?.showEvent(id);
+    },
+  );
 
   void _toast(HostNotice n) {
     if (!mounted) return;
@@ -100,40 +153,61 @@ class _HomeShellState extends State<HomeShell> {
     return PopScope(
       canPop: _tab == AppTab.home,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) setState(() => _tab = AppTab.home);
+        if (!didPop) _setTab(AppTab.home);
       },
-      child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.light,
-          systemNavigationBarColor: c.surface,
-          systemNavigationBarIconBrightness: Brightness.light,
-        ),
-        child: Scaffold(
-          body: IndexedStack(
-            index: _tab.index,
-            children: [
-              HomePage(onOpenNodes: _openNodesAdd),
-              NodesPage(key: _nodesKey),
-              const LogsPage(),
-              const SettingsPage(),
-            ],
-          ),
-          bottomNavigationBar: DecoratedBox(
-            decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: c.border)),
+      child: AppLinksScope(
+        links: _links,
+        child: Builder(
+          key: _inner,
+          builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(
+            value: SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.light,
+              systemNavigationBarColor: c.surface,
+              systemNavigationBarIconBrightness: Brightness.light,
             ),
-            child: NavigationBar(
-              selectedIndex: _tab.index,
-              onDestinationSelected: (i) =>
-                  setState(() => _tab = AppTab.values[i]),
-              destinations: [
-                for (final t in AppTab.values)
-                  NavigationDestination(
-                    icon: Icon(t.icon),
-                    label: t.label(l10n),
-                  ),
-              ],
+            child: Scaffold(
+              body: IndexedStack(
+                index: _tab.index,
+                children: [
+                  HomePage(onOpenNodes: _openNodesAdd),
+                  NodesPage(key: _nodesKey),
+                  LogsPage(controller: _logs!),
+                  const SettingsPage(),
+                ],
+              ),
+              bottomNavigationBar: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: c.border)),
+                ),
+                child: ListenableBuilder(
+                  listenable: _logs!,
+                  builder: (context, _) {
+                    final unseen = _logs!.unseen;
+                    return NavigationBar(
+                      selectedIndex: _tab.index,
+                      onDestinationSelected: (i) => _setTab(AppTab.values[i]),
+                      destinations: [
+                        for (final t in AppTab.values)
+                          NavigationDestination(
+                            icon:
+                                t == AppTab.logs &&
+                                    (unseen.error || unseen.warn)
+                                ? Badge(
+                                    smallSize: 8,
+                                    backgroundColor: unseen.error
+                                        ? c.danger
+                                        : c.warn,
+                                    child: Icon(t.icon),
+                                  )
+                                : Icon(t.icon),
+                            label: t.label(l10n),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
             ),
           ),
         ),

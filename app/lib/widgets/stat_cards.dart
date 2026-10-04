@@ -5,6 +5,7 @@ import '../core/format.dart';
 import '../l10n/l10n.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
+import 'live_conns_sheet.dart';
 
 /// Row 1 of Home (`.row1`): the Speed card on the left, Exit IP over Connections on the right.
 /// The cards are as tall as the right column; every line is one non-wrapping line and numbers sit
@@ -308,8 +309,8 @@ class ExitIpCard extends StatelessWidget {
   }
 }
 
-/// Open connections: the total, TCP and UDP stacked after it.
-// TODO(ui): a tap opens the Live connections sheet (mockup 76-conns.js).
+/// Open connections: the total, TCP and UDP stacked after it; a tap opens the Live connections
+/// sheet (mockup 76-conns.js).
 class ConnectionsCard extends StatelessWidget {
   const ConnectionsCard({
     super.key,
@@ -349,6 +350,7 @@ class ConnectionsCard extends StatelessWidget {
       ],
     );
     return AppCard(
+      onTap: () => showLiveConnections(context),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

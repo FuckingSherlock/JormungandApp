@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/core_host.dart';
+import 'core/settings_model.dart';
 import 'l10n/l10n.dart';
 import 'shell/home_shell.dart';
 import 'state/app_settings.dart';
@@ -26,10 +28,61 @@ class _JormungandAppState extends State<JormungandApp> {
 
   CoreHost get _core => widget.coreHost;
 
+  // The look (theme, text size, language) is part of the core's state (genCfg), so a backup
+  // carries it: the host's copy is applied when it loads or is restored, a change here is
+  // written back to it.
+  bool _applying = false;
+  String? _look; // the look of genCfg the settings match now
+  bool _langChosen = false; // the language is written only once the user picked one
+  Locale? _lastLocale;
+
+  String _lookOf(GenCfg g) => '${g.theme}|${g.uiScale}|${g.lang}';
+
+  void _loadLook() {
+    if (!_core.ready) return;
+    final g = _core.gen;
+    final sig = _lookOf(g);
+    if (sig == _look) return;
+    _look = sig;
+    _applying = true;
+    final theme = g.theme, scale = g.uiScale, lang = g.lang;
+    if (theme != null) _settings.setTheme(AppThemeId.parse(theme));
+    if (scale != null) _settings.setTextScale(scale);
+    if (lang != null &&
+        AppSettings.supported.any((l) => l.languageCode == lang)) {
+      _settings.setLocale(Locale(lang));
+    }
+    _lastLocale = _settings.locale;
+    _applying = false;
+  }
+
+  void _saveLook() {
+    if (_settings.locale != _lastLocale) {
+      _lastLocale = _settings.locale;
+      if (!_applying) _langChosen = true;
+    }
+    if (_applying || !_core.ready) return;
+    final g = _core.gen;
+    g.theme = _settings.theme.name;
+    g.uiScale = _settings.textScale;
+    if (_langChosen) g.lang = _settings.locale.languageCode;
+    _look = _lookOf(g);
+    _core.changed();
+  }
+
   @override
   void initState() {
     super.initState();
-    _core.init();
+    _lastLocale = _settings.locale;
+    _core.addListener(_loadLook);
+    _settings.addListener(_saveLook);
+    unawaited(
+      _core.init().then((_) {
+        if (!mounted) return null;
+        _loadLook();
+        return _core.runLaunchActions();
+      }),
+    );
     // Desktop: the window is closing - stop sing-box, put the system proxy back (or keep it by
     // the kill switch) and save. Android's process just ends; the state is saved as it changes.
     _lifecycle = AppLifecycleListener(
@@ -43,6 +96,7 @@ class _JormungandAppState extends State<JormungandApp> {
 
   @override
   void dispose() {
+    _core.removeListener(_loadLook);
     _lifecycle.dispose();
     _settings.dispose();
     super.dispose();

@@ -1,0 +1,133 @@
+package dev.jormungand.app
+
+import android.app.Activity
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageInstaller
+import android.content.pm.PackageManager
+import android.content.pm.Signature
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import java.security.MessageDigest
+import java.util.concurrent.Executors
+
+/**
+ * Installs the APK the core downloaded and verified (docs/updates.md section 9, Android).
+ *
+ *  1. "Install unknown apps" for this package: when it is not allowed the system screen opens and
+ *     the answer is `permission` (the file stays; the user taps Install again afterwards).
+ *  2. The file is checked: our package name, a version code above the installed one, signed by
+ *     the same certificate as the installed app (else `verify`).
+ *  3. A PackageInstaller session writes the file and commits; the system asks for one tap
+ *     (STATUS_PENDING_USER_ACTION). The answer arrives when the install ends: success usually
+ *     means the process is replaced and never answers, a refusal answers `aborted`.
+ *
+ * Not tested on a device yet (needs an APK signed with the release key and a newer build).
+ */
+object UpdateInstaller {
+    private const val ACTION = "dev.jormungand.app.UPDATE_RESULT"
+    private val io = Executors.newSingleThreadExecutor()
+    private var receiver: BroadcastReceiver? = null
+    private var pending: MethodChannel.Result? = null
+
+    fun install(activity: Activity, path: String, result: MethodChannel.Result) {
+        val ctx = activity.applicationContext
+        val pm = ctx.packageManager
+        if (pending != null) return result.success("busy")
+        if (!pm.canRequestPackageInstalls()) {
+            activity.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return result.success("permission")
+        }
+        pending = result
+        io.execute {
+            val why = try {
+                verify(ctx, path)?.also { return@execute finish(it) }
+                commit(ctx, path)
+                null
+            } catch (e: Exception) {
+                e.message ?: "install failed"
+            }
+            if (why != null) finish(why)
+        }
+    }
+
+    private fun finish(why: String?) {
+        val r = synchronized(this) { pending.also { pending = null } } ?: return
+        receiver?.let { runCatching { appContext?.unregisterReceiver(it) } }
+        receiver = null
+        android.os.Handler(android.os.Looper.getMainLooper()).post { r.success(why) }
+    }
+
+    private var appContext: Context? = null
+
+    @Suppress("DEPRECATION")
+    private fun certs(info: android.content.pm.PackageInfo?): Set<String> {
+        val sigs: Array<Signature> = if (Build.VERSION.SDK_INT >= 28) {
+            val si = info?.signingInfo ?: return emptySet()
+            if (si.hasMultipleSigners()) si.apkContentsSigners else si.signingCertificateHistory
+        } else info?.signatures ?: return emptySet()
+        return sigs.map { s -> MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) } }.toSet()
+    }
+
+    /** null = fine, else the reason. */
+    @Suppress("DEPRECATION")
+    private fun verify(ctx: Context, path: String): String? {
+        val pm = ctx.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        val archive = pm.getPackageArchiveInfo(path, flags) ?: return "verify"
+        val mine = pm.getPackageInfo(ctx.packageName, flags)
+        if (archive.packageName != ctx.packageName) return "verify"
+        val newCode = if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode else archive.versionCode.toLong()
+        val curCode = if (Build.VERSION.SDK_INT >= 28) mine.longVersionCode else mine.versionCode.toLong()
+        if (newCode <= curCode) return "verify"
+        if (certs(archive).intersect(certs(mine)).isEmpty()) return "verify"
+        return null
+    }
+
+    private fun commit(ctx: Context, path: String) {
+        appContext = ctx
+        val installer = ctx.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(ctx.packageName)
+        if (Build.VERSION.SDK_INT >= 31) params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        val id = installer.createSession(params)
+        installer.openSession(id).use { session ->
+            val file = File(path)
+            file.inputStream().use { input ->
+                session.openWrite("update.apk", 0, file.length()).use { out ->
+                    input.copyTo(out)
+                    session.fsync(out)
+                }
+            }
+            val r = object : BroadcastReceiver() {
+                override fun onReceive(c: Context, intent: Intent) {
+                    when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+                        PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                            @Suppress("DEPRECATION")
+                            val ask = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                            ask?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { c.startActivity(it) }
+                        }
+                        PackageInstaller.STATUS_SUCCESS -> finish(null)
+                        PackageInstaller.STATUS_FAILURE_ABORTED -> finish("aborted")
+                        else -> finish(intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "install failed")
+                    }
+                }
+            }
+            receiver = r
+            if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(r, IntentFilter(ACTION), Context.RECEIVER_NOT_EXPORTED)
+            else ctx.registerReceiver(r, IntentFilter(ACTION))
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+            val pi = PendingIntent.getBroadcast(ctx, id, Intent(ACTION).setPackage(ctx.packageName), flags)
+            session.commit(pi.intentSender)
+        }
+    }
+}

@@ -65,6 +65,25 @@ class RuleSetCache {
 
   String pathOf(RuleSetSource s) => p.join(dir, '${s.tag}.${s.binary ? 'srs' : 'json'}');
 
+  /// When each list of Rules → Rule sets was last downloaded (epoch ms, from the file's time), by
+  /// the list's name there: a user's set by its name, the built-in `geosite` / `geoip` by the
+  /// newest of their category files. A list never downloaded is absent.
+  Future<Map<String, int>> updatedTimes() async {
+    final out = <String, int>{};
+    final d = Directory(dir);
+    if (!await d.exists()) return out;
+    await for (final e in d.list()) {
+      if (e is! File) continue;
+      final file = p.basename(e.path);
+      final m = RegExp(r'^(geosite|geoip|set)-(.+)\.(srs|json)$').firstMatch(file);
+      if (m == null) continue;
+      final at = (await e.lastModified()).millisecondsSinceEpoch;
+      final name = m[1] == 'set' ? m[2]! : m[1]!;
+      if (at > (out[name] ?? 0)) out[name] = at;
+    }
+    return out;
+  }
+
   /// [proxyPort]: a loopback mixed inbound that always goes through the tunnel; lists "via
   /// VPN" download only through it. Direct lists use the system's proxy from the environment.
   Future<RuleSetFetch> ensure(List<RuleSetSource> sets, {int? proxyPort, bool refresh = false}) async {

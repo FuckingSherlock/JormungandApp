@@ -214,6 +214,25 @@ class SourceCard extends StatelessWidget {
   }
 }
 
+/// The meta line of a source card, for the cards of the target picker.
+Widget sourceMetaLine(BuildContext context, CoreHost host, Source s) =>
+    SourceCard(
+      source: s,
+      nodes: const [],
+      open: false,
+      edit: false,
+      searching: false,
+      onToggleOpen: () {},
+      onPing: () {},
+      onMenu: () {},
+      onNodeMenu: (_) {},
+      onGoneMenu: (_) {},
+      onAddServer: () {},
+    )._meta(context, host);
+
+/// The usage line (traffic, expiry) of a subscription card.
+Widget sourceUsageLine(Source s) => _Usage(source: s);
+
 /// A part of a card faded when the source is switched off in Nodes.
 class _Fade extends StatelessWidget {
   const _Fade({required this.faded, required this.child});

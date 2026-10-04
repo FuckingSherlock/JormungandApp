@@ -106,4 +106,30 @@ abstract interface class CoreApi {
 
   /// Closes one open connection ([id] from `traffic`) or all of them: `{ok}`.
   Future<Map<String, dynamic>> closeConnections([String? id]);
+
+  // ── the app's own update (appupdate.dart, docs/updates.md); the platform installs ──
+
+  /// `UpdateStatus.toJson` (phase idle / checking / upToDate / available / downloading / ready /
+  /// failed, the offer, the bytes); `{phase: 'unavailable'}` when the host gave the core no app version.
+  Map<String, dynamic> updateStatus();
+
+  /// The update status again whenever it changed. Broadcast.
+  Stream<Map<String, dynamic>> get updateChanges;
+
+  /// `{channel?: stable|beta, manual?: bool}` → the status. Throws a [FormatException] when there is no updater.
+  Future<Map<String, dynamic>> updateCheck(Map<String, dynamic> body);
+
+  /// Downloads the offered file and checks it (size, sha256): the status `ready` or `failed`.
+  Future<Map<String, dynamic>> updateDownload();
+
+  /// Stops a download in progress (the partial file stays for a resume).
+  void updateCancel();
+
+  /// `{autoCheck: bool, channel: stable|beta}`: what the scheduled check does (Settings → Data).
+  void updateSettings(Map<String, dynamic> body);
+
+  /// The platform calls it right before it hands the downloaded file to the installer / after the
+  /// install did not happen ([installFailed] with the reason).
+  Future<void> updateBeginInstall();
+  Future<void> updateInstallFailed(String reason);
 }

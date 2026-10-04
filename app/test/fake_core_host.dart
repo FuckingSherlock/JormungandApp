@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:jormungand/core/app_update.dart';
 import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
@@ -166,6 +167,7 @@ class FakeCoreHost extends CoreHost {
   @override
   void setAutoMode(bool on) {
     _auto = on;
+    catalog.setAutoConnect(on);
     notifyListeners();
   }
 
@@ -362,8 +364,252 @@ class FakeCoreHost extends CoreHost {
     return const SaveNodeResult(SaveNodeOutcome.added, added: 1);
   }
 
+  // ── Route, Logs, connections ──
+
   @override
-  Stream<Map<String, dynamic>> get events => const Stream.empty();
+  void selectConnect(String id) {
+    catalog.selectConnect(id);
+    _changed();
+  }
+
+  @override
+  void pinRouteNode(String id, String key) {
+    catalog.pinRouteNode(id, key);
+    _changed();
+  }
+
+  @override
+  void setConnectMode(String mode) {
+    catalog.setConnectMode(mode);
+    _changed();
+  }
+
+  @override
+  void reorderRoute(List<String> shown) {
+    catalog.reorderRoute(shown);
+    _changed();
+  }
+
+  @override
+  void resetRouteOrder() {
+    catalog.resetRouteOrder();
+    _changed();
+  }
+
+  @override
+  void reorderPick(String id, List<String> shownKeys) {
+    catalog.reorderUnitPick(id, shownKeys);
+    _changed();
+  }
+
+  /// The journal and the raw log the test fills in ([addEvent] / [addLogLine]); they are served the
+  /// way the core serves them (`{events, next, first}`, `{lines, next}`).
+  final List<Map<String, dynamic>> journal = [];
+  final List<Map<String, dynamic>> logLinesList = [];
+  final _eventStream = StreamController<Map<String, dynamic>>.broadcast();
+  final _logStream = StreamController<Map<String, dynamic>>.broadcast();
+  int _eventSeq = 0;
+  int _lineSeq = 0;
+  int saves = 0;
+
+  Map<String, dynamic> addEvent(
+    String cat,
+    String type, {
+    String level = 'info',
+    bool own = false,
+    Map<String, dynamic> data = const {},
+    int? at,
+    int? log,
+  }) {
+    final e = {
+      'id': _eventSeq++,
+      'at': at ?? DateTime.now().millisecondsSinceEpoch,
+      'cat': cat,
+      'type': type,
+      'level': level,
+      'own': own,
+      'data': data,
+      'log': ?log,
+    };
+    journal.add(e);
+    _eventStream.add(e);
+    return e;
+  }
+
+  Map<String, dynamic> addLogLine(
+    String msg, {
+    String lvl = 'info',
+    String src = 'sing-box',
+    int? t,
+  }) {
+    final l = {
+      'n': _lineSeq++,
+      't': t ?? DateTime.now().millisecondsSinceEpoch,
+      'src': src,
+      'lvl': lvl,
+      'msg': msg,
+    };
+    logLinesList.add(l);
+    _logStream.add(l);
+    return l;
+  }
+
+  @override
+  Map<String, dynamic> eventsPage({int? since}) => {
+    'events': [
+      for (final e in journal)
+        if (since == null || (e['id'] as int) >= since) e,
+    ],
+    'next': _eventSeq,
+    'first': journal.isEmpty ? _eventSeq : journal.first['id'],
+  };
+
+  @override
+  Map<String, dynamic> logPage({int? since}) => {
+    'lines': [
+      for (final l in logLinesList)
+        if (since == null || (l['n'] as int) >= since) l,
+    ],
+    'next': _lineSeq,
+  };
+
+  @override
+  Stream<Map<String, dynamic>> get logLines => _logStream.stream;
+
+  @override
+  void clearEvents() {
+    journal.clear();
+    calls.add('clearEvents');
+  }
+
+  @override
+  void clearLog() {
+    logLinesList.clear();
+    calls.add('clearLog');
+  }
+
+  @override
+  void postEvent(
+    String cat,
+    String type,
+    Map<String, dynamic> data, {
+    String level = 'info',
+    bool own = true,
+  }) {
+    addEvent(cat, type, level: level, own: own, data: data);
+  }
+
+  @override
+  void saveSoon() => saves++;
+
+  @override
+  Future<void> closeConnection([String? id]) async {
+    calls.add('closeConnection $id');
+    final t = _traffic;
+    setTraffic(
+      TrafficInfo(
+        down: t.down,
+        up: t.up,
+        downTotal: t.downTotal,
+        upTotal: t.upTotal,
+        tcp: t.tcp,
+        udp: t.udp,
+        conns: [
+          if (id != null)
+            for (final c in t.conns)
+              if (c.id != id) c,
+        ],
+      ),
+    );
+  }
+
+  // ── Settings tab ──
+
+  /// How often a page called [changed] (it saves and syncs in the live host).
+  int changes = 0;
+
+  @override
+  void changed() {
+    changes++;
+    catalog.syncCatalog();
+    notifyListeners();
+  }
+
+  DnsHealth? dnsHealthValue;
+  AppUpdate update = const AppUpdate(phase: UpdPhase.idle, current: '0.1.0');
+  bool installable = false;
+  Map<String, dynamic> versionInfo = const {};
+  double? speedMbps;
+
+  /// What [pingDns] answers by address (default 24 ms).
+  final Map<String, int?> dnsPings = {};
+
+  @override
+  DnsHealth? get dnsHealth => dnsHealthValue;
+
+  @override
+  Future<int?> pingDns(String addr) async {
+    calls.add('pingDns $addr');
+    return dnsPings.containsKey(addr) ? dnsPings[addr] : 24;
+  }
+
+  @override
+  String get appVersion => '0.1.0';
+
+  @override
+  AppUpdate get appUpdate => update;
+
+  @override
+  bool get canInstallUpdate => installable;
+
+  @override
+  Future<void> checkUpdate() async => calls.add('checkUpdate');
+
+  @override
+  Future<void> downloadUpdate() async => calls.add('downloadUpdate');
+
+  @override
+  void cancelUpdate() => calls.add('cancelUpdate');
+
+  @override
+  Future<bool> installUpdate() async {
+    calls.add('installUpdate');
+    return true;
+  }
+
+  @override
+  Future<Map<String, dynamic>> version() async => versionInfo;
+
+  @override
+  Future<void> importState(Map<String, dynamic> snapshot) async {
+    calls.add('importState');
+    catalog = Catalog.fromJson(snapshot);
+    changed();
+  }
+
+  @override
+  double? get lastSpeedMbps => speedMbps;
+
+  /// Rules: what the device "has installed" and when the rule sets were downloaded.
+  List<InstalledApp> apps = const [];
+  Map<String, int> ruleSetAt = const {};
+
+  @override
+  Future<List<InstalledApp>> installedApps() async {
+    catalog.appInfo = (pkg) {
+      for (final a in apps) {
+        if (a.pkg == pkg) return (name: a.name, kind: 'package');
+      }
+      return null;
+    };
+    return apps;
+  }
+
+  @override
+  Future<Map<String, int>> ruleSetTimes() async => ruleSetAt;
+
+  @override
+  Stream<Map<String, dynamic>> get events => _eventStream.stream;
 
   @override
   Stream<HostNotice> get notices => _notices.stream;
@@ -371,6 +617,8 @@ class FakeCoreHost extends CoreHost {
   @override
   void dispose() {
     _notices.close();
+    _eventStream.close();
+    _logStream.close();
     super.dispose();
   }
 }

@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:jormungand_core/jormungand_core.dart';
 
 import '../platform/vpn_channel.dart';
+import 'app_update.dart';
 import 'core_host.dart';
+import 'settings_model.dart';
 
 /// The real [CoreHost]: the in-process core ([CoreApi], normally `CoreService`) plus the
 /// [Catalog] (the mockup's catalog logic in Dart), the way the mockup's `95-live.js` drives
@@ -20,6 +23,9 @@ class LiveCoreHost extends CoreHost {
     required this.api,
     required this.isAndroid,
     this.vpn,
+    this.appVersion = '',
+    this.installer,
+    this.ruleSetTimesOf,
     this.saveDelay = const Duration(milliseconds: 400),
     this.reconnectDelay = const Duration(milliseconds: 600),
     this.trafficEvery = const Duration(seconds: 1),
@@ -34,6 +40,17 @@ class LiveCoreHost extends CoreHost {
 
   /// Android's VpnService bridge; null elsewhere.
   final VpnChannel? vpn;
+
+  /// The running app's version (`0.1.0`), shown in Settings -> Data.
+  @override
+  final String appVersion;
+
+  /// Hands a downloaded update file to the platform's installer (Android: PackageInstaller);
+  /// null where that side is not written, then [canInstallUpdate] is false.
+  final Future<bool> Function(String file)? installer;
+
+  /// When the rule-set lists were downloaded (the core's rule-set cache), by name; null = unknown.
+  final Future<Map<String, int>> Function()? ruleSetTimesOf;
 
   final Duration saveDelay;
   final Duration reconnectDelay;
@@ -58,6 +75,11 @@ class LiveCoreHost extends CoreHost {
   KillBlock? _blocking;
   ExitState _exit = const ExitState.checking();
   TrafficInfo _traffic = TrafficInfo.zero;
+  DnsHealth? _dnsHealth;
+  double? _lastSpeedMbps;
+  AppUpdate _upd = const AppUpdate();
+  StreamSubscription<Map<String, dynamic>>? _updSub;
+  String? _updSettingsSig;
   Object? _sourcesRev;
 
   // the plan the core runs (null = none): what a reconnect is compared with
@@ -90,6 +112,7 @@ class LiveCoreHost extends CoreHost {
       catalog = Catalog.fromJson(
         snap is Map ? Map<String, dynamic>.from(snap) : null,
       );
+      catalog.appInfo = _appInfo;
       catalog.syncCatalog();
       catalog.purgeExpiredGone();
       if (isAndroid) {
@@ -105,6 +128,12 @@ class LiveCoreHost extends CoreHost {
       _killSig = _killSigNow();
       _statusSub = api.statusChanges.listen(_onStatus, onError: (_) {});
       _eventSub = api.eventStream.listen(_events.add, onError: (_) {});
+      _upd = AppUpdate.fromJson(api.updateStatus());
+      _updSub = api.updateChanges.listen((s) {
+        _upd = AppUpdate.fromJson(s);
+        _notify();
+      }, onError: (_) {});
+      _syncUpdateSettings();
       _ready = true;
     } catch (e) {
       _initError = '$e';
@@ -121,7 +150,8 @@ class LiveCoreHost extends CoreHost {
     await _flushSave();
     await _statusSub?.cancel();
     await _eventSub?.cancel();
-    _statusSub = _eventSub = null;
+    await _updSub?.cancel();
+    _statusSub = _eventSub = _updSub = null;
     if (_ready) {
       try {
         await api.dispose();
@@ -138,6 +168,7 @@ class LiveCoreHost extends CoreHost {
     _trafficTimer?.cancel();
     _statusSub?.cancel();
     _eventSub?.cancel();
+    _updSub?.cancel();
     _events.close();
     _notices.close();
     super.dispose();
@@ -203,6 +234,16 @@ class LiveCoreHost extends CoreHost {
       );
     }
     if (st['error'] != null) _error = '${st['error']}';
+    final dns = st['dns'];
+    _dnsHealth = _connected && dns is Map && dns['active'] != null
+        ? DnsHealth(
+            active: '${dns['active']}',
+            failed: {
+              for (final s in (dns['servers'] as List? ?? const []))
+                if (s is Map && s['ok'] == false) '${s['id']}',
+            },
+          )
+        : null;
     _syncTrafficTimer();
     if (notify) _notify();
   }
@@ -305,13 +346,20 @@ class LiveCoreHost extends CoreHost {
         upTotal: _num(t['upTotal']),
         tcp: _num(t['tcp']).toInt(),
         udp: _num(t['udp']).toInt(),
+        conns: [
+          for (final m in (t['conns'] as List? ?? const []))
+            if (m is Map) LiveConn.fromJson(m),
+        ],
       );
+      // the list changes with every byte; the pages only need to know of a new / gone one or a
+      // moved total, which is exactly what the speed cards already notify on
       final same =
           next.down == _traffic.down &&
           next.up == _traffic.up &&
           next.downTotal == _traffic.downTotal &&
           next.tcp == _traffic.tcp &&
-          next.udp == _traffic.udp;
+          next.udp == _traffic.udp &&
+          next.conns.length == _traffic.conns.length;
       _traffic = next;
       if (!same) _notify();
     } catch (_) {
@@ -659,15 +707,128 @@ class LiveCoreHost extends CoreHost {
     changed();
   }
 
+  // ── Route ──
+
+  @override
+  void selectConnect(String id) {
+    catalog.selectConnect(id);
+    changed();
+  }
+
+  @override
+  void pinRouteNode(String id, String key) {
+    final again =
+        !catalog.autoConnect &&
+        catalog.activeConnectId == id &&
+        catalog.pinnedNode == key;
+    catalog.pinRouteNode(id, key);
+    _journal('pin', {
+      'action': 'pin',
+      'entry': id,
+      'server': again ? null : key,
+    });
+    changed();
+  }
+
+  @override
+  void setConnectMode(String mode) {
+    if (mode == catalog.connectMode) return;
+    catalog.setConnectMode(mode);
+    changed();
+  }
+
+  @override
+  void reorderRoute(List<String> shown) {
+    catalog.reorderRoute(shown);
+    changed();
+  }
+
+  @override
+  void resetRouteOrder() {
+    catalog.resetRouteOrder();
+    changed();
+  }
+
+  @override
+  void reorderPick(String id, List<String> shownKeys) {
+    catalog.reorderUnitPick(id, shownKeys);
+    changed();
+  }
+
+  // ── Logs and connections ──
+
+  @override
+  Map<String, dynamic> eventsPage({int? since}) => api.events(since: since);
+
+  @override
+  Map<String, dynamic> logPage({int? since}) => api.log(since: since);
+
+  @override
+  Stream<Map<String, dynamic>> get logLines => api.logStream;
+
+  @override
+  void clearEvents() => api.clearEvents();
+
+  @override
+  void clearLog() => api.clearLog();
+
+  @override
+  void postEvent(
+    String cat,
+    String type,
+    Map<String, dynamic> data, {
+    String level = 'info',
+    bool own = true,
+  }) {
+    if (!_ready) return;
+    try {
+      api.postEvent({
+        'cat': cat,
+        'type': type,
+        'level': level,
+        'own': own,
+        'data': data,
+      });
+    } catch (_) {
+      // a journal line must never fail an action
+    }
+  }
+
+  @override
+  void saveSoon() => _scheduleSave();
+
+  @override
+  Future<void> closeConnection([String? id]) async {
+    await api.closeConnections(id);
+    final left = id == null
+        ? <LiveConn>[]
+        : [
+            for (final c in _traffic.conns)
+              if (c.id != id) c,
+          ];
+    _traffic = TrafficInfo(
+      down: _traffic.down,
+      up: _traffic.up,
+      downTotal: _traffic.downTotal,
+      upTotal: _traffic.upTotal,
+      tcp: _traffic.tcp,
+      udp: _traffic.udp,
+      conns: left,
+    );
+    _notify();
+  }
+
   /// Call after any edit of [catalog]: keeps it in step, saves it, tells the core what moved
   /// (Auto settings, kill switch) or reconnects when the plan is another one, and rebuilds
   /// the listeners.
+  @override
   void changed() {
     if (_disposed) return;
     catalog.syncCatalog();
     _scheduleSave();
     _syncAuto();
     _syncKill();
+    _syncUpdateSettings();
     _scheduleReconnect();
     _notify();
   }
@@ -745,6 +906,222 @@ class LiveCoreHost extends CoreHost {
         _notice(HostNotice('connectFailed', '$e'));
         return <String, dynamic>{};
       });
+    }
+  }
+
+  // ── Settings tab ──
+
+  @override
+  DnsHealth? get dnsHealth => _dnsHealth;
+
+  @override
+  double? get lastSpeedMbps => _lastSpeedMbps;
+
+  @override
+  Future<Map<String, dynamic>> version() => api.version();
+
+  // ── Rules ──
+
+  List<InstalledApp>? _apps;
+  Map<String, InstalledApp> _appsByPkg = const {};
+  final Map<String, Uint8List?> _icons = {};
+
+  /// The names of installed apps for the catalog (the plan, the delete dialog, Rules).
+  AppInfo? _appInfo(String pkg) {
+    final a = _appsByPkg[pkg];
+    return a == null ? null : (name: a.name, kind: 'package');
+  }
+
+  @override
+  Future<List<InstalledApp>> installedApps() async {
+    final cached = _apps;
+    if (cached != null) return cached;
+    final v = vpn;
+    final list = v == null
+        ? const <InstalledApp>[]
+        : [
+            for (final a in await v.apps())
+              InstalledApp(pkg: a.pkg, name: a.name, system: a.system),
+          ]
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    _apps = list;
+    _appsByPkg = {for (final a in list) a.pkg: a};
+    catalog.appInfo = _appInfo;
+    _notify();
+    return list;
+  }
+
+  @override
+  Future<Uint8List?> appIcon(String pkg) async {
+    if (_icons.containsKey(pkg)) return _icons[pkg];
+    return _icons[pkg] = await vpn?.appIcon(pkg);
+  }
+
+  @override
+  Future<Map<String, int>> ruleSetTimes() async =>
+      await ruleSetTimesOf?.call() ?? const {};
+
+  @override
+  Future<void> importState(Map<String, dynamic> snapshot) async {
+    _saveTimer?.cancel();
+    _dirty = false;
+    await api.saveState(snapshot);
+    final r = await api.state();
+    final snap = r['snapshot'];
+    catalog = Catalog.fromJson(
+      snap is Map ? Map<String, dynamic>.from(snap) : snapshot,
+    );
+    catalog.appInfo = _appInfo;
+    catalog.syncCatalog();
+    catalog.purgeExpiredGone();
+    if (isAndroid) {
+      catalog.segState
+        ..mode = 'tun'
+        ..sys = 'off';
+    }
+    // a running connection takes the restored state (plan, Auto, kill switch)
+    changed();
+  }
+
+  /// The app's update options (auto-check, channel) go to the core's scheduled check.
+  void _syncUpdateSettings() {
+    if (_disposed) return;
+    final g = gen;
+    final sig = '${g.updates}|${g.updChannel}';
+    if (sig == _updSettingsSig) return;
+    _updSettingsSig = sig;
+    try {
+      api.updateSettings({'autoCheck': g.updates, 'channel': g.updChannel});
+    } catch (_) {}
+  }
+
+  @override
+  AppUpdate get appUpdate => _upd;
+
+  @override
+  bool get canInstallUpdate => installer != null;
+
+  @override
+  Future<void> checkUpdate() async {
+    if (!_ready || _upd.busy || _upd.phase == UpdPhase.unavailable) return;
+    try {
+      _upd = AppUpdate.fromJson(
+        await api.updateCheck({'channel': gen.updChannel, 'manual': true}),
+      );
+    } catch (e) {
+      _notice(HostNotice('updateCheckFailed', '$e', args: ['$e']));
+    }
+    _notify();
+  }
+
+  @override
+  Future<void> downloadUpdate() async {
+    if (!_ready || _upd.phase == UpdPhase.downloading) return;
+    try {
+      _upd = AppUpdate.fromJson(await api.updateDownload());
+    } catch (e) {
+      _notice(HostNotice('updateCheckFailed', '$e', args: ['$e']));
+    }
+    _notify();
+  }
+
+  @override
+  void cancelUpdate() {
+    if (_ready) api.updateCancel();
+  }
+
+  @override
+  Future<bool> installUpdate() async {
+    final file = _upd.file, install = installer;
+    if (!_ready || file == null || install == null) return false;
+    await api.updateBeginInstall();
+    final ok = await install(file);
+    if (!ok) await api.updateInstallFailed('the installer did not start');
+    return ok;
+  }
+
+  // ── on launch ──
+
+  /// What the General settings ask for when the app opens: "Connect on launch" and "Check
+  /// servers on launch" (the top Auto entries and the targets of the rules).
+  @override
+  Future<void> runLaunchActions() async {
+    if (!_ready) return;
+    final g = gen;
+    if (g.connectOnLaunch && !_connected && !catalog.catalogEmpty()) {
+      unawaited(connect());
+    }
+    if (g.pingOnLaunch) {
+      final nodes = _launchPingNodes();
+      if (nodes.isNotEmpty) await pingNodes(nodes);
+    }
+  }
+
+  List<CatalogNode> _launchPingNodes() {
+    final c = catalog;
+    final top = [
+      for (final id in c.visibleOrder())
+        if (c.connectEntry(id)?.inAuto == true) id,
+    ].take(1 + c.autoCfg.standby.toInt());
+    final ids = <String>{
+      if (!c.autoConnect) ?c.effectiveConnectId(),
+      ...top,
+    };
+    final refs = <NodeRef>[
+      for (final id in ids) ..._entryRefs(id),
+      for (final t in _ruleTargets()) ..._targetRefs(t),
+    ];
+    final seen = <String>{};
+    return [
+      for (final r in refs)
+        if (seen.add(r.node.id)) r.node,
+    ];
+  }
+
+  List<NodeRef> _entryRefs(String id) {
+    final chain = catalog.chainsData[id];
+    return chain != null
+        ? [...catalog.chainEntryRefs(chain), ...catalog.chainExitRefs(chain)]
+        : catalog.unitRefs(id);
+  }
+
+  /// Targets of the enabled rules and the apps that go through a proxy entry.
+  Set<String> _ruleTargets() => {
+    for (final r in catalog.rulesData.values)
+      if (r.enabled && r.action == 'proxy' && r.target.isNotEmpty) r.target,
+    for (final a in catalog.appRules.values)
+      for (final (_, h) in a.halves)
+        if (h.act == 'proxy' && h.target.isNotEmpty) h.target,
+  };
+
+  /// The servers behind a rule target (`src:` / `node:` / `profile:` / `chain:` + id).
+  List<NodeRef> _targetRefs(String t) {
+    final at = t.indexOf(':');
+    if (at < 0) return const [];
+    final kind = t.substring(0, at), ref = t.substring(at + 1);
+    switch (kind) {
+      case 'src':
+        final s = catalog.sourcesData[ref];
+        return s != null && s.enabled
+            ? [for (final n in catalog.liveNodes(s)) NodeRef(ref, n)]
+            : const [];
+      case 'node':
+        final parts = ref.split('::');
+        final s = parts.length == 2 ? catalog.sourcesData[parts[0]] : null;
+        if (s == null || !s.enabled) return const [];
+        return [
+          for (final n in s.nodes)
+            if (n.id == parts[1] && !catalog.isNodeDisabled(s, n.id))
+              NodeRef(s.id, n),
+        ];
+      case 'profile':
+        return catalog.profilesData.containsKey(ref)
+            ? catalog.unitRefs(ref)
+            : const [];
+      default:
+        return catalog.chainsData.containsKey(ref)
+            ? _entryRefs(ref)
+            : const [];
     }
   }
 
@@ -1261,6 +1638,14 @@ class LiveCoreHost extends CoreHost {
     }
     return api.speedTest({
       'node': {'key': n.id, 'outbound': n.outbound},
+    }).map((p) {
+      // the Home card's "Last: N Mbps": the download of the last test that finished
+      final down = p['down'];
+      if (p['final'] == true && p['error'] == null && down is num && down > 0) {
+        _lastSpeedMbps = down / 1e6;
+        _notify();
+      }
+      return p;
     });
   }
 

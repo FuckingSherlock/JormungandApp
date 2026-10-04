@@ -1,0 +1,652 @@
+import 'package:intl/intl.dart';
+import 'package:jormungand_core/jormungand_core.dart'
+    show
+        AppRulesOps,
+        Catalog,
+        EventFilter,
+        EventGroup,
+        EventRecord,
+        ruleTitle,
+        serviceTitles,
+        targetName;
+
+import '../l10n/l10n.dart';
+import '../widgets/node_row.dart' show nodeProtoLabel;
+
+/// The words of the Events journal (mockup 47-events.js `evDescribe`, `evValue`, `evWhyRows`): the
+/// structured data of an event as sentences, ids resolved to names through the catalog (falling
+/// back to the raw id). The core and the models decide what happened and what is shown; this
+/// only says it in the user's language.
+class EventWords {
+  EventWords(this.l10n, this.catalog);
+
+  final AppLocalizations l10n;
+  final Catalog catalog;
+
+  // ── labels ──
+
+  String catLabel(String cat) => switch (cat) {
+    'conn' => l10n.connection,
+    'auto' => 'Auto',
+    'site' => l10n.sites,
+    'sub' => l10n.subscriptions,
+    'rules' => l10n.rules,
+    'dns' => 'DNS',
+    'core' => l10n.core,
+    _ => cat,
+  };
+
+  String typeLabel(String cat, String type) => switch ('$cat/$type') {
+    'conn/connected' => l10n.connected,
+    'conn/disconnected' => l10n.disconnected,
+    'conn/connectFailed' => l10n.connectFailed,
+    'conn/lost' => l10n.connectionLost,
+    'conn/restored' => l10n.connectionRestored,
+    'conn/offline' => l10n.noNetwork,
+    'conn/online' => l10n.networkBack,
+    'auto/switched' => l10n.entryOrServerSwitched,
+    'auto/fastest' => l10n.fastestMoved,
+    'auto/unstable' => l10n.unstableEntry,
+    'site/blocked' => l10n.siteDoesNotOpen,
+    'site/unreachable' => l10n.siteDoesNotOpenOnAny,
+    'sub/updated' => l10n.updated,
+    'sub/failed' => l10n.updateFailed,
+    'sub/removed' => l10n.serversRemoved,
+    'sub/back' => l10n.serversBack,
+    'sub/dead' => l10n.serversDoNotRespond,
+    'rules/fallback' => l10n.ruleTargetUnavailable,
+    'rules/targetBack' => l10n.ruleTargetBack,
+    'rules/ruleSetFailed' => l10n.ruleSetNotDownloaded,
+    'rules/ruleSetUpdated' => l10n.ruleSetUpdated,
+    'dns/switched' => l10n.dnsServerSwitched,
+    'core/crashed' => l10n.singBoxStopped,
+    'core/restarted' => l10n.singBoxStartedAgain,
+    'core/restartFailed' => l10n.couldNotStartAgain,
+    'core/tunNeedsAdmin' => l10n.tunNeedsAdministratorRights,
+    'core/down' => l10n.vpnIsDown,
+    'core/sysProxy' => l10n.systemProxy,
+    'core/deprecated' => l10n.deprecatedSetting,
+    'core/stateRestored' => l10n.savedDataRestored,
+    'core/stateLost' => l10n.savedDataLost,
+    _ => '$cat / $type',
+  };
+
+  // ── names ──
+
+  String entry(Object? id) {
+    if (id == null || '$id'.isEmpty) return '';
+    return catalog.connectEntry('$id')?.name ?? '$id';
+  }
+
+  String server(Object? key) {
+    if (key == null || '$key'.isEmpty) return '';
+    return catalog.nodeOfKey('$key')?.name ?? '$key';
+  }
+
+  String source(Object? sid, [Object? name]) {
+    final s = catalog.sourcesData['$sid']?.name;
+    if (s != null && s.isNotEmpty) return s;
+    if (name != null && '$name'.isNotEmpty) return '$name';
+    return sid == null ? '' : '$sid';
+  }
+
+  /// A switch between two servers: when both show the same name (another protocol, or another
+  /// address), the protocol is appended ("· HY2"), and when that is the same too, the address.
+  (String, String) serverPair(Object? from, Object? to) {
+    final a = server(from), b = server(to);
+    if (from == null || to == null || '$from'.isEmpty || '$to'.isEmpty || a != b) {
+      return (a, b);
+    }
+    final na = catalog.nodeOfKey('$from'), nb = catalog.nodeOfKey('$to');
+    if (na == null || nb == null || '$from' == '$to') return (a, b);
+    final pa = nodeProtoLabel(na), pb = nodeProtoLabel(nb);
+    return pa != pb
+        ? ('$a · $pa', '$b · $pb')
+        : ('$a · ${na.address}:${na.port}', '$b · ${nb.address}:${nb.port}');
+  }
+
+  /// `sid::nid` is a server, anything else an entry.
+  String nameOf(Object? k) => '$k'.contains('::') ? server(k) : entry(k);
+
+  String dnsName(Object? id) {
+    final n = catalog.dnsServers['$id']?.name;
+    return n != null && n.isNotEmpty ? n : '$id';
+  }
+
+  String target(Object? t) => '$t' == 'proxy' ? l10n.mainFlow2 : targetName(catalog, '$t');
+
+  String duration(num ms) {
+    final s = (ms / 1000).round();
+    if (s < 90) return l10n.s(s);
+    if (s < 5400) return l10n.min((s / 60).round());
+    return l10n.hMin(s ~/ 3600, ((s % 3600) / 60).round());
+  }
+
+  String stamp(int t) {
+    final d = DateTime.fromMillisecondsSinceEpoch(t);
+    return '${DateFormat.MMMd(l10n.localeName).format(d)} ${clock(t, seconds: true)}';
+  }
+
+  String clock(int t, {bool seconds = false}) {
+    final d = DateTime.fromMillisecondsSinceEpoch(t);
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.hour)}:${two(d.minute)}${seconds ? ':${two(d.second)}' : ''}';
+  }
+
+  String dayLabel(int t, int now) {
+    final a = DateTime.fromMillisecondsSinceEpoch(now), b = DateTime.fromMillisecondsSinceEpoch(t);
+    final diff = DateTime.utc(a.year, a.month, a.day).difference(DateTime.utc(b.year, b.month, b.day)).inDays;
+    if (diff == 0) return l10n.today;
+    if (diff == 1) return l10n.yesterday;
+    return DateFormat.MMMEd(l10n.localeName).format(b);
+  }
+
+  // ── sentences ──
+
+  String _reason(Map<String, dynamic> d) {
+    final isRoute = d['route'] != null && '${d['route']}'.isNotEmpty;
+    final (from, to) = isRoute
+        ? serverPair(d['from'], d['to'])
+        : (entry(d['from']), entry(d['to']));
+    final reason = d['reason'];
+    if (reason == 'failover') {
+      final fails = d['fails'];
+      return fails is num && fails > 0
+          ? l10n.failedChecksPlural(fails, from)
+          : l10n.failedItsChecks(from);
+    }
+    if (reason == 'back') return l10n.isBackReturnedToIt(to);
+    if (reason == 'fastest') return l10n.isFaster(to);
+    return reason == null ? '' : '$reason';
+  }
+
+  String _noRoute(Map<String, dynamic> d) =>
+      d['retries'] == 'off' ? l10n.retriesThroughOtherRoutesAreOff : l10n.noOtherWorkingRouteToTry;
+
+  String _destHost(String dest) {
+    final i = dest.lastIndexOf(':');
+    return i > 0 && !dest.contains(']') && dest.indexOf(':') == i ? dest.substring(0, i) : dest;
+  }
+
+  String host(Map<String, dynamic> d) {
+    final h = d['host'];
+    return h is String && h.isNotEmpty ? h : _destHost('${d['dest'] ?? ''}');
+  }
+
+  /// The rule (or, when no rule is involved, the app) of a fallback event: "Streaming and 2 more".
+  String _who(Map<String, dynamic> d) {
+    final base = _isRule(d) ? '${d['rule']}' : '${d['app']}';
+    final more = d['more'];
+    return more is num && more > 0 ? '$base ${l10n.and(l10n.more2(more))}' : base;
+  }
+
+  bool _isRule(Map<String, dynamic> d) => d['rule'] != null && '${d['rule']}'.isNotEmpty;
+
+  String _fallbackText(Map<String, dynamic> d) {
+    final to = '${d['to'] ?? ''}', who = _who(d), rule = _isRule(d);
+    switch (to) {
+      case 'block':
+        return rule ? l10n.ruleBlockedWhileItIsDown(who) : l10n.appBlockedWhileItIsDown(who);
+      case 'direct':
+        return rule ? l10n.ruleGoesDirect(who) : l10n.appGoesDirect(who);
+      case 'main':
+        return rule ? l10n.ruleGoesThroughTheMainFlow(who) : l10n.appGoesThroughTheMainFlow(who);
+    }
+    if (to.contains(':')) {
+      final t = targetName(catalog, to);
+      return rule ? l10n.ruleGoesThrough(who, t) : l10n.appGoesThrough(who, t);
+    }
+    return '${rule ? l10n.rule : l10n.app} $who $to';
+  }
+
+  String _modeText(Object? m) => m == 'tun' ? 'TUN' : m == 'proxy' ? 'Proxy' : '';
+  String _routeText(Object? r) => r == 'global' ? l10n.global : r == 'rules' ? l10n.byRules : '';
+
+  String _lines(Iterable<String?> parts, [String sep = ' · ']) =>
+      parts.where((s) => s != null && s.isNotEmpty).join(sep);
+
+  /// The line of the row: title and detail.
+  ({String title, String detail}) describe(EventRecord e) {
+    final d = e.data;
+    (String, String) r(String a, [String b = '']) => (a, b);
+    final (title, detail) = switch ((e.cat, e.type)) {
+      ('user', 'connect') => r(l10n.youConnected, entry(d['entry'])),
+      ('user', 'disconnect') => r(l10n.youDisconnected),
+      ('user', 'pin') => d['server'] != null && '${d['server']}'.isNotEmpty
+          ? r(l10n.youPinned2(server(d['server'])), entry(d['entry']))
+          : r(l10n.youUnpinnedTheServer, entry(d['entry'])),
+      ('user', 'mode') => r(d['value'] == 'tun' ? l10n.youSwitchedToTunMode : l10n.youSwitchedToProxyMode),
+      ('user', 'route') => r(d['value'] == 'global' ? l10n.youSwitchedToGlobal : l10n.youSwitchedToByRules),
+      ('user', 'sysProxy') => r(d['on'] == true ? l10n.youTurnedTheSystemProxyOn : l10n.youTurnedTheSystemProxyOff),
+      ('conn', 'connected') => r(
+        d['entry'] != null && '${d['entry']}'.isNotEmpty ? l10n.connected2(entry(d['entry'])) : l10n.connected,
+        _lines([
+          d['server'] != null ? server(d['server']) : null,
+          _modeText(d['mode']),
+          _routeText(d['route']),
+        ]),
+      ),
+      ('conn', 'disconnected') => r(
+        l10n.disconnected,
+        d['by'] == 'error' ? '${d['reason'] ?? l10n.theConnectionDropped}' : l10n.youDisconnected,
+      ),
+      ('conn', 'connectFailed') => r(l10n.couldNotConnect, '${d['reason'] ?? ''}'),
+      ('conn', 'lost') => r(l10n.connectionLost, l10n.noRouteAnswersWaitingForThe),
+      ('conn', 'restored') => r(l10n.connectionRestored, d['downMs'] is num ? l10n.downFor2(duration(d['downMs'] as num)) : ''),
+      ('conn', 'offline') => r(l10n.noNetwork, l10n.theSystemReportsNoConnection),
+      ('conn', 'online') => r(l10n.networkIsBack, d['downMs'] is num ? l10n.downFor2(duration(d['downMs'] as num)) : ''),
+      ('auto', 'switched') => () {
+        final (f, t) = serverPair(d['from'], d['to']);
+        final hasRoute = d['route'] != null && '${d['route']}'.isNotEmpty;
+        return r(
+          hasRoute
+              ? 'Auto: ${entry(d['route'])} — $f → $t'
+              : 'Auto: ${entry(d['from'])} → ${entry(d['to'])}',
+          _reason(d),
+        );
+      }(),
+      ('auto', 'fastest') => () {
+        final (f, t) = serverPair(d['from'], d['to']);
+        return r('Fastest: ${entry(d['route'])} — $f → $t', l10n.isNowTheFastest(t));
+      }(),
+      ('auto', 'unstable') => r(
+        l10n.isUnstable2(entry(d['id'])),
+        l10n.droppedBackToItAfterMin(
+          d['strikes'] is num ? d['strikes'] as num : 0,
+          d['holdMs'] is num ? ((d['holdMs'] as num) / 60000).round().clamp(1, 1 << 30) : 1,
+        ),
+      ),
+      ('site', 'blocked') => r(
+        l10n.doesNotOpen(host(d)),
+        _lines([
+          _entryMark('⚠️', d['entry'] ?? d['route'], d['server']),
+          d['via'] != null && '${d['via']}'.isNotEmpty ? _entryMark('✅', d['via'], d['viaServer']) : null,
+          whyText(d),
+        ], '   '),
+      ),
+      ('site', 'unreachable') => () {
+        final tried = d['tried'] is List ? d['tried'] as List : const [];
+        return r(
+          l10n.doesNotOpen(host(d)),
+          _lines([
+            _entryMark('⚠️', d['entry'] ?? d['route'], d['server']),
+            for (final x in tried)
+              if (x is Map) _entryMark('⚠️', x['entry'], x['server']),
+            if (tried.isEmpty) _noRoute(d),
+            whyText(d),
+          ], '   '),
+        );
+      }(),
+      ('sub', 'updated') => r(
+        l10n.updated3(source(d['source'], d['name'])),
+        _lines([
+          d['total'] is num ? l10n.serversPlural(d['total'] as num) : null,
+          d['added'] is num && (d['added'] as num) > 0 ? l10n.newText(d['added'] as num) : null,
+          d['removed'] is num && (d['removed'] as num) > 0 ? l10n.removed2(d['removed'] as num) : null,
+        ]),
+      ),
+      ('sub', 'failed') => r(l10n.updateFailed2(source(d['source'], d['name'])), '${d['error'] ?? ''}'),
+      ('sub', 'removed') => r(
+        l10n.theProviderRemovedServersPlural(d['count'] is num ? d['count'] as num : 0, source(d['source'], d['name'])),
+        l10n.seeUnavailableInNodesTheirSettings,
+      ),
+      ('sub', 'back') => r(
+        l10n.serversAreBackPlural(d['count'] is num ? d['count'] as num : 0, source(d['source'], d['name'])),
+        l10n.previousSettingsRestored,
+      ),
+      ('sub', 'dead') => r(l10n.itsServersDoNotRespond(source(d['source'], d['name'])), l10n.contactTheSubscriptionProviderSSupport),
+      ('rules', 'ruleSetFailed') => r(
+        l10n.ruleSetNotDownloaded2('${d['tag']}'),
+        _lines([d['error'] != null ? '${d['error']}' : null, l10n.theLastCopyIsUsed], ' — '),
+      ),
+      ('rules', 'ruleSetUpdated') => r(l10n.ruleSetUpdated2('${d['tag']}')),
+      ('rules', 'fallback') => r(l10n.doesNotAnswer(target(d['target'])), _fallbackText(d)),
+      ('rules', 'targetBack') => r(
+        l10n.answersAgain(target(d['target'])),
+        _isRule(d) ? l10n.ruleBackThroughIt(_who(d)) : l10n.appBackThroughIt(_who(d)),
+      ),
+      ('dns', 'switched') => r(
+        l10n.dns(dnsName(d['from']), dnsName(d['to'])),
+        d['reason'] == 'failover'
+            ? l10n.doesNotAnswer(dnsName(d['from']))
+            : d['reason'] == 'back'
+            ? l10n.answersAgainReturnedToIt(dnsName(d['to']))
+            : l10n.switchAutomaticallyIsOffTheFirst,
+      ),
+      ('core', 'crashed') => r(
+        l10n.singBoxStopped,
+        d['code'] is num ? l10n.exitCodeStartingItAgain(d['code'] as num) : l10n.startingItAgain,
+      ),
+      ('core', 'restarted') => r(
+        l10n.singBoxStartedAgain,
+        _lines([
+          d['attempt'] is num ? l10n.attempt2(d['attempt'] as num) : null,
+          d['downMs'] is num ? l10n.wasDown2(duration(d['downMs'] as num)) : null,
+        ]),
+      ),
+      ('core', 'down') => r(
+        l10n.vpnIsDown,
+        d['proxy'] == 'kept' ? l10n.internetIsBlockedTheSystemProxy : l10n.trafficGoesDirectStillTrying,
+      ),
+      ('core', 'tunNeedsAdmin') => r(l10n.tunNeedsAdministratorRights, l10n.runTheAppAsAdministratorOr),
+      ('core', 'restartFailed') => r(
+        l10n.singBoxCouldNotStartAgain,
+        _lines([
+          d['attempt'] is num ? l10n.attempt2(d['attempt'] as num) : null,
+          d['error'] != null ? '${d['error']}' : null,
+        ]),
+      ),
+      ('core', 'sysProxy') => d['by'] == 'user'
+          ? r(d['on'] == true ? l10n.youSetTheSystemProxy : l10n.youRemovedTheSystemProxy, l10n.fromTheVpnIsDownKill)
+          : r(
+              d['error'] != null && '${d['error']}'.isNotEmpty
+                  ? (d['on'] == true ? l10n.systemProxyCouldNotBeSet : l10n.systemProxyCouldNotBeRestored)
+                  : (d['on'] == true ? l10n.systemProxyOn : l10n.systemProxyOff),
+              '${d['error'] ?? ''}',
+            ),
+      ('core', 'deprecated') => r(l10n.singBoxADeprecatedSetting, '${d['text'] ?? ''}'),
+      ('core', 'stateRestored') => r(
+        l10n.savedDataWasDamagedRestoredFrom,
+        d['savedAt'] is num ? l10n.backupFromLaterChangesAreLost(stamp((d['savedAt'] as num).toInt())) : l10n.laterChangesAreLost,
+      ),
+      ('core', 'stateLost') => r(l10n.savedDataWasDamagedAndCould, l10n.startingEmptyTheDamagedFileIs),
+      _ => r('${e.cat} / ${e.type}'),
+    };
+    return (title: title, detail: detail);
+  }
+
+  String _entryMark(String mark, Object? id, Object? srv) {
+    if (id == null || '$id'.isEmpty) return '';
+    final s = srv != null && '$srv'.isNotEmpty ? ' (${server(srv)})' : '';
+    return '$mark ${entry(id)}$s';
+  }
+
+  /// One line, for a notification and the export.
+  String text(EventRecord e) {
+    final d = describe(e);
+    return d.detail.isEmpty ? d.title : '${d.title} — ${d.detail}';
+  }
+
+  /// What the search of the Events filter looks in: the sentence and the values of the data.
+  String searchText(EventRecord e) => '${text(e)} ${e.data.values.join(' ')}';
+
+  // ── why: the rule that decided a request ──
+
+  String processName(Map<String, dynamic> d) {
+    final p = d['process'];
+    if (p is Map) return '${p['name'] ?? p['path'] ?? ''}';
+    return '';
+  }
+
+  Map? _ruleOf(Map<String, dynamic> d) => d['rule'] is Map ? d['rule'] as Map : null;
+
+  /// What routing decided and where to look at it; null = an event without it.
+  WhyRow? why(Map<String, dynamic> d) {
+    final r = _ruleOf(d);
+    if (r == null) return null;
+    final id = '${r['id'] ?? ''}';
+    final name = '${r['name'] ?? ''}';
+    switch ('${r['kind']}') {
+      case 'final':
+        return WhyRow(l10n.rule, l10n.noneMainFlow, go: WhyGo.route);
+      case 'user':
+        final x = catalog.rulesData[id];
+        return WhyRow(l10n.rule, x != null ? ruleTitle(x) : (name.isNotEmpty ? name : id), go: x != null ? WhyGo.user : WhyGo.none, id: id);
+      case 'app':
+        final known = catalog.appRules.containsKey(id) || catalog.appInfo?.call(id) != null;
+        return WhyRow(l10n.app, known ? catalog.appLabel(id) : (name.isNotEmpty ? name : id), go: known ? WhyGo.app : WhyGo.none, id: id);
+      case 'service':
+        return WhyRow(l10n.service, serviceTitles[id] ?? (name.isNotEmpty ? name : id), go: WhyGo.rules, id: id, at: 'svc:$id');
+      case 'quick':
+        return WhyRow(l10n.rule, name.isNotEmpty ? name : id, go: WhyGo.rules, id: id, at: 'quick:$id');
+      case 'system' when id == 'private':
+        return WhyRow(l10n.rule, name.isNotEmpty ? name : id, go: WhyGo.rules, id: id, at: 'lan');
+      default:
+        final t = name.isNotEmpty ? name : '${r['text'] ?? r['kind'] ?? ''}';
+        return WhyRow(l10n.rule, t);
+    }
+  }
+
+  /// The line of the notification and the export.
+  String whyText(Map<String, dynamic> d) {
+    final w = why(d), p = processName(d);
+    return _lines([
+      if (w != null) w.go == WhyGo.route ? l10n.noRuleMainFlow : '${w.key} ${w.name}',
+      if (p.isNotEmpty) '${l10n.app} $p',
+    ], '   ');
+  }
+
+  /// The app of the event's process among the apps with their own route ('' = not there).
+  String appPkg(Map<String, dynamic> d) {
+    final p = d['process'];
+    if (p is! Map) return '';
+    final n = '${p['name'] ?? ''}'.toLowerCase().replaceFirst(RegExp(r'\.exe$'), '');
+    if (n.isEmpty) return '';
+    for (final pkg in catalog.appRules.keys) {
+      if (pkg.toLowerCase() == n || pkg.split('.').last.toLowerCase() == n || catalog.appLabel(pkg).toLowerCase() == n) {
+        return pkg;
+      }
+    }
+    return '';
+  }
+
+  String _half(String act, String tgt) => switch (act) {
+    'proxy' => tgt.isNotEmpty ? '→ ${targetName(catalog, tgt)}' : 'Proxy',
+    'direct' => 'Direct',
+    'block' => 'Block',
+    _ => 'Default',
+  };
+
+  String appActText(String pkg) {
+    final a = catalog.appRules[pkg];
+    if (a == null) return '';
+    if (!a.split) return _half(a.tcp.act, a.tcp.target);
+    return 'TCP ${_half(a.tcp.act, a.tcp.target)} · UDP ${_half(a.udp.act, a.udp.target)}';
+  }
+
+  bool _appHasOwn(String pkg) {
+    final a = catalog.appRules[pkg];
+    return a != null && a.halves.any((h) => h.$2.act != 'default');
+  }
+
+  /// Where a rule (the `data.rule` shape) leads now; '' = not known. With today's settings.
+  String ruleTo(Map r) {
+    final id = '${r['id'] ?? ''}';
+    switch ('${r['kind']}') {
+      case 'user':
+        final x = catalog.rulesData[id];
+        if (x == null) return '';
+        if (x.action == 'direct') return 'Direct';
+        if (x.action == 'block') return 'Block';
+        return x.target.isNotEmpty ? '→ ${targetName(catalog, x.target)}' : 'Proxy';
+      case 'app':
+        return appActText(id);
+      case 'service':
+        final v = catalog.quickCfg.services[id];
+        return v == 'vpn' ? l10n.vpn : v == 'direct' ? 'Direct' : '';
+      case 'quick':
+        return id == 'ads' ? 'Block' : id == 'region' ? 'Direct' : '';
+      case 'system':
+        return id == 'private' ? 'Direct' : '';
+      case 'final':
+        return switch (catalog.quickCfg.finalAction) { 'proxy' => 'Proxy', 'direct' => 'Direct', 'block' => 'Block', _ => '' };
+    }
+    return '';
+  }
+
+  /// The rows of the "why" block: what routing applied (with where it leads now) and the app that
+  /// sent the request. With an app route that the matched rule overrode, the applied row says so.
+  List<WhyRow> whyRows(Map<String, dynamic> d) {
+    final rows = <WhyRow>[];
+    final w = why(d), proc = processName(d), pkg = appPkg(d);
+    final r = _ruleOf(d);
+    final byApp = r != null && r['kind'] == 'app';
+    if (w != null) rows.add(w.withTo(ruleTo(r!)));
+    if (proc.isNotEmpty && !byApp) {
+      final own = pkg.isNotEmpty && _appHasOwn(pkg);
+      rows.add(WhyRow(
+        l10n.app,
+        pkg.isNotEmpty ? catalog.appLabel(pkg) : proc,
+        go: pkg.isNotEmpty ? WhyGo.app : WhyGo.none,
+        id: pkg,
+        to: own ? appActText(pkg) : '',
+        mark: own ? (r != null && r['kind'] == 'final' ? l10n.notApplied : l10n.overriddenByRule) : null,
+        dim: own,
+      ));
+    }
+    if (w != null && rows.any((x) => x.dim)) rows[0] = rows[0].withMark(l10n.applied);
+    return rows;
+  }
+
+  // ── fields of an opened row ──
+
+  String fieldLabel(String k) => switch (k) {
+    'entry' || 'id' => l10n.entry,
+    'server' => l10n.server,
+    'mode' => l10n.mode,
+    'route' => l10n.route,
+    'from' => l10n.from,
+    'to' => l10n.to,
+    'reason' => l10n.reason,
+    'by' => l10n.by,
+    'host' => l10n.site,
+    'dest' => l10n.address,
+    'via' => l10n.opensVia,
+    'source' => l10n.subscription,
+    'name' => l10n.name,
+    'added' => l10n.newServers,
+    'removed' => l10n.removed,
+    'total' || 'count' => l10n.servers,
+    'error' => l10n.error,
+    'tag' => l10n.ruleSet,
+    'url' => 'URL',
+    'code' => l10n.exitCode,
+    'rule' => l10n.rule,
+    'app' || 'process' => l10n.app,
+    'target' => l10n.target,
+    'more' => l10n.moreRulesAndApps,
+    'tried' => l10n.alsoTried,
+    'retries' => l10n.retriesThroughOtherRoutes,
+    'savedAt' => l10n.backupSaved,
+    'kept' => l10n.damagedFileKeptAs,
+    'attempt' => l10n.attempt,
+    'downMs' => l10n.downFor,
+    'holdMs' => l10n.waits,
+    'strikes' => l10n.drops,
+    'fails' => l10n.failedChecks,
+    'on' => l10n.state,
+    'action' => l10n.action,
+    'value' => l10n.value,
+    'text' => l10n.text,
+    _ => k.isEmpty ? k : k[0].toUpperCase() + k.substring(1),
+  };
+
+  String fieldValue(String k, Object? v, EventRecord e) {
+    if (e.cat == 'dns') {
+      if (k == 'from' || k == 'to') return dnsName(v);
+      if (k == 'reason') {
+        return switch (v) {
+          'failover' => l10n.itStoppedAnswering,
+          'back' => l10n.aHigherServerAnswersAgain,
+          'off' => l10n.switchAutomaticallyTurnedOff,
+          _ => '$v',
+        };
+      }
+    }
+    if (e.cat == 'rules') {
+      if (k == 'target') return target(v);
+      if (k == 'to') return switch (v) { 'block' => 'Block', 'direct' => 'Direct', 'main' => l10n.mainFlow2, _ => '$v' };
+    }
+    if (e.cat == 'core' && (e.type == 'stateRestored' || e.type == 'stateLost')) {
+      if (k == 'from') return switch (v) { 'bak' => l10n.lastBackup, 'bak2' => l10n.olderBackup, _ => '$v' };
+      if (k == 'reason') {
+        return switch (v) {
+          'nul' => l10n.theFileWasEmptyAPower,
+          'empty' => l10n.theFileWasEmpty,
+          'invalid' || 'notObject' => l10n.theFileWasNotReadable,
+          'unreadable' => l10n.theFileCouldNotBeOpened,
+          'missing' => l10n.theFileWasMissing,
+          _ => '$v',
+        };
+      }
+      if (k == 'savedAt' && v is num) return stamp(v.toInt());
+    }
+    if (k == 'tried' && v is List) {
+      if (v.isEmpty) return _noRoute(e.data);
+      return v
+          .map((x) => x is Map ? entry(x['entry']) + (x['server'] != null && '${x['server']}'.isNotEmpty ? ' (${server(x['server'])})' : '') : '$x')
+          .join(', ');
+    }
+    if (k == 'rule' && v is Map) {
+      final w = why({'rule': v});
+      if (w == null) return '$v';
+      return w.key == l10n.rule ? w.name : '${w.key} · ${w.name}';
+    }
+    if (k == 'process' && v is Map) {
+      final name = '${v['name'] ?? ''}', path = '${v['path'] ?? ''}';
+      return path.isNotEmpty && path != name ? '$name ($path)' : name;
+    }
+    if (k == 'retries') return v == 'off' ? l10n.off : '$v';
+    if (v is bool) return k == 'on' ? (v ? l10n.onText : l10n.off) : (v ? l10n.yes : l10n.no);
+    if ((k == 'downMs' || k == 'holdMs') && v is num) return duration(v);
+    if (k == 'mode') return _modeText(v).isNotEmpty ? _modeText(v) : '$v';
+    if (k == 'route' && (v == 'global' || v == 'rules')) return _routeText(v);
+    if (k == 'by') return v == 'user' ? l10n.you : l10n.anError;
+    if (k == 'source') return source(v);
+    if ((k == 'from' || k == 'to') && e.cat == 'auto' && e.data['route'] != null && '${e.data['route']}'.isNotEmpty && v is String) {
+      final (a, b) = serverPair(e.data['from'], e.data['to']);
+      return k == 'from' ? a : b;
+    }
+    if (const ['entry', 'server', 'route', 'from', 'to', 'via', 'id'].contains(k) && v is String) return nameOf(v);
+    return v is Map || v is List ? '$v' : '$v';
+  }
+
+  /// Every field of the event in words: time(s), the event's name, then its data.
+  List<(String, String)> fields(EventGroup g) {
+    final e = g.ev;
+    final out = <(String, String)>[
+      if (g.items.length > 1)
+        (l10n.times, g.items.map((x) => clock(x.at, seconds: true)).join(', '))
+      else
+        (l10n.time, stamp(e.at)),
+      (l10n.event, '${e.cat} / ${e.type}${e.own ? ' ${l10n.yours}' : ''}'),
+    ];
+    for (final x in e.data.entries) {
+      final v = x.value;
+      if (v == null || (v is String && v.isEmpty)) continue;
+      out.add((fieldLabel(x.key), fieldValue(x.key, v, e)));
+    }
+    return out;
+  }
+
+  // ── the filter ──
+
+  /// "Filtered: ..." of the bar under the tabs.
+  String filterText(EventFilter f) {
+    final parts = <String>[];
+    if (f.q.isNotEmpty) parts.add('“${f.q}”');
+    if (f.problems) parts.add(l10n.onlyProblems);
+    for (final c in f.offCats) {
+      final n = f.typesOn(c);
+      final label = catLabel(c.$1);
+      parts.add(n > 0 ? '$label $n/${c.$2.length}' : l10n.no2(label));
+    }
+    return parts.join(' · ');
+  }
+}
+
+enum WhyGo { none, route, user, app, rules }
+
+/// A row of the "why" block of a site event.
+class WhyRow {
+  const WhyRow(this.key, this.name, {this.go = WhyGo.none, this.id = '', this.at = '', this.to = '', this.mark, this.dim = false});
+
+  final String key, name;
+  final WhyGo go;
+  final String id, at, to;
+  final String? mark;
+  final bool dim;
+
+  WhyRow withTo(String t) => WhyRow(key, name, go: go, id: id, at: at, to: t, mark: mark, dim: dim);
+  WhyRow withMark(String m) => WhyRow(key, name, go: go, id: id, at: at, to: to, mark: m, dim: dim);
+}

@@ -1,6 +1,10 @@
-import 'package:flutter/widgets.dart';
-import 'package:jormungand_core/jormungand_core.dart' show Catalog, CatalogNode;
+import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart';
+import 'package:jormungand_core/jormungand_core.dart'
+    show Catalog, CatalogNode, LiveConn, dnsLatency;
+
+import 'app_update.dart';
 import 'catalog_forms.dart';
 
 export 'catalog_forms.dart';
@@ -121,9 +125,13 @@ class TrafficInfo {
     this.upTotal = 0,
     this.tcp = 0,
     this.udp = 0,
+    this.conns = const [],
   });
 
   static const zero = TrafficInfo();
+
+  /// The open connections (Home -> Connections -> Live connections).
+  final List<LiveConn> conns;
 
   final num down;
   final num up;
@@ -397,6 +405,142 @@ abstract class CoreHost extends ChangeNotifier {
 
   /// Short messages for toasts.
   Stream<HostNotice> get notices;
+
+  // ── Route ──
+  //
+  // The Route list lives in [catalog] (`connectOrder`, `autoConnect`, `activeConnectId`,
+  // `pinnedNode`); these apply one tap of the sheet and call [changed].
+
+  /// The AUTO / MANUAL button of a row.
+  void selectConnect(String id);
+
+  /// A tap on a server of an unfolded row (`sid::nid`): Manual on it; the pinned one again unpins.
+  void pinRouteNode(String id, String key);
+
+  /// The Simple / Profiles switch of Route.
+  void setConnectMode(String mode);
+
+  /// Route was dragged: the new order of the shown entries (`catalog.visibleOrder`).
+  void reorderRoute(List<String> shown);
+
+  /// "Follow Nodes order".
+  void resetRouteOrder();
+
+  /// The servers of a Priority row were dragged: the new order of its shown keys.
+  void reorderPick(String id, List<String> shownKeys);
+
+  // ── Logs and connections ──
+
+  /// The events journal / the raw log as the core keeps them (`{events, next, first}` /
+  /// `{lines, next}`, from [since]); the raw lines also arrive on [logLines].
+  Map<String, dynamic> eventsPage({int? since});
+  Map<String, dynamic> logPage({int? since});
+  Stream<Map<String, dynamic>> get logLines;
+  void clearEvents();
+  void clearLog();
+
+  /// An event only the UI knows (a retry's result...) into the journal.
+  void postEvent(
+    String cat,
+    String type,
+    Map<String, dynamic> data, {
+    String level = 'info',
+    bool own = true,
+  });
+
+  /// Saves the state soon without the effects of [changed] (the Logs read marks).
+  void saveSoon();
+
+  /// Closes one connection, or all of them without an [id].
+  Future<void> closeConnection([String? id]);
+
+  // ── Settings tab ──
+  //
+  // The settings objects live in [catalog] (`autoCfg`, `connCfg`, `dnsCfg`, `dnsServers`...,
+  // and `genCfg` / `notifCfg` in its `unknown` map, see settings_model.dart); a page edits them
+  // and calls [changed], which saves, tells the running core what moved and reconnects when the
+  // plan is another one.
+
+  void changed();
+
+  /// Once, when the app has opened and the host is ready: "Connect on launch", "Check servers on
+  /// launch".
+  Future<void> runLaunchActions() async {}
+
+  /// The DNS server in use and the ones that do not answer while connected (core `status.dns`);
+  /// null when not connected.
+  DnsHealth? get dnsHealth => null;
+
+  /// Latency of a DNS server by one real query (core `dnsLatency`): ms, -1 no answer, null = cannot
+  /// be measured here (quic://).
+  Future<int?> pingDns(String addr) => dnsLatency(addr);
+
+  // App updates (docs/updates.md). The core checks and downloads; the platform installs.
+
+  /// The running app's version (`0.1.0`), empty when the host does not know it.
+  String get appVersion => '';
+
+  /// The update as the Data sheet shows it; `unavailable` in a host without an updater.
+  AppUpdate get appUpdate => const AppUpdate();
+
+  /// The platform can take a downloaded file and install it (Android PackageInstaller); false
+  /// where that side is not written (the Windows updater), then the file is only downloaded.
+  bool get canInstallUpdate => false;
+
+  /// "Check now" (a check the user asked for; the failure is shown, not journalled silently).
+  Future<void> checkUpdate() async {}
+  Future<void> downloadUpdate() async {}
+  void cancelUpdate() {}
+
+  /// Hands the downloaded file to the installer; false when the platform refused or cannot.
+  Future<bool> installUpdate() async => false;
+
+  /// Core / sing-box versions and the data folder (`CoreApi.version`).
+  Future<Map<String, dynamic>> version() async => const {};
+
+  /// Backup: the whole state as one snapshot, and the reverse (replaces everything; a running
+  /// connection restarts with the restored state).
+  Map<String, dynamic> exportState() => catalog.toJson();
+  Future<void> importState(Map<String, dynamic> snapshot) async {}
+
+  /// Last Speed Test result (Mbps), null = none yet.
+  double? get lastSpeedMbps => null;
+
+  // ── Rules ──
+
+  /// The installed apps for Rules -> Per-app routing, by name; empty where the platform cannot
+  /// list them (the desktop: apps are not picked by package there yet). Cached after the first
+  /// call; also tells the catalog the names of apps (`catalog.appInfo`).
+  Future<List<InstalledApp>> installedApps() async => const [];
+
+  /// An app's icon (PNG), null when it has none.
+  Future<Uint8List?> appIcon(String pkg) async => null;
+
+  /// When each list of Rules -> Rule sets was downloaded (epoch ms) by its name there; a list
+  /// that never was is absent.
+  Future<Map<String, int>> ruleSetTimes() async => const {};
+}
+
+/// An installed app of the device (Android): its package, its label and whether it is a
+/// system one.
+class InstalledApp {
+  const InstalledApp({
+    required this.pkg,
+    required this.name,
+    this.system = false,
+  });
+
+  final String pkg;
+  final String name;
+  final bool system;
+}
+
+/// `status.dns` while connected: the server in use and the ones that fail.
+class DnsHealth {
+  const DnsHealth({this.active, this.failed = const {}});
+
+  final String? active;
+  final Set<String> failed;
 }
 
 class CoreHostScope extends InheritedNotifier<CoreHost> {

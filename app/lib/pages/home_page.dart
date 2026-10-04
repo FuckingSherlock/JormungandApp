@@ -2,16 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
+import 'route_page.dart';
 import '../widgets/app_view.dart';
 import '../widgets/conn_badge.dart';
 import '../widgets/connect_dock.dart';
+import '../widgets/nav_cards.dart';
 import '../widgets/segments.dart';
 import '../widgets/stat_cards.dart';
 import '../widgets/vpn_alert.dart';
 
 /// Home tab: header with the connection badge, VpnAlert, the stat cards, the mode / route /
 /// system-proxy segments, and the ConnectDock under them (mockup markup/10-home.html).
-// TODO(ui): the NavCards (Auto mode, Rules, DNS, Speed Test) - their sheets are not ported yet.
 class HomePage extends StatefulWidget {
   const HomePage({super.key, this.onOpenNodes});
 
@@ -93,9 +94,11 @@ class _HomePageState extends State<HomePage> {
             onPressed: () => Navigator.of(ctx).pop(),
             child: Text(l10n.cancel),
           ),
-          // TODO(ui): Open Route - the Route sheet is not ported yet, so for now it only closes.
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              showRouteSheet(context, edit: true);
+            },
             child: Text(l10n.openRoute),
           ),
         ],
@@ -106,8 +109,11 @@ class _HomePageState extends State<HomePage> {
   /// A tap on the dock row: Route when there is something to connect, else Nodes -> +.
   void _rowTap() {
     final host = CoreHostScope.read(context);
-    if (host.catalogEmpty) widget.onOpenNodes?.call();
-    // TODO(ui): else open Route (mockup `toggleRoute`).
+    if (host.catalogEmpty) {
+      widget.onOpenNodes?.call();
+    } else {
+      showRouteSheet(context);
+    }
   }
 
   @override
@@ -133,6 +139,8 @@ class _HomePageState extends State<HomePage> {
               StatCards(host: host),
               const SizedBox(height: 10),
               SegmentsCard(host: host),
+              const SizedBox(height: 10),
+              NavCards(host: host),
             ],
           ),
         ),

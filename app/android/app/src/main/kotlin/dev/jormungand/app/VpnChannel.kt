@@ -2,6 +2,9 @@ package dev.jormungand.app
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.VpnService
 import android.os.Handler
 import android.os.Looper
@@ -9,6 +12,7 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
@@ -52,6 +56,8 @@ object VpnBridge {
  *                       tests, Speed Test) under [id]; answers when it is up
  *  stopBox  -> null     args {id}
  *  status   -> Map      {running: Boolean} (the tunnel)
+ *  apps     -> List     the installed apps: [{pkg, name, system}] (Rules -> Per-app routing)
+ *  appIcon  -> bytes?   args {pkg}: the app's icon as a 96 px PNG, null when it has none
  *
  *  events: {type: 'stopped', reason: 'revoked'} — the tunnel went away on its own (the user or
  *  another VPN app took the VPN away). A plain `stop` does not send one.
@@ -143,6 +149,55 @@ class VpnChannel(private val activity: Activity) {
                 }
             }
             "status" -> result.success(mapOf("running" to (JormungandVpnService.instance?.isUp == true)))
+            // the update feed's asset keys come from this (docs/updates.md: updatePlatforms)
+            "abis" -> result.success(android.os.Build.SUPPORTED_ABIS.toList())
+            // the installed version (versionName / versionCode) the updater compares against
+            "appVersion" -> {
+                @Suppress("DEPRECATION")
+                val info = activity.packageManager.getPackageInfo(activity.packageName, 0)
+                @Suppress("DEPRECATION")
+                val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+                result.success(mapOf("name" to (info.versionName ?: ""), "code" to code))
+            }
+            // Rules -> Per-app routing: the installed apps, then their icons one by one
+            "apps" -> io.execute {
+                try {
+                    val pm = activity.packageManager
+                    val list = pm.getInstalledApplications(0)
+                        .filter { it.packageName != activity.packageName }
+                        .map {
+                            // a system app the user has updated (Chrome, Play services) counts as a user one
+                            val sys = (it.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
+                                (it.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0
+                            mapOf("pkg" to it.packageName, "name" to pm.getApplicationLabel(it).toString(), "system" to sys)
+                        }
+                    main.post { result.success(list) }
+                } catch (e: Throwable) {
+                    main.post { result.error("apps_failed", e.message ?: e.toString(), null) }
+                }
+            }
+            "appIcon" -> {
+                val pkg = call.argument<String>("pkg")
+                if (pkg.isNullOrEmpty()) {
+                    result.success(null)
+                    return
+                }
+                io.execute {
+                    val png = try {
+                        val d = activity.packageManager.getApplicationIcon(pkg)
+                        val size = 96
+                        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                        d.setBounds(0, 0, size, size)
+                        d.draw(Canvas(bmp))
+                        val out = ByteArrayOutputStream()
+                        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        out.toByteArray()
+                    } catch (e: Throwable) {
+                        null
+                    }
+                    main.post { result.success(png) }
+                }
+            }
             else -> result.notImplemented()
         }
     }

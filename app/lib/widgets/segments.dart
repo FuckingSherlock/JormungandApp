@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
+import '../platform/platform_caps.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
 
 /// Home's `.segments-card`: Mode (TUN | Proxy), Route (Global | Rules) and, on desktop, the
 /// system proxy (its name over On | Off). Two options each, so a tap anywhere flips the control.
+/// Android has only Route (no TUN | Proxy, no system proxy: `PlatformCaps`), drawn as one
+/// horizontal toggle across the card.
 class SegmentsCard extends StatelessWidget {
   const SegmentsCard({super.key, required this.host});
 
@@ -16,53 +19,59 @@ class SegmentsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final l10n = context.l10n;
+    final caps = host.caps;
+    final alone = !caps.tunSwitch && !caps.systemProxy;
+    final route = SegmentControl(
+      first: l10n.global,
+      second: l10n.rules,
+      firstActive: host.global,
+      pill: c.accent,
+      horizontal: alone,
+      onTap: () => host.setGlobal(!host.global),
+    );
     return AppCard(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: SegmentControl(
-              // 'TUN' and 'Proxy' are names of the modes, the mockup does not translate them
-              first: 'TUN',
-              second: 'Proxy',
-              firstActive: host.tun,
-              pill: host.tun ? c.active : c.accent,
-              // Android is always the VPN (TUN): nothing to switch
-              onTap: host.isAndroid ? null : () => host.setTun(!host.tun),
+      child: alone
+          ? route
+          : Row(
+              children: [
+                if (caps.tunSwitch) ...[
+                  Expanded(
+                    child: SegmentControl(
+                      // 'TUN' and 'Proxy' are names of the modes, the mockup does not translate them
+                      first: 'TUN',
+                      second: 'Proxy',
+                      firstActive: host.tun,
+                      pill: host.tun ? c.active : c.accent,
+                      onTap: () => host.setTun(!host.tun),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                Expanded(child: route),
+                if (caps.systemProxy) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: SegmentControl(
+                      title: 'Sys proxy',
+                      first: l10n.onText,
+                      second: l10n.off,
+                      firstActive: host.sysProxy,
+                      pill: c.accent,
+                      onTap: () => host.setSysProxy(!host.sysProxy),
+                    ),
+                  ),
+                ],
+              ],
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: SegmentControl(
-              first: l10n.global,
-              second: l10n.rules,
-              firstActive: host.global,
-              pill: c.accent,
-              onTap: () => host.setGlobal(!host.global),
-            ),
-          ),
-          if (!host.isAndroid) ...[
-            const SizedBox(width: 10),
-            Expanded(
-              child: SegmentControl(
-                title: 'Sys proxy',
-                first: l10n.onText,
-                second: l10n.off,
-                firstActive: host.sysProxy,
-                pill: c.accent,
-                onTap: () => host.setSysProxy(!host.sysProxy),
-              ),
-            ),
-          ],
-        ],
-      ),
     );
   }
 }
 
 /// `.segment-control`: two options with a pill under the active one that slides over
 /// (`.28s`). Without [title] they are stacked (the pill moves up and down); with it the name
-/// takes the top half and the options sit side by side below (`.seg-split`).
+/// takes the top half and the options sit side by side below (`.seg-split`); [horizontal] is the
+/// options side by side with no name (a lone control).
 class SegmentControl extends StatelessWidget {
   const SegmentControl({
     super.key,
@@ -71,6 +80,7 @@ class SegmentControl extends StatelessWidget {
     required this.firstActive,
     required this.pill,
     this.title,
+    this.horizontal = false,
     this.onTap,
   });
 
@@ -79,6 +89,9 @@ class SegmentControl extends StatelessWidget {
   final bool firstActive;
   final Color pill;
   final String? title;
+
+  /// One row, the halves side by side, no title.
+  final bool horizontal;
   final VoidCallback? onTap;
 
   static const Duration slide = Duration(milliseconds: 280);
@@ -87,7 +100,6 @@ class SegmentControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final split = title != null;
     final onPill = Theme.of(context).colorScheme.onPrimary;
     Widget label(String text, bool active) => Center(
       child: AnimatedDefaultTextStyle(
@@ -100,8 +112,31 @@ class SegmentControl extends StatelessWidget {
         child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
+    // the pill slides left / right under the halves
+    final sideBySide = Stack(
+      children: [
+        AnimatedAlign(
+          duration: slide,
+          curve: curve,
+          alignment: firstActive ? Alignment.centerLeft : Alignment.centerRight,
+          child: FractionallySizedBox(
+            widthFactor: .5,
+            heightFactor: 1,
+            child: _Pill(color: pill),
+          ),
+        ),
+        Row(
+          children: [
+            Expanded(child: label(first, firstActive)),
+            Expanded(child: label(second, !firstActive)),
+          ],
+        ),
+      ],
+    );
     final Widget options;
-    if (split) {
+    if (horizontal) {
+      options = sideBySide;
+    } else if (title != null) {
       options = Column(
         children: [
           Expanded(
@@ -118,30 +153,7 @@ class SegmentControl extends StatelessWidget {
               ),
             ),
           ),
-          Expanded(
-            child: Stack(
-              children: [
-                AnimatedAlign(
-                  duration: slide,
-                  curve: curve,
-                  alignment: firstActive
-                      ? Alignment.centerLeft
-                      : Alignment.centerRight,
-                  child: FractionallySizedBox(
-                    widthFactor: .5,
-                    heightFactor: 1,
-                    child: _Pill(color: pill),
-                  ),
-                ),
-                Row(
-                  children: [
-                    Expanded(child: label(first, firstActive)),
-                    Expanded(child: label(second, !firstActive)),
-                  ],
-                ),
-              ],
-            ),
-          ),
+          Expanded(child: sideBySide),
         ],
       );
     } else {
@@ -176,7 +188,7 @@ class SegmentControl extends StatelessWidget {
         child: Opacity(
           opacity: onTap == null ? .6 : 1,
           child: Container(
-            height: 76,
+            height: horizontal ? 46 : 76,
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               color: c.t1.tint(.05),

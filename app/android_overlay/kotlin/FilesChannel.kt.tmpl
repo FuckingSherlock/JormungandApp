@@ -1,0 +1,123 @@
+package __APP_ID__
+
+import android.app.Activity
+import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.provider.OpenableColumns
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.Executors
+
+/**
+ * MethodChannel `jormungand/files` (Dart side: lib/platform/files_channel.dart): the system file
+ * picker for the backup, and the installer of a downloaded update.
+ *
+ *  save    -> String?  args {name, text}: the "save as" dialog (ACTION_CREATE_DOCUMENT); the saved
+ *                      file's display name, null when the user closed the dialog
+ *  pick    -> Map?     the "open" dialog (ACTION_OPEN_DOCUMENT); {name, text} of the chosen file
+ *                      (UTF-8, at most 64 MB), null when cancelled
+ *  install -> String?  args {path}: installs the downloaded APK (UpdateInstaller); null = the
+ *                      system installer took it, else why not (`permission`, `verify`, `aborted`...)
+ */
+class FilesChannel(private val activity: Activity) {
+    companion object {
+        const val NAME = "jormungand/files"
+        private const val REQUEST_SAVE = 0x4A4E
+        private const val REQUEST_OPEN = 0x4A4F
+        private const val MAX_BYTES = 64 * 1024 * 1024
+    }
+
+    private val main = Handler(Looper.getMainLooper())
+    private val io = Executors.newSingleThreadExecutor()
+    private var pendingSave: Pair<MethodChannel.Result, String>? = null
+    private var pendingOpen: MethodChannel.Result? = null
+
+    fun register(messenger: BinaryMessenger) {
+        MethodChannel(messenger, NAME).setMethodCallHandler(::onCall)
+    }
+
+    private fun onCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "save" -> {
+                if (pendingSave != null) return result.error("busy", "a save dialog is open", null)
+                val text = call.argument<String>("text") ?: ""
+                pendingSave = result to text
+                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_TITLE, call.argument<String>("name") ?: "jormungand-backup.json")
+                }
+                @Suppress("DEPRECATION")
+                activity.startActivityForResult(intent, REQUEST_SAVE)
+            }
+            "pick" -> {
+                if (pendingOpen != null) return result.error("busy", "an open dialog is open", null)
+                pendingOpen = result
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(
+                        Intent.EXTRA_MIME_TYPES,
+                        arrayOf("application/json", "text/plain", "application/octet-stream"),
+                    )
+                }
+                @Suppress("DEPRECATION")
+                activity.startActivityForResult(intent, REQUEST_OPEN)
+            }
+            "install" -> {
+                val path = call.argument<String>("path")
+                if (path == null) result.error("args", "path", null)
+                else UpdateInstaller.install(activity, path, result)
+            }
+            else -> result.notImplemented()
+        }
+    }
+
+    /** Called from MainActivity.onActivityResult; true when the request code was ours. */
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        when (requestCode) {
+            REQUEST_SAVE -> {
+                val (result, text) = pendingSave ?: return true
+                pendingSave = null
+                val uri = data?.data
+                if (resultCode != Activity.RESULT_OK || uri == null) return result.success(null).let { true }
+                io.execute {
+                    try {
+                        activity.contentResolver.openOutputStream(uri, "wt")!!.use {
+                            it.write(text.toByteArray(Charsets.UTF_8))
+                        }
+                        main.post { result.success(displayName(uri) ?: "backup") }
+                    } catch (e: Exception) {
+                        main.post { result.error("save_failed", e.message, null) }
+                    }
+                }
+                return true
+            }
+            REQUEST_OPEN -> {
+                val result = pendingOpen ?: return true
+                pendingOpen = null
+                val uri = data?.data
+                if (resultCode != Activity.RESULT_OK || uri == null) return result.success(null).let { true }
+                io.execute {
+                    try {
+                        val bytes = activity.contentResolver.openInputStream(uri)!!.use { it.readNBytes(MAX_BYTES + 1) }
+                        if (bytes.size > MAX_BYTES) throw IllegalStateException("file is too large")
+                        val map = mapOf("name" to (displayName(uri) ?: "backup"), "text" to String(bytes, Charsets.UTF_8))
+                        main.post { result.success(map) }
+                    } catch (e: Exception) {
+                        main.post { result.error("open_failed", e.message, null) }
+                    }
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun displayName(uri: android.net.Uri): String? =
+        activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+}

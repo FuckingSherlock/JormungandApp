@@ -148,6 +148,29 @@ void main() {
     expect(hits, ['/nope.srs', '/nope.srs']);
   });
 
+  test('updatedTimes: a user list by its name, geosite / geoip by their newest file; nothing downloaded = absent', () async {
+    final cache = RuleSetCache(p.join(tmp.path, 'none'));
+    expect(await cache.updatedTimes(), isEmpty);
+    final old = DateTime.now().subtract(const Duration(days: 3));
+    final fresh = DateTime.now().subtract(const Duration(hours: 5));
+    Future<void> file(String name, DateTime at) async {
+      final f = File(p.join(tmp.path, name))..writeAsBytesSync([1]);
+      f.setLastModifiedSync(at);
+    }
+
+    await file('geosite-youtube.srs', old);
+    await file('geosite-category-ru.srs', fresh);
+    await file('geoip-ru.srs', old);
+    await file('set-ru-blocked.srs', fresh);
+    await file('set-mine.json', old);
+    await file('notes.txt', fresh);
+    final t = await RuleSetCache(tmp.path).updatedTimes();
+    expect(t.keys.toSet(), {'geosite', 'geoip', 'ru-blocked', 'mine'});
+    expect(t['geosite'], fresh.millisecondsSinceEpoch);
+    expect(t['geoip'], old.millisecondsSinceEpoch);
+    expect(t['ru-blocked'], fresh.millisecondsSinceEpoch);
+  });
+
   test('ensureFor: what the routing plan names; the tunnel inbound in the config', () async {
     final plan = {
       'kind': 'unit',

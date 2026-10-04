@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'api.dart';
+import 'appupdate.dart';
 import 'auto.dart';
 import 'config.dart';
 import 'device.dart';
@@ -59,6 +60,12 @@ class CoreService implements CoreApi {
     Timer Function(Duration, void Function())? timer,
     DateTime Function()? now,
     bool Function()? isElevated,
+    this.appVersion,
+    this.updatePlatformKeys = const [],
+    this.updateFeeds,
+    this.updatePublicKeys,
+    this.updateGet,
+    this.updateFirstDelay = const Duration(seconds: 10),
   })  : boxFactory = boxFactory ?? ((dir) => SingBoxProcess(singBox, dir)),
         _isElevated = isElevated ?? processIsElevated,
         _timer = timer ?? Timer.new,
@@ -82,6 +89,16 @@ class CoreService implements CoreApi {
   /// throwaway sing-boxes of the tests.
   final String singBox;
   final String dataDir;
+
+  /// The running app's version (semver + build) and the update asset keys of this device
+  /// (`updatePlatforms`): with a version the core checks the feeds for a newer one (appupdate.dart).
+  /// [updateFeeds] / [updateGet] / [updateFirstDelay] are the tests' seams.
+  final AppVersion? appVersion;
+  final List<String> updatePlatformKeys;
+  final List<String>? updateFeeds;
+  final List<String>? updatePublicKeys;
+  final UpdateGet? updateGet;
+  final Duration updateFirstDelay;
 
   /// The main sing-box (the connection).
   late final BoxRunner runner;
@@ -249,6 +266,7 @@ class CoreService implements CoreApi {
     }
     _recheckExit(); // the direct IP, shown on Home before any connect
     updater.start();
+    await _startAppUpdater();
   }
 
   @override
@@ -257,6 +275,7 @@ class CoreService implements CoreApi {
     _wakeUp();
     _stopAuto();
     updater.stop();
+    await appUpdater?.dispose();
     await runner.stop();
     try {
       if (_killSwitch && _killWhileClosed && sysProxy.isSet) {
@@ -1138,4 +1157,81 @@ class CoreService implements CoreApi {
     }();
     return out.stream;
   }
+
+  // ───────────────────────────── the app's own update ─────────────────────────────
+
+  /// The updater of [appVersion]; null when the host did not say which version runs (tests, jormd).
+  late final AppUpdater? appUpdater = appVersion == null
+      ? null
+      : AppUpdater(
+          dir: Directory(p.join(dataDir, 'updates')),
+          current: appVersion!,
+          platforms: updatePlatformKeys,
+          feeds: updateFeeds,
+          publicKeys: updatePublicKeys,
+          get: updateGet ?? httpUpdateGet(proxyPort: () => _innerPort),
+          tunnelUp: () => _innerPort != null,
+          onEvent: (type, level, data) => _event('core', type, level, data),
+        );
+  bool _updAuto = true;
+  UpdateChannel _updChannel = UpdateChannel.stable;
+
+  Future<void> _startAppUpdater() async {
+    final u = appUpdater;
+    if (u == null) return;
+    try {
+      await u.reconcile(); // did the install of the last run work?
+      await u.restore(); // a file downloaded earlier
+    } catch (_) {
+      // the update state is a convenience: a broken updates folder must not stop the core
+    }
+    u.changes.listen((_) => _changed());
+    u.startSchedule(autoCheck: () => _updAuto, channel: () => _updChannel, firstDelay: updateFirstDelay);
+  }
+
+  @override
+  Map<String, dynamic> updateStatus() => appUpdater?.status.toJson() ?? {'phase': 'unavailable'};
+
+  @override
+  Stream<Map<String, dynamic>> get updateChanges => appUpdater?.changes.map((s) => s.toJson()) ?? const Stream.empty();
+
+  UpdateChannel _channelOf(Object? c) => c == 'beta' ? UpdateChannel.beta : UpdateChannel.stable;
+
+  @override
+  Future<Map<String, dynamic>> updateCheck(Map<String, dynamic> body) async {
+    final u = appUpdater;
+    if (u == null) throw const FormatException('Update checks are not available in this build');
+    final st = await u.check(channel: _channelOf(body['channel'] ?? _updChannel.name), manual: body['manual'] != false);
+    return st.toJson();
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateDownload() async {
+    final u = appUpdater;
+    if (u == null) throw const FormatException('Update checks are not available in this build');
+    try {
+      return (await u.download()).toJson();
+    } on UpdateException catch (e) {
+      throw FormatException(e.message);
+    }
+  }
+
+  @override
+  void updateCancel() => appUpdater?.cancelDownload();
+
+  @override
+  void updateSettings(Map<String, dynamic> body) {
+    if (body.containsKey('autoCheck')) _updAuto = body['autoCheck'] != false;
+    if (body.containsKey('channel')) _updChannel = _channelOf(body['channel']);
+  }
+
+  @override
+  Future<void> updateBeginInstall() async {
+    final u = appUpdater;
+    if (u == null) throw const FormatException('No updater');
+    await u.beginInstall();
+  }
+
+  @override
+  Future<void> updateInstallFailed(String reason) async => appUpdater?.installFailed(reason);
 }

@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- self-update: install the downloaded APK -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Rules -> Per-app routing lists every installed app (Android 11+ hides the others otherwise);
+         like the self-update above, this is for the APK we ship ourselves, not for a store -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
 
     <application
         android:label="Jormungand"

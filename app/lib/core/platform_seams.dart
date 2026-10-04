@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../platform/files_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'core_host.dart';
 import 'libbox_runner.dart';
@@ -71,26 +72,44 @@ Future<CoreHost> openCoreHost() async {
   if (Platform.isAndroid) {
     const vpn = VpnChannel();
     var boxes = 0;
+    final ver = await vpn.appVersion();
+    final version = ver?.name ?? fallbackAppVersion;
+    final core = CoreService(
+      singBox: '',
+      dataDir: dataDir,
+      appVersion: AppVersion.tryParse(version, build: ver?.code ?? 1),
+      updatePlatformKeys: updatePlatforms(os: 'android', abis: await vpn.abis()),
+      runner: LibboxRunner(ChannelLibboxPort(vpn)),
+      boxFactory: (_) =>
+          LibboxRunner(ChannelLibboxPort(vpn, boxId: 'box${boxes++}')),
+      sysProxy: NoSystemProxy(),
+      isElevated: () => true, // TUN is the VpnService here, not an admin matter
+    );
     return LiveCoreHost(
-      api: CoreService(
-        singBox: '',
-        dataDir: dataDir,
-        runner: LibboxRunner(ChannelLibboxPort(vpn)),
-        boxFactory: (_) =>
-            LibboxRunner(ChannelLibboxPort(vpn, boxId: 'box${boxes++}')),
-        sysProxy: NoSystemProxy(),
-        isElevated: () =>
-            true, // TUN is the VpnService here, not an admin matter
-      ),
+      api: core,
+      ruleSetTimesOf: core.ruleSets.updatedTimes,
       isAndroid: true,
       vpn: vpn,
+      appVersion: version,
+      installer: installApk,
     );
   }
   final singBox = desktopSingBoxPath();
   // a sing-box left by an app that was killed would hold the ports
   await killOrphans(singBox);
+  final core = CoreService(
+    singBox: singBox,
+    dataDir: dataDir,
+    appVersion: AppVersion.tryParse(fallbackAppVersion, build: 1),
+    updatePlatformKeys: updatePlatforms(os: 'windows'),
+  );
   return LiveCoreHost(
-    api: CoreService(singBox: singBox, dataDir: dataDir),
+    api: core,
+    ruleSetTimesOf: core.ruleSets.updatedTimes,
     isAndroid: false,
+    appVersion: fallbackAppVersion,
   );
 }
+
+/// The version of a build that has no platform to ask (desktop); keep in step with pubspec.yaml.
+const fallbackAppVersion = '0.1.0';

@@ -446,9 +446,12 @@ class InlineField extends StatelessWidget {
 
 /// `.set-group`: rows in one framed block, a hairline between them.
 class SetGroup extends StatelessWidget {
-  const SetGroup({super.key, required this.children});
+  const SetGroup({super.key, required this.children, this.card = false});
 
   final List<Widget> children;
+
+  /// The Settings sheets' groups are on the card colour instead of the faint tint.
+  final bool card;
 
   @override
   Widget build(BuildContext context) {
@@ -457,7 +460,7 @@ class SetGroup extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(18, 6, 18, 12),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: c.t1.tint(.035),
+        color: card ? c.card : c.t1.tint(.035),
         border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -484,11 +487,15 @@ class SetRow extends StatelessWidget {
     this.below,
     this.onTap,
     this.labelWidget,
+    this.hintWidget,
   });
 
   final String? label;
   final Widget? labelWidget;
   final String? hint;
+
+  /// A hint that needs more than a string (a warning colour).
+  final Widget? hintWidget;
   final Widget? trailing;
   final Widget? below;
   final VoidCallback? onTap;
@@ -501,7 +508,10 @@ class SetRow extends StatelessWidget {
       children: [
         labelWidget ??
             Text(label ?? '', style: TextStyle(fontSize: 15, color: c.t1)),
-        if (hint != null) HintText(hint!),
+        if (hintWidget != null)
+          hintWidget!
+        else if (hint != null)
+          HintText(hint!),
       ],
     );
     final content = below == null

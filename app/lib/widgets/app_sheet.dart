@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../shell/app_links.dart';
 import '../theme/app_colors.g.dart';
 import 'app_view.dart';
 
@@ -14,13 +15,15 @@ Future<T?> showAppSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
 }) {
+  // the sheet's route is not under the shell, so the links it hands out are carried over
+  final links = AppLinksScope.of(context);
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
     elevation: 0,
-    builder: builder,
+    builder: (ctx) => AppLinksScope(links: links, child: builder(ctx)),
   );
 }
 
@@ -47,9 +50,17 @@ class SheetFrame extends StatelessWidget {
     this.full = false,
     this.headerActions = const [],
     this.bodyPadding,
+    this.titleBadge,
+    this.subHeader,
   });
 
   final String title;
+
+  /// Pinned under the header, over the scrolling body (the tabs, a search field).
+  final Widget? subHeader;
+
+  /// Right after the title text (the round ? of a help sheet).
+  final Widget? titleBadge;
   final Widget child;
   final List<Widget>? footer;
   final bool full;
@@ -93,15 +104,22 @@ class SheetFrame extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: c.t1,
-                  ),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: c.t1,
+                        ),
+                      ),
+                    ),
+                    ?titleBadge,
+                  ],
                 ),
               ),
               ...headerActions,
@@ -110,6 +128,7 @@ class SheetFrame extends StatelessWidget {
             ],
           ),
         ),
+        ?subHeader,
         if (full) Expanded(child: body) else Flexible(child: body),
         if (footer != null)
           Container(

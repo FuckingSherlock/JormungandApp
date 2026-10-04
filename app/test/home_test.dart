@@ -179,6 +179,8 @@ void main() {
     await tester.tap(find.byIcon(AppTab.settings.icon));
     await tester.pumpAndSettle();
     // Settings -> Appearance -> Text size to the right end
+    await tester.tap(find.byKey(const ValueKey('settings-setlook')));
+    await tester.pumpAndSettle();
     await tester.drag(find.byType(Slider), const Offset(600, 0));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(AppTab.home.icon));

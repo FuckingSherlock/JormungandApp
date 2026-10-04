@@ -96,6 +96,31 @@ void main() {
       expect(_tun(_build(_plan(stack: 'wireguard')))!['stack'], 'mixed');
     });
 
+    test('apps set to Direct as a whole (packages, Rules mode) are left out of the tunnel (exclude_package)', () {
+      Map<String, dynamic> app(String id, String act, {String kind = 'package', bool split = false, String udp = 'default'}) => {
+            'id': id,
+            'kind': kind,
+            'name': id,
+            'act': act,
+            'target': '',
+            'fallback': 'default',
+            'split': split,
+            'udp': {'act': udp, 'target': '', 'fallback': 'default'},
+          };
+      final apps = [
+        app('com.bank', 'direct'),
+        app('com.chat', 'proxy'),
+        app('com.split.half', 'direct', split: true), // UDP stays Default: not whole
+        app('com.split.both', 'direct', split: true, udp: 'direct'),
+        app('chrome.exe', 'direct', kind: 'process'),
+        app('com.dflt', 'default'),
+      ];
+      final t = _tun(_build(_plan(routing: _routing(apps: apps))))!;
+      expect(t['exclude_package'], ['com.bank', 'com.split.both']);
+      expect(_tun(_build(_plan(global: true, routing: _routing(apps: apps))))!.containsKey('exclude_package'), isFalse, reason: 'Global ignores apps');
+      expect(_tun(_build(_plan()))!.containsKey('exclude_package'), isFalse);
+    });
+
     test('proxy mode (or no mode): no tun inbound, no hijack rule; mixed-in stays in both', () {
       for (final mode in [null, 'proxy']) {
         final c = _build(_plan(mode: mode));
