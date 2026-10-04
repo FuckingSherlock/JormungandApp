@@ -2931,5 +2931,16 @@
         "type": "String"
       }
     }
+  },
+  "noQrCodeFoundInThe": "No QR code found in the image",
+  "theCameraIsNotAvailable": "The camera is not available",
+  "noSubscriptionUrlOrServerLink2": "No subscription URL or server link found",
+  "couldNotOpen": "Could not open {s0}",
+  "@couldNotOpen": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
   }
 }

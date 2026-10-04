@@ -142,6 +142,17 @@ const managed = kts ? [
 g = g.trimEnd() + '\n\n' + managed.join('\n') + '\n';
 writeFileSync(gradle, g);
 
+// 4. gradle.properties: Kotlin's incremental caches cannot link files of two drives ("Could not
+// close incremental caches"), and on Windows the Pub cache (plugins with Kotlin: url_launcher,
+// file_picker, camera) sits on C: while the project may sit on G:. Not incremental = always works.
+const props = join(android, 'gradle.properties');
+if (existsSync(props)) {
+  const p = readFileSync(props, 'utf8');
+  if (!/^kotlin\.incremental\s*=/m.test(p)) {
+    writeFileSync(props, p.trimEnd() + '\n# jormungand overlay: plugins on another drive (Pub cache) break the incremental Kotlin caches\nkotlin.incremental=false\n');
+  }
+}
+
 console.log(`android overlay applied: applicationId ${APPLICATION_ID}, minSdk ${MIN_SDK}, libbox.aar ${hasLibbox ? "yes" : "NO (core/tool/build_libbox.ps1)"}, ${gradle.replace(app, "app")}`);
 if (!/applicationId\s*=?\s*"/.test(g) || !g.includes(`"${APPLICATION_ID}"`)) console.warn('  could not patch applicationId / namespace in the gradle file - set them by hand');
 if (!new RegExp(`minSdk(Version)?\\s*=?\\s*${MIN_SDK}`).test(g)) console.warn('  could not patch minSdk - set it by hand');

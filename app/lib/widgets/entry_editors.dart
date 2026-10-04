@@ -11,6 +11,7 @@ import 'catalog_card.dart';
 import 'form_parts.dart';
 import 'gone_block.dart';
 import 'node_row.dart';
+import 'nodes_help.dart';
 import 'nodes_menus.dart';
 import 'nodes_text.dart';
 import 'pick_parts.dart';
@@ -107,6 +108,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
     final refs = catalog.orderRefs(catalog.profileNodeRefs(_d), _d.pickOrder);
     return SheetFrame(
       title: editing ? l10n.editProfile : l10n.createProfile,
+      titleBadge: const NodesHelpButton(NodesHelp.profile),
       full: true,
       footer: [
         if (warn != null) WarnNote(warn),
@@ -547,6 +549,7 @@ class _ChainEditorState extends State<_ChainEditor> {
     final ready = _d.inId != null && _d.outId != null;
     return SheetFrame(
       title: editing ? l10n.editChain : l10n.createChain,
+      titleBadge: const NodesHelpButton(NodesHelp.chain),
       full: true,
       footer: [
         if (warns.isNotEmpty) WarnNote(warns.join('. ')),

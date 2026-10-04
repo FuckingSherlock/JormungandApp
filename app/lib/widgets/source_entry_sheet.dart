@@ -8,6 +8,7 @@ import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
 import 'gone_block.dart';
+import 'nodes_help.dart';
 import 'pick_parts.dart';
 
 /// Nodes -> a source's menu -> Route settings (mockup 72-source-entry.js): which of the source's
@@ -59,6 +60,7 @@ class _SourceEntrySheet extends StatelessWidget {
     final updating = host.isUpdating(sid);
     return SheetFrame(
       title: s.name,
+      titleBadge: const NodesHelpButton(NodesHelp.sourceEntry),
       full: true,
       footer: [
         if (none) WarnNote(l10n.selectAtLeast1ServerOtherwise),

@@ -16,6 +16,10 @@
     <!-- Rules -> Per-app routing lists every installed app (Android 11+ hides the others otherwise);
          like the self-update above, this is for the APK we ship ourselves, not for a store -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
+    <!-- Nodes -> + -> Scan QR code (flutter_zxing over the camera plugin; runtime permission, asked on first scan).
+         The camera is optional: a device without one still installs the app. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <application
         android:label="Jormungand"

@@ -9,6 +9,7 @@ import '../l10n/l10n.dart';
 import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
+import 'nodes_help.dart';
 import 'nodes_menus.dart';
 import 'settings_parts.dart';
 
@@ -304,6 +305,7 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
                         color: c.t2,
                       ),
                     ),
+                    const NodesHelpButton(NodesHelp.srcAdvanced),
                   ],
                 ),
               ),

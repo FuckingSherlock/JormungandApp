@@ -15,8 +15,11 @@ class AppView extends StatelessWidget {
     required this.child,
     this.summary,
     this.actions = const [],
+    this.titleBadge,
   });
 
+  /// The round ? next to the title (`.help-btn`).
+  final Widget? titleBadge;
   final String title;
   final String? summary;
   final List<Widget> actions;
@@ -38,16 +41,23 @@ class AppView extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -.3,
-                          color: c.t1,
-                        ),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -.3,
+                                color: c.t1,
+                              ),
+                            ),
+                          ),
+                          ?titleBadge,
+                        ],
                       ),
                       if (summary != null)
                         Text(

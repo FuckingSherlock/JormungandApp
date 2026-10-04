@@ -9,6 +9,7 @@ import '../widgets/catalog_card.dart';
 import '../widgets/entry_card.dart';
 import '../widgets/form_parts.dart';
 import '../widgets/nodes_forms.dart';
+import '../widgets/nodes_help.dart';
 import '../widgets/nodes_menus.dart';
 import '../widgets/entry_editors.dart';
 import '../widgets/source_card.dart';
@@ -135,6 +136,7 @@ class NodesPageState extends State<NodesPage> {
     }
     return AppView(
       title: l10n.nodes,
+      titleBadge: const NodesHelpButton(NodesHelp.nodes),
       summary: _summary(context, catalog),
       actions: [
         IconBtn(

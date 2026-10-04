@@ -26,6 +26,10 @@ class PlatformCaps {
   /// Settings -> DNS: "Without TUN -> Resolve for IP rules" exists for the proxy port and the
   /// system proxy, i.e. only where TUN can be off.
   bool get dnsResolveForIp => !android;
+
+  /// Nodes -> + -> Scan QR code: the camera scanner (flutter_zxing over the `camera` plugin) is
+  /// wired for Android only; on the desktop the QR of a screenshot goes through Import config file.
+  bool get cameraScan => android;
 }
 
 extension HostCaps on CoreHost {

@@ -1329,5 +1329,9 @@
   "proxyPortTunStackTestUrl": "Порт прокси, стек TUN, тестовый URL",
   "direct2": "{s0} Direct",
   "noTestYet": "Тестов ещё не было",
-  "lastMbps": "Последний: {s0} Мбит/с"
+  "lastMbps": "Последний: {s0} Мбит/с",
+  "noQrCodeFoundInThe": "В изображении не найден QR-код",
+  "theCameraIsNotAvailable": "Камера недоступна",
+  "noSubscriptionUrlOrServerLink2": "Ссылка на подписку или сервер не найдена",
+  "couldNotOpen": "Не удалось открыть {s0}"
 }

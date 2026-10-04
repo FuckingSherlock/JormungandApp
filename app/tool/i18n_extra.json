@@ -33,5 +33,9 @@
   "Proxy port, TUN stack, test URL": "Порт прокси, стек TUN, тестовый URL",
   "{0} direct": "{0} Direct",
   "No test yet": "Тестов ещё не было",
-  "Last: {0} Mbps": "Последний: {0} Мбит/с"
+  "Last: {0} Mbps": "Последний: {0} Мбит/с",
+  "No QR code found in the image": "В изображении не найден QR-код",
+  "The camera is not available": "Камера недоступна",
+  "No subscription URL or server link found": "Ссылка на подписку или сервер не найдена",
+  "Could not open {0}": "Не удалось открыть {0}"
 }

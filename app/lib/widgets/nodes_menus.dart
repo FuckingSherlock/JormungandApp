@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:jormungand_core/jormungand_core.dart'
     show CatalogImpact, CatalogNode, CatalogOps, ImpactLine, Source;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
+import '../platform/import_io.dart';
+import '../platform/platform_caps.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
 import 'app_sheet.dart';
@@ -12,6 +15,7 @@ import 'entry_editors.dart';
 import 'form_parts.dart';
 import 'nodes_forms.dart';
 import 'nodes_text.dart';
+import 'qr_box.dart';
 import 'source_entry_sheet.dart';
 import 'speed_test_sheet.dart';
 
@@ -132,29 +136,57 @@ void showNodesAdd(
         onTap: () =>
             _after(sheet, context, () => _openChainEditor(context, 'simple')),
       ),
-      // TODO(ui): the camera scanner and the file picker need platform plugins (mobile_scanner,
-      // file_picker); the rows are here so the menu matches the mockup.
-      MenuRow(
-        icon: const Icon(Icons.qr_code_2),
-        label: l10n.scanQrCode,
-        onTap: () => _after(
-          sheet,
-          context,
-          () => showToast(context, l10n.notAvailableYet),
+      if (host.caps.cameraScan)
+        MenuRow(
+          icon: const Icon(Icons.qr_code_2),
+          label: l10n.scanQrCode,
+          onTap: () =>
+              _after(sheet, context, () => _scanQr(context, onOpenCard)),
         ),
-      ),
       MenuRow(
         icon: const Icon(Icons.insert_drive_file_outlined),
         label: l10n.importConfigFile,
         sub: l10n.singBoxJsonClashYaml,
-        onTap: () => _after(
-          sheet,
-          context,
-          () => showToast(context, l10n.notAvailableYet),
-        ),
+        onTap: () =>
+            _after(sheet, context, () => _importFile(context, onOpenCard)),
       ),
     ],
   );
+}
+
+/// "Scan QR code": the camera reads a code, its text goes where pasted text goes.
+Future<void> _scanQr(
+  BuildContext context,
+  ValueChanged<String> onOpenCard,
+) async {
+  final text = await ImportIo.current.scan(context);
+  if (text == null || !context.mounted) return;
+  _importText(context, text, onOpenCard);
+}
+
+/// "Import config file": a picked image is read as a QR code, any other file as text; either
+/// goes where pasted text goes.
+Future<void> _importFile(
+  BuildContext context,
+  ValueChanged<String> onOpenCard,
+) async {
+  final l10n = context.l10n;
+  String? text;
+  try {
+    text = await ImportIo.current.pickFile();
+  } on ImportException catch (e) {
+    if (context.mounted) {
+      showToast(
+        context,
+        e.failure == ImportFailure.noQr
+            ? l10n.noQrCodeFoundInThe
+            : l10n.theFileCouldNotBeOpened,
+      );
+    }
+    return;
+  }
+  if (text == null || !context.mounted) return;
+  _importText(context, text, onOpenCard);
 }
 
 /// Chain editor from the menus: a chain needs two units of the tab (`openCreateChain`).
@@ -180,7 +212,6 @@ Future<void> _addFromClipboard(
   ValueChanged<String> onOpenCard,
 ) async {
   final l10n = context.l10n;
-  final host = CoreHostScope.read(context);
   String text;
   try {
     text = (await Clipboard.getData(Clipboard.kTextPlain))?.text?.trim() ?? '';
@@ -189,13 +220,34 @@ Future<void> _addFromClipboard(
     return;
   }
   if (!context.mounted) return;
+  _importText(
+    context,
+    text,
+    onOpenCard,
+    foundToast: l10n.subscriptionUrlFoundInClipboard,
+    notFound: l10n.noSubscriptionUrlOrServerLink,
+  );
+}
+
+/// Where text from the clipboard, a QR code or a file goes: a subscription URL opens the
+/// subscription form with it, share links the server form. [foundToast] follows a URL;
+/// [notFound] is said when the text holds neither.
+void _importText(
+  BuildContext context,
+  String raw,
+  ValueChanged<String> onOpenCard, {
+  String? foundToast,
+  String? notFound,
+}) {
+  final host = CoreHostScope.read(context);
+  final text = raw.trim();
   if (RegExp(r'^https?://\S+$', caseSensitive: false).hasMatch(text)) {
     showSubscriptionForm(context, prefillUrl: text, onOpenCard: onOpenCard);
-    showToast(context, l10n.subscriptionUrlFoundInClipboard);
+    if (foundToast != null) showToast(context, foundToast);
   } else if (text.isNotEmpty && host.parseLinks(text).isNotEmpty) {
     showNodeForm(context, link: text, onOpenCard: onOpenCard);
   } else {
-    showToast(context, l10n.noSubscriptionUrlOrServerLink);
+    showToast(context, notFound ?? context.l10n.noSubscriptionUrlOrServerLink2);
   }
 }
 
@@ -325,26 +377,17 @@ void showSourceActions(
           ),
         ),
       ],
-      // TODO(ui): open the page in the browser (url_launcher); a toast says where it would go
       if (isSub && site.isNotEmpty)
         MenuRow(
           icon: const Icon(Icons.language),
           label: l10n.openWebsite,
-          onTap: () => _after(
-            sheet,
-            context,
-            () => showToast(context, l10n.opens2(site)),
-          ),
+          onTap: () => _after(sheet, context, () => _openUrl(context, site)),
         ),
       if (isSub && support.isNotEmpty)
         MenuRow(
           icon: const Icon(Icons.language),
           label: l10n.support,
-          onTap: () => _after(
-            sheet,
-            context,
-            () => showToast(context, l10n.opens2(support)),
-          ),
+          onTap: () => _after(sheet, context, () => _openUrl(context, support)),
         ),
       MenuRow(
         icon: const Icon(Icons.delete_outline),
@@ -410,6 +453,26 @@ void showNodeActions(BuildContext context, Source s, CatalogNode n) {
   );
 }
 
+/// "Open website" / "Support": the page of the provider in the browser (or the app that handles
+/// its link, e.g. Telegram). The address comes from the subscription's headers, so only web,
+/// Telegram and mail schemes are launched; no scheme means https.
+Future<void> _openUrl(BuildContext context, String raw) async {
+  final l10n = context.l10n;
+  var text = raw.trim();
+  if (!RegExp(r'^[a-z][a-z0-9+.-]*:', caseSensitive: false).hasMatch(text)) {
+    text = 'https://$text';
+  }
+  final uri = Uri.tryParse(text);
+  var ok = false;
+  if (uri != null &&
+      const {'http', 'https', 'tg', 'mailto'}.contains(uri.scheme)) {
+    try {
+      ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+  }
+  if (!ok && context.mounted) showToast(context, l10n.couldNotOpen(raw));
+}
+
 String _noLinkWhy(AppLocalizations l10n, CatalogNode n) =>
     l10n.thisServerHasNoShareLink(
       (n.unsupported ?? '').isNotEmpty ? n.unsupported! : n.protocol,
@@ -441,9 +504,8 @@ void _showNodeShare(BuildContext context, CatalogNode n) {
   );
 }
 
-/// The share sheet (`showQr`): the text and Copy.
-// TODO(ui): the QR code itself - needs a QR encoder (the mockup vendors one in 36-qr.js; the app
-// has no QR package yet). The colours are ready: `colors.qrDark` / `colors.qrLight`.
+/// The share sheet (`showQr`): the code, the text under it and Copy. A text that does not fit
+/// into a QR code only gets a toast.
 void showShareSheet(
   BuildContext context, {
   required String title,
@@ -452,21 +514,42 @@ void showShareSheet(
   required String copyLabel,
 }) {
   final c = context.colors;
+  final qr = QrBox.of(text);
+  if (qr == null) {
+    showToast(context, context.l10n.tooLongForAQrCode);
+    return;
+  }
   _menu(
     context,
     title,
     (sheet) => [
-      Container(
-        margin: const EdgeInsets.fromLTRB(20, 4, 20, 10),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: c.border),
-        ),
-        child: SelectableText(
-          text,
-          style: monoText.copyWith(fontSize: 12, color: c.t2),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+        child: Column(
+          children: [
+            qr,
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxHeight: 74),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: c.card,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: c.border),
+              ),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  text,
+                  style: monoText.copyWith(
+                    fontSize: 11,
+                    height: 1.4,
+                    color: c.t2,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       MenuRow(

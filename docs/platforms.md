@@ -30,6 +30,7 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | sing-box | процесс `core/tool/bin/sing-box.exe` | `libbox.aar` (`core/tool/build_libbox.ps1`) |
 | Обновления | zip + `jorm-updater` | APK через `PackageInstaller`, проверка — WorkManager (`docs/updates.md`) |
 | Листы (sheets) | стек от верха экрана, над нижней навигацией | пока `showModalBottomSheet` (`app_sheet.dart`) |
+| Nodes → + → Scan QR code | заглушка («камера недоступна в мокапе») | камера на zxing-cpp (`flutter_zxing`, без Google Play Services / ML Kit), разрешение `CAMERA` из оверлея манифеста; на ПК строки нет (`caps.cameraScan`), QR-картинка идёт через «Import config file» |
 
 Платформенные условия во Flutter — через один помощник возможностей платформы (не разбросанные
 `Platform.isAndroid`), чтобы тесты могли подменить платформу.
@@ -45,7 +46,8 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | Оболочка, нижняя навигация | `markup/40-bottomnav.html`, `css/10-shell.css`, `30-bottomnav.css`, `js/60-sheets.js`, `85-sheet-swipe.js` | `shell/home_shell.dart`, `widgets/app_view.dart`, `widgets/app_sheet.dart` |
 | Home, док | `markup/10-home.html`, `js/50-home.js`, `css/20-home.css`, `50-dock.css`, `design/tools/geometry.mjs` | `pages/home_page.dart`, `widgets/connect_dock.dart`, `dock_profile.dart`, `dock_paths.g.dart` (генерируется), `stat_cards.dart`, `segments.dart`, `nav_cards.dart` (Auto mode / Rules / DNS / Speed Test), `vpn_alert.dart`, `conn_badge.dart` |
 | Nodes | `markup/20-nodes.html`, `60-sheets-nodes.html`, `js/20-profiles.js`, `30-nodes.js`, `31-catalog.js`, `32-nodes-forms.js`, `33-source-error.js`, `70-profile-forms.js`, `72-source-entry.js`, `80-drag.js`, `css/70-nodes.css` | `pages/nodes_page.dart`, `widgets/source_card.dart`, `entry_card.dart`, `node_row.dart`, `catalog_card.dart`, `gone_block.dart`, `nodes_menus.dart`, `nodes_forms.dart`, `entry_editors.dart`, `source_entry_sheet.dart`, `source_error_strip.dart`, `pick_parts.dart`, `core/catalog_forms.dart` |
-| Share, QR | `js/36-qr.js`, `37-share.js`, `css/72-share-data.css` | `widgets/nodes_menus.dart` (лист «Поделиться») |
+| Share, QR | `js/36-qr.js`, `37-share.js`, `css/72-share-data.css` | `widgets/nodes_menus.dart` (лист «Поделиться», «Open website» / «Support» через `url_launcher`), `qr_box.dart` (код, `qr_flutter`) |
+| Импорт: Scan QR, файл | заглушки (`60-sheets-nodes.html`) | `platform/import_io.dart` (шов камеры и файла, `ImportIo.current`), `widgets/qr_scanner_page.dart` (камера, `flutter_zxing`), `nodes_menus.dart` (`_importText` — общий путь с «From clipboard») |
 | Speed test | `js/38-speed.js` | `widgets/speed_test_sheet.dart` |
 | Пинг | `js/15-ping.js` | ядро (`CoreService`), `widgets/latency_text.dart` |
 | Route, Auto | `markup/50-sheets-connect.html`, `js/55-automode.js`, `94-live-auto.js`, `css/55-automode.css` | `pages/route_page.dart` |
@@ -53,7 +55,7 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | Rules, приложения | `markup/55-sheets-rules.html`, `js/40-rules.js`, `42-apps.js`, `44-target-picker.js`, `75-rule-form.js`, `css/65-rules.css` | `pages/rules_page.dart`, `widgets/rules_*.dart`; список приложений Android — канал `jormungand/vpn` (`apps`) |
 | Logs, события | `markup/35-logs.html`, `js/46-logs.js`, `47-events.js`, `css/67-logs.css` | `pages/logs_page.dart`, `widgets/logs_*.dart` |
 | Settings | `markup/30-settings.html`, `js/56-dns.js`, `57-general.js`, `58-notif.js`, `59-data.js`, `css/95-settings.css` | `pages/settings_page.dart` (меню), `widgets/settings_auto.dart` (Auto mode, + `autoCardSub`), `settings_look.dart` (Appearance / General / Notifications), `settings_conn.dart`, `settings_dns.dart`, `settings_data.dart` (обновления, бэкап, About), `settings_parts.dart` (общие части листов), `core/settings_model.dart` (хранение `genCfg` / `notifCfg`, диапазоны и проверки полей), `core/app_update.dart` (состояние обновления для UI), `state/app_settings.dart`; различия платформ — `platform/platform_caps.dart` (`host.caps`); файлы бэкапа и установка APK — `platform/files_channel.dart` + `android_overlay/kotlin/FilesChannel.kt.tmpl`, `UpdateInstaller.kt.tmpl` |
-| Справка «?» | `js/58-help.js` | `widgets/settings_parts.dart` (`showHelp`, `HelpTopic`) |
+| Справка «?» | `js/58-help.js` | `widgets/settings_parts.dart` (`showHelp`, `HelpTopic`; Settings), `widgets/nodes_help.dart` (`NodesHelp`: Nodes, Advanced подписки, профиль, пункт-источник, цепочка), `rules_parts.dart` (`RoundHelp`, `showTermsSheet`) |
 | Меню, формы, тосты | `js/34-ui.js`, `css/80-menus-forms.css`, `90-toast.css` | `widgets/form_parts.dart`, `app_card.dart`, `settings_row.dart` |
 | Шов к ядру | `js/12-backend.js`, `93-routing-plan.js`, `95-live.js` | `core/core_host.dart`, `core/live_core_host.dart`, `core/platform_seams.dart`, `core/libbox_runner.dart` |
 | Демо-данные мокапа | `js/10-data.js`, моки в `12-backend.js` | **не переносятся** — только реальные данные ядра или пустые состояния |
@@ -131,6 +133,10 @@ Android-часть живёт в `app/android_overlay/` (Kotlin-шаблоны `
 перезапустить скрипт. Проверка Kotlin без сборки Dart:
 `app/android> .\gradlew.bat :app:compileReleaseKotlin -x compileFlutterBuildRelease`.
 Логи с телефона: `adb logcat -s flutter:* AndroidRuntime:E`.
+Плагины с Kotlin (`url_launcher`, `file_picker`, `camera`) лежат в Pub-кеше на `C:`, проект — на `G:`:
+инкрементальные кеши Kotlin на двух дисках падают («Could not close incremental caches»), поэтому
+оверлей дописывает `kotlin.incremental=false` в `android/gradle.properties`. Нативная часть
+`flutter_zxing` (zxing-cpp) собирается CMake из SDK (`cmake/3.22.1`) и NDK.
 
 Сырой лог (Logs → Raw) на Android собирается из трёх источников: заметки ядра (`LogBook.note`), строки
 sing-box туннеля и разовых боксов пинга / Speed Test (через `SingBoxApi.logLines()`; libbox шлёт строки

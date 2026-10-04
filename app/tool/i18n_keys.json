@@ -1363,5 +1363,9 @@
   "Empty = auto: the provider’s period, else the one in Auto mode · 0 = never · at least 10 s": "emptyAutoTheProviderSPeriod2",
   "Update this subscription every": "updateThisSubscriptionEvery",
   "Empty = auto · 0 = never · from 10 seconds to 30 days": "emptyAuto0NeverFrom10",
-  "never": "never2"
+  "never": "never2",
+  "No QR code found in the image": "noQrCodeFoundInThe",
+  "The camera is not available": "theCameraIsNotAvailable",
+  "No subscription URL or server link found": "noSubscriptionUrlOrServerLink2",
+  "Could not open {0}": "couldNotOpen"
 }
