@@ -80,11 +80,14 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
   Source? get _edit => widget.source;
   bool get _isGroup => _edit?.kind == 'node';
 
+  /// A manual group or a local file (kind 'file'): only the name is edited.
+  bool get _nameOnly => _edit != null && _edit!.kind != 'sub';
+
   @override
   void initState() {
     super.initState();
     final s = _edit;
-    final settings = s == null || _isGroup
+    final settings = s == null || _nameOnly
         ? const SubscriptionSettings()
         : SubscriptionSettings.of(s);
     _url = TextEditingController(text: widget.prefillUrl ?? s?.url ?? '');
@@ -151,7 +154,7 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
     final url = _url.text.trim();
     final filter = _filter.text.trim();
     final s = _edit;
-    if (s != null && _isGroup) {
+    if (s != null && _nameOnly) {
       if (name.isNotEmpty) host.saveSource(s.id, name: name);
       Navigator.of(context).pop();
       return;
@@ -207,6 +210,8 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
     final s = _edit;
     final title = s == null
         ? l10n.addSubscription
+        : s.kind == 'file'
+        ? l10n.rename
         : _isGroup
         ? l10n.renameGroup
         : l10n.editSubscription;
@@ -230,7 +235,7 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (!_isGroup)
+          if (!_nameOnly)
             FormGroup(
               label: l10n.subscriptionUrl,
               child: AppTextField(
@@ -245,10 +250,10 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
             label: _isGroup ? l10n.groupName : l10n.name,
             child: AppTextField(
               controller: _name,
-              hint: _isGroup ? null : l10n.takenFromTheSubscriptionIfEmpty,
+              hint: _nameOnly ? null : l10n.takenFromTheSubscriptionIfEmpty,
             ),
           ),
-          if (!_isGroup) ...[
+          if (!_nameOnly) ...[
             const SizedBox(height: 2),
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),

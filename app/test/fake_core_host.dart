@@ -210,6 +210,23 @@ class FakeCoreHost extends CoreHost {
     return const AddSourceResult(AddSourceOutcome.added);
   }
 
+  /// Reads the text with the core's own reader, like the live host (the id is the next `src<N>`).
+  @override
+  Future<ImportFileResult> importConfigFile(String fileName, String text) async {
+    calls.add('importConfigFile $fileName');
+    final Map<String, dynamic> r;
+    try {
+      r = localSourceFromText(fileName, text);
+    } on FormatException catch (e) {
+      return ImportFileResult.failed(e.message);
+    }
+    final id = 'src${catalog.sourceSeq++}';
+    final s = Source.fromJson({...r, 'id': id});
+    catalog.addSource(s);
+    _changed();
+    return ImportFileResult.added(id, s.name, s.nodes.length);
+  }
+
   @override
   Future<void> updateSource(String sid, {bool rediscover = false}) async =>
       calls.add('updateSource $sid${rediscover ? ' rediscover' : ''}');

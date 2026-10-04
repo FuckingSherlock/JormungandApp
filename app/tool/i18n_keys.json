@@ -1367,5 +1367,22 @@
   "No QR code found in the image": "noQrCodeFoundInThe",
   "The camera is not available": "theCameraIsNotAvailable",
   "No subscription URL or server link found": "noSubscriptionUrlOrServerLink2",
-  "Could not open {0}": "couldNotOpen"
+  "Could not open {0}": "couldNotOpen",
+  "sing-box JSON, Clash YAML, a list of links": "singBoxJsonClashYamlA",
+  "local file": "localFile",
+  "Local file": "localFile2",
+  "Rename": "rename",
+  "No servers found in the file": "noServersFoundInTheFile",
+  "The file is over 16 MB": "theFileIsOver16Mb",
+  "A local file has nothing to update: import the file again": "aLocalFileHasNothingTo",
+  "Delete imported file": "deleteImportedFile",
+  "Read as {0}": "readAs",
+  "Imported {0}": "imported2",
+  "Imported {#0} server from {1}": "importedServerFrom",
+  "Imported {#0} servers from {1}": "importedServersFromPlural",
+  "Could not import {0}: {1}": "couldNotImport",
+  "The imported file and its {#0} server are removed. This can’t be undone.": "theImportedFileAndItsServer",
+  "The imported file and its {#0} servers are removed. This can’t be undone.": "theImportedFileAndItsServersPlural",
+  "The imported file and its {#0} server are removed": "theImportedFileAndItsServer2",
+  "The imported file and its {#0} servers are removed": "theImportedFileAndItsServersPlural2"
 }

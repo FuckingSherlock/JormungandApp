@@ -486,6 +486,8 @@ class LiveCoreHost extends CoreHost {
           ? DockKind.profile
           : source != null && source.kind == 'sub'
           ? DockKind.sub
+          : source != null && source.kind == 'file'
+          ? DockKind.file
           : DockKind.set,
       name: e.name,
       simpleMode: simple,
@@ -1303,6 +1305,31 @@ class LiveCoreHost extends CoreHost {
     catalog.sourcesData[sid] = next;
     catalog.syncCatalog();
     if (r['notModified'] != true) _keepRunningIfNoReload(updated: [next]);
+  }
+
+  @override
+  Future<ImportFileResult> importConfigFile(
+    String fileName,
+    String text,
+  ) async {
+    final Map<String, dynamic> r;
+    try {
+      r = api.addSourceFromText({'name': fileName, 'text': text});
+    } on FormatException catch (e) {
+      return ImportFileResult.failed(e.message);
+    } catch (e) {
+      return ImportFileResult.failed('$e');
+    }
+    // the core gives the source without an id: the catalog owner allocates it
+    final id = 'src${catalog.sourceSeq++}';
+    final s = Source.fromJson({
+      ...Map<String, dynamic>.from(r['source'] as Map),
+      'id': id,
+    });
+    s.count = s.nodes.length;
+    catalog.addSource(s);
+    changed();
+    return ImportFileResult.added(id, s.name, s.nodes.length);
   }
 
   @override

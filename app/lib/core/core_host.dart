@@ -145,7 +145,7 @@ class TrafficInfo {
 
 /// The small kind label of the dock row; never translated (mockup `profCardLabel`, `data-notr`).
 /// [simple] / [profiles] are shown when nothing is connected (the Route mode).
-enum DockKind { chain, profile, sub, set, simple, profiles }
+enum DockKind { chain, profile, sub, file, set, simple, profiles }
 
 /// Why the dock has no entry: `nothingInAuto` / `empty` (nothing to connect in this mode).
 enum DockNone { nothingInAuto, empty }
@@ -214,6 +214,27 @@ class AddSourceResult {
   final AddSourceOutcome outcome;
   final String name;
   final String? error;
+}
+
+/// What [CoreHost.importConfigFile] made of a file: a new local source ([sourceId], its [name]
+/// and server [count]) or the [error] text (nothing was added).
+class ImportFileResult {
+  const ImportFileResult.added(
+    String this.sourceId,
+    this.name,
+    this.count,
+  ) : error = null;
+  const ImportFileResult.failed(String this.error)
+    : sourceId = null,
+      name = '',
+      count = 0;
+
+  final String? sourceId;
+  final String name;
+  final int count;
+  final String? error;
+
+  bool get ok => error == null;
 }
 
 /// The UI's one line to the core: state to show, actions to take. The real one is
@@ -318,6 +339,11 @@ abstract class CoreHost extends ChangeNotifier {
     String name = '',
     SubscriptionSettings? settings,
   });
+
+  /// Nodes -> + -> Import config file: the text of a picked file (sing-box JSON, Clash YAML, a list
+  /// of links) becomes a local source (kind `file`, named after [fileName]), added at the end of
+  /// Simple, on and in Auto. Nothing recognised / too big: [ImportFileResult.error], nothing added.
+  Future<ImportFileResult> importConfigFile(String fileName, String text);
 
   /// Updates a subscription (a never loaded one fetches again); `rediscover` asks with every
   /// User-Agent again. Failure: the source keeps its servers and shows the error strip, a

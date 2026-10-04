@@ -2818,6 +2818,68 @@
   "thisVersionHasToBeDownloaded": "This version has to be downloaded by hand",
   "updateChecksAreNotAvailableIn": "Update checks are not available in this build yet",
   "somethingWentWrong": "Something went wrong",
+  "singBoxJsonClashYamlA": "sing-box JSON, Clash YAML, a list of links",
+  "localFile": "local file",
+  "localFile2": "Local file",
+  "readAs": "Read as {s0}",
+  "@readAs": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "imported2": "Imported {s0}",
+  "@imported2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "rename": "Rename",
+  "importedServersFromPlural": "{n0, plural, one{Imported {n0} server from {s1}} other{Imported {n0} servers from {s1}}}",
+  "@importedServersFromPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "couldNotImport": "Could not import {s0}: {s1}",
+  "@couldNotImport": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "noServersFoundInTheFile": "No servers found in the file",
+  "theFileIsOver16Mb": "The file is over 16 MB",
+  "aLocalFileHasNothingTo": "A local file has nothing to update: import the file again",
+  "deleteImportedFile": "Delete imported file",
+  "theImportedFileAndItsServersPlural": "{n0, plural, one{The imported file and its {n0} server are removed. This can’t be undone.} other{The imported file and its {n0} servers are removed. This can’t be undone.}}",
+  "@theImportedFileAndItsServersPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "theImportedFileAndItsServersPlural2": "{n0, plural, one{The imported file and its {n0} server are removed} other{The imported file and its {n0} servers are removed}}",
+  "@theImportedFileAndItsServersPlural2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
   "vpnPermissionWasNotGranted": "VPN permission was not granted",
   "couldNotSaveTheState": "Could not save the state: {s0}",
   "@couldNotSaveTheState": {

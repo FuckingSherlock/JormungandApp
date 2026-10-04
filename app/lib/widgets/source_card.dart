@@ -190,6 +190,9 @@ class SourceCard extends StatelessWidget {
     final s = source;
     final catalog = host.catalog;
     final isSub = s.kind == 'sub';
+    final isFile = s.kind == 'file';
+    // a manual group counts "servers", the others "nodes" (mockup `srcMetaHtml`)
+    final nodesWord = s.kind != 'node';
     final live = catalog.liveNodes(s).length;
     final gone = s.gone.length;
     final total = s.nodes.length + gone;
@@ -198,17 +201,26 @@ class SourceCard extends StatelessWidget {
     final TextStyle warnOrDim = TextStyle(color: gone > 0 ? c.warn : c.t3);
     return MetaLine(
       parts: [
-        if (isSub ? format.isNotEmpty : true)
+        if (isFile)
+          // the format it was read as is in the hover hint
+          Tooltip(
+            message: l10n.readAs(format),
+            child: FmtTag(l10n.localFile),
+          )
+        else if (isSub ? format.isNotEmpty : true)
           FmtTag(isSub ? format : l10n.manual3),
         live < total
             ? Text(
-                isSub
+                nodesWord
                     ? l10n.nodes2('$live', '$total')
                     : l10n.servers2('$live', '$total'),
                 style: warnOrDim,
               )
-            : Text(isSub ? l10n.nodesPlural(total) : l10n.serversPlural(total)),
-        if (isSub && updatedAt is num) Text(shortAgo(l10n, updatedAt)),
+            : Text(
+                nodesWord ? l10n.nodesPlural(total) : l10n.serversPlural(total),
+              ),
+        if ((isSub || isFile) && updatedAt is num)
+          Text(shortAgo(l10n, updatedAt)),
       ],
     );
   }

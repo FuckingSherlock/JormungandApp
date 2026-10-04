@@ -261,6 +261,43 @@ void main() {
     );
   });
 
+  test('an imported file becomes a local source; garbage adds nothing', () async {
+    await start();
+    final r = await host.importConfigFile(
+      'my list.txt',
+      'vless://11111111-1111-1111-1111-111111111111@one.example.com:443?security=tls&sni=one.example.com#One\n'
+      'trojan://pw@two.example.com:443?sni=two.example.com#Two\n',
+    );
+    expect(r.ok, isTrue);
+    expect(r.sourceId, 'src3');
+    expect(r.name, 'my list');
+    expect(r.count, 2);
+    final s = host.catalog.sourcesData['src3']!;
+    expect(s.kind, 'file');
+    expect(s.url, isNull);
+    expect(s.nodes.length, 2);
+    expect(s.count, 2);
+    expect(host.catalog.sourceOrder.last, 'src3');
+    expect(host.catalog.sourceSeq, 4);
+
+    // the dock says `file` when the entry is such a source
+    host.catalog.setAutoConnect(false);
+    host.catalog.activeConnectId = 'src3';
+    host.changed();
+    expect(host.dock.kind, DockKind.file);
+
+    // nothing to update: a no-op, no error strip
+    await host.updateSource('src3');
+    expect(s.unknown['lastError'], isNull);
+    expect(host.isUpdating('src3'), isFalse);
+
+    final bad = await host.importConfigFile('junk.json', 'not a config');
+    expect(bad.ok, isFalse);
+    expect(bad.error, 'No servers found in the file');
+    expect(host.catalog.sourceOrder, ['a', 'b', 'src3']);
+    expect(host.catalog.sourceSeq, 4);
+  });
+
   test(
     'the dock follows the core: Auto members give pings and the server',
     () async {

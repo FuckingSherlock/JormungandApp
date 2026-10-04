@@ -146,7 +146,7 @@ void showNodesAdd(
       MenuRow(
         icon: const Icon(Icons.insert_drive_file_outlined),
         label: l10n.importConfigFile,
-        sub: l10n.singBoxJsonClashYaml,
+        sub: l10n.singBoxJsonClashYamlA,
         onTap: () =>
             _after(sheet, context, () => _importFile(context, onOpenCard)),
       ),
@@ -164,16 +164,18 @@ Future<void> _scanQr(
   _importText(context, text, onOpenCard);
 }
 
-/// "Import config file": a picked image is read as a QR code, any other file as text; either
-/// goes where pasted text goes.
+/// "Import config file": a picked image is read as a QR code and its text goes where pasted
+/// text goes; any other file (sing-box JSON, Clash YAML, a list of links) becomes a local source
+/// (kind `file`) and its card opens.
 Future<void> _importFile(
   BuildContext context,
   ValueChanged<String> onOpenCard,
 ) async {
   final l10n = context.l10n;
-  String? text;
+  final host = CoreHostScope.read(context);
+  PickedFile? picked;
   try {
-    text = await ImportIo.current.pickFile();
+    picked = await ImportIo.current.pickFile();
   } on ImportException catch (e) {
     if (context.mounted) {
       showToast(
@@ -185,8 +187,30 @@ Future<void> _importFile(
     }
     return;
   }
-  if (text == null || !context.mounted) return;
-  _importText(context, text, onOpenCard);
+  if (picked == null || !context.mounted) return;
+  // an image (its QR) or a file that is just a subscription URL: the usual paste path
+  if (picked.qr ||
+      RegExp(r'^https?://\S+$', caseSensitive: false).hasMatch(picked.text.trim())) {
+    _importText(context, picked.text, onOpenCard);
+    return;
+  }
+  final r = await host.importConfigFile(picked.name, picked.text);
+  if (!context.mounted) return;
+  final sid = r.sourceId;
+  if (sid == null) {
+    final err = r.error ?? '';
+    showToast(
+      context,
+      l10n.couldNotImport(picked.name, switch (err) {
+        'No servers found in the file' => l10n.noServersFoundInTheFile,
+        'The file is over 16 MB' => l10n.theFileIsOver16Mb,
+        _ => err,
+      }),
+    );
+    return;
+  }
+  onOpenCard(sid);
+  showToast(context, l10n.importedServersFromPlural(r.count, r.name));
 }
 
 /// Chain editor from the menus: a chain needs two units of the tab (`openCreateChain`).
@@ -325,7 +349,11 @@ void showSourceActions(
     (sheet) => [
       MenuRow(
         icon: const Icon(Icons.edit_outlined),
-        label: isSub ? l10n.editSubscription : l10n.renameGroup,
+        label: isSub
+            ? l10n.editSubscription
+            : s.kind == 'file'
+            ? l10n.rename
+            : l10n.renameGroup,
         onTap: () => _after(
           sheet,
           context,
@@ -776,11 +804,14 @@ void confirmDeleteSource(BuildContext context, Source s) {
   final host = CoreHostScope.read(context);
   final n = s.nodes.length, g = s.gone.length;
   final sub = s.kind == 'sub';
+  final file = s.kind == 'file';
   final String note;
   if (g > 0) {
     note =
         (sub
             ? l10n.theSubscriptionAndItsServersArePlural2(n)
+            : file
+            ? l10n.theImportedFileAndItsServersPlural2(n)
             : l10n.theGroupAndItsServersArePlural2(n)) +
         (g == 1
             ? l10n.withUnavailableOneKeptForTheir(g)
@@ -789,6 +820,8 @@ void confirmDeleteSource(BuildContext context, Source s) {
   } else {
     note = sub
         ? l10n.theSubscriptionAndItsServersArePlural(n)
+        : file
+        ? l10n.theImportedFileAndItsServersPlural(n)
         : l10n.theGroupAndItsServersArePlural(n);
   }
   _confirmDelete(
@@ -796,7 +829,11 @@ void confirmDeleteSource(BuildContext context, Source s) {
     title: l10n.delete2(s.name),
     note: note,
     lines: host.catalog.deleteSourceImpact(s.id),
-    label: sub ? l10n.deleteSubscription : l10n.deleteGroup,
+    label: sub
+        ? l10n.deleteSubscription
+        : file
+        ? l10n.deleteImportedFile
+        : l10n.deleteGroup,
     onDelete: () => host.deleteSource(s.id),
   );
 }

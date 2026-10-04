@@ -350,6 +350,8 @@ class _SourcePickCard extends StatelessWidget {
                             Text(
                               s.kind == 'sub'
                                   ? l10n.subscription2
+                                  : s.kind == 'file'
+                                  ? l10n.localFile2
                                   : l10n.manual3,
                             ),
                             Text(

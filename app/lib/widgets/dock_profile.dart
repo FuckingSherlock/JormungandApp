@@ -10,7 +10,7 @@ import 'app_card.dart';
 
 /// The row of the dock (mockup `.dock-profile`): what is connected, or would be.
 ///
-/// Top line: the kind (chain / profile / sub / set, or Simple / Profiles when there is no entry;
+/// Top line: the kind (chain / profile / sub / file / set, or Simple / Profiles when there is no entry;
 /// never translated, like the mockup's `data-notr`) and the entry's name. Under it: AUTO / MANUAL,
 /// the protocol and server traffic leaves through (a chain: entry -> exit; a profile: its
 /// subscription first), and on the right the latency in a frame.
