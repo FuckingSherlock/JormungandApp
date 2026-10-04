@@ -196,6 +196,16 @@ Reality pbk/sid, flow, транспорт (type, path, Host, service_name), obfs
 полностью совпадающие. Поля, которые формат дописывает сам (tag, domain_strategy…), в
 вариант не входят — одна нода из ссылки, Clash и sing-box JSON остаётся одной.
 
+Нормализация hysteria2 / tuic / hysteria (QUIC), чтобы один сервер из ссылок и из Clash
+не раздваивался: Remnawave в Clash сам дописывает каждой hy2-ноде `client-fingerprint: chrome`
+и `alpn: [h3]`, а `pinSHA256` из ссылки превращает в `skip-cert-verify: true`.
+- uTLS fingerprint у QUIC-протоколов отбрасывается (sing-box: «unsupported usage for uTLS» —
+  нода с ним не подключается вообще);
+- у hysteria2 `alpn` = `h3` — значение по умолчанию, в вариант не входит (другой ALPN — вариант);
+- `pinSHA256` hysteria2 → `tls.insecure` (закрепление самоподписанного сертификата в sing-box
+  недоступно: его `certificate_public_key_sha256` считается от публичного ключа, а не от
+  сертификата), как и в Clash-выдаче провайдера.
+
 ETag / Last-Modified хранятся в стратегии вместе с `parser` — версией парсера
 (`parserVersion`); после изменения разбора условные заголовки не шлются, первое обновление
 читает подписку целиком (иначе 304 оставил бы ноды в старом виде).

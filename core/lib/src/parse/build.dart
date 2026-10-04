@@ -189,6 +189,11 @@ Node buildSs({
   return Node.make(name: name, protocol: 'ss', address: host, port: port, identity: '$method:$password', outbound: ob, unsupported: bad);
 }
 
+/// `tls` of a QUIC protocol (hysteria, hysteria2, tuic). sing-box cannot run uTLS over QUIC
+/// ("unsupported usage for uTLS"), so a fingerprint a format carries (Clash gives every
+/// hysteria2 `client-fingerprint`) is dropped.
+Map<String, dynamic> _quicTls(Params q) => buildTls({...q, 'security': 'tls'}, defaultOn: true)!..remove('utls');
+
 /// [ports] = extra port ranges for port hopping, as `20000-30000` or `443`.
 Node buildHy2({
   required String name,
@@ -214,12 +219,16 @@ Node buildHy2({
   if (obfs != null && obfs.isNotEmpty && obfs != 'none') {
     ob['obfs'] = {'type': obfs, 'password': q['obfs-password'] ?? ''};
   }
-  ob['tls'] = buildTls({...q, 'security': 'tls'}, defaultOn: true);
+  final tls = _quicTls(q);
+  // `pinSHA256` pins the server certificate (a self-signed one): sing-box has no such pin
+  // (its own hashes the public key), so the check is off, as in the provider's Clash export.
+  if ((q['pinSHA256'] ?? '').isNotEmpty) tls['insecure'] = true;
+  ob['tls'] = tls;
   return Node.make(name: name, protocol: 'hy2', address: host, port: port, identity: password, outbound: ob);
 }
 
 Node buildTuic({required String name, required String host, required int port, required String uuid, required String password, required Params q}) {
-  final tls = buildTls({...q, 'security': 'tls'}, defaultOn: true)!;
+  final tls = _quicTls(q);
   tls.putIfAbsent('alpn', () => ['h3']);
   final ob = <String, dynamic>{
     'type': 'tuic',
@@ -320,7 +329,7 @@ Node buildSsh({
 /// (only udp exists in sing-box), TLS keys.
 Node buildHysteria({required String name, required String host, required int port, required String auth, required Params q}) {
   int? mbps(String? v) => int.tryParse(RegExp(r'\d+').stringMatch(v ?? '') ?? '');
-  final tls = buildTls({...q, 'security': 'tls'}, defaultOn: true)!;
+  final tls = _quicTls(q);
   tls.putIfAbsent('alpn', () => ['hysteria']);
   final ob = <String, dynamic>{
     'type': 'hysteria',

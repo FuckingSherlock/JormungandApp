@@ -187,9 +187,70 @@ void main() {
     Node hy(String q, [String name = 'VK']) => parseLink('$base$q#$name')!;
 
     test('SNI / fingerprint / ALPN variants are separate nodes of one server', () {
-      final ns = [hy('sni=a.example'), hy('sni=b.example'), hy('sni=a.example&alpn=h3'), hy('sni=a.example')];
+      final ns = [hy('sni=a.example'), hy('sni=b.example'), hy('sni=a.example&alpn=h2'), hy('sni=a.example')];
       expect(ns.map((n) => n.key).toSet(), hasLength(3));
       expect(ns.map((n) => n.base).toSet(), hasLength(1));
+    });
+
+    // A provider's link list and its Clash export of the same hysteria2 servers: Clash adds
+    // `client-fingerprint` and `alpn: [h3]` itself and turns a link's pinSHA256 into skip-cert-verify.
+    test('hysteria2: link list and Clash export of one server are one node', () {
+      final pin = 'a' * 64;
+      final links = parseSubscription(base64.encode(utf8.encode([
+        'hysteria2://pw@hosta.example:7443/?sni=a.example#🇩🇪 HY2 Plain',
+        'hysteria2://pw@hostb.example:47003/?sni=b.example&pinSHA256=$pin#🧪 HY2 Pinned',
+        'hysteria2://pw@hostb.example:47004/?obfs=salamander&obfs-password=op&sni=b.example&pinSHA256=$pin#🧪 HY2 Salamander',
+      ].join('\n')))).$2;
+      final clash = parseSubscription('''
+proxies:
+  - name: '🇩🇪 HY2 Plain'
+    type: hysteria2
+    server: hosta.example
+    port: 7443
+    password: pw
+    sni: a.example
+    client-fingerprint: chrome
+    alpn:
+      - h3
+  - name: '🧪 HY2 Pinned'
+    type: hysteria2
+    server: hostb.example
+    port: 47003
+    password: pw
+    sni: b.example
+    skip-cert-verify: true
+    client-fingerprint: chrome
+    alpn:
+      - h3
+  - name: '🧪 HY2 Salamander'
+    type: hysteria2
+    server: hostb.example
+    port: 47004
+    password: pw
+    obfs: salamander
+    obfs-password: op
+    sni: b.example
+    skip-cert-verify: true
+    client-fingerprint: chrome
+    alpn:
+      - h3
+''').$2;
+      expect(links, hasLength(3));
+      expect(clash, hasLength(3));
+      for (var i = 0; i < 3; i++) {
+        expect(clash[i].key, links[i].key, reason: links[i].name);
+      }
+      expect((links[1].outbound['tls'] as Map)['insecure'], true);
+      expect((links[0].outbound['tls'] as Map).containsKey('insecure'), isFalse);
+      // sing-box cannot run uTLS over QUIC: no fingerprint on hysteria2 / tuic / hysteria
+      for (final n in clash) {
+        expect((n.outbound['tls'] as Map).containsKey('utls'), isFalse);
+      }
+      final tuic = parseLink('tuic://00000000-0000-0000-0000-000000000000:pw@t.example:443?sni=t.example&fp=chrome#T')!;
+      expect((tuic.outbound['tls'] as Map).containsKey('utls'), isFalse);
+      // explicit non-default ALPN is still a different variant
+      expect(hy('sni=a.example&alpn=h2').key, isNot(hy('sni=a.example').key));
+      expect(hy('sni=a.example&alpn=h3').key, hy('sni=a.example').key);
     });
 
     test('sni=off sends no SNI', () {

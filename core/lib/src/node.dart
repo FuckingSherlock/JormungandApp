@@ -123,12 +123,14 @@ String variantOf(Map<String, dynamic> ob) {
   final tr = m(ob['transport']), headers = m(tr?['headers']), obfs = m(ob['obfs']);
   final alpn = tls?['alpn'] is List ? ([...(tls!['alpn'] as List).map((e) => '$e')]..sort()).join(',') : null;
   final host = headers?['Host'] ?? headers?['host'] ?? tr?['host'];
+  // hysteria2 speaks h3 whether or not a format says so (Clash adds `alpn: [h3]` itself).
+  final defaultAlpn = ob['type'] == 'hysteria2' && alpn == 'h3';
   final v = <String, Object?>{
     'tls': tls?['enabled'] == true ? 1 : null,
     'sni': tls?['server_name'],
     'nosni': tls?['disable_sni'] == true ? 1 : null,
     'insecure': tls?['insecure'] == true ? 1 : null,
-    'alpn': alpn,
+    'alpn': defaultAlpn ? null : alpn,
     'fp': utls?['enabled'] == true ? utls!['fingerprint'] : null,
     'pbk': reality?['public_key'],
     'sid': reality?['short_id'],

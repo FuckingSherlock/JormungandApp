@@ -16,7 +16,8 @@ const discoveryAgents = ['sing-box/1.14.2', 'mihomo/1.19.28', 'ClashMeta'];
 /// subscription in full instead of getting 304 and keeping the old nodes.
 /// 2: protocol words leave names. 3: socks / http / ssh / hysteria / quic parsed, servers
 /// sing-box cannot run listed as unsupported, VLESS encryption flagged.
-const parserVersion = 3;
+/// 4: no uTLS on QUIC protocols, hysteria2 `pinSHA256` -> insecure, hysteria2 alpn h3 is the default.
+const parserVersion = 4;
 
 /// The UA chip of the subscription form → the header sent.
 String userAgentFor(String chip) => switch (chip) {
