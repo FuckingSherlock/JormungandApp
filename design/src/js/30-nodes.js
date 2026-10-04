@@ -149,12 +149,14 @@ function openGoneActions(sid, nid) {
 // not working = switched off or gone from the subscription); when it wraps, it breaks between items.
 function srcMetaHtml(s) {
   const parts = [], live = liveNodes(s).length, off = s.nodes.length - live, gone = (s.gone || []).length;
-  const total = s.nodes.length + gone, word = s.kind === 'sub' ? 'node' : 'server';
+  const total = s.nodes.length + gone, word = s.kind === 'node' ? 'server' : 'node';
   const why = [off && off + ' off', gone && gone + ' gone from the subscription'].filter(Boolean).join(', ');
-  parts.push(`<span class="fmt-tag">${s.kind === 'sub' ? s.format : 'manual'}</span>`);
+  // a local file source (kind 'file') says so, with the format it was read as on hover; no URL, no age of an update
+  parts.push(s.kind === 'file' ? `<span class="fmt-tag" title="Read as ${s.format}">local file</span>` : `<span class="fmt-tag">${s.kind === 'sub' ? s.format : 'manual'}</span>`);
   parts.push(live < total ? `<span class="${gone ? 'gone-meta' : 'dis-meta'}" title="${why}">${live}/${total} ${word}s</span>`
     : `${total} ${word}${total === 1 ? '' : 's'}`);
   if (s.kind === 'sub') parts.push(`<span title="Updated ${timeAgo(s.updatedAt)}">${shortAgo(s.updatedAt)}</span>`);
+  if (s.kind === 'file') parts.push(`<span title="Imported ${timeAgo(s.updatedAt)}">${shortAgo(s.updatedAt)}</span>`);
   return parts.map((p, i) => `<span class="meta-part">${p}${i < parts.length - 1 ? '<span class="dot">·</span>' : ''}</span>`).join('');
 }
 function shortAgo(ts) {
@@ -409,7 +411,7 @@ function openActions(title, rowsHtml) {
 function openSourceActions(sid) {
   const s = sourcesData[sid];
   const close = "closeSheet('actions');";
-  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`)
+  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : s.kind === 'file' ? 'Rename' : 'Rename group', close + `openSrcForm('${sid}')`)
     + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
     if ((s.userAgent || 'Auto') === 'Auto') rows += menuRow(ICON.refresh, 'Update with all user agents<div class="menu-sub">Asks as sing-box, mihomo and Clash again and merges what each gives</div>', close + `updateSource('${sid}',{rediscover:true})`);
@@ -491,12 +493,12 @@ function confirmDeleteSource(sid) {
   const s = sourcesData[sid];
   if (!s) return;
   const n = s.nodes.length, g = (s.gone || []).length;
-  const what = (s.kind === 'sub' ? 'The subscription and its {0} server' : 'The group and its {0} server') + (n === 1 ? '' : 's');
+  const what = (s.kind === 'sub' ? 'The subscription and its {0} server' : s.kind === 'file' ? 'The imported file and its {0} server' : 'The group and its {0} server') + (n === 1 ? '' : 's');
   const note = g ? tn(n, what + ' are removed') + tn(g, ', with {0} unavailable one' + (g === 1 ? '' : 's') + ' kept for their settings') + t('. This can’t be undone.')
     : tn(n, what + ' are removed. This can’t be undone.');
   const dead = new Set(Object.values(chainsData).filter(c => c.inId === sid || c.outId === sid).map(c => 'chain:' + c.id));
   const impact = deleteImpact(r => r.sid === sid, sid).concat(targetImpact(t => t === 'src:' + sid || t.startsWith('node:' + sid + '::') || dead.has(t)));
-  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, impact, `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));
+  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, impact, `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : s.kind === 'file' ? 'imported file' : 'group')));
 }
 
 function confirmDeleteNode(sid, nid) {

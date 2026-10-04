@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'fetch.dart';
+import 'localsource.dart';
 import 'merge.dart';
 import 'state.dart';
 
@@ -23,6 +24,8 @@ Future<Map<String, dynamic>> updateSubscription(
   DateTime? now,
   HttpClient? client,
 }) async {
+  // a local source has no URL: nothing to fetch, it changes only by importing the file again
+  if (s['kind'] == localSourceKind) throw const FormatException('A local file has nothing to update: import the file again');
   List<Map<String, dynamic>> maps(Object? l) => [for (final x in (l as List? ?? const [])) (x as Map).cast<String, dynamic>()];
   final prevNodes = maps(s['nodes']);
   final r = await fetchSubscription(
@@ -74,7 +77,7 @@ const retryAfterFailure = Duration(minutes: 30);
 /// (0 = never; at least 10 s) is the user's own period. `'auto'` (default): the provider's
 /// `profile-update-interval` (at least 1 h) if it sent one, else the global [subsEvery]
 /// (seconds, Auto mode; default 12 h); a global 0 switches all automatic updates off.
-/// Switched-off sources and server groups never update.
+/// Switched-off sources, server groups and local file sources (`kind: 'file'`) never update.
 Duration? autoUpdatePeriod(Map s, Object? subsEvery) {
   if (s['kind'] != 'sub' || s['enabled'] == false || '${s['url'] ?? ''}'.isEmpty) return null;
   final own = s['updateInterval'];

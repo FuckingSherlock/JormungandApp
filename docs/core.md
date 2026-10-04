@@ -56,6 +56,7 @@ sing-box привязан к процессу ядра (`killjob.dart`, Windows)
 | Auto при подключении (failover, возврат, Priority-сервер) | показывает то, что сообщило ядро | `auto.dart` (AutoService) |
 | Скачивание подписок, UA discovery, ETag, dedup, gone | — | `fetch.dart`, `merge.dart` |
 | Парсинг ссылок / Clash / sing-box JSON | — | `parse/` |
+| Локальный источник (импорт файла: текст → источник `kind: 'file'`) | выбор файла, id, карточка | `localsource.dart` |
 | Конфиг sing-box | — | `config.dart` |
 | Запуск, остановка, пинг | — | `runtime.dart` |
 | Системный прокси (Windows) | переключатель | `sysproxy.dart` |
@@ -117,7 +118,7 @@ JS мокапа. Без Flutter, без IO, без таймеров; время 
 (`Daemon`) — только HTTP-адаптер над ним: маршруты, JSON, заголовок `X-Jorm`, проверка Host,
 отдача мокапа; те же маршруты и тот же JSON, что описаны в «API (`jormd`)». Один метод
 `CoreService` = один маршрут: `state / saveState / status / traffic / log / events / postEvent /
-version / manualNode / share / fetchSource / parse / connect / disconnect / releaseSysProxy /
+version / manualNode / share / fetchSource / parse / addSourceFromText / connect / disconnect / releaseSysProxy /
 retry / killSwitchSettings / autoSettings / dnsAutoSetting / recheckExit / ping / speedTest /
 closeConnections`. Тела и ответы — те же карты (`Map<String, dynamic>`), что в HTTP;
 `FormatException` — сообщение для пользователя (в HTTP это 400), любая другая ошибка — сбой ядра
@@ -639,6 +640,7 @@ Global, hijack вкл / выкл, системные правила первым
 | `GET/PUT /api/state` | снимок состояния UI / статус |
 | `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
+| `POST /api/sources/import` | `{name, text}` → `{source}`: локальный источник (`kind: 'file'`, без `id` — его выдаёт владелец каталога) из текста выбранного файла (Nodes → + → Import config file). `name` — имя файла, расширение (`.json` `.yaml` `.yml` `.txt` `.conf` `.list`) отбрасывается. Формат определяется по содержимому, как у подписки (sing-box JSON, Clash YAML, список ссылок, всё это и в base64); серверы дедуплицируются и именуются как у подписки. `source`: `{kind, name, enabled, inAuto, offNodes, disabledNodes, nodes, gone, count, format, updatedAt}`. Ничего не распознано или файл > 16 МБ — 400 `{error}` (`No servers found in the file`), ядро ничего не хранит: источник кладёт в каталог и сохраняет вызывающий (`PUT /api/state`). Источник не обновляется ни таймером, ни `fetchSource` (тот отвечает 400). См. connect-model.md → «Локальный источник» |
 | `POST /api/connect` | `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?, dnsAuto?}` — kill switch, см. «Kill switch»; `dnsAuto` — Settings → DNS → Switch automatically (по умолчанию true), см. «Правила в конфиге» |
 | `POST /api/dns/auto` | `{auto: bool}` — Switch automatically на ходу, без переподключения (выкл — первый сервер сразу) → status |
 | `POST /api/killswitch` | `{killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — сменить на ходу, без переподключения → status |

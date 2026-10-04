@@ -110,6 +110,7 @@ class Daemon {
         'POST /api/node' => Future(() => {'node': service.manualNode(body).toJson()}),
         'POST /api/share' => Future.value({'link': service.share(body)}),
         'POST /api/sources/fetch' => service.fetchSource(body),
+        'POST /api/sources/import' => Future(() => service.addSourceFromText(body)),
         'POST /api/parse' => Future.value(service.parse(body)),
         'POST /api/connect' => service.connect(body),
         'POST /api/disconnect' => service.disconnect(),

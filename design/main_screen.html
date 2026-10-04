@@ -2182,10 +2182,11 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>
         <div class="menu-label">Scan QR code</div>
       </div>
-      <div class="menu-row" onclick="closeSheet('addmenu');toast('File picker is not available in the mockup')">
+      <div class="menu-row" id="importFileRow" onclick="closeSheet('addmenu');pickConfigFile()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <div class="menu-label">Import config file<div class="menu-sub">sing-box JSON, Clash YAML</div></div>
+        <div class="menu-label">Import config file<div class="menu-sub">sing-box JSON, Clash YAML, a list of links</div></div>
       </div>
+      <input type="file" id="configFile" accept=".json,.yaml,.yml,.txt,.conf,.list,application/json,text/*" style="display:none" onchange="readConfigFile(this)">
     </div>
   </div>
 
@@ -3943,6 +3944,25 @@ Object.assign(I18N, { ru: {
   "This version has to be downloaded by hand": "Эту версию нужно скачать вручную",
   "Update checks are not available in this build yet": "Проверка обновлений в этой сборке пока недоступна",
   "Something went wrong": "Что-то пошло не так",
+
+  // ── Import config file: a local source (kind 'file') ──
+  "sing-box JSON, Clash YAML, a list of links": "sing-box JSON, Clash YAML, список ссылок",
+  "local file": "локальный файл",
+  "Local file": "Локальный файл",
+  "Read as {0}": "Прочитан как {0}",
+  "Imported {0}": "Импортировано {0}",
+  "Rename": "Переименовать",
+  "Imported {#0} server from {1}": "Импортирован {0} узел из {1}",
+  "Imported {#0} servers from {1}": ["Импортирован {0} узел из {1}", "Импортировано {0} узла из {1}", "Импортировано {0} узлов из {1}"],
+  "Could not import {0}: {1}": "Не удалось импортировать {0}: {1}",
+  "No servers found in the file": "В файле не найдено узлов",
+  "The file is over 16 MB": "Файл больше 16 МБ",
+  "A local file has nothing to update: import the file again": "У локального файла нечего обновлять: импортируйте файл заново",
+  "Delete imported file": "Удалить импортированный файл",
+  "The imported file and its {#0} server are removed. This can’t be undone.": "Импортированный файл и его {0} узел удаляются. Это нельзя отменить.",
+  "The imported file and its {#0} servers are removed. This can’t be undone.": ["Импортированный файл и его {0} узел удаляются. Это нельзя отменить.", "Импортированный файл и его {0} узла удаляются. Это нельзя отменить.", "Импортированный файл и его {0} узлов удаляются. Это нельзя отменить."],
+  "The imported file and its {#0} server are removed": "Импортированный файл и его {0} узел удаляются",
+  "The imported file and its {#0} servers are removed": ["Импортированный файл и его {0} узел удаляются", "Импортированный файл и его {0} узла удаляются", "Импортированный файл и его {0} узлов удаляются"],
 } });
 /* ══════════════════════ DATA MODEL ══════════════════════ */
 
@@ -4144,6 +4164,18 @@ let backend = {
     if (f.edit) return Promise.resolve([Object.assign({}, got[0], { id: f.edit.id })]);
     return Promise.resolve(got.map(p => Object.assign({ id: mockNodeId(p) }, p)));
   },
+  // A picked config file (Nodes → + → Import config file; core: localsource.dart): sing-box
+  // JSON, Clash YAML or a list of links (plain / base64) → a new local source (kind 'file'),
+  // without an id. `name` is the file name, its extension goes. Rejects with a message when
+  // nothing is recognised.
+  addSourceFromText(name, text) {
+    const { format, nodes } = mockReadConfig(text);
+    if (!nodes.length) return Promise.reject(new Error('No servers found in the file'));
+    return wait(250).then(() => ({
+      kind: 'file', name: name.replace(/\.(json|ya?ml|txt|conf|list)$/i, '').trim() || 'Local file', enabled: true, inAuto: true,
+      offNodes: [], disabledNodes: [], gone: [], nodes, count: nodes.length, format, updatedAt: Date.now(),
+    }));
+  },
   // Latency of each node; onResult(n, ms) as each lands (ms -1 = timeout).
   ping(nodes, onResult) {
     return Promise.all(nodes.map(n => wait(300 + Math.random() * 1400).then(() => onResult(n, mockPing(n)))));
@@ -4307,6 +4339,41 @@ let backend = {
 
 function mockFetchFails(s) {
   if (/fail/i.test(s.url || '')) throw new Error('Connection timed out (15 s)');
+}
+// The mock's reading of a picked config file, as far as the page needs it (the core's parsers
+// are in core/lib/src/parse): sing-box JSON (server outbounds), Clash YAML (proxies: items with
+// name / type / server / port), else a list of links, plain or base64. One server once.
+const MOCK_FILE_PROTOS = { vless: 'vless', vmess: 'vmess', trojan: 'trojan', shadowsocks: 'ss', ss: 'ss', hysteria2: 'hy2', hy2: 'hy2',
+  hysteria: 'hy', tuic: 'tuic', anytls: 'anytls', socks: 'socks', socks5: 'socks', http: 'http', ssh: 'ssh' };
+function mockReadConfig(text, depth) {
+  const t = (text || '').trim(), found = [];
+  const add = (name, type, server, port) => {
+    const protocol = MOCK_FILE_PROTOS[String(type || '').toLowerCase()];
+    if (protocol && server) found.push(Object.assign({ protocol, address: String(server), port: String(port || 443), secret: '' },
+      splitFlagLite(name || server + ':' + (port || 443))));
+  };
+  let format = null;
+  if (t.startsWith('{')) {
+    try {
+      const j = JSON.parse(t);
+      if (Array.isArray(j.outbounds)) { format = 'sing-box'; j.outbounds.forEach(o => { if (!o.detour) add(o.tag, o.type, o.server, o.server_port); }); }
+    } catch (e) {}
+  } else if (/^proxies:/m.test(t)) {
+    format = 'clash';
+    const field = (b, k) => { const m = b.match(new RegExp('(?:^|[\\s{,])' + k + ':\\s*["\']?([^,}\\n"\']+)', 'i')); return m && m[1].trim(); };
+    t.split(/^\s*-\s+/m).slice(1).forEach(b => add(field(b, 'name'), field(b, 'type'), field(b, 'server'), field(b, 'port')));
+  } else {
+    splitLinks(t).map(parseShareLinkLite).filter(Boolean).forEach(p => found.push(Object.assign({}, p, splitFlagLite(p.name || p.address + ':' + p.port))));
+    if (found.length) format = 'links';
+    else if (!depth && t && !/\s/.test(t)) {
+      const inner = b64Text(t);
+      const r = inner ? mockReadConfig(inner, 1) : null;
+      if (r && r.nodes.length) return { format: r.format === 'links' ? 'base64' : r.format, nodes: r.nodes };
+    }
+  }
+  const seen = new Set();
+  const nodes = found.map(p => Object.assign({ id: mockNodeId(p) }, p)).filter(n => !seen.has(n.id) && seen.add(n.id));
+  return { format, nodes };
 }
 const mockClosed = new Map();   // connection id → when it was closed (hidden for 15 s)
 function mockNodeId(p) {
@@ -5068,7 +5135,7 @@ function updateMainConnectCard() {
     : empty ? (simpleMode() ? 'No servers yet' : 'No profiles yet') : '—';
   // the kind, short and never translated (the label has data-notr)
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'chain' : profilesData[id] ? 'profile'
-    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'sub' : 'set') : simpleMode() ? 'simple' : 'profiles';
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'sub' : sourcesData[id].kind === 'file' ? 'file' : 'set') : simpleMode() ? 'simple' : 'profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
@@ -5241,12 +5308,14 @@ function openGoneActions(sid, nid) {
 // not working = switched off or gone from the subscription); when it wraps, it breaks between items.
 function srcMetaHtml(s) {
   const parts = [], live = liveNodes(s).length, off = s.nodes.length - live, gone = (s.gone || []).length;
-  const total = s.nodes.length + gone, word = s.kind === 'sub' ? 'node' : 'server';
+  const total = s.nodes.length + gone, word = s.kind === 'node' ? 'server' : 'node';
   const why = [off && off + ' off', gone && gone + ' gone from the subscription'].filter(Boolean).join(', ');
-  parts.push(`<span class="fmt-tag">${s.kind === 'sub' ? s.format : 'manual'}</span>`);
+  // a local file source (kind 'file') says so, with the format it was read as on hover; no URL, no age of an update
+  parts.push(s.kind === 'file' ? `<span class="fmt-tag" title="Read as ${s.format}">local file</span>` : `<span class="fmt-tag">${s.kind === 'sub' ? s.format : 'manual'}</span>`);
   parts.push(live < total ? `<span class="${gone ? 'gone-meta' : 'dis-meta'}" title="${why}">${live}/${total} ${word}s</span>`
     : `${total} ${word}${total === 1 ? '' : 's'}`);
   if (s.kind === 'sub') parts.push(`<span title="Updated ${timeAgo(s.updatedAt)}">${shortAgo(s.updatedAt)}</span>`);
+  if (s.kind === 'file') parts.push(`<span title="Imported ${timeAgo(s.updatedAt)}">${shortAgo(s.updatedAt)}</span>`);
   return parts.map((p, i) => `<span class="meta-part">${p}${i < parts.length - 1 ? '<span class="dot">·</span>' : ''}</span>`).join('');
 }
 function shortAgo(ts) {
@@ -5501,7 +5570,7 @@ function openActions(title, rowsHtml) {
 function openSourceActions(sid) {
   const s = sourcesData[sid];
   const close = "closeSheet('actions');";
-  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : 'Rename group', close + `openSrcForm('${sid}')`)
+  let rows = menuRow(ICON.edit, s.kind === 'sub' ? 'Edit subscription' : s.kind === 'file' ? 'Rename' : 'Rename group', close + `openSrcForm('${sid}')`)
     + menuRow(ICON.bolt, 'Route settings<div class="menu-sub">Servers it uses as a route entry, Fastest / Priority, in Auto</div>', close + `openSourceEntry('${sid}')`);
   if (s.kind === 'sub') {
     if ((s.userAgent || 'Auto') === 'Auto') rows += menuRow(ICON.refresh, 'Update with all user agents<div class="menu-sub">Asks as sing-box, mihomo and Clash again and merges what each gives</div>', close + `updateSource('${sid}',{rediscover:true})`);
@@ -5583,12 +5652,12 @@ function confirmDeleteSource(sid) {
   const s = sourcesData[sid];
   if (!s) return;
   const n = s.nodes.length, g = (s.gone || []).length;
-  const what = (s.kind === 'sub' ? 'The subscription and its {0} server' : 'The group and its {0} server') + (n === 1 ? '' : 's');
+  const what = (s.kind === 'sub' ? 'The subscription and its {0} server' : s.kind === 'file' ? 'The imported file and its {0} server' : 'The group and its {0} server') + (n === 1 ? '' : 's');
   const note = g ? tn(n, what + ' are removed') + tn(g, ', with {0} unavailable one' + (g === 1 ? '' : 's') + ' kept for their settings') + t('. This can’t be undone.')
     : tn(n, what + ' are removed. This can’t be undone.');
   const dead = new Set(Object.values(chainsData).filter(c => c.inId === sid || c.outId === sid).map(c => 'chain:' + c.id));
   const impact = deleteImpact(r => r.sid === sid, sid).concat(targetImpact(t => t === 'src:' + sid || t.startsWith('node:' + sid + '::') || dead.has(t)));
-  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, impact, `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : 'group')));
+  openActions('Delete ' + s.name + '?', confirmDeleteHtml(note, impact, `deleteSource('${sid}')`, 'Delete ' + (s.kind === 'sub' ? 'subscription' : s.kind === 'file' ? 'imported file' : 'group')));
 }
 
 function confirmDeleteNode(sid, nid) {
@@ -5862,8 +5931,8 @@ function toggleSrcAdvanced(force) {
 function openSrcForm(id, prefillUrl) {
   editingSourceId = id || null;
   const s = id ? sourcesData[id] : mkSub('draft', '', 0);
-  const isGroup = s.kind === 'node';
-  document.getElementById('sfTitle').textContent = !id ? 'Add subscription' : isGroup ? 'Rename group' : 'Edit subscription';
+  const isGroup = s.kind !== 'sub';   // a manual group or a local file: only the name is edited
+  document.getElementById('sfTitle').textContent = !id ? 'Add subscription' : s.kind === 'file' ? 'Rename' : isGroup ? 'Rename group' : 'Edit subscription';
   document.getElementById('sfSaveBtn').textContent = id ? 'Save' : 'Add';
   document.getElementById('sfDeleteBtn').style.display = id ? '' : 'none';
   document.getElementById('sf-sub-only-top').style.display = isGroup ? 'none' : '';
@@ -5964,6 +6033,34 @@ function pasteFromClipboard() {
   // Mockup: pretend the clipboard held a subscription URL.
   openSrcForm(null, 'https://sub.example.net/api/sub/LvRxk-PCg04NKVzp');
   toast('Subscription URL found in clipboard');
+}
+
+/* ── Import config file (Nodes → + → Import config file) ──
+   A file with sing-box JSON, Clash YAML or a list of links becomes a local source (kind 'file',
+   docs/connect-model.md): no URL, no Update, the servers as read from the file; its name is the
+   file name without the extension and is edited like any source's. Importing the file again is
+   how it changes (a new source; the old one is deleted by hand). */
+
+function pickConfigFile() { document.getElementById('configFile').click(); }
+
+const CONFIG_FILE_MAX = 16 * 1048576;   // the core's limit for a subscription / file
+function readConfigFile(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  const fail = e => toast('Could not import ' + f.name + ': ' + e.message);
+  if (f.size > CONFIG_FILE_MAX) return fail(new Error('The file is over 16 MB'));
+  // the backend reads the text (the core: localsource.dart) and gives the source, without an id
+  f.text().then(text => backend.addSourceFromText(f.name, text)).then(src => {
+    const id = 'src' + (sourceSeq++);
+    sourcesData[id] = Object.assign({}, src, { id });
+    sourceOrder.push(id);
+    sourceAdded(id);
+    expandState[id] = true;
+    renderAll();
+    const n = src.nodes.length;
+    toast('Imported ' + n + ' server' + (n === 1 ? '' : 's') + ' from ' + src.name);
+  }, fail);
 }
 
 /* ── Manual server form ── */
@@ -10042,7 +10139,7 @@ function renderCreateProfileSources() {
     const open = cpOpen.has(id), live = liveNodes(s);
     const alive = live.filter(isAlive).length;
     const picked = state === 'all' ? live.length : live.filter(n => cpNodes.has(id + '::' + n.id)).length;
-    const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
+    const meta = [s.kind === 'sub' ? 'subscription' : s.kind === 'file' ? 'local file' : 'manual',
                   state === 'some' ? `${picked} of ${live.length} nodes` : `${live.length} nodes`, `${alive} alive`]
       .concat((s.gone || []).length ? [`<span class="gone-meta">${s.gone.length} unavailable</span>`] : []).join('<span class="dot">·</span>');
     const rows = open ? (cpPickMode === 'priority' ? sortedNodes(live) : byPing(live)).map(n => {
@@ -12001,6 +12098,8 @@ const liveBackend = {
       outbound: same ? f.edit.outbound : undefined, unsupported: same ? f.edit.unsupported : undefined,
     }).then(r => [r.node]);
   },
+  // A picked config file → a new local source without an id (core: localsource.dart); a file with no servers is a 400.
+  addSourceFromText(name, text) { return api('/api/sources/import', { name, text }).then(r => r.source); },
   speedTest(n, onProgress, signal) {
     if (!n.outbound || n.unsupported) return Promise.reject(new Error('This server cannot be tested (no sing-box outbound)'));
     return ndjson('/api/speedtest', { node: { key: n.id, outbound: n.outbound } }, onProgress, signal);

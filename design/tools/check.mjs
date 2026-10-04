@@ -240,9 +240,17 @@ const SHOTS = {
   'dock-empty': async p => { await p.evaluate(() => { liveApply(null); connected = false; renderAll(); renderConnState(); updateMainConnectCard(); }); await settle(p); return { clip: await clipOf(p, '.dock', 60) }; },
   'nodeform-many': async p => { await tab(p, 'nodes'); await p.evaluate(links => { openNodeForm(); document.getElementById('nf-link').value = links.join('\n'); parseNodeLink(); }, SAMPLE_LINKS); await settle(p); },
   'nodeform-edit': async p => { await tab(p, 'nodes'); await p.evaluate(() => { const g = manualGroups()[0]; openNodeForm(g, sourcesData[g].nodes[0].id); }); await settle(p); },
+  // Nodes → + → Import config file: a Clash file picked, its local source (no refresh / URL bits) at the end of the list
+  'import-file': async p => {
+    await tab(p, 'nodes');
+    await p.setInputFiles('#configFile', { name: 'office-vpn.yaml', mimeType: 'text/yaml', buffer: Buffer.from(IMPORT_YAML) });
+    await p.waitForTimeout(700);
+    await p.evaluate(() => { document.querySelector('#view-nodes .scroll').scrollTop = 99999; });
+    await settle(p);
+  },
 };
 // ru-<preset>: the same preset with the language set to Russian (docs/i18n.md); `all` skips them.
-for (const n of ['home', 'nodes', 'route', 'settings', 'rules', 'rule-form', 'logs', 'profiles', 'settings-auto', 'settings-dns', 'dock', 'connections', 'help', 'update-available']) if (SHOTS[n]) SHOTS['ru-' + n] = SHOTS[n];
+for (const n of ['home', 'nodes', 'route', 'settings', 'rules', 'rule-form', 'logs', 'profiles', 'settings-auto', 'settings-dns', 'dock', 'connections', 'help', 'update-available', 'import-file']) if (SHOTS[n]) SHOTS['ru-' + n] = SHOTS[n];
 // Links the manual server form must read without a core: vmess base64, legacy ss, IPv6, anytls.
 const SAMPLE_LINKS = [
   'vmess://' + Buffer.from(JSON.stringify({ v: '2', ps: '🇳🇱 Amsterdam VM', add: 'nl1.example.net', port: '443', id: '11111111-2222-3333-4444-555555555555', aid: '0', net: 'ws', tls: 'tls' })).toString('base64'),
@@ -250,6 +258,19 @@ const SAMPLE_LINKS = [
   'trojan://secret@[2001:db8::1]:443?sni=v6.example#%F0%9F%87%A9%F0%9F%87%AA%20Berlin%20v6',
   'anytls://pw@any.example:8443?sni=any.example#AnyTLS%201',
 ];
+// Config files the Import config file row must read (Nodes → + ): Clash YAML, sing-box JSON, a link list.
+const IMPORT_YAML = `proxies:
+  - {name: "🇩🇪 Berlin 01", type: vless, server: de1.example.net, port: 443, uuid: 11111111-2222-3333-4444-555555555555}
+  - {name: "🇳🇱 Amsterdam 01", type: trojan, server: nl1.example.net, port: 443, password: pw}
+  - {name: "🇫🇮 Helsinki 01", type: ss, server: fi1.example.net, port: 8388, cipher: aes-128-gcm, password: pw}
+proxy-groups: []
+`;
+const IMPORT_JSON = JSON.stringify({ outbounds: [
+  { type: 'selector', tag: 'select', outbounds: ['a'] },
+  { type: 'vless', tag: '🇸🇪 Stockholm 01', server: 'se1.example.net', server_port: 443, uuid: '11111111-2222-3333-4444-555555555555' },
+  { type: 'shadowsocks', tag: '🇵🇱 Warsaw 01', server: 'pl1.example.net', server_port: 8388, method: 'aes-128-gcm', password: 'pw' },
+  { type: 'direct', tag: 'direct' },
+] });
 
 async function clipOf(page, sel, extraTop = 0) {
   const r = await page.locator(sel).boundingBox();
@@ -484,6 +505,85 @@ async function runChecks() {
         core: protoLabel({ protocol: 'vless', outbound: { tls: { reality: { enabled: true } } } }) === 'reality' && protoLabel({ protocol: 'vless', outbound: { tls: {} } }) === 'vless' };
     });
     expect(Object.values(r).every(Boolean), JSON.stringify(r));
+    await p.close();
+  });
+
+  for (const lang of ['en', 'ru']) await check('nodes: Import config file — Clash / sing-box / links become local sources (no URL, no Update), junk is refused, rename, delete, backup; 320 px / 120%' + (lang === 'ru' ? ' [ru]' : ''), async () => {
+    const p = await openPage(browser, { width: 320, lang });
+    await p.evaluate(() => applyScale(UI_SCALE_MAX));
+    await tab(p, 'nodes');
+    const said = () => p.textContent('#toast'), count = () => p.evaluate(() => sourceOrder.length);
+    const n0 = await count();
+    const pick = (name, text) => p.setInputFiles('#configFile', { name, mimeType: 'text/plain', buffer: Buffer.from(text) });
+    const last = () => p.evaluate(() => { const s = sourcesData[sourceOrder[sourceOrder.length - 1]]; return { id: s.id, kind: s.kind, name: s.name, url: s.url, format: s.format, n: s.nodes.length, count: s.count, enabled: s.enabled }; });
+    // the menu row opens the file chooser (it was a stub toast)
+    await p.evaluate(() => openNodesAdd()); await settle(p);
+    expect(await p.isVisible('#importFileRow'), 'no Import config file row');
+    const [chooser] = await Promise.all([p.waitForEvent('filechooser'), p.click('#importFileRow')]);
+    expect(!chooser.isMultiple(), 'the picker takes one file');
+    await chooser.setFiles({ name: 'office-vpn.yaml', mimeType: 'text/yaml', buffer: Buffer.from(IMPORT_YAML) });
+    await p.waitForTimeout(600);
+    let s = await last();
+    expect(await count() === n0 + 1 && s.kind === 'file' && s.name === 'office-vpn' && s.url === undefined && s.format === 'clash' && s.n === 3 && s.count === 3 && s.enabled, 'clash: ' + JSON.stringify(s));
+    expect(await p.evaluate(() => sourceOrder.includes(sourcesData[sourceOrder[sourceOrder.length - 1]].id) && catalogOrder.simple.includes(sourceOrder[sourceOrder.length - 1])), 'not in the Simple tab');
+    expect(/office-vpn/.test(await said()) && (lang === 'ru' ? /Импортировано 3 узла/ : /Imported 3 servers from office-vpn/).test(await said()), 'toast: ' + await said());
+    // the card: marked as a local file; no Update button, no usage line, no URL anywhere
+    const card = `.src-card[data-id=${s.id}]`;
+    const cardHtml = await p.$eval(card, el => ({ tag: el.querySelector('.fmt-tag').textContent, update: !!el.querySelector('button[title=Update]'), usage: !!el.querySelector('.src-usage'), err: !!el.querySelector('.src-error'), meta: el.querySelector('.src-meta').textContent }));
+    expect(cardHtml.tag === (lang === 'ru' ? 'локальный файл' : 'local file') && !cardHtml.update && !cardHtml.usage && !cardHtml.err, 'card: ' + JSON.stringify(cardHtml));
+    expect(!await p.evaluate(sid => { const s = sourcesData[sid]; return updateSource(sid), s.updating || ('url' in s); }, s.id), 'Update touched it');
+    // the meta line wraps between items on a 320 px screen at 120 %, nothing sticks out
+    const sticks = await p.evaluate(() => {
+      const bad = [], sc = document.querySelector('#view-nodes .scroll');
+      if (sc.scrollWidth > sc.clientWidth + 1) bad.push('scroll ' + sc.scrollWidth + '>' + sc.clientWidth);
+      document.querySelectorAll('.src-meta.wrap').forEach(el => { const r = el.getBoundingClientRect(); if (r.width && [...el.children].some(c => c.getBoundingClientRect().right > r.right + 1)) bad.push('meta: ' + el.textContent); });
+      return bad;
+    });
+    expect(!sticks.length, sticks.join(' | '));
+
+    // sing-box JSON: server outbounds only; a list of links, plain and base64 (a server twice is one)
+    await pick('sb.json', IMPORT_JSON); await p.waitForTimeout(500);
+    s = await last();
+    expect(s.kind === 'file' && s.name === 'sb' && s.format === 'sing-box' && s.n === 2, 'sing-box: ' + JSON.stringify(s));
+    await pick('links.txt', SAMPLE_LINKS.concat(SAMPLE_LINKS[0]).join('\n')); await p.waitForTimeout(500);
+    s = await last();
+    expect(s.format === 'links' && s.n === SAMPLE_LINKS.length, 'links: ' + JSON.stringify(s));
+    await pick('links-b64', Buffer.from(SAMPLE_LINKS.join('\n')).toString('base64')); await p.waitForTimeout(500);
+    s = await last();
+    expect(s.format === 'base64' && s.n === SAMPLE_LINKS.length && s.name === 'links-b64', 'base64: ' + JSON.stringify(s));
+    // junk: refused with the reason, nothing added
+    const n1 = await count();
+    await pick('junk.txt', 'this is not a config'); await p.waitForTimeout(400);
+    expect(await count() === n1 && (lang === 'ru' ? /Не удалось импортировать junk\.txt: В файле не найдено узлов/ : /Could not import junk\.txt: No servers found in the file/).test(await said()), 'junk: ' + await said());
+
+    // its menu: rename (only the name), route settings, delete; no URL / update / QR rows
+    const sid = (await p.evaluate(() => sourceOrder.find(id => sourcesData[id].name === 'sb')));
+    await p.evaluate(sid => openSourceActions(sid), sid); await settle(p);
+    const rows = await p.$$eval('#actions-body .menu-row', r => r.map(x => x.textContent.trim()));
+    expect(rows.length === 3 && /^(Rename|Переименовать)/.test(rows[0]) && !rows.some(t => /^(Copy URL|Show QR|Update with)/.test(t)), 'menu rows: ' + rows.join(' | '));
+    await p.evaluate(sid => { closeSheet('actions'); openSrcForm(sid); }, sid); await settle(p);
+    expect(!await p.isVisible('#sf-url') && await p.inputValue('#sf-name') === 'sb', 'rename form shows the URL / the name is wrong');
+    await p.fill('#sf-name', 'Stockholm file');
+    await p.click('#sfSaveBtn'); await settle(p);
+    s = await p.evaluate(sid => ({ name: sourcesData[sid].name, n: sourcesData[sid].nodes.length, kind: sourcesData[sid].kind, url: sourcesData[sid].url }), sid);
+    expect(s.name === 'Stockholm file' && s.n === 2 && s.kind === 'file' && s.url === undefined, 'rename: ' + JSON.stringify(s));
+
+    // backup: the snapshot carries it, restore brings it back
+    const back = await p.evaluate(async sid => {
+      const snap = JSON.parse(JSON.stringify(await backend.exportState()));
+      const got = snap.sourcesData[sid];
+      await backend.importState(snap);
+      return [got && got.kind, got && got.nodes.length, sourcesData[sid] && sourcesData[sid].kind, sourcesData[sid] && sourcesData[sid].name, sourceOrder.includes(sid)];
+    }, sid);
+    expect(back.join() === 'file,2,file,Stockholm file,true', 'backup: ' + back.join());
+
+    // delete impact as for any source: the confirmation says what goes
+    await p.evaluate(sid => confirmDeleteSource(sid), sid); await settle(p);
+    const del = await p.textContent('#actions-body');
+    expect((lang === 'ru' ? /Импортированный файл и его 2 узла удаляются/ : /The imported file and its 2 servers are removed/).test(del), 'delete text: ' + del.slice(0, 120));
+    await p.evaluate(sid => { closeSheet('actions'); deleteSource(sid); }, sid); await settle(p);
+    expect(await p.evaluate(sid => !sourcesData[sid] && !sourceOrder.includes(sid) && !catalogOrder.simple.includes(sid), sid), 'not deleted');
+    expect(!p.errors.length, p.errors.join(' | '));
     await p.close();
   });
 

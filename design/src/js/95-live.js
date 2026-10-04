@@ -286,6 +286,8 @@ const liveBackend = {
       outbound: same ? f.edit.outbound : undefined, unsupported: same ? f.edit.unsupported : undefined,
     }).then(r => [r.node]);
   },
+  // A picked config file → a new local source without an id (core: localsource.dart); a file with no servers is a 400.
+  addSourceFromText(name, text) { return api('/api/sources/import', { name, text }).then(r => r.source); },
   speedTest(n, onProgress, signal) {
     if (!n.outbound || n.unsupported) return Promise.reject(new Error('This server cannot be tested (no sing-box outbound)'));
     return ndjson('/api/speedtest', { node: { key: n.id, outbound: n.outbound } }, onProgress, signal);

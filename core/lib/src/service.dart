@@ -15,6 +15,7 @@ import 'elevation.dart';
 import 'eventbook.dart';
 import 'exitip.dart';
 import 'fallback.dart';
+import 'localsource.dart';
 import 'logbook.dart';
 import 'manual.dart' as manual;
 import 'node.dart';
@@ -798,6 +799,10 @@ class CoreService implements CoreApi {
   @override
   Map<String, dynamic> parse(Map<String, dynamic> body) =>
       {'nodes': [for (final n in parseLinks('${body['text'] ?? ''}')) n.toJson()]};
+
+  @override
+  Map<String, dynamic> addSourceFromText(Map<String, dynamic> body) =>
+      {'source': localSourceFromText('${body['name'] ?? ''}', '${body['text'] ?? ''}')};
 
   /// The one way sing-box is started, by a connect and by a restart after a crash: the
   /// rule lists on disk first (ones via VPN that are missing wait for the tunnel — the

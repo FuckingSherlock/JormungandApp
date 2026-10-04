@@ -71,6 +71,11 @@ abstract interface class CoreApi {
   /// `{text}` → `{nodes}` parsed from links.
   Map<String, dynamic> parse(Map<String, dynamic> body);
 
+  /// `{name, text}` → `{source}`: a local source (`kind: 'file'`, no `id` — the catalog owner
+  /// gives one) from the text of a picked file (localsource.dart). [name] is the file name,
+  /// its extension is dropped. Nothing recognised — a [FormatException] with the reason.
+  Map<String, dynamic> addSourceFromText(Map<String, dynamic> body);
+
   /// `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?, dnsAuto?}`
   /// → the status. Throws when it did not connect (the status holds `error`).
   Future<Map<String, dynamic>> connect(Map<String, dynamic> body);

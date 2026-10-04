@@ -55,6 +55,18 @@ let backend = {
     if (f.edit) return Promise.resolve([Object.assign({}, got[0], { id: f.edit.id })]);
     return Promise.resolve(got.map(p => Object.assign({ id: mockNodeId(p) }, p)));
   },
+  // A picked config file (Nodes → + → Import config file; core: localsource.dart): sing-box
+  // JSON, Clash YAML or a list of links (plain / base64) → a new local source (kind 'file'),
+  // without an id. `name` is the file name, its extension goes. Rejects with a message when
+  // nothing is recognised.
+  addSourceFromText(name, text) {
+    const { format, nodes } = mockReadConfig(text);
+    if (!nodes.length) return Promise.reject(new Error('No servers found in the file'));
+    return wait(250).then(() => ({
+      kind: 'file', name: name.replace(/\.(json|ya?ml|txt|conf|list)$/i, '').trim() || 'Local file', enabled: true, inAuto: true,
+      offNodes: [], disabledNodes: [], gone: [], nodes, count: nodes.length, format, updatedAt: Date.now(),
+    }));
+  },
   // Latency of each node; onResult(n, ms) as each lands (ms -1 = timeout).
   ping(nodes, onResult) {
     return Promise.all(nodes.map(n => wait(300 + Math.random() * 1400).then(() => onResult(n, mockPing(n)))));
@@ -218,6 +230,41 @@ let backend = {
 
 function mockFetchFails(s) {
   if (/fail/i.test(s.url || '')) throw new Error('Connection timed out (15 s)');
+}
+// The mock's reading of a picked config file, as far as the page needs it (the core's parsers
+// are in core/lib/src/parse): sing-box JSON (server outbounds), Clash YAML (proxies: items with
+// name / type / server / port), else a list of links, plain or base64. One server once.
+const MOCK_FILE_PROTOS = { vless: 'vless', vmess: 'vmess', trojan: 'trojan', shadowsocks: 'ss', ss: 'ss', hysteria2: 'hy2', hy2: 'hy2',
+  hysteria: 'hy', tuic: 'tuic', anytls: 'anytls', socks: 'socks', socks5: 'socks', http: 'http', ssh: 'ssh' };
+function mockReadConfig(text, depth) {
+  const t = (text || '').trim(), found = [];
+  const add = (name, type, server, port) => {
+    const protocol = MOCK_FILE_PROTOS[String(type || '').toLowerCase()];
+    if (protocol && server) found.push(Object.assign({ protocol, address: String(server), port: String(port || 443), secret: '' },
+      splitFlagLite(name || server + ':' + (port || 443))));
+  };
+  let format = null;
+  if (t.startsWith('{')) {
+    try {
+      const j = JSON.parse(t);
+      if (Array.isArray(j.outbounds)) { format = 'sing-box'; j.outbounds.forEach(o => { if (!o.detour) add(o.tag, o.type, o.server, o.server_port); }); }
+    } catch (e) {}
+  } else if (/^proxies:/m.test(t)) {
+    format = 'clash';
+    const field = (b, k) => { const m = b.match(new RegExp('(?:^|[\\s{,])' + k + ':\\s*["\']?([^,}\\n"\']+)', 'i')); return m && m[1].trim(); };
+    t.split(/^\s*-\s+/m).slice(1).forEach(b => add(field(b, 'name'), field(b, 'type'), field(b, 'server'), field(b, 'port')));
+  } else {
+    splitLinks(t).map(parseShareLinkLite).filter(Boolean).forEach(p => found.push(Object.assign({}, p, splitFlagLite(p.name || p.address + ':' + p.port))));
+    if (found.length) format = 'links';
+    else if (!depth && t && !/\s/.test(t)) {
+      const inner = b64Text(t);
+      const r = inner ? mockReadConfig(inner, 1) : null;
+      if (r && r.nodes.length) return { format: r.format === 'links' ? 'base64' : r.format, nodes: r.nodes };
+    }
+  }
+  const seen = new Set();
+  const nodes = found.map(p => Object.assign({ id: mockNodeId(p) }, p)).filter(n => !seen.has(n.id) && seen.add(n.id));
+  return { format, nodes };
 }
 const mockClosed = new Map();   // connection id → when it was closed (hidden for 15 s)
 function mockNodeId(p) {

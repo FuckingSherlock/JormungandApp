@@ -20,8 +20,8 @@ function toggleSrcAdvanced(force) {
 function openSrcForm(id, prefillUrl) {
   editingSourceId = id || null;
   const s = id ? sourcesData[id] : mkSub('draft', '', 0);
-  const isGroup = s.kind === 'node';
-  document.getElementById('sfTitle').textContent = !id ? 'Add subscription' : isGroup ? 'Rename group' : 'Edit subscription';
+  const isGroup = s.kind !== 'sub';   // a manual group or a local file: only the name is edited
+  document.getElementById('sfTitle').textContent = !id ? 'Add subscription' : s.kind === 'file' ? 'Rename' : isGroup ? 'Rename group' : 'Edit subscription';
   document.getElementById('sfSaveBtn').textContent = id ? 'Save' : 'Add';
   document.getElementById('sfDeleteBtn').style.display = id ? '' : 'none';
   document.getElementById('sf-sub-only-top').style.display = isGroup ? 'none' : '';
@@ -122,6 +122,34 @@ function pasteFromClipboard() {
   // Mockup: pretend the clipboard held a subscription URL.
   openSrcForm(null, 'https://sub.example.net/api/sub/LvRxk-PCg04NKVzp');
   toast('Subscription URL found in clipboard');
+}
+
+/* ── Import config file (Nodes → + → Import config file) ──
+   A file with sing-box JSON, Clash YAML or a list of links becomes a local source (kind 'file',
+   docs/connect-model.md): no URL, no Update, the servers as read from the file; its name is the
+   file name without the extension and is edited like any source's. Importing the file again is
+   how it changes (a new source; the old one is deleted by hand). */
+
+function pickConfigFile() { document.getElementById('configFile').click(); }
+
+const CONFIG_FILE_MAX = 16 * 1048576;   // the core's limit for a subscription / file
+function readConfigFile(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  const fail = e => toast('Could not import ' + f.name + ': ' + e.message);
+  if (f.size > CONFIG_FILE_MAX) return fail(new Error('The file is over 16 MB'));
+  // the backend reads the text (the core: localsource.dart) and gives the source, without an id
+  f.text().then(text => backend.addSourceFromText(f.name, text)).then(src => {
+    const id = 'src' + (sourceSeq++);
+    sourcesData[id] = Object.assign({}, src, { id });
+    sourceOrder.push(id);
+    sourceAdded(id);
+    expandState[id] = true;
+    renderAll();
+    const n = src.nodes.length;
+    toast('Imported ' + n + ' server' + (n === 1 ? '' : 's') + ' from ' + src.name);
+  }, fail);
 }
 
 /* ── Manual server form ── */

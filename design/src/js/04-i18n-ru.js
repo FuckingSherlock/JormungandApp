@@ -1366,4 +1366,23 @@ Object.assign(I18N, { ru: {
   "This version has to be downloaded by hand": "Эту версию нужно скачать вручную",
   "Update checks are not available in this build yet": "Проверка обновлений в этой сборке пока недоступна",
   "Something went wrong": "Что-то пошло не так",
+
+  // ── Import config file: a local source (kind 'file') ──
+  "sing-box JSON, Clash YAML, a list of links": "sing-box JSON, Clash YAML, список ссылок",
+  "local file": "локальный файл",
+  "Local file": "Локальный файл",
+  "Read as {0}": "Прочитан как {0}",
+  "Imported {0}": "Импортировано {0}",
+  "Rename": "Переименовать",
+  "Imported {#0} server from {1}": "Импортирован {0} узел из {1}",
+  "Imported {#0} servers from {1}": ["Импортирован {0} узел из {1}", "Импортировано {0} узла из {1}", "Импортировано {0} узлов из {1}"],
+  "Could not import {0}: {1}": "Не удалось импортировать {0}: {1}",
+  "No servers found in the file": "В файле не найдено узлов",
+  "The file is over 16 MB": "Файл больше 16 МБ",
+  "A local file has nothing to update: import the file again": "У локального файла нечего обновлять: импортируйте файл заново",
+  "Delete imported file": "Удалить импортированный файл",
+  "The imported file and its {#0} server are removed. This can’t be undone.": "Импортированный файл и его {0} узел удаляются. Это нельзя отменить.",
+  "The imported file and its {#0} servers are removed. This can’t be undone.": ["Импортированный файл и его {0} узел удаляются. Это нельзя отменить.", "Импортированный файл и его {0} узла удаляются. Это нельзя отменить.", "Импортированный файл и его {0} узлов удаляются. Это нельзя отменить."],
+  "The imported file and its {#0} server are removed": "Импортированный файл и его {0} узел удаляются",
+  "The imported file and its {#0} servers are removed": ["Импортированный файл и его {0} узел удаляются", "Импортированный файл и его {0} узла удаляются", "Импортированный файл и его {0} узлов удаляются"],
 } });

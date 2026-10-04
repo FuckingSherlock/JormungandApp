@@ -78,7 +78,7 @@ function renderCreateProfileSources() {
     const open = cpOpen.has(id), live = liveNodes(s);
     const alive = live.filter(isAlive).length;
     const picked = state === 'all' ? live.length : live.filter(n => cpNodes.has(id + '::' + n.id)).length;
-    const meta = [s.kind === 'sub' ? 'subscription' : 'manual',
+    const meta = [s.kind === 'sub' ? 'subscription' : s.kind === 'file' ? 'local file' : 'manual',
                   state === 'some' ? `${picked} of ${live.length} nodes` : `${live.length} nodes`, `${alive} alive`]
       .concat((s.gone || []).length ? [`<span class="gone-meta">${s.gone.length} unavailable</span>`] : []).join('<span class="dot">·</span>');
     const rows = open ? (cpPickMode === 'priority' ? sortedNodes(live) : byPing(live)).map(n => {

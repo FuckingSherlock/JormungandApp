@@ -533,7 +533,7 @@ function updateMainConnectCard() {
     : empty ? (simpleMode() ? 'No servers yet' : 'No profiles yet') : '—';
   // the kind, short and never translated (the label has data-notr)
   document.getElementById('profCardLabel').textContent = chainsData[id] ? 'chain' : profilesData[id] ? 'profile'
-    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'sub' : 'set') : simpleMode() ? 'simple' : 'profiles';
+    : sourcesData[id] ? (sourcesData[id].kind === 'sub' ? 'sub' : sourcesData[id].kind === 'file' ? 'file' : 'set') : simpleMode() ? 'simple' : 'profiles';
   badge.textContent = autoConnect ? 'AUTO' : 'MANUAL';
   badge.style.color = autoConnect ? 'var(--active)' : 'var(--warn)';
   badge.style.background = autoConnect ? 'rgba(var(--active-rgb),.15)' : 'rgba(var(--warn-rgb),.15)';
