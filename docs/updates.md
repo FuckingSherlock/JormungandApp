@@ -383,7 +383,10 @@ dart run tool/release_manifest.dart --key <файл> --version 0.2.0 --build 12 
 (`--split-per-abi`; `-BuildNumber` = `build` манифеста). Ключ подписи —
 `%USERPROFILE%\.jormungand\android-release.jks` (alias `jormungand`), пароль только в переменной
 `JORM_ANDROID_KS_PASS`; ключ создаётся при первой сборке и **должен быть сохранён**: другой ключ —
-другой подписант, и установка поверх невозможна. В конце скрипт печатает SHA-256 сертификата — его
+другой подписант, и установка поверх невозможна. Создан 2026-10-04 со случайным паролем в
+`%USERPROFILE%\.jormungand\android-release.pass`; копии: секреты GitHub Actions `JORM_ANDROID_KEYSTORE_B64` /
+`JORM_ANDROID_KS_PASS` (для CI, обратно не читаются) и secrets-mcp с теми же именами (хост
+`backup-only.invalid` — только резерв). В конце скрипт печатает SHA-256 сертификата — его
 (hex в нижнем регистре, без двоеточий) кладут в `android.signerSha256` манифеста (`--signer-sha256`).
 С `-BuildNumber` скрипт передаёт Flutter `--android-project-arg force-version-code-ignoring-abi=true`:
 `versionCode` всех ABI равен `build` (раздел 5), без смещений `1000 × ABI`. Другой файл ключа —
