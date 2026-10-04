@@ -424,6 +424,94 @@ void main() {
       expect(a.hits, ['manifest-stable.json']); // 404 on the manifest, the .sig is not asked
     });
 
+    group('empty channel (manifest answers 404 / 410)', () {
+      test('stable with no manifest anywhere -> up to date, no error, lastError cleared; attempts logged', () async {
+        final events = <String>[];
+        final attempts = <dynamic>[];
+        final u = updater(onEvent: (t, l, d) {
+          events.add('$t/$l');
+          if (t == 'updateChannelEmpty') attempts.addAll(d['attempts'] as List);
+        });
+        a.fail['manifest-stable.json'] = 500;
+        expect((await u.check()).lastError!.code, UpdateError.network);
+        a.fail.clear();
+        final s = await u.check(manual: true);
+        expect(s.phase, UpdatePhase.upToDate);
+        expect(s.error, isNull);
+        expect(s.lastError, isNull);
+        expect(s.checkedAt, isNotNull);
+        expect(a.hits.where((h) => h.endsWith('.sig')), isEmpty);
+        expect(events, contains('updateChannelEmpty/info'));
+        expect(events.where((e) => e.startsWith('updateFailed')), hasLength(1)); // only the 500 earlier
+        expect(attempts.single['code'], 'notFound');
+        expect(attempts.single['error'], 'HTTP 404');
+      });
+
+      test('410 counts as absent too; 403 does not', () async {
+        a.fail['manifest-stable.json'] = 410;
+        expect((await updater().check(manual: true)).phase, UpdatePhase.upToDate);
+        a.fail['manifest-stable.json'] = 403;
+        final s = await updater().check(manual: true);
+        expect(s.phase, UpdatePhase.failed);
+        expect(s.error!.code, UpdateError.network);
+      });
+
+      test('beta: valid beta + stable 404 -> the beta is offered; both empty -> up to date', () async {
+        publish(a, await release(keys, version: '0.3.0-beta.1', build: 7, channel: UpdateChannel.beta));
+        var s = await updater().check(channel: UpdateChannel.beta, manual: true);
+        expect(s.phase, UpdatePhase.available);
+        expect(s.offer!.version.toString(), '0.3.0-beta.1+7');
+        a.files.clear();
+        s = await updater().check(channel: UpdateChannel.beta, manual: true);
+        expect(s.phase, UpdatePhase.upToDate);
+        expect(s.error, isNull);
+      });
+
+      test('beta: stable empty, beta unreachable -> still a network error', () async {
+        net.blockedAll.add(a.port);
+        final s = await updater().check(channel: UpdateChannel.beta, manual: true);
+        expect(s.error!.code, UpdateError.network);
+      });
+
+      test('404 on one feed + a valid manifest on another -> the offer', () async {
+        publish(b, await release(keys));
+        final s = await updater(feeds: [a.base, b.base]).check(manual: true);
+        expect(s.phase, UpdatePhase.available);
+        expect(s.offer!.feed, b.base);
+      });
+
+      test('404 on one feed + a bad signature on another -> badSignature, not "empty"', () async {
+        publish(b, await release(other, version: '0.9.0', build: 9));
+        final s = await updater(feeds: [a.base, b.base]).check(manual: true);
+        expect(s.phase, UpdatePhase.failed);
+        expect(s.error!.code, UpdateError.badSignature);
+        expect(s.error!.attempts, hasLength(2));
+      });
+
+      test('404 on a reachable feed + the others only unreachable -> empty channel', () async {
+        net.blockedAll.add(b.port);
+        final s = await updater(feeds: [a.base, b.base]).check(manual: true);
+        expect(s.phase, UpdatePhase.upToDate);
+        expect(s.error, isNull);
+      });
+
+      test('a manifest without its signature file is not "empty" (the .sig 404 is an error)', () async {
+        publish(a, await release(keys));
+        a.files.remove('manifest-stable.json.sig');
+        final s = await updater().check(manual: true);
+        expect(s.phase, UpdatePhase.failed);
+        expect(s.error!.code, UpdateError.network);
+      });
+
+      test('every feed unreachable -> network error, never "up to date"', () async {
+        net.blockedAll.addAll([a.port, b.port]);
+        final s = await updater(feeds: [a.base, b.base]).check(manual: true);
+        expect(s.phase, UpdatePhase.failed);
+        expect(s.error!.code, UpdateError.network);
+        expect(s.error!.attempts, hasLength(2));
+      });
+    });
+
     test('a feed with a bad signature is skipped for the next one; all bad -> badSignature', () async {
       final forged = await release(other, version: '0.9.0', build: 9);
       publish(a, forged);

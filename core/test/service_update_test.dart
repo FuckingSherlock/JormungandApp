@@ -96,11 +96,15 @@ void main() {
     await s.updateBeginInstall(); // the platform's step before the installer
   });
 
-  test('a manual check that finds nothing newer is upToDate; no feed answer is failed', () async {
+  test('a manual check that finds nothing newer is upToDate (also an empty channel); a broken feed answer is failed', () async {
     publish(feed, await release(keys, version: '0.1.0', build: 1));
     final s = await start(version: AppVersion.parse('0.1.0', build: 1));
     expect((await s.updateCheck({'manual': true}))['phase'], 'upToDate');
-    feed.files.clear();
+    feed.files.clear(); // 404: nothing published in the channel
+    final empty = await s.updateCheck({'manual': true});
+    expect(empty['phase'], 'upToDate');
+    expect(empty['error'], isNull);
+    feed.fail['manifest-stable.json'] = 500;
     final failed = await s.updateCheck({'manual': true});
     expect(failed['phase'], 'failed');
     expect((failed['error'] as Map)['code'], 'network');

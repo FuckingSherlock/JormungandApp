@@ -679,17 +679,23 @@ class AppUpdater {
       final errors = <UpdateException>[];
       for (final c in channels) {
         try {
-          found.add(await _fetchManifest(c));
+          final f = await _fetchManifest(c);
+          if (f != null) found.add(f); // null: nothing published in that channel
         } on UpdateException catch (e) {
           errors.add(e);
         }
       }
-      if (found.isEmpty) throw UpdateException.worst(errors);
+      if (found.isEmpty && errors.isNotEmpty) throw UpdateException.worst(errors);
       found.sort((a, b) => b.manifest.version.compareTo(a.manifest.version));
-      final best = found.first;
       _checkedAt = _now();
       _lastError = null;
       unawaited(_saveState());
+      if (found.isEmpty) {
+        // every asked channel is empty: nothing newer than what runs
+        _set(UpdateStatus(UpdatePhase.upToDate, current: current, checkedAt: _checkedAt));
+        return _status;
+      }
+      final best = found.first;
       final m = best.manifest;
       if (m.version <= current) {
         _set(UpdateStatus(UpdatePhase.upToDate, current: current, checkedAt: _checkedAt));
@@ -726,21 +732,28 @@ class AppUpdater {
   static String _base(String feed) => feed.endsWith('/') ? feed : '$feed/';
 
   /// Direct pass over all feeds, then tunnel pass; the first verified manifest wins.
-  Future<_Found> _fetchManifest(UpdateChannel channel) async {
+  /// Null: the channel is empty (nothing was ever published there) - a reachable feed
+  /// answered 404 / 410 for the manifest itself and no feed failed in a way that says more
+  /// than "unreachable" (a bad signature / manifest anywhere stays an error).
+  Future<_Found?> _fetchManifest(UpdateChannel channel) async {
     if (feeds.isEmpty) throw UpdateException(UpdateError.network, 'No update feed is configured');
     final errors = <UpdateException>[];
     final attempts = <Map<String, dynamic>>[];
+    var absent = false;
     for (final route in _routes) {
       for (final feed in feeds) {
         final name = 'manifest-${channel.name}.json';
         final url = Uri.parse('${_base(feed)}$name');
         try {
-          final bytes = await _readBody(url, route, maxManifestBytes);
+          final bytes = await _readBody(url, route, maxManifestBytes, absentIsEmpty: true);
           final sig = utf8.decode(await _readBody(Uri.parse('${_base(feed)}$name.sig'), route, 8 * 1024), allowMalformed: true);
           if (!await verifyManifestSignature(bytes, sig, publicKeys)) {
             throw UpdateException(UpdateError.badSignature, 'The manifest signature is not valid');
           }
           return _Found(UpdateManifest.parse(bytes, expectChannel: channel), feed, route);
+        } on _ManifestAbsent catch (e) {
+          absent = true;
+          attempts.add({'url': url.toString(), 'route': route.name, 'code': 'notFound', 'error': 'HTTP ${e.status}'});
         } on UpdateException catch (e) {
           errors.add(e);
           attempts.add({'url': url.toString(), 'route': route.name, 'code': e.code.name, 'error': e.message});
@@ -750,13 +763,20 @@ class AppUpdater {
         }
       }
     }
-    final w = UpdateException.worst(errors);
-    throw UpdateException(w.code, w.message, attempts: attempts);
+    // a 404 is not a failure; only real errors beyond "unreachable" override it
+    final w = errors.isEmpty ? null : UpdateException.worst(errors);
+    if (absent && (w == null || w.code == UpdateError.network)) {
+      _event('updateChannelEmpty', 'info', {'channel': channel.name, 'attempts': attempts});
+      return null;
+    }
+    final err = w ?? UpdateException(UpdateError.network, 'No update feed answered');
+    throw UpdateException(err.code, err.message, attempts: attempts);
   }
 
-  Future<List<int>> _readBody(Uri url, UpdateRoute route, int max) async {
+  Future<List<int>> _readBody(Uri url, UpdateRoute route, int max, {bool absentIsEmpty = false}) async {
     final r = await _get(url, route, timeout: requestTimeout);
     try {
+      if (absentIsEmpty && (r.status == 404 || r.status == 410)) throw _ManifestAbsent(r.status);
       if (r.status != 200) throw HttpException('HTTP ${r.status}', uri: url);
       if ((r.length ?? 0) > max) throw HttpException('Too big', uri: url);
       final b = BytesBuilder(copy: false);
@@ -1062,4 +1082,10 @@ class _Found {
   final UpdateManifest manifest;
   final String feed;
   final UpdateRoute route;
+}
+
+/// A feed answered 404 / 410 for the manifest file itself: nothing is published there.
+class _ManifestAbsent implements Exception {
+  _ManifestAbsent(this.status);
+  final int status;
 }
