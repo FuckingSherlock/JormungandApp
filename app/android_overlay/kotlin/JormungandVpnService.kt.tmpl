@@ -106,7 +106,7 @@ class JormungandVpnService : VpnService() {
         try {
             synchronized(lock) {
                 closeBoxLocked()
-                val b = LibboxBox(applicationContext, VpnPlatform(this))
+                val b = LibboxBox(applicationContext, VpnPlatform(this), "tunnel")
                 box = b
                 b.start(request.config)
                 isUp = true
@@ -211,6 +211,7 @@ class JormungandVpnService : VpnService() {
         val pfd = builder.establish() ?: error("android: the application is not prepared or is revoked")
         runCatching { tunFd?.close() }
         tunFd = pfd
+        VpnBridge.log("info", "tunnel: tun opened (fd ${pfd.fd}, mtu ${options.mtu}, auto route ${options.autoRoute})")
         return pfd.fd
     }
 
@@ -243,8 +244,11 @@ class JormungandVpnService : VpnService() {
 
 /** The tunnel's platform: [LibboxPlatform] plus the tun and socket protection from the service. */
 class VpnPlatform(private val service: JormungandVpnService) : LibboxPlatform(service) {
+    private var protectFailures = 0
+
     override fun autoDetectInterfaceControl(fd: Int) {
-        service.protect(fd)
+        // false: the socket stays inside the VPN and loops back into it; the first few are worth a line
+        if (!service.protect(fd) && protectFailures++ < 5) VpnBridge.log("warn", "tunnel: protect($fd) failed")
     }
 
     override fun openTun(options: TunOptions): Int = service.openTunInternal(options)

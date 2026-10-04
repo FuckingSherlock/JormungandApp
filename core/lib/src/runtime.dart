@@ -251,6 +251,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
   ProbePool? pool,
   Duration maxAge = Duration.zero,
   void Function(String kind, String key, int ms)? onResult,
+  void Function(String tag, String reason)? onFail,
   BoxFactory? boxFactory,
 }) async {
   final pl = pool ?? ProbePool.solo();
@@ -266,7 +267,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
   BoxRunner? sb;
   Future<Probe>? starting;
   Future<Probe> ensure() => starting ??= () async {
-        final pr = Probe(await freePort());
+        final pr = Probe(await freePort())..onFail = onFail;
         final box = boxFactory != null ? boxFactory(workDir) : SingBoxProcess(binary, workDir);
         sb = box;
         await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr));

@@ -24,11 +24,38 @@ import java.util.concurrent.Executors
 object VpnBridge {
     class Pending(val config: String, val done: (String?) -> Unit)
 
+    // Dart's listener comes and goes; what is said meanwhile waits (the newest [KEEP]) for the next one
+    private val waiting = ArrayDeque<Map<String, Any?>>()
+    private const val KEEP = 300
+
     @Volatile
     var sink: EventChannel.EventSink? = null
+        set(value) {
+            field = value
+            if (value != null) {
+                main.post {
+                    val now = synchronized(waiting) { waiting.toList().also { waiting.clear() } }
+                    for (e in now) value.success(e)
+                }
+            }
+        }
 
     private var pending: Pending? = null
     private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * A line for the app's raw log (Dart: `[android] <text>`), and for logcat. [level]: debug, info, warn, error.
+     * The native side has no log of its own that the user can see, and a failed ping or a silent
+     * network is the kind of thing only these lines explain.
+     */
+    fun log(level: String, text: String) {
+        when (level) {
+            "error" -> android.util.Log.e("Jormungand", text)
+            "warn" -> android.util.Log.w("Jormungand", text)
+            else -> android.util.Log.i("Jormungand", text)
+        }
+        emit(mapOf("type" to "log", "level" to level, "text" to text))
+    }
 
     @Synchronized
     fun begin(p: Pending) {
@@ -40,7 +67,17 @@ object VpnBridge {
     fun takePending(): Pending? = pending.also { pending = null }
 
     fun emit(event: Map<String, Any?>) {
-        main.post { sink?.success(event) }
+        main.post {
+            val s = sink
+            if (s != null) {
+                s.success(event)
+            } else {
+                synchronized(waiting) {
+                    waiting.addLast(event)
+                    while (waiting.size > KEEP) waiting.removeFirst()
+                }
+            }
+        }
     }
 }
 
@@ -125,13 +162,14 @@ class VpnChannel(private val activity: Activity) {
                     return
                 }
                 io.execute {
-                    val box = LibboxBox(activity.applicationContext, LibboxPlatform(activity.applicationContext))
+                    val box = LibboxBox(activity.applicationContext, LibboxPlatform(activity.applicationContext), id)
                     try {
                         boxes.remove(id)?.stop()
                         box.start(config)
                         boxes[id] = box
                         main.post { result.success(null) }
                     } catch (e: Throwable) {
+                        VpnBridge.log("error", "$id: startBox failed: ${e.javaClass.simpleName}: ${e.message}")
                         main.post { result.error("start_failed", e.message ?: e.toString(), null) }
                     }
                 }

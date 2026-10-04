@@ -46,12 +46,19 @@ object LibboxSetup {
  * (core/lib/src/runtime.dart `withApiService`), exactly as with the desktop process, so any number
  * of these can live side by side (the tunnel and the throwaway ones).
  */
-class LibboxBox(private val context: Context, private val platform: PlatformInterface) : CommandServerHandler {
+class LibboxBox(
+    private val context: Context,
+    private val platform: PlatformInterface,
+    /** What the lines of the raw log call it: "tunnel", "box3". */
+    private val name: String = "box",
+) : CommandServerHandler {
     private var server: CommandServer? = null
 
     /** Starts it and returns when it is up; throws with sing-box's reason when it is not. */
     @Synchronized
     fun start(config: String) {
+        val t0 = System.currentTimeMillis()
+        VpnBridge.log("debug", "$name: starting libbox (config ${config.length} bytes)")
         LibboxSetup.ensure(context)
         stop()
         val s = CommandServer(this, platform)
@@ -59,9 +66,11 @@ class LibboxBox(private val context: Context, private val platform: PlatformInte
         try {
             s.startOrReloadService(config, OverrideOptions())
         } catch (e: Throwable) {
+            VpnBridge.log("error", "$name: libbox did not start (${System.currentTimeMillis() - t0} ms): ${e.message ?: e}")
             stop()
             throw e
         }
+        VpnBridge.log("debug", "$name: libbox started in ${System.currentTimeMillis() - t0} ms")
     }
 
     @Synchronized
@@ -70,6 +79,7 @@ class LibboxBox(private val context: Context, private val platform: PlatformInte
         server = null
         runCatching { s.closeService() }.onFailure { Log.w(TAG, "close service", it) }
         runCatching { s.close() }.onFailure { Log.w(TAG, "close server", it) }
+        VpnBridge.log("debug", "$name: libbox stopped")
     }
 
     // CommandServerHandler: calls that come from libbox's own clients, which we do not have.
@@ -84,7 +94,7 @@ class LibboxBox(private val context: Context, private val platform: PlatformInte
     override fun triggerNativeCrash() {}
 
     override fun writeDebugMessage(message: String?) {
-        if (message != null) Log.d(TAG, message)
+        if (message != null) VpnBridge.log("debug", "$name: libbox: $message")
     }
 
     override fun connectSSHAgent(): Int = -1

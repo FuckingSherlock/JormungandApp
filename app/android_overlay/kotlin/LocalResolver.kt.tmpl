@@ -22,11 +22,33 @@ object LocalResolver : LocalDNSTransport {
     private const val RCODE_NXDOMAIN = 3
     private val executor = Executors.newCachedThreadPool()
 
+    private var lastFailLog = 0L
+    private var failsHidden = 0
+
+    /** A failed lookup goes to the raw log, at most one line a second (a ping asks for dozens of names). */
+    private fun failed(what: String, why: Any?) {
+        val now = System.currentTimeMillis()
+        synchronized(this) {
+            if (now - lastFailLog < 1000) {
+                failsHidden++
+                return
+            }
+            lastFailLog = now
+            val more = if (failsHidden > 0) " (+$failsHidden more)" else ""
+            failsHidden = 0
+            VpnBridge.log("warn", "dns: $what failed: $why$more")
+        }
+    }
+
     override fun raw(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
 
     @android.annotation.TargetApi(Build.VERSION_CODES.Q)
     override fun exchange(ctx: ExchangeContext, message: ByteArray) {
-        val network = DefaultNetworkMonitor.defaultNetwork ?: error("missing default interface")
+        val network = DefaultNetworkMonitor.defaultNetwork
+        if (network == null) {
+            failed("query", "missing default interface")
+            error("missing default interface")
+        }
         val done = CountDownLatch(1)
         val failure = AtomicReference<Throwable?>(null)
         val signal = CancellationSignal()
@@ -42,6 +64,7 @@ object LocalResolver : LocalDNSTransport {
             }
 
             override fun onError(error: DnsResolver.DnsException) {
+                failed("query", error)
                 val cause = error.cause
                 if (cause is ErrnoException) ctx.errnoCode(cause.errno) else failure.compareAndSet(null, error)
                 done.countDown()
@@ -53,7 +76,11 @@ object LocalResolver : LocalDNSTransport {
     }
 
     override fun lookup(ctx: ExchangeContext, network: String, domain: String) {
-        val default = DefaultNetworkMonitor.defaultNetwork ?: error("missing default interface")
+        val default = DefaultNetworkMonitor.defaultNetwork
+        if (default == null) {
+            failed("lookup of $domain", "missing default interface")
+            error("missing default interface")
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             val answer = try {
                 default.getAllByName(domain)
@@ -82,12 +109,14 @@ object LocalResolver : LocalDNSTransport {
                 if (rcode == 0) {
                     ctx.success(answer.mapNotNull { it.hostAddress }.joinToString("\n"))
                 } else {
+                    failed("lookup of $domain", "rcode $rcode")
                     ctx.errorCode(rcode)
                 }
                 done.countDown()
             }
 
             override fun onError(error: DnsResolver.DnsException) {
+                failed("lookup of $domain", error)
                 val cause = error.cause
                 if (cause is ErrnoException) ctx.errnoCode(cause.errno) else failure.compareAndSet(null, error)
                 done.countDown()

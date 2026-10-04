@@ -127,6 +127,14 @@ Android-часть живёт в `app/android_overlay/` (Kotlin-шаблоны `
 `app/android> .\gradlew.bat :app:compileReleaseKotlin -x compileFlutterBuildRelease`.
 Логи с телефона: `adb logcat -s flutter:* AndroidRuntime:E`.
 
+Сырой лог (Logs → Raw) на Android собирается из трёх источников: заметки ядра (`LogBook.note`), строки
+sing-box туннеля и разовых боксов пинга / Speed Test (через `SingBoxApi.logLines()`; libbox шлёт строки
+с ANSI-цветом и всех уровней — `LibboxRunner` отрезает цвет и лишние уровни по `log.level` конфига,
+строки разового бокса идут с меткой `[ping]` / `[speed]`) и собственные строки Kotlin-стороны
+(`VpnBridge.log` → EventChannel `jormungand/vpn_events`, `{type: 'log', level, text}` → `[android] …`:
+старт / стоп libbox, сети, которые видит libbox, DNS, `protect`). Неудачный пинг пишет в лог одну
+строку `Ping: N of M did not answer (failed tests: …)` с причинами по стадиям (`socks`, `tls`, `request`).
+
 ## Релиз
 
 Подписанный манифест и файлы — в публичном репо `FuckingSherlock/jormungand-releases` (релиз `feed`);

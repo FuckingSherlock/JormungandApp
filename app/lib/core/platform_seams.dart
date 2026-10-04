@@ -85,6 +85,11 @@ Future<CoreHost> openCoreHost() async {
       sysProxy: NoSystemProxy(),
       isElevated: () => true, // TUN is the VpnService here, not an admin matter
     );
+    // the Kotlin side's own lines (libbox start / stop, networks, DNS) into the raw log
+    vpn.logs.listen(
+      (l) => core.logBook.note(l.level, '[android] ${l.text}'),
+      onError: (Object _) {},
+    );
     return LiveCoreHost(
       api: core,
       ruleSetTimesOf: core.ruleSets.updatedTimes,

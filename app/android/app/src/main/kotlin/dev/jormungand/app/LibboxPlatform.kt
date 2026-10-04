@@ -98,11 +98,29 @@ open class LibboxPlatform(private val context: Context) : PlatformInterface {
     override fun getInterfaces(): NetworkInterfaceIterator {
         val javaInterfaces = Collections.list(NetworkInterface.getNetworkInterfaces() ?: Collections.emptyEnumeration())
         val result = mutableListOf<LibboxNetworkInterface>()
-        for (network in connectivity.allNetworks) {
-            val link = connectivity.getLinkProperties(network) ?: continue
-            val caps = connectivity.getNetworkCapabilities(network) ?: continue
-            val name = link.interfaceName ?: continue
-            val jif = javaInterfaces.find { it.name == name } ?: continue
+        val skipped = mutableListOf<String>() // what libbox will not see, and why: sing-box dials only through these
+        val networks = connectivity.allNetworks
+        for (network in networks) {
+            val link = connectivity.getLinkProperties(network)
+            if (link == null) {
+                skipped.add("$network: no link properties")
+                continue
+            }
+            val caps = connectivity.getNetworkCapabilities(network)
+            if (caps == null) {
+                skipped.add("${link.interfaceName}: no capabilities")
+                continue
+            }
+            val name = link.interfaceName
+            if (name == null) {
+                skipped.add("$network: no interface name")
+                continue
+            }
+            val jif = javaInterfaces.find { it.name == name }
+            if (jif == null) {
+                skipped.add("$name: not in NetworkInterface list (${javaInterfaces.size} there)")
+                continue
+            }
             val box = LibboxNetworkInterface()
             box.name = name
             box.dnsServer = Strings(link.dnsServers.mapNotNull { it.hostAddress })
@@ -132,6 +150,13 @@ open class LibboxPlatform(private val context: Context) : PlatformInterface {
             box.flags = flags
             box.metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
             result.add(box)
+        }
+        val summary = "network: ${networks.size} networks -> libbox sees " +
+            (result.joinToString(", ") { "${it.name}#${it.index}(type ${it.type}, flags ${it.flags})" }.ifEmpty { "none" }) +
+            (if (skipped.isEmpty()) "" else "; skipped: " + skipped.joinToString("; "))
+        if (summary != lastSummary) {
+            lastSummary = summary
+            VpnBridge.log(if (result.isEmpty()) "error" else "debug", summary)
         }
         return Interfaces(result)
     }
@@ -183,6 +208,9 @@ open class LibboxPlatform(private val context: Context) : PlatformInterface {
 
     companion object {
         private const val TAG = "LibboxPlatform"
+
+        @Volatile
+        private var lastSummary = ""
     }
 
     private fun InterfaceAddress.toPrefix(): String =

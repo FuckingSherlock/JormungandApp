@@ -30,6 +30,15 @@ class _Runner implements BoxRunner {
   Future<void> stop() async => up = false;
 }
 
+/// A throwaway box (latency test) that comes up and complains once.
+class _NoisyRunner extends _Runner {
+  @override
+  Future<void> start(Map<String, dynamic> config) async {
+    up = true;
+    onLog?.call('WARN[0000] boom');
+  }
+}
+
 Map<String, dynamic> _body({bool sys = false}) => {
       'plan': {
         'routes': [
@@ -66,6 +75,7 @@ void main() {
       singBox: 'none',
       dataDir: p.join(tmp.path, 'data'),
       runner: runner,
+      boxFactory: (_) => _NoisyRunner(),
       sysProxy: sys ?? NoSystemProxy(),
       exitCheck: (_) async => {'ip': '127.0.0.1'},
     );
@@ -132,6 +142,26 @@ void main() {
     expect(lines, [
       {'done': true, 'network': 'up'}
     ]);
+  });
+
+  test('a ping that gets no answer says why in the raw log, with the throwaway box\'s own lines', () async {
+    await start();
+    final lines = await svc.ping({
+      'nodes': [
+        {
+          'key': 's::a',
+          'outbound': {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'},
+        },
+      ],
+      'url': 'http://127.0.0.1:9/', // nothing listens on the test inbound either
+    }).toList();
+    expect(lines.where((l) => l['kind'] == 'n').single['ms'], -1);
+    final log = (svc.log()['lines'] as List).cast<Map>();
+    expect(log.map((l) => l['msg']), contains(matches(r'^\[ping\] boom$')));
+    expect(log.firstWhere((l) => '${l['msg']}'.startsWith('[ping]'))['lvl'], 'warn');
+    final why = log.firstWhere((l) => '${l['msg']}'.startsWith('Ping:'));
+    expect([why['src'], why['lvl']], ['core', 'warn']);
+    expect('${why['msg']}', allOf(contains('1 of 1 did not answer'), contains('x connect to the test inbound')));
   });
 
   test('dispose stops the box and ends the streams', () async {

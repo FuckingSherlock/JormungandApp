@@ -138,6 +138,17 @@ void main() {
       ]);
     });
 
+    test('libbox lines come coloured: colours go, level stays; a tag marks a throwaway sing-box', () {
+      final b = LogBook()
+        ..singBox('\x1B[33mWARN\x1B[0m[0003] [12 5ms] outbound/vless[t/a]: dial failed')
+        ..singBox('ERROR[0001] dns: x', tag: 'ping');
+      final l = (b.since(null)['lines'] as List).cast<Map>();
+      expect(l.map((x) => [x['lvl'], x['msg']]), [
+        ['warn', '[12 5ms] outbound/vless[t/a]: dial failed'],
+        ['error', '[ping] dns: x'],
+      ]);
+    });
+
     test('since, cap and clear', () {
       final b = LogBook(cap: 3);
       for (var i = 0; i < 5; i++) {

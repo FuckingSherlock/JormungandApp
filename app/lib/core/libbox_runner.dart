@@ -62,6 +62,7 @@ class LibboxRunner implements BoxRunner {
     await _closeLocal(); // a restart: the platform side replaces its sing-box itself
     final secret = newApiSecret();
     final apiPort = await freePort();
+    final want = _rank('${(config['log'] as Map?)?['level'] ?? 'info'}'.toUpperCase());
     _native = true;
     try {
       await _port.start(jsonEncode(withApiService(config, secret, apiPort)));
@@ -72,11 +73,13 @@ class LibboxRunner implements BoxRunner {
 
     final a = SingBoxApi(apiPort, secret);
     final deadline = DateTime.now().add(upTimeout);
+    Object? lastError;
     while (DateTime.now().isBefore(deadline)) {
       String? fatal;
       try {
         fatal = await a.serviceState();
-      } catch (_) {
+      } catch (e) {
+        lastError = e;
         await Future<void>.delayed(const Duration(milliseconds: 100));
         continue;
       }
@@ -87,17 +90,35 @@ class LibboxRunner implements BoxRunner {
       }
       _up = true;
       _api = a..watch();
-      _logSub = a.logLines().listen(
-        (l) => onLog?.call(l),
-        onError: (Object _) {},
-      );
+      _logSub = a.logLines().listen((l) {
+        // libbox sends every line, whatever the config's level says
+        final m = _levelOfLine.firstMatch(l);
+        if (m == null || _rank(m[1]!) <= want) onLog?.call(l);
+      }, onError: (Object _) {});
       _goneSub = _port.stoppedOnItsOwn.listen(_gone, onError: (Object _) {});
       return;
     }
     await a.close();
     await stop();
-    throw SingBoxError('sing-box did not come up in ${upTimeout.inSeconds} s');
+    throw SingBoxError(
+      'sing-box did not come up in ${upTimeout.inSeconds} s: its API on 127.0.0.1:$apiPort answered with $lastError',
+    );
   }
+
+  // "WARN[0003] …", coloured by libbox: "\x1b[33mWARN\x1b[0m[0003] …"
+  static final _levelOfLine = RegExp(
+    r'^(?:\x1B\[[0-9;]*m)?(PANIC|FATAL|ERROR|WARN|INFO|DEBUG|TRACE)',
+  );
+
+  static int _rank(String level) => switch (level) {
+    'PANIC' => 0,
+    'FATAL' => 1,
+    'ERROR' => 2,
+    'WARN' => 3,
+    'DEBUG' => 5,
+    'TRACE' => 6,
+    _ => 4,
+  };
 
   void _gone(String reason) {
     if (!_up) return;

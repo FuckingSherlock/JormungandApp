@@ -1090,6 +1090,7 @@ class CoreService implements CoreApi {
         final pairs = (body['pairs'] as List? ?? const []).cast<Map>();
         var network = pool.status;
         if (nodes.isNotEmpty || pairs.isNotEmpty) {
+          final why = <String, int>{}; // reason -> how many servers missed with it
           final r = await measureLatency(
             binary: singBox,
             workDir: p.join(dataDir, 'run', 'ping-${_pingSeq++ % 8}'),
@@ -1099,19 +1100,35 @@ class CoreService implements CoreApi {
             checkers: planCheckers({'urlTest': body}),
             pool: pool,
             maxAge: Duration(milliseconds: (body['maxAgeMs'] as num?)?.toInt() ?? 0),
-            boxFactory: boxFactory,
+            boxFactory: _loggedBoxes('ping'),
             onResult: (kind, key, ms) => line({'kind': kind, 'key': key, 'ms': ms}),
+            onFail: (tag, reason) => why[reason] = (why[reason] ?? 0) + 1,
           );
           network = r.network;
+          final missed = [...r.nodes.values, ...r.pairs.values].where((ms) => ms < 0).length;
+          if (missed > 0) {
+            final reasons = (why.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).take(4).map((e) => '${e.value}x ${e.key}').join('; ');
+            logBook.note('warn',
+                'Ping: $missed of ${r.nodes.length + r.pairs.length} did not answer${reasons.isEmpty ? '' : ' (failed tests: $reasons)'}; network ${network.name}');
+          }
         }
         line({'done': true, 'network': network.name});
       } catch (e) {
+        logBook.note('error', 'Ping failed: $e');
         line({'error': '$e'});
       }
       unawaited(out.close());
     }();
     return out.stream;
   }
+
+  /// The factory of the throwaway sing-boxes of one kind of test ([what]: "ping", "speed"): their
+  /// own lines go to the raw log under that tag, next to the core's.
+  BoxFactory _loggedBoxes(String what) => (dir) {
+        final b = boxFactory(dir);
+        b.onLog = (l) => logBook.singBox(l, tag: what);
+        return b;
+      };
 
   /// body: {node: {key, outbound}} or {pair: {key, entry: {outbound}, exit: {outbound}}},
   /// configUrl?. Progress as the test goes — `{phase (0 latency, 1 download, 2 upload,
@@ -1137,7 +1154,7 @@ class CoreService implements CoreApi {
           pair: body['pair'] as Map?,
           configUrl: '${body['configUrl'] ?? ''}',
           cancel: gone.future,
-          boxFactory: boxFactory,
+          boxFactory: _loggedBoxes('speed'),
           onProgress: (x) => line({
             'phase': x.phase,
             'down': x.downloadCapacity.toInt(),
@@ -1151,6 +1168,7 @@ class CoreService implements CoreApi {
           }),
         );
       } catch (e) {
+        logBook.note('error', 'Speed test failed: $e');
         line({'error': '$e', 'final': true});
       }
       unawaited(out.close());

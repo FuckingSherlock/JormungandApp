@@ -140,9 +140,19 @@ class VpnChannel {
     }
   }
 
+  // One platform listen for every consumer: the Kotlin side keeps a single sink, and a second
+  // `receiveBroadcastStream()` would replace it (and a cancel of the first would drop it).
+  static final Stream<dynamic> _all = _events.receiveBroadcastStream();
+
   /// The tunnel going away on its own. A broadcast stream; a plain [stop] sends nothing.
-  Stream<VpnStopped> get stopped => _events
-      .receiveBroadcastStream()
+  Stream<VpnStopped> get stopped => _all
       .where((e) => e is Map && e['type'] == 'stopped')
       .map((e) => VpnStopped('${(e as Map)['reason'] ?? ''}'));
+
+  /// What the Kotlin side says about itself (libbox start / stop, networks, DNS, protect):
+  /// `level` is debug, info, warn or error. What was said before the first listener is kept
+  /// there and arrives first.
+  Stream<({String level, String text})> get logs => _all
+      .where((e) => e is Map && e['type'] == 'log')
+      .map((e) => (level: '${(e as Map)['level'] ?? 'info'}', text: '${e['text'] ?? ''}'));
 }

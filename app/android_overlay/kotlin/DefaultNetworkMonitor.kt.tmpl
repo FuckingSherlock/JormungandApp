@@ -64,6 +64,7 @@ object DefaultNetworkMonitor {
                 registered = true
                 // until the callback answers: the active network, when it is not our own VPN
                 if (defaultNetwork == null) defaultNetwork = underlyingActive(cm)
+                VpnBridge.log("debug", "network: monitor on, default ${defaultNetwork ?: "unknown yet"}")
             }
             network = defaultNetwork
         }
@@ -113,6 +114,7 @@ object DefaultNetworkMonitor {
 
     private fun publishTo(listener: InterfaceUpdateListener, network: Network?) {
         if (network == null) {
+            VpnBridge.log("warn", "network: no default network")
             listener.updateDefaultInterface("", -1, false, false)
             return
         }
@@ -126,11 +128,12 @@ object DefaultNetworkMonitor {
                 null
             }
             if (name != null && index != null) {
+                VpnBridge.log("debug", "network: default is $name (index $index)")
                 listener.updateDefaultInterface(name, index, false, false)
                 return
             }
             Thread.sleep(100)
         }
-        Log.w(TAG, "no interface for the default network")
+        VpnBridge.log("warn", "network: no interface for the default network $network (link properties missing)")
     }
 }

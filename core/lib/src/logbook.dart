@@ -32,11 +32,17 @@ class LogBook {
   static final _stamped = RegExp(r'^[+-]\d{4} \d{4}-\d\d-\d\d \d\d:\d\d:\d\d (TRACE|DEBUG|INFO|WARN|ERROR|FATAL|PANIC) (.*)$');
   static final _bare = RegExp(r'^(TRACE|DEBUG|INFO|WARN|ERROR|FATAL|PANIC)\[\d+\] ?(.*)$');
 
+  // libbox hands its lines over coloured ("\x1b[33mWARN\x1b[0m[0003] …"): the colours go, the level stays
+  static final _ansi = RegExp(r'\x1B\[[0-9;]*m');
+
   /// A line sing-box wrote; the runtime's own lines ("[jormd] …") count as the core's.
-  void singBox(String raw) {
+  /// [tag]: whose sing-box it is when it is not the main one ("ping", "speed"): shown before the text.
+  void singBox(String raw, {String? tag}) {
+    if (raw.contains('\x1B')) raw = raw.replaceAll(_ansi, '');
     if (raw.startsWith('[jormd] ')) return note('warn', raw.substring(8));
     final m = _stamped.firstMatch(raw) ?? _bare.firstMatch(raw);
-    _add('sing-box', m == null ? 'info' : _level(m[1]!), m == null ? raw : m[2]!);
+    final text = m == null ? raw : m[2]!;
+    _add('sing-box', m == null ? 'info' : _level(m[1]!), tag == null ? text : '[$tag] $text');
   }
 
   /// A line of the core's own: [level] is debug, info, warn or error.

@@ -24,6 +24,10 @@ class Probe {
   final int port;
   final String secret;
 
+  /// Told why a latency test of [Probe.delay] got no answer ("socks: reply 4", "request: timeout");
+  /// set by the caller that wants the reasons in the log (a UI ping), not by Auto.
+  void Function(String tag, String reason)? onFail;
+
   /// The user name that has a name resolved through the DNS server [tag] and nothing else.
   static String dnsUser(String tag) => 'dns-check/$tag';
 
@@ -107,13 +111,20 @@ Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 500
     final sw = Stopwatch()..start();
     final int cold;
     final bool keep;
+    var stage = 'connect to the test inbound';
     try {
       w = await _Wire.connect(probe.port).timeout(left());
+      stage = 'socks to ${u.host}:$port';
       await w.socks(tag, probe.secret, u.host, port).timeout(left());
-      if (https) await w.secure(u.host).timeout(left());
+      if (https) {
+        stage = 'tls with ${u.host}';
+        await w.secure(u.host).timeout(left());
+      }
+      stage = 'request';
       keep = await w.request(req).timeout(left());
       cold = sw.elapsedMilliseconds;
-    } catch (_) {
+    } catch (e) {
+      probe.onFail?.call(tag, '$stage: ${e is TimeoutException ? 'no answer in ${timeoutMs ~/ 1000} s' : _why(e)}');
       return -1;
     }
     if (!keep) return cold;
@@ -128,6 +139,9 @@ Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 500
     w?.close();
   }
 }
+
+/// An error as one short phrase for the log ("SocketException: socks: reply 4" -> "socks: reply 4").
+String _why(Object e) => e is SocketException ? (e.message.isEmpty ? '${e.osError ?? e}' : e.message) : '$e';
 
 /// Whether the site [dest] (`host:port`) opens through [tag]: port 443 — a TLS handshake
 /// with it (its certificate valid for the host), port 80 — an answer to HEAD /. null when
@@ -248,7 +262,10 @@ class _Wire {
     final h = utf8.encode(host);
     await _write([5, 1, 0, 3, h.length, ...h, port >> 8, port & 0xff]);
     final r = await _take(4);
-    if (r[1] != 0) throw SocketException('socks: reply ${r[1]}');
+    if (r[1] != 0) {
+      const names = ['', 'general failure', 'not allowed', 'network unreachable', 'host unreachable', 'connection refused', 'TTL expired'];
+      throw SocketException('socks: reply ${r[1]}${r[1] < names.length ? ' (${names[r[1]]})' : ''}');
+    }
     await _take(switch (r[3]) { 1 => 4, 4 => 16, _ => (await _take(1))[0] } + 2);
   }
 
