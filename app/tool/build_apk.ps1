@@ -52,9 +52,11 @@ $repo = (Resolve-Path (Join-Path $app '..')).Path
 $aar = Join-Path $app 'android_overlay/app/libs/libbox.aar'
 
 # ── toolchain ────────────────────────────────────────────────────────────────────────────
-$javaHome = Pick 'JAVA_HOME' (Join-Path $Root 'jdk-17')
-$sdk = Pick 'ANDROID_HOME' (Join-Path $Root 'android-sdk')
-$flutterBin = Join-Path (Pick 'FLUTTER_ROOT' (Join-Path $Root 'flutter')) 'bin'
+# [IO.Path]::Combine, not Join-Path: on a Linux runner Join-Path fails on the G: drive of $Root
+# even when the env var wins.
+$javaHome = Pick 'JAVA_HOME' ([IO.Path]::Combine($Root, 'jdk-17'))
+$sdk = Pick 'ANDROID_HOME' ([IO.Path]::Combine($Root, 'android-sdk'))
+$flutterBin = Join-Path (Pick 'FLUTTER_ROOT' ([IO.Path]::Combine($Root, 'flutter'))) 'bin'
 $flutter = Join-Path $flutterBin $(if ($onWin) { 'flutter.bat' } else { 'flutter' })
 if (-not (Test-Path $flutter)) {
     $gc = Get-Command flutter -ErrorAction SilentlyContinue   # CI: flutter-action puts it on PATH
