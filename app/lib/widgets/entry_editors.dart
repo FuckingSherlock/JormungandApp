@@ -15,6 +15,7 @@ import 'nodes_help.dart';
 import 'nodes_menus.dart';
 import 'nodes_text.dart';
 import 'pick_parts.dart';
+import 'route_check.dart';
 
 /// The profile editor and the chain editor (mockup 70-profile-forms.js). A draft ([Profile] /
 /// [Chain] that is not in the catalog) is changed through the core's `CatalogDrafts` and handed to
@@ -615,7 +616,7 @@ class _ChainEditorState extends State<_ChainEditor> {
             padding: const EdgeInsets.fromLTRB(18, 6, 18, 4),
             child: const SizedBox.shrink(),
           ),
-          _RouteCheck(draft: _d),
+          RouteCheck(draft: _d),
           SetGroup(
             children: [
               SetRow(
@@ -819,62 +820,3 @@ class _ChainEditorState extends State<_ChainEditor> {
   }
 }
 
-/// `#cc-test`: the route check box. The check itself (every exit through every entry, the
-/// working pairs listed) needs a pair ping in the host; until then the box only explains it.
-// TODO(ui): the route check - pings the entries, then every exit through each entry (mockup
-// testChainRoute, 70-profile-forms.js); the host has no pair ping yet.
-class _RouteCheck extends StatefulWidget {
-  const _RouteCheck({required this.draft});
-
-  final Chain draft;
-
-  @override
-  State<_RouteCheck> createState() => _RouteCheckState();
-}
-
-class _RouteCheckState extends State<_RouteCheck> {
-  bool _tried = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final l10n = context.l10n;
-    final catalog = CoreHostScope.of(context).catalog;
-    final nEntry = catalog.chainEntryRefs(widget.draft).length;
-    final nExit = catalog.chainExitRefs(widget.draft).length;
-    final ok = nEntry > 0 && nExit > 0;
-    final String text;
-    Color color = c.t2;
-    if (!ok) {
-      text = nEntry == 0
-          ? l10n.entryHasNoSelectedWorkingNodes
-          : l10n.exitHasNoSelectedWorkingNodes;
-      color = c.warn;
-    } else if (_tried) {
-      text = l10n.notAvailableYet;
-    } else {
-      text = l10n.triesEveryExitNodeThroughThe;
-    }
-    return NodesBox(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                text,
-                style: TextStyle(fontSize: 13, height: 1.4, color: color),
-              ),
-            ),
-            const SizedBox(width: 12),
-            SecondaryButton(
-              label: _tried ? l10n.checkAgain : l10n.checkRoute,
-              icon: Icons.bolt,
-              onPressed: ok ? () => setState(() => _tried = true) : null,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

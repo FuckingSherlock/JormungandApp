@@ -1610,6 +1610,37 @@ class LiveCoreHost extends CoreHost {
     return _pingNodes([for (final r in refs) r.node]);
   }
 
+  @override
+  Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits) async {
+    final res = List<int>.filled(exits.length, -1);
+    final at = [
+      for (var i = 0; i < exits.length; i++)
+        if (exits[i].outbound != null && exits[i].usable) i,
+    ];
+    if (entry.outbound == null || !entry.usable || at.isEmpty) return res;
+    try {
+      await for (final l in api.ping({
+        'pairs': [
+          for (final i in at)
+            {
+              'key': '$i',
+              'entry': {'outbound': entry.outbound},
+              'exit': {'outbound': exits[i].outbound},
+            },
+        ],
+        if (catalog.connCfg.testUrl.isNotEmpty) 'url': catalog.connCfg.testUrl,
+        'checkers': catalog.connCfg.checkers,
+      })) {
+        final i = int.tryParse('${l['key']}'), ms = l['ms'];
+        if (l['kind'] != 'p' || i == null || i < 0 || i >= res.length || ms is! num) continue;
+        res[i] = ms.round();
+      }
+    } catch (_) {
+      // the tester could not run: no pair answered
+    }
+    return res;
+  }
+
   // ── share, speed test, manual servers ──
 
   @override

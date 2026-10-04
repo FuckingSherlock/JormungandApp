@@ -72,7 +72,7 @@ Android-сторона: `JormungandVpnService` — служба переднег
 
 ## TODO
 
-- Nodes, заглушки: «Проверить маршрут» цепочки (pair-ping); «Import config file» читает файл как текст ссылок / URL или картинку как QR, но не sing-box JSON / Clash YAML целиком (в ядре нет импорта из тела конфига).
+- Nodes, заглушки: «Import config file» читает файл как текст ссылок / URL или картинку как QR, но не sing-box JSON / Clash YAML целиком (в ядре нет импорта из тела конфига).
 - Logs: подписи тостов в оболочке.
 - Kotlin: `registerMyInterface` — пустышка.
 - `filesDir/libbox/configuration.json` содержит секрет API sing-box.

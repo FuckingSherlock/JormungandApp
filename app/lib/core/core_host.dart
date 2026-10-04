@@ -382,6 +382,11 @@ abstract class CoreHost extends ChangeNotifier {
   Future<void> pingAll();
   Future<void> pingEntry(String id);
 
+  /// The route check's pair ping (`backend.pingPair`): every one of [exits] through [entry] (the
+  /// exit's outbound detoured via the entry's), in one core call. Latency per exit in order,
+  /// `-1` = no answer (also for a server with no usable outbound). Nothing goes to the ping book.
+  Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits);
+
   // ── share, speed test, manual servers ──
 
   /// The share link of a server, null when it has none (no outbound, unsupported).

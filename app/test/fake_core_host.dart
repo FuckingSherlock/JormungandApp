@@ -349,6 +349,18 @@ class FakeCoreHost extends CoreHost {
   @override
   Future<void> pingEntry(String id) async => calls.add('pingEntry $id');
 
+  /// The route check's answers: `pairMs[exit.id]` (default: 50 ms); [pairGate], when set, holds
+  /// every `pingPairs` call until it completes (a test can cancel meanwhile).
+  final Map<String, int> pairMs = {};
+  Completer<void>? pairGate;
+
+  @override
+  Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits) async {
+    calls.add('pingPairs ${entry.id} ${exits.length}');
+    await pairGate?.future;
+    return [for (final x in exits) pairMs[x.id] ?? 50];
+  }
+
   @override
   String? shareLink(CatalogNode n) => 'vless://${n.address}#${n.name}';
 
