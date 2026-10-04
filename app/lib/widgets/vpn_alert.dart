@@ -93,15 +93,18 @@ class _AlertBox extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var i = 0; i < buttons.length; i++) ...[
-                    if (i > 0) const SizedBox(height: 6),
-                    buttons[i],
+              // stretch needs a bounded width: the buttons are as wide as the widest one
+              IntrinsicWidth(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0; i < buttons.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 6),
+                      buttons[i],
+                    ],
                   ],
-                ],
+                ),
               ),
             ],
           ),

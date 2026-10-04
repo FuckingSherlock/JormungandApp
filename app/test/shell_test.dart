@@ -19,10 +19,12 @@ void main() {
 
     await tester.tap(find.byIcon(AppTab.settings.icon));
     await tester.pumpAndSettle();
-    expect(
-      find.byType(Slider),
-      findsOneWidget,
-    ); // Settings -> Appearance -> Text size
+    // the Settings tab is a menu of sections; the Text size slider is in Appearance
+    expect(find.byKey(const ValueKey('settings-setlook')), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('settings-setlook')));
+    await tester.pumpAndSettle();
+    expect(find.byType(Slider), findsOneWidget);
   });
 
   test('text scale is clamped to 90-120 % in 5 % steps', () {

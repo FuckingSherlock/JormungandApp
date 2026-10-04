@@ -200,9 +200,12 @@ class _TotalRow extends StatelessWidget {
     return FittedBox(
       fit: BoxFit.scaleDown,
       alignment: Alignment.centerLeft,
-      child: SizedBox(
-        width: monoSlot(context, 13, 13),
+      // the 13-character slot is a minimum: wider content (big text size, wide glyphs) grows the
+      // row and the FittedBox scales it down, instead of overflowing
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minWidth: monoSlot(context, 13, 13)),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.baseline,
           textBaseline: TextBaseline.alphabetic,

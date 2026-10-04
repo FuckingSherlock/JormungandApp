@@ -7,13 +7,19 @@ import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/format.dart';
 import 'package:jormungand/shell/home_shell.dart';
 import 'package:jormungand/widgets/connect_dock.dart';
+import 'package:jormungand/widgets/segments.dart';
 
 import 'fake_core_host.dart';
 
-/// 320 dp wide, like the smallest phone the mockup is checked at.
-Future<void> pumpApp(WidgetTester tester, FakeCoreHost host) async {
+/// 320 dp wide by default, like the smallest phone the mockup is checked at. The test font (Ahem)
+/// is far wider than a real one, so a test that taps a wrapped alert asks for a wider [width].
+Future<void> pumpApp(
+  WidgetTester tester,
+  FakeCoreHost host, {
+  double width = 320,
+}) async {
   tester.view.devicePixelRatio = 2;
-  tester.view.physicalSize = const Size(640, 1280);
+  tester.view.physicalSize = Size(width * 2, 1280);
   addTearDown(tester.view.reset);
   await tester.pumpWidget(JormungandApp(coreHost: host));
   await tester.pumpAndSettle();
@@ -112,7 +118,7 @@ void main() {
     tester,
   ) async {
     final host = FakeCoreHost();
-    await pumpApp(tester, host);
+    await pumpApp(tester, host, width: 800);
     host.setPhase(
       ConnectionPhase.down,
       down: VpnDown(
@@ -149,15 +155,21 @@ void main() {
     expect(host.sysProxy, isTrue);
   });
 
-  testWidgets('Android: no system proxy segment, mode stays TUN', (
-    tester,
-  ) async {
+  testWidgets('Android: only Route is left, mode stays TUN', (tester) async {
     final host = FakeCoreHost(android: true);
     await pumpApp(tester, host);
+    // no TUN | Proxy switch, no system proxy: Route alone across the card
     expect(find.text('Sys proxy'), findsNothing);
-    await tester.tap(find.text('Proxy'));
+    expect(find.text('TUN'), findsNothing);
+    expect(find.text('Proxy'), findsNothing);
+    final card = find.byType(SegmentsCard);
+    expect(find.descendant(of: card, matching: find.text('Global')), findsOne);
+    expect(find.descendant(of: card, matching: find.text('Rules')), findsOne);
+    await tester.tap(find.descendant(of: card, matching: find.text('Global')));
     await tester.pump();
+    expect(host.global, isTrue);
     expect(host.tun, isTrue);
+    expect(host.sysProxy, isFalse);
   });
 
   testWidgets('everything fits 320 dp at the largest text size', (
@@ -182,6 +194,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('settings-setlook')));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(Slider), const Offset(600, 0));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute(); // Back closes the sheet
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(AppTab.home.icon));
     await tester.pumpAndSettle();
