@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:jormungand_core/jormungand_core.dart' show EventRecord;
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
@@ -55,6 +56,9 @@ class _HomeShellState extends State<HomeShell> {
   final _nodesKey = GlobalKey<NodesPageState>();
 
   LogsController? _logs;
+  StreamSubscription<EventRecord>? _notifs;
+  Timer? _flyTimer;
+  final _navKey = GlobalKey();
 
   /// A context under the [AppLinksScope] of [build]: the sheets the links open carry it over.
   final _inner = GlobalKey();
@@ -70,11 +74,14 @@ class _HomeShellState extends State<HomeShell> {
     _logs ??= LogsController(host)
       ..l10n = context.l10n
       ..start();
+    _notifs ??= _logs!.notifications.listen(_notify);
   }
 
   @override
   void dispose() {
     _notices?.cancel();
+    _notifs?.cancel();
+    _flyTimer?.cancel();
     _logs?.dispose();
     super.dispose();
   }
@@ -130,9 +137,103 @@ class _HomeShellState extends State<HomeShell> {
       'notSaved' => l10n.couldNotSaveTheState(n.text),
       _ => n.text,
     };
+    _flyTimer?.cancel();
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// A background journal event as a toast (mockup `notify` + `toast(msg, act, onTap)`): a tap
+  /// opens Logs -> Events at it; when it goes by itself it flies into the Logs item of the nav.
+  void _notify(EventRecord e) {
+    if (!mounted || _logs == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final text = _logs!.words.text(e);
+    final textKey = GlobalKey();
+    _flyTimer?.cancel();
+    messenger.hideCurrentSnackBar();
+    final ctl = messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        // stays until the timer below (it needs the rect for the flight) or a tap
+        duration: const Duration(hours: 1),
+        content: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            _flyTimer?.cancel();
+            messenger.hideCurrentSnackBar();
+            _links.openLogsEvent?.call(e.id);
+          },
+          child: SizedBox(
+            width: double.infinity,
+            child: Text(text, key: textKey),
+          ),
+        ),
+      ),
+    );
+    _flyTimer = Timer(const Duration(seconds: 6), () {
+      if (!mounted) return;
+      final from = _rectOf(textKey);
+      final to = _rectOf(_navKey);
+      final reduce = MediaQuery.disableAnimationsOf(context);
+      if (from != null && to != null && !reduce) {
+        // Logs is the third of the four equal items of the bar
+        final target = Offset(to.left + to.width * 2.5 / 4, to.center.dy - 8);
+        ctl.close();
+        messenger.removeCurrentSnackBar();
+        _fly(text, from, target);
+      } else {
+        ctl.close();
+      }
+    });
+  }
+
+  Rect? _rectOf(GlobalKey k) {
+    final o = k.currentContext?.findRenderObject();
+    if (o is! RenderBox || !o.attached || !o.hasSize) return null;
+    return o.localToGlobal(Offset.zero) & o.size;
+  }
+
+  /// The toast's text shrinks and fades towards [target] (transform and opacity only, 0.4 s).
+  void _fly(String text, Rect from, Offset target) {
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    final theme = Theme.of(context);
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned.fromRect(
+        rect: from.inflate(14), // the snackbar's padding around the text
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeIn,
+            onEnd: () => entry.remove(),
+            builder: (_, t, child) => Transform.translate(
+              offset: (target - from.center) * t,
+              child: Transform.scale(
+                scale: 1 - 0.9 * t,
+                child: Opacity(opacity: 1 - t, child: child),
+              ),
+            ),
+            child: Material(
+              color: theme.colorScheme.inverseSurface,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(
+                  text,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: theme.colorScheme.onInverseSurface),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
   }
 
   /// Home with nothing to connect through (mockup `dockTap`): Nodes, and its "+".
@@ -177,6 +278,7 @@ class _HomeShellState extends State<HomeShell> {
                 ],
               ),
               bottomNavigationBar: DecoratedBox(
+                key: _navKey,
                 decoration: BoxDecoration(
                   border: Border(top: BorderSide(color: c.border)),
                 ),
