@@ -2235,8 +2235,8 @@ textarea.form-input{resize:none;font-family:var(--mono);font-size:13px;line-heig
         <div class="form-label" style="padding:8px 18px 0">Updates</div>
         <div class="set-group">
           <div class="set-row">
-            <div class="set-label">Update every<div class="set-hint">Empty = auto: the provider’s period, else the one in Auto mode · 0 = never</div></div>
-            <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="auto"><span style="color:var(--t2);font-size:15px">h</span>
+            <div class="set-label">Update every<div class="set-hint">Empty = auto: the provider’s period, else the one in Auto mode · 0 = never · at least 10 s</div></div>
+            <button class="set-value" id="sf-interval" onclick="openIntervalDialog('srcEvery')"></button>
           </div>
           <div class="set-row">
             <div class="set-label">Reconnect after update</div>
@@ -2815,7 +2815,7 @@ Object.assign(I18N, { ru: {
   "Edit subscription": "Изменить подписку",
   "Edit: priority order, Fastest / Priority": "Изменить: порядок приоритета, Fastest / «Приоритет»",
   "Edit: reorder, switch sources and servers on / off": "Изменить: порядок, вкл. / выкл. источников и узлов",
-  "Empty = auto: the provider’s period, else the one in Auto mode · 0 = never": "Пусто = авто: период провайдера, иначе из режима Auto · 0 = никогда",
+  "Empty = auto: the provider’s period, else the one in Auto mode · 0 = never · at least 10 s": "Пусто = авто: период провайдера, иначе из режима Auto · 0 = никогда · не меньше 10 с",
   "English": "English",
   "Enter a port 1024–65535": "Введите порт 1024–65535",
   "Enter a valid address first": "Сначала введите корректный адрес",
@@ -3275,6 +3275,9 @@ Object.assign(I18N, { ru: {
   "Update": "Обновить",
   "Update all subscriptions": "Обновить все подписки",
   "Update all subscriptions every": "Обновлять все подписки каждые",
+  "Update this subscription every": "Обновлять эту подписку каждые",
+  "Empty = auto · 0 = never · from 10 seconds to 30 days": "Пусто = авто · 0 = никогда · от 10 секунд до 30 дней",
+  "never": "никогда",
   "Update every": "Обновлять каждые",
   "Update failed": "Не удалось обновить",
   "Update the rule set every": "Обновлять набор правил каждые",
@@ -3992,7 +3995,7 @@ let sourcesData = {
     gone: genNodes(20, 'sub').slice(18).map((n, i) => Object.assign(n, { goneAt: Date.now() - (i ? 13*24 : 30) * 3600e3 })), demoChurn: true }),
   src2: mkSub('src2', 'Work Servers', 9, { format:'clash', disabledNodes:['n8'], updatedAt: Date.now() - 26*3600e3, usage:{ used:38.2, total:100 }, expire:'2026-12-01' }),
   src3: { id:'src3', kind:'node', name:'Manual', enabled:true, inAuto:true, offNodes:[], disabledNodes:[], nodes:genNodes(2,'node') },
-  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updateInterval:6, updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo',
+  src4: mkSub('src4', 'Gaming Low-Ping', 6, { format:'base64', updateInterval:21600, updatedAt: Date.now() - 5*3600e3, usage:{ used:171.9, total:200 }, expire:'2026-10-03', userAgent:'mihomo',
     announce:'Maintenance on Oct 3, 02:00–04:00 UTC: servers may drop for a few minutes.', supportUrl:'https://t.me/example_support' }),
 };
 Object.values(sourcesData).forEach(s => s.count = s.nodes.length);
@@ -5870,10 +5873,11 @@ function openSrcForm(id, prefillUrl) {
   document.getElementById('sf-name').value = id ? s.name : '';
   if (!isGroup) {
     // Empty = 'auto': follows the global period from the Auto mode sheet.
-    document.getElementById('sf-interval').value = s.updateInterval === 'auto' ? '' : s.updateInterval;
+    // updateInterval is in seconds ('auto' or a number); the form edits a draft through the interval dialog.
+    sfInterval = s.updateInterval;
     // auto = the provider's period (profile-update-interval) if it sent one, else the global one
-    const autoSecs = autoCfg.subsEvery && s.providerInterval ? Math.max(1, s.providerInterval) * 3600 : autoCfg.subsEvery;
-    document.getElementById('sf-interval').placeholder = 'auto · ' + subsEveryText(autoSecs);
+    sfAutoSecs = autoCfg.subsEvery && s.providerInterval ? Math.max(1, s.providerInterval) * 3600 : autoCfg.subsEvery;
+    renderSrcInterval();
     document.getElementById('sf-reload').classList.toggle('on', !!s.reloadAfterUpdate);
     document.getElementById('sf-testafter').classList.toggle('on', !!s.testAfterUpdate);
     document.getElementById('sf-hwid').classList.toggle('on', !!s.hwid);
@@ -5888,11 +5892,18 @@ function openSrcForm(id, prefillUrl) {
   openSheet('srcform');
 }
 
+// The own update period of the form: 'auto' or seconds (0 = never, else at least 10 s, checked by the dialog).
+let sfInterval = 'auto', sfAutoSecs = 0;
+function srcFormInterval() { return sfInterval; }
+function renderSrcInterval() {
+  document.getElementById('sf-interval').innerHTML = (sfInterval === 'auto' ? 'auto · ' + subsEveryText(sfAutoSecs) : sfInterval === 0 ? 'never' : fmtEvery(sfInterval)) + CHEVRON_R;
+}
+
 function saveSrcForm() {
   const name = document.getElementById('sf-name').value.trim();
   const fields = {
     url: document.getElementById('sf-url').value.trim(),
-    updateInterval: document.getElementById('sf-interval').value.trim() === '' ? 'auto' : Math.max(0, parseInt(document.getElementById('sf-interval').value, 10) || 0),
+    updateInterval: srcFormInterval(),
     reloadAfterUpdate: document.getElementById('sf-reload').classList.contains('on'),
     testAfterUpdate: document.getElementById('sf-testafter').classList.contains('on'),
     hwid: document.getElementById('sf-hwid').classList.contains('on'),
@@ -8686,6 +8697,9 @@ const INTERVALS = {
                 hint: 'From 10 s to 60 min · at a connection check, never more often' },
   subsEvery:  { title: 'Update all subscriptions every', units: [['seconds', 1], ['minutes', 60], ['hours', 3600], ['days', 86400]], min: 10, max: 30 * 86400, off: true,
                 hint: '0 = off (only when you tap Update) · from 10 seconds to 30 days' },
+  // Nodes → subscription form: the own period ('auto' = empty field); the draft lives in sfInterval.
+  srcEvery:   { title: 'Update this subscription every', units: [['seconds', 1], ['minutes', 60], ['hours', 3600]], min: 10, max: 30 * 86400, off: true, auto: true,
+                hint: 'Empty = auto · 0 = never · from 10 seconds to 30 days', get: () => sfInterval, set: v => { sfInterval = v; renderSrcInterval(); } },
   // Rules → Rule sets → one set; get / set point the dialog at a value outside autoCfg.
   rsEvery:    { title: 'Update the rule set every', units: [['minutes', 60], ['hours', 3600], ['days', 86400]], min: 600, max: 30 * 86400,
                 hint: 'From 10 minutes to 30 days', get: () => rsDraft.every, set: v => { rsDraft.every = v; renderRsForm(); } },
@@ -8699,12 +8713,13 @@ function openIntervalDialog(key) {
   document.getElementById('iv-hint').textContent = c.hint;
   document.getElementById('iv-unit').innerHTML = c.units.map(([l, m]) => `<option value="${m}" ${m === mul ? 'selected' : ''}>${l}</option>`).join('');
   const input = document.getElementById('iv-value');
-  input.value = v / mul;
+  input.value = v === 'auto' ? '' : v / mul;
   openSheet('interval');
   input.focus(); input.select();
 }
 function saveIntervalDialog() {
   const c = INTERVALS[ivKey], raw = document.getElementById('iv-value').value.trim();
+  if (raw === '' && c.auto) { c.set('auto'); closeSheet('interval'); return; }
   const v = Number(raw) * Number(document.getElementById('iv-unit').value);
   if (raw === '' || !Number.isInteger(v) || !(v === 0 && c.off) && (v < c.min || v > c.max)) { toast(c.hint); return; }
   if (c.set) c.set(v); else setAutoCfg(ivKey, v);

@@ -31,10 +31,11 @@ function openSrcForm(id, prefillUrl) {
   document.getElementById('sf-name').value = id ? s.name : '';
   if (!isGroup) {
     // Empty = 'auto': follows the global period from the Auto mode sheet.
-    document.getElementById('sf-interval').value = s.updateInterval === 'auto' ? '' : s.updateInterval;
+    // updateInterval is in seconds ('auto' or a number); the form edits a draft through the interval dialog.
+    sfInterval = s.updateInterval;
     // auto = the provider's period (profile-update-interval) if it sent one, else the global one
-    const autoSecs = autoCfg.subsEvery && s.providerInterval ? Math.max(1, s.providerInterval) * 3600 : autoCfg.subsEvery;
-    document.getElementById('sf-interval').placeholder = 'auto · ' + subsEveryText(autoSecs);
+    sfAutoSecs = autoCfg.subsEvery && s.providerInterval ? Math.max(1, s.providerInterval) * 3600 : autoCfg.subsEvery;
+    renderSrcInterval();
     document.getElementById('sf-reload').classList.toggle('on', !!s.reloadAfterUpdate);
     document.getElementById('sf-testafter').classList.toggle('on', !!s.testAfterUpdate);
     document.getElementById('sf-hwid').classList.toggle('on', !!s.hwid);
@@ -49,11 +50,18 @@ function openSrcForm(id, prefillUrl) {
   openSheet('srcform');
 }
 
+// The own update period of the form: 'auto' or seconds (0 = never, else at least 10 s, checked by the dialog).
+let sfInterval = 'auto', sfAutoSecs = 0;
+function srcFormInterval() { return sfInterval; }
+function renderSrcInterval() {
+  document.getElementById('sf-interval').innerHTML = (sfInterval === 'auto' ? 'auto · ' + subsEveryText(sfAutoSecs) : sfInterval === 0 ? 'never' : fmtEvery(sfInterval)) + CHEVRON_R;
+}
+
 function saveSrcForm() {
   const name = document.getElementById('sf-name').value.trim();
   const fields = {
     url: document.getElementById('sf-url').value.trim(),
-    updateInterval: document.getElementById('sf-interval').value.trim() === '' ? 'auto' : Math.max(0, parseInt(document.getElementById('sf-interval').value, 10) || 0),
+    updateInterval: srcFormInterval(),
     reloadAfterUpdate: document.getElementById('sf-reload').classList.contains('on'),
     testAfterUpdate: document.getElementById('sf-testafter').classList.contains('on'),
     hwid: document.getElementById('sf-hwid').classList.contains('on'),

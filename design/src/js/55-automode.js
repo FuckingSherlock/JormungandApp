@@ -52,6 +52,9 @@ const INTERVALS = {
                 hint: 'From 10 s to 60 min · at a connection check, never more often' },
   subsEvery:  { title: 'Update all subscriptions every', units: [['seconds', 1], ['minutes', 60], ['hours', 3600], ['days', 86400]], min: 10, max: 30 * 86400, off: true,
                 hint: '0 = off (only when you tap Update) · from 10 seconds to 30 days' },
+  // Nodes → subscription form: the own period ('auto' = empty field); the draft lives in sfInterval.
+  srcEvery:   { title: 'Update this subscription every', units: [['seconds', 1], ['minutes', 60], ['hours', 3600]], min: 10, max: 30 * 86400, off: true, auto: true,
+                hint: 'Empty = auto · 0 = never · from 10 seconds to 30 days', get: () => sfInterval, set: v => { sfInterval = v; renderSrcInterval(); } },
   // Rules → Rule sets → one set; get / set point the dialog at a value outside autoCfg.
   rsEvery:    { title: 'Update the rule set every', units: [['minutes', 60], ['hours', 3600], ['days', 86400]], min: 600, max: 30 * 86400,
                 hint: 'From 10 minutes to 30 days', get: () => rsDraft.every, set: v => { rsDraft.every = v; renderRsForm(); } },
@@ -65,12 +68,13 @@ function openIntervalDialog(key) {
   document.getElementById('iv-hint').textContent = c.hint;
   document.getElementById('iv-unit').innerHTML = c.units.map(([l, m]) => `<option value="${m}" ${m === mul ? 'selected' : ''}>${l}</option>`).join('');
   const input = document.getElementById('iv-value');
-  input.value = v / mul;
+  input.value = v === 'auto' ? '' : v / mul;
   openSheet('interval');
   input.focus(); input.select();
 }
 function saveIntervalDialog() {
   const c = INTERVALS[ivKey], raw = document.getElementById('iv-value').value.trim();
+  if (raw === '' && c.auto) { c.set('auto'); closeSheet('interval'); return; }
   const v = Number(raw) * Number(document.getElementById('iv-unit').value);
   if (raw === '' || !Number.isInteger(v) || !(v === 0 && c.off) && (v < c.min || v > c.max)) { toast(c.hint); return; }
   if (c.set) c.set(v); else setAutoCfg(ivKey, v);

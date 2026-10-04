@@ -1359,5 +1359,9 @@
   "next {0}": "next2",
   "{#0} on": "onText2",
   "{0} direct": "direct2",
-  "Last: {0} Mbps": "lastMbps"
+  "Last: {0} Mbps": "lastMbps",
+  "Empty = auto: the provider’s period, else the one in Auto mode · 0 = never · at least 10 s": "emptyAutoTheProviderSPeriod2",
+  "Update this subscription every": "updateThisSubscriptionEvery",
+  "Empty = auto · 0 = never · from 10 seconds to 30 days": "emptyAuto0NeverFrom10",
+  "never": "never2"
 }

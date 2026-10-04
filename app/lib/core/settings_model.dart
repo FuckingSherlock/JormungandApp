@@ -208,6 +208,13 @@ const Map<String, IntervalLimits> intervals = {
     max: 30 * 86400,
     off: true,
   ),
+  // a subscription's own period (Nodes -> subscription form); an empty field = 'auto'
+  'srcEvery': IntervalLimits(
+    units: [('seconds', 1), ('minutes', 60), ('hours', 3600)],
+    min: 10,
+    max: 30 * 86400,
+    off: true,
+  ),
 };
 
 /// The multiplier a [seconds] value opens in: the largest unit that divides it (an off value opens

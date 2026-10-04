@@ -365,7 +365,9 @@ class AppTextField extends StatelessWidget {
           keyboardType ?? (lines > 1 ? TextInputType.multiline : null),
       obscureText: obscure,
       autocorrect: false,
-      enableSuggestions: false,
+      // suggestions on (autocorrect stays off): with them off keyboards like SwiftKey drop the
+      // suggestion strip and with it the clipboard button
+      enableSuggestions: !obscure,
       autofocus: autofocus,
       textInputAction: textInputAction,
       onChanged: onChanged,
@@ -423,7 +425,9 @@ class InlineField extends StatelessWidget {
       obscureText: obscure,
       keyboardType: keyboardType,
       autocorrect: false,
-      enableSuggestions: false,
+      // suggestions on (autocorrect stays off): with them off keyboards like SwiftKey drop the
+      // suggestion strip and with it the clipboard button
+      enableSuggestions: !obscure,
       onChanged: onChanged,
       textAlign: alignLeft ? TextAlign.left : TextAlign.right,
       cursorColor: c.accent,

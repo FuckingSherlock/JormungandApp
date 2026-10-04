@@ -80,8 +80,8 @@
         <div class="form-label" style="padding:8px 18px 0">Updates</div>
         <div class="set-group">
           <div class="set-row">
-            <div class="set-label">Update every<div class="set-hint">Empty = auto: the provider’s period, else the one in Auto mode · 0 = never</div></div>
-            <input class="set-input" id="sf-interval" inputmode="numeric" placeholder="auto"><span style="color:var(--t2);font-size:15px">h</span>
+            <div class="set-label">Update every<div class="set-hint">Empty = auto: the provider’s period, else the one in Auto mode · 0 = never · at least 10 s</div></div>
+            <button class="set-value" id="sf-interval" onclick="openIntervalDialog('srcEvery')"></button>
           </div>
           <div class="set-row">
             <div class="set-label">Reconnect after update</div>

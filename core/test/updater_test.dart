@@ -38,14 +38,16 @@ Map<String, dynamic> _snap(Map<String, dynamic> s, {num subsEvery = 12 * 3600}) 
 void main() {
   group('period', () {
     test('own hours, auto = provider (min 1 h) else global, 0 = never', () {
-      expect(autoUpdatePeriod(_sub('u', interval: 6), 3600), const Duration(hours: 6));
+      expect(autoUpdatePeriod(_sub('u', interval: 6 * 3600), 3600), const Duration(hours: 6));
       expect(autoUpdatePeriod(_sub('u', interval: 0), 3600), isNull);
+      expect(autoUpdatePeriod(_sub('u', interval: 90), 3600), const Duration(seconds: 90));
+      expect(autoUpdatePeriod(_sub('u', interval: 3), 3600), const Duration(seconds: 10));
       expect(autoUpdatePeriod(_sub('u'), 3600), const Duration(hours: 1));
       expect(autoUpdatePeriod(_sub('u'), null), const Duration(hours: 12));
       expect(autoUpdatePeriod(_sub('u', provider: 24), 3600), const Duration(hours: 24));
       expect(autoUpdatePeriod(_sub('u', provider: 0.1), 3600), const Duration(hours: 1));
       expect(autoUpdatePeriod(_sub('u', provider: 24), 0), isNull); // global off = all off
-      expect(autoUpdatePeriod(_sub('u', interval: 6, provider: 24), 3600), const Duration(hours: 6));
+      expect(autoUpdatePeriod(_sub('u', interval: 6 * 3600, provider: 24), 3600), const Duration(hours: 6));
       expect(autoUpdatePeriod({..._sub('u'), 'enabled': false}, 3600), isNull);
       expect(autoUpdatePeriod({'kind': 'node', 'enabled': true}, 3600), isNull);
     });

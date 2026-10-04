@@ -1,12 +1,16 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart' show CatalogNode, Source;
 
 import '../core/core_host.dart';
+import '../core/settings_model.dart';
 import '../l10n/l10n.dart';
 import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
 import 'nodes_menus.dart';
+import 'settings_parts.dart';
 
 /// The subscription / group form and the manual server form (mockup 32-nodes-forms.js). Both are
 /// full-height sheets; what is wrong with the input is told inside the sheet (a toast would hide
@@ -58,7 +62,8 @@ class _SubscriptionForm extends StatefulWidget {
 class _SubscriptionFormState extends State<_SubscriptionForm> {
   late final TextEditingController _url;
   late final TextEditingController _name;
-  late final TextEditingController _interval;
+  /// the own update period: 'auto' or seconds (0 = never)
+  late Object _interval;
   late final TextEditingController _filter;
   late final TextEditingController _password;
   late final TextEditingController _website;
@@ -83,9 +88,7 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
         : SubscriptionSettings.of(s);
     _url = TextEditingController(text: widget.prefillUrl ?? s?.url ?? '');
     _name = TextEditingController(text: s?.name ?? '');
-    _interval = TextEditingController(
-      text: settings.updateInterval is num ? '${settings.updateInterval}' : '',
-    );
+    _interval = settings.updateInterval;
     _filter = TextEditingController(text: settings.filter);
     _password = TextEditingController(text: settings.password);
     _website = TextEditingController(text: settings.website);
@@ -99,10 +102,45 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
 
   @override
   void dispose() {
-    for (final c in [_url, _name, _interval, _filter, _password, _website]) {
+    for (final c in [_url, _name, _filter, _password, _website]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  /// What 'auto' means for this source: the provider's period, else the global one (Auto mode).
+  String _autoText(AppLocalizations l10n) {
+    final global = widget.host.catalog.autoCfg.subsEvery;
+    final s = _edit;
+    final provider = s?.unknown['providerInterval'];
+    final secs = global > 0 && provider is num && provider > 0
+        ? math.max(1, provider) * 3600
+        : global;
+    return secs > 0 ? fmtEvery(l10n, secs) : l10n.off2;
+  }
+
+  Future<void> _pickInterval() async {
+    final l10n = context.l10n;
+    final spec = intervals['srcEvery']!;
+    final cur = _interval is num ? _interval as num : 0;
+    final unit = intervalUnitFor(spec, cur);
+    final hint = l10n.emptyAuto0NeverFrom10;
+    final r = await showNumberUnitDialog(
+      context,
+      title: l10n.updateThisSubscriptionEvery,
+      hint: hint,
+      initial: _interval is num ? fmtNum(cur / unit) : '',
+      units: spec.units,
+      unit: unit,
+      validate: (text, u) =>
+          text.trim().isEmpty || parseInterval(spec, text, u) != null ? null : hint,
+    );
+    if (r == null || !mounted) return;
+    setState(
+      () => _interval = r.text.trim().isEmpty
+          ? 'auto'
+          : parseInterval(spec, r.text, r.unit) ?? _interval,
+    );
   }
 
   void _save() {
@@ -126,13 +164,8 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
         return;
       }
     }
-    final interval = _interval.text.trim();
     final settings = SubscriptionSettings(
-      updateInterval: interval.isEmpty
-          ? 'auto'
-          : ((int.tryParse(interval) ?? 0) < 0
-                ? 0
-                : (int.tryParse(interval) ?? 0)),
+      updateInterval: _interval,
       reloadAfterUpdate: _reload,
       testAfterUpdate: _test,
       hwid: _hwid,
@@ -204,7 +237,7 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
                 lines: 3,
                 mono: true,
                 hint: 'https://…/api/sub/…',
-                keyboardType: TextInputType.url,
+                keyboardType: TextInputType.text, // not .url: SwiftKey hides its clipboard bar on the URL keyboard
               ),
             ),
           FormGroup(
@@ -224,22 +257,14 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
               children: [
                 SetRow(
                   label: l10n.updateEvery,
-                  hint: l10n.emptyAutoTheProviderSPeriod,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      InlineField(
-                        controller: _interval,
-                        width: 70,
-                        hint: l10n.auto,
-                        keyboardType: TextInputType.number,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        l10n.h3,
-                        style: TextStyle(fontSize: 15, color: c.t2),
-                      ),
-                    ],
+                  hint: l10n.emptyAutoTheProviderSPeriod2,
+                  trailing: SetValueButton(
+                    text: _interval is num
+                        ? ((_interval as num) == 0
+                              ? l10n.never2
+                              : fmtEvery(l10n, _interval as num))
+                        : '${l10n.auto} · ${_autoText(l10n)}',
+                    onTap: _pickInterval,
                   ),
                 ),
                 SetRow(

@@ -6,7 +6,6 @@ import 'package:jormungand_core/jormungand_core.dart';
 import '../core/core_host.dart';
 import '../core/rules_text.dart';
 import '../l10n/l10n.dart';
-import '../shell/app_links.dart';
 import '../theme/app_colors.g.dart';
 import '../widgets/app_sheet.dart';
 import '../widgets/apps_sheet.dart';
@@ -21,15 +20,8 @@ import '../widgets/settings_parts.dart' show AmLink;
 /// Pushes the Rules screen over the shell (mockup `openRules`); [at] is a row to scroll to and
 /// flash (`svc:telegram`, `quick:ads`, `quick:region`, `lan`): the journal's "why" link.
 Future<void> showRulesPage(BuildContext context, {String? at}) {
-  final links = AppLinksScope.of(context);
-  return Navigator.of(context).push<void>(
-    MaterialPageRoute(
-      builder: (_) => AppLinksScope(
-        links: links,
-        child: RulesPage(focus: at),
-      ),
-    ),
-  );
+  // a sheet like the mockup's: a swipe down on the header / Back closes it
+  return showAppSheet<void>(context, builder: (_) => RulesPage(focus: at));
 }
 
 /// The Rules screen (mockup markup/55-sheets-rules.html, js/40-rules.js `renderRules`): Apps ->
@@ -317,234 +309,224 @@ class _RulesPageState extends State<RulesPage> {
     );
 
     final appsSet = cat.appRules.length;
-    return Scaffold(
-      backgroundColor: c.bg,
-      body: SafeArea(
-        bottom: false,
-        child: SheetFrame(
-          title: l10n.rules,
-          full: true,
-          titleBadge: RoundHelp(
-            onTap: () => showTermsSheet(context, l10n.rules, [
-              (l10n.order, l10n.checkedTopToBottomAppsYour),
-              (l10n.myRules, l10n.dragToReorderTapOneTo),
-              (l10n.quickRules, l10n.readyMadeLocalNetworkAdsYour),
-              (l10n.test, l10n.typeASiteAnIpOr),
-              (l10n.finalOrder, l10n.theWholeListAsTheEngine),
-            ]),
-          ),
-          subHeader: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SearchBox(
-                    controller: _search,
-                    hint: l10n.searchRulesAndServices,
-                    onChanged: (v) =>
-                        setState(() => _q = v.trim().toLowerCase()),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Tooltip(
-                  message: l10n.whichRuleCatchesAnAddress,
-                  child: OutlinedButton(
-                    onPressed: () => showRuleTest(context),
-                    child: Text(l10n.test),
-                  ),
-                ),
-              ],
+    return SheetFrame(
+      title: l10n.rules,
+      full: true,
+      titleBadge: RoundHelp(
+        onTap: () => showTermsSheet(context, l10n.rules, [
+          (l10n.order, l10n.checkedTopToBottomAppsYour),
+          (l10n.myRules, l10n.dragToReorderTapOneTo),
+          (l10n.quickRules, l10n.readyMadeLocalNetworkAdsYour),
+          (l10n.test, l10n.typeASiteAnIpOr),
+          (l10n.finalOrder, l10n.theWholeListAsTheEngine),
+        ]),
+      ),
+      subHeader: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: SearchBox(
+                controller: _search,
+                hint: l10n.searchRulesAndServices,
+                onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
+              ),
             ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            const SizedBox(width: 8),
+            Tooltip(
+              message: l10n.whichRuleCatchesAnAddress,
+              child: OutlinedButton(
+                onPressed: () => showRuleTest(context),
+                child: Text(l10n.test),
+              ),
+            ),
+          ],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          RulesLabel(l10n.apps),
+          SetGroup(
             children: [
-              RulesLabel(l10n.apps),
-              SetGroup(
-                children: [
-                  ChevronRow(
-                    label: l10n.perAppRouting,
-                    hint: appsSet > 0
-                        ? l10n.appsWithTheirOwnRoute2(appsSet)
-                        : l10n.noAppsSet,
-                    onTap: () => showApps(context),
-                  ),
-                ],
-              ),
-              RulesLabel(
-                l10n.myRules,
-                note: l10n.firstMatchWins,
-                action: AmLink(l10n.add, onTap: () => showRuleForm(context)),
-              ),
-              SetGroup(children: [rulesList]),
-              RulesLabel(l10n.quickRules),
-              SetGroup(
-                children: [
-                  if (_hit('local networks'))
-                    quickRow(
-                      'lan',
-                      l10n.localNetworksDirect,
-                      l10n.alwaysInGlobalToo192168,
-                      Text(
-                        l10n.always,
-                        style: TextStyle(fontSize: 12, color: c.t3),
-                      ),
-                    ),
-                  if (_hit('ads block'))
-                    quickRow(
-                      'quick:ads',
-                      l10n.blockAds,
-                      l10n.knownAdAndTrackerDomains,
-                      MiniToggle(
-                        on: q.ads,
-                        onChanged: (v) {
-                          q.ads = v;
-                          save();
-                        },
-                      ),
-                    ),
-                  if (_hit('region direct'))
-                    quickRow(
-                      'quick:region',
-                      l10n.myRegionDirect,
-                      l10n.itsSitesAndIpsSkipThe,
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (q.regionOn)
-                            DropdownButton<String>(
-                              value: regions.containsKey(q.region)
-                                  ? q.region
-                                  : null,
-                              isDense: true,
-                              underline: const SizedBox.shrink(),
-                              dropdownColor: c.card,
-                              style: TextStyle(fontSize: 13, color: c.t1),
-                              items: [
-                                for (final code in regions.keys)
-                                  DropdownMenuItem(
-                                    value: code,
-                                    child: Text(regionLabel(l10n, code)),
-                                  ),
-                              ],
-                              onChanged: (v) {
-                                if (v == null) return;
-                                q.region = v;
-                                save();
-                              },
-                            ),
-                          MiniToggle(
-                            on: q.regionOn,
-                            onChanged: (v) {
-                              q.regionOn = v;
-                              save();
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-              if (!(_q.isNotEmpty && shownSvc.isEmpty)) ...[
-                RulesLabel(l10n.services),
-                SetGroup(
-                  children: [
-                    SetRow(
-                      label: added.isNotEmpty
-                          ? l10n.added2(added.length)
-                          : l10n.noneAdded,
-                      hint: added.isEmpty
-                          ? l10n.routeAKnownAppOrSite
-                          : added.map(svcName).join(', '),
-                      onTap: () => setState(() {
-                        _svcOpen = !_svcOpen;
-                        _svcAddOpen = false;
-                      }),
-                      trailing: AnimatedRotation(
-                        turns: svcOpenNow ? .5 : 0,
-                        duration: const Duration(milliseconds: 200),
-                        child: Icon(
-                          Icons.keyboard_arrow_down,
-                          size: 18,
-                          color: c.t3,
-                        ),
-                      ),
-                    ),
-                    if (svcOpenNow) ...[
-                      for (final k in shownSvc) svcRow(k),
-                      svcAdd,
-                    ],
-                  ],
-                ),
-              ],
-              RulesLabel(l10n.everythingElse),
-              SetGroup(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Seg3(
-                      wide: true,
-                      options: const [
-                        ('proxy', 'Proxy'),
-                        ('direct', 'Direct'),
-                        ('block', 'Block'),
-                      ],
-                      value: q.finalAction,
-                      onChanged: (v) {
-                        q.finalAction = v;
-                        save();
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              RulesLabel(
-                l10n.targetUnavailable,
-                note: l10n.rulesOnDefaultAndApps,
-              ),
-              SetGroup(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Seg3(
-                      wide: true,
-                      options: [
-                        ('main', l10n.mainFlow2),
-                        ('block', 'Block'),
-                        ('direct', 'Direct'),
-                      ],
-                      value: q.fallback,
-                      onChanged: (v) {
-                        q.fallback = v;
-                        save();
-                      },
-                    ),
-                  ),
-                  SetRow(hint: l10n.whenARuleSProfileChain),
-                ],
-              ),
-              SetGroup(
-                children: [
-                  ChevronRow(
-                    label: l10n.finalOrder,
-                    hint: l10n.theListExactlyAsTheEngine,
-                    onTap: () => showFinalOrder(context),
-                  ),
-                  ChevronRow(
-                    label: l10n.ruleSets,
-                    hint: l10n.listsGeositeGeoipYourOwn(cat.ruleSets.length),
-                    onTap: () => showRuleSets(context),
-                  ),
-                  ChevronRow(
-                    label: l10n.importExport,
-                    hint: l10n.singBoxJsonClashRules,
-                    onTap: () => showRuleIO(context),
-                  ),
-                ],
+              ChevronRow(
+                label: l10n.perAppRouting,
+                hint: appsSet > 0
+                    ? l10n.appsWithTheirOwnRoute2(appsSet)
+                    : l10n.noAppsSet,
+                onTap: () => showApps(context),
               ),
             ],
           ),
-        ),
+          RulesLabel(
+            l10n.myRules,
+            note: l10n.firstMatchWins,
+            action: AmLink(l10n.add, onTap: () => showRuleForm(context)),
+          ),
+          SetGroup(children: [rulesList]),
+          RulesLabel(l10n.quickRules),
+          SetGroup(
+            children: [
+              if (_hit('local networks'))
+                quickRow(
+                  'lan',
+                  l10n.localNetworksDirect,
+                  l10n.alwaysInGlobalToo192168,
+                  Text(
+                    l10n.always,
+                    style: TextStyle(fontSize: 12, color: c.t3),
+                  ),
+                ),
+              if (_hit('ads block'))
+                quickRow(
+                  'quick:ads',
+                  l10n.blockAds,
+                  l10n.knownAdAndTrackerDomains,
+                  MiniToggle(
+                    on: q.ads,
+                    onChanged: (v) {
+                      q.ads = v;
+                      save();
+                    },
+                  ),
+                ),
+              if (_hit('region direct'))
+                quickRow(
+                  'quick:region',
+                  l10n.myRegionDirect,
+                  l10n.itsSitesAndIpsSkipThe,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (q.regionOn)
+                        DropdownButton<String>(
+                          value: regions.containsKey(q.region)
+                              ? q.region
+                              : null,
+                          isDense: true,
+                          underline: const SizedBox.shrink(),
+                          dropdownColor: c.card,
+                          style: TextStyle(fontSize: 13, color: c.t1),
+                          items: [
+                            for (final code in regions.keys)
+                              DropdownMenuItem(
+                                value: code,
+                                child: Text(regionLabel(l10n, code)),
+                              ),
+                          ],
+                          onChanged: (v) {
+                            if (v == null) return;
+                            q.region = v;
+                            save();
+                          },
+                        ),
+                      MiniToggle(
+                        on: q.regionOn,
+                        onChanged: (v) {
+                          q.regionOn = v;
+                          save();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          if (!(_q.isNotEmpty && shownSvc.isEmpty)) ...[
+            RulesLabel(l10n.services),
+            SetGroup(
+              children: [
+                SetRow(
+                  label: added.isNotEmpty
+                      ? l10n.added2(added.length)
+                      : l10n.noneAdded,
+                  hint: added.isEmpty
+                      ? l10n.routeAKnownAppOrSite
+                      : added.map(svcName).join(', '),
+                  onTap: () => setState(() {
+                    _svcOpen = !_svcOpen;
+                    _svcAddOpen = false;
+                  }),
+                  trailing: AnimatedRotation(
+                    turns: svcOpenNow ? .5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 18,
+                      color: c.t3,
+                    ),
+                  ),
+                ),
+                if (svcOpenNow) ...[
+                  for (final k in shownSvc) svcRow(k),
+                  svcAdd,
+                ],
+              ],
+            ),
+          ],
+          RulesLabel(l10n.everythingElse),
+          SetGroup(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Seg3(
+                  wide: true,
+                  options: const [
+                    ('proxy', 'Proxy'),
+                    ('direct', 'Direct'),
+                    ('block', 'Block'),
+                  ],
+                  value: q.finalAction,
+                  onChanged: (v) {
+                    q.finalAction = v;
+                    save();
+                  },
+                ),
+              ),
+            ],
+          ),
+          RulesLabel(l10n.targetUnavailable, note: l10n.rulesOnDefaultAndApps),
+          SetGroup(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Seg3(
+                  wide: true,
+                  options: [
+                    ('main', l10n.mainFlow2),
+                    ('block', 'Block'),
+                    ('direct', 'Direct'),
+                  ],
+                  value: q.fallback,
+                  onChanged: (v) {
+                    q.fallback = v;
+                    save();
+                  },
+                ),
+              ),
+              SetRow(hint: l10n.whenARuleSProfileChain),
+            ],
+          ),
+          SetGroup(
+            children: [
+              ChevronRow(
+                label: l10n.finalOrder,
+                hint: l10n.theListExactlyAsTheEngine,
+                onTap: () => showFinalOrder(context),
+              ),
+              ChevronRow(
+                label: l10n.ruleSets,
+                hint: l10n.listsGeositeGeoipYourOwn(cat.ruleSets.length),
+                onTap: () => showRuleSets(context),
+              ),
+              ChevronRow(
+                label: l10n.importExport,
+                hint: l10n.singBoxJsonClashRules,
+                onTap: () => showRuleIO(context),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -2393,10 +2393,19 @@ async function runChecks() {
       setAutoCfg('threshold', 50);
       closeSheet('setauto'); switchTab('home');
       openSrcForm('src1');
-      out.auto = document.getElementById('sf-interval').value === '' && /auto · 12 h/.test(document.getElementById('sf-interval').placeholder);
-      document.getElementById('sf-interval').value = '8'; saveSrcForm();
-      out.own = sourcesData.src1.updateInterval === 8;
-      openSrcForm('src1'); document.getElementById('sf-interval').value = ''; saveSrcForm();
+      const ivBtn = () => document.getElementById('sf-interval').textContent.trim();
+      const ivSet = (v, u) => { document.getElementById('sf-interval').click(); document.getElementById('iv-value').value = v; document.getElementById('iv-unit').value = u; saveIntervalDialog(); };
+      out.auto = /^auto · 12 h$/.test(ivBtn());
+      document.getElementById('sf-interval').click();
+      out.dlg = document.getElementById('sh-interval').classList.contains('open') && document.getElementById('iv-value').value === '' && document.getElementById('iv-unit').options.length === 3;
+      ivSet('8', '3600'); saveSrcForm();
+      out.own = sourcesData.src1.updateInterval === 8 * 3600;
+      openSrcForm('src1'); out.ownShown = ivBtn() === '8 h' && !document.getElementById('sh-interval').classList.contains('open');
+      ivSet('3', '1'); out.tooLow = sfInterval === 8 * 3600;   // under 10 s: refused, dialog stays
+      closeSheet('interval');
+      ivSet('30', '60'); out.min = ivBtn() === '30 min'; saveSrcForm();
+      out.minStored = sourcesData.src1.updateInterval === 1800;
+      openSrcForm('src1'); ivSet('', '60'); saveSrcForm();
       out.back = sourcesData.src1.updateInterval === 'auto';
       return out;
     });

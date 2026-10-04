@@ -70,16 +70,16 @@ Future<Map<String, dynamic>> updateSubscription(
 const retryAfterFailure = Duration(minutes: 30);
 
 /// How often subscription [s] updates itself; null = never
-/// (docs/subscription-parsing.md → «Автообновление»). `updateInterval`: a number of hours
-/// (0 = never) is the user's own period. `'auto'` (default): the provider's
+/// (docs/subscription-parsing.md → «Автообновление»). `updateInterval`: a number of seconds
+/// (0 = never; at least 10 s) is the user's own period. `'auto'` (default): the provider's
 /// `profile-update-interval` (at least 1 h) if it sent one, else the global [subsEvery]
 /// (seconds, Auto mode; default 12 h); a global 0 switches all automatic updates off.
 /// Switched-off sources and server groups never update.
 Duration? autoUpdatePeriod(Map s, Object? subsEvery) {
   if (s['kind'] != 'sub' || s['enabled'] == false || '${s['url'] ?? ''}'.isEmpty) return null;
   final own = s['updateInterval'];
-  final hours = own is num ? own : (own is String ? num.tryParse(own) : null);
-  if (hours != null) return hours > 0 ? Duration(minutes: (hours * 60).round()) : null;
+  final secs = own is num ? own : (own is String ? num.tryParse(own) : null);
+  if (secs != null) return secs > 0 ? Duration(seconds: max(10, secs.round())) : null;
   final global = subsEvery is num ? subsEvery : 12 * 3600;
   if (global <= 0) return null;
   final provider = s['providerInterval'];
