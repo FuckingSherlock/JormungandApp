@@ -73,7 +73,7 @@ jobs:
 
       - name: libbox.aar cache
         id: libbox
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: app/android_overlay/app/libs
           key: libbox-${{ env.SING_BOX_VERSION }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('core/tool/build_libbox.ps1') }}
@@ -81,6 +81,14 @@ jobs:
       - name: Build libbox.aar (cache miss)
         if: steps.libbox.outputs.cache-hit != 'true'
         run: pwsh core/tool/build_libbox.ps1 -Version "$SING_BOX_VERSION" -Root "$RUNNER_TEMP/android-dev"
+
+      # saved right away, so a later failing step doesn't throw the ~10 min build away
+      - name: Save libbox.aar cache
+        if: steps.libbox.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/android_overlay/app/libs
+          key: ${{ steps.libbox.outputs.cache-primary-key }}
 
       - name: Version
         run: |
@@ -108,7 +116,7 @@ jobs:
         run: |
           # SHA-256 of the signing certificate: lower-case hex, no colons (manifest android.signerSha256)
           signer=$(keytool -list -v -keystore "$JORM_KEYSTORE" -alias jormungand -storepass:env JORM_ANDROID_KS_PASS \
-            | sed -n 's/^ *SHA256: *//p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')
+            | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -n 1 | tr -d ': \r' | tr 'A-F' 'a-f')
           [ "${#signer}" -eq 64 ] || { echo "::error::cannot read the keystore certificate"; exit 1; }
           echo "SIGNER=$signer" >> "$GITHUB_ENV"
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
