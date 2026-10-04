@@ -152,9 +152,28 @@ class _HomeShellState extends State<HomeShell> {
     final textKey = GlobalKey();
     _flyTimer?.cancel();
     messenger.hideCurrentSnackBar();
+    // same offer as the Logs row: a site that opens through another entry -> a rule for it
+    final d = e.data;
+    final canRule =
+        e.cat == 'site' &&
+        e.type == 'blocked' &&
+        d['via'] != null &&
+        _links.newRuleFor != null;
     final ctl = messenger.showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
+        action: canRule
+            ? SnackBarAction(
+                label: context.l10n.createRule,
+                onPressed: () {
+                  _flyTimer?.cancel();
+                  _links.newRuleFor!(
+                    host: _logs!.words.host(d),
+                    via: '${d['via']}',
+                  );
+                },
+              )
+            : null,
         // stays until the timer below (it needs the rect for the flight) or a tap
         duration: const Duration(hours: 1),
         content: GestureDetector(

@@ -41,6 +41,28 @@ void main() {
     expect(nav.selectedIndex, AppTab.logs.index);
   });
 
+  testWidgets('a blocked-site toast offers Create rule, prefilled', (
+    tester,
+  ) async {
+    final host = await open(tester);
+    host.addEvent(
+      'site',
+      'blocked',
+      level: 'warn',
+      data: {'host': 'example.com', 'via': 'nope'},
+    );
+    await shown(tester);
+
+    expect(find.byType(SnackBarAction), findsOneWidget);
+    await tester.tap(find.byType(SnackBarAction));
+    await tester.pumpAndSettle();
+
+    // the action does not also open Logs
+    final nav = tester.widget<NavigationBar>(find.byType(NavigationBar));
+    expect(nav.selectedIndex, isNot(AppTab.logs.index));
+    expect(find.widgetWithText(TextField, 'example.com'), findsOneWidget);
+  });
+
   testWidgets('an own event does not toast; an untapped one flies away', (
     tester,
   ) async {
