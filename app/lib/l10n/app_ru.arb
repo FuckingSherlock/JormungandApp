@@ -1356,5 +1356,9 @@
   "workInTheBackground": "Работа в фоне",
   "allow": "Разрешить",
   "allowedTheVpnAutoAndThe": "Разрешено: VPN, Auto и пинги работают при выключенном экране и когда приложение смахнуто из недавних.",
-  "limitedByTheSystemAndroidMay": "Ограничено системой: Android может остановить VPN и Auto в фоне. Разрешите, чтобы они продолжали работать."
+  "limitedByTheSystemAndroidMay": "Ограничено системой: Android может остановить VPN и Auto в фоне. Разрешите, чтобы они продолжали работать.",
+  "closeTheApp": "Закрыть приложение?",
+  "theVpnIsOnClosingThe": "VPN включён. Если закрыть окно, он продолжит работать.",
+  "closeWindow": "Закрыть окно",
+  "disconnectAndClose": "Отключить и закрыть"
 }

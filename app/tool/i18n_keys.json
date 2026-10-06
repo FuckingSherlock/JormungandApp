@@ -1398,5 +1398,9 @@
   "Not allowed. Without it the VPN cannot be kept reliably in the background, so the app does not connect.": "notAllowedWithoutItTheVpn",
   "Allowed: the VPN, Auto and the pings keep working with the screen off and the app swiped away.": "allowedTheVpnAutoAndThe",
   "Not allowed: Android may stop the VPN and Auto in the background, so the app will not connect.": "notAllowedAndroidMayStopThe",
-  "Limited by the system: Android may stop the VPN and Auto in the background. Allow it to keep them running.": "limitedByTheSystemAndroidMay"
+  "Limited by the system: Android may stop the VPN and Auto in the background. Allow it to keep them running.": "limitedByTheSystemAndroidMay",
+  "Close the app?": "closeTheApp",
+  "The VPN is on. Closing the window keeps it running.": "theVpnIsOnClosingThe",
+  "Close window": "closeWindow",
+  "Disconnect and close": "disconnectAndClose"
 }

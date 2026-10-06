@@ -318,6 +318,35 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     });
   }
 
+  /// Back on Home (Android): with the VPN on, ask whether to keep it running behind the window
+  /// or disconnect first; with it off, just send the window behind.
+  Future<void> _closeWindow() async {
+    final host = CoreHostScope.read(context);
+    if (host.isOn) {
+      final l10n = context.l10n;
+      final disconnect = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(l10n.closeTheApp),
+          content: Text(l10n.theVpnIsOnClosingThe),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(l10n.disconnectAndClose),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(l10n.closeWindow),
+            ),
+          ],
+        ),
+      );
+      if (disconnect == null || !mounted) return; // dismissed: stay
+      if (disconnect) await host.disconnect();
+    }
+    await const TileChannel().moveToBack();
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -332,7 +361,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         if (_tab != AppTab.home) {
           _setTab(AppTab.home);
         } else {
-          unawaited(const TileChannel().moveToBack());
+          unawaited(_closeWindow());
         }
       },
       child: AppLinksScope(

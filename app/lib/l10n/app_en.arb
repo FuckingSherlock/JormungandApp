@@ -3013,5 +3013,9 @@
   "workInTheBackground": "Work in the background",
   "allow": "Allow",
   "allowedTheVpnAutoAndThe": "Allowed: the VPN, Auto and the pings keep working with the screen off and the app swiped away.",
-  "limitedByTheSystemAndroidMay": "Limited by the system: Android may stop the VPN and Auto in the background. Allow it to keep them running."
+  "limitedByTheSystemAndroidMay": "Limited by the system: Android may stop the VPN and Auto in the background. Allow it to keep them running.",
+  "closeTheApp": "Close the app?",
+  "theVpnIsOnClosingThe": "The VPN is on. Closing the window keeps it running.",
+  "closeWindow": "Close window",
+  "disconnectAndClose": "Disconnect and close"
 }
