@@ -1,6 +1,5 @@
 package dev.jormungand.app
 
-import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -36,12 +35,12 @@ object UpdateInstaller {
     private var receiver: BroadcastReceiver? = null
     private var pending: MethodChannel.Result? = null
 
-    fun install(activity: Activity, path: String, result: MethodChannel.Result) {
-        val ctx = activity.applicationContext
+    fun install(host: Context, path: String, result: MethodChannel.Result) {
+        val ctx = host.applicationContext
         val pm = ctx.packageManager
         if (pending != null) return result.success("busy")
         if (!pm.canRequestPackageInstalls()) {
-            activity.startActivity(
+            host.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.packageName))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )

@@ -1,7 +1,6 @@
 package __APP_ID__
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
@@ -22,9 +21,9 @@ import io.flutter.plugin.common.MethodChannel
  * What the Quick Settings tile, the VpnService and the Dart side tell each other (docs/platforms.md,
  * "Плитка быстрых настроек"). One process, so plain statics.
  *
- * The tile's truth about "connected" is NATIVE ([JormungandVpnService.isUp]): it stays right when the
- * Dart side is gone (activity closed, engine destroyed, the tunnel still up) and after a process
- * restart (nothing up = off). Dart only adds what native cannot know: "connecting" /
+ * The tile's truth about "connected" is NATIVE ([JormungandVpnService.isUp]): it stays right while the
+ * Dart side is not up (the engine of [AppEngine] is made on the first window, the process may exist
+ * without it) and after a process restart (nothing up = off; the tunnel dies with the process). Dart only adds what native cannot know: "connecting" /
  * "disconnecting" and the name of the current connection, which it pushes ([store]) on every
  * change; the last push is kept in SharedPreferences so the tile can show the name with no Dart.
  */
@@ -141,7 +140,7 @@ object TileBridge {
  *  events: {type: 'tile', action: 'connect' | 'disconnect', launch: Boolean}. The listener is
  *  also the "Dart is alive" mark: gone with the engine ([unregister]).
  */
-class TileChannel(private val activity: Activity) {
+class TileChannel(private val app: Context) {
     companion object {
         const val NAME = "jormungand/tile"
         const val EVENTS = "jormungand/tile_events"
@@ -155,7 +154,7 @@ class TileChannel(private val activity: Activity) {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                 own = events
                 TileBridge.sink = events
-                TileBridge.refresh(activity)
+                TileBridge.refresh(app)
             }
 
             override fun onCancel(arguments: Any?) = unregister()
@@ -166,14 +165,14 @@ class TileChannel(private val activity: Activity) {
     fun unregister() {
         if (TileBridge.sink === own) TileBridge.sink = null
         own = null
-        TileBridge.refresh(activity)
+        TileBridge.refresh(app)
     }
 
     private fun onCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "state" -> {
                 TileBridge.store(
-                    activity,
+                    app,
                     call.argument<String>("phase") ?: "off",
                     call.argument<String>("name") ?: "",
                     call.argument<Boolean>("canConnect") ?: true,
@@ -182,7 +181,7 @@ class TileChannel(private val activity: Activity) {
             }
             "launchAction" -> result.success(TileBridge.takeLaunch())
             "moveToBack" -> {
-                activity.moveTaskToBack(true)
+                AppEngine.activity?.moveTaskToBack(true)
                 result.success(null)
             }
             else -> result.notImplemented()

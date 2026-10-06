@@ -1352,5 +1352,9 @@
   "couldNotOpen": "Не удалось открыть {s0}",
   "notificationsAreBlocked": "Уведомления заблокированы",
   "androidDoesNotLetTheApp": "Android не даёт приложению показывать уведомления, поэтому события не дойдут, пока оно в фоне.",
-  "openSettings": "Открыть настройки"
+  "openSettings": "Открыть настройки",
+  "workInTheBackground": "Работа в фоне",
+  "allow": "Разрешить",
+  "allowedTheVpnAutoAndThe": "Разрешено: VPN, Auto и пинги работают при выключенном экране и когда приложение смахнуто из недавних.",
+  "limitedByTheSystemAndroidMay": "Ограничено системой: Android может остановить VPN и Auto в фоне. Разрешите, чтобы они продолжали работать."
 }

@@ -129,6 +129,7 @@ class LiveCoreHost extends CoreHost {
         _applyStatus(Map<String, dynamic>.from(st), notify: false);
       }
       _killSig = _killSigNow();
+      await _adoptRunning();
       _statusSub = api.statusChanges.listen(_onStatus, onError: (_) {});
       _eventSub = api.eventStream.listen(_events.add, onError: (_) {});
       _upd = AppUpdate.fromJson(api.updateStatus());
@@ -138,11 +139,46 @@ class LiveCoreHost extends CoreHost {
       }, onError: (_) {});
       _syncUpdateSettings();
       _ready = true;
+      // a tunnel taken over with another plan than the catalog makes now: the same path as after
+      // any change of settings (a reconnect after the usual pause), never a silent restart
+      _scheduleReconnect();
     } catch (e) {
       _initError = '$e';
       _notice(HostNotice('initFailed', '$e', args: ['$e']));
     }
     _notify();
+  }
+
+  /// The engine of the app was made again while the tunnel (the VpnService) kept running: the
+  /// core takes it over — connected, the API / Auto / traffic attached, nothing stopped or
+  /// started. The plan it runs becomes the one a later change is compared with (so a catalog
+  /// that builds another plan now is an ordinary plan change, see [_scheduleReconnect]).
+  Future<void> _adoptRunning() async {
+    try {
+      final kill = _killPlan();
+      final r = await api.adopt({
+        'dnsAuto': catalog.dnsCfg.auto,
+        'auto': catalog.planAuto(),
+        ...kill,
+      });
+      final raw = r['plan'];
+      if (r['adopted'] != true || raw is! Map) return;
+      final plan = Map<String, dynamic>.from(raw);
+      final routes = plan['routes'] as List;
+      final current = (plan['current'] as num?)?.toInt() ?? 0;
+      catalog.liveAnchor =
+          (routes[current < 0 ? 0 : current] as Map)['id'] as String?;
+      _planSig = catalog.planSigOf(plan);
+      _autoSig = _autoSigOf();
+      _killSig = _killSigOf(kill);
+      _applyStatus(
+        Map<String, dynamic>.from(r['status'] as Map),
+        notify: false,
+      );
+    } catch (e) {
+      // not taken over: the core stopped what it could not take, the state stays "disconnected"
+      _notice(HostNotice('connectFailed', '$e'));
+    }
   }
 
   @override

@@ -1,0 +1,82 @@
+package __APP_ID__
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+
+/**
+ * MethodChannel `jormungand/power` (Dart side: lib/platform/power_channel.dart): the battery-
+ * optimization exemption ("Allow the app to always run in the background"). Without it Doze and
+ * the vendors' task killers may stop the tunnel's helpers (Auto, pings, the core's timers) and the
+ * process. Soft: the app never blocks a connect on it, it asks once after the first successful
+ * connect and has a row in Settings -> Connection.
+ *
+ *  status  -> Boolean  the app is on the "not optimized" list now
+ *  request -> Boolean  args {once: Boolean}: opens the system dialog (ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+ *                      or the system list when a vendor has no such dialog); answers the state after
+ *                      it. With `once` at most one dialog per install; only a dialog that really
+ *                      opened counts (no window on screen = nothing asked, nothing counted)
+ */
+class PowerChannel(private val app: Context) {
+    companion object {
+        const val NAME = "jormungand/power"
+        private const val REQUEST_POWER = 0x4A50
+        private const val PREFS = "jorm_power"
+        private const val ASKED = "asked"
+
+        fun exempt(ctx: Context): Boolean =
+            ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
+    }
+
+    private var pending: MethodChannel.Result? = null
+
+    fun register(messenger: BinaryMessenger) {
+        MethodChannel(messenger, NAME).setMethodCallHandler(::onCall)
+    }
+
+    private fun onCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "status" -> result.success(exempt(app))
+            "request" -> request(call.argument<Boolean>("once") == true, result)
+            else -> result.notImplemented()
+        }
+    }
+
+    private fun request(once: Boolean, result: MethodChannel.Result) {
+        val prefs = app.getSharedPreferences(PREFS, 0)
+        val a: Activity? = AppEngine.activity
+        if (exempt(app) || a == null || (once && prefs.getBoolean(ASKED, false))) {
+            result.success(exempt(app))
+            return
+        }
+        pending?.success(exempt(app)) // a second ask replaces the first
+        pending = null
+        val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            .setData(Uri.parse("package:${app.packageName}"))
+        try {
+            @Suppress("DEPRECATION")
+            a.startActivityForResult(direct, REQUEST_POWER)
+            pending = result
+        } catch (e: Throwable) {
+            VpnBridge.log("warn", "power: the exemption dialog is not available: ${e.message}")
+            // some vendors have no such dialog: the system's list of apps, the user sets it there
+            runCatching { a.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+            result.success(exempt(app))
+        }
+        prefs.edit().putBoolean(ASKED, true).apply()
+    }
+
+    /** From MainActivity.onActivityResult; true when the request code was ours. */
+    fun onActivityResult(requestCode: Int): Boolean {
+        if (requestCode != REQUEST_POWER) return false
+        pending?.success(exempt(app))
+        pending = null
+        return true
+    }
+}

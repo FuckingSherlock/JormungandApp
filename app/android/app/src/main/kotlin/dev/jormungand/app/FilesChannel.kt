@@ -1,6 +1,7 @@
 package dev.jormungand.app
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
@@ -21,7 +22,7 @@ import java.util.concurrent.Executors
  *  install -> String?  args {path}: installs the downloaded APK (UpdateInstaller); null = the
  *                      system installer took it, else why not (`permission`, `verify`, `aborted`...)
  */
-class FilesChannel(private val activity: Activity) {
+class FilesChannel(private val app: Context) {
     companion object {
         const val NAME = "jormungand/files"
         private const val REQUEST_SAVE = 0x4A4E
@@ -43,6 +44,7 @@ class FilesChannel(private val activity: Activity) {
             "save" -> {
                 if (pendingSave != null) return result.error("busy", "a save dialog is open", null)
                 val text = call.argument<String>("text") ?: ""
+                val window = AppEngine.activity ?: return result.error("no_window", "the app is not on screen", null)
                 pendingSave = result to text
                 val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -50,10 +52,11 @@ class FilesChannel(private val activity: Activity) {
                     putExtra(Intent.EXTRA_TITLE, call.argument<String>("name") ?: "jormungand-backup.json")
                 }
                 @Suppress("DEPRECATION")
-                activity.startActivityForResult(intent, REQUEST_SAVE)
+                window.startActivityForResult(intent, REQUEST_SAVE)
             }
             "pick" -> {
                 if (pendingOpen != null) return result.error("busy", "an open dialog is open", null)
+                val window = AppEngine.activity ?: return result.error("no_window", "the app is not on screen", null)
                 pendingOpen = result
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -64,12 +67,12 @@ class FilesChannel(private val activity: Activity) {
                     )
                 }
                 @Suppress("DEPRECATION")
-                activity.startActivityForResult(intent, REQUEST_OPEN)
+                window.startActivityForResult(intent, REQUEST_OPEN)
             }
             "install" -> {
                 val path = call.argument<String>("path")
                 if (path == null) result.error("args", "path", null)
-                else UpdateInstaller.install(activity, path, result)
+                else UpdateInstaller.install(AppEngine.activity ?: app, path, result)
             }
             else -> result.notImplemented()
         }
@@ -85,7 +88,7 @@ class FilesChannel(private val activity: Activity) {
                 if (resultCode != Activity.RESULT_OK || uri == null) return result.success(null).let { true }
                 io.execute {
                     try {
-                        activity.contentResolver.openOutputStream(uri, "wt")!!.use {
+                        app.contentResolver.openOutputStream(uri, "wt")!!.use {
                             it.write(text.toByteArray(Charsets.UTF_8))
                         }
                         main.post { result.success(displayName(uri) ?: "backup") }
@@ -102,7 +105,7 @@ class FilesChannel(private val activity: Activity) {
                 if (resultCode != Activity.RESULT_OK || uri == null) return result.success(null).let { true }
                 io.execute {
                     try {
-                        val bytes = activity.contentResolver.openInputStream(uri)!!.use { it.readNBytes(MAX_BYTES + 1) }
+                        val bytes = app.contentResolver.openInputStream(uri)!!.use { it.readNBytes(MAX_BYTES + 1) }
                         if (bytes.size > MAX_BYTES) throw IllegalStateException("file is too large")
                         val map = mapOf("name" to (displayName(uri) ?: "backup"), "text" to String(bytes, Charsets.UTF_8))
                         main.post { result.success(map) }
@@ -117,7 +120,7 @@ class FilesChannel(private val activity: Activity) {
     }
 
     private fun displayName(uri: android.net.Uri): String? =
-        activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+        app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) it.getString(0) else null
         }
 }

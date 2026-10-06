@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <!-- Android 13+: the ongoing "connected" notification (runtime permission, requested by the app) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- "Allow the app to always run in the background" dialog (Settings -> Connection -> Work in the background;
+         asked once after the first connect): Doze and the vendors' task killers stop the tunnel's helpers otherwise -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- self-update: install the downloaded APK -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- Rules -> Per-app routing lists every installed app (Android 11+ hides the others otherwise);
@@ -44,10 +47,12 @@
             </intent-filter>
         </activity>
 
-        <!-- The tunnel. BIND_VPN_SERVICE: only the system may bind it. -->
+        <!-- The tunnel. BIND_VPN_SERVICE: only the system may bind it. stopWithTask=false: swiping the app
+             from Recents must not stop the tunnel (nor the engine with the Dart core, see AppEngine.kt). -->
         <service
             android:name=".JormungandVpnService"
             android:exported="false"
+            android:stopWithTask="false"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="specialUse">
             <intent-filter>

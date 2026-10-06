@@ -80,6 +80,13 @@ abstract interface class CoreApi {
   /// → the status. Throws when it did not connect (the status holds `error`).
   Future<Map<String, dynamic>> connect(Map<String, dynamic> body);
 
+  /// Takes over a sing-box that outlived the previous core (Android: the engine was recreated
+  /// while the tunnel stayed up) instead of starting another one. `{dnsAuto?, killSwitch?,
+  /// killOnDisconnect?, killWhileClosed?, downProxy?, auto?}` — the app's settings now, as in a
+  /// connect body. → `{adopted: false[, stopped: true]}` or `{adopted: true, plan, status}`;
+  /// runners that cannot adopt answer `{adopted: false}`.
+  Future<Map<String, dynamic>> adopt(Map<String, dynamic> body);
+
   Future<Map<String, dynamic>> disconnect();
 
   /// Takes the system proxy off now (down alert, blocked plaque).

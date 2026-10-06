@@ -48,6 +48,23 @@ abstract interface class BoxRunner {
   Future<void> stop();
 }
 
+/// A [BoxRunner] whose sing-box can outlive the core that started it (libbox in Android's
+/// VpnService when the app's Flutter engine is destroyed and made again, the process and the
+/// service staying). The platform keeps a record next to the running sing-box for as long as it
+/// runs; a new core finds it and takes the sing-box over instead of starting another one
+/// ([CoreService.adopt]).
+abstract interface class AdoptableRunner implements BoxRunner {
+  /// Keeps [record] (the core's JSON-able description of what this sing-box runs) with it. Call
+  /// after every successful [start]; the platform drops it when sing-box stops.
+  Future<void> keep(Map<String, dynamic> record);
+
+  /// Takes over a sing-box that runs already: connects its API, attaches the log, sets [running].
+  /// Returns what [keep] was given, null when nothing runs. Throws [SingBoxError] when
+  /// something runs that cannot be taken over (no record, the API does not answer); [stop]
+  /// then closes it.
+  Future<Map<String, dynamic>?> adopt();
+}
+
 /// Makes a runner for a throwaway sing-box (latency tests, Speed Test) working in [workDir].
 typedef BoxFactory = BoxRunner Function(String workDir);
 

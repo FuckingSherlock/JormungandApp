@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:jormungand_core/jormungand_core.dart' show EventRecord;
 
 import '../platform/notify_channel.dart';
+import '../platform/power_channel.dart';
 import 'core_host.dart';
 import 'event_text.dart';
 import 'settings_model.dart';
@@ -19,10 +20,13 @@ import 'settings_model.dart';
 ///    and the master switch are on).
 /// Where there are no system notifications ([NotifyIo.available] is false) all of it does nothing.
 class SystemNotifier {
-  SystemNotifier(this.host, {NotifyIo? io}) : io = io ?? NotifyIo.current;
+  SystemNotifier(this.host, {NotifyIo? io, PowerIo? power})
+    : io = io ?? NotifyIo.current,
+      power = power ?? PowerIo.current;
 
   final CoreHost host;
   final NotifyIo io;
+  final PowerIo power;
 
   bool _started = false;
   bool _wasOn = false;
@@ -79,9 +83,7 @@ class SystemNotifier {
 
   void _onHost() {
     final on = host.phase == ConnectionPhase.connected;
-    if (on && !_wasOn && host.notif.enabled) {
-      io.request(once: true); // the first connect only (the native side counts)
-    }
+    if (on && !_wasOn) unawaited(_askOnce()); // the first connect only (the native side counts)
     _wasOn = on;
     if (!on) {
       _nodeSent = false; // the next connect shows its name again
@@ -92,6 +94,13 @@ class SystemNotifier {
     _nodeSent = true;
     _sentNode = node;
     io.setVpnNode(node);
+  }
+
+  /// The first connect asks for the notification permission, then (one system dialog at a time,
+  /// so after the first one is answered) for the battery-optimization exemption.
+  Future<void> _askOnce() async {
+    if (host.notif.enabled) await io.request(once: true);
+    await power.request(once: true);
   }
 
   /// `Entry · server` of the dock; null when the name should not be shown or there is none.

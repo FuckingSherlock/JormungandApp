@@ -16,6 +16,7 @@ import '../pages/rules_page.dart';
 import '../pages/settings_page.dart';
 import '../platform/notify_channel.dart';
 import '../theme/app_colors.g.dart';
+import '../platform/tile_channel.dart';
 import '../widgets/apps_sheet.dart';
 import '../widgets/rule_form.dart';
 import '../widgets/rules_extras.dart';
@@ -41,8 +42,8 @@ enum AppTab {
   };
 }
 
-/// Scaffold with the four tabs. Pages stay alive (IndexedStack); Back from any tab goes to Home,
-/// Back on Home leaves the app (the mockup: "Back closes the top sheet, then goes Home").
+/// Scaffold with the four tabs. Pages stay alive (IndexedStack); Back from any tab goes to Home;
+/// on Home the desktop leaves the app, Android sends it behind (docs/platforms.md, "Работа в фоне").
 // TODO(ui): sheets (Add, Route, Rules, ...) as a stack that Back closes one by one, and the
 // unseen error / warning dots on the Logs item (mockup .nav-dot).
 class HomeShell extends StatefulWidget {
@@ -321,10 +322,18 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final c = context.colors;
     final l10n = context.l10n;
+    final android = CoreHostScope.read(context).isAndroid;
     return PopScope(
-      canPop: _tab == AppTab.home,
+      // Android: Back on Home sends the task behind instead of finishing the activity (the
+      // engine, the core and the tunnel stay either way; this keeps the window state too)
+      canPop: _tab == AppTab.home && !android,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) _setTab(AppTab.home);
+        if (didPop) return;
+        if (_tab != AppTab.home) {
+          _setTab(AppTab.home);
+        } else {
+          unawaited(const TileChannel().moveToBack());
+        }
       },
       child: AppLinksScope(
         links: _links,

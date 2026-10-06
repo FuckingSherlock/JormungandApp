@@ -7,6 +7,7 @@ import 'package:jormungand/app.dart';
 import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/platform/notify_channel.dart';
+import 'package:jormungand/platform/power_channel.dart';
 import 'package:jormungand/shell/home_shell.dart';
 import 'package:jormungand/widgets/form_parts.dart';
 
@@ -72,6 +73,27 @@ class FakeNotifyIo implements NotifyIo {
   FutureOr<void> Function()? onDisconnect;
 }
 
+/// The battery-exemption seam: records the asks.
+class FakePowerIo implements PowerIo {
+  final requests = <bool>[]; // the `once` of each request
+  final _access = ValueNotifier(BackgroundAccess.denied);
+
+  @override
+  bool get available => true;
+
+  @override
+  ValueListenable<BackgroundAccess> get access => _access;
+
+  @override
+  Future<BackgroundAccess> refresh() async => _access.value;
+
+  @override
+  Future<BackgroundAccess> request({bool once = false}) async {
+    requests.add(once);
+    return _access.value;
+  }
+}
+
 /// The platform only goes resumed <-> inactive <-> hidden <-> paused one step at a time.
 const _lifecycle = [
   AppLifecycleState.resumed,
@@ -93,15 +115,21 @@ void _lifecycleTo(AppLifecycleState target) {
 void main() {
   late FakeNotifyIo io;
   late NotifyIo saved;
+  late FakePowerIo power;
+  late PowerIo savedPower;
 
   setUp(() {
     saved = NotifyIo.current;
     io = FakeNotifyIo();
     NotifyIo.current = io;
+    savedPower = PowerIo.current;
+    power = FakePowerIo();
+    PowerIo.current = power;
   });
 
   tearDown(() {
     NotifyIo.current = saved;
+    PowerIo.current = savedPower;
     _lifecycleTo(AppLifecycleState.resumed);
   });
 
@@ -221,6 +249,17 @@ void main() {
       host.setPhase(ConnectionPhase.connected);
       await tester.pump();
       expect(io.requests, [true]); // nothing more
+    });
+
+    testWidgets('the first connect also asks for the background access, once-only, even with notifications off', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      host.notif.setFlag('enabled', false);
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pump();
+      expect(io.requests, isEmpty);
+      expect(power.requests, [true]); // `once`: the native side keeps the count
     });
 
     testWidgets('the VPN notification gets the entry and server; none with Status off', (

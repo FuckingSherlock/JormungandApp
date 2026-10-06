@@ -94,12 +94,14 @@ class _JormungandAppState extends State<JormungandApp> {
     if (tilePort != null) _tile = TileSync(_core, tilePort)..start();
     // Desktop: the window is closing - stop sing-box, put the system proxy back (or keep it by
     // the kill switch) and save. Android's process just ends; the state is saved as it changes.
+    // Android's `detached` is NOT a close: the activity went (swiped from Recents, Back) while the
+    // engine, this core and the tunnel stay (docs/platforms.md, "Работа в фоне"), so no shutdown.
     _lifecycle = AppLifecycleListener(
       onExitRequested: () async {
         await _core.shutdown();
         return AppExitResponse.exit;
       },
-      onDetach: _core.shutdown,
+      onDetach: _core.isAndroid ? null : _core.shutdown,
     );
   }
 

@@ -83,6 +83,29 @@ class VpnChannel {
     }
   }
 
+  /// Keeps [record] in the service next to the running tunnel (dropped when the tunnel stops, so
+  /// it can never describe one that is gone). A new engine reads it with [recall].
+  Future<void> remember(String record) async {
+    try {
+      await _channel.invokeMethod<void>('remember', <String, Object?>{
+        'record': record,
+      });
+    } on MissingPluginException {
+      // not Android
+    }
+  }
+
+  /// Whether the tunnel runs and what [remember] was given for it.
+  Future<({bool running, String? record})> recall() async {
+    try {
+      final m = await _channel.invokeMapMethod<String, Object?>('status');
+      final r = m?['record'];
+      return (running: m?['running'] == true, record: r is String ? r : null);
+    } on MissingPluginException {
+      return (running: false, record: null);
+    }
+  }
+
   /// The device's ABIs, best first (`Build.SUPPORTED_ABIS`); empty off Android.
   Future<List<String>> abis() async {
     try {

@@ -32,6 +32,8 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | Листы (sheets) | стек от верха экрана, над нижней навигацией | пока `showModalBottomSheet` (`app_sheet.dart`) |
 | Уведомления о событиях | тост в приложении (ПК — ещё свои всплывающие окна, `desktopStyle`) | в фоне — системное уведомление Android (канал «Events», группа со сводкой), на переднем плане — тост; разрешение `POST_NOTIFICATIONS` запрашивается (раздел «Системные уведомления» ниже); на ПК системных нет |
 | Уведомление VPN | нет | постоянное уведомление службы: имя подключения и кнопка «Отключить» |
+| Закрытие окна | закрытие = выход, ядро останавливается (`AppLifecycleListener.onDetach`) | Back на Home — «свернуть» (`moveTaskToBack`), смахивание из недавних — не конец: движок Dart и туннель живут в процессе, а не в Activity; раздел «Работа в фоне» ниже |
+| Работа в фоне | — | строка Settings → Connection «Работа в фоне» (исключение из оптимизации батареи); просьба один раз после первого успешного подключения, подключение она не блокирует |
 | Nodes → + → Scan QR code | заглушка («камера недоступна в мокапе») | камера на zxing-cpp (`flutter_zxing`, без Google Play Services / ML Kit), разрешение `CAMERA` из оверлея манифеста; на ПК строки нет (`caps.cameraScan`), QR-картинка идёт через «Import config file» |
 
 Платформенные условия во Flutter — через один помощник возможностей платформы (не разбросанные
@@ -58,6 +60,7 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | Logs, события | `markup/35-logs.html`, `js/46-logs.js`, `47-events.js`, `css/67-logs.css` | `pages/logs_page.dart`, `widgets/logs_*.dart` |
 | Settings | `markup/30-settings.html`, `js/56-dns.js`, `57-general.js`, `58-notif.js`, `59-data.js`, `css/95-settings.css` | `pages/settings_page.dart` (меню), `widgets/settings_auto.dart` (Auto mode, + `autoCardSub`), `settings_look.dart` (Appearance / General / Notifications), `settings_conn.dart`, `settings_dns.dart`, `settings_data.dart` (обновления, бэкап, About), `settings_parts.dart` (общие части листов), `core/settings_model.dart` (хранение `genCfg` / `notifCfg`, диапазоны и проверки полей), `core/app_update.dart` (состояние обновления для UI), `state/app_settings.dart`; различия платформ — `platform/platform_caps.dart` (`host.caps`); файлы бэкапа и установка APK — `platform/files_channel.dart` + `android_overlay/kotlin/FilesChannel.kt.tmpl`, `UpdateInstaller.kt.tmpl` |
 | Системные уведомления Android | `js/58-notif.js` (только настройки; уведомлений нет) | `core/system_notifier.dart` (`SystemNotifier`), `platform/notify_channel.dart` (шов `NotifyIo`, канал `jormungand/notify`), `shell/home_shell.dart` (`_notify`, тап), `widgets/settings_look.dart` (`NotifPermissionHint`), `android_overlay/kotlin/AppNotifier.kt.tmpl`, `NotifyChannel.kt.tmpl`, `res/values{,-ru}/jorm_notif_strings.xml` |
+| Работа в фоне Android | — (в мокапе окно = приложение) | `android_overlay/kotlin/AppEngine.kt.tmpl` (движок и каналы процесса), `MainActivity.kt.tmpl` (только окно), `PowerChannel.kt.tmpl` (канал `jormungand/power`), `JormungandVpnService.kt.tmpl` (`onTaskRemoved`, запись для усыновления); Dart: `platform/power_channel.dart` (шов `PowerIo`), `widgets/background_access_row.dart` (строка в `settings_conn.dart`), `core/libbox_runner.dart` (`keep` / `adopt`), `core/live_core_host.dart` (`_adoptRunning`), `app.dart` (`onDetach`), `shell/home_shell.dart` (Back на Home) |
 | Справка «?» | `js/58-help.js` | `widgets/settings_parts.dart` (`showHelp`, `HelpTopic`; Settings), `widgets/nodes_help.dart` (`NodesHelp`: Nodes, Advanced подписки, профиль, пункт-источник, цепочка), `rules_parts.dart` (`RoundHelp`, `showTermsSheet`) |
 | Меню, формы, тосты | `js/34-ui.js`, `css/80-menus-forms.css`, `90-toast.css` | `widgets/form_parts.dart`, `app_card.dart`, `settings_row.dart` |
 | Шов к ядру | `js/12-backend.js`, `93-routing-plan.js`, `95-live.js` | `core/core_host.dart`, `core/live_core_host.dart`, `core/platform_seams.dart`, `core/libbox_runner.dart` |
@@ -154,6 +157,64 @@ sing-box туннеля и разовых боксов пинга / Speed Test (
 BoxRunner, `withCacheFile`). Правила `process_path → direct` для самого приложения на Android нет:
 `resolvedExecutable` там — общий `app_process64`.
 
+### Работа в фоне (Android)
+
+Правило: **туннель никогда не перезапускается из-за того, что интерфейс закрыли или открыли заново**;
+приложение показывает правду и продолжает управлять туннелем. Туннель (`JormungandVpnService`, служба
+переднего плана с libbox) переживает окно, поэтому и ядро Dart (Auto, пинги, журнал, уведомления,
+действия плитки) живёт не в окне.
+
+- **Движок принадлежит процессу** (`AppEngine.kt.tmpl`): `FlutterEngine` и все каналы (`vpn`, `files`,
+  `apps`, `tile`, `notify`, `power`) создаются один раз при первом окне и держат application-контекст.
+  `MainActivity` только подключается (`provideFlutterEngine` → `AppEngine.get`) и никогда не
+  уничтожает движок (`shouldDestroyEngineWithHost() = false`); плагины (`file_picker`, `camera`, …)
+  привязываются к каждому новому окну сами (ActivityAware). Что требует окна (согласие VPN, диалоги
+  файлов / разрешений / батареи, `moveTaskToBack`) идёт через `AppEngine.activity` — открытое сейчас окно;
+  его нет — ответ «нет», ничего не зависает.
+- **Службе** в манифесте задано `android:stopWithTask="false"`; смахивание из недавних приводит только к
+  строке в логе (`onTaskRemoved`). Процесс заканчивается — вместе умирают движок, служба и туннель
+  (уведомление и плитка при следующем старте процесса стираются: `AppEngine.get`, `TileBridge.refresh`).
+- **Back на Home** сворачивает приложение (`moveTaskToBack`, `HomeShell`: `PopScope`), а не выходит; на
+  остальных вкладках Back, как раньше, ведёт на Home. Выхода «закрыть всё» на Android нет: туннель
+  выключается кнопкой дока, плиткой или кнопкой уведомления.
+- **`AppLifecycleState.detached`**: когда Activity отсоединяется от переживающего движка, Flutter шлёт
+  `detached`. На ПК это «закрыли окно» и ядро выключается (`AppLifecycleListener.onDetach`); на Android
+  этот колбэк не ставится (`app.dart`) — иначе закрытие окна остановило бы туннель.
+- **Усыновление: запасной путь** (процесс остался, а новый движок Dart — с холодным ядром; на практике
+  редко, но состояние обязано быть верным). Пока туннель поднят, ядро держит у Kotlin **запись**:
+  `BoxRunner.keep` → `VpnChannel.remember` → `VpnBridge.record` (одна непрозрачная JSON-строка в
+  памяти процесса: `{apiPort, secret, level, core: {plan, tunnelPort, probePort, probeSecret, sysPort,
+  sysWanted, ruleSetFiles, upSince}}`). Она стирается в `closeBoxLocked()` и живёт ровно столько, сколько
+  туннель и процесс (на диск не пишется: секрет API не должен переживать процесс). Новое ядро в `init()`
+  перед всем остальным (`LiveCoreHost._adoptRunning` → `CoreApi.adopt` → `CoreService.adopt`)
+  спрашивает `status` (`VpnChannel.recall`: работает ли туннель + запись) и:
+  - **нет туннеля** — «отключено», как раньше;
+  - **есть и запись годится** — `LibboxRunner.adopt` проверяет API (`serviceState`), подключает журнал
+    sing-box, ловит «остановился сам»; ядро восстанавливает план, порты, пробу, Auto / fallback / DNS /
+    трафик, состояние «подключено» **без** остановки и запуска; kill switch и Auto берутся текущие;
+  - **есть, а годной записи нет** (API молчит, запись не разобралась) — ядро **останавливает** туннель
+    и показывает «отключено»: честное состояние важнее сохранённого соединения.
+  Усыновлённый план становится «запущенным» (`_planSig`, `catalog.liveAnchor`); если каталог сейчас
+  строит другой план, это обычное «нужен перезапуск» — тот же путь, что после любой смены настроек
+  (`_scheduleReconnect`, пауза 600 мс, уведомление `reconnectFailed` при отказе), а не тихий рестарт.
+- **Работа в фоне (батарея).** Doze и «убийцы задач» вендоров (MIUI, One UI…) могут останавливать
+  помощников туннеля и сам процесс. Приложение просит исключение из оптимизации, но **не требует**:
+  подключение никогда не блокируется. Канал `jormungand/power` (`PowerChannel.kt.tmpl`; Dart —
+  `PowerIo`, в тестах подменяется): `status` → разрешено ли (`isIgnoringBatteryOptimizations`),
+  `request {once}` → системный диалог `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` напрямую (своего листа
+  нет; нет такого диалога у вендора — системный список `ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`).
+  Спрашивается **один раз** за установку при первом успешном подключении (`SystemNotifier._askOnce`,
+  сразу после запроса разрешения на уведомления; флаг в SharedPreferences `jorm_power/asked` считается,
+  только если диалог реально открылся — без окна ничего не потрачено); повторно сам не спрашивает.
+  Дальше — строка **Settings → Connection → «Работа в фоне»** (только Android, `BackgroundAccessRow`):
+  «Разрешено» / «Ограничено системой»; при ограничении — кнопка «Разрешить» (тот же диалог, не `once`);
+  состояние перечитывается при возврате в приложение. Плитке отдельный путь не нужен.
+
+Проверяется только на устройстве: смахивание из недавних при поднятом VPN; повторное подключение
+плагинов к новому окну (файлы, камера, разрешения); подключение плиткой при живом ядре без окна и
+согласие VPN без окна; диалог батареи на первом подключении; кнопка «Disconnect» уведомления без
+окна; убитый процесс — чистое «отключено» (плитка и уведомление очищены).
+
 ### Системные уведомления (Android)
 
 Источник и фильтр те же, что у тостов: `LogsController.notifications` (новые события журнала, не `own`,
@@ -182,7 +243,7 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
 - **Уведомление VPN.** Заголовок Jormungand, текст «VPN is on · <запись · сервер>», кнопка «Disconnect»,
   тап открывает приложение. Имя шлёт Dart (`setStatus`) на каждое изменение, пока подключено, и только
   при включённых мастере и Status; иначе общий текст. «Disconnect» просит Dart (`CoreHost.disconnect`,
-  как кнопка дока); нет ответа (движок закрыт) — служба сама закрывает туннель. Скорость в тексте — пока нет.
+  как кнопка дока); нет ответа (ядро Dart не слушает) — служба сама закрывает туннель. Скорость в тексте — пока нет.
 
 ### Плитка быстрых настроек (Android)
 
@@ -198,7 +259,7 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   canConnect}, `launchAction`, `moveToBack`) и EventChannel `jormungand/tile_events`
   (`{type: 'tile', action: 'connect' | 'disconnect', launch}`). Событие плитки НЕ копится, пока Dart не
   слушает (у `vpn_events` очередь есть): старое нажатие не должно сработать позже. Подписка Dart на этот
-  канал = признак «ядро Dart живо»; он снимается вместе с движком (`cleanUpFlutterEngine`).
+  канал = признак «ядро Dart живо»; движок живёт с процессом (раздел «Работа в фоне»), поэтому метка остаётся и после закрытия окна; снимается, когда Dart перестаёт слушать.
 - **Состояние плитки.** «Включено» — факт нативной стороны (`JormungandVpnService.isUp`): верно и без Dart
   (активность закрыта, туннель держится) и после рестарта процесса (ничего не поднято = выключено). Dart
   добавляет то, чего натив не знает: «Подключение…» / «Отключение…» (`unavailable`, пока живой Dart
@@ -219,8 +280,8 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   жить, а не `finish()`).
 - **Почему не безголовый движок.** Два движка Dart в одном процессе — два `CoreService` на одном каталоге
   данных (состояние, кэш libbox); согласие VPN требует Activity; план и каталог живут только в Dart.
-  Запуск `MainActivity` — один Dart-ядро, один код пути подключения, без гонок; цена — окно приложения
-  на секунду.
+  Один движок на процесс (`AppEngine`), один код пути подключения, без гонок; пока движка нет (процесс только что стартовал) — `MainActivity` с extra, цена — окно приложения
+  на секунду; дальше движок живёт и без окна, плитка шлёт событие прямо в него.
 
 ## Релиз
 

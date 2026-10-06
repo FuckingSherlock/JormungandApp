@@ -1,6 +1,7 @@
 package __APP_ID__
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Handler
@@ -38,6 +39,15 @@ object VpnBridge {
 
     private var pending: Pending? = null
     private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * What the Dart core kept next to the running tunnel (`remember`): the plan and ports a new
+     * engine needs to take the tunnel over. Opaque to Kotlin. It lives exactly as long as the tunnel
+     * ([JormungandVpnService] clears it when libbox closes), so it can never describe a tunnel that
+     * is gone.
+     */
+    @Volatile
+    var record: String? = null
 
     /**
      * A line for the app's raw log (Dart: `[android] <text>`), and for logcat. [level]: debug, info, warn, error.
@@ -88,14 +98,16 @@ object VpnBridge {
  *  startBox -> null     args {id: String, config: String}: a throwaway libbox WITHOUT a tunnel (latency
  *                       tests, Speed Test) under [id]; answers when it is up
  *  stopBox  -> null     args {id}
- *  status   -> Map      {running: Boolean} (the tunnel)
+ *  status   -> Map      {running: Boolean, record: String?} (the tunnel; the record `remember` kept for it)
+ *  remember -> null     args {record: String}: kept with the running tunnel (dropped when it stops); a new
+ *                       engine takes the tunnel over from it instead of starting another one
  *
  *  events: {type: 'stopped', reason: 'revoked'} — the tunnel went away on its own (the user or
  *  another VPN app took the VPN away). A plain `stop` does not send one.
  *
  * The notification permission (Android 13+) and the system notifications are NotifyChannel's.
  */
-class VpnChannel(private val activity: Activity) {
+class VpnChannel(private val app: Context) {
     companion object {
         const val NAME = "jormungand/vpn"
         const val EVENTS = "jormungand/vpn_events"
@@ -136,9 +148,14 @@ class VpnChannel(private val activity: Activity) {
                         }
                     },
                 )
-                val intent = Intent(activity, JormungandVpnService::class.java)
+                val intent = Intent(app, JormungandVpnService::class.java)
                     .setAction(JormungandVpnService.ACTION_START)
-                activity.startForegroundService(intent) // minSdk 26
+                try {
+                    app.startForegroundService(intent) // minSdk 26
+                } catch (e: Throwable) {
+                    // e.g. Android 12+ refusing a foreground service started from the background
+                    VpnBridge.takePending()?.done?.invoke("the VPN service could not be started: ${e.message ?: e}")
+                }
             }
             "stop" -> {
                 val service = JormungandVpnService.instance
@@ -156,7 +173,7 @@ class VpnChannel(private val activity: Activity) {
                     return
                 }
                 io.execute {
-                    val box = LibboxBox(activity.applicationContext, LibboxPlatform(activity.applicationContext), id)
+                    val box = LibboxBox(app, LibboxPlatform(app), id)
                     try {
                         boxes.remove(id)?.stop()
                         box.start(config)
@@ -180,13 +197,21 @@ class VpnChannel(private val activity: Activity) {
                     }
                 }
             }
-            "status" -> result.success(mapOf("running" to (JormungandVpnService.instance?.isUp == true)))
+            "status" -> {
+                val up = JormungandVpnService.instance?.isUp == true
+                result.success(mapOf("running" to up, "record" to (if (up) VpnBridge.record else null)))
+            }
+            "remember" -> {
+                // only for a tunnel that is up: a record outliving it would be a lie
+                if (JormungandVpnService.instance?.isUp == true) VpnBridge.record = call.argument<String>("record")
+                result.success(null)
+            }
             // the update feed's asset keys come from this (docs/updates.md: updatePlatforms)
             "abis" -> result.success(android.os.Build.SUPPORTED_ABIS.toList())
             // the installed version (versionName / versionCode) the updater compares against
             "appVersion" -> {
                 @Suppress("DEPRECATION")
-                val info = activity.packageManager.getPackageInfo(activity.packageName, 0)
+                val info = app.packageManager.getPackageInfo(app.packageName, 0)
                 @Suppress("DEPRECATION")
                 val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
                 result.success(mapOf("name" to (info.versionName ?: ""), "code" to code))
@@ -196,14 +221,19 @@ class VpnChannel(private val activity: Activity) {
     }
 
     private fun prepare(result: MethodChannel.Result) {
-        val consent = VpnService.prepare(activity)
+        val consent = VpnService.prepare(app)
         if (consent == null) {
             result.success(true) // already granted
             return
         }
+        val window = AppEngine.activity
+        if (window == null) {
+            result.success(false) // the consent dialog needs a window; the app is not on screen
+            return
+        }
         pendingPrepare?.success(false) // a second ask replaces the first
         pendingPrepare = result
-        activity.startActivityForResult(consent, REQUEST_PREPARE)
+        window.startActivityForResult(consent, REQUEST_PREPARE)
     }
 
     /** Called from MainActivity.onActivityResult; true when the request code was ours. */

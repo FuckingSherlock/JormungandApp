@@ -1390,5 +1390,13 @@
   "Notifications are blocked": "notificationsAreBlocked",
   "Android does not let the app show notifications, so events will not reach you while it is in the background.": "androidDoesNotLetTheApp",
   "Open Android settings": "openAndroidSettings",
-  "Open settings": "openSettings"
+  "Open settings": "openSettings",
+  "Work in the background": "workInTheBackground",
+  "Android stops VPN apps in the background to save battery: the connection would drop, and Auto, pings and notifications would stop. Allow Jormungand to work without battery limits to connect.": "androidStopsVpnAppsInThe",
+  "Allow": "allow",
+  "Not now": "notNow",
+  "Not allowed. Without it the VPN cannot be kept reliably in the background, so the app does not connect.": "notAllowedWithoutItTheVpn",
+  "Allowed: the VPN, Auto and the pings keep working with the screen off and the app swiped away.": "allowedTheVpnAutoAndThe",
+  "Not allowed: Android may stop the VPN and Auto in the background, so the app will not connect.": "notAllowedAndroidMayStopThe",
+  "Limited by the system: Android may stop the VPN and Auto in the background. Allow it to keep them running.": "limitedByTheSystemAndroidMay"
 }

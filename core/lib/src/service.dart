@@ -848,7 +848,98 @@ class CoreService implements CoreApi {
     _dnsServers = info.dnsServers;
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     _tunnelPort = tunnelPort;
+    // what a core made later needs to take this sing-box over (see [adopt])
+    final r = runner;
+    if (r is AdoptableRunner) {
+      try {
+        await r.keep({
+          'plan': plan,
+          'tunnelPort': tunnelPort,
+          'probePort': probePort,
+          'probeSecret': probe.secret,
+          'sysPort': sysPort,
+          'sysWanted': sys,
+          'ruleSetFiles': lists.files,
+          'upSince': _now().millisecondsSinceEpoch,
+        });
+      } catch (e) {
+        runner.note('the record for taking this sing-box over was not kept: $e');
+      }
+    }
     return (lists, warnings);
+  }
+
+  /// A sing-box that outlived the core that started it (Android: the app's engine was destroyed,
+  /// the VpnService kept the tunnel) is taken over instead of started again: no stop, no start,
+  /// the API and the Auto / fallback / DNS services attach to it as after a connect. [body]: what
+  /// a connect body holds for the running state — `dnsAuto`, the kill switch fields and `auto`
+  /// (the Auto settings the app has NOW, the kept plan has the ones of the connect).
+  /// → `{adopted: false}` (nothing runs, or this runner cannot adopt), `{adopted: false, stopped: true}`
+  /// (something ran that could not be taken over; it was stopped so that the state is true), or
+  /// `{adopted: true, plan, status}` — the plan it runs, for the caller to compare with what its
+  /// catalog builds now (a difference is a plan change like any other).
+  @override
+  Future<Map<String, dynamic>> adopt(Map<String, dynamic> body) async {
+    final r = runner;
+    if (r is! AdoptableRunner || r.running || _plan != null) return {'adopted': false};
+    return _locked(() async {
+      if (r.running || _plan != null) return {'adopted': false};
+      final Map<String, dynamic>? rec;
+      try {
+        rec = await r.adopt();
+      } catch (e) {
+        logBook.note('warn', 'A running tunnel could not be taken over ($e): stopped');
+        await r.stop();
+        return {'adopted': false, 'stopped': true};
+      }
+      if (rec == null) return {'adopted': false};
+      final Map<String, dynamic> plan;
+      final Probe probe;
+      final RoutingInfo info = RoutingInfo();
+      final int tunnelPort;
+      final int? sysPort;
+      try {
+        plan = (rec['plan'] as Map).cast<String, dynamic>();
+        tunnelPort = (rec['tunnelPort'] as num).toInt();
+        sysPort = (rec['sysPort'] as num?)?.toInt();
+        probe = Probe((rec['probePort'] as num).toInt(), rec['probeSecret'] as String);
+        // the config again with the same inputs, for what it says about itself (rules by name,
+        // fallbacks, DNS servers); the config itself is not used
+        buildConfig(plan,
+            tunnelPort: tunnelPort,
+            sysPort: sysPort,
+            probe: probe,
+            ruleSetFiles: ((rec['ruleSetFiles'] as Map?) ?? const {}).cast<String, String>(),
+            warnings: <String>[],
+            info: info,
+            selfPaths: _selfPaths);
+      } catch (e) {
+        logBook.note('warn', 'A running tunnel could not be taken over (its record: $e): stopped');
+        await r.stop();
+        return {'adopted': false, 'stopped': true};
+      }
+      _connectSeq++;
+      _applyKill(body);
+      if (body['dnsAuto'] is bool) _dnsAuto = body['dnsAuto'] as bool;
+      final auto = body['auto'];
+      _plan = auto is Map ? {...plan, 'auto': auto} : plan;
+      _sysWanted = rec['sysWanted'] == true;
+      _upSince = DateTime.fromMillisecondsSinceEpoch((rec['upSince'] as num?)?.toInt() ?? _now().millisecondsSinceEpoch);
+      _attempt = 0;
+      _probe = probe;
+      _fallbacks = info.fallbacks;
+      _ruleNames = info.ruleNames;
+      _dnsServers = info.dnsServers;
+      _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
+      _tunnelPort = tunnelPort;
+      _sysPort = sysPort;
+      _error = null;
+      _startAuto(_plan!);
+      _recheckExit();
+      logBook.note('info', 'Took over the running tunnel (${plan['kind']}, up since $_upSince)');
+      _changed();
+      return {'adopted': true, 'plan': plan, 'status': _statusMap()};
+    });
   }
 
   /// The loopback port of `sys-in`, the open inbound the system proxy points at while the user

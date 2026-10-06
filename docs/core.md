@@ -165,6 +165,22 @@ closeConnections`. Тела и ответы — те же карты (`Map<Strin
 `<cacheDir>/boxes/boxN.db`, удаляется при остановке (остатки убитого приложения чистятся при старте).
 Десктоп не затронут: у каждого процесса sing-box свой `-D workDir` (`run/main`, `run/ping-N`, `run/speed`).
 
+**Усыновление работающего sing-box** (Android, `AdoptableRunner` в `runtime.dart`; общая картина —
+`docs/platforms.md` → «Работа в фоне»). Туннель живёт в `VpnService`, ядро — в движке Dart; ядро может
+родиться заново при живом туннеле. Раннер, который это умеет, реализует `AdoptableRunner`:
+`keep(record)` — `CoreService` вызывает его после каждого успешного старта sing-box (`_startSingBox`) и
+отдаёт запись `{plan, tunnelPort, probePort, probeSecret, sysPort, sysWanted, ruleSetFiles, upSince}`
+(платформа хранит её, пока туннель поднят); `adopt()` — запись или `null`, если ничего не запущено
+(бросает `SingBoxError`, если запущено, а подключиться нельзя). `CoreApi.adopt(body)` (тело — то же, что
+у `connect` для живого состояния: `dnsAuto`, поля kill switch и `auto` с настройками Auto «сейчас») зовут
+в `init()` до чего-либо ещё; ответ: `{adopted: false}` (нечего усыновлять или раннер не умеет),
+`{adopted: false, stopped: true}` (работало, но не усыновилось — ядро остановило его, чтобы состояние
+было верным) или `{adopted: true, plan, status}`. Ядро собирает конфиг заново из записи только ради
+`RoutingInfo` (имена правил, fallback-и, DNS-серверы), не отправляя его; запускает Auto / проверку
+выхода, как после `connect`; `start` и `stop` раннера не вызываются. Вызывающий сравнивает вернувшийся
+план с тем, что его каталог строит сейчас: разница — обычная смена плана (перезапуск после паузы), а не
+тихий рестарт. Десктопный `SingBoxProcess` не `AdoptableRunner`: `adopt` у него всегда `{adopted: false}`.
+
 ## Нода
 
 `{id, name, flag, protocol, address, port, outbound, unsupported?}`. `id` =

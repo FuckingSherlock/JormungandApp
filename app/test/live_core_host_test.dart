@@ -303,6 +303,55 @@ void main() {
     expect(host.catalog.sourceSeq, 4);
   });
 
+  test('servers switched off in Nodes survive an update: not "removed by the provider", hidden in a chain exit', () async {
+    String line(String host, String name) =>
+        'ss://${base64.encode(utf8.encode('aes-256-gcm:password'))}@$host:8388#${Uri.encodeComponent(name)}';
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((req) {
+      req.response
+        ..headers.set('content-type', 'text/plain')
+        ..write(
+          base64.encode(
+            utf8.encode(
+              [
+                line('one.example', 'One'),
+                line('two.example', 'Two'),
+                line('three.example', 'Three'),
+              ].join('\n'),
+            ),
+          ),
+        );
+      req.response.close();
+    });
+    final snap = snapshot();
+    ((snap['sourcesData'] as Map)['a'] as Map)
+      ..['url'] = 'http://127.0.0.1:${server.port}/sub'
+      ..['nodes'] = <dynamic>[]
+      ..['userAgent'] = 'sing-box';
+    await start(snap: snap);
+    await host.updateSource('a');
+    final catalog = host.catalog;
+    final s = catalog.sourcesData['a']!;
+    expect(s.nodes.map((n) => n.name), ['One', 'Two', 'Three']);
+
+    host.toggleNodeEnabled('a', s.nodes[1].id);
+    host.toggleNodeEnabled('a', s.nodes[2].id);
+    final chain = Chain(id: 'c1', name: 'C', inId: 'b', outId: 'a');
+    catalog.chainsData['c1'] = chain;
+    catalog.catalogOrder['simple']!.add('c1');
+    await host.updateSource('a'); // the provider still sends all three
+
+    final after = catalog.sourcesData['a']!;
+    expect(after.gone, isEmpty);
+    expect(after.disabledNodes, hasLength(2));
+    expect(catalog.unitGoneRefs('a'), isEmpty);
+    expect(catalog.chainExitRefs(chain).map((r) => r.node.name), ['One']);
+    expect(catalog.chainExitOrder(chain).map((r) => r.node.name), ['One']);
+    // switched off in Nodes is a reason to show, not a removal
+    expect(catalog.offReasons(catalog.chainExitOrder(chain, withOff: true)).map((r) => r.nid), [after.nodes[1].id, after.nodes[2].id]);
+  });
+
   test(
     'a ping that cannot run keeps what the nodes had; only a never-pinged node stays without a value',
     () async {

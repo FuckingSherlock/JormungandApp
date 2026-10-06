@@ -46,7 +46,20 @@ class ProcessPort implements LibboxPort {
     stops++;
     _proc?.kill();
     _proc = null;
+    _record = null;
   }
+
+  String? _record;
+
+  // the service keeps the record for as long as the tunnel runs
+  @override
+  Future<void> remember(String record) async {
+    if (_proc != null) _record = record;
+  }
+
+  @override
+  Future<({bool running, String? record})> recall() async =>
+      (running: _proc != null, record: _proc == null ? null : _record);
 
   @override
   Stream<String> get stoppedOnItsOwn => gone.stream;
@@ -224,6 +237,60 @@ void main() {
     skip: _skip,
     timeout: const Timeout(Duration(seconds: 40)),
   );
+
+  test(
+    'adopt: a second runner (a new engine) takes the running sing-box over — API, log lines, stop — with no start',
+    () async {
+      final mixed = await freePort();
+      await runner.start(_config(mixed));
+      await runner.keep({'plan': 'the core\'s record'});
+      expect(port.starts, 1);
+
+      // the first engine is gone (its runner is just dropped, not stopped); another one starts
+      final lines = <String>[];
+      final second = LibboxRunner(port, upTimeout: const Duration(seconds: 10))
+        ..onLog = lines.add;
+      final rec = await second.adopt();
+      expect(rec, {'plan': 'the core\'s record'});
+      expect(port.starts, 1, reason: 'no start');
+      expect(port.stops, 0, reason: 'no stop');
+      expect(second.running, isTrue);
+      expect(await second.api!.serviceState(), isNull);
+
+      final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      target.listen(
+        (r) => r.response
+          ..write('ok')
+          ..close(),
+      );
+      addTearDown(() => target.close(force: true));
+      await _get(mixed, target.port);
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (!lines.any((l) => l.contains('${target.port}')) &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(lines.any((l) => l.contains('${target.port}')), isTrue, reason: 'log attached');
+
+      await second.stop();
+      expect(port.stops, 1);
+      expect(await port.recall(), (running: false, record: null));
+    },
+    skip: _skip,
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+
+  test('adopt: nothing running -> null; a tunnel with no usable record -> SingBoxError, and stop closes it', () async {
+    expect(await runner.adopt(), isNull);
+
+    await runner.start(_config(await freePort()));
+    port._record = null; // the platform lost the record
+    final second = LibboxRunner(port, upTimeout: const Duration(seconds: 2));
+    await expectLater(second.adopt(), throwsA(isA<SingBoxError>()));
+    expect(second.running, isFalse);
+    await second.stop(); // it IS running on the platform: closed
+    expect(port.stops, 1);
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 40)));
 
   test(
     'stop: closes the platform side once; a failed start leaves nothing to stop',

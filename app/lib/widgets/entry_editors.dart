@@ -787,11 +787,8 @@ class _ChainEditorState extends State<_ChainEditor> {
                                   node: r.node,
                                   onPing: () => host.pingNodes([r.node]),
                                 ),
-                            if (active)
-                              GoneBlock(
-                                refs: catalog.unitGoneRefs(id),
-                                isOn: (r) => !off.contains(r.key),
-                              ),
+                            // servers the provider dropped are not offered here: a chain keeps
+                            // nothing for them worth showing (Nodes lists them)
                           ],
                         ),
                       ),

@@ -17,6 +17,15 @@ abstract interface class LibboxPort {
   /// Reasons of sing-box stopping on its own (the system took the VPN away). Empty for ports
   /// that have no such thing.
   Stream<String> get stoppedOnItsOwn;
+
+  /// Keeps [record] next to the running sing-box on the platform side: it lives exactly as long
+  /// as sing-box does (a stop, a revoke or the process ending drop it). Ports whose sing-box
+  /// cannot outlive the app do nothing.
+  Future<void> remember(String record);
+
+  /// Whether the platform runs a sing-box now and what [remember] was given for it (null: none).
+  /// Asked by a freshly started core to take over a tunnel the previous engine left running.
+  Future<({bool running, String? record})> recall();
 }
 
 /// Android's [BoxRunner]: sing-box as libbox inside the app (behind the VpnService for the
@@ -30,7 +39,7 @@ abstract interface class LibboxPort {
 /// [cacheFile]: this instance's own sing-box cache file ([withCacheFile]); every libbox in the
 /// app process wants one and locks it, so two instances must never share a path. [temporaryCache]:
 /// the file is deleted when the instance stops (the throwaway ones); the tunnel's stays.
-class LibboxRunner implements BoxRunner {
+class LibboxRunner implements AdoptableRunner {
   LibboxRunner(
     this._port, {
     this.upTimeout = const Duration(seconds: 8),
@@ -49,6 +58,8 @@ class LibboxRunner implements BoxRunner {
   StreamSubscription<String>? _logSub, _goneSub;
   bool _native = false; // the platform may hold a running sing-box
   bool _up = false;
+  int _apiPort = 0; // of the running sing-box: what [keep] hands to a later core
+  String _secret = '', _level = 'INFO';
 
   @override
   bool get running => _up;
@@ -104,14 +115,10 @@ class LibboxRunner implements BoxRunner {
         await stop();
         throw SingBoxError('sing-box failed to start: $fatal');
       }
-      _up = true;
-      _api = a..watch();
-      _logSub = a.logLines().listen((l) {
-        // libbox sends every line, whatever the config's level says
-        final m = _levelOfLine.firstMatch(l);
-        if (m == null || _rank(m[1]!) <= want) onLog?.call(l);
-      }, onError: (Object _) {});
-      _goneSub = _port.stoppedOnItsOwn.listen(_gone, onError: (Object _) {});
+      _apiPort = apiPort;
+      _secret = secret;
+      _level = '${(config['log'] as Map?)?['level'] ?? 'info'}'.toUpperCase();
+      _attach(a, want);
       return;
     }
     await a.close();
@@ -119,6 +126,64 @@ class LibboxRunner implements BoxRunner {
     throw SingBoxError(
       'sing-box did not come up in ${upTimeout.inSeconds} s: its API on 127.0.0.1:$apiPort answered with $lastError',
     );
+  }
+
+  /// The API of the running sing-box [a]: [running], its streams, its log (cut to [want]), its end.
+  void _attach(SingBoxApi a, int want) {
+    _up = true;
+    _api = a..watch();
+    _logSub = a.logLines().listen((l) {
+      // libbox sends every line, whatever the config's level says
+      final m = _levelOfLine.firstMatch(l);
+      if (m == null || _rank(m[1]!) <= want) onLog?.call(l);
+    }, onError: (Object _) {});
+    _goneSub = _port.stoppedOnItsOwn.listen(_gone, onError: (Object _) {});
+  }
+
+  @override
+  Future<void> keep(Map<String, dynamic> record) async {
+    if (!_up) return;
+    await _port.remember(
+      jsonEncode({
+        'apiPort': _apiPort,
+        'secret': _secret,
+        'level': _level,
+        'core': record,
+      }),
+    );
+  }
+
+  @override
+  Future<Map<String, dynamic>?> adopt() async {
+    if (_up) return null;
+    final s = await _port.recall();
+    if (!s.running) return null;
+    _native = true; // it is there: a stop closes it, also when it cannot be taken over
+    final Map<String, dynamic> rec;
+    final SingBoxApi a;
+    try {
+      rec = (jsonDecode(s.record ?? '') as Map).cast<String, dynamic>();
+      a = SingBoxApi((rec['apiPort'] as num).toInt(), rec['secret'] as String);
+    } catch (e) {
+      throw SingBoxError('the tunnel left by the previous run has no usable record ($e)');
+    }
+    try {
+      final fatal = await a.serviceState().timeout(upTimeout);
+      if (fatal != null) throw SingBoxError('sing-box reports: $fatal');
+    } catch (e) {
+      await a.close().catchError((Object _) {});
+      throw SingBoxError('the tunnel left by the previous run does not answer on its API: $e');
+    }
+    _apiPort = (rec['apiPort'] as num).toInt();
+    _secret = rec['secret'] as String;
+    _level = '${rec['level'] ?? 'INFO'}';
+    final core = rec['core'];
+    if (core is! Map) {
+      await a.close().catchError((Object _) {});
+      throw SingBoxError('the tunnel left by the previous run has no core record');
+    }
+    _attach(a, _rank(_level));
+    return core.cast<String, dynamic>();
   }
 
   // "WARN[0003] …", coloured by libbox: "\x1b[33mWARN\x1b[0m[0003] …"

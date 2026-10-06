@@ -6,6 +6,7 @@ import '../l10n/l10n.dart';
 import '../platform/platform_caps.dart';
 import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
+import 'background_access_row.dart';
 import 'form_parts.dart';
 import 'nodes_menus.dart' show copyText;
 import 'settings_parts.dart';
@@ -129,6 +130,7 @@ class _ConnBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const BackgroundAccessRow(), // Android: the battery-optimization exemption
         SetGroup(
           card: true,
           children: [

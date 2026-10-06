@@ -50,6 +50,16 @@ class ChannelLibboxPort implements LibboxPort {
   Stream<String> get stoppedOnItsOwn => boxId == null
       ? _vpn.stopped.map((e) => e.reason)
       : const Stream<String>.empty();
+
+  // only the tunnel outlives the engine (it is the VpnService's); throwaway boxes die with it
+  @override
+  Future<void> remember(String record) async {
+    if (boxId == null) await _vpn.remember(record);
+  }
+
+  @override
+  Future<({bool running, String? record})> recall() async =>
+      boxId == null ? _vpn.recall() : (running: false, record: null);
 }
 
 /// Where the desktop sing-box is: `JORMUNGAND_SINGBOX`, else next to the app's executable.

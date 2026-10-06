@@ -6,6 +6,8 @@
 - `20-profiles.js` `chainExitOrder`: узлы, которым цепочка не задала порядок, идут в порядке `pickOrder`
   юнита выхода (подписки/профиля): `orderRefs(orderRefs(unitRefs(...), unitOwner(c.outId)?.pickOrder), c.exitOrder)`.
   Как в core `catalog.dart` `chainExitOrder`.
+- `70-profile-forms.js` ~307: убрать `goneBlockHtml` из редактора цепочки (`cc:${side}:${id}`) —
+  пропавшие серверы в цепочке не показываются (docs/connect-model.md «Пропавшие ноды»).
 - Golden: после переноса — перегенерировать `core/test/golden/catalog.json` и очистить `_mockupBehind`
   в `core/test/catalog_golden_test.dart` (пока там пропущены сценарии, где core ушёл вперёд мокапа).
 - Лист Notifications: строка-предупреждение «Уведомления заблокированы» + «Открыть настройки» (на

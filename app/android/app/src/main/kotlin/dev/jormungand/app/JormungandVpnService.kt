@@ -42,7 +42,7 @@ class JormungandVpnService : VpnService() {
         /** The notification's Disconnect button (see [AppNotifier.vpnNotification]). */
         const val ACTION_DISCONNECT = "dev.jormungand.app.vpn.DISCONNECT"
         private const val TAG = "JormungandVpn"
-        private const val NOTIFICATION_ID = 1
+        internal const val NOTIFICATION_ID = 1
 
         @Volatile
         var instance: JormungandVpnService? = null
@@ -79,6 +79,13 @@ class JormungandVpnService : VpnService() {
         }
         // Not sticky: a restart without the Dart side could not rebuild the config.
         return START_NOT_STICKY
+    }
+
+    // Swiped from Recents: the tunnel stays (stopWithTask=false), and so does the engine with the Dart
+    // core (AppEngine); nothing to do, the line is for the log
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        VpnBridge.log("info", "tunnel: the app was swiped away, the tunnel keeps running")
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onRevoke() {
@@ -127,6 +134,7 @@ class JormungandVpnService : VpnService() {
 
     private fun closeBoxLocked() {
         isUp = false
+        VpnBridge.record = null // what Dart kept for taking this tunnel over is void with it
         TileBridge.refresh(this) // the Quick Settings tile follows the tunnel, Dart or not
         box?.stop()
         box = null

@@ -40,5 +40,9 @@
   "Could not open {0}": "Не удалось открыть {0}",
   "Notifications are blocked": "Уведомления заблокированы",
   "Android does not let the app show notifications, so events will not reach you while it is in the background.": "Android не даёт приложению показывать уведомления, поэтому события не дойдут, пока оно в фоне.",
-  "Open settings": "Открыть настройки"
+  "Open settings": "Открыть настройки",
+  "Work in the background": "Работа в фоне",
+  "Allow": "Разрешить",
+  "Allowed: the VPN, Auto and the pings keep working with the screen off and the app swiped away.": "Разрешено: VPN, Auto и пинги работают при выключенном экране и когда приложение смахнуто из недавних.",
+  "Limited by the system: Android may stop the VPN and Auto in the background. Allow it to keep them running.": "Ограничено системой: Android может остановить VPN и Auto в фоне. Разрешите, чтобы они продолжали работать."
 }
