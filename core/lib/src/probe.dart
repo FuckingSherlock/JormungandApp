@@ -140,12 +140,20 @@ Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 500
   }
 }
 
+/// The probe inbound turned the test down before any request was made (no such SOCKS user =
+/// no such outbound to test, or no password method): says nothing about the path under test.
+class ProbeRefused extends SocketException {
+  const ProbeRefused(super.message);
+}
+
 /// An error as one short phrase for the log ("SocketException: socks: reply 4" -> "socks: reply 4").
 String _why(Object e) => e is SocketException ? (e.message.isEmpty ? '${e.osError ?? e}' : e.message) : '$e';
 
 /// Whether the site [dest] (`host:port`) opens through [tag]: port 443 — a TLS handshake
 /// with it (its certificate valid for the host), port 80 — an answer to HEAD /. null when
-/// it cannot be told (another port, an IP address on 443).
+/// it cannot be told: another port, an IP address on 443, or the test never ran (the
+/// inbound is not there, or it refused the user name [tag] — no such outbound to test);
+/// false only when the request really went through [tag] and failed.
 Future<bool?> probeReach(Probe probe, String tag, String dest, {int timeoutMs = 5000}) async {
   final i = dest.lastIndexOf(':');
   final host = i > 0 ? dest.substring(0, i).replaceAll(RegExp(r'^\[|\]$'), '') : dest;
@@ -156,7 +164,11 @@ Future<bool?> probeReach(Probe probe, String tag, String dest, {int timeoutMs = 
   Duration left() => deadline.difference(DateTime.now());
   _Wire? w;
   try {
-    w = await _Wire.connect(probe.port).timeout(left());
+    try {
+      w = await _Wire.connect(probe.port).timeout(left());
+    } catch (_) {
+      return null; // the test inbound is not there: nothing was tested
+    }
     await w.socks(tag, probe.secret, host, port!).timeout(left());
     if (port == 443) {
       await w.secure(host).timeout(left());
@@ -164,6 +176,8 @@ Future<bool?> probeReach(Probe probe, String tag, String dest, {int timeoutMs = 
       await w.request(utf8.encode('HEAD / HTTP/1.1\r\nHost: $host\r\nUser-Agent: Jormungand\r\nAccept: */*\r\n\r\n')).timeout(left());
     }
     return true;
+  } on ProbeRefused {
+    return null; // the inbound did not take the user name: the request never ran
   } catch (_) {
     return false;
   } finally {
@@ -255,10 +269,10 @@ class _Wire {
   Future<void> socks(String user, String pass, String host, int port) async {
     await _write([5, 1, 2]); // one method: user name / password
     final m = await _take(2);
-    if (m[0] != 5 || m[1] != 2) throw const SocketException('socks: no auth');
+    if (m[0] != 5 || m[1] != 2) throw const ProbeRefused('socks: no auth');
     final u = utf8.encode(user), pw = utf8.encode(pass);
     await _write([1, u.length, ...u, pw.length, ...pw]);
-    if ((await _take(2))[1] != 0) throw const SocketException('socks: auth refused');
+    if ((await _take(2))[1] != 0) throw const ProbeRefused('socks: auth refused');
     final h = utf8.encode(host);
     await _write([5, 1, 0, 3, h.length, ...h, port >> 8, port & 0xff]);
     final r = await _take(4);

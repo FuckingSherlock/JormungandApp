@@ -752,6 +752,59 @@ void main() {
       expect(events.length, 1);
     });
 
+    // Right after a start sing-box tells no member of a urltest yet, so a failed connection
+    // names the GROUP (`route0`): the probe inbound has no user for a group — the site test
+    // must go to the member in use, or not run at all, never "fail" on a refusal.
+    test('the failed connection names the route group: the site test goes to the member in use', () async {
+      final p = plan([unit('A', ['s::a', 's::a2']), unit('B', ['s::b'])]);
+      final fake = FakeBox(buildConfig(p), {'s::a': 50, 's::a2': 20, 's::b': 60});
+      final asked = <String>[];
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) async {
+        asked.add(tag);
+        return true;
+      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      await auto.check();
+      auto.onClosed(cc(outbound: 'route0', chain: const ['route0', 'proxy']));
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(asked, ['route0/s::a2']);
+    });
+
+    test('the failed connection names the route group, the member in use is unknown: no site test, no claim', () async {
+      final p = plan([unit('A', ['s::a', 's::a2']), unit('B', ['s::b'])]);
+      final fake = _NoUrltestNow(buildConfig(p), {'s::a': 30, 's::a2': 40, 's::b': 60}); // urltest.Now() = ""
+      final asked = <String>[];
+      final events = <Object>[];
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) async {
+        asked.add(tag);
+        return false; // would be taken for "does not open" were it asked
+      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      auto.blocked.listen(events.add);
+      auto.unreachable.listen(events.add);
+      await auto.check();
+      auto.onClosed(cc(outbound: 'route0', chain: const ['route0', 'proxy']));
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(asked, isEmpty);
+      expect(events, isEmpty);
+      expect(auto.blockedCount + auto.unreachableCount, 0);
+    });
+
+    test('the failed connection names something that is no server of the route (a stranger tag): skipped', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
+      final asked = <String>[];
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) async {
+        asked.add(tag);
+        return true;
+      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      await auto.check();
+      auto.onClosed(cc(outbound: 'route0/nope', chain: const ['route0/nope', 'route0', 'proxy']));
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(asked, isEmpty);
+    });
+
     // A current; B, C, D, E answer, so any of them may be tried
     (AutoService, FakeBox, List<(String, String)>, List<AutoBlocked>, List<AutoUnreachable>, List<String>) five(Future<bool?> Function(String, String) reach,
         {String? siteRetry, int Function()? clock}) {
@@ -920,6 +973,17 @@ void main() {
       expect(reachCalls, 0, reason: 'the node itself does not answer: sites are not tried');
     });
   });
+}
+
+/// sing-box 1.14 before the first urltest round: `Now()` is "", so no member is reported.
+class _NoUrltestNow extends FakeBox {
+  _NoUrltestNow(super.config, super.alive);
+
+  @override
+  Map<String, String> get selected => {
+        for (final e in super.selected.entries)
+          if (groups[e.key]?.type != 'urltest') e.key: e.value,
+      };
 }
 
 class _Dead implements BoxControl {

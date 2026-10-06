@@ -589,8 +589,9 @@ class AutoService {
     final alts = [for (var i = 0; i < _routes.length; i++) if (i != index && _routes[i].health.answered) _routes[i]].take(settings.siteAlternates).toList();
     final off = settings.siteAlternates == 0;
     for (final MapEntry(key: dest, value: fail) in dests.entries) {
-      final tag = fail.tag;
       if (_stopped) return;
+      final tag = _serverTag(cur, fail.tag);
+      if (tag == null) continue; // not a server we can aim a test at: no evidence either way
       final here = await reach!(tag, dest);
       if (here != false) continue; // opens now, or cannot be told
       _Route? via;
@@ -631,6 +632,20 @@ class AutoService {
       lastUnreachable = u;
       if (!_unreachable.isClosed) _unreachable.add(u);
     }
+  }
+
+  // The server tag a site test can go through for a failed connection's outbound [tag]: a
+  // server of the route's groups as is; the route's main group itself (its connection's
+  // outbound while a urltest has not finished its first round — sing-box tells no member
+  // yet) = the member in use, when known. Anything else (the entry group, a stranger):
+  // null — the probe inbound has no user for a group, the test would never run.
+  String? _serverTag(_Route r, String tag) {
+    for (final g in r.groups) {
+      final k = g.keyOf(tag);
+      if (k != null && g.keys.contains(k)) return tag;
+    }
+    final now = r.main.now;
+    return tag == r.main.tag && now != null && r.main.keys.contains(now) ? r.main.member(now) : null;
   }
 
   void _kickNow() {

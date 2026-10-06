@@ -325,7 +325,11 @@ probe.dart; `plan.auto.checkers`, иначе `urlTest.checkers`, нет поля
 где открылся; число — `AutoSettings.siteAlternates` из `plan.auto.siteRetry`: 0 / 3 / все) →
 событие `blocked` (`AutoBlocked {route, server, dest, via, viaServer}`); не открылся нигде или
 другого маршрута нет → `unreachable` (`AutoUnreachable {route, server, dest, tried, retriesOff}`);
-оба — пара маршрут + сайт раз в час. Ответ `reach` «не знаю» (null) не считается пробой. `onLog`: строка
+оба — пара маршрут + сайт раз в час. Ответ `reach` «не знаю» (null) не считается пробой;
+`probeReach` отвечает null и когда проба не состоялась (`ProbeRefused`: probe inbound не принял
+имя пользователя — у групп его нет; inbound не отвечает), false — только если запрос прошёл через
+тег и не удался. Тег группы маршрута (urltest до первого раунда не называет сервер) `AutoService`
+сводит к серверу в работе (`_serverTag`), неизвестен — сайт пропускается. `onLog`: строка
 sing-box `missing default interface` → `offline` (раунды ничего не меряют, как `noNet`),
 `updated default interface` → снова в сети, проверка сразу.
 
