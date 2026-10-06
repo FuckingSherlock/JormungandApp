@@ -164,6 +164,7 @@ const SHOTS = {
   'kill-off-confirm': async p => { await p.evaluate(() => { connCfg.killSwitch = true; connected = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); toggleKillSwitch(); }); await settle(p); },
   // password on the proxy port: a login and password shown, copy buttons (fixed values: the shot must not change)
   'conn-proxy-auth': async p => { await p.evaluate(() => { connCfg.sysProxy = true; connCfg.proxyAuth = true; connCfg.proxyUser = 'k7m2xq9d'; connCfg.proxyPass = 'Kq7mT2vXp9Rd4WzN8sYb'; switchTab('settings'); openSheet('setconn'); renderConnSettings(); }); await settle(p); },
+  'conn-ipv6': async p => { await p.evaluate(() => { connCfg.ipv6 = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); }); await settle(p); },
   'kill-on': async p => { await p.evaluate(() => { connCfg.killSwitch = true; connCfg.killOnDisconnect = true; switchTab('settings'); openSheet('setconn'); renderConnSettings(); }); await settle(p); },
   'core-down-kept': async p => { await p.evaluate(() => { connected = true; vpn.down = { since: Date.now() - 83e3, attempt: 4, proxy: 'kept' }; renderConnState(); }); await settle(p); },
   'core-down-direct': async p => { await p.evaluate(() => { connected = true; vpn.down = { since: Date.now() - 250e3, attempt: 9, proxy: 'removed' }; renderConnState(); }); await settle(p); },
@@ -1522,6 +1523,30 @@ async function runChecks() {
       segState.mode = m; connCfg.tunStack = 'mixed'; renderConnSettings(); return out; });
     expect(sig.tunDiffers && sig.proxySame, JSON.stringify(sig));
     await p.evaluate(() => closeSheet('setconn'));
+    await p.close();
+  });
+
+  await check('settings: IPv6 — off by default, the toggle goes to connCfg, the snapshot and the plan; it reconnects in TUN and in proxy mode; the row fits 320 px at 120 %', async () => {
+    const p = await openPage(browser, { width: 320 });
+    await p.evaluate(() => { applyScale(UI_SCALE_MAX); Object.values(sourcesData).forEach(s => s.nodes.forEach(n => { n.outbound = { type: 'socks', server: '127.0.0.1', server_port: 1 }; n.unsupported = false; })); });
+    await tab(p, 'settings');
+    await p.evaluate(() => openSheet('setconn'));
+    const row = await p.evaluate(() => { const r = document.querySelector('[data-key=ipv6]'); return { on: r.querySelector('.mini-toggle').classList.contains('on'), hint: r.querySelector('.set-hint').textContent }; });
+    expect(!row.on && /Leave off unless/.test(row.hint), 'default off: ' + JSON.stringify(row));
+    expect(await p.evaluate(() => connCfg.ipv6 === false && livePlan().ipv6 === false), 'plan default false');
+    await p.click('[data-key=ipv6] .mini-toggle');
+    const r = await p.evaluate(() => ({ cfg: connCfg.ipv6, snap: liveSnapshot().connCfg.ipv6, plan: livePlan().ipv6, on: document.querySelector('[data-key=ipv6] .mini-toggle').classList.contains('on') }));
+    expect(r.cfg === true && r.snap === true && r.plan === true && r.on, JSON.stringify(r));
+    // the DNS strategy counts in proxy mode too: the signature follows it in both modes
+    const sig = await p.evaluate(() => { const m = segState.mode, out = {};
+      for (const mode of ['tun', 'proxy']) { segState.mode = mode; connCfg.ipv6 = false; const a = planSig(); connCfg.ipv6 = true; out[mode] = planSig() !== a; }
+      segState.mode = m; renderConnSettings(); return out; });
+    expect(sig.tun && sig.proxy, JSON.stringify(sig));
+    // 320 px at 120 %: the row stays inside the sheet
+    const fit = await p.evaluate(() => { const r = document.querySelector('[data-key=ipv6]'), l = r.querySelector('.set-label').getBoundingClientRect(), t = r.querySelector('.mini-toggle').getBoundingClientRect(), b = r.getBoundingClientRect();
+      return { labelRight: l.right, toggleLeft: t.left, toggleRight: t.right, rowRight: b.right, scroll: r.scrollWidth - r.clientWidth, w: innerWidth }; });
+    expect(fit.labelRight <= fit.toggleLeft + 1 && fit.toggleRight <= fit.rowRight + 1 && fit.rowRight <= fit.w + 1 && fit.scroll <= 1, 'fit: ' + JSON.stringify(fit));
+    await p.evaluate(() => { connCfg.ipv6 = false; closeSheet('setconn'); });
     await p.close();
   });
 

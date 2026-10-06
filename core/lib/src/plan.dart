@@ -32,6 +32,12 @@ bool planTun(Map<String, dynamic> plan) => plan['mode'] == 'tun';
 const tunStacks = ['mixed', 'system', 'gvisor'];
 String planTunStack(Map<String, dynamic> plan) => tunStacks.contains(plan['tunStack']) ? plan['tunStack'] as String : 'mixed';
 
+/// Settings → Connection → IPv6 (`plan.ipv6`; off when missing): off = the core's DNS answers no
+/// AAAA (`dns.strategy: ipv4_only`) and IPv6 connections entering the TUN are rejected at once
+/// (config.dart `ipv6OffRule`), so nothing hangs on an address the network and the exits may not
+/// carry; on = dual stack as is.
+bool planIpv6(Map<String, dynamic> plan) => plan['ipv6'] == true;
+
 /// Settings → DNS → Hijack DNS (`plan.routing.dns.hijack`; on unless the UI says off): in TUN,
 /// every DNS query is answered by the core's DNS, even one aimed at a hard-coded server.
 bool planHijackDns(Map<String, dynamic> plan) {

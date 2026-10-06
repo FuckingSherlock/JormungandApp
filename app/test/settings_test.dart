@@ -313,6 +313,28 @@ void main() {
       expect(host.changes, greaterThan(changes));
     });
 
+    testWidgets('Connection: IPv6 is off by default, the toggle lands in the catalog and is saved (both platforms)', (
+      tester,
+    ) async {
+      for (final android in [false, true]) {
+        final host = FakeCoreHost(android: android);
+        await _pump(tester, host);
+        await _open(tester, 'setconn');
+        expect(host.catalog.connCfg.ipv6, isFalse);
+        final t = _toggleOf('IPv6');
+        await tester.ensureVisible(t);
+        await tester.pumpAndSettle();
+        final changes = host.changes;
+        await tester.tap(t);
+        await tester.pumpAndSettle();
+        expect(host.catalog.connCfg.ipv6, isTrue, reason: 'android: $android');
+        expect(host.changes, greaterThan(changes));
+        await tester.tap(t);
+        await tester.pumpAndSettle();
+        expect(host.catalog.connCfg.ipv6, isFalse);
+      }
+    });
+
     testWidgets('General and Notifications: switches persist in the state', (
       tester,
     ) async {

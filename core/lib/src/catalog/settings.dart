@@ -38,7 +38,7 @@ class SegState with RoundTrip {
 
 /// Settings → Connection. Kill-switch fields only travel with the snapshot (the core reads
 /// them from the connect body, not from the plan); the plan reads `port`, `proxyAuth` /
-/// `proxyUser` / `proxyPass`, `testUrl`, `checkers`, `tunStack`.
+/// `proxyUser` / `proxyPass`, `testUrl`, `checkers`, `tunStack`, `ipv6`.
 class ConnCfg with RoundTrip {
   ConnCfg({
     this.sysProxy = false,
@@ -53,6 +53,7 @@ class ConnCfg with RoundTrip {
     this.testUrl = '',
     List<String>? checkers,
     this.tunStack = 'mixed',
+    this.ipv6 = false,
   }) : checkers = checkers ?? [...defaultCheckers];
 
   factory ConnCfg.fromJson(Json j) {
@@ -69,6 +70,7 @@ class ConnCfg with RoundTrip {
       testUrl: _get(j, 'testUrl', ''),
       checkers: j['checkers'] is List ? strList(j['checkers']) : null,
       tunStack: _get(j, 'tunStack', 'mixed'),
+      ipv6: _get(j, 'ipv6', false),
     );
     c.capture(j, _known);
     return c;
@@ -76,7 +78,7 @@ class ConnCfg with RoundTrip {
 
   static const _known = {
     'sysProxy', 'killSwitch', 'killOnDisconnect', 'killWhileClosed', 'downProxy', 'port', 'proxyAuth', 'proxyUser', 'proxyPass', //
-    'testUrl', 'checkers', 'tunStack',
+    'testUrl', 'checkers', 'tunStack', 'ipv6',
   };
 
   bool sysProxy;
@@ -96,6 +98,9 @@ class ConnCfg with RoundTrip {
   List<String> checkers;
   String tunStack;
 
+  /// IPv6 through the tunnel (TUN address and AAAA answers); off by default.
+  bool ipv6;
+
   Json toJson() => {
         'sysProxy': sysProxy,
         'killSwitch': killSwitch,
@@ -109,6 +114,7 @@ class ConnCfg with RoundTrip {
         'testUrl': testUrl,
         'checkers': [...checkers],
         'tunStack': tunStack,
+        'ipv6': ipv6,
         ...deepCopy(unknown) as Json,
       };
 }

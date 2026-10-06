@@ -139,8 +139,9 @@ const DEFAULT_CHECKERS = ['https://cp.cloudflare.com/generate_204', 'https://www
   'http://www.msftconnecttest.com/connecttest.txt', 'http://captive.apple.com/hotspot-detect.html'];
 // Kill switch (rules.md §7): killOnDisconnect / killWhileClosed only count with killSwitch on (the latter also
 // needs genCfg.launchAtStartup + connectOnLaunch); downProxy only with it off: the proxy when the VPN cannot recover.
-const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, proxyAuth: false, proxyUser: '', proxyPass: '', testUrl: '', checkers: DEFAULT_CHECKERS.slice(), tunStack: 'mixed' };
+const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, proxyAuth: false, proxyUser: '', proxyPass: '', testUrl: '', checkers: DEFAULT_CHECKERS.slice(), tunStack: 'mixed', ipv6: false };
 // tunStack: sing-box's TUN network stack ('mixed' | 'system' | 'gvisor'); the plan carries it (95-live.js), only TUN reads it.
+// ipv6: off (default) = the TUN has no IPv6 address and the core's DNS answers no AAAA (TUN and proxy port alike); on = dual stack.
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());

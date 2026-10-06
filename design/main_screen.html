@@ -2905,6 +2905,7 @@ Object.assign(I18N, { ru: {
   "is deleted with it": "удаляется вместе с ним",
   "is taken by the app": "занят приложением",
   "is unstable": "нестабилен",
+  "IPv6": "IPv6",
   "It does": "Открывается",
   "It stopped answering": "Перестал отвечать",
   "its checks": "его проверки",
@@ -3262,6 +3263,7 @@ Object.assign(I18N, { ru: {
   "TCP through the system stack, UDP through gVisor — works almost everywhere": "TCP через системный стек, UDP через gVisor — работает почти везде",
   "Fastest; may clash with some firewalls or antivirus": "Самый быстрый; может конфликтовать с некоторыми файрволами и антивирусами",
   "Most compatible, uses more CPU": "Максимальная совместимость, но сильнее нагружает процессор",
+  "Leave off unless your network and servers carry IPv6 — otherwise apps hang on IPv6 addresses": "Не включайте, если сеть и серверы без IPv6: приложения будут зависать на IPv6-адресах",
   "Turn it off": "Выключить",
   "turn on Use in Auto in Route": "включите «В Auto» в «Маршруте»",
   "Turn the kill switch off?": "Выключить kill switch?",
@@ -8689,8 +8691,9 @@ const DEFAULT_CHECKERS = ['https://cp.cloudflare.com/generate_204', 'https://www
   'http://www.msftconnecttest.com/connecttest.txt', 'http://captive.apple.com/hotspot-detect.html'];
 // Kill switch (rules.md §7): killOnDisconnect / killWhileClosed only count with killSwitch on (the latter also
 // needs genCfg.launchAtStartup + connectOnLaunch); downProxy only with it off: the proxy when the VPN cannot recover.
-const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, proxyAuth: false, proxyUser: '', proxyPass: '', testUrl: '', checkers: DEFAULT_CHECKERS.slice(), tunStack: 'mixed' };
+const connCfg = { sysProxy: false, killSwitch: false, killOnDisconnect: false, killWhileClosed: false, downProxy: 'remove', port: 2080, proxyAuth: false, proxyUser: '', proxyPass: '', testUrl: '', checkers: DEFAULT_CHECKERS.slice(), tunStack: 'mixed', ipv6: false };
 // tunStack: sing-box's TUN network stack ('mixed' | 'system' | 'gvisor'); the plan carries it (95-live.js), only TUN reads it.
+// ipv6: off (default) = the TUN has no IPv6 address and the core's DNS answers no AAAA (TUN and proxy port alike); on = dual stack.
 const PORT_RESERVED = [7788, 9090];   // jormd, the core's Clash API
 function setProxyPort(input) {
   const v = Number(input.value.trim());
@@ -9296,6 +9299,8 @@ function renderConnSettings() {
     <div class="set-group">
       <div class="set-row" data-key="tunStack"><div class="set-label" style="flex:1">TUN stack<div class="set-hint">${tunStackOpt().hint}</div></div>
         <button class="set-value" id="conn-tunstack" onclick="openTunStackPicker()"><span data-notr>${tunStackOpt().name}</span>${CHEVRON_R}</button></div>
+      <div class="set-row" data-key="ipv6"><div class="set-label" style="flex:1">IPv6<div class="set-hint">Leave off unless your network and servers carry IPv6 — otherwise apps hang on IPv6 addresses</div></div>
+        ${toggle(connCfg.ipv6, 'connCfg.ipv6=!connCfg.ipv6;renderConnSettings()')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Latency test URL<div class="set-hint">The address ping and Fastest time; pick one that answers fast from here</div></div>
         <button class="set-value" id="conn-testurl" onclick="openTestUrlPicker()">${testUrlLabel()}${CHEVRON_R}</button></div>
       <div class="set-row"><div class="set-label" style="flex:1">Backup checks<div class="set-hint">When the test URL does not answer through a server, these are tried; the server works if any answers</div></div>
@@ -11958,7 +11963,7 @@ function livePlan(anchor) {
     const id = anchor || effectiveConnectId(true);
     if (!id || !connectEntry(id)) throw new Error(nothingInAuto() ? 'Nothing in Auto — turn on Use in Auto in Route' : 'Nothing to connect — add a subscription in Nodes');
     // mixedAuth: the port asks for a login; with the system proxy on the core opens a second, open port for it (docs/core.md)
-    const base = { mode: segState.mode === 'tun' ? 'tun' : 'proxy', mixedPort: connCfg.port || 2080, tunStack: connCfg.tunStack || 'mixed', mixedAuth: connCfg.proxyAuth ? { user: connCfg.proxyUser, pass: connCfg.proxyPass } : undefined, global: segState.route === 'global',
+    const base = { mode: segState.mode === 'tun' ? 'tun' : 'proxy', mixedPort: connCfg.port || 2080, tunStack: connCfg.tunStack || 'mixed', ipv6: !!connCfg.ipv6, mixedAuth: connCfg.proxyAuth ? { user: connCfg.proxyUser, pass: connCfg.proxyPass } : undefined, global: segState.route === 'global',
       urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold, url: connCfg.testUrl || undefined }, auto: planAuto(), routing: routingPlan() };
     return Object.assign(base, planRoutes(id));
   });

@@ -189,6 +189,7 @@ Auto, которая может работать; в Manual — закреплё
   mode?: 'tun' | 'proxy',       // 'tun' — вход tun-in (см. «TUN»); нет / иное = только локальный порт
   mixedAuth?: { user, pass },   // пароль на пользовательский порт; нет = порт открыт
   tunStack?: 'mixed' | 'system' | 'gvisor',   // стек TUN (connCfg.tunStack, по умолчанию mixed); читается только в TUN
+  ipv6?: bool,                  // connCfg.ipv6, по умолчанию false: без AAAA в DNS и с отказом IPv6 в TUN (см. «TUN» → IPv6)
   urlTest: { interval: autoCfg.checkEvery, tolerance: autoCfg.threshold,
              url: connCfg.testUrl /* нет — gstatic; им же проверяет AutoService */ },
   auto: { failAfter, threshold, checkEvery, standby, warmEvery,
@@ -477,11 +478,29 @@ sing-box сам создаёт интерфейс (wintun встроен в би
 
 | поле | значение |
 |---|---|
-| `address` | `172.19.0.1/30`, `fdfe:dcba:9876::1/126` (IPv6 включён) |
+| `address` | `172.19.0.1/30`, `fdfe:dcba:9876::1/126` (dual stack всегда, при любом `plan.ipv6`) |
 | `mtu` | 9000 |
 | `auto_route`, `strict_route` | true, true |
 | `stack` | `plan.tunStack`: `mixed` (по умолчанию) / `system` / `gvisor`; неизвестное = `mixed` |
 | `route_exclude_address` | локальные сети мимо туннеля: `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `224/4`, `255.255.255.255/32`, `fc00::/7`, `fe80::/10`, `ff00::/8` (`tunBypass`) |
+
+**IPv6** (`plan.ipv6`, Settings → Connection → IPv6; по умолчанию **выкл.**, нет в плане = выкл.).
+Телефон / сеть часто без глобального IPv6, а выходы прокси его не несут: приложение получает AAAA,
+идёт на IPv6-адрес через туннель и зависает. Выкл. — две меры. (1) В `dns` стоит
+`strategy: ipv4_only` (поле верхнего уровня `dns.strategy`, не устаревшее `strategy` DNS-правила
+1.14): sing-box отвечает на AAAA пустым ответом и режет IPv6-подсказки HTTPS-записей, а имена
+(серверы прокси, DoH-хосты, `resolve`) разрешает только в IPv4; это действует и в режиме
+прокси (клиенты порта тоже не получают AAAA). (2) Только в TUN: системное правило
+`{inbound: tun-in, ip_version: 6, action: reject, no_drop: true}` (`ipv6OffRule`) — любое IPv6-соединение,
+вошедшее в туннель (например, на IPv6-литерал, без DNS), сразу получает отказ (TCP RST / ICMP
+unreachable, метод `default`), и приложение уходит на IPv4, а не зависает; `no_drop` — чтобы при
+шквале попыток sing-box не переключился на тихий drop (50 срабатываний за 30 с). Правило стоит
+**после** `sniff` и DNS hijack (DNS к IPv6-резолверу туннеля всё равно отвечается) и до остальных.
+Сам TUN **остаётся dual stack** (адрес, `::/0`, исключения): без IPv6-маршрута IPv6-литералы
+уходили бы мимо VPN на сети с IPv6 — утечка. Android: `VpnService` берёт адреса и маршруты из
+конфига `tun` (libbox `TunOptions`), IPv6-маршрут есть, отказ даёт sing-box. Вкл.: как раньше,
+dual stack, без `strategy` и без reject. Смена — часть подписи плана (переподключение) в обоих
+режимах. Тесты: `tun_test.dart` (в т. ч. настоящий `sing-box check`), `catalog_model_test.dart`.
 
 Синтаксис 1.14 (`address`, правила-действия): sniff — правило `route` (`{action: sniff}` для всех
 входов), не поле входа; `route.auto_detect_interface: true` — свои исходящие sing-box привязаны к
@@ -497,7 +516,8 @@ sing-box сам создаёт интерфейс (wintun встроен в би
 **Системные правила** (идут раньше правил пользователя, в обоих режимах, названы `RuleOrigin
 'system'` в `RoutingInfo.ruleNames`):
 1. `probe-in` (замеры) — как раньше, первыми; `sniff`.
-2. TUN: `DNS hijack` (`dns-hijack`) — см. ниже.
+2. TUN: `DNS hijack` (`dns-hijack`) — см. ниже. Затем, при IPv6 выкл., `reject` для IPv6 из `tun-in`
+   (без имени в `ruleNames`; см. «IPv6» выше).
 3. `tunnel-in` → `proxy` (`Core checks`, `tunnel`) — как раньше.
 4. Программы ядра → `direct` (`Core and speed tests`, `core`): `process_path` (Windows —
    `process_path_regex` `(?i)^…$`, без учёта регистра пути) из `selfProcessPaths(singBox)`: сам процесс ядра

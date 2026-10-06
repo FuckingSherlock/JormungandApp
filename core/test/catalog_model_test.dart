@@ -117,7 +117,7 @@ void main() {
         'modeState': {
           'profiles': {'order': ['p'], 'active': 'p', 'auto': false, 'pin': 'b::b1', 'extra': 1},
         },
-        'connCfg': {'port': 7000, 'proxyAuth': true, 'proxyUser': 'u', 'proxyPass': 'p', 'newSetting': 'z', 'checkers': ['https://c.example']},
+        'connCfg': {'port': 7000, 'proxyAuth': true, 'proxyUser': 'u', 'proxyPass': 'p', 'newSetting': 'z', 'checkers': ['https://c.example'], 'ipv6': true},
         'autoCfg': {'failAfter': 3, 'retryPause': 0.25, 'newTune': true},
         'quickCfg': {'region': 'BY', 'services': {'telegram': 'vpn', 'custom': 'direct'}, 'more': [1]},
         'rulesData': {
@@ -435,6 +435,22 @@ void main() {
       final q = c.livePlan();
       expect(q.containsKey('mixedAuth'), isFalse);
       expect((q['urlTest'] as Map).containsKey('url'), isFalse);
+    });
+
+    test('IPv6: off for a snapshot without it (migration), saved when on, in the plan and the signature in both modes', () {
+      final c = make();
+      expect(c.connCfg.ipv6, isFalse);
+      expect(c.toJson()['connCfg']['ipv6'], isFalse);
+      expect(c.livePlan()['ipv6'], isFalse);
+      final sig = c.planSig();
+      c.connCfg.ipv6 = true; // the DNS strategy counts in proxy mode, the TUN address in TUN
+      expect(c.livePlan()['ipv6'], isTrue);
+      expect(c.planSig(), isNot(sig));
+      expect(make(jsonDecode(jsonEncode(c.toJson())) as Map<String, dynamic>).connCfg.ipv6, isTrue);
+      c.segState.mode = 'tun';
+      final tun = c.planSig();
+      c.connCfg.ipv6 = false;
+      expect(c.planSig(), isNot(tun));
     });
 
     test('planSig: ping order and the core\'s moves do not change it; a real change does', () {

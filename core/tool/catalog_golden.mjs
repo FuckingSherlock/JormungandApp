@@ -224,6 +224,7 @@ const SCENARIOS = [
   { name: 'xhttp-all', setup: "Object.values(sourcesData).forEach(s => s.nodes.forEach(n => n.unsupported = 'XHTTP'))" },
   { name: 'no-outbound-src3', setup: "sourcesData.src3.nodes.forEach(n => delete n.outbound)" },
   { name: 'tun-auth', setup: "segState.mode = 'tun'; segState.sys = 'on'; connCfg.proxyAuth = true; connCfg.proxyUser = 'u'; connCfg.proxyPass = 'p'; connCfg.testUrl = 'https://t.example/'; connCfg.tunStack = 'gvisor'; connCfg.port = 0", full: true },
+  { name: 'ipv6-on', setup: "segState.mode = 'tun'; connCfg.ipv6 = true" },
   { name: 'global', setup: "segState.route = 'global'; segState.sys = 'on'; autoCfg.checkEvery = 45; autoCfg.threshold = 80" },
   { name: 'rules-targets', setup: EXTRA_RULES, full: true },
   { name: 'rules-targets-src1-off', setup: EXTRA_RULES + "; sourcesData.src1.enabled = false", full: true },

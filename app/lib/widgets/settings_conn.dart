@@ -301,6 +301,11 @@ class _ConnBody extends StatelessWidget {
               ),
             ),
             SetRow(
+              label: l10n.ipv6,
+              hint: l10n.leaveOffUnlessYourNetworkAnd,
+              trailing: toggle(cfg.ipv6, (v) => cfg.ipv6 = v),
+            ),
+            SetRow(
               label: l10n.latencyTestUrl,
               hint: l10n.theAddressPingAndFastestTime,
               trailing: SetValueButton(

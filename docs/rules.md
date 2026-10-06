@@ -432,7 +432,14 @@ DoH в браузерах обходит Hijack — не наше дело, не
   выбор **TUN stack** (`connCfg.tunStack`: `mixed` по умолчанию / `system` / `gvisor`; подсказки:
   Mixed — TCP через системный стек, UDP через gVisor; System — самый быстрый, может конфликтовать
   с файрволами и антивирусами; gVisor — самый совместимый, больше нагружает CPU; в плане —
-  `tunStack`; при подключённом TUN смена — переподключение, в режиме прокси просто сохраняется)
+  `tunStack`; при подключённом TUN смена — переподключение, в режиме прокси просто сохраняется),
+  тумблер **IPv6** (`connCfg.ipv6`, по умолчанию **выкл.**, как в Karing; подсказка «Leave off
+  unless your network and servers carry IPv6 — otherwise apps hang on IPv6 addresses»): выкл. —
+  DNS ядра отвечает без AAAA (`dns.strategy: ipv4_only`; это и в режиме прокси — клиенты порта
+  тоже не получают непригодных AAAA), а в TUN IPv6-соединения сразу отклоняются (правило
+  `reject` для `ip_version: 6`; сам TUN остаётся dual stack, чтобы IPv6 не уходил мимо VPN);
+  вкл. — dual stack, как раньше. В плане — `ipv6`; смена при подключении —
+  переподключение в обоих режимах; детали — `core.md` → «TUN» → IPv6)
   и выбор Latency test URL — см. subscription-parsing.md → URL для
   latency-теста). Подсказка: «Blocks traffic when the VPN is down. Works for apps that use the
   system proxy; full block needs TUN.» Он блокирует **только приложения, которые ходят через

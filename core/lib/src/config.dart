@@ -4,6 +4,7 @@
 /// ```
 /// { routes: [Route…], current: 0,  // Auto entries by priority (plan.dart); Manual: one
 ///   mixedPort: 2080, global: false,
+///   ipv6: false,   // Settings → Connection → IPv6: off = no AAAA answers, IPv6 refused in the TUN (plan.dart)
 ///   mixedAuth: { user, pass },   // optional: the user port asks for this login / password
 ///   urlTest: { url, interval /*s*/, tolerance /*ms*/ },
 ///   auto: { failAfter, threshold, checkEvery, standby, warmEvery, retryPause,
@@ -60,9 +61,15 @@ import 'rulenames.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 
-/// The TUN's own addresses; the second of each is the "gateway" the system's DNS points at.
+/// The TUN's own addresses (always dual stack: the `::/0` route keeps IPv6 inside the tunnel, where
+/// the plan's `ipv6` off rejects it, [ipv6OffRule]); the second of each is the "gateway" the system's DNS points at.
 const tunAddress = ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'];
 const tunDnsAddress = ['172.19.0.2/32', 'fdfe:dcba:9876::2/128'];
+
+/// IPv6 off, TUN: every IPv6 connection that enters the tunnel is refused at once (TCP RST / ICMP
+/// unreachable), so apps fall back to IPv4 instead of hanging. The IPv6 route stays in the TUN on purpose:
+/// without it IPv6 literals would leave past the VPN on a network that has IPv6.
+const ipv6OffRule = {'inbound': [tunTag], 'ip_version': 6, 'action': 'reject', 'no_drop': true};
 
 /// Local networks stay out of the tunnel (the same ground as the `Private networks` rule):
 /// private, link-local, multicast and broadcast, IPv4 and IPv6.
@@ -243,6 +250,9 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       'servers': routing.dnsServers,
       if (routing.dnsRules.isNotEmpty) 'rules': routing.dnsRules,
       'final': routing.dnsFinal,
+      // IPv6 off: no AAAA answers to apps / the proxy port's clients (sing-box answers them empty) and
+      // names are resolved to IPv4 only, TUN or not (a literal IPv6 address in TUN: [ipv6OffRule])
+      if (!planIpv6(plan)) 'strategy': 'ipv4_only',
     },
     'inbounds': [
       {
@@ -263,6 +273,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
         ...?pr?.rules,
         {'action': 'sniff'},
         ...hijack,
+        if (tun && !planIpv6(plan)) ipv6OffRule, // after the DNS hijack: DNS to the tunnel's IPv6 resolver is still answered
         ?tunnelRule,
         ?selfRule,
         ...routing.rules,
@@ -285,7 +296,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
 
 const tunTag = 'tun-in';
 
-/// The TUN inbound: dual stack, strict routes (no leaks past the tunnel on the other
+/// The TUN inbound: dual stack always (IPv6 off is a reject rule, [ipv6OffRule], not a missing
+/// address: no `::/0` route would let IPv6 literals bypass the VPN), strict routes (no leaks past the tunnel on the other
 /// interfaces), local networks excluded ([tunBypass]), the stack from the plan. sing-box's
 /// own outbounds bind to the real interface (`route.auto_detect_interface`), so they
 /// do not loop back into it. Android: an app set to Direct as a whole (Rules → Per-app routing, not

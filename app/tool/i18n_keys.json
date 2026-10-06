@@ -1384,5 +1384,7 @@
   "The imported file and its {#0} server are removed. This can’t be undone.": "theImportedFileAndItsServer",
   "The imported file and its {#0} servers are removed. This can’t be undone.": "theImportedFileAndItsServersPlural",
   "The imported file and its {#0} server are removed": "theImportedFileAndItsServer2",
-  "The imported file and its {#0} servers are removed": "theImportedFileAndItsServersPlural2"
+  "The imported file and its {#0} servers are removed": "theImportedFileAndItsServersPlural2",
+  "IPv6": "ipv6",
+  "Leave off unless your network and servers carry IPv6 — otherwise apps hang on IPv6 addresses": "leaveOffUnlessYourNetworkAnd"
 }

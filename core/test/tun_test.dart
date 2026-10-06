@@ -23,12 +23,13 @@ Map<String, dynamic> _grp(Map outbound) => {
       ],
     };
 
-Map<String, dynamic> _plan({String? mode = 'tun', bool global = false, String? stack, Map<String, dynamic>? routing}) => {
+Map<String, dynamic> _plan({String? mode = 'tun', bool global = false, String? stack, bool? ipv6, Map<String, dynamic>? routing}) => {
       'kind': 'unit',
       'main': _grp(_node),
       'global': global,
       'mode': ?mode,
       'tunStack': ?stack,
+      'ipv6': ?ipv6,
       'routing': ?routing,
     };
 
@@ -72,8 +73,8 @@ Map<String, dynamic> _build(Map<String, dynamic> plan, {List<String> self = cons
 
 void main() {
   group('the tun inbound', () {
-    test('tun mode: dual stack, strict routes, LAN excluded, the default stack mixed', () {
-      final t = _tun(_build(_plan()))!;
+    test('tun mode with IPv6 on: dual stack, strict routes, LAN excluded, the default stack mixed', () {
+      final t = _tun(_build(_plan(ipv6: true)))!;
       expect(t, {
         'type': 'tun',
         'tag': 'tun-in',
@@ -87,6 +88,38 @@ void main() {
       expect(tunBypass, containsAll(['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', 'fc00::/7', 'fe80::/10']));
       expect(t.keys, isNot(contains('inet4_address')), reason: '1.14 syntax: address, not the legacy fields');
       expect(t.keys, isNot(contains('sniff')), reason: 'sniffing is a route rule');
+    });
+
+    test('IPv6 off (the default, also when the plan has no ipv6): the TUN stays dual stack, IPv6 entering it is rejected, DNS answers no AAAA', () {
+      for (final plan in [_plan(), _plan(ipv6: false)]) {
+        final c = _build(plan);
+        final t = _tun(c)!;
+        expect(t['address'], tunAddress, reason: 'the ::/0 route stays: IPv6 literals must not leave past the VPN');
+        expect(t['route_exclude_address'], tunBypass);
+        expect((c['dns'] as Map)['strategy'], 'ipv4_only');
+        final rules = _rules(c);
+        expect(rules.where((r) => r['action'] == 'reject').toList(), [
+          {'inbound': ['tun-in'], 'ip_version': 6, 'action': 'reject', 'no_drop': true},
+        ]);
+        // after sniff and the DNS hijack (DNS to the tunnel's IPv6 resolver is still answered), before the rest
+        final reject = rules.indexWhere((r) => r['action'] == 'reject');
+        expect(reject, greaterThan(rules.indexWhere((r) => r['action'] == 'sniff')));
+        expect(reject, greaterThan(rules.lastIndexWhere(_isHijack)));
+        expect(reject, lessThan(rules.indexWhere(_isSelf)));
+        expect(reject, lessThan(rules.indexWhere((r) => r['inbound'] is List && (r['inbound'] as List).contains('tunnel-in'))));
+      }
+    });
+
+    test('IPv6 on: today\'s dual stack, no reject rule, no DNS strategy; proxy mode takes the DNS strategy only', () {
+      final c = _build(_plan(ipv6: true, routing: _routing(hijack: false)));
+      expect((c['dns'] as Map).containsKey('strategy'), isFalse);
+      expect(_rules(c).where((r) => r['action'] == 'reject'), isEmpty);
+      expect(_rules(c).where(_isHijack).single['ip_cidr'], tunDnsAddress);
+      expect((_build(_plan(mode: 'proxy', ipv6: true))['dns'] as Map).containsKey('strategy'), isFalse);
+      final off = _build(_plan(mode: 'proxy'));
+      expect((off['dns'] as Map)['strategy'], 'ipv4_only', reason: 'proxy clients get no AAAA either');
+      expect(_tun(off), isNull);
+      expect(_rules(off).where((r) => r['action'] == 'reject'), isEmpty, reason: 'the reject rule is the TUN\'s');
     });
 
     test('plan.tunStack picks the stack; an unknown one is mixed', () {
@@ -340,12 +373,14 @@ void main() {
     );
     final self = selfProcessPaths(_bin);
 
-    test('every stack, hijack on / off, Rules and Global', () async {
+    test('every stack, hijack on / off, Rules and Global, IPv6 on / off', () async {
       for (final stack in tunStacks) {
         for (final hijack in [true, false]) {
           for (final global in [false, true]) {
-            final plan = _plan(stack: stack, global: global, routing: _routing(hijack: hijack, apps: routing['apps'] as List<Map>, rules: routing['rules'] as List<Map>));
-            await check('$stack hijack=$hijack global=$global', buildConfig(plan, tunnelPort: 40001, selfPaths: self));
+            for (final ipv6 in [true, false]) {
+              final plan = _plan(stack: stack, global: global, ipv6: ipv6, routing: _routing(hijack: hijack, apps: routing['apps'] as List<Map>, rules: routing['rules'] as List<Map>));
+              await check('$stack hijack=$hijack global=$global ipv6=$ipv6', buildConfig(plan, tunnelPort: 40001, selfPaths: self));
+            }
           }
         }
       }

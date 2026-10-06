@@ -153,6 +153,7 @@ extension CatalogPlan on Catalog {
           'mode': segState.tun ? 'tun' : 'proxy',
           'mixedPort': connCfg.port != 0 ? connCfg.port : 2080,
           'tunStack': connCfg.tunStack.isNotEmpty ? connCfg.tunStack : 'mixed',
+          'ipv6': connCfg.ipv6,
           if (connCfg.proxyAuth) 'mixedAuth': {'user': connCfg.proxyUser, 'pass': connCfg.proxyPass},
           'global': segState.global,
           'urlTest': {

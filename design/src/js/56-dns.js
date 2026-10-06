@@ -379,6 +379,8 @@ function renderConnSettings() {
     <div class="set-group">
       <div class="set-row" data-key="tunStack"><div class="set-label" style="flex:1">TUN stack<div class="set-hint">${tunStackOpt().hint}</div></div>
         <button class="set-value" id="conn-tunstack" onclick="openTunStackPicker()"><span data-notr>${tunStackOpt().name}</span>${CHEVRON_R}</button></div>
+      <div class="set-row" data-key="ipv6"><div class="set-label" style="flex:1">IPv6<div class="set-hint">Leave off unless your network and servers carry IPv6 — otherwise apps hang on IPv6 addresses</div></div>
+        ${toggle(connCfg.ipv6, 'connCfg.ipv6=!connCfg.ipv6;renderConnSettings()')}</div>
       <div class="set-row"><div class="set-label" style="flex:1">Latency test URL<div class="set-hint">The address ping and Fastest time; pick one that answers fast from here</div></div>
         <button class="set-value" id="conn-testurl" onclick="openTestUrlPicker()">${testUrlLabel()}${CHEVRON_R}</button></div>
       <div class="set-row"><div class="set-label" style="flex:1">Backup checks<div class="set-hint">When the test URL does not answer through a server, these are tried; the server works if any answers</div></div>
