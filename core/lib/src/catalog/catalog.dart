@@ -528,8 +528,10 @@ class Catalog {
   List<NodeRef> chainEntryRefs(Chain c, {bool withOff = false}) =>
       unitRefs(c.inId, withOff: withOff).where((r) => !c.inOff.contains(r.key)).toList();
 
-  /// Every exit server in priority order, unticked ones included (`chainExitOrder`).
-  List<NodeRef> chainExitOrder(Chain c, {bool withOff = false}) => orderRefs(unitRefs(c.outId, withOff: withOff), c.exitOrder);
+  /// Every exit server in priority order, unticked ones included (`chainExitOrder`): the chain's
+  /// own order first; servers it never ordered follow the exit unit's own `pickOrder`.
+  List<NodeRef> chainExitOrder(Chain c, {bool withOff = false}) =>
+      orderRefs(orderRefs(unitRefs(c.outId, withOff: withOff), unitOwner(c.outId)?.pickOrder), c.exitOrder);
 
   List<NodeRef> chainExitRefs(Chain c, {bool withOff = false}) =>
       chainExitOrder(c, withOff: withOff).where((r) => !c.outOff.contains(r.key)).toList();

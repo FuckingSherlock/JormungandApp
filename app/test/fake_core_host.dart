@@ -621,10 +621,12 @@ class FakeCoreHost extends CoreHost {
 
   /// Rules: what the device "has installed" and when the rule sets were downloaded.
   List<InstalledApp> apps = const [];
+  int appRefreshes = 0;
   Map<String, int> ruleSetAt = const {};
 
   @override
-  Future<List<InstalledApp>> installedApps() async {
+  Future<List<InstalledApp>> installedApps({bool refresh = false}) async {
+    appRefreshes += refresh ? 1 : 0;
     catalog.appInfo = (pkg) {
       for (final a in apps) {
         if (a.pkg == pkg) return (name: a.name, kind: 'package');

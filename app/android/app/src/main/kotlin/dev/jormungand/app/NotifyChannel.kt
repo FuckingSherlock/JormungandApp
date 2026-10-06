@@ -1,0 +1,137 @@
+package dev.jormungand.app
+
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+
+/**
+ * MethodChannel `jormungand/notify` (Dart side: lib/platform/notify_channel.dart): the system
+ * notifications. The notifications themselves are built by [AppNotifier].
+ *
+ *  permission    -> String  `granted` | `denied` (the Android 13 permission and the system switch together)
+ *  request       -> String  args {once: Boolean}: asks for POST_NOTIFICATIONS (API 33+; before it only
+ *                           reports); with `once` the dialog is shown at most once per install, so a
+ *                           plain connect never nags. Answers with the state after the dialog
+ *  openSettings  -> null    the app's system notification settings
+ *  post          -> null    args {id: Int, title, text}: a journal event as a notification (grouped)
+ *  cancelEvents  -> null    removes the event notifications (the app came to the front)
+ *  setStatus     -> null    args {node: String?}: the entry / server shown in the VPN notification
+ *  takeLaunchEvent -> Int?  the event id of the notification that started / raised the app and has not
+ *                           been handed over yet; the first call also tells Kotlin that Dart listens
+ *
+ *  Kotlin -> Dart: `openEvent` (Int; a tap on an event notification while Dart listens) and
+ *  `disconnect` (the VPN notification's action; Dart answers true, any error = nobody listens and the
+ *  service closes the tunnel itself, see [AppNotifier] / [JormungandVpnService]).
+ */
+class NotifyChannel(private val activity: Activity) {
+    companion object {
+        const val NAME = "jormungand/notify"
+        private const val REQUEST_POST = 0x4A4F
+        private const val PREFS = "jorm_notify"
+        private const val ASKED = "asked"
+
+        /** The live channel to Dart, or null while the Flutter engine is not there. */
+        @Volatile
+        var dart: MethodChannel? = null
+    }
+
+    private var pendingRequest: MethodChannel.Result? = null
+    private var launchEvent: Int? = null
+    private var dartReady = false
+
+    fun register(messenger: BinaryMessenger) {
+        val ch = MethodChannel(messenger, NAME)
+        ch.setMethodCallHandler(::onCall)
+        dart = ch
+    }
+
+    fun unregister() {
+        dart = null
+    }
+
+    private fun state() = if (AppNotifier.allowed(activity)) "granted" else "denied"
+
+    private fun onCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "permission" -> result.success(state())
+            "request" -> request(call.argument<Boolean>("once") == true, result)
+            "openSettings" -> {
+                val i = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+                runCatching { activity.startActivity(i) }
+                    .onFailure { VpnBridge.log("warn", "notifications: settings not opened: ${it.message}") }
+                result.success(null)
+            }
+            "post" -> {
+                val id = call.argument<Int>("id")
+                if (id == null) {
+                    result.error("bad_args", "id is required", null)
+                    return
+                }
+                AppNotifier.postEvent(
+                    activity.applicationContext,
+                    id,
+                    call.argument<String>("title") ?: "",
+                    call.argument<String>("text") ?: "",
+                )
+                result.success(null)
+            }
+            "cancelEvents" -> {
+                AppNotifier.cancelEvents(activity.applicationContext)
+                result.success(null)
+            }
+            "setStatus" -> {
+                AppNotifier.vpnNode = call.argument<String>("node")?.takeIf { it.isNotEmpty() }
+                JormungandVpnService.instance?.refreshNotification()
+                result.success(null)
+            }
+            "takeLaunchEvent" -> {
+                dartReady = true
+                result.success(launchEvent)
+                launchEvent = null
+            }
+            else -> result.notImplemented()
+        }
+    }
+
+    private fun request(once: Boolean, result: MethodChannel.Result) {
+        val prefs = activity.getSharedPreferences(PREFS, 0)
+        val granted = activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || granted || (once && prefs.getBoolean(ASKED, false))) {
+            result.success(state())
+            return
+        }
+        prefs.edit().putBoolean(ASKED, true).apply()
+        pendingRequest?.success(state()) // a second ask replaces the first
+        pendingRequest = result
+        activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_POST)
+    }
+
+    /** From MainActivity.onRequestPermissionsResult; true when the request code was ours. */
+    fun onRequestPermissionsResult(requestCode: Int): Boolean {
+        if (requestCode != REQUEST_POST) return false
+        pendingRequest?.success(state())
+        pendingRequest = null
+        return true
+    }
+
+    /** From MainActivity (configureFlutterEngine, onNewIntent): a tap on an event notification. */
+    fun onIntent(intent: Intent?) {
+        if (intent?.action != AppNotifier.ACTION_OPEN_EVENT || !intent.hasExtra(AppNotifier.EXTRA_EVENT)) return
+        val id = intent.getIntExtra(AppNotifier.EXTRA_EVENT, -1)
+        intent.action = null // a recreated activity must not replay it
+        intent.removeExtra(AppNotifier.EXTRA_EVENT)
+        val ch = dart
+        if (dartReady && ch != null) {
+            ch.invokeMethod("openEvent", id)
+        } else {
+            launchEvent = id
+        }
+    }
+}

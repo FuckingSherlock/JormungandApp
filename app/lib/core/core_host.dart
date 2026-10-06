@@ -541,8 +541,10 @@ abstract class CoreHost extends ChangeNotifier {
 
   /// The installed apps for Rules -> Per-app routing, by name; empty where the platform cannot
   /// list them (the desktop: apps are not picked by package there yet). Cached after the first
-  /// call; also tells the catalog the names of apps (`catalog.appInfo`).
-  Future<List<InstalledApp>> installedApps() async => const [];
+  /// call ([refresh] asks the platform again: an app installed since); also tells the catalog the
+  /// names of apps (`catalog.appInfo`).
+  Future<List<InstalledApp>> installedApps({bool refresh = false}) async =>
+      const [];
 
   /// An app's icon (PNG), null when it has none.
   Future<Uint8List?> appIcon(String pkg) async => null;

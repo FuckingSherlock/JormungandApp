@@ -7,6 +7,7 @@ library;
 import 'catalog.dart';
 import 'json_util.dart';
 import 'models.dart';
+import 'rules_logic.dart' show AppRulesOps;
 import 'rules_model.dart';
 
 /// One line of the "This will affect" list. [level]: `warn` | `bad`.
@@ -93,7 +94,7 @@ extension CatalogImpact on Catalog {
     for (final e in appRules.entries) {
       for (final (proto, h) in e.value.halves) {
         if (h.act == 'proxy' && h.target.isNotEmpty && gone(h.target)) {
-          final name = appInfo?.call(e.key)?.name ?? e.key;
+          final name = appLabel(e.key);
           lines.add(ImpactLine(name, 'app${proto.isNotEmpty ? ' · $proto' : ''}', 'loses its target — traffic goes ${_fallbackText(ruleFallback(h.fallback))}', 'warn'));
         }
       }

@@ -37,5 +37,8 @@
   "No QR code found in the image": "В изображении не найден QR-код",
   "The camera is not available": "Камера недоступна",
   "No subscription URL or server link found": "Ссылка на подписку или сервер не найдена",
-  "Could not open {0}": "Не удалось открыть {0}"
+  "Could not open {0}": "Не удалось открыть {0}",
+  "Notifications are blocked": "Уведомления заблокированы",
+  "Android does not let the app show notifications, so events will not reach you while it is in the background.": "Android не даёт приложению показывать уведомления, поэтому события не дойдут, пока оно в фоне.",
+  "Open settings": "Открыть настройки"
 }

@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'catalog.dart';
 import 'json_util.dart';
 import 'models.dart';
+import 'rules_logic.dart' show AppRulesOps;
 import 'rules_model.dart';
 
 /// The plan (`{mode, mixedPort, tunStack, mixedAuth?, global, urlTest, auto, routing, routes,
@@ -391,7 +392,7 @@ extension CatalogPlan on Catalog {
       apps.add({
         'id': e.key,
         'kind': info != null && info.kind.isNotEmpty ? info.kind : 'package',
-        'name': info != null && info.name.isNotEmpty ? info.name : e.key,
+        'name': appLabel(e.key), // the installed list's name, else the one kept with the rule (before the list is read), else the package
         ...half(a.tcp),
         'split': a.split,
         'udp': half(a.udp),

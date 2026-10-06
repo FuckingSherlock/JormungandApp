@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 
 /// A tunnel that went away without being asked to: the user (or another VPN app) took the VPN
@@ -104,38 +102,6 @@ class VpnChannel {
       if (name is! String || name.isEmpty || code is! num) return null;
       return (name: name, code: code.toInt());
     } on MissingPluginException {
-      return null;
-    }
-  }
-
-  /// The installed apps (Rules -> Per-app routing): package, label, system or not. Empty off
-  /// Android.
-  Future<List<({String pkg, String name, bool system})>> apps() async {
-    try {
-      final l = await _channel.invokeListMethod<Map<Object?, Object?>>('apps');
-      return [
-        for (final m in l ?? const <Map<Object?, Object?>>[])
-          if (m['pkg'] is String)
-            (
-              pkg: m['pkg'] as String,
-              name: '${m['name'] ?? m['pkg']}',
-              system: m['system'] == true,
-            ),
-      ];
-    } on MissingPluginException {
-      return const [];
-    }
-  }
-
-  /// An app's icon as PNG bytes; null when it has none (or off Android).
-  Future<Uint8List?> appIcon(String pkg) async {
-    try {
-      return await _channel.invokeMethod<Uint8List>('appIcon', <String, Object?>{
-        'pkg': pkg,
-      });
-    } on MissingPluginException {
-      return null;
-    } on PlatformException {
       return null;
     }
   }

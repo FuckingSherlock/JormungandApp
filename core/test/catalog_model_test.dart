@@ -559,6 +559,10 @@ void main() {
         'udp': {'act': 'direct', 'target': '', 'fallback': 'default'},
       });
       expect(apps[1]['name'], 'old.app'); // not in the installed list: its id
+      // the installed list is not read yet (cold start): the name kept with the rule, not the package
+      c.appInfo = null;
+      c.appRules['org.telegram.messenger']!.unknown['name'] = 'Telegram';
+      expect((c.routingPlan()['apps'] as List)[0]['name'], 'Telegram');
       expect(apps[1]['udp'], {'act': 'proxy', 'target': 'src:a', 'fallback': 'default'}); // the old udpTarget
       final t = r['targets'] as Map;
       expect(t.keys, unorderedEquals(['src:a', 'profile:p', 'chain:c1', 'src:b']));
@@ -665,6 +669,16 @@ void main() {
       c.sourcesData['b']!.enabled = false;
       expect(c.profileProblem(['b'], []), 'Source b is off in Nodes — switch it on there or select another server');
       expect(c.profileProblem(['b'], ['a::a1']), isNull);
+    });
+
+    test('chain exit order: servers the chain never ordered follow the exit unit\'s pickOrder', () {
+      final s = snap();
+      ((s['sourcesData'] as Map)['a'] as Map)['pickOrder'] = ['a::a2', 'a::a1'];
+      final c = make(s);
+      final d = Chain(id: 'x', inId: 'b', outId: 'a');
+      expect(c.chainExitOrder(d).map((r) => r.node.id), ['a2', 'a1', 'a3']);
+      d.exitOrder = ['a::a3'];
+      expect(c.chainExitOrder(d).map((r) => r.node.id), ['a3', 'a2', 'a1']);
     });
 
     test('a chain needs a server at both ends and two different ends', () {

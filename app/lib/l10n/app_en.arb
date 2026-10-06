@@ -3006,5 +3006,8 @@
         "type": "String"
       }
     }
-  }
+  },
+  "notificationsAreBlocked": "Notifications are blocked",
+  "androidDoesNotLetTheApp": "Android does not let the app show notifications, so events will not reach you while it is in the background.",
+  "openSettings": "Open settings"
 }

@@ -1386,5 +1386,9 @@
   "The imported file and its {#0} server are removed": "theImportedFileAndItsServer2",
   "The imported file and its {#0} servers are removed": "theImportedFileAndItsServersPlural2",
   "IPv6": "ipv6",
-  "Leave off unless your network and servers carry IPv6 — otherwise apps hang on IPv6 addresses": "leaveOffUnlessYourNetworkAnd"
+  "Leave off unless your network and servers carry IPv6 — otherwise apps hang on IPv6 addresses": "leaveOffUnlessYourNetworkAnd",
+  "Notifications are blocked": "notificationsAreBlocked",
+  "Android does not let the app show notifications, so events will not reach you while it is in the background.": "androidDoesNotLetTheApp",
+  "Open Android settings": "openAndroidSettings",
+  "Open settings": "openSettings"
 }

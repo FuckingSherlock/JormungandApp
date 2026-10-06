@@ -58,6 +58,22 @@
                 android:value="vpn"/>
         </service>
 
+        <!-- Quick Settings tile (JormungandTileService.kt). Not an ACTIVE_TILE on purpose: the system binds it
+             on every shade open, so its state is read fresh. TOGGLEABLE: a switch for accessibility (API 30+). -->
+        <service
+            android:name=".JormungandTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true"/>
+        </service>
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>

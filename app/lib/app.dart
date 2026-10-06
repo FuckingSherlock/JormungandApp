@@ -6,6 +6,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/core_host.dart';
 import 'core/settings_model.dart';
+import 'core/tile_sync.dart';
+import 'platform/tile_channel.dart';
 import 'l10n/l10n.dart';
 import 'shell/home_shell.dart';
 import 'state/app_settings.dart';
@@ -14,9 +16,12 @@ import 'theme/app_colors.g.dart';
 /// Root widget: owns the app-wide [AppSettings], shares the [CoreHost] it is given (built in
 /// main.dart by `openCoreHost`, a fake in tests), applies the theme, locale and text-scale policy.
 class JormungandApp extends StatefulWidget {
-  const JormungandApp({super.key, required this.coreHost});
+  const JormungandApp({super.key, required this.coreHost, this.tilePort});
 
   final CoreHost coreHost;
+
+  /// The Quick Settings tile's line to the platform; null = the real one on Android, none elsewhere.
+  final TilePort? tilePort;
 
   @override
   State<JormungandApp> createState() => _JormungandAppState();
@@ -25,6 +30,7 @@ class JormungandApp extends StatefulWidget {
 class _JormungandAppState extends State<JormungandApp> {
   final AppSettings _settings = AppSettings();
   late final AppLifecycleListener _lifecycle;
+  TileSync? _tile;
 
   CoreHost get _core => widget.coreHost;
 
@@ -83,6 +89,9 @@ class _JormungandAppState extends State<JormungandApp> {
         return _core.runLaunchActions();
       }),
     );
+    // Android: the Quick Settings tile shows the connection and toggles it
+    final tilePort = widget.tilePort ?? (_core.isAndroid ? const TileChannel() : null);
+    if (tilePort != null) _tile = TileSync(_core, tilePort)..start();
     // Desktop: the window is closing - stop sing-box, put the system proxy back (or keep it by
     // the kill switch) and save. Android's process just ends; the state is saved as it changes.
     _lifecycle = AppLifecycleListener(
@@ -97,6 +106,7 @@ class _JormungandAppState extends State<JormungandApp> {
   @override
   void dispose() {
     _core.removeListener(_loadLook);
+    _tile?.dispose();
     _lifecycle.dispose();
     _settings.dispose();
     super.dispose();

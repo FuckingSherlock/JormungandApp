@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../core/core_host.dart';
 import '../core/settings_model.dart';
+import '../core/system_notifier.dart';
 import '../l10n/l10n.dart';
+import '../platform/notify_channel.dart';
 import '../state/app_settings.dart';
 import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
@@ -304,6 +306,7 @@ class NotifSheet extends StatelessWidget {
         onChanged: (v) {
           n.setFlag(key, v);
           host.changed();
+          SystemNotifier.askForSwitch(NotifyIo.current, v);
         },
       ),
     );
@@ -365,6 +368,7 @@ class NotifSheet extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const NotifPermissionHint(),
           SetGroup(
             card: true,
             children: [
@@ -376,6 +380,7 @@ class NotifSheet extends StatelessWidget {
                   onChanged: (v) {
                     n.setFlag('enabled', v);
                     host.changed();
+                    SystemNotifier.askForSwitch(NotifyIo.current, v);
                   },
                 ),
               ),
@@ -433,6 +438,68 @@ class NotifSheet extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Android blocks notifications for the app (the permission was refused, or the switch in the
+/// system settings is off): a warning row with a button to the app's system notification page.
+/// Nothing where there are no system notifications or they are allowed. Re-reads the state when
+/// the user comes back from the system settings.
+class NotifPermissionHint extends StatefulWidget {
+  const NotifPermissionHint({super.key});
+
+  @override
+  State<NotifPermissionHint> createState() => _NotifPermissionHintState();
+}
+
+class _NotifPermissionHintState extends State<NotifPermissionHint>
+    with WidgetsBindingObserver {
+  final NotifyIo _io = NotifyIo.current;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (_io.available) _io.refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _io.available) _io.refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_io.available) return const SizedBox.shrink();
+    final l10n = context.l10n;
+    return ValueListenableBuilder<NotifyPermission>(
+      valueListenable: _io.permission,
+      builder: (context, state, _) {
+        if (state != NotifyPermission.denied) return const SizedBox.shrink();
+        return SetGroup(
+          card: true,
+          children: [
+            SetRow(
+              label: l10n.notificationsAreBlocked,
+              hintWidget: HintText(l10n.androidDoesNotLetTheApp, warn: true),
+              below: Align(
+                alignment: Alignment.centerLeft,
+                child: SecondaryButton(
+                  label: l10n.openSettings,
+                  onPressed: _io.openSettings,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

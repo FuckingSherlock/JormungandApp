@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tile_connecting">Подключение…</string>
+    <string name="tile_disconnecting">Отключение…</string>
+    <string name="tile_on">Подключено</string>
+    <string name="tile_off">Не подключено</string>
+    <string name="tile_setup">Настройте в приложении</string>
+</resources>

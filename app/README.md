@@ -21,7 +21,7 @@ app/
                                  по платформе), libbox_runner.dart (BoxRunner Android поверх libbox), app_update.dart,
                                  logs_controller.dart, settings_model.dart, форматтеры и тексты
     state/app_settings.dart      тема / масштаб / язык (ChangeNotifier + InheritedNotifier)
-    platform/                    vpn_channel.dart (MethodChannel `jormungand/vpn`), files_channel.dart, platform_caps.dart
+    platform/                    vpn_channel.dart (MethodChannel `jormungand/vpn`), files_channel.dart, notify_channel.dart (системные уведомления), platform_caps.dart
     shell/                       home_shell.dart (нижняя навигация Home · Nodes · Logs · Settings, Back -> Home), app_links.dart
     pages/                       home, nodes, logs, settings, route, rules
     widgets/                     карточки, листы (AppSheet), формы, строки, док (ConnectDock + PowerTab); имена как в макете
@@ -75,4 +75,4 @@ Android-сторона: `JormungandVpnService` — служба переднег
 - Logs: подписи тостов в оболочке.
 - Kotlin: `registerMyInterface` — пустышка.
 - `filesDir/libbox/configuration.json` содержит секрет API sing-box.
-- Позже: `POST_NOTIFICATIONS` и действия уведомления, статус «VPN отозван», версия sing-box на Android, урезать теги libbox (APK ~100 МБ), упрощённый per-app на Android.
+- Позже: скорость в уведомлении VPN, статус «VPN отозван», версия sing-box на Android, урезать теги libbox (APK ~100 МБ), упрощённый per-app на Android.

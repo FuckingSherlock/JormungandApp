@@ -286,5 +286,38 @@ void main() {
       expect(b['notModified'], isTrue);
       expect((b['patch'] as Map).keys.toSet(), {'updatedAt', 'usage', 'expire', 'announce'});
     });
+
+    group('filter and gone', () {
+      String line(String host, String name) => 'ss://${_b64('aes-256-gcm:password')}@$host:8388#${Uri.encodeComponent(name)}';
+      List<String> sent = [];
+      Future<Map<String, dynamic>> run(Map<String, dynamic> s) async {
+        final patch = (await updateSubscription(s, now: DateTime(2026, 9, 1)))['patch'] as Map<String, dynamic>;
+        return patch;
+      }
+
+      test('servers the filter leaves out are not "removed by the provider"', () async {
+        sent = [line('a.example', 'A-DE'), line('b.example', 'B-NL')];
+        pr = await Provider.start((req) => req.response.write(_b64(sent.join('\n'))));
+        final s = <String, dynamic>{'url': pr.url, 'userAgent': 'sing-box', 'nodes': [], 'gone': []};
+        s.addAll(await run(s));
+        expect(s['nodes'], hasLength(2));
+        s['filter'] = 'DE';
+        final p = await run(s);
+        expect([for (final n in p['nodes'] as List) n['name']], ['A-DE']);
+        expect(p['gone'], isEmpty);
+      });
+
+      test('a server the provider dropped is gone when the filter would keep it', () async {
+        sent = [line('a.example', 'A-DE'), line('b.example', 'B-NL'), line('c.example', 'C-DE')];
+        pr = await Provider.start((req) => req.response.write(_b64(sent.join('\n'))));
+        final s = <String, dynamic>{'url': pr.url, 'userAgent': 'sing-box', 'nodes': [], 'gone': [], 'filter': ''};
+        s.addAll(await run(s));
+        s['filter'] = 'DE';
+        sent = [line('b.example', 'B-NL'), line('c.example', 'C-DE')];
+        final p = await run(s);
+        expect([for (final n in p['nodes'] as List) n['name']], ['C-DE']);
+        expect([for (final g in p['gone'] as List) g['name']], ['A-DE']);
+      });
+    });
   });
 }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Texts of the native side (Quick Settings tile). They follow the system language; Russian: values-ru -->
+<resources>
+    <string name="tile_label" translatable="false">Jormungand</string>
+    <string name="tile_connecting">Connecting…</string>
+    <string name="tile_disconnecting">Disconnecting…</string>
+    <string name="tile_on">Connected</string>
+    <string name="tile_off">Not connected</string>
+    <string name="tile_setup">Set up in the app</string>
+</resources>

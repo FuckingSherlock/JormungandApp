@@ -9,10 +9,12 @@ import '../l10n/l10n.dart';
 import '../pages/home_page.dart';
 import '../pages/logs_page.dart';
 import '../core/logs_controller.dart';
+import '../core/system_notifier.dart';
 import '../pages/nodes_page.dart';
 import '../pages/route_page.dart';
 import '../pages/rules_page.dart';
 import '../pages/settings_page.dart';
+import '../platform/notify_channel.dart';
 import '../theme/app_colors.g.dart';
 import '../widgets/apps_sheet.dart';
 import '../widgets/rule_form.dart';
@@ -50,18 +52,34 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   AppTab _tab = AppTab.home;
   StreamSubscription<HostNotice>? _notices;
   final _nodesKey = GlobalKey<NodesPageState>();
 
   LogsController? _logs;
   StreamSubscription<EventRecord>? _notifs;
+
+  /// Android system notifications: events while the app is behind, the permission, the VPN
+  /// notification's text; a tap on one comes back through [NotifyIo.eventTaps].
+  SystemNotifier? _sys;
+  StreamSubscription<int>? _taps;
   Timer? _flyTimer;
   final _navKey = GlobalKey();
 
   /// A context under the [AppLinksScope] of [build]: the sheets the links open carry it over.
   final _inner = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _sys?.onResumed();
+  }
 
   @override
   void didChangeDependencies() {
@@ -75,10 +93,38 @@ class _HomeShellState extends State<HomeShell> {
       ..l10n = context.l10n
       ..start();
     _notifs ??= _logs!.notifications.listen(_notify);
+    if (_sys == null) {
+      final io = NotifyIo.current;
+      _sys = SystemNotifier(host, io: io)..start();
+      _taps = io.eventTaps.listen(_openFromShade);
+      io.takeLaunchEvent().then((id) {
+        if (id != null) _openFromShade(id);
+      });
+    }
+  }
+
+  /// A tap on an event notification: Logs -> Events at it (once the journal is loaded).
+  void _openFromShade(int id) {
+    if (!mounted) return;
+    final host = CoreHostScope.read(context);
+    if (host.ready) {
+      _links.openLogsEvent?.call(id);
+      return;
+    }
+    void whenReady() {
+      if (!host.ready) return;
+      host.removeListener(whenReady);
+      if (mounted) _links.openLogsEvent?.call(id);
+    }
+
+    host.addListener(whenReady);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _taps?.cancel();
+    _sys?.dispose();
     _notices?.cancel();
     _notifs?.cancel();
     _flyTimer?.cancel();
@@ -147,6 +193,11 @@ class _HomeShellState extends State<HomeShell> {
   /// opens Logs -> Events at it; when it goes by itself it flies into the Logs item of the nav.
   void _notify(EventRecord e) {
     if (!mounted || _logs == null) return;
+    // the app is behind: the shade (Android) instead of a toast nobody sees
+    if (_sys?.systemNotifies == true) {
+      _sys!.postEvent(e, _logs!.words);
+      return;
+    }
     final messenger = ScaffoldMessenger.of(context);
     final text = _logs!.words.text(e);
     final textKey = GlobalKey();

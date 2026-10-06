@@ -1,0 +1,311 @@
+package dev.jormungand.app
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.PendingIntent
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.graphics.drawable.Icon
+import android.net.VpnService
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.service.quicksettings.Tile
+import android.service.quicksettings.TileService
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+
+/**
+ * What the Quick Settings tile, the VpnService and the Dart side tell each other (docs/platforms.md,
+ * "Плитка быстрых настроек"). One process, so plain statics.
+ *
+ * The tile's truth about "connected" is NATIVE ([JormungandVpnService.isUp]): it stays right when the
+ * Dart side is gone (activity closed, engine destroyed, the tunnel still up) and after a process
+ * restart (nothing up = off). Dart only adds what native cannot know: "connecting" /
+ * "disconnecting" and the name of the current connection, which it pushes ([store]) on every
+ * change; the last push is kept in SharedPreferences so the tile can show the name with no Dart.
+ */
+object TileBridge {
+    /** Intent extra of MainActivity: what the tile wants the app to do once Dart is up (`connect`). */
+    const val EXTRA_ACTION = "dev.jormungand.app.tile.ACTION"
+
+    private const val PREFS = "jormungand_tile"
+    private const val BUSY_MAX_MS = 90_000L // a "connecting" nobody confirmed for this long is stale
+    private const val LAUNCH_MAX_MS = 20_000L
+    private val main = Handler(Looper.getMainLooper())
+
+    enum class Phase { OFF, ON, CONNECTING, DISCONNECTING }
+
+    class Model(val phase: Phase, val name: String, val canConnect: Boolean)
+
+    /** Dart's listener of `jormungand/tile_events`; non-null = a Dart core is alive and listening. */
+    @Volatile
+    var sink: EventChannel.EventSink? = null
+
+    /** A native stop is running (Dart was not there to do it). */
+    @Volatile
+    var nativeBusy = false
+
+    /** When Dart pushed its state last (epoch ms). */
+    @Volatile
+    var lastPushAt = 0L
+        private set
+
+    private var pendingLaunch: String? = null
+    private var pendingLaunchAt = 0L
+
+    private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Dart's push: [phase] is off | on | connecting | disconnecting; [name] the connection's name, empty = none. */
+    fun store(ctx: Context, phase: String, name: String, canConnect: Boolean) {
+        lastPushAt = System.currentTimeMillis()
+        prefs(ctx).edit()
+            .putString("phase", phase)
+            .putString("name", name)
+            .putBoolean("canConnect", canConnect)
+            .putLong("at", lastPushAt)
+            .apply()
+        refresh(ctx)
+    }
+
+    fun model(ctx: Context): Model {
+        val p = prefs(ctx)
+        val up = JormungandVpnService.instance?.isUp == true
+        val fresh = System.currentTimeMillis() - p.getLong("at", 0L) < BUSY_MAX_MS
+        val dart = if (sink != null && fresh) p.getString("phase", null) else null
+        val phase = when {
+            nativeBusy || dart == "disconnecting" -> Phase.DISCONNECTING
+            dart == "connecting" -> Phase.CONNECTING
+            up -> Phase.ON
+            else -> Phase.OFF
+        }
+        return Model(phase, p.getString("name", "") ?: "", p.getBoolean("canConnect", true))
+    }
+
+    /** The tile re-reads [model] (when it is on the shade; the system binds the service for it). */
+    fun refresh(ctx: Context) {
+        val app = ctx.applicationContext
+        runCatching {
+            TileService.requestListeningState(app, ComponentName(app, JormungandTileService::class.java))
+        }
+        JormungandTileService.current?.let { main.post { it.render() } }
+    }
+
+    /**
+     * Tells the live Dart core to [action] (`connect` | `disconnect`); false when nobody listens.
+     * Not queued: a tap from a minute ago must not fire when Dart comes up later. Main thread.
+     */
+    fun sendLive(action: String, launch: Boolean = false): Boolean {
+        val s = sink ?: return false
+        return try {
+            s.success(mapOf("type" to "tile", "action" to action, "launch" to launch))
+            true
+        } catch (e: Throwable) {
+            false
+        }
+    }
+
+    /** MainActivity got an intent: the tile's request goes live to Dart, or waits for its first pull. */
+    fun onLaunchIntent(intent: Intent?, live: Boolean) {
+        val action = intent?.getStringExtra(EXTRA_ACTION) ?: return
+        intent.removeExtra(EXTRA_ACTION) // a recreated activity must not repeat it
+        if (live && sendLive(action, launch = true)) return
+        synchronized(this) {
+            pendingLaunch = action
+            pendingLaunchAt = System.currentTimeMillis()
+        }
+    }
+
+    @Synchronized
+    fun takeLaunch(): String? {
+        val a = pendingLaunch
+        pendingLaunch = null
+        return if (a != null && System.currentTimeMillis() - pendingLaunchAt < LAUNCH_MAX_MS) a else null
+    }
+
+    fun postDelayed(ms: Long, r: Runnable) {
+        main.postDelayed(r, ms)
+    }
+}
+
+/**
+ * Channel `jormungand/tile` + EventChannel `jormungand/tile_events` (Dart: lib/platform/tile_channel.dart).
+ *
+ *  state        args {phase, name, canConnect}: Dart's state for the tile
+ *  launchAction -> String?  the request MainActivity was started with (`connect`), once
+ *  moveToBack   -> null     the app goes behind (a connect the tile asked for is done)
+ *
+ *  events: {type: 'tile', action: 'connect' | 'disconnect', launch: Boolean}. The listener is
+ *  also the "Dart is alive" mark: gone with the engine ([unregister]).
+ */
+class TileChannel(private val activity: Activity) {
+    companion object {
+        const val NAME = "jormungand/tile"
+        const val EVENTS = "jormungand/tile_events"
+    }
+
+    private var own: EventChannel.EventSink? = null
+
+    fun register(messenger: BinaryMessenger) {
+        MethodChannel(messenger, NAME).setMethodCallHandler(::onCall)
+        EventChannel(messenger, EVENTS).setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                own = events
+                TileBridge.sink = events
+                TileBridge.refresh(activity)
+            }
+
+            override fun onCancel(arguments: Any?) = unregister()
+        })
+    }
+
+    /** The engine goes (or Dart stopped listening): the tile falls back to what native knows. */
+    fun unregister() {
+        if (TileBridge.sink === own) TileBridge.sink = null
+        own = null
+        TileBridge.refresh(activity)
+    }
+
+    private fun onCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "state" -> {
+                TileBridge.store(
+                    activity,
+                    call.argument<String>("phase") ?: "off",
+                    call.argument<String>("name") ?: "",
+                    call.argument<Boolean>("canConnect") ?: true,
+                )
+                result.success(null)
+            }
+            "launchAction" -> result.success(TileBridge.takeLaunch())
+            "moveToBack" -> {
+                activity.moveTaskToBack(true)
+                result.success(null)
+            }
+            else -> result.notImplemented()
+        }
+    }
+}
+
+/**
+ * The Quick Settings tile: on / off of the VPN with the connection's name under the label.
+ *
+ * Tap, connected: Dart is alive -> it disconnects (so its state stays right); else the service is
+ * stopped here. Tap, not connected: no VPN consent yet, or nothing to connect through -> the app
+ * opens (it asks / explains); Dart is alive -> it connects, in the background; else MainActivity
+ * starts with [TileBridge.EXTRA_ACTION] = connect and Dart does it as soon as it is up (the plan
+ * and the catalog live in Dart only), then the app goes behind again.
+ *
+ * Not an ACTIVE_TILE: the system binds it every time the shade opens, so the state is read fresh
+ * from [JormungandVpnService] (a dead process = off, never a stale "on").
+ */
+class JormungandTileService : TileService() {
+    companion object {
+        @Volatile
+        var current: JormungandTileService? = null
+            private set
+        private const val NATIVE_STOP_AFTER_MS = 6_000L
+    }
+
+    override fun onStartListening() {
+        current = this
+        render()
+    }
+
+    override fun onStopListening() {
+        if (current === this) current = null
+    }
+
+    override fun onTileAdded() = render()
+
+    override fun onClick() {
+        val m = TileBridge.model(this)
+        when (m.phase) {
+            TileBridge.Phase.ON -> disconnect()
+            TileBridge.Phase.OFF -> connect(m)
+            else -> render() // busy: the tile is unavailable, a stray tap changes nothing
+        }
+    }
+
+    private fun connect(m: TileBridge.Model) {
+        when {
+            !m.canConnect -> openApp(connect = false)
+            VpnService.prepare(this) != null -> openApp(connect = true) // consent needs the app on screen
+            TileBridge.sendLive("connect") -> {}
+            else -> openApp(connect = true)
+        }
+    }
+
+    private fun disconnect() {
+        if (TileBridge.sendLive("disconnect")) {
+            // Dart is there and will push "disconnecting" at once; if it never does (it is stuck),
+            // the tunnel is stopped here after all
+            val at = System.currentTimeMillis()
+            val app = applicationContext
+            TileBridge.postDelayed(NATIVE_STOP_AFTER_MS) {
+                if (JormungandVpnService.instance?.isUp == true && TileBridge.lastPushAt < at) stopNative(app)
+            }
+        } else {
+            stopNative(applicationContext)
+        }
+    }
+
+    private fun stopNative(app: Context) {
+        val svc = JormungandVpnService.instance ?: return TileBridge.refresh(app)
+        TileBridge.nativeBusy = true
+        TileBridge.refresh(app)
+        svc.stopTunnel {
+            TileBridge.nativeBusy = false
+            TileBridge.refresh(app)
+        }
+    }
+
+    @SuppressLint("StartActivityAndCollapseDeprecated")
+    @Suppress("DEPRECATION")
+    private fun openApp(connect: Boolean) {
+        val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (connect) intent.putExtra(TileBridge.EXTRA_ACTION, "connect")
+        if (Build.VERSION.SDK_INT >= 34) {
+            // Android 14: startActivityAndCollapse takes a PendingIntent only
+            val pi = PendingIntent.getActivity(
+                this, if (connect) 1 else 0, intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            startActivityAndCollapse(pi)
+        } else {
+            startActivityAndCollapse(intent)
+        }
+    }
+
+    fun render() {
+        val tile = qsTile ?: return
+        val m = TileBridge.model(this)
+        tile.state = when (m.phase) {
+            TileBridge.Phase.ON -> Tile.STATE_ACTIVE
+            TileBridge.Phase.OFF -> Tile.STATE_INACTIVE
+            else -> Tile.STATE_UNAVAILABLE
+        }
+        val text = when (m.phase) {
+            TileBridge.Phase.CONNECTING -> getString(R.string.tile_connecting)
+            TileBridge.Phase.DISCONNECTING -> getString(R.string.tile_disconnecting)
+            TileBridge.Phase.ON -> m.name.ifEmpty { getString(R.string.tile_on) }
+            TileBridge.Phase.OFF -> when {
+                m.name.isNotEmpty() -> m.name
+                !m.canConnect -> getString(R.string.tile_setup)
+                else -> getString(R.string.tile_off)
+            }
+        }
+        tile.icon = Icon.createWithResource(this, R.drawable.ic_tile)
+        if (Build.VERSION.SDK_INT >= 29) {
+            tile.label = getString(R.string.tile_label)
+            tile.subtitle = text
+        } else {
+            // no subtitle before Android 10: the label carries the text
+            tile.label = if (m.phase == TileBridge.Phase.OFF && m.name.isEmpty()) getString(R.string.tile_label) else text
+        }
+        tile.updateTile()
+    }
+}

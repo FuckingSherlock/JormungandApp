@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:jormungand_core/jormungand_core.dart';
 
+import '../platform/apps_io.dart';
 import '../platform/vpn_channel.dart';
 import 'app_update.dart';
 import 'core_host.dart';
@@ -119,6 +120,8 @@ class LiveCoreHost extends CoreHost {
         catalog.segState
           ..mode = 'tun'
           ..sys = 'off';
+        // the names of installed apps for logs, the plan and the delete dialog, before Rules is opened
+        unawaited(installedApps());
       }
       final st = r['status'];
       if (st is Map) {
@@ -934,18 +937,30 @@ class LiveCoreHost extends CoreHost {
     return a == null ? null : (name: a.name, kind: 'package');
   }
 
+  Future<List<InstalledApp>>? _appsLoad;
+
   @override
-  Future<List<InstalledApp>> installedApps() async {
+  Future<List<InstalledApp>> installedApps({bool refresh = false}) {
     final cached = _apps;
-    if (cached != null) return cached;
-    final v = vpn;
-    final list = v == null
-        ? const <InstalledApp>[]
-        : [
-            for (final a in await v.apps())
-              InstalledApp(pkg: a.pkg, name: a.name, system: a.system),
-          ]
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    if (cached != null && !refresh) return Future.value(cached);
+    return _appsLoad ??= _loadApps().whenComplete(() => _appsLoad = null);
+  }
+
+  Future<List<InstalledApp>> _loadApps() async {
+    if (!isAndroid) {
+      // the desktop cannot list apps by package: nothing to show, nothing to cache for long
+      return _apps = const <InstalledApp>[];
+    }
+    final List<AppEntry> got;
+    try {
+      got = await AppsIo.current.list();
+    } catch (_) {
+      return _apps ?? const <InstalledApp>[]; // the platform failed: what was known, asked again next time
+    }
+    final list = [
+      for (final a in got)
+        InstalledApp(pkg: a.pkg, name: a.name, system: a.system),
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     _apps = list;
     _appsByPkg = {for (final a in list) a.pkg: a};
     catalog.appInfo = _appInfo;
@@ -956,7 +971,7 @@ class LiveCoreHost extends CoreHost {
   @override
   Future<Uint8List?> appIcon(String pkg) async {
     if (_icons.containsKey(pkg)) return _icons[pkg];
-    return _icons[pkg] = await vpn?.appIcon(pkg);
+    return _icons[pkg] = await AppsIo.current.icon(pkg);
   }
 
   @override

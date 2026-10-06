@@ -52,9 +52,14 @@ class SheetFrame extends StatelessWidget {
     this.bodyPadding,
     this.titleBadge,
     this.subHeader,
+    this.scrolls = true,
   });
 
   final String title;
+
+  /// False: [child] scrolls by itself (a long lazy list: slivers), the frame adds no scroll view
+  /// and no [bodyPadding]; [full] is then expected.
+  final bool scrolls;
 
   /// Pinned under the header, over the scrolling body (the tabs, a search field).
   final Widget? subHeader;
@@ -72,14 +77,16 @@ class SheetFrame extends StatelessWidget {
     final c = context.colors;
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final body = ContentScale(
-      child: SingleChildScrollView(
-        padding:
-            bodyPadding ??
-            (full
-                ? const EdgeInsets.symmetric(vertical: 12)
-                : const EdgeInsets.only(top: 6, bottom: 18)),
-        child: child,
-      ),
+      child: scrolls
+          ? SingleChildScrollView(
+              padding:
+                  bodyPadding ??
+                  (full
+                      ? const EdgeInsets.symmetric(vertical: 12)
+                      : const EdgeInsets.only(top: 6, bottom: 18)),
+              child: child,
+            )
+          : child,
     );
     final column = Column(
       mainAxisSize: full ? MainAxisSize.max : MainAxisSize.min,

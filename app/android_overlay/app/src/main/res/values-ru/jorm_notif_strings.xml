@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="jorm_channel_vpn">VPN</string>
+    <string name="jorm_channel_events">События</string>
+    <string name="jorm_channel_events_desc">События подключения, Auto, подписок и правил, пока приложение в фоне</string>
+    <string name="jorm_vpn_on">VPN включён</string>
+    <string name="jorm_vpn_on_via">VPN включён · %1$s</string>
+    <string name="jorm_disconnect">Отключить</string>
+    <plurals name="jorm_events_summary">
+        <item quantity="one">%d событие</item>
+        <item quantity="few">%d события</item>
+        <item quantity="many">%d событий</item>
+        <item quantity="other">%d события</item>
+    </plurals>
+</resources>

@@ -273,7 +273,10 @@ RegExp? filterRegExp(String filter) {
   }
 }
 
-bool _keep(RegExp re, Node n) => re.hasMatch(n.name) || re.hasMatch('${n.flag} ${n.name}');
+bool _keep(RegExp re, Node n) => filterKeeps(re, n.name, n.flag);
+
+/// The filter's test on a server name (and the name with its flag in front).
+bool filterKeeps(RegExp re, String name, String flag) => re.hasMatch(name) || re.hasMatch('$flag $name');
 
 Future<SubscriptionResult> _fetch(
   HttpClient c,

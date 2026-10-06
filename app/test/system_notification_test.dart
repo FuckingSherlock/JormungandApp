@@ -1,0 +1,327 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jormungand/app.dart';
+import 'package:jormungand/core/core_host.dart';
+import 'package:jormungand/core/settings_model.dart';
+import 'package:jormungand/platform/notify_channel.dart';
+import 'package:jormungand/shell/home_shell.dart';
+import 'package:jormungand/widgets/form_parts.dart';
+
+import 'fake_core_host.dart';
+
+/// A system-notification seam that records what the app asks of it.
+class FakeNotifyIo implements NotifyIo {
+  FakeNotifyIo({NotifyPermission state = NotifyPermission.granted})
+    : _state = ValueNotifier(state);
+
+  final ValueNotifier<NotifyPermission> _state;
+  final posted = <SystemNote>[];
+  final requests = <bool>[]; // the `once` of each request
+  final vpnNodes = <String?>[];
+  int cancels = 0;
+  int settingsOpened = 0;
+  int? launchEvent;
+  final _taps = StreamController<int>.broadcast();
+
+  /// What a request answers (the user's choice in the system dialog).
+  NotifyPermission answer = NotifyPermission.granted;
+
+  void tap(int id) => _taps.add(id);
+
+  @override
+  bool get available => true;
+
+  @override
+  ValueListenable<NotifyPermission> get permission => _state;
+
+  @override
+  Future<NotifyPermission> refresh() async => _state.value;
+
+  @override
+  Future<NotifyPermission> request({bool once = false}) async {
+    requests.add(once);
+    return _state.value = answer;
+  }
+
+  @override
+  Future<void> openSettings() async => settingsOpened++;
+
+  @override
+  Future<void> post(SystemNote note) async => posted.add(note);
+
+  @override
+  Future<void> cancelEvents() async => cancels++;
+
+  @override
+  Future<void> setVpnNode(String? node) async => vpnNodes.add(node);
+
+  @override
+  Stream<int> get eventTaps => _taps.stream;
+
+  @override
+  Future<int?> takeLaunchEvent() async {
+    final id = launchEvent;
+    launchEvent = null;
+    return id;
+  }
+
+  @override
+  FutureOr<void> Function()? onDisconnect;
+}
+
+/// The platform only goes resumed <-> inactive <-> hidden <-> paused one step at a time.
+const _lifecycle = [
+  AppLifecycleState.resumed,
+  AppLifecycleState.inactive,
+  AppLifecycleState.hidden,
+  AppLifecycleState.paused,
+];
+
+void _lifecycleTo(AppLifecycleState target) {
+  final binding = TestWidgetsFlutterBinding.instance;
+  var i = _lifecycle.indexOf(binding.lifecycleState ?? AppLifecycleState.resumed);
+  final to = _lifecycle.indexOf(target);
+  while (i != to) {
+    i += to > i ? 1 : -1;
+    binding.handleAppLifecycleStateChanged(_lifecycle[i]);
+  }
+}
+
+void main() {
+  late FakeNotifyIo io;
+  late NotifyIo saved;
+
+  setUp(() {
+    saved = NotifyIo.current;
+    io = FakeNotifyIo();
+    NotifyIo.current = io;
+  });
+
+  tearDown(() {
+    NotifyIo.current = saved;
+    _lifecycleTo(AppLifecycleState.resumed);
+  });
+
+  Future<FakeCoreHost> open(WidgetTester tester) async {
+    final host = FakeCoreHost(android: true);
+    await tester.pumpWidget(JormungandApp(coreHost: host));
+    await tester.pumpAndSettle();
+    // the first look at the journal is history; only later events notify
+    await tester.pump(const Duration(seconds: 4));
+    return host;
+  }
+
+  Future<void> settle(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+  }
+
+  void goBackground(WidgetTester tester) =>
+      _lifecycleTo(AppLifecycleState.paused);
+
+  void comeBack(WidgetTester tester) => _lifecycleTo(AppLifecycleState.resumed);
+
+  group('events', () {
+    testWidgets('in the foreground: a toast, no system notification', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      host.addEvent('conn', 'lost', level: 'warn');
+      await settle(tester);
+
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(io.posted, isEmpty);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('in the background: a system notification, no toast', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      goBackground(tester);
+      final e = host.addEvent('conn', 'lost', level: 'warn');
+      await settle(tester);
+
+      expect(find.byType(SnackBar), findsNothing);
+      expect(io.posted, hasLength(1));
+      expect(io.posted.single.id, e['id']);
+      expect(io.posted.single.title, 'Connection lost');
+    });
+
+    testWidgets('only what Settings -> Notifications lets through; never own events', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      goBackground(tester);
+      host.notif.setFlag('connLost', false);
+      host.addEvent('conn', 'lost', level: 'warn');
+      host.addEvent('conn', 'lost', level: 'warn', own: true);
+      host.addEvent('core', 'stateRestored'); // a kind that never notifies
+      await settle(tester);
+      expect(io.posted, isEmpty);
+
+      host.notif.setFlag('connLost', true);
+      host.notif.setFlag('enabled', false);
+      host.addEvent('conn', 'restored');
+      await settle(tester);
+      expect(io.posted, isEmpty);
+    });
+
+    testWidgets('coming back clears the shade and toasts work again', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      goBackground(tester);
+      comeBack(tester);
+      await tester.pump();
+      expect(io.cancels, 1);
+
+      host.addEvent('conn', 'lost', level: 'warn');
+      await settle(tester);
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(io.posted, isEmpty);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a tap on a notification opens Logs -> Events', (tester) async {
+      await open(tester);
+      io.tap(3);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      final nav = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(nav.selectedIndex, AppTab.logs.index);
+    });
+
+    testWidgets('the notification that started the app opens Logs too', (
+      tester,
+    ) async {
+      io.launchEvent = 5;
+      await open(tester);
+      final nav = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(nav.selectedIndex, AppTab.logs.index);
+      expect(io.launchEvent, isNull);
+    });
+  });
+
+  group('permission and the VPN notification', () {
+    testWidgets('the first connect asks once; a master switch that is off does not', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pump();
+      expect(io.requests, [true]);
+
+      host.setPhase(ConnectionPhase.disconnected);
+      host.notif.setFlag('enabled', false);
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pump();
+      expect(io.requests, [true]); // nothing more
+    });
+
+    testWidgets('the VPN notification gets the entry and server; none with Status off', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pump();
+      expect(io.vpnNodes, ['Remnawave · Frankfurt 1']);
+
+      // a dock change that is not a new name sends nothing
+      host.setTraffic(host.traffic);
+      await tester.pump();
+      expect(io.vpnNodes, hasLength(1));
+
+      host.setPhase(ConnectionPhase.disconnected);
+      host.notif.setFlag('status', false);
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pump();
+      expect(io.vpnNodes.last, isNull);
+    });
+
+    testWidgets('the Disconnect button of the notification disconnects through the host', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pump();
+      await io.onDisconnect!();
+      expect(host.phase, ConnectionPhase.disconnected);
+    });
+
+    Future<void> openNotifSettings(WidgetTester tester) async {
+      // tall enough that the sheet's lazy list builds every row
+      tester.view.devicePixelRatio = 2;
+      tester.view.physicalSize = const Size(640, 5000);
+      addTearDown(tester.view.reset);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-setnotif')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('denied: the Notifications page offers the system settings', (
+      tester,
+    ) async {
+      io = FakeNotifyIo(state: NotifyPermission.denied);
+      NotifyIo.current = io;
+      await open(tester);
+      await openNotifSettings(tester);
+
+      expect(find.text('Notifications are blocked'), findsOneWidget);
+      await tester.tap(find.text('Open settings'));
+      await tester.pump();
+      expect(io.settingsOpened, 1);
+    });
+
+    testWidgets('granted: no hint; turning a switch on asks only when blocked', (
+      tester,
+    ) async {
+      await open(tester);
+      await openNotifSettings(tester);
+      expect(find.text('Notifications are blocked'), findsNothing);
+
+      Finder toggleOf(String label) => find.descendant(
+        of: find
+            .ancestor(of: find.text(label), matching: find.byType(SetRow))
+            .first,
+        matching: find.byType(MiniToggle),
+      );
+      await tester.tap(toggleOf('Subscription updated')); // off -> on
+      await tester.pumpAndSettle();
+      expect(io.requests, isEmpty); // already granted
+    });
+
+    testWidgets('blocked: a switch turned on asks for the permission', (
+      tester,
+    ) async {
+      io = FakeNotifyIo(state: NotifyPermission.denied)
+        ..answer = NotifyPermission.granted;
+      NotifyIo.current = io;
+      final host = await open(tester);
+      host.notif.setFlag('subUpdated', false);
+      await openNotifSettings(tester);
+      await tester.tap(
+        find.descendant(
+          of: find
+              .ancestor(
+                of: find.text('Subscription updated'),
+                matching: find.byType(SetRow),
+              )
+              .first,
+          matching: find.byType(MiniToggle),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(io.requests, [false]);
+      // answered: granted, so the hint is gone
+      expect(find.text('Notifications are blocked'), findsNothing);
+      expect(host.notif.flag('subUpdated'), isTrue);
+    });
+  });
+}

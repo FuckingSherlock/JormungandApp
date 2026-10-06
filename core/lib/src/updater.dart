@@ -44,9 +44,18 @@ Future<Map<String, dynamic>> updateSubscription(
   final patch = <String, dynamic>{'updatedAt': (now ?? DateTime.now()).millisecondsSinceEpoch};
   if (!r.notModified) {
     final m = mergeUpdate(prevNodes, maps(s['gone']), r.nodes, now: now);
+    // servers the user's filter leaves out were not dropped by the provider: no "Unavailable"
+    // entry for them (they could not come back while the filter stands anyway)
+    final re = filterRegExp((s['filter'] as String?) ?? '');
+    final gone = re == null
+        ? m.gone
+        : [
+            for (final g in m.gone)
+              if (filterKeeps(re, '${g['rawName'] ?? g['name'] ?? ''}', '${g['flag'] ?? ''}')) g,
+          ];
     patch.addAll({
       'nodes': m.nodes,
-      'gone': m.gone,
+      'gone': gone,
       'count': m.nodes.length,
       'uaStrategy': r.strategy,
       'discoveredAt': r.discoveredAt,

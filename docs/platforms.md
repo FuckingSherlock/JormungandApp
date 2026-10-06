@@ -26,10 +26,12 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | Переключатель TUN \| Proxy | есть, по умолчанию Proxy | нет: всегда VPN (TUN через `VpnService`) |
 | Global \| Rules | вертикальный сегмент рядом с TUN \| Proxy | горизонтальный переключатель в одну строку |
 | TUN | нужен админ (`core/tunNeedsAdmin`), WFP kill switch непостоянный | согласие VPN (`prepare`), отзыв системой |
-| Per-app | по пути процесса | по пакету (`include/exclude_package`); позже упрощённый режим «только из списка / все, кроме» |
+| Per-app | по пути процесса | по пакету: правила `package_name`, приложение целиком на Direct — `exclude_package` (мимо VPN); список — установленные приложения со значками (`rules.md`); позже упрощённый режим «только из списка / все, кроме» (`include_package`) |
 | sing-box | процесс `core/tool/bin/sing-box.exe` | `libbox.aar` (`core/tool/build_libbox.ps1`) |
 | Обновления | zip + `jorm-updater` | APK через `PackageInstaller`, проверка — WorkManager (`docs/updates.md`) |
 | Листы (sheets) | стек от верха экрана, над нижней навигацией | пока `showModalBottomSheet` (`app_sheet.dart`) |
+| Уведомления о событиях | тост в приложении (ПК — ещё свои всплывающие окна, `desktopStyle`) | в фоне — системное уведомление Android (канал «Events», группа со сводкой), на переднем плане — тост; разрешение `POST_NOTIFICATIONS` запрашивается (раздел «Системные уведомления» ниже); на ПК системных нет |
+| Уведомление VPN | нет | постоянное уведомление службы: имя подключения и кнопка «Отключить» |
 | Nodes → + → Scan QR code | заглушка («камера недоступна в мокапе») | камера на zxing-cpp (`flutter_zxing`, без Google Play Services / ML Kit), разрешение `CAMERA` из оверлея манифеста; на ПК строки нет (`caps.cameraScan`), QR-картинка идёт через «Import config file» |
 
 Платформенные условия во Flutter — через один помощник возможностей платформы (не разбросанные
@@ -52,9 +54,10 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | Пинг | `js/15-ping.js` | ядро (`CoreService`), `widgets/latency_text.dart` |
 | Route, Auto | `markup/50-sheets-connect.html`, `js/55-automode.js`, `94-live-auto.js`, `css/55-automode.css` | `pages/route_page.dart` |
 | Live connections | `js/76-conns.js` | лист соединений (рядом с `route_page.dart` / Home) |
-| Rules, приложения | `markup/55-sheets-rules.html`, `js/40-rules.js`, `42-apps.js`, `44-target-picker.js`, `75-rule-form.js`, `css/65-rules.css` | `pages/rules_page.dart`, `widgets/rules_*.dart`; список приложений Android — канал `jormungand/vpn` (`apps`) |
+| Rules, приложения | `markup/55-sheets-rules.html`, `js/40-rules.js`, `42-apps.js`, `44-target-picker.js`, `75-rule-form.js`, `css/65-rules.css` | `pages/rules_page.dart`, `widgets/rules_*.dart`; список приложений Android — канал `jormungand/apps` (`list`, `icon`; `platform/apps_io.dart`, шов `AppsIo.current`, Kotlin `AppsChannel.kt.tmpl`; манифест — `QUERY_ALL_PACKAGES`), ленивый лист `widgets/apps_sheet.dart`; подробности — `rules.md` → «Приложения» |
 | Logs, события | `markup/35-logs.html`, `js/46-logs.js`, `47-events.js`, `css/67-logs.css` | `pages/logs_page.dart`, `widgets/logs_*.dart` |
 | Settings | `markup/30-settings.html`, `js/56-dns.js`, `57-general.js`, `58-notif.js`, `59-data.js`, `css/95-settings.css` | `pages/settings_page.dart` (меню), `widgets/settings_auto.dart` (Auto mode, + `autoCardSub`), `settings_look.dart` (Appearance / General / Notifications), `settings_conn.dart`, `settings_dns.dart`, `settings_data.dart` (обновления, бэкап, About), `settings_parts.dart` (общие части листов), `core/settings_model.dart` (хранение `genCfg` / `notifCfg`, диапазоны и проверки полей), `core/app_update.dart` (состояние обновления для UI), `state/app_settings.dart`; различия платформ — `platform/platform_caps.dart` (`host.caps`); файлы бэкапа и установка APK — `platform/files_channel.dart` + `android_overlay/kotlin/FilesChannel.kt.tmpl`, `UpdateInstaller.kt.tmpl` |
+| Системные уведомления Android | `js/58-notif.js` (только настройки; уведомлений нет) | `core/system_notifier.dart` (`SystemNotifier`), `platform/notify_channel.dart` (шов `NotifyIo`, канал `jormungand/notify`), `shell/home_shell.dart` (`_notify`, тап), `widgets/settings_look.dart` (`NotifPermissionHint`), `android_overlay/kotlin/AppNotifier.kt.tmpl`, `NotifyChannel.kt.tmpl`, `res/values{,-ru}/jorm_notif_strings.xml` |
 | Справка «?» | `js/58-help.js` | `widgets/settings_parts.dart` (`showHelp`, `HelpTopic`; Settings), `widgets/nodes_help.dart` (`NodesHelp`: Nodes, Advanced подписки, профиль, пункт-источник, цепочка), `rules_parts.dart` (`RoundHelp`, `showTermsSheet`) |
 | Меню, формы, тосты | `js/34-ui.js`, `css/80-menus-forms.css`, `90-toast.css` | `widgets/form_parts.dart`, `app_card.dart`, `settings_row.dart` |
 | Шов к ядру | `js/12-backend.js`, `93-routing-plan.js`, `95-live.js` | `core/core_host.dart`, `core/live_core_host.dart`, `core/platform_seams.dart`, `core/libbox_runner.dart` |
@@ -150,6 +153,74 @@ sing-box туннеля и разовых боксов пинга / Speed Test (
 `cache.db` под замком, второй экземпляр падает по `initialize cache-file: timeout` (docs/core.md →
 BoxRunner, `withCacheFile`). Правила `process_path → direct` для самого приложения на Android нет:
 `resolvedExecutable` там — общий `app_process64`.
+
+### Системные уведомления (Android)
+
+Источник и фильтр те же, что у тостов: `LogsController.notifications` (новые события журнала, не `own`,
+пропущенные `notifAllows`, см. `connect-model.md` → Notifications). Оболочка (`_notify`) решает по
+`AppLifecycleState`: `resumed` — тост как раньше; любое другое (свёрнуто, шторка, диалог) — системное
+уведомление (`SystemNotifier.postEvent`: заголовок и пояснение события на языке приложения). Дубля нет:
+в одном случае показывается ровно одно. Возврат на передний план убирает уведомления событий.
+
+- **Канал `jormungand/notify`** (`NotifyChannel.kt.tmpl`, отдельный от `jormungand/vpn`): `permission`,
+  `request {once}`, `openSettings`, `post {id, title, text}`, `cancelEvents`, `setStatus {node}`,
+  `takeLaunchEvent`; Kotlin → Dart: `openEvent` (тап), `disconnect` (кнопка уведомления VPN). Dart-шов —
+  `NotifyIo` (`NotifyIo.current`, в тестах подменяется); где `available` = false (не Android) всё пусто и
+  остаются тосты.
+- **Уведомления** (`AppNotifier.kt.tmpl`): канал `events` (важность default; отдельный от `vpn`), по
+  одному на событие, все в группе `jorm.events` со сводкой («N событий», InboxStyle); остаётся не больше
+  6, старые убираются; звук — только от сводки и не чаще раза в 15 с. Тап → `MainActivity` с действием
+  `OPEN_EVENT` и id события → Dart (`openEvent`; при холодном старте — `takeLaunchEvent` после запуска
+  оболочки) → `AppLinks.openLogsEvent`, как у тоста. Тексты канала, сводки и кнопки — ресурсы
+  `jorm_notif_strings.xml` (язык системы, не выбор в приложении).
+- **Разрешение** (API 33+; ниже — только переключатель системы). Запрос один раз за установку при первом
+  успешном подключении (`request(once: true)`, нативный флаг в SharedPreferences; мастер-переключатель
+  Notifications выключен — не просим) и когда пользователь включает переключатель на странице
+  Notifications (`SystemNotifier.askForSwitch`; Android сам не покажет диалог после двух отказов).
+  Заблокировано (отказ или выключено в системе) — на странице Notifications строка-предупреждение с
+  кнопкой «Open settings» (`ACTION_APP_NOTIFICATION_SETTINGS`); состояние перечитывается при возврате.
+- **Уведомление VPN.** Заголовок Jormungand, текст «VPN is on · <запись · сервер>», кнопка «Disconnect»,
+  тап открывает приложение. Имя шлёт Dart (`setStatus`) на каждое изменение, пока подключено, и только
+  при включённых мастере и Status; иначе общий текст. «Disconnect» просит Dart (`CoreHost.disconnect`,
+  как кнопка дока); нет ответа (движок закрыт) — служба сама закрывает туннель. Скорость в тексте — пока нет.
+
+### Плитка быстрых настроек (Android)
+
+Круглая плитка в шторке включает и выключает VPN и показывает имя текущего подключения под подписью
+(API 29+; раньше имя идёт в подпись). Код: `JormungandTileService.kt.tmpl` (`JormungandTileService`,
+`TileBridge`, `TileChannel`), Dart — `lib/platform/tile_channel.dart` (`TilePort` / `TileChannel`) и
+`lib/core/tile_sync.dart` (`TileSync`, его запускает `JormungandApp` только на Android). Иконка —
+`android_overlay/app/src/main/res/drawable/ic_tile.xml` (шестиугольник дока с символом питания; у
+приложения пока нет собственного глифа), тексты — `res/values{,-ru}/jorm_strings.xml` (язык системы, не
+выбор в приложении).
+
+- **Каналы.** Отдельные от `jormungand/vpn`: MethodChannel `jormungand/tile` (`state` {phase, name,
+  canConnect}, `launchAction`, `moveToBack`) и EventChannel `jormungand/tile_events`
+  (`{type: 'tile', action: 'connect' | 'disconnect', launch}`). Событие плитки НЕ копится, пока Dart не
+  слушает (у `vpn_events` очередь есть): старое нажатие не должно сработать позже. Подписка Dart на этот
+  канал = признак «ядро Dart живо»; он снимается вместе с движком (`cleanUpFlutterEngine`).
+- **Состояние плитки.** «Включено» — факт нативной стороны (`JormungandVpnService.isUp`): верно и без Dart
+  (активность закрыта, туннель держится) и после рестарта процесса (ничего не поднято = выключено). Dart
+  добавляет то, чего натив не знает: «Подключение…» / «Отключение…» (`unavailable`, пока живой Dart
+  подтверждает фазу; устаревшее за 90 с не считается) и имя. `TileSync` шлёт `state` на каждое изменение
+  `CoreHost` (фаза, имя, `canConnect = dock.hasEntry`), натив держит последнее в SharedPreferences. Служба
+  туннеля сама просит плитку перечитаться на старте и остановке. Плитка не `ACTIVE_TILE`: система
+  привязывает её при каждом открытии шторки, состояние читается заново.
+- **Имя** (`tileName`): цепочка — её имя; иначе сервер, через который уходит трафик (`флаг имя`); без
+  сервера — имя записи; нет записи — пусто («Не подключено» / «Настройте в приложении»).
+- **Нажатие, включено.** Dart жив → событие `disconnect` (его `CoreHost.disconnect`, как кнопка дока; если
+  Dart не отметился за 6 с — туннель останавливается нативно). Dart не жив → `stopTunnel` в службе.
+- **Нажатие, выключено.** Нет согласия VPN (`VpnService.prepare != null`) или нечего подключать
+  (`canConnect` = false) → открывается приложение (`startActivityAndCollapse`, на API 34+ с
+  PendingIntent). Dart жив → событие `connect` (то же `CoreHost.connect`, с запомненным текущим
+  профилем / цепочкой; не «переподключить»: включённое и занятое игнорируется). Dart не жив →
+  `MainActivity` с extra `TileBridge.EXTRA_ACTION=connect`; Dart забирает его (`launchAction`) после
+  `init()`, подключается и по успеху отправляет приложение назад (`moveTaskToBack` — движок остаётся
+  жить, а не `finish()`).
+- **Почему не безголовый движок.** Два движка Dart в одном процессе — два `CoreService` на одном каталоге
+  данных (состояние, кэш libbox); согласие VPN требует Activity; план и каталог живут только в Dart.
+  Запуск `MainActivity` — один Dart-ядро, один код пути подключения, без гонок; цена — окно приложения
+  на секунду.
 
 ## Релиз
 

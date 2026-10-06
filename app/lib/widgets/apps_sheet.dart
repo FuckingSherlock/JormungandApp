@@ -47,12 +47,25 @@ class _AppsSheet extends StatefulWidget {
 class _AppsSheetState extends State<_AppsSheet> {
   final _search = TextEditingController();
   String _filter = 'user';
-  Future<List<InstalledApp>>? _apps;
+  List<InstalledApp>? _installed;
+  bool _started = false;
+  bool _loading = true;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _apps ??= CoreHostScope.read(context).installedApps();
+    if (_started) return;
+    _started = true;
+    final host = CoreHostScope.read(context);
+    // what the host already knows shows at once; the platform is asked again for an app installed since
+    host.installedApps().then(_got);
+    host.installedApps(refresh: true).then(_got).whenComplete(() {
+      if (mounted) setState(() => _loading = false);
+    });
+  }
+
+  void _got(List<InstalledApp> list) {
+    if (mounted) setState(() => _installed = list);
   }
 
   @override
@@ -66,10 +79,35 @@ class _AppsSheetState extends State<_AppsSheet> {
     final l10n = context.l10n;
     final c = context.colors;
     final cat = CoreHostScope.of(context).catalog;
+    final installed = _installed ?? const <InstalledApp>[];
+    final rows = <_AppRow>[
+      for (final a in installed) _AppRow(a.pkg, a.name, a.system),
+      // an app with a rule that this device does not list (the desktop, an uninstalled app)
+      for (final pkg in cat.appRules.keys)
+        if (!installed.any((a) => a.pkg == pkg))
+          _AppRow(pkg, cat.appLabel(pkg), false),
+    ];
+    final q = _search.text.trim().toLowerCase();
+    final shown =
+        [
+          for (final a in rows)
+            if ((_filter == 'set'
+                    ? cat.appRules.containsKey(a.pkg)
+                    : _filter == 'sys'
+                    ? a.system
+                    : !a.system) &&
+                (q.isEmpty ||
+                    a.name.toLowerCase().contains(q) ||
+                    a.pkg.contains(q)))
+              a,
+        ]..sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
     return SheetFrame(
       title: l10n.perAppRouting,
       titleBadge: RoundHelp(onTap: () => _appsHelp(context)),
       full: true,
+      scrolls: false,
       subHeader: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -102,63 +140,51 @@ class _AppsSheetState extends State<_AppsSheet> {
           ),
         ],
       ),
-      child: FutureBuilder<List<InstalledApp>>(
-        future: _apps,
-        builder: (context, snap) {
-          final installed = snap.data ?? const <InstalledApp>[];
-          final rows = <_AppRow>[
-            for (final a in installed) _AppRow(a.pkg, a.name, a.system),
-            // an app with a rule that this device does not list (the desktop, an uninstalled app)
-            for (final pkg in cat.appRules.keys)
-              if (!installed.any((a) => a.pkg == pkg))
-                _AppRow(pkg, cat.appLabel(pkg), false),
-          ];
-          final q = _search.text.trim().toLowerCase();
-          final shown =
-              [
-                for (final a in rows)
-                  if ((_filter == 'set'
-                          ? cat.appRules.containsKey(a.pkg)
-                          : _filter == 'sys'
-                          ? a.system
-                          : !a.system) &&
-                      (q.isEmpty ||
-                          a.name.toLowerCase().contains(q) ||
-                          a.pkg.contains(q)))
-                    a,
-              ]..sort(
-                (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-              );
-          if (shown.isEmpty) {
-            return Padding(
-              padding: const EdgeInsets.all(14),
-              child: Center(
-                child: Text(
-                  snap.connectionState == ConnectionState.waiting
-                      ? '…'
-                      : l10n.noApps,
-                  style: TextStyle(fontSize: 14, color: c.t3),
+      // a lazy list: a phone has hundreds of apps, and every row on screen asks for its icon
+      child: CustomScrollView(
+        slivers: [
+          if (shown.isEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(26),
+                child: Center(
+                  child: Text(
+                    _loading ? '…' : l10n.noApps,
+                    style: TextStyle(fontSize: 14, color: c.t3),
+                  ),
                 ),
               ),
-            );
-          }
-          return SetGroup(
-            children: [
-              for (final a in shown)
-                _AppListRow(
-                  app: a,
-                  onTap: () => showAppAct(context, a.pkg, name: a.name),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+              sliver: DecoratedSliver(
+                decoration: BoxDecoration(
+                  color: c.t1.tint(.035),
+                  border: Border.all(color: c.border),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-            ],
-          );
-        },
+                sliver: SliverList.separated(
+                  itemCount: shown.length,
+                  separatorBuilder: (_, _) =>
+                      Divider(height: 1, thickness: 1, color: c.border),
+                  itemBuilder: (context, i) => _AppListRow(
+                    key: ValueKey(shown[i].pkg),
+                    app: shown[i],
+                    onTap: () =>
+                        showAppAct(context, shown[i].pkg, name: shown[i].name),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
 class _AppListRow extends StatelessWidget {
-  const _AppListRow({required this.app, required this.onTap});
+  const _AppListRow({super.key, required this.app, required this.onTap});
 
   final _AppRow app;
   final VoidCallback onTap;

@@ -1,7 +1,5 @@
 package dev.jormungand.app
 
-import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager.NameNotFoundException
@@ -11,6 +9,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import io.flutter.plugin.common.MethodChannel
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.RoutePrefix
 import io.nekohasekai.libbox.TunOptions
@@ -34,14 +33,15 @@ import java.util.concurrent.Executors
  * servers, and the core's direct requests (subscriptions), then bypass the tunnel without any
  * routing trick, and the throwaway libbox of a latency test measures the real path.
  *
- * TODO: notification text through strings.xml (en / ru), action "Disconnect", tap opens the app,
- *  live speed in the text while connected.
+ * TODO: live speed in the notification text while connected (the text, "Disconnect" and the tap are in [AppNotifier]).
  */
 class JormungandVpnService : VpnService() {
     companion object {
         const val ACTION_START = "dev.jormungand.app.vpn.START"
+
+        /** The notification's Disconnect button (see [AppNotifier.vpnNotification]). */
+        const val ACTION_DISCONNECT = "dev.jormungand.app.vpn.DISCONNECT"
         private const val TAG = "JormungandVpn"
-        private const val CHANNEL_ID = "vpn"
         private const val NOTIFICATION_ID = 1
 
         @Volatile
@@ -66,6 +66,10 @@ class JormungandVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_DISCONNECT) {
+            disconnectFromNotification()
+            return START_NOT_STICKY
+        }
         enterForeground() // within 5 s of startForegroundService, whatever happens next
         val request = VpnBridge.takePending()
         if (request == null) {
@@ -111,6 +115,7 @@ class JormungandVpnService : VpnService() {
                 b.start(request.config)
                 isUp = true
             }
+            TileBridge.refresh(this)
             request.done(null)
         } catch (e: Throwable) {
             Log.e(TAG, "start", e)
@@ -122,6 +127,7 @@ class JormungandVpnService : VpnService() {
 
     private fun closeBoxLocked() {
         isUp = false
+        TileBridge.refresh(this) // the Quick Settings tile follows the tunnel, Dart or not
         box?.stop()
         box = null
         runCatching { tunFd?.close() }
@@ -129,21 +135,36 @@ class JormungandVpnService : VpnService() {
     }
 
     private fun leave() {
+        AppNotifier.vpnNode = null // the next start shows the plain text until Dart says where it goes
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
+    /**
+     * The Disconnect button: the Dart core owns the connection state (system proxy, journal, UI), so
+     * it is asked to disconnect; when nobody answers (the app's engine is gone) the tunnel is closed here.
+     */
+    private fun disconnectFromNotification() {
+        val dart = NotifyChannel.dart
+        if (dart == null) {
+            stopTunnel {}
+            return
+        }
+        dart.invokeMethod("disconnect", null, object : MethodChannel.Result {
+            override fun success(result: Any?) {}
+            override fun error(code: String, message: String?, details: Any?) = stopTunnel {}
+            override fun notImplemented() = stopTunnel {}
+        })
+    }
+
+    /** The notification again with what [AppNotifier] knows now (the entry / server Dart pushed). */
+    fun refreshNotification() {
+        if (!isUp) return
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, AppNotifier.vpnNotification(this))
+    }
+
     private fun enterForeground() {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "VPN", NotificationManager.IMPORTANCE_LOW)
-        )
-        val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Jormungand")
-            .setContentText("VPN is on")
-            .setSmallIcon(applicationInfo.icon)
-            .setOngoing(true)
-            .build()
+        val notification = AppNotifier.vpnNotification(this)
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {

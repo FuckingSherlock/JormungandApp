@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Texts of the notifications (AppNotifier). They follow the system language; Russian: values-ru.
+     Event texts themselves come from Dart in the app's language. -->
+<resources>
+    <string name="jorm_channel_vpn">VPN</string>
+    <string name="jorm_channel_events">Events</string>
+    <string name="jorm_channel_events_desc">Connection, Auto, subscription and rule events while the app is in the background</string>
+    <string name="jorm_vpn_on">VPN is on</string>
+    <string name="jorm_vpn_on_via">VPN is on · %1$s</string>
+    <string name="jorm_disconnect">Disconnect</string>
+    <plurals name="jorm_events_summary">
+        <item quantity="one">%d event</item>
+        <item quantity="other">%d events</item>
+    </plurals>
+</resources>
