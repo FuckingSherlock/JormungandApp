@@ -67,7 +67,8 @@ object AppEngine {
                 app.getSystemService(NotificationManager::class.java).cancel(JormungandVpnService.NOTIFICATION_ID)
             }
             TileBridge.refresh(app)
-            ResumeStore.processStarted(app) // "was on" of a process that died on its own is over
+            // "was on" of a process that died on its own is over (one from a replaced build is armed instead)
+            ResumeStore.processStarted(app)
         }
         return e
     }
@@ -79,9 +80,10 @@ object AppEngine {
      * only attaches its view (FlutterActivity skips the entrypoint of an engine that executes Dart).
      */
     @Synchronized
-    fun startDart(context: Context) {
+    fun startDart(context: Context): Boolean {
         val e = get(context)
-        if (e.dartExecutor.isExecutingDart) return
+        if (e.dartExecutor.isExecutingDart) return false
         e.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+        return true
     }
 }

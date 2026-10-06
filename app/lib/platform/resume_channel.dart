@@ -48,6 +48,11 @@ abstract interface class ResumePort {
 
   /// The resume is dealt with (the native side lets go of the process it kept alive for it).
   Future<void> done();
+
+  /// The native side's last resume decisions (process start, receiver, take, tunnel up / down and
+  /// why), oldest first, one line each with time and versionCode: written into the app's log on
+  /// every start, so a resume that did not happen can be explained from the app alone.
+  Future<List<String>> trail();
 }
 
 /// Android: MethodChannel `jormungand/resume` (Kotlin: android_overlay/kotlin/ResumeAfterUpdate.kt.tmpl).
@@ -120,6 +125,15 @@ class ResumeChannel implements ResumePort {
       await _channel.invokeMethod<void>('done');
     } on MissingPluginException {
       // not Android
+    }
+  }
+
+  @override
+  Future<List<String>> trail() async {
+    try {
+      return await _channel.invokeListMethod<String>('trail') ?? const [];
+    } on MissingPluginException {
+      return const [];
     }
   }
 }

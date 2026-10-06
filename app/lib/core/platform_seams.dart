@@ -127,6 +127,7 @@ Future<CoreHost> openCoreHost() async {
       appVersion: version,
       installer: installApk,
       resume: const ResumeChannel(),
+      logNote: core.logBook.note,
       network: const NetworkChannel(),
     );
   }

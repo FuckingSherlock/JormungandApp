@@ -71,6 +71,11 @@ class _Port implements ResumePort {
   Future<void> promptConnect() async => prompts++;
   @override
   Future<void> done() async => dones++;
+
+  /// What the native side kept (the decisions of ResumeStore); a real one is written on its own.
+  final trailLines = <String>[];
+  @override
+  Future<List<String>> trail() async => trailLines;
 }
 
 class _Vpn extends VpnChannel {
@@ -159,6 +164,7 @@ void main() {
   late _Port port;
   late _Vpn vpn;
   final hosts = <LiveCoreHost>[];
+  final logged = <String>[];
   final now = DateTime(2026, 10, 6, 12);
   final at = now.millisecondsSinceEpoch;
 
@@ -167,6 +173,7 @@ void main() {
     runner = _Runner();
     port = _Port();
     vpn = _Vpn();
+    logged.clear();
   });
 
   tearDown(() async {
@@ -199,6 +206,7 @@ void main() {
       vpn: vpn,
       installer: installer,
       resume: port,
+      logNote: (level, text) => logged.add('$level $text'),
       now: () => now,
       saveDelay: const Duration(milliseconds: 20),
       reconnectDelay: const Duration(milliseconds: 20),
@@ -304,6 +312,40 @@ void main() {
     expect(port.prompts, 1);
     expect(port.dones, 1);
     expect(h.phase, ConnectionPhase.disconnected);
+  });
+
+  test('a start that a window made first (no headless engine) picks the record up the same way', () async {
+    // the native side armed it in the process start (the user opened the app before MY_PACKAGE_REPLACED
+    // arrived): from Dart's side it is a fresh record on an ordinary start, with a tile / notification
+    // that the window syncs by itself (no ports given here)
+    final h = await host();
+    port.rec = record(when: at - const Duration(minutes: 9).inMilliseconds); // inside the window
+
+    expect(await resumeInBackground(h), ResumeOutcome.resumed);
+    expect(h.phase, ConnectionPhase.connected);
+    expect(runner.starts, 1);
+    expect(port.takes, 1);
+
+    // the receiver arriving later finds nothing armed (the record was consumed): no second connect
+    expect(await resumeInBackground(h), ResumeOutcome.none);
+    expect(runner.starts, 1);
+  });
+
+  test('the native decisions go into the app log, with what this start made of them', () async {
+    final h = await host();
+    port.trailLines.addAll(['10-07 12:00:00 v11 process start: package replaced since the record (v10 -> v11), armed here before the receiver']);
+    port.rec = record();
+
+    await h.resumeAfterUpdate();
+
+    expect(logged, hasLength(2));
+    expect(logged.first, startsWith('info [resume] 10-07 12:00:00 v11 process start'));
+    expect(logged.last, 'info [resume] Dart: resumed');
+
+    // a start with no update still says so: the trail is what explains "nothing happened"
+    logged.clear();
+    await h.resumeAfterUpdate();
+    expect(logged.last, 'info [resume] Dart: none');
   });
 
   test('a resumed connect tells the tile and the notification; no window needed', () async {

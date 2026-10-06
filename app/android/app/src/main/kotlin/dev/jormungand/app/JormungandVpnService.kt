@@ -109,7 +109,7 @@ class JormungandVpnService : VpnService() {
         // The user (or another VPN app) took the VPN away.
         worker.execute {
             synchronized(lock) { closeBoxLocked() }
-            ResumeStore.tunnelDown(applicationContext) // taken away: not "on" for a later update
+            ResumeStore.tunnelDown(applicationContext, "revoked") // taken away: not "on" for a later update
             VpnBridge.emit(mapOf("type" to "stopped", "reason" to "revoked"))
             leave()
         }
@@ -117,6 +117,8 @@ class JormungandVpnService : VpnService() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        // for the resume trail: the service going away with no stop / revoke before it is what an update looks like
+        ResumeStore.note(applicationContext, "service onDestroy (tunnel up: $isUp)")
         worker.execute { synchronized(lock) { closeBoxLocked() } }
         worker.shutdown()
         super.onDestroy()
@@ -126,7 +128,7 @@ class JormungandVpnService : VpnService() {
     fun stopTunnel(done: () -> Unit) {
         worker.execute {
             synchronized(lock) { closeBoxLocked() }
-            ResumeStore.tunnelDown(applicationContext) // switched off on purpose (dock, tile, notification)
+            ResumeStore.tunnelDown(applicationContext, "stop") // switched off on purpose (dock, tile, notification)
             leave()
             done()
         }
@@ -147,7 +149,7 @@ class JormungandVpnService : VpnService() {
         } catch (e: Throwable) {
             Log.e(TAG, "start", e)
             synchronized(lock) { closeBoxLocked() }
-            ResumeStore.tunnelDown(applicationContext)
+            ResumeStore.tunnelDown(applicationContext, "start failed")
             request.done(e.message ?: e.toString())
             leave()
         }

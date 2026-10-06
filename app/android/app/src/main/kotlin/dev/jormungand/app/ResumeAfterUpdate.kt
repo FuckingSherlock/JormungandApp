@@ -35,9 +35,20 @@ import io.flutter.plugin.common.MethodChannel
  *
  * A process that starts with no tunnel and no armed record forgets `connected` ([processStarted]):
  * the app that died on its own (a crash, the system killing it) is not "was on" for a later update.
+ * One exception: a record whose `fromCode` differs from this build's versionCode is from a build
+ * that was replaced - the process may start (a window opened by the user, "Open" in the package
+ * installer, the tile) before the system's MY_PACKAGE_REPLACED reaches [ResumeReceiver], and the
+ * record is then armed right there, not wiped. Either order of the two arms the same record once
+ * ([arm] is idempotent with [processStarted]), and [take] consumes it once.
+ *
+ *  - `trail`: the last decisions of this file (process start, receiver, take, tunnel up / down and
+ *    why, hold), a few lines with time and versionCode. There is no logcat on the user's phone: Dart
+ *    copies it into the app's log on every start (channel `trail`), so a failed resume can be read there.
  */
 object ResumeStore {
     private const val PREFS = "jorm_resume"
+    private const val TAG = "JormungandResume"
+    private const val TRAIL_MAX = 30
 
     /** How long a replacement stays good for a resume; Dart checks the same (a stale one is dropped). */
     const val WINDOW_MS = 10 * 60 * 1000L
@@ -54,6 +65,21 @@ object ResumeStore {
         return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
     }
 
+    /** One line into [trail] (and logcat): what was decided and why. */
+    @Synchronized
+    fun note(ctx: Context, text: String) {
+        val line = "${java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())} v${versionCode(ctx)} $text"
+        Log.i(TAG, line)
+        val p = prefs(ctx)
+        val lines = (p.getString("trail", "") ?: "").split('\n').filter { it.isNotEmpty() } + line
+        p.edit().putString("trail", lines.takeLast(TRAIL_MAX).joinToString("\n")).commit()
+    }
+
+    /** The kept decisions, oldest first (Dart writes them into the app's log). */
+    @Synchronized
+    fun trail(ctx: Context): List<String> =
+        (prefs(ctx).getString("trail", "") ?: "").split('\n').filter { it.isNotEmpty() }
+
     /** The tunnel is up (libbox started). */
     fun tunnelUp(ctx: Context) {
         prefs(ctx).edit()
@@ -61,14 +87,18 @@ object ResumeStore {
             .putLong("fromCode", versionCode(ctx))
             .putLong("savedAt", System.currentTimeMillis())
             .commit()
+        note(ctx, "tunnel up: connected=true")
         ResumeNotifier.cancel(ctx) // connected: "tap to connect" is void
-        finishHold()
+        finishHold(ctx, "tunnel up")
     }
 
     /** The tunnel was stopped on purpose (or revoked, or failed to start): the user's state is "off". */
-    fun tunnelDown(ctx: Context) {
-        prefs(ctx).edit().putBoolean("connected", false).commit()
-        finishHold()
+    fun tunnelDown(ctx: Context, why: String) {
+        val p = prefs(ctx)
+        val was = p.getBoolean("connected", false)
+        p.edit().putBoolean("connected", false).commit()
+        note(ctx, "tunnel down ($why): connected $was -> false")
+        finishHold(ctx, "tunnel down")
     }
 
     /** Dart, before the installer: connected or not, through which entry. */
@@ -79,27 +109,45 @@ object ResumeStore {
             .putLong("fromCode", versionCode(ctx))
             .putLong("savedAt", System.currentTimeMillis())
             .commit()
+        note(ctx, "save before install (Dart): connected=$connected entry=$entry")
     }
 
     /** [UpdateInstaller], right before the commit: what native knows, on top of Dart's answer. */
     fun beforeInstall(ctx: Context) {
         val p = prefs(ctx)
         val up = JormungandVpnService.instance?.isUp == true
+        val was = p.getBoolean("connected", false)
         p.edit()
-            .putBoolean("connected", p.getBoolean("connected", false) || up)
+            .putBoolean("connected", was || up)
             .putLong("fromCode", versionCode(ctx))
             .putLong("savedAt", System.currentTimeMillis())
             .commit()
+        note(ctx, "before install: connected=${was || up} (record $was, service up $up)")
     }
 
     /**
      * MY_PACKAGE_REPLACED: the record qualifies when the VPN was on and the version really changed.
-     * Returns whether a resume was armed.
+     * Returns whether a resume is armed (and waits for Dart). Idempotent with [processStarted]: a
+     * process that started first (a window) has armed the record already - that stays, and no
+     * second arming is made; a record Dart already [take]s no longer says `connected`.
      */
     fun arm(ctx: Context): Boolean {
         val p = prefs(ctx)
-        val qualifies = p.getBoolean("connected", false) && p.getLong("fromCode", 0L) != versionCode(ctx)
-        p.edit().putLong("armedAt", if (qualifies) System.currentTimeMillis() else 0L).commit()
+        val now = System.currentTimeMillis()
+        val at = p.getLong("armedAt", 0L)
+        val connected = p.getBoolean("connected", false)
+        val from = p.getLong("fromCode", 0L)
+        if (at != 0L && now - at < WINDOW_MS) {
+            note(ctx, "MY_PACKAGE_REPLACED: already armed ${(now - at) / 1000}s ago (the process started first), kept")
+            return true
+        }
+        val qualifies = connected && from != versionCode(ctx)
+        p.edit().putLong("armedAt", if (qualifies) now else 0L).commit()
+        note(
+            ctx,
+            "MY_PACKAGE_REPLACED: connected=$connected fromCode=$from -> " +
+                if (qualifies) "armed" else "not armed (" + (if (!connected) "the VPN was off" else "same versionCode") + ")",
+        )
         return qualifies
     }
 
@@ -107,7 +155,10 @@ object ResumeStore {
     fun take(ctx: Context): Map<String, Any?>? {
         val p = prefs(ctx)
         val at = p.getLong("armedAt", 0L)
-        if (at == 0L) return null
+        if (at == 0L) {
+            note(ctx, "take: nothing armed (connected=${p.getBoolean("connected", false)})")
+            return null
+        }
         val rec = mapOf(
             "connected" to p.getBoolean("connected", false),
             "entry" to (p.getString("entry", "") ?: ""),
@@ -116,15 +167,33 @@ object ResumeStore {
             "at" to at,
         )
         p.edit().putLong("armedAt", 0L).putBoolean("connected", false).commit()
+        note(ctx, "take: record connected=${rec["connected"]} fromCode=${rec["fromCode"]} armed ${(System.currentTimeMillis() - at) / 1000}s ago, consumed")
         return rec
     }
 
-    /** A new process with no tunnel: `connected` of a process that died on its own is over (unless a resume waits). */
+    /**
+     * A new process with no tunnel (the engine is made): `connected` of a process that died on its
+     * own is over - unless a resume waits, or the record is from another build (see the class text).
+     */
     fun processStarted(ctx: Context) {
         val p = prefs(ctx)
+        val now = System.currentTimeMillis()
         val at = p.getLong("armedAt", 0L)
-        if (at != 0L && System.currentTimeMillis() - at < WINDOW_MS) return
-        p.edit().putLong("armedAt", 0L).putBoolean("connected", false).apply()
+        val connected = p.getBoolean("connected", false)
+        val from = p.getLong("fromCode", 0L)
+        val code = versionCode(ctx)
+        if (at != 0L && now - at < WINDOW_MS) {
+            note(ctx, "process start: record armed ${(now - at) / 1000}s ago, kept")
+            return
+        }
+        if (at == 0L && connected && from != code) {
+            // replaced since the record, and MY_PACKAGE_REPLACED has not been handled (yet): arm it here
+            p.edit().putLong("armedAt", now).commit()
+            note(ctx, "process start: package replaced since the record (v$from -> v$code), armed here before the receiver")
+            return
+        }
+        p.edit().putLong("armedAt", 0L).putBoolean("connected", false).commit()
+        note(ctx, "process start: no tunnel, connected=$connected fromCode=$from armedAt=${if (at == 0L) "none" else "${(now - at) / 1000}s ago (stale)"} -> cleared")
     }
 
     /**
@@ -133,16 +202,18 @@ object ResumeStore {
      * foreground service from the background, for as long as the connect takes.
      */
     @Synchronized
-    fun hold(r: BroadcastReceiver.PendingResult) {
+    fun hold(ctx: Context, r: BroadcastReceiver.PendingResult) {
         hold?.finish()
         hold = r
-        main.postDelayed({ finishHold() }, HOLD_MS)
+        main.postDelayed({ finishHold(ctx, "timeout ${HOLD_MS / 1000}s") }, HOLD_MS)
     }
 
     @Synchronized
-    fun finishHold() {
-        hold?.let { runCatching { it.finish() } }
+    fun finishHold(ctx: Context, why: String) {
+        val h = hold ?: return
+        runCatching { h.finish() }
         hold = null
+        note(ctx, "receiver released: $why")
     }
 }
 
@@ -154,12 +225,15 @@ class ResumeReceiver : BroadcastReceiver() {
         if (!ResumeStore.arm(app)) return
         // No window may be started from here, so the Dart core comes up on the process's engine without one:
         // it takes the record, connects and the foreground service takes the process over.
-        ResumeStore.hold(goAsync())
+        ResumeStore.hold(app, goAsync())
         try {
-            AppEngine.startDart(app)
+            // false: a window started the process first and its engine already runs Dart (it takes the record itself)
+            val started = AppEngine.startDart(app)
+            ResumeStore.note(app, if (started) "receiver: Dart started without a window" else "receiver: Dart already running, nothing to start")
         } catch (e: Throwable) {
             Log.e("JormungandResume", "headless start failed", e)
-            ResumeStore.finishHold()
+            ResumeStore.note(app, "receiver: headless start failed: $e")
+            ResumeStore.finishHold(app, "headless start failed")
         }
     }
 }
@@ -204,6 +278,7 @@ object ResumeNotifier {
  *  take   -> Map?  {connected, entry, fromCode, code, at}: the record a package replacement armed, once; null otherwise
  *  prompt -> null  posts the "Updated - tap to connect" notification (consent for the VPN is missing)
  *  done   -> null  the resume is dealt with
+ *  trail  -> List<String>  the kept decisions of [ResumeStore] (oldest first), for the app's log
  *  attached -> Boolean  whether a window has attached to the engine (a headless Dart start waits for one)
  *
  *  Kotlin -> Dart: `windowAttached` (MainActivity attached; the UI may start).
@@ -248,9 +323,10 @@ class ResumeChannel(private val app: Context) {
                 result.success(null)
             }
             "done" -> {
-                ResumeStore.finishHold()
+                ResumeStore.finishHold(app, "Dart done")
                 result.success(null)
             }
+            "trail" -> result.success(ResumeStore.trail(app))
             else -> result.notImplemented()
         }
     }

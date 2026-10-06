@@ -31,6 +31,7 @@ class LiveCoreHost extends CoreHost {
     this.resume,
     this.network,
     this.resumeWindow = const Duration(minutes: 10),
+    this.logNote,
     this.ruleSetTimesOf,
     this.saveDelay = const Duration(milliseconds: 400),
     this.reconnectDelay = const Duration(milliseconds: 600),
@@ -65,6 +66,9 @@ class LiveCoreHost extends CoreHost {
 
   /// How long after the package replacement a resume still counts; a later start leaves the VPN off.
   final Duration resumeWindow;
+
+  /// A line into the app's raw log (`level`: debug, info, warn, error); the core's `logBook.note`.
+  final void Function(String level, String text)? logNote;
 
   /// When the rule-set lists were downloaded (the core's rule-set cache), by name; null = unknown.
   final Future<Map<String, int>> Function()? ruleSetTimesOf;
@@ -1136,6 +1140,22 @@ class LiveCoreHost extends CoreHost {
   Future<ResumeOutcome> resumeAfterUpdate() async {
     final port = resume;
     if (port == null || !_ready) return ResumeOutcome.none;
+    final outcome = await _resumeAfterUpdate(port);
+    // No logcat on the phone: the native decisions (and what this start made of them) go into the
+    // app's log, so a VPN that did not come back after an update can be explained from there.
+    final note = logNote;
+    if (note != null) {
+      try {
+        for (final line in await port.trail()) {
+          note('info', '[resume] $line');
+        }
+        note(outcome == ResumeOutcome.failed ? 'warn' : 'info', '[resume] Dart: ${outcome.name}');
+      } catch (_) {}
+    }
+    return outcome;
+  }
+
+  Future<ResumeOutcome> _resumeAfterUpdate(ResumePort port) async {
     try {
       final rec = await port.take(); // consumed: a resume never runs twice
       if (rec == null) return ResumeOutcome.none;
