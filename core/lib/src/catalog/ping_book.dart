@@ -11,16 +11,20 @@ const pingFreshMs = 5 * 60 * 1000;
 /// One result: [ms] (`-1` = timeout; null while [testing] or never), [at] = when it was
 /// measured (ms since epoch), [fails] = timeouts in a row (Auto's `failAfter`).
 class PingEntry {
-  PingEntry({this.ms, this.testing = false, this.at = 0, this.fails = 0});
+  PingEntry({this.ms, this.testing = false, this.at = 0, this.fails = 0, this.was});
 
   num? ms;
+
+  /// The [ms] from before the ping in flight went out: what stays when that ping fails to run
+  /// at all ([PingBook.unmarkTesting]). Null outside a ping.
+  num? was;
 
   /// A ping is in flight. The entry keeps [at] and [fails], so `knownDead` holds meanwhile.
   bool testing;
   num at;
   int fails;
 
-  PingEntry copy() => PingEntry(ms: ms, testing: testing, at: at, fails: fails);
+  PingEntry copy() => PingEntry(ms: ms, testing: testing, at: at, fails: fails, was: was);
 }
 
 class PingBook {
@@ -64,9 +68,25 @@ class PingBook {
   void markTesting(Iterable<CatalogNode> nodes) {
     for (final n in nodes) {
       final e = entry(n)?.copy() ?? PingEntry();
+      e.was = e.ms ?? e.was; // a second ping on the same node must not lose it
       e.ms = null;
       e.testing = true;
       _m[keyOf(n)] = e;
+    }
+  }
+
+  /// A ping that could not run (no tester, an error of the call) measured nothing: the node
+  /// goes back to what it had before [markTesting] — a value, or none when it never had one.
+  /// Only an answer or a timeout replaces a value; a dash means "never pinged".
+  void unmarkTesting(Iterable<CatalogNode> nodes) {
+    for (final n in nodes) {
+      final e = entry(n);
+      if (e == null || !e.testing) continue;
+      if (e.was == null) {
+        _m.remove(keyOf(n));
+      } else {
+        _m[keyOf(n)] = PingEntry(ms: e.was, at: e.at, fails: e.fails);
+      }
     }
   }
 

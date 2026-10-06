@@ -72,6 +72,14 @@ Future<CoreHost> openCoreHost() async {
   if (Platform.isAndroid) {
     const vpn = VpnChannel();
     var boxes = 0;
+    // Every libbox of the process locks its own cache file (withCacheFile): the tunnel's stays
+    // under the data dir, the throwaway ones live in the cache dir and go with their instance.
+    final boxCache = Directory(
+      '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}boxes',
+    );
+    try {
+      await boxCache.delete(recursive: true); // what a killed app left
+    } catch (_) {}
     final ver = await vpn.appVersion();
     final version = ver?.name ?? fallbackAppVersion;
     final core = CoreService(
@@ -79,9 +87,18 @@ Future<CoreHost> openCoreHost() async {
       dataDir: dataDir,
       appVersion: AppVersion.tryParse(version, build: ver?.code ?? 1),
       updatePlatformKeys: updatePlatforms(os: 'android', abis: await vpn.abis()),
-      runner: LibboxRunner(ChannelLibboxPort(vpn)),
-      boxFactory: (_) =>
-          LibboxRunner(ChannelLibboxPort(vpn, boxId: 'box${boxes++}')),
+      runner: LibboxRunner(
+        ChannelLibboxPort(vpn),
+        cacheFile: '$dataDir${Platform.pathSeparator}run${Platform.pathSeparator}main${Platform.pathSeparator}cache.db',
+      ),
+      boxFactory: (_) {
+        final id = 'box${boxes++}';
+        return LibboxRunner(
+          ChannelLibboxPort(vpn, boxId: id),
+          cacheFile: '${boxCache.path}${Platform.pathSeparator}$id.db',
+          temporaryCache: true,
+        );
+      },
       sysProxy: NoSystemProxy(),
       isElevated: () => true, // TUN is the VpnService here, not an admin matter
     );

@@ -193,6 +193,24 @@ Map<String, dynamic> withApiService(Map<String, dynamic> config, String secret, 
       ],
     };
 
+/// [config] with its own cache file at [path] (`experimental.cache_file`, the rest of it kept: the
+/// tunnel's `cache_id`). libbox keeps one bbolt file per instance and forces it on, and the file
+/// is locked, so every instance of the Android app (the tunnel, each throwaway latency / Speed
+/// Test one) must have a file of its own: a second one on the shared default `cache.db` dies
+/// after 10 s with `initialize cache-file: timeout`. Desktop sing-box processes have a working
+/// directory each and need none.
+Map<String, dynamic> withCacheFile(Map<String, dynamic> config, String path) {
+  final exp = (config['experimental'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+  final cache = (exp['cache_file'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+  return {
+    ...config,
+    'experimental': {
+      ...exp,
+      'cache_file': {...cache, 'enabled': true, 'path': path},
+    },
+  };
+}
+
 /// A free loopback port (for an inbound or the API service of a second sing-box), free
 /// for UDP and TCP both: an inbound listens on both. A random port below the dynamic range,
 /// not a port 0: Windows hands those out one after another, straight into its reserved

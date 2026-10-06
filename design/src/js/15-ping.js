@@ -69,11 +69,21 @@ function mockPairPing(entry, exit) {
 // Pings nodes in parallel; resolves when all are done. Views refresh as results land.
 function pingNodes(nodes) {
   nodes = byPingRank(nodes);   // before 'testing' overwrites what the cache knew
+  const before = new Map(nodes.map(n => [pingKey(n), pingEntry(n)]));
   // 'testing' keeps when and how often it missed, so Auto's knownDead holds meanwhile
   nodes.forEach(n => pingCache.set(pingKey(n), Object.assign({ at: 0, fails: 0 }, pingEntry(n), { ms: 'testing' })));
   refreshSourceViews();
   return backend.ping(nodes, (n, ms) => {
     setPing(n, ms);
+    refreshSourceViews();
+  }).then(() => {
+    // a ping that could not run measured nothing: the node keeps what it had (a dash only
+    // for one never pinged)
+    nodes.forEach(n => {
+      const k = pingKey(n), e = pingCache.get(k);
+      if (!e || e.ms !== 'testing') return;
+      if (before.get(k)) pingCache.set(k, before.get(k)); else pingCache.delete(k);
+    });
     refreshSourceViews();
   });
 }

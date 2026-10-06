@@ -14,6 +14,9 @@ class FakeRunner implements BoxRunner {
   bool up = false;
   int starts = 0;
   Map<String, dynamic>? lastConfig;
+
+  /// A sing-box that cannot start (a ping's throwaway box: the core answers `{error}`).
+  Object? failWith;
   @override
   void Function(String line)? onLog;
   @override
@@ -29,6 +32,7 @@ class FakeRunner implements BoxRunner {
   void note(String line) => onLog?.call('[jormd] $line');
   @override
   Future<void> start(Map<String, dynamic> config) async {
+    if (failWith != null) throw failWith!;
     up = true;
     starts++;
     lastConfig = config;
@@ -89,6 +93,7 @@ void main() {
   late FakeRunner runner;
   late CoreService core;
   late LiveCoreHost host;
+  Object? boxFails; // set: every throwaway sing-box (ping, Speed Test) fails to start
 
   Future<void> start({bool elevated = true, Map<String, dynamic>? snap}) async {
     dir = Directory.systemTemp.createTempSync('jorm_app_');
@@ -100,7 +105,7 @@ void main() {
       singBox: '',
       dataDir: dir.path,
       runner: runner,
-      boxFactory: (_) => FakeRunner(),
+      boxFactory: (_) => FakeRunner()..failWith = boxFails,
       sysProxy: NoSystemProxy(),
       isElevated: () => elevated,
       exitCheck: (port) async => {
@@ -297,6 +302,29 @@ void main() {
     expect(host.catalog.sourceOrder, ['a', 'b', 'src3']);
     expect(host.catalog.sourceSeq, 4);
   });
+
+  test(
+    'a ping that cannot run keeps what the nodes had; only a never-pinged node stays without a value',
+    () async {
+      await start();
+      final nodes = host.catalog.sourcesData['a']!.nodes;
+      host.catalog.pings.set(nodes[0], 42);
+      host.catalog.pings.set(nodes[1], -1);
+      boxFails = SingBoxError('no sing-box');
+      final b1 = host.catalog.sourcesData['b']!.nodes.single;
+
+      await host.pingNodes([...nodes, b1]);
+
+      final pings = host.catalog.pings;
+      expect(pings.ping(nodes[0]), 42);
+      expect(pings.ping(nodes[1]), -1);
+      expect(pings.entry(nodes[1])!.fails, 1);
+      expect(pings.entry(nodes[0])!.testing, isFalse);
+      expect(pings.entry(b1), isNull); // never pinged: a dash
+      expect(pings.anyTesting, isFalse);
+      boxFails = null;
+    },
+  );
 
   test(
     'the dock follows the core: Auto members give pings and the server',

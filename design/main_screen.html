@@ -4583,11 +4583,21 @@ function mockPairPing(entry, exit) {
 // Pings nodes in parallel; resolves when all are done. Views refresh as results land.
 function pingNodes(nodes) {
   nodes = byPingRank(nodes);   // before 'testing' overwrites what the cache knew
+  const before = new Map(nodes.map(n => [pingKey(n), pingEntry(n)]));
   // 'testing' keeps when and how often it missed, so Auto's knownDead holds meanwhile
   nodes.forEach(n => pingCache.set(pingKey(n), Object.assign({ at: 0, fails: 0 }, pingEntry(n), { ms: 'testing' })));
   refreshSourceViews();
   return backend.ping(nodes, (n, ms) => {
     setPing(n, ms);
+    refreshSourceViews();
+  }).then(() => {
+    // a ping that could not run measured nothing: the node keeps what it had (a dash only
+    // for one never pinged)
+    nodes.forEach(n => {
+      const k = pingKey(n), e = pingCache.get(k);
+      if (!e || e.ms !== 'testing') return;
+      if (before.get(k)) pingCache.set(k, before.get(k)); else pingCache.delete(k);
+    });
     refreshSourceViews();
   });
 }
@@ -12134,10 +12144,11 @@ const liveBackend = {
     if (!ok.length) return Promise.resolve();
     const uniq = new Map(ok.map(n => [n.id, n])), left = new Set(ok);
     const report = (n, ms) => { if (left.delete(n)) onResult(n, ms); };
+    let failed = false;   // the tester could not run: nothing measured, pingNodes keeps the old values
     return apiPing({ nodes: [...uniq.values()].map(n => ({ key: n.id, outbound: n.outbound })) },
       l => { if (l.kind === 'n') ok.filter(n => n.id === l.key).forEach(n => report(n, l.ms)); })
-      .catch(e => toast('Ping failed: ' + e.message))
-      .then(() => [...left].forEach(n => report(n, -1)));
+      .catch(e => { failed = true; toast('Ping failed: ' + e.message); })
+      .then(() => { if (!failed) [...left].forEach(n => report(n, -1)); });
   },
   // Pairs asked in the same moment (a chain check) go to the core as one batch.
   pingPair(entry, exit) {

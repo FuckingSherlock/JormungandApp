@@ -181,6 +181,13 @@ void main() {
       }
     });
 
+    test('Android: no self paths, so no process_path rule (resolvedExecutable is the shared app_process64)', () {
+      expect(selfProcessPaths(_bin, android: true), isEmpty);
+      final c = buildConfig(_plan(), tunnelPort: 40001, selfPaths: selfProcessPaths(_bin, android: true));
+      expect(_rules(c).where(_isSelf), isEmpty);
+      expect(_rules(c).any((r) => r.containsKey('process_path') || r.containsKey('process_path_regex')), isFalse);
+    });
+
     test('registered as system rules in the rule names', () {
       final info = RoutingInfo();
       final c = _build(_plan(), info: info);

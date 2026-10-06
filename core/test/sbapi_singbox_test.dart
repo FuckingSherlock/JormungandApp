@@ -193,6 +193,24 @@ void main() {
     expect(newApiSecret(), isNot(newApiSecret()));
     expect(newApiSecret(), hasLength(32));
   });
+
+  test('withCacheFile gives the instance its own cache file and keeps the rest of experimental', () {
+    final tester = withCacheFile({'log': {'level': 'warn'}}, '/cache/box1.db');
+    expect((tester['experimental'] as Map)['cache_file'], {'enabled': true, 'path': '/cache/box1.db'});
+    expect(tester['log'], {'level': 'warn'});
+    final tunnel = withCacheFile({
+      'experimental': {
+        'clash_api': {'x': 1},
+        'cache_file': {'enabled': true, 'cache_id': 'abc'},
+      },
+    }, '/run/main/cache.db');
+    final e = tunnel['experimental'] as Map;
+    expect(e['clash_api'], {'x': 1});
+    expect(e['cache_file'], {'enabled': true, 'cache_id': 'abc', 'path': '/run/main/cache.db'});
+    // two instances, two paths: never the shared default
+    expect(((withCacheFile({}, 'a.db')['experimental'] as Map)['cache_file'] as Map)['path'],
+        isNot(((withCacheFile({}, 'b.db')['experimental'] as Map)['cache_file'] as Map)['path']));
+  });
 }
 
 Future<T> _waitFor<T>(List<T> list, bool Function(T) test, {Duration timeout = const Duration(seconds: 5)}) async {

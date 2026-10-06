@@ -322,10 +322,11 @@ const liveBackend = {
     if (!ok.length) return Promise.resolve();
     const uniq = new Map(ok.map(n => [n.id, n])), left = new Set(ok);
     const report = (n, ms) => { if (left.delete(n)) onResult(n, ms); };
+    let failed = false;   // the tester could not run: nothing measured, pingNodes keeps the old values
     return apiPing({ nodes: [...uniq.values()].map(n => ({ key: n.id, outbound: n.outbound })) },
       l => { if (l.kind === 'n') ok.filter(n => n.id === l.key).forEach(n => report(n, l.ms)); })
-      .catch(e => toast('Ping failed: ' + e.message))
-      .then(() => [...left].forEach(n => report(n, -1)));
+      .catch(e => { failed = true; toast('Ping failed: ' + e.message); })
+      .then(() => { if (!failed) [...left].forEach(n => report(n, -1)); });
   },
   // Pairs asked in the same moment (a chain check) go to the core as one batch.
   pingPair(entry, exit) {

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:jormungand_core/jormungand_core.dart';
 
@@ -25,10 +26,21 @@ abstract interface class LibboxPort {
 /// service on a loopback port with a random secret ([withApiService]), and [api] is a
 /// [SingBoxApi] on it (Auto, traffic, connections, Speed Test unchanged). sing-box's log lines
 /// come through the same API ([SingBoxApi.logLines]) since there is no process output.
+///
+/// [cacheFile]: this instance's own sing-box cache file ([withCacheFile]); every libbox in the
+/// app process wants one and locks it, so two instances must never share a path. [temporaryCache]:
+/// the file is deleted when the instance stops (the throwaway ones); the tunnel's stays.
 class LibboxRunner implements BoxRunner {
-  LibboxRunner(this._port, {this.upTimeout = const Duration(seconds: 8)});
+  LibboxRunner(
+    this._port, {
+    this.upTimeout = const Duration(seconds: 8),
+    this.cacheFile,
+    this.temporaryCache = false,
+  });
 
   final LibboxPort _port;
+  final String? cacheFile;
+  final bool temporaryCache;
 
   /// How long the API service may take to answer after the platform said "up".
   final Duration upTimeout;
@@ -63,11 +75,15 @@ class LibboxRunner implements BoxRunner {
     final secret = newApiSecret();
     final apiPort = await freePort();
     final want = _rank('${(config['log'] as Map?)?['level'] ?? 'info'}'.toUpperCase());
+    final cache = cacheFile;
+    if (cache != null) await File(cache).parent.create(recursive: true);
     _native = true;
     try {
-      await _port.start(jsonEncode(withApiService(config, secret, apiPort)));
+      final full = withApiService(config, secret, apiPort);
+      await _port.start(jsonEncode(cache == null ? full : withCacheFile(full, cache)));
     } catch (_) {
       _native = false; // the platform cleans up after a failed start
+      await _dropCache();
       rethrow;
     }
 
@@ -126,6 +142,7 @@ class LibboxRunner implements BoxRunner {
     _native = false;
     note('sing-box stopped: $reason');
     unawaited(_closeLocal());
+    unawaited(_dropCache());
     onExit?.call(0);
   }
 
@@ -137,6 +154,15 @@ class LibboxRunner implements BoxRunner {
       _native = false;
       await _port.stop();
     }
+    await _dropCache();
+  }
+
+  Future<void> _dropCache() async {
+    final cache = cacheFile;
+    if (cache == null || !temporaryCache) return;
+    try {
+      await File(cache).delete();
+    } catch (_) {} // not there, or still held: the next start of the app sweeps the leftovers
   }
 
   Future<void> _closeLocal() async {

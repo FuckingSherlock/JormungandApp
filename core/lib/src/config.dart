@@ -81,7 +81,11 @@ const tunBypass = [
 /// The executables whose connections must never enter the tunnel: this process (the dart VM
 /// for jormd, the app later) and the sing-box binary (ping / speed-test instances are separate
 /// processes). Resolved to real paths; a sing-box that is not a file (looked up on PATH) is left out.
-List<String> selfProcessPaths(String singBox) {
+/// Android: none. `Platform.resolvedExecutable` there is the zygote's `app_process64`, shared by every
+/// app, so a `process_path → direct` rule on it would be wrong; the app's own traffic stays out of
+/// the VPN anyway (its package is excluded) and sing-box runs inside it ([android] is for tests).
+List<String> selfProcessPaths(String singBox, {bool? android}) {
+  if (android ?? Platform.isAndroid) return const [];
   final out = <String>{Platform.resolvedExecutable};
   try {
     final f = File(singBox);

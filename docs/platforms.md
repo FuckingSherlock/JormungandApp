@@ -146,6 +146,11 @@ sing-box туннеля и разовых боксов пинга / Speed Test (
 старт / стоп libbox, сети, которые видит libbox, DNS, `protect`). Неудачный пинг пишет в лог одну
 строку `Ping: N of M did not answer (failed tests: …)` с причинами по стадиям (`socks`, `tls`, `request`).
 
+Каждый libbox процесса (туннель и каждый разовый бокс) получает свой файл кэша sing-box — общий
+`cache.db` под замком, второй экземпляр падает по `initialize cache-file: timeout` (docs/core.md →
+BoxRunner, `withCacheFile`). Правила `process_path → direct` для самого приложения на Android нет:
+`resolvedExecutable` там — общий `app_process64`.
+
 ## Релиз
 
 Подписанный манифест и файлы — в публичном репо `FuckingSherlock/jormungand-releases` (релиз `feed`);

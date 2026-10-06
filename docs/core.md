@@ -157,6 +157,14 @@ closeConnections`. Тела и ответы — те же карты (`Map<Strin
 Платформенная сторона (libbox, `VpnService`) — `app/android_overlay/kotlin/`, шов к ней —
 `LibboxPort`. Код Kotlin ещё не собирался.
 
+Свой файл кэша у каждого экземпляра. libbox держит bbolt-файл `cache.db` в рабочей папке и включает его
+сам (при `PlatformLogWriter`); файл под замком, и второй экземпляр в том же процессе (бокс пинга при
+поднятом туннеле, туннель при идущем пинге) через ~10 с падает с `initialize cache-file: timeout`.
+Поэтому `LibboxRunner` кладёт в конфиг `experimental.cache_file.path` (`withCacheFile`, `runtime.dart`;
+`cache_id` туннеля сохраняется): туннель — постоянный `<dataDir>/run/main/cache.db`, разовые боксы —
+`<cacheDir>/boxes/boxN.db`, удаляется при остановке (остатки убитого приложения чистятся при старте).
+Десктоп не затронут: у каждого процесса sing-box свой `-D workDir` (`run/main`, `run/ping-N`, `run/speed`).
+
 ## Нода
 
 `{id, name, flag, protocol, address, port, outbound, unsupported?}`. `id` =
@@ -492,6 +500,9 @@ sing-box сам создаёт интерфейс (wintun встроен в би
    (`Platform.resolvedExecutable`: для jormd — dart VM, потом exe Flutter) и бинарник sing-box
    (замеры и Speed Test — отдельные процессы sing-box: через туннель они бы зациклились). Правило
    стоит после `tunnel-in`, поэтому то, что ядро шлёт через `tunnel-in`, по-прежнему идёт в туннель.
+   **Android: правила нет** (`selfProcessPaths` пуст): `resolvedExecutable` там — общий для всех приложений
+   zygote `app_process64`, а само приложение и так вне VPN (`addDisallowedApplication`), боксы пинга
+   живут в его процессе.
 5. `Private networks` (`private`) — и так первое в `routing.rules`.
 Правила есть и в режиме прокси (там они ничего не ловят: ядро ходит через `tunnel-in`).
 

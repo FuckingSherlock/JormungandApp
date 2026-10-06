@@ -192,6 +192,23 @@ void main() {
       expect(c.pings.isAlive(n), isTrue);
     });
 
+    test('unmarkTesting: a ping that did not run gives back the old value; a never-pinged node ends without one', () {
+      final c = make();
+      final a = nodeOf(c, 'a::a1'), dead = nodeOf(c, 'a::a2'), fresh = nodeOf(c, 'b::b1');
+      ping(c, 'a::a1', 80);
+      ping(c, 'a::a2', -1, fails: 2);
+      c.pings.markTesting([a, dead, fresh]);
+      c.pings.markTesting([a]); // a second ping on the same node: the first old value stays
+      expect(c.pings.ping(a), isNull);
+      c.pings.unmarkTesting([a, dead, fresh]);
+      expect(c.pings.ping(a), 80);
+      expect(c.pings.entry(a)!.testing, isFalse);
+      expect(c.pings.ping(dead), -1);
+      expect(c.pings.entry(dead)!.fails, 2);
+      expect(c.pings.entry(fresh), isNull);
+      expect(c.pings.anyTesting, isFalse);
+    });
+
     test('rank: alive by ms, never measured, dead last', () {
       final c = make();
       ping(c, 'a::a1', 80);

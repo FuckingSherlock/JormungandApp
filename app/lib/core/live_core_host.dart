@@ -1886,8 +1886,8 @@ class LiveCoreHost extends CoreHost {
       error = true;
     }
     for (final n in left) {
-      // the tester could not run (no sing-box): nothing was measured, so nothing is known
-      error ? catalog.pings.remove(n) : catalog.pings.set(n, -1);
+      // the tester could not run (no sing-box): nothing was measured, the old value stays
+      error ? catalog.pings.unmarkTesting([n]) : catalog.pings.set(n, -1);
     }
     changed();
   }

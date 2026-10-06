@@ -151,6 +151,47 @@ void main() {
   );
 
   test(
+    'cacheFile: the port gets that instance\'s own cache path next to the API service',
+    () async {
+      final cache = '${tmp.path}/sub/c1.db';
+      runner = LibboxRunner(
+        port,
+        upTimeout: const Duration(seconds: 10),
+        cacheFile: cache,
+      );
+      await runner.start(_config(await freePort()));
+      final sent =
+          jsonDecode(File('${tmp.path}/config1.json').readAsStringSync())
+              as Map;
+      expect((sent['experimental'] as Map)['cache_file'], {
+        'enabled': true,
+        'path': cache,
+      });
+      expect((sent['services'] as List).cast<Map>().any((s) => s['type'] == 'api'), isTrue);
+    },
+    skip: _skip,
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+
+  test('temporaryCache: a throwaway instance deletes its cache file on stop and on a failed start; the tunnel keeps its own', () async {
+    final temp = File('${tmp.path}/box1.db')..writeAsStringSync('x');
+    final kept = File('${tmp.path}/main.db')..writeAsStringSync('x');
+    final box = LibboxRunner(port, cacheFile: temp.path, temporaryCache: true);
+    final tunnel = LibboxRunner(port, cacheFile: kept.path);
+    await tunnel.stop();
+    expect(kept.existsSync(), isTrue);
+    port.failWith = SingBoxError('bad config');
+    await expectLater(
+      box.start(_config(1)),
+      throwsA(isA<SingBoxError>()),
+    );
+    expect(temp.existsSync(), isFalse);
+    temp.writeAsStringSync('x');
+    await box.stop();
+    expect(temp.existsSync(), isFalse);
+  });
+
+  test(
     'a second start replaces the first (new API service, no stop in between)',
     () async {
       await runner.start(_config(await freePort()));

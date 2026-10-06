@@ -13,3 +13,4 @@ app/android_overlay/app/libs/
 app/android/key.properties
 *.jks
 *.keystore
+.tmp/
