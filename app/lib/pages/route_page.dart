@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
-    show CatalogDrafts, CatalogNode, OffReason;
+    show CatalogDrafts, CatalogNode, NodeRef, OffReason;
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
@@ -856,7 +856,7 @@ class _EntryRow extends StatelessWidget {
                 ),
               Expanded(
                 child: InkWell(
-                  onTap: isChain ? null : onToggleOpen,
+                  onTap: onToggleOpen,
                   splashFactory: NoSplash.splashFactory,
                   highlightColor: Colors.transparent,
                   child: Padding(
@@ -877,7 +877,7 @@ class _EntryRow extends StatelessWidget {
               ),
             ],
           ),
-          if (!isChain && open) _Body(id: id, edit: edit),
+          if (open) isChain ? _ChainBody(id: id) : _Body(id: id, edit: edit),
         ],
       ),
     );
@@ -1112,6 +1112,84 @@ class _Body extends StatelessWidget {
               ],
             ),
           list,
+        ],
+      ),
+    );
+  }
+}
+
+/// The unfolded chain of a row: both ends with their servers (the one used now marked, the
+/// latency as Nodes shows it); tap a server pings it. Read-only - a chain is edited in Nodes.
+class _ChainBody extends StatelessWidget {
+  const _ChainBody({required this.id});
+
+  final String id;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final l10n = context.l10n;
+    final host = CoreHostScope.of(context);
+    final catalog = host.catalog;
+    final chain = catalog.chainsData[id];
+    if (chain == null) return const SizedBox.shrink();
+
+    Widget side(String label, String? unitId, List<NodeRef> refs, CatalogNode? now) {
+      final mixed = refs.map((r) => r.sid).toSet().length > 1;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(0, 8, 0, 4),
+            child: Text(
+              '$label · ${catalog.unitName(unitId)}'.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: .5,
+                color: c.t3,
+              ),
+            ),
+          ),
+          if (refs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(l10n.noWorkingServers, style: TextStyle(fontSize: 13, color: c.t3)),
+            )
+          else
+            for (final (i, r) in refs.indexed)
+              NodeRow(
+                key: ValueKey('chain-$id-$label-${r.key}'),
+                node: r.node,
+                sourceName: mixed ? catalog.sourcesData[r.sid]?.name : null,
+                now: identical(r.node, now),
+                topBorder: i > 0,
+                onTap: () => host.pingNodes([r.node]),
+              ),
+        ],
+      );
+    }
+
+    final exits = catalog.chainExitRefs(chain);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          side(
+            l10n.entry,
+            chain.inId,
+            catalog.byPing<NodeRef>(catalog.chainEntryRefs(chain), (r) => r.node),
+            catalog.chainEntryNode(chain),
+          ),
+          side(
+            l10n.exit,
+            chain.outId,
+            chain.exitMode == 'priority' ? exits : catalog.byPing<NodeRef>(exits, (r) => r.node),
+            catalog.chainExitNode(chain),
+          ),
         ],
       ),
     );

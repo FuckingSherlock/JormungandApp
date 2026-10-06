@@ -25,3 +25,5 @@
 - Фильтр подписки (`updater.dart`): отфильтрованные серверы не попадают в `gone`. В мокапе логики
   обновления нет (mock backend) — переносить нечего, только если мок имитирует `gone` по фильтру.
 - Settings → Data (блок App updates): строка «Auto-download» (`genCfg.updAutoDownload`: `off` / `wifi` по умолчанию / `always`) между Auto-check и Channel; серая, когда Auto-check выкл. Выбор: Off / Wi-Fi only / Always (в браузерном макете платных сетей нет — можно показывать Off / Always). Подпись «Downloads what Auto-check finds; installing stays yours». Flutter: `settings_data.dart` (`_UpdatesBlock`); в бэкап через genCfg; нужна и мок-логика (`mockUpdate`) — после найденного плановой проверкой сразу `downloading` → `ready`. Док: `docs/updates.md` §6, §11.
+
+- Route (Flutter app): раскрытая строка цепочки показывает стороны Entry / Exit с серверами (как карточка в Nodes), раскрытие по тапу на карточке, без шеврона. В мокапе у цепочек в Route разворота нет — добавить (`js/20-profiles.js`), см. docs/connect-model.md «Каталог (Nodes) и Route».

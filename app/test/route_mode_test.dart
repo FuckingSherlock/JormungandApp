@@ -166,4 +166,38 @@ void main() {
     expect(find.byKey(const ValueKey('route-use-bar')), findsNothing);
     expect(find.byKey(const ValueKey('route-used-profiles')), findsOneWidget);
   });
+
+  testWidgets('a chain row unfolds into its entry and exit servers; the tap still selects', (
+    tester,
+  ) async {
+    final host = _host();
+    final c = host.catalog;
+    c.sourcesData['s2'] = Source(
+      id: 's2',
+      name: 'Beta',
+      url: 'https://beta.example.com/sub',
+      nodes: [_node('b1', 'Beta one')],
+    );
+    c.sourceOrder = ['s1', 's2'];
+    c.chainsData['c1'] = Chain(id: 'c1', name: 'Hop', inId: 's2', outId: 's1');
+    c.catalogOrder['simple']!.add('c1');
+    c.syncCatalog();
+    await pumpApp(tester, host);
+    await tester.tap(find.text('Remnawave'));
+    await tester.pumpAndSettle();
+    expect(_inRoute(find.text('Hop')), findsOneWidget);
+    expect(_inRoute(find.text('EXIT · ALPHA')), findsNothing);
+
+    await tester.tap(_inRoute(find.text('Hop')));
+    await tester.pumpAndSettle();
+    expect(_inRoute(find.text('ENTRY · BETA')), findsOneWidget);
+    expect(_inRoute(find.text('EXIT · ALPHA')), findsOneWidget);
+    expect(_inRoute(find.textContaining('Beta one', findRichText: true)), findsWidgets);
+    expect(_inRoute(find.textContaining('Alpha two', findRichText: true)), findsWidgets);
+    expect(host.catalog.effectiveConnectId(), isNot('c1')); // unfolding selected nothing
+
+    await tester.tap(_inRoute(find.text('Hop')));
+    await tester.pumpAndSettle();
+    expect(_inRoute(find.text('EXIT · ALPHA')), findsNothing);
+  });
 }
