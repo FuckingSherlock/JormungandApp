@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:jormungand_core/jormungand_core.dart';
 
 import '../platform/apps_io.dart';
+import '../platform/network_channel.dart';
 import '../platform/resume_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'app_update.dart';
@@ -28,6 +29,7 @@ class LiveCoreHost extends CoreHost {
     this.appVersion = '',
     this.installer,
     this.resume,
+    this.network,
     this.resumeWindow = const Duration(minutes: 10),
     this.ruleSetTimesOf,
     this.saveDelay = const Duration(milliseconds: 400),
@@ -56,6 +58,10 @@ class LiveCoreHost extends CoreHost {
   /// Where "the VPN was on" is kept across the app's own update (Android: native store); null =
   /// not remembered, nothing is resumed.
   final ResumePort? resume;
+
+  /// Whether the real network is metered (Android); null = never metered (the desktop). Goes to the
+  /// core with the update settings: «Auto-download: Wi-Fi only» waits for an unmetered network.
+  final NetworkPort? network;
 
   /// How long after the package replacement a resume still counts; a later start leaves the VPN off.
   final Duration resumeWindow;
@@ -90,7 +96,9 @@ class LiveCoreHost extends CoreHost {
   double? _lastSpeedMbps;
   AppUpdate _upd = const AppUpdate();
   StreamSubscription<Map<String, dynamic>>? _updSub;
+  StreamSubscription<bool>? _meteredSub;
   String? _updSettingsSig;
+  bool _metered = false;
   Object? _sourcesRev;
 
   // the plan the core runs (null = none): what a reconnect is compared with
@@ -147,7 +155,14 @@ class LiveCoreHost extends CoreHost {
         _upd = AppUpdate.fromJson(s);
         _notify();
       }, onError: (_) {});
+      try {
+        _metered = await network?.metered() ?? false;
+      } catch (_) {}
       _syncUpdateSettings();
+      _meteredSub =network?.meteredChanges.listen((m) {
+        _metered = m;
+        _syncUpdateSettings();
+      }, onError: (_) {});
       _ready = true;
       // a tunnel taken over with another plan than the catalog makes now: the same path as after
       // any change of settings (a reconnect after the usual pause), never a silent restart
@@ -200,7 +215,9 @@ class LiveCoreHost extends CoreHost {
     await _statusSub?.cancel();
     await _eventSub?.cancel();
     await _updSub?.cancel();
+    await _meteredSub?.cancel();
     _statusSub = _eventSub = _updSub = null;
+    _meteredSub = null;
     if (_ready) {
       try {
         await api.dispose();
@@ -218,6 +235,7 @@ class LiveCoreHost extends CoreHost {
     _statusSub?.cancel();
     _eventSub?.cancel();
     _updSub?.cancel();
+    _meteredSub?.cancel();
     _events.close();
     _notices.close();
     super.dispose();
@@ -1046,15 +1064,21 @@ class LiveCoreHost extends CoreHost {
     changed();
   }
 
-  /// The app's update options (auto-check, channel) go to the core's scheduled check.
+  /// The app's update options (auto-check, channel, auto-download, whether the network is metered)
+  /// go to the core's scheduled check.
   void _syncUpdateSettings() {
     if (_disposed) return;
     final g = gen;
-    final sig = '${g.updates}|${g.updChannel}';
+    final sig = '${g.updates}|${g.updChannel}|${g.updAutoDownload}|$_metered';
     if (sig == _updSettingsSig) return;
     _updSettingsSig = sig;
     try {
-      api.updateSettings({'autoCheck': g.updates, 'channel': g.updChannel});
+      api.updateSettings({
+        'autoCheck': g.updates,
+        'channel': g.updChannel,
+        'autoDownload': g.updAutoDownload,
+        'metered': _metered,
+      });
     } catch (_) {}
   }
 

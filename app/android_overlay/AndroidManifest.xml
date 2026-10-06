@@ -45,6 +45,11 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- long-press on our Quick Settings tile (One UI: a tap on its label): open Home (TileBridge.onLaunchIntent) -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
         </activity>
 
         <!-- The tunnel. BIND_VPN_SERVICE: only the system may bind it. stopWithTask=false: swiping the app

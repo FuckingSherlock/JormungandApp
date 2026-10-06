@@ -31,6 +31,7 @@ class _JormungandAppState extends State<JormungandApp> {
   final AppSettings _settings = AppSettings();
   late final AppLifecycleListener _lifecycle;
   TileSync? _tile;
+  final _homeRequests = StreamController<void>.broadcast(); // tile long-press -> HomeShell
 
   CoreHost get _core => widget.coreHost;
 
@@ -91,7 +92,7 @@ class _JormungandAppState extends State<JormungandApp> {
     );
     // Android: the Quick Settings tile shows the connection and toggles it
     final tilePort = widget.tilePort ?? (_core.isAndroid ? const TileChannel() : null);
-    if (tilePort != null) _tile = TileSync(_core, tilePort)..start();
+    if (tilePort != null) _tile = TileSync(_core, tilePort, onHome: () => _homeRequests.add(null))..start();
     // Desktop: the window is closing - stop sing-box, put the system proxy back (or keep it by
     // the kill switch) and save. Android's process just ends; the state is saved as it changes.
     // Android's `detached` is NOT a close: the activity went (swiped from Recents, Back) while the
@@ -109,6 +110,7 @@ class _JormungandAppState extends State<JormungandApp> {
   void dispose() {
     _core.removeListener(_loadLook);
     _tile?.dispose();
+    _homeRequests.close();
     _lifecycle.dispose();
     _settings.dispose();
     super.dispose();
@@ -142,7 +144,7 @@ class _JormungandAppState extends State<JormungandApp> {
               ).copyWith(textScaler: TextScaler.noScaling),
               child: child!,
             ),
-            home: const HomeShell(),
+            home: HomeShell(homeRequests: _homeRequests.stream),
           ),
         ),
       ),

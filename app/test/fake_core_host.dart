@@ -12,6 +12,7 @@ class FakeCoreHost extends CoreHost {
     DockSummary? dock,
     this.catalogIsEmpty = false,
     this.android = false,
+    this.emptyFromCatalog = false,
   }) : dockSummary =
            dock ??
            const DockSummary(
@@ -28,6 +29,10 @@ class FakeCoreHost extends CoreHost {
   DockSummary dockSummary;
   bool catalogIsEmpty;
   final bool android;
+
+  /// The empty state (the dock row, the connect check) follows the real [catalog] of the host,
+  /// the way the live host does, instead of [catalogIsEmpty] and the fixed [dockSummary].
+  final bool emptyFromCatalog;
 
   /// While set, a connect waits for it (the test sees the "connecting" phase).
   Completer<void>? gate;
@@ -107,6 +112,9 @@ class FakeCoreHost extends CoreHost {
     }
     final o = outcomeOverride;
     if (o != null) return ConnectResult(o);
+    if (emptyFromCatalog && catalog.catalogEmpty()) {
+      return const ConnectResult(ConnectOutcome.catalogEmpty);
+    }
     return connect();
   }
 
@@ -172,10 +180,17 @@ class FakeCoreHost extends CoreHost {
   }
 
   @override
-  DockSummary get dock => dockSummary;
+  DockSummary get dock => emptyFromCatalog && catalog.catalogEmpty()
+      ? DockSummary(
+          kind: catalog.simpleMode ? DockKind.simple : DockKind.profiles,
+          none: DockNone.empty,
+          simpleMode: catalog.simpleMode,
+        )
+      : dockSummary;
 
   @override
-  bool get catalogEmpty => catalogIsEmpty;
+  bool get catalogEmpty =>
+      emptyFromCatalog ? catalog.catalogEmpty() : catalogIsEmpty;
 
   @override
   ExitState get exit => _exit;
@@ -567,6 +582,9 @@ class FakeCoreHost extends CoreHost {
   DnsHealth? dnsHealthValue;
   AppUpdate update = const AppUpdate(phase: UpdPhase.idle, current: '0.1.0');
   bool installable = false;
+
+  /// When set, installUpdate waits for it (its value is the install result).
+  Completer<bool>? installGate;
   Map<String, dynamic> versionInfo = const {};
   double? speedMbps;
 
@@ -603,6 +621,8 @@ class FakeCoreHost extends CoreHost {
   @override
   Future<bool> installUpdate() async {
     calls.add('installUpdate');
+    final gate = installGate;
+    if (gate != null) return gate.future;
     return true;
   }
 

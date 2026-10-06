@@ -4,6 +4,7 @@ import 'package:jormungand_core/jormungand_core.dart'
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
+import '../shell/app_links.dart';
 import '../theme/app_colors.g.dart';
 import '../widgets/app_sheet.dart';
 import '../widgets/catalog_card.dart' show GripHandle;
@@ -20,16 +21,30 @@ import '../widgets/source_entry_sheet.dart';
 /// servers, tap a server to use only it), ✎ for the order, the Use in Auto switches and
 /// Fastest / Priority. Everything is created and edited in Nodes; this only picks.
 ///
+/// The Simple / Profiles switcher only VIEWS a mode (the dot marks the one the route uses now);
+/// another mode gets a "Use this mode" button, and a mode with nothing in it an empty state that
+/// leads to creating something, so the switch is explicit and never a dead end.
+///
 /// All the logic is the core's (`Catalog` Route ops through the [CoreHost]); this is the view.
-Future<void> showRouteSheet(BuildContext context, {bool edit = false}) {
-  return showAppSheet<void>(context, builder: (_) => RouteSheet(edit: edit));
+Future<void> showRouteSheet(
+  BuildContext context, {
+  bool edit = false,
+  String? mode,
+}) {
+  return showAppSheet<void>(
+    context,
+    builder: (_) => RouteSheet(edit: edit, mode: mode),
+  );
 }
 
 class RouteSheet extends StatefulWidget {
-  const RouteSheet({super.key, this.edit = false});
+  const RouteSheet({super.key, this.edit = false, this.mode});
 
   /// Opens in edit mode (the "Nothing in Auto" alert).
   final bool edit;
+
+  /// The mode to look at first (`simple` / `profiles`); null = the one the route uses.
+  final String? mode;
 
   @override
   State<RouteSheet> createState() => _RouteSheetState();
@@ -37,6 +52,9 @@ class RouteSheet extends StatefulWidget {
 
 class _RouteSheetState extends State<RouteSheet> {
   late bool _edit = widget.edit;
+
+  /// The mode on screen; null = the one the route uses (follows it).
+  late String? _view = widget.mode;
 
   /// Unfolded rows: each on its own, unfolding one never folds another.
   final _open = <String>{};
@@ -52,32 +70,46 @@ class _RouteSheetState extends State<RouteSheet> {
     final c = context.colors;
     final broken = catalog.brokenOrder();
     final visible = catalog.visibleOrder();
+    final view = _view ?? catalog.connectMode;
+    final used = view == catalog.connectMode; // what is on screen is what the route uses
     return SheetFrame(
       title: l10n.route,
       full: true,
       titleBadge: _HelpButton(onTap: () => _showHelp(context)),
       headerActions: [
-        _AutoBadge(auto: catalog.autoConnect, onTap: () => host.setAutoMode(!catalog.autoConnect)),
+        if (used)
+          _AutoBadge(auto: catalog.autoConnect, onTap: () => host.setAutoMode(!catalog.autoConnect)),
       ],
       subHeader: Padding(
         padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
         child: Row(
           children: [
-            IconBtn(
-              tooltip: _edit ? l10n.done : l10n.editPriorityOrderFastestPriority,
-              active: _edit,
-              activeColor: c.active,
-              onTap: () => setState(() => _edit = !_edit),
-              icon: Icon(_edit ? Icons.check : Icons.edit_outlined, size: 18),
+            // the order and the Fastest / Priority are the active mode's: not for a mode only viewed
+            Opacity(
+              opacity: used ? 1 : .35,
+              child: IgnorePointer(
+                ignoring: !used,
+                child: IconBtn(
+                  tooltip: _edit && used ? l10n.done : l10n.editPriorityOrderFastestPriority,
+                  active: _edit && used,
+                  activeColor: c.active,
+                  onTap: () => setState(() => _edit = !_edit),
+                  icon: Icon(_edit && used ? Icons.check : Icons.edit_outlined, size: 18),
+                ),
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: _ModeSwitch(
-                mode: catalog.connectMode,
+                mode: view,
+                used: catalog.connectMode,
                 onChanged: (m) {
-                  if (m == catalog.connectMode) return;
-                  setState(() => _swap = m == 'profiles' ? 1 : -1);
-                  host.setConnectMode(m);
+                  if (m == view) return;
+                  // only what is shown changes; the route switches with "Use this mode"
+                  setState(() {
+                    _swap = m == 'profiles' ? 1 : -1;
+                    _view = m;
+                  });
                 },
               ),
             ),
@@ -87,6 +119,7 @@ class _RouteSheetState extends State<RouteSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (used)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
             child: Row(
@@ -144,11 +177,17 @@ class _RouteSheetState extends State<RouteSheet> {
               children: [...previous, ?current],
             ),
             child: KeyedSubtree(
-              key: ValueKey(catalog.connectMode),
-              child: _list(context, host, visible),
+              key: ValueKey('$view/$used'),
+              child: used
+                  ? _list(context, host, visible)
+                  : _OtherMode(
+                      mode: view,
+                      onUse: () => host.setConnectMode(view),
+                      onCreate: () => _create(context, view),
+                    ),
             ),
           ),
-          if (broken.isNotEmpty)
+          if (used && broken.isNotEmpty)
             Container(
               margin: const EdgeInsets.only(top: 8),
               padding: const EdgeInsets.only(top: 8),
@@ -168,13 +207,22 @@ class _RouteSheetState extends State<RouteSheet> {
                 ),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
-            child: _note(context, host),
-          ),
+          if (used)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+              child: _note(context, host),
+            ),
         ],
       ),
     );
+  }
+
+  /// "Create profile" / "Add subscription or server" of an empty mode: Nodes at its "+".
+  void _create(BuildContext context, String mode) {
+    final open = AppLinksScope.of(context).openNodesAdd;
+    if (open == null) return;
+    Navigator.of(context).pop();
+    open(tab: mode);
   }
 
   Widget _note(BuildContext context, CoreHost host) {
@@ -212,6 +260,12 @@ class _RouteSheetState extends State<RouteSheet> {
     final c = context.colors;
     final catalog = host.catalog;
     if (visible.isEmpty) {
+      if (catalog.modeEmpty(catalog.connectMode)) {
+        return _EmptyMode(
+          mode: catalog.connectMode,
+          onCreate: () => _create(context, catalog.connectMode),
+        );
+      }
       return Padding(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
         child: Text(
@@ -460,11 +514,13 @@ class _AutoBadge extends StatelessWidget {
   }
 }
 
-/// `.route-modes`: Simple / Profiles with a sliding ink.
+/// `.route-modes`: Simple / Profiles with a sliding ink. The ink is the mode on screen, the dot
+/// the one the route uses ([used]), like the Nodes tabs.
 class _ModeSwitch extends StatelessWidget {
-  const _ModeSwitch({required this.mode, required this.onChanged});
+  const _ModeSwitch({required this.mode, required this.used, required this.onChanged});
 
   final String mode;
+  final String used;
   final ValueChanged<String> onChanged;
 
   @override
@@ -478,14 +534,35 @@ class _ModeSwitch extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
           child: Center(
-            child: AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 250),
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: mode == id ? onAccentOf(context) : c.t2,
-              ),
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 250),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: mode == id ? onAccentOf(context) : c.t2,
+                    ),
+                    child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                if (used == id) ...[
+                  const SizedBox(width: 6),
+                  Tooltip(
+                    message: l10n.theRouteUsesThisTabNow,
+                    child: DecoratedBox(
+                      key: ValueKey('route-used-$id'),
+                      decoration: BoxDecoration(
+                        color: mode == id ? onAccentOf(context) : c.active,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const SizedBox(width: 6, height: 6),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ),
@@ -516,6 +593,135 @@ class _ModeSwitch extends StatelessWidget {
             Row(children: [side('simple', l10n.simple), side('profiles', l10n.profiles)]),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A mode that only is viewed (the route uses the other): the "Use this mode" bar and what is in
+/// it, read-only; nothing in it = [_EmptyMode].
+class _OtherMode extends StatelessWidget {
+  const _OtherMode({required this.mode, required this.onUse, required this.onCreate});
+
+  final String mode;
+  final VoidCallback onUse;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final l10n = context.l10n;
+    final catalog = CoreHostScope.of(context).catalog;
+    if (catalog.modeEmpty(mode)) return _EmptyMode(mode: mode, onCreate: onCreate);
+    final usedLabel = catalog.simpleMode ? l10n.simple : l10n.profiles;
+    final ids = catalog.modeOrder(mode).where(catalog.entryVisible).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          key: const ValueKey('route-use-bar'),
+          margin: const EdgeInsets.fromLTRB(14, 6, 14, 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: c.card,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                l10n.theRouteUsesNow(usedLabel),
+                style: TextStyle(fontSize: 13, color: c.t2),
+              ),
+              const SizedBox(height: 10),
+              PrimaryButton(label: l10n.useThisMode, onPressed: onUse),
+            ],
+          ),
+        ),
+        for (final id in ids) _PreviewRow(id: id),
+      ],
+    );
+  }
+}
+
+/// A row of a mode that is not the route's: the name and what is in it, nothing to tap.
+class _PreviewRow extends StatelessWidget {
+  const _PreviewRow({required this.id});
+
+  final String id;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final l10n = context.l10n;
+    final catalog = CoreHostScope.of(context).catalog;
+    final e = catalog.connectEntry(id);
+    if (e == null) return const SizedBox.shrink();
+    final isChain = catalog.chainsData[id] != null;
+    return Opacity(
+      opacity: catalog.isBroken(id) ? .5 : 1,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 9, 20, 9),
+        child: Row(
+          children: [
+            Flexible(
+              child: Text(
+                e.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: c.t1),
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (isChain)
+              ConnTag(l10n.chain2)
+            else
+              Text(
+                l10n.nodesPlural(catalog.unitRefs(id).length),
+                maxLines: 1,
+                style: TextStyle(fontSize: 13, color: c.t3),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A mode with nothing to connect through: no profiles / no servers, and the way to make one
+/// (Nodes at its "+"), never a dead end.
+class _EmptyMode extends StatelessWidget {
+  const _EmptyMode({required this.mode, required this.onCreate});
+
+  final String mode;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final l10n = context.l10n;
+    final simple = mode == 'simple';
+    final wired = AppLinksScope.of(context).openNodesAdd != null;
+    return Padding(
+      key: ValueKey('route-empty-$mode'),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            simple ? l10n.noServersYet : l10n.noProfilesYet,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: c.t2),
+          ),
+          if (wired) ...[
+            const SizedBox(height: 14),
+            PrimaryButton(
+              label: simple ? l10n.addSubscriptionOrServer : l10n.createProfile,
+              onPressed: onCreate,
+            ),
+          ],
+        ],
       ),
     );
   }

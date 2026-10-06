@@ -749,6 +749,28 @@ void main() {
       expect(c.toggleEntryAuto('c1'), isTrue); // nothing left in Auto
     });
 
+    test('modeEmpty tells either mode without switching to it', () {
+      final c = make();
+      expect(c.modeEmpty('simple'), isFalse);
+      expect(c.modeEmpty('profiles'), isFalse);
+      for (final id in [...c.getProfileIds()]) {
+        c.deleteProfile(id);
+      }
+      for (final id in [...c.catalogOrder['profiles']!]) {
+        if (c.chainsData.containsKey(id)) c.deleteChain(id);
+      }
+      c.syncCatalog(); // what the host does after every edit
+      expect(c.connectMode, 'simple');
+      expect(c.modeEmpty('profiles'), isTrue);
+      expect(c.modeEmpty('simple'), isFalse);
+      expect(c.catalogEmpty(), isFalse);
+      c.setConnectMode('profiles'); // stuck in an empty mode: catalogEmpty is about the active one
+      expect(c.catalogEmpty(), isTrue);
+      expect(c.modeEmpty('profiles'), isTrue);
+      expect(c.modeEmpty('simple'), isFalse);
+      expect(Catalog.fromJson(null, now: () => clock).modeEmpty('simple'), isTrue);
+    });
+
     test('deleting a source removes it from profiles and chains and drops the chains that end on it', () {
       final c = make();
       c.profilesData['p']!.nodes = ['a::a1', 'b::b1'];

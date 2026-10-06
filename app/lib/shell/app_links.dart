@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 class AppLinks {
   const AppLinks({
     this.openNodesEntry,
+    this.openNodesAdd,
     this.openRules,
     this.openRuleForm,
     this.openAppAct,
@@ -20,6 +21,9 @@ class AppLinks {
 
   /// Nodes at the card of a source / profile / chain, unfolded and in view.
   final void Function(String id)? openNodesEntry;
+
+  /// Nodes on [tab] (`simple` / `profiles`) with its "+" open (an empty mode of Route).
+  final void Function({String? tab})? openNodesAdd;
 
   /// Rules, at a service / quick rule (`svc:telegram`, `quick:ads`, `lan`) or just the screen.
   final void Function([String? at])? openRules;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -478,6 +479,35 @@ void main() {
       expect(host.calls, contains('installUpdate'));
     });
 
+    testWidgets('updates: Install shows a status until the install returns; a refusal brings the button back', (tester) async {
+      final host = FakeCoreHost();
+      host.installable = true;
+      host.update = const AppUpdate(
+        phase: UpdPhase.ready,
+        current: '0.1.0',
+        file: r'C:\u\jormungand-0.2.0.apk',
+        offer: UpdOffer(version: '0.2.0', channel: 'stable', size: 1024, notes: {}),
+      );
+      final gate = host.installGate = Completer<bool>();
+      await _pump(tester, host);
+      await _open(tester, 'setdata');
+      await tester.tap(find.text('Install'));
+      await tester.pump();
+      expect(host.calls, contains('installUpdate'));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Installing… the app will close and restart'), findsOneWidget);
+      // a second tap does nothing while it runs
+      await tester.tap(find.text('Install'));
+      await tester.pump();
+      expect(host.calls.where((c) => c == 'installUpdate'), hasLength(1));
+
+      gate.complete(false);
+      await tester.pumpAndSettle();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Installing… the app will close and restart'), findsNothing);
+      expect(find.text('Install'), findsOneWidget);
+    });
+
     testWidgets('updates: a build without an updater says so', (tester) async {
       final host = FakeCoreHost();
       host.update = const AppUpdate(phase: UpdPhase.unavailable);
@@ -490,6 +520,43 @@ void main() {
       await tester.tap(find.text('Check now'));
       await tester.pump();
       expect(host.calls, isNot(contains('checkUpdate')));
+    });
+
+    testWidgets('updates: Auto-download is Off / Wi-Fi only / Always on Android, Off / Always on the desktop, and needs Auto-check', (tester) async {
+      final host = FakeCoreHost(android: true);
+      await _pump(tester, host);
+      await _open(tester, 'setdata');
+      expect(host.gen.updAutoDownload, 'wifi'); // the default
+      expect(find.text('Wi-Fi only'), findsOneWidget);
+      await tester.tap(find.text('Wi-Fi only'));
+      await tester.pumpAndSettle();
+      expect(find.text('Off'), findsOneWidget);
+      expect(find.text('Always'), findsOneWidget);
+      await tester.tap(find.text('Always'));
+      await tester.pumpAndSettle();
+      expect(host.gen.updAutoDownload, 'always');
+
+      // Auto-check off: the choice is dimmed and does nothing
+      host.gen.updates = false;
+      host.changed();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Always'));
+      await tester.pumpAndSettle();
+      expect(find.text('Off'), findsNothing);
+    });
+
+    testWidgets('updates: on the desktop Auto-download has no Wi-Fi only', (tester) async {
+      final host = FakeCoreHost();
+      await _pump(tester, host);
+      await _open(tester, 'setdata');
+      expect(find.text('Wi-Fi only'), findsNothing);
+      expect(find.text('Always'), findsOneWidget); // the stored default `wifi` reads as Always
+      await tester.tap(find.text('Always'));
+      await tester.pumpAndSettle();
+      expect(find.text('Wi-Fi only'), findsNothing);
+      await tester.tap(find.text('Off'));
+      await tester.pumpAndSettle();
+      expect(host.gen.updAutoDownload, 'off');
     });
   });
 

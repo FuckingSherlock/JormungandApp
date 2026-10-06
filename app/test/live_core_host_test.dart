@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/live_core_host.dart';
 import 'package:jormungand/core/settings_model.dart';
+import 'package:jormungand/platform/network_channel.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
 /// A runner that is not sing-box: starts when told to, counts the starts, has no API service.
@@ -88,6 +89,31 @@ Map<String, dynamic> snapshot() => {
   },
   'segState': {'mode': 'proxy', 'route': 'rules', 'sys': 'off'},
 };
+
+/// A core that remembers what the app told its updater.
+class _RecCore extends CoreService {
+  _RecCore({required super.dataDir, required super.runner})
+    : super(singBox: '', boxFactory: (_) => FakeRunner(), sysProxy: NoSystemProxy(), isElevated: () => true);
+
+  final updateBodies = <Map<String, dynamic>>[];
+
+  @override
+  void updateSettings(Map<String, dynamic> body) {
+    updateBodies.add(body);
+    super.updateSettings(body);
+  }
+}
+
+class _FakeNetwork implements NetworkPort {
+  bool isMetered = true;
+  final changes = StreamController<bool>.broadcast();
+
+  @override
+  Future<bool> metered() async => isMetered;
+
+  @override
+  Stream<bool> get meteredChanges => changes.stream;
+}
 
 void main() {
   late Directory dir;
@@ -407,6 +433,38 @@ void main() {
       boxFails = null;
     },
   );
+
+  test('update settings (auto-download, metered network) go to the core and follow every change', () async {
+    await start();
+    await host.shutdown();
+    host.dispose();
+    final rec = _RecCore(dataDir: dir.path, runner: runner);
+    final net = _FakeNetwork();
+    host = LiveCoreHost(
+      api: rec,
+      isAndroid: false,
+      network: net,
+      saveDelay: const Duration(milliseconds: 20),
+      reconnectDelay: const Duration(milliseconds: 20),
+      trafficEvery: const Duration(milliseconds: 50),
+    );
+    await host.init();
+    // the first push already knows the network and the default (Wi-Fi only)
+    expect(rec.updateBodies.last, {'autoCheck': true, 'channel': 'stable', 'autoDownload': 'wifi', 'metered': true});
+
+    net.isMetered = false;
+    net.changes.add(false);
+    await settle(20);
+    expect(rec.updateBodies.last['metered'], false);
+
+    host.gen.updAutoDownload = 'always';
+    host.changed();
+    expect(rec.updateBodies.last['autoDownload'], 'always');
+    final n = rec.updateBodies.length;
+    host.changed(); // nothing moved: nothing sent
+    expect(rec.updateBodies, hasLength(n));
+    await net.changes.close();
+  });
 
   test(
     'the dock follows the core: Auto members give pings and the server',

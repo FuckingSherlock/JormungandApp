@@ -317,6 +317,7 @@ void main() {
     expect(tile.pushed.single.phase, 'on');
     expect(tile.pushed.single.name, isNotEmpty);
     expect(notify.nodes, hasLength(1));
+    expect(notify.visible, [true]); // the native side keeps it; a headless start says it too
   });
 }
 
@@ -324,6 +325,9 @@ class _Notify implements NotifyIo {
   final nodes = <String?>[];
   @override
   Future<void> setVpnNode(String? node) async => nodes.add(node);
+  final visible = <bool>[];
+  @override
+  Future<void> setVpnVisible(bool v) async => visible.add(v);
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

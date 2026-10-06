@@ -7,6 +7,7 @@ import 'package:jormungand_core/jormungand_core.dart' show Catalog;
 import 'package:jormungand/app.dart';
 import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/settings_model.dart';
+import 'package:jormungand/core/system_notifier.dart';
 import 'package:jormungand/platform/notify_channel.dart';
 import 'package:jormungand/platform/power_channel.dart';
 import 'package:jormungand/shell/home_shell.dart';
@@ -24,6 +25,7 @@ class FakeNotifyIo implements NotifyIo {
   final posted = <SystemNote>[];
   final requests = <bool>[]; // the `once` of each request
   final vpnNodes = <String?>[];
+  final vpnVisible = <bool>[];
   int cancels = 0;
   int settingsOpened = 0;
   int? launchEvent;
@@ -60,6 +62,9 @@ class FakeNotifyIo implements NotifyIo {
 
   @override
   Future<void> setVpnNode(String? node) async => vpnNodes.add(node);
+
+  @override
+  Future<void> setVpnVisible(bool visible) async => vpnVisible.add(visible);
 
   @override
   Stream<int> get eventTaps => _taps.stream;
@@ -433,6 +438,63 @@ void main() {
       await tester.tap(toggles.at(0)); // the master
       await tester.pumpAndSettle();
       expect(io.vpnNodes.last, isNull);
+    });
+
+    testWidgets('the Status and master switches hide the VPN notification, on screen', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      expect(io.vpnVisible, [true]); // the native side hears it before any connect
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pump();
+      expect(io.vpnVisible, [true]); // nothing new: sent only on a change
+      expect(io.vpnNodes.last, 'Remnawave · Frankfurt 1');
+
+      await openNotifSettings(tester);
+      // Android: the row says that a hidden notification is not a stopped VPN
+      expect(find.textContaining('The VPN keeps running'), findsOneWidget);
+      final toggles = find.descendant(
+        of: find.byType(NotifSheet),
+        matching: find.byType(MiniToggle),
+      );
+      await tester.tap(toggles.at(1)); // Status off
+      await tester.pumpAndSettle();
+      expect(io.vpnVisible, [true, false]);
+      await tester.tap(toggles.at(1)); // Status on, with the name
+      await tester.pumpAndSettle();
+      expect(io.vpnVisible, [true, false, true]);
+      expect(io.vpnNodes.last, 'Remnawave · Frankfurt 1');
+
+      await tester.tap(toggles.at(0)); // the master off: hidden whatever Status says
+      await tester.pumpAndSettle();
+      expect(io.vpnVisible.last, isFalse);
+      await tester.tap(toggles.at(0));
+      await tester.pumpAndSettle();
+      expect(io.vpnVisible.last, isTrue);
+
+      // off while disconnected is kept for the next start of the service
+      host.setPhase(ConnectionPhase.disconnected);
+      await tester.pump();
+      await tester.tap(toggles.at(1));
+      await tester.pumpAndSettle();
+      expect(io.vpnVisible.last, isFalse);
+    });
+
+    test('a reloaded app pushes what the settings say; both switches on = shown', () {
+      for (final (master, status, shown) in [
+        (true, true, true),
+        (true, false, false),
+        (false, true, false),
+        (false, false, false),
+      ]) {
+        final host = FakeCoreHost(android: true)
+          ..notif.setFlag('enabled', master)
+          ..notif.setFlag('status', status);
+        final fake = FakeNotifyIo();
+        SystemNotifier(host, io: fake, power: FakePowerIo()).start();
+        expect(fake.vpnVisible, [shown], reason: 'master $master, Status $status');
+        expect(host.notif.vpnStatusShown, shown);
+      }
     });
 
     testWidgets('blocked: a switch turned on asks for the permission', (

@@ -48,6 +48,12 @@ class _HomePageState extends State<HomePage> {
       case ConnectOutcome.nothingInAuto:
         await _alertNothingInAuto();
       case ConnectOutcome.catalogEmpty:
+        // the other mode has something: Route, where it can be switched to (never a silent switch)
+        final other = _usableOtherMode(host);
+        if (other != null) {
+          await showRouteSheet(context, mode: other);
+          return;
+        }
         final l10n = context.l10n;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -106,11 +112,25 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// A tap on the dock row: Route when there is something to connect, else Nodes -> +.
+  /// The mode the route does not use, when it has something to connect through (the current
+  /// one is empty): where Route leads the user instead of a dead end.
+  String? _usableOtherMode(CoreHost host) {
+    final cat = host.catalog;
+    final other = cat.simpleMode ? 'profiles' : 'simple';
+    return cat.modeEmpty(other) ? null : other;
+  }
+
+  /// A tap on the dock row: Route when there is something to connect (an empty mode with a
+  /// usable other one: Route on that, to switch), else Nodes -> +.
   void _rowTap() {
     final host = CoreHostScope.read(context);
     if (host.catalogEmpty) {
-      widget.onOpenNodes?.call();
+      final other = _usableOtherMode(host);
+      if (other != null) {
+        showRouteSheet(context, mode: other);
+      } else {
+        widget.onOpenNodes?.call();
+      }
     } else {
       showRouteSheet(context);
     }

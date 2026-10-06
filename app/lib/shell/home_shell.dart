@@ -47,7 +47,10 @@ enum AppTab {
 // TODO(ui): sheets (Add, Route, Rules, ...) as a stack that Back closes one by one, and the
 // unseen error / warning dots on the Logs item (mockup .nav-dot).
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key});
+  const HomeShell({super.key, this.homeRequests});
+
+  /// "Show Home with the dock" (long-press on the Android Quick Settings tile): Home tab, no sheet open.
+  final Stream<void>? homeRequests;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -65,6 +68,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   /// notification's text; a tap on one comes back through [NotifyIo.eventTaps].
   SystemNotifier? _sys;
   StreamSubscription<int>? _taps;
+  StreamSubscription<void>? _homeSub;
   Timer? _flyTimer;
   final _navKey = GlobalKey();
 
@@ -75,6 +79,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _homeSub = widget.homeRequests?.listen((_) => _showHome());
+  }
+
+  /// Home tab with the dock visible: close sheets and dialogs on top.
+  void _showHome() {
+    if (!mounted) return;
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    _setTab(AppTab.home);
   }
 
   @override
@@ -125,6 +137,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _taps?.cancel();
+    _homeSub?.cancel();
     _sys?.dispose();
     _notices?.cancel();
     _notifs?.cancel();
@@ -153,6 +166,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _setTab(AppTab.nodes);
       _afterTab(() => _nodesKey.currentState?.openEntry(id));
     },
+    openNodesAdd: ({tab}) => _openNodesAdd(tab: tab),
     openRules: ([at]) => showRulesPage(_ctx, at: at),
     openRuleForm: (id) => showRuleForm(_ctx, id: id),
     openAppAct: (pkg) => showAppAct(_ctx, pkg),
@@ -307,14 +321,16 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     overlay.insert(entry);
   }
 
-  /// Home with nothing to connect through (mockup `dockTap`): Nodes, and its "+".
-  void _openNodesAdd() {
-    final empty = CoreHostScope.read(context).catalog.sourceOrder.isEmpty;
+  /// Home with nothing to connect through in any mode (mockup `dockTap`), or Route's empty mode:
+  /// Nodes, and its "+". Without sources a profile has nothing to be made of: Simple; otherwise
+  /// [tab], or the mode the route is in.
+  void _openNodesAdd({String? tab}) {
+    final catalog = CoreHostScope.read(context).catalog;
+    final empty = catalog.sourceOrder.isEmpty;
+    final at = empty ? 'simple' : tab ?? catalog.connectMode;
     setState(() => _tab = AppTab.nodes);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _nodesKey.currentState?.openAdd(tab: empty ? 'simple' : null);
-      }
+      if (mounted) _nodesKey.currentState?.openAdd(tab: at);
     });
   }
 

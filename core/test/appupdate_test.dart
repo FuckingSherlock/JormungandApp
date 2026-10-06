@@ -846,6 +846,63 @@ void main() {
       expect(await updater().reconcile(), InstallOutcome.none);
     });
 
+    group('restore sweeps the updates folder', () {
+      File put(AppUpdater u, String name, {Duration age = Duration.zero}) {
+        final f = File(p.join(u.dir.path, name))
+          ..createSync(recursive: true)
+          ..writeAsBytesSync([1, 2, 3]);
+        f.setLastModifiedSync(DateTime.now().subtract(age));
+        return f;
+      }
+
+      Set<String> names(AppUpdater u) => u.dir.listSync().whereType<File>().map((f) => p.basename(f.path)).toSet();
+
+      test('a valid ready file stays with ready.json; an orphan installer goes', () async {
+        publish(a, await release(keys, size: 20000));
+        final u = updater();
+        await u.check(manual: true);
+        final done = await u.download();
+        final orphan = put(u, 'jormungand-0.0.9.apk');
+        final s = await updater().restore();
+        expect(s.phase, UpdatePhase.ready);
+        expect(File(done.file!).existsSync(), isTrue);
+        expect(File(p.join(u.dir.path, 'ready.json')).existsSync(), isTrue);
+        expect(orphan.existsSync(), isFalse);
+      });
+
+      test('a stale ready: everything goes but .json files and a fresh .part', () async {
+        publish(a, await release(keys, size: 20000));
+        final u = updater();
+        await u.check(manual: true);
+        final done = await u.download();
+        put(u, 'older.apk');
+        put(u, 'state.json');
+        put(u, 'next.part', age: const Duration(hours: 1));
+        // the running version is already the offered one: the file is stale
+        final s = await updater(current: '0.2.0+2').restore();
+        expect(s.phase, UpdatePhase.idle);
+        expect(File(done.file!).existsSync(), isFalse);
+        expect(names(u), {'state.json', 'next.part'});
+      });
+
+      test('an old .part (4 days) goes, a fresh one (1 h) stays', () async {
+        final u = updater();
+        put(u, 'old.part', age: const Duration(days: 4));
+        put(u, 'fresh.part', age: const Duration(hours: 1));
+        await u.restore();
+        expect(names(u), {'fresh.part'});
+      });
+
+      test('started.json and state.json are never swept', () async {
+        final u = updater();
+        put(u, 'started.json', age: const Duration(days: 30));
+        put(u, 'state.json', age: const Duration(days: 30));
+        put(u, 'x.apk');
+        await u.restore();
+        expect(names(u), {'started.json', 'state.json'});
+      });
+    });
+
     test('the time of the last check survives', () async {
       publish(a, await release(keys));
       final u = updater();
@@ -887,6 +944,118 @@ void main() {
 
       u.stopSchedule();
       await u.dispose();
+    });
+
+    group('auto-download', () {
+      // runs the scheduled check once; [on] is the live Auto-check switch
+      Future<(AppUpdater, List<(Duration, void Function())>)> scheduled({bool Function()? on}) async {
+        final timers = <(Duration, void Function())>[];
+        final u = updater();
+        u.startSchedule(
+            autoCheck: on ?? () => true,
+            channel: () => UpdateChannel.stable,
+            timer: (d, f) {
+              timers.add((d, f));
+              return Timer(const Duration(days: 1), () {});
+            });
+        return (u, timers);
+      }
+
+      Future<void> tickAndWait(List<(Duration, void Function())> timers) async {
+        final n = timers.length;
+        timers.last.$2();
+        for (var i = 0; i < 100 && timers.length == n; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+
+      Future<void> until(bool Function() ok) async {
+        for (var i = 0; i < 100 && !ok(); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      }
+
+      test('off (default): a scheduled check only offers', () async {
+        publish(a, await release(keys));
+        final (u, timers) = await scheduled();
+        await tickAndWait(timers);
+        expect(u.status.phase, UpdatePhase.available);
+        u.stopSchedule();
+      });
+
+      test('wifi: downloads on an unmetered network, waits on a metered one, starts when it turns unmetered', () async {
+        final r = await release(keys, size: 50000);
+        publish(a, r);
+        final (u, timers) = await scheduled();
+        u.setAutoDownload(auto: UpdateAutoDownload.wifi, metered: true);
+        await tickAndWait(timers);
+        expect(u.status.phase, UpdatePhase.available);
+        expect(a.hits.where((h) => h.endsWith('.apk')), isEmpty);
+
+        u.setAutoDownload(metered: false); // the network changed: the waiting offer goes
+        await until(() => u.status.phase == UpdatePhase.ready);
+        expect(u.status.phase, UpdatePhase.ready);
+        expect(File(u.status.file!).readAsBytesSync(), r.installer);
+        u.stopSchedule();
+      });
+
+      test('wifi: unmetered at the check = download at once, never installs', () async {
+        publish(a, await release(keys, size: 50000));
+        final (u, timers) = await scheduled();
+        u.setAutoDownload(auto: UpdateAutoDownload.wifi, metered: false);
+        await tickAndWait(timers);
+        expect(u.status.phase, UpdatePhase.ready);
+        expect(File(p.join(u.dir.path, 'started.json')).existsSync(), isFalse);
+        u.stopSchedule();
+      });
+
+      test('always downloads on a metered network; turning it on later starts the waiting offer', () async {
+        publish(a, await release(keys, size: 50000));
+        final (u, timers) = await scheduled();
+        u.setAutoDownload(auto: UpdateAutoDownload.off, metered: true);
+        await tickAndWait(timers);
+        expect(u.status.phase, UpdatePhase.available);
+        u.setAutoDownload(auto: UpdateAutoDownload.wifi); // metered: still waits
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        expect(u.status.phase, UpdatePhase.available);
+        u.setAutoDownload(auto: UpdateAutoDownload.always);
+        await until(() => u.status.phase == UpdatePhase.ready);
+        expect(u.status.phase, UpdatePhase.ready);
+        u.stopSchedule();
+      });
+
+      test('Auto-check off: no auto-download even when the setting changes', () async {
+        publish(a, await release(keys, size: 50000));
+        var on = true;
+        final (u, timers) = await scheduled(on: () => on);
+        await tickAndWait(timers);
+        expect(u.status.phase, UpdatePhase.available);
+        on = false;
+        u.setAutoDownload(auto: UpdateAutoDownload.always);
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        expect(u.status.phase, UpdatePhase.available);
+        u.stopSchedule();
+      });
+
+      test('a failed auto-download is silent: the offer stays, lastError says why, a later change retries', () async {
+        final r = await release(keys, size: 100000);
+        publish(a, r);
+        a.cutAfter = 30000;
+        final (u, timers) = await scheduled();
+        u.setAutoDownload(auto: UpdateAutoDownload.always);
+        await tickAndWait(timers);
+        expect(u.status.phase, UpdatePhase.available);
+        expect(u.status.offer, isNotNull);
+        expect(u.status.error, isNull);
+        expect(u.status.lastError?.code, UpdateError.network);
+
+        a.cutAfter = null;
+        u.setAutoDownload(metered: true); // no effect on `always`, but it is a change: retried
+        await until(() => u.status.phase == UpdatePhase.ready);
+        expect(u.status.phase, UpdatePhase.ready);
+        u.stopSchedule();
+      });
     });
   });
 

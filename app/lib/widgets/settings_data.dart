@@ -289,8 +289,26 @@ String _updError(AppLocalizations l10n, UpdError? e) {
   return m.isEmpty ? l10n.somethingWentWrong : m;
 }
 
-class _UpdatesBlock extends StatelessWidget {
+class _UpdatesBlock extends StatefulWidget {
   const _UpdatesBlock();
+
+  @override
+  State<_UpdatesBlock> createState() => _UpdatesBlockState();
+}
+
+class _UpdatesBlockState extends State<_UpdatesBlock> {
+  /// Install was tapped and has not come back yet: the replacement can take seconds
+  /// before the app closes, so the card says so instead of looking frozen.
+  bool _installing = false;
+
+  Future<void> _install(CoreHost host) async {
+    setState(() => _installing = true);
+    try {
+      await host.installUpdate();
+    } catch (_) {}
+    // success ends this process; a refusal (declined dialog, installer failure) lands here
+    if (mounted) setState(() => _installing = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -437,10 +455,32 @@ class _UpdatesBlock extends StatelessWidget {
               if (host.canInstallUpdate)
                 PrimaryButton(
                   label: l10n.install,
-                  onPressed: () => host.installUpdate(),
+                  onPressed: _installing ? null : () => _install(host),
                 )
               else if (u.file != null)
                 HintText(u.file!),
+              if (_installing && host.canInstallUpdate) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: c.accent,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        l10n.installingTheAppWillCloseAnd,
+                        style: TextStyle(fontSize: 13, color: c.t2),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
             if (p == UpdPhase.failed && !u.checkFailed) ...[
               WarnNote(_updError(l10n, u.error)),
@@ -492,6 +532,17 @@ class _UpdatesBlock extends StatelessWidget {
               ),
             ),
             SetRow(
+              label: l10n.autoDownload,
+              hint: l10n.downloadsWhatAutoCheckFindsInstalling,
+              trailing: Opacity(
+                opacity: gen.updates ? 1 : .4,
+                child: SetValueButton(
+                  text: _autoDownloadLabel(l10n, host),
+                  onTap: gen.updates ? () => _pickAutoDownload(context, host) : null,
+                ),
+              ),
+            ),
+            SetRow(
               label: l10n.channel,
               hint: l10n.betaGetsNewVersionsEarlier,
               trailing: SetValueButton(
@@ -503,6 +554,38 @@ class _UpdatesBlock extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// Off / Wi-Fi only / Always. The desktop has no metered networks, so there «Wi-Fi only» would
+  /// be «Always» under another name: the list is Off / Always and a stored `wifi` reads as Always.
+  String _autoDownloadLabel(AppLocalizations l10n, CoreHost host) {
+    final v = host.gen.updAutoDownload;
+    if (v == 'off') return l10n.off;
+    if (v == 'always' || !host.isAndroid) return l10n.always;
+    return l10n.wiFiOnly;
+  }
+
+  void _pickAutoDownload(BuildContext context, CoreHost host) {
+    final l10n = context.l10n;
+    final gen = host.gen;
+    final shown = gen.updAutoDownload == 'wifi' && !host.isAndroid
+        ? 'always'
+        : gen.updAutoDownload;
+    showMenuSheet<void>(context, l10n.autoDownload, (sheet) {
+      PickRow pick(String label, String v) => PickRow(
+        label: label,
+        selected: shown == v,
+        onTap: () => closeThen(sheet, () {
+          gen.updAutoDownload = v;
+          host.changed();
+        }),
+      );
+      return [
+        pick(l10n.off, 'off'),
+        if (host.isAndroid) pick(l10n.wiFiOnly, 'wifi'),
+        pick(l10n.always, 'always'),
+      ];
+    });
   }
 
   void _pickChannel(BuildContext context, CoreHost host) {

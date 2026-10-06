@@ -24,6 +24,7 @@ Future<ResumeOutcome> resumeInBackground(
       await tile?.push(TileState('on', tileName(dock), dock.hasEntry));
     } catch (_) {}
     try {
+      await notify?.setVpnVisible(host.notif.vpnStatusShown);
       await notify?.setVpnNode(_vpnNodeLabel(host));
     } catch (_) {}
   }
@@ -33,8 +34,7 @@ Future<ResumeOutcome> resumeInBackground(
 /// What the VPN notification shows (`Entry · server`, as `SystemNotifier` does while the window is
 /// open); null where the user switched the name off.
 String? _vpnNodeLabel(CoreHost host) {
-  final n = host.notif;
-  if (!n.enabled || !n.flag('status')) return null;
+  if (!host.notif.vpnStatusShown) return null;
   final d = host.dock;
   if (!d.hasEntry) return null;
   final server = d.node?.name ?? '';

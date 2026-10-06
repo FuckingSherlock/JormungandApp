@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/app.dart';
 import 'package:jormungand/core/core_host.dart';
@@ -156,5 +157,29 @@ void main() {
     );
     await tester.pump();
     expect(port.pushed, isNotEmpty);
+  });
+
+  testWidgets('long-press on the tile (home): Home tab, sheets closed', (tester) async {
+    final port = FakeTilePort();
+    await tester.pumpWidget(
+      JormungandApp(coreHost: FakeCoreHost(android: true), tilePort: port),
+    );
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.person_outline)); // Settings tab
+    await tester.pump();
+    final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
+    unawaited(
+      nav.push(
+        MaterialPageRoute<void>(builder: (_) => const Text('open sheet')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('open sheet'), findsOneWidget);
+
+    port.tap('home');
+    await tester.pumpAndSettle();
+    expect(find.text('open sheet'), findsNothing);
+    final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+    expect(bar.selectedIndex, 0);
   });
 }

@@ -218,12 +218,19 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   описано в `docs/updates.md` → «Подключение после обновления».
 - **Имя в уведомлении VPN** переживает перезапуск службы: `AppNotifier.vpnNode` не стирается в `leave()`,
   а только если следующий старт службы позже 15 с (Dart шлёт имя раз за подключение).
+- **Платная сеть** для «Settings → Data → Auto-download → Wi-Fi only»: канал `jormungand/network`
+  (`NetworkChannel.kt.tmpl`, Dart — `NetworkPort`): метод `metered` и поток смен. Считается по
+  нижележащим (не-VPN) сетям, потому что наш VPN объявляет себя неплатным. На Windows платных сетей
+  нет (`metered = false`, пункта «Wi-Fi only» в выборе нет). Подробно — `docs/updates.md` (разделы 6, 9).
 
 Проверяется только на устройстве: смахивание из недавних при поднятом VPN; возврат VPN после обновления
 (из приложения и APK из браузера / `adb install -r` с другим `versionCode`; без согласия VPN); повторное подключение
 плагинов к новому окну (файлы, камера, разрешения); подключение плиткой при живом ядре без окна и
 согласие VPN без окна; диалог батареи на первом подключении; кнопка «Disconnect» уведомления без
-окна; убитый процесс — чистое «отключено» (плитка и уведомление очищены).
+окна; убитый процесс — чистое «отключено» (плитка и уведомление очищены); скрытое уведомление VPN
+(Notifications → мастер / Status выключены): подключение, переключение на лету, возврат после обновления и
+подключение плиткой, а главное — что туннель и Auto живут с погашенным экраном и после смахивания из
+недавних (раздел «Системные уведомления»).
 
 ### Системные уведомления (Android)
 
@@ -234,7 +241,7 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
 в одном случае показывается ровно одно. Возврат на передний план убирает уведомления событий.
 
 - **Канал `jormungand/notify`** (`NotifyChannel.kt.tmpl`, отдельный от `jormungand/vpn`): `permission`,
-  `request {once}`, `openSettings`, `post {id, title, text}`, `cancelEvents`, `setStatus {node}`,
+  `request {once}`, `openSettings`, `post {id, title, text}`, `cancelEvents`, `setStatus {node?, visible?}`,
   `takeLaunchEvent`; Kotlin → Dart: `openEvent` (тап), `disconnect` (кнопка уведомления VPN). Dart-шов —
   `NotifyIo` (`NotifyIo.current`, в тестах подменяется); где `available` = false (не Android) всё пусто и
   остаются тосты.
@@ -251,9 +258,27 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   Заблокировано (отказ или выключено в системе) — на странице Notifications строка-предупреждение с
   кнопкой «Open settings» (`ACTION_APP_NOTIFICATION_SETTINGS`); состояние перечитывается при возврате.
 - **Уведомление VPN.** Заголовок Jormungand, текст «VPN is on · <запись · сервер>», кнопка «Disconnect»,
-  тап открывает приложение. Имя шлёт Dart (`setStatus`) на каждое изменение, пока подключено, и только
+  тап открывает приложение. Имя шлёт Dart (`setStatus {node}`) на каждое изменение, пока подключено, и только
   при включённых мастере и Status; иначе общий текст. «Disconnect» просит Dart (`CoreHost.disconnect`,
   как кнопка дока); нет ответа (ядро Dart не слушает) — служба сама закрывает туннель. Скорость в тексте — пока нет.
+- **Скрыть уведомление VPN.** Мастер или Status выключены (`NotifCfg.vpnStatusShown` = false) — уведомления
+  нет вообще. `SystemNotifier` шлёт `setStatus {visible}` (`NotifyIo.setVpnVisible`) на каждое изменение
+  (подключено или нет) и при старте, `resumeInBackground` — после возврата VPN. Натив хранит выбор сам
+  (SharedPreferences `jorm_notify/vpnShown`, по умолчанию «показано»): служба слушается его без Dart —
+  старт после обновления (`ResumeAfterUpdate`), плитка, перезапуск. Служба обязана войти в foreground за 5 с
+  после `startForegroundService`, поэтому `enterForeground()` всегда делает `startForeground`, а при
+  «скрыто» сразу `stopForeground(STOP_FOREGROUND_REMOVE)` (на Android 12+ показ уведомления службы
+  отложен ~10 с, так что обычно оно не мелькает вовсе). Переключение на лету: скрыто → `stopForeground(REMOVE)`,
+  показано → `startForeground` с текущим уведомлением (`refreshNotification`; отказ системы — остаётся
+  скрытым, в логе). **Почему VPN не умирает:** пока туннель установлен, система сама держит привязку к `VpnService`
+  (`BIND_VPN_SERVICE`, процесс получает приоритет как у foreground-службы); WireGuard для Android живёт вообще
+  без постоянного уведомления. Движок Dart (`AppEngine`) от foreground-статуса службы напрямую не зависит —
+  он держится процессом, а процесс — этой привязкой. Другого, что требует «foreground» (плитка, `ResumeStore.hold`,
+  Disconnect), нет: плитка читает `isUp`, `hold` — про окно приёмника, «Disconnect» из уведомления
+  при скрытом остаётся кнопками дока / плитки. По умолчанию уведомление **показано**: на агрессивных
+  прошивках (MIUI, ColorOS…) видимое уведомление может быть надёжнее для долгой жизни процесса. Под
+  Status в Settings → Notifications на Android подсказка: скрытое уведомление — VPN всё равно работает
+  (значок ключа в строке состояния — от Android).
 
 ### Плитка быстрых настроек (Android)
 
@@ -267,9 +292,14 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
 
 - **Каналы.** Отдельные от `jormungand/vpn`: MethodChannel `jormungand/tile` (`state` {phase, name,
   canConnect}, `launchAction`, `moveToBack`) и EventChannel `jormungand/tile_events`
-  (`{type: 'tile', action: 'connect' | 'disconnect', launch}`). Событие плитки НЕ копится, пока Dart не
+  (`{type: 'tile', action: 'connect' | 'disconnect' | 'home', launch}`). Событие плитки НЕ копится, пока Dart не
   слушает (у `vpn_events` очередь есть): старое нажатие не должно сработать позже. Подписка Dart на этот
   канал = признак «ядро Dart живо»; движок живёт с процессом (раздел «Работа в фоне»), поэтому метка остаётся и после закрытия окна; снимается, когда Dart перестаёт слушать.
+- **Долгое нажатие на плитку** (на One UI — нажатие на её подпись) система шлёт `QS_TILE_PREFERENCES` в
+  `MainActivity` (intent-filter в манифесте; по умолчанию открылись бы «О приложении»). `TileBridge.onLaunchIntent`
+  превращает его в то же событие канала с `action: 'home'` (живой Dart — сразу, иначе через `launchAction`),
+  `TileSync.onHome` → `HomeShell`: закрывает шиты и диалоги (`popUntil` первого маршрута) и открывает вкладку
+  Home с доком.
 - **Состояние плитки.** «Включено» — факт нативной стороны (`JormungandVpnService.isUp`): верно и без Dart
   (активность закрыта, туннель держится) и после рестарта процесса (ничего не поднято = выключено). Dart
   добавляет то, чего натив не знает: «Подключение…» / «Отключение…» (`unavailable`, пока живой Dart

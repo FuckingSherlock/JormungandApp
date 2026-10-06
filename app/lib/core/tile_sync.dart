@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show VoidCallback;
 
 import '../platform/tile_channel.dart';
 import 'core_host.dart';
@@ -19,10 +20,13 @@ String tileName(DockSummary s) {
 /// tap asks: the same `connect` / `disconnect` as the dock's power button. A connect the tile
 /// started the app for (`launch`) sends the app behind again once it is through.
 class TileSync {
-  TileSync(this.host, this.port);
+  TileSync(this.host, this.port, {this.onHome});
 
   final CoreHost host;
   final TilePort port;
+
+  /// Long-press on the tile (action `home`): the app shows Home with no sheet open.
+  final VoidCallback? onHome;
 
   StreamSubscription<TileAction>? _sub;
   TileState? _last;
@@ -66,6 +70,7 @@ class TileSync {
   }
 
   Future<void> _onAction(TileAction a) async {
+    if (a.action == 'home') return _run(a); // no core needed
     await host.init();
     if (_disposed) return;
     await _run(a);
@@ -73,6 +78,8 @@ class TileSync {
 
   Future<void> _run(TileAction a) async {
     switch (a.action) {
+      case 'home':
+        onHome?.call();
       case 'connect':
         // a tap is "turn on", never "reconnect": an app that is on or busy leaves it be
         if (host.isOn || host.busy) return;

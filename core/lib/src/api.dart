@@ -137,7 +137,9 @@ abstract interface class CoreApi {
   /// Stops a download in progress (the partial file stays for a resume).
   void updateCancel();
 
-  /// `{autoCheck: bool, channel: stable|beta}`: what the scheduled check does (Settings → Data).
+  /// `{autoCheck: bool, channel: stable|beta, autoDownload: off|wifi|always, metered: bool}`: what the
+  /// scheduled check does and whether it downloads what it finds (Settings → Data); `metered` is the
+  /// platform's report of the underlying network (`wifi` downloads only while it is false).
   void updateSettings(Map<String, dynamic> body);
 
   /// The platform calls it right before it hands the downloaded file to the installer / after the

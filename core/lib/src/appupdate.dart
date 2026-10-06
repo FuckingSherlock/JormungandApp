@@ -575,6 +575,9 @@ class UpdateStatus {
       };
 }
 
+/// Settings → Data «Auto-download» (`genCfg.updAutoDownload`): `wifi` = unmetered networks only.
+enum UpdateAutoDownload { off, wifi, always }
+
 /// What [AppUpdater.reconcile] found after a restart.
 enum InstallOutcome { none, installed, failed }
 
@@ -637,6 +640,9 @@ class AppUpdater {
   UpdateException? _lastError;
   Timer? _timer;
   int? _checkedAt;
+  bool Function()? _autoCheck;
+  UpdateAutoDownload _autoDownload = UpdateAutoDownload.off;
+  bool _metered = false;
 
   UpdateStatus get status => _status;
   Stream<UpdateStatus> get changes => _changes.stream;
@@ -803,8 +809,12 @@ class AppUpdater {
   }) {
     stopSchedule();
     final mk = timer ?? Timer.new;
+    _autoCheck = autoCheck;
     Future<void> tick() async {
-      if (autoCheck() && _downloading == null && _status.phase != UpdatePhase.ready) await check(channel: channel());
+      if (autoCheck() && _downloading == null && _status.phase != UpdatePhase.ready) {
+        await check(channel: channel());
+        await _maybeAutoDownload();
+      }
       _timer = mk(every, () => unawaited(tick()));
     }
 
@@ -814,6 +824,34 @@ class AppUpdater {
   void stopSchedule() {
     _timer?.cancel();
     _timer = null;
+  }
+
+  /// Settings → Data «Auto-download» and what the platform reports about the network. A
+  /// change while an offer waits (`available`) starts the download if the rules now allow it.
+  void setAutoDownload({UpdateAutoDownload? auto, bool? metered}) {
+    final changed = (auto != null && auto != _autoDownload) || (metered != null && metered != _metered);
+    if (auto != null) _autoDownload = auto;
+    if (metered != null) _metered = metered;
+    if (changed) unawaited(_maybeAutoDownload());
+  }
+
+  /// Auto-download (never an install): [UpdateAutoDownload.always], or `wifi` on an unmetered
+  /// network, while the scheduled check is on. A failure stays silent like a scheduled
+  /// check's: the offer stays, the error goes to [UpdateStatus.lastError], the user can retry.
+  Future<void> _maybeAutoDownload() async {
+    if (_status.phase != UpdatePhase.available || _status.offer == null || _downloading != null || _checking != null) return;
+    if (_autoCheck?.call() != true) return;
+    final ok = _autoDownload == UpdateAutoDownload.always || (_autoDownload == UpdateAutoDownload.wifi && !_metered);
+    if (!ok) return;
+    try {
+      final s = await download();
+      if (s.phase == UpdatePhase.failed) {
+        _lastError = s.error;
+        _set(UpdateStatus(UpdatePhase.available, current: current, offer: s.offer, checkedAt: _checkedAt, lastError: _lastError));
+      }
+    } catch (_) {
+      // nothing to download any more
+    }
   }
 
   Future<void> dispose() async {
@@ -1006,7 +1044,10 @@ class AppUpdater {
     _checkedAt ??= (_readState()['lastCheckAt'] as num?)?.toInt();
     if (_status.phase == UpdatePhase.idle && _checkedAt != null) _set(UpdateStatus(UpdatePhase.idle, current: current, checkedAt: _checkedAt));
     try {
-      if (!_readyFile.existsSync()) return _status;
+      if (!_readyFile.existsSync()) {
+        _sweep();
+        return _status;
+      }
       final j = jsonDecode(_readyFile.readAsStringSync()) as Map<String, dynamic>;
       final m = UpdateManifest.parse(utf8.encode(jsonEncode(j['manifest'])));
       final a = UpdateAsset.fromJson(j['asset']['platform'] ?? (j['offer'] as Map)['platform'], j['asset']);
@@ -1020,6 +1061,7 @@ class AppUpdater {
             feed: j['feed'] as String? ?? '',
             route: j['route'] == 'tunnel' ? UpdateRoute.tunnel : UpdateRoute.direct);
         _set(UpdateStatus(UpdatePhase.ready, current: current, offer: offer, file: f.path, checkedAt: _checkedAt));
+        _sweep(keep: {p.basename(f.path), p.basename(_readyFile.path)});
         return _status;
       }
       _drop(f);
@@ -1027,7 +1069,29 @@ class AppUpdater {
     } catch (_) {
       _drop(_readyFile);
     }
+    _sweep();
     return _status;
+  }
+
+  /// How long an unfinished `.part` waits for a resume before [restore] deletes it.
+  static const partKeep = Duration(days: 3);
+
+  /// At start: files nothing refers to any more go — installers other than the ready one
+  /// (an update installed another way, a newer one superseded it) and `.part`s older than
+  /// [partKeep]. A recent `.part` stays for a resume. Never touches `.json` files.
+  void _sweep({Set<String> keep = const {}}) {
+    try {
+      if (!dir.existsSync()) return;
+      final now = DateTime.fromMillisecondsSinceEpoch(_now());
+      for (final e in dir.listSync()) {
+        if (e is! File) continue;
+        final n = p.basename(e.path);
+        // bookkeeping (`state.json`, `ready.json`, the updater's `started.json`) is not ours to sweep
+        if (n.endsWith('.json') || keep.contains(n)) continue;
+        if (n.endsWith('.part') && now.difference(e.lastModifiedSync()) < partKeep) continue;
+        _drop(e);
+      }
+    } catch (_) {}
   }
 
   /// The platform side calls it right before it hands the file to the installer.

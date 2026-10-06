@@ -3017,5 +3017,20 @@
   "closeTheApp": "Close the app?",
   "theVpnIsOnClosingThe": "The VPN is on. Closing the window keeps it running.",
   "closeWindow": "Close window",
-  "disconnectAndClose": "Disconnect and close"
+  "disconnectAndClose": "Disconnect and close",
+  "useThisMode": "Use this mode",
+  "theRouteUsesNow": "The route uses {s0} now",
+  "@theRouteUsesNow": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "addSubscriptionOrServer": "Add subscription or server",
+  "switchedOffTheNotificationIsHidden": "Switched off, the notification is hidden. The VPN keeps running; the key icon in the status bar is Android's. Disconnect from the dock or the Quick Settings tile.",
+  "installingTheAppWillCloseAnd": "Installing… the app will close and restart",
+  "autoDownload": "Auto-download",
+  "wiFiOnly": "Wi-Fi only",
+  "downloadsWhatAutoCheckFindsInstalling": "Downloads what Auto-check finds; installing stays yours"
 }

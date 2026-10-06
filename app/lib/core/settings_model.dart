@@ -59,6 +59,15 @@ class GenCfg {
   String get updChannel => _m['updChannel'] == 'beta' ? 'beta' : 'stable';
   set updChannel(String v) => _m['updChannel'] = v;
 
+  /// Download an update the scheduled check found: `off` | `wifi` (unmetered networks only, the
+  /// default) | `always`. Never installs by itself.
+  String get updAutoDownload {
+    final v = _m['updAutoDownload'];
+    return v == 'off' || v == 'always' ? v as String : 'wifi';
+  }
+
+  set updAutoDownload(String v) => _m['updAutoDownload'] = v;
+
   /// Theme id (`AppThemeId.name`); null = never chosen.
   String? get theme => _m['theme'] is String ? _m['theme'] as String : null;
   set theme(String? v) => _m['theme'] = v;
@@ -111,6 +120,9 @@ class NotifCfg {
   void setFlag(String key, bool v) => _m[key] = v;
 
   bool get enabled => flag('enabled');
+
+  /// Android: the persistent "VPN is on" notification is on the shade (master and Status both on).
+  bool get vpnStatusShown => enabled && flag('status');
 
   /// PC: `own` pop-ups in the corner or `system` notifications.
   String get desktopStyle => _m['desktopStyle'] == 'system' ? 'system' : 'own';

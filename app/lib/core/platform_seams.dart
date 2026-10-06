@@ -6,6 +6,7 @@ import 'package:jormungand_core/jormungand_core.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../platform/files_channel.dart';
+import '../platform/network_channel.dart';
 import '../platform/resume_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'core_host.dart';
@@ -126,6 +127,7 @@ Future<CoreHost> openCoreHost() async {
       appVersion: version,
       installer: installApk,
       resume: const ResumeChannel(),
+      network: const NetworkChannel(),
     );
   }
   final singBox = desktopSingBoxPath();

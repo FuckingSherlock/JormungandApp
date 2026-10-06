@@ -16,8 +16,9 @@ import 'settings_model.dart';
 ///    ([systemNotifies] tells which);
 ///  - the first connect asks for the notification permission once (the system dialog is never
 ///    shown again on its own), and Settings asks when the user switches a kind on ([askForSwitch]);
-///  - the VPN notification gets the name of the current connection (only while the Status switch
-///    and the master switch are on).
+///  - the VPN notification gets the name of the current connection and stays on the shade only while
+///    the Status switch and the master switch are on ([NotifCfg.vpnStatusShown]); off, it is hidden
+///    (the VPN keeps running).
 /// Where there are no system notifications ([NotifyIo.available] is false) all of it does nothing.
 class SystemNotifier {
   SystemNotifier(this.host, {NotifyIo? io, PowerIo? power})
@@ -32,6 +33,7 @@ class SystemNotifier {
   bool _wasOn = false;
   String? _sentNode;
   bool _nodeSent = false;
+  bool? _sentShown;
 
   /// The app is not in front (anything but `resumed`; unknown yet counts as in front).
   static bool get inBackground {
@@ -82,6 +84,13 @@ class SystemNotifier {
   }
 
   void _onHost() {
+    // The notification's presence, connected or not: the native side keeps it for the next start of
+    // the service (a reconnect, the tile, an update) when no Dart is there to say it.
+    final shown = host.notif.vpnStatusShown;
+    if (shown != _sentShown) {
+      _sentShown = shown;
+      io.setVpnVisible(shown);
+    }
     final on = host.phase == ConnectionPhase.connected;
     if (on && !_wasOn) unawaited(_askOnce()); // the first connect only (the native side counts)
     _wasOn = on;
@@ -105,8 +114,7 @@ class SystemNotifier {
 
   /// `Entry · server` of the dock; null when the name should not be shown or there is none.
   String? _nodeLabel() {
-    final n = host.notif;
-    if (!n.enabled || !n.flag('status')) return null;
+    if (!host.notif.vpnStatusShown) return null;
     final d = host.dock;
     if (!d.hasEntry) return null;
     final server = d.node?.name ?? '';

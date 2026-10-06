@@ -56,6 +56,11 @@ abstract class NotifyIo {
   /// The entry / server shown in the VPN notification; null = the plain text.
   Future<void> setVpnNode(String? node);
 
+  /// Whether the VPN notification is on the shade at all (Settings -> Notifications: master and
+  /// Status). The native side keeps it, so the service obeys it with no Dart running; hidden, the
+  /// VPN still runs (the system's key icon stays).
+  Future<void> setVpnVisible(bool visible);
+
   /// Taps on event notifications (the event ids) while the app runs.
   Stream<int> get eventTaps;
 
@@ -157,6 +162,10 @@ class PlatformNotifyIo implements NotifyIo {
   @override
   Future<void> setVpnNode(String? node) =>
       _call('setStatus', <String, Object?>{'node': node});
+
+  @override
+  Future<void> setVpnVisible(bool visible) =>
+      _call('setStatus', <String, Object?>{'visible': visible});
 
   @override
   Future<int?> takeLaunchEvent() async {

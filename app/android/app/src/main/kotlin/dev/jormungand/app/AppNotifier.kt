@@ -37,10 +37,27 @@ object AppNotifier {
     @Volatile
     var vpnNode: String? = null
 
+    private const val PREFS = "jorm_notify" // the same file as NotifyChannel's "asked"
+    private const val VPN_SHOWN = "vpnShown"
+
     private val burst = AtomicInteger(0)
 
     @Volatile
     private var lastAlert = 0L
+
+    /**
+     * Whether the VPN notification is to stay on the shade (Settings -> Notifications: the master and
+     * Status switches). Dart pushes it on every change ([NotifyChannel] `setStatus`) and the choice is
+     * kept here, so the service obeys it with no Dart running (a start after an update, the tile).
+     * Default: shown. The service still enters the foreground with it (the 5 s rule) and then drops
+     * it from the shade, see [JormungandVpnService].
+     */
+    fun vpnShown(ctx: Context): Boolean =
+        ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(VPN_SHOWN, true)
+
+    fun setVpnShown(ctx: Context, shown: Boolean) {
+        ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(VPN_SHOWN, shown).apply()
+    }
 
     private fun manager(ctx: Context) = ctx.getSystemService(NotificationManager::class.java)
 
@@ -66,7 +83,7 @@ object AppNotifier {
         return PendingIntent.getActivity(ctx, code, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    /** The foreground notification of the tunnel. */
+    /** The foreground notification of the tunnel (what the service enters the foreground with, shown or not). */
     fun vpnNotification(ctx: Context): Notification {
         ensureChannels(ctx)
         val node = vpnNode

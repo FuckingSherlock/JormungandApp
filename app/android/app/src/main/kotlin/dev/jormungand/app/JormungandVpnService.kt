@@ -65,6 +65,15 @@ class JormungandVpnService : VpnService() {
     var isUp = false
         private set
 
+    /** Guards [started] / [onShade] with the calls into startForeground / stopForeground. */
+    private val shadeLock = Any()
+
+    /** Between entering the foreground in onStartCommand and [leave]. */
+    private var started = false
+
+    /** The service is a foreground one, i.e. its notification is on the shade. */
+    private var onShade = false
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -158,7 +167,11 @@ class JormungandVpnService : VpnService() {
         // The name is kept for a restart (NAME_KEPT_MS): Dart sends it once per connection and stays
         // "connected" across a restart of the tunnel (new plan, adoption), so it would not send it again.
         leftAt = System.currentTimeMillis()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        synchronized(shadeLock) {
+            started = false
+            onShade = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
         stopSelf()
     }
 
@@ -179,19 +192,57 @@ class JormungandVpnService : VpnService() {
         })
     }
 
-    /** The notification again with what [AppNotifier] knows now (the entry / server Dart pushed). */
+    /**
+     * The notification again with what [AppNotifier] knows now: the entry / server Dart pushed and
+     * whether it is to be on the shade at all (Settings -> Notifications). Hidden: the service drops
+     * out of the foreground (the VPN keeps running, see [enterForeground]); shown again: it re-enters.
+     */
     fun refreshNotification() {
-        if (!isUp) return
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, AppNotifier.vpnNotification(this))
+        synchronized(shadeLock) {
+            if (!started) return
+            val want = AppNotifier.vpnShown(this)
+            when {
+                want && onShade ->
+                    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, AppNotifier.vpnNotification(this))
+                want -> try {
+                    startForegroundLocked()
+                } catch (e: Throwable) {
+                    // e.g. Android 12+ refusing a foreground start from the background: stays hidden
+                    Log.w(TAG, "notification not shown", e)
+                }
+                else -> hideLocked()
+            }
+        }
     }
 
+    /**
+     * Foreground within 5 s of startForegroundService, whatever the user chose; with the notification
+     * switched off it is dropped from the shade right after. The VPN keeps running: while the tunnel is
+     * established the system itself binds this service (BIND_VPN_SERVICE) and the process keeps the
+     * priority of a foreground one (as in WireGuard, which shows no notification at all).
+     */
     private fun enterForeground() {
+        synchronized(shadeLock) {
+            started = true
+            startForegroundLocked()
+            if (!AppNotifier.vpnShown(this)) hideLocked()
+        }
+    }
+
+    private fun startForegroundLocked() {
         val notification = AppNotifier.vpnNotification(this)
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        onShade = true
+    }
+
+    private fun hideLocked() {
+        if (!onShade) return
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        onShade = false
     }
 
     /** libbox's openTun: the `tun` inbound's options -> a VpnService.Builder -> the descriptor. */

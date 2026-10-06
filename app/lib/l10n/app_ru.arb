@@ -1360,5 +1360,13 @@
   "closeTheApp": "Закрыть приложение?",
   "theVpnIsOnClosingThe": "VPN включён. Если закрыть окно, он продолжит работать.",
   "closeWindow": "Закрыть окно",
-  "disconnectAndClose": "Отключить и закрыть"
+  "disconnectAndClose": "Отключить и закрыть",
+  "useThisMode": "Использовать этот режим",
+  "theRouteUsesNow": "Сейчас маршрут идёт через «{s0}»",
+  "addSubscriptionOrServer": "Добавить подписку или сервер",
+  "switchedOffTheNotificationIsHidden": "Если выключить, уведомление скрывается. VPN продолжает работать; значок ключа в строке состояния — от Android. Отключайтесь кнопкой дока или плиткой быстрых настроек.",
+  "installingTheAppWillCloseAnd": "Устанавливаем… приложение закроется и перезапустится",
+  "autoDownload": "Автоскачивание",
+  "wiFiOnly": "Только Wi‑Fi",
+  "downloadsWhatAutoCheckFindsInstalling": "Скачивает найденное автопроверкой; ставить обновление вы будете сами"
 }

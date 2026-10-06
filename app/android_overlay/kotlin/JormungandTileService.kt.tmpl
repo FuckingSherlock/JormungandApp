@@ -109,8 +109,10 @@ object TileBridge {
 
     /** MainActivity got an intent: the tile's request goes live to Dart, or waits for its first pull. */
     fun onLaunchIntent(intent: Intent?, live: Boolean) {
-        val action = intent?.getStringExtra(EXTRA_ACTION) ?: return
-        intent.removeExtra(EXTRA_ACTION) // a recreated activity must not repeat it
+        // long-press on the tile (One UI: a tap on its label) = "open Home", no tile action
+        val prefs = intent?.action == TileService.ACTION_QS_TILE_PREFERENCES
+        val action = if (prefs) "home" else intent?.getStringExtra(EXTRA_ACTION) ?: return
+        if (prefs) intent?.action = null else intent?.removeExtra(EXTRA_ACTION) // a recreated activity must not repeat it
         if (live && sendLive(action, launch = true)) return
         synchronized(this) {
             pendingLaunch = action

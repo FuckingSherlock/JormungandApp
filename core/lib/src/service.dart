@@ -1289,6 +1289,7 @@ class CoreService implements CoreApi {
         );
   bool _updAuto = true;
   UpdateChannel _updChannel = UpdateChannel.stable;
+  UpdateAutoDownload _updAutoDownload = UpdateAutoDownload.wifi;
 
   Future<void> _startAppUpdater() async {
     final u = appUpdater;
@@ -1300,6 +1301,7 @@ class CoreService implements CoreApi {
       // the update state is a convenience: a broken updates folder must not stop the core
     }
     u.changes.listen((_) => _changed());
+    u.setAutoDownload(auto: _updAutoDownload);
     u.startSchedule(autoCheck: () => _updAuto, channel: () => _updChannel, firstDelay: updateFirstDelay);
   }
 
@@ -1337,7 +1339,15 @@ class CoreService implements CoreApi {
   void updateSettings(Map<String, dynamic> body) {
     if (body.containsKey('autoCheck')) _updAuto = body['autoCheck'] != false;
     if (body.containsKey('channel')) _updChannel = _channelOf(body['channel']);
+    if (body.containsKey('autoDownload')) _updAutoDownload = _autoDownloadOf(body['autoDownload']);
+    appUpdater?.setAutoDownload(auto: _updAutoDownload, metered: body['metered'] is bool ? body['metered'] as bool : null);
   }
+
+  UpdateAutoDownload _autoDownloadOf(Object? v) => switch (v) {
+        'off' => UpdateAutoDownload.off,
+        'always' => UpdateAutoDownload.always,
+        _ => UpdateAutoDownload.wifi,
+      };
 
   @override
   Future<void> updateBeginInstall() async {

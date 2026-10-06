@@ -439,7 +439,11 @@ class Catalog {
   List<String> brokenOrder() => connectOrder.where((id) => entryVisible(id) && isBroken(id)).toList();
 
   /// First run or everything deleted: nothing in this mode to connect (`catalogEmpty`).
-  bool catalogEmpty() => !connectOrder.any(entryVisible);
+  bool catalogEmpty() => modeEmpty(connectMode);
+
+  /// Nothing to connect through in [mode] (either one, active or not): the mode cannot be
+  /// switched to, Route offers to create something there instead.
+  bool modeEmpty(String mode) => !modeOrder(mode).any(entryVisible);
 
   String unitName(String? id) {
     final u = id == null ? null : profilesData[id] ?? sourcesData[id];

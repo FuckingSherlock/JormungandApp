@@ -298,9 +298,20 @@ class NotifSheet extends StatelessWidget {
     final l10n = context.l10n;
     final host = CoreHostScope.of(context);
     final n = host.notif;
+    // Android: a hidden VPN notification is not a stopped VPN
+    final hideNote = NotifyIo.current.available;
     Widget row(String key, String label, String hint) => SetRow(
       label: label,
-      hint: hint,
+      hint: hideNote && key == 'status' ? null : hint,
+      hintWidget: hideNote && key == 'status'
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                HintText(hint),
+                HintText(l10n.switchedOffTheNotificationIsHidden),
+              ],
+            )
+          : null,
       trailing: MiniToggle(
         on: n.flag(key),
         onChanged: (v) {

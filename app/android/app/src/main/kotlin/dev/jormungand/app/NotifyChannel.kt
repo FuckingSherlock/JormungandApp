@@ -21,7 +21,9 @@ import io.flutter.plugin.common.MethodChannel
  *  openSettings  -> null    the app's system notification settings
  *  post          -> null    args {id: Int, title, text}: a journal event as a notification (grouped)
  *  cancelEvents  -> null    removes the event notifications (the app came to the front)
- *  setStatus     -> null    args {node: String?}: the entry / server shown in the VPN notification
+ *  setStatus     -> null    args {node: String?, visible: Boolean}, either key optional: the entry / server
+ *                           shown in the VPN notification; whether it is on the shade at all (kept natively,
+ *                           the service obeys it with no Dart; hidden = the service leaves the foreground)
  *  takeLaunchEvent -> Int?  the event id of the notification that started / raised the app and has not
  *                           been handed over yet; the first call also tells Kotlin that Dart listens
  *
@@ -87,7 +89,9 @@ class NotifyChannel(private val app: Context) {
                 result.success(null)
             }
             "setStatus" -> {
-                AppNotifier.vpnNode = call.argument<String>("node")?.takeIf { it.isNotEmpty() }
+                // each key only when it is sent: Dart sends the visibility alone while disconnected
+                if (call.hasArgument("node")) AppNotifier.vpnNode = call.argument<String>("node")?.takeIf { it.isNotEmpty() }
+                call.argument<Boolean>("visible")?.let { AppNotifier.setVpnShown(app, it) }
                 JormungandVpnService.instance?.refreshNotification()
                 result.success(null)
             }
