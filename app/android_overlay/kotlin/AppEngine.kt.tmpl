@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.NotificationManager
 import android.content.Context
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.embedding.engine.plugins.util.GeneratedPluginRegister
 
 /**
@@ -39,6 +40,8 @@ object AppEngine {
         private set
     lateinit var power: PowerChannel
         private set
+    lateinit var resume: ResumeChannel
+        private set
 
     @Synchronized
     fun get(context: Context): FlutterEngine {
@@ -54,6 +57,7 @@ object AppEngine {
         tile = TileChannel(app).also { it.register(messenger) }
         notify = NotifyChannel(app).also { it.register(messenger) }
         power = PowerChannel(app).also { it.register(messenger) }
+        resume = ResumeChannel(app).also { it.register(messenger) }
         engine = e
         // A process that starts with no tunnel: nothing of an earlier run may stay on show
         // (the service's notification goes with its process, but a stale tile model is cheap to fix).
@@ -62,7 +66,21 @@ object AppEngine {
                 app.getSystemService(NotificationManager::class.java).cancel(JormungandVpnService.NOTIFICATION_ID)
             }
             TileBridge.refresh(app)
+            ResumeStore.processStarted(app) // "was on" of a process that died on its own is over
         }
         return e
+    }
+
+    /**
+     * Runs the app's Dart `main` on the engine when no window has done it (the process was started
+     * by the package replacement, [ResumeReceiver], and no activity may be opened from there). Dart's
+     * `main` copes with having no view yet; the first [MainActivity] later finds Dart running and
+     * only attaches its view (FlutterActivity skips the entrypoint of an engine that executes Dart).
+     */
+    @Synchronized
+    fun startDart(context: Context) {
+        val e = get(context)
+        if (e.dartExecutor.isExecutingDart) return
+        e.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
     }
 }

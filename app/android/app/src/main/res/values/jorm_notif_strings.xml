@@ -8,6 +8,8 @@
     <string name="jorm_vpn_on">VPN is on</string>
     <string name="jorm_vpn_on_via">VPN is on · %1$s</string>
     <string name="jorm_disconnect">Disconnect</string>
+    <string name="jorm_channel_update">App updates</string>
+    <string name="jorm_resume_tap">Updated — tap to connect</string>
     <plurals name="jorm_events_summary">
         <item quantity="one">%d event</item>
         <item quantity="other">%d events</item>

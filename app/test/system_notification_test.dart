@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jormungand_core/jormungand_core.dart' show Catalog;
 import 'package:jormungand/app.dart';
 import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/settings_model.dart';
@@ -10,6 +11,7 @@ import 'package:jormungand/platform/notify_channel.dart';
 import 'package:jormungand/platform/power_channel.dart';
 import 'package:jormungand/shell/home_shell.dart';
 import 'package:jormungand/widgets/form_parts.dart';
+import 'package:jormungand/widgets/settings_look.dart' show NotifSheet;
 
 import 'fake_core_host.dart';
 
@@ -334,6 +336,103 @@ void main() {
       await tester.tap(toggleOf('Subscription updated')); // off -> on
       await tester.pumpAndSettle();
       expect(io.requests, isEmpty); // already granted
+    });
+
+    // every switch of the sheet, tapped on screen, end to end: what it saved, what the journal lets
+    // through (toast in front / shade behind) and what a reloaded state still says
+    testWidgets('each switch of the sheet decides its events; the master mutes all', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      await openNotifSettings(tester);
+      final toggles = find.descendant(
+        of: find.byType(NotifSheet),
+        matching: find.byType(MiniToggle),
+      );
+      const order = ['enabled', ...NotifCfg.allKeys];
+      expect(toggles, findsNWidgets(order.length));
+      Future<void> tap(String key) async {
+        await tester.tap(toggles.at(order.indexOf(key)));
+        await tester.pumpAndSettle();
+      }
+
+      const events = {
+        'autoSwitch': ('auto', 'switched'),
+        'unstable': ('auto', 'unstable'),
+        'connLost': ('conn', 'lost'),
+        'coreCrash': ('core', 'crashed'),
+        'blocked': ('site', 'blocked'),
+        'subUpdated': ('sub', 'updated'),
+        'subFailed': ('sub', 'failed'),
+        'ruleSets': ('rules', 'ruleSetFailed'),
+      };
+      // how many notifications the kind's event makes now, in the background
+      Future<int> fire(String key) async {
+        final before = io.posted.length;
+        goBackground(tester);
+        final (cat, type) = events[key]!;
+        host.addEvent(cat, type, level: 'warn');
+        await settle(tester);
+        comeBack(tester);
+        await tester.pump();
+        return io.posted.length - before;
+      }
+
+      for (final key in events.keys) {
+        final was = host.notif.flag(key);
+        expect(await fire(key), was ? 1 : 0, reason: '$key as it starts');
+        await tap(key);
+        expect(host.notif.flag(key), !was, reason: '$key saved');
+        expect(await fire(key), was ? 0 : 1, reason: '$key flipped');
+        // a reloaded state reads the same
+        final back = NotifCfg(
+          Catalog.fromJson(host.catalog.toJson()).unknown['notifCfg'] as Map<String, dynamic>,
+        );
+        expect(back.flag(key), !was, reason: '$key persists');
+        await tap(key); // as it was
+      }
+
+      // the master switch: nothing at all, in the background and in front
+      for (final key in events.keys) {
+        host.notif.setFlag(key, true);
+      }
+      await tap('enabled');
+      expect(host.notif.enabled, isFalse);
+      for (final key in events.keys) {
+        expect(await fire(key), 0, reason: '$key under the master switch');
+      }
+      // in front: no toast either
+      host.addEvent('conn', 'lost', level: 'warn');
+      await settle(tester);
+      expect(find.byType(SnackBar), findsNothing);
+
+      await tap('enabled');
+      expect(await fire('connLost'), 1);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('the Status switch changes the name in the VPN notification at once', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pump();
+      expect(io.vpnNodes.last, 'Remnawave · Frankfurt 1');
+      await openNotifSettings(tester);
+      final toggles = find.descendant(
+        of: find.byType(NotifSheet),
+        matching: find.byType(MiniToggle),
+      );
+      await tester.tap(toggles.at(1)); // Status
+      await tester.pumpAndSettle();
+      expect(host.notif.flag('status'), isFalse);
+      expect(io.vpnNodes.last, isNull);
+      await tester.tap(toggles.at(1));
+      await tester.pumpAndSettle();
+      expect(io.vpnNodes.last, 'Remnawave · Frankfurt 1');
+      await tester.tap(toggles.at(0)); // the master
+      await tester.pumpAndSettle();
+      expect(io.vpnNodes.last, isNull);
     });
 
     testWidgets('blocked: a switch turned on asks for the permission', (

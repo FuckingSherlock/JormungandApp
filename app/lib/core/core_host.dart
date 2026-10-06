@@ -53,6 +53,30 @@ class ConnectResult {
   bool get started => outcome == ConnectOutcome.started;
 }
 
+/// What [CoreHost.resumeAfterUpdate] did (docs/updates.md, "Подключение после обновления").
+enum ResumeOutcome {
+  /// This start follows no update (or the platform does not remember): nothing to do.
+  none,
+
+  /// The VPN was off, or the user switched it off: left as it is.
+  notWanted,
+
+  /// The record is older than the window, or the version did not change: ignored.
+  stale,
+
+  /// The VPN is already on (taken over) or a connect is running: left alone.
+  alreadyOn,
+
+  /// Connected again through the remembered entry.
+  resumed,
+
+  /// The VPN consent is missing: "Updated - tap to connect" was posted instead.
+  needsConsent,
+
+  /// The connect did not work (the usual failure notice was sent).
+  failed,
+}
+
 /// A short message from the host for a toast. [code] lets the UI use its own (localised) text:
 /// `vpnDenied`, `connectFailed`, `warning`, `initFailed`, `notSaved`, `subFailed` ([args] =
 /// source name, error), `updateFailed` (the same, an update of a source that was loaded),
@@ -525,6 +549,11 @@ abstract class CoreHost extends ChangeNotifier {
 
   /// Hands the downloaded file to the installer; false when the platform refused or cannot.
   Future<bool> installUpdate() async => false;
+
+  /// The first thing after the core is up: when this start follows the app's own update that
+  /// replaced a running VPN, connects again through the entry it used (once). The platform keeps
+  /// the record; none = nothing happens.
+  Future<ResumeOutcome> resumeAfterUpdate() async => ResumeOutcome.none;
 
   /// Core / sing-box versions and the data folder (`CoreApi.version`).
   Future<Map<String, dynamic>> version() async => const {};

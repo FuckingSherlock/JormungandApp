@@ -63,6 +63,16 @@
                 android:value="vpn"/>
         </service>
 
+        <!-- After the app's own update (in the app or sideloaded) the VPN comes back if it was on: the system
+             sends this to the replaced package (ResumeAfterUpdate.kt). exported=false: only the system sends it. -->
+        <receiver
+            android:name=".ResumeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+
         <!-- Quick Settings tile (JormungandTileService.kt). Not an ACTIVE_TILE on purpose: the system binds it
              on every shade open, so its state is read fresh. TOGGLEABLE: a switch for accessibility (API 30+). -->
         <service

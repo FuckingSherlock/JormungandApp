@@ -6,6 +6,8 @@
     <string name="jorm_vpn_on">VPN включён</string>
     <string name="jorm_vpn_on_via">VPN включён · %1$s</string>
     <string name="jorm_disconnect">Отключить</string>
+    <string name="jorm_channel_update">Обновления приложения</string>
+    <string name="jorm_resume_tap">Обновлено — нажмите, чтобы подключиться</string>
     <plurals name="jorm_events_summary">
         <item quantity="one">%d событие</item>
         <item quantity="few">%d события</item>

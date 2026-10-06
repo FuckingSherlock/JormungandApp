@@ -44,6 +44,11 @@ class JormungandVpnService : VpnService() {
         private const val TAG = "JormungandVpn"
         internal const val NOTIFICATION_ID = 1
 
+        /** When the service last left (ms): Dart resends the name only when it changes, not on a restart. */
+        @Volatile
+        private var leftAt = 0L
+        private const val NAME_KEPT_MS = 15_000L
+
         @Volatile
         var instance: JormungandVpnService? = null
             private set
@@ -70,6 +75,9 @@ class JormungandVpnService : VpnService() {
             disconnectFromNotification()
             return START_NOT_STICKY
         }
+        // a start soon after a stop is a restart of the same connection (a new plan, a reconnect):
+        // the name stays; a later one is another connection until Dart says where it goes (see [leave])
+        if (System.currentTimeMillis() - leftAt > NAME_KEPT_MS) AppNotifier.vpnNode = null
         enterForeground() // within 5 s of startForegroundService, whatever happens next
         val request = VpnBridge.takePending()
         if (request == null) {
@@ -92,6 +100,7 @@ class JormungandVpnService : VpnService() {
         // The user (or another VPN app) took the VPN away.
         worker.execute {
             synchronized(lock) { closeBoxLocked() }
+            ResumeStore.tunnelDown(applicationContext) // taken away: not "on" for a later update
             VpnBridge.emit(mapOf("type" to "stopped", "reason" to "revoked"))
             leave()
         }
@@ -108,6 +117,7 @@ class JormungandVpnService : VpnService() {
     fun stopTunnel(done: () -> Unit) {
         worker.execute {
             synchronized(lock) { closeBoxLocked() }
+            ResumeStore.tunnelDown(applicationContext) // switched off on purpose (dock, tile, notification)
             leave()
             done()
         }
@@ -123,10 +133,12 @@ class JormungandVpnService : VpnService() {
                 isUp = true
             }
             TileBridge.refresh(this)
+            ResumeStore.tunnelUp(applicationContext)
             request.done(null)
         } catch (e: Throwable) {
             Log.e(TAG, "start", e)
             synchronized(lock) { closeBoxLocked() }
+            ResumeStore.tunnelDown(applicationContext)
             request.done(e.message ?: e.toString())
             leave()
         }
@@ -143,7 +155,9 @@ class JormungandVpnService : VpnService() {
     }
 
     private fun leave() {
-        AppNotifier.vpnNode = null // the next start shows the plain text until Dart says where it goes
+        // The name is kept for a restart (NAME_KEPT_MS): Dart sends it once per connection and stays
+        // "connected" across a restart of the tunnel (new plan, adoption), so it would not send it again.
+        leftAt = System.currentTimeMillis()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

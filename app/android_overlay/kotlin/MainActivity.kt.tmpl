@@ -26,6 +26,12 @@ class MainActivity : FlutterActivity() {
         AppEngine.notify.onIntent(intent) // a tap on an event notification, same
     }
 
+    // an engine that started with no window (after the app's update) waits for the first one: say it is here
+    override fun onStart() {
+        super.onStart()
+        AppEngine.resume.windowAttached()
+    }
+
     override fun onDestroy() {
         if (AppEngine.activity === this) AppEngine.activity = null
         super.onDestroy()

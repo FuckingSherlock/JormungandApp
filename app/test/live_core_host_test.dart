@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/live_core_host.dart';
+import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
 /// A runner that is not sing-box: starts when told to, counts the starts, has no API service.
@@ -212,6 +213,38 @@ void main() {
     final saved = (await core.state())['snapshot'] as Map<String, dynamic>;
     expect((saved['segState'] as Map)['route'], 'global');
     expect((saved['segState'] as Map)['mode'], 'tun');
+  });
+
+  test('Settings -> Notifications switches are saved and read back by a new host', () async {
+    await start();
+    host.notif
+      ..setFlag('enabled', false)
+      ..setFlag('autoSwitch', false)
+      ..setFlag('coreCrash', true);
+    host.changed();
+    await settle();
+    final saved = (await core.state())['snapshot'] as Map<String, dynamic>;
+    expect(saved['notifCfg'], {'enabled': false, 'autoSwitch': false, 'coreCrash': true});
+
+    // the same data dir, a new host (the app started again)
+    await host.shutdown();
+    host.dispose();
+    host = LiveCoreHost(
+      api: core,
+      isAndroid: false,
+      saveDelay: const Duration(milliseconds: 20),
+      reconnectDelay: const Duration(milliseconds: 20),
+      trafficEvery: const Duration(milliseconds: 50),
+    );
+    await host.init();
+    expect(host.notif.enabled, isFalse);
+    expect(host.notif.flag('autoSwitch'), isFalse);
+    expect(host.notif.flag('coreCrash'), isTrue);
+    expect(host.notif.flag('connLost'), isTrue); // never touched: the default
+    expect(notifAllows(host.catalog.unknown['notifCfg'], 'coreCrash'), isFalse); // the master is off
+    host.notif.setFlag('enabled', true);
+    expect(notifAllows(host.catalog.unknown['notifCfg'], 'coreCrash'), isTrue);
+    expect(notifAllows(host.catalog.unknown['notifCfg'], 'autoSwitch'), isFalse);
   });
 
   test(

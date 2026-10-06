@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:jormungand_core/jormungand_core.dart';
 
 import '../platform/apps_io.dart';
+import '../platform/resume_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'app_update.dart';
 import 'core_host.dart';
@@ -26,6 +27,8 @@ class LiveCoreHost extends CoreHost {
     this.vpn,
     this.appVersion = '',
     this.installer,
+    this.resume,
+    this.resumeWindow = const Duration(minutes: 10),
     this.ruleSetTimesOf,
     this.saveDelay = const Duration(milliseconds: 400),
     this.reconnectDelay = const Duration(milliseconds: 600),
@@ -49,6 +52,13 @@ class LiveCoreHost extends CoreHost {
   /// Hands a downloaded update file to the platform's installer (Android: PackageInstaller);
   /// null where that side is not written, then [canInstallUpdate] is false.
   final Future<bool> Function(String file)? installer;
+
+  /// Where "the VPN was on" is kept across the app's own update (Android: native store); null =
+  /// not remembered, nothing is resumed.
+  final ResumePort? resume;
+
+  /// How long after the package replacement a resume still counts; a later start leaves the VPN off.
+  final Duration resumeWindow;
 
   /// When the rule-set lists were downloaded (the core's rule-set cache), by name; null = unknown.
   final Future<Map<String, int>> Function()? ruleSetTimesOf;
@@ -1087,10 +1097,44 @@ class LiveCoreHost extends CoreHost {
   Future<bool> installUpdate() async {
     final file = _upd.file, install = installer;
     if (!_ready || file == null || install == null) return false;
+    // the replacement ends this process: what the next start needs is written before it
+    await _flushSave();
+    try {
+      await resume?.save(connected: isOn, entry: catalog.effectiveConnectId() ?? '');
+    } catch (_) {}
     await api.updateBeginInstall();
     final ok = await install(file);
     if (!ok) await api.updateInstallFailed('the installer did not start');
     return ok;
+  }
+
+  @override
+  Future<ResumeOutcome> resumeAfterUpdate() async {
+    final port = resume;
+    if (port == null || !_ready) return ResumeOutcome.none;
+    try {
+      final rec = await port.take(); // consumed: a resume never runs twice
+      if (rec == null) return ResumeOutcome.none;
+      if (!rec.connected) return ResumeOutcome.notWanted;
+      final age = _now().millisecondsSinceEpoch - rec.at;
+      if (age < 0 || age > resumeWindow.inMilliseconds || rec.code == rec.fromCode) {
+        return ResumeOutcome.stale;
+      }
+      if (_connected || _connecting || _disconnecting) return ResumeOutcome.alreadyOn;
+      final r = await connect(); // the catalog's current entry: the one the record names
+      if (r.outcome == ConnectOutcome.vpnPermissionDenied) {
+        // the consent needs a window and there is none: the notification opens the app and connects
+        await port.promptConnect();
+        return ResumeOutcome.needsConsent;
+      }
+      return r.started ? ResumeOutcome.resumed : ResumeOutcome.failed;
+    } catch (_) {
+      return ResumeOutcome.failed;
+    } finally {
+      try {
+        await port.done();
+      } catch (_) {}
+    }
   }
 
   // ── on launch ──

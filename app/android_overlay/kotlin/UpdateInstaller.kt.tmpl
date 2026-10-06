@@ -27,6 +27,9 @@ import java.util.concurrent.Executors
  *     (STATUS_PENDING_USER_ACTION). The answer arrives when the install ends: success usually
  *     means the process is replaced and never answers, a refusal answers `aborted`.
  *
+ * Before the commit the "VPN was on" record is refreshed ([ResumeStore.beforeInstall]); after the
+ * replacement [ResumeReceiver] brings the VPN back.
+ *
  * Not tested on a device yet (needs an APK signed with the release key and a newer build).
  */
 object UpdateInstaller {
@@ -50,6 +53,9 @@ object UpdateInstaller {
         io.execute {
             val why = try {
                 verify(ctx, path)?.also { return@execute finish(it) }
+                // the replacement kills this process and the tunnel: what comes back after it is
+                // decided by this record (docs/updates.md, "Подключение после обновления")
+                ResumeStore.beforeInstall(ctx)
                 commit(ctx, path)
                 null
             } catch (e: Exception) {
