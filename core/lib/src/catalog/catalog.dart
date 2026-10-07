@@ -128,6 +128,18 @@ class Catalog {
   /// [effectiveConnectId] and [unitNode] show it instead of their own guess.
   CoreRoute? coreRoute;
 
+  /// The server every route group of the running plan stands on, by route id (`status.auto.routes`
+  /// reports all of them, not only the current route): [coreNode] shows them for the routes Auto is
+  /// not on, and a new plan starts each group where it was ([coreGroupNode]). Empty = not connected.
+  Map<String, CoreRoute> coreGroups = {};
+
+  /// The plan as the frozen mockup builds it (the golden tests set it): in Manual it holds the
+  /// anchor alone, so Auto ↔ Manual is another plan (a reconnect), and a Priority chain exit starts
+  /// on the first one measured alive. False (the real hosts): the plan holds every Auto route in
+  /// either mode and carries `manual`, the core switches the mode live; a Priority chain exit starts
+  /// on the first one not known dead.
+  bool mockupPlan = false;
+
   /// The anchor the running plan was built on (`live.anchor`): [liveSigAnchor] keeps it
   /// while it is still an Auto entry.
   String? liveAnchor;
@@ -494,7 +506,17 @@ class Catalog {
   /// [which]: `server` or `entryServer`.
   CatalogNode? coreNode(String? id, String which, List<NodeRef> refs) {
     final c = coreRoute;
-    if (c == null || c.id != id) return null;
+    if (c == null) return null;
+    return _coreServer(c.id == id ? c : coreGroups[id], which, refs);
+  }
+
+  /// The server the core has a route's group on, whatever route it is on now and also while
+  /// [withoutCore]: what a plan built for a reconnect starts the group on (`chosen`), so a standby
+  /// route keeps the server Auto had moved it to. Null = not known / not one of [refs].
+  CatalogNode? coreGroupNode(String? id, String which, List<NodeRef> refs) => _coreServer(coreGroups[id], which, refs);
+
+  CatalogNode? _coreServer(CoreRoute? c, String which, List<NodeRef> refs) {
+    if (c == null) return null;
     final key = which == 'server' ? c.server : c.entryServer;
     if (key == null) return null;
     for (final r in refs) {
@@ -512,9 +534,12 @@ class Catalog {
     return best;
   }
 
+  /// The first server in order that is not known dead: one not measured yet is a candidate too
+  /// (unmeasured is not dead, as in [mayWork]); a measured, answering one counts, a known-dead
+  /// one is skipped. Null = every server is known dead.
   CatalogNode? _firstAlive(Iterable<CatalogNode> nodes) {
     for (final n in nodes) {
-      if (pings.isAlive(n)) return n;
+      if (!knownDead(n)) return n;
     }
     return null;
   }

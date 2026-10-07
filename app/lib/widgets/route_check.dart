@@ -114,6 +114,12 @@ class _RouteCheckState extends State<RouteCheck> {
         ];
         final ms = await host.pingPairs(entry, to);
         if (!live()) return;
+        if (ms.length != to.length) {
+          // the call itself failed: no verdict on these pairs, not "all dead" (nothing is written)
+          t.done = i + 1;
+          setState(() {});
+          continue;
+        }
         for (var k = 0; k < to.length; k++) {
           // the pair book keeps what the chain lives by: every exit through this entry
           catalog.pairs.set(entry, to[k], ms[k], catalog.pings.now);

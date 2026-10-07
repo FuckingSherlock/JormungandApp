@@ -54,6 +54,39 @@ class ConnectResult {
   bool get started => outcome == ConnectOutcome.started;
 }
 
+/// The last finished Speed Test of the connection (`status.speed` of the core).
+class SpeedResult {
+  const SpeedResult({
+    required this.downMbps,
+    required this.upMbps,
+    required this.latencyMs,
+    required this.rpm,
+    required this.at,
+  });
+
+  final double downMbps;
+  final double upMbps;
+
+  /// Latency without load, ms; 0 = not measured.
+  final int latencyMs;
+
+  /// Round trips per minute under load (responsiveness), 0 = not measured.
+  final int rpm;
+  final DateTime at;
+
+  /// `status.speed` (bit/s, `at` in ms since the epoch); null when it is none or malformed.
+  static SpeedResult? fromJson(Object? j) {
+    if (j is! Map || j['down'] is! num || j['at'] is! num) return null;
+    return SpeedResult(
+      downMbps: (j['down'] as num) / 1e6,
+      upMbps: ((j['up'] as num?) ?? 0) / 1e6,
+      latencyMs: (j['latency'] as num?)?.toInt() ?? 0,
+      rpm: (j['rpm'] as num?)?.toInt() ?? 0,
+      at: DateTime.fromMillisecondsSinceEpoch((j['at'] as num).toInt()),
+    );
+  }
+}
+
 /// What [CoreHost.resumeAfterUpdate] did (docs/updates.md, "Подключение после обновления").
 enum ResumeOutcome {
   /// This start follows no update (or the platform does not remember): nothing to do.
@@ -462,8 +495,9 @@ abstract class CoreHost extends ChangeNotifier {
 
   /// The route check's pair ping (`backend.pingPair`): every one of [exits] through [entry] (the
   /// exit's outbound detoured via the entry's), in one core call. Latency per exit in order,
-  /// `-1` = no answer (also for a server with no usable outbound). Nothing goes to the pair book
-  /// (the caller writes what it keeps: `catalog.pairs`).
+  /// `-1` = no answer (also for a server with no usable outbound). An EMPTY list = the call itself
+  /// failed (the tester could not run): no verdict on any pair, the caller writes nothing. Nothing
+  /// goes to the pair book (the caller writes what it keeps: `catalog.pairs`).
   Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits);
 
   /// A chain measured the way it connects: its entries directly (always with [entries], else only
@@ -614,8 +648,25 @@ abstract class CoreHost extends ChangeNotifier {
   Map<String, dynamic> exportState() => catalog.toJson();
   Future<void> importState(Map<String, dynamic> snapshot) async {}
 
-  /// Last Speed Test result (Mbps), null = none yet.
-  double? get lastSpeedMbps => null;
+  /// Last Speed Test of the connection (Home → Speed Test card; kept by the core across
+  /// restarts), null = none yet.
+  SpeedResult? get lastSpeed => null;
+
+  /// Its download in Mbps, null = none yet.
+  double? get lastSpeedMbps => lastSpeed?.downMbps;
+
+  /// The Home card's test of the running connection is in progress, and its latest progress map
+  /// (`phase`, `down`, `up`, `elapsed`, …; empty before the first step).
+  bool get speedTesting => false;
+  Map<String, dynamic> get speedProgress => const {};
+
+  /// A failed last test (the text), null when the last one finished or none ran; cleared by the next run.
+  String? get speedError => null;
+
+  /// A tap on the Home Speed Test card: starts sing-box's network quality test through the running
+  /// connection (the main flow, chains included) or, while it runs, stops it (nothing is kept).
+  /// Not connected: does nothing (the page says «Connect first»).
+  Future<void> toggleSpeedTest() async {}
 
   // ── Rules ──
 

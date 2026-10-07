@@ -1439,5 +1439,10 @@
   "Android System": "androidSystem",
   "can be switched on for this chain only": "canBeSwitchedOnForThis",
   "Disabled in subscription · {0}": "disabledInSubscription",
-  "Build": "build"
+  "Build": "build",
+  "Connect first": "connectFirst",
+  "Speed test finished": "speedTestFinished",
+  "Speed test failed": "speedTestFailed",
+  "Speed test: ↓ {0} · ↑ {1} Mbps": "speedTestMbps",
+  "Latency {0} ms": "latencyMs"
 }

@@ -72,8 +72,10 @@ class CoreService implements CoreApi {
     this.updateGet,
     this.updateFirstDelay = const Duration(seconds: 10),
     SiteChecker? siteChecker,
+    Stream<NetworkQualityTestProgress> Function(String outbound)? currentSpeedSource,
   })  : _singBoxVer = knownSingBoxVersion,
         _siteCheckerArg = siteChecker,
+        _currentSpeedSource = currentSpeedSource,
         boxFactory = boxFactory ?? ((dir) => SingBoxProcess(singBox, dir)),
         _isElevated = isElevated ?? processIsElevated,
         _timer = timer ?? Timer.new,
@@ -116,6 +118,12 @@ class CoreService implements CoreApi {
   /// (sitecheck.dart); asks through the tunnel. [siteChecker] is the tests' seam.
   final SiteChecker? _siteCheckerArg;
   late final SiteChecker siteChecker = _siteCheckerArg ?? SiteChecker(proxyPort: () => _innerPort);
+
+  /// The network quality test of the running connection ([speedTest] with `current`): by default
+  /// the main sing-box's API service; the tests' seam.
+  final Stream<NetworkQualityTestProgress> Function(String outbound)? _currentSpeedSource;
+  Map<String, dynamic>? _lastSpeed; // the last finished test of the connection (`last-speed.json`)
+  File get _speedFile => File(p.join(dataDir, 'last-speed.json'));
 
   /// The main sing-box (the connection).
   late final BoxRunner runner;
@@ -285,6 +293,10 @@ class CoreService implements CoreApi {
     eventBook.load(); // trims an old journal at start
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     await store.read(); // a damaged snapshot is recovered (and journaled) now, not at the UI's first request
+    try {
+      final j = jsonDecode(await _speedFile.readAsString());
+      if (j is Map && j['down'] is num && j['at'] is num) _lastSpeed = Map<String, dynamic>.from(j);
+    } catch (_) {} // none yet / unreadable: the Home card says "No test yet"
     final m = _readKillMarker();
     if (m != null && m['keepWhileClosed'] == true && sysProxy.isSet) {
       // left on purpose (kill switch while the app is closed): internet stays blocked
@@ -821,6 +833,7 @@ class CoreService implements CoreApi {
         'network': pool.toJson(),
         'dns': runner.running ? _dns?.toJson() : null,
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
+        'speed': _lastSpeed, // last Speed Test of the connection: {down, up (bit/s), latency (ms), rpm, at (ms)}
       };
 
   Map<String, dynamic>? _autoState() {
@@ -1138,11 +1151,15 @@ class CoreService implements CoreApi {
     };
   }
 
-  /// body: {auto} — Settings → Auto mode changed while connected: the running AutoService
-  /// takes it at its next round, no reconnect (none of it is in the sing-box config).
+  /// body: {auto?, manual?, entry?} — Settings → Auto mode changed while connected: the running
+  /// AutoService takes it at its next round, no reconnect (none of it is in the sing-box config).
+  /// `manual` (bool) is the Auto ↔ Manual switch, live as well: the plan already holds every Auto
+  /// route, the controller only stops moving between them; `entry` (a route id) is the route Manual
+  /// stands on, the selector `proxy` goes there with no restart. The plan kept for a restart after a
+  /// crash follows (`manual`, `current`).
   @override
   Future<Map<String, dynamic>> autoSettings(Map<String, dynamic> body) async {
-    final plan = _plan, auto = body['auto'];
+    final plan = _plan, auto = body['auto'], manual = body['manual'], entry = body['entry'];
     if (plan != null && auto is Map) {
       _plan = {...plan, 'auto': auto};
       final s = _auto?.settings = AutoSettings.fromPlan(_plan!);
@@ -1151,6 +1168,15 @@ class CoreService implements CoreApi {
         _dns?.settings = s;
       }
     }
+    final a = _auto;
+    if (_plan != null && manual is bool) {
+      final was = a?.index;
+      final ok = a == null || await a.setManual(manual, entry: entry is String ? entry : null);
+      _plan = {..._plan!, 'manual': manual, if (a != null) 'current': a.index};
+      if (a != null && a.index != was) _recheckExit(); // another route = another exit
+      if (!ok) runner.note('auto: manual on ${entry ?? '?'}: not a route of this plan, a new plan is needed');
+    }
+    _changed();
     return status();
   }
 
@@ -1316,12 +1342,13 @@ class CoreService implements CoreApi {
       };
 
   /// body: {node: {key, outbound}} or {pair: {key, entry: {outbound}, exit: {outbound}}},
-  /// configUrl?. Progress as the test goes — `{phase (0 latency, 1 download, 2 upload,
+  /// configUrl?; or {current: true}: the running connection itself ([_currentSpeed]). Progress as the test goes — `{phase (0 latency, 1 download, 2 upload,
   /// 3 done), down, up (bit/s), downRpm, upRpm, latency (ms), elapsed (ms), final}` — the
   /// last with `final: true` (and `error` when it failed). Cancelling the subscription stops
   /// the test.
   @override
   Stream<Map<String, dynamic>> speedTest(Map<String, dynamic> body) {
+    if (body['current'] == true) return _currentSpeed();
     final gone = Completer<void>();
     final out = StreamController<Map<String, dynamic>>(onCancel: () {
       if (!gone.isCompleted) gone.complete();
@@ -1340,17 +1367,7 @@ class CoreService implements CoreApi {
           configUrl: '${body['configUrl'] ?? ''}',
           cancel: gone.future,
           boxFactory: _loggedBoxes('speed'),
-          onProgress: (x) => line({
-            'phase': x.phase,
-            'down': x.downloadCapacity.toInt(),
-            'up': x.uploadCapacity.toInt(),
-            'downRpm': x.downloadRPM,
-            'upRpm': x.uploadRPM,
-            'latency': x.idleLatencyMs,
-            'elapsed': x.elapsedMs.toInt(),
-            'final': x.isFinal,
-            if (x.error.isNotEmpty) 'error': x.error,
-          }),
+          onProgress: (x) => line(_speedMap(x)),
         );
       } catch (e) {
         logBook.note('error', 'Speed test failed: $e');
@@ -1358,6 +1375,79 @@ class CoreService implements CoreApi {
       }
       unawaited(out.close());
     }();
+    return out.stream;
+  }
+
+  static Map<String, dynamic> _speedMap(NetworkQualityTestProgress x) => {
+        'phase': x.phase,
+        'down': x.downloadCapacity.toInt(),
+        'up': x.uploadCapacity.toInt(),
+        'downRpm': x.downloadRPM,
+        'upRpm': x.uploadRPM,
+        'latency': x.idleLatencyMs,
+        'elapsed': x.elapsedMs.toInt(),
+        'final': x.isFinal,
+        if (x.error.isNotEmpty) 'error': x.error,
+      };
+
+  /// Speed Test of the running connection (`speedTest({current: true})`): sing-box's network
+  /// quality test through the main flow's own outbound ([topTag], the group the whole route goes
+  /// through, chains included) on the running sing-box — no throwaway one. Same progress maps; not
+  /// connected → one `{error, final}`. A finished test is kept (`status.speed`, `last-speed.json`)
+  /// and written to the journal (`speed/done`, `speed/failed`); one cancelled by the listener
+  /// leaves nothing.
+  Stream<Map<String, dynamic>> _currentSpeed() {
+    StreamSubscription<NetworkQualityTestProgress>? sub;
+    final out = StreamController<Map<String, dynamic>>(onCancel: () async {
+      final s = sub;
+      sub = null;
+      await s?.cancel();
+    });
+    var finished = false;
+    void finish(Map<String, dynamic> m) {
+      if (finished) return;
+      finished = true;
+      final error = '${m['error'] ?? ''}';
+      if (error.isEmpty && m['down'] is num && (m['down'] as num) > 0) {
+        final r = <String, dynamic>{
+          'down': m['down'],
+          'up': m['up'],
+          'latency': m['latency'],
+          'rpm': m['downRpm'],
+          'at': _now().millisecondsSinceEpoch,
+        };
+        _lastSpeed = r;
+        unawaited(_speedFile.writeAsString(jsonEncode(r)).catchError((Object _) => _speedFile));
+        _event('speed', 'done', 'info', r,
+            note: 'Speed test of the connection: down ${((m['down'] as num) / 1e6).toStringAsFixed(1)} Mbps, up ${(((m['up'] as num?) ?? 0) / 1e6).toStringAsFixed(1)} Mbps, latency ${m['latency']} ms');
+        _changed();
+      } else {
+        final why = error.isNotEmpty ? error : 'the test ended without a result';
+        _event('speed', 'failed', 'warn', {'error': why}, note: 'Speed test of the connection failed: $why');
+        m = {...m, 'error': why};
+      }
+      if (!out.isClosed) {
+        out.add(m);
+        unawaited(out.close());
+      }
+    }
+
+    final api = runner.api;
+    final Stream<NetworkQualityTestProgress> Function(String)? source =
+        _currentSpeedSource ?? (api == null ? null : (tag) => api.speedTest(tag));
+    if (!runner.running || source == null) {
+      out.add({'error': 'Not connected', 'final': true});
+      unawaited(out.close());
+      return out.stream;
+    }
+    sub = source(topTag).listen((x) {
+      final m = _speedMap(x);
+      if (x.isFinal) {
+        finish(m);
+      } else if (!out.isClosed) {
+        out.add(m);
+      }
+    }, onError: (Object e) => finish({'error': '$e', 'final': true}), onDone: () => finish({'final': true}));
     return out.stream;
   }
 

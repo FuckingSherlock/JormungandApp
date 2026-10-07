@@ -364,6 +364,9 @@ void main() {
       ch.exitMode = 'priority';
       c.sourcesData['a']!.pickOrder = ['a::a1', 'a::a2', 'a::a3'];
       expect(c.chainExitNode(ch)!.id, 'a2'); // the first alive by the pair in the chain's order
+      // the plan starts on the first not known dead: one miss is not dead yet (a1), a never-measured one is a candidate
+      expect(((c.livePlan()['routes'] as List)[2]['main'] as Map)['chosen'], 'a::a1');
+      pair(c, 'b::b1', 'a::a1', -1, fails: 9);
       expect(((c.livePlan()['routes'] as List)[2]['main'] as Map)['chosen'], 'a::a2');
       expect(c.byChainPing<NodeRef>(ch, c.chainExitRefs(ch), (r) => r.node).map((r) => r.node.id), ['a3', 'a2', 'a1']);
     });
@@ -451,7 +454,7 @@ void main() {
       ping(c, 'a::a3', -1, fails: 9);
       expect(c.unitNode('a')!.id, 'a3');
       final plan = c.livePlan();
-      final main = (plan['routes'] as List).single['main'] as Map;
+      final main = (plan['routes'] as List).firstWhere((r) => r['id'] == 'a')['main'] as Map;
       expect(main['pinned'], isTrue);
       expect(main['pick'], 'priority');
       expect(main['chosen'], 'a::a3');
@@ -501,14 +504,55 @@ void main() {
       final c = make();
       ping(c, 'a::a1', 90);
       ping(c, 'a::a2', 30);
-      ping(c, 'a::a3', -1);
+      ping(c, 'a::a3', -1, fails: 9);
       List keys(Plan p, int route) => [for (final n in ((p['routes'] as List)[route]['main'] as Map)['nodes']) n['key']];
       expect(keys(c.livePlan(), 0), ['a::a2', 'a::a1', 'a::a3']);
       c.sourcesData['a']!.pickMode = 'priority';
       c.sourcesData['a']!.pickOrder = ['a::a3', 'a::a1'];
       final p = c.livePlan();
       expect(keys(p, 0), ['a::a3', 'a::a1', 'a::a2']);
-      expect(((p['routes'] as List)[0]['main'] as Map)['chosen'], 'a::a1'); // the first alive one in the order
+      expect(((p['routes'] as List)[0]['main'] as Map)['chosen'], 'a::a1'); // the first not known dead in the order
+    });
+
+    test('Priority starts on the first server not known dead: one never measured is a candidate, a known-dead one is skipped', () {
+      final c = make();
+      c.sourcesData['a']!.pickMode = 'priority';
+      c.sourcesData['a']!.pickOrder = ['a::a3', 'a::a1', 'a::a2'];
+      ping(c, 'a::a1', 90);
+      ping(c, 'a::a2', 30);
+      // a3 was never measured: it is not dead, it goes first
+      expect(c.unitNode('a')!.id, 'a3');
+      expect(((c.livePlan()['routes'] as List)[0]['main'] as Map)['chosen'], 'a::a3');
+      ping(c, 'a::a3', -1, fails: 9); // known dead now
+      expect(c.unitNode('a')!.id, 'a1');
+    });
+
+    test('a new plan starts every route group where the core had it (standby routes too); that is no plan change', () {
+      final c = make();
+      c.sourcesData['a']!.pickMode = 'priority';
+      c.sourcesData['a']!.pickOrder = ['a::a1', 'a::a2', 'a::a3'];
+      c.chainsData['c1']!.exitMode = 'priority';
+      c.chainsData['c1']!.exitOrder = ['a::a1', 'a::a2', 'a::a3'];
+      Object? chosen(Plan p, int route) => ((p['routes'] as List)[route]['main'] as Map)['chosen'];
+      final before = c.planSig();
+      var p = c.livePlan();
+      expect([chosen(p, 0), chosen(p, 2)], ['a::a1', 'a::a1']); // the catalog's own guess
+      // Auto had moved the standby routes: a to a2, the chain to the exit a3 through the entry b2
+      c.coreRoute = const CoreRoute(id: 'b', server: 'b::b2');
+      c.coreGroups = {
+        'a': const CoreRoute(id: 'a', server: 'a::a2'),
+        'b': const CoreRoute(id: 'b', server: 'b::b2'),
+        'c1': const CoreRoute(id: 'c1', server: 'a::a3', entryServer: 'b::b2'),
+      };
+      p = c.livePlan();
+      expect([chosen(p, 0), chosen(p, 2)], ['a::a2', 'a::a3']);
+      expect(p['current'], 0, reason: 'the anchor stays the catalog\'s pick');
+      expect(c.planSig(), before, reason: 'where a group stands is the core\'s business, not a new plan');
+      // the UI shows the core's server for a route it is not on, too
+      expect(c.unitNode('a')!.id, 'a2');
+      // a server that is no longer there is ignored
+      c.coreGroups = {'a': const CoreRoute(id: 'a', server: 'a::gone')};
+      expect(chosen(c.livePlan(), 0), 'a::a1');
     });
 
     test('servers the core cannot use are left out; none left is an error with the reason', () {
@@ -529,16 +573,27 @@ void main() {
               .having((e) => e.message, 'message', 'No server here the core can use (XHTTP is not in sing-box)')));
     });
 
-    test('Auto lists every Auto entry as a route, Manual only the pinned one; current = the anchor', () {
+    test('Auto lists every Auto entry as a route, Manual too (`manual`, current = the anchor); the mockup\'s plan only the pinned one', () {
       final c = make();
       var p = c.livePlan();
       expect((p['routes'] as List).map((r) => r['id']), ['a', 'b', 'c1']);
       expect(p['current'], 0);
+      expect(p.containsKey('manual'), isFalse);
       expect((p['routes'] as List)[2]['kind'], 'chain');
+      final auto = c.planSig();
       c.selectConnect('b');
       p = c.livePlan();
+      expect((p['routes'] as List).map((r) => r['id']), ['a', 'b', 'c1']);
+      expect(p['current'], 1);
+      expect(p['manual'], isTrue);
+      expect(c.planSig(), auto, reason: 'Auto <-> Manual is no new plan: the core switches it live');
+      c.mockupPlan = true; // the mockup's plan
+      p = c.livePlan();
       expect((p['routes'] as List).map((r) => r['id']), ['b']);
+      expect(p.containsKey('manual'), isFalse);
+      c.mockupPlan = false;
       c.selectConnect('b'); // back to Auto
+      expect(c.planSig(), auto);
       c.connectEntry('a')!.inAuto = false;
       p = c.livePlan();
       expect((p['routes'] as List).map((r) => r['id']), ['b', 'c1']);

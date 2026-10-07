@@ -61,6 +61,7 @@ const eventCats = <(String, List<String>)>[
   ('sub', ['updated', 'failed', 'removed', 'back', 'dead']),
   ('rules', ['fallback', 'targetBack', 'ruleSetFailed', 'ruleSetUpdated']),
   ('dns', ['switched']),
+  ('speed', ['done', 'failed']),
   ('core', ['crashed', 'restarted', 'restartFailed', 'tunNeedsAdmin', 'down', 'sysProxy', 'deprecated', 'stateRestored', 'stateLost']),
 ];
 

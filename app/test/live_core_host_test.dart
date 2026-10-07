@@ -105,6 +105,27 @@ class _RecCore extends CoreService {
   }
 }
 
+/// A core that remembers what the app told its running Auto (`POST /api/auto`).
+class _AutoRecCore extends CoreService {
+  _AutoRecCore({
+    required super.singBox,
+    required super.dataDir,
+    required super.runner,
+    required super.boxFactory,
+    required super.sysProxy,
+    required super.isElevated,
+    required super.exitCheck,
+  });
+
+  final autoBodies = <Map<String, dynamic>>[];
+
+  @override
+  Future<Map<String, dynamic>> autoSettings(Map<String, dynamic> body) {
+    autoBodies.add(body);
+    return super.autoSettings(body);
+  }
+}
+
 class _FakeNetwork implements NetworkPort {
   bool isMetered = true;
   final changes = StreamController<bool>.broadcast();
@@ -140,7 +161,7 @@ void main() {
       '${dir.path}/ui-state.json',
     ).writeAsStringSync(jsonEncode(snap ?? snapshot()));
     runner = FakeRunner();
-    core = CoreService(
+    core = _AutoRecCore(
       singBox: '',
       dataDir: dir.path,
       runner: runner,
@@ -235,12 +256,51 @@ void main() {
     await settle();
     expect(runner.starts, 2);
 
-    // Manual on the other entry: another entry is another plan
-    host.catalog.selectConnect('b');
-    host.changed();
+    // a server pinned on the other entry: another group, another plan
+    host.pinRouteNode('b', 'b::b1');
     await settle();
     expect(runner.starts, 3);
     expect(host.autoMode, isFalse);
+  });
+
+  test('Auto <-> Manual (the badge) and Manual on another entry reach the running core live: no reconnect', () async {
+    await start();
+    host.setGlobal(true); // no rule lists to fetch through the fake runner's dead port
+    await host.connect();
+    expect(runner.starts, 1);
+    final bodies = (core as _AutoRecCore).autoBodies;
+
+    host.setAutoMode(false); // the Auto pill: Manual on the entry Auto is on
+    await settle();
+    expect(host.autoMode, isFalse);
+    expect(runner.starts, 1, reason: 'the plan holds every Auto route in either mode: same plan, sing-box untouched');
+    expect(bodies.last['manual'], isTrue);
+    expect(bodies.last['entry'], 'a');
+
+    host.setAutoMode(true);
+    await settle();
+    expect(runner.starts, 1);
+    expect(bodies.last['manual'], isFalse);
+    expect(bodies.last.containsKey('entry'), isFalse);
+
+    // the MANUAL button of another row: the core goes to that route
+    host.selectConnect('b');
+    await settle();
+    expect(runner.starts, 1);
+    expect([bodies.last['manual'], bodies.last['entry']], [true, 'b']);
+
+    // the same state again: nothing is sent twice
+    final n = bodies.length;
+    host.changed();
+    await settle();
+    expect(bodies.length, n);
+    expect(runner.starts, 1);
+
+    // an entry out of Auto has no route in the plan: that is another plan
+    host.catalog.connectEntry('b')!.inAuto = false;
+    host.changed();
+    await settle();
+    expect(runner.starts, 2);
   });
 
   test('segments are saved with the catalog', () async {

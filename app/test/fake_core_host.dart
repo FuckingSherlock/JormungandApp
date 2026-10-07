@@ -386,10 +386,14 @@ class FakeCoreHost extends CoreHost {
   final Map<String, int> pairMs = {};
   Completer<void>? pairGate;
 
+  /// A `pingPairs` call that fails as a whole (an empty list).
+  bool pairCallFails = false;
+
   @override
   Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits) async {
     calls.add('pingPairs ${entry.id} ${exits.length}');
     await pairGate?.future;
+    if (pairCallFails) return const [];
     return [for (final x in exits) pairMs[x.id] ?? 50];
   }
 
@@ -635,7 +639,31 @@ class FakeCoreHost extends CoreHost {
   /// When set, installUpdate waits for it (its value is the install result).
   Completer<bool>? installGate;
   Map<String, dynamic> versionInfo = const {};
-  double? speedMbps;
+  SpeedResult? speed;
+  bool speedRunning = false;
+  Map<String, dynamic> speedStep = const {};
+  String? speedFailed;
+
+  @override
+  SpeedResult? get lastSpeed => speed;
+
+  @override
+  bool get speedTesting => speedRunning;
+
+  @override
+  Map<String, dynamic> get speedProgress => speedStep;
+
+  @override
+  String? get speedError => speedFailed;
+
+  @override
+  Future<void> toggleSpeedTest() async {
+    calls.add(speedRunning ? 'speedTest stop' : 'speedTest start');
+    if (!speedRunning && _phase != ConnectionPhase.connected) return;
+    speedRunning = !speedRunning;
+    if (speedRunning) speedStep = const {'phase': 0};
+    notifyListeners();
+  }
 
   /// What [pingDns] answers by address (default 24 ms).
   final Map<String, int?> dnsPings = {};
@@ -693,9 +721,6 @@ class FakeCoreHost extends CoreHost {
     catalog = Catalog.fromJson(snapshot);
     changed();
   }
-
-  @override
-  double? get lastSpeedMbps => speedMbps;
 
   /// Rules: what the device "has installed" and when the rule sets were downloaded.
   List<InstalledApp> apps = const [];

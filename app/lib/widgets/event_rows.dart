@@ -28,6 +28,7 @@ Color eventColor(AppColors c, String cat) => switch (cat) {
   'sub' => c.activeDim,
   'rules' => c.accentDim,
   'dns' => c.purple,
+  'speed' => c.purple,
   'core' => c.t2,
   _ => c.t3,
 };
@@ -40,6 +41,7 @@ IconData eventIcon(String cat) => switch (cat) {
   'sub' => Icons.cloud_download_outlined,
   'rules' => Icons.call_split,
   'dns' => Icons.dns_outlined,
+  'speed' => Icons.speed,
   'core' => Icons.memory,
   _ => Icons.person_outline,
 };

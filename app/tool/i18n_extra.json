@@ -86,5 +86,10 @@
   "Android System": "Система Android",
   "Disabled in subscription · {0}": "Отключены в подписке · {0}",
   "can be switched on for this chain only": "можно включить только для этой цепочки",
-  "Build": "Сборка"
+  "Build": "Сборка",
+  "Connect first": "Сначала подключитесь",
+  "Speed test finished": "Проверка скорости завершена",
+  "Speed test failed": "Проверка скорости не удалась",
+  "Speed test: ↓ {0} · ↑ {1} Mbps": "Скорость: ↓ {0} · ↑ {1} Мбит/с",
+  "Latency {0} ms": "Задержка {0} мс"
 }

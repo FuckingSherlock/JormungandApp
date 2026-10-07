@@ -127,6 +127,26 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('By entry'), findsNothing);
+    // "answered with a miss" is a verdict: every pair is in the book as dead
+    final cat = host.catalog;
+    final a1 = cat.sourcesData['s1']!.nodes[0];
+    expect(cat.pairs.ping(a1, cat.sourcesData['s2']!.nodes[0]), -1);
+  });
+
+  testWidgets('route check: a call that failed as a whole writes nothing to the pair book', (tester) async {
+    final host = _host()..pairCallFails = true;
+    await _openChainEditor(tester, host);
+
+    await tester.tap(find.text('Check route'));
+    await tester.pumpAndSettle();
+    expect(host.calls.where((c) => c.startsWith('pingPairs')), ['pingPairs a1 3', 'pingPairs a2 3']);
+    final cat = host.catalog;
+    for (final e in cat.sourcesData['s1']!.nodes) {
+      for (final x in cat.sourcesData['s2']!.nodes) {
+        expect(cat.pairs.entry(e, x), isNull, reason: 'no verdict on ${e.id} -> ${x.id}');
+      }
+    }
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('route check: Stop ends the run, a late answer changes nothing', (

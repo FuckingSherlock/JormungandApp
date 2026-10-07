@@ -1397,5 +1397,10 @@
   "androidSystem": "Система Android",
   "disabledInSubscription": "Отключены в подписке · {s0}",
   "canBeSwitchedOnForThis": "можно включить только для этой цепочки",
-  "build": "Сборка"
+  "build": "Сборка",
+  "connectFirst": "Сначала подключитесь",
+  "speedTestFinished": "Проверка скорости завершена",
+  "speedTestFailed": "Проверка скорости не удалась",
+  "speedTestMbps": "Скорость: ↓ {s0} · ↑ {s1} Мбит/с",
+  "latencyMs": "Задержка {s0} мс"
 }

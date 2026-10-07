@@ -3096,5 +3096,27 @@
     }
   },
   "canBeSwitchedOnForThis": "can be switched on for this chain only",
-  "build": "Build"
+  "build": "Build",
+  "connectFirst": "Connect first",
+  "speedTestFinished": "Speed test finished",
+  "speedTestFailed": "Speed test failed",
+  "speedTestMbps": "Speed test: ↓ {s0} · ↑ {s1} Mbps",
+  "@speedTestMbps": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "latencyMs": "Latency {s0} ms",
+  "@latencyMs": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  }
 }

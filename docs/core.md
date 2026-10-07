@@ -235,8 +235,10 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
 - План строится на выборе самого UI, не ядра (`withoutCore`): переключения AutoService не
   меняют план.
 - Подключено и план изменился — UI сам переподключает. Сравнивается состав: маршруты (все записи
-  Auto), серверы групп (у Fastest — без порядка, и в маршрутах, и в целях правил), закреп Manual,
-  правила, Global/Rules, системный прокси, `urlTest`. `plan.auto` не сравнивается: изменённые
+  Auto; в Manual тот же состав), серверы групп (у Fastest — без порядка, и в маршрутах, и в целях
+  правил), закреп Manual на сервер, правила, Global/Rules, системный прокси, `urlTest`. Auto ↔ Manual
+  (`plan.manual`) и Manual на другую запись Auto в подпись не входят: хост шлёт `{manual, entry}` в
+  `POST /api/auto`, sing-box не трогается. `plan.auto` не сравнивается: изменённые
   настройки Auto mode UI шлёт в `POST /api/auto`, работающий AutoService берёт их со следующего
   раунда. Не сравниваются порядок по пингу, `chosen` групп маршрутов и
   `current`: пинг и переключения AutoService — не повод рвать соединения. `chosen` цели правила
@@ -699,7 +701,7 @@ Global, hijack вкл / выкл, системные правила первым
 | `POST /api/killswitch` | `{killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — сменить на ходу, без переподключения → status |
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
-| `POST /api/auto` | `{auto}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения → status |
+| `POST /api/auto` | `{auto?, manual?, entry?}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения. `manual` (bool) — Auto ↔ Manual вживую: план уже держит все маршруты Auto (`plan.manual` — режим на старте), контроллер лишь перестаёт/начинает ходить между ними; `entry` (id записи) — маршрут, на котором стоит Manual: селектор `proxy` переключается туда без перезапуска и без события `auto/switched`. Записи нет в плане — режим применён, маршрут не двигается (хост шлёт новый план). `status.auto`: `manual`, `routes[].server` / `entryServer` — где стоят группы **каждого** маршрута → status |
 | `POST /api/disconnect`, `GET /api/status` | status: `{connected, mode: 'tun'\|'proxy'\|null, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, network, dns, sourcesRev}` — `network: {status: 'up'\|'down'\|'unknown', since, lastAnswer, offline, silent, doubt}` — общее состояние сети пула замеров (см. «Пул замеров»); `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые: до 5000 + 500 соединений); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
 | `POST /api/site-check` | `{event}` (id события `site/*`) → `{check}` — «Check with checker»: ядро спрашивает check-host.net о сайте события (`CoreApi.siteCheck`, `sitecheck.dart`), событие сначала получает `data.check.state: 'pending'`, потом результат с `manual: true`; идёт до ~30 с. 400, если события нет / оно не про сайт / сайт игнорируется |
@@ -710,7 +712,7 @@ Global, hijack вкл / выкл, системные правила первым
 | `DELETE /api/connections`, `DELETE /api/connections/{id}` | закрыть все / одно соединение (API service sing-box); без подключения `{ok:false}` |
 | `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, ruleName, ruleKind, ruleId?, out, process, pkg?, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
-| `POST /api/speedtest` | `{node:{key, outbound}}` или `{pair:{key, entry, exit}}`, `configUrl?` → поток NDJSON по ходу замера: `{phase (0 задержка, 1 загрузка, 2 отдача, 3 готово), down, up (бит/с), downRpm, upRpm, latency (мс), elapsed, final}`, последняя строка `final: true` (при сбое с `error`). Отдельный sing-box с одним сервером, network quality test sing-box (серверы Apple mensura, если не задан `configUrl`); закрыли страницу/лист — замер останавливается |
+| `POST /api/speedtest` | `{node:{key, outbound}}` или `{pair:{key, entry, exit}}`, `configUrl?` → поток NDJSON по ходу замера: `{phase (0 задержка, 1 загрузка, 2 отдача, 3 готово), down, up (бит/с), downRpm, upRpm, latency (мс), elapsed, final}`, последняя строка `final: true` (при сбое с `error`). Отдельный sing-box с одним сервером, network quality test sing-box (серверы Apple mensura, если не задан `configUrl`); закрыли страницу/лист — замер останавливается. `{current: true}` — вместо отдельного бокса меряет **работающее подключение**: тест через исходящий `proxy` (главный поток) основного sing-box; не подключено → одна строка `{error: 'Not connected', final: true}`. Законченный замер хранится в `<data>/last-speed.json`, отдаётся в `status.speed` (`{down, up, latency, rpm, at}`) и пишется в журнал (`speed/done`, `speed/failed`); отменённый ничего не оставляет |
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}], url?, maxAgeMs?, …checkers}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true, network:"up"\|"down"\|"unknown"}` или `{error}`. Замеры идут через пул (см. «Пул замеров»): результат пишется в него, `maxAgeMs` > 0 отдаёт ответ пула не старше этого вместо замера (пинг запуска; по умолчанию 0 — меряет всегда); `network` — состояние сети (`down`: ни один сервер не ответил и прямой путь молчит — UI может сказать «нет сети»). Замеры идут в порядке списка (16 параллельно; запасные проверки промахнувшегося сервера — по две за раз, не все сразу: каталожный пинг на сотнях серверов не держит сотни соединений; Auto по-прежнему спрашивает все сразу); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
 
 `status.auto` (пока подключено; `null` — нет): `{now: id маршрута, index, server, entryServer
@@ -848,7 +850,7 @@ Raw). Событие:
 ```
 { id,        // растёт на 1, не откатывается: ни после рестарта, ни после очистки
   at,        // мс с эпохи
-  cat,       // conn | auto | site | sub | rules | dns | core | user
+  cat,       // conn | auto | site | sub | rules | dns | speed | core | user
   type, level: 'info' | 'warn' | 'error',
   own,       // true = причина — действие самого пользователя: уведомления нет
   log?,      // номер строки LogBook, записанной в тот же момент (переход в Raw)

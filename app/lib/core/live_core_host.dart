@@ -113,7 +113,10 @@ class LiveCoreHost extends CoreHost {
   KillBlock? _blocking;
   ExitState _exit = const ExitState.checking();
   DnsHealth? _dnsHealth;
-  double? _lastSpeedMbps;
+  SpeedResult? _lastSpeed;
+  StreamSubscription<Map<String, dynamic>>? _speedSub;
+  Map<String, dynamic> _speedProgress = const {};
+  String? _speedError;
   AppUpdate _upd = const AppUpdate();
   StreamSubscription<Map<String, dynamic>>? _updSub;
   StreamSubscription<bool>? _meteredSub, _screenSub;
@@ -124,6 +127,7 @@ class LiveCoreHost extends CoreHost {
   // the plan the core runs (null = none): what a reconnect is compared with
   String? _planSig;
   String? _autoSig;
+  String? _modeSig; // Auto / Manual (+ the entry) the core was last told: switched live, no reconnect
   String? _killSig;
   Timer? _reconnectTimer;
   Timer? _saveTimer;
@@ -226,6 +230,7 @@ class LiveCoreHost extends CoreHost {
           (routes[current < 0 ? 0 : current] as Map)['id'] as String?;
       _planSig = catalog.planSigOf(plan);
       _autoSig = _autoSigOf();
+      _modeSig = null; // the next change tells the core the mode the catalog is in now
       _killSig = _killSigOf(kill);
       _applyStatus(
         Map<String, dynamic>.from(r['status'] as Map),
@@ -267,6 +272,7 @@ class LiveCoreHost extends CoreHost {
     _notifyTimer?.cancel();
     _statusSub?.cancel();
     _eventSub?.cancel();
+    _speedSub?.cancel();
     _updSub?.cancel();
     _meteredSub?.cancel();
     _screenSub?.cancel();
@@ -328,6 +334,8 @@ class LiveCoreHost extends CoreHost {
     final before = _statusSig();
     _dockCache = null;
     _connected = st['connected'] == true;
+    _lastSpeed = SpeedResult.fromJson(st['speed']) ?? _lastSpeed;
+    if (!_connected) _endSpeedTest(); // the tunnel is gone: so is the test through it
     final auto = _connected && st['auto'] is Map ? st['auto'] as Map : null;
     // the one lookup of this status: a member key `sid::nid` -> its server, by a map per source
     final byKey = _keyLookup();
@@ -338,6 +346,18 @@ class LiveCoreHost extends CoreHost {
             server: auto['server'] as String?,
             entryServer: auto['entryServer'] as String?,
           );
+    // where every route's groups stand, standby routes too: a new plan starts them there
+    final groups = auto?['routes'];
+    catalog.coreGroups = {
+      if (groups is List)
+        for (final g in groups.whereType<Map>())
+          if (g['id'] != null && (g['server'] != null || g['entryServer'] != null))
+            '${g['id']}': CoreRoute(
+              id: '${g['id']}',
+              server: g['server'] as String?,
+              entryServer: g['entryServer'] as String?,
+            ),
+    };
     final members = auto?['members'];
     if (members is List) {
       catalog.pings.mergeCore(members.whereType<Map>(), byKey);
@@ -751,6 +771,7 @@ class LiveCoreHost extends CoreHost {
       return _failed(msg, code);
     } finally {
       _connecting = false;
+      _syncMode(); // a switch made while the plan was going over
       _notifyNow();
     }
   }
@@ -759,6 +780,7 @@ class LiveCoreHost extends CoreHost {
   /// plan the core now runs becomes the one a later change is compared with.
   Future<Map<String, dynamic>> _sendPlan() async {
     final plan = catalog.livePlan();
+    final mode = _modeSigNow(); // as the plan was built: a switch during the await is told after it
     final kill = _killPlan();
     final st = await api.connect({
       'plan': plan,
@@ -773,6 +795,7 @@ class LiveCoreHost extends CoreHost {
         (routes[current < 0 ? 0 : current] as Map)['id'] as String?;
     _planSig = catalog.planSigOf(plan);
     _autoSig = _autoSigOf();
+    _modeSig = mode;
     _applyStatus(Map<String, dynamic>.from(st), notify: false);
     return st;
   }
@@ -796,6 +819,7 @@ class LiveCoreHost extends CoreHost {
     _disconnecting = true;
     _planSig = null;
     _autoSig = null;
+    _modeSig = null;
     _reconnectTimer?.cancel();
     _error = null;
     _notifyNow();
@@ -1022,6 +1046,7 @@ class LiveCoreHost extends CoreHost {
     catalog.syncCatalog();
     _scheduleSave();
     _syncAuto();
+    _syncMode();
     _syncKill();
     _syncUpdateSettings();
     _scheduleReconnect();
@@ -1069,6 +1094,32 @@ class LiveCoreHost extends CoreHost {
     });
   }
 
+  /// What the core's Auto must be told of the mode: Manual and the entry it stands on, or Auto.
+  String _modeSigNow() => catalog.autoConnect ? 'auto' : 'manual:${catalog.effectiveConnectId() ?? ''}';
+
+  /// Auto <-> Manual (the badge, MANUAL on a row) while connected: the plan holds every Auto route
+  /// in either mode, so it is the same plan and sing-box stays as it is; the core's Auto only
+  /// stops / resumes moving between the routes, and in Manual goes to the entry picked (a switch of
+  /// the selector `proxy`). An entry the plan has no route for is another plan: the reconnect
+  /// ([_scheduleReconnect]) brings it.
+  void _syncMode() {
+    if (!_connected || _connecting || _reconnecting || _planSig == null) return;
+    final sig = _modeSigNow();
+    if (sig == _modeSig) return;
+    _modeSig = sig;
+    final manual = !catalog.autoConnect;
+    api
+        .autoSettings({
+          'auto': catalog.planAuto(),
+          'manual': manual,
+          if (manual) 'entry': catalog.effectiveConnectId(),
+        })
+        .then(
+          (st) => _applyStatus(Map<String, dynamic>.from(st)),
+          onError: (Object e) => _notice(HostNotice('connectFailed', '$e')),
+        );
+  }
+
   // `genCfg` is a UI setting the catalog keeps untouched; the kill switch "while closed" counts
   // only with autostart + connect on launch (the mockup's `killClosedOk`)
   Map<String, dynamic> _killPlan() {
@@ -1110,7 +1161,72 @@ class LiveCoreHost extends CoreHost {
   DnsHealth? get dnsHealth => _dnsHealth;
 
   @override
-  double? get lastSpeedMbps => _lastSpeedMbps;
+  SpeedResult? get lastSpeed => _lastSpeed;
+
+  @override
+  bool get speedTesting => _speedSub != null;
+
+  @override
+  Map<String, dynamic> get speedProgress => _speedProgress;
+
+  @override
+  String? get speedError => _speedError;
+
+  @override
+  Future<void> toggleSpeedTest() async {
+    if (_speedSub != null) {
+      _endSpeedTest(); // a second tap: stops, nothing is kept
+      return;
+    }
+    if (phase != ConnectionPhase.connected) return;
+    _speedError = null;
+    _speedProgress = const {'phase': 0};
+    void fail(String why) {
+      if (_speedSub == null) return;
+      _speedSub = null;
+      _speedError = why;
+      _notifyNow();
+    }
+
+    _speedSub = api
+        .speedTest({'current': true})
+        .listen(
+          (p) {
+            if (_speedSub == null) return;
+            _speedProgress = p;
+            if (p['final'] != true) {
+              _notify();
+              return;
+            }
+            final err = p['error'];
+            final down = p['down'];
+            if (err != null || down is! num || down <= 0) {
+              fail('${err ?? 'no result'}');
+              return;
+            }
+            _speedSub = null;
+            _lastSpeed = SpeedResult(
+              downMbps: down / 1e6,
+              upMbps: ((p['up'] as num?) ?? 0) / 1e6,
+              latencyMs: (p['latency'] as num?)?.toInt() ?? 0,
+              rpm: (p['downRpm'] as num?)?.toInt() ?? 0,
+              at: DateTime.now(),
+            );
+            _notifyNow();
+          },
+          onError: (Object e) => fail('$e'),
+          onDone: () => fail('the test ended without a result'),
+        );
+    _notifyNow();
+  }
+
+  void _endSpeedTest() {
+    final s = _speedSub;
+    if (s == null) return;
+    _speedSub = null;
+    unawaited(s.cancel());
+    _notifyNow();
+  }
 
   @override
   Future<Map<String, dynamic>> version() => api.version();
@@ -1436,6 +1552,7 @@ class LiveCoreHost extends CoreHost {
       _notifyNow();
     } finally {
       _reconnecting = false;
+      _syncMode(); // a switch made while the plan was going over
     }
   }
 
@@ -2063,7 +2180,8 @@ class LiveCoreHost extends CoreHost {
         res[at[k]] = ms.round();
       }
     } catch (_) {
-      // the tester could not run: no pair answered
+      // the tester could not run: no verdict, not "every pair is dead" (see [CoreHost.pingPairs])
+      return const [];
     }
     return res;
   }
@@ -2096,14 +2214,6 @@ class LiveCoreHost extends CoreHost {
     }
     return api.speedTest({
       'node': {'key': n.id, 'outbound': n.outbound},
-    }).map((p) {
-      // the Home card's "Last: N Mbps": the download of the last test that finished
-      final down = p['down'];
-      if (p['final'] == true && p['error'] == null && down is num && down > 0) {
-        _lastSpeedMbps = down / 1e6;
-        _notify();
-      }
-      return p;
     });
   }
 

@@ -1092,6 +1092,67 @@ void main() {
       expect(reachCalls, 0, reason: 'the node itself does not answer: sites are not tried');
     });
   });
+
+  group('Manual: the plan holds every route, the controller stays on one', () {
+    Map<String, dynamic> three({bool manual = true}) =>
+        {...plan([unit('A', ['s::a']), unit('B', ['s::b']), unit('C', ['s::c'])]), if (manual) 'manual': true};
+
+    test('a dead route is not left and no other route is tested; back in Auto (live) it fails over', () async {
+      final p = three();
+      final fake = FakeBox(buildConfig(p), {'s::b': 40, 's::c': 50}); // A is dead
+      final auto = AutoService(fake, p, delay: fake.delayTest);
+      expect(auto.manual, isTrue);
+      for (var i = 0; i < 4; i++) {
+        await auto.check();
+      }
+      expect(fake.groups['proxy']!.now, 'route0');
+      expect(fake.tested.where((t) => t.contains('route1') || t.contains('route2')), isEmpty, reason: 'only the route the user stays on is looked at');
+      expect(auto.switchCount, 0);
+      expect(auto.toJson()['manual'], isTrue);
+      expect(await auto.setManual(false), isTrue); // no restart, no new plan
+      for (var i = 0; i < 4; i++) {
+        await auto.check();
+      }
+      expect(fake.groups['proxy']!.now, 'route1', reason: 'Auto again: A is dead, B is the first that answers');
+      expect(auto.toJson()['now'], 'B');
+    });
+
+    test('setManual(on, entry) moves the selector to that route: no switch event; a stranger entry is refused', () async {
+      final p = three(manual: false);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 40, 's::c': 50});
+      final auto = AutoService(fake, p, delay: fake.delayTest);
+      final events = <AutoSwitch>[];
+      auto.switches.listen(events.add);
+      expect(await auto.setManual(true, entry: 'C'), isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect([fake.groups['proxy']!.now, auto.index, auto.manual, auto.toJson()['now']], ['route2', 2, true, 'C']);
+      expect(events, isEmpty);
+      expect(auto.switchCount, 0);
+      // the same route again, and Manual on the one it is on: nothing to move
+      expect(await auto.setManual(true, entry: 'C'), isTrue);
+      expect(await auto.setManual(true, entry: 'nope'), isFalse);
+      expect([auto.index, fake.groups['proxy']!.now], [2, 'route2']);
+      // in Manual a route above is not looked at, however good it is
+      for (var i = 0; i < 3; i++) {
+        await auto.check();
+      }
+      expect(fake.groups['proxy']!.now, 'route2');
+    });
+
+    test('status.auto reports the server of every route group, standby routes too', () async {
+      final p = plan([
+        unit('A', ['s::a1', 's::a2'], pick: 'priority', chosen: 's::a1'),
+        unit('B', ['s::b1', 's::b2'], pick: 'priority', chosen: 's::b2'),
+        {'id': 'X', 'kind': 'chain', 'entry': _grp(['s::e1', 's::e2']), 'main': _grp(['s::x1'], pick: 'priority', chosen: 's::x1')},
+      ]);
+      final (auto, _) = setup(p, {'s::a1': 40, 's::a2': 50, 's::b1': 40, 's::b2': 50, 's::e1': 20, 's::e2': 30, 's::x1': 10});
+      await auto.check(); // sing-box's groups are read
+      final routes = {for (final r in (auto.toJson()['routes'] as List).cast<Map>()) r['id']: [r['server'], r['entryServer']]};
+      expect(routes['A'], ['s::a1', null]);
+      expect(routes['B'], ['s::b2', null], reason: 'a standby route: the server its group is on, not its first');
+      expect(routes['X'], ['s::x1', 's::e1']);
+    });
+  });
 }
 
 /// sing-box 1.14 before the first urltest round: `Now()` is "", so no member is reported.

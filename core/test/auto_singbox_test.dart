@@ -469,4 +469,69 @@ void main() {
       await loop.down();
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+
+  test('daemon: Auto <-> Manual and Manual on another entry are live: the same sing-box, no new connect, no switch event', () async {
+    final loop = _Loop();
+    await loop.up(['a', 'b']);
+    final mixed = await freePort();
+    final daemon = Daemon(
+      singBox: _bin,
+      dataDir: p.join(loop.tmp.path, 'data'),
+      uiFile: p.join(loop.tmp.path, 'none.html'),
+      exitCheck: (_) async => {'ip': '127.0.0.1'},
+      sysProxy: _FakeSysProxy(),
+    );
+    final api = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    api.listen(daemon.handle);
+    Future<Map<String, dynamic>> call(String path, [Map<String, dynamic>? body]) async {
+      final c = HttpClient()..findProxy = (_) => 'DIRECT';
+      try {
+        final req = await c.openUrl(body == null ? 'GET' : 'POST', Uri.parse('http://127.0.0.1:${api.port}$path'));
+        req.headers.set('X-Jorm', '1');
+        if (body != null) req.write(jsonEncode(body));
+        final res = await req.close();
+        return (jsonDecode(await res.transform(utf8.decoder).join()) as Map).cast<String, dynamic>();
+      } finally {
+        c.close(force: true);
+      }
+    }
+
+    try {
+      await call('/api/connect', {
+        'plan': {
+          'routes': [
+            {'id': 'A', 'kind': 'unit', 'main': {'pick': 'fastest', 'nodes': [_node('s::a', loop.port('a'))]}},
+            {'id': 'B', 'kind': 'unit', 'main': {'pick': 'fastest', 'nodes': [_node('s::b', loop.port('b'))]}},
+          ],
+          'current': 0,
+          'manual': true, // Manual on A: the plan still holds B
+          'mixedPort': mixed,
+          'global': true,
+          'urlTest': {'url': loop.url},
+          'auto': {'failAfter': 1, 'checkers': <String>[], 'returnTo': 'never', 'retryPause': 0.1},
+        },
+        'systemProxy': false,
+      });
+      Future<Map> auto() async => ((await call('/api/status'))['auto'] as Map);
+      expect([(await auto())['manual'], (await auto())['now']], [true, 'A']);
+      // Manual -> Auto: the controller resumes, nothing else happens
+      await call('/api/auto', {'manual': false});
+      expect([(await auto())['manual'], (await auto())['now']], [false, 'A']);
+      // Auto -> Manual on B (the entry picked): the selector goes there, sing-box stays
+      final st = await call('/api/auto', {'manual': true, 'entry': 'B'});
+      expect([st['auto']['manual'], st['auto']['now']], [true, 'B']);
+      expect(await _get(mixed, loop.hostUrl), 'hello from target', reason: 'traffic goes on through the new route');
+      // an entry the plan has no route for: Manual is kept, nothing moves (the host sends a new plan)
+      final st2 = await call('/api/auto', {'manual': true, 'entry': 'Z'});
+      expect([st2['auto']['manual'], st2['auto']['now']], [true, 'B']);
+      final events = [for (final e in (await call('/api/events'))['events'] as List) '${(e as Map)['cat']}/${e['type']}'];
+      expect(events.where((e) => e == 'conn/connected'), hasLength(1), reason: 'no second connect');
+      expect(events.where((e) => e == 'auto/switched' || e == 'core/restarted'), isEmpty);
+      expect((await call('/api/status'))['restarts'], 0);
+    } finally {
+      await daemon.shutdown();
+      await api.close(force: true);
+      await loop.down();
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
 }

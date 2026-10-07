@@ -33,6 +33,7 @@ class EventWords {
     'sub' => l10n.subscriptions,
     'rules' => l10n.rules,
     'dns' => 'DNS',
+    'speed' => l10n.speedTest2,
     'core' => l10n.core,
     _ => cat,
   };
@@ -60,6 +61,8 @@ class EventWords {
     'rules/ruleSetFailed' => l10n.ruleSetNotDownloaded,
     'rules/ruleSetUpdated' => l10n.ruleSetUpdated,
     'dns/switched' => l10n.dnsServerSwitched,
+    'speed/done' => l10n.speedTestFinished,
+    'speed/failed' => l10n.speedTestFailed,
     'core/crashed' => l10n.singBoxStopped,
     'core/restarted' => l10n.singBoxStartedAgain,
     'core/restartFailed' => l10n.couldNotStartAgain,
@@ -316,6 +319,19 @@ class EventWords {
             ? l10n.answersAgainReturnedToIt(dnsName(d['to']))
             : l10n.switchAutomaticallyIsOffTheFirst,
       ),
+      ('speed', 'done') => () {
+        String mbps(Object? bps) {
+          final v = ((bps as num?) ?? 0) / 1e6;
+          return v >= 100 ? '${v.round()}' : v.toStringAsFixed(1);
+        }
+
+        final lat = (d['latency'] as num?)?.toInt() ?? 0;
+        return r(
+          l10n.speedTestMbps(mbps(d['down']), mbps(d['up'])),
+          lat > 0 ? l10n.latencyMs('$lat') : '',
+        );
+      }(),
+      ('speed', 'failed') => r(l10n.speedTestFailed, '${d['error'] ?? ''}'),
       ('core', 'crashed') => r(
         l10n.singBoxStopped,
         d['code'] is num ? l10n.exitCodeStartingItAgain(d['code'] as num) : l10n.startingItAgain,

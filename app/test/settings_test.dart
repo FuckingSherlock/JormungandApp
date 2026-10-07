@@ -613,10 +613,70 @@ void main() {
       // Rules is the shell's to open: not offered until it is wired
       expect(find.byKey(const ValueKey('nav-rules')), findsNothing);
 
-      host.speedMbps = 87.4;
+      host.speed = SpeedResult(
+        downMbps: 87.4,
+        upMbps: 22.1,
+        latencyMs: 34,
+        rpm: 900,
+        at: DateTime.now(),
+      );
       host.changed();
       await tester.pump();
-      expect(find.text('Last: 87 Mbps'), findsOneWidget);
+      expect(find.textContaining('↓ 87.4 · ↑ 22.1 Mbps'), findsOneWidget);
+      expect(find.textContaining('34 ms'), findsOneWidget);
+    });
+
+    testWidgets('Speed Test card: disabled while disconnected, a tap says so', (
+      tester,
+    ) async {
+      final host = FakeCoreHost();
+      await _pump(tester, host, page: const HomePage());
+      await tester.tap(find.byKey(const ValueKey('nav-speed')));
+      await tester.pump();
+      expect(find.text('Connect first'), findsOneWidget);
+      expect(host.speedRunning, isFalse);
+      expect(host.calls, isNot(contains('speedTest start')));
+    });
+
+    testWidgets(
+      'Speed Test card: a tap runs the test, progress on the card, a second tap stops it',
+      (tester) async {
+        final host = FakeCoreHost()..setPhase(ConnectionPhase.connected);
+        await _pump(tester, host, page: const HomePage());
+        await tester.tap(find.byKey(const ValueKey('nav-speed')));
+        await tester.pump();
+        expect(host.calls, contains('speedTest start'));
+        expect(host.speedRunning, isTrue);
+        expect(find.text('Measuring latency…'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('nav-speed-progress')),
+          findsOneWidget,
+        );
+
+        host.speedStep = const {
+          'phase': 1,
+          'down': 45000000,
+          'up': 12000000,
+          'elapsed': 8000,
+        };
+        host.changed();
+        await tester.pump();
+        expect(find.text('Speed test: ↓ 45.0 · ↑ 12.0 Mbps'), findsOneWidget);
+
+        await tester.tap(find.byKey(const ValueKey('nav-speed')));
+        await tester.pump();
+        expect(host.calls.last, 'speedTest stop');
+        expect(host.speedRunning, isFalse);
+        expect(find.byKey(const ValueKey('nav-speed-progress')), findsNothing);
+        expect(find.text('No test yet'), findsOneWidget);
+      },
+    );
+
+    testWidgets('Speed Test card: a failed test says so', (tester) async {
+      final host = FakeCoreHost()..setPhase(ConnectionPhase.connected);
+      host.speedFailed = 'connection reset';
+      await _pump(tester, host, page: const HomePage());
+      expect(find.text('Test failed'), findsOneWidget);
     });
 
     testWidgets('NavCards: Auto mode and DNS open their sheets, Rules the link', (

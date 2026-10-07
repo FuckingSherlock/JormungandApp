@@ -278,6 +278,7 @@ void main() {
 
   Catalog load(J snapshot, J meta) {
     final c = Catalog.fromJson(snapshot, now: () => now);
+    c.mockupPlan = true; // the mockup's plan: Manual = the anchor alone
     c.appInfo = (pkg) {
       final a = apps[pkg];
       return a == null ? null : (name: a['name'] as String, kind: (a['kind'] ?? '') as String);

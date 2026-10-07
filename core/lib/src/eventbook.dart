@@ -53,7 +53,7 @@ class EventBook {
   final int cap;
   final DateTime Function() _clock;
 
-  static const cats = {'conn', 'auto', 'site', 'sub', 'rules', 'dns', 'core', 'user'};
+  static const cats = {'conn', 'auto', 'site', 'sub', 'rules', 'dns', 'speed', 'core', 'user'};
   static const levels = {'info', 'warn', 'error'};
 
   final _events = ListQueue<Map<String, dynamic>>();

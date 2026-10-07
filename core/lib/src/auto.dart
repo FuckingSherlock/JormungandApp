@@ -330,6 +330,7 @@ class AutoService {
       {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, ProbePool? pool})
       : settings = settings ?? AutoSettings.fromPlan(plan),
         pool = pool ?? ProbePool.solo(),
+        manual = plan['manual'] == true,
         _clock = clock ?? _wallClock {
     final rs = planRoutes(plan);
     _routes = [for (var i = 0; i < rs.length; i++) _Route(i, rs[i])];
@@ -364,6 +365,30 @@ class AutoService {
 
   /// The route in use (index into the plan's routes).
   late int index;
+
+  /// Manual (`plan.manual`): the plan holds every Auto route, but this one stays on the route in
+  /// use — nothing is tested or moved between routes (servers inside the route still heal, a
+  /// pinned one never moves). Switched live by [setManual]: no sing-box restart.
+  bool manual;
+
+  /// Auto ↔ Manual live ([manual]); in Manual [entry] (a route id) is the route to be on: the
+  /// selector `proxy` goes there at once (the user's own pick, no switch event). False = [entry]
+  /// is not a route of this plan (it needs a new plan, the host reconnects) or sing-box refused.
+  /// Back in Auto a round runs at once: the routes above the current one are looked at again.
+  Future<bool> setManual(bool on, {String? entry}) async {
+    manual = on;
+    var ok = true;
+    final i = entry == null ? -1 : _routes.indexWhere((r) => r.id == entry);
+    if (on && entry != null && i != index) {
+      ok = i >= 0 && !_stopped && await api.select(topTag, _routes[i].tag);
+      if (ok) {
+        index = i;
+        _routes[i].inUseSince = _clock();
+      }
+    }
+    if (!on) _kickNow();
+    return ok;
+  }
 
   /// Moves so far (routes and Priority servers, as on [switches]); a Fastest group's own
   /// re-picks inside sing-box are not counted.
@@ -491,7 +516,7 @@ class AutoService {
       }..removeWhere((h, _) => keep.contains(h));
       final retry = cur.health.fails > 0 && cur.health.fails < settings.failAfter;
       final todo = {index};
-      if (!retry) {
+      if (!retry && !manual) {
         // the spares are due a little early rather than a whole check late
         final now = _clock();
         final warm = settings.standby > 0 && (_warmedAt == null || now - _warmedAt! >= settings.warmEvery.inMilliseconds - 1000);
@@ -600,7 +625,8 @@ class AutoService {
     if (reach == null || dests.isEmpty) return;
     // each try is a request to the user's real site through a server they did not pick:
     // how many is the setting ([AutoSettings.siteAlternates], 0 = none)
-    final alts = [for (var i = 0; i < _routes.length; i++) if (i != index && _routes[i].health.answered) _routes[i]].take(settings.siteAlternates).toList();
+    // (Manual: only the entry the user picked, no other route is tried)
+    final alts = [for (var i = 0; !manual && i < _routes.length; i++) if (i != index && _routes[i].health.answered) _routes[i]].take(settings.siteAlternates).toList();
     final off = settings.siteAlternates == 0;
     for (final MapEntry(key: dest, value: fail) in dests.entries) {
       if (_stopped) return;
@@ -889,7 +915,7 @@ blockedCount++;
     if (cur.health.fails >= settings.failAfter) {
       // dead: the routes above and the spares at once, then the next batch by priority;
       // the first by priority that answered takes over
-      bool untested(int i) => i != index && !_routes[i].checked;
+      bool untested(int i) => !manual && i != index && !_routes[i].checked; // Manual: no other route is looked at
       final first = [for (var i = 0; i < _routes.length; i++) if (untested(i) && (i < index || i <= index + settings.standby)) i];
       await Future.wait(first.map((i) => _checkRoute(_routes[i])));
       var to = _firstAnswered();
@@ -956,8 +982,8 @@ blockedCount++;
   void _closeStalled(String tag, bool Function() away) =>
       _stall.sweep(tag, away, every: settings.stallAfter, onClosed: () => stalledClosed++);
 
-  /// For the app: `{now: route id, index, server, entryServer (chain), routes: [{id, ms,
-  /// fails, oks, at, strikes, holdUntil}], members: [{key, ms, fails, oks, at}] (every
+  /// For the app: `{now: route id, index, server, entryServer (chain), manual, routes: [{id, ms,
+  /// fails, oks, at, strikes, holdUntil, server, entryServer}], members: [{key, ms, fails, oks, at}] (every
   /// server tested so far, not a chain's exits: those are measured through the entry),
   /// pairs: [{entry, key, ms, fails, oks, at}] (a chain's exit [key] through the entry
   /// server [entry]: the exits' own results, one per pair tested),
@@ -979,8 +1005,12 @@ blockedCount++;
       'server': cur.main.now,
       'entryServer': cur.entry?.now,
       'routes': [
-        for (final r in _routes) {'id': r.id, ...r.health.toJson(), 'strikes': r.strikes, 'holdUntil': holdUntil(r)},
+        // server / entryServer: where each route's groups stand, the standby ones too (a new plan
+        // starts them there; null = not told by sing-box yet)
+        for (final r in _routes)
+          {'id': r.id, ...r.health.toJson(), 'strikes': r.strikes, 'holdUntil': holdUntil(r), 'server': r.main.now, 'entryServer': r.entry?.now},
       ],
+      'manual': manual,
       'members': [
         for (final r in _routes)
           for (final g in r.groups)

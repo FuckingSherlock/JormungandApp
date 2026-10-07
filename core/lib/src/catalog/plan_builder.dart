@@ -85,7 +85,19 @@ extension CatalogPlan on Catalog {
   /// A chain's `entry` and `main` groups: the exits ordered / chosen by their answer through the
   /// entry in use (the pair), not their direct one.
   Json _planChain(Chain c) {
-    final exits = chainExitRefs(c), exitNode = chainExitNode(c), entry = chainEntryNode(c);
+    final exits = chainExitRefs(c), entryRefs = chainEntryRefs(c);
+    // the servers the core has the groups on win over the catalog's guess (a reconnect keeps them)
+    final entry = coreGroupNode(c.id, 'entryServer', entryRefs) ?? chainEntryNode(c);
+    // no server of the core's: a Priority exit starts on the first one not known dead through the
+    // entry (never measured is a candidate, as in Auto's own `mayWork`), else the catalog's pick
+    CatalogNode? firstLive() {
+      for (final r in exits) {
+        if (!chainExitKnownDead(c, r.node, entry)) return r.node;
+      }
+      return null;
+    }
+
+    final exitNode = coreGroupNode(c.id, 'server', exits) ?? (c.exitMode == 'priority' && !mockupPlan ? firstLive() : null) ?? chainExitNode(c);
     return {
       'entry': planGroup(chainEntryRefs(c), 'fastest'),
       'main': planGroup(exits, c.exitMode == 'priority' ? 'priority' : 'fastest', _refOf(exits, exitNode), (r) => chainExitRank(c, r.node, entry)),
@@ -98,7 +110,7 @@ extension CatalogPlan on Catalog {
     if (c != null) {
       return {'id': id, 'kind': 'chain', ..._planChain(c)};
     }
-    final refs = unitPickRefs(id), n = unitNode(id), pin = pinnedRef(id);
+    final refs = unitPickRefs(id), n = coreGroupNode(id, 'server', refs) ?? unitNode(id), pin = pinnedRef(id);
     final main = planGroup(refs, pin != null || unitPriority(id) ? 'priority' : 'fastest', pin ?? _refOf(refs, n));
     if (pin != null) main['pinned'] = true; // Manual on a server: held there, the core never moves it
     return {'id': id, 'kind': 'unit', 'main': main};
@@ -106,11 +118,13 @@ extension CatalogPlan on Catalog {
 
   /// The routes of the plan and the one to start on (the anchor). Auto: every Auto entry —
   /// the core moves between them through a selector, so a failover or a return never
-  /// restarts sing-box; only a change of this list does. Manual: the anchor alone. Entries
+  /// restarts sing-box; only a change of this list does. Manual: the same list (the core's Auto
+  /// only stays on the anchor, see `plan.manual`), so Auto ↔ Manual is no new plan; the anchor
+  /// alone when it is not an Auto entry, or in the mockup's plan ([mockupPlan]). Entries
   /// the core cannot use are left out; the anchor itself must be usable (`planRoutes`).
   ({List<Json> routes, int current}) planRoutesOf(String anchor) {
     final order = autoOrder(), i = order.indexOf(anchor);
-    final ids = !autoConnect || i < 0 ? [anchor] : order;
+    final ids = (!autoConnect && mockupPlan) || i < 0 ? [anchor] : order;
     final routes = <Json>[];
     for (final id in ids) {
       if (id == anchor) {
@@ -169,6 +183,8 @@ extension CatalogPlan on Catalog {
           },
           'auto': planAuto(),
           'routing': routingPlan(),
+          // Manual: the core's Auto stays on the anchor (the routes are the Auto ones all the same)
+          if (!autoConnect && !mockupPlan) 'manual': true,
         };
         final r = planRoutesOf(id);
         plan['routes'] = r.routes;
@@ -183,7 +199,8 @@ extension CatalogPlan on Catalog {
   /// servers to 'testing': neither may restart sing-box and drop every connection), nor the
   /// server a main-flow group is on (the core moves those itself; only a Manual pin counts).
   /// A rule target's Priority pick does count: nothing but a new plan moves it. The system
-  /// proxy is in it: switched while connected, the core gets it with the reconnect. A string,
+  /// proxy is in it: switched while connected, the core gets it with the reconnect. Auto ↔
+  /// Manual is not (`plan.manual`; the routes are the same): the core switches it live. A string,
   /// compared by `==`; the same one the mockup's `planSigOf` gives (`planSigOf`).
   String planSigOf(Plan plan) {
     List<String> keys(Json x) {
@@ -221,6 +238,7 @@ extension CatalogPlan on Catalog {
     final out = <String, dynamic>{...plan};
     out['current'] = null;
     out['auto'] = null;
+    out.remove('manual'); // switched live in the core, not a plan change
     if (routing != null) out['routing'] = routing;
     out['systemProxy'] = segState.systemProxy;
     out['tunStack'] = segState.tun ? plan['tunStack'] : null;
