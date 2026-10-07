@@ -94,8 +94,18 @@ void main() {
       addTearDown(sub.cancel);
       await Future<void>.delayed(const Duration(milliseconds: 300)); // let the subscription settle
 
-      await _get(mixed, 'http://blocked.example/');
-      final c = await _waitFor(closed, (c) => c.destination.startsWith('blocked.example'));
+      // sing-box race (~10-15 % of requests): when the server rejects at once, the outbound
+      // can fail before the copy loop counts the request's bytes, and the record shows
+      // up == 0. Not a bug of ours — repeat the request until a record with up > 0 shows.
+      ClosedConnection? c;
+      for (var i = 0; i < 15 && c == null; i++) {
+        await _get(mixed, 'http://blocked.example/');
+        await _waitFor(closed, (c) => c.destination.startsWith('blocked.example'));
+        c = closed.where((c) => c.destination.startsWith('blocked.example') && c.up > 0).firstOrNull;
+      }
+      expect(c, isNotNull, reason: 'a rejected request with its bytes counted');
+      expect(closed.where((c) => c.destination.startsWith('blocked.example')).every((c) => c.down == 0), isTrue);
+      c = c!;
       expect(c.outbound, 'route0/nodeA');
       expect(c.chain, contains('proxy'));
       expect(c.up, greaterThan(0));
