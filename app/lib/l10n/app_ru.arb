@@ -1371,5 +1371,15 @@
   "downloadsWhatAutoCheckFindsInstalling": "Скачивает найденное автопроверкой; ставить обновление вы будете сами",
   "showLess": "Свернуть",
   "copySite": "Копировать сайт",
-  "isHigherInTheOrderMoved": "{s0} выше по порядку — перешли на него"
+  "isHigherInTheOrderMoved": "{s0} выше по порядку — перешли на него",
+  "ignoreSite": "Игнорировать сайт",
+  "ignored": "{s0} игнорируется",
+  "undo": "Отменить",
+  "ignoredSites": "Игнорируемые сайты",
+  "noEventsNotificationsOrFailedRequest": "Для этих сайтов и их поддоменов нет событий, уведомлений и строк об ошибках запросов. Маршрутизация не меняется.",
+  "noIgnoredSites": "Игнорируемых сайтов нет",
+  "exampleCom": "example.com",
+  "enterASiteLikeExampleCom": "Введите сайт, например example.com",
+  "isAlreadyInTheList": "{s0} уже в списке",
+  "fromIgnoredSites": "{n0} от игнорируемых сайтов"
 }

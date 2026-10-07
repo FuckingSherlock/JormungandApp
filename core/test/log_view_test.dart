@@ -124,6 +124,33 @@ void main() {
     expect(feed.cfg.rawTop, -1);
   });
 
+  test('LogFeed: failed lines of ignored sites are hidden until the chip is on; the list applies to old lines too', () {
+    final cfg = LogCfg();
+    final feed = LogFeed(cfg);
+    feed.apply({
+      'lines': [
+        line(0, 'warn', 'outbound connection to api.dead.example.com:443: timeout'),
+        line(1, 'error', 'other.org: refused'),
+        line(2, 'info', 'dead.example.com is only mentioned'),
+      ],
+      'next': 3,
+    });
+    expect(feed.shown('all', '').length, 3);
+    expect(feed.ignoredCount, 0);
+    feed.setIgnored(IgnoredSites(['dead.example.com']));
+    expect(feed.ignoredCount, 1, reason: 'only problem lines count');
+    expect(feed.shown('all', '').map((l) => l.n), [1, 2]);
+    expect(feed.visibleCount, 2);
+    feed.apply({'lines': [line(3, 'warn', 'dead.example.com: reset')], 'next': 4});
+    expect(feed.ignoredCount, 2);
+    cfg.showIgnored = true;
+    expect(feed.shown('all', '').length, 4);
+    expect(LogCfg.fromJson(cfg.toJson()).showIgnored, isTrue);
+    expect(LogCfg().showIgnored, isFalse, reason: 'off by default');
+    feed.setIgnored(IgnoredSites());
+    expect(feed.ignoredCount, 0);
+  });
+
   test('LogFeed: unread below the oldest kept line are dropped', () {
     final cfg = LogCfg(rawTop: 3, rawUnread: {0, 1, 2});
     final feed = LogFeed(cfg);

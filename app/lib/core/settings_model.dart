@@ -130,6 +130,15 @@ class NotifCfg {
 
   /// How many of [allKeys] are on.
   int get onCount => allKeys.where(flag).length;
+
+  /// Sites the user ignores (Logs menu -> Ignored sites): no `site/*` events, notifications or
+  /// raw failed-connection lines for the host and its subdomains. Cleaned hosts, in the order added.
+  List<String> get ignoredSites => [
+    for (final h in _m['ignoredSites'] is List ? _m['ignoredSites'] as List : const [])
+      if (h is String) h,
+  ];
+  set ignoredSites(List<String> v) =>
+      v.isEmpty ? _m.remove('ignoredSites') : _m['ignoredSites'] = List<String>.of(v);
 }
 
 extension SettingsOfHost on CoreHost {

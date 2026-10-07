@@ -19,7 +19,8 @@ import io.flutter.plugin.common.MethodChannel
  *                           reports); with `once` the dialog is shown at most once per install, so a
  *                           plain connect never nags. Answers with the state after the dialog
  *  openSettings  -> null    the app's system notification settings
- *  post          -> null    args {id: Int, title, text}: a journal event as a notification (grouped)
+ *  post          -> null    args {id: Int, title, text, actions?: [{id, label}], site?, via?}: a journal event as a
+ *                           notification (grouped); a button opens the app and comes back as `eventAct`
  *  cancelEvents  -> null    removes the event notifications (the app came to the front)
  *  setStatus     -> null    args {node: String?, visible: Boolean}, either key optional: the entry / server
  *                           shown in the VPN notification; whether it is on the shade at all (kept natively,
@@ -27,7 +28,11 @@ import io.flutter.plugin.common.MethodChannel
  *  takeLaunchEvent -> Int?  the event id of the notification that started / raised the app and has not
  *                           been handed over yet; the first call also tells Kotlin that Dart listens
  *
- *  Kotlin -> Dart: `openEvent` (Int; a tap on an event notification while Dart listens) and
+ *  takeLaunchAction -> Map? {id, act, site, via} of a button that started / raised the app and was not
+ *                           handed over yet (what `eventAct` is when Dart is listening)
+ *
+ *  Kotlin -> Dart: `openEvent` (Int; a tap on an event notification while Dart listens), `eventAct`
+ *  (Map {id, act, site, via}; a button of an event notification while Dart listens) and
  *  `disconnect` (the VPN notification's action; Dart answers true, any error = nobody listens and the
  *  service closes the tunnel itself, see [AppNotifier] / [JormungandVpnService]).
  */
@@ -45,6 +50,7 @@ class NotifyChannel(private val app: Context) {
 
     private var pendingRequest: MethodChannel.Result? = null
     private var launchEvent: Int? = null
+    private var launchAct: Map<String, Any>? = null
     private var dartReady = false
 
     fun register(messenger: BinaryMessenger) {
@@ -76,11 +82,20 @@ class NotifyChannel(private val app: Context) {
                     result.error("bad_args", "id is required", null)
                     return
                 }
+                val actions = (call.argument<List<Map<String, Any?>>>("actions") ?: emptyList())
+                    .mapNotNull { m ->
+                        val aid = m["id"] as? String
+                        val label = m["label"] as? String
+                        if (aid == null || label == null) null else aid to label
+                    }
                 AppNotifier.postEvent(
                     app,
                     id,
                     call.argument<String>("title") ?: "",
                     call.argument<String>("text") ?: "",
+                    actions,
+                    call.argument<String>("site") ?: "",
+                    call.argument<String>("via") ?: "",
                 )
                 result.success(null)
             }
@@ -99,6 +114,10 @@ class NotifyChannel(private val app: Context) {
                 dartReady = true
                 result.success(launchEvent)
                 launchEvent = null
+            }
+            "takeLaunchAction" -> {
+                result.success(launchAct)
+                launchAct = null
             }
             else -> result.notImplemented()
         }
@@ -126,8 +145,27 @@ class NotifyChannel(private val app: Context) {
         return true
     }
 
-    /** From MainActivity (onCreate, onNewIntent): a tap on an event notification. */
+    /** From MainActivity (onCreate, onNewIntent): a tap on an event notification, or on a button of one. */
     fun onIntent(intent: Intent?) {
+        if (intent?.action == AppNotifier.ACTION_EVENT_ACT && intent.hasExtra(AppNotifier.EXTRA_EVENT)) {
+            val id = intent.getIntExtra(AppNotifier.EXTRA_EVENT, -1)
+            val act = mapOf(
+                "id" to id,
+                "act" to (intent.getStringExtra(AppNotifier.EXTRA_ACT) ?: ""),
+                "site" to (intent.getStringExtra(AppNotifier.EXTRA_SITE) ?: ""),
+                "via" to (intent.getStringExtra(AppNotifier.EXTRA_VIA) ?: ""),
+            )
+            intent.action = null // a recreated activity must not replay it
+            intent.removeExtra(AppNotifier.EXTRA_EVENT)
+            AppNotifier.cancelEvent(app, id) // a button does not dismiss its notification
+            val ch = dart
+            if (dartReady && ch != null) {
+                ch.invokeMethod("eventAct", act)
+            } else {
+                launchAct = act
+            }
+            return
+        }
         if (intent?.action != AppNotifier.ACTION_OPEN_EVENT || !intent.hasExtra(AppNotifier.EXTRA_EVENT)) return
         val id = intent.getIntExtra(AppNotifier.EXTRA_EVENT, -1)
         intent.action = null // a recreated activity must not replay it

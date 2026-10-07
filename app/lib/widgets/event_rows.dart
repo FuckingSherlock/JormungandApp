@@ -11,6 +11,7 @@ import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
 import 'follow_list.dart' show HitFlash;
 import 'form_parts.dart';
+import 'ignored_sites.dart';
 import 'nodes_menus.dart' show copyText;
 import 'search_field.dart';
 
@@ -201,6 +202,10 @@ class EventRow extends StatelessWidget {
         final via = dd['via'] == null || '${dd['via']}'.isEmpty ? null : '${dd['via']}';
         acts.add((l10n.createRule, () => links.newRuleFor!(host: site, via: via)));
       }
+      acts.add((
+        l10n.ignoreSite,
+        () => ignoreSiteWithUndo(ScaffoldMessenger.of(context), l10n, logs, site),
+      ));
     }
     if (e.cat == 'sub' &&
         e.type == 'failed' &&

@@ -1158,11 +1158,12 @@ class LiveCoreHost extends CoreHost {
   }
 
   /// The app's update options (auto-check, channel, auto-download, whether the network is metered)
-  /// go to the core's scheduled check.
+  /// go to the core's scheduled check; so does the list of ignored sites (no reconnect for either).
   void _syncUpdateSettings() {
     if (_disposed) return;
     final g = gen;
-    final sig = '${g.updates}|${g.updChannel}|${g.updAutoDownload}|$_metered';
+    final ignored = notif.ignoredSites;
+    final sig = '${g.updates}|${g.updChannel}|${g.updAutoDownload}|$_metered|${ignored.join(',')}';
     if (sig == _updSettingsSig) return;
     _updSettingsSig = sig;
     try {
@@ -1171,6 +1172,7 @@ class LiveCoreHost extends CoreHost {
         'channel': g.updChannel,
         'autoDownload': g.updAutoDownload,
         'metered': _metered,
+        'ignoredSites': ignored,
       });
     } catch (_) {}
   }

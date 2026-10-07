@@ -3042,5 +3042,36 @@
         "type": "String"
       }
     }
+  },
+  "ignoreSite": "Ignore site",
+  "ignored": "{s0} ignored",
+  "@ignored": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "undo": "Undo",
+  "ignoredSites": "Ignored sites",
+  "noEventsNotificationsOrFailedRequest": "No events, notifications or failed-request lines for these sites and their subdomains. Routing is not affected.",
+  "noIgnoredSites": "No ignored sites",
+  "exampleCom": "example.com",
+  "enterASiteLikeExampleCom": "Enter a site, like example.com",
+  "isAlreadyInTheList": "{s0} is already in the list",
+  "@isAlreadyInTheList": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "fromIgnoredSites": "{n0} from ignored sites",
+  "@fromIgnoredSites": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
   }
 }

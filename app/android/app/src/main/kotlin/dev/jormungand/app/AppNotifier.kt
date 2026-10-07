@@ -27,6 +27,12 @@ object AppNotifier {
     const val ACTION_OPEN_EVENT = "dev.jormungand.app.notif.OPEN_EVENT"
     const val EXTRA_EVENT = "jorm_event_id"
 
+    /** A button of an event notification (Create rule / Ignore site): opens the app and hands Dart the choice. */
+    const val ACTION_EVENT_ACT = "dev.jormungand.app.notif.EVENT_ACT"
+    const val EXTRA_ACT = "jorm_act"
+    const val EXTRA_SITE = "jorm_site"
+    const val EXTRA_VIA = "jorm_via"
+
     private const val GROUP = "jorm.events"
     private const val SUMMARY_ID = 2
     private const val EVENT_BASE = 1000
@@ -112,15 +118,27 @@ object AppNotifier {
             .build()
     }
 
-    /** One journal event as a notification ([eventId]: the journal id, what a tap hands back to Dart). */
-    fun postEvent(ctx: Context, eventId: Int, title: String, text: String) {
+    /**
+     * One journal event as a notification ([eventId]: the journal id, what a tap hands back to Dart).
+     * [actions] (id to label) are its buttons; a tap on one opens the app and hands Dart the action id
+     * with the event's [site] / [via] (the event itself may be long gone from the journal).
+     */
+    fun postEvent(
+        ctx: Context,
+        eventId: Int,
+        title: String,
+        text: String,
+        actions: List<Pair<String, String>> = emptyList(),
+        site: String = "",
+        via: String = "",
+    ) {
         val nm = manager(ctx)
         if (!nm.areNotificationsEnabled()) return
         ensureChannels(ctx)
         val nid = EVENT_BASE + (eventId and 0xFFFFF)
         if (children(nm).isEmpty()) burst.set(0) // everything before was dealt with
         burst.incrementAndGet()
-        val n = Notification.Builder(ctx, EVENTS_CHANNEL)
+        val b = Notification.Builder(ctx, EVENTS_CHANNEL)
             .setSmallIcon(ctx.applicationInfo.icon)
             .setContentTitle(title)
             .setContentText(text)
@@ -131,8 +149,23 @@ object AppNotifier {
             .setAutoCancel(true)
             .setGroup(GROUP)
             .setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
-            .build()
-        nm.notify(nid, n)
+        for ((i, a) in actions.withIndex()) {
+            val pi = openApp(
+                ctx,
+                {
+                    setAction(ACTION_EVENT_ACT)
+                        .putExtra(EXTRA_EVENT, eventId)
+                        .putExtra(EXTRA_ACT, a.first)
+                        .putExtra(EXTRA_SITE, site)
+                        .putExtra(EXTRA_VIA, via)
+                },
+                nid * 4 + 1 + i, // its own request code: one PendingIntent per button
+            )
+            b.addAction(
+                Notification.Action.Builder(Icon.createWithResource(ctx, android.R.drawable.ic_menu_info_details), a.second, pi).build(),
+            )
+        }
+        nm.notify(nid, b.build())
         val kids = children(nm)
         for (old in kids.sortedBy { it.postTime }.dropLast(MAX_CHILDREN)) nm.cancel(old.id)
         postSummary(ctx, nm)
@@ -172,6 +205,13 @@ object AppNotifier {
                 .setOnlyAlertOnce(quiet)
                 .build(),
         )
+    }
+
+    /** The notification of one event (a button of it was pressed: a button does not dismiss it by itself). */
+    fun cancelEvent(ctx: Context, eventId: Int) {
+        val nm = manager(ctx)
+        nm.cancel(EVENT_BASE + (eventId and 0xFFFFF))
+        postSummary(ctx, nm)
     }
 
     /** The app is in front again: what it posted about events is stale. */

@@ -1413,5 +1413,15 @@
   "Downloads what Auto-check finds; installing stays yours": "downloadsWhatAutoCheckFindsInstalling",
   "Show less": "showLess",
   "Copy site": "copySite",
-  "{0} is higher in the order — moved to it": "isHigherInTheOrderMoved"
+  "{0} is higher in the order — moved to it": "isHigherInTheOrderMoved",
+  "Ignore site": "ignoreSite",
+  "Undo": "undo",
+  "Ignored sites": "ignoredSites",
+  "No events, notifications or failed-request lines for these sites and their subdomains. Routing is not affected.": "noEventsNotificationsOrFailedRequest",
+  "No ignored sites": "noIgnoredSites",
+  "example.com": "exampleCom",
+  "Enter a site, like example.com": "enterASiteLikeExampleCom",
+  "{0} ignored": "ignored",
+  "{0} is already in the list": "isAlreadyInTheList",
+  "{#0} from ignored sites": "fromIgnoredSites"
 }

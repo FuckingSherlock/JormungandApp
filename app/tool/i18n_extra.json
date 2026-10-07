@@ -59,5 +59,15 @@
   "Downloads what Auto-check finds; installing stays yours": "Скачивает найденное автопроверкой; ставить обновление вы будете сами",
   "Show less": "Свернуть",
   "Copy site": "Копировать сайт",
-  "{0} is higher in the order — moved to it": "{0} выше по порядку — перешли на него"
+  "{0} is higher in the order — moved to it": "{0} выше по порядку — перешли на него",
+  "Ignore site": "Игнорировать сайт",
+  "{0} ignored": "{0} игнорируется",
+  "Undo": "Отменить",
+  "Ignored sites": "Игнорируемые сайты",
+  "No events, notifications or failed-request lines for these sites and their subdomains. Routing is not affected.": "Для этих сайтов и их поддоменов нет событий, уведомлений и строк об ошибках запросов. Маршрутизация не меняется.",
+  "No ignored sites": "Игнорируемых сайтов нет",
+  "example.com": "example.com",
+  "Enter a site, like example.com": "Введите сайт, например example.com",
+  "{0} is already in the list": "{0} уже в списке",
+  "{#0} from ignored sites": "{#0} от игнорируемых сайтов"
 }

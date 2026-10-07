@@ -18,6 +18,7 @@ import '../platform/notify_channel.dart';
 import '../theme/app_colors.g.dart';
 import '../platform/tile_channel.dart';
 import '../widgets/apps_sheet.dart';
+import '../widgets/ignored_sites.dart';
 import '../widgets/rule_form.dart';
 import '../widgets/rules_extras.dart';
 import '../widgets/settings_dns.dart';
@@ -68,6 +69,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   /// notification's text; a tap on one comes back through [NotifyIo.eventTaps].
   SystemNotifier? _sys;
   StreamSubscription<int>? _taps;
+  StreamSubscription<NoteActionTap>? _actTaps;
   StreamSubscription<void>? _homeSub;
   Timer? _flyTimer;
   final _navKey = GlobalKey();
@@ -120,24 +122,50 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       final io = NotifyIo.current;
       _sys = SystemNotifier(host, io: io)..start();
       _taps = io.eventTaps.listen(_openFromShade);
+      _actTaps = io.actionTaps.listen(_actFromShade);
       io.takeLaunchEvent().then((id) {
         if (id != null) _openFromShade(id);
+      });
+      io.takeLaunchAction().then((a) {
+        if (a != null) _actFromShade(a);
       });
     }
   }
 
   /// A tap on an event notification: Logs -> Events at it (once the journal is loaded).
-  void _openFromShade(int id) {
+  void _openFromShade(int id) => _whenReady(() => _links.openLogsEvent?.call(id));
+
+  /// A button of an event notification: Create rule (the editor, prefilled) or Ignore site (added,
+  /// with the same «ignored · Undo» toast as in the app).
+  void _actFromShade(NoteActionTap t) {
+    if (t.site.isEmpty) return;
+    _whenReady(() {
+      switch (t.action) {
+        case 'rule':
+          _links.newRuleFor?.call(host: t.site, via: t.via.isEmpty ? null : t.via);
+        case 'ignore':
+          ignoreSiteWithUndo(
+            ScaffoldMessenger.of(context),
+            context.l10n,
+            _logs!,
+            t.site,
+          );
+      }
+    });
+  }
+
+  /// Runs [then] once the host has loaded its state (now, when it has).
+  void _whenReady(VoidCallback then) {
     if (!mounted) return;
     final host = CoreHostScope.read(context);
     if (host.ready) {
-      _links.openLogsEvent?.call(id);
+      then();
       return;
     }
     void whenReady() {
       if (!host.ready) return;
       host.removeListener(whenReady);
-      if (mounted) _links.openLogsEvent?.call(id);
+      if (mounted) then();
     }
 
     host.addListener(whenReady);
@@ -147,6 +175,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _taps?.cancel();
+    _actTaps?.cancel();
     _homeSub?.cancel();
     _sys?.dispose();
     _notices?.cancel();
@@ -256,39 +285,62 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     messenger.hideCurrentSnackBar();
     // same offer as the Logs row: a site that opens through another entry -> a rule for it
     final d = e.data;
+    final l10n = context.l10n;
+    final site = e.cat == 'site' ? _logs!.words.host(d) : '';
     final canRule =
         e.cat == 'site' &&
         e.type == 'blocked' &&
         d['via'] != null &&
         _links.newRuleFor != null;
+    // a snackbar has room for one action: the two of a site event sit under its text
+    final inverse = Theme.of(context).colorScheme.inversePrimary;
+    Widget act(String label, VoidCallback onTap) => TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: inverse,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        minimumSize: const Size(0, 36),
+      ),
+      child: Text(label),
+    );
     final ctl = messenger.showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
-        action: canRule
-            ? SnackBarAction(
-                label: context.l10n.createRule,
-                onPressed: () {
-                  _flyTimer?.cancel();
-                  _links.newRuleFor!(
-                    host: _logs!.words.host(d),
-                    via: '${d['via']}',
-                  );
-                },
-              )
-            : null,
         // stays until the timer below (it needs the rect for the flight) or a tap
         duration: const Duration(hours: 1),
-        content: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            _flyTimer?.cancel();
-            messenger.hideCurrentSnackBar();
-            _links.openLogsEvent?.call(e.id);
-          },
-          child: SizedBox(
-            width: double.infinity,
-            child: Text(text, key: textKey),
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                _flyTimer?.cancel();
+                messenger.hideCurrentSnackBar();
+                _links.openLogsEvent?.call(e.id);
+              },
+              child: SizedBox(
+                width: double.infinity,
+                child: Text(text, key: textKey),
+              ),
+            ),
+            if (site.isNotEmpty)
+              Wrap(
+                spacing: 4,
+                children: [
+                  if (canRule)
+                    act(l10n.createRule, () {
+                      _flyTimer?.cancel();
+                      messenger.hideCurrentSnackBar();
+                      _links.newRuleFor!(host: site, via: '${d['via']}');
+                    }),
+                  act(l10n.ignoreSite, () {
+                    _flyTimer?.cancel();
+                    ignoreSiteWithUndo(messenger, l10n, _logs!, site);
+                  }),
+                ],
+              ),
+          ],
         ),
       ),
     );

@@ -16,11 +16,48 @@ enum NotifyPermission {
 /// A journal event for the shade: [id] is the event's id (a tap brings it back through
 /// [NotifyIo.eventTaps]).
 class SystemNote {
-  const SystemNote({required this.id, required this.title, this.text = ''});
+  const SystemNote({
+    required this.id,
+    required this.title,
+    this.text = '',
+    this.actions = const [],
+    this.site = '',
+    this.via = '',
+  });
 
   final int id;
   final String title;
   final String text;
+
+  /// Buttons of the notification: `(id, label)`; a press brings [NoteActionTap] back.
+  final List<(String, String)> actions;
+
+  /// The site / the entry it opens through, carried by the buttons (the event itself may be gone
+  /// from the journal when one is pressed).
+  final String site, via;
+}
+
+/// A press on a button of an event notification (`rule` | `ignore`): the app comes to the front and
+/// this arrives, through [NotifyIo.actionTaps] or [NotifyIo.takeLaunchAction].
+class NoteActionTap {
+  const NoteActionTap({
+    required this.id,
+    required this.action,
+    this.site = '',
+    this.via = '',
+  });
+
+  final int id;
+  final String action, site, via;
+
+  static NoteActionTap? fromMap(Object? m) => m is Map && m['id'] is int
+      ? NoteActionTap(
+          id: m['id'] as int,
+          action: '${m['act'] ?? ''}',
+          site: '${m['site'] ?? ''}',
+          via: '${m['via'] ?? ''}',
+        )
+      : null;
 }
 
 /// The seam to the system's notifications: the Android channel `jormungand/notify`
@@ -67,6 +104,12 @@ abstract class NotifyIo {
   /// The event of the notification that started the app and was not handed over yet.
   Future<int?> takeLaunchEvent();
 
+  /// Presses on the buttons of event notifications (Create rule / Ignore site) while the app runs.
+  Stream<NoteActionTap> get actionTaps;
+
+  /// The button that started the app and was not handed over yet.
+  Future<NoteActionTap?> takeLaunchAction();
+
   /// The Disconnect button of the VPN notification. The handler answers when it has taken the
   /// request; none set = the native side closes the tunnel itself.
   set onDisconnect(FutureOr<void> Function()? handler);
@@ -81,6 +124,7 @@ class PlatformNotifyIo implements NotifyIo {
 
   final _permission = ValueNotifier(NotifyPermission.unsupported);
   final _taps = StreamController<int>.broadcast();
+  final _actTaps = StreamController<NoteActionTap>.broadcast();
   FutureOr<void> Function()? _disconnect;
 
   @override
@@ -95,11 +139,18 @@ class PlatformNotifyIo implements NotifyIo {
   @override
   Stream<int> get eventTaps => _taps.stream;
 
+  @override
+  Stream<NoteActionTap> get actionTaps => _actTaps.stream;
+
   Future<Object?> _fromNative(MethodCall call) async {
     switch (call.method) {
       case 'openEvent':
         final id = call.arguments;
         if (id is int) _taps.add(id);
+        return null;
+      case 'eventAct':
+        final t = NoteActionTap.fromMap(call.arguments);
+        if (t != null) _actTaps.add(t);
         return null;
       case 'disconnect':
         final h = _disconnect;
@@ -154,6 +205,13 @@ class PlatformNotifyIo implements NotifyIo {
     'id': note.id,
     'title': note.title,
     'text': note.text,
+    if (note.actions.isNotEmpty) ...{
+      'actions': [
+        for (final (id, label) in note.actions) {'id': id, 'label': label},
+      ],
+      'site': note.site,
+      'via': note.via,
+    },
   });
 
   @override
@@ -166,6 +224,18 @@ class PlatformNotifyIo implements NotifyIo {
   @override
   Future<void> setVpnVisible(bool visible) =>
       _call('setStatus', <String, Object?>{'visible': visible});
+
+  @override
+  Future<NoteActionTap?> takeLaunchAction() async {
+    if (!available) return null;
+    try {
+      return NoteActionTap.fromMap(await _channel.invokeMethod<Object>('takeLaunchAction'));
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
 
   @override
   Future<int?> takeLaunchEvent() async {

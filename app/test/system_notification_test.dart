@@ -69,6 +69,23 @@ class FakeNotifyIo implements NotifyIo {
   @override
   Stream<int> get eventTaps => _taps.stream;
 
+  final _actTaps = StreamController<NoteActionTap>.broadcast();
+
+  /// A press on a button of a notification (`rule` | `ignore`).
+  void press(NoteActionTap t) => _actTaps.add(t);
+
+  @override
+  Stream<NoteActionTap> get actionTaps => _actTaps.stream;
+
+  NoteActionTap? launchAction;
+
+  @override
+  Future<NoteActionTap?> takeLaunchAction() async {
+    final a = launchAction;
+    launchAction = null;
+    return a;
+  }
+
   @override
   Future<int?> takeLaunchEvent() async {
     final id = launchEvent;
@@ -229,6 +246,48 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       final nav = tester.widget<NavigationBar>(find.byType(NavigationBar));
       expect(nav.selectedIndex, AppTab.logs.index);
+    });
+
+    testWidgets('a site notification has Create rule and Ignore site; a pressed button acts', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      goBackground(tester);
+      host.addEvent(
+        'site',
+        'blocked',
+        level: 'warn',
+        data: {'host': 'dead.example.com', 'via': 'nope'},
+      );
+      host.addEvent('site', 'unreachable', level: 'warn', data: {'host': 'other.org', 'tried': const []});
+      host.addEvent('conn', 'lost', level: 'warn');
+      await settle(tester);
+      expect(io.posted, hasLength(3));
+      expect(io.posted[0].actions.map((a) => a.$1), ['rule', 'ignore']);
+      expect([io.posted[0].site, io.posted[0].via], ['dead.example.com', 'nope']);
+      expect(io.posted[1].actions.map((a) => a.$1), ['ignore'], reason: 'no working route: no rule to offer');
+      expect(io.posted[2].actions, isEmpty);
+
+      comeBack(tester);
+      await tester.pump();
+      io.press(const NoteActionTap(id: 0, action: 'ignore', site: 'dead.example.com'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(host.notif.ignoredSites, ['dead.example.com']);
+      expect(find.text('dead.example.com ignored'), findsOneWidget);
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+
+      io.press(const NoteActionTap(id: 0, action: 'rule', site: 'dead.example.com', via: 'nope'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, 'dead.example.com'), findsOneWidget);
+    });
+
+    testWidgets('a button that started the app is handled once the app is up', (tester) async {
+      io.launchAction = const NoteActionTap(id: 0, action: 'ignore', site: 'dead.example.com');
+      final host = await open(tester);
+      expect(host.notif.ignoredSites, ['dead.example.com']);
+      expect(io.launchAction, isNull);
+      await tester.pumpAndSettle(const Duration(seconds: 5));
     });
 
     testWidgets('the notification that started the app opens Logs too', (

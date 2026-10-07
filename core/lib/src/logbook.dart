@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'durable.dart';
+import 'ignored_sites.dart';
 
 /// The core's own version (pubspec `version`), shown in Settings → Data → About.
 const coreVersion = '0.1.0';
@@ -29,8 +30,8 @@ final connLineRe = RegExp(r'(inbound|outbound)/[^:]*: (inbound|outbound) (packet
 /// empties the book, numbering goes on.
 ///
 /// Two rings, so the flood of successful connections cannot push the rest out: those lines
-/// ([connLineRe], not warnings / errors) keep the last [noiseCap]; everything else keeps the
-/// last [cap]. [since] merges them by number.
+/// ([connLineRe], not warnings / errors) and the failed ones of [ignored] sites keep the last
+/// [noiseCap]; everything else keeps the last [cap]. [since] merges them by number.
 ///
 /// With a [file] the warnings and errors are also kept on disk (JSON Lines, written behind
 /// the memory: collected and appended in one write [flushEvery] after the first, and by [flush]
@@ -53,6 +54,11 @@ class LogBook {
   final Duration flushEvery;
   final _lines = ListQueue<Map<String, Object>>();
   final _noise = ListQueue<Map<String, Object>>();
+
+  /// The sites the user ignores: their failed-connection lines (warnings / errors that name the
+  /// host or a subdomain) go to the noise ring, not the main one, so they cannot push the
+  /// rest out and are not kept on disk. Applies to the lines written from now on.
+  IgnoredSites ignored = IgnoredSites.empty;
   int _next = 0;
   bool _loaded = false;
 
@@ -116,7 +122,9 @@ class LogBook {
     load();
     final line = <String, Object>{'n': _next++, 't': DateTime.now().millisecondsSinceEpoch, 'src': src, 'lvl': level, 'msg': text};
     final problem = level == 'warn' || level == 'error';
-    if (!problem && src == 'sing-box' && connLineRe.hasMatch(text)) {
+    // a failed request to an ignored site is noise too: its own ring, nothing for the disk
+    final quiet = problem && !ignored.isEmpty && ignored.matchesText(text);
+    if (quiet || (!problem && src == 'sing-box' && connLineRe.hasMatch(text))) {
       _noise.add(line);
       while (_noise.length > noiseCap) {
         _noise.removeFirst();

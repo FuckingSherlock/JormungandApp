@@ -478,7 +478,7 @@ void main() {
     );
     await host.init();
     // the first push already knows the network and the default (Wi-Fi only)
-    expect(rec.updateBodies.last, {'autoCheck': true, 'channel': 'stable', 'autoDownload': 'wifi', 'metered': true});
+    expect(rec.updateBodies.last, {'autoCheck': true, 'channel': 'stable', 'autoDownload': 'wifi', 'metered': true, 'ignoredSites': []});
 
     net.isMetered = false;
     net.changes.add(false);
@@ -491,6 +491,13 @@ void main() {
     final n = rec.updateBodies.length;
     host.changed(); // nothing moved: nothing sent
     expect(rec.updateBodies, hasLength(n));
+
+    // the ignored sites go the same way: the core filters by them at once, no reconnect
+    host.notif.ignoredSites = ['dead.example.com'];
+    host.changed();
+    expect(rec.updateBodies.last['ignoredSites'], ['dead.example.com']);
+    expect(rec.ignoredSites.matches('api.dead.example.com'), isTrue);
+    expect(host.phase, isNot(ConnectionPhase.connecting));
     await net.changes.close();
   });
 

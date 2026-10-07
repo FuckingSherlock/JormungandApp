@@ -140,6 +140,9 @@ abstract interface class CoreApi {
   /// `{autoCheck: bool, channel: stable|beta, autoDownload: off|wifi|always, metered: bool}`: what the
   /// scheduled check does and whether it downloads what it finds (Settings → Data); `metered` is the
   /// platform's report of the underlying network (`wifi` downloads only while it is false).
+  /// Also `{ignoredSites: [host…]}` (any of the keys alone): the sites the journal and the raw log stay
+  /// quiet about (no `site/*` events; their failed-connection lines go to the noise ring); the host and
+  /// its subdomains; takes effect at once, no reconnect, routing is not touched.
   void updateSettings(Map<String, dynamic> body);
 
   /// The platform calls it right before it hands the downloaded file to the installer / after the

@@ -53,8 +53,9 @@ void main() {
     );
     await shown(tester);
 
-    expect(find.byType(SnackBarAction), findsOneWidget);
-    await tester.tap(find.byType(SnackBarAction));
+    // the two buttons (Create rule, Ignore site) sit under the text
+    expect(find.text('Ignore site'), findsOneWidget);
+    await tester.tap(find.text('Create rule'));
     await tester.pumpAndSettle();
 
     // the action does not also open Logs

@@ -7,6 +7,7 @@ import 'package:jormungand_core/jormungand_core.dart'
         EventFilter,
         EventGroup,
         EventRecord,
+        IgnoredSites,
         LogCfg,
         LogFeed,
         LogLine,
@@ -18,6 +19,7 @@ import 'package:jormungand_core/jormungand_core.dart'
 import '../l10n/l10n.dart';
 import 'core_host.dart';
 import 'event_text.dart';
+import 'settings_model.dart';
 
 /// What the Logs tab shows and keeps (mockup 46-logs.js, 47-events.js): the events journal and
 /// the raw log of the core, fed by the host's streams and a slow poll (the streams only say
@@ -180,7 +182,7 @@ class LogsController extends ChangeNotifier {
       if (force) notifyListeners();
       return;
     }
-    var changed = false;
+    var changed = _syncIgnored();
     try {
       var r = feed.apply(host.eventsPage(since: feed.next));
       if (r.reset) r = feed.apply(host.eventsPage());
@@ -194,6 +196,8 @@ class LogsController extends ChangeNotifier {
         if (cfg.seen.length != n) _save();
         for (final e in r.notify) {
           final kind = eventNotifKind[e.key];
+          // an event of a site ignored a moment ago (the core was not told yet) stays silent too
+          if (e.cat == 'site' && _ign.matches('${e.data['host'] ?? ''}')) continue;
           if (kind != null && notifAllows(host.catalog.unknown['notifCfg'], kind)) {
             _notify.add(e);
           }
@@ -215,7 +219,7 @@ class LogsController extends ChangeNotifier {
           _rawChanged();
           if (tab == 'raw' && !rawFollow) {
             final q = rawQuery.trim().toLowerCase();
-            rawUnseen += r.fresh.where((l) => LogFeed.shows(l, rawLevel, q, conns: cfg.showConns)).length;
+            rawUnseen += r.fresh.where((l) => raw.lineShows(l, rawLevel, q)).length;
           }
         }
       } catch (_) {}
@@ -386,6 +390,7 @@ class LogsController extends ChangeNotifier {
     rawLevel = 'all';
     // the line asked for may be a connection one: the chip goes on so it is there
     if (!cfg.showConns && raw.lines.any((l) => l.n == n && l.isConn)) setShowConns(true);
+    if (!cfg.showIgnored && raw.lines.any((l) => l.n == n && raw.isIgnored(l))) setShowIgnored(true);
     searching = false;
     rawQuery = '';
     _shownLines = null;
@@ -486,6 +491,69 @@ class LogsController extends ChangeNotifier {
     _shownLines = null;
     _unreadLines = null;
     rawVersion++;
+    notifyListeners();
+  }
+
+  /// The «from ignored sites» chip: the failed-connection lines of ignored sites shown or not (kept in the state).
+  void setShowIgnored(bool v) {
+    if (cfg.showIgnored == v) return;
+    cfg.showIgnored = v;
+    _save();
+    _shownLines = null;
+    _unreadLines = null;
+    rawVersion++;
+    notifyListeners();
+  }
+
+  // ── Ignored sites (kept in `notifCfg`, told to the core by the host; the raw view sorts by it) ──
+
+  IgnoredSites _ign = IgnoredSites.empty;
+  String _ignSig = '';
+
+  /// The ignored hosts, cleaned, in the order added.
+  List<String> get ignoredSites => host.notif.ignoredSites;
+
+  /// Whether [h] is an ignored host or a subdomain of one.
+  bool isSiteIgnored(String h) => _ign.matches(h);
+
+  /// The raw lines the list covers (the hint over the Raw list).
+  int get ignoredLineCount => raw.ignoredCount;
+
+  /// The list in the state changed (here, a restored backup...): the raw lines are sorted again.
+  /// True when it had.
+  bool _syncIgnored() {
+    final list = ignoredSites;
+    final sig = list.join('\n');
+    if (sig == _ignSig) return false;
+    _ignSig = sig;
+    _ign = IgnoredSites(list);
+    raw.setIgnored(_ign);
+    _rawChanged();
+    return true;
+  }
+
+  /// Adds [input] (a host or an address) to the ignored sites. Returns the cleaned host, or null when
+  /// it is not a host or is in the list already ([IgnoredSites.clean] tells which).
+  String? ignoreSite(String input) {
+    final h = IgnoredSites.clean(input);
+    if (h.isEmpty) return null;
+    final list = ignoredSites;
+    if (list.contains(h)) return null;
+    _setIgnored([...list, h]);
+    return h;
+  }
+
+  /// Takes [h] off the list (Undo of [ignoreSite], the x of the list).
+  void unignoreSite(String h) => _setIgnored([for (final x in ignoredSites) if (x != h) x]);
+
+  void clearIgnored() => _setIgnored(const []);
+
+  void _setIgnored(List<String> v) {
+    host.notif.ignoredSites = v;
+    host.changed(); // saves; the core hears of it at once, no reconnect
+    _syncIgnored();
+    _shownLines = null;
+    _unreadLines = null;
     notifyListeners();
   }
 

@@ -15,6 +15,7 @@ import 'elevation.dart';
 import 'eventbook.dart';
 import 'exitip.dart';
 import 'fallback.dart';
+import 'ignored_sites.dart';
 import 'localsource.dart';
 import 'logbook.dart';
 import 'manual.dart' as manual;
@@ -176,6 +177,10 @@ class CoreService implements CoreApi {
   DnsFailover? _dns;
   List<TargetFallback> _fallbacks = const [];
   RuleNames? _ruleNames; // the running config's rules by name (Live connections)
+
+  /// Sites the user wants no events / notifications / raw failed-connection lines about
+  /// (`updateSettings {ignoredSites}`); routing never reads it.
+  IgnoredSites ignoredSites = IgnoredSites.empty;
   List<DnsEntry> _dnsServers = const [];
   bool _dnsAuto = true; // Settings → DNS → Switch automatically (connect body `dnsAuto`, POST /api/dns/auto)
   final Timer Function(Duration, void Function()) _timer;
@@ -399,34 +404,8 @@ class CoreService implements CoreApi {
       runner.note('auto: ${u.id} is unstable (${u.strikes} drops), back to it after ${u.holdMs ~/ 60000} min of answers');
       eventBook.add('auto', 'unstable', 'warn', data: {'id': u.id, 'strikes': u.strikes, 'holdMs': u.holdMs});
     });
-    auto.blocked.listen((b) {
-      final at = b.dest.lastIndexOf(':'), port = at < 0 ? null : int.tryParse(b.dest.substring(at + 1));
-      eventBook.add('site', 'blocked', 'warn', data: {
-        'host': port == null ? b.dest : b.dest.substring(0, at),
-        'port': ?port,
-        'entry': b.route,
-        'server': b.server,
-        'dest': b.dest,
-        'via': b.via,
-        'viaServer': b.viaServer,
-        'rule': ruleEventData(_ruleNames, b.rule),
-        'process': ?processEventData(b.process),
-      });
-    });
-    auto.unreachable.listen((u) {
-      final at = u.dest.lastIndexOf(':'), port = at < 0 ? null : int.tryParse(u.dest.substring(at + 1));
-      eventBook.add('site', 'unreachable', 'warn', data: {
-        'host': port == null ? u.dest : u.dest.substring(0, at),
-        'port': ?port,
-        'entry': u.route,
-        'server': u.server,
-        'dest': u.dest,
-        'tried': [for (final t in u.tried) {'entry': t.route, 'server': t.server}],
-        if (u.retriesOff) 'retries': 'off',
-        'rule': ruleEventData(_ruleNames, u.rule),
-        'process': ?processEventData(u.process),
-      });
-    });
+    auto.blocked.listen(siteBlocked);
+    auto.unreachable.listen(siteUnreachable);
     auto.net.listen((n) {
       final (type, level) = switch (n.kind) {
         'lost' => ('lost', 'warn'),
@@ -440,6 +419,46 @@ class CoreService implements CoreApi {
     _startFallback(api, auto);
     _startDnsFailover(api, auto);
     _changed();
+  }
+
+  /// Auto found a site that does not open through the route but opens through another one: the
+  /// journal says so (`site/blocked`), unless the site is ignored. Public for the tests.
+  void siteBlocked(AutoBlocked b) {
+    final (host, port) = _hostPort(b.dest);
+    if (ignoredSites.matches(host)) return;
+    eventBook.add('site', 'blocked', 'warn', data: {
+      'host': host,
+      'port': ?port,
+      'entry': b.route,
+      'server': b.server,
+      'dest': b.dest,
+      'via': b.via,
+      'viaServer': b.viaServer,
+      'rule': ruleEventData(_ruleNames, b.rule),
+      'process': ?processEventData(b.process),
+    });
+  }
+
+  /// A site that opens through no route (`site/unreachable`), unless it is ignored.
+  void siteUnreachable(AutoUnreachable u) {
+    final (host, port) = _hostPort(u.dest);
+    if (ignoredSites.matches(host)) return;
+    eventBook.add('site', 'unreachable', 'warn', data: {
+      'host': host,
+      'port': ?port,
+      'entry': u.route,
+      'server': u.server,
+      'dest': u.dest,
+      'tried': [for (final t in u.tried) {'entry': t.route, 'server': t.server}],
+      if (u.retriesOff) 'retries': 'off',
+      'rule': ruleEventData(_ruleNames, u.rule),
+      'process': ?processEventData(u.process),
+    });
+  }
+
+  static (String, int?) _hostPort(String dest) {
+    final at = dest.lastIndexOf(':'), port = at < 0 ? null : int.tryParse(dest.substring(at + 1));
+    return (port == null ? dest : dest.substring(0, at), port);
   }
 
   /// "If unavailable" live: a target that stops answering has its rules' selectors flipped to
@@ -1347,6 +1366,11 @@ class CoreService implements CoreApi {
 
   @override
   void updateSettings(Map<String, dynamic> body) {
+    if (body.containsKey('ignoredSites')) {
+      final v = body['ignoredSites'];
+      ignoredSites = IgnoredSites([if (v is List) for (final h in v) '$h']);
+      logBook.ignored = ignoredSites;
+    }
     if (body.containsKey('autoCheck')) _updAuto = body['autoCheck'] != false;
     if (body.containsKey('channel')) _updChannel = _channelOf(body['channel']);
     if (body.containsKey('autoDownload')) _updAutoDownload = _autoDownloadOf(body['autoDownload']);

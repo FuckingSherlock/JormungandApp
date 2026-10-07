@@ -4,6 +4,7 @@
 /// the UI (it knows the catalog and the language).
 library;
 
+import 'ignored_sites.dart';
 import 'logbook.dart' show connLineRe;
 
 /// One event of the journal (`events()['events']` item, eventbook.dart).
@@ -218,7 +219,7 @@ class EventFilter {
 
 /// The kept part of the Logs state (`unknown['logCfg']` of the snapshot).
 class LogCfg {
-  LogCfg({this.showOwn = false, this.showConns = false, Set<int>? seen, this.rawTop, Set<int>? rawUnread})
+  LogCfg({this.showOwn = false, this.showConns = false, this.showIgnored = false, Set<int>? seen, this.rawTop, Set<int>? rawUnread})
       : seen = seen ?? <int>{},
         rawUnread = rawUnread ?? <int>{};
 
@@ -238,6 +239,7 @@ class LogCfg {
     return LogCfg(
       showOwn: j['showOwn'] == true,
       showConns: j['showConns'] == true,
+      showIgnored: j['showIgnored'] == true,
       seen: {for (final x in (j['seen'] as List? ?? const [])) if (x is num) x.toInt()},
       // -1: the core had no line yet (its numbers start at 0)
       rawTop: top is num && top >= -1 ? top.toInt() : null,
@@ -249,6 +251,9 @@ class LogCfg {
 
   /// Raw: show the lines of successful connections (off by default, they flood the log).
   bool showConns;
+
+  /// Raw: show the failed-connection lines of ignored sites (off by default).
+  bool showIgnored;
 
   /// Ids of the warning / error events already seen.
   final Set<int> seen;
@@ -262,6 +267,7 @@ class LogCfg {
   Map<String, dynamic> toJson() => {
     'showOwn': showOwn,
     'showConns': showConns,
+    'showIgnored': showIgnored,
     'seen': seen.toList()..sort(),
     'rawUnread': unreadRanges(rawUnread),
     'rawTop': rawTop,
@@ -353,11 +359,37 @@ class LogFeed {
   final lines = <LogLine>[];
   int? next;
 
+  IgnoredSites _ignored = IgnoredSites.empty;
+
+  // Numbers of the problem lines that name an ignored site (decided here against the current
+  // list, so a site ignored a minute ago also hides what it wrote before).
+  final _ignNs = <int>{};
+
+  /// The ignored sites changed: the lines are sorted again.
+  void setIgnored(IgnoredSites s) {
+    _ignored = s;
+    _ignNs.clear();
+    for (final l in lines) {
+      _markIgnored(l);
+    }
+  }
+
+  void _markIgnored(LogLine l) {
+    if (l.problem && _ignored.matchesText(l.msg)) _ignNs.add(l.n);
+  }
+
+  /// [l] is a failed-connection line of an ignored site.
+  bool isIgnored(LogLine l) => _ignNs.contains(l.n);
+
+  /// How many of the kept lines are from ignored sites (the hint over the Raw list).
+  int get ignoredCount => _ignNs.length;
+
   /// Applies a `log()` answer. Returns the new lines; `reset` = the core's numbers started over.
   ({List<LogLine> fresh, bool reset}) apply(Map r) {
     final rNext = (r['next'] as num?)?.toInt() ?? 0;
     if (next != null && rNext < next!) {
       lines.clear();
+      _ignNs.clear();
       next = null;
       resetUnread();
       return (fresh: const [], reset: true);
@@ -377,9 +409,15 @@ class LogFeed {
     }
     cfg.rawTop = (top ?? -1) > rNext - 1 ? top : rNext - 1;
     lines.addAll(fresh);
+    if (!_ignored.isEmpty) {
+      for (final l in fresh) {
+        _markIgnored(l);
+      }
+    }
     if (lines.length > logKeep) lines.removeRange(0, lines.length - logKeep);
     final lo = lines.isNotEmpty ? lines.first.n : next ?? 0;
     cfg.rawUnread.removeWhere((n) => n < lo);
+    _ignNs.removeWhere((n) => n < lo);
     return (fresh: fresh, reset: false);
   }
 
@@ -391,6 +429,7 @@ class LogFeed {
   /// A Clear: the unread are gone, what the core wrote so far is taken into account.
   void clear() {
     lines.clear();
+    _ignNs.clear();
     cfg.rawUnread.clear();
     final top = cfg.rawTop ?? -1, n = (next ?? 0) - 1;
     cfg.rawTop = top > n ? top : n;
@@ -408,8 +447,12 @@ class LogFeed {
   /// The lines of the Raw tab for a level filter ('all' / 'warn') and a search.
   List<LogLine> shown(String level, String query) {
     final q = query.trim().toLowerCase();
-    return [for (final l in lines) if (shows(l, level, q, conns: cfg.showConns)) l];
+    return [for (final l in lines) if (lineShows(l, level, q)) l];
   }
+
+  /// [shows] with this feed's switches: Connections and Ignored sites (hidden unless switched on).
+  bool lineShows(LogLine l, String level, String q) =>
+      shows(l, level, q, conns: cfg.showConns) && (cfg.showIgnored || !isIgnored(l));
 
   /// Whether the Raw tab shows [l] for [level] and [q] (a search already trimmed and lower case).
   /// With [conns] off the sing-box lines of successful connections are left out (problems never are).
@@ -419,7 +462,7 @@ class LogFeed {
       (q.isEmpty || l.msg.toLowerCase().contains(q) || l.src.contains(q));
 
   /// The lines the Connections switch lets through (before the level chip and the search).
-  int get visibleCount => cfg.showConns ? lines.length : lines.where((l) => !l.isConn).length;
+  int get visibleCount => cfg.showConns && (cfg.showIgnored || _ignNs.isEmpty) ? lines.length : lines.where((l) => (cfg.showConns || !l.isConn) && (cfg.showIgnored || !isIgnored(l))).length;
 
   List<LogLine> get unread => [for (final l in lines) if (cfg.rawUnread.contains(l.n)) l];
 }

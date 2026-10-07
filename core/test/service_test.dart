@@ -164,6 +164,28 @@ void main() {
     expect('${why['msg']}', allOf(contains('1 of 1 did not answer'), contains('x connect to the test inbound')));
   });
 
+  test('ignored sites: no site/* event for the host or a subdomain, others still get one; no reconnect', () async {
+    await start();
+    AutoBlocked blocked(String dest) => AutoBlocked(route: 'A', server: 's', dest: dest, via: 'B', viaServer: 't', at: 1);
+    AutoUnreachable gone(String dest) => AutoUnreachable(route: 'A', server: 's', dest: dest, tried: const [], at: 1);
+    List<String> hosts() => [
+          for (final e in (svc.events()['events'] as List).cast<Map>())
+            if (e['cat'] == 'site') '${e['type']} ${(e['data'] as Map)['host']}',
+        ];
+    svc.updateSettings({'ignoredSites': ['Dead.Example.com.', 'https://other.org/x', '', 'dead.example.com']});
+    expect(svc.ignoredSites.hosts, ['dead.example.com', 'other.org'], reason: 'cleaned, no repeats');
+    svc.siteBlocked(blocked('dead.example.com:443'));
+    svc.siteBlocked(blocked('api.dead.example.com:443'));
+    svc.siteUnreachable(gone('cdn.other.org:80'));
+    svc.siteBlocked(blocked('notdead.example.com:443')); // not a subdomain: a different host
+    svc.siteUnreachable(gone('example.com:443'));
+    expect(hosts(), ['blocked notdead.example.com', 'unreachable example.com']);
+    svc.updateSettings({'ignoredSites': []});
+    svc.siteBlocked(blocked('dead.example.com:443'));
+    expect(hosts().last, 'blocked dead.example.com');
+    expect(runner.running, isFalse, reason: 'changing the list does not touch the connection');
+  });
+
   test('dispose stops the box and ends the streams', () async {
     await start();
     await svc.connect(_body());

@@ -13,6 +13,7 @@ import '../widgets/app_view.dart';
 import '../widgets/event_rows.dart';
 import '../widgets/follow_list.dart';
 import '../widgets/form_parts.dart';
+import '../widgets/ignored_sites.dart';
 import '../widgets/log_parts.dart';
 import '../widgets/nodes_menus.dart' show copyText;
 import '../widgets/search_field.dart';
@@ -124,7 +125,7 @@ class _LogsPageState extends State<LogsPage> {
       if (_c.evFollow) _ev.toBottom(smooth: !first && _c.onScreen && _c.tab == 'events');
     }
     final lines = _c.raw.lines;
-    final rawSig = '${lines.length}|${lines.lastOrNull?.n}|${lines.firstOrNull?.n}|${_c.rawLevel}|${_c.rawQuery}|${_c.cfg.showConns}';
+    final rawSig = '${lines.length}|${lines.lastOrNull?.n}|${lines.firstOrNull?.n}|${_c.rawLevel}|${_c.rawQuery}|${_c.cfg.showConns}|${_c.cfg.showIgnored}|${_c.ignoredLineCount}';
     if (rawSig != _rawSig) {
       _rawSig = rawSig;
       _rawF.follow = _c.rawFollow;
@@ -333,10 +334,11 @@ class _LogsPageState extends State<LogsPage> {
       summary: _c.l10n == null ? null : _summary(l10n),
       actions: [
         SizedBox(
-          width: 124,
+          width: 168,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
-            children: events
+            children: [
+              ...events
                 ? [
                     Stack(
                       clipBehavior: Clip.none,
@@ -405,6 +407,14 @@ class _LogsPageState extends State<LogsPage> {
                       icon: const Icon(Icons.delete_outline, size: 19),
                     ),
                   ],
+              const SizedBox(width: 8),
+              IconBtn(
+                key: const ValueKey('logsMenu'),
+                tooltip: l10n.more,
+                onTap: () => showLogsMenu(context, _c),
+                icon: const Icon(Icons.more_vert, size: 19),
+              ),
+            ],
           ),
         ),
       ],
@@ -464,7 +474,12 @@ class _LogsPageState extends State<LogsPage> {
 
   Widget _levels(AppLocalizations l10n) {
     final conns = _c.cfg.showConns;
-    final unread = [for (final x in _c.unreadLines) if (conns || !x.isConn) x];
+    final ign = _c.cfg.showIgnored;
+    final ignored = _c.ignoredLineCount;
+    final unread = [
+      for (final x in _c.unreadLines)
+        if ((conns || !x.isConn) && (ign || !_c.raw.isIgnored(x))) x,
+    ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 6, 18, 8),
       child: Wrap(
@@ -490,6 +505,14 @@ class _LogsPageState extends State<LogsPage> {
             unread: const [],
             onTap: () => _c.setShowConns(!conns),
           ),
+          if (ignored > 0)
+            LevelChip(
+              key: const ValueKey('rawIgnored'),
+              label: l10n.fromIgnoredSites(ignored),
+              active: ign,
+              unread: const [],
+              onTap: () => _c.setShowIgnored(!ign),
+            ),
         ],
       ),
     );

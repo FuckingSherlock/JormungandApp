@@ -256,6 +256,16 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   `OPEN_EVENT` и id события → Dart (`openEvent`; при холодном старте — `takeLaunchEvent` после запуска
   оболочки) → `AppLinks.openLogsEvent`, как у тоста. Тексты канала, сводки и кнопки — ресурсы
   `jorm_notif_strings.xml` (язык системы, не выбор в приложении).
+- **Кнопки уведомления «сайт не открывается»** (`site/blocked` с `via` — «Create rule» и «Ignore site»;
+  `site/unreachable` — только «Ignore site»; подписи на языке приложения, их шлёт Dart в `post {actions:
+  [{id, label}], site, via}`). Нажатие — `PendingIntent.getActivity` на `MainActivity` с действием
+  `EVENT_ACT` (id события, действие `rule` | `ignore`, `site`, `via` в extras — событие к тому времени может
+  выпасть из журнала) → `NotifyChannel.onIntent` убирает это уведомление (кнопка само его не снимает) и шлёт
+  Dart `eventAct` (холодный старт — `takeLaunchAction` после запуска оболочки) → `NotifyIo.actionTaps` →
+  оболочка: `rule` открывает редактор правила с хостом, `ignore` добавляет хост в список и показывает
+  тост «{host} ignored · Undo». **Приложение при этом выходит на передний план** (activity-интент); «Ignore
+  без открытия приложения» (BroadcastReceiver) не сделан — после гибели процесса там некому править
+  снимок состояния.
 - **Разрешение** (API 33+; ниже — только переключатель системы). Запрос один раз за установку при первом
   успешном подключении (`request(once: true)`, нативный флаг в SharedPreferences; мастер-переключатель
   Notifications выключен — не просим) и когда пользователь включает переключатель на странице

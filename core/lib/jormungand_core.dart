@@ -18,6 +18,7 @@ export 'src/eventbook.dart';
 export 'src/exitip.dart';
 export 'src/fallback.dart';
 export 'src/fetch.dart';
+export 'src/ignored_sites.dart';
 export 'src/killjob.dart' show killOrphans;
 export 'src/localsource.dart';
 export 'src/log_view.dart';

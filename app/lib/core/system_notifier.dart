@@ -64,7 +64,23 @@ class SystemNotifier {
   /// An event that passed the journal's filter: the shade, with its own words.
   Future<void> postEvent(EventRecord e, EventWords words) {
     final d = words.describe(e);
-    return io.post(SystemNote(id: e.id, title: d.title, text: d.detail));
+    // "does not open": Create rule (when it opens through another entry) and Ignore site
+    final site = e.cat == 'site' ? words.host(e.data) : '';
+    final via = e.data['via'] == null ? '' : '${e.data['via']}';
+    return io.post(
+      SystemNote(
+        id: e.id,
+        title: d.title,
+        text: d.detail,
+        site: site,
+        via: via,
+        actions: [
+          if (site.isNotEmpty && e.type == 'blocked' && via.isNotEmpty)
+            ('rule', words.l10n.createRule),
+          if (site.isNotEmpty) ('ignore', words.l10n.ignoreSite),
+        ],
+      ),
+    );
   }
 
   /// The app came to the front: what was posted meanwhile is stale.

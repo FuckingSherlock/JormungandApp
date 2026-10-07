@@ -43,6 +43,42 @@ void main() {
     });
   });
 
+  group('ignored sites', () {
+    test('host matching: the host and its subdomains only', () {
+      final s = IgnoredSites(['Example.com', 'http://dead.org:8080/x', '*.wild.net', 'bad host']);
+      expect(s.hosts, ['example.com', 'dead.org', 'wild.net']);
+      expect(s.matches('example.com'), isTrue);
+      expect(s.matches('API.Example.com:443'), isTrue);
+      expect(s.matches('notexample.com'), isFalse);
+      expect(s.matches('example.com.evil.io'), isFalse);
+      expect(s.matchesText('dial tcp: lookup a.dead.org: no such host'), isTrue);
+      expect(s.matchesText('outbound connection to wild.net:443 failed.'), isTrue);
+      expect(s.matchesText('dial tcp 1.2.3.4:443: i/o timeout'), isFalse);
+    });
+
+    test('failed lines of an ignored site go to the noise ring: they do not push errors out, nor reach the disk', () async {
+      final dir = Directory.systemTemp.createTempSync('logbook-ign');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File(p.join(dir.path, 'problems.jsonl'));
+      final b = LogBook(cap: 3, noiseCap: 2, file: file, flushEvery: const Duration(milliseconds: 20));
+      b.ignored = IgnoredSites(['dead.example.com']);
+      b.singBox('ERROR[0001] real: broken'); // 0
+      for (var i = 0; i < 20; i++) {
+        b.singBox('WARN[0001] [$i 5ms] outbound/vless[x]: outbound connection to api.dead.example.com:443: i/o timeout');
+      }
+      b.note('warn', 'auto: dead.example.com:443 does not open through A');
+      b.singBox('ERROR[0001] other.org: refused');
+      final l = _lines(b);
+      expect(l.where((x) => '${x['msg']}'.contains('real: broken')).length, 1, reason: 'the error survives the flood');
+      expect(l.where((x) => '${x['msg']}'.contains('dead.example.com')).length, 2, reason: 'only the last noiseCap');
+      expect(l.where((x) => '${x['msg']}'.contains('other.org')).length, 1);
+      await b.flush();
+      final disk = file.readAsStringSync();
+      expect(disk, contains('real: broken'));
+      expect(disk, isNot(contains('dead.example.com')));
+    });
+  });
+
   group('log book on disk', () {
     late Directory dir;
     late File file;
