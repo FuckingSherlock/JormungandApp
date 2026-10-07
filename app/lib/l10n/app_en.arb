@@ -3032,5 +3032,15 @@
   "installingTheAppWillCloseAnd": "Installing… the app will close and restart",
   "autoDownload": "Auto-download",
   "wiFiOnly": "Wi-Fi only",
-  "downloadsWhatAutoCheckFindsInstalling": "Downloads what Auto-check finds; installing stays yours"
+  "downloadsWhatAutoCheckFindsInstalling": "Downloads what Auto-check finds; installing stays yours",
+  "showLess": "Show less",
+  "copySite": "Copy site",
+  "isHigherInTheOrderMoved": "{s0} is higher in the order — moved to it",
+  "@isHigherInTheOrderMoved": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  }
 }

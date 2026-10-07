@@ -4,6 +4,8 @@
 /// the UI (it knows the catalog and the language).
 library;
 
+import 'logbook.dart' show connLineRe;
+
 /// One event of the journal (`events()['events']` item, eventbook.dart).
 class EventRecord {
   EventRecord({
@@ -86,7 +88,7 @@ bool notifAllows(Object? cfg, String kind) {
 
 const eventRepeatWindow =Duration(minutes: 10);
 const eventKeep = 1000;
-const logKeep = 2000;
+const logKeep = 5500; // the log book: 5000 + its 500 connection lines
 
 const _keyFields = <String, List<String>>{
   'site/blocked': ['host', 'entry'],
@@ -216,7 +218,7 @@ class EventFilter {
 
 /// The kept part of the Logs state (`unknown['logCfg']` of the snapshot).
 class LogCfg {
-  LogCfg({this.showOwn = false, Set<int>? seen, this.rawTop, Set<int>? rawUnread})
+  LogCfg({this.showOwn = false, this.showConns = false, Set<int>? seen, this.rawTop, Set<int>? rawUnread})
       : seen = seen ?? <int>{},
         rawUnread = rawUnread ?? <int>{};
 
@@ -235,6 +237,7 @@ class LogCfg {
     }
     return LogCfg(
       showOwn: j['showOwn'] == true,
+      showConns: j['showConns'] == true,
       seen: {for (final x in (j['seen'] as List? ?? const [])) if (x is num) x.toInt()},
       // -1: the core had no line yet (its numbers start at 0)
       rawTop: top is num && top >= -1 ? top.toInt() : null,
@@ -243,6 +246,9 @@ class LogCfg {
   }
 
   bool showOwn;
+
+  /// Raw: show the lines of successful connections (off by default, they flood the log).
+  bool showConns;
 
   /// Ids of the warning / error events already seen.
   final Set<int> seen;
@@ -255,6 +261,7 @@ class LogCfg {
 
   Map<String, dynamic> toJson() => {
     'showOwn': showOwn,
+    'showConns': showConns,
     'seen': seen.toList()..sort(),
     'rawUnread': unreadRanges(rawUnread),
     'rawTop': rawTop,
@@ -294,6 +301,10 @@ class LogLine {
   String get groupKey => '${t ~/ 1000}|$lvl|$src';
 
   bool get problem => lvl == 'warn' || lvl == 'error';
+
+  /// A successful connection of sing-box: `[id 5ms] inbound/mixed[mixed-in]: inbound connection to host:443`
+  /// (also `outbound connection`, `packet connection`). Warnings and errors are never one.
+  bool get isConn => !problem && src != 'core' && connLineRe.hasMatch(msg);
 }
 
 /// The events list as the Logs tab keeps it, fed by `events()` pages and the push stream.
@@ -397,11 +408,18 @@ class LogFeed {
   /// The lines of the Raw tab for a level filter ('all' / 'warn') and a search.
   List<LogLine> shown(String level, String query) {
     final q = query.trim().toLowerCase();
-    return [
-      for (final l in lines)
-        if ((level == 'all' || l.problem) && (q.isEmpty || l.msg.toLowerCase().contains(q) || l.src.contains(q))) l,
-    ];
+    return [for (final l in lines) if (shows(l, level, q, conns: cfg.showConns)) l];
   }
+
+  /// Whether the Raw tab shows [l] for [level] and [q] (a search already trimmed and lower case).
+  /// With [conns] off the sing-box lines of successful connections are left out (problems never are).
+  static bool shows(LogLine l, String level, String q, {bool conns = true}) =>
+      (level == 'all' || l.problem) &&
+      (conns || !l.isConn) &&
+      (q.isEmpty || l.msg.toLowerCase().contains(q) || l.src.contains(q));
+
+  /// The lines the Connections switch lets through (before the level chip and the search).
+  int get visibleCount => cfg.showConns ? lines.length : lines.where((l) => !l.isConn).length;
 
   List<LogLine> get unread => [for (final l in lines) if (cfg.rawUnread.contains(l.n)) l];
 }

@@ -111,6 +111,16 @@ release signing key) are never written to the repo or read by the agent.
   retried until green.
 - Token economy: batch edits, then one verify; grep first, then read only the needed lines; look at
   the grid, not single screenshots.
+- Agent size: an agent re-reads its whole growing context on every tool call, so cost grows ~quadratically.
+  Split big work into stages of ~40–60 tool calls (core → app → CI), each a fresh agent with a short summary
+  of the previous stage; never one agent for a multi-layer feature.
+- Diagnose + fix in one agent: for a bug with a known search area give `coder-deep` "verify the hypothesis,
+  then fix" instead of an `analyzer` report followed by a coder re-reading the same code. `analyzer` only
+  for real design questions or unfamiliar code.
+- Checks in briefs: the coder runs only the tests of what it touched (+ `analyze`); the full suites and
+  gradle run once, by the lead via the Haiku `test-runner`, before the commit.
+- At most 4 Sonnet agents at once; avoid parallel agents in the same files. An agent stopped by a limit is
+  resumed with SendMessage (its context survives), not restarted.
 - User decisions and the plan go into `.claude_states/state_N.md` ("Дальше").
 
 ## Git, end of session, deploy

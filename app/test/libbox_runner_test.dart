@@ -186,6 +186,31 @@ void main() {
     timeout: const Timeout(Duration(seconds: 40)),
   );
 
+  test(
+    'watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)',
+    () async {
+      await runner.start(_config(await freePort()));
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (runner.api!.status == null && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(runner.api!.status, isNotNull, reason: 'watch() runs on the tunnel');
+      await runner.stop();
+
+      final box = LibboxRunner(port, upTimeout: const Duration(seconds: 10), watchApi: false);
+      final lines = <String>[];
+      box.onLog = lines.add;
+      await box.start(_config(await freePort()));
+      addTearDown(box.stop);
+      await Future<void>.delayed(const Duration(milliseconds: 2500)); // longer than the streams' 1 s push
+      expect(box.api!.status, isNull);
+      expect(await box.api!.serviceState(), isNull, reason: 'the commands work');
+      expect(lines, isNotEmpty, reason: 'sing-box\'s log (debug here) still comes through');
+    },
+    skip: _skip,
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+
   test('temporaryCache: a throwaway instance deletes its cache file on stop and on a failed start; the tunnel keeps its own', () async {
     final temp = File('${tmp.path}/box1.db')..writeAsStringSync('x');
     final kept = File('${tmp.path}/main.db')..writeAsStringSync('x');

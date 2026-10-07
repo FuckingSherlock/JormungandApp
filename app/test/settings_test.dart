@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/core/app_update.dart';
 import 'package:jormungand/core/core_host.dart';
+import 'package:jormungand/core/format.dart' show fmtBytes;
 import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/l10n/gen/app_localizations.dart';
 import 'package:jormungand/pages/home_page.dart';
@@ -477,6 +478,29 @@ void main() {
       await tester.tap(find.text('Install'));
       await tester.pump();
       expect(host.calls, contains('installUpdate'));
+    });
+
+    testWidgets('updates: an offer with a delta shows the patch size, not the installer\'s', (tester) async {
+      final host = FakeCoreHost();
+      host.update = const AppUpdate(
+        phase: UpdPhase.available,
+        current: '0.1.0',
+        offer: UpdOffer(
+          version: '0.2.0',
+          channel: 'stable',
+          size: 100 * 1000 * 1000,
+          deltaSize: 5 * 1024 * 1024,
+          notes: {},
+        ),
+      );
+      await _pump(tester, host);
+      await _open(tester, 'setdata');
+      expect(find.text(fmtBytes(5 * 1024 * 1024)), findsOneWidget);
+      expect(find.text(fmtBytes(100 * 1000 * 1000)), findsNothing);
+      // the JSON the core sends
+      final o = UpdOffer.fromJson({'version': '0.2.0', 'size': 100, 'delta': true, 'deltaSize': 7, 'notes': {}});
+      expect([o.size, o.deltaSize, o.downloadSize], [100, 7, 7]);
+      expect(UpdOffer.fromJson({'version': '0.2.0', 'size': 100, 'notes': {}}).downloadSize, 100);
     });
 
     testWidgets('updates: Install shows a status until the install returns; a refusal brings the button back', (tester) async {

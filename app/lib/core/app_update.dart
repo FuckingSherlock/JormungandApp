@@ -29,6 +29,7 @@ class UpdOffer {
     this.forced = false,
     this.page,
     this.kind = '',
+    this.deltaSize = 0,
   });
 
   factory UpdOffer.fromJson(Map<String, dynamic> j) => UpdOffer(
@@ -42,11 +43,19 @@ class UpdOffer {
     forced: j['forced'] == true,
     page: j['page'] as String?,
     kind: '${j['kind'] ?? ''}',
+    deltaSize: j['delta'] == true ? (j['deltaSize'] as num?)?.toInt() ?? 0 : 0,
   );
 
   final String version;
   final String channel;
   final int size;
+
+  /// > 0: a patch for the installed file is on offer, this many bytes (docs/updates.md, delta updates);
+  /// [size] stays the whole installer's.
+  final int deltaSize;
+
+  /// What the download will fetch: the patch when there is one, else the installer.
+  int get downloadSize => deltaSize > 0 ? deltaSize : size;
 
   /// Release notes by language (`en`, `ru`).
   final Map<String, String> notes;

@@ -110,6 +110,22 @@ if (\$d.ShowDialog() -eq 'OK') { [Console]::Out.Write(\$d.FileName) }
   static String _ps(String s) => s.replaceAll("'", "''");
 }
 
+/// Android: the APK the running app was installed from (`applicationInfo.sourceDir`); the core
+/// hashes it to pick a delta update and applies the patch to it. Null elsewhere / when the
+/// platform does not say.
+Future<String?> installedApkPath() async {
+  if (!Platform.isAndroid) return null;
+  try {
+    return await const MethodChannel(
+      'jormungand/files',
+    ).invokeMethod<String>('installedPackage');
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
+  }
+}
+
 /// Android: hands the downloaded, verified APK to the system installer (Kotlin
 /// UpdateInstaller). Resolves to true when the installer took it; false when it did not (the
 /// "Install unknown apps" screen was opened, the file did not pass the check, the user declined).

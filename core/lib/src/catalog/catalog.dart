@@ -114,6 +114,10 @@ class Catalog {
   /// Measured pings (`snapshot.pings`).
   final PingBook pings;
 
+  /// A chain's exits measured through one of its entries (`snapshot.pairs`): what decides
+  /// whether an exit works in the chain, instead of the direct [pings].
+  final PairBook pairs = PairBook();
+
   /// Keys of the snapshot this model does not know (`genCfg`, `notifCfg`, `logCfg`…):
   /// written back as they were.
   Json unknown = {};
@@ -141,7 +145,7 @@ class Catalog {
   static const _known = {
     'sourcesData', 'sourceOrder', 'sourceSeq', 'connectMode', 'connectOrder', 'activeConnectId', 'autoConnect', 'pinnedNode', //
     'modeState', 'profilesData', 'profileSeq', 'chainsData', 'chainSeq', 'catalogOrder', 'routeCustom', 'segState', 'connCfg', 'autoCfg',
-    'rulesData', 'ruleOrder', 'ruleSeq', 'quickCfg', 'appRules', 'ruleSets', 'rsSeq', 'dnsServers', 'dnsOrder', 'dnsSeq', 'dnsCfg', 'pings',
+    'rulesData', 'ruleOrder', 'ruleSeq', 'quickCfg', 'appRules', 'ruleSets', 'rsSeq', 'dnsServers', 'dnsOrder', 'dnsSeq', 'dnsCfg', 'pings', 'pairs',
   };
 
   void _loadDefaults() {
@@ -224,6 +228,7 @@ class Catalog {
     }
     if (s['dnsCfg'] is Map) dnsCfg = DnsCfg.fromJson(asJson(s['dnsCfg']));
     pings.restore(s['pings'], [for (final x in sourcesData.values) ...[...x.nodes, ...x.gone]]);
+    pairs.restore(s['pairs']);
     unknown = {for (final e in s.entries) if (!_known.contains(e.key)) e.key: deepCopy(e.value)};
   }
 
@@ -259,6 +264,7 @@ class Catalog {
         'dnsSeq': dnsSeq,
         'dnsCfg': dnsCfg.toJson(),
         'pings': pings.toJson(),
+        'pairs': pairs.toJson(),
         ...deepCopy(unknown) as Json,
       };
 
@@ -545,12 +551,79 @@ class Catalog {
     return coreNode(c.id, 'entryServer', refs) ?? bestAlive([for (final r in refs) r.node]);
   }
 
+  /// The exit [x] as the chain sees it: its pair with the entry in use ([entry], default
+  /// [chainEntryNode]) — an exit may be unreachable directly and fine through the entry.
+  /// An entry that never measured it hands over to the fastest fresh answer of [x] through
+  /// another entry of the chain (a miss through another entry proves nothing: it may be that
+  /// entry that was dead); null = no pair measured.
+  PingEntry? chainPair(Chain c, CatalogNode x, [CatalogNode? entry]) {
+    entry ??= chainEntryNode(c);
+    final own = entry == null ? null : pairs.entry(entry, x);
+    if (own != null) return own;
+    PingEntry? best;
+    for (final r in chainEntryRefs(c)) {
+      final p = pairs.entry(r.node, x);
+      if (p == null || p.ms == null || p.ms! < 0 || pings.now - p.at >= pingFreshMs) continue;
+      if (best == null || p.ms! < best.ms!) best = p;
+    }
+    return best;
+  }
+
+  /// What the exit [x] shows in the chain: the [chainPair]; a pair never measured shows the
+  /// server's direct answer, but only a live one (a direct miss says nothing about the way
+  /// through the entry). Null = unknown.
+  PingEntry? chainExitEntry(Chain c, CatalogNode x, [CatalogNode? entry]) {
+    final p = chainPair(c, x, entry);
+    if (p != null) return p;
+    final d = pings.entry(x);
+    return d != null && d.ms != null && d.ms! >= 0 ? d : null;
+  }
+
+  /// ms the exit answers through the chain; null = unknown or a ping in flight, `-1` = dead.
+  num? chainExitPing(Chain c, CatalogNode x, [CatalogNode? entry]) => chainExitEntry(c, x, entry)?.ms;
+
+  bool chainExitAlive(Chain c, CatalogNode x, [CatalogNode? entry]) {
+    final v = chainExitPing(c, x, entry);
+    return v != null && v >= 0;
+  }
+
+  /// Order by the chain's own measures: alive by ms, unknown, dead last (`PingBook.rank`).
+  double chainExitRank(Chain c, CatalogNode x, [CatalogNode? entry]) {
+    final v = chainExitPing(c, x, entry);
+    if (v == null) return 1e9;
+    return v >= 0 ? v.toDouble() : 2e9;
+  }
+
   CatalogNode? chainExitNode(Chain c) {
     final refs = chainExitRefs(c);
     final core = coreNode(c.id, 'server', refs);
     if (core != null) return core;
+    final entry = chainEntryNode(c);
     final exits = [for (final r in refs) r.node];
-    return c.exitMode == 'priority' ? _firstAlive(exits) : bestAlive(exits);
+    if (c.exitMode == 'priority') {
+      for (final x in exits) {
+        if (chainExitAlive(c, x, entry)) return x;
+      }
+      return null;
+    }
+    CatalogNode? best;
+    for (final x in exits) {
+      if (chainExitAlive(c, x, entry) && (best == null || chainExitPing(c, x, entry)! < chainExitPing(c, best, entry)!)) best = x;
+    }
+    return best;
+  }
+
+  /// The chain's latency for the dock and the card: the pair measured for the entry and exit
+  /// in use (the whole chain); both hops added up while that pair was never measured. Null =
+  /// no answer or nothing measured.
+  int? chainLatency(Chain c) {
+    final a = chainEntryNode(c);
+    if (a == null) return null;
+    final b = chainExitNode(c);
+    if (b == null) return null;
+    final p = chainPair(c, b, a);
+    if (p != null && p.ms != null) return p.ms! >= 0 ? p.ms!.round() : null;
+    return pings.isAlive(a) && pings.isAlive(b) ? (pings.ping(a)! + pings.ping(b)!).round() : null;
   }
 
   /// The entry has a server to connect through and it answers (`isUsable`).
@@ -566,19 +639,27 @@ class Catalog {
   /// Known not to work: silent `failAfter` times in a row, the last time within
   /// [pingFreshMs] (a result being re-measured keeps counting until the new one is in).
   /// Servers not measured yet, or measured long ago, still count as working (`knownDead`).
-  bool knownDead(CatalogNode n) {
-    final e = pings.entry(n);
+  bool knownDead(CatalogNode n) => _deadEntry(pings.entry(n));
+
+  bool _deadEntry(PingEntry? e) {
     if (e == null) return false;
     final missed = e.testing || (e.ms != null && e.ms! < 0);
     return missed && e.fails >= autoCfg.failAfter && pings.now - e.at < pingFreshMs;
   }
 
+  /// A chain's exit is known not to work through the entry in use (its pair, [chainPair]); a
+  /// direct miss says nothing, a pair never measured is not dead.
+  bool chainExitKnownDead(Chain c, CatalogNode x, [CatalogNode? entry]) => _deadEntry(chainPair(c, x, entry));
+
   /// Auto passes over an entry only when it is known not to work (`mayWork`): some server
-  /// not known dead; for a chain, on both ends.
+  /// not known dead; for a chain, an entry not known dead and an exit not known dead through
+  /// the entry in use.
   bool mayWork(String id) {
     final c = chainsData[id];
     if (c != null) {
-      return chainEntryRefs(c).any((r) => !knownDead(r.node)) && chainExitRefs(c).any((r) => !knownDead(r.node));
+      if (!chainEntryRefs(c).any((r) => !knownDead(r.node))) return false;
+      final entry = chainEntryNode(c);
+      return chainExitRefs(c).any((r) => !chainExitKnownDead(c, r.node, entry));
     }
     return unitPickRefs(id).any((r) => !knownDead(r.node));
   }

@@ -282,7 +282,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
   String url = defaultTestUrl,
   List<String> checkers = const [],
   int timeoutMs = 5000,
-  int parallel = 32,
+  int parallel = 16,
   ProbePool? pool,
   Duration maxAge = Duration.zero,
   void Function(String kind, String key, int ms)? onResult,
@@ -318,7 +318,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
         final (kind, key, id) = jobs[next++];
         final tag = '${kind == 'n' ? 't' : 'p'}/$key';
         final ms = await pl.probe(id, (u) async => (await ensure()).delay(tag, u, timeoutMs: timeoutMs),
-            url: url, checkers: checkers, maxAge: maxAge);
+            url: url, checkers: checkers, maxAge: maxAge, checkerFanOut: 2);
         (kind == 'n' ? res.nodes : res.pairs)[key] = ms;
         onResult?.call(kind, key, ms);
       }

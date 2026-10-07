@@ -43,6 +43,12 @@ extension CatalogDrafts on Catalog {
   List<T> byPing<T>(List<T> list, CatalogNode Function(T) nodeOf) =>
       stableSorted(list, (x) => pings.rank(nodeOf(x)));
 
+  /// `byPing` for a chain's exits: by their answer through the entry in use ([chainExitRank]).
+  List<T> byChainPing<T>(Chain c, List<T> list, CatalogNode Function(T) nodeOf) {
+    final entry = chainEntryNode(c);
+    return stableSorted(list, (x) => chainExitRank(c, nodeOf(x), entry));
+  }
+
   // ───────────────────────────── ids ─────────────────────────────
 
   /// A fresh id for a profile made now: `profile<time>` like the mockup, bumped while taken.

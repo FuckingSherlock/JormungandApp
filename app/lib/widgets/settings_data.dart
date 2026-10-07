@@ -344,7 +344,9 @@ class _UpdatesBlockState extends State<_UpdatesBlock> {
 
     Widget? card;
     if (o != null && p != UpdPhase.checking) {
-      final total = o.size > 0 ? o.size : u.total;
+      final total = p == UpdPhase.downloading && u.total > 0
+          ? u.total
+          : (o.downloadSize > 0 ? o.downloadSize : u.total);
       final pct = total > 0 ? (u.received * 100 / total).round().clamp(0, 100) : 0;
       final notes = o.notesFor(lang);
       card = Container(
@@ -379,7 +381,7 @@ class _UpdatesBlockState extends State<_UpdatesBlock> {
                   ),
                 ),
                 Text(
-                  fmtBytes(o.size),
+                  fmtBytes(o.downloadSize),
                   style: monoText.copyWith(fontSize: 12, color: c.t2),
                 ),
               ],

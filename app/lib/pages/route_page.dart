@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
-    show CatalogDrafts, CatalogNode, NodeRef, OffReason;
+    show Catalog, CatalogDrafts, CatalogNode, NodeRef, OffReason;
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
@@ -778,6 +778,7 @@ class _EntryRow extends StatelessWidget {
     final skip = auto && !e.inAuto;
     final src = catalog.sourcesData[id];
     final off = src == null ? 0 : catalog.offCount(src);
+    final subs = _subSources(catalog, id);
 
     final tags = <Widget>[
       if (isChain)
@@ -865,15 +866,22 @@ class _EntryRow extends StatelessWidget {
                   ),
                 ),
               ),
-              ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 34),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: PingAllButton(
-                    tooltip: l10n.pingItsServers2,
-                    onTap: () => host.pingEntry(id),
-                  ),
+              if (subs.isNotEmpty)
+                IconBtn(
+                  kind: IconBtnKind.ghost,
+                  large: true,
+                  tooltip: l10n.update,
+                  onTap: () {
+                    for (final sid in subs) {
+                      host.updateSource(sid);
+                    }
+                  },
+                  icon: Spin(spinning: subs.any(host.isUpdating), child: const Icon(Icons.refresh)),
                 ),
+              PingAllButton(
+                large: true,
+                tooltip: l10n.pingItsServers2,
+                onTap: () => host.pingEntry(id),
               ),
             ],
           ),
@@ -1007,23 +1015,6 @@ class _Body extends StatelessWidget {
         ? catalog.unitPickRefs(id)
         : catalog.byPing(catalog.unitRefs(id), (r) => r.node);
     final pin = catalog.pinnedRef(id);
-    final subs = {
-      for (final r in catalog.unitRefs(id, withOff: true))
-        if (catalog.sourcesData[r.sid]?.kind == 'sub') r.sid,
-    };
-    final updating = subs.any(host.isUpdating);
-    final update = subs.isEmpty
-        ? null
-        : IconBtn(
-            kind: IconBtnKind.ghost,
-            tooltip: l10n.update,
-            onTap: () {
-              for (final sid in subs) {
-                host.updateSource(sid);
-              }
-            },
-            icon: Spin(spinning: updating, child: const Icon(Icons.refresh)),
-          );
     final hint = pin != null
         ? l10n.manualOnlyTheHighlightedServer
         : priority
@@ -1033,7 +1024,19 @@ class _Body extends StatelessWidget {
     var rank = 0;
     final ranks = [for (final _ in refs) priority ? ++rank : null];
 
-    Widget row(int i) {
+    // known-dead servers go to the "Unavailable" block (not while reordering Priority)
+    final split = !(priority && edit);
+    final dead = <int>[
+      if (split)
+        for (var i = 0; i < refs.length; i++)
+          if (catalog.knownDead(refs[i].node)) i,
+    ];
+    final alive = [
+      for (var i = 0; i < refs.length; i++)
+        if (!dead.contains(i)) i,
+    ];
+
+    Widget row(int i, {bool top = true}) {
       final r = refs[i];
       final pinned = pin != null && pin.key == r.key;
       return Container(
@@ -1046,7 +1049,7 @@ class _Body extends StatelessWidget {
             : null,
         child: NodeRow(
           node: r.node,
-          topBorder: i > 0,
+          topBorder: top && i > 0,
           lead: priority
               ? [
                   if (edit)
@@ -1089,7 +1092,17 @@ class _Body extends StatelessWidget {
         itemBuilder: (context, i) => row(i),
       );
     } else {
-      list = Column(children: [for (var i = 0; i < refs.length; i++) row(i)]);
+      list = Column(
+        children: [
+          for (final (k, i) in alive.indexed) row(i, top: k > 0),
+          if (dead.isNotEmpty)
+            _DeadBlock(
+              key: ValueKey('route-dead-$id'),
+              count: dead.length,
+              rowAt: (k) => row(dead[k], top: k > 0),
+            ),
+        ],
+      );
     }
 
     return Padding(
@@ -1101,16 +1114,10 @@ class _Body extends StatelessWidget {
             PickModeSwitch(
               priority: priority,
               onChanged: (p) => host.setPickMode(id, p ? 'priority' : 'fastest'),
-              trailing: update,
             ),
             HintText(hint),
           ] else
-            Row(
-              children: [
-                Expanded(child: HintText(hint)),
-                ?update,
-              ],
-            ),
+            HintText(hint),
           list,
         ],
       ),
@@ -1134,8 +1141,25 @@ class _ChainBody extends StatelessWidget {
     final chain = catalog.chainsData[id];
     if (chain == null) return const SizedBox.shrink();
 
-    Widget side(String label, String? unitId, List<NodeRef> refs, CatalogNode? now) {
+    Widget side(String label, String? unitId, List<NodeRef> refs, CatalogNode? now, {bool exit = false}) {
       final mixed = refs.map((r) => r.sid).toSet().length > 1;
+      // an exit is dead through the chain's entry (the pair), an entry on its own ping
+      bool isDead(NodeRef r) =>
+          exit ? catalog.chainExitKnownDead(chain, r.node) : catalog.knownDead(r.node);
+      final alive = [for (final r in refs) if (!isDead(r)) r];
+      final dead = [for (final r in refs) if (isDead(r)) r];
+      Widget nodeRow(NodeRef r, bool top, bool exit) => NodeRow(
+        key: ValueKey('chain-$id-$label-${r.key}'),
+        node: r.node,
+        sourceName: mixed ? catalog.sourcesData[r.sid]?.name : null,
+        now: identical(r.node, now),
+        topBorder: top,
+        // an exit answers through the chain's entry: shown and measured that way
+        trailing: exit ? ChainExitLatency(chain, r.node) : null,
+        onTap: () => exit
+            ? host.pingChain(chain, exits: [r.node], entries: false)
+            : host.pingNodes([r.node]),
+      );
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1158,16 +1182,15 @@ class _ChainBody extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(l10n.noWorkingServers, style: TextStyle(fontSize: 13, color: c.t3)),
             )
-          else
-            for (final (i, r) in refs.indexed)
-              NodeRow(
-                key: ValueKey('chain-$id-$label-${r.key}'),
-                node: r.node,
-                sourceName: mixed ? catalog.sourcesData[r.sid]?.name : null,
-                now: identical(r.node, now),
-                topBorder: i > 0,
-                onTap: () => host.pingNodes([r.node]),
+          else ...[
+            for (final (k, r) in alive.indexed) nodeRow(r, k > 0, exit),
+            if (dead.isNotEmpty)
+              _DeadBlock(
+                key: ValueKey('route-dead-$id-$label'),
+                count: dead.length,
+                rowAt: (k) => nodeRow(dead[k], k > 0, exit),
               ),
+          ],
         ],
       );
     }
@@ -1187,14 +1210,78 @@ class _ChainBody extends StatelessWidget {
           side(
             l10n.exit,
             chain.outId,
-            chain.exitMode == 'priority' ? exits : catalog.byPing<NodeRef>(exits, (r) => r.node),
+            chain.exitMode == 'priority' ? exits : catalog.byChainPing<NodeRef>(chain, exits, (r) => r.node),
             catalog.chainExitNode(chain),
+            exit: true,
           ),
         ],
       ),
     );
   }
 }
+
+/// The servers of an unfolded entry that are known dead, in a block looking like the "removed by
+/// the provider" `GoneBlock` ("Unavailable · N"): the first [_deadHead] rows, "Show all N" for the
+/// rest (and "Show less" back). [rowAt] builds the k-th dead row.
+class _DeadBlock extends StatefulWidget {
+  const _DeadBlock({super.key, required this.count, required this.rowAt});
+
+  final int count;
+  final Widget Function(int k) rowAt;
+
+  static const _deadHead = 2;
+
+  @override
+  State<_DeadBlock> createState() => _DeadBlockState();
+}
+
+class _DeadBlockState extends State<_DeadBlock> {
+  bool _all = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final l10n = context.l10n;
+    final n = widget.count;
+    final more = n > _DeadBlock._deadHead;
+    final shown = _all || !more ? n : _DeadBlock._deadHead;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(border: Border(top: BorderSide(color: c.border))),
+          child: Text(
+            l10n.unavailable3('$n'),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.t2),
+          ),
+        ),
+        for (var k = 0; k < shown; k++) widget.rowAt(k),
+        if (more)
+          InkWell(
+            key: const ValueKey('route-dead-toggle'),
+            onTap: () => setState(() => _all = !_all),
+            splashFactory: NoSplash.splashFactory,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              child: Text(
+                _all ? l10n.showLess : l10n.showAll2(n),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.accent),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The subscriptions behind an entry (what its refresh button updates); none for a chain.
+Set<String> _subSources(Catalog catalog, String id) => catalog.chainsData[id] != null
+    ? const {}
+    : {
+        for (final r in catalog.unitRefs(id, withOff: true))
+          if (catalog.sourcesData[r.sid]?.kind == 'sub') r.sid,
+      };
 
 /// `.conn-row.broken`: an entry with nothing to connect through; a tap says what to switch on.
 class _BrokenRow extends StatelessWidget {

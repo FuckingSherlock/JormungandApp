@@ -74,5 +74,22 @@ void main() {
       Future<int> test(String u) async => u == 'url' ? throw StateError('boom') : 5;
       expect(await withCheckers(test, 'url', ['a']), 5);
     });
+
+    test('fanOut: checkers go in groups, the next group only when the one before missed', () async {
+      final called = <String>[];
+      Future<int> test(String u) async {
+        called.add(u);
+        return u == 'c' ? 9 : -1;
+      }
+
+      expect(await withCheckers(test, 'url', ['a', 'b', 'c', 'd', 'e'], fanOut: 2), 9);
+      expect(called, ['url', 'a', 'b', 'c', 'd']);
+      expect(called.contains('e'), isFalse, reason: 'the third group is not asked once the second answered');
+    });
+
+    test('fanOut: all groups miss -> -1', () async {
+      Future<int> test(String u) async => -1;
+      expect(await withCheckers(test, 'url', ['a', 'b', 'c'], fanOut: 2), -1);
+    });
   });
 }

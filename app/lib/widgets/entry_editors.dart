@@ -599,9 +599,8 @@ class _ChainEditorState extends State<_ChainEditor> {
                   }),
                   trailing: PingAllButton(
                     tooltip: l10n.testLatencyOfTheExitServers,
-                    onTap: () => host.pingNodes([
-                      for (final r in catalog.chainExitRefs(_d)) r.node,
-                    ]),
+                    // the exits are measured through the entry in use, not directly
+                    onTap: () => host.pingChain(_d, entries: false),
                   ),
                 ),
                 HintText(
@@ -682,6 +681,8 @@ class _ChainEditorState extends State<_ChainEditor> {
                 : '${n == null ? '' : '${n.flag} '}${nOn < all.length ? l10n.ofNodes(nOn, all.length) : l10n.nodesPlural(all.length)}';
             final List<NodeRef> list = active && priority
                 ? catalog.chainExitOrder(_d)
+                : active && side == 'out'
+                ? catalog.byChainPing<NodeRef>(_d, all, (r) => r.node)
                 : catalog.byPing<NodeRef>(all, (r) => r.node);
             return Stack(
               children: [
@@ -772,6 +773,7 @@ class _ChainEditorState extends State<_ChainEditor> {
                               PickRows(
                                 refs: list,
                                 orderable: priority,
+                                exitOf: side == 'out' ? _d : null,
                                 isOn: (r) => !off.contains(r.key),
                                 onTap: (r) => setState(
                                   () =>

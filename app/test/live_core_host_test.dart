@@ -434,6 +434,34 @@ void main() {
     },
   );
 
+  test(
+    'a chain ping goes to the pair book (exits through the entry), never to the exits\' own pings; one that cannot run keeps the old pair',
+    () async {
+      await start();
+      final catalog = host.catalog;
+      final chain = Chain(id: 'c1', name: 'C', inId: 'b', outId: 'a');
+      catalog.chainsData['c1'] = chain;
+      catalog.catalogOrder['simple']!.add('c1');
+      final b1 = catalog.sourcesData['b']!.nodes.single;
+      final a = catalog.sourcesData['a']!.nodes;
+      catalog.pings.set(b1, 20); // the entry answers: it is the one in use
+      catalog.pairs.set(b1, a[0], 55, catalog.pings.now);
+      boxFails = SingBoxError('no sing-box');
+
+      await host.pingChain(chain, entries: false);
+
+      expect(catalog.pairs.ping(b1, a[0]), 55); // not measured: the old value stays
+      expect(catalog.pairs.entry(b1, a[1]), isNull); // never measured: a dash
+      expect(catalog.pairs.anyTesting, isFalse);
+      expect(catalog.pings.entry(a[0]), isNull); // the exits were not pinged directly
+      expect(catalog.pings.entry(a[1]), isNull);
+      // what the chain lives by is the pair
+      expect(catalog.chainExitNode(chain), same(a[0]));
+      expect(catalog.chainLatency(chain), 55);
+      boxFails = null;
+    },
+  );
+
   test('update settings (auto-download, metered network) go to the core and follow every change', () async {
     await start();
     await host.shutdown();

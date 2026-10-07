@@ -1,8 +1,9 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:jormungand_core/jormungand_core.dart'
-    show Catalog, CatalogNode, LiveConn, dnsLatency;
+    show Catalog, CatalogNode, Chain, LiveConn, dnsLatency;
 
 import 'app_update.dart';
 import 'catalog_forms.dart';
@@ -165,6 +166,20 @@ class TrafficInfo {
   final int udp;
 
   int get connections => tcp + udp;
+}
+
+/// Holds the live [TrafficInfo]; [update] says whether the listeners hear of it (a poll that
+/// changed nothing the cards show keeps the newest data without a rebuild).
+class TrafficNotifier extends ChangeNotifier implements ValueListenable<TrafficInfo> {
+  TrafficInfo _value = TrafficInfo.zero;
+
+  @override
+  TrafficInfo get value => _value;
+
+  void update(TrafficInfo next, {bool notify = true}) {
+    _value = next;
+    if (notify) notifyListeners();
+  }
 }
 
 /// The small kind label of the dock row; never translated (mockup `profCardLabel`, `data-notr`).
@@ -339,7 +354,20 @@ abstract class CoreHost extends ChangeNotifier {
   bool get catalogEmpty;
 
   ExitState get exit;
-  TrafficInfo get traffic;
+
+  /// Live speed / totals / connections. Kept apart from the host's own notifications: it moves
+  /// every second while connected, and only the stat cards and the live-connections sheet listen
+  /// to [trafficNotifier] — [notifyListeners] is not called for it.
+  TrafficInfo get traffic => trafficNotifier.value;
+
+  /// The listenable of [traffic].
+  final TrafficNotifier trafficNotifier = TrafficNotifier();
+
+  @override
+  void dispose() {
+    trafficNotifier.dispose();
+    super.dispose();
+  }
 
   /// Tap on the Exit IP card: check where traffic leaves again.
   Future<void> refreshExit();
@@ -434,8 +462,15 @@ abstract class CoreHost extends ChangeNotifier {
 
   /// The route check's pair ping (`backend.pingPair`): every one of [exits] through [entry] (the
   /// exit's outbound detoured via the entry's), in one core call. Latency per exit in order,
-  /// `-1` = no answer (also for a server with no usable outbound). Nothing goes to the ping book.
+  /// `-1` = no answer (also for a server with no usable outbound). Nothing goes to the pair book
+  /// (the caller writes what it keeps: `catalog.pairs`).
   Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits);
+
+  /// A chain measured the way it connects: its entries directly (always with [entries], else only
+  /// when none is in use yet), then [exits] (default: all of the chain's) through the entry in
+  /// use (`catalog.chainEntryNode`) — the pair results land in `catalog.pairs`, what the chain's
+  /// exits live by. A chain exit is never pinged directly for the chain.
+  Future<void> pingChain(Chain c, {Iterable<CatalogNode>? exits, bool entries = true});
 
   // ── share, speed test, manual servers ──
 
@@ -605,21 +640,67 @@ class DnsHealth {
   final Set<String> failed;
 }
 
-class CoreHostScope extends InheritedNotifier<CoreHost> {
-  const CoreHostScope({super.key, required CoreHost host, required super.child})
-    : super(notifier: host);
+/// The host for the widgets below. [listenTo] (default: the host itself) is what rebuilds the
+/// dependents: the shell gives each tab a [HostGate], so a tab that is not on screen is not
+/// rebuilt by the host's notifications.
+class CoreHostScope extends InheritedNotifier<Listenable> {
+  const CoreHostScope({
+    super.key,
+    required this.host,
+    Listenable? listenTo,
+    required super.child,
+  }) : super(notifier: listenTo ?? host);
+
+  final CoreHost host;
 
   /// Listens: rebuilds when the host notifies.
   static CoreHost of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<CoreHostScope>();
     assert(scope != null, 'No CoreHostScope above this context');
-    return scope!.notifier!;
+    return scope!.host;
   }
 
   /// For event handlers: no rebuild dependency.
   static CoreHost read(BuildContext context) {
     final scope = context.getInheritedWidgetOfExactType<CoreHostScope>();
     assert(scope != null, 'No CoreHostScope above this context');
-    return scope!.notifier!;
+    return scope!.host;
+  }
+}
+
+/// Passes the host's notifications on while [active]; one that came meanwhile is delivered once
+/// when it turns active again (a hidden tab catches up in a single rebuild).
+class HostGate extends ChangeNotifier {
+  HostGate(this._source, {bool active = true}) : _active = active {
+    _source.addListener(_onSource);
+  }
+
+  final Listenable _source;
+  bool _active;
+  bool _stale = false;
+
+  bool get active => _active;
+
+  set active(bool on) {
+    if (on == _active) return;
+    _active = on;
+    if (on && _stale) {
+      _stale = false;
+      notifyListeners();
+    }
+  }
+
+  void _onSource() {
+    if (_active) {
+      notifyListeners();
+    } else {
+      _stale = true;
+    }
+  }
+
+  @override
+  void dispose() {
+    _source.removeListener(_onSource);
+    super.dispose();
   }
 }

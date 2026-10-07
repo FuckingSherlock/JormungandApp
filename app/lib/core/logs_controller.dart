@@ -28,6 +28,18 @@ import 'event_text.dart';
 ///
 /// One per app, owned by the shell: it runs in the background too, because the in-app
 /// notifications (toasts) and the dots on the Logs tab come from it.
+///
+/// What it costs is kept proportional to what the user can see (the core writes a line per
+/// sing-box message, a failed connect or a ping run is a burst of hundreds):
+/// - the streams only arm a ~300 ms timer ([_pollSoon]); one poll then reads what is new
+///   (the core finds it by number, `since`), so a burst is one read;
+/// - the events are read always (toasts, the dots: [unseenNotifier], which is all the shell's nav
+///   listens to), but this controller's own listeners (the Logs page) hear of a change, and the
+///   derived lists are rebuilt, only while the Logs tab is on screen ([visible]);
+/// - the raw lines are not read at all while it is not: no line stream, no list. The first look
+///   catches up from the cursor ([LogFeed.next]); what arrived meanwhile is unread, as before;
+/// - the unread numbers are written to the state when the tab or the app goes away ([flush]),
+///   never per line.
 class LogsController extends ChangeNotifier {
   LogsController(this.host);
 
@@ -52,14 +64,39 @@ class LogsController extends ChangeNotifier {
   /// Unfolded event rows (`EventGroup.key`).
   final openRows = <int>{};
 
-  /// The Logs tab is on screen (the owner sets it).
+  /// The Logs tab is the selected one (the owner sets it).
   bool onScreen = false;
+  bool _foreground = true;
+
+  /// The Logs tab is on screen and the app is in front: the only time the page needs anything.
+  bool get visible => onScreen && _foreground;
 
   /// The shell tells whether the Logs tab is the one on screen; the page marks what it shows as seen.
   void setOnScreen(bool on) {
     if (onScreen == on) return;
+    final was = visible;
     onScreen = on;
-    notifyListeners();
+    _visibleChanged(was);
+  }
+
+  /// The shell tells whether the app is in front (not paused / hidden). Behind, the page is
+  /// not fed and the unread numbers are kept.
+  void setForeground(bool front) {
+    if (_foreground == front) return;
+    final was = visible;
+    _foreground = front;
+    _visibleChanged(was);
+  }
+
+  void _visibleChanged(bool was) {
+    if (visible == was) return; // the tab changed behind the app: the page is not watching
+    _syncLineSub();
+    if (visible) {
+      _poll(force: true); // catch up on what came while it was not looked at
+    } else {
+      flush();
+      notifyListeners();
+    }
   }
 
   /// Background events that may notify (not own, newer than the first look, switched on in
@@ -76,19 +113,35 @@ class LogsController extends ChangeNotifier {
   bool _loaded = false;
   bool _disposed = false;
   StreamSubscription<Map<String, dynamic>>? _evSub, _lineSub;
-  Timer? _timer, _persist;
-  bool _pollQueued = false;
+  Timer? _timer, _debounce;
   List<EventGroup>? _groups;
   List<EventRecord>? _shown;
-  String _savedRaw = '';
+
+  /// How long a burst of lines / events is gathered before one read of the core.
+  static const pollDelay = Duration(milliseconds: 300);
+
+  /// Bumped whenever the events list or the filter over it changes / the raw lines or their
+  /// unread numbers change: the pages cache what they derive from them by these.
+  int evVersion = 0, rawVersion = 0;
 
   /// Starts listening; the first read waits for the host to be ready.
   void start() {
     _evSub ??= host.events.listen((_) => _pollSoon());
-    _lineSub ??= host.logLines.listen((_) => _pollSoon());
+    _syncLineSub();
     _timer ??= Timer.periodic(const Duration(seconds: 3), (_) => _poll());
     host.addListener(_onHost);
     _onHost();
+  }
+
+  // The raw lines are only wanted while the page shows them.
+  void _syncLineSub() {
+    if (_disposed) return;
+    if (visible) {
+      _lineSub ??= host.logLines.listen((_) => _pollSoon());
+    } else if (_lineSub != null) {
+      _lineSub!.cancel();
+      _lineSub = null;
+    }
   }
 
   void _onHost() {
@@ -97,63 +150,77 @@ class LogsController extends ChangeNotifier {
       host.removeListener(_onHost);
       cfg = LogCfg.fromJson(host.catalog.unknown['logCfg']);
       raw = LogFeed(cfg);
-      _savedRaw = '${cfg.rawTop}${cfg.rawUnread.length}';
+      if (cfg.rawTop == null) {
+        // first run: what the core holds counts as read, what comes later is unread. The lines
+        // are not read now (nobody looks), only the number the next one gets.
+        try {
+          cfg.rawTop = ((host.logPage(since: 0x7fffffff)['next'] as num?)?.toInt() ?? 0) - 1;
+        } catch (_) {}
+      }
       _poll();
     }
   }
 
+  /// A line or an event arrived: read the core soon, once for the burst.
   void _pollSoon() {
-    if (_pollQueued || _disposed) return;
-    _pollQueued = true;
-    scheduleMicrotask(() {
-      _pollQueued = false;
+    if (_debounce != null || _disposed) return;
+    _debounce = Timer(pollDelay, () {
+      _debounce = null;
       _poll();
     });
   }
 
-  /// Reads what is new from the core: events, then raw lines.
-  void _poll() {
-    if (!_loaded || _disposed || l10n == null) return;
+  /// Reads what is new from the core: events always, raw lines while [visible]. The page hears
+  /// of a change only while it looks ([force]: tell it anyway, it just came into view).
+  void _poll({bool force = false}) {
+    if (_disposed) return;
+    _debounce?.cancel();
+    _debounce = null;
+    if (!_loaded || l10n == null) {
+      if (force) notifyListeners();
+      return;
+    }
     var changed = false;
     try {
       var r = feed.apply(host.eventsPage(since: feed.next));
       if (r.reset) r = feed.apply(host.eventsPage());
       if (r.changed) {
         changed = true;
-        _groups = _shown = null;
-        final ids = {for (final e in feed.list) e.id};
-        final seen = cfg.seen.where(ids.contains).toSet();
-        if (seen.length != cfg.seen.length) {
-          cfg.seen
-            ..clear()
-            ..addAll(seen);
-          _save();
-        }
+        _dropGroups();
+        // the dots are for events the journal still has
+        final first = feed.list.isEmpty ? (feed.next ?? 0) : feed.list.first.id;
+        final n = cfg.seen.length;
+        cfg.seen.removeWhere((id) => id < first);
+        if (cfg.seen.length != n) _save();
         for (final e in r.notify) {
           final kind = eventNotifKind[e.key];
           if (kind != null && notifAllows(host.catalog.unknown['notifCfg'], kind)) {
             _notify.add(e);
           }
         }
-        if (onScreen && tab == 'events' && !evFollow) {
+        if (visible && tab == 'events' && !evFollow) {
           evUnseen += r.fresh.where(_visible).length;
         }
+        _recountUnseen();
       }
     } catch (_) {
       // the core is not up yet: the next poll asks again
     }
-    try {
-      var r = raw.apply(host.logPage(since: raw.next));
-      if (r.reset) r = raw.apply(host.logPage());
-      if (r.fresh.isNotEmpty || r.reset) {
-        changed = true;
-        if (onScreen && tab == 'raw' && !rawFollow) {
-          rawUnseen += r.fresh.where((l) => _rawShown(l)).length;
+    if (visible) {
+      try {
+        var r = raw.apply(host.logPage(since: raw.next));
+        if (r.reset) r = raw.apply(host.logPage());
+        if (r.fresh.isNotEmpty || r.reset) {
+          changed = true;
+          _rawChanged();
+          if (tab == 'raw' && !rawFollow) {
+            final q = rawQuery.trim().toLowerCase();
+            rawUnseen += r.fresh.where((l) => LogFeed.shows(l, rawLevel, q, conns: cfg.showConns)).length;
+          }
         }
-        _syncRaw();
-      }
-    } catch (_) {}
-    if (changed) notifyListeners();
+      } catch (_) {}
+    }
+    if ((changed && visible) || force) notifyListeners();
   }
 
   /// New lines/events that arrived while the list was scrolled up (the pill counts them); the
@@ -178,10 +245,33 @@ class LogsController extends ChangeNotifier {
   List<EventRecord> get shownEvents =>
       _shown ??= [for (final e in feed.list) if (_visible(e)) e];
 
-  /// The rows: repeats folded.
+  /// The rows: repeats folded. Rebuilt once per [evVersion], not per frame.
   List<EventGroup> get groups => _groups ??= foldEvents(shownEvents);
 
   int get shownCount => shownEvents.length;
+
+  // The events list or what is shown of it changed: everything derived from it goes.
+  void _dropGroups() {
+    _groups = _shown = null;
+    _evLevels = null;
+    evVersion++;
+  }
+
+  ({int warn, int err})? _evLevels;
+
+  /// How many warnings / errors the journal holds (the summary line; every event, not only the shown).
+  ({int warn, int err}) get evLevels =>
+      _evLevels ??= _count(feed.list.length, (i) => feed.list[i].level);
+
+  ({int warn, int err}) _count(int n, String Function(int i) level) {
+    var warn = 0, err = 0;
+    for (var i = 0; i < n; i++) {
+      final l = level(i);
+      if (l == 'warn') warn++;
+      if (l == 'error') err++;
+    }
+    return (warn: warn, err: err);
+  }
 
   EventGroup? groupOf(int eventId) {
     for (final g in groups) {
@@ -191,7 +281,7 @@ class LogsController extends ChangeNotifier {
   }
 
   void _refilter() {
-    _groups = _shown = null;
+    _dropGroups();
     notifyListeners();
   }
 
@@ -232,15 +322,20 @@ class LogsController extends ChangeNotifier {
   }
 
   /// Which levels of warning / error events are not seen yet (the dots on the Logs tab; events
-  /// the filter hides count too).
-  ({bool error, bool warn}) get unseen {
+  /// the filter hides count too). A notifier of its own: the nav bar listens to it, not to the
+  /// controller, so a burst of lines or events does not rebuild anything unless a dot changes.
+  final unseenNotifier = ValueNotifier<({bool error, bool warn})>((error: false, warn: false));
+
+  ({bool error, bool warn}) get unseen => unseenNotifier.value;
+
+  void _recountUnseen() {
     var err = false, warn = false;
     for (final e in feed.list) {
       if (cfg.seen.contains(e.id)) continue;
       if (e.level == 'error') err = true;
       if (e.level == 'warn') warn = true;
     }
-    return (error: err, warn: warn);
+    unseenNotifier.value = (error: err, warn: warn);
   }
 
   /// The warnings / errors in the viewport are seen.
@@ -248,6 +343,7 @@ class LogsController extends ChangeNotifier {
     final n = cfg.seen.length;
     cfg.seen.addAll(ids);
     if (cfg.seen.length == n) return;
+    _recountUnseen();
     _save();
     notifyListeners();
   }
@@ -277,7 +373,7 @@ class LogsController extends ChangeNotifier {
     tab = 'events';
     final e = feed.list.where((x) => x.id == id).firstOrNull;
     if (e != null && !_visible(e)) filter.reset();
-    _groups = _shown = null;
+    _dropGroups();
     final g = groupOf(id);
     if (g != null) markSeen(g.items.map((x) => x.id));
     hitEvent = (id: id, token: ++_token);
@@ -288,8 +384,12 @@ class LogsController extends ChangeNotifier {
   void showRawLine(int n) {
     tab = 'raw';
     rawLevel = 'all';
+    // the line asked for may be a connection one: the chip goes on so it is there
+    if (!cfg.showConns && raw.lines.any((l) => l.n == n && l.isConn)) setShowConns(true);
     searching = false;
     rawQuery = '';
+    _shownLines = null;
+    rawVersion++;
     hitLine = (n: n, token: ++_token);
     notifyListeners();
   }
@@ -303,7 +403,7 @@ class LogsController extends ChangeNotifier {
     tab = 'events';
     final e = feed.list.where((x) => x.id == id).firstOrNull;
     if (e != null && !_visible(e)) filter.reset();
-    _groups = _shown = null;
+    _dropGroups();
     final g = groupOf(id);
     if (g != null) openRows.add(g.key);
     hitEvent = (id: id, token: ++_token);
@@ -316,7 +416,8 @@ class LogsController extends ChangeNotifier {
     cfg.seen.clear();
     openRows.clear();
     evUnseen = 0;
-    _groups = _shown = null;
+    _dropGroups();
+    _recountUnseen();
     _save();
     _poll();
     notifyListeners();
@@ -324,6 +425,7 @@ class LogsController extends ChangeNotifier {
 
   /// Both logs as text: the events (readable), then the raw lines.
   String exportText() {
+    _poll(); // up to the last line, whatever the timer has not read yet
     final w = words;
     final events = feed.list
         .map(
@@ -340,31 +442,74 @@ class LogsController extends ChangeNotifier {
 
   // ── Raw ──
 
-  bool _rawShown(LogLine l) =>
-      raw.shown(rawLevel, rawQuery).any((x) => x.n == l.n);
+  // The raw lines or their unread numbers changed; the numbers are for the state (see [flush]).
+  void _rawChanged() {
+    rawVersion++;
+    _shownLines = null;
+    _rawLevels = null;
+    _unreadLines = null;
+    _rawDirty = true;
+  }
 
-  List<LogLine> get shownLines => raw.shown(rawLevel, rawQuery);
+  List<LogLine>? _shownLines;
+  ({int warn, int err})? _rawLevels;
+  List<LogLine>? _unreadLines;
+  int _unreadFor = -1;
+
+  /// The raw lines the level chip and the search let through. Filtered once per change.
+  List<LogLine> get shownLines => _shownLines ??= raw.shown(rawLevel, rawQuery);
+
+  /// How many warnings / errors the raw log holds.
+  ({int warn, int err}) get rawLevels =>
+      _rawLevels ??= _count(raw.lines.length, (i) => raw.lines[i].lvl);
+
+  /// The lines not read yet (the badges on the level chips).
+  List<LogLine> get unreadLines {
+    // read lines leave the set without a change of the lines: the size tells
+    if (_unreadFor != cfg.rawUnread.length) _unreadLines = null;
+    _unreadFor = cfg.rawUnread.length;
+    return _unreadLines ??= raw.unread;
+  }
 
   void setRawLevel(String lvl) {
     rawLevel = lvl;
+    _shownLines = null;
+    rawVersion++;
+    notifyListeners();
+  }
+
+  /// The «Connections» chip: lines of successful connections shown or not (kept in the state).
+  void setShowConns(bool v) {
+    if (cfg.showConns == v) return;
+    cfg.showConns = v;
+    _save();
+    _shownLines = null;
+    _unreadLines = null;
+    rawVersion++;
     notifyListeners();
   }
 
   void setRawQuery(String q) {
     rawQuery = q;
+    _shownLines = null;
+    rawVersion++;
     notifyListeners();
   }
 
   void toggleSearch([bool? on]) {
     searching = on ?? !searching;
-    if (!searching) rawQuery = '';
+    if (!searching) {
+      rawQuery = '';
+      _shownLines = null;
+      rawVersion++;
+    }
     notifyListeners();
   }
 
   /// The raw lines in the viewport are read.
   void markRead(Iterable<int> ns) {
     if (!raw.markRead(ns)) return;
-    _syncRaw();
+    _rawDirty = true;
     notifyListeners();
   }
 
@@ -372,44 +517,37 @@ class LogsController extends ChangeNotifier {
     host.clearLog();
     raw.clear();
     rawUnseen = 0;
-    _syncRaw();
+    _rawChanged();
     notifyListeners();
     _poll();
   }
 
-  /// The numbers of the unread lines keep with the state; written spaced out, so a stream of
-  /// lines does not save the whole state every second.
-  void _syncRaw() {
-    final key = '${cfg.rawTop}${cfg.rawUnread.length}';
-    if (key == _savedRaw || _persist != null) return;
-    _persist = Timer(const Duration(seconds: 3), () {
-      _persist = null;
-      _savedRaw = '${cfg.rawTop}${cfg.rawUnread.length}';
-      _save();
-    });
-  }
+  /// The numbers of the unread lines changed since they were written to the state. They are
+  /// written when the Logs tab or the app goes away ([flush]): never per line, a full state save
+  /// is far more than a stream of lines should cost.
+  bool _rawDirty = false;
 
   void _save() {
     host.catalog.unknown['logCfg'] = cfg.toJson();
     host.saveSoon();
   }
 
-  /// The kept state now (the app is going to the background).
+  /// The kept state now: the unread raw lines, when they changed (the Logs tab was left, the
+  /// app is going to the background).
   void flush() {
-    if (_persist != null) {
-      _persist!.cancel();
-      _persist = null;
-      _save();
-    }
+    if (!_rawDirty) return;
+    _rawDirty = false;
+    _save();
   }
 
   @override
   void dispose() {
+    flush();
     _disposed = true;
     _evSub?.cancel();
     _lineSub?.cancel();
     _timer?.cancel();
-    _persist?.cancel();
+    _debounce?.cancel();
     host.removeListener(_onHost);
     _notify.close();
     super.dispose();

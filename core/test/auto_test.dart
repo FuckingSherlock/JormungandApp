@@ -358,6 +358,88 @@ void main() {
     expect(spares, [0, 2, 4]);
   });
 
+  test('a server move inside a spare route is a log note, not a switch; moves of the route in use and between routes are', () async {
+    var t = 0;
+    final p = plan([unit('A', ['s::a1', 's::a2'], pick: 'priority', chosen: 's::a1'), unit('B', ['s::b1', 's::b2'], pick: 'priority', chosen: 's::b1')],
+        auto: {'standby': 1, 'warmEvery': 10});
+    final fake = FakeBox(buildConfig(p), {'s::a1': 40, 's::a2': 50, 's::b1': 60, 's::b2': 70});
+    final notes = <String>[];
+    final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t, note: notes.add);
+    final events = <AutoSwitch>[];
+    auto.switches.listen(events.add);
+    Future<void> check() async {
+      t += 60000;
+      await auto.check();
+    }
+
+    await check();
+    fake.alive.remove('s::b1'); // the spare route's own server dies
+    await check();
+    await check();
+    expect(fake.groups['route1']!.now, 'route1/s::b2');
+    await Future<void>.delayed(Duration.zero);
+    expect(events, isEmpty, reason: 'B carries no traffic: housekeeping');
+    expect(notes, contains('auto: standby B: server s::b1 → s::b2 (failover)'));
+    expect([auto.toJson()['now'], auto.toJson()['switches']], ['A', 0]);
+
+    fake.alive['s::b1'] = 60; // and comes back
+    await check();
+    await check();
+    expect(fake.groups['route1']!.now, 'route1/s::b1');
+    await Future<void>.delayed(Duration.zero);
+    expect(events, isEmpty);
+    expect(notes, contains('auto: standby B: server s::b2 → s::b1 (back)'));
+
+    fake.alive.remove('s::a1'); // the route in use moves its server: a switch
+    await check();
+    await check();
+    await Future<void>.delayed(Duration.zero);
+    expect([for (final e in events) '${e.route}: ${e.from}>${e.to} ${e.reason}'], ['A: s::a1>s::a2 failover']);
+
+    fake.alive.remove('s::a2'); // the whole route dies: a switch to B is reported as always
+    await check();
+    await check();
+    await Future<void>.delayed(Duration.zero);
+    expect(auto.toJson()['now'], 'B');
+    expect(events.last.isRoute, isTrue);
+    expect([events.last.from, events.last.to, events.last.reason], ['A', 'B', 'failover']);
+  });
+
+  test('Priority started below a server that never missed: the move up is `preferred`, silent in the first rounds, an event later', () async {
+    final p = plan([unit('P', ['s::p1', 's::p2'], pick: 'priority', chosen: 's::p2')], auto: {'returnTo': 'faster'});
+    final pAlways = plan([unit('P', ['s::p1', 's::p2'], pick: 'priority', chosen: 's::p2')]);
+
+    // started on p2 while p1 answers: the first rounds put it on p1 with a log note only
+    final notes = <String>[];
+    final box = FakeBox(buildConfig(pAlways), {'s::p1': 40, 's::p2': 60});
+    final a1 = AutoService(box, pAlways, delay: box.delayTest, note: notes.add);
+    final events = <AutoSwitch>[];
+    a1.switches.listen(events.add);
+    expect(a1.toJson()['server'], 's::p2');
+    await a1.check();
+    await a1.check();
+    await Future<void>.delayed(Duration.zero);
+    expect(a1.toJson()['server'], 's::p1');
+    expect(events, isEmpty, reason: 'not news right after the connect');
+    expect(notes, contains('auto: P: server s::p2 → s::p1 (preferred, right after the connect)'));
+
+    // later in the session the same move is an event, reason preferred (p1 never missed)
+    final box2 = FakeBox(buildConfig(p), {'s::p1': 200, 's::p2': 60});
+    final a2 = AutoService(box2, p, delay: box2.delayTest, note: notes.add);
+    final ev2 = <AutoSwitch>[];
+    a2.switches.listen(ev2.add);
+    for (var i = 0; i < 4; i++) {
+      await a2.check();
+    }
+    expect(a2.toJson()['server'], 's::p2', reason: 'p1 is slower than p2 + threshold: held');
+    box2.alive['s::p1'] = 10;
+    await a2.check();
+    await a2.check();
+    await Future<void>.delayed(Duration.zero);
+    expect(a2.toJson()['server'], 's::p1');
+    expect([for (final e in ev2) '${e.route}: ${e.from}>${e.to} ${e.reason}'], ['P: s::p2>s::p1 preferred']);
+  });
+
   test('a start below a route that answers: back up after failAfter answers', () async {
     final (auto, _) = setup(plan([unit('A', ['s::a']), unit('B', ['s::b'])], current: 1), {'s::a': 40, 's::b': 60});
     expect(auto.toJson()['now'], 'B');
@@ -381,6 +463,26 @@ void main() {
     expect(keys, isNot(contains('s::x')));
     final e1 = (j['members'] as List).cast<Map>().firstWhere((m) => m['key'] == 's::e1');
     expect([e1['ms'], e1['fails']], [-1, 1]);
+  });
+
+  test('chain: a result of an exit belongs to its pair; the entry switching starts a count of its own; status.auto.pairs', () async {
+    final (auto, fake) = setup(plan([chain('X', ['s::e1', 's::e2'], ['s::x'])]), {'s::e1': 20, 's::e2': 30, 's::x': 40});
+    await auto.check();
+    List<Map> pairs() => (auto.toJson()['pairs'] as List).cast<Map>();
+    Map pair(String e) => pairs().firstWhere((p) => p['entry'] == e && p['key'] == 's::x');
+    expect([pair('s::e1')['ms'], pair('s::e1')['fails']], [60, 0]);
+    // the exit goes silent through e1: the misses are the pair e1 > x's
+    fake.alive.remove('s::x');
+    await auto.check();
+    expect(pair('s::e1')['fails'], greaterThan(0));
+    final missed = pair('s::e1')['fails'];
+    // the entry e1 dies: Auto moves the entry to e2; the exit through e2 counts from zero
+    fake.alive.remove('s::e1');
+    fake.alive['s::x'] = 40;
+    await auto.check();
+    expect(auto.toJson()['entryServer'], 's::e2');
+    expect([pair('s::e2')['ms'], pair('s::e2')['fails']], [70, 0]);
+    expect(pair('s::e1')['fails'], missed, reason: 'the old pair keeps its own count');
   });
 
   test('sing-box not answering: the check judges nothing', () async {

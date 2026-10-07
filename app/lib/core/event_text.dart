@@ -156,6 +156,7 @@ class EventWords {
           : l10n.failedItsChecks(from);
     }
     if (reason == 'back') return l10n.isBackReturnedToIt(to);
+    if (reason == 'preferred') return l10n.isHigherInTheOrderMoved(to);
     if (reason == 'fastest') return l10n.isFaster(to);
     return reason == null ? '' : '$reason';
   }

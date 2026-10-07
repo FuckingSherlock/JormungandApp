@@ -96,9 +96,10 @@ class ProbePool {
       '$identity|$url|${(checkers.where((c) => c != url).toSet().toList()..sort()).join(',')}';
 
   /// ms of one test of [identity] by [one] (a request to the URL it is given, see
-  /// [withCheckers]): [url] first, then every one of [checkers] at once when it misses.
-  /// Served from the pool when a result is younger than [maxAge] (an answer) or [missAge]
-  /// (a miss), else measured — or joined, when the same key is being measured.
+  /// [withCheckers]): [url] first, then every one of [checkers] when it misses — at once, or
+  /// [checkerFanOut] at a time. Served from the pool when a result is younger than [maxAge]
+  /// (an answer) or [missAge] (a miss), else measured — or joined, when the same key is being
+  /// measured.
   Future<int> probe(
     String identity,
     Future<int> Function(String url) one, {
@@ -106,6 +107,7 @@ class ProbePool {
     List<String> checkers = const [],
     Duration maxAge = Duration.zero,
     Duration missAge = Duration.zero,
+    int checkerFanOut = 0,
   }) {
     final key = keyOf(identity, url, checkers);
     final had = _results[key];
@@ -118,7 +120,7 @@ class ProbePool {
     if (running != null) return running;
     final done = Completer<int>();
     _inflight[key] = done.future;
-    withCheckers(one, url, checkers).catchError((_) => -1).then((ms) {
+    withCheckers(one, url, checkers, fanOut: checkerFanOut).catchError((_) => -1).then((ms) {
       _inflight.remove(key);
       _put(key, ms);
       done.complete(ms);

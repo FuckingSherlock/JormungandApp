@@ -15,16 +15,34 @@ import 'logbook.dart';
 /// the [LogBook] line written at the same moment (a jump to Raw); [data] holds structured
 /// fields only, never a ready sentence (the app words it in the user's language).
 ///
-/// Kept: the last [maxAge] and at most [cap] events. With a [file] the journal is a JSON
-/// Lines file: an append per event, a rewrite when something is pruned or cleared (the
-/// rewrite starts with a `{"seq": N}` line, so the ids go on after a restart even when no
-/// event is left). A line that does not parse (a write cut off by a crash) is dropped.
-/// Without a [file] it lives in memory only. Disk trouble never reaches the caller.
+/// Kept: the last [maxAge] and at most [cap] events (in memory strictly). With a [file] the
+/// journal is a JSON Lines file written behind the memory: new events are collected and
+/// appended in one write [flushEvery] after the first of them (and by [flush], which the
+/// owner calls on shutdown), so a burst costs one fsync, not one per event; a crash loses
+/// at most that last second. What is pruned stays in the file until [pruneChunk] lines are
+/// stale, then the file is rewritten once (also on [clear]); the rewrite starts with a
+/// `{"seq": N}` line, so the ids go on after a restart even when no event is left, and the
+/// start trims the file to the limits. A line that does not parse (a write cut off by a
+/// crash) is dropped. The writes are asynchronous and run one after another. Without a
+/// [file] it lives in memory only. Disk trouble never reaches the caller (a failed write
+/// makes the next one a rewrite).
 class EventBook {
-  EventBook(this.file, {this.log, this.maxAge = const Duration(days: 7), this.cap = 1000, DateTime Function()? clock})
+  EventBook(this.file,
+      {this.log,
+      this.maxAge = const Duration(days: 7),
+      this.cap = 1000,
+      this.flushEvery = const Duration(milliseconds: 1500),
+      this.pruneChunk = 100,
+      DateTime Function()? clock})
       : _clock = clock ?? DateTime.now;
 
   final File? file;
+
+  /// How long new events wait in memory before they are appended to the file.
+  final Duration flushEvery;
+
+  /// How many pruned events may stay in the file before it is rewritten.
+  final int pruneChunk;
 
   /// Where [add] takes the `log` link from.
   final LogBook? log;
@@ -48,6 +66,7 @@ class EventBook {
     if (f == null) return;
     var dropped = false;
     try {
+      f.parent.createSync(recursive: true);
       if (!f.existsSync()) return;
       for (final line in f.readAsLinesSync(encoding: const Utf8Codec(allowMalformed: true))) {
         if (line.trim().isEmpty) continue;
@@ -69,7 +88,8 @@ class EventBook {
     } on FileSystemException {
       return;
     }
-    if (_prune() || dropped) _rewrite();
+    if (_prune() || dropped) _rewriteSync();
+    _stale = 0;
   }
 
   // A journal line: an event map, the `seq` marker (its number) or null (corrupt).
@@ -102,10 +122,13 @@ class EventBook {
       'data': data,
     };
     _events.add(e);
-    if (_prune()) {
-      _rewrite();
-    } else {
-      _append(e);
+    _prune();
+    if (file != null) {
+      _pending.add('${jsonEncode(e)}\n');
+      _timer ??= Timer(flushEvery, () {
+        _timer = null;
+        unawaited(flush());
+      });
     }
     if (!_added.isClosed) _added.add(e);
     return e['id'] as int;
@@ -123,21 +146,42 @@ class EventBook {
 
   /// `{events (oldest first, ids from [from]; the last [tail] without it), next (the id the
   /// next event gets), first (the oldest id kept: the app sees a gap or a clear)}`.
+  ///
+  /// The ids only grow along the queue: the start is found by a binary search, so a poll
+  /// that finds nothing new costs nothing, whatever the size of the journal.
   Map<String, dynamic> since(int? from, {int tail = 200}) {
     load();
-    final l = [for (final e in _events) if (from == null || (e['id'] as int) >= from) e];
+    final n = _events.length;
+    var i = 0;
+    if (from == null) {
+      if (n > tail) i = n - tail;
+    } else if (n > 0 && from > (_events.last['id'] as int)) {
+      i = n;
+    } else {
+      var hi = n;
+      while (i < hi) {
+        final mid = (i + hi) >> 1;
+        if ((_events.elementAt(mid)['id'] as int) < from) {
+          i = mid + 1;
+        } else {
+          hi = mid;
+        }
+      }
+    }
     return {
-      'events': from == null && l.length > tail ? l.sublist(l.length - tail) : l,
+      'events': [for (var k = i; k < n; k++) _events.elementAt(k)],
       'next': _next,
       'first': _events.isEmpty ? _next : _events.first['id'],
     };
   }
 
-  /// Empties the journal (and the file); ids go on.
+  /// Empties the journal (and the file, by a rewrite); ids go on.
   void clear() {
     load();
     _events.clear();
-    _rewrite();
+    _pending.clear();
+    _rewrite = true;
+    if (file != null) unawaited(flush());
   }
 
   int get length {
@@ -151,30 +195,67 @@ class EventBook {
     final oldest = _clock().millisecondsSinceEpoch - maxAge.inMilliseconds;
     while (_events.isNotEmpty && ((_events.first['at'] as int) < oldest || _events.length > cap)) {
       _events.removeFirst();
+      _stale++;
       any = true;
     }
     return any;
   }
 
-  void _append(Map<String, dynamic> e) {
+  // New events not in the file yet (each a whole line), the timer that writes them, the last
+  // write (the next one waits for it), the lines of the file that are no longer kept, and a
+  // rewrite that is due (a clear, a failed write).
+  final _pending = <String>[];
+  Timer? _timer;
+  Future<void> _io = Future<void>.value();
+  int _stale = 0;
+  bool _rewrite = false;
+
+  String get _whole => '${jsonEncode({'seq': _next})}\n${[for (final e in _events) '${jsonEncode(e)}\n'].join()}';
+
+  /// Puts what waits in memory into the file now: an append, or the rewrite when it is due.
+  /// Completes when it is written (and everything before it). The owner calls it on shutdown.
+  Future<void> flush() {
+    _timer?.cancel();
+    _timer = null;
     final f = file;
-    if (f == null) return;
+    final whole = _rewrite || _stale >= pruneChunk;
+    if (f == null || (_pending.isEmpty && !whole)) return _io;
+    final String text;
+    if (whole) {
+      text = _whole;
+      _rewrite = false;
+      _stale = 0;
+    } else {
+      text = _pending.join();
+    }
+    _pending.clear();
+    return _io = _io.then((_) => _write(f, text, whole));
+  }
+
+  Future<void> _write(File f, String text, bool whole) async {
     try {
-      f.parent.createSync(recursive: true);
-      f.writeAsStringSync('${jsonEncode(e)}\n', mode: FileMode.append, flush: true);
-    } on FileSystemException {
-      // memory keeps it
+      // the directory is made by [load]: a write that comes late (the data directory is gone,
+      // as in a test that cleaned up) must not bring it back
+      if (whole) {
+        await writeFileDurable(f, text);
+      } else {
+        await f.writeAsString(text, mode: FileMode.append, flush: true);
+      }
+    } catch (_) {
+      _rewrite = true; // memory keeps it; the next write puts the whole journal back
     }
   }
 
-  void _rewrite() {
+  // The synchronous rewrite of [load] (nothing else writes yet).
+  void _rewriteSync() {
     final f = file;
     if (f == null) return;
     try {
       f.parent.createSync(recursive: true);
-      writeFileDurableSync(f, '${jsonEncode({'seq': _next})}\n${[for (final e in _events) '${jsonEncode(e)}\n'].join()}');
+      writeFileDurableSync(f, _whole);
     } on FileSystemException {
       // the old file stays; the next rewrite tries again
+      _rewrite = true;
     }
   }
 }

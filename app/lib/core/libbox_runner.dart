@@ -39,17 +39,25 @@ abstract interface class LibboxPort {
 /// [cacheFile]: this instance's own sing-box cache file ([withCacheFile]); every libbox in the
 /// app process wants one and locks it, so two instances must never share a path. [temporaryCache]:
 /// the file is deleted when the instance stops (the throwaway ones); the tunnel's stays.
+///
+/// [watchApi]: open the API's connections / groups / status streams ([SingBoxApi.watch]). Only
+/// the tunnel needs them (Auto, the dock, Live connections); a throwaway latency / Speed Test
+/// box says nothing anyone reads there, and three gRPC streams per box, each pushing every
+/// second, only cost the UI isolate time during a ping run. Its log stays on: [CoreService]
+/// keeps the failure lines of the test boxes in the raw log.
 class LibboxRunner implements AdoptableRunner {
   LibboxRunner(
     this._port, {
     this.upTimeout = const Duration(seconds: 8),
     this.cacheFile,
     this.temporaryCache = false,
+    this.watchApi = true,
   });
 
   final LibboxPort _port;
   final String? cacheFile;
   final bool temporaryCache;
+  final bool watchApi;
 
   /// How long the API service may take to answer after the platform said "up".
   final Duration upTimeout;
@@ -131,11 +139,11 @@ class LibboxRunner implements AdoptableRunner {
   /// The API of the running sing-box [a]: [running], its streams, its log (cut to [want]), its end.
   void _attach(SingBoxApi a, int want) {
     _up = true;
-    _api = a..watch();
+    _api = a;
+    if (watchApi) a.watch();
     _logSub = a.logLines().listen((l) {
       // libbox sends every line, whatever the config's level says
-      final m = _levelOfLine.firstMatch(l);
-      if (m == null || _rank(m[1]!) <= want) onLog?.call(l);
+      if (want >= 6 || _rankOfLine(l) <= want) onLog?.call(l);
     }, onError: (Object _) {});
     _goneSub = _port.stoppedOnItsOwn.listen(_gone, onError: (Object _) {});
   }
@@ -186,10 +194,25 @@ class LibboxRunner implements AdoptableRunner {
     return core.cast<String, dynamic>();
   }
 
-  // "WARN[0003] …", coloured by libbox: "\x1b[33mWARN\x1b[0m[0003] …"
-  static final _levelOfLine = RegExp(
-    r'^(?:\x1B\[[0-9;]*m)?(PANIC|FATAL|ERROR|WARN|INFO|DEBUG|TRACE)',
-  );
+  // The level of a line ("WARN[0003] …", coloured by libbox: "\x1b[33mWARN\x1b[0m[0003] …"); a line
+  // with none passes (rank 0). No regex: this runs for every line sing-box writes, the most common
+  // levels are asked first.
+  static int _rankOfLine(String l) {
+    var i = 0;
+    if (l.startsWith('\x1B[')) {
+      i = l.indexOf('m');
+      if (i < 0) return 0;
+      i++;
+    }
+    bool at(String w) => l.startsWith(w, i);
+    if (at('INFO')) return 4;
+    if (at('WARN')) return 3;
+    if (at('ERROR')) return 2;
+    if (at('DEBUG')) return 5;
+    if (at('TRACE')) return 6;
+    if (at('FATAL')) return 1;
+    return 0; // PANIC, or not a level at all
+  }
 
   static int _rank(String level) => switch (level) {
     'PANIC' => 0,

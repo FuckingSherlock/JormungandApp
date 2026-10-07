@@ -63,6 +63,7 @@ class CoreService implements CoreApi {
     bool Function()? isElevated,
     this.appVersion,
     this.updatePlatformKeys = const [],
+    this.installedPackage,
     this.updateFeeds,
     this.updatePublicKeys,
     this.updateGet,
@@ -96,6 +97,10 @@ class CoreService implements CoreApi {
   /// [updateFeeds] / [updateGet] / [updateFirstDelay] are the tests' seams.
   final AppVersion? appVersion;
   final List<String> updatePlatformKeys;
+
+  /// The file the running app was installed from (Android `sourceDir`), if the platform can read it:
+  /// updates then download a delta against it instead of the whole file ([AppUpdater.installedPackage]).
+  final String? installedPackage;
   final List<String>? updateFeeds;
   final List<String>? updatePublicKeys;
   final UpdateGet? updateGet;
@@ -114,7 +119,8 @@ class CoreService implements CoreApi {
   final Future<Map<String, dynamic>> Function(int? proxyPort) exitCheck;
 
   /// sing-box output and the core's own notes (the Logs tab).
-  final logBook = LogBook();
+  /// Warnings and errors also live in `problems.jsonl` (they survive a restart and the flood of connection lines).
+  late final logBook = LogBook(file: File(p.join(dataDir, 'problems.jsonl')));
 
   /// What happened, structured (eventbook.dart): the Events tab and the notifications.
   late final eventBook = EventBook(File(p.join(dataDir, 'events.jsonl')), log: logBook);
@@ -254,6 +260,7 @@ class CoreService implements CoreApi {
   @override
   Future<void> init() async {
     await Directory(dataDir).create(recursive: true);
+    logBook.load(); // last run's warnings and errors
     eventBook.load(); // trims an old journal at start
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     await store.read(); // a damaged snapshot is recovered (and journaled) now, not at the UI's first request
@@ -291,6 +298,8 @@ class CoreService implements CoreApi {
       unawaited(_statusCtl.close());
       logBook.close();
       eventBook.close();
+      await logBook.flush();
+      await eventBook.flush(); // the journal is written behind the memory: what waits goes to the file now
     }
   }
 
@@ -1281,6 +1290,7 @@ class CoreService implements CoreApi {
           dir: Directory(p.join(dataDir, 'updates')),
           current: appVersion!,
           platforms: updatePlatformKeys,
+          installedPackage: installedPackage,
           feeds: updateFeeds,
           publicKeys: updatePublicKeys,
           get: updateGet ?? httpUpdateGet(proxyPort: () => _innerPort),

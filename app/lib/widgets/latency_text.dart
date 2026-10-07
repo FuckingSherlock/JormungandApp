@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:jormungand_core/jormungand_core.dart' show CatalogNode;
+import 'package:jormungand_core/jormungand_core.dart' show CatalogNode, Chain;
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
@@ -74,6 +74,21 @@ class LatencyText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = CoreHostScope.of(context).catalog.pings.entry(node);
+    return LatencyView(ms: e?.ms, testing: e?.testing ?? false);
+  }
+}
+
+/// The latency of a chain's exit as the chain gets it: through the entry in use (the pair
+/// book, `Catalog.chainExitEntry`), not the server's own direct ping. Same look as [LatencyText].
+class ChainExitLatency extends StatelessWidget {
+  const ChainExitLatency(this.chain, this.node, {super.key});
+
+  final Chain chain;
+  final CatalogNode node;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = CoreHostScope.of(context).catalog.chainExitEntry(chain, node);
     return LatencyView(ms: e?.ms, testing: e?.testing ?? false);
   }
 }

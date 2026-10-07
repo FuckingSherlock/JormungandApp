@@ -50,7 +50,7 @@ extension CatalogPlan on Catalog {
   /// fastest first and the dead ones last (sing-box's urltest uses its first server until its
   /// own first round of tests is done). Throws [CatalogException] `noUsableServer` when none
   /// can be put into a config (`planGroup`).
-  Json planGroup(List<NodeRef> refs, String pick, [NodeRef? chosen]) {
+  Json planGroup(List<NodeRef> refs, String pick, [NodeRef? chosen, double Function(NodeRef)? rank]) {
     final ok = refs.where((r) => r.node.usable).toList();
     if (ok.isEmpty) {
       NodeRef? bad;
@@ -64,7 +64,7 @@ extension CatalogPlan on Catalog {
       throw CatalogException(
           'noUsableServer', 'No server here the core can use${bad != null ? ' (${bad.node.unsupported} is not in sing-box)' : ''}');
     }
-    final nodes = pick == 'fastest' ? stableSorted(ok, (r) => pings.rank(r.node)) : ok;
+    final nodes = pick == 'fastest' ? stableSorted(ok, rank ?? (NodeRef r) => pings.rank(r.node)) : ok;
     return {
       'pick': pick,
       'chosen': pick == 'priority' && chosen != null ? chosen.key : null,
@@ -82,17 +82,21 @@ extension CatalogPlan on Catalog {
     return null;
   }
 
+  /// A chain's `entry` and `main` groups: the exits ordered / chosen by their answer through the
+  /// entry in use (the pair), not their direct one.
+  Json _planChain(Chain c) {
+    final exits = chainExitRefs(c), exitNode = chainExitNode(c), entry = chainEntryNode(c);
+    return {
+      'entry': planGroup(chainEntryRefs(c), 'fastest'),
+      'main': planGroup(exits, c.exitMode == 'priority' ? 'priority' : 'fastest', _refOf(exits, exitNode), (r) => chainExitRank(c, r.node, entry)),
+    };
+  }
+
   /// One Route entry as a route of the plan (`planRoute`).
   Json planRoute(String id) {
     final c = chainsData[id];
     if (c != null) {
-      final exits = chainExitRefs(c), exitNode = chainExitNode(c);
-      return {
-        'id': id,
-        'kind': 'chain',
-        'entry': planGroup(chainEntryRefs(c), 'fastest'),
-        'main': planGroup(exits, c.exitMode == 'priority' ? 'priority' : 'fastest', _refOf(exits, exitNode)),
-      };
+      return {'id': id, 'kind': 'chain', ..._planChain(c)};
     }
     final refs = unitPickRefs(id), n = unitNode(id), pin = pinnedRef(id);
     final main = planGroup(refs, pin != null || unitPriority(id) ? 'priority' : 'fastest', pin ?? _refOf(refs, n));
@@ -324,12 +328,7 @@ extension CatalogPlan on Catalog {
         final refs = unitPickRefs(ref), n = unitNode(ref);
         return {'kind': 'unit', 'main': planGroup(refs, unitPriority(ref) ? 'priority' : 'fastest', _refOf(refs, n))};
       }
-      final c = chainsData[ref]!, exits = chainExitRefs(c), exitNode = chainExitNode(c);
-      return {
-        'kind': 'chain',
-        'entry': planGroup(chainEntryRefs(c), 'fastest'),
-        'main': planGroup(exits, c.exitMode == 'priority' ? 'priority' : 'fastest', _refOf(exits, exitNode)),
-      };
+      return {'kind': 'chain', ..._planChain(chainsData[ref]!)};
     } on Object {
       // nothing here sing-box can use (XHTTP only) — and, like the mockup's catch-all, a target that is
       // a bare id of a source ('src1': the chain branch finds no chain): unavailable

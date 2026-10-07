@@ -4,6 +4,7 @@ library;
 
 export 'src/api.dart';
 export 'src/appupdate.dart';
+export 'src/delta.dart';
 export 'src/auto.dart';
 export 'src/catalog/catalog_lib.dart';
 export 'src/config.dart';

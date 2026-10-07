@@ -1,6 +1,8 @@
 /// The one latency store of the app (`pingCache` in 15-ping.js), keyed by server variant:
 /// `protocol://address:port#id` — a dead variant never looks alive because a sibling
-/// answered, and one variant in two subscriptions shares one entry.
+/// answered, and one variant in two subscriptions shares one entry. A chain's exit is not
+/// the same server through its entry as on its own, so those results live apart, in the
+/// [PairBook] (key: entry's key `>` exit's key).
 library;
 
 import 'models.dart';
@@ -142,6 +144,93 @@ class PingBook {
       }
       final v = variants[k];
       if (v != null && v.length == 1 && !_m.containsKey(v.first)) _m[v.first] = entry;
+    }
+  }
+}
+
+/// Latency of a chain's exit measured through one of its entry servers (the whole chain's
+/// round trip): the same fields as [PingBook], keyed by the pair `pingKey(entry) > pingKey(exit)`.
+/// Kept in the snapshot as `pairs` (`[[key, {ms, at, fails}], …]`).
+class PairBook {
+  final Map<String, PingEntry> _m = {};
+
+  static String keyOf(CatalogNode entry, CatalogNode exit) => '${PingBook.keyOf(entry)}>${PingBook.keyOf(exit)}';
+
+  PingEntry? entry(CatalogNode entry, CatalogNode exit) => _m[keyOf(entry, exit)];
+
+  /// ms of the last result; null = never measured or a ping in flight.
+  num? ping(CatalogNode entry, CatalogNode exit) => this.entry(entry, exit)?.ms;
+
+  bool isAlive(CatalogNode entry, CatalogNode exit) {
+    final v = ping(entry, exit);
+    return v != null && v >= 0;
+  }
+
+  /// A finished measure: a timeout counts one more fail, an answer resets them. [at] is the
+  /// time of the measure (ms since epoch).
+  void set(CatalogNode entry, CatalogNode exit, num ms, int at) {
+    final prev = this.entry(entry, exit);
+    _m[keyOf(entry, exit)] = PingEntry(ms: ms, at: at, fails: ms == -1 ? (prev?.fails ?? 0) + 1 : 0);
+  }
+
+  /// Pings of [exits] through [entry] go out.
+  void markTesting(CatalogNode entry, Iterable<CatalogNode> exits) {
+    for (final x in exits) {
+      final e = this.entry(entry, x)?.copy() ?? PingEntry();
+      e.was = e.ms ?? e.was;
+      e.ms = null;
+      e.testing = true;
+      _m[keyOf(entry, x)] = e;
+    }
+  }
+
+  /// A ping that could not run: the pair goes back to what it had ([PingBook.unmarkTesting]).
+  void unmarkTesting(CatalogNode entry, Iterable<CatalogNode> exits) {
+    for (final x in exits) {
+      final e = this.entry(entry, x);
+      if (e == null || !e.testing) continue;
+      if (e.was == null) {
+        _m.remove(keyOf(entry, x));
+      } else {
+        _m[keyOf(entry, x)] = PingEntry(ms: e.was, at: e.at, fails: e.fails);
+      }
+    }
+  }
+
+  void put(CatalogNode entry, CatalogNode exit, PingEntry e) => _m[keyOf(entry, exit)] = e;
+  void remove(CatalogNode entry, CatalogNode exit) => _m.remove(keyOf(entry, exit));
+  bool get anyTesting => _m.values.any((e) => e.testing);
+  Iterable<String> get keys => _m.keys;
+  void clear() => _m.clear();
+
+  /// The core's own pair checks (`status.auto.pairs`: `{entry, key: 'sid::nid', ms, at, fails}`)
+  /// land here: newer ones only, a ping in flight wins. True when changed.
+  bool mergeCore(Iterable<Map> pairs, CatalogNode? Function(String key) nodeOfKey) {
+    var changed = false;
+    for (final m in pairs) {
+      final a = nodeOfKey('${m['entry']}'), b = nodeOfKey('${m['key']}');
+      final ms = m['ms'], at = m['at'];
+      final e = a == null || b == null ? null : entry(a, b);
+      if (a == null || b == null || ms is! num || ms < -1 || (e != null && (e.testing || e.at >= (at is num ? at : 0)))) continue;
+      _m[keyOf(a, b)] = PingEntry(ms: ms, at: at is num ? at : 0, fails: m['fails'] is num ? (m['fails'] as num).toInt() : 0);
+      changed = true;
+    }
+    return changed;
+  }
+
+  List<dynamic> toJson() => [
+        for (final e in _m.entries)
+          if (!e.value.testing && e.value.ms != null) [e.key, {'ms': e.value.ms, 'at': e.value.at, 'fails': e.value.fails}],
+      ];
+
+  void restore(Object? list) {
+    _m.clear();
+    if (list is! List) return;
+    for (final item in list) {
+      if (item is! List || item.length < 2 || item[0] is! String || item[1] is! Map) continue;
+      final e = item[1] as Map, ms = e['ms'];
+      if (ms is! num) continue;
+      _m[item[0] as String] = PingEntry(ms: ms, at: e['at'] is num ? e['at'] as num : 0, fails: e['fails'] is num ? (e['fails'] as num).toInt() : (ms == -1 ? 1 : 0));
     }
   }
 }

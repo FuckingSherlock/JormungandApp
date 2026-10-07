@@ -265,6 +265,8 @@ final Map<String, void Function(Catalog)> ops = {
 const _mockupBehind = <String, String>{
   'priority-source': 'chainExitOrder follows the exit unit pickOrder (mockup_todo.md)',
   'op-route-node-drag': 'chainExitOrder follows the exit unit pickOrder (mockup_todo.md)',
+  'src1-dead': 'a chain exit lives by its pair through the entry, not by its direct ping (mockup_todo.md)',
+  'op-auto-off': 'a chain exit lives by its pair through the entry, not by its direct ping (mockup_todo.md)',
 };
 
 void main() {

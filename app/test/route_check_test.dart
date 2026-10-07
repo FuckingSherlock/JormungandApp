@@ -84,6 +84,11 @@ void main() {
         'pingPairs a2 3',
       ]);
       expect(find.text('6 working pairs · best 30 ms'), findsOneWidget);
+      // every measured pair is kept in the pair book: what the chain's exits live by
+      final cat = host.catalog;
+      final a1 = cat.sourcesData['s1']!.nodes[0], a2 = cat.sourcesData['s1']!.nodes[1];
+      final b = cat.sourcesData['s2']!.nodes;
+      expect([cat.pairs.ping(a1, b[0]), cat.pairs.ping(a1, b[2]), cat.pairs.ping(a2, b[1])], [30, 80, 60]);
       expect(find.text('Check again'), findsOneWidget);
       // the top four of six, the rest behind "Show all"
       expect(find.text('Show all 6'), findsOneWidget);

@@ -13,7 +13,7 @@ import 'nodes_text.dart';
 
 /// Nodes -> a profile or a chain card (mockup `renderEntryCard`). Head: name, what it is made of,
 /// the ping and edit buttons. Under it the server it would use now with its ping (a chain: entry
-/// -> exit and the two hops added up), or what is off in Nodes. Opened: its servers - tap one to
+/// -> exit and the measured pair's latency, `Catalog.chainLatency`), or what is off in Nodes. Opened: its servers - tap one to
 /// ping it; a chain lists both ends, and in edit mode every server of each end, framed when this
 /// chain uses it (tap = on / off for this chain only).
 class EntryCard extends StatelessWidget {
@@ -59,12 +59,14 @@ class EntryCard extends StatelessWidget {
         if (!edit)
           IconBtn(
             kind: IconBtnKind.ghost,
+            large: true,
             tooltip: l10n.testLatency,
             onTap: () => host.pingEntry(id),
             icon: const Icon(Icons.bolt),
           ),
         IconBtn(
           kind: IconBtnKind.ghost,
+          large: true,
           tooltip: chain != null ? l10n.editChain : l10n.editProfile,
           onTap: onEdit,
           icon: const Icon(Icons.edit_outlined),
@@ -140,13 +142,7 @@ class EntryCard extends StatelessWidget {
           style: base,
         ),
       );
-      final total =
-          a != null &&
-              b != null &&
-              catalog.pings.isAlive(a) &&
-              catalog.pings.isAlive(b)
-          ? catalog.pings.ping(a)! + catalog.pings.ping(b)!
-          : null;
+      final total = catalog.chainLatency(chain);
       return Padding(
         padding: pad,
         child: Row(
@@ -227,8 +223,9 @@ class EntryCard extends StatelessWidget {
           host,
           chain.exitMode == 'priority'
               ? exits
-              : catalog.byPing<NodeRef>(exits, (r) => r.node),
+              : catalog.byChainPing<NodeRef>(chain, exits, (r) => r.node),
           catalog.chainExitNode(chain),
+          exitOf: chain,
         );
       }
       return Column(
@@ -269,8 +266,9 @@ class EntryCard extends StatelessWidget {
     BuildContext context,
     CoreHost host,
     List<NodeRef> refs,
-    CatalogNode? now,
-  ) {
+    CatalogNode? now, {
+    Chain? exitOf,
+  }) {
     if (refs.isEmpty) return const _EntryEmpty();
     final mixed = _mixed(refs);
     return Column(
@@ -282,7 +280,11 @@ class EntryCard extends StatelessWidget {
             sourceName: mixed ? host.catalog.sourcesData[r.sid]?.name : null,
             now: identical(r.node, now),
             topBorder: i > 0,
-            onTap: () => host.pingNodes([r.node]),
+            // a chain's exit answers through the chain's entry: that is what a tap measures
+            trailing: exitOf == null ? null : ChainExitLatency(exitOf, r.node),
+            onTap: () => exitOf == null
+                ? host.pingNodes([r.node])
+                : host.pingChain(exitOf, exits: [r.node], entries: false),
           ),
       ],
     );
@@ -306,7 +308,8 @@ class EntryCard extends StatelessWidget {
     } else if (chain.exitMode == 'priority') {
       refs = catalog.chainExitOrder(chain);
     } else {
-      refs = catalog.byPing<NodeRef>(
+      refs = catalog.byChainPing<NodeRef>(
+        chain,
         catalog.chainExitOrder(chain),
         (r) => r.node,
       );
@@ -320,6 +323,7 @@ class EntryCard extends StatelessWidget {
           NodeRow(
             node: r.node,
             sourceName: mixed ? catalog.sourcesData[r.sid]?.name : null,
+            trailing: side == 'out' ? ChainExitLatency(chain, r.node) : null,
             framed: true,
             on: !off.contains(r.key),
             dim: off.contains(r.key),

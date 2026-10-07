@@ -1368,5 +1368,8 @@
   "installingTheAppWillCloseAnd": "Устанавливаем… приложение закроется и перезапустится",
   "autoDownload": "Автоскачивание",
   "wiFiOnly": "Только Wi‑Fi",
-  "downloadsWhatAutoCheckFindsInstalling": "Скачивает найденное автопроверкой; ставить обновление вы будете сами"
+  "downloadsWhatAutoCheckFindsInstalling": "Скачивает найденное автопроверкой; ставить обновление вы будете сами",
+  "showLess": "Свернуть",
+  "copySite": "Копировать сайт",
+  "isHigherInTheOrderMoved": "{s0} выше по порядку — перешли на него"
 }

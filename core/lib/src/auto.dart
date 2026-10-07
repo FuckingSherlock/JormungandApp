@@ -191,8 +191,10 @@ class Health {
 
 /// A move the service made: between routes ([route] null, [from] / [to] = route ids), or
 /// between the servers of a Priority group ([route] = its route's id, [from] / [to] =
-/// server keys). [reason]: `failover` (the current one stopped answering) or `back` (a
-/// higher one answers again).
+/// server keys). [reason]: `failover` (the current one stopped answering), `back` (a
+/// higher one that had missed answers again) or `preferred` (a higher one that never missed:
+/// the group had started below it). Only moves of the route in use are emitted: a server move
+/// inside a spare / higher route is a log note (`auto: standby …`), not a switch.
 class AutoSwitch {
   const AutoSwitch({required this.from, required this.to, required this.reason, required this.at, this.route});
   final String? route;
@@ -279,14 +281,23 @@ class _Group {
   bool get pair => entry != null;
   final List<String> keys;
   final ids = <String, String>{}; // key → the server's pool identity (pool.dart)
+
+  /// A server's health by [_hkey]: for a chain's exits it is the pair's (entry in use + exit).
   final health = <String, Health>{};
   String? now; // the server in use (key)
+  final missed = <String>{}; // servers that missed a test here: a move up to one is a `back`
 
   String get current => now ?? keys.first;
   String member(String key) => '$tag/$key';
   String? keyOf(Object? t) => t is String && t.startsWith('$tag/') ? t.substring(tag.length + 1) : null;
-  Health of(String key) => health.putIfAbsent(key, Health.new);
+
+  /// A chain's exit is measured through the entry server in use, so its misses are that
+  /// pair's: when the entry switches the exit starts a count of its own (the old pair keeps its).
+  String _hkey(String key) => entry == null ? key : '${entry!.current}$_pairSep$key';
+  Health of(String key) => health.putIfAbsent(_hkey(key), Health.new);
 }
+
+const _pairSep = '\n';
 
 class _Route {
   _Route(int i, Map<String, dynamic> r)
@@ -386,6 +397,7 @@ class AutoService {
   /// Connections closed as stalled on a route / server left for a dead one.
   int stalledClosed = 0;
   int? checkedAt;
+  int _rounds = 0; // check rounds completed since the connect
   int? refreshedAt;
 
   final _switches = StreamController<AutoSwitch>.broadcast();
@@ -504,6 +516,7 @@ class AutoService {
         _judge();
       }
       checkedAt = _clock();
+      _rounds++;
       if (_failCheck) {
         _failCheck = false;
         if (identical(_routes[index], cur) && cur.health.answered) {
@@ -748,7 +761,10 @@ class AutoService {
 
   Future<int> _test(_Group g, String key) async {
     final ms = await _ping(g, key);
-    if (!_stopped) g.of(key).record(ms, _clock());
+    if (!_stopped) {
+      g.of(key).record(ms, _clock());
+      if (ms < 0) g.missed.add(key);
+    }
     return ms;
   }
 
@@ -823,6 +839,23 @@ class AutoService {
     final from = g.current;
     if (_stopped || !await api.select(g.tag, g.member(key))) return false;
     g.now = key;
+    // `back` = it failed here before; a higher server that never missed was just not the
+    // one the plan started on (nothing "came back")
+    if (reason == 'back') {
+      if (!g.missed.remove(key)) reason = 'preferred';
+    }
+    // a route traffic does not use (a spare, one above): housekeeping, not a switch the
+    // user sees — a log note only (judged after the await: `index` may have moved)
+    if (!identical(r, _routes[index])) {
+      note?.call('auto: standby ${r.id}: server $from → $key ($reason)');
+      return true;
+    }
+    // the first rounds after the connect (the earliest a higher server has answered failAfter
+    // times) putting the group on its preferred server: not news
+    if (reason == 'preferred' && _rounds < settings.failAfter) {
+      note?.call('auto: ${r.id}: server $from → $key ($reason, right after the connect)');
+      return true;
+    }
     _emit(AutoSwitch(route: r.id, from: from, to: key, reason: reason, at: _clock()));
     return true;
   }
@@ -925,6 +958,8 @@ class AutoService {
   /// For the app: `{now: route id, index, server, entryServer (chain), routes: [{id, ms,
   /// fails, oks, at, strikes, holdUntil}], members: [{key, ms, fails, oks, at}] (every
   /// server tested so far, not a chain's exits: those are measured through the entry),
+  /// pairs: [{entry, key, ms, fails, oks, at}] (a chain's exit [key] through the entry
+  /// server [entry]: the exits' own results, one per pair tested),
   /// switches (count), switchedAt, lastSwitch ({route?, from, to, reason, at}; with
   /// `route` = a Priority server move inside that route, `from`/`to` are then server
   /// keys), unstable (count), lastUnstable ({id, strikes, hold, at}), noNet, stalledClosed,
@@ -951,6 +986,17 @@ class AutoService {
             if (!g.pair)
               for (final e in g.health.entries)
                 if (e.value.at > 0) {'key': e.key, ...e.value.toJson()},
+      ],
+      'pairs': [
+        for (final r in _routes)
+          if (r.main.pair)
+            for (final e in r.main.health.entries)
+              if (e.value.at > 0)
+                {
+                  'entry': e.key.substring(0, e.key.indexOf(_pairSep)),
+                  'key': e.key.substring(e.key.indexOf(_pairSep) + 1),
+                  ...e.value.toJson(),
+                },
       ],
       'switches': switchCount,
       'switchedAt': switchedAt,

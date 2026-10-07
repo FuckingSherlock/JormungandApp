@@ -161,6 +161,29 @@ void main() {
       b.note('info', 'after');
       expect(b.since(0)['lines'], [containsPair('n', 5)]);
     });
+
+    test('since finds its start by number, however far the book has moved (cap, clear, a number ahead)', () {
+      final b = LogBook(cap: 100);
+      List<int> ns(int? from) => [for (final l in b.since(from)['lines'] as List) (l as Map)['n'] as int];
+      expect(ns(0), isEmpty);
+      for (var i = 0; i < 250; i++) {
+        b.note('info', 'l$i');
+      }
+      expect(ns(null), [for (var i = 150; i < 250; i++) i], reason: 'the last 100 are kept');
+      expect(ns(0), ns(null), reason: 'a number older than the oldest kept = all kept');
+      expect(ns(150), ns(null));
+      expect(ns(151).length, 99);
+      expect(ns(249), [249]);
+      expect(ns(250), isEmpty, reason: 'the next number: nothing new');
+      expect(ns(9999), isEmpty);
+      expect(b.since(9999)['next'], 250);
+      b.clear();
+      expect(ns(0), isEmpty);
+      b.note('info', 'x');
+      b.note('info', 'y');
+      expect(ns(0), [250, 251]);
+      expect(ns(251), [251]);
+    });
   });
 
   group('jormd routes', () {

@@ -1410,5 +1410,8 @@
   "Installing… the app will close and restart": "installingTheAppWillCloseAnd",
   "Auto-download": "autoDownload",
   "Wi-Fi only": "wiFiOnly",
-  "Downloads what Auto-check finds; installing stays yours": "downloadsWhatAutoCheckFindsInstalling"
+  "Downloads what Auto-check finds; installing stays yours": "downloadsWhatAutoCheckFindsInstalling",
+  "Show less": "showLess",
+  "Copy site": "copySite",
+  "{0} is higher in the order — moved to it": "isHigherInTheOrderMoved"
 }

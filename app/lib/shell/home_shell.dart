@@ -72,6 +72,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Timer? _flyTimer;
   final _navKey = GlobalKey();
 
+  /// Per tab: lets the host's notifications through only while the tab is shown.
+  final Map<AppTab, HostGate> _gates = {};
+
   /// A context under the [AppLinksScope] of [build]: the sheets the links open carry it over.
   final _inner = GlobalKey();
 
@@ -92,6 +95,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) _sys?.onResumed();
+    // behind the app the Logs page is not fed, and the unread raw lines go to the state
+    _logs?.setForeground(
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
+    );
   }
 
   @override
@@ -100,6 +107,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // the host's short messages (a connect that failed, a subscription that did not load...)
     // are toasts on whatever tab is open
     final host = CoreHostScope.read(context);
+    for (final t in AppTab.values) {
+      _gates.putIfAbsent(t, () => HostGate(host, active: t == _tab));
+    }
     _notices ??= host.notices.listen(_toast);
     // one journal for the app: it runs on every tab (the dots on the Logs item come from it)
     _logs ??= LogsController(host)
@@ -143,11 +153,37 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _notifs?.cancel();
     _flyTimer?.cancel();
     _logs?.dispose();
+    for (final g in _gates.values) {
+      g.dispose();
+    }
     super.dispose();
+  }
+
+  /// One tab of the stack. Pages stay alive, but a tab that is not shown is not laid out, its
+  /// tickers stop and the host's notifications do not rebuild it (its [HostGate] is closed; it
+  /// catches up in one rebuild when the tab is shown again).
+  Widget _tabBody(AppTab t, Widget page) {
+    final on = t == _tab;
+    return Offstage(
+      offstage: !on,
+      child: TickerMode(
+        enabled: on,
+        child: ExcludeFocus(
+          excluding: !on,
+          child: CoreHostScope(
+            host: CoreHostScope.read(context),
+            listenTo: _gates[t],
+            child: page,
+          ),
+        ),
+      ),
+    );
   }
 
   void _setTab(AppTab t) {
     if (t == _tab) return;
+    _gates[_tab]?.active = false;
+    _gates[t]?.active = true;
     setState(() => _tab = t);
     _logs?.setOnScreen(t == AppTab.logs);
     if (t == AppTab.logs) _logs?.open();
@@ -328,7 +364,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final catalog = CoreHostScope.read(context).catalog;
     final empty = catalog.sourceOrder.isEmpty;
     final at = empty ? 'simple' : tab ?? catalog.connectMode;
-    setState(() => _tab = AppTab.nodes);
+    _setTab(AppTab.nodes);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _nodesKey.currentState?.openAdd(tab: at);
     });
@@ -392,13 +428,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               systemNavigationBarIconBrightness: Brightness.light,
             ),
             child: Scaffold(
-              body: IndexedStack(
-                index: _tab.index,
+              body: Stack(
+                fit: StackFit.expand,
                 children: [
-                  HomePage(onOpenNodes: _openNodesAdd),
-                  NodesPage(key: _nodesKey),
-                  LogsPage(controller: _logs!),
-                  const SettingsPage(),
+                  _tabBody(AppTab.home, HomePage(onOpenNodes: _openNodesAdd)),
+                  _tabBody(AppTab.nodes, NodesPage(key: _nodesKey)),
+                  _tabBody(AppTab.logs, LogsPage(controller: _logs!)),
+                  _tabBody(AppTab.settings, const SettingsPage()),
                 ],
               ),
               bottomNavigationBar: DecoratedBox(
@@ -407,7 +443,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   border: Border(top: BorderSide(color: c.border)),
                 ),
                 child: ListenableBuilder(
-                  listenable: _logs!,
+                  listenable: _logs!.unseenNotifier,
                   builder: (context, _) {
                     final unseen = _logs!.unseen;
                     return NavigationBar(

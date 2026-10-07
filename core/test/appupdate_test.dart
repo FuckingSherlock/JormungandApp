@@ -131,6 +131,7 @@ Future<Release> release(
   int size = 200000,
   List<String> urls = const [],
   Uint8List? installer,
+  List<UpdateDelta> deltas = const [],
   Map<String, String> notes = const {'en': 'Faster Auto', 'ru': 'Быстрее Auto'},
 }) async {
   final data = installer ?? noise(size);
@@ -141,7 +142,7 @@ Future<Release> release(
     publishedAt: DateTime.utc(2026, 10, 3, 12),
     notes: notes,
     assets: {
-      platform: UpdateAsset(platform: platform, file: 'jormungand-$version-$platform.apk', size: data.length, sha256: sha256.convert(data).toString(), urls: urls, kind: 'apk'),
+      platform: UpdateAsset(platform: platform, file: 'jormungand-$version-$platform.apk', size: data.length, sha256: sha256.convert(data).toString(), urls: urls, kind: 'apk', deltas: deltas),
     },
   );
   final bytes = manifestBytes(m);
@@ -189,7 +190,7 @@ void main() {
     }
   });
 
-  AppUpdater updater({String current = '0.1.0+1', List<String>? feeds, List<String>? publicKeys, List<String>? platforms, UpdateEventSink? onEvent}) => AppUpdater(
+  AppUpdater updater({String current = '0.1.0+1', List<String>? feeds, List<String>? publicKeys, List<String>? platforms, UpdateEventSink? onEvent, String? installedPackage}) => AppUpdater(
         dir: Directory(p.join(tmp.path, 'updates')),
         current: v(current),
         platforms: platforms ?? ['android-arm64-v8a', 'android-armeabi-v7a'],
@@ -198,6 +199,7 @@ void main() {
         get: net.get,
         tunnelUp: () => tunnel,
         onEvent: onEvent,
+        installedPackage: installedPackage,
         stallTimeout: const Duration(seconds: 5),
       );
 
@@ -276,6 +278,34 @@ void main() {
       expect(refused(with_((j) => (j['assets']['android-arm64-v8a'] as Map)['urls'] = ['../up'])).code, UpdateError.badManifest);
       expect(() => UpdateManifest.parse(utf8.encode('nope')), throwsA(isA<UpdateException>()));
       expect(() => UpdateManifest.parse(utf8.encode('[]')), throwsA(isA<UpdateException>()));
+    });
+
+    test('deltas: round trip; an asset without them is as before; malformed ones refuse the manifest', () async {
+      final h = sha256.convert([1]).toString();
+      final d = UpdateDelta(from: h, file: 'x-from-0.1.0.delta', size: 1234, sha256: sha256.convert([2]).toString(), urls: const ['https://h.example/x.delta']);
+      final r = await release(keys, deltas: [d]);
+      final m = UpdateManifest.parse(r.bytes, expectChannel: UpdateChannel.stable);
+      final got = m.assets['android-arm64-v8a']!.deltas.single;
+      expect([got.from, got.file, got.size, got.sha256, got.urls], [d.from, d.file, d.size, d.sha256, d.urls]);
+      expect(jsonDecode(utf8.decode(r.bytes))['schema'], 1, reason: 'old clients ignore unknown asset fields: schema stays 1');
+      expect((await release(keys)).manifest.assets.values.first.deltas, isEmpty);
+      expect(jsonDecode(utf8.decode((await release(keys)).bytes))['assets']['android-arm64-v8a'], isNot(contains('deltas')));
+
+      final good = jsonDecode(utf8.decode(r.bytes)) as Map<String, dynamic>;
+      for (final bad in <dynamic>[
+        'nope',
+        [<String, dynamic>{...d.toJson(), 'from': 'ABC'}],
+        [<String, dynamic>{...d.toJson(), 'file': '../x'}],
+        [<String, dynamic>{...d.toJson(), 'size': 0}],
+        [<String, dynamic>{...d.toJson(), 'sha256': 'zz'}],
+        [<String, dynamic>{...d.toJson(), 'urls': ['ftp://x']}],
+        ['not an object'],
+        [for (var i = 0; i < 17; i++) d.toJson()],
+      ]) {
+        final c = jsonDecode(jsonEncode(good)) as Map<String, dynamic>;
+        (c['assets']['android-arm64-v8a'] as Map)['deltas'] = bad;
+        expect(() => UpdateManifest.parse(utf8.encode(jsonEncode(c))), throwsA(isA<UpdateException>().having((e) => e.code, 'code', UpdateError.badManifest)), reason: '$bad');
+      }
     });
 
     test('an asset for a platform this build does not know is skipped', () async {
@@ -773,6 +803,184 @@ void main() {
       final s = await u.download();
       expect(s.phase, UpdatePhase.failed);
       expect(s.error!.code, UpdateError.disk);
+    });
+  });
+
+  group('delta download', () {
+    late Uint8List oldApk, newApk;
+    late File installed;
+    var seq = 0;
+
+    setUp(() {
+      oldApk = noise(400000);
+      // the next release: 20 KB new in the middle, the rest the same
+      newApk = Uint8List.fromList([...oldApk.sublist(0, 150000), ...noise(20000), ...oldApk.sublist(150000)]);
+      installed = File(p.join(tmp.path, 'installed.apk'))..writeAsBytesSync(oldApk);
+    });
+
+    /// The patch [from] -> [to] as bytes.
+    Future<Uint8List> patchOf(Uint8List from, Uint8List to) async {
+      final id = seq++;
+      final f = File(p.join(tmp.path, 'pf$id'))..writeAsBytesSync(from);
+      final t = File(p.join(tmp.path, 'pt$id'))..writeAsBytesSync(to);
+      final out = File(p.join(tmp.path, 'po$id'));
+      await makeDelta(oldPath: f.path, newPath: t.path, outPath: out.path);
+      return out.readAsBytesSync();
+    }
+
+    UpdateDelta entry(Uint8List patch, {Uint8List? served, String? from}) => UpdateDelta(
+        from: from ?? sha256.convert(oldApk).toString(), file: 'jormungand-0.2.0-from-0.1.0.delta', size: (served ?? patch).length, sha256: sha256.convert(patch).toString());
+
+    /// Publishes the release with [d] and puts [served] (default: [patch]) on the host.
+    Future<Release> publishWith(UpdateDelta d, Uint8List served) async {
+      final r = await release(keys, installer: newApk, deltas: [d]);
+      publish(a, r);
+      a.files[d.file] = served;
+      return r;
+    }
+
+    List<String> listing(AppUpdater u) => Directory(u.dir.path).listSync().map((e) => p.basename(e.path)).toList()..sort();
+
+    test('the patch for the installed file is fetched instead of the installer and applied', () async {
+      final patch = await patchOf(oldApk, newApk);
+      expect(patch.length, lessThan(40000));
+      final d = entry(patch);
+      final r = await publishWith(d, patch);
+      final events = <String>[];
+      final u = updater(installedPackage: installed.path, onEvent: (t, l, data) => events.add(t == 'updateDownloaded' ? '$t:${data['delta']}:${data['downloaded']}' : t));
+      final totals = <int>{};
+      final sub = u.changes.listen((s) {
+        if (s.phase == UpdatePhase.downloading) totals.add(s.total);
+      });
+      await u.check(manual: true);
+      final offer = u.status.offer!.toJson();
+      expect(offer['delta'], isTrue);
+      expect(offer['deltaSize'], patch.length);
+      expect(offer['size'], newApk.length, reason: 'size stays the installer\'s');
+      final s = await u.download();
+      await sub.cancel();
+      expect(s.phase, UpdatePhase.ready);
+      expect(File(s.file!).readAsBytesSync(), newApk);
+      expect(p.basename(s.file!), r.file);
+      expect(a.hits.where((h) => h.endsWith('.apk')), isEmpty, reason: 'the installer was not downloaded');
+      expect(a.hits, contains(d.file));
+      expect(totals, {patch.length}, reason: 'progress is the patch\'s');
+      expect(events, ['updateAvailable', 'updateDownloaded:true:${patch.length}']);
+      expect(listing(u), ['installed.json', 'ready.json', r.file, 'state.json']..sort());
+
+      // a restart brings the ready file back, the hash of the installed file is not computed again
+      final u2 = updater(installedPackage: installed.path);
+      expect((await u2.restore()).phase, UpdatePhase.ready);
+    });
+
+    test('a cut patch download resumes with Range; the whole file is not asked for after a good delta', () async {
+      final patch = await patchOf(oldApk, newApk);
+      final d = entry(patch);
+      await publishWith(d, patch);
+      final u = updater(installedPackage: installed.path);
+      await u.check(manual: true);
+      a.cutAfter = 3000;
+      var s = await u.download(); // the patch is cut, the whole file is cut as well: failed, parts stay
+      expect(s.phase, UpdatePhase.failed);
+      final part = File(p.join(u.dir.path, '${d.file}.part'));
+      expect(part.existsSync(), isTrue);
+      expect(part.lengthSync(), 3000);
+      a.cutAfter = null;
+      a.ranges.clear();
+      a.hits.clear();
+      s = await u.download();
+      expect(s.phase, UpdatePhase.ready);
+      expect(File(s.file!).readAsBytesSync(), newApk);
+      expect(a.ranges.first, 'bytes=3000-');
+      expect(a.hits.where((h) => h.endsWith('.apk')), isEmpty);
+      expect(listing(u).where((n) => n.endsWith('.part')), isEmpty, reason: 'the cut whole-file .part is gone too');
+    });
+
+    test('another installed build (no delta from its hash): the whole file, no delta offered', () async {
+      final patch = await patchOf(oldApk, newApk);
+      await publishWith(entry(patch), patch);
+      installed.writeAsBytesSync(noise(400000));
+      final u = updater(installedPackage: installed.path);
+      await u.check(manual: true);
+      expect(u.status.offer!.delta, isNull);
+      expect(u.status.offer!.toJson(), isNot(contains('delta')));
+      final s = await u.download();
+      expect(s.phase, UpdatePhase.ready);
+      expect(File(s.file!).readAsBytesSync(), newApk);
+      expect(a.hits.where((h) => h.endsWith('.delta')), isEmpty);
+    });
+
+    test('no installed package (the desktop) or an unreadable one: the whole file', () async {
+      final patch = await patchOf(oldApk, newApk);
+      await publishWith(entry(patch), patch);
+      for (final pkg in [null, p.join(tmp.path, 'missing.apk'), tmp.path]) {
+        final u = updater(installedPackage: pkg);
+        await u.check(manual: true);
+        expect(u.status.phase, UpdatePhase.available, reason: '$pkg');
+        expect(u.status.offer!.delta, isNull, reason: '$pkg');
+      }
+      expect(a.hits.where((h) => h.endsWith('.delta')), isEmpty);
+    });
+
+    /// A delta that cannot be used: the download still ends `ready` with the whole file, silently.
+    Future<void> fallsBack(UpdateDelta d, Uint8List served, {bool serve = true}) async {
+      final r = await release(keys, installer: newApk, deltas: [d]);
+      publish(a, r);
+      if (serve) a.files[d.file] = served;
+      final events = <String>[];
+      final u = updater(installedPackage: installed.path, onEvent: (t, l, data) => events.add('$t:$l'));
+      final states = <UpdatePhase>[];
+      final totals = <int>[];
+      final sub = u.changes.listen((s) {
+        states.add(s.phase);
+        if (s.phase == UpdatePhase.downloading) totals.add(s.total);
+      });
+      await u.check(manual: true);
+      expect(u.status.offer!.delta, isNotNull);
+      final s = await u.download();
+      await sub.cancel();
+      expect(s.phase, UpdatePhase.ready);
+      expect(File(s.file!).readAsBytesSync(), newApk);
+      expect(states, isNot(contains(UpdatePhase.failed)));
+      expect(events, contains('updateDeltaFailed:info'));
+      expect(events, isNot(contains('updateFailed:warn')));
+      expect(totals.last, newApk.length, reason: 'progress is the whole file\'s after the fallback');
+      expect(s.offer!.delta, isNull);
+      expect(listing(u), ['installed.json', 'ready.json', r.file, 'state.json']..sort(), reason: 'no patch / .part left behind');
+    }
+
+    test('a damaged patch (the manifest vouches for its bytes) falls back to the whole file', () async {
+      final patch = await patchOf(oldApk, newApk);
+      final bad = Uint8List.fromList(patch)..[patch.length ~/ 2] ^= 0x55;
+      await fallsBack(entry(bad), bad);
+    });
+
+    test('the patch on the host is not the one the manifest names: hash mismatch, whole file', () async {
+      final patch = await patchOf(oldApk, newApk);
+      final other = Uint8List.fromList(patch)..[200] ^= 1;
+      await fallsBack(entry(patch), other);
+    });
+
+    test('a patch made against another base than it claims: refused by its header', () async {
+      final elsewhere = noise(400000);
+      final patch = await patchOf(elsewhere, newApk);
+      await fallsBack(entry(patch), patch); // from = the installed file's hash, header says otherwise
+    });
+
+    test('a patch that produces another file than the release: refused, whole file', () async {
+      final wrong = Uint8List.fromList(newApk)..[1000] ^= 1;
+      final patch = await patchOf(oldApk, wrong);
+      await fallsBack(entry(patch), patch);
+    });
+
+    test('the patch is missing on the host (404): whole file', () async {
+      final patch = await patchOf(oldApk, newApk);
+      await fallsBack(entry(patch), patch, serve: false);
+    });
+
+    test('a garbage that is no patch at all: whole file', () async {
+      final junk = noise(5000);
+      await fallsBack(entry(junk), junk);
     });
   });
 

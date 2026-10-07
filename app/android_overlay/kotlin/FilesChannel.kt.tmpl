@@ -21,6 +21,8 @@ import java.util.concurrent.Executors
  *                      (UTF-8, at most 64 MB), null when cancelled
  *  install -> String?  args {path}: installs the downloaded APK (UpdateInstaller); null = the
  *                      system installer took it, else why not (`permission`, `verify`, `aborted`...)
+ *  installedPackage -> String  the installed APK (`applicationInfo.sourceDir`, readable by the app):
+ *                      its sha256 picks the delta update, which is applied to it (docs/updates.md)
  */
 class FilesChannel(private val app: Context) {
     companion object {
@@ -74,6 +76,7 @@ class FilesChannel(private val app: Context) {
                 if (path == null) result.error("args", "path", null)
                 else UpdateInstaller.install(AppEngine.activity ?: app, path, result)
             }
+            "installedPackage" -> result.success(app.applicationInfo.sourceDir)
             else -> result.notImplemented()
         }
     }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/shell/home_shell.dart';
+import 'package:jormungand/widgets/node_row.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
 import 'fake_core_host.dart';
@@ -172,4 +173,58 @@ void main() {
     expect(find.text('Chain'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'Nodes: an open card builds the servers on screen only, the rest as it scrolls',
+    (tester) async {
+      await pumpApp(tester, _bigHost(300));
+      await _openNodes(tester);
+      await tester.tap(find.text('Big'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Big node 0', findRichText: true),
+        findsWidgets,
+      );
+      expect(
+        find.textContaining('Big node 299', findRichText: true),
+        findsNothing,
+      );
+      expect(
+        find.byType(NodeRow).evaluate().length,
+        lessThan(60),
+        reason: 'a lazy list, not 300 rows',
+      );
+
+      await tester.scrollUntilVisible(
+        find.textContaining('Big node 299', findRichText: true),
+        600,
+        scrollable: find
+            .descendant(
+              of: find.byType(CustomScrollView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      expect(
+        find.textContaining('Big node 299', findRichText: true),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+}
+
+/// A host with one subscription of [n] servers: "Big node 0" ...
+FakeCoreHost _bigHost(int n) {
+  final host = FakeCoreHost();
+  host.catalog.sourcesData['big'] = Source(
+    id: 'big',
+    name: 'Big',
+    url: 'https://big.example.com/sub',
+    nodes: [for (var i = 0; i < n; i++) _node('n$i', 'Big node $i')],
+  );
+  host.catalog.sourceOrder = ['big'];
+  host.catalog.syncCatalog();
+  return host;
 }

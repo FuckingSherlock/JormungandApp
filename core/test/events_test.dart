@@ -34,10 +34,21 @@ void main() {
       file = File(p.join(tmp.path, 'sub', 'events.jsonl')); // the directory does not exist yet
       now = DateTime(2026, 9, 29, 12);
     });
-    tearDown(() => tmp.delete(recursive: true));
+    final books = <EventBook>[];
+    tearDown(() async {
+      await Future.wait(books.map((b) => b.flush())); // no timer of a book writes into a deleted directory
+      books.clear();
+      await tmp.delete(recursive: true);
+    });
 
-    EventBook book({LogBook? log, int cap = 1000}) => EventBook(file, log: log, cap: cap, clock: () => now);
+    EventBook book({LogBook? log, int cap = 1000, int pruneChunk = 100}) {
+      final b = EventBook(file, log: log, cap: cap, pruneChunk: pruneChunk, clock: () => now);
+      books.add(b);
+      return b;
+    }
+
     List<String> lines() => file.existsSync() ? file.readAsLinesSync() : [];
+    List<Object?> ids() => [for (final l in lines()) (jsonDecode(l) as Map)['id'] ?? 'seq'];
 
     test('append: id, at, the shape; since = ids from N, none = the last 200; next and first', () {
       final b = book();
@@ -97,26 +108,55 @@ void main() {
       expect([r['next'], r['first']], [3, 2]);
     });
 
-    test('pruned by count: the oldest go, the file is rewritten to what is kept', () {
-      final b = book(cap: 5);
-      for (var i = 0; i < 8; i++) {
+    test('pruned by count: the oldest go from memory at once, the file is rewritten once enough are stale', () async {
+      final b = book(cap: 5, pruneChunk: 3);
+      for (var i = 0; i < 7; i++) {
         b.add('core', 'restarted', 'info', data: {'attempt': i});
       }
       final r = b.since(null);
-      expect([for (final e in r['events'] as List) (e as Map)['id']], [3, 4, 5, 6, 7]);
-      expect(r['first'], 3);
-      expect(lines().length, 6, reason: 'the marker line and five events');
-      expect(jsonDecode(lines()[1])['id'], 3);
+      expect([for (final e in r['events'] as List) (e as Map)['id']], [2, 3, 4, 5, 6]);
+      expect(r['first'], 2);
+      await b.flush();
+      expect(ids(), [0, 1, 2, 3, 4, 5, 6], reason: '2 stale, under the chunk: appended, nothing rewritten');
+
+      b.add('core', 'restarted', 'info', data: {'attempt': 7}); // 3 stale: the chunk is full
+      await b.flush();
+      expect(ids(), ['seq', 3, 4, 5, 6, 7], reason: 'the marker line and the five kept');
+      expect(book(cap: 5).since(null)['first'], 3);
     });
 
-    test('pruned by age: on append and on start', () {
-      final b = book();
+    test('writes are buffered: one append per burst, after flushEvery or on flush; a rewrite never doubles a pending line', () async {
+      final b = EventBook(file, flushEvery: const Duration(milliseconds: 150), clock: () => now);
+      books.add(b);
+      b.add('core', 'restarted', 'info');
+      b.add('core', 'restarted', 'info');
+      expect(file.existsSync(), isFalse, reason: 'nothing is written inside the call');
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      expect(ids(), [0, 1], reason: 'the timer wrote both');
+
+      b.add('core', 'restarted', 'info');
+      await b.flush();
+      expect(ids(), [0, 1, 2], reason: 'flush does not wait for the timer');
+      await b.flush();
+      expect(ids(), [0, 1, 2], reason: 'nothing pending: nothing written');
+
+      b.add('core', 'restarted', 'info');
+      b.clear(); // the pending line is dropped with the rest, the file is rewritten
+      b.add('core', 'restarted', 'info');
+      await b.flush();
+      expect(ids(), ['seq', 4]);
+      expect((jsonDecode(lines().first) as Map)['seq'], 4, reason: 'the marker is what the clear saw; the next event follows it');
+    });
+
+    test('pruned by age: on append and on start', () async {
+      final b = book(pruneChunk: 1);
       b.add('core', 'restarted', 'info');
       now = now.add(_day * 3);
       b.add('core', 'restarted', 'info');
       now = now.add(_day * 5); // the first is 8 days old, the second 5
       b.add('core', 'restarted', 'info');
       expect([for (final e in b.since(null)['events'] as List) (e as Map)['id']], [1, 2]);
+      await b.flush();
       expect(lines().length, 3);
 
       now = now.add(_day * 3); // on start: 8 and 3 days old
@@ -126,22 +166,49 @@ void main() {
       expect(lines().length, 2, reason: 'the old line is gone from the file at once');
     });
 
-    test('persisted: a new book on the same file has the same events; ids go on', () {
+    test('since: by id, whatever was pruned or cleared; ids older than the oldest kept give all, ahead give none', () {
+      final b = book(cap: 50);
+      List<int> got(int? from, {int tail = 200}) => [for (final e in b.since(from, tail: tail)['events'] as List) (e as Map)['id'] as int];
+      for (var i = 0; i < 120; i++) {
+        b.add('core', 'restarted', 'info');
+      }
+      expect(got(null), [for (var i = 70; i < 120; i++) i]);
+      expect(got(null, tail: 10), [for (var i = 110; i < 120; i++) i]);
+      expect(got(0), got(null));
+      expect(got(70), got(null));
+      expect(got(71).length, 49);
+      expect(got(119), [119]);
+      expect(got(120), isEmpty);
+      expect(got(5000), isEmpty);
+      b.clear();
+      expect(got(0), isEmpty);
+      b.add('core', 'restarted', 'info');
+      expect(got(0), [120]);
+      expect(got(120), [120]);
+      expect(got(121), isEmpty);
+    });
+
+    test('persisted: a new book on the same file has the same events; ids go on', () async {
       final b = book();
       b.add('auto', 'switched', 'info', data: {'from': 'A', 'to': 'B'});
       b.add('site', 'blocked', 'warn', data: {'host': 'x.example'});
+      await b.flush();
       final again = book();
       expect(again.since(null), b.since(null));
       expect(again.add('core', 'restarted', 'info'), 2);
+      await again.flush();
       expect(book().length, 3);
     });
 
-    test('ids never go back: after a clear, and when every event was pruned by age', () {
+    test('ids never go back: after a clear, and when every event was pruned by age', () async {
       final b = book();
       b.add('core', 'restarted', 'info');
       b.add('core', 'restarted', 'info');
       b.clear();
-      expect(book().add('core', 'restarted', 'info'), 2);
+      await b.flush();
+      final next = book();
+      expect(next.add('core', 'restarted', 'info'), 2);
+      await next.flush();
 
       now = now.add(_day * 30); // all old
       final old = book();
@@ -150,24 +217,33 @@ void main() {
       expect(old.add('core', 'restarted', 'info'), 3);
     });
 
-    test('a corrupt line (garbage, a write cut off by a crash) is dropped; the rest stays and appends work', () {
+    test('a corrupt line (garbage, a write cut off by a crash) is dropped; the rest stays and appends work', () async {
       final b = book();
       b.add('core', 'restarted', 'info', data: {'attempt': 1});
       b.add('core', 'restarted', 'info', data: {'attempt': 2});
+      await b.flush();
       final good = lines();
       file.writeAsStringSync('${good[0]}\nnot json at all\n{"id": "x"}\n[1,2]\n${good[1]}\n{"id": 2, "at": 1, "ca', flush: true);
       final again = book();
       expect([for (final e in again.since(null)['events'] as List) (e as Map)['id']], [0, 1]);
       expect(again.add('core', 'restarted', 'info'), 2);
+      await again.flush();
       expect(lines().every((l) => jsonDecode(l) is Map), isTrue, reason: 'the file was cleaned and ends on a whole line');
       expect(book().length, 3);
     });
 
-    test('a file that cannot be written does not break the book', () {
-      final b = EventBook(File(p.join(tmp.path, 'a-file', 'events.jsonl')), clock: () => now);
-      File(p.join(tmp.path, 'a-file')).writeAsStringSync('in the way of the directory');
+    test('a file that cannot be written does not break the book; once it can, the journal is written whole', () async {
+      final dir = Directory(p.join(tmp.path, 'a-file'));
+      File(dir.path).writeAsStringSync('in the way of the directory');
+      final b = EventBook(File(p.join(dir.path, 'events.jsonl')), clock: () => now);
       expect(b.add('core', 'restarted', 'info'), 0);
       expect(b.length, 1);
+      await b.flush(); // fails quietly
+      File(dir.path).deleteSync();
+      dir.createSync();
+      b.add('core', 'restarted', 'info');
+      await b.flush();
+      expect(EventBook(File(p.join(dir.path, 'events.jsonl')), clock: () => now).length, 2, reason: 'the first event came back with the rewrite');
     });
   });
 
@@ -205,6 +281,7 @@ void main() {
     tearDown(() async {
       await server.close(force: true);
       await origin.close(force: true);
+      await d.events.flush();
       await tmp.delete(recursive: true);
     });
 
@@ -247,6 +324,7 @@ void main() {
       (_, r) = await call('GET', '/api/events');
       expect([types(r), r['next'], r['first']], [isEmpty, 2, 2]);
       expect((await call('POST', '/api/events', {'cat': 'user', 'type': 'mode', 'level': 'info'})).$2, {'id': 2});
+      await d.events.flush();
       expect(File(p.join(tmp.path, 'events.jsonl')).existsSync(), isTrue);
     });
 

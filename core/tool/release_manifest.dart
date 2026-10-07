@@ -5,7 +5,11 @@
 //     --asset android-arm64-v8a=build/app-arm64-v8a-release.apk \
 //     --asset windows-x64=build/jormungand-0.2.0-setup.exe \
 //     [--asset ...] [--min-supported 0.1.5] [--notes-en notes.en.txt] [--notes-ru notes.ru.txt] \
-//     [--url-base https://host/path/v0.2.0] [--page https://...] [--signer-sha256 <hex>] [--kind <apk|installer|zip>]
+//     [--url-base https://host/path/v0.2.0] [--page https://...] [--signer-sha256 <hex>] [--kind <apk|installer|zip>] \
+//     [--delta <platform>=<patch file>,<sha256 of the full file it applies to>]...
+//
+// --delta (repeatable): a patch made by tool/make_delta.dart; listed in that platform's asset
+// (`deltas`), its urls get the same --url-base rules as the asset's.
 //
 // --asset: <platform>=<file> (platforms: android-arm64-v8a, android-armeabi-v7a, android-x86_64,
 // windows-x64). --url-base (repeatable): where the files will be uploaded; each gives
@@ -30,7 +34,7 @@ Never _die(String msg, [int code = 64]) {
 Future<void> main(List<String> args) async {
   final one = <String, String>{};
   final many = <String, List<String>>{};
-  const multi = {'--asset', '--url-base', '--signer-sha256'};
+  const multi = {'--asset', '--url-base', '--signer-sha256', '--delta'};
   const single = {'--key', '--version', '--build', '--channel', '--out', '--min-supported', '--notes-en', '--notes-ru', '--page', '--kind'};
   for (var i = 0; i < args.length; i++) {
     final a = args[i];
@@ -73,6 +77,16 @@ Future<void> main(List<String> args) async {
     if (f != null) notes[lang] = File(f).readAsStringSync().trim();
   }
 
+  // --delta <platform>=<patch file>,<sha256 of the full file it applies to>
+  final deltas = <String, List<UpdateDelta>>{};
+  for (final spec in many['--delta'] ?? const <String>[]) {
+    final eq = spec.indexOf('='), comma = spec.lastIndexOf(',');
+    if (eq < 0 || comma < eq) _die('--delta $spec: expected <platform>=<patch file>,<from sha256>');
+    final platform = spec.substring(0, eq), file = File(spec.substring(eq + 1, comma)), from = spec.substring(comma + 1).trim().toLowerCase();
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(from)) _die('--delta $spec: the part after the comma is not a sha256');
+    if (!file.existsSync()) _die('Delta file not found: ${file.path}');
+    (deltas[platform] ??= []).add(await deltaFromFile(file, from, urlBases: many['--url-base'] ?? const []));
+  }
   final assets = <String, UpdateAsset>{};
   for (final spec in many['--asset']!) {
     final eq = spec.indexOf('=');
@@ -80,7 +94,10 @@ Future<void> main(List<String> args) async {
     final platform = spec.substring(0, eq), file = File(spec.substring(eq + 1));
     if (!file.existsSync()) _die('Asset file not found: ${file.path}');
     if (assets.containsKey(platform)) _die('Two assets for $platform');
-    assets[platform] = await assetFromFile(platform, file, urlBases: many['--url-base'] ?? const [], kind: one['--kind']);
+    assets[platform] = await assetFromFile(platform, file, urlBases: many['--url-base'] ?? const [], kind: one['--kind'], deltas: deltas[platform] ?? const []);
+  }
+  for (final platform in deltas.keys) {
+    if (!assets.containsKey(platform)) _die('--delta for $platform, which has no --asset');
   }
 
   final m = UpdateManifest(
@@ -113,6 +130,9 @@ Future<void> main(List<String> args) async {
   stdout.writeln('Upload both to every feed, and the installers:');
   for (final a in assets.values) {
     stdout.writeln('  ${a.platform}: ${a.file} (${a.size} bytes, sha256 ${a.sha256.substring(0, 12)}…)${a.urls.isEmpty ? '' : ' -> ${a.urls.join(', ')}'}');
+    for (final d in a.deltas) {
+      stdout.writeln('    delta from ${d.from.substring(0, 12)}…: ${d.file} (${d.size} bytes)${d.urls.isEmpty ? '' : ' -> ${d.urls.join(', ')}'}');
+    }
   }
   if (!utf8.decode(bytes).contains('"urls"')) stdout.writeln('No --url-base: the installers must sit next to the manifest on each feed.');
 }

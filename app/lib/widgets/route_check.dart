@@ -115,6 +115,8 @@ class _RouteCheckState extends State<RouteCheck> {
         final ms = await host.pingPairs(entry, to);
         if (!live()) return;
         for (var k = 0; k < to.length; k++) {
+          // the pair book keeps what the chain lives by: every exit through this entry
+          catalog.pairs.set(entry, to[k], ms[k], catalog.pings.now);
           if (ms[k] >= 0) t.pairs.add(_Pair(entry, to[k], ms[k]));
         }
         t.pairs.sort((a, b) => a.ms.compareTo(b.ms));

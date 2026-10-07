@@ -37,7 +37,13 @@ class SourceCard extends StatelessWidget {
     required this.onGoneMenu,
     required this.onAddServer,
     this.grip,
+    this.sliver = false,
   });
+
+  /// Builds a sliver (for a [CustomScrollView]) instead of a box: the servers are a lazy list,
+  /// so a source with hundreds of them builds the rows on screen only. The Nodes page uses it
+  /// except while it reorders (the drag list is made of boxes).
+  final bool sliver;
 
   final Source source;
   final List<CatalogNode> nodes;
@@ -65,11 +71,10 @@ class SourceCard extends StatelessWidget {
     final s = source;
     final updating = host.isUpdating(s.id);
     final isSub = s.kind == 'sub';
-    final sorted = catalog.sortedNodes<CatalogNode>(
-      nodes,
-      host.nodeSort,
-      (n) => n,
-    );
+    // sorted only when the servers are shown: a closed card does not pay for its list
+    final sorted = open
+        ? catalog.sortedNodes<CatalogNode>(nodes, host.nodeSort, (n) => n)
+        : const <CatalogNode>[];
 
     final head = CardHead(
       name: s.name,
@@ -82,6 +87,7 @@ class SourceCard extends StatelessWidget {
         if (isSub && !edit)
           IconBtn(
             kind: IconBtnKind.ghost,
+            large: true,
             tooltip: l10n.update,
             onTap: () => host.updateSource(s.id),
             icon: Spin(spinning: updating, child: const Icon(Icons.refresh)),
@@ -97,12 +103,14 @@ class SourceCard extends StatelessWidget {
         else
           IconBtn(
             kind: IconBtnKind.ghost,
+            large: true,
             tooltip: l10n.testLatency,
             onTap: onPing,
             icon: const Icon(Icons.bolt),
           ),
         IconBtn(
           kind: IconBtnKind.ghost,
+          large: true,
           tooltip: l10n.more,
           onTap: onMenu,
           icon: const Icon(Icons.more_vert),
@@ -142,19 +150,55 @@ class SourceCard extends StatelessWidget {
         ),
     ];
 
+    final tail = <Widget>[
+      if (s.kind == 'node') _AddRow(onTap: onAddServer),
+      if (!searching)
+        GoneBlock(
+          refs: catalog.goneRefs(s.id),
+          onRowTap: (r) => onGoneMenu(r.node),
+          onForgetAll: () => host.forgetGone(s.id),
+        ),
+    ];
+    if (sliver) {
+      final at = {for (final (i, n) in sorted.indexed) n.id: i};
+      Widget fade(Widget list) => s.enabled
+          ? list
+          : SliverOpacity(opacity: .45, sliver: list);
+      return CatalogCardSliver(
+        head: head,
+        below: below,
+        open: open,
+        grip: edit ? (searching ? const GripHandle(hidden: true) : grip) : null,
+        rows: open
+            ? [
+                fade(
+                  SliverList.builder(
+                    itemCount: sorted.length,
+                    findChildIndexCallback: (k) =>
+                        k is ValueKey<String> ? at[k.value] : null,
+                    itemBuilder: (_, i) => _row(host, sorted[i], i),
+                  ),
+                ),
+                fade(
+                  SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: tail,
+                    ),
+                  ),
+                ),
+              ]
+            : const [],
+      );
+    }
+
     final body = _Fade(
       faded: !s.enabled,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final (i, n) in sorted.indexed) _row(host, n, i),
-          if (s.kind == 'node') _AddRow(onTap: onAddServer),
-          if (!searching)
-            GoneBlock(
-              refs: catalog.goneRefs(s.id),
-              onRowTap: (r) => onGoneMenu(r.node),
-              onForgetAll: () => host.forgetGone(s.id),
-            ),
+          ...tail,
         ],
       ),
     );
@@ -170,16 +214,21 @@ class SourceCard extends StatelessWidget {
 
   Widget _row(CoreHost host, CatalogNode n, int i) {
     final on = !host.catalog.isNodeDisabled(source, n.id);
-    return NodeRow(
-      node: n,
-      framed: edit,
-      on: on,
-      dim: !on,
-      topBorder: i > 0,
-      onTap: edit
-          ? () => host.toggleNodeEnabled(source.id, n.id)
-          : () => onNodeMenu(n),
-      onPing: () => host.pingNodes([n]),
+    // keyed by the server and painted on its own layer: the answers of a ping run repaint one
+    // row, not the list
+    return RepaintBoundary(
+      key: ValueKey(n.id),
+      child: NodeRow(
+        node: n,
+        framed: edit,
+        on: on,
+        dim: !on,
+        topBorder: i > 0,
+        onTap: edit
+            ? () => host.toggleNodeEnabled(source.id, n.id)
+            : () => onNodeMenu(n),
+        onPing: () => host.pingNodes([n]),
+      ),
     );
   }
 

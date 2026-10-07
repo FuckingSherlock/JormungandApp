@@ -73,14 +73,27 @@ class Probe {
 /// every one of [checkers] at once. The node passes traffic when any answers: the ms of
 /// [url], else of the first checker that answered; -1 = none did. (One blocked service
 /// must not make a working node look dead; the extra requests go only to a node that
-/// already missed.)
-Future<int> withCheckers(Future<int> Function(String url) test, String url, List<String> checkers) async {
+/// already missed.) [fanOut] > 0 asks the checkers [fanOut] at a time (the next group only when
+/// the one before did not answer): a ping run over hundreds of servers keeps fewer connections
+/// open; 0 = all at once (Auto's way, where the answer must come at the fastest).
+Future<int> withCheckers(Future<int> Function(String url) test, String url, List<String> checkers, {int fanOut = 0}) async {
   final ms = await test(url).catchError((_) => -1);
   final rest = [for (final c in checkers) if (c != url) c];
   if (ms >= 0 || rest.isEmpty) return ms;
+  final size = fanOut <= 0 ? rest.length : fanOut;
+  for (var i = 0; i < rest.length; i += size) {
+    final group = rest.sublist(i, i + size > rest.length ? rest.length : i + size);
+    final v = await _firstAnswer(test, group);
+    if (v >= 0) return v;
+  }
+  return -1;
+}
+
+/// The ms of the first of [urls] that answers, all asked at once; -1 when none did.
+Future<int> _firstAnswer(Future<int> Function(String url) test, List<String> urls) {
   final done = Completer<int>();
-  var left = rest.length;
-  for (final c in rest) {
+  var left = urls.length;
+  for (final c in urls) {
     test(c).catchError((_) => -1).then((v) {
       if (done.isCompleted) return;
       if (v >= 0) {

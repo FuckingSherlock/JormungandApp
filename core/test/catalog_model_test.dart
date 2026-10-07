@@ -282,6 +282,140 @@ void main() {
     });
   });
 
+  // A chain's exit may be unreachable on its own and fine through the entry: it lives by its pair.
+  group('chain pairs', () {
+    void pair(Catalog c, String entry, String exit, num ms, {int? fails, int age = 1000}) =>
+        c.pairs.put(nodeOf(c, entry), nodeOf(c, exit), PingEntry(ms: ms, at: clock - age, fails: fails ?? (ms < 0 ? 1 : 0)));
+
+    test('an exit dead directly but alive through the entry works: exit node, usable, mayWork, latency', () {
+      final c = make();
+      final ch = c.chainsData['c1']!;
+      ping(c, 'b::b1', 20);
+      ping(c, 'b::b2', 50);
+      for (final k in ['a::a1', 'a::a2', 'a::a3']) {
+        ping(c, k, -1, fails: 5); // not reachable directly
+      }
+      expect(c.chainExitNode(ch), isNull);
+      expect(c.isUsable('c1'), isFalse);
+      expect(c.mayWork('c1'), isTrue); // every exit misses directly, but a direct miss says nothing about the pair
+      pair(c, 'b::b1', 'a::a2', 70);
+      expect(c.chainExitNode(ch)!.id, 'a2');
+      expect(c.isUsable('c1'), isTrue);
+      expect(c.mayWork('c1'), isTrue);
+      expect(c.chainLatency(ch), 70); // the pair itself, not 20 + (a2 direct)
+      expect(c.chainExitPing(ch, nodeOf(c, 'a::a2')), 70);
+      expect(c.chainExitPing(ch, nodeOf(c, 'a::a1')), isNull); // no pair, direct miss: unknown
+    });
+
+    test('a direct miss does not kill an exit for Auto: mayWork holds until its pair is known dead', () {
+      final c = make();
+      final ch = c.chainsData['c1']!;
+      ping(c, 'b::b1', 20);
+      for (final k in ['a::a1', 'a::a2', 'a::a3']) {
+        ping(c, k, -1, fails: 5);
+        pair(c, 'b::b1', k, -1, fails: 2);
+      }
+      expect(c.mayWork('c1'), isFalse);
+      pair(c, 'b::b1', 'a::a3', -1, fails: 1); // one lost ping
+      expect(c.mayWork('c1'), isTrue);
+      pair(c, 'b::b1', 'a::a3', -1, fails: 2, age: pingFreshMs + 1); // long ago
+      expect(c.mayWork('c1'), isTrue);
+      expect(c.chainExitKnownDead(ch, nodeOf(c, 'a::a1')), isTrue);
+      // a chain whose exits are all dead through the entry is skipped, whatever their direct pings
+      pair(c, 'b::b1', 'a::a3', -1, fails: 2);
+      for (final k in ['a::a1', 'a::a2', 'a::a3']) {
+        ping(c, k, 30);
+      }
+      expect(c.mayWork('c1'), isFalse);
+    });
+
+    test('the pair is read through the entry in use: the core\'s, else the best alive one; another entry\'s fresh pair fills in', () {
+      final c = make();
+      final ch = c.chainsData['c1']!;
+      ping(c, 'b::b1', 20);
+      ping(c, 'b::b2', 40);
+      pair(c, 'b::b1', 'a::a1', -1, fails: 3);
+      pair(c, 'b::b2', 'a::a1', 90);
+      // b1 is the entry in use and says dead
+      expect(c.chainExitAlive(ch, nodeOf(c, 'a::a1')), isFalse);
+      expect(c.chainExitKnownDead(ch, nodeOf(c, 'a::a1')), isTrue);
+      c.coreRoute = const CoreRoute(id: 'c1', server: 'a::a1', entryServer: 'b::b2');
+      expect(c.chainPair(ch, nodeOf(c, 'a::a1'))!.ms, 90);
+      c.coreRoute = null;
+      // an exit b1 never measured: the fresh pair through b2 is used
+      pair(c, 'b::b2', 'a::a2', 55);
+      expect(c.chainPair(ch, nodeOf(c, 'a::a2'))!.ms, 55);
+      pair(c, 'b::b2', 'a::a2', 55, age: pingFreshMs + 1);
+      expect(c.chainPair(ch, nodeOf(c, 'a::a2')), isNull); // stale: not borrowed
+    });
+
+    test('Fastest / Priority exits order and choose by the pair; direct answers are a hint only while no pair exists', () {
+      final c = make();
+      ping(c, 'b::b1', 20);
+      final ch = c.chainsData['c1']!;
+      ping(c, 'a::a1', 10); // direct only: a hint
+      pair(c, 'b::b1', 'a::a2', 60);
+      pair(c, 'b::b1', 'a::a3', 40);
+      expect(c.chainExitNode(ch)!.id, 'a1'); // the hint is the fastest number
+      pair(c, 'b::b1', 'a::a1', -1, fails: 1); // measured through the entry: dead
+      expect(c.chainExitNode(ch)!.id, 'a3');
+      List keys(Plan p) => [for (final n in (((p['routes'] as List)[2]['main']) as Map)['nodes']) n['key']];
+      expect(keys(c.livePlan()), ['a::a3', 'a::a2', 'a::a1']);
+      ch.exitMode = 'priority';
+      c.sourcesData['a']!.pickOrder = ['a::a1', 'a::a2', 'a::a3'];
+      expect(c.chainExitNode(ch)!.id, 'a2'); // the first alive by the pair in the chain's order
+      expect(((c.livePlan()['routes'] as List)[2]['main'] as Map)['chosen'], 'a::a2');
+      expect(c.byChainPing<NodeRef>(ch, c.chainExitRefs(ch), (r) => r.node).map((r) => r.node.id), ['a3', 'a2', 'a1']);
+    });
+
+    test('without pairs the chain reads the direct answers as before (the hop sum for the latency)', () {
+      final c = make();
+      final ch = c.chainsData['c1']!;
+      ping(c, 'b::b1', 20);
+      ping(c, 'a::a1', 30);
+      expect(c.chainExitNode(ch)!.id, 'a1');
+      expect(c.chainLatency(ch), 50);
+      ping(c, 'a::a1', -1, fails: 3);
+      expect(c.chainExitNode(ch), isNull);
+      expect(c.chainLatency(ch), isNull);
+    });
+
+    test('pairs are saved in the snapshot and a ping in flight is not', () {
+      final c = make();
+      final b1 = nodeOf(c, 'b::b1'), a1 = nodeOf(c, 'a::a1'), a2 = nodeOf(c, 'a::a2');
+      c.pairs.set(b1, a1, 70, clock);
+      c.pairs.set(b1, a2, -1, clock);
+      c.pairs.set(b1, a2, -1, clock);
+      c.pairs.markTesting(b1, [nodeOf(c, 'a::a3')]);
+      final j = c.toJson();
+      expect((j['pairs'] as List).length, 2);
+      final back = make(jsonDecode(jsonEncode(j)) as Map<String, dynamic>);
+      expect(back.pairs.ping(nodeOf(back, 'b::b1'), nodeOf(back, 'a::a1')), 70);
+      expect(back.pairs.entry(nodeOf(back, 'b::b1'), nodeOf(back, 'a::a2'))!.fails, 2);
+      expect(back.pairs.anyTesting, isFalse);
+      c.pairs.unmarkTesting(b1, [nodeOf(c, 'a::a3')]);
+      expect(c.pairs.entry(b1, nodeOf(c, 'a::a3')), isNull);
+    });
+
+    test('the core\'s pair checks land newer-only, an in-flight pair wins; unknown servers are skipped', () {
+      final c = make();
+      final b1 = nodeOf(c, 'b::b1'), a1 = nodeOf(c, 'a::a1'), a2 = nodeOf(c, 'a::a2');
+      c.pairs.put(b1, a1, PingEntry(ms: 90, at: 5000));
+      c.pairs.markTesting(b1, [a2]);
+      final changed = c.pairs.mergeCore([
+        {'entry': 'b::b1', 'key': 'a::a1', 'ms': 20, 'at': 4000}, // older
+        {'entry': 'b::b1', 'key': 'a::a2', 'ms': 20, 'at': 9000}, // in flight
+        {'entry': 'b::b2', 'key': 'a::a1', 'ms': 33, 'at': 9000, 'fails': 0},
+        {'entry': 'zz::q', 'key': 'a::a1', 'ms': 1, 'at': 1},
+      ], c.nodeOfKey);
+      expect(changed, isTrue);
+      expect(c.pairs.ping(b1, a1), 90);
+      expect(c.pairs.ping(b1, a2), isNull);
+      expect(c.pairs.ping(nodeOf(c, 'b::b2'), a1), 33);
+      expect(c.pairs.keys.length, 3);
+    });
+  });
+
   group('what is connected', () {
     test('Auto: the first entry in Auto that may work; every one silent -> still the first', () {
       final c = make();

@@ -56,5 +56,8 @@
   "Installing… the app will close and restart": "Устанавливаем… приложение закроется и перезапустится",
   "Auto-download": "Автоскачивание",
   "Wi-Fi only": "Только Wi‑Fi",
-  "Downloads what Auto-check finds; installing stays yours": "Скачивает найденное автопроверкой; ставить обновление вы будете сами"
+  "Downloads what Auto-check finds; installing stays yours": "Скачивает найденное автопроверкой; ставить обновление вы будете сами",
+  "Show less": "Свернуть",
+  "Copy site": "Копировать сайт",
+  "{0} is higher in the order — moved to it": "{0} выше по порядку — перешли на него"
 }

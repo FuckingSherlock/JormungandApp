@@ -84,6 +84,7 @@ JSON (UTF-8), подписывается **байтами файла как ес
 | `notes` | заметки к релизу по языкам; показывается язык интерфейса, иначе `en` |
 | `android.signerSha256` | SHA-256 сертификата(ов) подписи APK (hex); список — на время смены сертификата |
 | `assets[<платформа>]` | файл для платформы: `file` (только `[A-Za-z0-9._-]`, без путей — это имя в папке обновлений), `size`, `sha256` (hex), `kind` (`apk` / `installer` / `zip`), `urls` — абсолютные адреса или относительные к ленте (под каждой лентой); нет `urls` → `<лента>/<file>` |
+| `assets[…].deltas` | необязательный список патчей «старый полный файл → этот»: `[{from, file, size, sha256, urls?}]` — `from` = sha256 **старого полного файла** (hex), остальное как у файла (`file` — по тем же правилам имени, `sha256` — самого патча, `urls` как у файла). До 16 штук; неверная форма → `badManifest`. Раздел 7 → «Дельта-обновления». Старые клиенты неизвестное поле актива не читают и качают файл целиком, поэтому `schema` остаётся 1 |
 
 Платформы: `android-arm64-v8a`, `android-armeabi-v7a`, `android-x86_64`, `windows-x64`. Актив
 неизвестной платформы пропускается (новый релиз может добавить свои). Приложение берёт первый
@@ -231,6 +232,46 @@ APK). Что **не** защищает: **заморозку** (хост мол�
 Размер установщика ограничен 600 МБ. Права: запись только в папку приложения. Ошибка диска —
 `disk` (UI: «нет места / нет доступа»).
 
+### Дельта-обновления
+
+APK весит ~100 МБ, из них `libbox.so` (81 МБ) и `libflutter.so` (12 МБ) почти не меняются, а
+`libapp.so` (9 МБ) и dex — каждый выпуск. Поэтому манифест может приложить к активу **патчи** от
+прежних выпусков (`deltas`, раздел 2), и приложение качает патч вместо файла целиком.
+
+**Формат патча** (наш, чистый Dart: `core/lib/src/delta.dart` — и генератор, и применялка, одни и те же в
+CI и в приложении). В духе rsync: старый файл режется на блоки по 4 КиБ, у каждого слабый скользящий
+хеш (Adler-подобный) и сильный (64 бита MD5); новый файл просматривается скользящим окном, совпавшее
+окно → операция `COPY(смещение в старом, длина)` (соседние копии сливаются в одну; совпадение
+продлевается назад по накопленным «новым» байтам и вперёд за последний блок), остальное — `LITERAL`.
+Файл: заголовок (магия `JDLT`, версия формата 1, размер и sha256 старого, размер и sha256 нового) + gzip-поток
+операций (`0x00` END, `0x01` COPY varint varint, `0x02` LITERAL varint байты). Всё потоком: генератор
+держит индекс блоков старого файла (~16 байт на блок) и окно 1 МиБ, применялка — один кусок распакованного
+потока и буфер копирования 64 КиБ; целиком файлы в память не читаются (на 50 МБ — десятки МБ RSS).
+Что бы патч ни утверждал, результат пишется в `.part`, хешируется по ходу и обязан дать sha256 нового
+файла (из заголовка **и** из подписанного манифеста); патч не к тому файлу, битый или обрезанный —
+`DeltaException`. Замер на реальном APK arm64 (102,7 МБ): те же APK — патч 1 КБ; изменён весь
+`libapp.so` (9,4 МБ, каждый блок) — 4,2 МБ (это его сжатый размер); 40 локальных правок — 9 КБ;
+генерация ≈ 3 с, применение ≈ 1,2 с.
+
+**Выбор.** Платформа сообщает ядру путь **установленного пакета** (`installedPackage`: на Android
+`applicationInfo.sourceDir`, канал `jormungand/files` → `installedPackage`; на десктопе нет — всегда файл
+целиком). При проверке (когда найден новый выпуск) ядро считает sha256 этого файла — **один раз**:
+значение запоминается по `путь|размер|mtime` (в памяти и в `updates/installed.json`, перезапуск не
+хеширует 100 МБ заново) — и ищет в `deltas` актива запись с `from` == хеш. Есть → предложение
+(`UpdateOffer.delta`) отдаёт `delta: true` и `deltaSize` (в `size` остаётся размер файла целиком; UI
+Settings → Data показывает размер патча). Нет (`from` не совпал, например локальная сборка, или пути нет) —
+как раньше.
+
+**Загрузка.** Патч качается по тем же правилам, что и файл (два круга, `urls`, докачка `.part`, размер и
+sha256 патча из манифеста), прогресс `received/total` — по размеру патча. Затем применяется к
+установленному файлу в `<файл>.new.part`, проверяются размер и sha256 результата (sha256 актива), файл
+переименовывается в `<файл>`, патч удаляется. **Любая неудача** — нет совпадения / патч недоступен / битый /
+не тот / результат не сошёлся / диск — **молча** переходит к загрузке файла целиком (статус
+`downloading` перезапускается с `total` = размер файла; у `failed` предложение остаётся с патчем, повтор
+сначала снова пробует патч) и пишет событие `updateDeltaFailed` (info). Отмена отменяет всё. Результат —
+обычный `ready`-файл: проверки платформы перед установкой (Android: подпись, versionCode) те же, патч их
+не обходит.
+
 **Платная сеть** (Android): решает настройка «Auto-download» (раздел 6, 11): `wifi` — только
 неплатная сеть. Платформа сообщает ядру `metered`; ручное «Скачать» всегда качает, что бы ни было
 (человек нажал сам).
@@ -275,6 +316,10 @@ UpdateInstaller
   сертификату установленного приложения. Не сошлось — не ставим, событие `updateFailed` (stage
   `verify`). (Android и так откажет с `INSTALL_FAILED_UPDATE_INCOMPATIBLE` — но мы говорим причину
   человеческим языком и ничего не показываем пользователю про «чужой пакет».)
+- **Дельта-обновления.** Установленный APK ядру нужен как основа патча и для его выбора по хешу: канал
+  `jormungand/files`, метод `installedPackage` → `applicationInfo.sourceDir` (читается самим приложением;
+  это тот самый файл, что был установлен, побайтно — PackageInstaller копирует его как есть). Раздел 7 →
+  «Дельта-обновления».
 - **Платная сеть для автоскачивания.** Канал `jormungand/network` (`NetworkChannel.kt.tmpl`; Dart —
   `NetworkPort` / `NetworkChannel`, в тестах подменяется): `metered` и поток изменений
   (`NetworkCallback`). Наш VPN объявляет себя неплатным, поэтому `activeNetwork` при включённом
@@ -418,6 +463,7 @@ UpdateInstaller
 | манифест новее формата | `schema`: «обновите вручную», `page` |
 | нет файла для устройства | `noAsset` |
 | скачивание оборвалось | `.part` остаётся, Retry докачивает |
+| патч (дельта) не подошёл / не скачался / не применился | тихо: `updateDeltaFailed` (info), качается файл целиком, раздел 7 |
 | размер / sha256 не сошлись | файл удалён, следующий адрес; все адреса — `failed` (`hash` / `size`) |
 | Android: пользователь отказался в диалоге | `installFailed`: файл остаётся, статус `ready`, можно нажать ещё раз |
 | Android: установка не удалась (`INSTALL_FAILED_*`) | `installFailed(причина)`, файл остаётся |
@@ -437,7 +483,8 @@ UpdateInstaller
 | событие | когда | `data` |
 |---|---|---|
 | `core/updateAvailable` info | проверка нашла версию, которой раньше не предлагали (раз на версию) | `{version, build, channel, forced, via}` |
-| `core/updateDownloaded` info | файл скачан и проверен | `{version, build, size, via}` |
+| `core/updateDownloaded` info | файл скачан и проверен | `{version, build, size, via}`; по патчу ещё `delta: true, downloaded` (байт патча) |
+| `core/updateDeltaFailed` info | патч не удалось использовать (нет / не скачался / битый / не к тому файлу / результат не сошёлся / диск) — дальше качается файл целиком, раздел 7 | `{code: 'network'\|'delta'\|'disk', error, from, attempts?}` |
 | `core/updateFailed` warn (`info` — тихая проверка по расписанию) | сбой проверки / скачивания / проверки файла / установки | `{stage: 'check'\|'download'\|'verify'\|'install', code, error, attempts?, from?, to?}` |
 | `core/updateChannelEmpty` info | манифест канала отсутствует (404/410), раздел 5 | `{channel, attempts}` |
 | `core/updateInstalled` info | после рестарта версия == цель | `{from, to}` |
@@ -478,8 +525,16 @@ dart run tool/release_keys.dart <файл-приватного-ключа>     #
 dart run tool/release_manifest.dart --key <файл> --version 0.2.0 --build 12 --channel stable --out dist/ \
    --asset android-arm64-v8a=<apk> --asset android-armeabi-v7a=<apk> --asset android-x86_64=<apk> --asset windows-x64=<zip> \
    [--min-supported 0.1.5] [--notes-en n.en.txt] [--notes-ru n.ru.txt] \
-   [--url-base https://…/v0.2.0]… [--signer-sha256 <hex>]… [--page https://…]
+   [--url-base https://…/v0.2.0]… [--signer-sha256 <hex>]… [--page https://…] \
+   [--delta android-arm64-v8a=<патч>,<sha256 старого apk>]…
+
+dart run tool/make_delta.dart <старый apk> <новый apk> <патч> [--block 4096] [--no-verify]
 ```
+
+`make_delta` пишет патч (раздел 7 → «Дельта-обновления»), сразу применяет его к старому файлу и сверяет с
+новым (`--no-verify` отключает) и печатает `from=` (sha256 старого — это `from` записи манифеста), `to=`,
+`size=`, `sha256=` патча и `ratio=` (процент от размера нового). `--delta` (повторяемый) добавляет патч в
+`deltas` актива той платформы, `urls` — по тем же `--url-base`.
 
 `release_keys` пишет приватный ключ (base64 seed) в указанный файл — отказывается писать внутрь
 любого git-дерева и поверх существующего файла — и печатает публичный ключ в виде готовой
@@ -557,10 +612,21 @@ git tag v0.1.0 && git push origin v0.1.0
    «нет»); beta берёт основу = max(pubspec `X.Y.Z`, stable с `patch + 1`) — раздел 5.
 3. `build_apk.ps1 -BuildName … -BuildNumber … -KeystorePath …` — три APK, подпись релизным ключом.
    Проверяется, что каждый APK подписан именно им (`apksigner`) и что `versionCode == build` (`aapt2`).
-4. `release_manifest.dart --channel <beta|stable>` с `--signer-sha256` (SHA-256 сертификата из keytool),
-   `--url-base https://github.com/FuckingSherlock/jormungand-releases/releases/download/v<версия>`.
-5. Публикация через `gh` в **FuckingSherlock/jormungand-releases**: релиз `v<версия>` с APK
-   `jormungand-<версия>-<abi>.apk` (beta — prerelease, stable — обычный, `--latest`); релиз `feed`
+4. «Delta patches» (`continue-on-error`, ничто здесь не может провалить выпуск): для каждого ABI —
+   патч от APK **последних `DELTA_FROM` (3) релизов того же канала**, которые ещё лежат в
+   `jormungand-releases` (beta: пререлизы `v…-beta.N`; stable: обычные `vX.Y.Z`; не `feed`, не текущий;
+   отбор по `createdAt`). Старый APK скачивается `gh release download`, патч — `make_delta.dart`
+   (`jormungand-<версия>-<abi>-from-<старая версия>.delta`, с самопроверкой применением). Не скачался APK /
+   не вышел патч / патч больше `DELTA_MAX_PERCENT` (60 %) от APK — этот патч пропускается с предупреждением.
+   Оставшиеся — в `deltas.txt` (`<платформа>=<патч>,<sha256 старого apk>` на строку). Шаг идёт до публикации,
+   а значит до чистки старых релизов (она после, оставляет 10 ≥ `DELTA_FROM`); патчи лежат в релизе своей
+   версии и уходят вместе с ним.
+5. `release_manifest.dart --channel <beta|stable>` с `--signer-sha256` (SHA-256 сертификата из keytool),
+   `--url-base https://github.com/FuckingSherlock/jormungand-releases/releases/download/v<версия>` и
+   `--delta …` на каждую строку `deltas.txt`.
+6. Публикация через `gh` в **FuckingSherlock/jormungand-releases**: релиз `v<версия>` с APK
+   `jormungand-<версия>-<abi>.apk` и патчами из `deltas.txt` (beta — prerelease, stable — обычный,
+   `--latest`); релиз `feed`
    создаётся, если его нет; **после** APK в `feed` заливаются `manifest-<канал>.json` и `.sig`
    (`--clobber`). Чистка — только после beta: остаются 10 новейших beta-релизов
    (`^v\d+\.\d+\.\d+-beta\.\d+$`), старые удаляются вместе с тегами — `feed` и stable не трогаются.
@@ -596,13 +662,20 @@ CI-релиз — поверх локальной. Старый debug-подпи
 ## 14. Ядро
 
 `core/lib/src/appupdate.dart` (экспортируется из `jormungand_core.dart`): `AppVersion`,
-`UpdateManifest` / `UpdateAsset` (`parse`, `toJson`), `chooseAsset`, `updatePlatforms`,
+`UpdateManifest` / `UpdateAsset` / `UpdateDelta` (`parse`, `toJson`), `chooseAsset`, `updatePlatforms`,
 `verifyManifestSignature`, `UpdateGet` (шов HTTP; `httpUpdateGet(proxyPort:)` — настоящий),
 `AppUpdater` (`check`, `download`, `cancelDownload`, `restore`, `beginInstall`, `installFailed`,
 `reconcile`, `cleanup`, `startSchedule`, `changes`), `UpdateStatus` / `UpdateOffer` /
 `UpdateException` (`UpdateError`). `appupdate_release.dart` — сторона издателя (ключи, подпись,
 сборка актива); пакетом не экспортируется, им пользуются `tool/release_*.dart`. Зависимость:
 `cryptography`.
+
+`core/lib/src/delta.dart` (тоже из барреля): `makeDelta(oldPath:, newPath:, outPath:, blockSize:)` →
+`DeltaStats`, `applyDelta(oldPath:, patchPath:, outPath:, expectOldSha256:, expectNewSha256:)` →
+`DeltaHeader` (`DeltaException` на любой патч, который нельзя применить; выход при ошибке удаляется),
+`readDeltaHeader`. `CoreService(installedPackage:)` → `AppUpdater(installedPackage:)` — путь установленного
+пакета (Android: `applicationInfo.sourceDir`; `platform_seams.dart` берёт его у канала `jormungand/files`, метод
+`installedPackage`); без него дельт нет.
 
 Как подключить `CoreService`: `AppUpdater(dir: <dataDir>/updates, current: <версия приложения>,
 platforms: updatePlatforms(os:, abis:), get: httpUpdateGet(proxyPort: () => <_innerPort>),
@@ -615,8 +688,13 @@ channel: …)`.
 фолбэк лент (мёртвая / 404 / неверная подпись → следующая; прямо → туннель; туннель не пробуется без
 туннеля); каналы; `minSupported`; загрузка (sha256, размер, докачка с Range, сервер без Range, обрыв,
 отмена, диск); перезапуск (`restore`, `reconcile`); расписание; автоскачивание (off / wifi / always,
-платная сеть → неплатная, Auto-check выкл., тихий сбой и повтор); настоящий `httpUpdateGet` через
-loopback-прокси.
+платная сеть → неплатная, Auto-check выкл., тихий сбой и повтор); дельты (манифест с `deltas` и отказы,
+патч выбран по хешу установленного файла и применён вместо загрузки файла, докачка патча, другой
+установленный файл / нет пакета → целиком, битый / чужой / не тот патч / 404 / мусор → тихий откат на
+файл целиком); настоящий `httpUpdateGet` через loopback-прокси.
+`core/test/delta_test.dart`: генератор и применялка на синтетических файлах (одинаковые, сдвиг, середина,
+дописанное, пустой старый / новый, короче блока, нули, случайные правки, разные размеры блока), отказы
+(битый байт, обрезка, не патч, версия, чужая база, другой хеш), поток 50 МБ с ограничением памяти.
 
 ## Открытые вопросы
 

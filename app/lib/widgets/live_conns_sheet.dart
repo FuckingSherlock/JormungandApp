@@ -141,8 +141,14 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
 
   // ── build ──
 
+  // the speed and the connections tick on their own notifier (not the host's)
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: CoreHostScope.of(context).trafficNotifier,
+    builder: (context, _) => _body(context),
+  );
+
+  Widget _body(BuildContext context) {
     final l10n = context.l10n;
     final host = CoreHostScope.of(context);
     final c = context.colors;

@@ -29,6 +29,7 @@ class IconBtn extends StatelessWidget {
     this.kind = IconBtnKind.normal,
     this.active = false,
     this.activeColor,
+    this.large = false,
   });
 
   final Widget icon;
@@ -37,6 +38,9 @@ class IconBtn extends StatelessWidget {
   final IconBtnKind kind;
   final bool active;
   final Color? activeColor;
+
+  /// An inline action of a card (ping, refresh, edit): a 48 dp target, 22 dp icon, for a thumb.
+  final bool large;
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +65,7 @@ class IconBtn extends StatelessWidget {
         : active
         ? tone
         : c.border;
-    final side = ghost ? 30.0 : 36.0;
+    final side = large ? 48.0 : ghost ? 30.0 : 36.0;
     Widget w = Material(
       color: bg,
       shape: RoundedRectangleBorder(
@@ -78,7 +82,7 @@ class IconBtn extends StatelessWidget {
           height: side,
           child: Center(
             child: IconTheme(
-              data: IconThemeData(color: fg, size: ghost ? 16 : 17),
+              data: IconThemeData(color: fg, size: large ? 22 : ghost ? 16 : 17),
               child: icon,
             ),
           ),
@@ -980,7 +984,10 @@ class _ChainPainter extends CustomPainter {
   bool shouldRepaint(_ChainPainter old) => old.color != color;
 }
 
-/// The small round "pinging" ring of a latency slot (`.lat-spin`).
+/// The small round "pinging" ring of a latency slot (`.lat-spin`). Still, not spinning: a ping
+/// run puts one in every row of a long list, and hundreds of running animations (each a frame
+/// of its own) were what made the list stutter; the ring's open arc says "in progress" and the
+/// row's own value replaces it as the answer comes.
 class PingSpinner extends StatelessWidget {
   const PingSpinner({super.key, this.size = 12});
 
@@ -989,14 +996,33 @@ class PingSpinner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CircularProgressIndicator(
-        strokeWidth: 2,
-        color: c.t2,
-        backgroundColor: c.t2.tint(.3),
+    return RepaintBoundary(
+      child: CustomPaint(
+        size: Size.square(size),
+        painter: _RingPainter(c.t2, c.t2.tint(.3)),
       ),
     );
   }
+}
+
+class _RingPainter extends CustomPainter {
+  const _RingPainter(this.arc, this.track);
+
+  final Color arc;
+  final Color track;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 2.0;
+    final rect = (Offset.zero & size).deflate(stroke / 2);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(rect, 0, 6.2832, false, paint..color = track);
+    canvas.drawArc(rect, -1.5708, 1.8, false, paint..color = arc);
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) => old.arc != arc || old.track != track;
 }

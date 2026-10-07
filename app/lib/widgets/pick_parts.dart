@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:jormungand_core/jormungand_core.dart' show NodeRef;
+import 'package:jormungand_core/jormungand_core.dart' show Chain, NodeRef;
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
@@ -7,6 +7,7 @@ import '../theme/app_colors.g.dart';
 import 'app_card.dart';
 import 'catalog_card.dart';
 import 'form_parts.dart';
+import 'latency_text.dart';
 import 'node_row.dart';
 
 /// Pieces the three server pickers share: the source entry sheet, the profile editor and the
@@ -19,15 +20,17 @@ String pickModeHint(AppLocalizations l10n, bool priority) => priority
 
 /// `.seg-ping`: the bolt next to the Fastest / Priority switch.
 class PingAllButton extends StatelessWidget {
-  const PingAllButton({super.key, required this.onTap, this.tooltip});
+  const PingAllButton({super.key, required this.onTap, this.tooltip, this.large = false});
 
   final VoidCallback onTap;
   final String? tooltip;
+  final bool large;
 
   @override
   Widget build(BuildContext context) => IconBtn(
     kind: IconBtnKind.ghost,
-    tooltip: tooltip ?? context.l10n.testLatency,
+    large: large,
+    tooltip: tooltip ??context.l10n.testLatency,
     onTap: onTap,
     icon: const Icon(Icons.bolt),
   );
@@ -139,7 +142,12 @@ class PickRows extends StatelessWidget {
     this.onReorder,
     this.protoOf,
     this.sourceNames = false,
+    this.exitOf,
   });
+
+  /// The rows are this chain's exits: they show and ping the answer through the chain's entry
+  /// (the pair), not the server's own.
+  final Chain? exitOf;
 
   final List<NodeRef> refs;
   final bool Function(NodeRef) isOn;
@@ -181,7 +189,10 @@ class PickRows extends StatelessWidget {
               ]
             : const [],
         onTap: () => onTap(r),
-        onPing: () => host.pingNodes([r.node]),
+        trailing: exitOf == null ? null : ChainExitLatency(exitOf!, r.node),
+        onPing: () => exitOf == null
+            ? host.pingNodes([r.node])
+            : host.pingChain(exitOf!, exits: [r.node], entries: false),
       );
     }
 

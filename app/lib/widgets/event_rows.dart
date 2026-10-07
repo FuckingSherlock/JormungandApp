@@ -11,6 +11,7 @@ import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
 import 'follow_list.dart' show HitFlash;
 import 'form_parts.dart';
+import 'nodes_menus.dart' show copyText;
 import 'search_field.dart';
 
 /// Rows of the Events journal (mockup 47-events.js: `evRowHtml`, `evBlockedHtml`, `evWhyHtml`,
@@ -192,11 +193,14 @@ class EventRow extends StatelessWidget {
     void leave() => logs.returnId = e.id;
     final acts = <(String, VoidCallback)>[];
     final dd = e.data;
-    if (e.cat == 'site' && e.type == 'blocked' && dd['via'] != null && links.newRuleFor != null) {
-      acts.add((
-        l10n.createRule,
-        () => links.newRuleFor!(host: words.host(dd), via: '${dd['via']}'),
-      ));
+    // "does not open": the site can be copied and made a rule whenever the event names one
+    final site = e.cat == 'site' ? words.host(dd) : '';
+    if (site.isNotEmpty) {
+      acts.add((l10n.copySite, () => copyText(context, site, l10n.site)));
+      if (links.newRuleFor != null) {
+        final via = dd['via'] == null || '${dd['via']}'.isEmpty ? null : '${dd['via']}';
+        acts.add((l10n.createRule, () => links.newRuleFor!(host: site, via: via)));
+      }
     }
     if (e.cat == 'sub' &&
         e.type == 'failed' &&

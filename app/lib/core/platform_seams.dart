@@ -99,6 +99,7 @@ Future<CoreHost> openCoreHost() async {
       dataDir: dataDir,
       appVersion: AppVersion.tryParse(version, build: ver?.code ?? 1),
       updatePlatformKeys: updatePlatforms(os: 'android', abis: await vpn.abis()),
+      installedPackage: await installedApkPath(), // delta updates are applied to it
       runner: LibboxRunner(
         ChannelLibboxPort(vpn),
         cacheFile: '$dataDir${Platform.pathSeparator}run${Platform.pathSeparator}main${Platform.pathSeparator}cache.db',
@@ -109,6 +110,7 @@ Future<CoreHost> openCoreHost() async {
           ChannelLibboxPort(vpn, boxId: id),
           cacheFile: '${boxCache.path}${Platform.pathSeparator}$id.db',
           temporaryCache: true,
+          watchApi: false, // nobody reads a test box's connections / groups / status
         );
       },
       sysProxy: NoSystemProxy(),

@@ -55,7 +55,7 @@ Uint8List readSeedFile(File f) {
 
 /// A file as the manifest describes it. [urlBases]: where it will be uploaded; each gives
 /// `<base>/<file name>` in `urls` (none: relative, the feeds are asked for it).
-Future<UpdateAsset> assetFromFile(String platform, File f, {List<String> urlBases = const [], String? kind}) async {
+Future<UpdateAsset> assetFromFile(String platform, File f, {List<String> urlBases = const [], String? kind, List<UpdateDelta> deltas = const []}) async {
   if (!updatePlatformIds.contains(platform)) throw ArgumentError('Unknown platform "$platform" (${updatePlatformIds.join(', ')})');
   final name = p.basename(f.path);
   final hash = (await sha256.bind(f.openRead()).first).toString();
@@ -67,6 +67,20 @@ Future<UpdateAsset> assetFromFile(String platform, File f, {List<String> urlBase
     sha256: hash,
     urls: [for (final b in urlBases) '${b.endsWith('/') ? b : '$b/'}$name'],
     kind: kind ?? (ext == '.apk' ? 'apk' : ext == '.zip' ? 'zip' : ext == '.exe' || ext == '.msi' ? 'installer' : null),
+    deltas: deltas,
+  );
+}
+
+/// A patch file ([makeDelta]) as the manifest describes it: it applies to the full file whose
+/// sha256 is [from]. [urlBases] as in [assetFromFile].
+Future<UpdateDelta> deltaFromFile(File f, String from, {List<String> urlBases = const []}) async {
+  final name = p.basename(f.path);
+  return UpdateDelta(
+    from: from.toLowerCase(),
+    file: name,
+    size: f.lengthSync(),
+    sha256: (await sha256.bind(f.openRead()).first).toString(),
+    urls: [for (final b in urlBases) '${b.endsWith('/') ? b : '$b/'}$name'],
   );
 }
 

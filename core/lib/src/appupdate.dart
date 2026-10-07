@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:path/path.dart' as p;
 
+import 'delta.dart';
 import 'durable.dart';
 
 // The app's self-update, platform-free half (docs/updates.md): the signed manifest, the
@@ -218,9 +219,53 @@ enum UpdateChannel {
   static UpdateChannel of(String? s) => s == 'beta' ? beta : stable;
 }
 
+/// A patch that turns an older full file of the same platform into this release's asset
+/// (docs/updates.md -> "Дельта-обновления"): download it instead of the whole installer when the
+/// installed file's sha256 is [from]. Made by `tool/make_delta.dart`, applied by [applyDelta].
+class UpdateDelta {
+  const UpdateDelta({required this.from, required this.file, required this.size, required this.sha256, this.urls = const []});
+
+  /// Lower-case hex sha256 of the full file the patch applies to.
+  final String from;
+
+  /// File name only, like [UpdateAsset.file].
+  final String file;
+  final int size;
+
+  /// Lower-case hex sha256 of the patch file itself.
+  final String sha256;
+
+  /// As [UpdateAsset.urls].
+  final List<String> urls;
+
+  static final _hexRe = RegExp(r'^[0-9a-f]{64}$');
+
+  static UpdateDelta fromJson(String platform, Object? j) {
+    if (j is! Map) throw FormatException('$platform: delta is not an object');
+    final from = j['from'], file = j['file'], size = j['size'], hash = j['sha256'], urls = j['urls'];
+    if (from is! String || !_hexRe.hasMatch(from)) throw FormatException('$platform: bad delta from');
+    if (file is! String || !UpdateAsset._fileRe.hasMatch(file) || file.contains('..')) throw FormatException('$platform: bad delta file name');
+    if (size is! int || size <= 0 || size > maxAssetBytes) throw FormatException('$platform: bad delta size');
+    if (hash is! String || !_hexRe.hasMatch(hash)) throw FormatException('$platform: bad delta sha256');
+    if (urls != null && (urls is! List || urls.any((u) => u is! String || !UpdateAsset._goodUrl(u)))) throw FormatException('$platform: bad delta urls');
+    return UpdateDelta(from: from, file: file, size: size, sha256: hash, urls: [for (final u in (urls as List? ?? const [])) u as String]);
+  }
+
+  Map<String, dynamic> toJson() => {
+        'from': from,
+        'file': file,
+        'size': size,
+        'sha256': sha256,
+        if (urls.isNotEmpty) 'urls': urls,
+      };
+}
+
+/// At most this many deltas per asset are read (a manifest is a few KB).
+const maxDeltasPerAsset = 16;
+
 /// One installable file of a release.
 class UpdateAsset {
-  const UpdateAsset({required this.platform, required this.file, required this.size, required this.sha256, this.urls = const [], this.kind});
+  const UpdateAsset({required this.platform, required this.file, required this.size, required this.sha256, this.urls = const [], this.kind, this.deltas = const []});
 
   /// One of [updatePlatformIds].
   final String platform;
@@ -238,6 +283,10 @@ class UpdateAsset {
   /// `apk` | `installer` | `zip`; the platform side decides what to do with it.
   final String? kind;
 
+  /// Patches from older full files to this one ([UpdateDelta]); a client that does not know the
+  /// field ignores it and downloads the whole file.
+  final List<UpdateDelta> deltas;
+
   static final _fileRe = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$');
 
   static UpdateAsset fromJson(String platform, Object? j) {
@@ -248,8 +297,16 @@ class UpdateAsset {
     if (hash is! String || !RegExp(r'^[0-9a-f]{64}$').hasMatch(hash)) throw FormatException('$platform: bad sha256');
     if (urls != null && (urls is! List || urls.any((u) => u is! String || !_goodUrl(u)))) throw FormatException('$platform: bad urls');
     if (kind != null && kind is! String) throw FormatException('$platform: bad kind');
+    final deltas = j['deltas'];
+    if (deltas != null && (deltas is! List || deltas.length > maxDeltasPerAsset)) throw FormatException('$platform: bad deltas');
     return UpdateAsset(
-        platform: platform, file: file, size: size, sha256: hash, urls: [for (final u in (urls as List? ?? const [])) u as String], kind: kind as String?);
+        platform: platform,
+        file: file,
+        size: size,
+        sha256: hash,
+        urls: [for (final u in (urls as List? ?? const [])) u as String],
+        kind: kind as String?,
+        deltas: [for (final d in (deltas as List? ?? const [])) UpdateDelta.fromJson(platform, d)]);
   }
 
   static bool _goodUrl(String u) {
@@ -264,6 +321,7 @@ class UpdateAsset {
         'sha256': sha256,
         if (urls.isNotEmpty) 'urls': urls,
         if (kind != null) 'kind': kind,
+        if (deltas.isNotEmpty) 'deltas': [for (final d in deltas) d.toJson()],
       };
 }
 
@@ -499,9 +557,13 @@ enum UpdatePhase { idle, checking, upToDate, available, downloading, ready, fail
 
 /// What the manifest offers this device.
 class UpdateOffer {
-  const UpdateOffer({required this.manifest, required this.asset, required this.forced, required this.feed, required this.route});
+  const UpdateOffer({required this.manifest, required this.asset, required this.forced, required this.feed, required this.route, this.delta});
   final UpdateManifest manifest;
   final UpdateAsset asset;
+
+  /// The patch that fits the installed file (its sha256 is the delta's `from`): what a download
+  /// fetches first. Null: the whole file.
+  final UpdateDelta? delta;
 
   /// The running version is below `minSupported`: the app must update before use.
   final bool forced;
@@ -512,6 +574,8 @@ class UpdateOffer {
 
   AppVersion get version => manifest.version;
 
+  UpdateOffer withoutDelta() => UpdateOffer(manifest: manifest, asset: asset, forced: forced, feed: feed, route: route);
+
   Map<String, dynamic> toJson() => {
         'version': manifest.version.semver,
         'build': manifest.version.build,
@@ -521,6 +585,8 @@ class UpdateOffer {
         'publishedAt': manifest.publishedAt?.toUtc().toIso8601String(),
         'page': manifest.page,
         'size': asset.size,
+        if (delta != null) 'delta': true,
+        if (delta != null) 'deltaSize': delta!.size,
         'file': asset.file,
         'kind': asset.kind,
         'platform': asset.platform,
@@ -601,6 +667,7 @@ class AppUpdater {
     UpdateGet? get,
     this.tunnelUp,
     this.onEvent,
+    this.installedPackage,
     int Function()? now,
     this.manifestTimeout = const Duration(seconds: 15),
     this.requestTimeout = const Duration(seconds: 20),
@@ -630,6 +697,11 @@ class AppUpdater {
   /// The events journal: `('updateAvailable' | 'updateDownloaded' | 'updateFailed' |
   /// 'updateInstalled', level, data)` in category `core`.
   final UpdateEventSink? onEvent;
+
+  /// The file the running app was installed from (Android: `applicationInfo.sourceDir`), when the
+  /// platform can read it: its sha256 picks a delta of the offer ([UpdateDelta.from]). Null: always
+  /// the whole file (the desktop, for now).
+  final String? installedPackage;
   final int Function() _now;
   final Duration manifestTimeout, requestTimeout, stallTimeout;
 
@@ -711,7 +783,8 @@ class AppUpdater {
       if (asset == null) {
         throw UpdateException(UpdateError.noAsset, 'Version ${m.version} has no file for this device (${platforms.join(', ')})');
       }
-      final offer = UpdateOffer(manifest: m, asset: asset, forced: m.minSupported != null && current < m.minSupported!, feed: best.feed, route: best.route);
+      final offer = UpdateOffer(
+          manifest: m, asset: asset, forced: m.minSupported != null && current < m.minSupported!, feed: best.feed, route: best.route, delta: await _matchDelta(asset));
       // the same offer already downloaded: stay ready
       if (before.phase == UpdatePhase.ready && before.offer?.version == offer.version && before.file != null) {
         _set(UpdateStatus(UpdatePhase.ready, current: current, offer: offer, file: before.file, checkedAt: _checkedAt));
@@ -876,9 +949,10 @@ class AppUpdater {
   Future<UpdateStatus> _download(UpdateOffer offer) async {
     _cancel = false;
     final a = offer.asset;
-    _set(UpdateStatus(UpdatePhase.downloading, current: current, offer: offer, total: a.size, checkedAt: _checkedAt));
+    _set(UpdateStatus(UpdatePhase.downloading, current: current, offer: offer, total: offer.delta?.size ?? a.size, checkedAt: _checkedAt));
     final errors = <UpdateException>[];
     final attempts = <Map<String, dynamic>>[];
+    var plan = offer; // what the statuses show while downloading
     try {
       await dir.create(recursive: true);
       final routes = _routes;
@@ -887,14 +961,28 @@ class AppUpdater {
           ..remove(UpdateRoute.tunnel)
           ..insert(0, UpdateRoute.tunnel);
       }
-      final urls = _assetUrls(offer);
+      // the patch for the installed file first; whatever goes wrong there, the whole file is next
+      final delta = offer.delta;
+      if (delta != null) {
+        final got = await _downloadDelta(offer, delta, routes);
+        if (got != null) {
+          await _writeReady(offer, got.file);
+          _set(UpdateStatus(UpdatePhase.ready, current: current, offer: offer, file: got.file.path, checkedAt: _checkedAt));
+          _event('updateDownloaded', 'info', {'version': offer.version.semver, 'build': offer.version.build, 'size': a.size, 'via': got.route.name, 'delta': true, 'downloaded': delta.size});
+          return _status;
+        }
+        // the statuses of the whole-file download say so; a failure keeps [offer] (a retry tries the patch again)
+        plan = offer.withoutDelta();
+        _set(UpdateStatus(UpdatePhase.downloading, current: current, offer: plan, total: a.size, checkedAt: _checkedAt));
+      }
+      final urls = _urlsOf(plan, a.urls, a.file);
       for (final route in routes) {
         for (final url in urls) {
           try {
-            final file = await _downloadOne(offer, url, route);
-            await _writeReady(offer, file);
-            _set(UpdateStatus(UpdatePhase.ready, current: current, offer: offer, file: file.path, checkedAt: _checkedAt));
-            _event('updateDownloaded', 'info', {'version': offer.version.semver, 'build': offer.version.build, 'size': a.size, 'via': route.name});
+            final file = await _downloadOne(plan, url, route, file: a.file, size: a.size, sha: a.sha256);
+            await _writeReady(plan, file);
+            _set(UpdateStatus(UpdatePhase.ready, current: current, offer: plan, file: file.path, checkedAt: _checkedAt));
+            _event('updateDownloaded', 'info', {'version': plan.version.semver, 'build': plan.version.build, 'size': a.size, 'via': route.name});
             return _status;
           } on UpdateException catch (e) {
             if (e.code == UpdateError.cancelled) rethrow;
@@ -926,14 +1014,14 @@ class AppUpdater {
 
   /// The asset's addresses: absolute ones as they are, relative ones under every feed
   /// (the feed that gave the manifest first), none given: `<feed>/<file>`.
-  List<Uri> _assetUrls(UpdateOffer o) {
+  List<Uri> _urlsOf(UpdateOffer o, List<String> urls, String file) {
     final order = [o.feed, ...feeds.where((f) => f != o.feed)];
     final out = <Uri>[];
     void add(Uri u) {
       if (!out.contains(u)) out.add(u);
     }
 
-    final given = o.asset.urls.isEmpty ? [o.asset.file] : o.asset.urls;
+    final given = urls.isEmpty ? [file] : urls;
     for (final u in given) {
       final uri = Uri.parse(u);
       if (uri.hasScheme) {
@@ -947,21 +1035,21 @@ class AppUpdater {
     return out;
   }
 
-  /// One address over one route, resuming a `.part`; the verified file at the end.
-  Future<File> _downloadOne(UpdateOffer offer, Uri url, UpdateRoute route, {bool retried = false}) async {
-    final a = offer.asset;
-    final part = File(p.join(dir.path, '${a.file}.part'));
+  /// One address over one route, resuming a `.part`; the verified file at the end. [file], [size]
+  /// and [sha] are what is fetched: the installer, or a delta of the offer.
+  Future<File> _downloadOne(UpdateOffer offer, Uri url, UpdateRoute route, {required String file, required int size, required String sha, bool retried = false}) async {
+    final part = File(p.join(dir.path, '$file.part'));
     var have = part.existsSync() ? part.lengthSync() : 0;
-    if (have > a.size) {
+    if (have > size) {
       part.deleteSync();
       have = 0;
     }
-    if (have < a.size) {
+    if (have < size) {
       final r = await _get(url, route, rangeFrom: have, timeout: requestTimeout);
       try {
         if (r.status == 416 && have > 0 && !retried) {
           part.deleteSync();
-          return await _downloadOne(offer, url, route, retried: true);
+          return await _downloadOne(offer, url, route, file: file, size: size, sha: sha, retried: true);
         }
         if (r.status != 200 && r.status != 206) throw HttpException('HTTP ${r.status}', uri: url);
         final resume = r.status == 206 && have > 0;
@@ -972,10 +1060,10 @@ class AppUpdater {
           await for (final chunk in r.body.timeout(stallTimeout)) {
             if (_cancel) throw UpdateException(UpdateError.cancelled, 'Cancelled');
             got += chunk.length;
-            if (got > a.size) throw UpdateException(UpdateError.size, 'The file is bigger than the ${a.size} bytes announced');
+            if (got > size) throw UpdateException(UpdateError.size, 'The file is bigger than the $size bytes announced');
             sink.add(chunk);
-            if (_status.phase == UpdatePhase.downloading && (got - _status.received >= 65536 || got == a.size)) {
-              _set(UpdateStatus(UpdatePhase.downloading, current: current, offer: offer, received: got, total: a.size, checkedAt: _checkedAt));
+            if (_status.phase == UpdatePhase.downloading && (got - _status.received >= 65536 || got == size)) {
+              _set(UpdateStatus(UpdatePhase.downloading, current: current, offer: offer, received: got, total: size, checkedAt: _checkedAt));
             }
           }
           await sink.flush();
@@ -990,19 +1078,123 @@ class AppUpdater {
         r.onClose?.call();
       }
     }
-    if (part.lengthSync() != a.size) {
+    if (part.lengthSync() != size) {
       final n = part.lengthSync();
       // the connection ended early: leave the .part, the next try resumes it
-      throw UpdateException(UpdateError.network, 'The connection ended at $n of ${a.size} bytes');
+      throw UpdateException(UpdateError.network, 'The connection ended at $n of $size bytes');
     }
     final digest = (await sha256.bind(part.openRead()).first).toString();
-    if (digest != a.sha256) {
+    if (digest != sha) {
       _drop(part);
       throw UpdateException(UpdateError.hash, 'The file does not match its sha256');
     }
-    final done = File(p.join(dir.path, a.file));
+    final done = File(p.join(dir.path, file));
     if (done.existsSync()) done.deleteSync();
     return part.renameSync(done.path);
+  }
+
+  // ── delta ──
+
+  String? _installedSha;
+  String? _installedKey;
+
+  File get _installedCache => File(p.join(dir.path, 'installed.json'));
+
+  /// sha256 of [installedPackage], hashed once: remembered by path + size + mtime (in memory and in
+  /// `installed.json`, so a restart does not hash 100 MB again). Null: no package / unreadable.
+  Future<String?> _installedSha256() async {
+    final path = installedPackage;
+    if (path == null || path.isEmpty) return null;
+    try {
+      final f = File(path);
+      final st = f.statSync();
+      if (st.type != FileSystemEntityType.file) return null;
+      final key = '$path|${st.size}|${st.modified.millisecondsSinceEpoch}';
+      if (_installedKey == key && _installedSha != null) return _installedSha;
+      try {
+        final j = jsonDecode(_installedCache.readAsStringSync());
+        if (j is Map && j['key'] == key && j['sha256'] is String) {
+          _installedKey = key;
+          return _installedSha = j['sha256'] as String;
+        }
+      } catch (_) {}
+      final sha = (await sha256.bind(f.openRead()).first).toString();
+      _installedKey = key;
+      _installedSha = sha;
+      try {
+        await dir.create(recursive: true);
+        await writeFileDurable(_installedCache, jsonEncode({'key': key, 'sha256': sha}));
+      } catch (_) {}
+      return sha;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The delta of [a] made against the installed file, if the manifest has one.
+  Future<UpdateDelta?> _matchDelta(UpdateAsset a) async {
+    if (a.deltas.isEmpty) return null;
+    final have = await _installedSha256();
+    if (have == null) return null;
+    for (final d in a.deltas) {
+      if (d.from == have) return d;
+    }
+    return null;
+  }
+
+  /// Fetches [d] (resumable like a full file), applies it to [installedPackage] and checks the result
+  /// against the asset's size and sha256. The finished installer and the route it came by; null =
+  /// no delta this time (nothing matched / unreachable / damaged patch / wrong result / disk): the
+  /// caller downloads the whole file and the journal has the reason. A cancel is rethrown.
+  Future<({File file, UpdateRoute route})?> _downloadDelta(UpdateOffer offer, UpdateDelta d, List<UpdateRoute> routes) async {
+    final a = offer.asset;
+    final base = installedPackage;
+    final failures = <Map<String, dynamic>>[];
+    void giveUp(String code, String error) {
+      _event('updateDeltaFailed', 'info', {'code': code, 'error': error, 'from': d.from.substring(0, 12), if (failures.isNotEmpty) 'attempts': failures});
+    }
+
+    if (base == null) return null;
+    for (final route in routes) {
+      for (final url in _urlsOf(offer, d.urls, d.file)) {
+        File patch;
+        try {
+          patch = await _downloadOne(offer, url, route, file: d.file, size: d.size, sha: d.sha256);
+        } on UpdateException catch (e) {
+          if (e.code == UpdateError.cancelled) rethrow;
+          failures.add({'url': url.toString(), 'route': route.name, 'code': e.code.name, 'error': e.message});
+          continue;
+        } on FileSystemException catch (e) {
+          giveUp('disk', 'Cannot write ${e.path ?? dir.path}: ${e.message}');
+          return null;
+        } catch (e) {
+          failures.add({'url': url.toString(), 'route': route.name, 'code': 'network', 'error': '$e'});
+          continue;
+        }
+        // the patch is the signed one (sha256 checked): if it does not apply, other addresses would not help
+        final out = File(p.join(dir.path, '${a.file}.new.part'));
+        try {
+          await applyDelta(oldPath: base, patchPath: patch.path, outPath: out.path, expectOldSha256: d.from, expectNewSha256: a.sha256);
+          if (out.lengthSync() != a.size) throw DeltaException('The result is not ${a.size} bytes');
+          final done = File(p.join(dir.path, a.file));
+          if (done.existsSync()) done.deleteSync();
+          _drop(File(p.join(dir.path, '${a.file}.part'))); // a whole-file try that was cut earlier
+          return (file: out.renameSync(done.path), route: route);
+        } on DeltaException catch (e) {
+          giveUp('delta', e.message);
+        } on FileSystemException catch (e) {
+          giveUp('disk', 'Cannot write ${e.path ?? dir.path}: ${e.message}');
+        } catch (e) {
+          giveUp('delta', '$e');
+        } finally {
+          _drop(patch);
+          _drop(out);
+        }
+        return null;
+      }
+    }
+    giveUp('network', 'The patch could not be downloaded');
+    return null;
   }
 
   void _drop(File f) {

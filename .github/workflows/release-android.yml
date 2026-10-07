@@ -45,6 +45,11 @@ env:
   # reached 2000 + n), and it must never go down (docs/updates.md section 5)
   BUILD_OFFSET: '3000'
   KEEP_BETAS: '10'
+  # delta updates (docs/updates.md, "Дельта-обновления"): patches from the APKs of this many latest
+  # releases of the same channel (must stay <= KEEP_BETAS: the cleanup below keeps that many), and a
+  # patch bigger than this share of the whole APK is not worth publishing
+  DELTA_FROM: '3'
+  DELTA_MAX_PERCENT: '60'
 
 jobs:
   # Until the one-time secrets are set (docs/updates.md section 13) a push only notes it and
@@ -206,6 +211,53 @@ jobs:
           done
           ls -l "$RUNNER_TEMP/dist"
 
+      # Delta patches (docs/updates.md, "Дельта-обновления"): for every ABI, a patch from the APK of
+      # each of the last DELTA_FROM releases of the same channel that are still in the feed repo (beta:
+      # prereleases vB; stable: stable releases; never `feed`, never this release) to the new APK.
+      # Nothing here may fail the release: an old APK that cannot be fetched, a patch that cannot be
+      # made / does not apply back, or one bigger than DELTA_MAX_PERCENT of the APK only skips that
+      # delta (a warning). The kept ones are listed in deltas.txt (`<platform>=<patch>,<sha256 of the
+      # old APK>`) for the manifest and the upload. Runs before the retention cleanup of the publish step.
+      - name: Delta patches
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.JORM_RELEASES_TOKEN }}
+        run: |
+          dist="$RUNNER_TEMP/dist"; work="$RUNNER_TEMP/delta-work"
+          mkdir -p "$work"; : > "$dist/deltas.txt"
+          if [ "$CHANNEL" = beta ]; then pre=true; pat='^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$'
+          else pre=false; pat='^v[0-9]+\.[0-9]+\.[0-9]+$'; fi
+          tags=$(gh release list --repo "$FEED_REPO" --limit 100 --json tagName,createdAt,isPrerelease \
+            | jq -r --argjson pre "$pre" --arg pat "$pat" --arg cur "v$VERSION" --argjson n "$DELTA_FROM" \
+              '[.[] | select(.isPrerelease == $pre and (.tagName | test($pat)) and .tagName != $cur)]
+               | sort_by(.createdAt) | reverse | .[:$n] | .[].tagName') || tags=""
+          if [ -z "$tags" ]; then echo "No earlier $CHANNEL release to make a delta from"; exit 0; fi
+          ( cd core && dart pub get ) || { echo "::warning::dart pub get failed, no deltas"; exit 0; }
+          for tag in $tags; do
+            oldver="${tag#v}"
+            for abi in arm64-v8a armeabi-v7a x86_64; do
+              new="$dist/jormungand-$VERSION-$abi.apk"
+              old="$work/$tag/jormungand-$oldver-$abi.apk"
+              patch="$dist/jormungand-$VERSION-$abi-from-$oldver.delta"
+              mkdir -p "$work/$tag"
+              if ! gh release download "$tag" --repo "$FEED_REPO" --pattern "jormungand-$oldver-$abi.apk" --dir "$work/$tag"; then
+                echo "::warning::cannot fetch the $abi APK of $tag, no delta from it"; continue
+              fi
+              if ! out=$(cd core && dart run tool/make_delta.dart "$old" "$new" "$patch"); then
+                echo "::warning::cannot make the $abi delta from $tag"; rm -f "$patch" "$old"; continue
+              fi
+              rm -f "$old"
+              from=$(printf '%s\n' "$out" | sed -n 's/^from=//p'); psize=$(stat -c %s "$patch"); full=$(stat -c %s "$new")
+              if ! [[ "$from" =~ ^[0-9a-f]{64}$ ]]; then echo "::warning::no sha256 from make_delta for $abi/$tag"; rm -f "$patch"; continue; fi
+              if [ $((psize * 100)) -gt $((full * DELTA_MAX_PERCENT)) ]; then
+                echo "::warning::$abi delta from $tag is $psize of $full bytes (over $DELTA_MAX_PERCENT %), not published"; rm -f "$patch"; continue
+              fi
+              echo "android-$abi=$patch,$from" >> "$dist/deltas.txt"
+              echo "$abi delta from $tag: $psize bytes (APK $full)"
+            done
+          done
+          { echo "Deltas:"; sed 's/^/  /' "$dist/deltas.txt"; } >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Signed manifest
         env:
           JORM_RELEASE_KEY: ${{ secrets.JORM_RELEASE_KEY }}
@@ -217,12 +269,20 @@ jobs:
           subject=$(git log -1 --format=%s | cut -c1-200)
           label=$([ "$CHANNEL" = stable ] && echo Release || echo Beta)
           printf '%s %s (build %s, commit %s)\n%s\n' "$label" "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$subject" > "$dist/notes.txt"
+          # the deltas the previous step kept (`<platform>=<patch>,<sha256 of the old APK>` per line)
+          delta_args=()
+          if [ -s "$dist/deltas.txt" ]; then
+            while IFS= read -r l; do
+              if [ -n "$l" ]; then delta_args+=(--delta "$l"); fi
+            done < "$dist/deltas.txt"
+          fi
           cd core
           dart pub get
           dart run tool/release_manifest.dart --key "$key" --version "$VERSION" --build "$BUILD" --channel "$CHANNEL" --out "$dist" \
             --asset "android-arm64-v8a=$dist/jormungand-$VERSION-arm64-v8a.apk" \
             --asset "android-armeabi-v7a=$dist/jormungand-$VERSION-armeabi-v7a.apk" \
             --asset "android-x86_64=$dist/jormungand-$VERSION-x86_64.apk" \
+            "${delta_args[@]}" \
             --url-base "https://github.com/$FEED_REPO/releases/download/v$VERSION" \
             --signer-sha256 "$SIGNER" \
             --page "https://github.com/$FEED_REPO/releases" \
@@ -236,12 +296,19 @@ jobs:
           [ -n "$GH_TOKEN" ] || { echo "::error::secret JORM_RELEASES_TOKEN is not set"; exit 1; }
           cd "$RUNNER_TEMP/dist"
           tag="v$VERSION"
+          # the installers, and the delta patches the manifest lists (only those: a half-made one is never uploaded)
+          files=(jormungand-*.apk)
+          if [ -s deltas.txt ]; then
+            while IFS= read -r l; do
+              if [ -n "$l" ]; then l="${l#*=}"; files+=("${l%,*}"); fi
+            done < deltas.txt
+          fi
           # 1. the installers (a re-run of the same run overwrites them); beta = prerelease, stable = a normal release
           if gh release view "$tag" --repo "$FEED_REPO" > /dev/null 2>&1; then
-            gh release upload "$tag" jormungand-*.apk --repo "$FEED_REPO" --clobber
+            gh release upload "$tag" "${files[@]}" --repo "$FEED_REPO" --clobber
           else
             kind=$([ "$CHANNEL" = beta ] && echo --prerelease || echo --latest)
-            gh release create "$tag" jormungand-*.apk --repo "$FEED_REPO" $kind \
+            gh release create "$tag" "${files[@]}" --repo "$FEED_REPO" $kind \
               --title "Jormungand $VERSION" --notes-file notes.txt
           fi
           # 2. the feed release (fixed tag) and, only after the APKs are up, the signed manifest

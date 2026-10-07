@@ -23,7 +23,11 @@ class StatCards extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: SpeedCard(traffic: host.traffic, connected: connected),
+            child: ListenableBuilder(
+              listenable: host.trafficNotifier,
+              builder: (_, _) =>
+                  SpeedCard(traffic: host.traffic, connected: connected),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -32,7 +36,13 @@ class StatCards extends StatelessWidget {
               children: [
                 ExitIpCard(host: host),
                 const SizedBox(height: 10),
-                ConnectionsCard(traffic: host.traffic, connected: connected),
+                ListenableBuilder(
+                  listenable: host.trafficNotifier,
+                  builder: (_, _) => ConnectionsCard(
+                    traffic: host.traffic,
+                    connected: connected,
+                  ),
+                ),
               ],
             ),
           ),

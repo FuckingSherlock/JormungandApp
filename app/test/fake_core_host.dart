@@ -47,7 +47,6 @@ class FakeCoreHost extends CoreHost {
     country: 'DE',
     city: 'Frankfurt',
   );
-  TrafficInfo _traffic = TrafficInfo.zero;
   bool _tun = false;
   bool _global = false;
   bool _sys = false;
@@ -62,7 +61,7 @@ class FakeCoreHost extends CoreHost {
   }
 
   void setTraffic(TrafficInfo t) {
-    _traffic = t;
+    trafficNotifier.update(t);
     notifyListeners();
   }
 
@@ -194,9 +193,6 @@ class FakeCoreHost extends CoreHost {
 
   @override
   ExitState get exit => _exit;
-
-  @override
-  TrafficInfo get traffic => _traffic;
 
   @override
   Future<void> refreshExit() async {}
@@ -394,6 +390,15 @@ class FakeCoreHost extends CoreHost {
   }
 
   @override
+  Future<void> pingChain(
+    Chain c, {
+    Iterable<CatalogNode>? exits,
+    bool entries = true,
+  }) async => calls.add(
+    'pingChain ${c.id} ${exits?.length ?? 'all'}${entries ? '' : ' exits-only'}',
+  );
+
+  @override
   String? shareLink(CatalogNode n) => 'vless://${n.address}#${n.name}';
 
   @override
@@ -549,7 +554,7 @@ class FakeCoreHost extends CoreHost {
   @override
   Future<void> closeConnection([String? id]) async {
     calls.add('closeConnection $id');
-    final t = _traffic;
+    final t = traffic;
     setTraffic(
       TrafficInfo(
         down: t.down,

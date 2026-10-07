@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:jormungand_core/jormungand_core.dart';
 
 import '../platform/apps_io.dart';
@@ -36,6 +37,7 @@ class LiveCoreHost extends CoreHost {
     this.saveDelay = const Duration(milliseconds: 400),
     this.reconnectDelay = const Duration(milliseconds: 600),
     this.trafficEvery = const Duration(seconds: 1),
+    this.notifyEvery = const Duration(milliseconds: 120),
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
 
@@ -76,6 +78,10 @@ class LiveCoreHost extends CoreHost {
   final Duration saveDelay;
   final Duration reconnectDelay;
   final Duration trafficEvery;
+
+  /// The pause that joins the notifications of a ping run (one answer per server) and of the
+  /// core's status ticks into one: see [_notify]. Zero = every one goes out at once.
+  final Duration notifyEvery;
   final DateTime Function() _now;
 
   /// The app's state. Public for the pages that edit it (Route, ...): they call [changed] after
@@ -95,7 +101,6 @@ class LiveCoreHost extends CoreHost {
   VpnDown? _down;
   KillBlock? _blocking;
   ExitState _exit = const ExitState.checking();
-  TrafficInfo _traffic = TrafficInfo.zero;
   DnsHealth? _dnsHealth;
   double? _lastSpeedMbps;
   AppUpdate _upd = const AppUpdate();
@@ -175,7 +180,7 @@ class LiveCoreHost extends CoreHost {
       _initError = '$e';
       _notice(HostNotice('initFailed', '$e', args: ['$e']));
     }
-    _notify();
+    _notifyNow();
   }
 
   /// The engine of the app was made again while the tunnel (the VpnService) kept running: the
@@ -236,6 +241,7 @@ class LiveCoreHost extends CoreHost {
     _reconnectTimer?.cancel();
     _saveTimer?.cancel();
     _trafficTimer?.cancel();
+    _notifyTimer?.cancel();
     _statusSub?.cancel();
     _eventSub?.cancel();
     _updSub?.cancel();
@@ -245,8 +251,39 @@ class LiveCoreHost extends CoreHost {
     super.dispose();
   }
 
+  Timer? _notifyTimer;
+  bool _notifyDirty = false;
+  DockSummary? _dockCache;
+
+  /// Tells the listeners, joined: the first call opens a [notifyEvery] window, the ones inside it
+  /// add nothing, one notification goes out when it closes. For what comes in bursts (a ping's
+  /// answers, the core's status ticks, the update's progress). A user's action or a change of
+  /// phase uses [_notifyNow].
   void _notify() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    _dockCache = null;
+    if (notifyEvery == Duration.zero) return _notifyNow();
+    _notifyDirty = true;
+    _notifyTimer ??= Timer(notifyEvery, () {
+      _notifyTimer = null;
+      if (_notifyDirty) _notifyNow();
+    });
+  }
+
+  /// Notifies at once and drops what [_notify] still held.
+  void _notifyNow() {
+    if (_disposed) return;
+    _notifyTimer?.cancel();
+    _notifyTimer = null;
+    _notifyDirty = false;
+    _dockCache = null;
+    notifyListeners();
+  }
+
+  /// Delivers a held [_notify] now (tests; the app needs no call).
+  @visibleForTesting
+  void flushNotify() {
+    if (_notifyDirty) _notifyNow();
   }
 
   void _notice(HostNotice n) {
@@ -264,8 +301,12 @@ class LiveCoreHost extends CoreHost {
   /// `status` -> what the UI shows: the phase, the exit, the down / blocking plaques, where the
   /// core's Auto stands (for the dock) and the pings it measured (`liveAutoStatus`).
   void _applyStatus(Map<String, dynamic> st, {bool notify = true}) {
+    final before = _statusSig();
+    _dockCache = null;
     _connected = st['connected'] == true;
     final auto = _connected && st['auto'] is Map ? st['auto'] as Map : null;
+    // the one lookup of this status: a member key `sid::nid` -> its server, by a map per source
+    final byKey = _keyLookup();
     catalog.coreRoute = auto == null || auto['now'] == null
         ? null
         : CoreRoute(
@@ -275,7 +316,11 @@ class LiveCoreHost extends CoreHost {
           );
     final members = auto?['members'];
     if (members is List) {
-      catalog.pings.mergeCore(members.whereType<Map>(), catalog.nodeOfKey);
+      catalog.pings.mergeCore(members.whereType<Map>(), byKey);
+    }
+    final pairs = auto?['pairs'];
+    if (pairs is List) {
+      catalog.pairs.mergeCore(pairs.whereType<Map>(), byKey);
     }
     final d = st['down'];
     _down = d is Map
@@ -316,7 +361,45 @@ class LiveCoreHost extends CoreHost {
           )
         : null;
     _syncTrafficTimer();
-    if (notify) _notify();
+    if (!notify) return;
+    // a change of phase, exit, plaques or Auto's route shows at once; a status that only brings
+    // pings joins the other bursts
+    if (_statusSig() != before) {
+      _notifyNow();
+    } else {
+      _notify();
+    }
+  }
+
+  /// What of the status the user sees at a glance: if it moved, the page is told without the
+  /// pause of [_notify].
+  String _statusSig() {
+    final e = _exit, d = _down, b = _blocking, r = catalog.coreRoute, h = _dnsHealth;
+    return '$_connected|${d?.since}|${d?.proxy}|${b?.since}|${b?.proxy}|${b?.reason}|'
+        '${e.checking}|${e.error}|${e.ip}|${e.country}|${e.city}|$_error|'
+        '${r?.id}|${r?.server}|${r?.entryServer}|${h?.active}|${h?.failed.length}';
+  }
+
+  /// `sid::nid` -> the server, like `catalog.nodeOfKey` but one map per source, built when the
+  /// first key of that source asks (a status carries a key per Auto member).
+  CatalogNode? Function(String key) _keyLookup() {
+    final bySource = <String, Map<String, CatalogNode>>{};
+    return (key) {
+      final i = key.indexOf('::');
+      if (i <= 0) return null;
+      final sid = key.substring(0, i);
+      final nodes = bySource.putIfAbsent(sid, () {
+        final s = catalog.sourcesData[sid];
+        final m = <String, CatalogNode>{};
+        if (s != null) {
+          for (final n in s.nodes) {
+            m.putIfAbsent(n.id, () => n); // the first with an id, as nodeOfKey finds it
+          }
+        }
+        return m;
+      });
+      return nodes[key.substring(i + 2)];
+    };
   }
 
   /// The core's own subscription timer updated a source (`status.sourcesRev` moved): the
@@ -397,9 +480,11 @@ class LiveCoreHost extends CoreHost {
       _trafficTimer!.cancel();
       _trafficTimer = null;
       // not connected: speed and connections are zero, the last session's totals stay
-      _traffic = TrafficInfo(
-        downTotal: _traffic.downTotal,
-        upTotal: _traffic.upTotal,
+      trafficNotifier.update(
+        TrafficInfo(
+          downTotal: traffic.downTotal,
+          upTotal: traffic.upTotal,
+        ),
       );
     }
   }
@@ -423,16 +508,17 @@ class LiveCoreHost extends CoreHost {
         ],
       );
       // the list changes with every byte; the pages only need to know of a new / gone one or a
-      // moved total, which is exactly what the speed cards already notify on
+      // moved total, which is exactly what the speed cards already notify on. Only
+      // [trafficNotifier] hears of it: the host (and so every page) does not rebuild per tick.
+      final was = traffic;
       final same =
-          next.down == _traffic.down &&
-          next.up == _traffic.up &&
-          next.downTotal == _traffic.downTotal &&
-          next.tcp == _traffic.tcp &&
-          next.udp == _traffic.udp &&
-          next.conns.length == _traffic.conns.length;
-      _traffic = next;
-      if (!same) _notify();
+          next.down == was.down &&
+          next.up == was.up &&
+          next.downTotal == was.downTotal &&
+          next.tcp == was.tcp &&
+          next.udp == was.udp &&
+          next.conns.length == was.conns.length;
+      trafficNotifier.update(next, notify: !same);
     } catch (_) {
       // the next tick tries again
     } finally {
@@ -492,17 +578,18 @@ class LiveCoreHost extends CoreHost {
   ExitState get exit => _connecting ? const ExitState.checking() : _exit;
 
   @override
-  TrafficInfo get traffic => _traffic;
-
-  @override
   Stream<Map<String, dynamic>> get events => _events.stream;
 
   @override
   Stream<HostNotice> get notices => _notices.stream;
 
-  /// What the dock row shows (mockup `updateMainConnectCard`).
+  /// What the dock row shows (mockup `updateMainConnectCard`). Kept until the next notification
+  /// ([_notify] / [_notifyNow] drop it): the tile, the system notifier and the pages all read
+  /// it once per change.
   @override
-  DockSummary get dock {
+  DockSummary get dock => _dockCache ??= _buildDock();
+
+  DockSummary _buildDock() {
     final id = catalog.effectiveConnectId();
     final e = catalog.connectEntry(id);
     final simple = catalog.simpleMode;
@@ -529,7 +616,6 @@ class LiveCoreHost extends CoreHost {
     final chain = catalog.chainsData[id];
     if (chain != null) {
       final a = catalog.chainEntryNode(chain), b = catalog.chainExitNode(chain);
-      final ma = ms(a), mb = ms(b);
       return DockSummary(
         kind: DockKind.chain,
         name: e.name,
@@ -537,7 +623,7 @@ class LiveCoreHost extends CoreHost {
         auto: auto,
         entryNode: _dockNode(a),
         node: _dockNode(b),
-        latencyMs: ma != null && mb != null ? ma + mb : null,
+        latencyMs: catalog.chainLatency(chain),
       );
     }
     final profile = catalog.profilesData[id];
@@ -624,7 +710,7 @@ class LiveCoreHost extends CoreHost {
     }
     _connecting = true;
     _error = null;
-    _notify();
+    _notifyNow();
     try {
       final st = await _sendPlan();
       _journal('connect', {
@@ -641,7 +727,7 @@ class LiveCoreHost extends CoreHost {
       return _failed(msg, code);
     } finally {
       _connecting = false;
-      _notify();
+      _notifyNow();
     }
   }
 
@@ -688,7 +774,7 @@ class LiveCoreHost extends CoreHost {
     _autoSig = null;
     _reconnectTimer?.cancel();
     _error = null;
-    _notify();
+    _notifyNow();
     _journal('disconnect', {'action': 'disconnect'});
     try {
       _applyStatus(
@@ -702,7 +788,7 @@ class LiveCoreHost extends CoreHost {
       await _refreshStatus();
     } finally {
       _disconnecting = false;
-      _notify();
+      _notifyNow();
     }
   }
 
@@ -728,12 +814,12 @@ class LiveCoreHost extends CoreHost {
   Future<void> refreshExit() async {
     if (_connecting || !_ready) return;
     _exit = const ExitState.checking();
-    _notify();
+    _notifyNow();
     try {
       _applyStatus(Map<String, dynamic>.from(await api.recheckExit()));
     } catch (_) {
       _exit = const ExitState.error();
-      _notify();
+      _notifyNow();
     }
   }
 
@@ -873,22 +959,24 @@ class LiveCoreHost extends CoreHost {
   @override
   Future<void> closeConnection([String? id]) async {
     await api.closeConnections(id);
+    final was = traffic;
     final left = id == null
         ? <LiveConn>[]
         : [
-            for (final c in _traffic.conns)
+            for (final c in was.conns)
               if (c.id != id) c,
           ];
-    _traffic = TrafficInfo(
-      down: _traffic.down,
-      up: _traffic.up,
-      downTotal: _traffic.downTotal,
-      upTotal: _traffic.upTotal,
-      tcp: _traffic.tcp,
-      udp: _traffic.udp,
-      conns: left,
+    trafficNotifier.update(
+      TrafficInfo(
+        down: was.down,
+        up: was.up,
+        downTotal: was.downTotal,
+        upTotal: was.upTotal,
+        tcp: was.tcp,
+        udp: was.udp,
+        conns: left,
+      ),
     );
-    _notify();
   }
 
   /// Call after any edit of [catalog]: keeps it in step, saves it, tells the core what moved
@@ -897,13 +985,14 @@ class LiveCoreHost extends CoreHost {
   @override
   void changed() {
     if (_disposed) return;
+    _dockCache = null;
     catalog.syncCatalog();
     _scheduleSave();
     _syncAuto();
     _syncKill();
     _syncUpdateSettings();
     _scheduleReconnect();
-    _notify();
+    _notifyNow();
   }
 
   // ── save ──
@@ -1102,7 +1191,7 @@ class LiveCoreHost extends CoreHost {
     } catch (e) {
       _notice(HostNotice('updateCheckFailed', '$e', args: ['$e']));
     }
-    _notify();
+    _notifyNow();
   }
 
   @override
@@ -1113,7 +1202,7 @@ class LiveCoreHost extends CoreHost {
     } catch (e) {
       _notice(HostNotice('updateCheckFailed', '$e', args: ['$e']));
     }
-    _notify();
+    _notifyNow();
   }
 
   @override
@@ -1195,21 +1284,27 @@ class LiveCoreHost extends CoreHost {
     if (g.pingOnLaunch) {
       final nodes = _launchPingNodes();
       if (nodes.isNotEmpty) await pingNodes(nodes);
+      // a chain's exits are measured through its entry, once the entries have answered
+      await Future.wait([
+        for (final ch in _launchChains()) pingChain(ch, entries: false),
+      ]);
     }
   }
 
-  List<CatalogNode> _launchPingNodes() {
+  /// The entries the launch ping looks at: the top Auto ones (+ the pinned one in Manual).
+  Set<String> _launchIds() {
     final c = catalog;
     final top = [
       for (final id in c.visibleOrder())
         if (c.connectEntry(id)?.inAuto == true) id,
     ].take(1 + c.autoCfg.standby.toInt());
-    final ids = <String>{
-      if (!c.autoConnect) ?c.effectiveConnectId(),
-      ...top,
-    };
+    return {if (!c.autoConnect) ?c.effectiveConnectId(), ...top};
+  }
+
+  /// The servers pinged directly: units' servers and chains' entries (never a chain's exits).
+  List<CatalogNode> _launchPingNodes() {
     final refs = <NodeRef>[
-      for (final id in ids) ..._entryRefs(id),
+      for (final id in _launchIds()) ..._entryRefs(id),
       for (final t in _ruleTargets()) ..._targetRefs(t),
     ];
     final seen = <String>{};
@@ -1219,11 +1314,22 @@ class LiveCoreHost extends CoreHost {
     ];
   }
 
+  /// The chains among the launch entries and the rule / app targets: their exits get pair pings.
+  List<Chain> _launchChains() {
+    final ids = <String>{
+      for (final id in _launchIds())
+        if (catalog.chainsData.containsKey(id)) id,
+      for (final t in _ruleTargets())
+        if (t.startsWith('chain:') && catalog.chainsData.containsKey(t.substring(6))) t.substring(6),
+    };
+    return [for (final id in ids) catalog.chainsData[id]!];
+  }
+
+  /// What is pinged directly for an entry: a unit's servers, a chain's entry servers (its exits
+  /// are measured through the entry: [pingChain]).
   List<NodeRef> _entryRefs(String id) {
     final chain = catalog.chainsData[id];
-    return chain != null
-        ? [...catalog.chainEntryRefs(chain), ...catalog.chainExitRefs(chain)]
-        : catalog.unitRefs(id);
+    return chain != null ? catalog.chainEntryRefs(chain) : catalog.unitRefs(id);
   }
 
   /// Targets of the enabled rules and the apps that go through a proxy entry.
@@ -1270,27 +1376,29 @@ class LiveCoreHost extends CoreHost {
 
   /// Connected and the plan is another one (another entry, a server switched off, Global /
   /// Rules, the system proxy...): the core gets the new config after 600 ms of quiet
-  /// (`liveMaybeReconnect`).
+  /// (`liveMaybeReconnect`). Building the plan to compare it is the costly part (the whole plan
+  /// and its JSON), so it is done once, when the quiet is over ([_reconnect]), not on every
+  /// change; a change put back meanwhile finds the same plan and does nothing. (A ping can move a
+  /// rule target's Priority pick, so a ping run's end cannot skip the check.)
   void _scheduleReconnect() {
     if (!_ready || !_connected || _connecting || _planSig == null) return;
-    final sig = catalog.planSig();
     _reconnectTimer?.cancel();
-    if (sig == null || sig == _planSig) return;
     _reconnectTimer = Timer(reconnectDelay, _reconnect);
   }
 
   Future<void> _reconnect() async {
     if (_reconnecting || !_connected || _connecting || _planSig == null) return;
-    if (catalog.planSig() == _planSig) return;
+    final sig = catalog.planSig();
+    if (sig == null || sig == _planSig) return;
     _reconnecting = true;
     try {
       await _sendPlan();
-      _notify();
+      _notifyNow();
     } catch (e) {
       final (msg, _) = _explain(e);
       _notice(HostNotice('reconnectFailed', msg));
       await _refreshStatus();
-      _notify();
+      _notifyNow();
     } finally {
       _reconnecting = false;
     }
@@ -1351,7 +1459,7 @@ class LiveCoreHost extends CoreHost {
     );
     changed();
     _updating.add(id);
-    _notify();
+    _notifyNow();
     var loaded = false;
     try {
       await _fetchInto(id);
@@ -1478,7 +1586,7 @@ class LiveCoreHost extends CoreHost {
       return;
     }
     _updating.add(sid);
-    _notify();
+    _notifyNow();
     final before = {for (final n in s.nodes) n.id};
     final gone0 = s.gone.length;
     var ok = false;
@@ -1770,11 +1878,87 @@ class LiveCoreHost extends CoreHost {
   @override
   Future<void> pingEntry(String id) {
     final c = catalog.chainsData[id];
-    final refs = c != null
-        ? [...catalog.chainEntryRefs(c), ...catalog.chainExitRefs(c)]
-        : catalog.unitRefs(id);
-    return _pingNodes([for (final r in refs) r.node]);
+    if (c != null) return pingChain(c);
+    return _pingNodes([for (final r in catalog.unitRefs(id)) r.node]);
   }
+
+  @override
+  Future<void> pingChain(
+    Chain c, {
+    Iterable<CatalogNode>? exits,
+    bool entries = true,
+  }) async {
+    final ins = [for (final r in catalog.chainEntryRefs(c)) r.node];
+    final outs = exits?.toList() ?? [for (final r in catalog.chainExitRefs(c)) r.node];
+    final known = catalog.chainEntryNode(c);
+    if (entries || known == null) {
+      if (known == null || ins.isEmpty) {
+        await _pingNodes(ins);
+      } else {
+        // the entry in use is known: the exits go through it while the entries are measured
+        await Future.wait([_pingNodes(ins), _pingPairsInto(known, outs)]);
+        // the entries' answers may have moved the entry in use: measure through the new one too
+        final now = catalog.chainEntryNode(c);
+        if (now != null && !identical(now, known)) await _pingPairsInto(now, outs);
+        return;
+      }
+    }
+    final entry = catalog.chainEntryNode(c);
+    if (entry != null) await _pingPairsInto(entry, outs);
+  }
+
+  /// [exits] through [entry], results into the pair book as they come (`pingChain`).
+  Future<void> _pingPairsInto(CatalogNode entry, List<CatalogNode> exits) async {
+    // a server never pairs with itself
+    final to = [
+      for (final x in exits)
+        if (PingBook.serverKey(x) != PingBook.serverKey(entry)) x,
+    ];
+    if (to.isEmpty || entry.outbound == null || !entry.usable) return;
+    final pairs = catalog.pairs;
+    final book = catalog.pings;
+    for (final x in to.where((x) => x.outbound == null || !x.usable)) {
+      pairs.set(entry, x, -1, book.now);
+    }
+    final ok = to.where((x) => x.outbound != null && x.usable).toList();
+    if (ok.isEmpty) {
+      changed();
+      return;
+    }
+    pairs.markTesting(entry, ok);
+    _notifyNow();
+    final left = {...ok};
+    var error = false;
+    try {
+      await for (final l in api.ping(_pairRequest(entry, ok))) {
+        if (l['error'] != null) error = true;
+        final i = int.tryParse('${l['key']}'), ms = l['ms'];
+        if (l['kind'] != 'p' || i == null || i < 0 || i >= ok.length || ms is! num) continue;
+        if (left.remove(ok[i])) pairs.set(entry, ok[i], ms, book.now);
+        _notify();
+      }
+    } catch (_) {
+      error = true;
+    }
+    for (final x in left) {
+      // the tester could not run: nothing was measured, the old value stays
+      error ? pairs.unmarkTesting(entry, [x]) : pairs.set(entry, x, -1, book.now);
+    }
+    changed();
+  }
+
+  Map<String, dynamic> _pairRequest(CatalogNode entry, List<CatalogNode> exits) => {
+    'pairs': [
+      for (var i = 0; i < exits.length; i++)
+        {
+          'key': '$i',
+          'entry': {'outbound': entry.outbound},
+          'exit': {'outbound': exits[i].outbound},
+        },
+    ],
+    if (catalog.connCfg.testUrl.isNotEmpty) 'url': catalog.connCfg.testUrl,
+    'checkers': catalog.connCfg.checkers,
+  };
 
   @override
   Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits) async {
@@ -1785,21 +1969,11 @@ class LiveCoreHost extends CoreHost {
     ];
     if (entry.outbound == null || !entry.usable || at.isEmpty) return res;
     try {
-      await for (final l in api.ping({
-        'pairs': [
-          for (final i in at)
-            {
-              'key': '$i',
-              'entry': {'outbound': entry.outbound},
-              'exit': {'outbound': exits[i].outbound},
-            },
-        ],
-        if (catalog.connCfg.testUrl.isNotEmpty) 'url': catalog.connCfg.testUrl,
-        'checkers': catalog.connCfg.checkers,
-      })) {
-        final i = int.tryParse('${l['key']}'), ms = l['ms'];
-        if (l['kind'] != 'p' || i == null || i < 0 || i >= res.length || ms is! num) continue;
-        res[i] = ms.round();
+      final req = _pairRequest(entry, [for (final i in at) exits[i]]);
+      await for (final l in api.ping(req)) {
+        final k = int.tryParse('${l['key']}'), ms = l['ms'];
+        if (l['kind'] != 'p' || k == null || k < 0 || k >= at.length || ms is! num) continue;
+        res[at[k]] = ms.round();
       }
     } catch (_) {
       // the tester could not run: no pair answered
@@ -1995,19 +2169,34 @@ class LiveCoreHost extends CoreHost {
 
   /// Latency of [nodes] by the core, results into the ping book as they come (`backend.ping`).
   Future<void> _pingNodes(List<CatalogNode> nodes) async {
-    final ok = nodes.where((n) => n.outbound != null && n.usable).toList();
-    for (final n in nodes.where((n) => !ok.contains(n))) {
-      catalog.pings.set(n, -1);
+    final ok = <CatalogNode>[];
+    var unusable = false;
+    for (final n in nodes) {
+      if (n.outbound != null && n.usable) {
+        ok.add(n);
+      } else {
+        catalog.pings.set(n, -1);
+        unusable = true;
+      }
     }
-    if (ok.isEmpty) return;
+    if (ok.isEmpty) {
+      if (unusable) _notify();
+      return;
+    }
     catalog.pings.markTesting(ok);
+    _notifyNow(); // the rows show "pinging" now, the answers follow joined by [_notify]
     final left = {...ok};
     var error = false;
     try {
-      final byId = {for (final n in ok) n.id: n};
+      // an answer carries the server's id: the servers with it, by a map (not a scan per answer)
+      final byId = <String, List<CatalogNode>>{};
+      for (final n in ok) {
+        (byId[n.id] ??= []).add(n);
+      }
       await for (final l in api.ping({
         'nodes': [
-          for (final n in byId.values) {'key': n.id, 'outbound': n.outbound},
+          for (final g in byId.values)
+            {'key': g.last.id, 'outbound': g.last.outbound},
         ],
         if (catalog.connCfg.testUrl.isNotEmpty) 'url': catalog.connCfg.testUrl,
         'checkers': catalog.connCfg.checkers,
@@ -2016,7 +2205,7 @@ class LiveCoreHost extends CoreHost {
         if (l['kind'] != 'n') continue;
         final ms = l['ms'];
         if (ms is! num) continue;
-        for (final n in ok.where((n) => n.id == l['key'])) {
+        for (final n in byId[l['key']] ?? const <CatalogNode>[]) {
           if (left.remove(n)) catalog.pings.set(n, ms);
         }
         _notify();

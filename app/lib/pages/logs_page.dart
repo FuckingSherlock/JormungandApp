@@ -45,7 +45,18 @@ class _LogsPageState extends State<LogsPage> {
   Timer? _seenTimer;
   int? _lastEvTok, _lastLineTok, _lastPin;
   String _evSig = '', _rawSig = '';
+
+  // What is derived from the controller's lists, kept until they change ([LogsController.evVersion]
+  // / [LogsController.rawVersion]): a frame or a rebuild for another reason does not fold 1000
+  // events or group 2000 lines again.
   List<RawGroup> _rawGroups = const [];
+  (int, String, String)? _rawGroupsFor;
+  List<Object> _items = const [];
+  (int, AppLocalizations?, int)? _itemsFor;
+
+  /// The page as last built while it was on screen: shown again, untouched, while it is not (the
+  /// shell rebuilds all tabs for its own reasons; this one has nothing to redo behind the others).
+  Widget? _built;
 
   @override
   void initState() {
@@ -92,7 +103,8 @@ class _LogsPageState extends State<LogsPage> {
   }
 
   void _onCtl() {
-    if (!mounted) return;
+    // not on screen: nothing to redraw; coming into view the controller tells again
+    if (!mounted || !_c.visible) return;
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -112,7 +124,7 @@ class _LogsPageState extends State<LogsPage> {
       if (_c.evFollow) _ev.toBottom(smooth: !first && _c.onScreen && _c.tab == 'events');
     }
     final lines = _c.raw.lines;
-    final rawSig = '${lines.length}|${lines.lastOrNull?.n}|${lines.firstOrNull?.n}|${_c.rawLevel}|${_c.rawQuery}';
+    final rawSig = '${lines.length}|${lines.lastOrNull?.n}|${lines.firstOrNull?.n}|${_c.rawLevel}|${_c.rawQuery}|${_c.cfg.showConns}';
     if (rawSig != _rawSig) {
       _rawSig = rawSig;
       _rawF.follow = _c.rawFollow;
@@ -144,9 +156,19 @@ class _LogsPageState extends State<LogsPage> {
     }
   }
 
+  /// The Raw tab's groups for the lines the filter lets through, grouped once per change.
+  List<RawGroup> _rawGroupsNow() {
+    final key = (_c.rawVersion, _c.rawLevel, _c.rawQuery);
+    if (_rawGroupsFor != key) {
+      _rawGroups = groupRaw(_c.shownLines);
+      _rawGroupsFor = key;
+    }
+    return _rawGroups;
+  }
+
   void _goToLine(int n, {required bool retry}) {
-    _rawGroups = groupRaw(_c.shownLines);
-    final i = _rawGroups.indexWhere((g) => g.lines.any((l) => l.n == n));
+    final groups = _rawGroupsNow();
+    final i = groups.indexWhere((g) => g.lines.any((l) => l.n == n));
     if (i < 0) {
       if (retry) {
         _c.refresh();
@@ -177,7 +199,7 @@ class _LogsPageState extends State<LogsPage> {
 
   /// The warnings / errors and lines whose row is in the viewport are seen / read.
   void _mark() {
-    if (!mounted || !_c.onScreen) return;
+    if (!mounted || !_c.visible) return;
     if (_c.tab == 'events') {
       final ctx = _evKey.currentContext;
       if (ctx == null) return;
@@ -191,27 +213,28 @@ class _LogsPageState extends State<LogsPage> {
 
   // ── content ──
 
+  /// The Events rows with the day headers between them, built once per change of the journal
+  /// (or of the language / the day: the labels say "Today").
   List<Object> _evItems() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final key = (_c.evVersion, _c.l10n, dayStart(now));
+    if (_itemsFor == key) return _items;
     final out = <Object>[];
     int? day;
     for (final g in _c.groups) {
       final dk = dayStart(g.at);
       if (dk != day) {
         day = dk;
-        out.add(_Day(_c.words.dayLabel(g.at, DateTime.now().millisecondsSinceEpoch)));
+        out.add(_Day(_c.words.dayLabel(g.at, now)));
       }
       out.add(g);
     }
-    return out;
+    _itemsFor = key;
+    return _items = out;
   }
 
   String _summary(AppLocalizations l10n) {
-    final warn = _c.tab == 'events'
-        ? _c.feed.list.where((e) => e.level == 'warn').length
-        : _c.raw.lines.where((e) => e.lvl == 'warn').length;
-    final err = _c.tab == 'events'
-        ? _c.feed.list.where((e) => e.level == 'error').length
-        : _c.raw.lines.where((e) => e.lvl == 'error').length;
+    final (:warn, :err) = _c.tab == 'events' ? _c.evLevels : _c.rawLevels;
     final String head;
     if (_c.tab == 'events') {
       final all = _c.feed.list.length;
@@ -219,7 +242,7 @@ class _LogsPageState extends State<LogsPage> {
           ? l10n.ofEvents(_c.shownCount, all)
           : l10n.eventsPlural(all);
     } else {
-      head = l10n.linesPlural(_c.raw.lines.length);
+      head = l10n.linesPlural(_c.raw.visibleCount);
     }
     return [
       head,
@@ -294,6 +317,12 @@ class _LogsPageState extends State<LogsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // behind another tab (or the app) the controller does not tell of changes: the page keeps what it was
+    if (!_c.visible && _built != null) return _built!;
+    return _built = _page(context);
+  }
+
+  Widget _page(BuildContext context) {
     final l10n = context.l10n;
     final c = context.colors;
     final events = _c.tab == 'events';
@@ -434,7 +463,8 @@ class _LogsPageState extends State<LogsPage> {
   }
 
   Widget _levels(AppLocalizations l10n) {
-    final unread = _c.raw.unread;
+    final conns = _c.cfg.showConns;
+    final unread = [for (final x in _c.unreadLines) if (conns || !x.isConn) x];
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 6, 18, 8),
       child: Wrap(
@@ -452,6 +482,13 @@ class _LogsPageState extends State<LogsPage> {
             active: _c.rawLevel == 'warn',
             unread: [for (final x in unread) if (x.lvl == 'warn' || x.lvl == 'error') x],
             onTap: () => _c.setRawLevel('warn'),
+          ),
+          LevelChip(
+            key: const ValueKey('rawConns'),
+            label: l10n.connections,
+            active: conns,
+            unread: const [],
+            onTap: () => _c.setShowConns(!conns),
           ),
         ],
       ),
@@ -508,16 +545,16 @@ class _LogsPageState extends State<LogsPage> {
     if (lines.isEmpty) {
       return _empty(_c.raw.lines.isEmpty ? l10n.noLinesYetSingBoxWrites : l10n.nothingMatches);
     }
-    _rawGroups = groupRaw(lines);
+    final groups = _rawGroupsNow();
     final unread = _c.cfg.rawUnread;
     final hit = _c.hitLine;
     return ListView.builder(
       key: _rawKey,
       controller: _rawF.scroll,
       padding: const EdgeInsets.only(bottom: 64),
-      itemCount: _rawGroups.length,
+      itemCount: groups.length,
       itemBuilder: (context, i) => RawGroupView(
-        group: _rawGroups[i],
+        group: groups[i],
         query: _c.rawQuery,
         unread: unread,
         hit: hit?.n,

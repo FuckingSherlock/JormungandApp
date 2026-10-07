@@ -23,14 +23,13 @@ class CatalogCard extends StatelessWidget {
   final bool open;
   final Color? borderColor;
 
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
+  /// The head with what sits below it, and the grip column at its left when there is one.
+  static Widget _top(Widget head, List<Widget> below, Widget? grip) {
     final main = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [head, ...below],
     );
-    final Widget top = grip == null
+    return grip == null
         ? Padding(padding: const EdgeInsets.only(left: 14), child: main)
         : IntrinsicHeight(
             child: Row(
@@ -44,6 +43,12 @@ class CatalogCard extends StatelessWidget {
               ],
             ),
           );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final top = _top(head, below, grip);
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
@@ -62,6 +67,53 @@ class CatalogCard extends StatelessWidget {
               ),
               child: body,
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// [CatalogCard] as a sliver, for a card with a long list of rows: the [head] part is one box,
+/// the [rows] are slivers (a lazy `SliverList`, so only the rows on screen are built), under a
+/// hairline. The frame is a [DecoratedSliver] over the whole group; unlike [CatalogCard] it does
+/// not clip, so the rows must not paint over the rounded corners (they have no background of
+/// their own in the list style). [rows] null / [open] false: the head alone.
+class CatalogCardSliver extends StatelessWidget {
+  const CatalogCardSliver({
+    super.key,
+    required this.head,
+    this.below = const [],
+    this.rows = const [],
+    this.grip,
+    this.open = false,
+    this.borderColor,
+  });
+
+  final Widget head;
+  final List<Widget> below;
+
+  /// Slivers under the head's hairline, shown when [open].
+  final List<Widget> rows;
+  final Widget? grip;
+  final bool open;
+  final Color? borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return DecoratedSliver(
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(c.radius),
+        border: Border.all(color: borderColor ?? c.border),
+      ),
+      sliver: SliverMainAxisGroup(
+        slivers: [
+          SliverToBoxAdapter(child: CatalogCard._top(head, below, grip)),
+          if (open && rows.isNotEmpty) ...[
+            SliverToBoxAdapter(child: Container(height: 1, color: c.border)),
+            ...rows,
+          ],
         ],
       ),
     );

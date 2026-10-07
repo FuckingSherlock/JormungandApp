@@ -31,6 +31,10 @@ class NodesPage extends StatefulWidget {
 /// One key per card, so [NodesPageState.openEntry] can scroll to it.
 final _cardKeys = <String, GlobalKey>{};
 
+/// The same for the reorder list, whose cards are boxes: a GlobalKey cannot move an element between
+/// a sliver and a box parent, so each list has its own.
+final _boxKeys = <String, GlobalKey>{};
+
 class NodesPageState extends State<NodesPage> {
   static const _tabs = ['simple', 'profiles'];
 
@@ -78,10 +82,11 @@ class NodesPageState extends State<NodesPage> {
       _query.clear();
       _open[id] = true;
     });
-    showTab(catalog.sourcesData[id] != null ? 'simple' : 'profiles');
+    // the tab the entry lives in: sources and Simple chains / profiles and Profiles chains
+    showTab(catalog.sourcesData[id] != null ? 'simple' : catalog.modeOf(id) ?? 'profiles');
     for (final delay in const [60, 320]) {
       Future.delayed(Duration(milliseconds: delay), () {
-        final ctx = _cardKeys[id]?.currentContext;
+        final ctx = _cardKeys[id]?.currentContext ?? _boxKeys[id]?.currentContext;
         if (mounted && ctx != null && ctx.mounted) {
           Scrollable.ensureVisible(
             ctx,
@@ -488,19 +493,17 @@ class _TabList extends StatelessWidget {
     if (visible.isEmpty) return _Empty(tab: tab, query: query);
 
     final reorder = edit && !searching;
-    Widget item(String id, int i) {
+    // [sliver]: the card is a sliver of the lazy list (the servers of an open card are built as
+    // they scroll into view); the reorder list needs boxes
+    Widget item(String id, int i, {bool sliver = false}) {
       final grip = reorder
           ? ReorderableDragStartListener(index: i, child: const GripHandle())
           : null;
       final s = catalog.sourcesData[id];
       final isOpen = searching ? true : (open[id] ?? false);
-      return Padding(
-        key: ValueKey(id),
-        padding: const EdgeInsets.only(bottom: 10),
-        child: KeyedSubtree(
-          key: _cardKeys.putIfAbsent(id, () => GlobalKey()),
-          child: s != null
+      final Widget card = s != null
             ? SourceCard(
+                sliver: sliver,
                 source: s,
                 nodes: shown[id] ?? s.nodes,
                 open: isOpen,
@@ -529,16 +532,39 @@ class _TabList extends StatelessWidget {
                 onEdit: () => catalog.isChain(id)
                     ? showChainEditor(context, id: id, tab: tab)
                     : showProfileEditor(context, id: id),
-              ),
-        ),
+              );
+      final key = (sliver ? _cardKeys : _boxKeys).putIfAbsent(id, () => GlobalKey());
+      if (sliver) {
+        return SliverPadding(
+          key: ValueKey(id),
+          padding: const EdgeInsets.only(bottom: 10),
+          sliver: KeyedSubtree(
+            key: key,
+            child: s != null ? card : SliverToBoxAdapter(child: card),
+          ),
+        );
+      }
+      return Padding(
+        key: ValueKey(id),
+        padding: const EdgeInsets.only(bottom: 10),
+        child: KeyedSubtree(key: key, child: card),
       );
     }
 
     const padding = EdgeInsets.fromLTRB(14, 0, 14, 24);
     if (!reorder) {
-      return ListView(
-        padding: padding,
-        children: [for (final (i, id) in visible.indexed) item(id, i)],
+      return CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: padding,
+            sliver: SliverMainAxisGroup(
+              slivers: [
+                for (final (i, id) in visible.indexed)
+                  item(id, i, sliver: true),
+              ],
+            ),
+          ),
+        ],
       );
     }
     return ReorderableListView.builder(
