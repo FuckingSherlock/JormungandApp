@@ -11,9 +11,8 @@ import 'package:jormungand_core/jormungand_core.dart'
         LogCfg,
         LogFeed,
         LogLine,
-        eventNotifKind,
+        eventNotifies,
         foldEvents,
-        notifAllows,
         rawLogText;
 
 import '../l10n/l10n.dart';
@@ -195,12 +194,10 @@ class LogsController extends ChangeNotifier {
         cfg.seen.removeWhere((id) => id < first);
         if (cfg.seen.length != n) _save();
         for (final e in r.notify) {
-          final kind = eventNotifKind[e.key];
           // an event of a site ignored a moment ago (the core was not told yet) stays silent too
           if (e.cat == 'site' && _ign.matches('${e.data['host'] ?? ''}')) continue;
-          if (kind != null && notifAllows(host.catalog.unknown['notifCfg'], kind)) {
-            _notify.add(e);
-          }
+          // a background event (found while the screen was off) goes by its own flag, not by the screen now
+          if (eventNotifies(host.catalog.unknown['notifCfg'], e)) _notify.add(e);
         }
         if (visible && tab == 'events' && !evFollow) {
           evUnseen += r.fresh.where(_visible).length;
@@ -296,6 +293,12 @@ class LogsController extends ChangeNotifier {
 
   void setProblems(bool v) {
     filter.problems = v;
+    _refilter();
+  }
+
+  /// The «Background» chip: events found while the screen was off shown (default) or hidden.
+  void setHideBg(bool v) {
+    filter.hideBg = v;
     _refilter();
   }
 
@@ -436,7 +439,7 @@ class LogsController extends ChangeNotifier {
         .map(
           (e) =>
               '${DateTime.fromMillisecondsSinceEpoch(e.at, isUtc: true).toIso8601String()} '
-              '${e.level.toUpperCase().padRight(5)} ${e.own ? '[you] ' : ''}${w.text(e)}',
+              '${e.level.toUpperCase().padRight(5)} ${e.own ? '[you] ' : ''}${e.bg ? '[bg] ' : ''}${w.text(e)}',
         )
         .join('\n');
     final all = raw.lines;

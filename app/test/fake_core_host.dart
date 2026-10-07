@@ -469,6 +469,7 @@ class FakeCoreHost extends CoreHost {
     Map<String, dynamic> data = const {},
     int? at,
     int? log,
+    bool bg = false,
   }) {
     final e = {
       'id': _eventSeq++,
@@ -477,6 +478,7 @@ class FakeCoreHost extends CoreHost {
       'type': type,
       'level': level,
       'own': own,
+      if (bg) 'bg': true,
       'data': data,
       'log': ?log,
     };

@@ -18,7 +18,7 @@ class _NoSysProxy extends SystemProxy {
   @override
   Future<String?> enable(int port) => throw StateError('system proxy touched');
   @override
-  Future<void> restore() => throw StateError('system proxy touched');
+  Future<void> restore() async {} // dispose in tearDown calls it; nothing is ever set
 }
 
 // The same server back from its own link: key (dedup), outbound, name and flag.
@@ -206,6 +206,7 @@ void main() {
     });
     tearDown(() async {
       await server.close(force: true);
+      await d.shutdown(); // the service keeps its files open until disposed (Windows can't delete them)
       await tmp.delete(recursive: true);
     });
 

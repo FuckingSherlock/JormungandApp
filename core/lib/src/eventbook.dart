@@ -9,9 +9,11 @@ import 'logbook.dart';
 /// The events journal: what happened, as structured records (the Logs → Events tab and
 /// every notification are made of it; the raw lines stay in [LogBook]).
 ///
-/// An event is `{id, at, cat, type, level, own, log?, data}`: [id] grows by one for every
+/// An event is `{id, at, cat, type, level, own, bg?, log?, data}`: [id] grows by one for every
 /// event and never goes back (also across restarts and [clear]); [at] is ms since epoch;
-/// [own] = the user's own action caused it (no notification for it); [log] = the number of
+/// [own] = the user's own action caused it (no notification for it); `bg` (only when true) = it
+/// happened while the phone's screen was off (a background failure: Settings → Notifications
+/// decides whether it notifies; the journal keeps it either way); [log] = the number of
 /// the [LogBook] line written at the same moment (a jump to Raw); [data] holds structured
 /// fields only, never a ready sentence (the app words it in the user's language).
 ///
@@ -108,7 +110,7 @@ class EventBook {
   /// Writes a new event and returns its id. [link]: put the current [LogBook] number on it
   /// (the caller writes the raw line first; an event without a raw line of its own, like
   /// the UI's, passes false).
-  int add(String cat, String type, String level, {Map<String, dynamic> data = const {}, bool own = false, bool link = true}) {
+  int add(String cat, String type, String level, {Map<String, dynamic> data = const {}, bool own = false, bool link = true, bool bg = false}) {
     load();
     final n = link ? log?.last : null;
     final e = <String, dynamic>{
@@ -118,6 +120,7 @@ class EventBook {
       'type': type,
       'level': level,
       'own': own,
+      if (bg) 'bg': true,
       'log': ?n,
       'data': data,
     };

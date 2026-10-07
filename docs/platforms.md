@@ -227,6 +227,12 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   (`NetworkChannel.kt.tmpl`, Dart — `NetworkPort`): метод `metered` и поток смен. Считается по
   нижележащим (не-VPN) сетям, потому что наш VPN объявляет себя неплатным. На Windows платных сетей
   нет (`metered = false`, пункта «Wi-Fi only» в выборе нет). Подробно — `docs/updates.md` (разделы 6, 9).
+- **Экран** (фоновые ошибки при выключенном экране): канал `jormungand/screen` (`ScreenChannel.kt.tmpl`,
+  Dart — `ScreenPort`): метод `on` (`PowerManager.isInteractive`) и поток смен. `ACTION_SCREEN_ON/OFF` нельзя
+  объявить в манифесте — приёмник регистрируется в рантайме на application-контексте, пока Dart слушает поток
+  (движок, ядро и служба VPN живут в одном процессе, так что приёмник живёт, пока живо ядро); при подписке
+  текущее значение приходит сразу. `LiveCoreHost` шлёт его ядру `updateSettings {screenOn}` (без
+  переподключения). На Windows порта нет — экран всегда «включён». Логика — `docs/connect-model.md` → «Фоновые ошибки».
 
 Проверяется только на устройстве: смахивание из недавних при поднятом VPN; возврат VPN после обновления
 (из приложения и APK из браузера / `adb install -r` с другим `versionCode`; без согласия VPN); повторное подключение

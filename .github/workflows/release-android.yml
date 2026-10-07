@@ -242,10 +242,10 @@ jobs:
           mkdir -p "$work"; : > "$dist/deltas.txt"
           if [ "$CHANNEL" = beta ]; then pre=true; pat='^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$'
           else pre=false; pat='^v[0-9]+\.[0-9]+\.[0-9]+$'; fi
-          tags=$(gh release list --repo "$FEED_REPO" --limit 100 --json tagName,createdAt,isPrerelease \
+          tags=$(gh release list --repo "$FEED_REPO" --limit 100 --json tagName,publishedAt,isPrerelease \
             | jq -r --argjson pre "$pre" --arg pat "$pat" --arg cur "v$VERSION" --argjson n "$DELTA_FROM" \
               '[.[] | select(.isPrerelease == $pre and (.tagName | test($pat)) and .tagName != $cur)]
-               | sort_by(.createdAt) | reverse | .[:$n] | .[].tagName') || tags=""
+               | sort_by(.publishedAt) | reverse | .[:$n] | .[].tagName') || tags=""
           if [ -z "$tags" ]; then echo "No earlier $CHANNEL release to make a delta from"; exit 0; fi
           ( cd core && dart pub get ) || { echo "::warning::dart pub get failed, no deltas"; exit 0; }
           for tag in $tags; do
@@ -335,10 +335,10 @@ jobs:
           # 3. beta only: keep the newest KEEP_BETAS beta releases; never `feed`, never a stable release
           #    (stable releases are never pruned)
           if [ "$CHANNEL" = beta ]; then
-            gh release list --repo "$FEED_REPO" --limit 200 --json tagName,createdAt,isPrerelease \
+            gh release list --repo "$FEED_REPO" --limit 200 --json tagName,publishedAt,isPrerelease \
               | jq -r --argjson keep "$KEEP_BETAS" --arg cur "$tag" \
                 '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$")) and .tagName != $cur)]
-                 | sort_by(.createdAt) | reverse | .[($keep - 1):] | .[].tagName' \
+                 | sort_by(.publishedAt) | reverse | .[($keep - 1):] | .[].tagName' \
               | while read -r old; do
                   echo "deleting old beta $old"
                   gh release delete "$old" --repo "$FEED_REPO" --yes --cleanup-tag

@@ -181,6 +181,12 @@ class CoreService implements CoreApi {
   /// Sites the user wants no events / notifications / raw failed-connection lines about
   /// (`updateSettings {ignoredSites}`); routing never reads it.
   IgnoredSites ignoredSites = IgnoredSites.empty;
+
+  /// The phone's screen is on (`updateSettings {screenOn}`; the platform pushes every change). Always
+  /// true where there is no such report (the desktop). A `site/*` event written while it is false is
+  /// marked `bg` (a background failure: the journal keeps it, Settings → Notifications decides on a
+  /// notification); read at the moment the failure is found, never later.
+  bool screenOn = true;
   List<DnsEntry> _dnsServers = const [];
   bool _dnsAuto = true; // Settings → DNS → Switch automatically (connect body `dnsAuto`, POST /api/dns/auto)
   final Timer Function(Duration, void Function()) _timer;
@@ -426,7 +432,7 @@ class CoreService implements CoreApi {
   void siteBlocked(AutoBlocked b) {
     final (host, port) = _hostPort(b.dest);
     if (ignoredSites.matches(host)) return;
-    eventBook.add('site', 'blocked', 'warn', data: {
+    eventBook.add('site', 'blocked', 'warn', bg: !screenOn, data: {
       'host': host,
       'port': ?port,
       'entry': b.route,
@@ -443,7 +449,7 @@ class CoreService implements CoreApi {
   void siteUnreachable(AutoUnreachable u) {
     final (host, port) = _hostPort(u.dest);
     if (ignoredSites.matches(host)) return;
-    eventBook.add('site', 'unreachable', 'warn', data: {
+    eventBook.add('site', 'unreachable', 'warn', bg: !screenOn, data: {
       'host': host,
       'port': ?port,
       'entry': u.route,
@@ -1371,6 +1377,7 @@ class CoreService implements CoreApi {
       ignoredSites = IgnoredSites([if (v is List) for (final h in v) '$h']);
       logBook.ignored = ignoredSites;
     }
+    if (body['screenOn'] is bool) screenOn = body['screenOn'] as bool;
     if (body.containsKey('autoCheck')) _updAuto = body['autoCheck'] != false;
     if (body.containsKey('channel')) _updChannel = _channelOf(body['channel']);
     if (body.containsKey('autoDownload')) _updAutoDownload = _autoDownloadOf(body['autoDownload']);

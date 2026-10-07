@@ -9,6 +9,7 @@ import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/live_core_host.dart';
 import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/platform/network_channel.dart';
+import 'package:jormungand/platform/screen_channel.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
 /// A runner that is not sing-box: starts when told to, counts the starts, has no API service.
@@ -113,6 +114,17 @@ class _FakeNetwork implements NetworkPort {
 
   @override
   Stream<bool> get meteredChanges => changes.stream;
+}
+
+class _FakeScreen implements ScreenPort {
+  bool isOn = true;
+  final changes_ = StreamController<bool>.broadcast();
+
+  @override
+  Future<bool> on() async => isOn;
+
+  @override
+  Stream<bool> get changes => changes_.stream;
 }
 
 void main() {
@@ -499,6 +511,34 @@ void main() {
     expect(rec.ignoredSites.matches('api.dead.example.com'), isTrue);
     expect(host.phase, isNot(ConnectionPhase.connecting));
     await net.changes.close();
+  });
+
+  test('the screen goes to the core: the state at start, then every change; no reconnect', () async {
+    await start();
+    await host.shutdown();
+    host.dispose();
+    final rec = _RecCore(dataDir: dir.path, runner: runner);
+    final scr = _FakeScreen();
+    host = LiveCoreHost(
+      api: rec,
+      isAndroid: false,
+      screen: scr,
+      saveDelay: const Duration(milliseconds: 20),
+      reconnectDelay: const Duration(milliseconds: 20),
+      trafficEvery: const Duration(milliseconds: 50),
+    );
+    scr.isOn = false;
+    await host.init();
+    expect(rec.screenOn, isFalse, reason: 'the state at start');
+    scr.changes_.add(true);
+    await settle(20);
+    expect(rec.screenOn, isTrue);
+    scr.changes_.add(false);
+    await settle(20);
+    expect(rec.screenOn, isFalse);
+    expect(rec.updateBodies.where((b) => b.containsKey('screenOn')).map((b) => b['screenOn']), [false, true, false]);
+    expect(host.phase, isNot(ConnectionPhase.connecting));
+    await scr.changes_.close();
   });
 
   test(

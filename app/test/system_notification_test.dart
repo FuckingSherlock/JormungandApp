@@ -413,7 +413,11 @@ void main() {
         of: find.byType(NotifSheet),
         matching: find.byType(MiniToggle),
       );
-      const order = ['enabled', ...NotifCfg.allKeys];
+      // «Errors while the screen is off» (not counted in allKeys) sits under «Site does not open»
+      final order = [
+        'enabled',
+        for (final k in NotifCfg.allKeys) ...[k, if (k == 'blocked') 'bgErrors'],
+      ];
       expect(toggles, findsNWidgets(order.length));
       Future<void> tap(String key) async {
         await tester.tap(toggles.at(order.indexOf(key)));

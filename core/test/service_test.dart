@@ -186,6 +186,22 @@ void main() {
     expect(runner.running, isFalse, reason: 'changing the list does not touch the connection');
   });
 
+  test('screen off: a site/* event is marked bg at the moment it is found; screen on again: unmarked', () async {
+    await start();
+    AutoBlocked blocked(String dest) => AutoBlocked(route: 'A', server: 's', dest: dest, via: 'B', viaServer: 't', at: 1);
+    AutoUnreachable gone(String dest) => AutoUnreachable(route: 'A', server: 's', dest: dest, tried: const [], at: 1);
+    List<bool> flags() => [for (final e in (svc.events()['events'] as List).cast<Map>()) e['bg'] == true];
+    expect(svc.screenOn, isTrue, reason: 'never reported = on');
+    svc.siteBlocked(blocked('a.example:443'));
+    svc.updateSettings({'screenOn': false});
+    svc.siteBlocked(blocked('b.example:443'));
+    svc.siteUnreachable(gone('c.example:443'));
+    svc.updateSettings({'screenOn': true});
+    svc.siteUnreachable(gone('d.example:443'));
+    expect(flags(), [false, true, true, false]);
+    expect(runner.running, isFalse, reason: 'the screen is no reason to touch the connection');
+  });
+
   test('dispose stops the box and ends the streams', () async {
     await start();
     await svc.connect(_body());

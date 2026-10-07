@@ -627,6 +627,7 @@ class EventWords {
     final parts = <String>[];
     if (f.q.isNotEmpty) parts.add('“${f.q}”');
     if (f.problems) parts.add(l10n.onlyProblems);
+    if (f.hideBg) parts.add(l10n.no2(l10n.background.toLowerCase()));
     for (final c in f.offCats) {
       final n = f.typesOn(c);
       final label = catLabel(c.$1);

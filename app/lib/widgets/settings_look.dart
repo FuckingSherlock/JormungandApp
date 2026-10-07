@@ -406,7 +406,12 @@ class NotifSheet extends StatelessWidget {
                   SetCaption(caption),
                   SetGroup(
                     card: true,
-                    children: [for (final (k, l, h) in rows) row(k, l, h)],
+                    children: [
+                      for (final (k, l, h) in rows) row(k, l, h),
+                      // a screen that can be off is a phone's: not on the desktop
+                      if (caption == l10n.connection && NotifyIo.current.available)
+                        row('bgErrors', l10n.errorsWhileScreenIsOff, l10n.aSiteThatFailsWhileThe),
+                    ],
                   ),
                 ],
               ],

@@ -143,6 +143,8 @@ abstract interface class CoreApi {
   /// Also `{ignoredSites: [host…]}` (any of the keys alone): the sites the journal and the raw log stay
   /// quiet about (no `site/*` events; their failed-connection lines go to the noise ring); the host and
   /// its subdomains; takes effect at once, no reconnect, routing is not touched.
+  /// Also `{screenOn: bool}` (alone): the platform's report of the phone's screen (Android); a `site/*`
+  /// event found while it is false is marked `bg: true` in the journal. Never reported = on.
   void updateSettings(Map<String, dynamic> body);
 
   /// The platform calls it right before it hands the downloaded file to the installer / after the

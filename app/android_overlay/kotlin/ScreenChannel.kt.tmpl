@@ -1,0 +1,82 @@
+package __APP_ID__
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+
+/**
+ * MethodChannel `jormungand/screen` + EventChannel `jormungand/screen_events` (Dart side:
+ * lib/platform/screen_channel.dart): is the phone's screen on. The core marks a "site does not open"
+ * event found while it is off as a background one (no toast / notification unless Settings ->
+ * Notifications says so).
+ *
+ *  on -> Boolean   PowerManager.isInteractive now
+ *  events: Boolean every change (and the current value at once on listen)
+ *
+ * ACTION_SCREEN_ON / ACTION_SCREEN_OFF cannot be declared in the manifest, so the receiver is
+ * registered at runtime, with the application context, while Dart listens: the engine (and with it
+ * the core and the tunnel) belongs to the process, not to an activity, so it stays registered for
+ * as long as the core runs. The value is read from the PowerManager on every broadcast.
+ */
+class ScreenChannel(private val app: Context) {
+    companion object {
+        const val NAME = "jormungand/screen"
+        const val EVENTS = "jormungand/screen_events"
+    }
+
+    private val main = Handler(Looper.getMainLooper())
+    private val pm: PowerManager = app.getSystemService(PowerManager::class.java)
+    private var sink: EventChannel.EventSink? = null
+    private var receiver: BroadcastReceiver? = null
+
+    fun register(messenger: BinaryMessenger) {
+        MethodChannel(messenger, NAME).setMethodCallHandler(::onCall)
+        EventChannel(messenger, EVENTS).setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                sink = events
+                val r = object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) = push()
+                }
+                receiver = r
+                val filter = IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                }
+                runCatching { app.registerReceiver(r, filter) }
+                push()
+            }
+
+            override fun onCancel(arguments: Any?) {
+                receiver?.let { runCatching { app.unregisterReceiver(it) } }
+                receiver = null
+                sink = null
+            }
+        })
+    }
+
+    private fun onCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "on" -> result.success(on())
+            else -> result.notImplemented()
+        }
+    }
+
+    // unknown: count as on, a failure is never hidden by a guess
+    private fun on(): Boolean = try {
+        pm.isInteractive
+    } catch (e: Throwable) {
+        true
+    }
+
+    private fun push() {
+        main.post { sink?.success(on()) }
+    }
+}

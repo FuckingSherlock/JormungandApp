@@ -59,6 +59,7 @@ object AppEngine {
         power = PowerChannel(app).also { it.register(messenger) }
         resume = ResumeChannel(app).also { it.register(messenger) }
         NetworkChannel(app).register(messenger)
+        ScreenChannel(app).register(messenger)
         engine = e
         // A process that starts with no tunnel: nothing of an earlier run may stay on show
         // (the service's notification goes with its process, but a stale tile model is cheap to fix).

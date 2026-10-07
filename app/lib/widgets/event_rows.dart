@@ -252,6 +252,16 @@ class EventRow extends StatelessWidget {
                 style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.t2),
               ),
             ],
+            // found while the screen was off
+            if (e.bg) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.nightlight_round, key: const ValueKey('evBg'), size: 12, color: c.t3),
+              const SizedBox(width: 2),
+              Text(
+                l10n.background.toLowerCase(),
+                style: TextStyle(fontSize: 11.5, color: c.t3),
+              ),
+            ],
           ],
         ),
         Padding(
@@ -668,6 +678,14 @@ class _EventFilterSheetState extends State<_EventFilterSheet> {
                     hint: l10n.warningsAndErrors,
                     trailing: MiniToggle(on: f.problems, onChanged: logs.setProblems),
                   ),
+                  // only where a screen-off failure exists (Android), or while it is hidden (to bring it back)
+                  if (f.hideBg || logs.feed.list.any((e) => e.bg))
+                    SetRow(
+                      key: const ValueKey('evFilterBg'),
+                      label: l10n.background,
+                      hint: l10n.foundWhileTheScreenWasOff,
+                      trailing: MiniToggle(on: !f.hideBg, onChanged: (v) => logs.setHideBg(!v)),
+                    ),
                 ],
               ),
               _Caption(l10n.categories),

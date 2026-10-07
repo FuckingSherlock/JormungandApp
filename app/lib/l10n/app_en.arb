@@ -3073,5 +3073,9 @@
         "type": "num"
       }
     }
-  }
+  },
+  "errorsWhileScreenIsOff": "Errors while screen is off",
+  "aSiteThatFailsWhileThe": "A site that fails while the screen is off is only written to the journal, marked Background. On: it notifies like the others.",
+  "background": "Background",
+  "foundWhileTheScreenWasOff": "Found while the screen was off"
 }

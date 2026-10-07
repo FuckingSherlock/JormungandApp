@@ -18,6 +18,7 @@ class EventRecord {
     required this.own,
     required this.log,
     required this.data,
+    this.bg = false,
   });
 
   factory EventRecord.fromJson(Map m) => EventRecord(
@@ -27,6 +28,7 @@ class EventRecord {
     type: '${m['type']}',
     level: '${m['level'] ?? 'info'}',
     own: m['own'] == true,
+    bg: m['bg'] == true,
     log: (m['log'] as num?)?.toInt(),
     data: m['data'] is Map ? Map<String, dynamic>.from(m['data'] as Map) : <String, dynamic>{},
   );
@@ -34,6 +36,9 @@ class EventRecord {
   final int id, at;
   final String cat, type, level;
   final bool own;
+
+  /// It happened while the screen was off (a background failure, eventbook.dart).
+  final bool bg;
 
   /// The number of the raw line written at the same moment (null = none).
   final int? log;
@@ -78,6 +83,8 @@ const notifDefaults = <String, bool>{
   'subUpdated': false,
   'subFailed': true,
   'ruleSets': true,
+  // not one of the toggles of the three groups: failures while the screen is off notify like the others
+  'bgErrors': false,
 };
 
 /// A background event of the kind [kind] (a value of [eventNotifKind]) may notify: the master
@@ -85,6 +92,15 @@ const notifDefaults = <String, bool>{
 bool notifAllows(Object? cfg, String kind) {
   bool on(String k) => cfg is Map && cfg[k] is bool ? cfg[k] as bool : notifDefaults[k] ?? false;
   return on('enabled') && on(kind);
+}
+
+/// [e] may notify (toast / system notification): its kind is on ([notifAllows]) and, when it
+/// happened while the screen was off (`bg`), «Errors while the screen is off» is on too. Judged by
+/// the event's own flag, never by the screen as it is when the notification would be shown.
+bool eventNotifies(Object? cfg, EventRecord e) {
+  final kind = eventNotifKind[e.key];
+  if (kind == null || !notifAllows(cfg, kind)) return false;
+  return !e.bg || (cfg is Map && cfg['bgErrors'] is bool ? cfg['bgErrors'] as bool : notifDefaults['bgErrors']!);
 }
 
 const eventRepeatWindow =Duration(minutes: 10);
@@ -174,10 +190,13 @@ class EventFilter {
   String q = '';
   bool problems = false;
 
+  /// The «Background» chip is off: events from while the screen was off are hidden.
+  bool hideBg = false;
+
   /// Switched-off types (`cat/type`).
   final off = <String>{};
 
-  int get count => (q.isEmpty ? 0 : 1) + (problems ? 1 : 0) + offCats.length;
+  int get count => (q.isEmpty ? 0 : 1) + (problems ? 1 : 0) + (hideBg ? 1 : 0) + offCats.length;
 
   /// The categories with at least one type switched off.
   List<(String, List<String>)> get offCats => [
@@ -192,6 +211,7 @@ class EventFilter {
   bool visible(EventRecord e, {required bool showOwn, required String Function(EventRecord e) text}) {
     if (e.cat == 'user' && !showOwn) return false;
     if (problems && e.level == 'info') return false;
+    if (hideBg && e.bg) return false;
     if (off.contains(e.key)) return false;
     if (q.isNotEmpty && !text(e).toLowerCase().contains(q)) return false;
     return true;
@@ -200,6 +220,7 @@ class EventFilter {
   void reset() {
     q = '';
     problems = false;
+    hideBg = false;
     off.clear();
   }
 

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../platform/files_channel.dart';
 import '../platform/network_channel.dart';
+import '../platform/screen_channel.dart';
 import '../platform/resume_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'core_host.dart';
@@ -131,6 +132,7 @@ Future<CoreHost> openCoreHost() async {
       resume: const ResumeChannel(),
       logNote: core.logBook.note,
       network: const NetworkChannel(),
+      screen: const ScreenChannel(),
     );
   }
   final singBox = desktopSingBoxPath();

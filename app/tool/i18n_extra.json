@@ -69,5 +69,9 @@
   "example.com": "example.com",
   "Enter a site, like example.com": "Введите сайт, например example.com",
   "{0} is already in the list": "{0} уже в списке",
-  "{#0} from ignored sites": "{#0} от игнорируемых сайтов"
+  "{#0} from ignored sites": "{#0} от игнорируемых сайтов",
+  "Errors while screen is off": "Ошибки при выключенном экране",
+  "A site that fails while the screen is off is only written to the journal, marked Background. On: it notifies like the others.": "Сайт, который не открывается при выключенном экране, только записывается в журнал с пометкой «Фон». Включено: уведомляет, как остальные.",
+  "Background": "Фон",
+  "Found while the screen was off": "Найдено при выключенном экране"
 }

@@ -191,10 +191,11 @@ void main() {
     test('persisted: a new book on the same file has the same events; ids go on', () async {
       final b = book();
       b.add('auto', 'switched', 'info', data: {'from': 'A', 'to': 'B'});
-      b.add('site', 'blocked', 'warn', data: {'host': 'x.example'});
+      b.add('site', 'blocked', 'warn', data: {'host': 'x.example'}, bg: true);
       await b.flush();
       final again = book();
       expect(again.since(null), b.since(null));
+      expect((again.since(null)['events'] as List).map((e) => (e as Map)['bg']), [null, true], reason: 'bg only when true, kept in the file');
       expect(again.add('core', 'restarted', 'info'), 2);
       await again.flush();
       expect(book().length, 3);

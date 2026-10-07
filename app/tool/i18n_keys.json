@@ -1423,5 +1423,9 @@
   "Enter a site, like example.com": "enterASiteLikeExampleCom",
   "{0} ignored": "ignored",
   "{0} is already in the list": "isAlreadyInTheList",
-  "{#0} from ignored sites": "fromIgnoredSites"
+  "{#0} from ignored sites": "fromIgnoredSites",
+  "Errors while screen is off": "errorsWhileScreenIsOff",
+  "A site that fails while the screen is off is only written to the journal, marked Background. On: it notifies like the others.": "aSiteThatFailsWhileThe",
+  "Background": "background",
+  "Found while the screen was off": "foundWhileTheScreenWasOff"
 }

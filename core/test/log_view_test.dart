@@ -167,6 +167,27 @@ void main() {
     expect(eventNotifKind['site/blocked'], 'blocked');
   });
 
+  test('background events (screen off): notify only with «bgErrors»; the filter hides them', () {
+    final bg = e({...ev(1, 'site', 'blocked', level: 'warn', data: {'host': 'a.com'}), 'bg': true});
+    final fg = e(ev(2, 'site', 'blocked', level: 'warn', data: {'host': 'a.com'}));
+    expect([bg.bg, fg.bg], [true, false]);
+    expect(eventNotifies(null, fg), isTrue);
+    expect(eventNotifies(null, bg), isFalse, reason: 'off by default');
+    expect(eventNotifies({'bgErrors': true}, bg), isTrue);
+    expect(eventNotifies({'bgErrors': true, 'blocked': false}, bg), isFalse, reason: 'the kind still decides');
+    expect(eventNotifies({'bgErrors': true, 'enabled': false}, bg), isFalse);
+    expect(eventNotifies({'bgErrors': false}, fg), isTrue, reason: 'normal events do not care');
+    final f = EventFilter();
+    String text(EventRecord x) => '';
+    expect(f.visible(bg, showOwn: false, text: text), isTrue, reason: 'shown by default');
+    f.hideBg = true;
+    expect(f.count, 1);
+    expect(f.visible(bg, showOwn: false, text: text), isFalse);
+    expect(f.visible(fg, showOwn: false, text: text), isTrue);
+    f.reset();
+    expect([f.hideBg, f.count], [false, 0]);
+  });
+
   test('log text, groups and days', () {
     final l = LogLine.fromJson(line(1, 'warn', 'm', src: 'core', t: 5000));
     expect(l.groupKey, '5|warn|core');

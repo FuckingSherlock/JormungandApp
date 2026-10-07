@@ -1381,5 +1381,9 @@
   "exampleCom": "example.com",
   "enterASiteLikeExampleCom": "Введите сайт, например example.com",
   "isAlreadyInTheList": "{s0} уже в списке",
-  "fromIgnoredSites": "{n0} от игнорируемых сайтов"
+  "fromIgnoredSites": "{n0} от игнорируемых сайтов",
+  "errorsWhileScreenIsOff": "Ошибки при выключенном экране",
+  "aSiteThatFailsWhileThe": "Сайт, который не открывается при выключенном экране, только записывается в журнал с пометкой «Фон». Включено: уведомляет, как остальные.",
+  "background": "Фон",
+  "foundWhileTheScreenWasOff": "Найдено при выключенном экране"
 }

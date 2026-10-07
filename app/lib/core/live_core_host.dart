@@ -7,6 +7,7 @@ import 'package:jormungand_core/jormungand_core.dart';
 import '../platform/apps_io.dart';
 import '../platform/network_channel.dart';
 import '../platform/resume_channel.dart';
+import '../platform/screen_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'app_update.dart';
 import 'core_host.dart';
@@ -31,6 +32,7 @@ class LiveCoreHost extends CoreHost {
     this.installer,
     this.resume,
     this.network,
+    this.screen,
     this.resumeWindow = const Duration(minutes: 10),
     this.logNote,
     this.ruleSetTimesOf,
@@ -65,6 +67,10 @@ class LiveCoreHost extends CoreHost {
   /// Whether the real network is metered (Android); null = never metered (the desktop). Goes to the
   /// core with the update settings: «Auto-download: Wi-Fi only» waits for an unmetered network.
   final NetworkPort? network;
+
+  /// The phone's screen (Android); null = always on (the desktop). Every change goes to the core at
+  /// once (`updateSettings {screenOn}`), which marks a site failure found while it is off as background.
+  final ScreenPort? screen;
 
   /// How long after the package replacement a resume still counts; a later start leaves the VPN off.
   final Duration resumeWindow;
@@ -105,7 +111,7 @@ class LiveCoreHost extends CoreHost {
   double? _lastSpeedMbps;
   AppUpdate _upd = const AppUpdate();
   StreamSubscription<Map<String, dynamic>>? _updSub;
-  StreamSubscription<bool>? _meteredSub;
+  StreamSubscription<bool>? _meteredSub, _screenSub;
   String? _updSettingsSig;
   bool _metered = false;
   Object? _sourcesRev;
@@ -172,6 +178,17 @@ class LiveCoreHost extends CoreHost {
         _metered = m;
         _syncUpdateSettings();
       }, onError: (_) {});
+      // the screen: the current state, then every change (the stream says it at once on listen too)
+      void screenOn(bool on) {
+        try {
+          api.updateSettings({'screenOn': on});
+        } catch (_) {}
+      }
+      try {
+        final on = await screen?.on();
+        if (on != null) screenOn(on);
+      } catch (_) {}
+      _screenSub = screen?.changes.listen(screenOn, onError: (_) {});
       _ready = true;
       // a tunnel taken over with another plan than the catalog makes now: the same path as after
       // any change of settings (a reconnect after the usual pause), never a silent restart
@@ -225,8 +242,9 @@ class LiveCoreHost extends CoreHost {
     await _eventSub?.cancel();
     await _updSub?.cancel();
     await _meteredSub?.cancel();
+    await _screenSub?.cancel();
     _statusSub = _eventSub = _updSub = null;
-    _meteredSub = null;
+    _meteredSub = _screenSub = null;
     if (_ready) {
       try {
         await api.dispose();
@@ -246,6 +264,7 @@ class LiveCoreHost extends CoreHost {
     _eventSub?.cancel();
     _updSub?.cancel();
     _meteredSub?.cancel();
+    _screenSub?.cancel();
     _events.close();
     _notices.close();
     super.dispose();

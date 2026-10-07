@@ -94,6 +94,7 @@ class NotifCfg {
     'subUpdated': false,
     'subFailed': true,
     'ruleSets': true,
+    'bgErrors': false,
   };
 
   /// The toggles of the three groups, in the order of the sheet.
@@ -120,6 +121,10 @@ class NotifCfg {
   void setFlag(String key, bool v) => _m[key] = v;
 
   bool get enabled => flag('enabled');
+
+  /// Android: «Errors while the screen is off» notify like the others (off: they are only in the
+  /// journal, marked as background). Not one of [allKeys].
+  bool get bgErrors => flag('bgErrors');
 
   /// Android: the persistent "VPN is on" notification is on the shade (master and Status both on).
   bool get vpnStatusShown => enabled && flag('status');
