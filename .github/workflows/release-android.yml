@@ -1,7 +1,7 @@
 # Builds the Android app (release APKs per ABI, signed with the release key) and publishes it to
 # the update feed (docs/updates.md section 13), two channels from this one workflow:
 #   beta   - every push to the default branch (touching app/, core/ or this file) and a manual run;
-#            version <base>-beta.<run number>, a prerelease `v<version>` + manifest-beta.json(.sig).
+#            version <base>-beta.<n> (n counts per base from the feed), a prerelease `v<version>` + manifest-beta.json(.sig).
 #   stable - a pushed tag `vX.Y.Z` (or a manual run with channel=stable on a tag / the default
 #            branch); version X.Y.Z, a normal release `vX.Y.Z` + manifest-stable.json(.sig).
 # Installers -> a release of FuckingSherlock/jormungand-releases, then the signed manifest -> the
@@ -167,7 +167,22 @@ jobs:
               IFS=. read -r a b c <<< "$stable"
               base=$(newest "$pub" "$a.$b.$((c + 1))")
             fi
-            version="$base-beta.$GITHUB_RUN_NUMBER"
+            # beta number counts per base: the newest beta in the feed of the same base + 1, else 1;
+            # a re-run of the run that published it (same build) keeps its number
+            n=1
+            code=$(curl -sSL -o "$RUNNER_TEMP/manifest-beta.json" -w '%{http_code}' \
+              "https://github.com/$FEED_REPO/releases/download/feed/manifest-beta.json") || { echo "::error::cannot reach the feed"; exit 1; }
+            if [ "$code" = 200 ]; then
+              prev=$(jq -er '.version' "$RUNNER_TEMP/manifest-beta.json") || { echo "::error::bad manifest-beta.json in the feed"; exit 1; }
+              prevBuild=$(jq -er '.build' "$RUNNER_TEMP/manifest-beta.json") || { echo "::error::bad manifest-beta.json in the feed"; exit 1; }
+              if [[ "$prev" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" = "$base" ]; then
+                if [ "$prevBuild" = "$((BUILD_OFFSET + GITHUB_RUN_NUMBER))" ]; then n="${BASH_REMATCH[2]}"
+                else n=$((BASH_REMATCH[2] + 1)); fi
+              fi
+            elif [ "$code" != 404 ]; then
+              echo "::error::feed answered HTTP $code for manifest-beta.json"; exit 1
+            fi
+            version="$base-beta.$n"
           fi
 
           echo "CHANNEL=$channel" >> "$GITHUB_ENV"
