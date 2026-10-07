@@ -15,10 +15,22 @@ import 'app_card.dart';
 /// the protocol and server traffic leaves through (a chain: entry -> exit; a profile: its
 /// subscription first), and on the right the latency in a frame.
 class DockProfile extends StatelessWidget {
-  const DockProfile({super.key, required this.summary, this.onTap});
+  const DockProfile({
+    super.key,
+    required this.summary,
+    this.onTap,
+    this.pinging = false,
+    this.onLatencyTap,
+  });
 
   final DockSummary summary;
   final VoidCallback? onTap;
+
+  /// The dock ping runs: a light goes round the latency frame.
+  final bool pinging;
+
+  /// A tap on the latency (not the row): starts / stops the dock ping. Null = the row's [onTap].
+  final VoidCallback? onLatencyTap;
 
   @override
   Widget build(BuildContext context) {
@@ -83,7 +95,12 @@ class DockProfile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            _LatencyBox(ms: s.latencyMs),
+            // its own tap: it pings, the rest of the row opens Route
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onLatencyTap,
+              child: _LatencyBox(ms: s.latencyMs, running: pinging),
+            ),
           ],
         ),
       ),
@@ -202,45 +219,125 @@ class _Route extends StatelessWidget {
       Align(alignment: Alignment.centerLeft, child: child);
 }
 
-/// `.profiles-meta`: the latency in a thin accent frame (tap = ping the top servers, later).
-// TODO(core-api): ping the top servers on a tap (`pingDockTop`) and run the light round the frame.
-class _LatencyBox extends StatelessWidget {
-  const _LatencyBox({required this.ms});
+/// `.profiles-meta`: the latency in a thin accent frame (tap = ping the top servers, see
+/// `CoreHost.toggleDockPing`). While [running] a light goes round the frame (`.ping-frame .run`:
+/// 28 % of the way, one lap per 1.1 s) — one controller that exists only meanwhile, and a ticker
+/// that stops by itself when the page is out of sight (`TickerMode`).
+class _LatencyBox extends StatefulWidget {
+  const _LatencyBox({required this.ms, required this.running});
 
   final int? ms;
+  final bool running;
+
+  @override
+  State<_LatencyBox> createState() => _LatencyBoxState();
+}
+
+class _LatencyBoxState extends State<_LatencyBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _lap = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.running) _lap.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_LatencyBox old) {
+    super.didUpdateWidget(old);
+    if (widget.running && !_lap.isAnimating) {
+      _lap.repeat();
+    } else if (!widget.running && _lap.isAnimating) {
+      _lap.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _lap.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final ms = widget.ms;
     return ConstrainedBox(
       constraints: BoxConstraints(minWidth: monoSlot(context, 4, 15) + 14),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: c.accent.tint(.3), width: 1.5),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(7, 2, 7, 3),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                ms == null ? '—' : '$ms',
-                maxLines: 1,
-                style: monoText.copyWith(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: c.t1,
-                ),
+      child: CustomPaint(
+        foregroundPainter: widget.running
+            ? _LightPainter(_lap, c.accent)
+            : null,
+        // the digits and the base frame stay in their own layer while the light moves
+        child: RepaintBoundary(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(color: c.accent.tint(.3), width: 1.5),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(7, 2, 7, 3),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    ms == null ? '—' : '$ms',
+                    maxLines: 1,
+                    style: monoText.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: c.t1,
+                    ),
+                  ),
+                  Text(
+                    'ms',
+                    style: monoText.copyWith(fontSize: 12, color: c.t2),
+                  ),
+                ],
               ),
-              Text('ms', style: monoText.copyWith(fontSize: 12, color: c.t2)),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+/// The light of the latency frame: a dash of 28 % of the frame's length going round it, drawn
+/// over the base stroke (repaints on the controller's ticks only, nothing is rebuilt).
+class _LightPainter extends CustomPainter {
+  _LightPainter(this.lap, this.color) : super(repaint: lap);
+
+  final Animation<double> lap;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = RRect.fromRectAndRadius(
+      (Offset.zero & size).deflate(.75),
+      const Radius.circular(5),
+    );
+    final metric = (Path()..addRRect(rect)).computeMetrics().first;
+    final len = metric.length, dash = len * .28;
+    final from = len * lap.value;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = color;
+    canvas.drawPath(metric.extractPath(from, from + dash), paint);
+    if (from + dash > len) {
+      canvas.drawPath(metric.extractPath(0, from + dash - len), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LightPainter old) =>
+      old.lap != lap || old.color != color;
 }
 
 /// "VPN is down · 3 min · retrying" above the dock row; the minutes are refreshed every 15 s

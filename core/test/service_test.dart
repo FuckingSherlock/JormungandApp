@@ -2,6 +2,7 @@
 // A fake BoxRunner (the platform seam, no sing-box binary) and the system proxy seams; the
 // HTTP adapter over the same logic is covered by killswitch_test / events_test / tun_test.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:jormungand_core/jormungand_core.dart';
@@ -68,7 +69,7 @@ void main() {
   late CoreService svc;
   late _Runner runner;
 
-  Future<void> start({SystemProxyBackend? sys}) async {
+  Future<void> start({SystemProxyBackend? sys, SiteChecker? checker}) async {
     tmp = await Directory.systemTemp.createTemp('jorm-svc');
     runner = _Runner();
     svc = CoreService(
@@ -78,6 +79,8 @@ void main() {
       boxFactory: (_) => _NoisyRunner(),
       sysProxy: sys ?? NoSystemProxy(),
       exitCheck: (_) async => {'ip': '127.0.0.1'},
+      // never the real check-host.net: a checker whose every request fails
+      siteChecker: checker ?? SiteChecker(get: (_, {proxyPort, timeout = Duration.zero}) async => throw const SocketException('no network in tests'), delay: (_) async {}),
     );
     await svc.init();
   }
@@ -200,6 +203,126 @@ void main() {
     svc.siteUnreachable(gone('d.example:443'));
     expect(flags(), [false, true, true, false]);
     expect(runner.running, isFalse, reason: 'the screen is no reason to touch the connection');
+  });
+
+  // check-host.net that says every node reaches the site ([opens]) or none does
+  SiteChecker fakeChecker(List<Uri> asked, {required bool opens}) => SiteChecker(
+        delay: (_) async {},
+        get: (url, {proxyPort, timeout = Duration.zero}) async {
+          asked.add(url);
+          const nodes = {'a': ['de', 'Germany', 'Frankfurt'], 'b': ['fr', 'France', 'Paris'], 'c': ['nl', 'Netherlands', 'Amsterdam']};
+          if (url.pathSegments.last == 'check-http') return (status: 200, body: jsonEncode({'ok': 1, 'request_id': 'r', 'nodes': nodes}));
+          final one = opens ? [[1, 0.2, 'OK', '200', '1.1.1.1']] : [[0, 5.0, 'Connection timed out']];
+          return (status: 200, body: jsonEncode({for (final k in nodes.keys) k: one}));
+        },
+      );
+
+  AutoUnreachable gone(String dest, {bool off = false}) => AutoUnreachable(route: 'A', server: 's', dest: dest, tried: const [], at: 1, retriesOff: off);
+  List<Map> siteEvents() => [for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site') e];
+  bool notifies(Map e) => eventNotifies(null, EventRecord.fromJson(e));
+
+  test('a site down on every route is quiet while the checker asks, loud when it opens elsewhere, quiet when down for the checker too', () async {
+    final asked = <Uri>[];
+    await start(checker: fakeChecker(asked, opens: true));
+    final changed = svc.eventStream.firstWhere((e) => e['rev'] != null);
+    svc.siteUnreachable(gone('a.example:443'));
+    var e = siteEvents().single;
+    expect((e['data'] as Map)['check']['state'], 'pending');
+    expect(notifies(e), isFalse, reason: 'quiet while the check is pending');
+    final id = e['id'];
+    final pushed = await changed;
+    expect(pushed['id'], id, reason: 'the same event, pushed again');
+    e = siteEvents().single;
+    expect([e['id'], e['rev']], [id, 1]);
+    final check = (e['data'] as Map)['check'] as Map;
+    expect([check['state'], check['ok'], check['total'], check['via']], ['opens', 3, 3, 'direct']);
+    expect((check['nodes'] as List).first, containsPair('country', 'Germany'));
+    expect(notifies(e), isTrue, reason: 'opens from the checker\'s nodes: notify');
+    expect((svc.events()['updated'] as List).single['id'], id, reason: 'a reader that already has the event learns of the change');
+    expect(asked.map((u) => u.queryParameters['host']).whereType<String>(), ['https://a.example']);
+
+    // the same on a checker that finds it down
+    final down = <Uri>[];
+    await svc.dispose();
+    await tmp.delete(recursive: true);
+    await start(checker: fakeChecker(down, opens: false));
+    final changed2 = svc.eventStream.firstWhere((e) => e['rev'] != null);
+    svc.siteUnreachable(gone('b.example:443'));
+    await changed2;
+    e = siteEvents().single;
+    expect(((e['data'] as Map)['check'] as Map)['state'], 'down');
+    expect(notifies(e), isFalse, reason: 'down everywhere: the journal only');
+  });
+
+  test('check trouble, a switched-off check and retries off: only the last notifies as before; a partial failure (blocked) asks nobody', () async {
+    final asked = <Uri>[];
+    await start(checker: fakeChecker(asked, opens: true));
+    // check switched off in Settings → Auto mode (plan.auto.siteCheck)
+    final body = _body();
+    ((body['plan'] as Map)['auto'] = {'siteCheck': false});
+    await svc.connect(body);
+    expect(svc.siteCheckOn, isFalse);
+    svc.siteUnreachable(gone('off.example:443'));
+    svc.siteUnreachable(gone('retries.example:443', off: true));
+    svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'part.example:443', via: 'B', viaServer: 't', at: 1));
+    await Future<void>.delayed(Duration.zero);
+    final byHost = {for (final e in siteEvents()) '${(e['data'] as Map)['host']}': e};
+    expect(((byHost['off.example']!['data'] as Map)['check'] as Map)['state'], 'off');
+    expect(notifies(byHost['off.example']!), isFalse);
+    expect((byHost['retries.example']!['data'] as Map).containsKey('check'), isFalse);
+    expect(notifies(byHost['retries.example']!), isTrue, reason: 'only the current route was tried: as before');
+    expect((byHost['part.example']!['data'] as Map).containsKey('check'), isFalse);
+    expect(notifies(byHost['part.example']!), isTrue);
+    expect(asked, isEmpty, reason: 'nothing was sent to the checker');
+  });
+
+  test('a checker that fails leaves the event quiet with the reason; an ignored host is never sent', () async {
+    await start(); // the default test checker fails every request
+    svc.updateSettings({'ignoredSites': ['secret.example']});
+    final changed = svc.eventStream.firstWhere((e) => e['rev'] != null);
+    svc.siteUnreachable(gone('api.secret.example:443'));
+    svc.siteUnreachable(gone('open.example:443'));
+    await changed;
+    final e = siteEvents().single;
+    final check = (e['data'] as Map)['check'] as Map;
+    expect([check['state'], check['error']], ['failed', contains('no network in tests')]);
+    expect(notifies(e), isFalse);
+  });
+
+  test('automatic checks are cached per site: the same site again within 10 minutes is not asked again', () async {
+    final asked = <Uri>[];
+    await start(checker: fakeChecker(asked, opens: true));
+    for (var i = 0; i < 2; i++) {
+      final changed = svc.eventStream.firstWhere((e) => e['rev'] != null && e['rev'] == 1 && e['id'] == siteEvents().last['id']);
+      svc.siteUnreachable(gone('again.example:443'));
+      await changed;
+    }
+    expect(siteEvents().length, 2);
+    expect(asked.where((u) => u.pathSegments.last == 'check-http').length, 1);
+    expect(siteEvents().map((e) => ((e['data'] as Map)['check'] as Map)['state']), ['opens', 'opens']);
+  });
+
+  test('«Check with checker»: the same event goes pending, then gets the result with manual: true (no notification); a bad id is a FormatException', () async {
+    final asked = <Uri>[];
+    await start(checker: fakeChecker(asked, opens: true));
+    await svc.connect(_body()..['plan'] = {...(_body()['plan'] as Map), 'auto': {'siteCheck': false}});
+    svc.siteUnreachable(gone('hand.example:443'));
+    final id = siteEvents().single['id'] as int;
+    expect(asked, isEmpty);
+    final states = <String>[];
+    final sub = svc.eventStream.where((e) => e['id'] == id).listen((e) => states.add('${((e['data'] as Map)['check'] as Map)['state']}'));
+    final r = await svc.siteCheck({'event': id});
+    await Future<void>.delayed(Duration.zero); // the stream delivers a turn later
+    await sub.cancel();
+    expect(states, ['pending', 'opens']);
+    expect((r['check'] as Map)['state'], 'opens');
+    final e = siteEvents().single;
+    expect(siteEvents().length, 1, reason: 'no new event');
+    expect([e['id'], e['rev'], ((e['data'] as Map)['check'] as Map)['manual']], [id, 2, true]);
+    expect(notifies(e), isFalse);
+    expect(() => svc.siteCheck({'event': 9999}), throwsFormatException);
+    final other = svc.postEvent({'cat': 'user', 'type': 'hello', 'level': 'info'})['id'];
+    expect(() => svc.siteCheck({'event': other}), throwsFormatException);
   });
 
   test('dispose stops the box and ends the streams', () async {

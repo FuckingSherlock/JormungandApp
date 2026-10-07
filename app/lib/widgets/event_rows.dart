@@ -85,7 +85,9 @@ class EventAct extends StatelessWidget {
   const EventAct(this.label, {super.key, required this.onTap});
 
   final String label;
-  final VoidCallback onTap;
+
+  /// Null = not available now (shown dimmed).
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -93,16 +95,19 @@ class EventAct extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: c.accent.tint(.13),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          child: Text(
-            label,
-            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.accent),
+      child: Opacity(
+        opacity: onTap == null ? .55 : 1,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: c.accent.tint(.13),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.accent),
+            ),
           ),
         ),
       ),
@@ -192,11 +197,18 @@ class EventRow extends StatelessWidget {
 
     // what a tap on an action does; each one that leaves the journal remembers the row
     void leave() => logs.returnId = e.id;
-    final acts = <(String, VoidCallback)>[];
+    final acts = <(String, VoidCallback?)>[];
     final dd = e.data;
     // "does not open": the site can be copied and made a rule whenever the event names one
     final site = e.cat == 'site' ? words.host(dd) : '';
     if (site.isNotEmpty) {
+      // the external checker (check-host): a check that is running now (older than 90 s = the core died meanwhile)
+      final check = dd['check'];
+      final asking =
+          check is Map &&
+          check['state'] == 'pending' &&
+          DateTime.now().millisecondsSinceEpoch - ((check['at'] as num?)?.toInt() ?? 0) < 90000;
+      acts.add((asking ? l10n.checking : l10n.checkWithChecker, asking ? null : () => host.checkSite(e.id)));
       acts.add((l10n.copySite, () => copyText(context, site, l10n.site)));
       if (links.newRuleFor != null) {
         final via = dd['via'] == null || '${dd['via']}'.isEmpty ? null : '${dd['via']}';
@@ -433,6 +445,7 @@ class _Vias extends StatelessWidget {
               ? l10n.retriesThroughOtherRoutesAreOff
               : l10n.noOtherWorkingRouteToTry)
         : null;
+    final verdict = words.checkText(d);
     return Container(
       margin: const EdgeInsets.only(top: 4),
       clipBehavior: Clip.antiAlias,
@@ -452,6 +465,18 @@ class _Vias extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.all(8),
               child: Text(note, style: TextStyle(fontSize: 12, color: c.t3)),
+            ),
+          ],
+          // what the external checker said (check-host): opens elsewhere / down everywhere / asking
+          if (verdict != null) ...[
+            if (rows.isNotEmpty || note != null) Divider(height: 1, thickness: 1, color: c.border),
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                verdict,
+                key: const ValueKey('evCheck'),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: d['check']['state'] == 'opens' ? c.accent : c.t2),
+              ),
             ),
           ],
         ],

@@ -40,6 +40,7 @@ export 'src/runtime.dart';
 export 'src/sbapi.dart';
 export 'src/service.dart';
 export 'src/share.dart';
+export 'src/sitecheck.dart';
 export 'src/state.dart';
 export 'src/sysproxy.dart';
 export 'src/traffic.dart';

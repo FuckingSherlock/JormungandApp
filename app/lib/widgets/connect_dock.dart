@@ -53,7 +53,12 @@ class ConnectDock extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (down != null) DockDownLine(since: down.since),
-                DockProfile(summary: host.dock, onTap: onRowTap),
+                DockProfile(
+                  summary: host.dock,
+                  onTap: onRowTap,
+                  pinging: host.dockPinging,
+                  onLatencyTap: host.toggleDockPing,
+                ),
               ],
             ),
           ),

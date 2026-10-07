@@ -9,7 +9,8 @@ import 'logbook.dart';
 /// The events journal: what happened, as structured records (the Logs → Events tab and
 /// every notification are made of it; the raw lines stay in [LogBook]).
 ///
-/// An event is `{id, at, cat, type, level, own, bg?, log?, data}`: [id] grows by one for every
+/// An event is `{id, at, cat, type, level, own, bg?, rev?, log?, data}` (`rev`: how often [update]
+/// changed it): [id] grows by one for every
 /// event and never goes back (also across restarts and [clear]); [at] is ms since epoch;
 /// [own] = the user's own action caused it (no notification for it); `bg` (only when true) = it
 /// happened while the phone's screen was off (a background failure: Settings → Notifications
@@ -137,6 +138,59 @@ class EventBook {
     return e['id'] as int;
   }
 
+  /// Changes event [id] in place (a check that finished later): [data] fields are laid over its
+  /// own, [level] replaces the level when given. The event keeps its id and place, gets `rev`
+  /// (the number of changes, absent = 0), is pushed on [stream] again and rides in [since]'s
+  /// `updated` for [updatedFor]; the file is rewritten behind the memory like after a prune.
+  /// Returns false when the event is not there any more.
+  bool update(int id, {Map<String, dynamic> data = const {}, String? level}) {
+    load();
+    final i = _indexOf(id);
+    if (i < 0) return false;
+    // the queue has no indexed write: the map changes where it is (readers compare `rev`)
+    final e = _events.elementAt(i);
+    if (level != null) e['level'] = level;
+    e['rev'] = ((e['rev'] as int?) ?? 0) + 1;
+    e['data'] = {...(e['data'] as Map<String, dynamic>), ...data};
+    _updatedAt[id] = _clock().millisecondsSinceEpoch;
+    if (_updatedAt.length > 50) _updatedAt.remove(_updatedAt.keys.first);
+    if (file != null) {
+      _rewrite = true;
+      _timer ??= Timer(flushEvery, () {
+        _timer = null;
+        unawaited(flush());
+      });
+    }
+    if (!_added.isClosed) _added.add(e);
+    return true;
+  }
+
+  /// The event with this id, or null.
+  Map<String, dynamic>? byId(int id) {
+    load();
+    final i = _indexOf(id);
+    return i < 0 ? null : _events.elementAt(i);
+  }
+
+  /// How long a changed event stays in the `updated` list of [since].
+  static const updatedFor = Duration(minutes: 10);
+  final _updatedAt = <int, int>{};
+
+  // The ids only grow along the queue: binary search; -1 = not there.
+  int _indexOf(int id) {
+    var lo = 0, hi = _events.length - 1;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1, v = _events.elementAt(mid)['id'] as int;
+      if (v == id) return mid;
+      if (v < id) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return -1;
+  }
+
   final _added = StreamController<Map<String, dynamic>>.broadcast();
 
   /// Every event as it is written (notifications, the live Events view, instead of polling [since]).
@@ -147,8 +201,9 @@ class EventBook {
     if (!_added.isClosed) unawaited(_added.close());
   }
 
-  /// `{events (oldest first, ids from [from]; the last [tail] without it), next (the id the
-  /// next event gets), first (the oldest id kept: the app sees a gap or a clear)}`.
+  /// `{events (oldest first, ids from [from]; the last [tail] without it), updated? (events
+  /// changed by [update] in the last [updatedFor], whatever their id: a reader compares `rev`),
+  /// next (the id the next event gets), first (the oldest id kept: the app sees a gap or a clear)}`.
   ///
   /// The ids only grow along the queue: the start is found by a binary search, so a poll
   /// that finds nothing new costs nothing, whatever the size of the journal.
@@ -171,8 +226,14 @@ class EventBook {
         }
       }
     }
+    final now = _clock().millisecondsSinceEpoch;
+    final updated = [
+      for (final MapEntry(key: id, value: at) in _updatedAt.entries)
+        if (now - at <= updatedFor.inMilliseconds && _indexOf(id) >= 0) _events.elementAt(_indexOf(id)),
+    ];
     return {
       'events': [for (var k = i; k < n; k++) _events.elementAt(k)],
+      if (updated.isNotEmpty) 'updated': updated,
       'next': _next,
       'first': _events.isEmpty ? _next : _events.first['id'],
     };

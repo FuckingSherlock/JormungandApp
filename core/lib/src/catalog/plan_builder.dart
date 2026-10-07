@@ -139,6 +139,7 @@ extension CatalogPlan on Catalog {
         'flapMax': autoCfg.flapMax,
         'flapReset': autoCfg.flapReset,
         'siteRetry': autoCfg.siteRetry,
+        if (!autoCfg.siteCheck) 'siteCheck': false,
         'checkers': [...connCfg.checkers], // Settings → Connection → Backup checks, taken live too
       };
 

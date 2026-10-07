@@ -948,6 +948,15 @@ class LiveCoreHost extends CoreHost {
   void clearEvents() => api.clearEvents();
 
   @override
+  Future<void> checkSite(int eventId) async {
+    try {
+      await api.siteCheck({'event': eventId});
+    } catch (_) {
+      // the event itself says it did not get an answer (or the core has no such event any more)
+    }
+  }
+
+  @override
   void clearLog() => api.clearLog();
 
   @override
@@ -1926,6 +1935,56 @@ class LiveCoreHost extends CoreHost {
     }
     final entry = catalog.chainEntryNode(c);
     if (entry != null) await _pingPairsInto(entry, outs);
+  }
+
+  DockPingRun? _dockRun;
+
+  @override
+  bool get dockPinging => _dockRun != null;
+
+  @override
+  Future<void> toggleDockPing() async {
+    final cur = _dockRun;
+    if (cur != null) {
+      // the batch in flight still reports; no new one goes out
+      cur.stop();
+      _dockRun = null;
+      _notifyNow();
+      return;
+    }
+    if (!_ready) return;
+    final run = _dockRun = DockPingRun(catalog, _measureDock);
+    _notifyNow();
+    try {
+      await run.run();
+    } finally {
+      if (identical(_dockRun, run)) {
+        _dockRun = null;
+        _notifyNow();
+      }
+    }
+  }
+
+  /// One batch of the dock ping: servers directly, a chain's exits as pairs through its entry
+  /// (after the direct pings when the chain has no entry in use yet: its entries may be among them).
+  Future<void> _measureDock(List<DockPingItem> batch) {
+    final direct = pingNodes([
+      for (final i in batch)
+        if (i.chain == null) i.node,
+    ]);
+    final exits = <String, (Chain, List<CatalogNode>)>{};
+    for (final i in batch) {
+      final c = i.chain;
+      if (c != null) exits.putIfAbsent(c.id, () => (c, <CatalogNode>[])).$2.add(i.node);
+    }
+    return Future.wait([
+      direct,
+      for (final (c, xs) in exits.values)
+        () async {
+          if (catalog.chainEntryNode(c) == null) await direct;
+          await pingChain(c, exits: xs, entries: false);
+        }(),
+    ]);
   }
 
   /// [exits] through [entry], results into the pair book as they come (`pingChain`).

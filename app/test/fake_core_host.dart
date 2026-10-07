@@ -398,6 +398,18 @@ class FakeCoreHost extends CoreHost {
     'pingChain ${c.id} ${exits?.length ?? 'all'}${entries ? '' : ' exits-only'}',
   );
 
+  bool _dockPinging = false;
+
+  @override
+  bool get dockPinging => _dockPinging;
+
+  @override
+  Future<void> toggleDockPing() async {
+    _dockPinging = !_dockPinging;
+    calls.add(_dockPinging ? 'dockPing start' : 'dockPing stop');
+    notifyListeners();
+  }
+
   @override
   String? shareLink(CatalogNode n) => 'vless://${n.address}#${n.name}';
 
@@ -505,12 +517,38 @@ class FakeCoreHost extends CoreHost {
     return l;
   }
 
+  /// «Check with checker» presses, by event id.
+  final checkedSites = <int>[];
+
+  /// What the checker says (`data.check` of the event); a test sets it.
+  Map<String, dynamic> checkAnswer = {'state': 'opens', 'ok': 2, 'total': 2, 'via': 'tunnel', 'nodes': const []};
+
+  /// Held until the test lets the check finish (null: it finishes at once).
+  Completer<void>? checkGate;
+
+  void _changeEvent(Map<String, dynamic> e, Map<String, dynamic> check) {
+    e['rev'] = ((e['rev'] as int?) ?? 0) + 1;
+    e['data'] = {...(e['data'] as Map<String, dynamic>), 'check': check};
+    _eventStream.add(e);
+  }
+
+  @override
+  Future<void> checkSite(int eventId) async {
+    checkedSites.add(eventId);
+    final e = journal.where((x) => x['id'] == eventId).firstOrNull;
+    if (e == null) return;
+    _changeEvent(e, {'state': 'pending', 'at': DateTime.now().millisecondsSinceEpoch, 'manual': true});
+    await checkGate?.future;
+    _changeEvent(e, {...checkAnswer, 'at': DateTime.now().millisecondsSinceEpoch, 'manual': true});
+  }
+
   @override
   Map<String, dynamic> eventsPage({int? since}) => {
     'events': [
       for (final e in journal)
         if (since == null || (e['id'] as int) >= since) e,
     ],
+    if (journal.any((e) => e['rev'] != null)) 'updated': [for (final e in journal) if (e['rev'] != null) e],
     'next': _eventSeq,
     'first': journal.isEmpty ? _eventSeq : journal.first['id'],
   };

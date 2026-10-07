@@ -474,6 +474,27 @@ void main() {
     },
   );
 
+  test('the dock ping walks the batches with a chain in the list and ends clean; a tap while it runs stops it', () async {
+    await start();
+    final catalog = host.catalog;
+    catalog.chainsData['c1'] = Chain(id: 'c1', name: 'C', inId: 'b', outId: 'a');
+    catalog.catalogOrder['simple']!.add('c1');
+    boxFails = SingBoxError('no sing-box');
+
+    await host.toggleDockPing(); // nothing answers: every batch is measured, then it ends by itself
+    expect(host.dockPinging, isFalse);
+    expect(catalog.pings.anyTesting, isFalse);
+    expect(catalog.pairs.anyTesting, isFalse);
+
+    final running = host.toggleDockPing();
+    expect(host.dockPinging, isTrue);
+    await host.toggleDockPing(); // a second tap: stopped at once, the batch in flight finishes
+    expect(host.dockPinging, isFalse);
+    await running;
+    expect(catalog.pings.anyTesting, isFalse);
+    boxFails = null;
+  });
+
   test('update settings (auto-download, metered network) go to the core and follow every change', () async {
     await start();
     await host.shutdown();

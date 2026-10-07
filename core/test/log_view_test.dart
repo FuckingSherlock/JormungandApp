@@ -167,6 +167,38 @@ void main() {
     expect(eventNotifKind['site/blocked'], 'blocked');
   });
 
+  test('site/unreachable with a check: only «opens» (not manual) notifies; without a check as before', () {
+    EventRecord gone(Object? check) => e(ev(1, 'site', 'unreachable', level: 'warn', data: {'host': 'a.com', 'check': ?check}));
+    expect(eventNotifies(null, gone(null)), isTrue, reason: 'retries off / an older event: as before');
+    for (final s in ['pending', 'off', 'down', 'failed']) {
+      expect(eventNotifies(null, gone({'state': s})), isFalse, reason: s);
+    }
+    expect(eventNotifies(null, gone({'state': 'opens'})), isTrue);
+    expect(eventNotifies(null, gone({'state': 'opens', 'manual': true})), isFalse, reason: 'the user pressed the button: they look');
+    expect(eventNotifies({'blocked': false}, gone({'state': 'opens'})), isFalse, reason: 'the kind still decides');
+    expect(eventNotifies(null, e(ev(2, 'site', 'blocked', level: 'warn', data: {'host': 'a.com', 'check': {'state': 'pending'}}))), isTrue,
+        reason: 'only unreachable has a check');
+  });
+
+  test('EventFeed: an event changed in place is replaced by its newer rev, notified once when it newly may', () {
+    final feed = EventFeed();
+    Map page({List<Map> events = const [], List<Map> updated = const [], int next = 2}) => {'events': events, 'updated': updated, 'next': next, 'first': 0};
+    Map gone(int rev, String state) => {...ev(1, 'site', 'unreachable', level: 'warn', data: {'host': 'a.com', 'check': {'state': state}}), 'rev': rev};
+    var r = feed.apply(page(events: [gone(0, 'pending')], next: 1));
+    expect(r.notify.map((x) => x.id), [1], reason: 'the first page: the caller still asks eventNotifies, which says no for pending');
+    expect(eventNotifies(null, r.notify.single), isFalse);
+    r = feed.apply(page(updated: [gone(1, 'opens')]));
+    expect([r.changed, r.fresh], [true, isEmpty]);
+    expect(feed.list.single.rev, 1);
+    expect(feed.list.single.data['check'], {'state': 'opens'});
+    expect(r.notify.map((x) => x.id), [1]);
+    expect(eventNotifies(null, r.notify.single), isTrue);
+    r = feed.apply(page(updated: [gone(1, 'opens')]));
+    expect([r.changed, r.notify], [false, isEmpty], reason: 'the same rev again: nothing');
+    r = feed.apply(page(updated: [{...gone(1, 'opens'), 'id': 77}]));
+    expect(r.changed, isFalse, reason: 'an event the list does not hold is ignored');
+  });
+
   test('background events (screen off): notify only with «bgErrors»; the filter hides them', () {
     final bg = e({...ev(1, 'site', 'blocked', level: 'warn', data: {'host': 'a.com'}), 'bg': true});
     final fg = e(ev(2, 'site', 'blocked', level: 'warn', data: {'host': 'a.com'}));

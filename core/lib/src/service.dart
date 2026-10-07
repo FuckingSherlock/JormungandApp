@@ -31,6 +31,7 @@ import 'runtime.dart' hide speedTest;
 import 'runtime.dart' as core_speed show speedTest;
 import 'sbapi.dart';
 import 'share.dart';
+import 'sitecheck.dart';
 import 'state.dart';
 import 'sysproxy.dart';
 import 'traffic.dart';
@@ -69,7 +70,9 @@ class CoreService implements CoreApi {
     this.updatePublicKeys,
     this.updateGet,
     this.updateFirstDelay = const Duration(seconds: 10),
-  })  : boxFactory = boxFactory ?? ((dir) => SingBoxProcess(singBox, dir)),
+    SiteChecker? siteChecker,
+  })  : _siteCheckerArg = siteChecker,
+        boxFactory = boxFactory ?? ((dir) => SingBoxProcess(singBox, dir)),
         _isElevated = isElevated ?? processIsElevated,
         _timer = timer ?? Timer.new,
         _now = now ?? DateTime.now,
@@ -106,6 +109,11 @@ class CoreService implements CoreApi {
   final List<String>? updatePublicKeys;
   final UpdateGet? updateGet;
   final Duration updateFirstDelay;
+
+  /// The external checker that tells a site down for everyone from one blocked only for the user
+  /// (sitecheck.dart); asks through the tunnel. [siteChecker] is the tests' seam.
+  final SiteChecker? _siteCheckerArg;
+  late final SiteChecker siteChecker = _siteCheckerArg ?? SiteChecker(proxyPort: () => _innerPort);
 
   /// The main sing-box (the connection).
   late final BoxRunner runner;
@@ -445,11 +453,19 @@ class CoreService implements CoreApi {
     });
   }
 
-  /// A site that opens through no route (`site/unreachable`), unless it is ignored.
+  /// Settings → Auto mode → «Check with an external checker» (`plan.auto.siteCheck`, default on).
+  bool get siteCheckOn => (_plan?['auto'] is Map ? (_plan!['auto'] as Map)['siteCheck'] : null) != false;
+
+  /// A site that opens through no route (`site/unreachable`), unless it is ignored. When every route
+  /// failed (not [AutoUnreachable.retriesOff]) the event carries `check` and is quiet (no toast, no
+  /// notification) until the external checker says the site opens elsewhere (sitecheck.dart): `pending`
+  /// while it asks, the result after (the same event, changed in place); `off` when the switch is off.
   void siteUnreachable(AutoUnreachable u) {
     final (host, port) = _hostPort(u.dest);
     if (ignoredSites.matches(host)) return;
-    eventBook.add('site', 'unreachable', 'warn', bg: !screenOn, data: {
+    final checks = !u.retriesOff;
+    final on = checks && siteCheckOn;
+    final id = eventBook.add('site', 'unreachable', 'warn', bg: !screenOn, data: {
       'host': host,
       'port': ?port,
       'entry': u.route,
@@ -459,8 +475,41 @@ class CoreService implements CoreApi {
       if (u.retriesOff) 'retries': 'off',
       'rule': ruleEventData(_ruleNames, u.rule),
       'process': ?processEventData(u.process),
+      if (checks) 'check': on ? {'state': 'pending', 'at': _now().millisecondsSinceEpoch} : {'state': 'off'},
     });
+    if (on) unawaited(_checkSiteEvent(id, host, port, manual: false));
   }
+
+  // Asks the checker and writes the answer into the event [id].
+  Future<void> _checkSiteEvent(int id, String host, int? port, {required bool manual}) async {
+    final r = await siteChecker.check(host, port, manual: manual);
+    if (_disposed) return;
+    eventBook.update(id, data: {'check': {...r.toJson(), if (manual) 'manual': true}});
+  }
+
+  /// body: `{event}` — the id of a `site/*` event: «Check with checker» on it. The event shows
+  /// `check.state: 'pending'` at once and is changed in place with the result (`manual: true`: the
+  /// user is looking, no notification for it); a check already running for the event is not
+  /// started twice. → `{check}`. An event that is not there or is not about a site is a [FormatException].
+  @override
+  Future<Map<String, dynamic>> siteCheck(Map<String, dynamic> body) async {
+    final id = body['event'];
+    final ev = id is int ? eventBook.byId(id) : null;
+    final data = ev?['data'];
+    if (ev == null || ev['cat'] != 'site' || data is! Map || data['host'] is! String) throw const FormatException('No such site event');
+    if (_checking.contains(id)) return {'check': data['check']};
+    if (ignoredSites.matches('${data['host']}')) throw const FormatException('The site is ignored');
+    _checking.add(id as int);
+    try {
+      eventBook.update(id, data: {'check': {'state': 'pending', 'at': _now().millisecondsSinceEpoch, 'manual': true}});
+      await _checkSiteEvent(id, '${data['host']}', (data['port'] as num?)?.toInt(), manual: true);
+    } finally {
+      _checking.remove(id);
+    }
+    return {'check': (eventBook.byId(id)?['data'] as Map?)?['check']};
+  }
+
+  final _checking = <int>{};
 
   static (String, int?) _hostPort(String dest) {
     final at = dest.lastIndexOf(':'), port = at < 0 ? null : int.tryParse(dest.substring(at + 1));

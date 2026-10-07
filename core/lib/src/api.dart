@@ -44,7 +44,8 @@ abstract interface class CoreApi {
 
   void clearLog();
 
-  /// `{events, next, first}` (eventbook.dart): events with an id of [since] and later.
+  /// `{events, updated?, next, first}` (eventbook.dart): events with an id of [since] and later;
+  /// `updated`: events changed in place lately (compare `rev`).
   Map<String, dynamic> events({int? since});
 
   /// Every journal event as it is written (the Events tab, notifications). Broadcast.
@@ -55,6 +56,11 @@ abstract interface class CoreApi {
   Map<String, dynamic> postEvent(Map<String, dynamic> body);
 
   void clearEvents();
+
+  /// `{event}` (the id of a `site/*` event) → `{check}`: asks the external checker (check-host.net) about
+  /// the event's site and changes that event in place with the result (`data.check`, `manual: true`;
+  /// `events()` then carries it in `updated`). A bad id is a [FormatException].
+  Future<Map<String, dynamic>> siteCheck(Map<String, dynamic> body);
 
   /// `{core, singBox, dataDir, dart, os}`.
   Future<Map<String, dynamic>> version();

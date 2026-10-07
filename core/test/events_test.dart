@@ -50,6 +50,32 @@ void main() {
     List<String> lines() => file.existsSync() ? file.readAsLinesSync() : [];
     List<Object?> ids() => [for (final l in lines()) (jsonDecode(l) as Map)['id'] ?? 'seq'];
 
+    test('update: the event changes where it is (rev, data laid over, id and place kept), is pushed again, rides in updated, and is rewritten to the file', () async {
+      final b = book();
+      final pushed = <Map<String, dynamic>>[];
+      b.stream.listen(pushed.add);
+      final id = b.add('site', 'unreachable', 'warn', data: {'host': 'a.com', 'check': {'state': 'pending'}});
+      b.add('conn', 'lost', 'warn');
+      expect(b.since(null)['updated'], isNull);
+      expect(b.update(id, data: {'check': {'state': 'opens'}}), isTrue);
+      expect(b.update(99, data: {'x': 1}), isFalse);
+      final r = b.since(null);
+      final e = (r['events'] as List).cast<Map>();
+      expect(e.map((x) => x['id']), [0, 1], reason: 'same place');
+      expect([e.first['rev'], e.first['level'], e.first['data']], [1, 'warn', {'host': 'a.com', 'check': {'state': 'opens'}}]);
+      expect(e.last.containsKey('rev'), isFalse);
+      expect((r['updated'] as List).single['id'], id);
+      expect(((b.since(5)['updated']) as List).single['id'], id, reason: 'whatever the cursor');
+      await Future<void>.delayed(Duration.zero);
+      expect(pushed.map((x) => x['id']), [0, 1, 0], reason: 'the change is pushed as the event itself');
+      now = now.add(const Duration(minutes: 11));
+      expect(b.since(null)['updated'], isNull, reason: 'a change leaves the list after 10 minutes');
+      await b.flush();
+      expect([for (final l in lines()) (jsonDecode(l) as Map)['rev']], [null, 1, null], reason: 'seq line, the changed event, the other');
+      final again = book()..load();
+      expect((again.since(null)['events'] as List).first['data'], {'host': 'a.com', 'check': {'state': 'opens'}});
+    });
+
     test('append: id, at, the shape; since = ids from N, none = the last 200; next and first', () {
       final b = book();
       expect(b.since(null), {'events': [], 'next': 0, 'first': 0});

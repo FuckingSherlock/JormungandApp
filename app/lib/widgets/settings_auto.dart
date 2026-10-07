@@ -216,6 +216,17 @@ class AutoModeBody extends StatelessWidget {
               ),
             ),
             SetRow(
+              label: l10n.checkWithAnExternalChecker,
+              hint: l10n.aSiteThatFailsOnEvery,
+              trailing: MiniToggle(
+                on: a.siteCheck,
+                onChanged: (v) {
+                  a.siteCheck = v;
+                  save();
+                },
+              ),
+            ),
+            SetRow(
               label: l10n.pauseChecksWithTheScreenOff,
               hint: l10n.savesBatteryChecksAgainOnWake,
               trailing: MiniToggle(

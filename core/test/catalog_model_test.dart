@@ -563,6 +563,13 @@ void main() {
       expect(p['urlTest'], {'interval': 60, 'tolerance': 50, 'url': 'https://t.example/'});
       expect((p['auto'] as Map)['checkers'], c.connCfg.checkers);
       expect((p['auto'] as Map).keys, containsAll(['failAfter', 'threshold', 'returnTo', 'siteRetry']));
+      // the external checker switch: on by default and then not written (the mockup's snapshots stay the same); off is
+      expect((p['auto'] as Map).containsKey('siteCheck'), isFalse);
+      expect(c.autoCfg.toJson().containsKey('siteCheck'), isFalse);
+      c.autoCfg.siteCheck = false;
+      expect((c.livePlan()['auto'] as Map)['siteCheck'], isFalse);
+      expect(AutoCfg.fromJson(c.autoCfg.toJson()).siteCheck, isFalse);
+      c.autoCfg.siteCheck = true;
       c.connCfg
         ..proxyAuth = false
         ..testUrl = '';

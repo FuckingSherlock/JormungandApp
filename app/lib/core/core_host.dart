@@ -472,6 +472,12 @@ abstract class CoreHost extends ChangeNotifier {
   /// exits live by. A chain exit is never pinged directly for the chain.
   Future<void> pingChain(Chain c, {Iterable<CatalogNode>? exits, bool entries = true});
 
+  /// A tap on the latency in the dock (`pingDockTop`): starts the dock ping (`Catalog.dockPingBatches`:
+  /// batches until [dockPingEnough] servers answered or all are measured) or, while it runs, stops it
+  /// (the batch in flight finishes). [dockPinging] drives the light round the latency frame.
+  bool get dockPinging;
+  Future<void> toggleDockPing();
+
   // ── share, speed test, manual servers ──
 
   /// The share link of a server, null when it has none (no outbound, unsupported).
@@ -527,6 +533,10 @@ abstract class CoreHost extends ChangeNotifier {
   Map<String, dynamic> logPage({int? since});
   Stream<Map<String, dynamic>> get logLines;
   void clearEvents();
+
+  /// «Check with checker» on a site event: the core asks check-host.net about its site and changes that
+  /// event in place (`data.check`, shown pending at once). Completes with the result; never throws.
+  Future<void> checkSite(int eventId);
   void clearLog();
 
   /// An event only the UI knows (a retry's result...) into the journal.

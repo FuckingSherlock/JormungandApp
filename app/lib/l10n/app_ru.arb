@@ -1385,5 +1385,13 @@
   "errorsWhileScreenIsOff": "Ошибки при выключенном экране",
   "aSiteThatFailsWhileThe": "Сайт, который не открывается при выключенном экране, только записывается в журнал с пометкой «Фон». Включено: уведомляет, как остальные.",
   "background": "Фон",
-  "foundWhileTheScreenWasOff": "Найдено при выключенном экране"
+  "foundWhileTheScreenWasOff": "Найдено при выключенном экране",
+  "checkWithChecker": "Проверить чекером",
+  "opensElsewhereNotThroughYourRoutes": "Открывается в других местах, но не через ваши маршруты",
+  "downEverywhereCheckHost": "Недоступен нигде (check-host)",
+  "askingCheckHost": "Спрашиваю check-host…",
+  "theCheckerDidNotAnswer": "Чекер не ответил",
+  "checker": "Чекер",
+  "checkWithAnExternalChecker": "Проверять внешним чекером",
+  "aSiteThatFailsOnEvery": "Сайт, не открывшийся ни по одному маршруту, проверяется через check-host.net; уведомление приходит, только если там он открывается"
 }

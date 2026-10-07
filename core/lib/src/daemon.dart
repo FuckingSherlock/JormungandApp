@@ -106,6 +106,7 @@ class Daemon {
             service.clearEvents();
             return {'ok': true};
           }),
+        'POST /api/site-check' => service.siteCheck(body),
         'GET /api/version' => service.version(),
         'POST /api/node' => Future(() => {'node': service.manualNode(body).toJson()}),
         'POST /api/share' => Future.value({'link': service.share(body)}),

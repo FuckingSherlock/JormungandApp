@@ -137,6 +137,7 @@ class AutoCfg with RoundTrip {
     this.pauseScreenOff = true,
     this.speedOnFail = false,
     this.subsEvery = 12 * 3600,
+    this.siteCheck = true,
   });
 
   factory AutoCfg.fromJson(Json j) {
@@ -155,6 +156,7 @@ class AutoCfg with RoundTrip {
       pauseScreenOff: _get(j, 'pauseScreenOff', true),
       speedOnFail: _get(j, 'speedOnFail', false),
       subsEvery: _get<num>(j, 'subsEvery', 12 * 3600),
+      siteCheck: _get(j, 'siteCheck', true),
     );
     c.capture(j, _known);
     return c;
@@ -162,7 +164,7 @@ class AutoCfg with RoundTrip {
 
   static const _known = {
     'threshold', 'checkEvery', 'failAfter', 'standby', 'warmEvery', 'retryPause', 'returnTo', 'flapGuard', 'flapMax', 'flapReset', //
-    'siteRetry', 'pauseScreenOff', 'speedOnFail', 'subsEvery',
+    'siteRetry', 'pauseScreenOff', 'speedOnFail', 'subsEvery', 'siteCheck',
   };
 
   num threshold;
@@ -184,6 +186,10 @@ class AutoCfg with RoundTrip {
   bool speedOnFail;
   num subsEvery;
 
+  /// A site that failed through every route is asked of the external checker (sitecheck.dart). Written
+  /// only when off: the mockup, which has no such switch, round-trips the same snapshot.
+  bool siteCheck;
+
   Json toJson() => {
         'threshold': threshold,
         'checkEvery': checkEvery,
@@ -199,6 +205,7 @@ class AutoCfg with RoundTrip {
         'pauseScreenOff': pauseScreenOff,
         'speedOnFail': speedOnFail,
         'subsEvery': subsEvery,
+        if (!siteCheck) 'siteCheck': false,
         ...deepCopy(unknown) as Json,
       };
 }

@@ -275,6 +275,7 @@ class EventWords {
               if (x is Map) _entryMark('⚠️', x['entry'], x['server']),
             if (tried.isEmpty) _noRoute(d),
             whyText(d),
+            checkText(d),
           ], '   '),
         );
       }(),
@@ -615,7 +616,47 @@ class EventWords {
     for (final x in e.data.entries) {
       final v = x.value;
       if (v == null || (v is String && v.isEmpty)) continue;
+      if (x.key == 'check' && v is Map) {
+        out.addAll(checkFields(v));
+        continue;
+      }
       out.add((fieldLabel(x.key), fieldValue(x.key, v, e)));
+    }
+    return out;
+  }
+
+  /// The external checker's verdict on a site event (`data.check`, docs/connect-model.md → «Внешний
+  /// чекер»): one sentence, or null when there is nothing to say (the check is off, or the event has none).
+  String? checkText(Map<String, dynamic> d) {
+    final c = d['check'];
+    if (c is! Map) return null;
+    return switch (c['state']) {
+      'opens' => l10n.opensElsewhereNotThroughYourRoutes,
+      'down' => l10n.downEverywhereCheckHost,
+      'pending' => l10n.askingCheckHost,
+      'failed' => l10n.theCheckerDidNotAnswer,
+      _ => null,
+    };
+  }
+
+  /// The checker's rows of an opened event: the verdict, then one row per node of the checker
+  /// («Germany, Frankfurt» → «OK 200 · 0.2 s» / the error).
+  List<(String, String)> checkFields(Map c) {
+    final out = <(String, String)>[];
+    final verdict = checkText({'check': c});
+    if (verdict != null) out.add((l10n.checker, verdict));
+    if (c['state'] == 'failed' && c['error'] != null && '${c['error']}'.isNotEmpty) out.add((l10n.error, '${c['error']}'));
+    final nodes = c['nodes'];
+    if (nodes is List) {
+      for (final n in nodes) {
+        if (n is! Map) continue;
+        final where = [for (final k in ['country', 'city']) if (n[k] != null && '${n[k]}'.isNotEmpty) '${n[k]}'].join(', ');
+        final ms = n['ms'] is num ? l10n.ms(n['ms'] as num) : null;
+        final what = n['ok'] == true
+            ? ['OK', if (n['code'] != null) '${n['code']}', if (ms != null) '· $ms'].join(' ')
+            : '${n['error'] ?? l10n.error}';
+        out.add((where.isEmpty ? '${n['cc'] ?? ''}' : where, what));
+      }
     }
     return out;
   }

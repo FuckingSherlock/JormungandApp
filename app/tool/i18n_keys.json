@@ -1427,5 +1427,13 @@
   "Errors while screen is off": "errorsWhileScreenIsOff",
   "A site that fails while the screen is off is only written to the journal, marked Background. On: it notifies like the others.": "aSiteThatFailsWhileThe",
   "Background": "background",
-  "Found while the screen was off": "foundWhileTheScreenWasOff"
+  "Found while the screen was off": "foundWhileTheScreenWasOff",
+  "Check with checker": "checkWithChecker",
+  "Opens elsewhere, not through your routes": "opensElsewhereNotThroughYourRoutes",
+  "Down everywhere (check-host)": "downEverywhereCheckHost",
+  "Asking check-host…": "askingCheckHost",
+  "The checker did not answer": "theCheckerDidNotAnswer",
+  "Checker": "checker",
+  "Check with an external checker": "checkWithAnExternalChecker",
+  "A site that fails on every route is asked of check-host.net; you are notified only if it opens from there": "aSiteThatFailsOnEvery"
 }

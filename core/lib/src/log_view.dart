@@ -19,6 +19,7 @@ class EventRecord {
     required this.log,
     required this.data,
     this.bg = false,
+    this.rev = 0,
   });
 
   factory EventRecord.fromJson(Map m) => EventRecord(
@@ -29,6 +30,7 @@ class EventRecord {
     level: '${m['level'] ?? 'info'}',
     own: m['own'] == true,
     bg: m['bg'] == true,
+    rev: (m['rev'] as num?)?.toInt() ?? 0,
     log: (m['log'] as num?)?.toInt(),
     data: m['data'] is Map ? Map<String, dynamic>.from(m['data'] as Map) : <String, dynamic>{},
   );
@@ -39,6 +41,9 @@ class EventRecord {
 
   /// It happened while the screen was off (a background failure, eventbook.dart).
   final bool bg;
+
+  /// How often the core changed the event in place (a finished check); 0 = never.
+  final int rev;
 
   /// The number of the raw line written at the same moment (null = none).
   final int? log;
@@ -100,6 +105,10 @@ bool notifAllows(Object? cfg, String kind) {
 bool eventNotifies(Object? cfg, EventRecord e) {
   final kind = eventNotifKind[e.key];
   if (kind == null || !notifAllows(cfg, kind)) return false;
+  // A site that failed through every route is quiet until the external checker says it opens elsewhere
+  // (pending, off, failed and "down everywhere" stay in the journal); a manual check is the user's own.
+  final check = e.key == 'site/unreachable' ? e.data['check'] : null;
+  if (check is Map && (check['state'] != 'opens' || check['manual'] == true)) return false;
   return !e.bg || (cfg is Map && cfg['bgErrors'] is bool ? cfg['bgErrors'] as bool : notifDefaults['bgErrors']!);
 }
 
@@ -366,7 +375,18 @@ class EventFeed {
     list.addAll(fresh);
     if (list.length > eventKeep) list.removeRange(0, list.length - eventKeep);
     final notify = [for (final e in fresh) if (e.id >= (notifyFrom ?? 0) && !e.own) e];
-    return (fresh: fresh, notify: notify, reset: false, changed: fresh.isNotEmpty || first || list.length != n0);
+    // events the core changed in place (a finished check): the newer `rev` replaces the one kept; it may
+    // newly be worth a notification (the caller still asks [eventNotifies])
+    var moved = false;
+    for (final m in (r['updated'] as List? ?? const [])) {
+      final e = EventRecord.fromJson(m as Map);
+      final at = list.indexWhere((x) => x.id == e.id);
+      if (at < 0 || list[at].rev >= e.rev) continue;
+      list[at] = e;
+      moved = true;
+      if (e.id >= (notifyFrom ?? 0) && !e.own && !notify.any((x) => x.id == e.id)) notify.add(e);
+    }
+    return (fresh: fresh, notify: notify, reset: false, changed: fresh.isNotEmpty || first || list.length != n0 || moved);
   }
 
   void clear() => list.clear();

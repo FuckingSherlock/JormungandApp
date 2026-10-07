@@ -3,6 +3,7 @@
 library;
 
 export 'catalog.dart';
+export 'dock_ping.dart';
 export 'drafts.dart';
 export 'impact.dart';
 export 'json_util.dart' show Json;
