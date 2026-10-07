@@ -206,6 +206,8 @@ extension CatalogOps on Catalog {
     for (final c in chainsData.values) {
       c.inOff = c.inOff.where((k) => !keys.contains(k)).toList();
       c.outOff = c.outOff.where((k) => !keys.contains(k)).toList();
+      c.inOn = c.inOn.where((k) => !keys.contains(k)).toList();
+      c.outOn = c.outOn.where((k) => !keys.contains(k)).toList();
       c.exitOrder = c.exitOrder.where((k) => !keys.contains(k)).toList();
     }
   }
@@ -246,6 +248,8 @@ extension CatalogOps on Catalog {
     for (final c in chainsData.values) {
       c.inOff = c.inOff.where((k) => !k.startsWith('$id::')).toList();
       c.outOff = c.outOff.where((k) => !k.startsWith('$id::')).toList();
+      c.inOn = c.inOn.where((k) => !k.startsWith('$id::')).toList();
+      c.outOn = c.outOn.where((k) => !k.startsWith('$id::')).toList();
       c.exitOrder = c.exitOrder.where((k) => !k.startsWith('$id::')).toList();
     }
     dropConnectEntry(id);

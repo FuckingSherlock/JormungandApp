@@ -1,5 +1,7 @@
 // The editors' draft operations of the Nodes screen (profile / chain forms, the source entry
 // sheet, server sort): ports of the mockup's cpSourceState / toggleCpNode / pickChainSide / ... .
+import 'dart:convert';
+
 import 'package:jormungand_core/jormungand_core.dart';
 import 'package:test/test.dart';
 
@@ -174,6 +176,101 @@ void main() {
       final d = c.newChainDraft('b', 'a');
       c.chainReorderExit(d, ['a::a3', 'a::a2', 'a::a1']);
       expect(d.exitOrder, ['a::a3', 'a::a2', 'a::a1']);
+    });
+
+    group('disabled in subscription, switched on for this chain', () {
+      List<String> keys(Iterable<NodeRef> rs) => [for (final r in rs) r.key];
+
+      test('offered only for a source end; forcing puts it into the chain group, not into the source', () {
+        final c = make();
+        c.sourcesData['a']!.offNodes = ['a2'];
+        final d = c.chainDraftOf('c1'); // b -> a
+        expect(keys(c.chainOffRefs(d, 'out')), ['a::a2']);
+        expect(keys(c.chainOffRefs(d, 'in')), isEmpty);
+        expect(keys(c.chainExitRefs(d)), ['a::a1', 'a::a3']);
+        c.chainForceNode(d, 'out', 'a::a2');
+        c.chainForceNode(d, 'out', 'a::a1'); // not off in the subscription: nothing to force
+        expect(d.outOn, ['a::a2']);
+        expect(keys(c.chainExitRefs(d)), ['a::a1', 'a::a3', 'a::a2']);
+        expect(c.saveChain(d, editId: 'c1'), isNull);
+        final nodes = [for (final n in (c.planRoute('c1')['main'] as Map)['nodes'] as List) n['key']];
+        expect(nodes, containsAll(['a::a1', 'a::a2', 'a::a3']));
+        // the subscription itself, Simple (its own entry) and Nodes keep it disabled
+        expect(keys(c.unitRefs('a')), ['a::a1', 'a::a3']);
+        expect(c.sourcesData['a']!.offNodes, ['a2']);
+        expect(c.isNodeOff(c.sourcesData['a']!, 'a2'), isTrue);
+        final p = c.planRoute('a')['main']['nodes'] as List;
+        expect(p.map((n) => n['key']), isNot(contains('a::a2')));
+        expect(keys(c.unitRefs('p')), contains('a::a2')); // a profile does not read offNodes
+      });
+
+      test('a tap on a forced server sends it back; None leaves it; ends swap with it; a new unit forgets it', () {
+        final c = make();
+        c.sourcesData['a']!.offNodes = ['a2'];
+        final d = c.newChainDraft('b', 'a');
+        c.chainForceNode(d, 'out', 'a::a2');
+        c.chainSetNodesAll(d, 'out');
+        expect(d.outOn, ['a::a2']);
+        c.chainSwapEnds(d);
+        expect(d.inId, 'a');
+        expect(d.inOn, ['a::a2']);
+        expect(d.outOn, isEmpty);
+        expect(d.inOff, ['a::a1', 'a::a3']); // None ticked the normal ones off, the forced one stays
+        expect(keys(c.chainEntryRefs(d)), ['a::a2']);
+        c.chainToggleNode(d, 'in', 'a::a2');
+        expect(d.inOn, isEmpty);
+        expect(d.inOff, ['a::a1', 'a::a3']);
+        c.chainForceNode(d, 'in', 'a::a2');
+        c.chainPickSide(d, 'in', 'b');
+        expect(d.inOn, isEmpty);
+      });
+
+      test('a chain whose only servers are forced on is valid', () {
+        final c = make();
+        c.sourcesData['b']!.offNodes = ['b1', 'b2'];
+        final d = c.newChainDraft('b', 'a');
+        expect(c.chainEntryRefs(d), isEmpty);
+        c.chainForceNode(d, 'in', 'b::b2');
+        expect(c.chainProblems(d), isEmpty);
+        expect(c.saveChain(d, editId: 'c1'), isNull);
+        expect(keys(c.chainEntryRefs(c.chainsData['c1']!)), ['b::b2']);
+        expect((c.planRoute('c1')['entry']['nodes'] as List).map((n) => n['key']), ['b::b2']);
+      });
+
+      test('survives a refresh by identity, waits while the server is dropped, is forgotten with it', () {
+        final c = make();
+        final a = c.sourcesData['a']!;
+        a.offNodes = ['a2'];
+        c.chainsData['c1']!.outOn = ['a::a2'];
+        final n2 = a.nodes.firstWhere((n) => n.id == 'a2');
+        a.nodes = a.nodes.where((n) => n.id != 'a2').toList(); // the provider dropped it
+        a.gone = [n2];
+        expect(keys(c.chainExitRefs(c.chainsData['c1']!)), ['a::a1', 'a::a3']);
+        expect(c.chainsData['c1']!.outOn, ['a::a2']);
+        a.nodes = [...a.nodes, n2]; // it came back with the same id
+        a.gone = [];
+        expect(keys(c.chainExitRefs(c.chainsData['c1']!)), contains('a::a2'));
+        c.deleteNode('a', 'a2');
+        expect(c.chainsData['c1']!.outOn, isEmpty);
+        c.chainsData['c1']!.inOn = ['b::b1'];
+        c.deleteSource('b');
+        expect(c.chainsData.containsKey('c1'), isFalse);
+      });
+
+      test('JSON: written only when non-empty, unknown keys stay', () {
+        final c = make();
+        final j = c.chainsData['c1']!.toJson();
+        expect(j.containsKey('inOn'), isFalse);
+        expect(j.containsKey('outOn'), isFalse);
+        c.chainsData['c1']!
+          ..inOn = ['b::b1']
+          ..outOn = ['a::a2'];
+        final back = Chain.fromJson(jsonDecode(jsonEncode(c.chainsData['c1']!.toJson())) as Map<String, dynamic>);
+        expect(back.inOn, ['b::b1']);
+        expect(back.outOn, ['a::a2']);
+        expect(Catalog.fromJson(jsonDecode(jsonEncode(c.toJson())) as Map<String, dynamic>).chainsData['c1']!.outOn, ['a::a2']);
+        expect(c.chainDraftOf('c1').outOn, ['a::a2']);
+      });
     });
   });
 

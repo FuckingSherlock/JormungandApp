@@ -1,0 +1,223 @@
+Resolving dependencies...
+Downloading packages...
+  camera_avfoundation 0.10.3+1 (0.11.0 available)
+  code_assets 1.2.1 (2.1.0 available)
+  cross_file 0.3.5+5 (0.4.0 available)
+  hooks 2.0.2 (2.2.0 available)
+  http2 2.3.1 (3.1.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.3 (1.19.0 available)
+  objective_c 9.5.0 (9.6.2 available)
+  petitparser 7.0.2 (7.1.0 available)
+  qr 3.0.2 (4.0.0 available)
+  record_use 0.6.0 (1.1.1 available)
+  test_api 0.7.12 (0.7.14 available)
+  vector_math 2.4.0 (2.4.3 available)
+  xml 7.0.1 (7.1.0 available)
+Got dependencies!
+14 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading G:/DEV/JormungandApp/app/test/adopt_test.dart
+00:00 +0: G:/DEV/JormungandApp/app/test/adopt_test.dart: a running tunnel is taken over: connected, nothing stopped or started
+00:00 +1: G:/DEV/JormungandApp/app/test/adopt_test.dart: a plan that differs from what the catalog builds now takes the usual reconnect, not a silent restart
+00:01 +2: G:/DEV/JormungandApp/app/test/adopt_test.dart: no tunnel: nothing to take over, disconnected
+00:01 +3: G:/DEV/JormungandApp/app/test/adopt_test.dart: a tunnel that cannot be taken over is stopped: the state is true, not "disconnected" over a live tunnel
+00:01 +4: G:/DEV/JormungandApp/app/test/apps_test.dart: ChannelAppsIo: the list and the icon come over the channel
+00:01 +5: G:/DEV/JormungandApp/app/test/adopt_test.dart: the record of a tunnel that stopped is gone: a later engine finds nothing
+00:01 +6: G:/DEV/JormungandApp/app/test/adopt_test.dart: the record of a tunnel that stopped is gone: a later engine finds nothing
+00:01 +7: G:/DEV/JormungandApp/app/test/apps_test.dart: the picker lists the installed apps by filter and search, and asks the platform again
+00:02 +8: G:/DEV/JormungandApp/app/test/apps_test.dart: the picker lists the installed apps by filter and search, and asks the platform again
+00:03 +9: G:/DEV/JormungandApp/app/test/apps_test.dart: the picker lists the installed apps by filter and search, and asks the platform again
+00:03 +10: G:/DEV/JormungandApp/app/test/apps_test.dart: the picker lists the installed apps by filter and search, and asks the platform again
+00:03 +11: G:/DEV/JormungandApp/app/test/apps_test.dart: the picker lists the installed apps by filter and search, and asks the platform again
+00:03 +12: G:/DEV/JormungandApp/app/test/apps_test.dart: the picker lists the installed apps by filter and search, and asks the platform again
+00:03 +13: G:/DEV/JormungandApp/app/test/chain_pair_test.dart: chain card: an exit that answers through the entry works, whatever its direct ping says
+00:04 +14: G:/DEV/JormungandApp/app/test/chain_pair_test.dart: chain card: an exit that answers through the entry works, whatever its direct ping says
+00:04 +15: G:/DEV/JormungandApp/app/test/chain_pair_test.dart: chain card: an exit that answers through the entry works, whatever its direct ping says
+00:04 +16: G:/DEV/JormungandApp/app/test/chain_pair_test.dart: chain card: an exit that answers through the entry works, whatever its direct ping says
+00:04 +17: G:/DEV/JormungandApp/app/test/home_test.dart: the power tab connects and disconnects: badge and dock follow
+00:04 +18: G:/DEV/JormungandApp/app/test/home_test.dart: the power tab connects and disconnects: badge and dock follow
+00:04 +19: G:/DEV/JormungandApp/app/test/background_errors_test.dart: toast and shade Settings -> Notifications has the switch (Android), off by default, saved
+00:04 +20: G:/DEV/JormungandApp/app/test/background_errors_test.dart: toast and shade Settings -> Notifications has the switch (Android), off by default, saved
+00:04 +21: G:/DEV/JormungandApp/app/test/background_errors_test.dart: toast and shade Settings -> Notifications has the switch (Android), off by default, saved
+00:04 +22: G:/DEV/JormungandApp/app/test/background_errors_test.dart: toast and shade Settings -> Notifications has the switch (Android), off by default, saved
+00:04 +23: G:/DEV/JormungandApp/app/test/background_errors_test.dart: toast and shade Settings -> Notifications has the switch (Android), off by default, saved
+00:05 +24: G:/DEV/JormungandApp/app/test/home_test.dart: nothing in Auto: the alert, no connect
+00:05 +25: G:/DEV/JormungandApp/app/test/home_test.dart: nothing in Auto: the alert, no connect
+00:05 +26: G:/DEV/JormungandApp/app/test/background_errors_test.dart: Events: a bg row is marked and the «Background» row of the filter hides / shows it
+00:05 +27: G:/DEV/JormungandApp/app/test/background_errors_test.dart: Events: a bg row is marked and the «Background» row of the filter hides / shows it
+00:05 +28: G:/DEV/JormungandApp/app/test/background_errors_test.dart: Events: a bg row is marked and the «Background» row of the filter hides / shows it
+00:05 +29: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:06 +30: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:06 +31: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:06 +32: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:06 +33: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:06 +34: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:06 +35: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:06 +36: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:06 +37: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:07 +38: G:/DEV/JormungandApp/app/test/ignored_sites_test.dart: Ignore site on an event: «host ignored · Undo»; Undo takes it off
+00:07 +39: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +40: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +41: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +42: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +43: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +44: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +45: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +46: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +47: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: start: the port gets the config plus the API service; api and log lines work
+00:07 +48: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:07 +49: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:07 +50: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:07 +51: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:07 +52: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:07 +53: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:07 +54: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:08 +55: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:08 +56: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:08 +57: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:08 +58: G:/DEV/JormungandApp/app/test/logs_conns_events_test.dart: a "does not open" event: copy and Create rule are there even without a working route
+00:08 +59: G:/DEV/JormungandApp/app/test/live_core_host_test.dart: a subscription that cannot be loaded stays with its error
+00:09 +60: G:/DEV/JormungandApp/app/test/live_core_host_test.dart: a subscription that cannot be loaded stays with its error
+00:09 +61: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +62: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +63: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +64: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +65: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +66: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +67: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +68: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +69: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +70: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:09 +71: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:10 +72: G:/DEV/JormungandApp/app/test/nodes_test.dart: Profile editor: Create stays off until something is ticked
+00:10 +73: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:10 +74: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:10 +75: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:10 +76: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +77: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +78: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +79: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +80: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +81: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +82: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +83: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +84: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +85: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +86: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +87: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:11 +88: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:12 +89: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:12 +90: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:12 +91: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:12 +92: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: watchApi: the tunnel opens the status / connections / groups streams, a throwaway box does not (its log still comes)
+00:12 +93: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:12 +94: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:12 +95: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:13 +96: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:13 +97: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:13 +98: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:14 +99: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:14 +100: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:14 +101: G:/DEV/JormungandApp/app/test/route_actions_test.dart: Route: refresh sits on the card next to the ping, 48 dp targets, no overflow
+00:14 +102: G:/DEV/JormungandApp/app/test/route_check_test.dart: route check: the exits go through each entry, working pairs are listed
+00:14 +103: G:/DEV/JormungandApp/app/test/route_check_test.dart: route check: the exits go through each entry, working pairs are listed
+00:14 +104: G:/DEV/JormungandApp/app/test/route_check_test.dart: route check: the exits go through each entry, working pairs are listed
+00:15 +105: G:/DEV/JormungandApp/app/test/route_check_test.dart: route check: the exits go through each entry, working pairs are listed
+00:15 +106: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +107: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +108: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +109: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +110: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +111: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +112: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +113: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +114: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +115: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +116: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +117: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +118: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stopped on its own: onExit fires once, running turns false, the api is dropped
+00:15 +119: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu seven rows, Connection names what is left on Android
+00:16 +120: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu seven rows, Connection names what is left on Android
+00:16 +121: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu seven rows, Connection names what is left on Android
+00:16 +122: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu seven rows, Connection names what is left on Android
+00:16 +123: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu seven rows, Connection names what is left on Android
+00:16 +124: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu seven rows, Connection names what is left on Android
+00:16 +125: G:/DEV/JormungandApp/app/test/shell_test.dart: shell opens on Home and switches tabs
+00:17 +126: G:/DEV/JormungandApp/app/test/shell_test.dart: shell opens on Home and switches tabs
+00:17 +127: G:/DEV/JormungandApp/app/test/shell_test.dart: shell opens on Home and switches tabs
+00:17 +128: G:/DEV/JormungandApp/app/test/site_check_test.dart: «Check with checker»: pending (button dimmed), then the same event shows the verdict and the nodes; no new event
+00:17 +129: G:/DEV/JormungandApp/app/test/site_check_test.dart: «Check with checker»: pending (button dimmed), then the same event shows the verdict and the nodes; no new event
+00:18 +130: G:/DEV/JormungandApp/app/test/site_check_test.dart: «Check with checker»: pending (button dimmed), then the same event shows the verdict and the nodes; no new event
+00:18 +131: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +132: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +133: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +134: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +135: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +136: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +137: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +138: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +139: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +140: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +141: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +142: G:/DEV/JormungandApp/app/test/settings_test.dart: settings menu every sheet fits 320 dp at the largest text size
+00:18 +143: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stop: closes the platform side once; a failed start leaves nothing to stop
+00:18 +144: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stop: closes the platform side once; a failed start leaves nothing to stop
+00:19 +145: G:/DEV/JormungandApp/app/test/libbox_runner_test.dart: stop: closes the platform side once; a failed start leaves nothing to stop
+00:19 +146: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +147: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +148: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +149: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +150: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +151: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +152: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +153: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +154: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +155: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +156: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +157: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +158: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +159: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +160: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +161: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +162: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +163: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events in the foreground: a toast, no system notification
+00:19 +164: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: the app wires the tile sync to its host
+00:19 +165: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: the app wires the tile sync to its host
+00:19 +166: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: the app wires the tile sync to its host
+00:19 +167: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: the app wires the tile sync to its host
+00:19 +168: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: the app wires the tile sync to its host
+00:19 +169: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events only what Settings -> Notifications lets through; never own events
+00:20 +170: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events only what Settings -> Notifications lets through; never own events
+00:20 +171: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: long-press on the tile (home): Home tab, sheets closed
+00:20 +172: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: long-press on the tile (home): Home tab, sheets closed
+00:20 +173: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: long-press on the tile (home): Home tab, sheets closed
+00:20 +174: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: long-press on the tile (home): Home tab, sheets closed
+00:20 +175: G:/DEV/JormungandApp/app/test/tile_sync_test.dart: long-press on the tile (home): Home tab, sheets closed
+00:20 +176: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events a tap on a notification opens Logs -> Events
+00:20 +177: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events a tap on a notification opens Logs -> Events
+00:20 +178: G:/DEV/JormungandApp/app/test/settings_test.dart: Data export writes the whole state
+00:20 +179: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events a site notification has Create rule and Ignore site; a pressed button acts
+00:20 +180: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events a site notification has Create rule and Ignore site; a pressed button acts
+00:20 +181: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events a site notification has Create rule and Ignore site; a pressed button acts
+00:20 +182: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events a site notification has Create rule and Ignore site; a pressed button acts
+00:20 +183: G:/DEV/JormungandApp/app/test/settings_test.dart: Data updates: a build without an updater says so
+00:20 +184: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events a button that started the app is handled once the app is up
+00:21 +185: G:/DEV/JormungandApp/app/test/settings_test.dart: Data updates: Auto-download is Off / Wi-Fi only / Always on Android, Off / Always on the desktop, and needs Auto-check
+00:21 +186: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events the notification that started the app opens Logs too
+00:21 +187: G:/DEV/JormungandApp/app/test/system_notification_test.dart: events the notification that started the app opens Logs too
+00:21 +188: G:/DEV/JormungandApp/app/test/settings_test.dart: Home NavCards: real values, no demo ones
+00:21 +189: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification the first connect asks once; a master switch that is off does not
+00:21 +190: G:/DEV/JormungandApp/app/test/settings_test.dart: Home NavCards: Auto mode and DNS open their sheets, Rules the link
+00:21 +191: G:/DEV/JormungandApp/app/test/settings_test.dart: Home NavCards: Auto mode and DNS open their sheets, Rules the link
+00:21 +192: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification the VPN notification gets the entry and server; none with Status off
+00:21 +193: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification the VPN notification gets the entry and server; none with Status off
+00:21 +194: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification the Disconnect button of the notification disconnects through the host
+00:21 +195: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification denied: the Notifications page offers the system settings
+00:22 +196: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification granted: no hint; turning a switch on asks only when blocked
+00:22 +197: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification each switch of the sheet decides its events; the master mutes all
+00:22 +198: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification the Status switch changes the name in the VPN notification at once
+00:23 +199: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification the Status and master switches hide the VPN notification, on screen
+00:23 +200: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification a reloaded app pushes what the settings say; both switches on = shown
+00:23 +201: G:/DEV/JormungandApp/app/test/system_notification_test.dart: permission and the VPN notification blocked: a switch turned on asks for the permission
+00:23 +202: All tests passed!

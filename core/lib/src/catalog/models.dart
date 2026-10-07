@@ -276,7 +276,8 @@ class Profile with RoundTrip implements Unit {
 
 /// A chain: [inId] (first hop) → [outId] (exit). The ends are units of the chain's tab:
 /// sources on Simple, profiles on Profiles. [inOff] / [outOff] are `sid::nid` keys
-/// switched off for this chain only; the exit picks by [exitMode].
+/// switched off for this chain only; the exit picks by [exitMode]. [inOn] / [outOn] are `sid::nid`
+/// keys of servers a source's own editor has switched off, that this chain uses anyway.
 class Chain with RoundTrip implements Entry {
   Chain({
     required this.id,
@@ -285,11 +286,15 @@ class Chain with RoundTrip implements Entry {
     this.outId,
     List<String>? inOff,
     List<String>? outOff,
+    List<String>? inOn,
+    List<String>? outOn,
     this.exitMode = 'fastest',
     List<String>? exitOrder,
     this.inAuto = true,
   })  : inOff = inOff ?? [],
         outOff = outOff ?? [],
+        inOn = inOn ?? [],
+        outOn = outOn ?? [],
         exitOrder = exitOrder ?? [];
 
   factory Chain.fromJson(Json j) {
@@ -300,6 +305,8 @@ class Chain with RoundTrip implements Entry {
       outId: j['outId'] as String?,
       inOff: strList(j['inOff']),
       outOff: strList(j['outOff']),
+      inOn: strList(j['inOn']),
+      outOn: strList(j['outOn']),
       exitMode: (j['exitMode'] ?? 'fastest') as String,
       exitOrder: strList(j['exitOrder']),
       inAuto: truthy(j['inAuto']),
@@ -308,7 +315,7 @@ class Chain with RoundTrip implements Entry {
     return c;
   }
 
-  static const _known = {'id', 'name', 'inId', 'outId', 'inOff', 'outOff', 'exitMode', 'exitOrder', 'inAuto'};
+  static const _known = {'id', 'name', 'inId', 'outId', 'inOff', 'outOff', 'inOn', 'outOn', 'exitMode', 'exitOrder', 'inAuto'};
 
   @override
   final String id;
@@ -318,6 +325,10 @@ class Chain with RoundTrip implements Entry {
   String? outId;
   List<String> inOff;
   List<String> outOff;
+
+  /// Servers off in their source's own editor (`offNodes`) that this chain's end uses anyway.
+  List<String> inOn;
+  List<String> outOn;
 
   /// `fastest` | `priority`.
   String exitMode;
@@ -335,6 +346,8 @@ class Chain with RoundTrip implements Entry {
     put(o, 'outId', outId, omit: outId == null);
     put(o, 'inOff', [...inOff], omit: inOff.isEmpty);
     put(o, 'outOff', [...outOff], omit: outOff.isEmpty);
+    put(o, 'inOn', [...inOn], omit: inOn.isEmpty);
+    put(o, 'outOn', [...outOn], omit: outOn.isEmpty);
     put(o, 'exitMode', exitMode, omit: exitMode == 'fastest');
     put(o, 'exitOrder', [...exitOrder], omit: exitOrder.isEmpty);
     put(o, 'inAuto', inAuto, omit: !inAuto);

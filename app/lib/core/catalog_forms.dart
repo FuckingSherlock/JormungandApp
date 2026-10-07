@@ -214,6 +214,8 @@ class ChainDraft {
     this.outId,
     this.inOff = const [],
     this.outOff = const [],
+    this.inOn = const [],
+    this.outOn = const [],
     this.exitMode = 'fastest',
     this.exitOrder = const [],
     this.inAuto = true,
@@ -226,6 +228,10 @@ class ChainDraft {
   final String? outId;
   final List<String> inOff;
   final List<String> outOff;
+
+  /// Servers the source's own editor has off, switched on for this chain.
+  final List<String> inOn;
+  final List<String> outOn;
   final String exitMode;
   final List<String> exitOrder;
   final bool inAuto;

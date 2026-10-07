@@ -1394,5 +1394,7 @@
   "checker": "Чекер",
   "checkWithAnExternalChecker": "Проверять внешним чекером",
   "aSiteThatFailsOnEvery": "Сайт, не открывшийся ни по одному маршруту, проверяется через check-host.net; уведомление приходит, только если там он открывается",
-  "androidSystem": "Система Android"
+  "androidSystem": "Система Android",
+  "disabledInSubscription": "Отключены в подписке · {s0}",
+  "canBeSwitchedOnForThis": "можно включить только для этой цепочки"
 }

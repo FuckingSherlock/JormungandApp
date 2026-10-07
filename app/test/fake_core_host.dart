@@ -347,9 +347,13 @@ class FakeCoreHost extends CoreHost {
     return null;
   }
 
+  /// The last chain draft passed to [saveChain].
+  ChainDraft? savedChain;
+
   @override
   String? saveChain(ChainDraft d) {
     calls.add('saveChain');
+    savedChain = d;
     return null;
   }
 

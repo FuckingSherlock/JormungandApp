@@ -1846,6 +1846,8 @@ class LiveCoreHost extends CoreHost {
         outId: d.outId,
         inOff: [...d.inOff],
         outOff: [...d.outOff],
+        inOn: [...d.inOn],
+        outOn: [...d.outOn],
         exitMode: d.exitMode,
         exitOrder: [...d.exitOrder],
         inAuto: d.inAuto,

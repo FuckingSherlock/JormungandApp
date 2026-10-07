@@ -98,6 +98,47 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Chain editor: servers off in the subscription fold into a block, one can be switched on for the chain only', (
+    tester,
+  ) async {
+    final host = _host();
+    host.catalog.sourcesData['s1']!.offNodes = ['a2'];
+    await pumpApp(tester, host);
+    await _openNodes(tester);
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Chain'));
+    await tester.pumpAndSettle();
+
+    // the entry list: Alpha (entry) has one server on and one off in its own editor
+    await tester.tap(find.byTooltip('Show nodes').first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Alpha one', findRichText: true), findsOneWidget);
+    expect(find.text('Disabled in subscription · 1'), findsOneWidget);
+    expect(find.textContaining('Alpha two', findRichText: true), findsNothing); // folded
+
+    await tester.tap(find.text('Disabled in subscription · 1'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Alpha two', findRichText: true), findsOneWidget);
+
+    await tester.tap(find.textContaining('Alpha two', findRichText: true));
+    await tester.pumpAndSettle();
+    // it joined the chain's entry list; nothing is left in the block
+    expect(find.text('Disabled in subscription · 1'), findsNothing);
+    expect(find.textContaining('Alpha two', findRichText: true), findsOneWidget);
+
+    final save = find.text('Create chain').last;
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(host.savedChain?.inOn, ['s1::a2']);
+    expect(host.savedChain?.outOn, isEmpty);
+    // the subscription itself keeps it disabled
+    expect(host.catalog.sourcesData['s1']!.offNodes, ['a2']);
+    expect(host.catalog.unitRefs('s1').map((r) => r.node.id), ['a1']);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'Nodes: the catalog lists its sources, a card unfolds its servers',
     (tester) async {

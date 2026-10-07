@@ -3086,5 +3086,14 @@
   "checker": "Checker",
   "checkWithAnExternalChecker": "Check with an external checker",
   "aSiteThatFailsOnEvery": "A site that fails on every route is asked of check-host.net; you are notified only if it opens from there",
-  "androidSystem": "Android System"
+  "androidSystem": "Android System",
+  "disabledInSubscription": "Disabled in subscription · {s0}",
+  "@disabledInSubscription": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "canBeSwitchedOnForThis": "can be switched on for this chain only"
 }

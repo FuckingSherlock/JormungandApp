@@ -302,7 +302,7 @@ class EntryCard extends StatelessWidget {
     final List<NodeRef> refs;
     if (side == 'in') {
       refs = catalog.byPing<NodeRef>(
-        catalog.unitRefs(chain.inId),
+        catalog.chainSideRefs(chain, 'in'),
         (r) => r.node,
       );
     } else if (chain.exitMode == 'priority') {

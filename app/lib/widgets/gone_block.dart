@@ -105,6 +105,87 @@ class _GoneBlockState extends State<GoneBlock> {
   }
 }
 
+/// Servers the source's own editor has switched off (`offNodes`), offered by the chain editor:
+/// one collapsed "Disabled in subscription · N" block below the end's list. A tap on a row
+/// calls [onSwitchOn]: the server joins this chain only, the subscription keeps it disabled.
+class DisabledBlock extends StatefulWidget {
+  const DisabledBlock({super.key, required this.refs, required this.onSwitchOn});
+
+  final List<NodeRef> refs;
+  final void Function(NodeRef) onSwitchOn;
+
+  @override
+  State<DisabledBlock> createState() => _DisabledBlockState();
+}
+
+class _DisabledBlockState extends State<DisabledBlock> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final refs = widget.refs;
+    if (refs.isEmpty) return const SizedBox.shrink();
+    final c = context.colors;
+    final l10n = context.l10n;
+    final host = CoreHostScope.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _open = !_open),
+          splashFactory: NoSplash.splashFactory,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: c.border)),
+            ),
+            child: Row(
+              children: [
+                AnimatedRotation(
+                  turns: _open ? 0 : -.25,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.expand_more, size: 16, color: c.t3),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    l10n.disabledInSubscription('${refs.length}'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: c.t2,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    l10n.canBeSwitchedOnForThis,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: c.t3),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_open)
+          for (final r in refs)
+            NodeRow(
+              node: r.node,
+              framed: true,
+              on: false,
+              onTap: () => widget.onSwitchOn(r),
+              onPing: () => host.pingNodes([r.node]),
+            ),
+      ],
+    );
+  }
+}
+
 /// `.gone-left`: the days before the dropped server is forgotten, amber in the last three.
 class _DaysLeft extends StatelessWidget {
   const _DaysLeft({required this.days});

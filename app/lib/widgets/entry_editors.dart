@@ -525,6 +525,8 @@ class _ChainEditorState extends State<_ChainEditor> {
         outId: _d.outId,
         inOff: _d.inOff,
         outOff: _d.outOff,
+        inOn: _d.inOn,
+        outOn: _d.outOn,
         exitMode: _d.exitMode,
         exitOrder: _d.exitOrder,
         inAuto: _inAuto,
@@ -662,7 +664,17 @@ class _ChainEditorState extends State<_ChainEditor> {
             final key = '$side:$id';
             final open = _open.contains(key);
             final active = id == current;
-            final all = catalog.unitRefs(id);
+            final all = active
+                ? catalog.chainSideRefs(_d, side)
+                : catalog.unitRefs(id);
+            // off in the source's own editor and not yet switched on for this chain
+            final offRefs = active
+                ? [
+                    for (final r in catalog.chainOffRefs(_d, side))
+                      if (!(side == 'in' ? _d.inOn : _d.outOn).contains(r.key))
+                        r,
+                  ]
+                : const <NodeRef>[];
             final nOn = active
                 ? all.where((r) => !off.contains(r.key)).length
                 : all.length;
@@ -789,6 +801,16 @@ class _ChainEditorState extends State<_ChainEditor> {
                                   node: r.node,
                                   onPing: () => host.pingNodes([r.node]),
                                 ),
+                            // servers the source's own editor switched off: folded below, one
+                            // tap uses one in this chain only
+                            if (active)
+                              DisabledBlock(
+                                refs: offRefs,
+                                onSwitchOn: (r) => setState(
+                                  () =>
+                                      catalog.chainForceNode(_d, side, r.key),
+                                ),
+                              ),
                             // servers the provider dropped are not offered here: a chain keeps
                             // nothing for them worth showing (Nodes lists them)
                           ],
@@ -796,7 +818,7 @@ class _ChainEditorState extends State<_ChainEditor> {
                       ),
                   ],
                 ),
-                if (all.length > 1)
+                if (all.length > 1 || offRefs.isNotEmpty)
                   Positioned(
                     right: 8,
                     top: 4,

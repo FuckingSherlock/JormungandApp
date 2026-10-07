@@ -172,6 +172,17 @@ extension CatalogDrafts on Catalog {
   /// A tap on a server of one end ([side] `in` | `out`): on / off for this chain only
   /// (`toggleChainNode`, `toggleChainNodeIn`). Works on a draft and on a saved chain alike.
   void chainToggleNode(Chain c, String side, String key) {
+    final on = side == 'in' ? c.inOn : c.outOn;
+    if (on.contains(key)) {
+      // a server forced on from "Disabled in subscription": a tap sends it back there
+      final rest = on.where((x) => x != key).toList();
+      if (side == 'in') {
+        c.inOn = rest;
+      } else {
+        c.outOn = rest;
+      }
+      return;
+    }
     final off = side == 'in' ? c.inOff : c.outOff;
     final next = off.contains(key) ? off.where((x) => x != key).toList() : [...off, key];
     if (side == 'in') {
@@ -181,8 +192,24 @@ extension CatalogDrafts on Catalog {
     }
   }
 
+  /// A server the source's own editor switched off, used by this chain anyway: on the end's
+  /// `inOn` / `outOn` (`forceChainNode`). Only [chainOffRefs] keys; taps on it afterwards go
+  /// through [chainToggleNode].
+  void chainForceNode(Chain c, String side, String key) {
+    if (!chainOffRefs(c, side).any((r) => r.key == key)) return;
+    final on = side == 'in' ? c.inOn : c.outOn;
+    if (on.contains(key)) return;
+    if (side == 'in') {
+      c.inOn = [...on, key];
+      c.inOff = c.inOff.where((x) => x != key).toList();
+    } else {
+      c.outOn = [...on, key];
+      c.outOff = c.outOff.where((x) => x != key).toList();
+    }
+  }
+
   /// "All" / "None" of an end: the ticks of its servers; dropped servers keep theirs
-  /// (`setChainNodesAll`).
+  /// (`setChainNodesAll`). Servers forced on are not touched.
   void chainSetNodesAll(Chain c, String side) {
     final off = side == 'in' ? c.inOff : c.outOff;
     final keys = unitRefs(side == 'in' ? c.inId : c.outId).map((r) => r.key).toList();
@@ -199,11 +226,15 @@ extension CatalogDrafts on Catalog {
   /// unit (`pickChainSide`).
   void chainPickSide(Chain c, String side, String id) {
     if (side == 'in') {
-      if (c.inId != id) c.inOff = [];
+      if (c.inId != id) {
+        c.inOff = [];
+        c.inOn = [];
+      }
       c.inId = id;
     } else {
       if (c.outId != id) {
         c.outOff = [];
+        c.outOn = [];
         c.exitOrder = [];
       }
       c.outId = id;
@@ -214,11 +245,14 @@ extension CatalogDrafts on Catalog {
   /// end, the exit order starts over (`swapChainEnds`).
   void chainSwapEnds(Chain c) {
     final inId = c.outId, outId = c.inId, inOff = c.outOff, outOff = c.inOff;
+    final inOn = c.outOn, outOn = c.inOn;
     c
       ..inId = inId
       ..outId = outId
       ..inOff = inOff
       ..outOff = outOff
+      ..inOn = inOn
+      ..outOn = outOn
       ..exitOrder = [];
   }
 
@@ -247,6 +281,8 @@ extension CatalogDrafts on Catalog {
         ..outId = draft.outId
         ..inOff = [...draft.inOff]
         ..outOff = [...draft.outOff]
+        ..inOn = [...draft.inOn]
+        ..outOn = [...draft.outOn]
         ..exitMode = draft.exitMode
         ..exitOrder = [...draft.exitOrder]
         ..inAuto = draft.inAuto;
@@ -259,6 +295,8 @@ extension CatalogDrafts on Catalog {
         outId: draft.outId,
         inOff: [...draft.inOff],
         outOff: [...draft.outOff],
+        inOn: [...draft.inOn],
+        outOn: [...draft.outOn],
         exitMode: draft.exitMode,
         exitOrder: [...draft.exitOrder],
         inAuto: draft.inAuto,

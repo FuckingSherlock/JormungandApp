@@ -535,13 +535,46 @@ class Catalog {
 
   // ───────────────────────────── chains ─────────────────────────────
 
+  /// Servers of a source end that the source's own editor switched off (`offNodes`) while
+  /// still on in Nodes: the chain editor offers them in "Disabled in subscription". Only a
+  /// source end has them (a profile ignores `offNodes`). [side]: `in` | `out`.
+  List<NodeRef> chainOffRefs(Chain c, String side) {
+    final id = side == 'in' ? c.inId : c.outId;
+    final s = id == null || profilesData.containsKey(id) ? null : sourcesData[id];
+    if (s == null || !s.enabled) return [];
+    return [
+      for (final n in liveNodes(s))
+        if (isNodeOff(s, n.id)) NodeRef(id!, n),
+    ].where(simKeep).toList();
+  }
+
+  /// The [chainOffRefs] this chain switched on for itself (`inOn` / `outOn`); [withOff] also
+  /// counts a switched-off source and servers off in Nodes (to tell why an end has none).
+  List<NodeRef> chainForcedRefs(Chain c, String side, {bool withOff = false}) {
+    final id = side == 'in' ? c.inId : c.outId;
+    final on = side == 'in' ? c.inOn : c.outOn;
+    final s = id == null || profilesData.containsKey(id) ? null : sourcesData[id];
+    if (s == null || on.isEmpty || !(s.enabled || withOff)) return [];
+    return [
+      for (final n in withOff ? s.nodes : liveNodes(s))
+        if (isNodeOff(s, n.id) && on.contains('$id::${n.id}')) NodeRef(id!, n),
+    ].where(simKeep).toList();
+  }
+
+  /// An end's servers before the chain's own ticks (`chainSideRefs`): the unit's, plus the ones
+  /// this chain forced on.
+  List<NodeRef> chainSideRefs(Chain c, String side, {bool withOff = false}) => [
+        ...unitRefs(side == 'in' ? c.inId : c.outId, withOff: withOff),
+        ...chainForcedRefs(c, side, withOff: withOff),
+      ];
+
   List<NodeRef> chainEntryRefs(Chain c, {bool withOff = false}) =>
-      unitRefs(c.inId, withOff: withOff).where((r) => !c.inOff.contains(r.key)).toList();
+      chainSideRefs(c, 'in', withOff: withOff).where((r) => !c.inOff.contains(r.key)).toList();
 
   /// Every exit server in priority order, unticked ones included (`chainExitOrder`): the chain's
   /// own order first; servers it never ordered follow the exit unit's own `pickOrder`.
   List<NodeRef> chainExitOrder(Chain c, {bool withOff = false}) =>
-      orderRefs(orderRefs(unitRefs(c.outId, withOff: withOff), unitOwner(c.outId)?.pickOrder), c.exitOrder);
+      orderRefs(orderRefs(chainSideRefs(c, 'out', withOff: withOff), unitOwner(c.outId)?.pickOrder), c.exitOrder);
 
   List<NodeRef> chainExitRefs(Chain c, {bool withOff = false}) =>
       chainExitOrder(c, withOff: withOff).where((r) => !c.outOff.contains(r.key)).toList();
