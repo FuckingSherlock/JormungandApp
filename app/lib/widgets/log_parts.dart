@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart' show LogLine;
 
+import '../core/core_host.dart' show CoreHostScope;
+import '../l10n/l10n.dart';
+import '../shell/app_links.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
+import 'app_mark.dart';
 import 'event_rows.dart' show LogTag;
 import 'follow_list.dart';
 import 'form_parts.dart' show onAccentOf;
@@ -42,6 +46,9 @@ String logClock(int t) {
 }
 
 final _cid = RegExp(r'^\[(\d+ [^\]]+)\] ');
+
+/// sing-box's INFO line naming the Android package of a connection: `[id 5ms] router: found package name: org.x`.
+final _foundPkg = RegExp(r'found package name: (\S+)\s*$');
 
 /// `.log-group`: the meta line (time, level tag, `core` tag) over the messages of the group. Each
 /// line is a [RowMark] (its number) so the page can tell which are in view; [hit] is the number of
@@ -124,7 +131,28 @@ class RawGroupView extends StatelessWidget {
           ? c.t3
           : c.t2,
     );
-    Widget w = Text.rich(TextSpan(children: _spans(context, l.msg, base)));
+    final spans = _spans(context, l.msg, base);
+    // sing-box says whose connection it is (`found package name: org.x`): the app's icon and name after the line
+    final pkg = _foundPkg.firstMatch(l.msg)?.group(1);
+    if (pkg != null) {
+      final host = CoreHostScope.read(context), links = AppLinksScope.of(context);
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: AppMark(
+              pkg: pkg,
+              name: appDisplayName(context.l10n, host.catalog, pkg),
+              size: 14,
+              style: base,
+              onTap: links.openAppAct == null ? null : () => links.openAppAct!(pkg),
+            ),
+          ),
+        ),
+      );
+    }
+    Widget w = Text.rich(TextSpan(children: spans));
     if (hit == l.n) w = HitFlash(token: hitToken, alpha: .35, duration: const Duration(milliseconds: 2200), child: w);
     if (hit == l.n && hitKey != null) w = KeyedSubtree(key: hitKey, child: w);
     return unread.contains(l.n) ? RowMark<int>(value: l.n, child: w) : w;

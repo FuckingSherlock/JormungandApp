@@ -708,7 +708,7 @@ Global, hijack вкл / выкл, системные правила первым
 | `POST /api/node` | `{protocol, address, port, secret, name, outbound?, unsupported?}` → `{node}`; ошибка формы — 400 `{error}` с текстом для пользователя |
 | `POST /api/share` | `{outbound, name, flag, unsupported?}` → `{link}` (null — у сервера нет формы ссылки) |
 | `DELETE /api/connections`, `DELETE /api/connections/{id}` | закрыть все / одно соединение (API service sing-box); без подключения `{ok:false}` |
-| `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, ruleName, ruleKind, ruleId?, out, process, down, up, downRate, upRate, start}]}` — см. ниже |
+| `GET /api/traffic` | `{running, down, up (Б/с), downTotal, upTotal, tcp, udp, conns:[{id, host, port, net, rule, ruleName, ruleKind, ruleId?, out, process, pkg?, down, up, downRate, upRate, start}]}` — см. ниже |
 | `POST /api/exit` | перепроверить выход туннеля; результат — в `status.exit` |
 | `POST /api/speedtest` | `{node:{key, outbound}}` или `{pair:{key, entry, exit}}`, `configUrl?` → поток NDJSON по ходу замера: `{phase (0 задержка, 1 загрузка, 2 отдача, 3 готово), down, up (бит/с), downRpm, upRpm, latency (мс), elapsed, final}`, последняя строка `final: true` (при сбое с `error`). Отдельный sing-box с одним сервером, network quality test sing-box (серверы Apple mensura, если не задан `configUrl`); закрыли страницу/лист — замер останавливается |
 | `POST /api/ping` | `{nodes:[{key, outbound}], pairs:[{key, entry, exit}], url?, maxAgeMs?, …checkers}` → поток NDJSON: строка `{kind:"n" или "p", key, ms}` на каждый результат сразу по готовности (-1 = нет ответа), в конце `{done:true, network:"up"\|"down"\|"unknown"}` или `{error}`. Замеры идут через пул (см. «Пул замеров»): результат пишется в него, `maxAgeMs` > 0 отдаёт ответ пула не старше этого вместо замера (пинг запуска; по умолчанию 0 — меряет всегда); `network` — состояние сети (`down`: ни один сервер не ответил и прямой путь молчит — UI может сказать «нет сети»). Замеры идут в порядке списка (16 параллельно; запасные проверки промахнувшегося сервера — по две за раз, не все сразу: каталожный пинг на сотнях серверов не держит сотни соединений; Auto по-прежнему спрашивает все сразу); UI шлёт ноды по кэшу: живые, неизмеренные, мёртвые |
@@ -765,7 +765,9 @@ Amazon, ipip.net (из Китая). Страна, которая режет од
 соединения из таблицы (сервер — конечный outbound, `route<i>/<sid::nid>`; у цепочки ещё
 выбранный сервер входа `route<i>-entry/…` из потока групп; у цели правила `<цель>/…` и
 `<цель>>entry/…`; в `out` выход первым; скорость соединения — байты за последнюю секунду).
-Процесс (`process`) — `route.find_process`.
+Процесс (`process`) — `route.find_process`; на Android ещё `pkg` — первый пакет из `packageNames`
+(ключ есть, только если он не пуст). Для `LiveConn.app` (группировка, фильтр, поиск) пакет — запасное
+значение, когда пути процесса нет.
 
 Правило соединения (`rulenames.dart`). sing-box сообщает сработавшее правило только как его
 `String()` — условия без действия и без номера (`network=tcp port=443`), списки длиннее
@@ -903,7 +905,12 @@ connections) и путь приложения; ядро хранит их ряд
 `rule: {kind, name?, id?, text?}` — `kind`: `user` (id правила), `app` (id приложения), `service`
 (ключ), `quick` (`ads` / `region`), `system` (`private` и служебные), `final` (правило не сработало:
 основной поток, `name` нет), `unknown` (имя не удалось определить — `text` сырой текст). `process?:
-{name, path}` — имя файла и полный путь; нет, если sing-box не знает приложение.
+{name, path}` — имя файла и полный путь; нет, если sing-box не знает приложение. `app?: string` —
+Android-пакет приложения (первое из `processInfo.packageNames` sing-box; `android` — системный uid
+1000); нет на десктопе и когда владельца не нашли. Путь с пакетом идёт той же цепочкой, что `process`:
+`ClosedConnection.pkg` / `LiveConnection.pkg` → `AutoBlocked.pkg` / `AutoUnreachable.pkg` (рядом с
+`process` в `_failDests`) → `data.app` в `siteBlocked` / `siteUnreachable`. UI только показывает (значок
+и имя, тап → диалог приложения), правил не создаёт.
 
 Не пишет ядро (нет данных или это знает только UI): `sub/removed`, `sub/back`, `sub/dead` (модель
 серверов и пинги живут в UI; UI шлёт их `POST /api/events`), `user/*` (действия пользователя — тоже

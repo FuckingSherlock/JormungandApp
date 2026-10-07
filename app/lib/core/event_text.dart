@@ -11,6 +11,7 @@ import 'package:jormungand_core/jormungand_core.dart'
         targetName;
 
 import '../l10n/l10n.dart';
+import '../widgets/app_mark.dart' show appDisplayName;
 import '../widgets/node_row.dart' show nodeProtoLabel;
 
 /// The words of the Events journal (mockup 47-events.js `evDescribe`, `evValue`, `evWhyRows`): the
@@ -380,6 +381,16 @@ class EventWords {
     return '';
   }
 
+  /// The Android package of the app that made the request (event data `app`; '' = none).
+  String eventApp(Map<String, dynamic> d) => d['app'] is String ? d['app'] as String : '';
+
+  /// The name of that app for a line: the installed-apps name, the package id when unknown, «Android
+  /// System» for the system; on desktop the file name of the process ('' = unknown).
+  String appName(Map<String, dynamic> d) {
+    final a = eventApp(d);
+    return a.isNotEmpty ? appDisplayName(l10n, catalog, a) : processName(d);
+  }
+
   Map? _ruleOf(Map<String, dynamic> d) => d['rule'] is Map ? d['rule'] as Map : null;
 
   /// What routing decided and where to look at it; null = an event without it.
@@ -396,7 +407,7 @@ class EventWords {
         return WhyRow(l10n.rule, x != null ? ruleTitle(x) : (name.isNotEmpty ? name : id), go: x != null ? WhyGo.user : WhyGo.none, id: id);
       case 'app':
         final known = catalog.appRules.containsKey(id) || catalog.appInfo?.call(id) != null;
-        return WhyRow(l10n.app, known ? catalog.appLabel(id) : (name.isNotEmpty ? name : id), go: known ? WhyGo.app : WhyGo.none, id: id);
+        return WhyRow(l10n.app, known ? catalog.appLabel(id) : (name.isNotEmpty ? name : id), go: known ? WhyGo.app : WhyGo.none, id: id, icon: eventApp(d) == id ? id : '');
       case 'service':
         return WhyRow(l10n.service, serviceTitles[id] ?? (name.isNotEmpty ? name : id), go: WhyGo.rules, id: id, at: 'svc:$id');
       case 'quick':
@@ -411,15 +422,17 @@ class EventWords {
 
   /// The line of the notification and the export.
   String whyText(Map<String, dynamic> d) {
-    final w = why(d), p = processName(d);
+    final w = why(d), p = appName(d);
     return _lines([
       if (w != null) w.go == WhyGo.route ? l10n.noRuleMainFlow : '${w.key} ${w.name}',
       if (p.isNotEmpty) '${l10n.app} $p',
     ], '   ');
   }
 
-  /// The app of the event's process among the apps with their own route ('' = not there).
+  /// The package of the event's app: `data.app` on Android, else the process among the apps with their
+  /// own route ('' = not known).
   String appPkg(Map<String, dynamic> d) {
+    if (eventApp(d).isNotEmpty) return eventApp(d); // Android: the package itself
     final p = d['process'];
     if (p is! Map) return '';
     final n = '${p['name'] ?? ''}'.toLowerCase().replaceFirst(RegExp(r'\.exe$'), '');
@@ -480,7 +493,7 @@ class EventWords {
   /// sent the request. With an app route that the matched rule overrode, the applied row says so.
   List<WhyRow> whyRows(Map<String, dynamic> d) {
     final rows = <WhyRow>[];
-    final w = why(d), proc = processName(d), pkg = appPkg(d);
+    final w = why(d), proc = appName(d), pkg = appPkg(d);
     final r = _ruleOf(d);
     final byApp = r != null && r['kind'] == 'app';
     if (w != null) rows.add(w.withTo(ruleTo(r!)));
@@ -488,9 +501,10 @@ class EventWords {
       final own = pkg.isNotEmpty && _appHasOwn(pkg);
       rows.add(WhyRow(
         l10n.app,
-        pkg.isNotEmpty ? catalog.appLabel(pkg) : proc,
+        pkg.isNotEmpty ? appDisplayName(l10n, catalog, pkg) : proc,
         go: pkg.isNotEmpty ? WhyGo.app : WhyGo.none,
         id: pkg,
+        icon: eventApp(d),
         to: own ? appActText(pkg) : '',
         mark: own ? (r != null && r['kind'] == 'final' ? l10n.notApplied : l10n.overriddenByRule) : null,
         dim: own,
@@ -583,6 +597,10 @@ class EventWords {
       final w = why({'rule': v});
       if (w == null) return '$v';
       return w.key == l10n.rule ? w.name : '${w.key} · ${w.name}';
+    }
+    if (k == 'app' && e.cat == 'site' && v is String && v.isNotEmpty) {
+      final n = appDisplayName(l10n, catalog, v);
+      return n == v ? v : '$n ($v)';
     }
     if (k == 'process' && v is Map) {
       final name = '${v['name'] ?? ''}', path = '${v['path'] ?? ''}';
@@ -682,7 +700,7 @@ enum WhyGo { none, route, user, app, rules }
 
 /// A row of the "why" block of a site event.
 class WhyRow {
-  const WhyRow(this.key, this.name, {this.go = WhyGo.none, this.id = '', this.at = '', this.to = '', this.mark, this.dim = false});
+  const WhyRow(this.key, this.name, {this.go = WhyGo.none, this.id = '', this.at = '', this.to = '', this.mark, this.dim = false, this.icon = ''});
 
   final String key, name;
   final WhyGo go;
@@ -690,6 +708,9 @@ class WhyRow {
   final String? mark;
   final bool dim;
 
-  WhyRow withTo(String t) => WhyRow(key, name, go: go, id: id, at: at, to: t, mark: mark, dim: dim);
-  WhyRow withMark(String m) => WhyRow(key, name, go: go, id: id, at: at, to: to, mark: m, dim: dim);
+  /// The package whose icon the row shows ('' = none: a rule, or an app known only by a process name).
+  final String icon;
+
+  WhyRow withTo(String t) => WhyRow(key, name, go: go, id: id, at: at, to: t, mark: mark, dim: dim, icon: icon);
+  WhyRow withMark(String m) => WhyRow(key, name, go: go, id: id, at: at, to: to, mark: m, dim: dim, icon: icon);
 }

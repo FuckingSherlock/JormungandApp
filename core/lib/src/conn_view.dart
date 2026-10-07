@@ -20,6 +20,7 @@ class LiveConn {
     required this.ruleId,
     required this.out,
     required this.process,
+    this.pkg = '',
     required this.down,
     required this.up,
     required this.downRate,
@@ -38,6 +39,7 @@ class LiveConn {
     ruleId: '${m['ruleId'] ?? ''}',
     out: [for (final t in (m['out'] as List? ?? const [])) '$t'],
     process: '${m['process'] ?? ''}',
+    pkg: '${m['pkg'] ?? ''}',
     down: (m['down'] as num?) ?? 0,
     up: (m['up'] as num?) ?? 0,
     downRate: (m['downRate'] as num?) ?? 0,
@@ -46,12 +48,16 @@ class LiveConn {
   );
 
   final String id, host, port, net, rule, ruleName, ruleKind, ruleId, process;
+
+  /// The Android package of the app ('' = none; desktop has [process]).
+  final String pkg;
   final List<String> out;
   final num down, up, downRate, upRate;
   final DateTime start;
 
-  /// The file name of the process path ('' = unknown).
-  String get app => process.isEmpty ? '' : process.split(RegExp(r'[\\/]')).last;
+  /// The file name of the process path, else the Android package ('' = unknown): what grouping, the
+  /// filter and the search take for "the app".
+  String get app => process.isEmpty ? pkg : process.split(RegExp(r'[\\/]')).last;
 
   /// sing-box's own text of the rule ('' for the final route).
   String get raw => rule.isNotEmpty && rule != 'final' ? rule : '';
@@ -257,7 +263,7 @@ class ConnView {
   bool matchesQuery(LiveConn c) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return true;
-    return [c.host, c.process, c.ruleLabel.isEmpty ? 'default / final' : c.ruleLabel, c.raw, via?.call(c) ?? c.out.join(' ')]
+    return [c.host, c.process, c.pkg, c.ruleLabel.isEmpty ? 'default / final' : c.ruleLabel, c.raw, via?.call(c) ?? c.out.join(' ')]
         .any((v) => v.toLowerCase().contains(q));
   }
 

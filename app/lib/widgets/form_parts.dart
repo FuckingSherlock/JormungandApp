@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show ValueListenable, visibleForTesting;
+import 'package:flutter/scheduler.dart' show Ticker, TickerCallback, TickerProvider;
 import 'package:jormungand_core/jormungand_core.dart' show PickState;
 
 import '../l10n/l10n.dart';
@@ -984,32 +986,93 @@ class _ChainPainter extends CustomPainter {
   bool shouldRepaint(_ChainPainter old) => old.color != color;
 }
 
-/// The small round "pinging" ring of a latency slot (`.lat-spin`). Still, not spinning: a ping
-/// run puts one in every row of a long list, and hundreds of running animations (each a frame
-/// of its own) were what made the list stutter; the ring's open arc says "in progress" and the
-/// row's own value replaces it as the answer comes.
-class PingSpinner extends StatelessWidget {
+/// The shared clock of every [PingSpinner]: one Ticker for the whole app, running only while at
+/// least one spinner is mounted in an enabled (visible) TickerMode. Spinners only repaint.
+class _SpinClock implements TickerProvider {
+  _SpinClock._();
+  static final instance = _SpinClock._();
+
+  /// Turns (0..1) of the current revolution; one revolution per second.
+  final ValueNotifier<double> turns = ValueNotifier(0);
+  Ticker? _ticker;
+  int _active = 0;
+
+  bool get running => _ticker?.isActive ?? false;
+  int get active => _active;
+
+  @override
+  Ticker createTicker(TickerCallback onTick) => Ticker(onTick);
+
+  void add() {
+    if (++_active == 1) {
+      _ticker ??= createTicker(
+        (d) => turns.value = (d.inMicroseconds % 1000000) / 1000000,
+      );
+      _ticker!.start();
+    }
+  }
+
+  void remove() {
+    if (_active > 0 && --_active == 0) _ticker?.stop();
+  }
+}
+
+/// Whether the shared spinner ticker is running (tests).
+@visibleForTesting
+bool pingSpinnerTicking() => _SpinClock.instance.running;
+
+/// The small round "pinging" ring of a latency slot (`.lat-spin`). All spinners share one
+/// ticker (see [_SpinClock]) and only repaint — no layout per frame, no per-row controller;
+/// hidden tabs (TickerMode off) don't count, and with none visible the ticker stops.
+class PingSpinner extends StatefulWidget {
   const PingSpinner({super.key, this.size = 12});
 
   final double size;
+
+  @override
+  State<PingSpinner> createState() => _PingSpinnerState();
+}
+
+class _PingSpinnerState extends State<PingSpinner> {
+  bool _counted = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final on = TickerMode.valuesOf(context).enabled;
+    if (on && !_counted) {
+      _SpinClock.instance.add();
+      _counted = true;
+    } else if (!on && _counted) {
+      _SpinClock.instance.remove();
+      _counted = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_counted) _SpinClock.instance.remove();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     return RepaintBoundary(
       child: CustomPaint(
-        size: Size.square(size),
-        painter: _RingPainter(c.t2, c.t2.tint(.3)),
+        size: Size.square(widget.size),
+        painter: _RingPainter(c.t2, c.t2.tint(.3), _SpinClock.instance.turns),
       ),
     );
   }
 }
 
 class _RingPainter extends CustomPainter {
-  const _RingPainter(this.arc, this.track);
+  _RingPainter(this.arc, this.track, this.turns) : super(repaint: turns);
 
   final Color arc;
   final Color track;
+  final ValueListenable<double> turns;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1020,7 +1083,8 @@ class _RingPainter extends CustomPainter {
       ..strokeWidth = stroke
       ..strokeCap = StrokeCap.round;
     canvas.drawArc(rect, 0, 6.2832, false, paint..color = track);
-    canvas.drawArc(rect, -1.5708, 1.8, false, paint..color = arc);
+    canvas.drawArc(
+        rect, -1.5708 + turns.value * 6.2832, 1.8, false, paint..color = arc);
   }
 
   @override

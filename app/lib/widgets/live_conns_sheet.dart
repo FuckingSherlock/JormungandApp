@@ -17,6 +17,7 @@ import '../l10n/l10n.dart';
 import '../shell/app_links.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
+import 'app_mark.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
 import 'nodes_menus.dart' show copyText;
@@ -84,7 +85,7 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
 
   String _text(AppLocalizations l10n, CoreHost host, LiveConn c) => [
     '${c.net} ${c.host}${c.port.isNotEmpty ? ':${c.port}' : ''}',
-    c.app.isEmpty ? l10n.unknown : c.app,
+    c.pkg.isNotEmpty ? appDisplayName(l10n, host.catalog, c.pkg) : (c.app.isEmpty ? l10n.unknown : c.app),
     _ruleName(l10n, c),
     _via(host, c.out, filter: true),
     '↓${fmtBytes(c.down)} ↑${fmtBytes(c.up)}',
@@ -345,7 +346,14 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
     final c = context.colors;
     final open = _open == x.id;
     final rule = x.ruleLabel;
+    final links = AppLinksScope.of(context);
     final meta = TextStyle(fontSize: 13, color: c.t2);
+    // leaves the sheet for the screen the tap opens
+    void leave(VoidCallback f) {
+      Navigator.of(context).pop();
+      f();
+    }
+
     return Material(
       color: open ? c.accent.tint(.06) : Colors.transparent,
       child: InkWell(
@@ -396,13 +404,39 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 1),
-                child: Text(
-                  '${x.app.isNotEmpty ? '${x.app} · ' : ''}↓ ${_rate(x.downRate)} ↑ ${_rate(x.upRate)}'
-                  ' · ${fmtBytes(x.down + x.up)} · ${_age(l10n, x.start)}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoText.copyWith(fontSize: 12, color: c.t3),
-                ),
+                child: x.pkg.isEmpty
+                    ? Text(
+                        '${x.app.isNotEmpty ? '${x.app} · ' : ''}↓ ${_rate(x.downRate)} ↑ ${_rate(x.upRate)}'
+                        ' · ${fmtBytes(x.down + x.up)} · ${_age(l10n, x.start)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoText.copyWith(fontSize: 12, color: c.t3),
+                      )
+                    // Android: the app's icon and name (a tap opens its route), then the numbers
+                    : Row(
+                        children: [
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 120),
+                            child: AppMark(
+                              key: ValueKey('connApp:${x.id}'),
+                              pkg: x.pkg,
+                              name: appDisplayName(l10n, host.catalog, x.pkg),
+                              size: 16,
+                              style: monoText.copyWith(fontSize: 12),
+                              onTap: links.openAppAct == null ? null : () => leave(() => links.openAppAct!(x.pkg)),
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              ' · ↓ ${_rate(x.downRate)} ↑ ${_rate(x.upRate)}'
+                              ' · ${fmtBytes(x.down + x.up)} · ${_age(l10n, x.start)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: monoText.copyWith(fontSize: 12, color: c.t3),
+                            ),
+                          ),
+                        ],
+                      ),
               ),
               if (open) _details(context, host, x),
             ],
@@ -462,7 +496,20 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
             ),
           ),
           line(l10n.route, val(_via(host, x.out))),
-          line(l10n.app, val(x.process.isNotEmpty ? x.process : l10n.unknown)),
+          line(
+            l10n.app,
+            x.pkg.isNotEmpty
+                ? Align(
+                    alignment: Alignment.centerLeft,
+                    child: AppMark(
+                      pkg: x.pkg,
+                      name: appDisplayName(l10n, catalog, x.pkg),
+                      style: monoText.copyWith(fontSize: 12.5),
+                      onTap: links.openAppAct == null ? null : () => leave(() => links.openAppAct!(x.pkg)),
+                    ),
+                  )
+                : val(x.process.isNotEmpty ? x.process : l10n.unknown),
+          ),
           line(
             l10n.started,
             val(

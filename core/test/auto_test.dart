@@ -758,8 +758,8 @@ void main() {
   });
 
   group('onClosed: requests that got nothing back', () {
-    ClosedConnection cc({String outbound = 'route0/s::a', List<String> chain = const ['route0/s::a', 'route0', 'proxy'], String dest = 'blocked.example:443', int up = 120, int down = 0, String rule = '', String process = ''}) =>
-        ClosedConnection(outbound: outbound, chain: chain, destination: dest, up: up, down: down, rule: rule, process: process);
+    ClosedConnection cc({String outbound = 'route0/s::a', List<String> chain = const ['route0/s::a', 'route0', 'proxy'], String dest = 'blocked.example:443', int up = 120, int down = 0, String rule = '', String process = '', String pkg = ''}) =>
+        ClosedConnection(outbound: outbound, chain: chain, destination: dest, up: up, down: down, rule: rule, process: process, pkg: pkg);
 
     test('ignored: down > 0 (the request did get something back)', () async {
       final p = plan([unit('A', ['s::a'])]);
@@ -842,7 +842,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(auto.blockedCount, 1);
-      expect(auto.lastBlocked?.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'B', 'viaServer': 's::b', 'rule': '', 'process': '', 'at': 0});
+      expect(auto.lastBlocked?.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'B', 'viaServer': 's::b', 'rule': '', 'process': '', 'pkg': '', 'at': 0});
       expect(events.length, 1);
 
       // the same route + site again, still within the hour: not reported again
@@ -940,7 +940,7 @@ void main() {
       await fail(auto);
       expect(asked.map((a) => a.$1), ['route0/s::a', 'route1/s::b', 'route2/s::c']);
       expect(blocked.length, 1);
-      expect(blocked.single.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'C', 'viaServer': 's::c', 'rule': '', 'process': '', 'at': 0});
+      expect(blocked.single.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'C', 'viaServer': 's::c', 'rule': '', 'process': '', 'pkg': '', 'at': 0});
       expect(gone, isEmpty);
     });
 
@@ -965,6 +965,7 @@ void main() {
         'retriesOff': false,
         'rule': '',
         'process': '',
+        'pkg': '',
         'at': 0,
       });
       expect(notes.any((n) => n.contains('down or blocked everywhere')), isTrue);
@@ -1027,6 +1028,22 @@ void main() {
       await fail(auto3);
       expect(gone3.single.rule, '');
       expect(gone3.single.process, '');
+      expect(gone3.single.pkg, '');
+
+      // Android: the package of the owner rides along, to both events
+      final (auto4, _, _, blocked4, _, _) = five((tag, dest) async => tag == 'route1/s::b');
+      await auto4.check();
+      auto4.onClosed(cc(pkg: 'org.telegram.messenger'));
+      await auto4.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(blocked4.single.pkg, 'org.telegram.messenger');
+      expect(blocked4.single.toJson()['pkg'], 'org.telegram.messenger');
+      final (auto5, _, _, _, gone5, _) = five((tag, dest) async => false);
+      await auto5.check();
+      auto5.onClosed(cc(pkg: 'com.x.y'));
+      await auto5.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(gone5.single.pkg, 'com.x.y');
     });
 
     test('siteRetry: off — no request through other routes, AutoUnreachable says the retries are off; all — every route up to the first that opens', () async {

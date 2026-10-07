@@ -3085,5 +3085,6 @@
   "theCheckerDidNotAnswer": "The checker did not answer",
   "checker": "Checker",
   "checkWithAnExternalChecker": "Check with an external checker",
-  "aSiteThatFailsOnEvery": "A site that fails on every route is asked of check-host.net; you are notified only if it opens from there"
+  "aSiteThatFailsOnEvery": "A site that fails on every route is asked of check-host.net; you are notified only if it opens from there",
+  "androidSystem": "Android System"
 }

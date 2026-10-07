@@ -1393,5 +1393,6 @@
   "theCheckerDidNotAnswer": "Чекер не ответил",
   "checker": "Чекер",
   "checkWithAnExternalChecker": "Проверять внешним чекером",
-  "aSiteThatFailsOnEvery": "Сайт, не открывшийся ни по одному маршруту, проверяется через check-host.net; уведомление приходит, только если там он открывается"
+  "aSiteThatFailsOnEvery": "Сайт, не открывшийся ни по одному маршруту, проверяется через check-host.net; уведомление приходит, только если там он открывается",
+  "androidSystem": "Система Android"
 }

@@ -26,7 +26,7 @@ export 'sbapi/started_service.pbenum.dart' show ConnectionEventType;
 /// A connection sing-box closed, as the core judges request failures by it.
 class ClosedConnection {
   const ClosedConnection(
-      {required this.outbound, required this.chain, required this.destination, required this.up, required this.down, this.rule = '', this.process = ''});
+      {required this.outbound, required this.chain, required this.destination, required this.up, required this.down, this.rule = '', this.process = '', this.pkg = ''});
 
   /// The server's outbound tag (the leaf, e.g. `route0/<key>`); [chain] = leaf … `proxy`.
   final String outbound;
@@ -35,8 +35,9 @@ class ClosedConnection {
   final int up, down; // bytes in total
 
   /// The rule sing-box matched, as it reports it (see rulenames.dart; '' = none, the final route) and
-  /// the path of the app that made the request ('' = unknown).
-  final String rule, process;
+  /// the path of the app that made the request ('' = unknown); [pkg] its Android package (the first
+  /// of `packageNames`; '' = none: desktop, or sing-box found no owner).
+  final String rule, process, pkg;
 
   factory ClosedConnection.of(Connection c) => ClosedConnection(
         outbound: c.outbound,
@@ -46,8 +47,12 @@ class ClosedConnection {
         down: c.downlinkTotal.toInt(),
         rule: c.rule,
         process: c.hasProcessInfo() ? c.processInfo.processPath : '',
+        pkg: _pkg(c),
       );
 }
+
+/// The Android package that owns the connection: the first of the process info's package names.
+String _pkg(Connection c) => c.hasProcessInfo() && c.processInfo.packageNames.isNotEmpty ? c.processInfo.packageNames.first : '';
 
 String _dest(Connection c) =>
     c.domain.isNotEmpty && !c.destination.startsWith(c.domain) ? '${c.domain}:${c.destination.split(':').last}' : c.destination;
@@ -65,6 +70,7 @@ class LiveConnection {
   String get network => c.network;
   String get rule => c.rule;
   String get process => c.hasProcessInfo() ? c.processInfo.processPath : '';
+  String get pkg => _pkg(c); // the Android package ('' = none)
   DateTime get start => DateTime.fromMillisecondsSinceEpoch(c.createdAt.toInt());
 
   /// host (the domain when there is one) and port.
@@ -207,7 +213,7 @@ class SingBoxApi implements BoxControl {
           if (e.hasConnection()) {
             _closedCtl.add(ClosedConnection.of(e.connection));
           } else if (c != null) {
-            _closedCtl.add(ClosedConnection(outbound: c.outbound, chain: c.chain, destination: _dest(c.c), up: c.up, down: c.down, rule: c.rule, process: c.process));
+            _closedCtl.add(ClosedConnection(outbound: c.outbound, chain: c.chain, destination: _dest(c.c), up: c.up, down: c.down, rule: c.rule, process: c.process, pkg: c.pkg));
           }
         default:
       }

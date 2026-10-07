@@ -577,10 +577,13 @@ int _hueOf(String s) {
 /// `.app-ico`: the app's own icon when the platform gives one, else its first letter on a tint
 /// that follows the package.
 class AppIcon extends StatefulWidget {
-  const AppIcon({super.key, required this.pkg, required this.name});
+  const AppIcon({super.key, required this.pkg, required this.name, this.size = 32});
 
   final String pkg;
   final String name;
+
+  /// The side of the tile (32 in the lists, smaller where an app is only named: events, connections).
+  final double size;
 
   @override
   State<AppIcon> createState() => _AppIconState();
@@ -601,18 +604,19 @@ class _AppIconState extends State<AppIcon> {
     final letter = widget.name.isEmpty
         ? '?'
         : String.fromCharCode(widget.name.runes.first).toUpperCase();
+    final s = widget.size, radius = BorderRadius.circular(9 * s / 32);
     final tile = Container(
-      width: 32,
-      height: 32,
+      width: s,
+      height: s,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: HSLColor.fromAHSL(.18, h, .6, .55).toColor(),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: radius,
       ),
       child: Text(
         letter,
         style: TextStyle(
-          fontSize: 15,
+          fontSize: 15 * s / 32,
           fontWeight: FontWeight.w700,
           color: HSLColor.fromAHSL(1, h, .7, .72).toColor(),
         ),
@@ -624,11 +628,11 @@ class _AppIconState extends State<AppIcon> {
         final bytes = snap.data;
         if (bytes == null || bytes.isEmpty) return tile;
         return ClipRRect(
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: radius,
           child: Image.memory(
             bytes,
-            width: 32,
-            height: 32,
+            width: s,
+            height: s,
             gaplessPlayback: true,
             errorBuilder: (_, _, _) => tile,
           ),

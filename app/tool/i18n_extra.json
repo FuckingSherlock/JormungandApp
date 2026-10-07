@@ -82,5 +82,6 @@
   "The checker did not answer": "Чекер не ответил",
   "Checker": "Чекер",
   "Check with an external checker": "Проверять внешним чекером",
-  "A site that fails on every route is asked of check-host.net; you are notified only if it opens from there": "Сайт, не открывшийся ни по одному маршруту, проверяется через check-host.net; уведомление приходит, только если там он открывается"
+  "A site that fails on every route is asked of check-host.net; you are notified only if it opens from there": "Сайт, не открывшийся ни по одному маршруту, проверяется через check-host.net; уведомление приходит, только если там он открывается",
+  "Android System": "Система Android"
 }

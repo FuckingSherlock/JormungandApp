@@ -220,10 +220,10 @@ class AutoUnstable {
 /// the failed request (its text, raw; '' = none, the final route), [process] the path of the app
 /// that made it ('' = unknown): why the request went that way, and who sent it.
 class AutoBlocked {
-  const AutoBlocked({required this.route, required this.server, required this.dest, required this.via, required this.viaServer, required this.at, this.rule = '', this.process = ''});
-  final String route, server, dest, via, viaServer, rule, process;
+  const AutoBlocked({required this.route, required this.server, required this.dest, required this.via, required this.viaServer, required this.at, this.rule = '', this.process = '', this.pkg = ''});
+  final String route, server, dest, via, viaServer, rule, process, pkg;
   final int at;
-  Map<String, dynamic> toJson() => {'route': route, 'server': server, 'dest': dest, 'via': via, 'viaServer': viaServer, 'rule': rule, 'process': process, 'at': at};
+  Map<String, dynamic> toJson() => {'route': route, 'server': server, 'dest': dest, 'via': via, 'viaServer': viaServer, 'rule': rule, 'process': process, 'pkg': pkg, 'at': at};
 }
 
 /// A site ([dest], `host:port`) that does not open through [route]'s server [server] while
@@ -233,8 +233,8 @@ class AutoBlocked {
 /// setting is off (so [tried] is empty for that reason, not for lack of routes). [rule] and
 /// [process]: as on [AutoBlocked].
 class AutoUnreachable {
-  const AutoUnreachable({required this.route, required this.server, required this.dest, required this.tried, required this.at, this.retriesOff = false, this.rule = '', this.process = ''});
-  final String route, server, dest, rule, process;
+  const AutoUnreachable({required this.route, required this.server, required this.dest, required this.tried, required this.at, this.retriesOff = false, this.rule = '', this.process = '', this.pkg = ''});
+  final String route, server, dest, rule, process, pkg;
   final List<({String route, String server})> tried;
   final bool retriesOff;
   final int at;
@@ -246,12 +246,13 @@ class AutoUnreachable {
         'retriesOff': retriesOff,
         'rule': rule,
         'process': process,
+        'pkg': pkg,
         'at': at,
       };
 }
 
 // A failed request: the server's outbound tag, the rule sing-box matched and the app's path.
-typedef _Fail = ({String tag, String rule, String process});
+typedef _Fail = ({String tag, String rule, String process, String pkg});
 
 /// The network came or went: [kind] `lost` (no route answers) / `restored`, `offline` (the
 /// OS has no network) / `online`; [downMs] on the second of each pair.
@@ -578,7 +579,7 @@ class AutoService {
     final now = _clock();
     requestFails++;
     lastRequestFail = {'route': _routes[index].id, 'dest': c.destination, 'sent': c.up, 'at': now};
-    if (c.up > 0 && _failDests.length < 20) _failDests[c.destination] = (tag: c.outbound, rule: c.rule, process: c.process);
+    if (c.up > 0 && _failDests.length < 20) _failDests[c.destination] = (tag: c.outbound, rule: c.rule, process: c.process, pkg: c.pkg);
     if (_failAt != null && now - _failAt! < settings.failWindow.inMilliseconds) return;
     _failAt = now;
     _failDests.removeWhere((d, _) => d != c.destination);
@@ -627,8 +628,8 @@ class AutoService {
       if (via != null) {
         if (now - (_blockedAt[key] ?? -3600000) < 3600000) continue;
         _blockedAt[key] = now;
-        final b = AutoBlocked(route: cur.id, server: cur.main.current, dest: dest, via: via.id, viaServer: via.main.current, at: now, rule: fail.rule, process: fail.process);
-        blockedCount++;
+        final b = AutoBlocked(route: cur.id, server: cur.main.current, dest: dest, via: via.id, viaServer: via.main.current, at: now, rule: fail.rule, process: fail.process, pkg: fail.pkg);
+blockedCount++;
         lastBlocked = b;
         note?.call('auto: $dest does not open through ${cur.id}, opens through ${via.id}');
         if (!_blocked.isClosed) _blocked.add(b);
@@ -640,7 +641,7 @@ class AutoService {
       if (unsure && tried.isEmpty) continue; // nothing was told for sure: no claim to the user
       if (now - (_unreachableAt[key] ?? -3600000) < 3600000) continue;
       _unreachableAt[key] = now;
-      final u = AutoUnreachable(route: cur.id, server: cur.main.current, dest: dest, tried: tried, retriesOff: off, at: now, rule: fail.rule, process: fail.process);
+      final u = AutoUnreachable(route: cur.id, server: cur.main.current, dest: dest, tried: tried, retriesOff: off, at: now, rule: fail.rule, process: fail.process, pkg: fail.pkg);
       unreachableCount++;
       lastUnreachable = u;
       if (!_unreachable.isClosed) _unreachable.add(u);

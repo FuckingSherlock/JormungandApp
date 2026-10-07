@@ -13,6 +13,7 @@ import 'follow_list.dart' show HitFlash;
 import 'form_parts.dart';
 import 'ignored_sites.dart';
 import 'nodes_menus.dart' show copyText;
+import 'rules_parts.dart' show AppIcon;
 import 'search_field.dart';
 
 /// Rows of the Events journal (mockup 47-events.js: `evRowHtml`, `evBlockedHtml`, `evWhyHtml`,
@@ -566,6 +567,11 @@ class _WhyRow extends StatelessWidget {
             width: 68,
             child: Text(row.key, style: TextStyle(fontSize: 11, color: c.t3)),
           ),
+          // an app that sent the request: its icon (cached by the host) before the name
+          if (row.icon.isNotEmpty) ...[
+            AppIcon(key: ValueKey('whyIcon:${row.icon}'), pkg: row.icon, name: row.name, size: 20),
+            const SizedBox(width: 8),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

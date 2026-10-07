@@ -56,6 +56,7 @@ Map<String, dynamic> trafficOf(SingBoxApi api, {RuleNames? names}) {
       if (origin != null && origin.id.isNotEmpty) 'ruleId': origin.id,
       'out': out,
       'process': c.process,
+      if (c.pkg.isNotEmpty) 'pkg': c.pkg,
       'down': c.down,
       'up': c.up,
       'downRate': c.downRate,

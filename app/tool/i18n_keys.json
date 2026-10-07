@@ -1435,5 +1435,6 @@
   "The checker did not answer": "theCheckerDidNotAnswer",
   "Checker": "checker",
   "Check with an external checker": "checkWithAnExternalChecker",
-  "A site that fails on every route is asked of check-host.net; you are notified only if it opens from there": "aSiteThatFailsOnEvery"
+  "A site that fails on every route is asked of check-host.net; you are notified only if it opens from there": "aSiteThatFailsOnEvery",
+  "Android System": "androidSystem"
 }

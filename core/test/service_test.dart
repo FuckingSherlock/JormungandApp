@@ -189,6 +189,18 @@ void main() {
     expect(runner.running, isFalse, reason: 'changing the list does not touch the connection');
   });
 
+  test('site events carry the Android package of the app as data.app (none = no key), next to data.process', () async {
+    await start();
+    svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'a.example:443', via: 'B', viaServer: 't', at: 1, pkg: 'org.telegram.messenger'));
+    svc.siteUnreachable(AutoUnreachable(route: 'A', server: 's', dest: 'b.example:443', tried: const [], at: 1, pkg: 'android'));
+    svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'c.example:443', via: 'B', viaServer: 't', at: 1, process: r'C:\x\Discord.exe'));
+    final data = [for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site') e['data'] as Map];
+    expect(data[0]['app'], 'org.telegram.messenger');
+    expect(data[1]['app'], 'android');
+    expect(data[2].containsKey('app'), isFalse);
+    expect(data[2]['process'], {'name': 'Discord.exe', 'path': r'C:\x\Discord.exe'});
+  });
+
   test('screen off: a site/* event is marked bg at the moment it is found; screen on again: unmarked', () async {
     await start();
     AutoBlocked blocked(String dest) => AutoBlocked(route: 'A', server: 's', dest: dest, via: 'B', viaServer: 't', at: 1);

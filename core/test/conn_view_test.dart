@@ -1,4 +1,5 @@
 import 'package:jormungand_core/jormungand_core.dart';
+import 'package:jormungand_core/src/sbapi/started_service.pb.dart' show ProcessInfo;
 import 'package:test/test.dart';
 
 Map<String, dynamic> conn(
@@ -38,6 +39,18 @@ void main() {
     expect(x.app, 'Telegram.exe');
     expect(x.port, '');
     expect(c(conn('2', 'a.com', process: '/usr/bin/curl')).app, 'curl');
+  });
+
+  test('pkg: the first package name of sing-box\'s process info reaches the live and the closed connection and the list JSON', () {
+    final proc = ProcessInfo(processPath: '', packageNames: ['org.telegram.messenger', 'other.pkg']);
+    final raw = Connection(id: '1', chainList: ['route0/s::a'], destination: 'a.com:443', processInfo: proc);
+    expect(LiveConnection(raw).pkg, 'org.telegram.messenger');
+    expect(ClosedConnection.of(raw).pkg, 'org.telegram.messenger');
+    expect(LiveConnection(Connection(id: '2')).pkg, '');
+    expect(ClosedConnection.of(Connection(id: '2', processInfo: ProcessInfo(processPath: '/usr/bin/curl'))).pkg, '');
+    expect(c({...conn('1', 'a.com'), 'pkg': 'org.telegram.messenger'}).pkg, 'org.telegram.messenger');
+    expect(c(conn('1', 'a.com')).pkg, '');
+    expect(c({...conn('1', 'a.com'), 'pkg': 'org.telegram.messenger'}).app, 'org.telegram.messenger', reason: 'no process path on Android: the package is the app');
   });
 
   test('domain: the registrable part, three labels under co.uk', () {

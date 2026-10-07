@@ -450,6 +450,7 @@ class CoreService implements CoreApi {
       'viaServer': b.viaServer,
       'rule': ruleEventData(_ruleNames, b.rule),
       'process': ?processEventData(b.process),
+      if (b.pkg.isNotEmpty) 'app': b.pkg,
     });
   }
 
@@ -475,6 +476,7 @@ class CoreService implements CoreApi {
       if (u.retriesOff) 'retries': 'off',
       'rule': ruleEventData(_ruleNames, u.rule),
       'process': ?processEventData(u.process),
+      if (u.pkg.isNotEmpty) 'app': u.pkg,
       if (checks) 'check': on ? {'state': 'pending', 'at': _now().millisecondsSinceEpoch} : {'state': 'off'},
     });
     if (on) unawaited(_checkSiteEvent(id, host, port, manual: false));
