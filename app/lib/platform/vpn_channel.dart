@@ -116,6 +116,18 @@ class VpnChannel {
     }
   }
 
+  /// The sing-box version built into libbox; null when unknown.
+  Future<String?> libboxVersion() async {
+    try {
+      final v = await _channel.invokeMethod<String>('libboxVersion');
+      return v == null || v.isEmpty ? null : v;
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
   /// The installed app's `versionName` and `versionCode`; null off Android.
   Future<({String name, int code})?> appVersion() async {
     try {

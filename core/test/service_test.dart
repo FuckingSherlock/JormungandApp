@@ -90,6 +90,17 @@ void main() {
     await tmp.delete(recursive: true);
   });
 
+  test('version: a known sing-box version (libbox on Android) is reported without running a binary', () async {
+    tmp = await Directory.systemTemp.createTemp('jorm-svc');
+    svc = CoreService(
+      singBox: 'does-not-exist',
+      dataDir: p.join(tmp.path, 'data'),
+      runner: _Runner(),
+      knownSingBoxVersion: '1.12.0',
+    );
+    expect((await svc.version())['singBox'], '1.12.0');
+  });
+
   test('connect / disconnect push the status, the journal and the log on their streams', () async {
     await start();
     final statuses = <Map<String, dynamic>>[], events = <Map<String, dynamic>>[], lines = <Map<String, dynamic>>[];

@@ -121,6 +121,11 @@ Visual Studio с «Desktop development with C++» — пока не устано
 | libbox | `pwsh core/tool/build_libbox.ps1 [-Force]` | `app/android_overlay/app/libs/libbox.aar` (не в git; пропускается, если актуален) |
 | APK для теста | `pwsh app/tool/build_apk.ps1` (`-DryRun` — только показать версию и источник подписи) | `app/build/app/outputs/flutter-apk/app-<abi>-release.apk`; **всегда** подпись релизным ключом `%USERPROFILE%\.jormungand\android-release.jks` (пароль — `JORM_ANDROID_KS_PASS` или `android-release.pass`); версия сама: `<версия CI>.dev`, versionCode = последней CI-сборки — встаёт `adb install -r` поверх неё, следующая CI-бета предлагается (`docs/updates.md` §5) |
 | APK с заданной версией | `pwsh app/tool/build_apk.ps1 -BuildName X.Y.Z -BuildNumber N` | то же, версия как задана (так вызывает CI) |
+
+Настройки → Данные → «О приложении»: «Сборка» = `versionCode · короткий коммит` (коммит скрипт передаёт как
+`--dart-define=JORM_COMMIT=<sha>` из `git rev-parse --short HEAD`, CI тоже идёт через скрипт; без него — только номер);
+версия sing-box на Android — из libbox (`VpnChannel` `libboxVersion` → `CoreService(knownSingBoxVersion:)`), на десктопе — `sing-box version`.
+`coreVersion` остаётся только в `/api/version` jormd.
 | APK + публикация beta (CI) | push в основную ветку (`app/**`, `core/**`) или `workflow_dispatch` → `.github/workflows/release-android.yml` | релиз `v<версия>-beta.N` в `FuckingSherlock/jormungand-releases` + `manifest-beta.json(.sig)` в релизе `feed`; секреты и разовые шаги — `docs/updates.md` §13 |
 | APK + публикация stable (CI) | `git tag v0.1.0 && git push origin v0.1.0` (версия тега = `X.Y.Z` в `app/pubspec.yaml`) | обычный релиз `v0.1.0` в `jormungand-releases` + `manifest-stable.json(.sig)` в `feed`; beta после stable идёт выше него (`0.1.1-beta.N`), `docs/updates.md` §5, §13 |
 | Установка | `adb install -r <apk>` (`G:\ANDROID_DEV\android-sdk\platform-tools\adb.exe`) | телефон юзера: Galaxy Note20, arm64-v8a, Android 13 |

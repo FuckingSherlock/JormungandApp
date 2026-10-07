@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Handler
 import android.os.Looper
+import io.nekohasekai.libbox.Libbox
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -208,6 +209,8 @@ class VpnChannel(private val app: Context) {
             }
             // the update feed's asset keys come from this (docs/updates.md: updatePlatforms)
             "abis" -> result.success(android.os.Build.SUPPORTED_ABIS.toList())
+            // the sing-box version inside libbox (Settings -> Data); null when it cannot be read
+            "libboxVersion" -> result.success(runCatching { Libbox.version() }.getOrNull())
             // the installed version (versionName / versionCode) the updater compares against
             "appVersion" -> {
                 @Suppress("DEPRECATION")

@@ -64,6 +64,7 @@ class CoreService implements CoreApi {
     DateTime Function()? now,
     bool Function()? isElevated,
     this.appVersion,
+    String? knownSingBoxVersion,
     this.updatePlatformKeys = const [],
     this.installedPackage,
     this.updateFeeds,
@@ -71,7 +72,8 @@ class CoreService implements CoreApi {
     this.updateGet,
     this.updateFirstDelay = const Duration(seconds: 10),
     SiteChecker? siteChecker,
-  })  : _siteCheckerArg = siteChecker,
+  })  : _singBoxVer = knownSingBoxVersion,
+        _siteCheckerArg = siteChecker,
         boxFactory = boxFactory ?? ((dir) => SingBoxProcess(singBox, dir)),
         _isElevated = isElevated ?? processIsElevated,
         _timer = timer ?? Timer.new,
@@ -1212,7 +1214,9 @@ class CoreService implements CoreApi {
     return {'id': eventBook.add(cat, type, level, data: data.cast<String, dynamic>(), own: own == true, link: false)};
   }
 
+  /// The sing-box version when there is no binary to ask (Android: libbox in the process).
   String? _singBoxVer;
+
   @override
   Future<Map<String, dynamic>> version() async => {
         'core': coreVersion,

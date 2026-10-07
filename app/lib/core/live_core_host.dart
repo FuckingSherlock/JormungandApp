@@ -29,6 +29,7 @@ class LiveCoreHost extends CoreHost {
     required this.isAndroid,
     this.vpn,
     this.appVersion = '',
+    this.appBuild = 0,
     this.installer,
     this.resume,
     this.network,
@@ -55,6 +56,10 @@ class LiveCoreHost extends CoreHost {
   /// The running app's version (`0.1.0`), shown in Settings -> Data.
   @override
   final String appVersion;
+
+  /// The running app's build number (Android versionCode); 0 when unknown.
+  @override
+  final int appBuild;
 
   /// Hands a downloaded update file to the platform's installer (Android: PackageInstaller);
   /// null where that side is not written, then [canInstallUpdate] is false.

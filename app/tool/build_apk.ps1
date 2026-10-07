@@ -240,6 +240,9 @@ $build = @('build', 'apk', '--release', '--split-per-abi')
 if ($BuildName) { $build += @('--build-name', $BuildName) }
 # versionCode = build for every ABI (docs/updates.md section 5)
 if ($BuildNumber) { $build += @('--build-number', $BuildNumber, '--android-project-arg', 'force-version-code-ignoring-abi=true') }
+# the short commit for Settings -> Data -> Build (empty without git: the row shows the build number only)
+$commit = (git -C $app rev-parse --short HEAD 2>$null)
+if ($LASTEXITCODE -eq 0 -and $commit) { $build += "--dart-define=JORM_COMMIT=$commit" }
 Run $flutter $build $app
 
 # ── result ───────────────────────────────────────────────────────────────────────────────

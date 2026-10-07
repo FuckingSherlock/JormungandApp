@@ -580,6 +580,12 @@ abstract class CoreHost extends ChangeNotifier {
   /// The running app's version (`0.1.0`), empty when the host does not know it.
   String get appVersion => '';
 
+  /// The running app's build number, 0 when the host does not know it.
+  int get appBuild => 0;
+
+  /// The commit the build was made from (`--dart-define=JORM_COMMIT=<short sha>`), empty if not given.
+  String get appCommit => const String.fromEnvironment('JORM_COMMIT');
+
   /// The update as the Data sheet shows it; `unavailable` in a host without an updater.
   AppUpdate get appUpdate => const AppUpdate();
 

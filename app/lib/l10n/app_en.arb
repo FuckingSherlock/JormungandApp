@@ -3095,5 +3095,6 @@
       }
     }
   },
-  "canBeSwitchedOnForThis": "can be switched on for this chain only"
+  "canBeSwitchedOnForThis": "can be switched on for this chain only",
+  "build": "Build"
 }

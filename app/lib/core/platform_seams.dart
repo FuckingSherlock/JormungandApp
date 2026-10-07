@@ -95,10 +95,12 @@ Future<CoreHost> openCoreHost() async {
     } catch (_) {}
     final ver = await vpn.appVersion();
     final version = ver?.name ?? fallbackAppVersion;
+    final build = ver?.code ?? 0;
     final core = CoreService(
       singBox: '',
       dataDir: dataDir,
       appVersion: AppVersion.tryParse(version, build: ver?.code ?? 1),
+      knownSingBoxVersion: await vpn.libboxVersion(),
       updatePlatformKeys: updatePlatforms(os: 'android', abis: await vpn.abis()),
       installedPackage: await installedApkPath(), // delta updates are applied to it
       runner: LibboxRunner(
@@ -128,6 +130,7 @@ Future<CoreHost> openCoreHost() async {
       isAndroid: true,
       vpn: vpn,
       appVersion: version,
+      appBuild: build,
       installer: installApk,
       resume: const ResumeChannel(),
       logNote: core.logBook.note,

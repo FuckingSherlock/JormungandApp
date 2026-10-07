@@ -92,8 +92,14 @@ class _DataSheetState extends State<DataSheet> {
                 trailing: val(host.appVersion, '—'),
               ),
               SetRow(
-                label: l10n.core,
-                trailing: v == null ? wait : val('${v['core'] ?? ''}', '—'),
+                label: l10n.build,
+                trailing: val(
+                  [
+                    if (host.appBuild > 0) '${host.appBuild}',
+                    if (host.appCommit.isNotEmpty) host.appCommit,
+                  ].join(' · '),
+                  '—',
+                ),
               ),
               SetRow(
                 label: 'sing-box',

@@ -371,6 +371,23 @@ void main() {
       BackupIo.current = io;
     });
 
+    testWidgets('About: «Build» is build number · short commit, sing-box comes from the core\'s version', (tester) async {
+      final host = FakeCoreHost()..versionInfo = const {'singBox': '1.12.0'};
+      await _pump(tester, host);
+      await _open(tester, 'setdata');
+      expect(find.text('Build'), findsOneWidget);
+      expect(find.text('7 · abc1234'), findsOneWidget);
+      expect(find.text('1.12.0'), findsOneWidget);
+      expect(find.text('Core'), findsNothing);
+    });
+
+    testWidgets('About: no commit given -> only the build number', (tester) async {
+      final host = FakeCoreHost()..commit = '';
+      await _pump(tester, host);
+      await _open(tester, 'setdata');
+      expect(find.text('7'), findsOneWidget);
+    });
+
     testWidgets('restore asks first, then imports', (tester) async {
       final host = FakeCoreHost();
       io.file = PickedFile(

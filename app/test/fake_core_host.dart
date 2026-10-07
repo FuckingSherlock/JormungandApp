@@ -652,6 +652,15 @@ class FakeCoreHost extends CoreHost {
   @override
   String get appVersion => '0.1.0';
 
+  int build = 7;
+  String commit = 'abc1234';
+
+  @override
+  int get appBuild => build;
+
+  @override
+  String get appCommit => commit;
+
   @override
   AppUpdate get appUpdate => update;
 
