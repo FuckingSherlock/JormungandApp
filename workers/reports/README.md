@@ -57,28 +57,24 @@ Workers KV, namespace `jormungand-reports` (binding `REPORTS`):
 
 ## Секреты (Telegram)
 
-Не хранятся в репозитории; ставятся один раз:
+Токен бота не хранится в репозитории; ставится один раз из этой папки (не из корня — иначе секрет
+попадёт на другой Worker):
 
 ```sh
 cd workers/reports
 npx wrangler secret put TELEGRAM_BOT_TOKEN   # токен бота от @BotFather
-npx wrangler secret put TELEGRAM_CHAT_ID     # id чата (см. ниже)
 ```
 
-Узнать chat id: написать боту любое сообщение, затем
-
-```sh
-curl -s https://api.telegram.org/bot<TOKEN>/getUpdates
-```
-
-и взять `result[0].message.chat.id`. Пока секретов нет, Worker молча пропускает уведомление — отчёт
-всё равно сохраняется. Сбой Telegram загрузку не ломает. Текст уведомления:
+`TELEGRAM_CHAT_ID` — не секрет, лежит в `vars` файла `wrangler.jsonc` (id группы отрицательный,
+`-100…`). Пока токена нет, Worker молча пропускает уведомление — отчёт всё равно сохраняется. Сбой
+Telegram загрузку не ломает. Текст уведомления:
 `Jormungand report <id> · <platform> <version> (<build>) · <size> KB` (отсутствующие поля — `?`).
 
 Итог последней отправки (без токена) Worker кладёт в KV под ключом `_notify/last` (7 суток):
-`npx wrangler kv key get --binding REPORTS --remote "_notify/last"` → `{at, id, status, ok, description}`.
-`chat not found` — бот не знает этот чат: нужно сначала написать боту `/start` из чата с этим id (или
-добавить его в группу, id группы — отрицательный, `-100…`).
+`npx wrangler kv key get --binding REPORTS --remote "_notify/last"` → `{at, id, status, ok, description}`;
+при отказе Telegram добавляются `bot` (кто это) и `seenChats` (чаты из `getUpdates`, по ним находится
+верный chat id). `chat not found` — бот не знает этот чат: добавить бота в группу и дать право читать
+сообщения / написать в группу.
 
 ## Получение отчёта разработчиком
 

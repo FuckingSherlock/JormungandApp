@@ -101,9 +101,10 @@
    счётчиками, Download log / Send report, report_info, `CoreService.sendReport` + `ReportUploader`) — СДЕЛАНО,
    закоммичено (525ae87). Отправка отчёта: реальный `HttpReportUploader` + шифрование на устройстве + decrypt-тул
    закоммичено (9ea8107); Worker `jormungand-reports` ЗАДЕПЛОЕН на KV (R2 на аккаунте не включён, решение
-   пользователя), https://jormungand-reports.slackerwarlock.workers.dev, проверен живым POST. ОТКРЫТО: токен бота
-   Telegram — пользователь сам перевыпускает у BotFather и кладёт `npx wrangler secret put TELEGRAM_BOT_TOKEN`
-   (в чат токен уже попал — перевыпустить), chat id пришлёт числом → положу в конфиг Worker; приватный ключ
+   пользователя), https://jormungand-reports.slackerwarlock.workers.dev, проверен живым POST. Telegram-уведомление ПОДКЛЮЧЕНО
+   (2026-10-10: токен — секрет Worker, chat id группы `-1004402254934` в `vars`; тестовый POST → Telegram 200
+   ok, `_notify/last`; прихода сообщения пользователь ещё не подтвердил). ОТКРЫТО: токен бота в чат попал —
+   перевыпустить у BotFather и положить заново `npx wrangler secret put TELEGRAM_BOT_TOKEN` из `workers/reports`; приватный ключ
    отчётов `%USERPROFILE%\.jormungand\report_private.key` — бэкап обязателен; сборка беты и проверка на телефоне
    (Send report → id в Telegram, Download log). Затем политика fallback по `tunTcpDead` и Direct fallback на
    классификаторе отказов.
