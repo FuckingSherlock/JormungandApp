@@ -175,14 +175,31 @@ export async function handle(request: Request, env: Env, ctx: Ctx, deps: Deps = 
     const f = deps.fetch ?? fetch;
     ctx.waitUntil(
       (async () => {
+        // Итог последней отправки (без токена) лежит в `_notify/last`: по нему видно, почему
+        // уведомление не пришло (чат не найден, бот заблокирован, токен отозван).
+        let result: Record<string, unknown>;
         try {
-          await f(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          const r = await f(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
           });
-        } catch {
+          let description = '';
+          try {
+            const j = (await r.json()) as { description?: unknown };
+            description = typeof j.description === 'string' ? j.description.slice(0, 200) : '';
+          } catch {
+            // не JSON — оставим пустым
+          }
+          result = { at: now.toISOString(), id, status: r.status, ok: r.ok, description };
+        } catch (e) {
           // уведомление не критично: отчёт уже сохранён
+          result = { at: now.toISOString(), id, ok: false, error: String(e).slice(0, 200) };
+        }
+        try {
+          await env.REPORTS.put('_notify/last', JSON.stringify(result), { expirationTtl: 7 * 24 * 3600 });
+        } catch {
+          // наблюдаемость не должна ничего ломать
         }
       })(),
     );

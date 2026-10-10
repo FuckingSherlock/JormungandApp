@@ -75,6 +75,11 @@ curl -s https://api.telegram.org/bot<TOKEN>/getUpdates
 всё равно сохраняется. Сбой Telegram загрузку не ломает. Текст уведомления:
 `Jormungand report <id> · <platform> <version> (<build>) · <size> KB` (отсутствующие поля — `?`).
 
+Итог последней отправки (без токена) Worker кладёт в KV под ключом `_notify/last` (7 суток):
+`npx wrangler kv key get --binding REPORTS --remote "_notify/last"` → `{at, id, status, ok, description}`.
+`chat not found` — бот не знает этот чат: нужно сначала написать боту `/start` из чата с этим id (или
+добавить его в группу, id группы — отрицательный, `-100…`).
+
 ## Получение отчёта разработчиком
 
 ```sh
