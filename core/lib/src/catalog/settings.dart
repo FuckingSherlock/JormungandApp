@@ -54,6 +54,7 @@ class ConnCfg with RoundTrip {
     List<String>? checkers,
     this.tunStack = 'mixed',
     this.ipv6 = false,
+    this.closeOnSwitch = true,
   }) : checkers = checkers ?? [...defaultCheckers];
 
   factory ConnCfg.fromJson(Json j) {
@@ -71,6 +72,7 @@ class ConnCfg with RoundTrip {
       checkers: j['checkers'] is List ? strList(j['checkers']) : null,
       tunStack: _get(j, 'tunStack', 'mixed'),
       ipv6: _get(j, 'ipv6', false),
+      closeOnSwitch: _get(j, 'closeOnSwitch', true),
     );
     c.capture(j, _known);
     return c;
@@ -78,7 +80,7 @@ class ConnCfg with RoundTrip {
 
   static const _known = {
     'sysProxy', 'killSwitch', 'killOnDisconnect', 'killWhileClosed', 'downProxy', 'port', 'proxyAuth', 'proxyUser', 'proxyPass', //
-    'testUrl', 'checkers', 'tunStack', 'ipv6',
+    'testUrl', 'checkers', 'tunStack', 'ipv6', 'closeOnSwitch',
   };
 
   bool sysProxy;
@@ -101,6 +103,10 @@ class ConnCfg with RoundTrip {
   /// IPv6 through the tunnel (TUN address and AAAA answers); off by default.
   bool ipv6;
 
+  /// Close the main flow's connections of the route left when the user moves it live (Manual);
+  /// on by default. Reaches the core through `updateSettings {closeOnSwitch}`.
+  bool closeOnSwitch;
+
   Json toJson() => {
         'sysProxy': sysProxy,
         'killSwitch': killSwitch,
@@ -115,6 +121,7 @@ class ConnCfg with RoundTrip {
         'checkers': [...checkers],
         'tunStack': tunStack,
         'ipv6': ipv6,
+        if (!closeOnSwitch) 'closeOnSwitch': false, // only off is written: the mockup's snapshots do not know the key
         ...deepCopy(unknown) as Json,
       };
 }

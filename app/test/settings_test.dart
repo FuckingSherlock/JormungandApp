@@ -337,6 +337,27 @@ void main() {
       }
     });
 
+    testWidgets('Connection: Close connections on route switch is on by default, the toggle lands in the catalog, is saved and survives the snapshot', (
+      tester,
+    ) async {
+      final host = FakeCoreHost();
+      await _pump(tester, host);
+      await _open(tester, 'setconn');
+      expect(host.catalog.connCfg.closeOnSwitch, isTrue);
+      final t = _toggleOf('Close connections on route switch');
+      await tester.ensureVisible(t);
+      await tester.pumpAndSettle();
+      final changes = host.changes;
+      await tester.tap(t);
+      await tester.pumpAndSettle();
+      expect(host.catalog.connCfg.closeOnSwitch, isFalse);
+      expect(host.changes, greaterThan(changes));
+      expect(ConnCfg.fromJson(host.catalog.connCfg.toJson()).closeOnSwitch, isFalse);
+      await tester.tap(t);
+      await tester.pumpAndSettle();
+      expect(host.catalog.connCfg.closeOnSwitch, isTrue);
+    });
+
     testWidgets('General and Notifications: switches persist in the state', (
       tester,
     ) async {

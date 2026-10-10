@@ -205,6 +205,11 @@ class CoreService implements CoreApi {
   /// marked `bg` (a background failure: the journal keeps it, Settings → Notifications decides on a
   /// notification); read at the moment the failure is found, never later.
   bool screenOn = true;
+
+  /// Settings → Connection → Close connections on route switch (`updateSettings {closeOnSwitch}`,
+  /// default on): a live route move made by the user (Manual) closes the main flow's connections of
+  /// the route left. Auto's own moves keep their stalled-connection sweep.
+  bool closeOnSwitch = true;
   List<DnsEntry> _dnsServers = const [];
   bool _dnsAuto = true; // Settings → DNS → Switch automatically (connect body `dnsAuto`, POST /api/dns/auto)
   final Timer Function(Duration, void Function()) _timer;
@@ -1171,7 +1176,7 @@ class CoreService implements CoreApi {
     final a = _auto;
     if (_plan != null && manual is bool) {
       final was = a?.index;
-      final ok = a == null || await a.setManual(manual, entry: entry is String ? entry : null);
+      final ok = a == null || await a.setManual(manual, entry: entry is String ? entry : null, closeOld: closeOnSwitch);
       _plan = {..._plan!, 'manual': manual, if (a != null) 'current': a.index};
       if (a != null && a.index != was) _recheckExit(); // another route = another exit
       if (!ok) runner.note('auto: manual on ${entry ?? '?'}: not a route of this plan, a new plan is needed');
@@ -1523,6 +1528,7 @@ class CoreService implements CoreApi {
       logBook.ignored = ignoredSites;
     }
     if (body['screenOn'] is bool) screenOn = body['screenOn'] as bool;
+    if (body['closeOnSwitch'] is bool) closeOnSwitch = body['closeOnSwitch'] as bool;
     if (body.containsKey('autoCheck')) _updAuto = body['autoCheck'] != false;
     if (body.containsKey('channel')) _updChannel = _channelOf(body['channel']);
     if (body.containsKey('autoDownload')) _updAutoDownload = _autoDownloadOf(body['autoDownload']);

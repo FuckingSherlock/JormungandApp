@@ -1444,5 +1444,7 @@
   "Speed test finished": "speedTestFinished",
   "Speed test failed": "speedTestFailed",
   "Speed test: ↓ {0} · ↑ {1} Mbps": "speedTestMbps",
-  "Latency {0} ms": "latencyMs"
+  "Latency {0} ms": "latencyMs",
+  "Close connections on route switch": "closeConnectionsOnRouteSwitch",
+  "Picking another route by hand closes the open connections of the old one, so apps reconnect the new way. Off: they finish on the old route": "pickingAnotherRouteByHandCloses"
 }

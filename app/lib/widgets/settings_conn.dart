@@ -329,6 +329,11 @@ class _ConnBody extends StatelessWidget {
                 ),
               ),
             ),
+            SetRow(
+              label: l10n.closeConnectionsOnRouteSwitch,
+              hint: l10n.pickingAnotherRouteByHandCloses,
+              trailing: toggle(cfg.closeOnSwitch, (v) => cfg.closeOnSwitch = v),
+            ),
           ],
         ),
       ],

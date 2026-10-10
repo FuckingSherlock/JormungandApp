@@ -228,6 +228,17 @@ void main() {
     expect(runner.running, isFalse, reason: 'the screen is no reason to touch the connection');
   });
 
+  test('updateSettings {closeOnSwitch}: on by default, set live; other keys leave it', () async {
+    await start();
+    expect(svc.closeOnSwitch, isTrue);
+    svc.updateSettings({'closeOnSwitch': false});
+    expect(svc.closeOnSwitch, isFalse);
+    svc.updateSettings({'screenOn': true});
+    expect(svc.closeOnSwitch, isFalse);
+    svc.updateSettings({'closeOnSwitch': true});
+    expect(svc.closeOnSwitch, isTrue);
+  });
+
   // check-host.net that says every node reaches the site ([opens]) or none does
   SiteChecker fakeChecker(List<Uri> asked, {required bool opens}) => SiteChecker(
         delay: (_) async {},

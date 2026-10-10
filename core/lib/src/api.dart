@@ -151,6 +151,8 @@ abstract interface class CoreApi {
   /// its subdomains; takes effect at once, no reconnect, routing is not touched.
   /// Also `{screenOn: bool}` (alone): the platform's report of the phone's screen (Android); a `site/*`
   /// event found while it is false is marked `bg: true` in the journal. Never reported = on.
+  /// Also `{closeOnSwitch: bool}` (default true): a live route move in Manual (`autoSettings {manual,
+  /// entry}`) closes the main flow's open connections of the route left; false = they finish there.
   void updateSettings(Map<String, dynamic> body);
 
   /// The platform calls it right before it hands the downloaded file to the installer / after the

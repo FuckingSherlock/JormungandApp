@@ -1046,9 +1046,9 @@ class LiveCoreHost extends CoreHost {
     catalog.syncCatalog();
     _scheduleSave();
     _syncAuto();
+    _syncUpdateSettings(); // before the mode: a route move reads closeOnSwitch
     _syncMode();
     _syncKill();
-    _syncUpdateSettings();
     _scheduleReconnect();
     _notifyNow();
   }
@@ -1307,12 +1307,14 @@ class LiveCoreHost extends CoreHost {
   }
 
   /// The app's update options (auto-check, channel, auto-download, whether the network is metered)
-  /// go to the core's scheduled check; so does the list of ignored sites (no reconnect for either).
+  /// go to the core's scheduled check; so do the list of ignored sites and Close connections on
+  /// route switch (no reconnect for any).
   void _syncUpdateSettings() {
     if (_disposed) return;
     final g = gen;
     final ignored = notif.ignoredSites;
-    final sig = '${g.updates}|${g.updChannel}|${g.updAutoDownload}|$_metered|${ignored.join(',')}';
+    final closeOnSwitch = catalog.connCfg.closeOnSwitch;
+    final sig = '${g.updates}|${g.updChannel}|${g.updAutoDownload}|$_metered|${ignored.join(',')}|$closeOnSwitch';
     if (sig == _updSettingsSig) return;
     _updSettingsSig = sig;
     try {
@@ -1322,6 +1324,7 @@ class LiveCoreHost extends CoreHost {
         'autoDownload': g.updAutoDownload,
         'metered': _metered,
         'ignoredSites': ignored,
+        'closeOnSwitch': closeOnSwitch,
       });
     } catch (_) {}
   }

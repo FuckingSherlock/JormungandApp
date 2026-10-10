@@ -826,6 +826,14 @@ EventBook (одна запись через 1,5 с после первой, `flu
 в JSON события только когда true, `EventRecord.bg`). Без переподключения, маршрутизацию не трогает;
 уведомляют ли такие события, решает приложение (`notifCfg.bgErrors`, `docs/connect-model.md` → «Фоновые ошибки»).
 
+**Закрывать соединения при смене маршрута** (`CoreApi.updateSettings({closeOnSwitch: bool})`, поле
+`CoreService.closeOnSwitch`, по умолчанию `true`; в приложении `connCfg.closeOnSwitch`): `autoSettings
+{manual, entry}` передаёт его в `AutoService.setManual(..., closeOld:)`; после успешного `select(proxy,
+новый маршрут)` закрываются (`BoxControl.closeConnection` по id) соединения, чья цепочка содержит и
+`proxy`, и тег прежнего маршрута. Не закрывается ничего, если маршрут не менялся (Manual на тот же,
+Manual → Auto) или `select` отказал. Собственные переходы Auto сюда не входят (у них свой свип
+застрявших, `stall.dart`). Подробности и поведение выкл. — `docs/connect-model.md` → «Auto в ядре».
+
 **Игнорируемые сайты** (`ignored_sites.dart`, `IgnoredSites`): список хостов, о которых пользователь
 не хочет слышать (мёртвый сайт, в который что-то ломится). Приложение шлёт его
 `CoreApi.updateSettings({ignoredSites: [host…]})` (ключи независимы; тот же шов, что у настроек

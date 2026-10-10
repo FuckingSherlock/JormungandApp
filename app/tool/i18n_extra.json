@@ -91,5 +91,7 @@
   "Speed test finished": "Проверка скорости завершена",
   "Speed test failed": "Проверка скорости не удалась",
   "Speed test: ↓ {0} · ↑ {1} Mbps": "Скорость: ↓ {0} · ↑ {1} Мбит/с",
-  "Latency {0} ms": "Задержка {0} мс"
+  "Latency {0} ms": "Задержка {0} мс",
+  "Close connections on route switch": "Закрывать соединения при смене маршрута",
+  "Picking another route by hand closes the open connections of the old one, so apps reconnect the new way. Off: they finish on the old route": "Выбор другого маршрута вручную закрывает открытые соединения прежнего, и приложения переподключаются уже по новому. Выкл: они доживают на прежнем маршруте"
 }

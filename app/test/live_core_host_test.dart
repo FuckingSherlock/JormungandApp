@@ -571,7 +571,7 @@ void main() {
     );
     await host.init();
     // the first push already knows the network and the default (Wi-Fi only)
-    expect(rec.updateBodies.last, {'autoCheck': true, 'channel': 'stable', 'autoDownload': 'wifi', 'metered': true, 'ignoredSites': []});
+    expect(rec.updateBodies.last, {'autoCheck': true, 'channel': 'stable', 'autoDownload': 'wifi', 'metered': true, 'ignoredSites': [], 'closeOnSwitch': true});
 
     net.isMetered = false;
     net.changes.add(false);
@@ -590,6 +590,13 @@ void main() {
     host.changed();
     expect(rec.updateBodies.last['ignoredSites'], ['dead.example.com']);
     expect(rec.ignoredSites.matches('api.dead.example.com'), isTrue);
+    expect(host.phase, isNot(ConnectionPhase.connecting));
+
+    // Close connections on route switch: sent as the setting changes, no reconnect
+    host.catalog.connCfg.closeOnSwitch = false;
+    host.changed();
+    expect(rec.updateBodies.last['closeOnSwitch'], isFalse);
+    expect(rec.closeOnSwitch, isFalse);
     expect(host.phase, isNot(ConnectionPhase.connecting));
     await net.changes.close();
   });

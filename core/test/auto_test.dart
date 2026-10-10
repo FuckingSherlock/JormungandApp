@@ -1139,6 +1139,30 @@ void main() {
       expect(fake.groups['proxy']!.now, 'route2');
     });
 
+    test('closeOld: a Manual move closes only the main flow connections of the route left; off closes none', () async {
+      for (final close in [true, false]) {
+        final p = three(manual: false);
+        final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 40, 's::c': 50});
+        fake.conns.addAll([
+          _conn('main', ['route0/s::a', 'route0', 'proxy']),
+          _conn('main2', ['route0/s::a', 'route0', 'proxy'], up: 5, down: 9), // moving ones go too: the user asked for it
+          _conn('direct', ['direct']),
+          _conn('target', ['route0/s::a', 'route0', 'Telegram']), // a rule target's own group, not the main flow
+          _conn('other', ['route1/s::b', 'route1', 'proxy']), // another route
+        ]);
+        final auto = AutoService(fake, p, delay: fake.delayTest);
+        expect(await auto.setManual(true, entry: 'C', closeOld: close), isTrue);
+        expect(fake.groups['proxy']!.now, 'route2');
+        expect(fake.closed, close ? ['main', 'main2'] : isEmpty);
+        // Manual on the route it is on, or Manual → Auto: nothing moves, nothing is closed
+        fake.closed.clear();
+        fake.conns.add(_conn('now', ['route2/s::c', 'route2', 'proxy']));
+        expect(await auto.setManual(true, entry: 'C', closeOld: close), isTrue);
+        expect(await auto.setManual(false, closeOld: close), isTrue);
+        expect(fake.closed, isEmpty);
+      }
+    });
+
     test('status.auto reports the server of every route group, standby routes too', () async {
       final p = plan([
         unit('A', ['s::a1', 's::a2'], pick: 'priority', chosen: 's::a1'),

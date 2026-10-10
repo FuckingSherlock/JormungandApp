@@ -375,19 +375,34 @@ class AutoService {
   /// selector `proxy` goes there at once (the user's own pick, no switch event). False = [entry]
   /// is not a route of this plan (it needs a new plan, the host reconnects) or sing-box refused.
   /// Back in Auto a round runs at once: the routes above the current one are looked at again.
-  Future<bool> setManual(bool on, {String? entry}) async {
+  /// With [closeOld] the connections of the main flow that went through the route left are
+  /// closed after the move (Settings → Connection → Close connections on route switch); the
+  /// rest (Direct, Block, a rule target's own group) and the tunnel stay.
+  Future<bool> setManual(bool on, {String? entry, bool closeOld = false}) async {
     manual = on;
     var ok = true;
     final i = entry == null ? -1 : _routes.indexWhere((r) => r.id == entry);
     if (on && entry != null && i != index) {
+      final old = _routes[index].tag;
       ok = i >= 0 && !_stopped && await api.select(topTag, _routes[i].tag);
       if (ok) {
         index = i;
         _routes[i].inUseSince = _clock();
+        if (closeOld) await _closeOnRoute(old);
       }
     }
     if (!on) _kickNow();
     return ok;
+  }
+
+  /// Closes the connections whose chain went through the main flow ([topTag]) and the route
+  /// [tag]; the ones that are moving no longer matter, the user asked for it.
+  Future<void> _closeOnRoute(String tag) async {
+    var n = 0;
+    for (final c in [...api.connections]) {
+      if (c.chain.contains(topTag) && c.chain.contains(tag) && await api.closeConnection(c.id)) n++;
+    }
+    if (n > 0) note?.call('auto: manual: closed $n connection${n == 1 ? '' : 's'} of the route left');
   }
 
   /// Moves so far (routes and Priority servers, as on [switches]); a Fastest group's own
