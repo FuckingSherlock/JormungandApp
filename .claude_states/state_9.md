@@ -88,6 +88,16 @@
    стеки (решать по результату: производительность, батарея, совместимость; не по цене); Android 8–9
    (procfs) не проверен; dev-jormd на Windows: `dart.exe` vs `dartvm.exe` в
    selfProcessPaths.
+   ЛОГИ И ОТЛАДКА (решения пользователя 2026-10-10, в работе): шапка Events/Raw однородная (фильтр, поиск, ⋮ →
+   Clear / Download log / Send report / Ignored sites; Copy убран); фильтры покрывают каждое событие; Raw —
+   лист фильтра + пояснение «Connections» + статус «Showing N of M», `found package name` в noise-кольцо,
+   инкрементальные списки и реже опрос; экспорт — структурный JSON-отчёт (шапка: версия/коммит/versionCode/
+   стек/режим/Android/подпись плана, сводка TUN по приложениям, события с данными, отказы); доставка —
+   свой Worker `jormungand-reports` + R2 + Telegram-уведомление, шифрование на устройстве нашим публичным
+   ключом, токен бота только в Worker (через secrets-mcp); детектор любых неудавшихся соединений (нужен и
+   для Direct fallback). Мокап ЗАМОРОЖЕН: только заметки в `.claude_states/mockup_todo.md` (правило в
+   CLAUDE.md «Mockup» и docs/platforms.md). Core-этапы: K1 (failures/TUN-детектор), K2 (logbook/eventbook/
+   report/docs/logs.md); дальше Flutter-этап UI, потом Worker + клиент отправки + decrypt-тул.
    Детектор (ещё не сделан): «осиротевшие» SYN (`found package name` без `inbound connection` под тем же
    ID) → событие + автофолбэк; сводка TUN по приложениям и шапка устройства в экспорте логов;
    `found package name` в `noise`-кольцо логбука (шквал Telegram занял 79 % кольца); проба достижимости

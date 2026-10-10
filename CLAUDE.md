@@ -4,10 +4,11 @@ VPN/proxy client over sing-box, a reworked clone of Karing. The user talks Russi
 
 Three products, one repo (how they fit together: **`docs/platforms.md`** — read it before any
 Flutter or build work):
-- **Mockup** `design/` — the spec of UI and behaviour; also the live desktop web UI through the
-  local daemon `jormd`. The user keeps designing here.
-- **Flutter app** `app/` — the real app, Android first, then Windows. Ported from the mockup screen
-  by screen; differences between platforms are listed in `docs/platforms.md`.
+- **Mockup** `design/` — the spec of UI and behaviour up to the freeze; also the live desktop web UI
+  through the local daemon `jormd`. **FROZEN since 2026-10-06: do not edit `design/`** — see "Mockup".
+- **Flutter app** `app/` — the real app, Android first, then Windows. Now the leading product: UI and
+  behaviour changes go straight here (after `docs/` and core); differences between platforms are
+  listed in `docs/platforms.md`.
 - **Core** `core/` — Dart package `jormungand_core` shared by both (parsers, catalog, plan, sing-box
   config and runtime, `CoreService`, updates). Design and API: `docs/core.md`.
 
@@ -40,10 +41,18 @@ Where things stand and what's next: the newest `.claude_states/state_N.md`.
 | `docs/i18n.md` | translation mechanism and glossary |
 | `app/README.md` | Flutter app layout, conventions, TODO |
 
-A change that adds or alters behaviour updates the doc in the same commit (logic → doc → mockup →
-Flutter).
+A change that adds or alters behaviour updates the doc in the same commit (logic → doc → core →
+Flutter; the mockup only gets a note, see "Mockup").
 
 ## Mockup
+
+- **Frozen** (since 2026-10-06, to save tokens): nobody edits `design/`, agents are never briefed to,
+  `npm run verify` is not part of Android work. Everything that changes on Android — screens, texts,
+  behaviour, events, settings — is written as a short note (what changed, which mockup file, which doc
+  section) to `.claude_states/mockup_todo.md`, in the same commit as the change. The mockup is brought
+  up to date later in one pass from those notes; then the golden tests' `_mockupBehind` is cleared and
+  `app/SYNCED_FROM` moved. Until then the sources of truth are `docs/` and the Flutter app itself.
+  The rules below describe the mockup for that later pass.
 
 - `design/main_screen.html` is **generated** — never edit or read it; it is built from `design/src/`.
 - `design/src/index.html` — skeleton with `@include` lines; `css/`, `markup/`, `js/` are concatenated
@@ -102,7 +111,7 @@ through a tunnel: `dart run tool/exit_check.dart`.
 
 Everything is in `docs/platforms.md` (mapping, sync from the mockup, generators, toolchain in
 `G:\ANDROID_DEV`, `build_libbox.ps1`, `build_apk.ps1`, adb install) and `app/README.md` (layout,
-conventions). Short version: change the mockup first; port by the mapping table; `node app/tool/gen_all.mjs`;
+conventions). Short version: docs → core → Flutter (mockup frozen: only a note in `.claude_states/mockup_todo.md`); `node app/tool/gen_all.mjs`;
 in `app/` `flutter analyze --no-fatal-infos` + `flutter test`; `pwsh app/tool/build_apk.ps1` (always release-signed, version picked from the feed; `-DryRun` previews);
 `adb install -r`. Never port the mockup's demo data or stub services. Secrets (keystore password,
 release signing key) are never written to the repo or read by the agent.
