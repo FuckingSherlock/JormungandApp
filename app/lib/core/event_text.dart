@@ -3,7 +3,6 @@ import 'package:jormungand_core/jormungand_core.dart'
     show
         AppRulesOps,
         Catalog,
-        EventFilter,
         EventGroup,
         EventRecord,
         ruleTitle,
@@ -845,22 +844,6 @@ class EventWords {
       }
     }
     return out;
-  }
-
-  // ── the filter ──
-
-  /// "Filtered: ..." of the bar under the tabs.
-  String filterText(EventFilter f) {
-    final parts = <String>[];
-    if (f.q.isNotEmpty) parts.add('“${f.q}”');
-    if (f.problems) parts.add(l10n.onlyProblems);
-    if (f.hideBg) parts.add(l10n.no2(l10n.background.toLowerCase()));
-    for (final c in f.offCats) {
-      final n = f.typesOn(c);
-      final label = catLabel(c.$1);
-      parts.add(n > 0 ? '$label $n/${c.$2.length}' : l10n.no2(label));
-    }
-    return parts.join(' · ');
   }
 }
 

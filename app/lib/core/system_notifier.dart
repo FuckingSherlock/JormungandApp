@@ -19,9 +19,12 @@ import 'settings_model.dart';
 ///  - the VPN notification gets the name of the current connection and stays on the shade only while
 ///    the Status switch and the master switch are on ([NotifCfg.vpnStatusShown]); off, it is hidden
 ///    (the VPN keeps running).
+///  - «Ignore site» on a notification is done on the native side without opening the app; the choices
+///    queue up there and are applied here, in order, through [onIgnoreOp] (on start, when the app
+///    comes back, and on the native side's ping).
 /// Where there are no system notifications ([NotifyIo.available] is false) all of it does nothing.
 class SystemNotifier {
-  SystemNotifier(this.host, {NotifyIo? io, PowerIo? power})
+  SystemNotifier(this.host, {NotifyIo? io, PowerIo? power, this.onIgnoreOp})
     : io = io ?? NotifyIo.current,
       power = power ?? PowerIo.current;
 
@@ -29,6 +32,12 @@ class SystemNotifier {
   final NotifyIo io;
   final PowerIo power;
 
+  /// Applies one «Ignore site» / «Undo» made on the shade (the shell: the journal's ignored list).
+  final void Function(SiteIgnoreOp op)? onIgnoreOp;
+
+  StreamSubscription<void>? _queued;
+  Future<void> _draining = Future.value();
+  bool _disposed = false;
   bool _started = false;
   bool _wasOn = false;
   String? _sentNode;
@@ -50,13 +59,48 @@ class SystemNotifier {
     io.refresh();
     io.onDisconnect = _disconnectFromShade;
     host.addListener(_onHost);
+    _queued = io.ignoreQueued.listen((_) => drainIgnoreOps());
     _onHost();
+    drainIgnoreOps(); // what was pressed while no Dart ran
   }
 
   void dispose() {
+    _disposed = true;
     if (!_started) return;
     host.removeListener(_onHost);
+    _queued?.cancel();
     io.onDisconnect = null;
+  }
+
+  /// Takes the «Ignore site» / «Undo» choices made on the shade and applies them in order once the host
+  /// has loaded its state (the list lives in it). Calls follow one another, never overlap.
+  Future<void> drainIgnoreOps() {
+    if (!io.available || onIgnoreOp == null) return Future.value();
+    return _draining = _draining.then((_) async {
+      if (_disposed) return;
+      await _whenReady();
+      if (_disposed) return;
+      for (final op in await io.takeIgnoreOps()) {
+        try {
+          onIgnoreOp!(op);
+        } catch (_) {
+          // one bad entry must not hold the rest back
+        }
+      }
+    });
+  }
+
+  Future<void> _whenReady() {
+    if (host.ready) return Future.value();
+    final c = Completer<void>();
+    void check() {
+      if (!host.ready) return;
+      host.removeListener(check);
+      c.complete();
+    }
+
+    host.addListener(check);
+    return c.future;
   }
 
   Future<void> _disconnectFromShade() => host.disconnect();
@@ -74,6 +118,9 @@ class SystemNotifier {
         text: d.detail,
         site: site,
         via: via,
+        // what «Ignore site» turns the notification into (done natively, in the app's language)
+        ignoredText: site.isEmpty ? '' : words.l10n.addedToIgnoredSites(site),
+        undoLabel: site.isEmpty ? '' : words.l10n.undo,
         actions: [
           if (site.isNotEmpty && e.type == 'blocked' && via.isNotEmpty)
             ('rule', words.l10n.createRule),
@@ -88,6 +135,7 @@ class SystemNotifier {
     if (!io.available) return;
     io.cancelEvents();
     io.refresh(); // back from the system settings
+    drainIgnoreOps(); // a ping that came before this Dart listened
   }
 
   /// Settings -> Notifications: a switch was turned on; asks for the permission when it is missing.

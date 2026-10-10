@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:jormungand_core/jormungand_core.dart' show EventRecord;
+import 'package:jormungand_core/jormungand_core.dart' show EventRecord, IgnoredSites;
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
@@ -120,7 +120,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _notifs ??= _logs!.notifications.listen(_notify);
     if (_sys == null) {
       final io = NotifyIo.current;
-      _sys = SystemNotifier(host, io: io)..start();
+      _sys = SystemNotifier(host, io: io, onIgnoreOp: _ignoreFromShade)..start();
       _taps = io.eventTaps.listen(_openFromShade);
       _actTaps = io.actionTaps.listen(_actFromShade);
       io.takeLaunchEvent().then((id) {
@@ -132,11 +132,27 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
-  /// A tap on an event notification: Logs -> Events at it (once the journal is loaded).
-  void _openFromShade(int id) => _whenReady(() => _links.openLogsEvent?.call(id));
+  /// A tap on an event notification: Logs -> Events at it (once the journal is loaded). A sheet or a
+  /// dialog the user left open is closed first, or the tab would change behind it.
+  void _openFromShade(int id) => _whenReady(() {
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    _links.openLogsEvent?.call(id);
+  });
 
-  /// A button of an event notification: Create rule (the editor, prefilled) or Ignore site (added,
-  /// with the same «ignored · Undo» toast as in the app).
+  /// «Ignore site» / «Undo» pressed on a notification: done natively without the app, applied here
+  /// ([SystemNotifier.drainIgnoreOps]). No toast: the notification itself said it.
+  void _ignoreFromShade(SiteIgnoreOp op) {
+    final logs = _logs;
+    if (logs == null) return;
+    if (op.ignore) {
+      logs.ignoreSite(op.site);
+    } else {
+      logs.unignoreSite(IgnoredSites.clean(op.site));
+    }
+  }
+
+  /// A button of an event notification: Create rule (the editor, prefilled). `ignore` only comes from a
+  /// notification posted by an older build (its button opened the app); the current ones never get here.
   void _actFromShade(NoteActionTap t) {
     if (t.site.isEmpty) return;
     _whenReady(() {

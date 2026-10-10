@@ -1,6 +1,6 @@
 // Ignored sites: a dead site that some program keeps opening can be silenced. «Ignore site» on its
-// events and toast adds the host (with «<host> ignored · Undo»), the Logs menu lists / edits / clears
-// the list, the Raw view hides the failed-connection lines of ignored sites behind a chip, no
+// events and toast adds the host (with «<host> ignored · Undo»), the filter sheets (Events and Raw) list /
+// edit / clear the list, the Raw view hides the failed-connection lines of ignored sites behind a chip, no
 // notification is made for them, and the core is told (no reconnect).
 import 'dart:async';
 
@@ -102,7 +102,23 @@ void main() {
     await tester.pumpAndSettle(const Duration(seconds: 5));
   });
 
-  testWidgets('Logs menu → Ignored sites: add (checked), remove, clear; the Raw chip counts the hidden lines', (
+  testWidgets('the «host ignored · Undo» toast goes by itself (an action does not make it stay)', (tester) async {
+    final host = FakeCoreHost();
+    host.addEvent('site', 'unreachable', level: 'warn', data: {'host': 'dead.example.com', 'entry': 'x', 'tried': const []});
+    await pumpApp(tester, host);
+    await tester.tap(find.byIcon(AppTab.logs.icon));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ignore site'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('dead.example.com ignored'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
+    expect(find.text('dead.example.com ignored'), findsNothing);
+    expect(host.notif.ignoredSites, ['dead.example.com'], reason: 'no Undo: it stays ignored');
+  });
+
+  testWidgets('Raw filter sheet → Ignored sites: add (checked), remove, clear; the Raw chip counts the hidden lines', (
     tester,
   ) async {
     final host = FakeCoreHost();
@@ -132,10 +148,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(_dead), findsNothing);
 
+    // the list is reached from the filter sheet (Raw tab), not from ⋮
     await tester.tap(find.byKey(const ValueKey('logsMenu')));
     await tester.pumpAndSettle();
-    expect(find.text('dead.example.com'), findsOneWidget, reason: 'the menu row shows what is ignored');
-    await tester.tap(find.text('Ignored sites'));
+    expect(find.text('Ignored sites'), findsNothing);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ignoredSitesRow')), findsOneWidget);
+    expect(find.text('dead.example.com'), findsOneWidget, reason: 'the row shows what is ignored');
+    await tester.tap(find.byKey(const ValueKey('ignoredSitesRow')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('ignored:dead.example.com')), findsOneWidget);
 
@@ -162,6 +185,23 @@ void main() {
     await tester.pump();
     expect(host.notif.ignoredSites, isEmpty);
     expect(find.text('No ignored sites'), findsOneWidget);
+  });
+
+  testWidgets('Events filter sheet → Ignored sites row opens the same list', (tester) async {
+    final host = FakeCoreHost();
+    host.notif.ignoredSites = ['dead.example.com'];
+    host.addEvent('conn', 'lost', level: 'warn');
+    await pumpApp(tester, host);
+    await tester.tap(find.byIcon(AppTab.logs.icon));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('ignoredSitesRow')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ignoredSitesRow')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ignored:dead.example.com')), findsOneWidget);
   });
 
   testWidgets('a «does not open» toast has both buttons; Ignore site adds the host', (tester) async {

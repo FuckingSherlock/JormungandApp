@@ -43,6 +43,56 @@ void main() {
     });
   });
 
+  group('the tag of a server in the brackets', () {
+    test('holds colons (route<i>-entry/<sid>::<nid>): such a connection line is flood too', () {
+      for (final tag in ['route0-entry/src1::n3', 'route2/src1::n10', 'chain:c1>entry/src2::n1', 'proxy', 'mixed-in']) {
+        for (final kind in ['outbound connection to a:443', 'outbound packet connection to a:53', 'inbound connection from 10.0.0.2:5000']) {
+          final dir = kind.startsWith('inbound') ? 'inbound/tun' : 'outbound/vless';
+          expect(isNoiseLine('[7 12ms] $dir[$tag]: $kind'), isTrue, reason: '$tag / $kind');
+        }
+      }
+      final b = LogBook(cap: 10, noiseCap: 2);
+      b.note('info', 'Connected');
+      for (var i = 0; i < 30; i++) {
+        b.singBox('INFO[0001] [$i 4ms] outbound/vless[route0-entry/src1::n3]: outbound connection to x.example:443');
+      }
+      expect(_lines(b).where((x) => (x['msg'] as String).contains('route0-entry')), hasLength(2), reason: 'the noise ring, not the main one');
+      expect(b.since(null, conns: false)['hidden'], 2, reason: 'left out at the source with Connections off');
+      expect(isNoiseLine('[1 5ms] outbound/vless[route0-entry/src1::n3]: outbound connection to x:1: dial tcp: i/o timeout'), isTrue,
+          reason: 'by text; a warn / error is never noise, the caller checks the level');
+    });
+
+    test('the other spellings of a connection / DNS answer in sing-box 1.14 are flood, decisions stay visible', () {
+      const flood = [
+        '[7 1ms] outbound/vless[route0/src1::n3]: outbound multiplex connection to a:443',
+        '[7 1ms] outbound/vless[route0/src1::n3]: outbound multiplex packet connection to a:443',
+        '[7 1ms] outbound/hysteria2[route1/src2::n1]: outbound packet connection to a:443',
+        '[7 1ms] outbound/vless[x]: outbound UoT connect packet connection to a:53',
+        '[7 1ms] inbound/tun[tun-in]: inbound DNS packet from 10.0.0.2:5353',
+        '[7 1ms] inbound/tun[tun-in]: inbound redirect DNS connection from 10.0.0.2:5353',
+        '[7 1ms] inbound/http[http-in]: [alice] inbound connection to a:443',
+        '[7 1ms] router: found user id: 10234',
+        '[7 1ms] router: found neighbor: aa:bb:cc:dd:ee:ff',
+        '[7 1ms] dns: exchanged A example.com. 300 IN A 1.2.3.4',
+        '[7 1ms] dns: cached AAAA example.com. 300 IN AAAA ::1',
+        '[7 1ms] dns: lookup succeed for example.com: 1.2.3.4',
+      ];
+      for (final l in flood) {
+        expect(isNoiseLine(l), isTrue, reason: l);
+      }
+      const keep = [
+        '[7 1ms] router: match[3] => route(proxy)',
+        '[7 1ms] dns: rejected A ads.example.com. 3 IN A',
+        '[7 1ms] outbound/block[block]: blocked connection to ads.example.com:443',
+        'connection: open outbound connection: dial tcp 1.2.3.4:443: i/o timeout',
+        '[7 1ms] outbound/vless[x]: failed to dial',
+      ];
+      for (final l in keep) {
+        expect(isNoiseLine(l), isFalse, reason: l);
+      }
+    });
+  });
+
   group('the program behind a connection (found package name)', () {
     const found = '[2 0ms] router: found package name: org.telegram.messenger';
     const foundPath = r'[3 0ms] router: found process path: C:\Program Files\App\app.exe';

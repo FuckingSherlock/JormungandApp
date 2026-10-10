@@ -78,6 +78,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- «Ignore site» / «Undo» on an event notification: handled here, no activity starts (EventActionReceiver.kt).
+             exported=false: only our own PendingIntents reach it. -->
+        <receiver
+            android:name=".EventActionReceiver"
+            android:exported="false"/>
+
         <!-- Quick Settings tile (JormungandTileService.kt). Not an ACTIVE_TILE on purpose: the system binds it
              on every shade open, so its state is read fresh. TOGGLEABLE: a switch for accessibility (API 30+). -->
         <service

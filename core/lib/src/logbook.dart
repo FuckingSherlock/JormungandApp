@@ -22,17 +22,29 @@ Future<String?> singBoxVersion(String binary) async {
 
 /// A sing-box line of a successful connection: `[id 5ms] inbound/mixed[mixed-in]: inbound connection to host:443`
 /// (also `outbound connection`, `packet connection`). The one pattern for the [LogBook] and the Raw view.
-final connLineRe = RegExp(r'(inbound|outbound)/[^:]*: (inbound|outbound) (packet )?connection\b');
+/// The tag in the brackets may hold colons (`outbound/vless[route0-entry/src1::n3]`: a server key is
+/// `sid::nid`), so it is read up to the closing `]: `, not up to the first colon. The words between
+/// the direction and `connection` are sing-box's variants (`outbound multiplex packet connection`,
+/// `inbound UoT connect connection`, `inbound redirect DNS connection`, `inbound DNS packet`), an
+/// optional `[user] ` comes before the direction (users of inbounds).
+final connLineRe = RegExp(
+  r'(?:inbound|outbound)/[^\s\[]+\[[^\n]*?\]: (?:\[[^\]\n]*\] )?(?:inbound|outbound) (?:[A-Za-z]+ ){0,3}?(?:packet )?(?:connection|DNS packet)\b',
+);
 
-/// The sing-box line that names the program behind a connection: `[id 5ms] router: found package name: org.x`
-/// (Android), `… router: found process path: C:\…\chrome.exe` (desktop). One per connection, so as
-/// loud as the connection lines.
-final foundLineRe = RegExp(r'router: found (package name|process path): ');
+/// The sing-box line that names what is behind a connection: `[id 5ms] router: found package name: org.x`
+/// (Android), `… router: found process path: C:\…\chrome.exe` (desktop), `found user` / `found neighbor`.
+/// One per connection, so as loud as the connection lines.
+final foundLineRe = RegExp(r'router: found (package name|process path|user id|user|neighbor hostname|neighbor): ');
 
-/// A sing-box line of the flood a busy device writes: a successful connection ([connLineRe]) or the
-/// program behind one ([foundLineRe]). Warnings and errors are never one (the caller checks the level).
-/// The [LogBook] keeps them in the noise ring; the Raw view's «Connections» switch shows them.
-bool isNoiseLine(String text) => connLineRe.hasMatch(text) || foundLineRe.hasMatch(text);
+/// A DNS answer sing-box logs at info, one line per record: `dns: exchanged A example.com. 300 IN A 1.2.3.4`
+/// (also `cached`, `optimistic`, `refreshed`, `lookup succeed for`). A flood like the connections.
+final dnsLineRe = RegExp(r'\bdns(?:/\S+)?: (?:exchanged|cached|optimistic|refreshed|lookup succeed for) ');
+
+/// A sing-box line of the flood a busy device writes: a successful connection ([connLineRe]), the
+/// program behind one ([foundLineRe]) or a DNS answer ([dnsLineRe]). Warnings and errors are never one
+/// (the caller checks the level). The [LogBook] keeps them in the noise ring; the Raw view's
+/// «Connections» switch shows them.
+bool isNoiseLine(String text) => connLineRe.hasMatch(text) || foundLineRe.hasMatch(text) || dnsLineRe.hasMatch(text);
 
 /// The log the Logs tab shows: sing-box's output and the core's own notes (connect,
 /// disconnect, failed requests), in one numbered sequence, newest last. The UI polls

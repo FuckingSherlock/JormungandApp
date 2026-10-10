@@ -27,12 +27,19 @@ class RawGroup {
   static String keyOf(LogLine l) => '${l.t ~/ 1000}|${l.lvl}|${l.src}';
 }
 
+/// The most lines one group (one list row) holds. A group is built whole, as one row, when it comes
+/// into view: a burst of hundreds of lines of one second (a busy connection, a reconnect) as one
+/// row made scrolling and opening the tab stutter. Longer runs continue in the next group (with
+/// its own meta line); the chunks are cut from the start of the run, so only the last one changes
+/// as lines arrive.
+const rawGroupMax = 24;
+
 List<RawGroup> groupRaw(List<LogLine> lines) {
   final out = <RawGroup>[];
   String? last;
   for (final l in lines) {
     final k = RawGroup.keyOf(l);
-    if (out.isNotEmpty && last == k) {
+    if (out.isNotEmpty && last == k && out.last.lines.length < rawGroupMax) {
       out.last.lines.add(l);
     } else {
       out.add(RawGroup(l));

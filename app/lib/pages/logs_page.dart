@@ -463,8 +463,6 @@ class _LogsPageState extends State<LogsPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _Tabs(tab: _c.tab, onTab: _setTab),
-          if (events && _evFilterCount > 0 && _c.l10n != null)
-            EventFilterBar(logs: _c, words: _c.words),
           if (events && _c.evSearching)
             SearchField(
               key: const ValueKey('evSearch'),

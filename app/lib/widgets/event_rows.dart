@@ -633,51 +633,6 @@ class _WhyRow extends StatelessWidget {
   }
 }
 
-/// `.ev-filterbar`: "Filtered: ..." and Reset, under the tabs while a filter is on.
-class EventFilterBar extends StatelessWidget {
-  const EventFilterBar({super.key, required this.logs, required this.words});
-
-  final LogsController logs;
-  final EventWords words;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final l10n = context.l10n;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
-      decoration: BoxDecoration(
-        color: c.accent.tint(.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              l10n.filtered2(words.filterText(logs.filter)),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12.5, color: c.t1),
-            ),
-          ),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: logs.resetFilter,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              child: Text(
-                l10n.reset,
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.accent),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// The sheet of the filter button: only problems, the categories with their types (and how many
 /// events of each the journal holds), and "Show my actions" (kept with the settings). The search is
 /// in the header of the page.
@@ -698,10 +653,6 @@ class _EventFilterSheet extends StatefulWidget {
 }
 
 class _EventFilterSheetState extends State<_EventFilterSheet> {
-  /// The categories the user turned over: a category starts unfolded when any of its types has
-  /// events in the journal or is switched off, and the user's tap flips that.
-  final _flipped = <String>{};
-
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -720,9 +671,6 @@ class _EventFilterSheetState extends State<_EventFilterSheet> {
           for (final e in logs.feed.list) {
             counts[e.key] = (counts[e.key] ?? 0) + 1;
           }
-          bool startsOpen((String, List<String>) cat) => cat.$2.any(
-            (t) => (counts['${cat.$1}/$t'] ?? 0) > 0 || f.off.contains('${cat.$1}/$t'),
-          );
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -752,10 +700,9 @@ class _EventFilterSheetState extends State<_EventFilterSheet> {
                       words: w,
                       logs: logs,
                       counts: counts,
-                      open: startsOpen(cat) != _flipped.contains(cat.$1),
-                      onFold: () => setState(() {
-                        if (!_flipped.remove(cat.$1)) _flipped.add(cat.$1);
-                      }),
+                      // all folded until the user opens one; what they opened stays so (kept)
+                      open: logs.catOpen(cat.$1),
+                      onFold: () => logs.toggleCatOpen(cat.$1),
                     ),
                 ],
               ),
@@ -776,10 +723,16 @@ class _EventFilterSheetState extends State<_EventFilterSheet> {
                   border: Border.all(color: c.accent.tint(.5)),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: SetRow(
-                  label: l10n.showMyActions,
-                  hint: l10n.connectDisconnectPinModeAndRoute2,
-                  trailing: MiniToggle(on: logs.cfg.showOwn, onChanged: logs.setShowOwn),
+                child: Column(
+                  children: [
+                    SetRow(
+                      label: l10n.showMyActions,
+                      hint: l10n.connectDisconnectPinModeAndRoute2,
+                      trailing: MiniToggle(on: logs.cfg.showOwn, onChanged: logs.setShowOwn),
+                    ),
+                    Divider(height: 1, thickness: 1, color: c.border),
+                    IgnoredSitesRow(logs: logs),
+                  ],
                 ),
               ),
             ],

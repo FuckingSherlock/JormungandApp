@@ -411,6 +411,15 @@ class LogsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A category of the Events filter sheet is unfolded (folded until the user opens it; kept).
+  bool catOpen(String cat) => cfg.openCats.contains(cat);
+
+  void toggleCatOpen(String cat) {
+    if (!cfg.openCats.remove(cat)) cfg.openCats.add(cat);
+    _save();
+    notifyListeners();
+  }
+
   /// Which levels of warning / error events are not seen yet (the dots on the Logs tab; events
   /// the filter hides count too). A notifier of its own: the nav bar listens to it, not to the
   /// controller, so a burst of lines or events does not rebuild anything unless a dot changes.

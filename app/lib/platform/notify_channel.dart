@@ -23,18 +23,41 @@ class SystemNote {
     this.actions = const [],
     this.site = '',
     this.via = '',
+    this.ignoredText = '',
+    this.undoLabel = '',
   });
 
   final int id;
   final String title;
   final String text;
 
-  /// Buttons of the notification: `(id, label)`; a press brings [NoteActionTap] back.
+  /// Buttons of the notification: `(id, label)`; a press brings [NoteActionTap] back (`ignore` does
+  /// not: it is done on the native side, see [NotifyIo.takeIgnoreOps]).
   final List<(String, String)> actions;
 
   /// The site / the entry it opens through, carried by the buttons (the event itself may be gone
   /// from the journal when one is pressed).
   final String site, via;
+
+  /// The words of the notification that replaces this one when `ignore` is pressed («{host} added to
+  /// ignored sites», «Undo»), in the app's language: the native side has nothing to translate with.
+  final String ignoredText, undoLabel;
+}
+
+/// A choice made on the shade without the app: «Ignore site» ([ignore]) or its «Undo». They are applied
+/// to the ignored sites list in the order they were made.
+class SiteIgnoreOp {
+  const SiteIgnoreOp({required this.ignore, required this.site});
+
+  final bool ignore;
+  final String site;
+
+  static SiteIgnoreOp? fromMap(Object? m) {
+    if (m is! Map) return null;
+    final op = m['op'], site = '${m['site'] ?? ''}';
+    if (site.isEmpty || (op != 'ignore' && op != 'unignore')) return null;
+    return SiteIgnoreOp(ignore: op == 'ignore', site: site);
+  }
 }
 
 /// A press on a button of an event notification (`rule` | `ignore`): the app comes to the front and
@@ -110,6 +133,13 @@ abstract class NotifyIo {
   /// The button that started the app and was not handed over yet.
   Future<NoteActionTap?> takeLaunchAction();
 
+  /// The native side queued an «Ignore site» / «Undo» made on the shade: read it with [takeIgnoreOps].
+  Stream<void> get ignoreQueued;
+
+  /// The queued choices, oldest first; the queue is emptied. The native side keeps them until asked, so
+  /// nothing is lost when no Dart ran at the time.
+  Future<List<SiteIgnoreOp>> takeIgnoreOps();
+
   /// The Disconnect button of the VPN notification. The handler answers when it has taken the
   /// request; none set = the native side closes the tunnel itself.
   set onDisconnect(FutureOr<void> Function()? handler);
@@ -125,6 +155,7 @@ class PlatformNotifyIo implements NotifyIo {
   final _permission = ValueNotifier(NotifyPermission.unsupported);
   final _taps = StreamController<int>.broadcast();
   final _actTaps = StreamController<NoteActionTap>.broadcast();
+  final _ignoreQueued = StreamController<void>.broadcast();
   FutureOr<void> Function()? _disconnect;
 
   @override
@@ -142,8 +173,14 @@ class PlatformNotifyIo implements NotifyIo {
   @override
   Stream<NoteActionTap> get actionTaps => _actTaps.stream;
 
+  @override
+  Stream<void> get ignoreQueued => _ignoreQueued.stream;
+
   Future<Object?> _fromNative(MethodCall call) async {
     switch (call.method) {
+      case 'ignoreQueued':
+        _ignoreQueued.add(null);
+        return null;
       case 'openEvent':
         final id = call.arguments;
         if (id is int) _taps.add(id);
@@ -211,6 +248,8 @@ class PlatformNotifyIo implements NotifyIo {
       ],
       'site': note.site,
       'via': note.via,
+      if (note.ignoredText.isNotEmpty) 'ignoredText': note.ignoredText,
+      if (note.undoLabel.isNotEmpty) 'undoLabel': note.undoLabel,
     },
   });
 
@@ -234,6 +273,21 @@ class PlatformNotifyIo implements NotifyIo {
       return null;
     } on PlatformException {
       return null;
+    }
+  }
+
+  @override
+  Future<List<SiteIgnoreOp>> takeIgnoreOps() async {
+    if (!available) return const [];
+    try {
+      final r = await _channel.invokeMethod<List<Object?>>('takeIgnoreOps');
+      return [
+        for (final m in r ?? const <Object?>[]) ?SiteIgnoreOp.fromMap(m),
+      ];
+    } on MissingPluginException {
+      return const [];
+    } on PlatformException {
+      return const [];
     }
   }
 

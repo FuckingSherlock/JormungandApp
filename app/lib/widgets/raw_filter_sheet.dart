@@ -4,6 +4,7 @@ import '../core/logs_controller.dart';
 import '../l10n/l10n.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
+import 'ignored_sites.dart' show IgnoredSitesRow;
 import 'log_parts.dart';
 
 /// The sheet of the filter button on the Raw tab: the level, the switch for the lines of successful
@@ -94,6 +95,9 @@ class _RawFilterSheet extends StatelessWidget {
                     ),
                   ),
                 ),
+              // the list of ignored sites: a setting of its own, apart from the switches above
+              // (the badge does not count it, Reset does not touch it)
+              SetGroup(children: [IgnoredSitesRow(logs: logs)]),
             ],
           );
         },

@@ -103,7 +103,7 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | Rules, приложения | `markup/55-sheets-rules.html`, `js/40-rules.js`, `42-apps.js`, `44-target-picker.js`, `75-rule-form.js`, `css/65-rules.css` | `pages/rules_page.dart`, `widgets/rules_*.dart`; список приложений Android — канал `jormungand/apps` (`list`, `icon`; `platform/apps_io.dart`, шов `AppsIo.current`, Kotlin `AppsChannel.kt.tmpl`; манифест — `QUERY_ALL_PACKAGES`), ленивый лист `widgets/apps_sheet.dart`; подробности — `rules.md` → «Приложения» |
 | Logs, события | `markup/35-logs.html`, `js/46-logs.js`, `47-events.js`, `css/67-logs.css` | `pages/logs_page.dart`, `widgets/logs_*.dart`, `widgets/report_actions.dart` («Download log» / «Send report»; у мокапа их нет — он заморожен), `core/report_info.dart` |
 | Settings | `markup/30-settings.html`, `js/56-dns.js`, `57-general.js`, `58-notif.js`, `59-data.js`, `css/95-settings.css` | `pages/settings_page.dart` (меню), `widgets/settings_auto.dart` (Auto mode, + `autoCardSub`), `settings_look.dart` (Appearance / General / Notifications), `settings_conn.dart`, `settings_dns.dart`, `settings_data.dart` (обновления, бэкап, About), `settings_parts.dart` (общие части листов), `core/settings_model.dart` (хранение `genCfg` / `notifCfg`, диапазоны и проверки полей), `core/app_update.dart` (состояние обновления для UI), `state/app_settings.dart`; различия платформ — `platform/platform_caps.dart` (`host.caps`); файлы бэкапа и установка APK — `platform/files_channel.dart` + `android_overlay/kotlin/FilesChannel.kt.tmpl`, `UpdateInstaller.kt.tmpl` |
-| Системные уведомления Android | `js/58-notif.js` (только настройки; уведомлений нет) | `core/system_notifier.dart` (`SystemNotifier`), `platform/notify_channel.dart` (шов `NotifyIo`, канал `jormungand/notify`), `shell/home_shell.dart` (`_notify`, тап), `widgets/settings_look.dart` (`NotifPermissionHint`), `android_overlay/kotlin/AppNotifier.kt.tmpl`, `NotifyChannel.kt.tmpl`, `res/values{,-ru}/jorm_notif_strings.xml` |
+| Системные уведомления Android | `js/58-notif.js` (только настройки; уведомлений нет) | `core/system_notifier.dart` (`SystemNotifier`), `platform/notify_channel.dart` (шов `NotifyIo`, канал `jormungand/notify`), `shell/home_shell.dart` (`_notify`, тап), `widgets/settings_look.dart` (`NotifPermissionHint`), `android_overlay/kotlin/AppNotifier.kt.tmpl`, `NotifyChannel.kt.tmpl`, `EventActionReceiver.kt.tmpl` («Ignore site» / «Undo» без приложения), `res/values{,-ru}/jorm_notif_strings.xml` |
 | Работа в фоне Android | — (в мокапе окно = приложение) | `android_overlay/kotlin/AppEngine.kt.tmpl` (движок и каналы процесса), `MainActivity.kt.tmpl` (только окно), `PowerChannel.kt.tmpl` (канал `jormungand/power`), `JormungandVpnService.kt.tmpl` (`onTaskRemoved`, запись для усыновления); Dart: `platform/power_channel.dart` (шов `PowerIo`), `widgets/background_access_row.dart` (строка в `settings_conn.dart`), `core/libbox_runner.dart` (`keep` / `adopt`), `core/live_core_host.dart` (`_adoptRunning`), `app.dart` (`onDetach`), `shell/home_shell.dart` (Back на Home) |
 | Справка «?» | `js/58-help.js` | `widgets/settings_parts.dart` (`showHelp`, `HelpTopic`; Settings), `widgets/nodes_help.dart` (`NodesHelp`: Nodes, Advanced подписки, профиль, пункт-источник, цепочка), `rules_parts.dart` (`RoundHelp`, `showTermsSheet`) |
 | Меню, формы, тосты | `js/34-ui.js`, `css/80-menus-forms.css`, `90-toast.css` | `widgets/form_parts.dart`, `app_card.dart`, `settings_row.dart` |
@@ -311,8 +311,10 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
 в одном случае показывается ровно одно. Возврат на передний план убирает уведомления событий.
 
 - **Канал `jormungand/notify`** (`NotifyChannel.kt.tmpl`, отдельный от `jormungand/vpn`): `permission`,
-  `request {once}`, `openSettings`, `post {id, title, text}`, `cancelEvents`, `setStatus {node?, visible?}`,
-  `takeLaunchEvent`; Kotlin → Dart: `openEvent` (тап), `disconnect` (кнопка уведомления VPN). Dart-шов —
+  `request {once}`, `openSettings`, `post {id, title, text, actions?, site?, via?, ignoredText?, undoLabel?}`,
+  `cancelEvents`, `setStatus {node?, visible?}`, `takeLaunchEvent`, `takeLaunchAction`, `takeIgnoreOps`;
+  Kotlin → Dart: `openEvent` (тап), `eventAct` (кнопка Create rule), `ignoreQueued` (в очередь легло «Ignore
+  site» / «Undo»), `disconnect` (кнопка уведомления VPN). Dart-шов —
   `NotifyIo` (`NotifyIo.current`, в тестах подменяется); где `available` = false (не Android) всё пусто и
   остаются тосты.
 - **Уведомления** (`AppNotifier.kt.tmpl`): канал `events` (важность default; отдельный от `vpn`), по
@@ -323,14 +325,30 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   `jorm_notif_strings.xml` (язык системы, не выбор в приложении).
 - **Кнопки уведомления «сайт не открывается»** (`site/blocked` с `via` — «Create rule» и «Ignore site»;
   `site/unreachable` — только «Ignore site»; подписи на языке приложения, их шлёт Dart в `post {actions:
-  [{id, label}], site, via}`). Нажатие — `PendingIntent.getActivity` на `MainActivity` с действием
-  `EVENT_ACT` (id события, действие `rule` | `ignore`, `site`, `via` в extras — событие к тому времени может
-  выпасть из журнала) → `NotifyChannel.onIntent` убирает это уведомление (кнопка само его не снимает) и шлёт
-  Dart `eventAct` (холодный старт — `takeLaunchAction` после запуска оболочки) → `NotifyIo.actionTaps` →
-  оболочка: `rule` открывает редактор правила с хостом, `ignore` добавляет хост в список и показывает
-  тост «{host} ignored · Undo». **Приложение при этом выходит на передний план** (activity-интент); «Ignore
-  без открытия приложения» (BroadcastReceiver) не сделан — после гибели процесса там некому править
-  снимок состояния.
+  [{id, label}], site, via, ignoredText, undoLabel}`).
+  - **Create rule** — `PendingIntent.getActivity` на `MainActivity` с действием `EVENT_ACT` (id события,
+    `rule`, `site`, `via` в extras — событие к тому времени может выпасть из журнала) → `NotifyChannel.onIntent`
+    убирает это уведомление (кнопка само его не снимает) и шлёт Dart `eventAct` (холодный старт —
+    `takeLaunchAction` после запуска оболочки) → `NotifyIo.actionTaps` → оболочка открывает редактор правила
+    с хостом. Приложение выходит на передний план.
+  - **Ignore site приложение не открывает.** Кнопка — `PendingIntent.getBroadcast` на `EventActionReceiver`
+    (`exported=false`, манифест оверлея). Приёмник (1) дописывает выбор (`+host`) в очередь `IgnoreQueue`
+    (SharedPreferences `jorm_notify/ignoreQueue`, по порядку) — ничего не теряется, пока Dart не запущен;
+    (2) заменяет то же уведомление (тот же id) на «{host} added to ignored sites» (тексты приходят из Dart
+    вместе с событием, язык приложения) с кнопкой «Undo»: вне группы, без звука, `setTimeoutAfter` 10 с,
+    сводка пересчитывается без звука; тап по нему — как по событию; (3) если движок жив, шлёт в Dart
+    `ignoreQueued`. Dart (`SystemNotifier.drainIgnoreOps`) забирает очередь (`takeIgnoreOps`, очередь
+    очищается) при старте оболочки, при возврате на передний план и по каждому `ignoreQueued`, ждёт `host.ready`
+    и по порядку применяет через `LogsController.ignoreSite` / `unignoreSite` — те же сохранение и
+    `updateSettings` ядру, что и из приложения. Если процесс жив (туннель держит его), список меняется сразу;
+    после гибели процесса — на следующем запуске (туннеля тогда нет, уведомлять нечему). **Undo** — `-host` в
+    очередь и `cancel` уведомления (оно просто исчезает; «removed» не показывается: лишний текст, язык и
+    жизненный цикл ради ничего). Кнопка `ignore` от уведомления старой сборки (activity-интент) по-прежнему
+    обрабатывается оболочкой как раньше (тост «{host} ignored · Undo»).
+- **Тап по уведомлению** (`ACTION_OPEN_EVENT` + id события; тап по свёрнутой сводке группы — id самого нового
+  события группы, а не просто «открыть приложение») → `openEvent` / `takeLaunchEvent` → оболочка закрывает
+  оставленные листы и диалоги (`popUntil` первого маршрута) и открывает Logs → Events на событии
+  (`LogsController.showEvent`: фильтр сбрасывается, если прячет событие).
 - **Разрешение** (API 33+; ниже — только переключатель системы). Запрос один раз за установку при первом
   успешном подключении (`request(once: true)`, нативный флаг в SharedPreferences; мастер-переключатель
   Notifications выключен — не просим) и когда пользователь включает переключатель на странице

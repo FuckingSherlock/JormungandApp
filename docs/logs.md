@@ -17,6 +17,13 @@
 | основное (`cap`) | 5000 | всё, кроме «шума»: заметки ядра, предупреждения и ошибки sing-box, служебные строки |
 | шум (`noiseCap`) | 500 | успешные соединения (`inbound/… connection`, `outbound/… connection`, `packet connection`), строки `router: found package name: …` / `found process path: …`, и упавшие соединения **игнорируемых сайтов** (`IgnoredSites`) |
 
+Классификация шквальных строк (`logbook.dart`): соединения — `connLineRe` (включая multiplex, UoT, DNS packet,
+`[user]`; **теги серверов содержат `::`**, например `outbound/vless[route0-entry/src1::n3]: outbound connection
+to …` — раньше такие строки не распознавались, забивали основное кольцо и игнорировали «Connections»);
+`found package name` / `found user` / `found neighbor` (`foundLineRe`); ответы DNS уровня info
+(`dns: exchanged|cached|optimistic|refreshed|lookup succeed for …`, `dnsLineRe`). Всё это — шум-кольцо и
+скрыто при выключенном «Connections».
+
 Решает `isNoiseLine(text)` (`logbook.dart`): предупреждение или ошибка никогда не шум (кроме строк игнорируемого
 сайта — они в шум-кольце, но остаются предупреждениями). `found package name` — по одной строке на каждое
 соединение, шквал одного приложения (Telegram) раньше занимал 79 % основного кольца.
@@ -311,7 +318,7 @@ log»), `network` (нет связи с сервером отчётов), `rejec
 
 Код: `app/lib/pages/logs_page.dart`, `core/logs_controller.dart`, `widgets/follow_list.dart` (`AnchoredList`,
 `FollowController`), `widgets/log_parts.dart` (группы Raw), `widgets/raw_filter_sheet.dart`,
-`widgets/event_rows.dart` (лист фильтра Events), `widgets/ignored_sites.dart` (меню ⋮).
+`widgets/event_rows.dart` (лист фильтра Events), `widgets/ignored_sites.dart` (строка и лист «Ignored sites»).
 
 **Шапка одна на обе вкладки:** [фильтр с бейджем] [поиск] [⋮]. Больше в шапке ничего нет: корзины, «скачать»
 и «копировать» отдельными иконками нет.
@@ -319,15 +326,24 @@ log»), `network` (нет связи с сервером отчётов), `rejec
 - **Фильтр** открывает лист своей вкладки. Бейдж на иконке — сколько в этом листе настроено не по умолчанию
   (поиск считается отдельно — его подсвечивает своя кнопка).
   - Events: типы по категориям, «Background», «Show my actions» (без поиска внутри листа; поиск —
-    кнопка в шапке).
+    кнопка в шапке). Категории **по умолчанию свёрнуты**; что пользователь развернул, запоминается
+    (`logCfg.openCats`, `LogsController.catOpen` / `toggleCatOpen`) и при повторном открытии листа остаётся
+    развёрнутым. Плашки «Filtered: …» над лентой **нет** (активный фильтр виден по бейджу на кнопке, Reset —
+    в листе).
   - Raw (`showRawFilter`): **уровень** (All / Warnings & errors); **Connections** — переключатель с
-    пояснением «Successful connections: one line per connection, thousands per minute. Hidden by default;
-    failed connections are always shown.»; **«N from ignored sites»** — переключатель, когда такие строки
+    пояснением «Successful connections and DNS answers: one line each, thousands per minute. Hidden by
+    default; failed connections are always shown.»; **«N from ignored sites»** — переключатель, когда такие строки
     есть (или он включён — чтобы его можно было выключить); **Reset** — только когда что-то настроено.
     Переключатели хранятся в `logCfg` (`showConns`, `showIgnored`).
+  - **«Ignored sites»** (`IgnoredSitesRow`, `widgets/ignored_sites.dart`) — отдельная настройка, строка есть в
+    обоих листах (Events: в блоке «Kept with your settings»; Raw: отдельной группой под Reset). Не входит в
+    бейдж фильтра, Reset её не трогает. Из меню ⋮ убрана.
+  - **Группы Raw** (`groupRaw`, `log_parts.dart`) ограничены `rawGroupMax = 24` строками: секунда шквала раньше
+    была одной гигантской строкой, строившейся целиком (подвисание). Серия продолжается в следующей группе
+    со своей meta-строкой; нумерация первых групп стабильна, меняется только последняя.
 - **Поиск** — поле под вкладками; у каждой вкладки свой запрос; закрытие поля очищает запрос.
 - **⋮**: «Clear events» / «Clear raw log» (по текущей вкладке; очистка событий спрашивает подтверждение),
-  «Download log» (весь отчёт текстом, как в «Отправке»), «Send report» (лист отправки), «Ignored sites».
+  «Download log» (весь отчёт текстом, как в «Отправке»), «Send report» (лист отправки).
   **Copy убран**: делать буфер из тысяч строк не для чего, а «Download log» отдаёт то же файлом
   (`LogsController.exportText` удалён).
 

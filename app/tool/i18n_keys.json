@@ -1516,6 +1516,7 @@
   "Clear raw log": "clearRawLog",
   "Filter log": "filterLog",
   "Level": "level",
-  "Successful connections: one line per connection, thousands per minute. Hidden by default; failed connections are always shown.": "successfulConnectionsOneLinePerConnectio",
-  "Connections hidden ({#0})": "connectionsHidden"
+  "Successful connections and DNS answers: one line each, thousands per minute. Hidden by default; failed connections are always shown.": "successfulConnectionsOneLinePerConnectio",
+  "Connections hidden ({#0})": "connectionsHidden",
+  "{0} added to ignored sites": "addedToIgnoredSites"
 }

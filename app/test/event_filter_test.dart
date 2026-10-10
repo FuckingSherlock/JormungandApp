@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/core/event_text.dart';
 import 'package:jormungand/l10n/l10n.dart';
 import 'package:jormungand/shell/home_shell.dart';
+import 'package:jormungand/widgets/form_parts.dart' show MiniToggle;
 import 'package:jormungand_core/jormungand_core.dart';
 
 import 'fake_core_host.dart';
@@ -56,6 +57,46 @@ void main() {
     expect(w.searchText(unstable).toLowerCase(), contains('auto'));
   });
 
+  testWidgets('filter sheet: categories start folded, an unfolded one is remembered; no «Filtered» bar', (tester) async {
+    final host = FakeCoreHost();
+    host.addEvent('auto', 'unstable', level: 'warn', data: {'id': 'e0', 'strikes': 2, 'holdMs': 60000});
+    host.addEvent('conn', 'lost', level: 'warn');
+    host.addEvent('site', 'unreachable', level: 'warn', bg: true, data: {'host': 'a.example.org', 'tried': const []});
+    await pumpApp(tester, host);
+    await tester.tap(find.byIcon(AppTab.logs.icon));
+    await tester.pumpAndSettle();
+    final words = EventWords(lookupAppLocalizations(const Locale('en')), host.catalog);
+    Future<void> openSheet() async {
+      await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+      await tester.pumpAndSettle();
+    }
+
+    await openSheet();
+    expect(find.byKey(const ValueKey('evCount:auto/unstable')), findsNothing, reason: 'all folded on the first open');
+    expect(find.byKey(const ValueKey('evCount:conn/lost')), findsNothing);
+    await tester.tap(find.text(words.catLabel('auto')).last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('evCount:auto/unstable')), findsOneWidget);
+    expect(find.byKey(const ValueKey('evCount:conn/lost')), findsNothing);
+    expect((host.catalog.unknown['logCfg'] as Map)['openCats'], ['auto']);
+
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    await openSheet();
+    expect(find.byKey(const ValueKey('evCount:auto/unstable')), findsOneWidget, reason: 'still unfolded');
+    expect(find.byKey(const ValueKey('evCount:conn/lost')), findsNothing, reason: 'the other one still folded');
+
+    // with a filter on there is a badge, but no «Filtered: …» text on the page
+    await tester.ensureVisible(find.byKey(const ValueKey('evFilterBg')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byKey(const ValueKey('evFilterBg')), matching: find.byType(MiniToggle)));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('logsFilterBadge')), findsOneWidget);
+    expect(find.textContaining('Filtered'), findsNothing);
+  });
+
   testWidgets('filter sheet: counts per type, empty ones dimmed; an event hides its type or shows it alone', (tester) async {
     final host = FakeCoreHost();
     for (var i = 0; i < 3; i++) {
@@ -69,11 +110,17 @@ void main() {
     await tester.tap(find.byIcon(Icons.filter_alt_outlined));
     await tester.pumpAndSettle();
     String count(String key) => tester.widget<Text>(find.byKey(ValueKey('evCount:$key'))).data!;
-    // categories with events start unfolded
+    // categories start folded; unfold the two used here
+    final words = EventWords(lookupAppLocalizations(const Locale('en')), host.catalog);
+    expect(find.byKey(const ValueKey('evCount:auto/unstable')), findsNothing);
+    for (final cat in ['auto', 'conn']) {
+      await tester.tap(find.text(words.catLabel(cat)).last);
+      await tester.pumpAndSettle();
+    }
     expect(count('auto/unstable'), '3');
     expect(count('conn/lost'), '1');
     expect(count('conn/failing'), '0');
-    expect(find.byKey(const ValueKey('evCount:core/crashed')), findsNothing, reason: 'an empty category stays folded');
+    expect(find.byKey(const ValueKey('evCount:core/crashed')), findsNothing, reason: 'another category stays folded');
     // the sheet has no search field any more
     expect(find.byType(TextField), findsNothing);
     await tester.tapAt(const Offset(5, 5));

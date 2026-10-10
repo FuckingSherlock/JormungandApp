@@ -63,6 +63,7 @@
   "Ignore site": "Игнорировать сайт",
   "{0} ignored": "{0} игнорируется",
   "Undo": "Отменить",
+  "{0} added to ignored sites": "{0} добавлен в игнорируемые сайты",
   "Ignored sites": "Игнорируемые сайты",
   "No events, notifications or failed-request lines for these sites and their subdomains. Routing is not affected.": "Для этих сайтов и их поддоменов нет событий, уведомлений и строк об ошибках запросов. Маршрутизация не меняется.",
   "No ignored sites": "Игнорируемых сайтов нет",
@@ -169,6 +170,6 @@
   "Clear raw log": "Очистить сырой лог",
   "Filter log": "Фильтр лога",
   "Level": "Уровень",
-  "Successful connections: one line per connection, thousands per minute. Hidden by default; failed connections are always shown.": "Успешные соединения: по строке на каждое, тысячи в минуту. По умолчанию скрыты; неудачные соединения показываются всегда.",
+  "Successful connections and DNS answers: one line each, thousands per minute. Hidden by default; failed connections are always shown.": "Успешные соединения и ответы DNS: по строке на каждое, тысячи в минуту. По умолчанию скрыты; неудачные соединения показываются всегда.",
   "Connections hidden ({#0})": "Соединения скрыты ({#0})"
 }

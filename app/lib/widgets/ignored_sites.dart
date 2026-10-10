@@ -7,8 +7,9 @@ import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
 import 'report_actions.dart';
+import 'rules_parts.dart' show ChevronRow;
 
-/// Ignored sites (Logs menu): a site that is dead by itself and that some program keeps opening
+/// Ignored sites (the filter sheets of Logs): a site that is dead by itself and that some program keeps opening
 /// floods the journal, the toasts and the raw log; the host and its subdomains can be silenced.
 /// Only what is shown changes, routing never looks at the list. The list lives in
 /// `notifCfg.ignoredSites`, the [LogsController] edits it.
@@ -30,6 +31,9 @@ void ignoreSiteWithUndo(
     ..showSnackBar(
       SnackBar(
         content: Text(l10n.ignored(shown)),
+        // a SnackBar with an action stays until dismissed by default (persist): this one goes by itself
+        persist: false,
+        duration: const Duration(seconds: 6),
         action: h == null
             ? null
             : SnackBarAction(label: l10n.undo, onPressed: () => logs.unignoreSite(h)),
@@ -37,9 +41,31 @@ void ignoreSiteWithUndo(
     );
 }
 
-/// Logs ⋮ → Ignored sites: the list with add / remove / clear.
+/// The list with add / remove / clear: opened from the row in the filter sheets of both tabs
+/// ([IgnoredSitesRow]); a setting of its own, not part of what the filter counts or Reset clears.
 Future<void> showIgnoredSites(BuildContext context, LogsController logs) =>
     showAppSheet<void>(context, builder: (_) => _IgnoredSitesSheet(logs: logs));
+
+/// «Ignored sites» as a row of a filter sheet: the first sites (or «None») under the label, a
+/// chevron into the list. Lives beside the filter's own switches, apart from them (it is kept
+/// with the settings, a Reset does not touch it).
+class IgnoredSitesRow extends StatelessWidget {
+  const IgnoredSitesRow({super.key, required this.logs});
+
+  final LogsController logs;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final sites = logs.ignoredSites;
+    return ChevronRow(
+      key: const ValueKey('ignoredSitesRow'),
+      label: l10n.ignoredSites,
+      hint: sites.isEmpty ? l10n.none : '${sites.take(3).join(', ')}${sites.length > 3 ? ' …' : ''}',
+      onTap: () => showIgnoredSites(context, logs),
+    );
+  }
+}
 
 class _IgnoredSitesSheet extends StatefulWidget {
   const _IgnoredSitesSheet({required this.logs});
@@ -202,8 +228,8 @@ Future<void> confirmClearEvents(BuildContext context, LogsController logs) {
   );
 }
 
-/// ⋮ of the Logs header (both tabs): Clear (of the tab on screen), the report (download, send)
-/// and the ignored sites. The filter and the search have their own buttons.
+/// ⋮ of the Logs header (both tabs): Clear (of the tab on screen) and the report (download, send).
+/// The filter (with the ignored sites in it) and the search have their own buttons.
 Future<void> showLogsMenu(BuildContext context, LogsController logs) {
   final l10n = context.l10n;
   final events = logs.tab == 'events';
@@ -244,17 +270,6 @@ Future<void> showLogsMenu(BuildContext context, LogsController logs) {
             onTap: () {
               Navigator.of(sheet).pop();
               showSendReport(context, logs);
-            },
-          ),
-          MenuRow(
-            icon: const Icon(Icons.visibility_off_outlined),
-            label: l10n.ignoredSites,
-            sub: logs.ignoredSites.isEmpty
-                ? l10n.none
-                : '${logs.ignoredSites.take(3).join(', ')}${logs.ignoredSites.length > 3 ? ' …' : ''}',
-            onTap: () {
-              Navigator.of(sheet).pop();
-              showIgnoredSites(context, logs);
             },
           ),
         ],

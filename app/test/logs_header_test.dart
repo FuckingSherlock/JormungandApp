@@ -3,8 +3,10 @@
 // that changed is rebuilt, and a list scrolled up keeps the row in view where it is.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/shell/home_shell.dart';
-import 'package:jormungand/widgets/log_parts.dart' show RawGroupView;
+import 'package:jormungand/widgets/log_parts.dart' show RawGroupView, groupRaw, rawGroupMax;
+import 'package:jormungand_core/jormungand_core.dart' show LogLine;
 
 import 'fake_core_host.dart';
 import 'home_test.dart' show pumpApp;
@@ -75,7 +77,7 @@ void main() {
     same();
   });
 
-  testWidgets('⋮: Clear (of the tab), Download log, Send report, Ignored sites; no Copy', (tester) async {
+  testWidgets('⋮: Clear (of the tab), Download log, Send report; no Copy, no Ignored sites', (tester) async {
     final host = FakeCoreHost();
     host.addEvent('conn', 'lost', level: 'warn');
     host.addLogLine('router: matched rule');
@@ -88,7 +90,7 @@ void main() {
     expect(find.text('Clear events'), findsOneWidget);
     expect(find.text('Download log'), findsOneWidget);
     expect(find.text('Send report'), findsOneWidget);
-    expect(find.text('Ignored sites'), findsOneWidget);
+    expect(find.text('Ignored sites'), findsNothing, reason: 'it lives in the filter sheets');
     expect(find.text('Copy all'), findsNothing);
 
     // Events: Clear asks first
@@ -141,7 +143,7 @@ void main() {
     expect(find.text('Filter log'), findsOneWidget);
     expect(
       find.text(
-        'Successful connections: one line per connection, thousands per minute. Hidden by default; failed connections are always shown.',
+        'Successful connections and DNS answers: one line each, thousands per minute. Hidden by default; failed connections are always shown.',
       ),
       findsOneWidget,
     );
@@ -165,6 +167,63 @@ void main() {
     await _closeSheet(tester);
     expect(find.text('Connections hidden (2)'), findsOneWidget);
     expect(find.text(_conn), findsNothing);
+  });
+
+  testWidgets('Raw filter sheet: Ignored sites is a separate setting, outside the count and Reset', (tester) async {
+    final host = FakeCoreHost();
+    host.notif.ignoredSites = ['dead.example.com'];
+    host.addLogLine(_conn);
+    host.addLogLine('router: matched rule');
+    await pumpApp(tester, host);
+    await _openLogs(tester, raw: true);
+
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ignoredSitesRow')), findsOneWidget);
+    expect(find.byKey(const ValueKey('rawFilterReset')), findsNothing, reason: 'the row is no filter setting');
+    await tester.tap(find.byKey(const ValueKey('rawConns')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('rawFilterReset')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('rawFilterReset')));
+    await tester.pumpAndSettle();
+    expect(host.notif.ignoredSites, ['dead.example.com'], reason: 'Reset leaves the list alone');
+    expect(find.byKey(const ValueKey('ignoredSitesRow')), findsOneWidget);
+    await _closeSheet(tester);
+    expect(find.byKey(const ValueKey('logsFilterBadge')), findsNothing);
+  });
+
+  test('groupRaw: a run of one second is cut into groups of 24; only the last one changes as lines come', () {
+    LogLine line(int n, {int sec = 5}) => LogLine(n: n, t: _t0 + sec * 1000 + n, src: 'sing-box', lvl: 'info', msg: 'm$n');
+    expect(rawGroupMax, 24);
+    final lines = [for (var i = 1; i <= 60; i++) line(i)];
+    var g = groupRaw(lines);
+    expect(g.map((e) => e.lines.length), [24, 24, 12]);
+    expect(g.map((e) => e.first.n), [1, 25, 49]);
+
+    lines.addAll([for (var i = 61; i <= 70; i++) line(i)]);
+    g = groupRaw(lines);
+    expect(g.map((e) => e.lines.length), [24, 24, 22]);
+    expect(g.map((e) => e.first.n), [1, 25, 49], reason: 'the first groups keep their numbers');
+
+    lines.add(line(71, sec: 6));
+    g = groupRaw(lines);
+    expect(g.length, 4, reason: 'another second starts a new group');
+    expect(g.last.lines.single.n, 71);
+  });
+
+  testWidgets('Raw: 70 lines of one second still render, down to the last', (tester) async {
+    final host = FakeCoreHost();
+    for (var i = 0; i < 70; i++) {
+      host.addLogLine('same second $i', t: _t0 + i);
+    }
+    await pumpApp(tester, host);
+    await _openLogs(tester, raw: true);
+    final pos = _rawPosition(tester);
+    pos.jumpTo(pos.maxScrollExtent);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('same second 69', findRichText: true), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the Raw sheet and status line fit 320 dp at 120 % text', (tester) async {

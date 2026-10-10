@@ -19,8 +19,12 @@ import io.flutter.plugin.common.MethodChannel
  *                           reports); with `once` the dialog is shown at most once per install, so a
  *                           plain connect never nags. Answers with the state after the dialog
  *  openSettings  -> null    the app's system notification settings
- *  post          -> null    args {id: Int, title, text, actions?: [{id, label}], site?, via?}: a journal event as a
- *                           notification (grouped); a button opens the app and comes back as `eventAct`
+ *  post          -> null    args {id: Int, title, text, actions?: [{id, label}], site?, via?, ignoredText?,
+ *                           undoLabel?}: a journal event as a notification (grouped); a button opens the app and
+ *                           comes back as `eventAct`, except `ignore`: that one works without the app
+ *                           ([EventActionReceiver]; [ignoredText] / [undoLabel] are the texts it shows)
+ *  takeIgnoreOps -> List<Map> [{op: ignore | unignore, site}] the «Ignore site» / «Undo» choices made on the shade
+ *                           since the last call, in order (the queue is emptied)
  *  cancelEvents  -> null    removes the event notifications (the app came to the front)
  *  setStatus     -> null    args {node: String?, visible: Boolean}, either key optional: the entry / server
  *                           shown in the VPN notification; whether it is on the shade at all (kept natively,
@@ -33,6 +37,7 @@ import io.flutter.plugin.common.MethodChannel
  *
  *  Kotlin -> Dart: `openEvent` (Int; a tap on an event notification while Dart listens), `eventAct`
  *  (Map {id, act, site, via}; a button of an event notification while Dart listens) and
+ *  `ignoreQueued` (no args; [EventActionReceiver] queued a choice, Dart reads it with `takeIgnoreOps`) and
  *  `disconnect` (the VPN notification's action; Dart answers true, any error = nobody listens and the
  *  service closes the tunnel itself, see [AppNotifier] / [JormungandVpnService]).
  */
@@ -96,6 +101,8 @@ class NotifyChannel(private val app: Context) {
                     actions,
                     call.argument<String>("site") ?: "",
                     call.argument<String>("via") ?: "",
+                    call.argument<String>("ignoredText") ?: "",
+                    call.argument<String>("undoLabel") ?: "",
                 )
                 result.success(null)
             }
@@ -119,6 +126,7 @@ class NotifyChannel(private val app: Context) {
                 result.success(launchAct)
                 launchAct = null
             }
+            "takeIgnoreOps" -> result.success(IgnoreQueue.take(app))
             else -> result.notImplemented()
         }
     }

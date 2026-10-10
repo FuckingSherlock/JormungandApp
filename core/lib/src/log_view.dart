@@ -269,9 +269,17 @@ class EventFilter {
 
 /// The kept part of the Logs state (`unknown['logCfg']` of the snapshot).
 class LogCfg {
-  LogCfg({this.showOwn = false, this.showConns = false, this.showIgnored = false, Set<int>? seen, this.rawTop, Set<int>? rawUnread})
-      : seen = seen ?? <int>{},
-        rawUnread = rawUnread ?? <int>{};
+  LogCfg({
+    this.showOwn = false,
+    this.showConns = false,
+    this.showIgnored = false,
+    Set<int>? seen,
+    this.rawTop,
+    Set<int>? rawUnread,
+    Set<String>? openCats,
+  })  : seen = seen ?? <int>{},
+        rawUnread = rawUnread ?? <int>{},
+        openCats = openCats ?? <String>{};
 
   factory LogCfg.fromJson(Object? j) {
     if (j is! Map) return LogCfg();
@@ -294,6 +302,7 @@ class LogCfg {
       // -1: the core had no line yet (its numbers start at 0)
       rawTop: top is num && top >= -1 ? top.toInt() : null,
       rawUnread: unread,
+      openCats: {for (final x in (j['openCats'] as List? ?? const [])) if (x is String) x},
     );
   }
 
@@ -314,10 +323,14 @@ class LogCfg {
   /// The numbers of the raw lines not read yet.
   final Set<int> rawUnread;
 
+  /// The categories the user unfolded in the Events filter sheet (all folded by default); kept.
+  final Set<String> openCats;
+
   Map<String, dynamic> toJson() => {
     'showOwn': showOwn,
     'showConns': showConns,
     'showIgnored': showIgnored,
+    'openCats': openCats.toList()..sort(),
     'seen': seen.toList()..sort(),
     'rawUnread': unreadRanges(rawUnread),
     'rawTop': rawTop,
@@ -362,7 +375,10 @@ class LogLine {
   /// connection of sing-box (`[id 5ms] inbound/mixed[mixed-in]: inbound connection to host:443`, also
   /// `outbound connection`, `packet connection`) or the program behind one (`router: found package
   /// name: org.x`, `found process path`). Warnings and errors are never one ([isNoiseLine]).
-  bool get isConn => !problem && src != 'core' && isNoiseLine(msg);
+  ///
+  /// Decided once per line (lazily): the Raw view asks for every kept line on each filter pass and
+  /// each count, and two regexes over thousands of lines were the cost of opening and scrolling it.
+  late final bool isConn = !problem && src != 'core' && isNoiseLine(msg);
 }
 
 /// The events list as the Logs tab keeps it, fed by `events()` pages and the push stream.

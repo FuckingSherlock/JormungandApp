@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger
  *    by Dart only while the app is not in the foreground. One notification per event (a tap opens
  *    Logs -> Events at it), all in one group with a summary, so a burst is a single entry on the
  *    shade; at most [MAX_CHILDREN] stay, the oldest are dropped. Only the summary makes a sound,
- *    and not more often than every [ALERT_GAP_MS].
+ *    and not more often than every [ALERT_GAP_MS]. A tap on a notification (or on the collapsed
+ *    group: its newest event) opens Logs -> Events at the event. «Ignore site» works without the app
+ *    ([EventActionReceiver]).
  */
 object AppNotifier {
     const val VPN_CHANNEL = "vpn"
@@ -32,6 +34,16 @@ object AppNotifier {
     const val EXTRA_ACT = "jorm_act"
     const val EXTRA_SITE = "jorm_site"
     const val EXTRA_VIA = "jorm_via"
+
+    /**
+     * «Ignore site» and its «Undo» do not open the app: broadcasts to [EventActionReceiver]. The texts
+     * of the replaced notification come from Dart with the event (the app's language, not the system's).
+     */
+    const val ACTION_SITE_IGNORE = "dev.jormungand.app.notif.SITE_IGNORE"
+    const val ACTION_SITE_UNDO = "dev.jormungand.app.notif.SITE_UNDO"
+    const val EXTRA_IGNORED_TEXT = "jorm_ignored_text"
+    const val EXTRA_UNDO_LABEL = "jorm_undo_label"
+    private const val CONFIRM_MS = 10_000L
 
     private const val GROUP = "jorm.events"
     private const val SUMMARY_ID = 2
@@ -118,10 +130,30 @@ object AppNotifier {
             .build()
     }
 
+    /** A tap on the body of an event's notification: the app opens at that event (Logs -> Events). */
+    private fun openEvent(ctx: Context, eventId: Int, code: Int): PendingIntent =
+        openApp(ctx, { setAction(ACTION_OPEN_EVENT).putExtra(EXTRA_EVENT, eventId) }, code)
+
+    private fun broadcast(ctx: Context, action: String, code: Int, extra: Intent.() -> Unit): PendingIntent {
+        val intent = Intent(ctx, EventActionReceiver::class.java).setAction(action).apply(extra)
+        return PendingIntent.getBroadcast(ctx, code, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    private fun undoButton(ctx: Context, eventId: Int, site: String, label: String): Notification.Action {
+        val pi = broadcast(ctx, ACTION_SITE_UNDO, notifId(eventId) * 4 + 3) {
+            putExtra(EXTRA_EVENT, eventId).putExtra(EXTRA_SITE, site)
+        }
+        return Notification.Action.Builder(Icon.createWithResource(ctx, android.R.drawable.ic_menu_revert), label, pi).build()
+    }
+
+    private fun notifId(eventId: Int) = EVENT_BASE + (eventId and 0xFFFFF)
+
     /**
      * One journal event as a notification ([eventId]: the journal id, what a tap hands back to Dart).
-     * [actions] (id to label) are its buttons; a tap on one opens the app and hands Dart the action id
-     * with the event's [site] / [via] (the event itself may be long gone from the journal).
+     * [actions] (id to label) are its buttons. `rule` opens the app and hands Dart the action id with the
+     * event's [site] / [via] (the event itself may be long gone from the journal). `ignore` does not open
+     * anything: [EventActionReceiver] records the choice and [ignoredEvent] swaps the notification for
+     * [ignoredText] with an [undoLabel] button.
      */
     fun postEvent(
         ctx: Context,
@@ -131,11 +163,13 @@ object AppNotifier {
         actions: List<Pair<String, String>> = emptyList(),
         site: String = "",
         via: String = "",
+        ignoredText: String = "",
+        undoLabel: String = "",
     ) {
         val nm = manager(ctx)
         if (!nm.areNotificationsEnabled()) return
         ensureChannels(ctx)
-        val nid = EVENT_BASE + (eventId and 0xFFFFF)
+        val nid = notifId(eventId)
         if (children(nm).isEmpty()) burst.set(0) // everything before was dealt with
         burst.incrementAndGet()
         val b = Notification.Builder(ctx, EVENTS_CHANNEL)
@@ -143,24 +177,32 @@ object AppNotifier {
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
-            .setContentIntent(
-                openApp(ctx, { setAction(ACTION_OPEN_EVENT).putExtra(EXTRA_EVENT, eventId) }, nid),
-            )
+            .setContentIntent(openEvent(ctx, eventId, nid))
             .setAutoCancel(true)
             .setGroup(GROUP)
             .setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
         for ((i, a) in actions.withIndex()) {
-            val pi = openApp(
-                ctx,
-                {
-                    setAction(ACTION_EVENT_ACT)
-                        .putExtra(EXTRA_EVENT, eventId)
-                        .putExtra(EXTRA_ACT, a.first)
+            val code = nid * 4 + 1 + i // its own request code: one PendingIntent per button
+            val pi = if (a.first == "ignore") {
+                broadcast(ctx, ACTION_SITE_IGNORE, code) {
+                    putExtra(EXTRA_EVENT, eventId)
                         .putExtra(EXTRA_SITE, site)
-                        .putExtra(EXTRA_VIA, via)
-                },
-                nid * 4 + 1 + i, // its own request code: one PendingIntent per button
-            )
+                        .putExtra(EXTRA_IGNORED_TEXT, ignoredText.ifEmpty { site })
+                        .putExtra(EXTRA_UNDO_LABEL, undoLabel)
+                }
+            } else {
+                openApp(
+                    ctx,
+                    {
+                        setAction(ACTION_EVENT_ACT)
+                            .putExtra(EXTRA_EVENT, eventId)
+                            .putExtra(EXTRA_ACT, a.first)
+                            .putExtra(EXTRA_SITE, site)
+                            .putExtra(EXTRA_VIA, via)
+                    },
+                    code,
+                )
+            }
             b.addAction(
                 Notification.Action.Builder(Icon.createWithResource(ctx, android.R.drawable.ic_menu_info_details), a.second, pi).build(),
             )
@@ -171,10 +213,33 @@ object AppNotifier {
         postSummary(ctx, nm)
     }
 
+    /**
+     * The «Ignore site» button was pressed ([EventActionReceiver]): the event's notification is replaced, in
+     * place (same id), by a short «[text]» with one [undoLabel] button. It leaves the group (it is no
+     * longer an event to look at), makes no sound and goes by itself after [CONFIRM_MS]; a tap on it still
+     * opens the app at the event.
+     */
+    fun ignoredEvent(ctx: Context, eventId: Int, site: String, text: String, undoLabel: String) {
+        val nm = manager(ctx)
+        val nid = notifId(eventId)
+        val b = Notification.Builder(ctx, EVENTS_CHANNEL)
+            .setSmallIcon(ctx.applicationInfo.icon)
+            .setContentTitle(text.ifEmpty { site })
+            .setContentIntent(openEvent(ctx, eventId, nid))
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setTimeoutAfter(CONFIRM_MS)
+        if (undoLabel.isNotEmpty()) b.addAction(undoButton(ctx, eventId, site, undoLabel))
+        nm.notify(nid, b.build())
+        postSummary(ctx, nm, alert = false) // it left the group: the count and the lines follow
+    }
+
     private fun children(nm: NotificationManager) =
         nm.activeNotifications.filter { it.id != SUMMARY_ID && it.notification.group == GROUP }
 
-    private fun postSummary(ctx: Context, nm: NotificationManager) {
+    /** [alert]: a new event arrived (the summary may make a sound); off for a summary redone after a removal. */
+    private fun postSummary(ctx: Context, nm: NotificationManager, alert: Boolean = true) {
         val kids = children(nm).sortedBy { it.postTime }
         if (kids.isEmpty()) {
             nm.cancel(SUMMARY_ID)
@@ -182,7 +247,7 @@ object AppNotifier {
         }
         val total = maxOf(kids.size, burst.get())
         val now = System.currentTimeMillis()
-        val quiet = now - lastAlert < ALERT_GAP_MS
+        val quiet = !alert || now - lastAlert < ALERT_GAP_MS
         if (!quiet) lastAlert = now
         val inbox = Notification.InboxStyle()
         for (k in kids.takeLast(MAX_CHILDREN).reversed()) {
@@ -197,7 +262,8 @@ object AppNotifier {
                 .setContentTitle("Jormungand")
                 .setContentText(summary)
                 .setStyle(inbox.setSummaryText(summary))
-                .setContentIntent(openApp(ctx, {}, SUMMARY_ID))
+                // a tap on the collapsed group opens the app at the newest event of it (not just the app)
+                .setContentIntent(openEvent(ctx, kids.last().id - EVENT_BASE, SUMMARY_ID))
                 .setAutoCancel(true)
                 .setGroup(GROUP)
                 .setGroupSummary(true)
@@ -210,8 +276,8 @@ object AppNotifier {
     /** The notification of one event (a button of it was pressed: a button does not dismiss it by itself). */
     fun cancelEvent(ctx: Context, eventId: Int) {
         val nm = manager(ctx)
-        nm.cancel(EVENT_BASE + (eventId and 0xFFFFF))
-        postSummary(ctx, nm)
+        nm.cancel(notifId(eventId))
+        postSummary(ctx, nm, alert = false)
     }
 
     /** The app is in front again: what it posted about events is stale. */

@@ -79,6 +79,26 @@ class FakeNotifyIo implements NotifyIo {
 
   NoteActionTap? launchAction;
 
+  /// The «Ignore site» / «Undo» choices made on the shade that Dart has not taken yet.
+  final ignoreQueue = <SiteIgnoreOp>[];
+  final _queued = StreamController<void>.broadcast();
+
+  /// The native side queues a choice and pings Dart ([ping] false: Dart was not listening).
+  void shade(String op, String site, {bool ping = true}) {
+    ignoreQueue.add(SiteIgnoreOp(ignore: op == 'ignore', site: site));
+    if (ping) _queued.add(null);
+  }
+
+  @override
+  Stream<void> get ignoreQueued => _queued.stream;
+
+  @override
+  Future<List<SiteIgnoreOp>> takeIgnoreOps() async {
+    final ops = List.of(ignoreQueue);
+    ignoreQueue.clear();
+    return ops;
+  }
+
   @override
   Future<NoteActionTap?> takeLaunchAction() async {
     final a = launchAction;
@@ -280,6 +300,58 @@ void main() {
       io.press(const NoteActionTap(id: 0, action: 'rule', site: 'dead.example.com', via: 'nope'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(TextField, 'dead.example.com'), findsOneWidget);
+    });
+
+    testWidgets('Ignore site is done natively: the notification carries its words, the choice comes as a queue', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      goBackground(tester);
+      host.addEvent('site', 'unreachable', level: 'warn', data: {'host': 'dead.example.com', 'tried': const []});
+      await settle(tester);
+      final note = io.posted.single;
+      expect(note.ignoredText, 'dead.example.com added to ignored sites');
+      expect(note.undoLabel, 'Undo');
+
+      // pressed on the shade: no app, no toast; the list changes and Undo takes it back
+      io.shade('ignore', 'dead.example.com');
+      await tester.pump();
+      expect(host.notif.ignoredSites, ['dead.example.com']);
+      expect(find.byType(SnackBar), findsNothing);
+      io.shade('unignore', 'dead.example.com');
+      await tester.pump();
+      expect(host.notif.ignoredSites, isEmpty);
+      expect(io.ignoreQueue, isEmpty);
+    });
+
+    testWidgets('the words of the replaced notification follow the app language', (tester) async {
+      final host = FakeCoreHost(android: true);
+      host.gen.lang = 'ru';
+      await tester.pumpWidget(JormungandApp(coreHost: host));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 4));
+      goBackground(tester);
+      host.addEvent('site', 'unreachable', level: 'warn', data: {'host': 'dead.example.com', 'tried': const []});
+      await settle(tester);
+      expect(io.posted.single.ignoredText, 'dead.example.com добавлен в игнорируемые сайты');
+      expect(io.posted.single.undoLabel, 'Отменить');
+    });
+
+    testWidgets('choices made while no Dart ran are applied, in order, once the app is up', (tester) async {
+      io
+        ..shade('ignore', 'a.example.com', ping: false)
+        ..shade('ignore', 'b.example.com', ping: false)
+        ..shade('unignore', 'a.example.com', ping: false);
+      final host = await open(tester);
+      expect(host.notif.ignoredSites, ['b.example.com']);
+      expect(io.ignoreQueue, isEmpty);
+
+      // one that arrives with the app behind and is only read when it comes back
+      goBackground(tester);
+      io.shade('ignore', 'c.example.com', ping: false);
+      comeBack(tester);
+      await tester.pump();
+      expect(host.notif.ignoredSites, ['b.example.com', 'c.example.com']);
     });
 
     testWidgets('a button that started the app is handled once the app is up', (tester) async {
@@ -586,5 +658,75 @@ void main() {
       expect(find.text('Notifications are blocked'), findsNothing);
       expect(host.notif.flag('subUpdated'), isTrue);
     });
+  });
+
+  group('a tap on an event notification lands on the event', () {
+    testWidgets('a sheet left open is closed first', (tester) async {
+      final host = FakeCoreHost(android: true);
+      host.addEvent('site', 'unreachable', level: 'warn', data: {'host': 'h0.test', 'tried': const []});
+      await tester.pumpWidget(JormungandApp(coreHost: host));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 4));
+      showDialog<void>(
+        context: tester.element(find.byType(HomeShell)),
+        builder: (_) => const AlertDialog(content: Text('left open')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('left open'), findsOneWidget);
+
+      io.tap(0);
+      await tester.pumpAndSettle(const Duration(seconds: 1));
+      expect(find.text('left open'), findsNothing);
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, AppTab.logs.index);
+      expect(find.textContaining('h0.test'), findsWidgets);
+    });
+
+    testWidgets('(the notification started the app)', (tester) async {
+      final host = FakeCoreHost(android: true);
+      for (var i = 0; i < 60; i++) {
+        host.addEvent('site', 'unreachable', level: 'warn', data: {'host': 'h$i.test', 'tried': const []});
+      }
+      io.launchEvent = 5;
+      await tester.pumpWidget(JormungandApp(coreHost: host));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pump(const Duration(seconds: 1));
+      final f = find.textContaining('h5.test');
+      expect(f, findsWidgets);
+      final r = tester.getRect(f.first);
+      final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+      expect(r.top >= 0 && r.bottom <= size.height, isTrue, reason: '$r in $size');
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+    });
+
+    for (final (paused, onLogs) in [(false, false), (true, false), (false, true), (true, true)]) {
+      testWidgets('(lifecycle paused when the tap arrives: $paused; Logs already open: $onLogs)', (tester) async {
+        final host = FakeCoreHost(android: true);
+        for (var i = 0; i < 60; i++) {
+          host.addEvent('site', 'unreachable', level: 'warn', data: {'host': 'h$i.test', 'tried': const []});
+        }
+        await tester.pumpWidget(JormungandApp(coreHost: host));
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(seconds: 4));
+        if (onLogs) {
+          await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Logs')));
+          await tester.pumpAndSettle();
+        }
+        expect(find.textContaining('h5.test'), findsNothing, reason: 'the list is at its end, the event far above');
+        if (paused) _lifecycleTo(AppLifecycleState.paused);
+        io.tap(5);
+        await tester.pump();
+        if (paused) _lifecycleTo(AppLifecycleState.resumed);
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pump(const Duration(seconds: 1));
+        final f = find.textContaining('h5.test');
+        expect(f, findsWidgets);
+        final r = tester.getRect(f.first);
+        final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+        expect(r.top >= 0 && r.bottom <= size.height, isTrue, reason: '$r in $size');
+        await tester.pumpAndSettle(const Duration(seconds: 5));
+      });
+    }
   });
 }

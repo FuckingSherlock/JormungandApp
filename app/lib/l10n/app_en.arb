@@ -3053,6 +3053,14 @@
     }
   },
   "undo": "Undo",
+  "addedToIgnoredSites": "{s0} added to ignored sites",
+  "@addedToIgnoredSites": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
   "ignoredSites": "Ignored sites",
   "noEventsNotificationsOrFailedRequest": "No events, notifications or failed-request lines for these sites and their subdomains. Routing is not affected.",
   "noIgnoredSites": "No ignored sites",
@@ -3324,7 +3332,7 @@
   "clearRawLog": "Clear raw log",
   "filterLog": "Filter log",
   "level": "Level",
-  "successfulConnectionsOneLinePerConnectio": "Successful connections: one line per connection, thousands per minute. Hidden by default; failed connections are always shown.",
+  "successfulConnectionsOneLinePerConnectio": "Successful connections and DNS answers: one line each, thousands per minute. Hidden by default; failed connections are always shown.",
   "connectionsHidden": "Connections hidden ({n0})",
   "@connectionsHidden": {
     "placeholders": {
