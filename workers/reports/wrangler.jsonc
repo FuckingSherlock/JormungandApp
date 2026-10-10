@@ -5,7 +5,7 @@
   "name": "jormungand-reports",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
-  "vars": { "TELEGRAM_CHAT_ID": "4402254934" },
+  "vars": { "TELEGRAM_CHAT_ID": "-1004402254934" },
   "kv_namespaces": [{ "binding": "REPORTS", "id": "9af5db13d4da49a38f96be914952bf67" }],
   "durable_objects": { "bindings": [{ "name": "LIMITER", "class_name": "Limiter" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Limiter"] }]

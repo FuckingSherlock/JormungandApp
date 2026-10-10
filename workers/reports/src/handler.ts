@@ -192,6 +192,30 @@ export async function handle(request: Request, env: Env, ctx: Ctx, deps: Deps = 
             // не JSON — оставим пустым
           }
           result = { at: now.toISOString(), id, status: r.status, ok: r.ok, description };
+          if (!r.ok) {
+            // Отказ: добавим, какой это бот и какие чаты он видел (id чатов не секрет) — по этому
+            // находится верный TELEGRAM_CHAT_ID, не показывая токен.
+            const api = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
+            try {
+              const me = (await (await f(`${api}/getMe`)).json()) as { result?: { id?: number; username?: string } };
+              result.bot = { id: me.result?.id, username: me.result?.username };
+            } catch {
+              // диагностика не обязательна
+            }
+            try {
+              const up = (await (await f(`${api}/getUpdates?limit=50`)).json()) as {
+                result?: { message?: { chat?: { id?: number; type?: string; title?: string; username?: string } }; my_chat_member?: { chat?: { id?: number; type?: string; title?: string } }; channel_post?: { chat?: { id?: number; type?: string; title?: string } } }[];
+              };
+              const seen = new Map<number, { id: number; type?: string; title?: string; username?: string }>();
+              for (const u of up.result ?? []) {
+                const c = u.message?.chat ?? u.my_chat_member?.chat ?? u.channel_post?.chat;
+                if (c && typeof c.id === 'number') seen.set(c.id, { id: c.id, type: c.type, title: c.title, username: (c as { username?: string }).username });
+              }
+              result.seenChats = [...seen.values()].slice(0, 20);
+            } catch {
+              // диагностика не обязательна
+            }
+          }
         } catch (e) {
           // уведомление не критично: отчёт уже сохранён
           result = { at: now.toISOString(), id, ok: false, error: String(e).slice(0, 200) };
