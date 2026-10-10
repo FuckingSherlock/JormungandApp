@@ -231,17 +231,77 @@ log»), `network` (нет связи с сервером отчётов), `rejec
 (сбой на стороне сервера), `failed` (прочее; `message` — текст). Приёмник сообщает их через
 `ReportUploadException(code, message)`.
 
-**Не сделано (намеренно, отдельным этапом).** Настоящий `ReportUploader` и его серверная часть — Worker
-`jormungand-reports`, шифрование на устройстве, выдача `id`. В ядре сейчас только шов:
-`abstract interface class ReportUploader` и `NotConfiguredUploader` (по умолчанию), поэтому отправка
-отвечает `not-configured`. Когда загрузчик появится: он открывает сетевое соединение, значит **обязан быть
-зарегистрирован в `core/lib/src/outside_tunnel.dart`** (реестр «работа вне туннеля»: guard-тесты ядра
-и приложения падают на файле с сетевым API, которого в реестре нет) — с указанием, как соединение
-остаётся вне туннеля (`ownRule`: правило self уводит его direct; иначе отчёт упрётся в выключенный
-прокси именно тогда, когда он нужнее всего).
-
 «Download log» (⋮) от отправки не зависит: тот же отчёт (`report()` без строгого режима) как текст
 (`reportToText`) в файл `jormungand-log-<дата>.txt` через `BackupIo`.
+
+### Загрузчик (`HttpReportUploader`)
+
+`core/lib/src/report_upload.dart`. В настоящих хостах (`app/lib/core/platform_seams.dart` — Android и ПК,
+`core/bin/jormd.dart`) в `CoreService(reportUploader:)` / `Daemon(reportUploader:)` подключён он; без
+параметра (тесты, чужой хост) остаётся `NotConfiguredUploader` и `not-configured`.
+
+`upload(gzipped, meta:)`: шифрует (`encryptReport`, `report_crypto.dart`) открытым ключом `reportPublicKey`,
+проверяет размер конверта и делает `POST` на `reportEndpoint`. Ничего не логирует из содержимого;
+`CoreService.sendReport` пишет в журнал только `id` / код ошибки.
+
+**Конверт v1** (бинарный, всё подряд):
+
+| Байты | Что |
+|---|---|
+| 4 | магия `JRP1` (`4A 52 50 31`): формат и версия |
+| 32 | эфемерный открытый ключ X25519 (новый на каждую отправку) |
+| 12 | nonce AES-GCM (случайный) |
+| остальное | AES-256-GCM: шифртекст `gzip(JSON отчёта)` + тег 16 байт |
+
+Ключ шифрования — `HKDF-SHA256(ikm = X25519(эфемерный закрытый, открытый получателя), salt = эфемерный
+открытый ‖ открытый получателя, info = utf8 "jormungand-report-v1")`, 32 байта. AAD = 4 байта магии.
+Накладные расходы конверта — 64 байта (`reportEnvelopeOverhead`). Новый формат — новая магия (`JRP2`), старый
+расшифровщик отвечает «wrong magic» и не пытается гадать.
+
+**Контракт с Worker'ом:**
+
+- `POST https://jormungand-reports.slackerwarlock.workers.dev/v1/report` (`reportEndpoint`; конструктор
+  загрузчика позволяет подменить — тесты ходят на `HttpServer` в loopback), тело — конверт,
+  `Content-Type: application/octet-stream`. Без заголовка авторизации.
+- Заголовки (всё открытое, из `meta`; отсутствующее не посылается, значения — печатный ASCII ≤ 64 знаков):
+  `X-Jorm-Format` (номер формата отчёта), `X-Jorm-Version`, `X-Jorm-Build` (`versionCode`),
+  `X-Jorm-Platform`, `X-Jorm-Size` (байт конверта).
+- Предел тела — 4 MiB (`reportMaxBytes`): больший конверт клиент не посылает, `rejected` локально
+  («use Download log instead»).
+- Ответ: `200 {"ok":true,"id":"<короткий id, напр. 20261010-k3x9qa>"}` → `ReportReceipt` (`at` — заголовок
+  `Date` ответа). Остальное: `400` / `413` / `415` → `rejected`; `429` → `rejected` (сообщение — «rate limit»);
+  `5xx` → `server`; нет соединения, TLS, обрыв, таймаут → `network`; всё прочее (в т.ч. `200` без `id`,
+  редирект, `401`/`404`) → `failed`. Причина из `{"error": …}` ответа попадает в `message`.
+- Таймауты: соединение 10 с (`reportConnectTimeout`), вся отправка 60 с (`reportUploadTimeout`).
+  Редиректы не выполняются.
+
+**Вне туннеля.** Соединение — своего процесса, поэтому запись `report-upload` в `outside_tunnel.dart`
+(`ownRule`): самоправило (`package_name` на Android, `process_path` на ПК) уводит его `direct` раньше правил
+пользователя, DNS отвечает прямой сервер. Через `tunnel-in` отчёт намеренно не ходит: он нужен именно тогда,
+когда прокси сломан. Kotlin-стороне ничего не нужно: Dart-клиент, как у загрузки подписок и обновлений.
+
+**Ключи.** Пара X25519 для получателя; закрытый ключ — только у разработчика.
+
+- `dart run tool/report_keys.dart` (в `core/`) создаёт пару, пишет закрытый ключ (base64 от 32 байт) в
+  `%USERPROFILE%\.jormungand\report_private.key` (`HOME` вне Windows), существующий файл **не перезаписывает**,
+  выводит только открытый ключ и путь. Открытый ключ — константа `reportPublicKey` в `report_upload.dart`.
+- Закрытый ключ в репозиторий не попадает, нигде не печатается и не логируется; **потеря = все накопленные
+  отчёты нечитаемы**, поэтому копию — в надёжное место (рядом с копией ключа подписи релизов). Смена ключа =
+  новая сборка с новым `reportPublicKey`; отчёты, зашифрованные старым, читаются только старым закрытым
+  ключом — старый файл не выбрасывать.
+- Открытый ключ в сборке — не секрет (из него закрытый не получить), но подменить его можно только сборкой:
+  Worker хранит лишь шифртекст, его утечка не раскрывает отчётов.
+
+**Расшифровка.** `dart run tool/decrypt_report.dart <file.bin> [--out report.json] [--key <файл ключа>] [--text]`
+(в `core/`): ключ — из `--key`, иначе из `report_private.key`; без `--out` — в stdout (UTF-8), `--text` — как
+«Download log» (плюс раздел `## Note` с заметкой). Ошибки: `Not a report envelope` (слишком короткий),
+`the magic is not JRP1` (не тот файл / новый формат), `authentication failed` (чужой ключ или файл изменён —
+тег GCM не сошёлся). Код — `report_crypto.dart` (`encryptReport`, `decryptReport`, `openReport`,
+`generateReportKeys`), им же пользуются тесты `report_crypto_test.dart` и `report_upload_test.dart`.
+
+**Что осталось.** Приёмная сторона — Worker `jormungand-reports` (`workers/reports/`): приём, лимиты,
+хранение шифртекста, выдача `id`, уведомление в Telegram; токен бота Telegram хранится как секрет Worker'а
+(не в приложении и не в репозитории). Пока Worker не выложен, отправка в сборке отвечает `network` / `failed`.
 
 ## Экран Logs (приложение)
 

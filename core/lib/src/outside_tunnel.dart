@@ -87,6 +87,14 @@ const outsideTunnel = <OutsideEntry>[
     ['core/lib/src/sitecheck.dart'],
   ),
   OutsideEntry(
+    'report-upload',
+    'Send report: the encrypted report is POSTed to the receiving Worker (report_upload.dart, '
+        'HttpReportUploader), always direct and never via tunnel-in — it is needed exactly when the '
+        'proxy is broken; the self rule and a DNS that works with every node dead',
+    OutsideHow.ownRule,
+    ['core/lib/src/report_upload.dart'],
+  ),
+  OutsideEntry(
     'dns-probe',
     'Settings → DNS pings: a real query from this machine straight to the server (UDP / TCP / DoT / DoH) '
         'and the system resolver; must reach the tested server, so the self rule stands before the '

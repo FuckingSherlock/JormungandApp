@@ -37,6 +37,7 @@ Future<void> main(List<String> args) async {
     dataDir: p.absolute(opt('data') ?? p.join(home, 'Jormungand')), // sing-box runs with -D, a relative path would miss
     uiFile: opt('ui') ?? p.normalize(p.join(root, '..', 'design', 'main_screen.html')),
     lanHosts: lanIps.toSet(),
+    reportUploader: HttpReportUploader(),
   );
   await daemon.init();
   if (orphans.isNotEmpty) {

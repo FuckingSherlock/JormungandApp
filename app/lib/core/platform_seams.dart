@@ -118,6 +118,7 @@ Future<CoreHost> openCoreHost() async {
       },
       sysProxy: NoSystemProxy(),
       isElevated: () => true, // TUN is the VpnService here, not an admin matter
+      reportUploader: HttpReportUploader(), // Send report: encrypted on the device, direct by the self rule
     );
     // the Kotlin side's own lines (libbox start / stop, networks, DNS) into the raw log
     vpn.logs.listen(
@@ -146,6 +147,7 @@ Future<CoreHost> openCoreHost() async {
     dataDir: dataDir,
     appVersion: AppVersion.tryParse(fallbackAppVersion, build: 1),
     updatePlatformKeys: updatePlatforms(os: 'windows'),
+    reportUploader: HttpReportUploader(),
   );
   return LiveCoreHost(
     api: core,

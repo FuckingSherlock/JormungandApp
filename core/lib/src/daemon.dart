@@ -6,6 +6,7 @@ import 'eventbook.dart';
 import 'exitip.dart';
 import 'logbook.dart';
 import 'pool.dart';
+import 'report_upload.dart';
 import 'rulesets.dart';
 import 'runtime.dart';
 import 'service.dart';
@@ -27,6 +28,8 @@ class Daemon {
   /// and [isElevated] are for tests (no probes past loopback; a fake system proxy, so a test
   /// never touches the real registry; a fake sing-box process; the restart waits and the clock
   /// under the test's control; whether the process counts as elevated, which TUN needs).
+  /// [reportUploader]: where "Send report" goes; none = `not-configured` (bin/jormd.dart plugs the
+  /// [HttpReportUploader]).
   Daemon({
     required String singBox,
     required String dataDir,
@@ -38,6 +41,7 @@ class Daemon {
     Timer Function(Duration, void Function())? timer,
     DateTime Function()? now,
     bool Function()? isElevated,
+    ReportUploader? reportUploader,
   }) : service = CoreService(
           singBox: singBox,
           dataDir: dataDir,
@@ -47,6 +51,7 @@ class Daemon {
           timer: timer,
           now: now,
           isElevated: isElevated,
+          reportUploader: reportUploader,
         );
 
   /// A daemon over a [CoreService] made elsewhere (its platform parts injected).
