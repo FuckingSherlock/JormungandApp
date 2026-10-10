@@ -27,6 +27,7 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 | Global \| Rules | вертикальный сегмент рядом с TUN \| Proxy | горизонтальный переключатель в одну строку |
 | TUN | нужен админ (`core/tunNeedsAdmin`), WFP kill switch непостоянный | согласие VPN (`prepare`), отзыв системой |
 | Per-app | по пути процесса | по пакету: правила `package_name`, приложение целиком на Direct — `exclude_package` (мимо VPN); список — установленные приложения со значками (`rules.md`); позже упрощённый режим «только из списка / все, кроме» (`include_package`) |
+| Свои соединения приложения (подписки, обновления, пинги) | приложение внутри TUN; правило `process_path → direct` по exe приложения и sing-box | приложение внутри VPN; правило `package_name → direct` по пакету; сокеты разовых libbox защищает `VpnService.protect` (раздел «Работа вне туннеля» ниже) |
 | sing-box | процесс `core/tool/bin/sing-box.exe` | `libbox.aar` (`core/tool/build_libbox.ps1`) |
 | Обновления | zip + `jorm-updater` | APK через `PackageInstaller`, проверка — WorkManager (`docs/updates.md`) |
 | Листы (sheets) | стек от верха экрана, над нижней навигацией | пока `showModalBottomSheet` (`app_sheet.dart`) |
@@ -38,6 +39,46 @@ Flutter — через `CoreHost` (`app/lib/core/core_host.dart`) → `LiveCoreH
 
 Платформенные условия во Flutter — через один помощник возможностей платформы (не разбросанные
 `Platform.isAndroid`), чтобы тесты могли подменить платформу.
+
+## Работа вне туннеля
+
+Приложение само **внутри** VPN (Android себя из VPN больше не исключает, на ПК так и было), поэтому
+соединение, которое оно открывает, входит в TUN как соединение любого приложения: без исключения оно
+зациклится в прокси, который проверяет, или не выйдет, пока прокси лежит. Всё, что открывает своё
+соединение или процесс и должно работать мимо туннеля, перечислено в одном списке:
+`core/lib/src/outside_tunnel.dart` (`outsideTunnel`: `id`, `what`, `how`, `files`). `how` — чем оно
+держится вне туннеля:
+
+| `how` | Что | Чем держится |
+|---|---|---|
+| `ownRule` | соединения процесса приложения: HTTP-клиенты Dart (подписки, списки правил, обновления, проверка IP и сайта, пинг DNS), процессы sing-box на ПК (пинг, Speed Test) | системное правило ядра «Core and speed tests» (`config.dart` → `selfRules`): Android `package_name: [пакет]`, ПК `process_path` (приложение и бинарник sing-box) → `direct`; после `sniff`, перехвата резолвера туннеля и `tunnel-in`, до `Private networks` и правил пользователя; есть и в Global. DNS-запросы тех же процессов — DNS-правило с прямым сервером (`core.md` → «TUN», «DNS») |
+| `protectedSocket` | Android: libbox-инстансы без туннеля (пинг, Speed Test, проверка маршрута), `LocalResolver` (`local` DNS sing-box) | сокеты держит вне VPN платформа (`VpnService.protect`, привязка к базовой сети); в TUN не входят, правил нет |
+| `loopback` | 127.0.0.1: API-сервис sing-box, `probe-in`, `tunnel-in`, `mixed-in`, поиск свободных портов | в TUN не попадает |
+| `noConnection` | локальные утилиты и опросы ОС (`reg`, `id`, `sing-box version`, `powershell` диалога файла, колбэки состояния сети) | соединений не открывает; в списке, чтобы новое использование API процессов было замечено |
+
+Нужно **через** туннель — не «вне»: код ходит через `tunnel-in` (loopback), правило `tunnel-in → proxy`
+стоит раньше самоправила.
+
+**Охранный тест.** `core/test/outside_tunnel_test.dart` (исходники ядра `core/lib/src`) и
+`app/test/outside_tunnel_guard_test.dart` (`app/lib` и Kotlin-оверлей `app/android_overlay/kotlin` —
+источник `app/android/**/*.kt`) ищут вызовы сетевых API: Dart — `HttpClient(`, `Socket.connect`,
+`RawDatagramSocket`, `ServerSocket`, `HttpServer`, `ClientChannel(`, `InternetAddress.lookup`,
+`Process.start` / `run`, пакеты `http` / `dio`; Kotlin — `URL`, сокеты, `DnsResolver`, `protect(`,
+`LibboxBox(`, колбэки сети (точный список — `core/test/outside_tunnel_scan.dart`; закомментированное не
+считается). Файл с находкой, которого нет в `outsideTunnel`, роняет тест; запись, чей файл исчез или
+больше не использует сетевой API, — тоже. Сообщение говорит, что делать.
+
+**Новое соединение (своё или перенесённое с другой платформы):**
+1. Запись в `outsideTunnel`: `id`, `what`, `how`, `files` — и `how` должен быть правдой: `ownRule` —
+   код исполняется в процессе, который матчит самоправило (Dart внутри приложения — да; внешняя
+   программа, которую мы запускаем, — её путь надо добавить в `selfProcessPaths`); `protectedSocket` —
+   сокеты действительно защищены платформой; `loopback` — только 127.0.0.1.
+2. Отличается между платформами — строка в «Отличия платформ» выше.
+3. Тесты: `dart test test/outside_tunnel_test.dart` в `core/`, `flutter test test/outside_tunnel_guard_test.dart`
+   в `app/`.
+
+Ограничения: `package_name` матчится по владельцу соединения (`getConnectionOwnerUid`, Android 10+),
+как правила приложений (`rules.md` §3).
 
 ## Соответствие файлов
 
@@ -84,10 +125,15 @@ git diff $(cat app/SYNCED_FROM)..HEAD --stat -- design/src design/tools docs
    цвета только `context.colors.*`, строки только ARB + русский; помещается в 320 dp при 120 %; общие
    файлы (`app_*.arb`, `i18n_extra.json`, `core_host.dart`, `live_core_host.dart`, `home_shell.dart`) —
    только точечные правки; виджет-тесты в `app/test/`; не собирать APK, не коммитить.
-3. `node app/tool/gen_all.mjs` → `flutter gen-l10n` → `flutter analyze --no-fatal-infos` → `flutter test`
+3. **Обязательно:** переносишь с ПК функционал, который открывает своё соединение или запускает процесс
+   (HTTP-клиент, сокет, DNS-запрос, `Process`, на Android — libbox-инстанс / резолвер), — зарегистрируй
+   его в `core/lib/src/outside_tunnel.dart` с `how` (раздел «Работа вне туннеля» выше); тест не даст
+   собрать без этого (`outside_tunnel_test.dart`, `outside_tunnel_guard_test.dart`). Приложение внутри
+   VPN: незарегистрированное соединение либо зациклится в туннеле, либо не выйдет при лежащем прокси.
+4. `node app/tool/gen_all.mjs` → `flutter gen-l10n` → `flutter analyze --no-fatal-infos` → `flutter test`
    (в `app/`); при правках ядра — `dart analyze` + `dart test` в `core/`.
-4. Сборка и установка (ниже), проверка на телефоне.
-5. Коммит, `git rev-parse HEAD > app/SYNCED_FROM` (коммитом позже — следующий коммит), push.
+5. Сборка и установка (ниже), проверка на телефоне.
+6. Коммит, `git rev-parse HEAD > app/SYNCED_FROM` (коммитом позже — следующий коммит), push.
 
 Если меняется логика (не только вид) — сначала `docs/*.md`, потом мокап, потом Flutter.
 
@@ -165,7 +211,8 @@ libbox не использует regex (`_rankOfLine`): он работает н
 Каждый libbox процесса (туннель и каждый разовый бокс) получает свой файл кэша sing-box — общий
 `cache.db` под замком, второй экземпляр падает по `initialize cache-file: timeout` (docs/core.md →
 BoxRunner, `withCacheFile`). Правила `process_path → direct` для самого приложения на Android нет:
-`resolvedExecutable` там — общий `app_process64`.
+`resolvedExecutable` там — общий `app_process64`; приложение матчится по пакету (`package_name`,
+«Работа вне туннеля» выше).
 
 ### Работа в фоне (Android)
 

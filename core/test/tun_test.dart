@@ -68,8 +68,13 @@ Map? _tun(Map<String, dynamic> c) => _inbounds(c).where((i) => i['type'] == 'tun
 bool _isHijack(Map r) => r['action'] == 'hijack-dns';
 bool _isSelf(Map r) => r.containsKey('process_path') || r.containsKey('process_path_regex');
 
-Map<String, dynamic> _build(Map<String, dynamic> plan, {List<String> self = const [r'C:\Apps\dart.exe', r'C:\Tools\sing-box.exe'], int? tunnelPort = 40001, RoutingInfo? info}) =>
-    buildConfig(plan, tunnelPort: tunnelPort, selfPaths: self, info: info);
+Map<String, dynamic> _build(Map<String, dynamic> plan,
+        {List<String> self = const [r'C:\Apps\dart.exe', r'C:\Tools\sing-box.exe'], List<String> packages = const [], int? tunnelPort = 40001, RoutingInfo? info}) =>
+    buildConfig(plan, tunnelPort: tunnelPort, selfPaths: self, selfPackages: packages, info: info);
+
+const _pkg = 'dev.jormungand.app';
+bool _isSelfPackage(Map r) => r.containsKey('package_name') && r['outbound'] == 'direct' && '${r['package_name']}' == '[$_pkg]';
+List<Map> _dnsRules(Map<String, dynamic> c) => (((c['dns'] as Map)['rules'] as List?) ?? const []).cast<Map>();
 
 void main() {
   group('the tun inbound', () {
@@ -105,8 +110,7 @@ void main() {
         final reject = rules.indexWhere((r) => r['action'] == 'reject');
         expect(reject, greaterThan(rules.indexWhere((r) => r['action'] == 'sniff')));
         expect(reject, greaterThan(rules.lastIndexWhere(_isHijack)));
-        expect(reject, lessThan(rules.indexWhere(_isSelf)));
-        expect(reject, lessThan(rules.indexWhere((r) => r['inbound'] is List && (r['inbound'] as List).contains('tunnel-in'))));
+        expect(reject, lessThan(rules.indexWhere((r) => r['ip_is_private'] == true)), reason: 'before Private networks and the user rules');
       }
     });
 
@@ -214,11 +218,55 @@ void main() {
       }
     });
 
-    test('Android: no self paths, so no process_path rule (resolvedExecutable is the shared app_process64)', () {
+    test('Android: no self paths, so no process_path rule (resolvedExecutable is the shared app_process64); the package is the rule', () {
       expect(selfProcessPaths(_bin, android: true), isEmpty);
-      final c = buildConfig(_plan(), tunnelPort: 40001, selfPaths: selfProcessPaths(_bin, android: true));
-      expect(_rules(c).where(_isSelf), isEmpty);
-      expect(_rules(c).any((r) => r.containsKey('process_path') || r.containsKey('process_path_regex')), isFalse);
+      final paths = selfProcessPaths(_bin, android: true), packages = selfPackageNames(package: _pkg, android: true);
+      expect(packages, [_pkg]);
+      final plan = _plan(routing: _routing(rules: [_rule('r1', {'domain_suffix': ['a.example']})]));
+      final c = buildConfig(plan, tunnelPort: 40001, selfPaths: paths, selfPackages: packages);
+      final rules = _rules(c);
+      expect(rules.where(_isSelf), isEmpty);
+      expect(rules.any((r) => r.containsKey('process_path') || r.containsKey('process_path_regex')), isFalse);
+      expect(rules.where(_isSelfPackage).single, {'package_name': [_pkg], 'action': 'route', 'outbound': 'direct'});
+      // the same place as the desktop's rule: after sniff and tunnel-in, before the LAN rule and the user's
+      final self = rules.indexWhere(_isSelfPackage), tunnel = rules.indexWhere((r) => (r['inbound'] as List?)?.contains('tunnel-in') == true);
+      final sniff = rules.indexWhere((r) => r['action'] == 'sniff');
+      final private = rules.indexWhere((r) => r['ip_is_private'] == true), user = rules.indexWhere((r) => r['domain_suffix']?.toString() == '[a.example]');
+      expect(sniff < tunnel && tunnel < self && self < private && private < user, isTrue, reason: '$rules');
+      // Global and proxy mode keep it too; a platform without a package or a path has none
+      for (final p in [_plan(global: true), _plan(mode: 'proxy')]) {
+        final g = buildConfig(p, tunnelPort: 40001, selfPackages: packages);
+        expect(_rules(g).where(_isSelfPackage), hasLength(1));
+        expect(_rules(g).where(_isSelf), isEmpty);
+      }
+      expect(_rules(buildConfig(_plan(), tunnelPort: 40001)).any((r) => r['outbound'] == 'direct' && (r.containsKey('package_name') || _isSelf(r))), isFalse);
+    });
+
+    test('desktop: process rules only, no package rule; selfPackageNames is empty off Android', () {
+      expect(selfPackageNames(package: _pkg, android: false), isEmpty);
+      final rules = _rules(_build(_plan(), packages: selfPackageNames(package: _pkg, android: false)));
+      expect(rules.where(_isSelf), hasLength(1));
+      expect(rules.any((r) => r.containsKey('package_name')), isFalse);
+      expect(_dnsRules(_build(_plan())).where((r) => r.containsKey('process_path') || r.containsKey('process_path_regex')), hasLength(1));
+    });
+
+    test('the self rules come from selfRules: package and paths side by side are two rules, none is none', () {
+      expect(selfRules(), isEmpty);
+      final both = selfRules(paths: [r'C:\x.exe'], packages: [_pkg]);
+      expect(both, hasLength(2));
+      expect(both.where((r) => r.containsKey('package_name')), hasLength(1));
+      expect(both.every((r) => r['action'] == 'route' && r['outbound'] == 'direct'), isTrue);
+    });
+
+    test('the own package is read from the process name when the platform does not say; an explicit one wins', () {
+      expect(selfPackageNames(package: 'a.b', android: true), ['a.b']);
+      expect(selfPackageNames(package: '', android: false), isEmpty);
+      // off Android (this machine) /proc/self/cmdline is not a package name: nothing is guessed
+      final read = selfPackageNames(android: true);
+      expect(read.length <= 1, isTrue);
+      for (final p in read) {
+        expect(RegExp(r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$').hasMatch(p), isTrue);
+      }
     });
 
     test('registered as system rules in the rule names', () {
@@ -251,7 +299,11 @@ void main() {
       final tun = _build(_plan(routing: routing)), proxy = _build(_plan(mode: 'proxy', routing: routing));
       List<String> after(Map<String, dynamic> c) {
         final r = _rules(c);
-        return [for (final x in r.skip(r.indexWhere(_isSelf) < 0 ? 0 : r.indexWhere(_isSelf) + 1)) jsonEncode(x)];
+        // the TUN's own system rules (hijack, IPv6 off) sit after the self rule too; they are not the user's
+        return [
+          for (final x in r.skip(r.indexWhere(_isSelf) < 0 ? 0 : r.indexWhere(_isSelf) + 1))
+            if (!_isHijack(x) && jsonEncode(x) != jsonEncode(ipv6OffRule)) jsonEncode(x),
+        ];
       }
 
       // everything of the proxy mode's rules after the system part is in TUN too, the same, in the same order
@@ -322,16 +374,23 @@ void main() {
   });
 
   group('DNS in TUN', () {
-    test('Hijack DNS on (also when the plan does not say): port 53 and sniffed dns from the tun go to the core DNS, after sniff', () {
+    test('Hijack DNS on (also when the plan does not say): the tunnel\'s own resolver first, then (behind the self rules) port 53 and sniffed dns from the tun', () {
+      final resolver = {'inbound': ['tun-in'], 'ip_cidr': tunDnsAddress, 'port': [53], 'action': 'hijack-dns'};
       for (final plan in [_plan(routing: _routing(hijack: true)), _plan(routing: _routing()), _plan()]) {
         final rules = _rules(_build(plan));
         final hijack = rules.where(_isHijack).toList();
         expect(hijack, [
+          resolver,
           {'inbound': ['tun-in'], 'port': [53], 'action': 'hijack-dns'},
           {'inbound': ['tun-in'], 'protocol': ['dns'], 'action': 'hijack-dns'},
         ]);
-        expect(rules.indexWhere(_isHijack), greaterThan(rules.indexWhere((r) => r['action'] == 'sniff')));
-        expect(rules.indexWhere(_isHijack), lessThan(rules.indexWhere(_isSelf)));
+        final at = rules.indexWhere(_isHijack), self = rules.indexWhere(_isSelf);
+        expect(at, greaterThan(rules.indexWhere((r) => r['action'] == 'sniff')));
+        // the app's own lookups (system resolver → the tunnel's resolver) are answered by the core, always;
+        // its other DNS (the DNS probes of Settings → DNS) is the self rule's and reaches the real server
+        expect(rules.indexOf(resolver), lessThan(self));
+        expect(rules.indexWhere((r) => r['port']?.toString() == '[53]' && r['ip_cidr'] == null), greaterThan(self));
+        expect(rules.indexWhere((r) => r['protocol']?.toString() == '[dns]'), greaterThan(self));
       }
     });
 
@@ -341,6 +400,47 @@ void main() {
         {'inbound': ['tun-in'], 'ip_cidr': tunDnsAddress, 'port': [53], 'action': 'hijack-dns'},
       ]);
       expect(tunDnsAddress.first, startsWith('172.19.0.2'), reason: 'the second address of the tun /30');
+    });
+
+    test('the app\'s own DNS lookups (through the hijack) are answered first of all by a direct server, in Rules and Global, desktop and Android', () {
+      for (final global in [false, true]) {
+        final plan = _plan(global: global, routing: _routing(rules: [_rule('r', {'domain_suffix': ['a.example']})]));
+        // Rules: the first enabled non-VPN server; the bootstrap (`local`/system) for the main flow's resolver
+        for (final (paths, packages) in [
+          (const [r'C:\Apps\dart.exe'], const <String>[]),
+          (const <String>[], const [_pkg]),
+        ]) {
+          final c = buildConfig(plan, tunnelPort: 40001, selfPaths: paths, selfPackages: packages);
+          final dns = c['dns'] as Map;
+          final rules = _dnsRules(c);
+          final own = rules.first;
+          expect(own['inbound'], ['tun-in'], reason: 'only what the TUN hands to the DNS: the proxy ports\' lookups are not the app\'s');
+          expect(own['action'], 'route');
+          expect(own.containsKey(packages.isNotEmpty ? 'package_name' : (Platform.isWindows ? 'process_path_regex' : 'process_path')), isTrue, reason: '$own');
+          expect(own.containsKey('outbound'), isFalse);
+          // the server is `default_domain_resolver`: direct by construction, never one that detours
+          final server = own['server'];
+          expect(server, (c['route'] as Map)['default_domain_resolver']);
+          final def = (dns['servers'] as List).cast<Map>().firstWhere((s) => s['tag'] == server);
+          expect(def.containsKey('detour'), isFalse, reason: 'the server answers outside the tunnel: $def');
+          expect(server, isNot(dns['final']), reason: 'final is the VPN server (via vpn, first enabled): the point is not to depend on it');
+          expect(dns['final'], 'dns-remote');
+        }
+      }
+    });
+
+    test('no own DNS rule without the TUN (the proxy ports\' queries are not the app\'s) or without a self rule', () {
+      expect(_dnsRules(_build(_plan(mode: 'proxy'))).where((r) => r.containsKey('process_path') || r.containsKey('process_path_regex')), isEmpty);
+      expect(_dnsRules(buildConfig(_plan(), tunnelPort: 40001)).any((r) => r.containsKey('package_name') || r.containsKey('server') && r['inbound'] != null), isFalse);
+      expect(_dnsRules(buildConfig(_plan(mode: 'proxy'), selfPackages: const [_pkg])), isEmpty);
+    });
+
+    test('the DNS rules for the same processes are made from the self rules', () {
+      for (final r in selfRules(paths: [r'C:\x.exe'], packages: [_pkg])) {
+        final d = selfDnsRules([r], server: 'dns-x').single;
+        expect({...d}..remove('inbound')..remove('action')..remove('server'), {...r}..remove('action')..remove('outbound'));
+        expect([d['inbound'], d['action'], d['server']], [['tun-in'], 'route', 'dns-x']);
+      }
     });
 
     test('Global keeps the hijack too; proxy mode never has it', () {
@@ -385,6 +485,18 @@ void main() {
         }
       }
     }, skip: _skip, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('Android shape: the package rule and the own-DNS rule pass check (Rules and Global, hijack on / off)', () async {
+      for (final global in [false, true]) {
+        for (final hijack in [true, false]) {
+          final plan = _plan(global: global, routing: _routing(hijack: hijack, rules: routing['rules'] as List<Map>));
+          final c = buildConfig(plan, tunnelPort: 40001, selfPaths: const [], selfPackages: const [_pkg]);
+          expect(_rules(c).where(_isSelfPackage), hasLength(1));
+          expect(_dnsRules(c).first['package_name'], [_pkg]);
+          await check('android global=$global hijack=$hijack', c);
+        }
+      }
+    }, skip: _skip);
 
     test('the resolve step limited to mixed-in / sys-in passes check (with and without a sys-in inbound)', () async {
       final r = _routing(rules: [_rule('ip', {}, ip: {'ip_cidr': ['8.8.8.0/24']})]);

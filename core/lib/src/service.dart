@@ -67,6 +67,7 @@ class CoreService implements CoreApi {
     String? knownSingBoxVersion,
     this.updatePlatformKeys = const [],
     this.installedPackage,
+    String? ownPackage,
     this.updateFeeds,
     this.updatePublicKeys,
     this.updateGet,
@@ -74,6 +75,7 @@ class CoreService implements CoreApi {
     SiteChecker? siteChecker,
     Stream<NetworkQualityTestProgress> Function(String outbound)? currentSpeedSource,
   })  : _singBoxVer = knownSingBoxVersion,
+        _ownPackage = ownPackage,
         _siteCheckerArg = siteChecker,
         _currentSpeedSource = currentSpeedSource,
         boxFactory = boxFactory ?? ((dir) => SingBoxProcess(singBox, dir)),
@@ -132,8 +134,12 @@ class CoreService implements CoreApi {
   final BoxFactory boxFactory;
   final SystemProxyBackend sysProxy;
   final bool Function() _isElevated;
-  // the programs that go direct in TUN: this process and the sing-box binary (config.dart)
+  // the programs that go direct in TUN: this process and the sing-box binary (desktop), the
+  // app's package (Android; the constructor's `ownPackage`, else the process's own name) —
+  // config.dart, outside_tunnel.dart
   late final List<String> _selfPaths = selfProcessPaths(singBox);
+  final String? _ownPackage;
+  late final List<String> _selfPackages = selfPackageNames(package: _ownPackage);
   final RuleSetCache ruleSets;
   final Future<Map<String, dynamic>> Function(int? proxyPort) exitCheck;
 
@@ -923,6 +929,9 @@ class CoreService implements CoreApi {
     final tunnelPort = await freePort(exclude: {mixed});
     final probePort = await freePort(exclude: {mixed, tunnelPort});
     final sysPort = sys && plan['mixedAuth'] != null ? await _sysInPort({mixed, tunnelPort, probePort}) : null;
+    if (Platform.isAndroid && _selfPackages.isEmpty) {
+      logBook.note('warn', "The app's own package is unknown: its own connections are routed like any app's, not direct");
+    }
     final probe = Probe(probePort);
     final info = RoutingInfo();
     try {
@@ -933,7 +942,8 @@ class CoreService implements CoreApi {
           ruleSetFiles: lists.files,
           warnings: warnings,
           info: info,
-          selfPaths: _selfPaths));
+          selfPaths: _selfPaths,
+          selfPackages: _selfPackages));
     } on SingBoxError catch (e) {
       // sing-box refused the TUN for a missing permission: the same advice as not being elevated
       if (planTun(plan) && tunAccessDenied(e.message)) throw TunNeedsAdmin(e.message);
@@ -1017,7 +1027,8 @@ class CoreService implements CoreApi {
             ruleSetFiles: ((rec['ruleSetFiles'] as Map?) ?? const {}).cast<String, String>(),
             warnings: <String>[],
             info: info,
-            selfPaths: _selfPaths);
+            selfPaths: _selfPaths,
+            selfPackages: _selfPackages);
       } catch (e) {
         logBook.note('warn', 'A running tunnel could not be taken over (its record: $e): stopped');
         await r.stop();

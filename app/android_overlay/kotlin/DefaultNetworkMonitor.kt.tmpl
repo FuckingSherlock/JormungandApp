@@ -62,7 +62,7 @@ object DefaultNetworkMonitor {
             if (!registered) {
                 register(cm)
                 registered = true
-                // until the callback answers: the active network, when it is not our own VPN
+                // until the callback answers: the underlying network (our own VPN is never the answer)
                 if (defaultNetwork == null) defaultNetwork = underlyingActive(cm)
                 VpnBridge.log("debug", "network: monitor on, default ${defaultNetwork ?: "unknown yet"}")
             }
@@ -83,10 +83,34 @@ object DefaultNetworkMonitor {
         }
     }
 
+    /**
+     * A first guess until the callback answers. The app is inside the VPN, so while the tunnel is up
+     * `activeNetwork` is the VPN itself for it: then the best of the other networks (validated first,
+     * the fastest transport first) stands in.
+     */
+    @Suppress("DEPRECATION")
     private fun underlyingActive(cm: ConnectivityManager): Network? {
-        val active = cm.activeNetwork ?: return null
-        val caps = cm.getNetworkCapabilities(active) ?: return null
-        return if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) null else active
+        fun underlying(n: Network): NetworkCapabilities? {
+            val caps = cm.getNetworkCapabilities(n) ?: return null
+            val ok = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            return if (ok) caps else null
+        }
+        cm.activeNetwork?.let { if (underlying(it) != null) return it }
+        return try {
+            cm.allNetworks
+                .mapNotNull { n -> underlying(n)?.let { n to it } }
+                .maxByOrNull { (_, c) ->
+                    var score = 0
+                    if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) score += 10
+                    if (c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) score += 3
+                    if (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) score += 2
+                    if (c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) score += 1
+                    score
+                }?.first
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun register(cm: ConnectivityManager) {
@@ -96,9 +120,10 @@ object DefaultNetworkMonitor {
             .build()
         when {
             Build.VERSION.SDK_INT >= 31 -> registerBestMatching(cm, request)
-            // REQUEST, not LISTEN: only the network that is THE default (needs CHANGE_NETWORK_STATE)
-            Build.VERSION.SDK_INT >= 28 -> cm.requestNetwork(request, callback, handler)
-            else -> cm.registerDefaultNetworkCallback(callback, handler)
+            // REQUEST, not LISTEN: only the network that is THE default (needs CHANGE_NETWORK_STATE).
+            // Not registerDefaultNetworkCallback below 28: the app is inside the VPN, so the default
+            // network is the VPN itself for it; the NOT_VPN request names the underlying one.
+            else -> cm.requestNetwork(request, callback, handler)
         }
     }
 

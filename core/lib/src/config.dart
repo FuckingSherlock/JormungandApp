@@ -44,9 +44,11 @@
 /// TUN: with `plan.mode == 'tun'` a `tun-in` inbound is added (docs/core.md → «TUN»); the user's
 /// rules, apps and quick rules apply to its traffic as to the proxy port's (Global: everything
 /// goes to the main flow). [selfPaths] = the executables of the core itself and of the sing-box
-/// instances it starts (ping, speed test): their connections go direct, ahead of the user's
-/// rules — through the tunnel they would loop. Behind `tunnel-in`'s rule, so what the core
-/// sends through that inbound still goes into the tunnel.
+/// instances it starts (ping, speed test); [selfPackages] = the app's package (Android): their
+/// connections go direct, ahead of the user's rules — through the tunnel they would loop. Behind
+/// `tunnel-in`'s rule, so what the core sends through that inbound still goes into the tunnel;
+/// their DNS lookups are answered by a direct DNS server ([selfDnsRules]). What must work outside
+/// the tunnel is listed in outside_tunnel.dart.
 library;
 
 import 'dart:convert';
@@ -89,8 +91,9 @@ const tunBypass = [
 /// for jormd, the app later) and the sing-box binary (ping / speed-test instances are separate
 /// processes). Resolved to real paths; a sing-box that is not a file (looked up on PATH) is left out.
 /// Android: none. `Platform.resolvedExecutable` there is the zygote's `app_process64`, shared by every
-/// app, so a `process_path → direct` rule on it would be wrong; the app's own traffic stays out of
-/// the VPN anyway (its package is excluded) and sing-box runs inside it ([android] is for tests).
+/// app, so a `process_path → direct` rule on it would be wrong; the app is matched by its package
+/// ([selfPackageNames], `package_name`) instead, and the sing-box instances run inside the app
+/// ([android] is for tests).
 List<String> selfProcessPaths(String singBox, {bool? android}) {
   if (android ?? Platform.isAndroid) return const [];
   final out = <String>{Platform.resolvedExecutable};
@@ -101,12 +104,62 @@ List<String> selfProcessPaths(String singBox, {bool? android}) {
   return out.toList();
 }
 
+/// Android: the app's own package, the match of its self rule ([selfRules]). [package] is what the
+/// platform said (the app may pass it); without it the process's own name is read from
+/// `/proc/self/cmdline` (an app's main process is named after its package; `pkg:service` →
+/// `pkg`). Empty off Android and when neither is known — then the app's traffic has no self rule
+/// and is routed like any app's, which the service says in the log ([android] is for tests).
+List<String> selfPackageNames({String? package, bool? android}) {
+  if (!(android ?? Platform.isAndroid)) return const [];
+  final p = package != null && package.isNotEmpty ? package : _procPackage();
+  return p == null ? const [] : [p];
+}
+
+final _packageName = RegExp(r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$');
+
+String? _procPackage() {
+  try {
+    final raw = File('/proc/self/cmdline').readAsBytesSync();
+    final end = raw.indexOf(0);
+    final name = utf8.decode(end < 0 ? raw : raw.sublist(0, end), allowMalformed: true).split(':').first.trim();
+    return _packageName.hasMatch(name) ? name : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// "These programs go direct": Windows compares paths without case, so a regex there.
 Map<String, dynamic> selfProcessRule(List<String> paths) => {
       if (Platform.isWindows) 'process_path_regex': [for (final p in paths) globToRegex(p)] else 'process_path': paths,
       'action': 'route',
       'outbound': 'direct',
     };
+
+/// The self rules: what the app's own connections (OutsideHow.ownRule in outside_tunnel.dart: the
+/// Dart HTTP clients, the desktop sing-box helper processes) are matched by once they enter the
+/// TUN, sent direct. Android: its package (`package_name`); desktop: the executables
+/// ([selfProcessPaths]). One rule per platform in practice; the TUN's own DNS rules for the
+/// same processes are made from these ([selfDnsRules]), so the two cannot disagree.
+List<Map<String, dynamic>> selfRules({List<String> paths = const [], List<String> packages = const []}) => [
+      if (packages.isNotEmpty) {'package_name': packages, 'action': 'route', 'outbound': 'direct'},
+      if (paths.isNotEmpty) selfProcessRule(paths),
+    ];
+
+/// The DNS rules for the same processes as [selfRules] ([rules]): their queries that the TUN's DNS
+/// hijack hands to the core's DNS ([inbound], the TUN) are answered by [server], a DNS server
+/// that resolves outside the tunnel (`Routing.domainResolver`). Without it a refresh of a
+/// subscription with every node dead would fail on its own DNS: the core's DNS `final` may go
+/// through the very proxy that is down.
+List<Map<String, dynamic>> selfDnsRules(List<Map<String, dynamic>> rules, {required String server, String inbound = tunTag}) => [
+      for (final r in rules)
+        {
+          'inbound': [inbound],
+          for (final e in r.entries)
+            if (e.key != 'action' && e.key != 'outbound') e.key: e.value,
+          'action': 'route',
+          'server': server,
+        },
+    ];
 
 /// Backup checks (Settings → Connection): services of different owners tried when the
 /// test URL does not answer through a node; the node passes traffic when any answers.
@@ -144,7 +197,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     Map<String, String> ruleSetFiles = const {},
     List<String>? warnings,
     RoutingInfo? info,
-    List<String> selfPaths = const []}) {
+    List<String> selfPaths = const [],
+    List<String> selfPackages = const []}) {
   final outs = <Map<String, dynamic>>[];
   final tun = planTun(plan);
   final test = (plan['urlTest'] as Map?) ?? const {};
@@ -217,16 +271,25 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   final pr = probe?.inbound([..._servers(outs), 'direct'], dnsServers: [for (final s in routing.dnsEnabled) s.tag]);
   final Map<String, dynamic>? tunnelRule = tunnelPort == null ? null : {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag};
   // TUN: DNS the core answers itself. Aimed at the tunnel's own resolver (what the system's DNS
-  // points at on the TUN interface) it always does — nothing else could answer it; with Hijack
-  // DNS on, any DNS query does, even one for a hard-coded server (by port and by sniffed protocol).
-  final hijack = <Map<String, dynamic>>[
+  // points at on the TUN interface) it always does — nothing else could answer it, the app's own
+  // lookups included, so this rule stands before the self rules; with Hijack DNS on, any other
+  // DNS query does, even one for a hard-coded server (by port and by sniffed protocol), after
+  // the self rules: the app's own DNS probes (Settings → DNS) must reach the server they test.
+  final tunResolverHijack = {'inbound': [tunTag], 'ip_cidr': tunDnsAddress, 'port': [53], 'action': 'hijack-dns'};
+  final hijackAll = <Map<String, dynamic>>[
     if (tun && planHijackDns(plan)) ...[
       {'inbound': [tunTag], 'port': [53], 'action': 'hijack-dns'},
       {'inbound': [tunTag], 'protocol': ['dns'], 'action': 'hijack-dns'},
-    ] else if (tun)
-      {'inbound': [tunTag], 'ip_cidr': tunDnsAddress, 'port': [53], 'action': 'hijack-dns'},
+    ],
   ];
-  final selfRule = selfPaths.isEmpty ? null : selfProcessRule(selfPaths);
+  final hijack = [if (tun) tunResolverHijack, ...hijackAll];
+  final selfRuleList = selfRules(paths: selfPaths, packages: selfPackages);
+  // The app's own lookups reach the core's DNS through the hijack: answered by a direct server
+  // first of all, whatever `final` and the rules say (they may lead through a proxy that is down)
+  final dnsRules = [
+    if (tun) ...selfDnsRules(selfRuleList, server: routing.domainResolver),
+    ...routing.dnsRules,
+  ];
   if (info != null) {
     // the route rules in the config's order, named for Live connections (rulenames.dart)
     for (final r in pr?.rules ?? const <Map<String, dynamic>>[]) {
@@ -237,7 +300,9 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       info.ruleNames.add(r, const RuleOrigin('system', 'DNS hijack', id: 'dns-hijack'));
     }
     if (tunnelRule != null) info.ruleNames.add(tunnelRule, const RuleOrigin('system', 'Core checks', id: 'tunnel'));
-    if (selfRule != null) info.ruleNames.add(selfRule, const RuleOrigin('system', 'Core and speed tests', id: 'core'));
+    for (final r in selfRuleList) {
+      info.ruleNames.add(r, const RuleOrigin('system', 'Core and speed tests', id: 'core'));
+    }
     for (var i = 0; i < routing.rules.length; i++) {
       final o = routing.origins[i];
       if (o != null) info.ruleNames.add(routing.rules[i], o);
@@ -248,7 +313,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     'log': {'level': 'info', 'timestamp': true},
     'dns': {
       'servers': routing.dnsServers,
-      if (routing.dnsRules.isNotEmpty) 'rules': routing.dnsRules,
+      if (dnsRules.isNotEmpty) 'rules': dnsRules,
       'final': routing.dnsFinal,
       // IPv6 off: no AAAA answers to apps / the proxy port's clients (sing-box answers them empty) and
       // names are resolved to IPv4 only, TUN or not (a literal IPv6 address in TUN: [ipv6OffRule])
@@ -272,10 +337,11 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       'rules': [
         ...?pr?.rules,
         {'action': 'sniff'},
-        ...hijack,
-        if (tun && !planIpv6(plan)) ipv6OffRule, // after the DNS hijack: DNS to the tunnel's IPv6 resolver is still answered
+        if (tun) tunResolverHijack,
         ?tunnelRule,
-        ?selfRule,
+        ...selfRuleList, // the app's own connections (docs/core.md → «TUN»): direct; behind tunnel-in's rule
+        ...hijackAll,
+        if (tun && !planIpv6(plan)) ipv6OffRule, // after the DNS hijack: DNS to the tunnel's IPv6 resolver is still answered
         ...routing.rules,
       ],
       if (routing.ruleSets.isNotEmpty) 'rule_set': routing.ruleSets,

@@ -29,9 +29,13 @@ import java.util.concurrent.Executors
  * ([stopTunnel]) and the system revoking the VPN ([onRevoke]) close libbox, the tun and the
  * service; the revoke is also reported to Dart (event `stopped`).
  *
- * The app itself is kept OUT of the VPN (addDisallowedApplication): sing-box's own sockets to the
- * servers, and the core's direct requests (subscriptions), then bypass the tunnel without any
- * routing trick, and the throwaway libbox of a latency test measures the real path.
+ * The app itself is INSIDE the VPN (never addDisallowedApplication of our own package; with a per-app
+ * allow list ours is added to it): sing-box's `system` / `mixed` stacks terminate TCP in a listener of
+ * this process, and a process outside the VPN would send the replies past the tun. Our own traffic
+ * therefore enters the tun and the core's routing sends it out by its `package_name` rule (direct);
+ * sing-box's own sockets (to the servers, direct outbounds) are protected one by one
+ * ([LibboxPlatform.autoDetectInterfaceControl]), as are those of the throwaway libbox of a latency
+ * test while a tunnel is up, so a ping still measures the real path.
  *
  * TODO: live speed in the notification text while connected (the text, "Disconnect" and the tap are in [AppNotifier]).
  */
@@ -64,6 +68,9 @@ class JormungandVpnService : VpnService() {
     @Volatile
     var isUp = false
         private set
+
+    /** The tun is established (openTunInternal .. closeBoxLocked): only then does [protect] take a socket out of it. */
+    internal val tunOpen: Boolean get() = tunFd != null
 
     /** Guards [started] / [onShade] with the calls into startForeground / stopForeground. */
     private val shadeLock = Any()
@@ -287,21 +294,25 @@ class JormungandVpnService : VpnService() {
                 for (r in options.inet6RouteRange.all()) builder.addRoute(r.address(), r.prefix())
             }
 
+            // Our own package is never excluded (see the class comment): an exclude entry for it is
+            // dropped, and in an allow list it is added, else the system stack's listener stays outside.
             val include = options.includePackage.allStrings()
             val exclude = options.excludePackage.allStrings()
             try {
                 if (include.isNotEmpty()) {
-                    // only these apps; ours is not among them, so it stays outside
-                    for (p in include) allow(builder, p)
+                    for (p in (include + packageName).distinct()) allow(builder, p)
                 } else {
-                    for (p in exclude) disallow(builder, p)
-                    disallow(builder, packageName)
+                    for (p in exclude) {
+                        if (p == packageName) {
+                            VpnBridge.log("warn", "tunnel: the app's own package in exclude_package is ignored")
+                        } else {
+                            disallow(builder, p)
+                        }
+                    }
                 }
             } catch (e: IllegalArgumentException) {
                 Log.e(TAG, "per-app lists", e)
             }
-        } else {
-            disallow(builder, packageName)
         }
 
         val pfd = builder.establish() ?: error("android: the application is not prepared or is revoked")
@@ -340,12 +351,8 @@ class JormungandVpnService : VpnService() {
 
 /** The tunnel's platform: [LibboxPlatform] plus the tun and socket protection from the service. */
 class VpnPlatform(private val service: JormungandVpnService) : LibboxPlatform(service) {
-    private var protectFailures = 0
-
-    override fun autoDetectInterfaceControl(fd: Int) {
-        // false: the socket stays inside the VPN and loops back into it; the first few are worth a line
-        if (!service.protect(fd) && protectFailures++ < 5) VpnBridge.log("warn", "tunnel: protect($fd) failed")
-    }
+    // protect() itself is [LibboxPlatform.autoDetectInterfaceControl]; the tunnel always has its service
+    override fun protector(): VpnService = service
 
     override fun openTun(options: TunOptions): Int = service.openTunInternal(options)
 }

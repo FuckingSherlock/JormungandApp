@@ -3,6 +3,7 @@ package __APP_ID__
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.VpnService
 import android.os.Build
 import android.os.Process
 import android.system.OsConstants
@@ -27,13 +28,14 @@ import java.net.InetSocketAddress
 import java.net.InterfaceAddress
 import java.net.NetworkInterface
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicInteger
 import io.nekohasekai.libbox.NetworkInterface as LibboxNetworkInterface
 
 /**
  * What libbox asks of the platform (sing-box 1.14 `experimental/libbox/platform.go`), the
- * part that needs no VPN: the default network and its interfaces, DNS, who owns a connection.
- * A libbox that runs without a tunnel (the throwaway one for pings and Speed Test) uses this
- * class as it is; the tunnel's [VpnPlatform] adds openTun and protect.
+ * part that needs no VPN: the default network and its interfaces, DNS, who owns a connection,
+ * protecting sockets from a running tunnel. A libbox that runs without a tunnel (the throwaway
+ * one for pings and Speed Test) uses this class as it is; the tunnel's [VpnPlatform] adds openTun.
  *
  * Not supported on purpose (answers "no"): the platform shell / SSH, bridges, the neighbor table,
  * WiFi state (needs the location permission), notifications from sing-box.
@@ -46,8 +48,21 @@ open class LibboxPlatform(private val context: Context) : PlatformInterface {
 
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
 
-    /** The tunnel's platform protects the socket from the VPN; with no tunnel there is nothing to do. */
-    override fun autoDetectInterfaceControl(fd: Int) {}
+    /**
+     * The VpnService whose protect() takes this libbox's sockets out of the VPN: the app itself is
+     * inside it, so every socket sing-box opens (to the servers, direct outbounds) would otherwise
+     * enter the tun. The throwaway libbox of a ping / Speed Test finds the running tunnel's service
+     * (null with no tun open: no VPN, nothing for a socket to bypass); the tunnel's [VpnPlatform] always has it.
+     */
+    protected open fun protector(): VpnService? = JormungandVpnService.instance?.takeIf { it.tunOpen }
+
+    private val protectFailures = AtomicInteger()
+
+    override fun autoDetectInterfaceControl(fd: Int) {
+        val vpn = protector() ?: return
+        // false: the socket stays inside the VPN and loops back into it; the first few are worth a line
+        if (!vpn.protect(fd) && protectFailures.getAndIncrement() < 5) VpnBridge.log("warn", "network: protect($fd) failed")
+    }
 
     override fun openTun(options: TunOptions): Int = error("android: this libbox has no tunnel")
 

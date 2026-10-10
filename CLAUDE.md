@@ -13,6 +13,20 @@ Flutter or build work):
 
 Where things stand and what's next: the newest `.claude_states/state_N.md`.
 
+## Priorities (the user's, above everything below)
+
+- **Quality first.** This is the user's own app, not made to order: the goal is the best result
+  that is possible at all. Cost and time of development do not count — never pick, recommend or
+  argue for an option because it is "cheaper", "simpler", "minimal work" or "faster to do". Compare
+  options on result, correctness, robustness, fit to the model; do the proper thing even when it
+  is large.
+- **Android is not a cut-down port.** Much was dropped or shortened while the Android app was
+  built; everything that was forgotten is added back (e.g. the kill switch, which `docs/rules.md`
+  describes in detail and a lot rests on; today `caps.killSwitch => !android`). Only what is
+  truly meaningless on the platform stays out (system proxy). A difference between platforms is
+  legitimate only when it is listed in `docs/platforms.md` with a reason; "not done yet" is a gap
+  to close, not a difference.
+
 ## Docs (Russian, the knowledge base — keep them current)
 
 | File | What |

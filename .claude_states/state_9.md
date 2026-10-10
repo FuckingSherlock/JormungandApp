@@ -67,3 +67,27 @@
    сам, без рестарта), правило «learned → цель» перед Direct. Первый запрос теряется, следующие идут
    через VPN. Список в Rules (домен, когда, почему; удалить/очистить), TTL ~7 дней → снова пробуем direct.
    Проверить: авто-перечитывание local rule-set в нашей версии sing-box.
+8. Android — не урезанный порт (решение пользователя, правило в CLAUDE.md «Priorities»): всё выпавшее при
+   сборке возвращаем — kill switch (сейчас `caps.killSwitch => !android`), `dnsResolveForIp` и прочее; нужен
+   аудит Android против мокапа/Windows (`platform_caps.dart`, `android`-условия в `app/lib`, список отличий
+   в `docs/platforms.md`). Вне остаётся только бессмысленное на платформе (системный прокси).
+9. TCP через TUN на Android не работал на `mixed`/`system` (Telegram у тестера; у пользователя то же): sing-box
+   видит SYN (`found package name`), но TCP не доходит до маршрутизации, UDP идёт; gVisor работает. Причина
+   (по исходникам, ещё не доказана сборкой): приложение исключено из VPN (`addDisallowedApplication(self)`),
+   слушатель системного стека отвечает по таблице UID мимо TUN; `ForwarderBindInterface` в sing-box только для
+   Darwin. Решение: НЕ исключать себя из VPN, а ловить свои запросы правилом `package_name` → direct (как
+   `selfRule` на десктопе, `config.dart`), после `tunnel-in`; проверить сборкой на `mixed`; gvisor — страховка
+   по умолчанию до подтверждения. Вопрос «нужны ли стеки кроме gvisor» решаем по результату, не по цене.
+10. Приложение не заметило, что TCP через TUN не проходит: все самопроверки идут через `probe-in`/`tunnel-in`
+   (мимо TUN). Нужны: детектор «осиротевших» SYN (`found package name` без `inbound connection` под тем же
+   СДЕЛАНО (в коммите, ждёт проверки на телефоне, mixed): приложение больше не исключает себя из VPN; свой
+   трафик ловит `package_name` → direct (после `tunnel-in`), свой DNS — правило в `dns.rules` на резолвер вне
+   туннеля; реестр `outside_tunnel.dart` + сторож-тесты (core, app, Kotlin-шаблоны), шаг в sync-процедуре
+   `docs/platforms.md`; ping/speed-боксы защищают сокеты через VpnService; на API<31 монитор сети не берёт
+   VPN как «сеть по умолчанию». Открыто: подтвердить на устройстве (mixed/system), потом решать про gvisor по
+   умолчанию; Android 8–9 (procfs) не проверен; dev-jormd на Windows: `dart.exe` vs `dartvm.exe` в
+   selfProcessPaths.
+   Детектор (ещё не сделан): «осиротевшие» SYN (`found package name` без `inbound connection` под тем же
+   ID) → событие + автофолбэк; сводка TUN по приложениям и шапка устройства в экспорте логов;
+   `found package name` в `noise`-кольцо логбука (шквал Telegram занял 79 % кольца); проба достижимости
+   Telegram DC через выход.
