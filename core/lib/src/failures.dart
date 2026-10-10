@@ -1,0 +1,573 @@
+/// Failed connections, caught and surfaced: one classifier ([ConnOutcome]) for what a closed
+/// connection says about itself, and the rolling book of them ([FailureBook]) with the
+/// `conn/failing` event. The same numbers answer «what is failing right now, for whom, through
+/// which route» in the report, and later «Direct → if it does not open → the target».
+///
+/// Two sources, both from the one sing-box that runs:
+/// - the API service's closed connections ([ClosedConnection]): who asked for what, through which
+///   outbound, how many bytes each way, how long it lived — the verdict;
+/// - its log lines (`connection: open connection to H:P using outbound/…: <error>`): the reason a
+///   dial failed, which the closed record does not carry — a hint that refines the verdict.
+library;
+
+import 'rulenames.dart' show processEventData;
+import 'sbapi.dart' show ClosedConnection;
+
+/// How a request ended.
+enum ConnKind {
+  /// Something came back (`down > 0`).
+  ok,
+
+  /// The far side or the network said no: `connection refused`, a rejected handshake, no route.
+  refused,
+
+  /// The connection was cut after it was made: `connection reset`, EOF, broken pipe.
+  reset,
+
+  /// It did not answer in time: `i/o timeout`, `deadline exceeded`, or a dial that never ended
+  /// (nothing sent, nothing back, a long time).
+  timeout,
+
+  /// Bytes went out and nothing came back for long (`up > 0`, `down == 0`, past
+  /// [ConnOutcome.instantMs]): the node or the site swallows the request.
+  stalled,
+
+  /// Nothing came back and it was over almost at once ([ConnOutcome.instantMs]); sing-box reports
+  /// `up == 0` for most of them, so the bytes sent do not decide this one.
+  instantRefusal,
+
+  /// The name did not resolve.
+  dnsFail,
+}
+
+/// The verdict on one closed connection. One place for «did it get anything back»: Auto's failed
+/// request ([isFailure]), the failure book and the reports read it from here.
+class ConnOutcome {
+  const ConnOutcome._(this.kind, {this.sent = false, this.durationMs, this.idle = false});
+
+  final ConnKind kind;
+
+  /// Bytes went out (`up > 0`).
+  final bool sent;
+
+  /// How long it lived, ms (null = not told).
+  final int? durationMs;
+
+  /// Nothing moved either way for a long time ([idleMs]): a pooled connection that was never used and
+  /// was closed — neither a success nor a failed request. Its [kind] is [ConnKind.ok] and the book
+  /// does not count it.
+  final bool idle;
+
+  bool get ok => kind == ConnKind.ok;
+  bool get failed => !ok;
+
+  /// `down == 0` and over within this many ms = [ConnKind.instantRefusal]; past it, [ConnKind.stalled]
+  /// (bytes sent) or [ConnKind.timeout] (none). A refusal through a proxy chain takes the round trips
+  /// to the far side, which a mobile link makes a second or more.
+  static const instantMs = 2000;
+
+  /// A connection that lived this long with no byte either way is idle, not failed.
+  static const idleMs = 60000;
+
+  /// The core's definition of a request that got nothing back: the connection closed with no byte
+  /// from the far side. What Auto's `onClosed` has always judged by.
+  static bool isFailure(ClosedConnection c) => c.down == 0;
+
+  /// [hint]: the kind a nearby log line named for this connection (see [kindOfError]); it wins over
+  /// the timing guess when nothing came back.
+  factory ConnOutcome.of(ClosedConnection c, {ConnKind? hint}) {
+    final d = c.durationMs, sent = c.up > 0;
+    if (!isFailure(c)) return ConnOutcome._(ConnKind.ok, sent: sent, durationMs: d);
+    if (hint != null) return ConnOutcome._(hint, sent: sent, durationMs: d);
+    if (c.up == 0 && d != null && d >= idleMs) return ConnOutcome._(ConnKind.ok, durationMs: d, idle: true);
+    final ConnKind k;
+    if (d != null && d < instantMs) {
+      k = ConnKind.instantRefusal;
+    } else if (sent) {
+      k = ConnKind.stalled;
+    } else {
+      k = d == null ? ConnKind.instantRefusal : ConnKind.timeout;
+    }
+    return ConnOutcome._(k, sent: sent, durationMs: d);
+  }
+
+  /// What the error text of a failed dial says (the tail of `open connection to H:P using …: <err>`);
+  /// null = not a failure of the request (the client gave up: `canceled by local`) or not known —
+  /// the timing decides then.
+  static ConnKind? kindOfError(String err) {
+    final e = err.toLowerCase();
+    if (e.contains('canceled by local') || e.contains('context canceled')) return null;
+    if (e.contains('no such host') || e.contains('lookup ') || e.contains('server misbehaving') || e.contains('dns')) return ConnKind.dnsFail;
+    if (e.contains('timeout') || e.contains('timed out') || e.contains('deadline exceeded')) return ConnKind.timeout;
+    if (e.contains('connection reset') ||
+        e.contains('reset by peer') ||
+        e.contains('broken pipe') ||
+        e.contains('unexpected eof') ||
+        e.contains('canceled by remote') ||
+        e.trim() == 'eof' ||
+        e.endsWith(': eof')) {
+      return ConnKind.reset;
+    }
+    if (e.contains('refused') ||
+        e.contains('unreachable') ||
+        e.contains('no route to host') ||
+        e.contains('verification failed') ||
+        e.contains('handshake') ||
+        e.contains('authentication') ||
+        e.contains('unauthorized') ||
+        e.contains('forbidden') ||
+        e.contains('rejected') ||
+        e.contains('tls:')) {
+      return ConnKind.refused;
+    }
+    return null;
+  }
+}
+
+/// A line of sing-box's log without its prefixes: the connection id (null = the line has none) and
+/// the text after `[id duration] `. Takes the stamped (`+0300 2026-… INFO …`), the bare
+/// (`INFO[0003] …`), the coloured and the exported (`2026-…Z INFO  …`) forms alike.
+class SbLine {
+  const SbLine(this.id, this.body);
+  final String? id;
+  final String body;
+
+  static final _ansi = RegExp(r'\x1B\[[0-9;]*m');
+  static final _idRe = RegExp(r'\[(\d{1,10}) [0-9][^\]\s]*\] ');
+
+  factory SbLine.parse(String raw) {
+    if (raw.contains('\x1B')) raw = raw.replaceAll(_ansi, '');
+    final m = _idRe.firstMatch(raw);
+    return m == null ? SbLine(null, raw) : SbLine(m[1], raw.substring(m.end));
+  }
+}
+
+/// `host:port` of a destination as sing-box writes it (an IPv6 host stays in its brackets);
+/// port 0 = none.
+(String, int) splitDest(String dest) {
+  final at = dest.lastIndexOf(':');
+  if (at < 0 || dest.endsWith(']')) return (dest, 0);
+  final port = int.tryParse(dest.substring(at + 1));
+  return port == null ? (dest, 0) : (dest.substring(0, at), port);
+}
+
+/// The inbound the core's own measurements go in through (probe.dart): never counted.
+const _probeInbound = 'probe-in';
+
+/// The core's own requests through the tunnel (subscriptions, the exit check): counted, never an event.
+const _tunnelInbound = 'tunnel-in';
+
+// The ring of 10 one-minute buckets: «the last 10 minutes» without a timestamp per request.
+class _Buckets {
+  static const n = 10;
+  final ok = List<int>.filled(n, 0), bad = List<int>.filled(n, 0), stamp = List<int>.filled(n, -1);
+
+  void add(int minute, {required bool failed}) {
+    final i = minute % n;
+    if (stamp[i] != minute) {
+      stamp[i] = minute;
+      ok[i] = 0;
+      bad[i] = 0;
+    }
+    if (failed) {
+      bad[i]++;
+    } else {
+      ok[i]++;
+    }
+  }
+
+  int okIn(int minute) => _sum(ok, minute);
+  int badIn(int minute) => _sum(bad, minute);
+
+  int _sum(List<int> a, int minute) {
+    var s = 0;
+    for (var i = 0; i < n; i++) {
+      if (stamp[i] > minute - n && stamp[i] <= minute) s += a[i];
+    }
+    return s;
+  }
+}
+
+class _Entry {
+  _Entry(this.who, this.process, this.host, this.port, this.outbound, this.inbound, this.network);
+  final String who, process, host, outbound, inbound, network;
+  final int port;
+  final buckets = _Buckets();
+  int okSince = 0, failedSince = 0, bgSince = 0;
+  final kinds = <ConnKind, int>{};
+  int lastAt = 0, lastFailAt = 0;
+  ConnKind? lastKind;
+  int? lastDurationMs;
+
+  // the event rule: failures within the streak window with no success between; `reported` until one
+  final streak = <(int, ConnKind)>[];
+  bool reported = false;
+
+  String get route {
+    final at = outbound.indexOf('/');
+    return at < 0 ? outbound : outbound.substring(0, at);
+  }
+
+  /// The app as the journal names it: the package (Android), else the program's file name.
+  String get app {
+    if (who.isNotEmpty) return who;
+    final p = processEventData(process);
+    return p == null ? '' : '${p['name']}';
+  }
+}
+
+class _Hint {
+  _Hint(this.kind, this.tag, this.at);
+  final ConnKind kind;
+  final String tag;
+  final int at;
+}
+
+class _Group {
+  _Group(this.id, this.at);
+  final int id;
+  final int at;
+  final hosts = <String>{};
+}
+
+/// The book of failed connections of the running sing-box: per (app, destination, outbound, inbound,
+/// tcp/udp) the successes and failures of the last 10 minutes and since sing-box started, by kind;
+/// bounded ([maxEntries]); fed by the closed-connection stream ([onClosed]) and the log ([onLog]).
+///
+/// `conn/failing` ([emit]): [failAfter] failures of one entry within [streakWindow] with no success
+/// between. One event per entry until a success resets it; entries of the same app and outbound that
+/// fail while the event is [groupWindow] fresh change it in place (`more`) instead of making new
+/// ones; at most [maxEvents] per [window] overall. Not raised for UDP, for the core's own
+/// requests, for an ignored site, or for a site Auto already reported ([noteSite]).
+///
+/// The caller owns the clock and the lifetime: [start] when sing-box starts (counters begin), [stop]
+/// when it ends; nothing here runs on a timer.
+class FailureBook {
+  FailureBook({
+    DateTime Function()? now,
+    bool Function(String host)? ignored,
+    bool Function()? background,
+    this.emit,
+    this.update,
+  })  : _now = now ?? DateTime.now,
+        _ignored = ignored,
+        _background = background;
+
+  /// The window of the «last 10 minutes» counters (10 one-minute buckets).
+  static const window = Duration(minutes: 10);
+
+  /// Failures of one entry, within [streakWindow] and with no success between, that make `conn/failing`.
+  static const failAfter = 3;
+  static const streakWindow = Duration(seconds: 60);
+
+  /// Entries of one app through one outbound that fail within this of the event change it in place.
+  static const groupWindow = Duration(minutes: 5);
+
+  /// At most this many `conn/failing` per [window]; the rest are only counted.
+  static const maxEvents = 6;
+
+  /// Entries kept (least recently seen without a failure go first).
+  static const maxEntries = 400;
+
+  /// A log hint is used for the connection that closes within this of it.
+  static const hintTtl = Duration(seconds: 20);
+
+  /// A site Auto reported ([noteSite]) gets no `conn/failing` for this long.
+  static const coveredFor = Duration(minutes: 10);
+
+  /// The destinations whose resolving failed (`dns: exchange failed for …`), kept.
+  static const maxDns = 50;
+
+  final DateTime Function() _now;
+  final bool Function(String host)? _ignored;
+  final bool Function()? _background;
+
+  /// Writes the journal entry; returns its id (null = not written). `bg`: the screen was off.
+  final int? Function(Map<String, dynamic> data, {required bool bg})? emit;
+
+  /// Changes the data of an entry [emit] wrote (a group's `more`).
+  final void Function(int id, Map<String, dynamic> data)? update;
+
+  bool _active = false;
+  int _since = 0;
+  final _entries = <String, _Entry>{}; // insertion order: the newest last
+  final _hints = <String, _Hint>{};
+  final _covered = <String, int>{};
+  final _groups = <String, _Group>{};
+  final _emitted = <int>[];
+  final _total = _Buckets();
+  int _okSince = 0, _failedSince = 0, _bgSince = 0, _events = 0;
+  final _kindsSince = <ConnKind, int>{};
+  final _dns = <String, (int, int)>{}; // host → (count, last at)
+
+  bool get active => _active;
+
+  /// sing-box started: the counters begin from nothing.
+  void start() {
+    _entries.clear();
+    _hints.clear();
+    _covered.clear();
+    _groups.clear();
+    _emitted.clear();
+    _dns.clear();
+    _kindsSince.clear();
+    _okSince = _failedSince = _bgSince = _events = 0;
+    for (var i = 0; i < _Buckets.n; i++) {
+      _total.ok[i] = _total.bad[i] = 0;
+      _total.stamp[i] = -1;
+    }
+    _since = _now().millisecondsSinceEpoch;
+    _active = true;
+  }
+
+  /// sing-box ended: nothing more is taken in; what was counted stays readable.
+  void stop() {
+    _active = false;
+    _hints.clear();
+  }
+
+  /// Auto reported [host] (`site/blocked` / `site/unreachable`): no `conn/failing` for it soon.
+  void noteSite(String host) {
+    _covered.remove(host);
+    _covered[host.toLowerCase()] = _now().millisecondsSinceEpoch;
+    while (_covered.length > 100) {
+      _covered.remove(_covered.keys.first);
+    }
+  }
+
+  bool _isCovered(String host, int ms) {
+    for (final e in _covered.entries) {
+      if (ms - e.value > coveredFor.inMilliseconds) continue;
+      if (host == e.key || host.endsWith('.${e.key}')) return true;
+    }
+    return false;
+  }
+
+  /// A line of sing-box's log: a failed dial's reason (the hint for the closed record that follows) and
+  /// a name that did not resolve.
+  void onLog(String line) {
+    if (!_active) return;
+    if (!line.contains('open connection to') && !line.contains('failed for')) return;
+    final l = SbLine.parse(line);
+    final o = _openRe.firstMatch(l.body);
+    if (o != null) {
+      final kind = ConnOutcome.kindOfError(o[4]!);
+      if (kind == null) return;
+      final dest = o[1]!;
+      _hints.remove(dest);
+      _hints[dest] = _Hint(kind, o[3]!, _now().millisecondsSinceEpoch);
+      while (_hints.length > 128) {
+        _hints.remove(_hints.keys.first);
+      }
+      return;
+    }
+    final d = _dnsRe.firstMatch(l.body);
+    if (d != null) {
+      final host = d[1]!.toLowerCase();
+      if (_ignored?.call(host) == true) return;
+      final was = _dns.remove(host);
+      _dns[host] = ((was?.$1 ?? 0) + 1, _now().millisecondsSinceEpoch);
+      while (_dns.length > maxDns) {
+        _dns.remove(_dns.keys.first);
+      }
+    }
+  }
+
+  // `connection: open connection to H:P using outbound/type[tag]: error`
+  static final _openRe = RegExp(r'open connection to (\S+) using (\S+?)\[([^\]]*)\]: (.*)$');
+  // `dns: exchange failed for example.com. IN A: error`
+  static final _dnsRe = RegExp(r'dns: (?:exchange|lookup) failed for (\S+?)\.?(?:\s+IN\s+\w+)?:');
+
+  /// A connection sing-box closed.
+  void onClosed(ClosedConnection c) {
+    if (!_active || c.inbound == _probeInbound) return;
+    final (host, port) = splitDest(c.destination);
+    final h = host.toLowerCase();
+    if (_ignored?.call(h) == true) return;
+    final hint = ConnOutcome.isFailure(c) ? _takeHint(c) : null;
+    final out = ConnOutcome.of(c, hint: hint?.kind);
+    if (out.idle) return;
+    final at = _now().millisecondsSinceEpoch, minute = at ~/ 60000;
+    final e = _entryFor(c, h, port, at);
+    e.lastAt = at;
+    _total.add(minute, failed: out.failed);
+    e.buckets.add(minute, failed: out.failed);
+    if (out.ok) {
+      e.okSince++;
+      _okSince++;
+      e.streak.clear();
+      e.reported = false;
+      return;
+    }
+    final bg = _background?.call() ?? false;
+    e.failedSince++;
+    _failedSince++;
+    if (bg) {
+      e.bgSince++;
+      _bgSince++;
+    }
+    e.kinds[out.kind] = (e.kinds[out.kind] ?? 0) + 1;
+    _kindsSince[out.kind] = (_kindsSince[out.kind] ?? 0) + 1;
+    e.lastFailAt = at;
+    e.lastKind = out.kind;
+    e.lastDurationMs = out.durationMs;
+    _streak(e, out.kind, at, h, bg);
+  }
+
+  _Hint? _takeHint(ClosedConnection c) {
+    final h = _hints.remove(c.destination);
+    if (h == null) return null;
+    if (_now().millisecondsSinceEpoch - h.at > hintTtl.inMilliseconds) return null;
+    return h.tag.isEmpty || h.tag == c.outbound ? h : null;
+  }
+
+  _Entry _entryFor(ClosedConnection c, String host, int port, int at) {
+    final who = c.pkg.isNotEmpty ? c.pkg : c.process;
+    final key = '$who\u0000$host:$port\u0000${c.outbound}\u0000${c.inbound}\u0000${c.network}';
+    var e = _entries.remove(key);
+    if (e == null) {
+      e = _Entry(c.pkg, c.process, host, port, c.outbound, c.inbound, c.network);
+      if (_entries.length >= maxEntries) _evict();
+    }
+    _entries[key] = e; // the newest last
+    return e;
+  }
+
+  void _evict() {
+    var drop = maxEntries ~/ 10;
+    final plain = [for (final en in _entries.entries) if (en.value.failedSince == 0) en.key].take(drop).toList();
+    for (final k in plain) {
+      _entries.remove(k);
+      drop--;
+    }
+    while (drop-- > 0 && _entries.isNotEmpty) {
+      _entries.remove(_entries.keys.first);
+    }
+  }
+
+  void _streak(_Entry e, ConnKind kind, int at, String host, bool bg) {
+    final from = at - streakWindow.inMilliseconds;
+    e.streak.removeWhere((s) => s.$1 < from);
+    e.streak.add((at, kind));
+    if (e.reported || e.streak.length < failAfter) return;
+    if (e.network == 'udp' || e.inbound == _tunnelInbound || e.inbound == _probeInbound) return;
+    if (_isCovered(host, at)) return;
+    e.reported = true;
+    _raise(e, at, bg);
+  }
+
+  void _raise(_Entry e, int at, bool bg) {
+    final send = emit;
+    if (send == null) return;
+    final gKey = '${e.who}\u0000${e.process}\u0000${e.outbound}';
+    final g = _groups[gKey], dest = '${e.host}:${e.port}';
+    // another destination of the same app through the same outbound joins the event; the same one
+    // failing again after a success is a new outage and a new event
+    if (g != null && at - g.at <= groupWindow.inMilliseconds && !g.hosts.contains(dest)) {
+      g.hosts.add(dest);
+      update?.call(g.id, {'more': g.hosts.length - 1});
+      return;
+    }
+    final recent = at - window.inMilliseconds;
+    _emitted.removeWhere((t) => t < recent);
+    if (_emitted.length >= maxEvents) return;
+    final counts = <ConnKind, int>{};
+    for (final s in e.streak) {
+      counts[s.$2] = (counts[s.$2] ?? 0) + 1;
+    }
+    var kind = e.streak.last.$2;
+    for (final k in counts.entries) {
+      if (k.value > counts[kind]!) kind = k.key;
+    }
+    final id = send({
+      if (e.who.isNotEmpty) 'app': e.who,
+      'process': ?processEventData(e.process),
+      'host': e.host,
+      if (e.port > 0) 'port': e.port,
+      'outbound': e.outbound,
+      'route': e.route,
+      'kind': kind.name,
+      'count': e.streak.length,
+      'windowMs': streakWindow.inMilliseconds,
+      'source': 'closed',
+    }, bg: bg);
+    if (id == null) return;
+    _emitted.add(at);
+    _events++;
+    final ng = _Group(id, at)..hosts.add('${e.host}:${e.port}');
+    _groups[gKey] = ng;
+    if (_groups.length > 100) _groups.remove(_groups.keys.first);
+  }
+
+  /// The numbers for the report: the totals, the apps and destinations that fail most (by the last
+  /// 10 minutes, then since sing-box started), the names that did not resolve. [top] bounds the lists.
+  Map<String, dynamic> toJson({int top = 20}) {
+    final minute = _now().millisecondsSinceEpoch ~/ 60000;
+    final failing = [for (final e in _entries.values) if (e.failedSince > 0) e];
+    int byWeight(_Entry a, _Entry b) {
+      final w = b.buckets.badIn(minute).compareTo(a.buckets.badIn(minute));
+      if (w != 0) return w;
+      final s = b.failedSince.compareTo(a.failedSince);
+      return s != 0 ? s : b.lastFailAt.compareTo(a.lastFailAt);
+    }
+
+    failing.sort(byWeight);
+    // by app: the same numbers added up over the app's entries
+    final apps = <String, Map<String, int>>{};
+    for (final e in failing) {
+      final a = apps.putIfAbsent(e.app.isEmpty ? '' : e.app, () => {'failed10m': 0, 'ok10m': 0, 'failedSince': 0, 'okSince': 0, 'bgSince': 0, 'destinations': 0});
+      a['failed10m'] = a['failed10m']! + e.buckets.badIn(minute);
+      a['ok10m'] = a['ok10m']! + e.buckets.okIn(minute);
+      a['failedSince'] = a['failedSince']! + e.failedSince;
+      a['okSince'] = a['okSince']! + e.okSince;
+      a['bgSince'] = a['bgSince']! + e.bgSince;
+      a['destinations'] = a['destinations']! + 1;
+    }
+    final appList = [for (final a in apps.entries) {'app': a.key, ...a.value}]
+      ..sort((x, y) {
+        final w = (y['failed10m'] as int).compareTo(x['failed10m'] as int);
+        return w != 0 ? w : (y['failedSince'] as int).compareTo(x['failedSince'] as int);
+      });
+    return {
+      'active': _active,
+      'since': _since,
+      'windowMs': window.inMilliseconds,
+      'ok': _okSince,
+      'failed': _failedSince,
+      'ok10m': _total.okIn(minute),
+      'failed10m': _total.badIn(minute),
+      'bgFailed': _bgSince,
+      'byKind': {for (final k in _kindsSince.entries) k.key.name: k.value},
+      'events': _events,
+      'entries': _entries.length,
+      'apps': appList.take(top).toList(),
+      'top': [
+        for (final e in failing.take(top))
+          {
+            if (e.who.isNotEmpty) 'app': e.who,
+            'process': ?processEventData(e.process),
+            'host': e.host,
+            if (e.port > 0) 'port': e.port,
+            'outbound': e.outbound,
+            'route': e.route,
+            if (e.inbound.isNotEmpty) 'inbound': e.inbound,
+            if (e.network.isNotEmpty) 'network': e.network,
+            'failed10m': e.buckets.badIn(minute),
+            'ok10m': e.buckets.okIn(minute),
+            'failedSince': e.failedSince,
+            'okSince': e.okSince,
+            if (e.bgSince > 0) 'bgSince': e.bgSince,
+            'byKind': {for (final k in e.kinds.entries) k.key.name: k.value},
+            'lastKind': e.lastKind?.name,
+            'lastAt': e.lastFailAt,
+            if (e.lastDurationMs != null) 'lastDurationMs': e.lastDurationMs,
+            if (e.reported) 'failing': true,
+          },
+      ],
+      'dns': [
+        for (final d in (_dns.entries.toList()..sort((a, b) => b.value.$1.compareTo(a.value.$1))).take(top))
+          {'host': d.key, 'count': d.value.$1, 'lastAt': d.value.$2},
+      ],
+    };
+  }
+}

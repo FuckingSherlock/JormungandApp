@@ -1,0 +1,630 @@
+# TUN gvisor, working (Android, 2026-10-10 10:36:33Z, from the app's log export)
+# lines: 627 (inbound 138, found 125, other 364); 2026-10-10T10:36:33.989 .. 2026-10-10T10:38:39.538
+# lines nothing reads are `other` and addresses of inbound lines are dropped; order, ids and times are as exported
+2026-10-10T10:36:33.989Z INFO  [2708533971 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:36:33.989Z INFO  [2708533971 2ms] router: found package name: com.sonyericsson.digitalclockwidget2
+2026-10-10T10:36:33.991Z INFO  [3331133 0ms] router: found package name: com.sonyericsson.digitalclockwidget2
+2026-10-10T10:36:33.992Z INFO  [1588641406 0ms] router: found package name: com.sonyericsson.digitalclockwidget2
+2026-10-10T10:36:33.992Z INFO  [735419367 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:36:33.992Z INFO  [735419367 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:36:33.992Z INFO  [735419367 0ms] router: found package name: com.sonyericsson.digitalclockwidget2
+2026-10-10T10:36:34.002Z INFO  other
+2026-10-10T10:36:34.149Z INFO  other
+2026-10-10T10:36:34.418Z INFO  other
+2026-10-10T10:36:34.418Z INFO  other
+2026-10-10T10:36:34.418Z INFO  other
+2026-10-10T10:36:34.418Z INFO  other
+2026-10-10T10:36:34.418Z INFO  other
+2026-10-10T10:36:34.418Z INFO  other
+2026-10-10T10:36:34.419Z INFO  other
+2026-10-10T10:36:34.419Z INFO  other
+2026-10-10T10:36:34.419Z INFO  other
+2026-10-10T10:36:34.419Z INFO  other
+2026-10-10T10:36:34.629Z INFO  other
+2026-10-10T10:36:34.669Z INFO  other
+2026-10-10T10:36:34.669Z INFO  other
+2026-10-10T10:36:34.669Z INFO  other
+2026-10-10T10:36:34.688Z INFO  other
+2026-10-10T10:36:34.689Z INFO  other
+2026-10-10T10:36:34.794Z INFO  other
+2026-10-10T10:36:35.105Z INFO  other
+2026-10-10T10:36:35.106Z INFO  other
+2026-10-10T10:36:35.151Z INFO  other
+2026-10-10T10:36:35.159Z INFO  other
+2026-10-10T10:36:35.184Z INFO  other
+2026-10-10T10:36:35.204Z INFO  other
+2026-10-10T10:36:35.221Z INFO  other
+2026-10-10T10:36:35.227Z INFO  other
+2026-10-10T10:36:35.254Z INFO  other
+2026-10-10T10:36:35.937Z INFO  other
+2026-10-10T10:36:39.427Z INFO  other
+2026-10-10T10:36:39.427Z INFO  other
+2026-10-10T10:36:39.467Z INFO  [1850512409 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:36:39.472Z INFO  [1850512409 2ms] router: found package name: com.android.chrome
+2026-10-10T10:36:39.474Z INFO  other
+2026-10-10T10:36:39.474Z INFO  [3167534044 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:36:39.477Z INFO  [3167534044 2ms] router: found package name: com.android.chrome
+2026-10-10T10:36:39.480Z INFO  [1281635746 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:36:39.480Z INFO  [1281635746 3ms] router: found package name: com.android.chrome
+2026-10-10T10:36:39.558Z INFO  other
+2026-10-10T10:36:39.558Z INFO  other
+2026-10-10T10:36:39.559Z INFO  other
+2026-10-10T10:36:39.559Z INFO  other
+2026-10-10T10:36:39.559Z INFO  other
+2026-10-10T10:36:39.559Z INFO  other
+2026-10-10T10:36:39.559Z INFO  other
+2026-10-10T10:36:39.559Z INFO  other
+2026-10-10T10:36:39.579Z INFO  [3032609985 1ms] router: found package name: com.android.chrome
+2026-10-10T10:36:39.579Z INFO  [1505587202 0ms] router: found package name: com.android.chrome
+2026-10-10T10:36:39.581Z INFO  [3605442651 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:36:39.581Z INFO  [3605442651 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:36:39.581Z INFO  [3605442651 0ms] router: found package name: com.android.chrome
+2026-10-10T10:36:39.581Z INFO  other
+2026-10-10T10:36:39.581Z INFO  other
+2026-10-10T10:36:39.715Z INFO  other
+2026-10-10T10:36:40.194Z INFO  other
+2026-10-10T10:36:40.205Z INFO  other
+2026-10-10T10:36:40.703Z INFO  other
+2026-10-10T10:36:40.783Z INFO  other
+2026-10-10T10:36:43.868Z INFO  [3175421362 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:36:43.869Z INFO  [3175421362 2ms] router: found package name: com.android.vending
+2026-10-10T10:36:43.870Z INFO  [3995279095 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:36:43.871Z INFO  [3995279095 1ms] router: found package name: com.android.vending
+2026-10-10T10:36:43.948Z INFO  other
+2026-10-10T10:36:43.948Z INFO  other
+2026-10-10T10:36:43.948Z INFO  other
+2026-10-10T10:36:43.948Z INFO  other
+2026-10-10T10:36:43.948Z INFO  other
+2026-10-10T10:36:43.949Z INFO  other
+2026-10-10T10:36:43.949Z INFO  other
+2026-10-10T10:36:43.949Z INFO  other
+2026-10-10T10:36:43.964Z INFO  [4125134157 1ms] router: found package name: com.android.vending
+2026-10-10T10:36:43.964Z INFO  [296087027 0ms] router: found package name: com.android.vending
+2026-10-10T10:36:43.964Z INFO  [3446172842 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:36:43.965Z INFO  [3446172842 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:36:43.965Z INFO  [3446172842 0ms] router: found package name: com.android.vending
+2026-10-10T10:36:43.973Z INFO  other
+2026-10-10T10:36:44.048Z INFO  other
+2026-10-10T10:36:45.818Z INFO  other
+2026-10-10T10:36:45.901Z INFO  other
+2026-10-10T10:36:46.036Z INFO  other
+2026-10-10T10:36:46.119Z INFO  other
+2026-10-10T10:36:46.803Z INFO  other
+2026-10-10T10:36:46.881Z INFO  other
+2026-10-10T10:36:54.509Z INFO  [2522916624 1ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:36:54.512Z INFO  [286572467 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:36:54.513Z INFO  [420971169 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:36:54.514Z INFO  [420971169 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:36:54.514Z INFO  [420971169 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:36:54.514Z INFO  other
+2026-10-10T10:36:54.514Z INFO  other
+2026-10-10T10:36:55.216Z INFO  [1334759508 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:36:55.220Z INFO  [1334759508 5ms] inbound/socks[probe-in]: [route0/src2::n3aa6a221bb88] inbound connection
+2026-10-10T10:36:55.223Z INFO  other
+2026-10-10T10:36:55.225Z INFO  other
+2026-10-10T10:36:55.315Z INFO  other
+2026-10-10T10:36:56.299Z INFO  other
+2026-10-10T10:36:56.300Z INFO  other
+2026-10-10T10:36:56.300Z INFO  other
+2026-10-10T10:36:56.375Z INFO  other
+2026-10-10T10:36:56.376Z INFO  other
+2026-10-10T10:36:56.377Z INFO  other
+2026-10-10T10:36:57.780Z INFO  other
+2026-10-10T10:36:57.781Z INFO  other
+2026-10-10T10:36:57.838Z INFO  other
+2026-10-10T10:36:57.847Z INFO  other
+2026-10-10T10:36:58.069Z INFO  other
+2026-10-10T10:36:58.332Z INFO  other
+2026-10-10T10:36:58.416Z INFO  other
+2026-10-10T10:37:06.258Z INFO  other
+2026-10-10T10:37:06.323Z INFO  other
+2026-10-10T10:37:16.424Z INFO  other
+2026-10-10T10:37:16.424Z INFO  other
+2026-10-10T10:37:16.424Z INFO  other
+2026-10-10T10:37:16.890Z INFO  other
+2026-10-10T10:37:25.330Z INFO  other
+2026-10-10T10:37:25.333Z INFO  other
+2026-10-10T10:37:25.333Z INFO  other
+2026-10-10T10:37:25.662Z INFO  [2944922008 3ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:25.663Z INFO  [1649207509 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:25.666Z INFO  [74138289 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:25.666Z INFO  [74138289 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:25.666Z INFO  [74138289 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:25.667Z INFO  other
+2026-10-10T10:37:25.667Z INFO  other
+2026-10-10T10:37:26.389Z INFO  other
+2026-10-10T10:37:26.389Z INFO  other
+2026-10-10T10:37:26.396Z INFO  other
+2026-10-10T10:37:26.397Z INFO  other
+2026-10-10T10:37:26.942Z INFO  other
+2026-10-10T10:37:26.942Z INFO  other
+2026-10-10T10:37:32.552Z INFO  [3817968357 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:32.553Z INFO  [3182025732 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:32.553Z INFO  [2927464147 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:32.557Z INFO  [3817968357 16ms] inbound/socks[probe-in]: [route0/src2::n3aa6a221bb88] inbound connection
+2026-10-10T10:37:32.559Z INFO  [3182025732 11ms] inbound/socks[probe-in]: [route1-entry/src1::na4dd2fecb061] inbound connection
+2026-10-10T10:37:32.559Z INFO  [2927464147 6ms] inbound/socks[probe-in]: [route2/src1::ncbec04e968c2] inbound connection
+2026-10-10T10:37:32.567Z INFO  other
+2026-10-10T10:37:32.567Z INFO  other
+2026-10-10T10:37:32.568Z INFO  other
+2026-10-10T10:37:32.568Z INFO  other
+2026-10-10T10:37:32.568Z INFO  other
+2026-10-10T10:37:32.568Z INFO  other
+2026-10-10T10:37:32.645Z INFO  other
+2026-10-10T10:37:32.820Z INFO  other
+2026-10-10T10:37:34.693Z INFO  other
+2026-10-10T10:37:34.877Z INFO  other
+2026-10-10T10:37:35.447Z INFO  other
+2026-10-10T10:37:35.591Z INFO  other
+2026-10-10T10:37:37.347Z DEBUG  other
+2026-10-10T10:37:37.351Z DEBUG  other
+2026-10-10T10:37:37.362Z DEBUG  other
+2026-10-10T10:37:37.539Z INFO  [3588288646 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:37.539Z INFO  [3498761328 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:37.539Z INFO  [3072714071 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:37.543Z INFO  [3588288646 3ms] inbound/socks[probe-in]: [route1-entry/src1::na4dd2fecb061] inbound connection
+2026-10-10T10:37:37.543Z INFO  [3072714071 3ms] inbound/socks[probe-in]: [route1-entry/src1::na4dd2fecb061] inbound connection
+2026-10-10T10:37:37.543Z INFO  [3498761328 4ms] inbound/socks[probe-in]: [route1-entry/src1::na4dd2fecb061] inbound connection
+2026-10-10T10:37:37.543Z INFO  other
+2026-10-10T10:37:37.543Z INFO  other
+2026-10-10T10:37:37.543Z INFO  other
+2026-10-10T10:37:37.543Z INFO  other
+2026-10-10T10:37:37.546Z INFO  other
+2026-10-10T10:37:37.546Z INFO  other
+2026-10-10T10:37:37.670Z INFO  [1773083088 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:37.677Z INFO  [1773083088 8ms] inbound/socks[probe-in]: [route1/src2::ne6fecbdc35b5] inbound connection
+2026-10-10T10:37:37.677Z INFO  other
+2026-10-10T10:37:37.677Z INFO  other
+2026-10-10T10:37:37.677Z INFO  other
+2026-10-10T10:37:38.040Z INFO  [1060692581 5ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:38.041Z INFO  [4229794082 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:38.041Z INFO  [3365188369 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:38.041Z INFO  [3365188369 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:38.041Z INFO  [3365188369 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:38.041Z INFO  other
+2026-10-10T10:37:38.041Z INFO  other
+2026-10-10T10:37:38.189Z INFO  [620294268 1ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:38.189Z INFO  [2985691438 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:38.190Z INFO  [3875326048 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:38.190Z INFO  [3875326048 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:38.190Z INFO  [3875326048 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:38.190Z INFO  other
+2026-10-10T10:37:38.190Z INFO  other
+2026-10-10T10:37:38.395Z INFO  [2213694997 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:38.402Z INFO  [2213694997 15ms] inbound/socks[probe-in]: [route1/src2::n6f50f4656d9e] inbound connection
+2026-10-10T10:37:38.403Z INFO  other
+2026-10-10T10:37:38.403Z INFO  other
+2026-10-10T10:37:38.404Z INFO  other
+2026-10-10T10:37:38.435Z INFO  [2152332228 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:38.436Z INFO  [2152332228 0ms] router: found package name: app.revanced.android.gms
+2026-10-10T10:37:38.436Z INFO  [885818863 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:38.436Z INFO  [885818863 0ms] router: found package name: app.revanced.android.gms
+2026-10-10T10:37:38.501Z INFO  other
+2026-10-10T10:37:38.501Z INFO  other
+2026-10-10T10:37:38.501Z INFO  other
+2026-10-10T10:37:38.501Z INFO  other
+2026-10-10T10:37:38.501Z INFO  other
+2026-10-10T10:37:38.501Z INFO  other
+2026-10-10T10:37:38.501Z INFO  other
+2026-10-10T10:37:38.501Z INFO  other
+2026-10-10T10:37:38.518Z INFO  [889258250 0ms] router: found package name: app.revanced.android.gms
+2026-10-10T10:37:38.518Z INFO  [3844815849 0ms] router: found package name: app.revanced.android.gms
+2026-10-10T10:37:38.518Z INFO  [3084379274 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:38.518Z INFO  [3084379274 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:38.518Z INFO  [3084379274 0ms] router: found package name: app.revanced.android.gms
+2026-10-10T10:37:38.521Z INFO  other
+2026-10-10T10:37:38.604Z INFO  other
+2026-10-10T10:37:38.901Z INFO  [1376263382 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:38.901Z INFO  [1376263382 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:38.920Z INFO  [461842658 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:38.920Z INFO  [461842658 2ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.030Z INFO  other
+2026-10-10T10:37:39.030Z INFO  other
+2026-10-10T10:37:39.030Z INFO  other
+2026-10-10T10:37:39.030Z INFO  other
+2026-10-10T10:37:39.030Z INFO  other
+2026-10-10T10:37:39.030Z INFO  other
+2026-10-10T10:37:39.030Z INFO  other
+2026-10-10T10:37:39.030Z INFO  other
+2026-10-10T10:37:39.536Z INFO  [3115785639 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:39.539Z INFO  [3115785639 2ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.539Z INFO  [890099815 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:39.540Z INFO  [890099815 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.540Z INFO  other
+2026-10-10T10:37:39.540Z INFO  other
+2026-10-10T10:37:39.540Z INFO  other
+2026-10-10T10:37:39.540Z INFO  other
+2026-10-10T10:37:39.540Z INFO  other
+2026-10-10T10:37:39.540Z INFO  other
+2026-10-10T10:37:39.540Z INFO  other
+2026-10-10T10:37:39.540Z INFO  other
+2026-10-10T10:37:39.545Z INFO  [3414659240 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.545Z INFO  [738999759 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.545Z INFO  [2142151934 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:39.545Z INFO  [2142151934 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:39.545Z INFO  [2142151934 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.545Z INFO  other
+2026-10-10T10:37:39.545Z INFO  other
+2026-10-10T10:37:39.757Z INFO  [3149373386 4ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.757Z INFO  [66094764 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.761Z INFO  [2554390097 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:39.761Z INFO  [2554390097 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:39.761Z INFO  [2554390097 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T10:37:39.761Z INFO  other
+2026-10-10T10:37:39.761Z INFO  other
+2026-10-10T10:37:40.724Z INFO  [890596693 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:40.725Z INFO  [890596693 2ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.725Z INFO  [118769833 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:40.728Z INFO  [118769833 1ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.728Z INFO  [1538900371 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:40.728Z INFO  [1538900371 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.728Z INFO  [2018087167 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:40.728Z INFO  [2018087167 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.744Z INFO  other
+2026-10-10T10:37:40.744Z INFO  other
+2026-10-10T10:37:40.744Z INFO  other
+2026-10-10T10:37:40.744Z INFO  other
+2026-10-10T10:37:40.744Z INFO  other
+2026-10-10T10:37:40.744Z INFO  other
+2026-10-10T10:37:40.748Z INFO  other
+2026-10-10T10:37:40.748Z INFO  other
+2026-10-10T10:37:40.753Z INFO  other
+2026-10-10T10:37:40.753Z INFO  other
+2026-10-10T10:37:40.874Z INFO  [1581105737 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:40.876Z INFO  [1581105737 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.884Z INFO  [1723990912 1ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.884Z INFO  [2095174740 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.884Z INFO  [2969181351 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:40.884Z INFO  [2969181351 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:40.884Z INFO  [2969181351 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.888Z INFO  [1922185582 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:40.890Z INFO  [1922185582 1ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.890Z INFO  [1693912755 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:40.890Z INFO  [1693912755 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.896Z INFO  other
+2026-10-10T10:37:40.905Z INFO  other
+2026-10-10T10:37:40.910Z INFO  [3043213742 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.910Z INFO  [803679539 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.910Z INFO  [806443986 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:40.910Z INFO  [806443986 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:40.910Z INFO  [806443986 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:40.916Z INFO  other
+2026-10-10T10:37:41.005Z INFO  [3485049235 2ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.005Z INFO  [294538656 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.005Z INFO  [2423369604 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:41.005Z INFO  [2423369604 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:41.005Z INFO  [2423369604 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.012Z INFO  other
+2026-10-10T10:37:41.481Z INFO  [645734263 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:41.483Z INFO  [645734263 2ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.483Z INFO  [4204495751 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:41.489Z INFO  [4204495751 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.489Z INFO  [646719179 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:41.489Z INFO  [646719179 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.489Z INFO  [2107044414 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:41.490Z INFO  [2107044414 1ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.513Z INFO  other
+2026-10-10T10:37:41.515Z INFO  other
+2026-10-10T10:37:41.519Z INFO  [2450523084 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.523Z INFO  [1612091841 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.523Z INFO  [1116714300 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:41.523Z INFO  [1116714300 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:41.523Z INFO  [1116714300 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.524Z INFO  [1565087554 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.524Z INFO  [2283679855 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.524Z INFO  [2468948504 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:41.524Z INFO  [2468948504 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:41.524Z INFO  [2468948504 0ms] router: found package name: ru.yandex.weatherplugin
+2026-10-10T10:37:41.527Z INFO  other
+2026-10-10T10:37:41.528Z INFO  other
+2026-10-10T10:37:43.431Z INFO  [2680047816 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:43.431Z INFO  [3456847720 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:43.431Z INFO  [3235966244 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:43.436Z INFO  [2680047816 5ms] inbound/socks[probe-in]: [route1/src2::n6f50f4656d9e] inbound connection
+2026-10-10T10:37:43.436Z INFO  [3456847720 3ms] inbound/socks[probe-in]: [route1/src2::n6f50f4656d9e] inbound connection
+2026-10-10T10:37:43.436Z INFO  [3235966244 2ms] inbound/socks[probe-in]: [route1/src2::n6f50f4656d9e] inbound connection
+2026-10-10T10:37:43.436Z INFO  other
+2026-10-10T10:37:43.436Z INFO  other
+2026-10-10T10:37:43.436Z INFO  other
+2026-10-10T10:37:43.436Z INFO  other
+2026-10-10T10:37:43.436Z INFO  other
+2026-10-10T10:37:43.436Z INFO  other
+2026-10-10T10:37:43.438Z INFO  other
+2026-10-10T10:37:43.438Z INFO  other
+2026-10-10T10:37:43.438Z INFO  other
+2026-10-10T10:37:43.635Z INFO  [3371676822 1ms] router: found package name: com.android.chrome
+2026-10-10T10:37:43.635Z INFO  [2553810408 0ms] router: found package name: com.android.chrome
+2026-10-10T10:37:43.635Z INFO  [1429382046 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:43.635Z INFO  [1429382046 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:43.635Z INFO  [1429382046 0ms] router: found package name: com.android.chrome
+2026-10-10T10:37:43.636Z INFO  other
+2026-10-10T10:37:43.636Z INFO  other
+2026-10-10T10:37:43.861Z INFO  [2140183823 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:43.862Z INFO  [2140183823 1ms] router: found package name: com.samsung.android.app.spage
+2026-10-10T10:37:43.862Z INFO  [702525410 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:43.863Z INFO  [702525410 0ms] router: found package name: com.samsung.android.app.spage
+2026-10-10T10:37:44.328Z INFO  [2212032701 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:44.329Z INFO  [2212032701 1ms] router: found package name: com.osp.app.signin
+2026-10-10T10:37:44.329Z INFO  [2323112320 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:44.330Z INFO  [2323112320 0ms] router: found package name: com.osp.app.signin
+2026-10-10T10:37:44.411Z INFO  other
+2026-10-10T10:37:44.411Z INFO  other
+2026-10-10T10:37:44.411Z INFO  other
+2026-10-10T10:37:44.411Z INFO  other
+2026-10-10T10:37:44.411Z INFO  other
+2026-10-10T10:37:44.415Z INFO  [51453193 0ms] router: found package name: com.osp.app.signin
+2026-10-10T10:37:44.415Z INFO  [1799908474 0ms] router: found package name: com.osp.app.signin
+2026-10-10T10:37:44.415Z INFO  [371676521 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:44.415Z INFO  [371676521 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:44.415Z INFO  [371676521 0ms] router: found package name: com.osp.app.signin
+2026-10-10T10:37:44.432Z INFO  other
+2026-10-10T10:37:44.511Z INFO  other
+2026-10-10T10:37:44.529Z INFO  other
+2026-10-10T10:37:44.529Z INFO  other
+2026-10-10T10:37:44.529Z INFO  other
+2026-10-10T10:37:44.529Z INFO  other
+2026-10-10T10:37:44.567Z INFO  [982416750 0ms] router: found package name: com.samsung.android.app.spage
+2026-10-10T10:37:44.567Z INFO  [110342871 0ms] router: found package name: com.samsung.android.app.spage
+2026-10-10T10:37:44.567Z INFO  [1207538004 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:44.567Z INFO  [1207538004 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:44.567Z INFO  [1207538004 0ms] router: found package name: com.samsung.android.app.spage
+2026-10-10T10:37:44.567Z INFO  other
+2026-10-10T10:37:44.567Z INFO  [355290905 0ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T10:37:44.570Z INFO  [355290905 1ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T10:37:44.571Z INFO  other
+2026-10-10T10:37:44.572Z INFO  other
+2026-10-10T10:37:44.617Z INFO  other
+2026-10-10T10:37:44.643Z INFO  other
+2026-10-10T10:37:46.765Z INFO  [1162420003 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:46.766Z INFO  [4121947880 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:46.766Z INFO  [1263435984 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:46.766Z INFO  [3088290137 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:46.770Z INFO  [1162420003 13ms] inbound/socks[probe-in]: [dns-check/dns-dns1] inbound connection
+2026-10-10T10:37:46.771Z INFO  [3088290137 4ms] inbound/socks[probe-in]: [dns-check/dns-remote] inbound connection
+2026-10-10T10:37:46.771Z INFO  [1263435984 6ms] inbound/socks[probe-in]: [dns-check/dns-google] inbound connection
+2026-10-10T10:37:46.771Z INFO  [4121947880 10ms] inbound/socks[probe-in]: [dns-check/dns-local] inbound connection
+2026-10-10T10:37:46.771Z INFO  other
+2026-10-10T10:37:46.771Z INFO  other
+2026-10-10T10:37:46.771Z INFO  other
+2026-10-10T10:37:46.774Z INFO  other
+2026-10-10T10:37:46.774Z INFO  other
+2026-10-10T10:37:46.774Z INFO  other
+2026-10-10T10:37:46.774Z INFO  other
+2026-10-10T10:37:46.774Z INFO  other
+2026-10-10T10:37:46.774Z INFO  other
+2026-10-10T10:37:46.775Z INFO  [2422663853 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:46.853Z INFO  other
+2026-10-10T10:37:46.857Z INFO  other
+2026-10-10T10:37:46.857Z INFO  other
+2026-10-10T10:37:46.857Z INFO  other
+2026-10-10T10:37:46.857Z INFO  other
+2026-10-10T10:37:46.857Z INFO  other
+2026-10-10T10:37:46.857Z INFO  other
+2026-10-10T10:37:46.857Z INFO  other
+2026-10-10T10:37:46.857Z INFO  other
+2026-10-10T10:37:46.861Z INFO  [2049143791 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:46.862Z INFO  [1641056813 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:47.115Z INFO  other
+2026-10-10T10:37:47.115Z INFO  other
+2026-10-10T10:37:47.115Z INFO  other
+2026-10-10T10:37:47.115Z INFO  other
+2026-10-10T10:37:47.118Z INFO  [90556634 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:48.421Z ERROR  other
+2026-10-10T10:37:49.685Z INFO  [2162491204 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:49.687Z INFO  [2162491204 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:49.689Z INFO  [689363307 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:49.690Z INFO  [689363307 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:49.779Z INFO  other
+2026-10-10T10:37:49.780Z INFO  other
+2026-10-10T10:37:49.780Z INFO  other
+2026-10-10T10:37:49.780Z INFO  other
+2026-10-10T10:37:49.786Z INFO  [1144751820 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:49.787Z INFO  [2040660468 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:49.787Z INFO  [3027604763 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:49.787Z INFO  [3027604763 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:49.787Z INFO  [3027604763 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:49.787Z INFO  other
+2026-10-10T10:37:49.787Z INFO  other
+2026-10-10T10:37:50.562Z INFO  [1436550454 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:50.566Z INFO  [1436550454 4ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:50.567Z INFO  [2598309273 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:50.569Z INFO  [2598309273 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:50.872Z INFO  other
+2026-10-10T10:37:50.878Z INFO  [605321731 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:50.878Z INFO  [737807227 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:50.878Z INFO  [1344533738 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:50.878Z INFO  [1344533738 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:50.878Z INFO  [1344533738 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:50.884Z INFO  other
+2026-10-10T10:37:50.959Z INFO  other
+2026-10-10T10:37:53.756Z ERROR  other
+2026-10-10T10:37:53.756Z ERROR  other
+2026-10-10T10:37:53.757Z ERROR  other
+2026-10-10T10:37:55.810Z INFO  [242793284 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:55.816Z INFO  [242793284 7ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:55.818Z INFO  [1874689138 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:55.819Z INFO  [1874689138 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:55.947Z INFO  other
+2026-10-10T10:37:55.947Z INFO  other
+2026-10-10T10:37:55.947Z INFO  other
+2026-10-10T10:37:55.947Z INFO  other
+2026-10-10T10:37:55.956Z INFO  [2270475864 2ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:55.957Z INFO  [900102025 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:55.959Z INFO  [309211152 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:55.959Z INFO  [309211152 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:37:55.959Z INFO  [309211152 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:55.961Z INFO  other
+2026-10-10T10:37:55.961Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.415Z INFO  other
+2026-10-10T10:37:58.498Z INFO  other
+2026-10-10T10:37:58.499Z INFO  other
+2026-10-10T10:37:58.499Z INFO  other
+2026-10-10T10:37:58.505Z INFO  other
+2026-10-10T10:37:58.505Z INFO  other
+2026-10-10T10:37:58.507Z INFO  other
+2026-10-10T10:37:58.525Z INFO  other
+2026-10-10T10:37:58.530Z INFO  other
+2026-10-10T10:37:58.578Z INFO  other
+2026-10-10T10:37:58.981Z INFO  other
+2026-10-10T10:37:59.705Z INFO  [72368424 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:37:59.708Z INFO  [72368424 3ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:59.721Z INFO  [4260672544 2ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:59.721Z INFO  [2886122403 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:59.722Z INFO  [3512574093 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:59.722Z INFO  [3512574093 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:37:59.722Z INFO  [3512574093 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:37:59.729Z INFO  other
+2026-10-10T10:37:59.810Z INFO  other
+2026-10-10T10:37:59.875Z WARN  other
+2026-10-10T10:37:59.887Z INFO  [4230956529 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T10:37:59.892Z INFO  [4230956529 5ms] inbound/socks[probe-in]: [route0/src2::n3aa6a221bb88] inbound connection
+2026-10-10T10:37:59.895Z INFO  other
+2026-10-10T10:37:59.896Z INFO  other
+2026-10-10T10:37:59.977Z INFO  other
+2026-10-10T10:38:02.104Z INFO  [2754431841 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:02.107Z INFO  [2754431841 3ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:02.108Z INFO  [497714066 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:02.110Z INFO  [497714066 2ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:02.191Z INFO  other
+2026-10-10T10:38:02.191Z INFO  other
+2026-10-10T10:38:02.191Z INFO  other
+2026-10-10T10:38:02.191Z INFO  other
+2026-10-10T10:38:02.206Z INFO  [1636236733 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:02.208Z INFO  [4016362822 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:02.209Z INFO  [3159928738 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:38:02.209Z INFO  [3159928738 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:38:02.209Z INFO  [3159928738 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:02.209Z INFO  other
+2026-10-10T10:38:02.209Z INFO  other
+2026-10-10T10:38:03.420Z INFO  other
+2026-10-10T10:38:03.534Z INFO  other
+2026-10-10T10:38:04.757Z INFO  [4173585514 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:04.759Z INFO  [4173585514 2ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:04.759Z INFO  [4226632533 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:04.761Z INFO  [4226632533 1ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:04.838Z INFO  other
+2026-10-10T10:38:04.838Z INFO  other
+2026-10-10T10:38:04.838Z INFO  other
+2026-10-10T10:38:04.844Z INFO  [186971788 1ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:04.845Z INFO  [87401097 0ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:04.845Z INFO  [3473389343 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:38:04.845Z INFO  [3473389343 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:38:04.845Z INFO  [3473389343 0ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:04.854Z INFO  other
+2026-10-10T10:38:04.934Z INFO  other
+2026-10-10T10:38:08.225Z INFO  [3042932261 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:08.229Z INFO  [3042932261 6ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:08.232Z INFO  [1298900594 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:08.232Z INFO  [1298900594 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:08.319Z INFO  other
+2026-10-10T10:38:08.319Z INFO  other
+2026-10-10T10:38:08.319Z INFO  other
+2026-10-10T10:38:08.319Z INFO  other
+2026-10-10T10:38:08.325Z INFO  [3533678171 1ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:08.327Z INFO  [2557070703 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:08.327Z INFO  [2575239323 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:38:08.327Z INFO  [2575239323 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T10:38:08.327Z INFO  [2575239323 0ms] router: found package name: com.anthropic.claude
+2026-10-10T10:38:08.328Z INFO  other
+2026-10-10T10:38:08.328Z INFO  other
+2026-10-10T10:38:09.543Z INFO  [3824973127 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:09.545Z INFO  [3824973127 3ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:12.288Z WARN  other
+2026-10-10T10:38:13.407Z INFO  other
+2026-10-10T10:38:13.407Z INFO  other
+2026-10-10T10:38:13.416Z INFO  other
+2026-10-10T10:38:13.417Z INFO  other
+2026-10-10T10:38:13.417Z INFO  other
+2026-10-10T10:38:13.417Z INFO  other
+2026-10-10T10:38:13.418Z INFO  other
+2026-10-10T10:38:13.476Z INFO  other
+2026-10-10T10:38:13.491Z INFO  other
+2026-10-10T10:38:13.491Z INFO  other
+2026-10-10T10:38:13.491Z INFO  other
+2026-10-10T10:38:13.491Z INFO  other
+2026-10-10T10:38:13.634Z INFO  other
+2026-10-10T10:38:13.979Z INFO  other
+2026-10-10T10:38:14.038Z INFO  other
+2026-10-10T10:38:14.204Z INFO  other
+2026-10-10T10:38:14.882Z INFO  [3356507243 2ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:14.882Z INFO  [992731452 0ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:14.882Z INFO  [3249509236 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:38:14.883Z INFO  [3249509236 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:38:14.883Z INFO  [3249509236 0ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:14.888Z INFO  other
+2026-10-10T10:38:14.972Z INFO  other
+2026-10-10T10:38:18.420Z INFO  other
+2026-10-10T10:38:18.421Z INFO  other
+2026-10-10T10:38:18.542Z INFO  other
+2026-10-10T10:38:18.592Z INFO  other
+2026-10-10T10:38:18.971Z INFO  other
+2026-10-10T10:38:19.235Z INFO  other
+2026-10-10T10:38:19.288Z INFO  other
+2026-10-10T10:38:19.542Z INFO  [2120186820 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:19.544Z INFO  [2120186820 1ms] router: found package name: com.buffbuff.community
+2026-10-10T10:38:23.840Z INFO  other
+2026-10-10T10:38:28.409Z INFO  other
+2026-10-10T10:38:28.409Z INFO  other
+2026-10-10T10:38:28.412Z INFO  other
+2026-10-10T10:38:28.412Z INFO  other
+2026-10-10T10:38:28.418Z INFO  other
+2026-10-10T10:38:28.418Z INFO  other
+2026-10-10T10:38:28.418Z INFO  other
+2026-10-10T10:38:28.419Z INFO  other
+2026-10-10T10:38:28.419Z INFO  other
+2026-10-10T10:38:28.494Z INFO  other
+2026-10-10T10:38:28.984Z INFO  other
+2026-10-10T10:38:29.483Z INFO  other
+2026-10-10T10:38:29.665Z INFO  other
+2026-10-10T10:38:30.070Z INFO  other
+2026-10-10T10:38:32.497Z INFO  [516795694 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:32.501Z INFO  [516795694 3ms] router: found package name: com.android.vending
+2026-10-10T10:38:32.514Z INFO  [4240572377 1ms] router: found package name: com.android.vending
+2026-10-10T10:38:32.514Z INFO  [2399712165 0ms] router: found package name: com.android.vending
+2026-10-10T10:38:32.515Z INFO  [2920741426 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:38:32.515Z INFO  [2920741426 0ms] inbound/tun[tun-in]: inbound connection
+2026-10-10T10:38:32.515Z INFO  [2920741426 0ms] router: found package name: com.android.vending
+2026-10-10T10:38:32.529Z INFO  other
+2026-10-10T10:38:32.651Z INFO  other
+2026-10-10T10:38:33.419Z INFO  other
+2026-10-10T10:38:33.585Z INFO  other
+2026-10-10T10:38:33.591Z INFO  other
+2026-10-10T10:38:34.008Z INFO  other
+2026-10-10T10:38:34.171Z INFO  other
+2026-10-10T10:38:34.291Z INFO  other
+2026-10-10T10:38:34.462Z INFO  other
+2026-10-10T10:38:34.868Z INFO  other
+2026-10-10T10:38:34.978Z INFO  other
+2026-10-10T10:38:35.032Z INFO  other
+2026-10-10T10:38:35.069Z INFO  other
+2026-10-10T10:38:35.154Z INFO  other
+2026-10-10T10:38:35.227Z INFO  other
+2026-10-10T10:38:35.576Z INFO  other
+2026-10-10T10:38:35.718Z INFO  other
+2026-10-10T10:38:35.734Z INFO  other
+2026-10-10T10:38:35.874Z INFO  other
+2026-10-10T10:38:35.900Z INFO  other
+2026-10-10T10:38:35.963Z INFO  other
+2026-10-10T10:38:35.967Z INFO  other
+2026-10-10T10:38:36.314Z INFO  other
+2026-10-10T10:38:36.355Z INFO  other
+2026-10-10T10:38:36.363Z INFO  other
+2026-10-10T10:38:36.486Z INFO  other
+2026-10-10T10:38:36.556Z INFO  other
+2026-10-10T10:38:36.914Z INFO  other
+2026-10-10T10:38:36.915Z INFO  other
+2026-10-10T10:38:38.201Z INFO  other
+2026-10-10T10:38:38.837Z INFO  other
+2026-10-10T10:38:38.837Z INFO  other
+2026-10-10T10:38:38.838Z INFO  other
+2026-10-10T10:38:39.537Z INFO  [1717181663 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T10:38:39.538Z INFO  [1717181663 1ms] router: found package name: com.buffbuff.community

@@ -90,12 +90,14 @@ class Daemon {
         return await _send(res, 200, await service.closeConnections(path.length > 17 ? Uri.decodeComponent(path.substring(17)) : null));
       }
       final since = int.tryParse(req.uri.queryParameters['since'] ?? '');
+      // `conns=0`: the log answer leaves the flood of connection lines out (and counts them in `hidden`)
+      final conns = req.uri.queryParameters['conns'] != '0';
       final out = await switch ('${req.method} $path') {
         'GET /api/state' => service.state(),
         'PUT /api/state' => service.saveState((body['snapshot'] as Map?)?.cast<String, dynamic>()),
         'GET /api/status' => service.status(),
         'GET /api/traffic' => service.traffic(),
-        'GET /api/log' => Future.value(service.log(since: since)),
+        'GET /api/log' => Future.value(service.log(since: since, conns: conns)),
         'DELETE /api/log' => Future(() {
             service.clearLog();
             return {'ok': true};
@@ -108,6 +110,9 @@ class Daemon {
           }),
         'POST /api/site-check' => service.siteCheck(body),
         'GET /api/version' => service.version(),
+        // the support report (report.dart); POST may carry {appInfo} (what only the page knows)
+        'GET /api/report' => service.report(),
+        'POST /api/report' => service.report(appInfo: ((body['appInfo'] as Map?) ?? const {}).cast<String, dynamic>()),
         'POST /api/node' => Future(() => {'node': service.manualNode(body).toJson()}),
         'POST /api/share' => Future.value({'link': service.share(body)}),
         'POST /api/sources/fetch' => service.fetchSource(body),

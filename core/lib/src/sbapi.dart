@@ -26,7 +26,17 @@ export 'sbapi/started_service.pbenum.dart' show ConnectionEventType;
 /// A connection sing-box closed, as the core judges request failures by it.
 class ClosedConnection {
   const ClosedConnection(
-      {required this.outbound, required this.chain, required this.destination, required this.up, required this.down, this.rule = '', this.process = '', this.pkg = ''});
+      {required this.outbound,
+      required this.chain,
+      required this.destination,
+      required this.up,
+      required this.down,
+      this.rule = '',
+      this.process = '',
+      this.pkg = '',
+      this.network = '',
+      this.inbound = '',
+      this.durationMs});
 
   /// The server's outbound tag (the leaf, e.g. `route0/<key>`); [chain] = leaf … `proxy`.
   final String outbound;
@@ -39,7 +49,13 @@ class ClosedConnection {
   /// of `packageNames`; '' = none: desktop, or sing-box found no owner).
   final String rule, process, pkg;
 
-  factory ClosedConnection.of(Connection c) => ClosedConnection(
+  /// `tcp` / `udp` ('' = not told), the inbound's tag it came in through (`tun-in`, `mixed-in`,
+  /// `probe-in` …; '' = not told) and how long it lived in ms (null = not told). Read by the
+  /// failure book (failures.dart); Auto does not need them.
+  final String network, inbound;
+  final int? durationMs;
+
+  factory ClosedConnection.of(Connection c, {int? nowMs}) => ClosedConnection(
         outbound: c.outbound,
         chain: List.of(c.chainList),
         destination: _dest(c),
@@ -48,7 +64,19 @@ class ClosedConnection {
         rule: c.rule,
         process: c.hasProcessInfo() ? c.processInfo.processPath : '',
         pkg: _pkg(c),
+        network: c.network,
+        inbound: c.inbound,
+        durationMs: _lived(c, nowMs),
       );
+}
+
+/// How long [c] lived: its own open / close stamps (ms), else until [nowMs] (a close event that came
+/// without the record's end). null = it has no start.
+int? _lived(Connection c, int? nowMs) {
+  final start = c.createdAt.toInt();
+  if (start <= 0) return null;
+  final end = c.closedAt.toInt() > 0 ? c.closedAt.toInt() : nowMs;
+  return end == null || end < start ? null : end - start;
 }
 
 /// The Android package that owns the connection: the first of the process info's package names.
@@ -211,9 +239,20 @@ class SingBoxApi implements BoxControl {
           // the history sent first (reset) is not news
           if (b.reset) break;
           if (e.hasConnection()) {
-            _closedCtl.add(ClosedConnection.of(e.connection));
+            _closedCtl.add(ClosedConnection.of(e.connection, nowMs: DateTime.now().millisecondsSinceEpoch));
           } else if (c != null) {
-            _closedCtl.add(ClosedConnection(outbound: c.outbound, chain: c.chain, destination: _dest(c.c), up: c.up, down: c.down, rule: c.rule, process: c.process, pkg: c.pkg));
+            _closedCtl.add(ClosedConnection(
+                outbound: c.outbound,
+                chain: c.chain,
+                destination: _dest(c.c),
+                up: c.up,
+                down: c.down,
+                rule: c.rule,
+                process: c.process,
+                pkg: c.pkg,
+                network: c.network,
+                inbound: c.c.inbound,
+                durationMs: _lived(c.c, DateTime.now().millisecondsSinceEpoch)));
           }
         default:
       }

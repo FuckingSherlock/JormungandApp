@@ -36,10 +36,12 @@ abstract interface class CoreApi {
   /// Speed, session totals and open connections; `running: false` with zeros without sing-box.
   Future<Map<String, dynamic>> traffic();
 
-  /// `{lines, next}`: log lines numbered [since] and later (all kept ones without it).
-  Map<String, dynamic> log({int? since});
+  /// `{lines, next, hidden?}`: log lines numbered [since] and later (all kept ones without it).
+  /// With [conns] off the flood of successful-connection / `found package name` lines is left
+  /// out by the core and `hidden` says how many it left out (logbook.dart `since`; docs/logs.md).
+  Map<String, dynamic> log({int? since, bool conns = true});
 
-  /// Every log line as it is written (the Logs tab, Raw). Broadcast.
+  /// Every log line as it is written (the Logs tab, Raw), the flood included. Broadcast.
   Stream<Map<String, dynamic>> get logStream;
 
   void clearLog();
@@ -64,6 +66,14 @@ abstract interface class CoreApi {
 
   /// `{core, singBox, dataDir, dart, os}`.
   Future<Map<String, dynamic>> version();
+
+  /// The support report (report.dart, docs/logs.md): one structured map (`format: 1`) with the
+  /// app and device, the connection, settings, network, counters, all kept events with their data
+  /// and every raw line — credentials and tokens masked (redact.dart), server names kept. [appInfo]
+  /// is what only the host knows (version, versionCode, commit, platform, androidApi, device model,
+  /// abis, locale, timezone, network type, …): it is taken as given, the core never guesses.
+  /// Built from memory in one pass (rings of at most 5500 lines); the caller may gzip it.
+  Future<Map<String, dynamic>> report({Map<String, dynamic> appInfo = const {}});
 
   /// `{protocol, address, port, secret, name, outbound?, unsupported?}` → the node (manual.dart).
   Node manualNode(Map<String, dynamic> body);

@@ -1,0 +1,725 @@
+# TUN system: TCP never reaches sing-box (Android, 2026-10-10 11:54:32Z, from the app's log export)
+# lines: 722 (inbound 98, found 106, other 517); 2026-10-10T11:54:32.201 .. 2026-10-10T11:55:05.542
+# lines nothing reads are `other` and addresses of inbound lines are dropped; order, ids and times are as exported
+2026-10-10T11:54:32.201Z INFO  [core] [android] tunnel: tun opened (fd 115, mtu 9000, auto route true)
+2026-10-10T11:54:32.246Z DEBUG  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  other
+2026-10-10T11:54:32.288Z INFO  [4077827079 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.288Z INFO  [4077827079 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:32.288Z INFO  [4225473836 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.288Z INFO  [4225473836 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:32.288Z INFO  [3528667396 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.288Z INFO  [3528667396 4ms] router: found package name: com.google.android.gsf, com.google.android.gms
+2026-10-10T11:54:32.288Z INFO  [4217701260 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.288Z INFO  [4217701260 2ms] router: found package name: com.google.android.gsf, com.google.android.gms
+2026-10-10T11:54:32.335Z INFO  other
+2026-10-10T11:54:32.337Z INFO  other
+2026-10-10T11:54:32.337Z INFO  [3228519450 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:32.337Z INFO  [3228519450 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:32.337Z INFO  other
+2026-10-10T11:54:32.337Z INFO  other
+2026-10-10T11:54:32.337Z INFO  other
+2026-10-10T11:54:32.337Z INFO  [969476255 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:32.338Z INFO  [1721173991 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:32.338Z INFO  [3412391668 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:32.338Z INFO  [3288871213 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.338Z INFO  [3288871213 0ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:32.338Z INFO  [2783365744 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.338Z INFO  [2783365744 0ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:32.338Z INFO  [1320180002 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.338Z INFO  [1320180002 0ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:32.338Z INFO  [1982587266 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.338Z INFO  [1982587266 0ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:32.349Z INFO  [2304308901 0ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.349Z INFO  [3357050781 0ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.349Z INFO  [125534146 0ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.349Z INFO  [1599585480 0ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.349Z INFO  [3431393483 0ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.349Z INFO  [1887314878 0ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.349Z INFO  [2485538413 0ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.350Z INFO  [2304308901 10ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.350Z INFO  [3357050781 7ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.350Z INFO  other
+2026-10-10T11:54:32.350Z INFO  other
+2026-10-10T11:54:32.350Z INFO  [125534146 6ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.352Z INFO  [1599585480 5ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.352Z INFO  other
+2026-10-10T11:54:32.352Z INFO  [1887314878 3ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.352Z INFO  [3431393483 5ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.352Z INFO  other
+2026-10-10T11:54:32.352Z INFO  other
+2026-10-10T11:54:32.352Z INFO  other
+2026-10-10T11:54:32.352Z INFO  [2485538413 3ms] inbound/mixed[tunnel-in]: inbound connection
+2026-10-10T11:54:32.353Z INFO  other
+2026-10-10T11:54:32.354Z INFO  other
+2026-10-10T11:54:32.359Z INFO  other
+2026-10-10T11:54:32.359Z INFO  other
+2026-10-10T11:54:32.359Z INFO  other
+2026-10-10T11:54:32.359Z INFO  other
+2026-10-10T11:54:32.359Z INFO  other
+2026-10-10T11:54:32.359Z INFO  other
+2026-10-10T11:54:32.360Z INFO  [2999972763 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.361Z INFO  [2999972763 0ms] router: found package name: com.mgoogle.android.gms
+2026-10-10T11:54:32.366Z INFO  [4099411631 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.367Z INFO  [4099411631 0ms] router: found package name: app.revanced.android.gms
+2026-10-10T11:54:32.376Z INFO  other
+2026-10-10T11:54:32.400Z INFO  other
+2026-10-10T11:54:32.418Z INFO  [1563099944 0ms] router: found package name: com.facebook.services
+2026-10-10T11:54:32.423Z INFO  [3945278958 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.423Z INFO  [3945278958 0ms] router: found package name: com.facebook.services
+2026-10-10T11:54:32.423Z INFO  [4260504441 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:32.423Z INFO  [4260504441 0ms] router: found package name: com.facebook.services
+2026-10-10T11:54:32.428Z INFO  other
+2026-10-10T11:54:32.428Z INFO  other
+2026-10-10T11:54:32.429Z INFO  other
+2026-10-10T11:54:32.430Z INFO  other
+2026-10-10T11:54:32.431Z INFO  other
+2026-10-10T11:54:32.432Z INFO  other
+2026-10-10T11:54:32.432Z INFO  other
+2026-10-10T11:54:32.444Z INFO  other
+2026-10-10T11:54:32.446Z INFO  other
+2026-10-10T11:54:32.452Z INFO  other
+2026-10-10T11:54:32.452Z INFO  other
+2026-10-10T11:54:32.462Z INFO  other
+2026-10-10T11:54:32.467Z INFO  other
+2026-10-10T11:54:32.493Z INFO  other
+2026-10-10T11:54:32.530Z INFO  other
+2026-10-10T11:54:32.543Z INFO  other
+2026-10-10T11:54:32.544Z INFO  other
+2026-10-10T11:54:32.565Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.569Z INFO  other
+2026-10-10T11:54:32.570Z INFO  other
+2026-10-10T11:54:32.570Z INFO  other
+2026-10-10T11:54:32.576Z INFO  [1304060606 0ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:32.576Z INFO  [326448314 0ms] router: found package name: app.revanced.android.gms
+2026-10-10T11:54:32.576Z INFO  [3151162466 0ms] router: found package name: com.mgoogle.android.gms
+2026-10-10T11:54:32.576Z INFO  [3808616211 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:32.582Z INFO  [616324287 1ms] router: found package name: com.google.android.gsf, com.google.android.gms
+2026-10-10T11:54:32.596Z INFO  other
+2026-10-10T11:54:32.674Z INFO  other
+2026-10-10T11:54:32.679Z INFO  other
+2026-10-10T11:54:32.679Z INFO  other
+2026-10-10T11:54:32.741Z INFO  other
+2026-10-10T11:54:32.741Z INFO  other
+2026-10-10T11:54:32.754Z INFO  other
+2026-10-10T11:54:32.754Z INFO  other
+2026-10-10T11:54:32.871Z INFO  other
+2026-10-10T11:54:32.872Z INFO  other
+2026-10-10T11:54:32.884Z INFO  other
+2026-10-10T11:54:32.981Z INFO  other
+2026-10-10T11:54:32.982Z INFO  other
+2026-10-10T11:54:33.011Z INFO  other
+2026-10-10T11:54:33.030Z INFO  other
+2026-10-10T11:54:33.039Z INFO  other
+2026-10-10T11:54:33.142Z INFO  other
+2026-10-10T11:54:33.170Z INFO  other
+2026-10-10T11:54:33.249Z INFO  [657697955 4ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:33.267Z INFO  [1945688393 12ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:33.338Z INFO  other
+2026-10-10T11:54:33.364Z INFO  other
+2026-10-10T11:54:33.366Z INFO  other
+2026-10-10T11:54:33.366Z INFO  other
+2026-10-10T11:54:33.406Z INFO  other
+2026-10-10T11:54:33.407Z INFO  other
+2026-10-10T11:54:33.424Z INFO  other
+2026-10-10T11:54:33.430Z INFO  other
+2026-10-10T11:54:33.430Z INFO  other
+2026-10-10T11:54:33.437Z INFO  other
+2026-10-10T11:54:33.532Z INFO  other
+2026-10-10T11:54:33.532Z INFO  other
+2026-10-10T11:54:33.546Z INFO  [3190474809 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:33.552Z INFO  [3190474809 4ms] router: found package name: com.anthropic.claude
+2026-10-10T11:54:33.552Z INFO  [1264619206 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:33.552Z INFO  [1264619206 1ms] router: found package name: com.anthropic.claude
+2026-10-10T11:54:33.553Z INFO  other
+2026-10-10T11:54:33.608Z INFO  other
+2026-10-10T11:54:33.608Z INFO  other
+2026-10-10T11:54:33.611Z INFO  other
+2026-10-10T11:54:33.631Z INFO  other
+2026-10-10T11:54:33.631Z INFO  other
+2026-10-10T11:54:33.631Z INFO  other
+2026-10-10T11:54:33.631Z INFO  other
+2026-10-10T11:54:33.636Z INFO  [3986292036 1ms] router: found package name: com.anthropic.claude
+2026-10-10T11:54:33.642Z INFO  [1132043434 1ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:33.642Z INFO  [1132043434 1ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:33.642Z INFO  [1132043434 1ms] router: found package name: com.anthropic.claude
+2026-10-10T11:54:33.642Z INFO  other
+2026-10-10T11:54:33.642Z INFO  other
+2026-10-10T11:54:33.642Z INFO  other
+2026-10-10T11:54:33.669Z INFO  other
+2026-10-10T11:54:33.682Z INFO  other
+2026-10-10T11:54:33.690Z INFO  other
+2026-10-10T11:54:33.731Z INFO  other
+2026-10-10T11:54:33.843Z INFO  other
+2026-10-10T11:54:33.892Z INFO  other
+2026-10-10T11:54:33.892Z INFO  other
+2026-10-10T11:54:33.895Z INFO  other
+2026-10-10T11:54:33.896Z INFO  other
+2026-10-10T11:54:33.964Z INFO  other
+2026-10-10T11:54:33.982Z INFO  other
+2026-10-10T11:54:33.991Z INFO  other
+2026-10-10T11:54:34.011Z INFO  other
+2026-10-10T11:54:34.060Z INFO  other
+2026-10-10T11:54:34.223Z INFO  other
+2026-10-10T11:54:34.248Z INFO  other
+2026-10-10T11:54:34.266Z INFO  other
+2026-10-10T11:54:34.266Z INFO  other
+2026-10-10T11:54:34.365Z INFO  other
+2026-10-10T11:54:34.377Z INFO  other
+2026-10-10T11:54:34.565Z INFO  other
+2026-10-10T11:54:34.581Z INFO  other
+2026-10-10T11:54:34.628Z INFO  other
+2026-10-10T11:54:34.652Z INFO  other
+2026-10-10T11:54:34.660Z INFO  other
+2026-10-10T11:54:34.696Z INFO  other
+2026-10-10T11:54:34.696Z INFO  other
+2026-10-10T11:54:34.720Z INFO  other
+2026-10-10T11:54:34.743Z INFO  other
+2026-10-10T11:54:34.795Z INFO  other
+2026-10-10T11:54:34.811Z INFO  other
+2026-10-10T11:54:34.826Z INFO  other
+2026-10-10T11:54:34.923Z INFO  other
+2026-10-10T11:54:34.938Z INFO  other
+2026-10-10T11:54:34.954Z INFO  other
+2026-10-10T11:54:34.971Z INFO  other
+2026-10-10T11:54:34.971Z INFO  other
+2026-10-10T11:54:34.996Z INFO  other
+2026-10-10T11:54:35.133Z INFO  other
+2026-10-10T11:54:35.215Z INFO  other
+2026-10-10T11:54:35.286Z INFO  other
+2026-10-10T11:54:35.286Z INFO  other
+2026-10-10T11:54:35.346Z INFO  other
+2026-10-10T11:54:35.346Z INFO  [2787658681 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.346Z INFO  [2132706200 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.346Z INFO  [2590831206 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.346Z INFO  [1559110021 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.346Z INFO  [1775404249 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.346Z INFO  [262241118 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.354Z INFO  [262241118 3ms] inbound/socks[probe-in]: [route1-entry/src1::n6f6e462cc483] inbound connection
+2026-10-10T11:54:35.354Z INFO  [2132706200 9ms] inbound/socks[probe-in]: [dns-check/dns-dns1] inbound connection
+2026-10-10T11:54:35.354Z INFO  [1775404249 5ms] inbound/socks[probe-in]: [dns-check/dns-remote] inbound connection
+2026-10-10T11:54:35.354Z INFO  [1559110021 7ms] inbound/socks[probe-in]: [dns-check/dns-google] inbound connection
+2026-10-10T11:54:35.354Z INFO  [2787658681 10ms] inbound/socks[probe-in]: [route0/src2::n3aa6a221bb88] inbound connection
+2026-10-10T11:54:35.354Z INFO  [2590831206 8ms] inbound/socks[probe-in]: [dns-check/dns-local] inbound connection
+2026-10-10T11:54:35.354Z INFO  other
+2026-10-10T11:54:35.354Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.355Z INFO  other
+2026-10-10T11:54:35.374Z INFO  other
+2026-10-10T11:54:35.374Z INFO  other
+2026-10-10T11:54:35.374Z INFO  other
+2026-10-10T11:54:35.374Z INFO  other
+2026-10-10T11:54:35.377Z INFO  [3025867707 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.429Z INFO  other
+2026-10-10T11:54:35.429Z INFO  other
+2026-10-10T11:54:35.429Z INFO  other
+2026-10-10T11:54:35.429Z INFO  other
+2026-10-10T11:54:35.432Z INFO  [2458771191 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.445Z INFO  other
+2026-10-10T11:54:35.453Z INFO  other
+2026-10-10T11:54:35.454Z INFO  other
+2026-10-10T11:54:35.457Z INFO  other
+2026-10-10T11:54:35.458Z INFO  other
+2026-10-10T11:54:35.623Z INFO  [1619107884 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:35.624Z INFO  [529383691 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:35.656Z INFO  [2861100661 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:35.658Z INFO  other
+2026-10-10T11:54:35.674Z INFO  other
+2026-10-10T11:54:35.674Z INFO  other
+2026-10-10T11:54:35.674Z INFO  other
+2026-10-10T11:54:35.675Z INFO  other
+2026-10-10T11:54:35.680Z INFO  [2577750259 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.686Z INFO  other
+2026-10-10T11:54:35.686Z INFO  other
+2026-10-10T11:54:35.686Z INFO  other
+2026-10-10T11:54:35.686Z INFO  other
+2026-10-10T11:54:35.691Z INFO  [1485785497 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:35.779Z INFO  other
+2026-10-10T11:54:35.808Z INFO  other
+2026-10-10T11:54:35.839Z INFO  other
+2026-10-10T11:54:35.930Z INFO  other
+2026-10-10T11:54:35.948Z INFO  [1118769586 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:35.949Z INFO  [324597535 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:36.024Z INFO  [2561954415 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:36.025Z INFO  [2656161544 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:36.133Z INFO  other
+2026-10-10T11:54:36.281Z INFO  other
+2026-10-10T11:54:36.336Z INFO  other
+2026-10-10T11:54:36.531Z INFO  other
+2026-10-10T11:54:36.561Z INFO  other
+2026-10-10T11:54:36.597Z INFO  other
+2026-10-10T11:54:36.597Z INFO  other
+2026-10-10T11:54:36.620Z INFO  other
+2026-10-10T11:54:36.621Z INFO  other
+2026-10-10T11:54:36.817Z INFO  other
+2026-10-10T11:54:36.850Z INFO  other
+2026-10-10T11:54:37.010Z INFO  other
+2026-10-10T11:54:37.016Z INFO  other
+2026-10-10T11:54:37.025Z INFO  other
+2026-10-10T11:54:37.032Z INFO  other
+2026-10-10T11:54:37.047Z INFO  other
+2026-10-10T11:54:37.063Z INFO  other
+2026-10-10T11:54:37.077Z INFO  other
+2026-10-10T11:54:37.227Z INFO  other
+2026-10-10T11:54:37.588Z INFO  [4284954045 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:38.044Z INFO  other
+2026-10-10T11:54:38.082Z INFO  other
+2026-10-10T11:54:38.128Z INFO  other
+2026-10-10T11:54:38.215Z INFO  other
+2026-10-10T11:54:38.270Z INFO  other
+2026-10-10T11:54:38.400Z INFO  other
+2026-10-10T11:54:38.569Z INFO  other
+2026-10-10T11:54:38.589Z INFO  other
+2026-10-10T11:54:38.638Z INFO  other
+2026-10-10T11:54:38.665Z INFO  other
+2026-10-10T11:54:38.734Z INFO  other
+2026-10-10T11:54:38.827Z INFO  other
+2026-10-10T11:54:38.828Z INFO  other
+2026-10-10T11:54:38.932Z INFO  other
+2026-10-10T11:54:38.936Z INFO  other
+2026-10-10T11:54:38.936Z INFO  other
+2026-10-10T11:54:38.995Z INFO  other
+2026-10-10T11:54:39.461Z INFO  other
+2026-10-10T11:54:39.513Z INFO  other
+2026-10-10T11:54:39.609Z INFO  other
+2026-10-10T11:54:39.644Z INFO  [3083359486 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:39.647Z INFO  [3083359486 2ms] router: found package name: com.anthropic.claude
+2026-10-10T11:54:39.648Z INFO  [3190095639 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:39.648Z INFO  [3190095639 0ms] router: found package name: com.anthropic.claude
+2026-10-10T11:54:39.683Z INFO  other
+2026-10-10T11:54:39.728Z INFO  other
+2026-10-10T11:54:39.728Z INFO  other
+2026-10-10T11:54:39.728Z INFO  other
+2026-10-10T11:54:39.728Z INFO  other
+2026-10-10T11:54:39.730Z INFO  [4150053117 0ms] router: found package name: com.anthropic.claude
+2026-10-10T11:54:39.730Z INFO  [967859174 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:39.730Z INFO  [967859174 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:39.730Z INFO  [967859174 0ms] router: found package name: com.anthropic.claude
+2026-10-10T11:54:39.730Z INFO  other
+2026-10-10T11:54:39.730Z INFO  other
+2026-10-10T11:54:39.956Z INFO  other
+2026-10-10T11:54:40.007Z INFO  other
+2026-10-10T11:54:40.345Z INFO  [2739622177 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:40.345Z INFO  [2006626397 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:40.345Z INFO  [230592258 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:40.349Z INFO  [2739622177 7ms] inbound/socks[probe-in]: [route1-entry/src1::n6f6e462cc483] inbound connection
+2026-10-10T11:54:40.349Z INFO  [230592258 3ms] inbound/socks[probe-in]: [route1-entry/src1::n6f6e462cc483] inbound connection
+2026-10-10T11:54:40.349Z INFO  [2006626397 5ms] inbound/socks[probe-in]: [route1-entry/src1::n6f6e462cc483] inbound connection
+2026-10-10T11:54:40.349Z INFO  other
+2026-10-10T11:54:40.349Z INFO  other
+2026-10-10T11:54:40.349Z INFO  other
+2026-10-10T11:54:40.349Z INFO  other
+2026-10-10T11:54:40.350Z INFO  other
+2026-10-10T11:54:40.350Z INFO  other
+2026-10-10T11:54:40.471Z INFO  [836004479 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:40.475Z INFO  [836004479 4ms] inbound/socks[probe-in]: [route1/src2::ne6fecbdc35b5] inbound connection
+2026-10-10T11:54:40.475Z INFO  other
+2026-10-10T11:54:40.475Z INFO  other
+2026-10-10T11:54:40.475Z INFO  other
+2026-10-10T11:54:40.676Z INFO  other
+2026-10-10T11:54:40.718Z INFO  other
+2026-10-10T11:54:40.722Z INFO  other
+2026-10-10T11:54:40.722Z INFO  [128586679 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:40.774Z INFO  other
+2026-10-10T11:54:40.986Z INFO  other
+2026-10-10T11:54:41.037Z INFO  other
+2026-10-10T11:54:41.225Z INFO  [181092783 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:41.226Z INFO  [181092783 1ms] inbound/socks[probe-in]: [route1/src2::n6f50f4656d9e] inbound connection
+2026-10-10T11:54:41.227Z INFO  other
+2026-10-10T11:54:41.228Z INFO  other
+2026-10-10T11:54:41.228Z INFO  other
+2026-10-10T11:54:41.299Z INFO  [2840344670 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:41.301Z INFO  [2840344670 1ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:41.306Z INFO  [325954452 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:41.306Z INFO  [325954452 1ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:41.379Z INFO  other
+2026-10-10T11:54:41.723Z INFO  [2275439377 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:41.757Z INFO  other
+2026-10-10T11:54:41.809Z INFO  other
+2026-10-10T11:54:41.876Z INFO  other
+2026-10-10T11:54:41.919Z INFO  other
+2026-10-10T11:54:42.087Z INFO  other
+2026-10-10T11:54:42.137Z INFO  other
+2026-10-10T11:54:42.575Z INFO  [2663424228 0ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:42.617Z INFO  [172023763 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:42.617Z INFO  [172023763 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:42.618Z INFO  [2696794373 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:42.619Z INFO  [2696794373 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:42.659Z INFO  other
+2026-10-10T11:54:42.695Z INFO  other
+2026-10-10T11:54:42.695Z INFO  other
+2026-10-10T11:54:42.698Z INFO  [1895759067 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:42.703Z INFO  other
+2026-10-10T11:54:42.885Z INFO  other
+2026-10-10T11:54:42.949Z INFO  other
+2026-10-10T11:54:43.149Z INFO  other
+2026-10-10T11:54:43.151Z INFO  other
+2026-10-10T11:54:43.194Z INFO  other
+2026-10-10T11:54:43.199Z INFO  other
+2026-10-10T11:54:43.456Z INFO  other
+2026-10-10T11:54:43.500Z INFO  other
+2026-10-10T11:54:43.594Z INFO  other
+2026-10-10T11:54:43.637Z INFO  other
+2026-10-10T11:54:43.713Z WARN  other
+2026-10-10T11:54:43.854Z INFO  other
+2026-10-10T11:54:43.899Z INFO  other
+2026-10-10T11:54:44.028Z INFO  other
+2026-10-10T11:54:44.077Z INFO  other
+2026-10-10T11:54:44.180Z INFO  [3069851328 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:44.180Z INFO  [157151691 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:44.181Z INFO  [3505084587 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:44.422Z INFO  other
+2026-10-10T11:54:44.478Z INFO  other
+2026-10-10T11:54:44.535Z INFO  other
+2026-10-10T11:54:44.580Z INFO  other
+2026-10-10T11:54:44.738Z INFO  other
+2026-10-10T11:54:44.796Z INFO  other
+2026-10-10T11:54:44.849Z INFO  other
+2026-10-10T11:54:44.895Z INFO  other
+2026-10-10T11:54:44.926Z INFO  other
+2026-10-10T11:54:44.976Z INFO  other
+2026-10-10T11:54:45.557Z INFO  other
+2026-10-10T11:54:45.606Z INFO  other
+2026-10-10T11:54:45.631Z INFO  other
+2026-10-10T11:54:45.681Z INFO  other
+2026-10-10T11:54:46.233Z INFO  [959811772 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:46.233Z INFO  [126131523 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:46.233Z INFO  [91875085 0ms] inbound/socks[probe-in]: inbound connection
+2026-10-10T11:54:46.238Z INFO  [91875085 1ms] inbound/socks[probe-in]: [route1/src2::n6f50f4656d9e] inbound connection
+2026-10-10T11:54:46.238Z INFO  other
+2026-10-10T11:54:46.238Z INFO  other
+2026-10-10T11:54:46.238Z INFO  other
+2026-10-10T11:54:46.239Z INFO  [126131523 5ms] inbound/socks[probe-in]: [route1/src2::n6f50f4656d9e] inbound connection
+2026-10-10T11:54:46.239Z INFO  [959811772 5ms] inbound/socks[probe-in]: [route1/src2::n6f50f4656d9e] inbound connection
+2026-10-10T11:54:46.239Z INFO  other
+2026-10-10T11:54:46.239Z INFO  other
+2026-10-10T11:54:46.240Z INFO  other
+2026-10-10T11:54:46.240Z INFO  other
+2026-10-10T11:54:46.240Z INFO  other
+2026-10-10T11:54:46.240Z INFO  other
+2026-10-10T11:54:46.541Z INFO  other
+2026-10-10T11:54:46.546Z INFO  other
+2026-10-10T11:54:46.589Z INFO  other
+2026-10-10T11:54:46.594Z INFO  other
+2026-10-10T11:54:46.912Z INFO  other
+2026-10-10T11:54:46.955Z INFO  other
+2026-10-10T11:54:46.970Z INFO  other
+2026-10-10T11:54:47.009Z INFO  other
+2026-10-10T11:54:47.221Z INFO  other
+2026-10-10T11:54:47.221Z INFO  other
+2026-10-10T11:54:47.231Z INFO  other
+2026-10-10T11:54:47.268Z INFO  other
+2026-10-10T11:54:47.275Z INFO  other
+2026-10-10T11:54:47.289Z INFO  other
+2026-10-10T11:54:47.471Z INFO  other
+2026-10-10T11:54:47.535Z INFO  other
+2026-10-10T11:54:47.564Z INFO  other
+2026-10-10T11:54:47.627Z INFO  other
+2026-10-10T11:54:47.721Z INFO  [1006159673 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:47.945Z INFO  other
+2026-10-10T11:54:47.948Z INFO  other
+2026-10-10T11:54:47.996Z INFO  other
+2026-10-10T11:54:48.004Z INFO  other
+2026-10-10T11:54:48.143Z INFO  other
+2026-10-10T11:54:48.176Z INFO  other
+2026-10-10T11:54:48.187Z INFO  other
+2026-10-10T11:54:48.198Z INFO  other
+2026-10-10T11:54:48.229Z INFO  other
+2026-10-10T11:54:48.238Z INFO  other
+2026-10-10T11:54:48.257Z INFO  [989255465 7ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:48.362Z INFO  other
+2026-10-10T11:54:48.367Z INFO  other
+2026-10-10T11:54:48.418Z INFO  other
+2026-10-10T11:54:48.422Z INFO  other
+2026-10-10T11:54:48.469Z INFO  other
+2026-10-10T11:54:48.524Z INFO  other
+2026-10-10T11:54:48.628Z INFO  other
+2026-10-10T11:54:48.678Z INFO  other
+2026-10-10T11:54:48.723Z INFO  [1166537823 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:48.724Z INFO  [1166537823 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T11:54:48.724Z INFO  [3354254803 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:48.724Z INFO  [3354254803 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T11:54:48.727Z INFO  [671732722 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T11:54:48.727Z INFO  [2422056688 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:48.727Z INFO  [2422056688 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:48.727Z INFO  [2422056688 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T11:54:48.727Z INFO  other
+2026-10-10T11:54:48.727Z INFO  other
+2026-10-10T11:54:48.727Z INFO  [437034879 0ms] router: found package name: app.rvx.android.youtube
+2026-10-10T11:54:48.755Z INFO  other
+2026-10-10T11:54:48.800Z INFO  other
+2026-10-10T11:54:48.800Z INFO  other
+2026-10-10T11:54:48.842Z INFO  other
+2026-10-10T11:54:48.871Z INFO  [4181663338 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:48.897Z INFO  other
+2026-10-10T11:54:48.951Z INFO  other
+2026-10-10T11:54:49.013Z INFO  other
+2026-10-10T11:54:49.017Z INFO  other
+2026-10-10T11:54:49.020Z INFO  other
+2026-10-10T11:54:49.059Z INFO  other
+2026-10-10T11:54:49.063Z INFO  other
+2026-10-10T11:54:49.078Z INFO  other
+2026-10-10T11:54:49.106Z INFO  other
+2026-10-10T11:54:49.162Z INFO  other
+2026-10-10T11:54:49.177Z INFO  other
+2026-10-10T11:54:49.202Z INFO  other
+2026-10-10T11:54:49.244Z INFO  other
+2026-10-10T11:54:49.264Z INFO  other
+2026-10-10T11:54:49.286Z INFO  other
+2026-10-10T11:54:49.296Z INFO  other
+2026-10-10T11:54:49.379Z INFO  other
+2026-10-10T11:54:49.400Z INFO  other
+2026-10-10T11:54:49.421Z INFO  other
+2026-10-10T11:54:49.481Z INFO  other
+2026-10-10T11:54:49.627Z INFO  other
+2026-10-10T11:54:49.702Z INFO  other
+2026-10-10T11:54:49.719Z INFO  other
+2026-10-10T11:54:49.728Z INFO  other
+2026-10-10T11:54:49.782Z INFO  other
+2026-10-10T11:54:49.786Z INFO  other
+2026-10-10T11:54:49.806Z INFO  other
+2026-10-10T11:54:49.819Z INFO  other
+2026-10-10T11:54:49.871Z INFO  other
+2026-10-10T11:54:49.895Z INFO  other
+2026-10-10T11:54:49.920Z INFO  other
+2026-10-10T11:54:49.943Z INFO  other
+2026-10-10T11:54:49.970Z INFO  other
+2026-10-10T11:54:49.991Z INFO  other
+2026-10-10T11:54:50.004Z INFO  other
+2026-10-10T11:54:50.029Z INFO  other
+2026-10-10T11:54:50.032Z INFO  other
+2026-10-10T11:54:50.067Z INFO  other
+2026-10-10T11:54:50.067Z INFO  other
+2026-10-10T11:54:50.071Z INFO  other
+2026-10-10T11:54:50.091Z INFO  other
+2026-10-10T11:54:50.111Z INFO  other
+2026-10-10T11:54:50.155Z INFO  other
+2026-10-10T11:54:50.155Z INFO  other
+2026-10-10T11:54:50.471Z INFO  other
+2026-10-10T11:54:50.546Z INFO  other
+2026-10-10T11:54:50.578Z INFO  other
+2026-10-10T11:54:50.660Z INFO  [4079299441 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:50.680Z INFO  other
+2026-10-10T11:54:50.749Z INFO  other
+2026-10-10T11:54:50.749Z INFO  other
+2026-10-10T11:54:50.769Z INFO  other
+2026-10-10T11:54:50.808Z INFO  other
+2026-10-10T11:54:50.808Z INFO  other
+2026-10-10T11:54:50.808Z INFO  other
+2026-10-10T11:54:50.816Z INFO  other
+2026-10-10T11:54:50.865Z INFO  other
+2026-10-10T11:54:50.865Z INFO  other
+2026-10-10T11:54:50.910Z INFO  other
+2026-10-10T11:54:50.910Z INFO  other
+2026-10-10T11:54:50.912Z INFO  other
+2026-10-10T11:54:50.934Z INFO  other
+2026-10-10T11:54:50.934Z INFO  other
+2026-10-10T11:54:50.962Z INFO  other
+2026-10-10T11:54:50.964Z INFO  other
+2026-10-10T11:54:50.964Z INFO  other
+2026-10-10T11:54:50.971Z INFO  other
+2026-10-10T11:54:50.998Z INFO  other
+2026-10-10T11:54:51.106Z INFO  other
+2026-10-10T11:54:51.114Z INFO  [966350533 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:51.135Z INFO  other
+2026-10-10T11:54:51.182Z INFO  other
+2026-10-10T11:54:51.215Z INFO  other
+2026-10-10T11:54:51.233Z INFO  other
+2026-10-10T11:54:51.245Z ERROR  other
+2026-10-10T11:54:51.247Z INFO  other
+2026-10-10T11:54:51.268Z INFO  other
+2026-10-10T11:54:51.295Z INFO  other
+2026-10-10T11:54:51.334Z INFO  other
+2026-10-10T11:54:51.334Z INFO  other
+2026-10-10T11:54:51.336Z INFO  other
+2026-10-10T11:54:51.380Z INFO  other
+2026-10-10T11:54:51.418Z INFO  other
+2026-10-10T11:54:51.418Z INFO  other
+2026-10-10T11:54:51.462Z INFO  other
+2026-10-10T11:54:51.493Z INFO  other
+2026-10-10T11:54:51.494Z INFO  other
+2026-10-10T11:54:51.527Z INFO  other
+2026-10-10T11:54:51.582Z INFO  other
+2026-10-10T11:54:51.617Z INFO  other
+2026-10-10T11:54:51.898Z INFO  other
+2026-10-10T11:54:51.974Z INFO  other
+2026-10-10T11:54:52.009Z INFO  other
+2026-10-10T11:54:52.075Z INFO  other
+2026-10-10T11:54:52.075Z INFO  other
+2026-10-10T11:54:52.078Z INFO  other
+2026-10-10T11:54:52.090Z INFO  other
+2026-10-10T11:54:52.107Z INFO  other
+2026-10-10T11:54:52.128Z INFO  other
+2026-10-10T11:54:52.129Z INFO  other
+2026-10-10T11:54:52.134Z INFO  other
+2026-10-10T11:54:52.174Z INFO  other
+2026-10-10T11:54:52.177Z INFO  other
+2026-10-10T11:54:52.177Z INFO  other
+2026-10-10T11:54:52.180Z INFO  other
+2026-10-10T11:54:52.204Z INFO  other
+2026-10-10T11:54:52.204Z INFO  other
+2026-10-10T11:54:52.223Z INFO  other
+2026-10-10T11:54:52.227Z INFO  other
+2026-10-10T11:54:52.231Z INFO  other
+2026-10-10T11:54:52.278Z INFO  other
+2026-10-10T11:54:52.314Z INFO  other
+2026-10-10T11:54:52.324Z INFO  other
+2026-10-10T11:54:52.337Z INFO  [2270924823 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:52.343Z INFO  [2270924823 4ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:52.349Z INFO  [998123041 1ms] router: found package name: com.buffbuff.community
+2026-10-10T11:54:52.402Z INFO  other
+2026-10-10T11:54:52.430Z INFO  other
+2026-10-10T11:54:52.476Z INFO  other
+2026-10-10T11:54:52.889Z INFO  other
+2026-10-10T11:54:53.016Z INFO  other
+2026-10-10T11:54:53.017Z INFO  other
+2026-10-10T11:54:53.017Z INFO  other
+2026-10-10T11:54:53.021Z INFO  other
+2026-10-10T11:54:53.048Z INFO  other
+2026-10-10T11:54:53.049Z INFO  other
+2026-10-10T11:54:53.107Z INFO  other
+2026-10-10T11:54:53.107Z INFO  other
+2026-10-10T11:54:53.107Z INFO  other
+2026-10-10T11:54:53.113Z INFO  [2862995203 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:53.116Z INFO  [177305408 2ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:53.121Z INFO  [2930607854 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:53.130Z INFO  other
+2026-10-10T11:54:53.172Z INFO  other
+2026-10-10T11:54:53.184Z INFO  other
+2026-10-10T11:54:53.189Z INFO  other
+2026-10-10T11:54:53.266Z INFO  other
+2026-10-10T11:54:53.275Z INFO  other
+2026-10-10T11:54:53.276Z INFO  other
+2026-10-10T11:54:53.317Z INFO  other
+2026-10-10T11:54:53.568Z INFO  other
+2026-10-10T11:54:56.184Z INFO  [38358475 2ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.185Z INFO  [2397258784 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:56.186Z INFO  [2397258784 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.188Z INFO  [935586350 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:56.188Z INFO  [935586350 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.222Z INFO  [1901807693 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:56.222Z INFO  [1901807693 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.225Z INFO  [2589033783 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:56.225Z INFO  [2589033783 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.267Z ERROR  other
+2026-10-10T11:54:56.267Z ERROR  other
+2026-10-10T11:54:56.267Z ERROR  other
+2026-10-10T11:54:56.289Z INFO  other
+2026-10-10T11:54:56.289Z INFO  other
+2026-10-10T11:54:56.318Z INFO  other
+2026-10-10T11:54:56.364Z INFO  [1185421501 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:56.365Z INFO  [1185421501 1ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.366Z INFO  [2537919299 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:56.367Z INFO  [2537919299 1ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.372Z INFO  [1829334608 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.372Z INFO  [95839440 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:56.372Z INFO  [95839440 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:56.372Z INFO  [95839440 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.372Z INFO  other
+2026-10-10T11:54:56.372Z INFO  other
+2026-10-10T11:54:56.447Z INFO  other
+2026-10-10T11:54:56.447Z INFO  other
+2026-10-10T11:54:56.505Z INFO  [3104800051 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:56.564Z INFO  [1229469358 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:56.567Z INFO  [2039647612 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:56.568Z INFO  [2039647612 1ms] router: found package name: com.whatsapp
+2026-10-10T11:54:57.060Z INFO  [1238057668 1ms] router: found package name: com.android.chrome
+2026-10-10T11:54:57.060Z INFO  [1991409274 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:57.060Z INFO  [1991409274 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:57.060Z INFO  [1991409274 0ms] router: found package name: com.android.chrome
+2026-10-10T11:54:57.060Z INFO  other
+2026-10-10T11:54:57.060Z INFO  other
+2026-10-10T11:54:57.510Z INFO  [1784059669 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:54:59.269Z INFO  [3106988674 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:59.269Z INFO  [3106988674 1ms] router: found package name: com.whatsapp
+2026-10-10T11:54:59.272Z INFO  [1524077501 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:59.272Z INFO  [622225226 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:54:59.272Z INFO  [3286838070 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:59.272Z INFO  [3286838070 0ms] inbound/tun[tun-in]: inbound packet connection
+2026-10-10T11:54:59.272Z INFO  [3286838070 0ms] router: found package name: com.whatsapp
+2026-10-10T11:54:59.272Z INFO  other
+2026-10-10T11:54:59.272Z INFO  other
+2026-10-10T11:54:59.272Z INFO  [622225226 1ms] router: found package name: com.whatsapp
+2026-10-10T11:54:59.272Z INFO  other
+2026-10-10T11:54:59.272Z INFO  other
+2026-10-10T11:54:59.272Z INFO  other
+2026-10-10T11:54:59.272Z INFO  other
+2026-10-10T11:55:00.520Z INFO  [256126777 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:00.521Z INFO  [1800510446 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:01.305Z INFO  [1941612105 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:55:01.306Z INFO  [1941612105 1ms] router: found package name: com.buffbuff.community
+2026-10-10T11:55:01.527Z INFO  [3678455936 2ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:01.530Z INFO  [1091496307 3ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:01.530Z INFO  [1178855673 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:02.359Z INFO  [3616156869 2ms] router: found package name: com.buffbuff.community
+2026-10-10T11:55:03.873Z INFO  [1422473815 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:55:03.874Z INFO  [1422473815 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:03.879Z INFO  [2121612495 1ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:03.924Z INFO  [3078750658 0ms] router: found package name: com.facebook.services
+2026-10-10T11:55:03.928Z INFO  [3763677425 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:55:03.928Z INFO  [3763677425 1ms] router: found package name: com.facebook.services
+2026-10-10T11:55:03.929Z INFO  [3966635128 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:55:03.931Z INFO  [3966635128 0ms] router: found package name: com.facebook.services
+2026-10-10T11:55:04.011Z INFO  other
+2026-10-10T11:55:04.011Z INFO  other
+2026-10-10T11:55:04.140Z INFO  [424171614 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:55:04.142Z INFO  [424171614 1ms] router: found package name: app.revanced.android.gms
+2026-10-10T11:55:04.143Z INFO  [2043047873 0ms] inbound/tun[tun-in]: inbound DNS packet
+2026-10-10T11:55:04.144Z INFO  [2043047873 0ms] router: found package name: com.mgoogle.android.gms
+2026-10-10T11:55:04.145Z INFO  [3434088857 0ms] router: found package name: app.revanced.android.gms
+2026-10-10T11:55:04.146Z INFO  [3337053280 0ms] router: found package name: com.mgoogle.android.gms
+2026-10-10T11:55:04.537Z INFO  [2625614893 2ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:04.869Z INFO  [3935413642 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:04.872Z INFO  [2425931201 2ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:04.872Z INFO  [372442573 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:04.873Z INFO  [2824550008 0ms] router: found package name: org.telegram.messenger.web
+2026-10-10T11:55:05.542Z INFO  [3418292094 1ms] router: found package name: org.telegram.messenger.web

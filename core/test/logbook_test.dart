@@ -43,6 +43,84 @@ void main() {
     });
   });
 
+  group('the program behind a connection (found package name)', () {
+    const found = '[2 0ms] router: found package name: org.telegram.messenger';
+    const foundPath = r'[3 0ms] router: found process path: C:\Program Files\App\app.exe';
+
+    test('is flood like the connection lines: the noise ring, never pushing the rest out', () {
+      final b = LogBook(cap: 10, noiseCap: 4);
+      b.note('info', 'Connected');
+      b.singBox('ERROR[0001] dns: broken');
+      for (var i = 0; i < 50; i++) {
+        b.singBox('INFO[0001] $found');
+        b.singBox('INFO[0001] $foundPath');
+      }
+      final l = _lines(b);
+      expect(l.where((x) => x['msg'] == 'Connected'), hasLength(1));
+      expect(l.where((x) => x['lvl'] == 'error'), hasLength(1));
+      expect(l.where((x) => (x['msg'] as String).contains('found p')), hasLength(4), reason: 'only the last noiseCap');
+      expect(isNoiseLine(found), isTrue);
+      expect(isNoiseLine(foundPath), isTrue);
+      expect(isNoiseLine('[1 5ms] router: match[3] => route(proxy)'), isFalse);
+    });
+
+    test('a core line that mentions it, and a warning, are not noise', () {
+      final b = LogBook(cap: 3, noiseCap: 3);
+      b.note('info', found);
+      b.singBox('WARN[0001] $found');
+      for (var i = 0; i < 10; i++) {
+        b.singBox('INFO[0001] $found');
+      }
+      final l = _lines(b);
+      expect(l.where((x) => x['src'] == 'core'), hasLength(1));
+      expect(l.where((x) => x['lvl'] == 'warn'), hasLength(1));
+    });
+
+    test('since(conns: false) leaves the flood out on the core side and says how much', () {
+      final b = LogBook(cap: 10, noiseCap: 10);
+      b.singBox('INFO[0001] $_conn'); // 0
+      b.singBox('INFO[0001] $found'); // 1
+      b.singBox('INFO[0001] [4 0ms] router: match => route(proxy)'); // 2
+      b.singBox('WARN[0001] [1 5ms] outbound/vless[x]: outbound connection to a:1 failed'); // 3, main ring
+      b.singBox('INFO[0001] $foundPath'); // 4
+      b.note('info', 'x'); // 5
+
+      final all = b.since(null);
+      expect(all.containsKey('hidden'), isFalse);
+      expect((all['lines'] as List).map((x) => (x as Map)['n']), [0, 1, 2, 3, 4, 5]);
+
+      final quiet = b.since(null, conns: false);
+      expect((quiet['lines'] as List).map((x) => (x as Map)['n']), [2, 3, 5]);
+      expect(quiet['hidden'], 3);
+      expect(quiet['next'], 6, reason: 'numbering stays whole: the next poll asks from 6 either way');
+
+      // a poll from a number: only what is newer is counted
+      expect(b.since(4, conns: false)['hidden'], 1);
+      // the same request with conns on brings the left-out lines
+      expect((b.since(1)['lines'] as List).length, 5);
+    });
+
+    test('a warning in the noise ring (an ignored site) is not hidden by conns: false', () {
+      final b = LogBook(cap: 10, noiseCap: 10)..ignored = IgnoredSites(['quiet.example']);
+      b.singBox('WARN[0001] [9 0ms] outbound/vless[x]: outbound connection to quiet.example:443 failed');
+      b.singBox('INFO[0001] $_conn');
+      final r = b.since(null, conns: false);
+      expect((r['lines'] as List), hasLength(1), reason: 'the failed line stays, the success goes');
+      expect(r['hidden'], 1);
+    });
+
+    test('the stream stays whole', () async {
+      final b = LogBook(cap: 10, noiseCap: 10);
+      final got = <String>[];
+      final sub = b.stream.listen((l) => got.add(l['msg'] as String));
+      b.singBox('INFO[0001] $found');
+      b.singBox('INFO[0001] $_conn');
+      await Future<void>.delayed(Duration.zero);
+      await sub.cancel();
+      expect(got, [found, _conn]);
+    });
+  });
+
   group('ignored sites', () {
     test('host matching: the host and its subdomains only', () {
       final s = IgnoredSites(['Example.com', 'http://dead.org:8080/x', '*.wild.net', 'bad host']);

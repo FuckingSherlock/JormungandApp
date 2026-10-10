@@ -359,6 +359,64 @@ void main() {
     expect(() => svc.siteCheck({'event': other}), throwsFormatException);
   });
 
+  test('a TUN that takes no TCP: core/tunTcpDead from the raw log, once; the snapshots follow the connection', () async {
+    tmp = await Directory.systemTemp.createTemp('jorm-svc');
+    runner = _Runner();
+    var t = DateTime.utc(2026, 10, 10, 12);
+    svc = CoreService(
+      singBox: 'none',
+      dataDir: p.join(tmp.path, 'data'),
+      runner: runner,
+      boxFactory: (_) => _NoisyRunner(),
+      sysProxy: NoSystemProxy(),
+      exitCheck: (_) async => {'ip': '127.0.0.1'},
+      isElevated: () => true,
+      now: () => t,
+    );
+    await svc.init();
+    expect(svc.failuresSnapshot()['active'], isFalse);
+    expect(svc.tunIngressSnapshot()['state'], 'off');
+
+    final body = _body();
+    body['plan'] = {...(body['plan'] as Map<String, dynamic>), 'mode': 'tun', 'tunStack': 'system'};
+    await svc.connect(body);
+    expect(svc.failuresSnapshot()['active'], isTrue);
+    final snap = svc.tunIngressSnapshot();
+    expect([snap['state'], snap['stack']], ['ok', 'system']);
+
+    List<Map> dead() => [
+          for (final e in (svc.events()['events'] as List).cast<Map>())
+            if (e['cat'] == 'core' && e['type'] == 'tunTcpDead') e,
+        ];
+    void orphans(int n) {
+      for (var i = 0; i < n; i++) {
+        runner.onLog!('INFO[0010] [${700 + i} 0ms] router: found package name: org.telegram.messenger.web');
+        for (var k = 0; k < 8; k++) {
+          runner.onLog!('INFO[0010] outbound/direct[direct]: other');
+        }
+      }
+    }
+
+    orphans(10);
+    expect(dead(), isEmpty, reason: 'grace: the first seconds are not judged');
+    t = t.add(const Duration(seconds: 10));
+    orphans(1);
+    final e = dead().single;
+    expect(e['level'], 'error');
+    final d = e['data'] as Map;
+    expect([d['stack'], d['accepted']], ['system', 0]);
+    expect(d['synSeen'], greaterThanOrEqualTo(TunIngressDetector.minUnpaired));
+    expect(d['apps'], ['org.telegram.messenger.web']);
+    orphans(10);
+    expect(dead().length, 1);
+    expect(svc.tunIngressSnapshot()['state'], 'dead');
+    expect((svc.log()['lines'] as List).any((l) => '${(l as Map)['msg']}'.contains('TUN')), isTrue, reason: 'it is said in the journal too');
+
+    await svc.disconnect();
+    expect(svc.failuresSnapshot()['active'], isFalse);
+    expect(svc.tunIngressSnapshot()['state'], 'off');
+  });
+
   test('dispose stops the box and ends the streams', () async {
     await start();
     await svc.connect(_body());

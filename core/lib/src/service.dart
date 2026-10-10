@@ -14,6 +14,7 @@ import 'durable.dart';
 import 'elevation.dart';
 import 'eventbook.dart';
 import 'exitip.dart';
+import 'failures.dart';
 import 'fallback.dart';
 import 'ignored_sites.dart';
 import 'localsource.dart';
@@ -24,6 +25,7 @@ import 'parse/links.dart';
 import 'plan.dart';
 import 'pool.dart';
 import 'probe.dart';
+import 'report.dart';
 import 'routing.dart';
 import 'rulenames.dart';
 import 'rulesets.dart';
@@ -35,6 +37,7 @@ import 'sitecheck.dart';
 import 'state.dart';
 import 'sysproxy.dart';
 import 'traffic.dart';
+import 'tun_ingress.dart';
 import 'updater.dart';
 
 /// The core as an object: everything jormd's HTTP API does, without HTTP (daemon.dart is
@@ -91,6 +94,8 @@ class CoreService implements CoreApi {
     runner.onLog = (line) {
       logBook.singBox(line);
       _auto?.onLog(line);
+      failures.onLog(line);
+      tunIngress.onLine(line);
     };
     ruleSets.onFailed = (tag, url, error) => _event('rules', 'ruleSetFailed', 'warn', {'tag': tag, 'url': url, 'error': error},
         note: 'Rule set $tag not downloaded ($url): $error');
@@ -182,7 +187,31 @@ class CoreService implements CoreApi {
   /// network status they share. `direct` = the direct path through the main sing-box's probe
   /// inbound (only asked while Auto runs, so while it is up).
   late final pool = ProbePool(direct: (url, t) async => _probe == null ? -1 : _probe!.delay('direct', url, timeoutMs: t));
-  StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto
+  StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto and the failure book
+
+  /// Failed connections of the running sing-box (failures.dart): `conn/failing` and the report's numbers.
+  late final failures = FailureBook(
+    now: _now,
+    ignored: (host) => ignoredSites.matches(host),
+    background: () => !screenOn,
+    emit: (data, {required bg}) {
+      final app = data['app'] ?? (data['process'] as Map?)?['name'];
+      logBook.note('warn',
+          '${app == null ? 'Requests' : 'Requests of $app'} to ${data['host']}${data['port'] == null ? '' : ':${data['port']}'} through ${data['outbound']} failed ${data['count']} times in a row (${data['kind']})');
+      return eventBook.add('conn', 'failing', 'warn', data: data, bg: bg);
+    },
+    update: (id, data) => eventBook.update(id, data: data),
+  );
+
+  /// Does TCP from the TUN reach sing-box (tun_ingress.dart): `core/tunTcpDead` and `core/tunTcpBack`.
+  late final tunIngress = TunIngressDetector(
+    now: _now,
+    onDead: (d) => _event('core', 'tunTcpDead', 'error', d,
+        note: 'TUN (${d['stack']}): TCP does not reach sing-box: ${d['synSeen']} connection attempts in ${(d['windowMs'] as int) ~/ 1000} s, none accepted'
+            '${(d['apps'] as List).isEmpty ? '' : ' (${(d['apps'] as List).join(', ')})'}'),
+    onBack: (d) => _event('core', 'tunTcpBack', 'info', d,
+        note: 'TUN (${d['stack']}): TCP reaches sing-box again after ${((d['deadMs'] as int) / 1000).round()} s'),
+  );
   int _connectSeq = 0;
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
@@ -420,6 +449,9 @@ class CoreService implements CoreApi {
   /// changes where traffic leaves: the exit is checked again.
   void _startAuto(Map<String, dynamic> plan) {
     _stopAuto();
+    // what a sing-box that just started does is counted from its first line, with or without the API
+    failures.start();
+    if (planTun(plan)) tunIngress.start(planTunStack(plan));
     final api = runner.api;
     if (api == null) return; // no API service (a test's fake process)
     pool.resetNetwork(); // a new sing-box: the network is presumed up again
@@ -429,7 +461,10 @@ class CoreService implements CoreApi {
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         note: runner.note);
     // requests that failed: sing-box's API service streams every closed connection
-    _closed = api.closedConnections().listen(auto.onClosed, onError: (Object e) => runner.note('auto: connection events stopped: $e'));
+    _closed = api.closedConnections().listen((c) {
+      failures.onClosed(c);
+      auto.onClosed(c);
+    }, onError: (Object e) => runner.note('auto: connection events stopped: $e'));
     auto.switches.listen((s) {
       runner.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
       if (s.reason == 'fastest') {
@@ -465,6 +500,7 @@ class CoreService implements CoreApi {
   void siteBlocked(AutoBlocked b) {
     final (host, port) = _hostPort(b.dest);
     if (ignoredSites.matches(host)) return;
+    failures.noteSite(host); // this is the event of the site: no `conn/failing` besides it
     eventBook.add('site', 'blocked', 'warn', bg: !screenOn, data: {
       'host': host,
       'port': ?port,
@@ -489,6 +525,7 @@ class CoreService implements CoreApi {
   void siteUnreachable(AutoUnreachable u) {
     final (host, port) = _hostPort(u.dest);
     if (ignoredSites.matches(host)) return;
+    failures.noteSite(host);
     final checks = !u.retriesOff;
     final on = checks && siteCheckOn;
     final id = eventBook.add('site', 'unreachable', 'warn', bg: !screenOn, data: {
@@ -591,6 +628,8 @@ class CoreService implements CoreApi {
   void _stopAuto() {
     unawaited(_closed?.cancel());
     _closed = null;
+    failures.stop();
+    tunIngress.stop();
     _auto?.stop();
     _auto = null;
     _fallback?.stop();
@@ -797,7 +836,7 @@ class CoreService implements CoreApi {
   }
 
   @override
-  Map<String, dynamic> log({int? since}) => logBook.since(since);
+  Map<String, dynamic> log({int? since, bool conns = true}) => logBook.since(since, conns: conns);
 
   @override
   void clearLog() => logBook.clear();
@@ -852,6 +891,13 @@ class CoreService implements CoreApi {
     if (auto == null || !runner.running) return null;
     return auto.toJson();
   }
+
+  /// The failed-connection book of the running sing-box: what fails, for which app, through
+  /// which outbound, since when (FailureBook.toJson). Empty and `active: false` when not connected.
+  Map<String, dynamic> failuresSnapshot({int top = 20}) => failures.toJson(top: top);
+
+  /// Whether TCP from the TUN reaches sing-box (TunIngressDetector.toJson): `state` off | ok | dead.
+  Map<String, dynamic> tunIngressSnapshot() => tunIngress.toJson();
 
   /// Asks where traffic leaves: through the tunnel after every (re)connect, directly at
   /// start and after a disconnect, and on demand. A check that finishes after a newer one
@@ -1267,6 +1313,68 @@ class CoreService implements CoreApi {
         'dart': Platform.version.split(' ').first,
         'os': Platform.operatingSystem,
       };
+
+  // the keys of the snapshot's settings objects the report carries (the rest of the snapshot is the
+  // user's sources and nodes); `connCfg` loses the local proxy's login
+  static const _reportCfgKeys = ['segState', 'connCfg', 'autoCfg', 'genCfg', 'notifCfg', 'logCfg'];
+
+  /// The support report (report.dart, docs/logs.md → Отчёт): everything the core keeps in memory,
+  /// gathered in one pass. [appInfo] is the host's own account of itself, taken as given.
+  @override
+  Future<Map<String, dynamic>> report({Map<String, dynamic> appInfo = const {}}) async {
+    final snap = await store.read().catchError((Object _) => null);
+    final cfg = <String, dynamic>{};
+    for (final k in _reportCfgKeys) {
+      final v = snap?[k];
+      if (v is! Map) continue;
+      final copy = Map<Object?, Object?>.of(v);
+      if (k == 'connCfg') copy.removeWhere((key, _) => key == 'proxyUser' || key == 'proxyPass');
+      cfg[k] = copy;
+    }
+    List<String> interfaces;
+    try {
+      interfaces = [
+        for (final i in await NetworkInterface.list(includeLoopback: true).timeout(const Duration(seconds: 2))) i.name,
+      ];
+    } catch (_) {
+      interfaces = const [];
+    }
+    final plan = _plan;
+    final events = [
+      for (final e in (eventBook.since(null, tail: 1 << 30)['events'] as List)) (e as Map).cast<String, dynamic>(),
+    ];
+    final lines = [
+      for (final l in (logBook.since(null)['lines'] as List)) (l as Map).cast<String, dynamic>(),
+    ];
+    return buildReport(
+      now: DateTime.now(),
+      appInfo: appInfo,
+      version: await version(),
+      status: _statusMap(),
+      plan: plan,
+      upSince: runner.running || _recovering != null ? _upSince : null,
+      settings: {
+        ...cfg,
+        'systemProxy': sysProxy.isSet,
+        'killSwitch': _killSwitch,
+        'killOnDisconnect': _killOnDisconnect,
+        'killWhileClosed': _killWhileClosed,
+        'downProxy': _downProxyMode,
+        'closeOnSwitch': closeOnSwitch,
+        'dnsAuto': _dnsAuto,
+        'ignoredSites': ignoredSites.hosts.length,
+        'screenOn': screenOn,
+      },
+      network: {
+        'interfaces': interfaces,
+        'tunUp': runner.running && plan != null && planTun(plan),
+      },
+      events: events,
+      lines: lines,
+      failures: failuresSnapshot(),
+      tunIngress: tunIngressSnapshot(),
+    );
+  }
 
   /// body: {protocol, address, port, secret, name, outbound?, unsupported?} — see manual.dart.
   @override

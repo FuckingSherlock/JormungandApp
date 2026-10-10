@@ -24,14 +24,26 @@ Future<String?> singBoxVersion(String binary) async {
 /// (also `outbound connection`, `packet connection`). The one pattern for the [LogBook] and the Raw view.
 final connLineRe = RegExp(r'(inbound|outbound)/[^:]*: (inbound|outbound) (packet )?connection\b');
 
+/// The sing-box line that names the program behind a connection: `[id 5ms] router: found package name: org.x`
+/// (Android), `… router: found process path: C:\…\chrome.exe` (desktop). One per connection, so as
+/// loud as the connection lines.
+final foundLineRe = RegExp(r'router: found (package name|process path): ');
+
+/// A sing-box line of the flood a busy device writes: a successful connection ([connLineRe]) or the
+/// program behind one ([foundLineRe]). Warnings and errors are never one (the caller checks the level).
+/// The [LogBook] keeps them in the noise ring; the Raw view's «Connections» switch shows them.
+bool isNoiseLine(String text) => connLineRe.hasMatch(text) || foundLineRe.hasMatch(text);
+
 /// The log the Logs tab shows: sing-box's output and the core's own notes (connect,
 /// disconnect, failed requests), in one numbered sequence, newest last. The UI polls
 /// [since] with the `next` of its previous answer, so every line reaches it once; [clear]
 /// empties the book, numbering goes on.
 ///
 /// Two rings, so the flood of successful connections cannot push the rest out: those lines
-/// ([connLineRe], not warnings / errors) and the failed ones of [ignored] sites keep the last
-/// [noiseCap]; everything else keeps the last [cap]. [since] merges them by number.
+/// ([isNoiseLine]: successful connections and `found package name` / `found process path`,
+/// not warnings / errors) and the failed ones of [ignored] sites keep the last [noiseCap];
+/// everything else keeps the last [cap]. [since] merges them by number (and with `conns: false`
+/// leaves the flood out on the core's side, saying how much it left out).
 ///
 /// With a [file] the warnings and errors are also kept on disk (JSON Lines, written behind
 /// the memory: collected and appended in one write [flushEvery] after the first, and by [flush]
@@ -124,7 +136,7 @@ class LogBook {
     final problem = level == 'warn' || level == 'error';
     // a failed request to an ignored site is noise too: its own ring, nothing for the disk
     final quiet = problem && !ignored.isEmpty && ignored.matchesText(text);
-    if (quiet || (!problem && src == 'sing-box' && connLineRe.hasMatch(text))) {
+    if (quiet || (!problem && src == 'sing-box' && isNoiseLine(text))) {
       _noise.add(line);
       while (_noise.length > noiseCap) {
         _noise.removeFirst();
@@ -209,7 +221,15 @@ class LogBook {
   /// Lines numbered [from] and later (all kept ones without it), and the number the next
   /// line will get. The numbers only grow along the queue, so the start is found by a binary
   /// search: the cost is the size of the answer, not of the book (the app asks after every burst).
-  Map<String, Object> since(int? from) {
+  ///
+  /// With [conns] off the flood ([isNoiseLine]: successful connections, `found package name`) is
+  /// left out here, at the source, and the answer says how much it left out: `hidden` = the number
+  /// of such lines among the numbers it covers (only present with [conns] off). The failed
+  /// connection lines of ignored sites also live in the noise ring, but they are warnings /
+  /// errors and still come (the UI's «Ignored sites» switch sorts those). [next] and the numbers
+  /// are the same either way, so a later request with [conns] on and the same [from] brings
+  /// the left-out lines. [stream] is not filtered.
+  Map<String, Object> since(int? from, {bool conns = true}) {
     load();
     // index of the first line numbered [from] or later in [q]
     int start(ListQueue<Map<String, Object>> q) {
@@ -230,14 +250,20 @@ class LogBook {
 
     var a = start(_lines), b = start(_noise);
     final out = <Map<String, Object>>[];
+    var hidden = 0;
     while (a < _lines.length || b < _noise.length) {
       if (b >= _noise.length || (a < _lines.length && (_lines.elementAt(a)['n'] as int) < (_noise.elementAt(b)['n'] as int))) {
         out.add(_lines.elementAt(a++));
       } else {
-        out.add(_noise.elementAt(b++));
+        final l = _noise.elementAt(b++);
+        if (!conns && l['lvl'] != 'warn' && l['lvl'] != 'error') {
+          hidden++;
+        } else {
+          out.add(l);
+        }
       }
     }
-    return {'lines': out, 'next': _next};
+    return {'lines': out, 'next': _next, if (!conns) 'hidden': hidden};
   }
 
   /// Empties the book and the file; numbering goes on.

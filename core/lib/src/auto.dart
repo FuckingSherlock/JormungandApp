@@ -50,6 +50,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'config.dart' show defaultTestUrl, planCheckers;
+import 'failures.dart' show ConnOutcome;
 import 'plan.dart';
 import 'pool.dart';
 import 'sbapi.dart' show BoxControl, ClosedConnection;
@@ -614,7 +615,7 @@ class AutoService {
   /// backup checks: it does not answer — the usual retries, `failAfter`, failover; it
   /// answers — the sites the requests went to are tried again ([_sites]).
   void onClosed(ClosedConnection c) {
-    if (_stopped || offline || c.down > 0) return;
+    if (_stopped || offline || !ConnOutcome.isFailure(c)) return;
     if (c.chain.map(_routeOf).firstWhere((i) => i != null, orElse: () => null) != index) return;
     final now = _clock();
     requestFails++;

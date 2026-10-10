@@ -409,6 +409,106 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 Не пишется в журнал: `core/restartFailed` только за первые три попытки (сбой раз в 30 с
 заполнил бы журнал; в сыром логе — каждая).
 
+## Неудачные соединения (`failures.dart`, `tun_ingress.dart`)
+
+Тихий отказ 2026-10-10 (на Android-стеках TUN `mixed` / `system` Telegram не работал: приложение
+исключало себя из VPN, sing-box писал `found package name`, а TCP до маршрутизации не доходил; ни
+ошибки, ни закрытого соединения) показал, что «ничего не пришло» ядро должно замечать само и
+говорить об этом, а не ждать, пока пользователь прочтёт сырой лог. Две части — по двум видам
+отказа; обе читают тот единственный sing-box, что запущен, и работают, пока подключено (в том
+числе когда API service нет — тестовый процесс — по сырому логу).
+
+### Что говорит закрытое соединение (`ConnOutcome`)
+
+Одно место, где решается «пришло ли что-нибудь». `ClosedConnection` кроме сервера, цепочки,
+адреса и байтов несёт `network` (tcp/udp), `inbound` (тег входа), `durationMs` (сколько жило).
+
+- `down > 0` — `ok`. `down == 0` — отказ (это и есть то, по чему Auto запускает проверку:
+  `ConnOutcome.isFailure`, поведение Auto не менялось).
+- Нет ответа, прожило < `instantMs` = 2 с — `instantRefusal` (отказ через цепочку занимает
+  круги до дальнего конца: на мобильной сети секунда и больше, поэтому порог 2 с, а байты
+  `up` тут не решают — sing-box для большинства таких пишет `up == 0`); ≥ 2 с и `up > 0` —
+  `stalled` (запрос ушёл, ответа нет); `up == 0` — `timeout`.
+- `up == 0`, `down == 0`, жило ≥ `idleMs` = 60 с — простаивавшее соединение пула, закрытое без
+  единого байта: не успех и не отказ (`idle`, в книгу не идёт).
+- Причина из лога перекрывает догадку по времени: строка
+  `connection: open connection to H:P using outbound/…[tag]: <ошибка>` даёт `timeout` / `reset` /
+  `refused` / `dnsFail` (`ConnOutcome.kindOfError`; `context canceled` / `canceled by local` — клиент
+  сам отказался, не вина маршрута, вида нет). Подсказка живёт 20 с (`hintTtl`) и относится только
+  к закрытому соединению того же тега outbound'а и того же адреса: закрытая запись приходит
+  примерно секундой позже строки с ошибкой.
+
+### Книга неудач (`FailureBook`, `CoreService.failuresSnapshot({top})`)
+
+Скользящие счётчики по ключу (пакет Android | процесс, `host:port`, outbound / маршрут, inbound,
+tcp/udp): за последние 10 минут (`window`, минутными корзинами) и с начала подключения. Ограничено:
+не больше 400 записей (`maxEntries`, вытесняются самые старые), в снимке — `top` (по умолчанию
+20) самых провальных; итоги (`ok` / `failed`) от вытеснения не зависят. Не считаются: игнорируемые
+сайты (список «Игнорируемые сайты», `ignoredSites`), входы `probe-in` (наши же пробы), простаивающие соединения.
+UDP и `tunnel-in` считаются, но события не дают. Фоновые (экран выключен, Android) считаются
+отдельно (`bgFailed`, `bgSince`) и событие получает `bg: true`.
+
+Снимок (`toJson`): `active`, `since`, `windowMs`, `ok`, `failed`, `ok10m`, `failed10m`, `bgFailed`,
+`byKind`, `events`, `entries`, `apps[]` (пакет/процесс: `failed10m`, `ok10m`, `failedSince`,
+`okSince`, `bgSince`, `destinations`), `top[]` (`app`/`process`, `host`, `port`, `outbound`,
+`route`, `inbound`, `network`, `failed10m`, `ok10m`, `failedSince`, `okSince`, `bgSince`,
+`byKind`, `lastKind`, `lastAt`, `lastDurationMs`, `failing` — есть, пока по адресу не было успеха
+после сообщённой серии), `dns[]` (имена, что не разрешились: `host`, `count`, `lastAt`; до 50).
+
+### Событие `conn/failing` (warn)
+
+≥ `failAfter` = 3 отказов одного (приложение, адрес, outbound) в пределах `streakWindow` = 60 с
+без успеха между ними. Данные: `{app?, process?, host, port, outbound, route, kind, count, windowMs,
+source: 'closed'}` — `app` = пакет Android, `process` = `{name, path}` (как у `site/*`), `kind` —
+какой вид был у большинства серии, `windowMs` = 60000, `source` показывает, откуда это взято
+(закрытые соединения; поле на вырост — другие источники). Дальше:
+
+- одно событие, пока успех не сбросит серию; после успеха по этому же адресу новые 3 отказа —
+  новое событие (повторный отказ);
+- другие адреса того же приложения через тот же outbound в течение `groupWindow` = 5 мин не дают
+  новых событий — событие обновляется полем `more` (сколько ещё адресов); другой outbound или
+  приложение — отдельное событие;
+- не более `maxEvents` = 6 в 10 минут (числа продолжают считаться);
+- сайт, о котором Auto уже сказал (`site/blocked` / `site/unreachable`), `coveredFor` = 10 мин
+  не получает `conn/failing` (и его поддомены): это то же самое событие, но с проверкой маршрутов.
+
+Событие нужно не вместо `site/*`, а там, где Auto молчит: нода живая (замер проходит), а
+конкретное приложение или порт не открывается.
+
+### TCP из TUN не доходит (`TunIngressDetector`, `tunIngressSnapshot()`)
+
+Отказ 2026-10-10 в книгу не попадает: запросы так и не становились соединениями. Сигнал в логе —
+**осиротевшие** `router: found package name` / `found process path`: поиск приложения идёт до
+того, как соединение создано, и у здорового стека рядом (в пределах `pairLines` = 5 строк, до или
+после, у TCP два поиска на соединение, `tcpCapacity` = 2; у UDP и DNS `otherCapacity` = 1)
+есть настоящая строка входа `inbound connection` / `inbound packet connection` / `inbound DNS
+packet`. На мёртвом TCP строк входа нет вовсе — поиски остаются без пары.
+
+Детектор читает сырой поток строк runner'а (не вкладку Logs: её кольцо вытесняет строки соединений
+первыми) и говорит:
+
+- `core/tunTcpDead` (error): за `window` = 30 с набралось ≥ `minUnpaired` = 8 осиротевших поисков, и
+  ни одного настоящего TCP-соединения TUN за это же окно; `grace` = 5 с после старта не судит.
+  Данные: `{stack, synSeen, accepted: 0, windowMs, apps}` (`apps` — до `maxApps` = 5 приложений
+  с наибольшим числом осиротевших). Одно на период «мёртв».
+- `core/tunTcpBack` (info): первое настоящее TCP-соединение после «мёртв». Данные:
+  `{stack, accepted, deadMs}`; потом возможен новый `Dead`.
+
+Пороги — по трём записанным сессиям (`core/test/fixtures/tun_ingress`): здоровый gVisor остаётся
+на ≤ 4 непарных за любое окно 10–60 с без TCP (несколько поисков без пары бывают и в норме, поэтому
+счёт по окну, а не «любой одиночный»); мёртвые `system` и `mixed` набирают 8 за 2–3 с и 10 за 4 с.
+Пороги именованные константы; тесты — повтор записанных логов (`tun_ingress_test.dart`).
+
+Снимок: `state` (`off` | `ok` | `dead`), `stack`, `sinceMs`, `windowMs`, `tcpInWindow`,
+`unpairedInWindow`, счётчики `tcp` / `udp` / `dns`, `lookedAt`, `unpaired`, `deadEvents`,
+`deadForMs?`, `apps?`, `thresholds`.
+
+Ограничения: пороги выведены из сессий Android; TUN рабочего стола (Windows) этим детектором не
+проверялся (там нет аналога исключения приложения, но строки те же). В экспорте Logs на телефоне
+кольцо шума держит только 500 новейших строк соединений — старые `inbound connection` в нём
+вытеснены, и повтор сырого экспорта целиком даёт ложное «мёртв»; фикстуры вырезаны из частей, где
+строки входа ещё есть.
+
 ## Kill switch
 
 Только системный прокси (в TUN — лишь `strict_route`, отдельного kill switch для него нет). Настройки приходят **верхнеуровневыми полями** тела
@@ -739,7 +839,8 @@ Global, hijack вкл / выкл, системные правила первым
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
 | `POST /api/auto` | `{auto?, manual?, entry?}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения. `manual` (bool) — Auto ↔ Manual вживую: план уже держит все маршруты Auto (`plan.manual` — режим на старте), контроллер лишь перестаёт/начинает ходить между ними; `entry` (id записи) — маршрут, на котором стоит Manual: селектор `proxy` переключается туда без перезапуска и без события `auto/switched`. Записи нет в плане — режим применён, маршрут не двигается (хост шлёт новый план). `status.auto`: `manual`, `routes[].server` / `entryServer` — где стоят группы **каждого** маршрута → status |
 | `POST /api/disconnect`, `GET /api/status` | status: `{connected, mode: 'tun'\|'proxy'\|null, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, network, dns, sourcesRev}` — `network: {status: 'up'\|'down'\|'unknown', since, lastAnswer, offline, silent, doubt}` — общее состояние сети пула замеров (см. «Пул замеров»); `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
-| `GET /api/log?since=N` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next}` — строки с номером ≥ N (без `since` — все хранимые: до 5000 + 500 соединений); UI опрашивает с `next` прошлого ответа. `DELETE /api/log` — очистить (нумерация продолжается) |
+| `GET /api/log?since=N&conns=0` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next, hidden?}` — строки с номером ≥ N (без `since` — все хранимые: до 5000 + 500 шума); UI опрашивает с `next` прошлого ответа. `conns=0` — шум-кольцо (успешные соединения, `found package name`) не отдаётся, `hidden` = сколько строк пропущено; нумерация и `next` те же. `DELETE /api/log` — очистить (нумерация продолжается). Подробно — `docs/logs.md` |
+| `GET /api/report`, `POST /api/report` | `CoreApi.report({appInfo})` → отчёт для разработчика одной картой: версии, состояние, план без секретов, настройки, сеть, сводка TUN, счётчики детекторов, все события и обе кольца сырого лога, секреты замаскированы (`report.dart`, `redact.dart`). `POST` — тело `{appInfo: {…}}` (то, что знает только вызывающий: версия приложения, устройство, `planSig`, `names`, …). Формат и маскирование — `docs/logs.md` → Отчёт |
 | `POST /api/site-check` | `{event}` (id события `site/*`) → `{check}` — «Check with checker»: ядро спрашивает check-host.net о сайте события (`CoreApi.siteCheck`, `sitecheck.dart`), событие сначала получает `data.check.state: 'pending'`, потом результат с `manual: true`; идёт до ~30 с. 400, если события нет / оно не про сайт / сайт игнорируется |
 | `GET /api/events?since=N` | `{events:[…], updated?, next, first}` — журнал событий (ниже): события с `id ≥ N`, старые первыми; без `since` — последние 200. `updated` (только когда есть) — события, которые ядро изменило на месте за последние 10 минут (`EventBook.update`: поле `rev` = число изменений, `data` дополнено, `id` и место прежние), какой бы у них ни был `id`: читатель, у которого уже есть событие, заменяет его, если `rev` новее (`EventFeed.apply`), и событие уходит ещё раз в `eventStream`. `next` — id следующего события, `first` — id самого старого из хранимых (пропуск между своим `next` и `first` = журнал обрезан или очищен). `POST /api/events` `{cat, type, level, own?, data?}` → `{id}` — событие, которое первым узнал UI (400 с причиной, если форма не та: неизвестные `cat` / `level`, `type` не `[A-Za-z][A-Za-z0-9_]{0,47}`, `own` не bool, `data` не объект или больше 4096 знаков JSON); к такому событию `log` не привязывается. `DELETE /api/events` — очистить (нумерация продолжается) |
 | `GET /api/version` | `{core, singBox, dataDir, dart, os}` — Settings → Data → About |
@@ -845,8 +946,9 @@ Connections и лист Live connections (новые сверху: хост:по
 спрашивает после каждого всплеска строк).
 
 **LogBook: два кольца и файл.** Строки sing-box об удачных соединениях (`connLineRe`: `inbound/…:
-inbound connection …`, `outbound connection`, `packet connection`; не warn / error) живут в своём
-малом кольце (`noiseCap`, 500), всё остальное — warn, error, заметки ядра, прочие info — в основном
+inbound connection …`, `outbound connection`, `packet connection`; не warn / error) и строки
+`router: found package name: …` / `found process path: …` (`isNoiseLine`: одна на каждое соединение;
+раньше занимали до 79 % основного кольца) живут в своём малом кольце (`noiseCap`, 500), всё остальное — warn, error, заметки ядра, прочие info — в основном
 (`cap`, 5000): поток соединений за ночь не вытесняет ошибки. `since` сливает кольца по номеру; приложение
 держит у себя до `logKeep` (5500) строк. Warn / error дополнительно пишутся в
 `<dataDir>/problems.jsonl` (`{t, src, lvl, msg}` на строку; ≤ 1 МБ): буферизованно и асинхронно, как

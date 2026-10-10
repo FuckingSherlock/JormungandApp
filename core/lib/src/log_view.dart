@@ -5,7 +5,7 @@
 library;
 
 import 'ignored_sites.dart';
-import 'logbook.dart' show connLineRe;
+import 'logbook.dart' show isNoiseLine;
 
 /// One event of the journal (`events()['events']` item, eventbook.dart).
 class EventRecord {
@@ -54,15 +54,30 @@ class EventRecord {
 }
 
 /// Categories of the journal and their types, in the filter's order (the labels are the UI's).
+///
+/// The complete list of what the core and the app write: `core/test/event_catalog_test.dart` scans
+/// the emit sites and fails on a pair that is not here (a new event: the catalog, the label in the
+/// app's `event_text.dart`, the table in docs/logs.md — one commit). `user/*` (the app's own
+/// actions) is outside the catalog by design. `sub/dead` is written by the mockup only (a source
+/// that stopped answering, see docs/logs.md).
 const eventCats = <(String, List<String>)>[
-  ('conn', ['connected', 'disconnected', 'connectFailed', 'lost', 'restored', 'offline', 'online']),
+  ('conn', ['connected', 'disconnected', 'connectFailed', 'lost', 'restored', 'offline', 'online', 'failing']),
   ('auto', ['switched', 'fastest', 'unstable']),
   ('site', ['blocked', 'unreachable']),
   ('sub', ['updated', 'failed', 'removed', 'back', 'dead']),
   ('rules', ['fallback', 'targetBack', 'ruleSetFailed', 'ruleSetUpdated']),
   ('dns', ['switched']),
   ('speed', ['done', 'failed']),
-  ('core', ['crashed', 'restarted', 'restartFailed', 'tunNeedsAdmin', 'down', 'sysProxy', 'deprecated', 'stateRestored', 'stateLost']),
+  (
+    'core',
+    [
+      'crashed', 'restarted', 'restartFailed', 'tunNeedsAdmin', 'down', 'sysProxy', 'deprecated', 'stateRestored', 'stateLost',
+      // the app's own update (appupdate.dart)
+      'updateAvailable', 'updateFailed', 'updateChannelEmpty', 'updateDownloaded', 'updateDeltaFailed', 'updateInstalled',
+      // TCP through the TUN (tun_ingress.dart)
+      'tunTcpDead', 'tunTcpBack',
+    ],
+  ),
 ];
 
 /// Which Settings → Notifications toggle an event type answers to (none: never a notification).
@@ -339,9 +354,11 @@ class LogLine {
 
   bool get problem => lvl == 'warn' || lvl == 'error';
 
-  /// A successful connection of sing-box: `[id 5ms] inbound/mixed[mixed-in]: inbound connection to host:443`
-  /// (also `outbound connection`, `packet connection`). Warnings and errors are never one.
-  bool get isConn => !problem && src != 'core' && connLineRe.hasMatch(msg);
+  /// A line of the connection flood — what the Raw view's «Connections» switch shows: a successful
+  /// connection of sing-box (`[id 5ms] inbound/mixed[mixed-in]: inbound connection to host:443`, also
+  /// `outbound connection`, `packet connection`) or the program behind one (`router: found package
+  /// name: org.x`, `found process path`). Warnings and errors are never one ([isNoiseLine]).
+  bool get isConn => !problem && src != 'core' && isNoiseLine(msg);
 }
 
 /// The events list as the Logs tab keeps it, fed by `events()` pages and the push stream.

@@ -38,6 +38,7 @@ Where things stand and what's next: the newest `.claude_states/state_N.md`.
 | `docs/rules.md` | routing rules, targets and "If unavailable", apps, DNS, system proxy, kill switch, modes |
 | `docs/subscription-parsing.md` | formats, UA strategy, dedup, latency URL, region rules |
 | `docs/updates.md` | in-app updates: signed manifest, feeds, keys, Windows / Android install |
+| `docs/logs.md` | logs, events catalog, report |
 | `docs/i18n.md` | translation mechanism and glossary |
 | `app/README.md` | Flutter app layout, conventions, TODO |
 
