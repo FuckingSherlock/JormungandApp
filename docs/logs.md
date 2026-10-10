@@ -299,9 +299,13 @@ log»), `network` (нет связи с сервером отчётов), `rejec
 тег GCM не сошёлся). Код — `report_crypto.dart` (`encryptReport`, `decryptReport`, `openReport`,
 `generateReportKeys`), им же пользуются тесты `report_crypto_test.dart` и `report_upload_test.dart`.
 
-**Что осталось.** Приёмная сторона — Worker `jormungand-reports` (`workers/reports/`): приём, лимиты,
-хранение шифртекста, выдача `id`, уведомление в Telegram; токен бота Telegram хранится как секрет Worker'а
-(не в приложении и не в репозитории). Пока Worker не выложен, отправка в сборке отвечает `network` / `failed`.
+**Приёмная сторона.** Worker `jormungand-reports` (`workers/reports/`, README там же): приём, лимиты
+(Durable Object: на IP 10/час и 50/сутки, всего 500/сутки), хранение шифртекста в Workers KV (namespace
+`jormungand-reports`, ключ `YYYY/MM/<id>`, TTL 90 суток; R2 на аккаунте не включён), выдача `id`, уведомление
+в Telegram. Токен бота и chat id — секреты Worker'а (`wrangler secret put`), не в приложении и не в
+репозитории; без них отчёты принимаются и хранятся, уведомление пропускается. Достать отчёт:
+`node workers/reports/tools/fetch.mjs <id> x.bin`, затем `dart run core/tool/decrypt_report.dart x.bin`
+(приватный ключ — `%USERPROFILE%\.jormungand\report_private.key`, копия у разработчика обязательна).
 
 ## Экран Logs (приложение)
 
