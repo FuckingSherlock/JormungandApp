@@ -113,6 +113,8 @@ class Daemon {
         // the support report (report.dart); POST may carry {appInfo} (what only the page knows)
         'GET /api/report' => service.report(),
         'POST /api/report' => service.report(appInfo: ((body['appInfo'] as Map?) ?? const {}).cast<String, dynamic>()),
+        'POST /api/report/send' => service.sendReport(
+            note: '${body['note'] ?? ''}', appInfo: ((body['appInfo'] as Map?) ?? const {}).cast<String, dynamic>()),
         'POST /api/node' => Future(() => {'node': service.manualNode(body).toJson()}),
         'POST /api/share' => Future.value({'link': service.share(body)}),
         'POST /api/sources/fetch' => service.fetchSource(body),

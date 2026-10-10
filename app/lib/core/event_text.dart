@@ -12,6 +12,7 @@ import 'package:jormungand_core/jormungand_core.dart'
 
 import '../l10n/l10n.dart';
 import '../widgets/app_mark.dart' show appDisplayName;
+import 'format.dart' show fmtBytes;
 import '../widgets/node_row.dart' show nodeProtoLabel;
 
 /// The words of the Events journal (mockup 47-events.js `evDescribe`, `evValue`, `evWhyRows`): the
@@ -72,6 +73,15 @@ class EventWords {
     'core/deprecated' => l10n.deprecatedSetting,
     'core/stateRestored' => l10n.savedDataRestored,
     'core/stateLost' => l10n.savedDataLost,
+    'conn/failing' => l10n.connectionsAreFailing,
+    'core/updateAvailable' => l10n.appUpdateAvailable,
+    'core/updateFailed' => l10n.appUpdateFailed,
+    'core/updateChannelEmpty' => l10n.noAppReleaseInTheChannel,
+    'core/updateDownloaded' => l10n.appUpdateDownloaded,
+    'core/updateDeltaFailed' => l10n.updatePatchFailed,
+    'core/updateInstalled' => l10n.appUpdated,
+    'core/tunTcpDead' => l10n.tcpDoesNotPassTheTunnel,
+    'core/tunTcpBack' => l10n.tcpPassesTheTunnelAgain,
     _ => '$cat / $type',
   };
 
@@ -369,10 +379,112 @@ class EventWords {
         d['savedAt'] is num ? l10n.backupFromLaterChangesAreLost(stamp((d['savedAt'] as num).toInt())) : l10n.laterChangesAreLost,
       ),
       ('core', 'stateLost') => r(l10n.savedDataWasDamagedAndCould, l10n.startingEmptyTheDamagedFileIs),
+      ('conn', 'failing') => () {
+        final port = d['port'] is num && (d['port'] as num) > 0 ? ':${d['port']}' : '';
+        final more = d['more'];
+        final dest = '${d['host'] ?? ''}$port${more is num && more > 0 ? ' ${l10n.and(l10n.more2(more))}' : ''}';
+        final who = appName(d);
+        final win = d['windowMs'] is num ? ((d['windowMs'] as num) / 1000).round() : 60;
+        final out = _outbound(d);
+        return r(
+          who.isEmpty ? l10n.connectionsToAreFailing(dest) : l10n.connectionsToAreFailing2(who, dest),
+          _lines([
+            _failKind(d['kind']),
+            d['count'] is num ? l10n.failuresInS(d['count'] as num, win) : null,
+            out.isEmpty ? null : l10n.through(out),
+          ]),
+        );
+      }(),
+      ('core', 'tunTcpDead') => () {
+        final apps = d['apps'] is List ? [for (final a in d['apps'] as List) _appOrProcess('$a')] : <String>[];
+        final stack = '${d['stack'] ?? ''}';
+        return r(
+          l10n.tcpDoesNotPassTheTunnel,
+          apps.isEmpty
+              ? l10n.stackTcpOfAppsIsNot(stack)
+              : l10n.stackTcpOfIsNotReaching(stack, apps.join(', ')),
+        );
+      }(),
+      ('core', 'tunTcpBack') => r(
+        l10n.tcpPassesTheTunnelAgain,
+        l10n.stackBackAfterWithoutTcp('${d['stack'] ?? ''}', d['deadMs'] is num ? duration(d['deadMs'] as num) : ''),
+      ),
+      ('core', 'updateAvailable') => r(
+        l10n.versionIsAvailable('${d['version'] ?? ''}'),
+        _lines([
+          '${d['channel'] ?? ''}',
+          d['forced'] == true ? l10n.requiredUpdate : null,
+          _updateVia(d['via']),
+        ]),
+      ),
+      ('core', 'updateFailed') => r(
+        switch (d['stage']) {
+          'check' => l10n.couldNotCheckForAnUpdate,
+          'verify' => l10n.theDownloadedUpdateFailedVerification,
+          'install' => l10n.theUpdateWasNotInstalled,
+          _ => l10n.couldNotDownloadTheUpdate,
+        },
+        '${d['error'] ?? ''}',
+      ),
+      ('core', 'updateChannelEmpty') => r(
+        l10n.noReleaseInTheChannel('${d['channel'] ?? ''}'),
+        d['attempts'] is List ? l10n.feedsAsked((d['attempts'] as List).length) : '',
+      ),
+      ('core', 'updateDownloaded') => r(
+        l10n.versionDownloaded('${d['version'] ?? ''}'),
+        _lines([
+          d['delta'] == true && d['downloaded'] is num && d['size'] is num
+              ? l10n.patchInsteadOf(fmtBytes(d['downloaded'] as num), fmtBytes(d['size'] as num))
+              : d['size'] is num
+              ? fmtBytes(d['size'] as num)
+              : null,
+          _updateVia(d['via']),
+        ]),
+      ),
+      ('core', 'updateDeltaFailed') => r(l10n.thePatchDidNotDownloadThe, '${d['error'] ?? ''}'),
+      ('core', 'updateInstalled') => r(l10n.updatedTo('${d['to'] ?? ''}'), l10n.was('${d['from'] ?? ''}')),
       _ => r('${e.cat} / ${e.type}'),
     };
     return (title: title, detail: detail);
   }
+
+  /// How a request of `conn/failing` ended (`ConnKind.name`).
+  String _failKind(Object? k) => switch (k) {
+    'refused' => l10n.refusedByTheFarSide,
+    'reset' => l10n.droppedAfterConnecting,
+    'timeout' => l10n.noAnswerInTime,
+    'stalled' => l10n.sentNothingCameBack,
+    'instantRefusal' => l10n.closedAtOnce,
+    'dnsFail' => l10n.theNameDidNotResolve,
+    _ => k == null ? '' : '$k',
+  };
+
+  /// The route a failing connection went through (`route`: `proxy` / `direct` / `block` / a tag).
+  String _outbound(Map<String, dynamic> d) {
+    final r = '${d['route'] ?? ''}';
+    if (r.isEmpty) return '${d['outbound'] ?? ''}';
+    return switch (r) {
+      'proxy' => l10n.mainFlow2,
+      'direct' => 'Direct',
+      'block' => 'Block',
+      _ => entry(r),
+    };
+  }
+
+  /// An app of `tunTcpDead` as sing-box named it: a package (Android) or a process path.
+  String _appOrProcess(String a) {
+    if (a.isEmpty || a.contains('\\') || a.contains('/')) {
+      return a.split(RegExp(r'[\\/]')).last;
+    }
+    return appDisplayName(l10n, catalog, a);
+  }
+
+  /// `data.via` of an update event: the route the feed was reached by.
+  String? _updateVia(Object? v) => switch (v) {
+    'direct' => l10n.through('Direct'),
+    'tunnel' => l10n.through(l10n.vpn),
+    _ => null,
+  };
 
   String _entryMark(String mark, Object? id, Object? srv) {
     if (id == null || '$id'.isEmpty) return '';
@@ -386,8 +498,11 @@ class EventWords {
     return d.detail.isEmpty ? d.title : '${d.title} — ${d.detail}';
   }
 
-  /// What the search of the Events filter looks in: the sentence and the values of the data.
-  String searchText(EventRecord e) => '${text(e)} ${e.data.values.join(' ')}';
+  /// What the search of the Events filter looks in: the sentence, the values of the data, and the
+  /// words of the type and the category ("Unstable entry", "Subscriptions") so that a type is found
+  /// by the name the filter sheet shows.
+  String searchText(EventRecord e) =>
+      '${text(e)} ${typeLabel(e.cat, e.type)} ${catLabel(e.cat)} ${e.cat} ${e.type} ${e.data.values.join(' ')}';
 
   // ── why: the rule that decided a request ──
 
@@ -532,7 +647,28 @@ class EventWords {
 
   // ── fields of an opened row ──
 
-  String fieldLabel(String k) => switch (k) {
+  String fieldLabel(String k, [EventRecord? e]) => switch (k) {
+    'count' when e?.cat == 'conn' => l10n.failures,
+    'code' when e?.cat == 'core' => l10n.code,
+    'via' when e?.cat == 'core' => l10n.route,
+    'kind' => l10n.failure,
+    'stage' => l10n.stage,
+    'version' => l10n.version,
+    'build' => l10n.build,
+    'channel' => l10n.channel,
+    'forced' => l10n.requiredText,
+    'size' => l10n.size,
+    'delta' => l10n.patch,
+    'downloaded' => l10n.downloaded,
+    'outbound' => l10n.outbound,
+    'port' => l10n.port,
+    'stack' => l10n.stack,
+    'apps' => l10n.apps,
+    'synSeen' => l10n.connectionsSeen,
+    'accepted' => l10n.accepted,
+    'windowMs' => l10n.window,
+    'deadMs' => l10n.downFor,
+    'attempts' => l10n.attempts,
     'entry' || 'id' => l10n.entry,
     'server' => l10n.server,
     'mode' => l10n.mode,
@@ -622,9 +758,24 @@ class EventWords {
       final name = '${v['name'] ?? ''}', path = '${v['path'] ?? ''}';
       return path.isNotEmpty && path != name ? '$name ($path)' : name;
     }
+    if (k == 'kind' && e.cat == 'conn') return _failKind(v);
+    if (k == 'via' && e.cat == 'core') return v == 'tunnel' ? l10n.vpn : v == 'direct' ? 'Direct' : '$v';
+    if (k == 'stage' && e.cat == 'core') {
+      return switch (v) {
+        'check' => l10n.couldNotCheckForAnUpdate,
+        'verify' => l10n.theDownloadedUpdateFailedVerification,
+        'install' => l10n.theUpdateWasNotInstalled,
+        _ => l10n.couldNotDownloadTheUpdate,
+      };
+    }
+    if ((k == 'size' || k == 'downloaded') && v is num) return fmtBytes(v);
+    if (k == 'apps' && v is List) return v.map((x) => _appOrProcess('$x')).join(', ');
+    if (k == 'attempts' && v is List) {
+      return v.map((x) => x is Map ? "${x['url'] ?? ''} — ${x['error'] ?? x['code'] ?? ''}" : '$x').join('\n');
+    }
     if (k == 'retries') return v == 'off' ? l10n.off : '$v';
     if (v is bool) return k == 'on' ? (v ? l10n.onText : l10n.off) : (v ? l10n.yes : l10n.no);
-    if ((k == 'downMs' || k == 'holdMs') && v is num) return duration(v);
+    if ((k == 'downMs' || k == 'holdMs' || k == 'windowMs' || k == 'deadMs') && v is num) return duration(v);
     if (k == 'mode') return _modeText(v).isNotEmpty ? _modeText(v) : '$v';
     if (k == 'route' && (v == 'global' || v == 'rules')) return _routeText(v);
     if (k == 'by') return v == 'user' ? l10n.you : l10n.anError;
@@ -650,11 +801,12 @@ class EventWords {
     for (final x in e.data.entries) {
       final v = x.value;
       if (v == null || (v is String && v.isEmpty)) continue;
+      if (x.key == 'source' && e.cat == 'conn') continue; // 'closed': where the core saw it, not a subscription
       if (x.key == 'check' && v is Map) {
         out.addAll(checkFields(v));
         continue;
       }
-      out.add((fieldLabel(x.key), fieldValue(x.key, v, e)));
+      out.add((fieldLabel(x.key, e), fieldValue(x.key, v, e)));
     }
     return out;
   }

@@ -14,7 +14,6 @@ import 'form_parts.dart';
 import 'ignored_sites.dart';
 import 'nodes_menus.dart' show copyText;
 import 'rules_parts.dart' show AppIcon;
-import 'search_field.dart';
 
 /// Rows of the Events journal (mockup 47-events.js: `evRowHtml`, `evBlockedHtml`, `evWhyHtml`,
 /// the filter sheet): one row per event, repeats folded, the title, the reason, the actions and
@@ -335,6 +334,31 @@ class EventRow extends StatelessWidget {
                       ],
                     ),
                   ),
+                // the type of this event: take it out of the journal, or look at it alone
+                // (`user/*` is outside the type filter: «Show my actions» rules it)
+                if (e.cat != 'user')
+                  Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        EventAct(
+                          l10n.hideThisType,
+                          key: const ValueKey('evHideType'),
+                          onTap: () => logs.toggleType(e.key),
+                        ),
+                        EventAct(
+                          l10n.showOnlyThisType,
+                          key: const ValueKey('evOnlyType'),
+                          onTap: () => logs.showOnlyType(e.key),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -654,8 +678,9 @@ class EventFilterBar extends StatelessWidget {
   }
 }
 
-/// The sheet of the filter button: search, only problems, the categories with their types, and
-/// "Show my actions" (kept with the settings).
+/// The sheet of the filter button: only problems, the categories with their types (and how many
+/// events of each the journal holds), and "Show my actions" (kept with the settings). The search is
+/// in the header of the page.
 Future<void> showEventFilter(BuildContext context, LogsController logs) {
   return showAppSheet<void>(
     context,
@@ -673,14 +698,9 @@ class _EventFilterSheet extends StatefulWidget {
 }
 
 class _EventFilterSheetState extends State<_EventFilterSheet> {
-  late final _q = TextEditingController(text: widget.logs.filter.q);
-  final _unfolded = <String>{};
-
-  @override
-  void dispose() {
-    _q.dispose();
-    super.dispose();
-  }
+  /// The categories the user turned over: a category starts unfolded when any of its types has
+  /// events in the journal or is switched off, and the user's tap flips that.
+  final _flipped = <String>{};
 
   @override
   Widget build(BuildContext context) {
@@ -695,15 +715,17 @@ class _EventFilterSheetState extends State<_EventFilterSheet> {
           final c = context.colors;
           final w = EventWords(l10n, logs.host.catalog);
           final f = logs.filter;
+          // how many events of each type the journal holds now (before any filter)
+          final counts = <String, int>{};
+          for (final e in logs.feed.list) {
+            counts[e.key] = (counts[e.key] ?? 0) + 1;
+          }
+          bool startsOpen((String, List<String>) cat) => cat.$2.any(
+            (t) => (counts['${cat.$1}/$t'] ?? 0) > 0 || f.off.contains('${cat.$1}/$t'),
+          );
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SearchField(
-                controller: _q,
-                hint: l10n.searchEvents,
-                onChanged: logs.setQuery,
-                margin: const EdgeInsets.fromLTRB(18, 0, 18, 6),
-              ),
               SetGroup(
                 children: [
                   SetRow(
@@ -729,9 +751,10 @@ class _EventFilterSheetState extends State<_EventFilterSheet> {
                       cat: cat,
                       words: w,
                       logs: logs,
-                      open: _unfolded.contains(cat.$1),
+                      counts: counts,
+                      open: startsOpen(cat) != _flipped.contains(cat.$1),
                       onFold: () => setState(() {
-                        if (!_unfolded.remove(cat.$1)) _unfolded.add(cat.$1);
+                        if (!_flipped.remove(cat.$1)) _flipped.add(cat.$1);
                       }),
                     ),
                 ],
@@ -755,7 +778,7 @@ class _EventFilterSheetState extends State<_EventFilterSheet> {
                 ),
                 child: SetRow(
                   label: l10n.showMyActions,
-                  hint: l10n.connectDisconnectPinModeAndRoute,
+                  hint: l10n.connectDisconnectPinModeAndRoute2,
                   trailing: MiniToggle(on: logs.cfg.showOwn, onChanged: logs.setShowOwn),
                 ),
               ),
@@ -825,6 +848,7 @@ class _CatBlock extends StatelessWidget {
     required this.cat,
     required this.words,
     required this.logs,
+    required this.counts,
     required this.open,
     required this.onFold,
   });
@@ -832,6 +856,9 @@ class _CatBlock extends StatelessWidget {
   final (String, List<String>) cat;
   final EventWords words;
   final LogsController logs;
+
+  /// Events in the journal by `cat/type`.
+  final Map<String, int> counts;
   final bool open;
   final VoidCallback onFold;
 
@@ -908,7 +935,20 @@ class _CatBlock extends StatelessWidget {
                     Expanded(
                       child: Text(
                         words.typeLabel(cat.$1, t),
-                        style: TextStyle(fontSize: 14, color: c.t1),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: (counts['${cat.$1}/$t'] ?? 0) > 0 ? c.t1 : c.t3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${counts['${cat.$1}/$t'] ?? 0}',
+                      key: ValueKey('evCount:${cat.$1}/$t'),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: c.t3,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],

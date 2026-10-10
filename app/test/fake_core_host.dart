@@ -562,13 +562,30 @@ class FakeCoreHost extends CoreHost {
   };
 
   @override
-  Map<String, dynamic> logPage({int? since}) => {
-    'lines': [
+  Map<String, dynamic> logPage({int? since, bool conns = true}) {
+    final inRange = [
       for (final l in logLinesList)
         if (since == null || (l['n'] as int) >= since) l,
-    ],
-    'next': _lineSeq,
-  };
+    ];
+    // noise the way the core's LogBook decides: a successful connection / found package line of
+    // sing-box that is not a warning or an error
+    bool noise(Map<String, dynamic> l) =>
+        l['lvl'] != 'warn' && l['lvl'] != 'error' && l['src'] == 'sing-box' && isNoiseLine('${l['msg']}');
+    final lines = [
+      for (final l in inRange)
+        if (conns || !noise(l)) l,
+    ];
+    logPageCalls.add((since: since, conns: conns));
+    return {
+      'lines': lines,
+      'next': _lineSeq,
+      // the core says how many noise lines it left out of this answer (only when asked to)
+      if (!conns) 'hidden': inRange.length - lines.length,
+    };
+  }
+
+  /// Every `logPage` question the page / controller asked, in order.
+  final logPageCalls = <({int? since, bool conns})>[];
 
   @override
   Stream<Map<String, dynamic>> get logLines => _logStream.stream;
@@ -714,6 +731,33 @@ class FakeCoreHost extends CoreHost {
 
   @override
   Future<Map<String, dynamic>> version() async => versionInfo;
+
+  /// The support report: what [report] answers, the answer of [sendReport] (a gate holds it while
+  /// the sheet's progress state is looked at) and the notes it was given.
+  Map<String, dynamic> reportMap = {
+    'format': 1,
+    'createdAt': '2026-01-02T03:04:05.000Z',
+    'app': {'version': '0.1.0'},
+    'events': <Object>[],
+    'raw': <Object>[],
+  };
+  Map<String, dynamic> sendResult = {'ok': true, 'id': 'r-1', 'bytes': 1234};
+  Completer<void>? sendGate;
+  final sentNotes = <String>[];
+
+  @override
+  Future<Map<String, dynamic>> report() async {
+    calls.add('report');
+    return reportMap;
+  }
+
+  @override
+  Future<Map<String, dynamic>> sendReport({String note = ''}) async {
+    calls.add('sendReport');
+    sentNotes.add(note);
+    await sendGate?.future;
+    return sendResult;
+  }
 
   @override
   Future<void> importState(Map<String, dynamic> snapshot) async {

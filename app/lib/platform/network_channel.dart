@@ -9,6 +9,10 @@ abstract interface class NetworkPort {
 
   /// Every change of [metered]; the current value comes at once on listen.
   Stream<bool> get meteredChanges;
+
+  /// What the phone is really on, for the support report: `wifi` | `ethernet` | `mobile` | `other` |
+  /// `none` | `unknown`.
+  Future<String> type();
 }
 
 /// Android: MethodChannel `jormungand/network` + EventChannel `jormungand/network_events`
@@ -25,6 +29,17 @@ class NetworkChannel implements NetworkPort {
       return await _channel.invokeMethod<bool>('metered') ?? false;
     } on MissingPluginException {
       return false;
+    }
+  }
+
+  @override
+  Future<String> type() async {
+    try {
+      return await _channel.invokeMethod<String>('type') ?? 'unknown';
+    } on MissingPluginException {
+      return 'unknown';
+    } on PlatformException {
+      return 'unknown';
     }
   }
 

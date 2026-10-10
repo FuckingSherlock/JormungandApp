@@ -6,6 +6,7 @@ import '../l10n/l10n.dart';
 import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
+import 'report_actions.dart';
 
 /// Ignored sites (Logs menu): a site that is dead by itself and that some program keeps opening
 /// floods the journal, the toasts and the raw log; the host and its subdomains can be silenced.
@@ -170,9 +171,42 @@ class _IgnoredSitesSheetState extends State<_IgnoredSitesSheet> {
   }
 }
 
-/// ⋮ of the Logs header: what is not a daily button. For now the ignored sites.
+/// Clear on the Events tab asks first (what a journal is worth is not undone).
+Future<void> confirmClearEvents(BuildContext context, LogsController logs) {
+  final l10n = context.l10n;
+  return showAppSheet<void>(
+    context,
+    builder: (sheet) => SheetFrame(
+      title: l10n.clearEvents2,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MenuNote(l10n.theEventsListIsEmptiedThe),
+          MenuRow(
+            icon: const Icon(Icons.delete_outline),
+            label: l10n.clearEvents,
+            danger: true,
+            onTap: () {
+              Navigator.of(sheet).pop();
+              logs.clearEvents();
+            },
+          ),
+          MenuRow(
+            icon: const Icon(Icons.close),
+            label: l10n.cancel,
+            onTap: () => Navigator.of(sheet).pop(),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// ⋮ of the Logs header (both tabs): Clear (of the tab on screen), the report (download, send)
+/// and the ignored sites. The filter and the search have their own buttons.
 Future<void> showLogsMenu(BuildContext context, LogsController logs) {
   final l10n = context.l10n;
+  final events = logs.tab == 'events';
   return showAppSheet<void>(
     context,
     builder: (sheet) => SheetFrame(
@@ -180,6 +214,38 @@ Future<void> showLogsMenu(BuildContext context, LogsController logs) {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          MenuRow(
+            key: const ValueKey('logsClear'),
+            icon: const Icon(Icons.delete_outline),
+            label: events ? l10n.clearEvents : l10n.clearRawLog,
+            danger: true,
+            onTap: () {
+              Navigator.of(sheet).pop();
+              if (events) {
+                confirmClearEvents(context, logs);
+              } else {
+                logs.clearRaw();
+              }
+            },
+          ),
+          MenuRow(
+            key: const ValueKey('logsDownload'),
+            icon: const Icon(Icons.file_download_outlined),
+            label: l10n.downloadLog,
+            onTap: () {
+              Navigator.of(sheet).pop();
+              downloadLog(context, logs);
+            },
+          ),
+          MenuRow(
+            key: const ValueKey('logsSendReport'),
+            icon: const Icon(Icons.outbox_outlined),
+            label: l10n.sendReport,
+            onTap: () {
+              Navigator.of(sheet).pop();
+              showSendReport(context, logs);
+            },
+          ),
           MenuRow(
             icon: const Icon(Icons.visibility_off_outlined),
             label: l10n.ignoredSites,

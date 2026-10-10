@@ -18,6 +18,7 @@ import io.flutter.plugin.common.MethodChannel
  * Data "Auto-download" (Wi-Fi only) asks it; the core downloads an update only while it says "no".
  *
  *  metered -> Boolean   now
+ *  type    -> String    wifi | ethernet | mobile | other | none (the support report's network.host)
  *  events: Boolean      every change (and the current value at once on listen)
  *
  * Our own VPN declares itself unmetered, so `activeNetwork` would answer "unmetered" through a
@@ -66,8 +67,36 @@ class NetworkChannel(private val app: Context) {
     private fun onCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "metered" -> result.success(metered())
+            "type" -> result.success(networkType())
             else -> result.notImplemented()
         }
+    }
+
+    /**
+     * What the phone is really on, for the support report: `wifi` | `ethernet` | `mobile` | `other` |
+     * `none`. The underlying (non-VPN) validated internet networks only, as in [metered]; Wi-Fi wins
+     * when several are up.
+     */
+    @Suppress("DEPRECATION")
+    private fun networkType(): String = try {
+        val kinds = cm.allNetworks.mapNotNull { n ->
+            val c = cm.getNetworkCapabilities(n)
+            if (c == null ||
+                !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                c.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
+                !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            ) {
+                null
+            } else when {
+                c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+                c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+                else -> "other"
+            }
+        }
+        listOf("wifi", "ethernet", "mobile", "other").firstOrNull { it in kinds } ?: "none"
+    } catch (e: Throwable) {
+        "unknown"
     }
 
     @Suppress("DEPRECATION")

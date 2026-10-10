@@ -1,21 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:jormungand_core/jormungand_core.dart'
-    show EventGroup, dayStart, rawLogText;
+import 'package:jormungand_core/jormungand_core.dart' show EventGroup, dayStart;
 
 import '../core/logs_controller.dart';
 import '../l10n/l10n.dart';
-import '../platform/files_channel.dart';
 import '../theme/app_colors.g.dart';
-import '../widgets/app_sheet.dart';
+import '../widgets/app_sheet.dart' show showToast;
 import '../widgets/app_view.dart';
 import '../widgets/event_rows.dart';
 import '../widgets/follow_list.dart';
 import '../widgets/form_parts.dart';
 import '../widgets/ignored_sites.dart';
 import '../widgets/log_parts.dart';
-import '../widgets/nodes_menus.dart' show copyText;
+import '../widgets/raw_filter_sheet.dart';
 import '../widgets/search_field.dart';
 
 /// Logs tab (mockup markup/35-logs.html, js/46-logs.js, 47-events.js): Events, the journal as
@@ -23,6 +21,12 @@ import '../widgets/search_field.dart';
 /// what arrives while they are there, and show a pill ("up N new") when scrolled up. What the
 /// user has looked at is marked by the [LogsController]: seen warnings (the dots on the nav) and
 /// read lines (the badges on the level chips).
+///
+/// The header is the same on both tabs: the filter (a sheet of its own for each tab, a badge with
+/// what is set), the search (a field under the tabs), ⋮ (clear, download, send, ignored sites).
+///
+/// A list scrolled up keeps what the user looks at where it is ([_Anchor]): rows that fall off
+/// its head, a filter, the Connections switch, a search do not move the row in view.
 class LogsPage extends StatefulWidget {
   const LogsPage({super.key, required this.controller});
 
@@ -30,6 +34,64 @@ class LogsPage extends StatefulWidget {
 
   @override
   State<LogsPage> createState() => _LogsPageState();
+}
+
+/// What keeps the row in view of a list where it is while the data under it changes: the pivot
+/// ([AnchoredList.pivot]) is the data order of the topmost visible row; the scroll origin is moved
+/// so that this row stays at its screen position.
+class _Anchor {
+  int? pivot;
+  int shape = 0;
+  int head = -1;
+
+  /// The data was reshaped (a filter, a clear...) or lost rows at its head ([head] is a token
+  /// of the first row). [list] is the built list of the data as it was rendered last, [follow]:
+  /// the list is at its end and pinned there.
+  void sync({
+    required bool follow,
+    required int shape,
+    required int head,
+    required BuildContext? list,
+    required ScrollController scroll,
+    required List<int> orders,
+  }) {
+    final reshaped = shape != this.shape;
+    final changed = reshaped || head != this.head;
+    this.shape = shape;
+    this.head = head;
+    if (follow) {
+      // pinned to the end: it jumps there after the build; no place to keep
+      if (reshaped) pivot = null;
+      return;
+    }
+    if (!changed || list == null) return;
+    // a row that is gone in the new data cannot be held: the next one in view is (the topmost
+    // anyway when none of them is left)
+    final row =
+        firstVisibleRow(list, where: (o) => _hasOrder(orders, o)) ?? firstVisibleRow(list);
+    if (row == null) return;
+    pivot = row.order;
+    shiftScroll(scroll, -row.top);
+  }
+
+  /// The numbering started over (the core restarted): a pivot from before is of no use.
+  void check(int? last) {
+    if (pivot != null && last != null && pivot! > last) pivot = null;
+  }
+
+  /// [order] is among [orders] (ascending, equal ones in a row).
+  static bool _hasOrder(List<int> orders, int order) {
+    var lo = 0, hi = orders.length;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (orders[mid] < order) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo < orders.length && orders[lo] == order;
+  }
 }
 
 class _LogsPageState extends State<LogsPage> {
@@ -42,7 +104,8 @@ class _LogsPageState extends State<LogsPage> {
   );
   final _evKey = GlobalKey(), _rawKey = GlobalKey();
   final _hitEvKey = GlobalKey(), _hitLineKey = GlobalKey();
-  final _search = TextEditingController();
+  final _evSearch = TextEditingController(), _rawSearch = TextEditingController();
+  final _evAnchor = _Anchor(), _rawAnchor = _Anchor();
   Timer? _seenTimer;
   int? _lastEvTok, _lastLineTok, _lastPin;
   String _evSig = '', _rawSig = '';
@@ -51,9 +114,22 @@ class _LogsPageState extends State<LogsPage> {
   // / [LogsController.rawVersion]): a frame or a rebuild for another reason does not fold 1000
   // events or group 2000 lines again.
   List<RawGroup> _rawGroups = const [];
+  List<int> _rawOrders = const [];
+  Map<int, int> _rawIndex = const {};
   (int, String, String)? _rawGroupsFor;
+
+  /// The views made for the groups (by the number of the first line), handed out again while a
+  /// group and its look are the same: a batch of lines then rebuilds only the group it touched.
+  final _rawViews = <int, _RawView>{};
+  int _rawViewsShape = -1;
   List<Object> _items = const [];
+  List<int> _evOrders = const [];
+  Map<String, int> _evIndex = const {};
   (int, AppLocalizations?, int)? _itemsFor;
+
+  /// The lists as last built: the one behind the other tab is shown again, as the identical
+  /// widget (nothing of it is rebuilt or laid out again), while its tab is not in front.
+  Widget? _evList, _rawList;
 
   /// The page as last built while it was on screen: shown again, untouched, while it is not (the
   /// shell rebuilds all tabs for its own reasons; this one has nothing to redo behind the others).
@@ -88,7 +164,8 @@ class _LogsPageState extends State<LogsPage> {
     _seenTimer?.cancel();
     _ev.dispose();
     _rawF.dispose();
-    _search.dispose();
+    _evSearch.dispose();
+    _rawSearch.dispose();
     super.dispose();
   }
 
@@ -106,6 +183,8 @@ class _LogsPageState extends State<LogsPage> {
   void _onCtl() {
     // not on screen: nothing to redraw; coming into view the controller tells again
     if (!mounted || !_c.visible) return;
+    _syncSearch();
+    _reanchor();
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -115,9 +194,55 @@ class _LogsPageState extends State<LogsPage> {
     });
   }
 
+  /// The search fields show what the controller holds (a Reset elsewhere clears the text).
+  void _syncSearch() {
+    if (!_c.evSearching && _evSearch.text.isNotEmpty) {
+      _evSearch.clear();
+    } else if (_evSearch.text.trim().toLowerCase() != _c.filter.q) {
+      _evSearch.text = _c.filter.q;
+    }
+    if (!_c.rawSearching && _rawSearch.text.isNotEmpty) {
+      _rawSearch.clear();
+    } else if (_rawSearch.text.trim().toLowerCase() != _c.rawQuery.trim().toLowerCase()) {
+      _rawSearch.text = _c.rawQuery;
+    }
+  }
+
+  /// Before the new rows are built: the list on screen keeps the row in view in place. The tree
+  /// still holds the rows of the last build, which is what is measured.
+  void _reanchor() {
+    if (_c.l10n == null) return;
+    if (_c.tab == 'events') {
+      _evItems();
+      final groups = _c.groups;
+      _evAnchor.sync(
+        follow: _c.evFollow,
+        shape: _c.evShape,
+        head: groups.firstOrNull?.key ?? -1,
+        list: _evKey.currentContext,
+        scroll: _ev.scroll,
+        orders: _evOrders,
+      );
+      _evAnchor.check(groups.lastOrNull?.ev.id);
+    } else {
+      _rawGroupsNow();
+      final groups = _rawGroups;
+      _rawAnchor.sync(
+        follow: _c.rawFollow,
+        shape: _c.rawShape,
+        head: groups.firstOrNull?.lines.first.n ?? -1,
+        list: _rawKey.currentContext,
+        scroll: _rawF.scroll,
+        orders: _rawOrders,
+      );
+      _rawAnchor.check(groups.lastOrNull?.lines.last.n);
+    }
+  }
+
   /// Keeps a following list at its bottom when its content changed.
   void _afterContent() {
-    final evSig = '${_c.groups.length}|${_c.groups.lastOrNull?.at}|${_c.groups.lastOrNull?.items.length}|${_c.tab}';
+    final evSig =
+        '${_c.groups.length}|${_c.groups.lastOrNull?.at}|${_c.groups.lastOrNull?.items.length}|${_c.tab}|${_c.evShape}';
     if (evSig != _evSig) {
       final first = _evSig.isEmpty;
       _evSig = evSig;
@@ -125,7 +250,8 @@ class _LogsPageState extends State<LogsPage> {
       if (_c.evFollow) _ev.toBottom(smooth: !first && _c.onScreen && _c.tab == 'events');
     }
     final lines = _c.raw.lines;
-    final rawSig = '${lines.length}|${lines.lastOrNull?.n}|${lines.firstOrNull?.n}|${_c.rawLevel}|${_c.rawQuery}|${_c.cfg.showConns}|${_c.cfg.showIgnored}|${_c.ignoredLineCount}';
+    final rawSig =
+        '${lines.length}|${lines.lastOrNull?.n}|${lines.firstOrNull?.n}|${_c.rawLevel}|${_c.rawQuery}|${_c.cfg.showConns}|${_c.cfg.showIgnored}|${_c.ignoredLineCount}|${_c.rawShape}';
     if (rawSig != _rawSig) {
       _rawSig = rawSig;
       _rawF.follow = _c.rawFollow;
@@ -147,7 +273,13 @@ class _LogsPageState extends State<LogsPage> {
       final items = _evItems();
       final i = items.indexWhere((x) => x is EventGroup && x.items.any((e) => e.id == he.id));
       if (i >= 0) {
-        scrollToRow(scroll: _ev.scroll, key: _hitEvKey, index: i, count: items.length);
+        // the origin is put on the row: it is built where it is looked for, then brought to the middle
+        _evAnchor.pivot = _evOrders[i];
+        shiftScroll(_ev.scroll, 0);
+        setState(() {});
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) showRow(_hitEvKey);
+        });
       }
     }
     final hl = _c.hitLine;
@@ -161,7 +293,12 @@ class _LogsPageState extends State<LogsPage> {
   List<RawGroup> _rawGroupsNow() {
     final key = (_c.rawVersion, _c.rawLevel, _c.rawQuery);
     if (_rawGroupsFor != key) {
-      _rawGroups = groupRaw(_c.shownLines);
+      final groups = groupRaw(_c.shownLines);
+      _rawGroups = groups;
+      // a group sits where its last line is: the group of a line is never before the line
+      _rawOrders = [for (final g in groups) g.lines.last.n];
+      _rawIndex = {for (var i = 0; i < groups.length; i++) groups[i].lines.first.n: i};
+      _rawViews.removeWhere((n, _) => !_rawIndex.containsKey(n));
       _rawGroupsFor = key;
     }
     return _rawGroups;
@@ -183,11 +320,11 @@ class _LogsPageState extends State<LogsPage> {
     }
     _rawF.follow = false;
     _c.rawFollow = false;
+    _rawAnchor.pivot = _rawOrders[i];
+    shiftScroll(_rawF.scroll, 0);
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        scrollToRow(scroll: _rawF.scroll, key: _hitLineKey, index: i, count: _rawGroups.length);
-      }
+      if (mounted) showRow(_hitLineKey);
     });
   }
 
@@ -215,22 +352,33 @@ class _LogsPageState extends State<LogsPage> {
   // ── content ──
 
   /// The Events rows with the day headers between them, built once per change of the journal
-  /// (or of the language / the day: the labels say "Today").
+  /// (or of the language / the day: the labels say "Today"). Also the order of each row (what
+  /// [AnchoredList] cuts at) and where each key is.
   List<Object> _evItems() {
     final now = DateTime.now().millisecondsSinceEpoch;
     final key = (_c.evVersion, _c.l10n, dayStart(now));
     if (_itemsFor == key) return _items;
-    final out = <Object>[];
+    final out = <Object>[], orders = <int>[];
+    final index = <String, int>{};
     int? day;
-    for (final g in _c.groups) {
+    final groups = _c.groups;
+    for (var gi = 0; gi < groups.length; gi++) {
+      final g = groups[gi];
       final dk = dayStart(g.at);
       if (dk != day) {
         day = dk;
-        out.add(_Day(_c.words.dayLabel(g.at, now)));
+        index['d$dk'] = out.length;
+        out.add(_Day(_c.words.dayLabel(g.at, now), dk));
+        // the header belongs before its first row: a list pivoted on that row keeps it in place
+        orders.add(gi == 0 ? g.ev.id - 1 : groups[gi - 1].ev.id);
       }
+      index['e${g.key}'] = out.length;
       out.add(g);
+      orders.add(g.ev.id);
     }
     _itemsFor = key;
+    _evOrders = orders;
+    _evIndex = index;
     return _items = out;
   }
 
@@ -260,62 +408,6 @@ class _LogsPageState extends State<LogsPage> {
     if (t == 'raw' && _c.rawFollow) _rawF.toBottom();
   }
 
-  void _toggleSearch([bool? on]) {
-    _c.toggleSearch(on);
-    if (!_c.searching) _search.clear();
-  }
-
-  Future<void> _export() async {
-    final l10n = context.l10n;
-    final name = 'jormungand-logs-${DateTime.now().toIso8601String().substring(0, 10)}.txt';
-    try {
-      final saved = await BackupIo.current.save(name, _c.exportText());
-      if (saved != null && mounted) showToast(context, l10n.logsSaved(saved));
-    } catch (e) {
-      if (mounted) showToast(context, l10n.exportFailed('$e'));
-    }
-  }
-
-  void _copy() {
-    final l10n = context.l10n;
-    final shown = _c.shownLines;
-    if (shown.isEmpty) {
-      showToast(context, l10n.noLinesToCopy);
-      return;
-    }
-    copyText(context, rawLogText(shown), l10n.linesPlural(shown.length));
-  }
-
-  void _confirmClear() {
-    final l10n = context.l10n;
-    showAppSheet<void>(
-      context,
-      builder: (sheet) => SheetFrame(
-        title: l10n.clearEvents2,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            MenuNote(l10n.theEventsListIsEmptiedThe),
-            MenuRow(
-              icon: const Icon(Icons.delete_outline),
-              label: l10n.clearEvents,
-              danger: true,
-              onTap: () {
-                Navigator.of(sheet).pop();
-                _c.clearEvents();
-              },
-            ),
-            MenuRow(
-              icon: const Icon(Icons.close),
-              label: l10n.cancel,
-              onTap: () => Navigator.of(sheet).pop(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     // behind another tab (or the app) the controller does not tell of changes: the page keeps what it was
@@ -323,90 +415,39 @@ class _LogsPageState extends State<LogsPage> {
     return _built = _page(context);
   }
 
+  /// The filter settings of the Events tab shown on the button's badge (the search is its own button).
+  int get _evFilterCount => _c.filter.count - (_c.filter.q.isEmpty ? 0 : 1);
+
   Widget _page(BuildContext context) {
     final l10n = context.l10n;
-    final c = context.colors;
     final events = _c.tab == 'events';
-    final filterCount = _c.filter.count;
-    if (!_c.searching && _search.text.isNotEmpty) _search.clear();
+    final filterCount = events ? _evFilterCount : _c.rawFilterCount;
+    final searchOn = _c.searching || (events ? _c.filter.q.isNotEmpty : _c.rawQuery.isNotEmpty);
+    // the list behind the other tab is not touched: the same widget as it was
+    final evList = events || _evList == null ? (_evList = _eventsList(l10n)) : _evList!;
+    final rawList = !events || _rawList == null ? (_rawList = _rawListWidget(l10n)) : _rawList!;
     return AppView(
       title: l10n.logs,
       summary: _c.l10n == null ? null : _summary(l10n),
       actions: [
         SizedBox(
-          width: 168,
+          width: 124,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              ...events
-                ? [
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        IconBtn(
-                          tooltip: l10n.filterEvents,
-                          active: filterCount > 0,
-                          onTap: () => showEventFilter(context, _c),
-                          icon: const Icon(Icons.filter_alt_outlined, size: 19),
-                        ),
-                        if (filterCount > 0)
-                          Positioned(
-                            top: -3,
-                            right: -3,
-                            child: Container(
-                              constraints: const BoxConstraints(minWidth: 15, minHeight: 15),
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: c.accent,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                '$filterCount',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  height: 1.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: onAccentOf(context),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(width: 8),
-                    IconBtn(
-                      tooltip: l10n.exportBothLogs,
-                      onTap: _export,
-                      icon: const Icon(Icons.file_download_outlined, size: 19),
-                    ),
-                    const SizedBox(width: 8),
-                    IconBtn(
-                      tooltip: l10n.clearEvents,
-                      onTap: _confirmClear,
-                      icon: const Icon(Icons.delete_outline, size: 19),
-                    ),
-                  ]
-                : [
-                    IconBtn(
-                      tooltip: l10n.search,
-                      active: _c.searching,
-                      onTap: _toggleSearch,
-                      icon: const Icon(Icons.search, size: 19),
-                    ),
-                    const SizedBox(width: 8),
-                    IconBtn(
-                      tooltip: l10n.copyAll,
-                      onTap: _copy,
-                      icon: const Icon(Icons.copy, size: 17),
-                    ),
-                    const SizedBox(width: 8),
-                    IconBtn(
-                      tooltip: l10n.clear,
-                      onTap: _c.clearRaw,
-                      icon: const Icon(Icons.delete_outline, size: 19),
-                    ),
-                  ],
+              _FilterButton(
+                tooltip: events ? l10n.filterEvents : l10n.filterLog,
+                count: filterCount,
+                onTap: () => events ? showEventFilter(context, _c) : showRawFilter(context, _c),
+              ),
+              const SizedBox(width: 8),
+              IconBtn(
+                key: const ValueKey('logsSearch'),
+                tooltip: l10n.search,
+                active: searchOn,
+                onTap: _c.toggleSearch,
+                icon: const Icon(Icons.search, size: 19),
+              ),
               const SizedBox(width: 8),
               IconBtn(
                 key: const ValueKey('logsMenu'),
@@ -422,23 +463,39 @@ class _LogsPageState extends State<LogsPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _Tabs(tab: _c.tab, onTab: _setTab),
-          if (events && filterCount > 0 && _c.l10n != null)
+          if (events && _evFilterCount > 0 && _c.l10n != null)
             EventFilterBar(logs: _c, words: _c.words),
-          if (!events && _c.searching)
+          if (events && _c.evSearching)
             SearchField(
-              controller: _search,
+              key: const ValueKey('evSearch'),
+              controller: _evSearch,
+              hint: l10n.searchEvents,
+              autofocus: true,
+              onChanged: _c.setQuery,
+              onClose: _c.toggleSearch,
+              closeTooltip: l10n.closeSearch,
+            ),
+          if (!events && _c.rawSearching)
+            SearchField(
+              key: const ValueKey('rawSearch'),
+              controller: _rawSearch,
               hint: l10n.searchTheLog,
               autofocus: true,
               onChanged: _c.setRawQuery,
-              onClose: () => _toggleSearch(false),
+              onClose: _c.toggleSearch,
               closeTooltip: l10n.closeSearch,
             ),
-          if (!events) _levels(l10n),
+          if (!events)
+            _RawStatus(
+              shown: _c.shownLines.length,
+              hidden: _c.cfg.showConns ? null : _c.rawHidden,
+              onHidden: () => showRawFilter(context, _c),
+            ),
           Expanded(
             child: Stack(
               children: [
-                Offstage(offstage: !events, child: _eventsList(l10n)),
-                Offstage(offstage: events, child: _rawList(l10n)),
+                Offstage(offstage: !events, child: evList),
+                Offstage(offstage: events, child: rawList),
                 Positioned(
                   left: 0,
                   right: 0,
@@ -472,52 +529,6 @@ class _LogsPageState extends State<LogsPage> {
     );
   }
 
-  Widget _levels(AppLocalizations l10n) {
-    final conns = _c.cfg.showConns;
-    final ign = _c.cfg.showIgnored;
-    final ignored = _c.ignoredLineCount;
-    final unread = [
-      for (final x in _c.unreadLines)
-        if ((conns || !x.isConn) && (ign || !_c.raw.isIgnored(x))) x,
-    ];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 6, 18, 8),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          LevelChip(
-            label: l10n.all,
-            active: _c.rawLevel == 'all',
-            unread: unread,
-            onTap: () => _c.setRawLevel('all'),
-          ),
-          LevelChip(
-            label: l10n.warningsErrors,
-            active: _c.rawLevel == 'warn',
-            unread: [for (final x in unread) if (x.lvl == 'warn' || x.lvl == 'error') x],
-            onTap: () => _c.setRawLevel('warn'),
-          ),
-          LevelChip(
-            key: const ValueKey('rawConns'),
-            label: l10n.connections,
-            active: conns,
-            unread: const [],
-            onTap: () => _c.setShowConns(!conns),
-          ),
-          if (ignored > 0)
-            LevelChip(
-              key: const ValueKey('rawIgnored'),
-              label: l10n.fromIgnoredSites(ignored),
-              active: ign,
-              unread: const [],
-              onTap: () => _c.setShowIgnored(!ign),
-            ),
-        ],
-      ),
-    );
-  }
-
   Widget _empty(String text) => Center(
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
@@ -537,14 +548,17 @@ class _LogsPageState extends State<LogsPage> {
     }
     final words = _c.words;
     final hit = _c.hitEvent;
-    return ListView.builder(
+    final orders = _evOrders, index = _evIndex;
+    return AnchoredList(
       key: _evKey,
       controller: _ev.scroll,
-      padding: const EdgeInsets.only(bottom: 64),
-      itemCount: items.length,
+      count: items.length,
+      orderAt: (i) => orders[i],
+      pivot: _evAnchor.pivot,
+      indexOfKey: (k) => k is ValueKey<String> ? index[k.value] : null,
       itemBuilder: (context, i) {
         final it = items[i];
-        if (it is _Day) return EventDay(it.label);
+        if (it is _Day) return KeyedSubtree(key: ValueKey('d${it.day}'), child: EventDay(it.label));
         final g = it as EventGroup;
         Widget row = EventRow(
           group: g,
@@ -558,41 +572,200 @@ class _LogsPageState extends State<LogsPage> {
         if (hit != null && g.items.any((e) => e.id == hit.id)) {
           row = KeyedSubtree(key: _hitEvKey, child: row);
         }
-        return row;
+        return RowMark<RowAnchor>(
+          key: ValueKey('e${g.key}'),
+          value: RowAnchor(orders[i]),
+          child: row,
+        );
       },
     );
   }
 
-  Widget _rawList(AppLocalizations l10n) {
+  Widget _rawListWidget(AppLocalizations l10n) {
     final lines = _c.shownLines;
     if (lines.isEmpty) {
       return _empty(_c.raw.lines.isEmpty ? l10n.noLinesYetSingBoxWrites : l10n.nothingMatches);
     }
     final groups = _rawGroupsNow();
+    final orders = _rawOrders, index = _rawIndex;
     final unread = _c.cfg.rawUnread;
     final hit = _c.hitLine;
-    return ListView.builder(
-      key: _rawKey,
-      controller: _rawF.scroll,
-      padding: const EdgeInsets.only(bottom: 64),
-      itemCount: groups.length,
-      itemBuilder: (context, i) => RawGroupView(
-        group: groups[i],
-        query: _c.rawQuery,
+    final query = _c.rawQuery;
+    // the lines the cached views were made of are the filter's: any other filter starts over
+    if (_rawViewsShape != _c.rawShape) {
+      _rawViews.clear();
+      _rawViewsShape = _c.rawShape;
+    }
+    Widget view(int i) {
+      final g = groups[i];
+      final n = g.lines.first.n;
+      final hitN = hit != null && g.lines.any((l) => l.n == hit.n) ? hit.n : null;
+      final hitToken = hitN == null ? null : hit!.token;
+      final made = _rawViews[n];
+      if (made != null &&
+          made.sig == g.sig &&
+          made.query == query &&
+          made.hit == hitN &&
+          made.hitToken == hitToken &&
+          made.first == (i == 0) &&
+          identical(made.unread, unread)) {
+        return made.view;
+      }
+      final v = RawGroupView(
+        group: g,
+        query: query,
         unread: unread,
-        hit: hit?.n,
-        hitToken: hit?.token,
+        hit: hitN,
+        hitToken: hitToken,
         hitKey: _hitLineKey,
         first: i == 0,
+      );
+      _rawViews[n] = _RawView(g.sig, query, hitN, hitToken, i == 0, unread, v);
+      return v;
+    }
+
+    return AnchoredList(
+      key: _rawKey,
+      controller: _rawF.scroll,
+      count: groups.length,
+      orderAt: (i) => orders[i],
+      pivot: _rawAnchor.pivot,
+      indexOfKey: (k) => k is ValueKey<int> ? index[k.value] : null,
+      itemBuilder: (context, i) => RowMark<RowAnchor>(
+        key: ValueKey(groups[i].lines.first.n),
+        value: RowAnchor(orders[i]),
+        child: view(i),
       ),
     );
   }
 }
 
+/// A [RawGroupView] and what it was made of.
+class _RawView {
+  const _RawView(this.sig, this.query, this.hit, this.hitToken, this.first, this.unread, this.view);
+
+  final (int, int, int) sig;
+  final String query;
+  final int? hit, hitToken;
+  final bool first;
+  final Set<int> unread;
+  final Widget view;
+}
+
 class _Day {
-  const _Day(this.label);
+  const _Day(this.label, this.day);
 
   final String label;
+  final int day;
+}
+
+/// The filter button of the header with the number of what is set on its corner.
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({required this.tooltip, required this.count, required this.onTap});
+
+  final String tooltip;
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconBtn(
+          key: const ValueKey('logsFilter'),
+          tooltip: tooltip,
+          active: count > 0,
+          onTap: onTap,
+          icon: const Icon(Icons.filter_alt_outlined, size: 19),
+        ),
+        if (count > 0)
+          Positioned(
+            top: -3,
+            right: -3,
+            child: Container(
+              key: const ValueKey('logsFilterBadge'),
+              constraints: const BoxConstraints(minWidth: 15, minHeight: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: c.accent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.5,
+                  fontWeight: FontWeight.w700,
+                  color: onAccentOf(context),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The line under the tabs of Raw: how many lines are in the list and, while the successful
+/// connections are off, how many of them the core left out (a tap opens the filter to switch
+/// them on). [hidden] null: they are shown.
+class _RawStatus extends StatelessWidget {
+  const _RawStatus({required this.shown, required this.hidden, required this.onHidden});
+
+  final int shown;
+  final int? hidden;
+  final VoidCallback onHidden;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final l10n = context.l10n;
+    final style = TextStyle(fontSize: 12.5, color: c.t3);
+    return Padding(
+      key: const ValueKey('rawStatus'),
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 4),
+      // the same height with and without the count of hidden lines (which has a bigger tap target):
+      // the list under it does not move when it comes and goes
+      child: Row(
+        children: [
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                l10n.linesPlural(shown),
+                key: const ValueKey('rawStatusLines'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+          ),
+          if (hidden != null) ...[
+            Text(' · ', style: style),
+            Flexible(
+              child: GestureDetector(
+                key: const ValueKey('rawStatusHidden'),
+                behavior: HitTestBehavior.opaque,
+                onTap: onHidden,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    l10n.connectionsHidden(hidden!),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: style.copyWith(color: c.accent, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 /// `.log-tabbar`: Events / Raw with a sliding ink.

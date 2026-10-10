@@ -97,7 +97,12 @@
    ключом, токен бота только в Worker (через secrets-mcp); детектор любых неудавшихся соединений (нужен и
    для Direct fallback). Мокап ЗАМОРОЖЕН: только заметки в `.claude_states/mockup_todo.md` (правило в
    CLAUDE.md «Mockup» и docs/platforms.md). Core-этапы: K1 (failures/TUN-детектор), K2 (logbook/eventbook/
-   report/docs/logs.md); дальше Flutter-этап UI, потом Worker + клиент отправки + decrypt-тул.
+   report/docs/logs.md) — СДЕЛАНО (5bceb7e); Flutter-этап (экран Logs, подписи 9 новых событий и фильтр с
+   счётчиками, Download log / Send report, report_info, `CoreService.sendReport` + `ReportUploader`) — СДЕЛАНО,
+   на полном прогоне. Отправка пока отвечает `not-configured`. ДАЛЬШЕ: Worker `jormungand-reports` (R2 +
+   Telegram, лимиты) + реальный `ReportUploader` (шифрование на устройстве нашим публичным ключом, регистрация в
+   outside_tunnel.dart) + decrypt-тул; токен бота пользователь кладёт в secrets-mcp (BotFather); затем политика
+   fallback по `tunTcpDead` и Direct fallback на классификаторе отказов.
    Детектор (ещё не сделан): «осиротевшие» SYN (`found package name` без `inbound connection` под тем же
    ID) → событие + автофолбэк; сводка TUN по приложениям и шапка устройства в экспорте логов;
    `found package name` в `noise`-кольцо логбука (шквал Telegram занял 79 % кольца); проба достижимости

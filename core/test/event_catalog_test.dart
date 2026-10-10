@@ -14,17 +14,7 @@ import 'package:test/test.dart';
 /// The catalog types the app has no words for yet (`typeLabel` in app/lib/core/event_text.dart):
 /// a debt for the Flutter stage (label + ARB en / ru + the sentence of the event), not a state to
 /// keep. A type that gets its label must leave this list (the test says so).
-const pendingLabels = <String>{
-  'conn/failing',
-  'core/updateAvailable',
-  'core/updateFailed',
-  'core/updateChannelEmpty',
-  'core/updateDownloaded',
-  'core/updateDeltaFailed',
-  'core/updateInstalled',
-  'core/tunTcpDead',
-  'core/tunTcpBack',
-};
+const pendingLabels = <String>{};
 
 /// Types in the catalog that no code of this repository writes: the mockup writes them.
 const mockupOnly = <String>{'sub/dead'};

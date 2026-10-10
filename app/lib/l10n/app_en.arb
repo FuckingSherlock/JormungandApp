@@ -3120,5 +3120,217 @@
     }
   },
   "closeConnectionsOnRouteSwitch": "Close connections on route switch",
-  "pickingAnotherRouteByHandCloses": "Picking another route by hand closes the open connections of the old one, so apps reconnect the new way. Off: they finish on the old route"
+  "pickingAnotherRouteByHandCloses": "Picking another route by hand closes the open connections of the old one, so apps reconnect the new way. Off: they finish on the old route",
+  "connectionsAreFailing": "Connections are failing",
+  "appUpdateAvailable": "App update available",
+  "appUpdateFailed": "App update failed",
+  "noAppReleaseInTheChannel": "No app release in the channel",
+  "appUpdateDownloaded": "App update downloaded",
+  "updatePatchFailed": "Update patch failed",
+  "appUpdated": "App updated",
+  "tcpDoesNotPassTheTunnel": "TCP does not pass the tunnel",
+  "tcpPassesTheTunnelAgain": "TCP passes the tunnel again",
+  "connectionsToAreFailing": "Connections to {s0} are failing",
+  "@connectionsToAreFailing": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionsToAreFailing2": "{s0}: connections to {s1} are failing",
+  "@connectionsToAreFailing2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "through": "Through {s0}",
+  "@through": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "refusedByTheFarSide": "Refused by the far side",
+  "droppedAfterConnecting": "Dropped after connecting",
+  "noAnswerInTime": "No answer in time",
+  "sentNothingCameBack": "Sent, nothing came back",
+  "closedAtOnce": "Closed at once",
+  "theNameDidNotResolve": "The name did not resolve",
+  "failuresInS": "Failures: {n0} in {n1} s",
+  "@failuresInS": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "versionIsAvailable": "Version {s0} is available",
+  "@versionIsAvailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "requiredUpdate": "Required update",
+  "couldNotCheckForAnUpdate": "Could not check for an update",
+  "couldNotDownloadTheUpdate": "Could not download the update",
+  "theDownloadedUpdateFailedVerification": "The downloaded update failed verification",
+  "theUpdateWasNotInstalled": "The update was not installed",
+  "noReleaseInTheChannel": "No release in the {s0} channel",
+  "@noReleaseInTheChannel": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "feedsAsked": "Feeds asked: {n0}",
+  "@feedsAsked": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "versionDownloaded": "Version {s0} downloaded",
+  "@versionDownloaded": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "patchInsteadOf": "Patch {s0} instead of {s1}",
+  "@patchInsteadOf": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "thePatchDidNotDownloadThe": "The patch did not download — the whole file is used",
+  "updatedTo": "Updated to {s0}",
+  "@updatedTo": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "was": "Was {s0}",
+  "@was": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "stackTcpOfIsNotReaching": "Stack {s0}: TCP of {s1} is not reaching routing",
+  "@stackTcpOfIsNotReaching": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "stackTcpOfAppsIsNot": "Stack {s0}: TCP of apps is not reaching routing",
+  "@stackTcpOfAppsIsNot": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "stackBackAfterWithoutTcp": "Stack {s0}: back after {s1} without TCP",
+  "@stackBackAfterWithoutTcp": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "hideThisType": "Hide this type",
+  "showOnlyThisType": "Show only this type",
+  "connectDisconnectPinModeAndRoute2": "Connect, disconnect, pin, mode and route. Separate from the types above",
+  "stage": "Stage",
+  "size": "Size",
+  "failure": "Failure",
+  "outbound": "Outbound",
+  "stack": "Stack",
+  "failures": "Failures",
+  "requiredText": "Required",
+  "patch": "Patch",
+  "connectionsSeen": "Connections seen",
+  "accepted": "Accepted",
+  "window": "Window",
+  "attempts": "Attempts",
+  "code": "Code",
+  "sendReport": "Send report",
+  "downloadLog": "Download log",
+  "whatIsSent": "What is sent",
+  "appAndDeviceInformationTheEvents": "App and device information, the events journal, the raw log and the package names of the apps whose traffic went through the tunnel.",
+  "passwordsUuidsTokensSubscriptionLinksAnd": "Passwords, UUIDs, tokens, subscription links and e-mail addresses are masked. Domains and IP addresses stay: the diagnosis needs them.",
+  "noteOptional": "Note (optional)",
+  "whatDoesNotWorkAndSince": "What does not work and since when",
+  "sending": "Sending…",
+  "sentReportId": "Sent. Report id: {s0}",
+  "@sentReportId": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "quoteThisIdWhenYouWrite": "Quote this id when you write to the developer.",
+  "sendingIsNotSetUpIn": "Sending is not set up in this build yet. Save the log and send the file by hand.",
+  "noConnectionToTheReportServer": "No connection to the report server. Check the network and try again.",
+  "theServerDidNotAcceptThe": "The server did not accept the report: {s0}",
+  "@theServerDidNotAcceptThe": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "theReportServerFailedTryAgain": "The report server failed. Try again later.",
+  "couldNotSendTheReport": "Could not send the report: {s0}",
+  "@couldNotSendTheReport": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "clearRawLog": "Clear raw log",
+  "filterLog": "Filter log",
+  "level": "Level",
+  "successfulConnectionsOneLinePerConnectio": "Successful connections: one line per connection, thousands per minute. Hidden by default; failed connections are always shown.",
+  "connectionsHidden": "Connections hidden ({n0})",
+  "@connectionsHidden": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  }
 }

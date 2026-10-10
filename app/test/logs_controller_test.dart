@@ -30,9 +30,9 @@ class _CountingHost extends FakeCoreHost {
   }
 
   @override
-  Map<String, dynamic> logPage({int? since}) {
+  Map<String, dynamic> logPage({int? since, bool conns = true}) {
     logReads++;
-    return super.logPage(since: since);
+    return super.logPage(since: since, conns: conns);
   }
 
   @override
@@ -78,6 +78,7 @@ void main() {
   it('a burst of lines and events is one read per list, after the debounce, not one per line', (tester) async {
     await start(tester);
     c.setOnScreen(true);
+    c.setTab('raw');
     await wait(tester);
     host.resetCounts();
     for (var i = 0; i < 50; i++) {
@@ -87,14 +88,118 @@ void main() {
     host.addEvent('conn', 'restored');
     await tester.pump(const Duration(milliseconds: 100));
     expect([host.eventReads, host.logReads], [0, 0], reason: 'still gathering the burst');
-    await wait(tester, 300);
+    await wait(tester, 250); // 350 ms: the events are read (300 ms), the lines gather for 500 ms
+    expect([host.eventReads, host.logReads], [1, 0]);
+    await wait(tester, 200);
     expect([host.eventReads, host.logReads], [1, 1]);
     expect(c.raw.lines.length, 50);
     expect(c.feed.list.length, 2);
 
     host.addLogLine('one more');
-    await wait(tester);
+    await wait(tester, 600);
     expect(c.raw.lines.length, 51, reason: 'the next burst is read too');
+  });
+
+  it('lines that keep coming reach the page at most every 500 ms, not once per line', (tester) async {
+    await start(tester);
+    c.setOnScreen(true);
+    c.setTab('raw');
+    await wait(tester);
+    host.resetCounts();
+    notified = 0;
+    // 40 lines a second for 3 seconds
+    for (var i = 0; i < 120; i++) {
+      host.addLogLine('l$i');
+      await tester.pump(const Duration(milliseconds: 25));
+    }
+    await wait(tester, 600);
+    expect(c.raw.lines.length, 120);
+    expect(host.logReads, lessThanOrEqualTo(7), reason: 'one read per 500 ms window, not per line');
+    expect(notified, lessThanOrEqualTo(7), reason: 'and the page is told once per read');
+    expect(notified, greaterThan(1));
+  });
+
+  it('the Raw read asks the core without the connections while they are off, and keeps what it left out', (tester) async {
+    await start(tester);
+    c.setOnScreen(true);
+    c.setTab('raw');
+    await wait(tester);
+    host.logPageCalls.clear();
+    host.addLogLine('[1 5ms] inbound/mixed[mixed-in]: inbound connection to example.com:443');
+    host.addLogLine('[2 5ms] outbound/vless[x]: outbound connection to example.com:443');
+    host.addLogLine('router: matched rule');
+    await wait(tester, 600);
+    expect(host.logPageCalls.every((q) => !q.conns), isTrue, reason: 'Connections is off by default');
+    expect(c.raw.lines.map((l) => l.msg), ['router: matched rule']);
+    expect(c.rawHidden, 2);
+
+    host.addLogLine('[3 5ms] inbound/mixed[mixed-in]: inbound connection to example.org:443');
+    await wait(tester, 600);
+    expect(c.rawHidden, 3, reason: 'the count follows every answer of the core');
+    expect(c.raw.lines.length, 1);
+
+    // switched on: everything is asked for again from the start (the numbers are the core's)
+    host.logPageCalls.clear();
+    final shape = c.rawShape;
+    c.setShowConns(true);
+    expect(host.logPageCalls, [(since: null, conns: true)]);
+    expect(c.raw.lines.length, 4);
+    expect(c.rawHidden, 0, reason: 'nothing is left out any more');
+    expect(c.rawShape, greaterThan(shape), reason: 'the page keeps the row in view across it');
+    host.addLogLine('after');
+    await wait(tester, 600);
+    expect(host.logPageCalls.last.conns, isTrue);
+    expect(c.raw.lines.length, 5);
+
+    // and off again
+    host.logPageCalls.clear();
+    c.setShowConns(false);
+    expect(host.logPageCalls, [(since: null, conns: false)]);
+    expect(c.raw.lines.map((l) => l.msg), ['router: matched rule', 'after']);
+    expect(c.rawHidden, 3);
+    expect(c.rawFilterCount, 0);
+
+    c.clearRaw();
+    expect(c.rawHidden, 0, reason: 'a Clear starts the count over');
+  });
+
+  it('the Raw filter: the count on the button, and Reset puts every part back', (tester) async {
+    await start(tester);
+    c.setOnScreen(true);
+    c.setTab('raw');
+    host.addLogLine('[1 5ms] inbound/mixed[mixed-in]: inbound connection to example.com:443');
+    host.addLogLine('router: matched rule');
+    await wait(tester, 600);
+    expect(c.rawFilterCount, 0);
+    c.setRawLevel('warn');
+    c.setShowConns(true);
+    c.setShowIgnored(true);
+    expect(c.rawFilterCount, 3);
+    expect(c.raw.lines.length, 2);
+    c.resetRawFilter();
+    expect(c.rawFilterCount, 0);
+    expect([c.rawLevel, c.cfg.showConns, c.cfg.showIgnored], ['all', false, false]);
+    expect(c.raw.lines.map((l) => l.msg), ['router: matched rule']);
+    expect(c.rawHidden, 1);
+  });
+
+  it('search is its own switch on each tab; closing it clears the text', (tester) async {
+    await start(tester);
+    c.setOnScreen(true);
+    c.toggleSearch(true);
+    expect([c.evSearching, c.rawSearching, c.searching], [true, false, true]);
+    c.setQuery('lost');
+    expect(c.filter.q, 'lost');
+    c.setTab('raw');
+    expect(c.searching, isFalse, reason: 'Raw has its own search');
+    c.toggleSearch(true);
+    c.setRawQuery('abc');
+    c.toggleSearch(false);
+    expect(c.rawQuery, isEmpty);
+    expect(c.filter.q, 'lost', reason: 'the other tab keeps its search');
+    c.setTab('events');
+    c.toggleSearch(false);
+    expect(c.filter.q, isEmpty);
   });
 
   it('while the Logs tab is not on screen: no line stream, no raw read, the controller\'s listeners hear nothing; events and the dot keep working', (tester) async {
@@ -107,7 +212,7 @@ void main() {
       host.addLogLine('hidden $i');
     }
     host.addEvent('conn', 'lost', level: 'warn');
-    await wait(tester, 4000); // the debounce and the 3 s safety poll both had their turn
+    await wait(tester, 6000); // the debounce and the 5 s safety poll both had their turn
 
     expect(host.logReads, 0, reason: 'the raw log is read when somebody looks');
     expect(host.eventReads, greaterThan(0));
@@ -120,10 +225,12 @@ void main() {
 
   it('showing the tab catches up from the cursor; what came meanwhile is unread; leaving it stops the stream again', (tester) async {
     await start(tester);
+    c.setTab('raw');
     for (var i = 0; i < 30; i++) {
       host.addLogLine('hidden $i');
     }
     await wait(tester);
+    notified = 0;
     c.setOnScreen(true);
     expect(host.lineListeners, 1);
     expect(c.raw.lines.length, 30);
@@ -133,7 +240,7 @@ void main() {
     c.markRead(c.raw.lines.map((l) => l.n));
     expect(c.cfg.rawUnread, isEmpty);
     host.addLogLine('while looking');
-    await wait(tester);
+    await wait(tester, 600);
     expect(c.raw.lines.length, 31);
     markReadOf(c);
 
@@ -141,16 +248,41 @@ void main() {
     expect(host.lineListeners, 0);
     host.resetCounts();
     host.addLogLine('behind');
-    await wait(tester, 4000);
+    await wait(tester, 6000);
     expect(host.logReads, 0);
     c.setOnScreen(true);
     expect(c.raw.lines.length, 32);
     expect(c.cfg.rawUnread.length, 1, reason: 'only the line that came behind is unread');
   });
 
+  it('behind the Events tab the raw lines are not read either; the Raw tab catches up from the cursor', (tester) async {
+    await start(tester);
+    c.setOnScreen(true);
+    await wait(tester);
+    expect(c.tab, 'events');
+    expect(host.lineListeners, 0, reason: 'no line stream for a list nobody looks at');
+    host.resetCounts();
+    for (var i = 0; i < 20; i++) {
+      host.addLogLine('behind $i');
+    }
+    await wait(tester, 6000);
+    expect(host.logReads, 0);
+    expect(c.raw.lines, isEmpty);
+
+    c.setTab('raw');
+    expect(host.lineListeners, 1);
+    expect(c.raw.lines.length, 20, reason: 'read at once when the tab opens');
+    expect(c.cfg.rawUnread.length, 20);
+    expect(c.rawUnseen, 0, reason: 'a first read is no "new" for the pill');
+
+    c.setTab('events');
+    expect(host.lineListeners, 0);
+  });
+
   it('the unread numbers are written when the tab or the app goes away, never per line', (tester) async {
     await start(tester);
     c.setOnScreen(true);
+    c.setTab('raw');
     await wait(tester);
     host.saves = 0;
     for (var i = 0; i < 40; i++) {
@@ -158,7 +290,7 @@ void main() {
       await wait(tester, 250);
     }
     expect(host.saves, 0, reason: 'ten seconds of lines: no state save');
-    await wait(tester); // the last burst is read
+    await wait(tester, 600); // the last burst is read
     c.setOnScreen(false);
     expect(host.saves, 1);
     final saved = host.catalog.unknown['logCfg'] as Map;
@@ -171,7 +303,7 @@ void main() {
 
     c.setOnScreen(true);
     host.addLogLine('again');
-    await wait(tester);
+    await wait(tester, 600);
     c.setForeground(false); // the app goes to the background with the tab open
     expect(host.saves, 2);
     expect(host.lineListeners, 0);
@@ -182,11 +314,12 @@ void main() {
   it('the derived lists are built once per change: the same list until something arrives', (tester) async {
     await start(tester);
     c.setOnScreen(true);
+    c.setTab('raw');
     host.addEvent('conn', 'lost', level: 'warn');
     host.addEvent('conn', 'restored');
     host.addLogLine('a');
     host.addLogLine('b', lvl: 'warn');
-    await wait(tester);
+    await wait(tester, 600);
 
     final groups = c.groups, lines = c.shownLines, unread = c.unreadLines;
     final ev = c.evVersion, rv = c.rawVersion;
@@ -195,11 +328,11 @@ void main() {
     expect(identical(c.unreadLines, unread), isTrue);
     expect(c.evLevels, (warn: 1, err: 0));
     expect(c.rawLevels, (warn: 1, err: 0));
-    await wait(tester, 4000);
+    await wait(tester, 6000);
     expect([c.evVersion, c.rawVersion], [ev, rv], reason: 'a poll that finds nothing changes nothing');
 
     host.addLogLine('c');
-    await wait(tester);
+    await wait(tester, 600);
     expect(c.rawVersion, greaterThan(rv));
     expect(identical(c.shownLines, lines), isFalse);
     expect(c.shownLines.length, 3);
@@ -220,6 +353,7 @@ void main() {
     c.start();
     await tester.pump();
     host.addLogLine('new');
+    c.setTab('raw');
     c.setOnScreen(true);
     expect(c.raw.lines.length, 3);
     expect(c.cfg.rawUnread, {2});

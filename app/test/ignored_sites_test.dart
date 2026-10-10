@@ -26,11 +26,12 @@ void main() {
     try {
       c.start();
       await tester.pump();
+      c.setTab('raw');
       c.setOnScreen(true);
       host.addLogLine('[1 2s] outbound/vless[x]: outbound connection to dead.example.com:443: $_dead', lvl: 'warn');
       host.addLogLine('[2 1s] connection: open outbound connection: dial tcp 1.2.3.4:443: i/o timeout', lvl: 'error');
       host.addLogLine('[3 1s] outbound/vless[x]: outbound connection to notdead.example.com:443: refused', lvl: 'warn');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 600));
       expect(c.shownLines.length, 3);
       expect(c.ignoredLineCount, 0);
 
@@ -45,7 +46,7 @@ void main() {
       expect(c.raw.visibleCount, 2);
 
       host.addLogLine('router: api.dead.example.com timed out', lvl: 'warn'); // a later one is sorted too
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 600));
       expect(c.ignoredLineCount, 2);
 
       c.setShowIgnored(true);
@@ -111,16 +112,25 @@ void main() {
     await tester.tap(find.byIcon(AppTab.logs.icon));
     await tester.pumpAndSettle();
 
-    // Raw: the failed line of the ignored site is behind a chip
+    // Raw: the failed line of the ignored site is behind a switch of the filter sheet
     await tester.tap(find.text('Raw'));
     await tester.pumpAndSettle();
     expect(find.text(_dead), findsNothing);
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
     expect(find.text('1 from ignored sites'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('rawIgnored')));
     await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(5, 5)); // closes the sheet
+    await tester.pumpAndSettle();
     expect(find.textContaining('no such host'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('rawIgnored')));
     await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    expect(find.text(_dead), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('logsMenu')));
     await tester.pumpAndSettle();

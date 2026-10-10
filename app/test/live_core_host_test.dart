@@ -135,6 +135,9 @@ class _FakeNetwork implements NetworkPort {
 
   @override
   Stream<bool> get meteredChanges => changes.stream;
+
+  @override
+  Future<String> type() async => 'wifi';
 }
 
 class _FakeScreen implements ScreenPort {

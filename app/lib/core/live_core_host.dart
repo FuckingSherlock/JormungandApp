@@ -11,6 +11,7 @@ import '../platform/screen_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'app_update.dart';
 import 'core_host.dart';
+import 'report_info.dart';
 import 'settings_model.dart';
 
 /// The real [CoreHost]: the in-process core ([CoreApi], normally `CoreService`) plus the
@@ -968,7 +969,7 @@ class LiveCoreHost extends CoreHost {
   Map<String, dynamic> eventsPage({int? since}) => api.events(since: since);
 
   @override
-  Map<String, dynamic> logPage({int? since}) => api.log(since: since);
+  Map<String, dynamic> logPage({int? since, bool conns = true}) => api.log(since: since, conns: conns);
 
   @override
   Stream<Map<String, dynamic>> get logLines => api.logStream;
@@ -1230,6 +1231,28 @@ class LiveCoreHost extends CoreHost {
 
   @override
   Future<Map<String, dynamic>> version() => api.version();
+
+  // what the report knows only from the app and the phone (report_info.dart)
+  Future<Map<String, dynamic>> _reportInfo() => ReportInfo(
+        device: vpn?.deviceInfo,
+        abis: vpn?.abis,
+        libbox: vpn?.libboxVersion,
+        vpnUp: vpn?.running,
+        networkType: network?.type,
+        metered: network?.metered,
+      ).build(this, planSig: _planSig);
+
+  @override
+  Future<Map<String, dynamic>> report() async => api.report(appInfo: await _reportInfo());
+
+  @override
+  Future<Map<String, dynamic>> sendReport({String note = ''}) async {
+    try {
+      return await api.sendReport(note: note, appInfo: await _reportInfo());
+    } catch (e) {
+      return {'ok': false, 'error': 'failed', 'message': '$e'};
+    }
+  }
 
   // ── Rules ──
 

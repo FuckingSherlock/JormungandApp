@@ -37,6 +37,7 @@ export 'src/pool.dart';
 export 'src/probe.dart';
 export 'src/redact.dart';
 export 'src/report.dart';
+export 'src/report_upload.dart';
 export 'src/routing.dart';
 export 'src/rulenames.dart';
 export 'src/rulesets.dart';

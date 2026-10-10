@@ -11,9 +11,9 @@ import 'package:jormungand_core/jormungand_core.dart'
         LogCfg,
         LogFeed,
         LogLine,
+        eventCats,
         eventNotifies,
-        foldEvents,
-        rawLogText;
+        foldEvents;
 
 import '../l10n/l10n.dart';
 import 'core_host.dart';
@@ -32,13 +32,18 @@ import 'settings_model.dart';
 ///
 /// What it costs is kept proportional to what the user can see (the core writes a line per
 /// sing-box message, a failed connect or a ping run is a burst of hundreds):
-/// - the streams only arm a ~300 ms timer ([_pollSoon]); one poll then reads what is new
-///   (the core finds it by number, `since`), so a burst is one read;
+/// - the streams only arm a timer ([_pollSoon]: ~300 ms for events, [rawBatch] for lines); one
+///   poll then reads what is new (the core finds it by number, `since`), so a burst is one read
+///   and the page is told of new lines at most twice a second;
+/// - the raw read asks the core without the successful-connection lines while «Connections» is
+///   off (`conns: false`): their flood is never marshalled; the core says how many it left out
+///   ([rawHidden]);
 /// - the events are read always (toasts, the dots: [unseenNotifier], which is all the shell's nav
 ///   listens to), but this controller's own listeners (the Logs page) hear of a change, and the
 ///   derived lists are rebuilt, only while the Logs tab is on screen ([visible]);
-/// - the raw lines are not read at all while it is not: no line stream, no list. The first look
-///   catches up from the cursor ([LogFeed.next]); what arrived meanwhile is unread, as before;
+/// - the raw lines are not read at all while the Raw tab is not on screen (the Logs tab behind
+///   another one, the app behind, or the Events tab in front): no line stream, no list. The first
+///   look catches up from the cursor ([LogFeed.next]); what arrived meanwhile is unread, as before;
 /// - the unread numbers are written to the state when the tab or the app goes away ([flush]),
 ///   never per line.
 class LogsController extends ChangeNotifier {
@@ -60,7 +65,16 @@ class LogsController extends ChangeNotifier {
   String tab = 'events';
   String rawLevel = 'all';
   String rawQuery = '';
-  bool searching = false;
+
+  /// The search field of the tab is open (Events: the text is [EventFilter.q]; Raw: [rawQuery]).
+  bool evSearching = false, rawSearching = false;
+
+  /// The search of the tab on screen is open.
+  bool get searching => tab == 'events' ? evSearching : rawSearching;
+
+  /// How many lines of successful connections the core left out of the answers since the list was
+  /// last read whole (the «Connections hidden (K)» of the Raw status line); 0 while they are shown.
+  int rawHidden = 0;
 
   /// Unfolded event rows (`EventGroup.key`).
   final openRows = <int>{};
@@ -71,6 +85,10 @@ class LogsController extends ChangeNotifier {
 
   /// The Logs tab is on screen and the app is in front: the only time the page needs anything.
   bool get visible => onScreen && _foreground;
+
+  /// The raw lines are wanted: the Raw tab of the Logs tab is on screen. Behind the Events tab
+  /// nothing reads them (the core keeps them; the first look catches up from the cursor).
+  bool get _rawWanted => visible && tab == 'raw';
 
   /// The shell tells whether the Logs tab is the one on screen; the page marks what it shows as seen.
   void setOnScreen(bool on) {
@@ -114,22 +132,34 @@ class LogsController extends ChangeNotifier {
   bool _loaded = false;
   bool _disposed = false;
   StreamSubscription<Map<String, dynamic>>? _evSub, _lineSub;
-  Timer? _timer, _debounce;
+  Timer? _timer, _debounce, _rawDebounce;
   List<EventGroup>? _groups;
   List<EventRecord>? _shown;
 
-  /// How long a burst of lines / events is gathered before one read of the core.
+  /// How long a burst of events is gathered before one read of the core.
   static const pollDelay = Duration(milliseconds: 300);
+
+  /// How long a burst of raw lines is gathered before one read: the page hears of new lines (and
+  /// redraws) at most this often, however fast sing-box writes.
+  static const rawBatch = Duration(milliseconds: 500);
+
+  /// The safety poll: the streams only say "something new", this finds what they missed.
+  static const safetyPoll = Duration(seconds: 5);
 
   /// Bumped whenever the events list or the filter over it changes / the raw lines or their
   /// unread numbers change: the pages cache what they derive from them by these.
   int evVersion = 0, rawVersion = 0;
 
+  /// Bumped when the list under the user's eyes is made different by something else than lines
+  /// arriving at its end (a filter, a search, the Connections switch, a clear): the page keeps the
+  /// row the user looks at in place across it. Events / Raw.
+  int evShape = 0, rawShape = 0;
+
   /// Starts listening; the first read waits for the host to be ready.
   void start() {
     _evSub ??= host.events.listen((_) => _pollSoon());
     _syncLineSub();
-    _timer ??= Timer.periodic(const Duration(seconds: 3), (_) => _poll());
+    _timer ??= Timer.periodic(safetyPoll, (_) => _poll());
     host.addListener(_onHost);
     _onHost();
   }
@@ -137,8 +167,8 @@ class LogsController extends ChangeNotifier {
   // The raw lines are only wanted while the page shows them.
   void _syncLineSub() {
     if (_disposed) return;
-    if (visible) {
-      _lineSub ??= host.logLines.listen((_) => _pollSoon());
+    if (_rawWanted) {
+      _lineSub ??= host.logLines.listen((_) => _rawSoon());
     } else if (_lineSub != null) {
       _lineSub!.cancel();
       _lineSub = null;
@@ -162,66 +192,105 @@ class LogsController extends ChangeNotifier {
     }
   }
 
-  /// A line or an event arrived: read the core soon, once for the burst.
+  /// An event arrived: read the journal soon, once for the burst.
   void _pollSoon() {
     if (_debounce != null || _disposed) return;
     _debounce = Timer(pollDelay, () {
       _debounce = null;
-      _poll();
+      _poll(rawLines: false);
     });
   }
 
-  /// Reads what is new from the core: events always, raw lines while [visible]. The page hears
-  /// of a change only while it looks ([force]: tell it anyway, it just came into view).
-  void _poll({bool force = false}) {
+  /// A raw line arrived: read the log soon, once for the burst ([rawBatch]).
+  void _rawSoon() {
+    if (_rawDebounce != null || _disposed) return;
+    _rawDebounce = Timer(rawBatch, () {
+      _rawDebounce = null;
+      _poll(events: false);
+    });
+  }
+
+  /// One `log()` answer; [rawHidden] follows what the core says it left out: an answer from the
+  /// start (no [since]) replaces the count, one from the cursor adds to it.
+  Map<String, dynamic> _logPage({int? since}) {
+    final page = host.logPage(since: since, conns: cfg.showConns);
+    final hidden = (page['hidden'] as num?)?.toInt() ?? 0;
+    rawHidden = since == null ? hidden : rawHidden + hidden;
+    return page;
+  }
+
+  /// Reads what is new from the core: events always, raw lines while [visible] ([events] /
+  /// [rawLines] limit the read to one of them: the timers of each). The page hears of a change
+  /// only while it looks ([force]: tell it anyway, it just came into view).
+  void _poll({bool force = false, bool events = true, bool rawLines = true}) {
     if (_disposed) return;
-    _debounce?.cancel();
-    _debounce = null;
+    if (events) {
+      _debounce?.cancel();
+      _debounce = null;
+    }
+    if (rawLines) {
+      _rawDebounce?.cancel();
+      _rawDebounce = null;
+    }
     if (!_loaded || l10n == null) {
       if (force) notifyListeners();
       return;
     }
+    // the ignored list also tells the events' notifications, so it is looked at on every read
     var changed = _syncIgnored();
+    if (events && _readEvents()) changed = true;
+    if (rawLines && _rawWanted && _readRaw()) changed = true;
+    if ((changed && visible) || force) notifyListeners();
+  }
+
+  /// The journal's new events; true when the list changed.
+  bool _readEvents() {
     try {
       var r = feed.apply(host.eventsPage(since: feed.next));
       if (r.reset) r = feed.apply(host.eventsPage());
-      if (r.changed) {
-        changed = true;
-        _dropGroups();
-        // the dots are for events the journal still has
-        final first = feed.list.isEmpty ? (feed.next ?? 0) : feed.list.first.id;
-        final n = cfg.seen.length;
-        cfg.seen.removeWhere((id) => id < first);
-        if (cfg.seen.length != n) _save();
-        for (final e in r.notify) {
-          // an event of a site ignored a moment ago (the core was not told yet) stays silent too
-          if (e.cat == 'site' && _ign.matches('${e.data['host'] ?? ''}')) continue;
-          // a background event (found while the screen was off) goes by its own flag, not by the screen now
-          if (eventNotifies(host.catalog.unknown['notifCfg'], e)) _notify.add(e);
-        }
-        if (visible && tab == 'events' && !evFollow) {
-          evUnseen += r.fresh.where(_visible).length;
-        }
-        _recountUnseen();
+      if (!r.changed) return false;
+      _dropGroups();
+      // the dots are for events the journal still has
+      final first = feed.list.isEmpty ? (feed.next ?? 0) : feed.list.first.id;
+      final n = cfg.seen.length;
+      cfg.seen.removeWhere((id) => id < first);
+      if (cfg.seen.length != n) _save();
+      for (final e in r.notify) {
+        // an event of a site ignored a moment ago (the core was not told yet) stays silent too
+        if (e.cat == 'site' && _ign.matches('${e.data['host'] ?? ''}')) continue;
+        // a background event (found while the screen was off) goes by its own flag, not by the screen now
+        if (eventNotifies(host.catalog.unknown['notifCfg'], e)) _notify.add(e);
       }
+      if (visible && tab == 'events' && !evFollow) {
+        evUnseen += r.fresh.where(_visible).length;
+      }
+      _recountUnseen();
+      return true;
     } catch (_) {
       // the core is not up yet: the next poll asks again
+      return false;
     }
-    if (visible) {
-      try {
-        var r = raw.apply(host.logPage(since: raw.next));
-        if (r.reset) r = raw.apply(host.logPage());
-        if (r.fresh.isNotEmpty || r.reset) {
-          changed = true;
-          _rawChanged();
-          if (tab == 'raw' && !rawFollow) {
-            final q = rawQuery.trim().toLowerCase();
-            rawUnseen += r.fresh.where((l) => raw.lineShows(l, rawLevel, q)).length;
-          }
-        }
-      } catch (_) {}
+  }
+
+  /// The log's new lines (without the successful connections while they are off); true when the
+  /// list changed. The pill counts only lines that came after the list was read whole.
+  bool _readRaw() {
+    try {
+      final incremental = raw.next != null;
+      var r = raw.apply(_logPage(since: raw.next));
+      var reset = r.reset;
+      if (reset) r = raw.apply(_logPage());
+      if (r.fresh.isEmpty && !reset) return false;
+      _rawChanged();
+      if (reset) rawShape++;
+      if (incremental && !reset && tab == 'raw' && !rawFollow) {
+        final q = rawQuery.trim().toLowerCase();
+        rawUnseen += r.fresh.where((l) => raw.lineShows(l, rawLevel, q)).length;
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
-    if ((changed && visible) || force) notifyListeners();
   }
 
   /// New lines/events that arrived while the list was scrolled up (the pill counts them); the
@@ -283,6 +352,7 @@ class LogsController extends ChangeNotifier {
 
   void _refilter() {
     _dropGroups();
+    evShape++;
     notifyListeners();
   }
 
@@ -309,6 +379,19 @@ class LogsController extends ChangeNotifier {
 
   void toggleCat(String cat) {
     filter.toggleCat(cat);
+    _refilter();
+  }
+
+  /// «Show only this type»: every type of the catalog but [key] goes off ([key] on). Returns to
+  /// normal with «Reset»; other parts of the filter (query, problems) stay as they are.
+  void showOnlyType(String key) {
+    filter.off
+      ..clear()
+      ..addAll([
+        for (final (cat, types) in eventCats)
+          for (final t in types)
+            if ('$cat/$t' != key) '$cat/$t',
+      ]);
     _refilter();
   }
 
@@ -361,7 +444,7 @@ class LogsController extends ChangeNotifier {
   /// The Logs tab was tapped (mockup `openLogs`): Events, the latest at once, pinned to the bottom.
   void open() {
     returnId = null;
-    tab = 'events';
+    _setTab('events');
     evFollow = true;
     evUnseen = 0;
     pinToken++;
@@ -371,16 +454,25 @@ class LogsController extends ChangeNotifier {
   void setTab(String t) {
     returnId = null; // a hand-made tab change forgets the journal return
     if (tab == t) return;
-    tab = t;
+    _setTab(t);
     notifyListeners();
+  }
+
+  /// Switches the tab: the line stream follows it, and the Raw tab catches up on what the core
+  /// wrote while it was not looked at.
+  void _setTab(String t) {
+    tab = t;
+    _syncLineSub();
+    if (_rawWanted && _loaded && l10n != null) _readRaw();
   }
 
   /// A notification was tapped: Logs -> Events at that event (the filter cleared if it hides it).
   void showEvent(int id) {
-    tab = 'events';
+    _setTab('events');
     final e = feed.list.where((x) => x.id == id).firstOrNull;
     if (e != null && !_visible(e)) filter.reset();
     _dropGroups();
+    evShape++;
     final g = groupOf(id);
     if (g != null) markSeen(g.items.map((x) => x.id));
     hitEvent = (id: id, token: ++_token);
@@ -389,17 +481,35 @@ class LogsController extends ChangeNotifier {
 
   /// Events -> "In raw log": the Raw tab at line [n], the filters cleared so it is there.
   void showRawLine(int n) {
-    tab = 'raw';
+    _setTab('raw');
     rawLevel = 'all';
-    // the line asked for may be a connection one: the chip goes on so it is there
-    if (!cfg.showConns && raw.lines.any((l) => l.n == n && l.isConn)) setShowConns(true);
+    // the line asked for may be a connection one: the switch goes on so it is there (while they
+    // are off the core does not send them, so the line is asked for by its number)
+    if (!cfg.showConns && _isConnLine(n)) setShowConns(true);
     if (!cfg.showIgnored && raw.lines.any((l) => l.n == n && raw.isIgnored(l))) setShowIgnored(true);
-    searching = false;
+    rawSearching = false;
     rawQuery = '';
     _shownLines = null;
     rawVersion++;
+    rawShape++;
     hitLine = (n: n, token: ++_token);
     notifyListeners();
+  }
+
+  /// Whether raw line [n] is one of the successful-connection lines the list leaves out.
+  bool _isConnLine(int n) {
+    for (final l in raw.lines) {
+      if (l.n == n) return l.isConn;
+    }
+    // not in the list: with the connections off the core did not send it; ask for it
+    try {
+      final lines = host.logPage(since: n)['lines'];
+      if (lines is List && lines.isNotEmpty) {
+        final first = LogLine.fromJson(lines.first as Map);
+        return first.n == n && first.isConn;
+      }
+    } catch (_) {}
+    return false;
   }
 
   /// The event an action left the journal from (Open, In raw log): Back returns to its row.
@@ -408,10 +518,11 @@ class LogsController extends ChangeNotifier {
   /// Back in the journal with a row open and lit (after Open / In raw log).
   void returnTo(int id) {
     returnId = null;
-    tab = 'events';
+    _setTab('events');
     final e = feed.list.where((x) => x.id == id).firstOrNull;
     if (e != null && !_visible(e)) filter.reset();
     _dropGroups();
+    evShape++;
     final g = groupOf(id);
     if (g != null) openRows.add(g.key);
     hitEvent = (id: id, token: ++_token);
@@ -425,27 +536,11 @@ class LogsController extends ChangeNotifier {
     openRows.clear();
     evUnseen = 0;
     _dropGroups();
+    evShape++;
     _recountUnseen();
     _save();
     _poll();
     notifyListeners();
-  }
-
-  /// Both logs as text: the events (readable), then the raw lines.
-  String exportText() {
-    _poll(); // up to the last line, whatever the timer has not read yet
-    final w = words;
-    final events = feed.list
-        .map(
-          (e) =>
-              '${DateTime.fromMillisecondsSinceEpoch(e.at, isUtc: true).toIso8601String()} '
-              '${e.level.toUpperCase().padRight(5)} ${e.own ? '[you] ' : ''}${e.bg ? '[bg] ' : ''}${w.text(e)}',
-        )
-        .join('\n');
-    final all = raw.lines;
-    return 'Jormungand logs, ${DateTime.now().toUtc().toIso8601String()}\n\n'
-        '== Events (${feed.list.length}) ==\n$events\n\n'
-        '== Raw log (${all.length} lines) ==\n${rawLogText(all)}\n';
   }
 
   // ── Raw ──
@@ -479,25 +574,70 @@ class LogsController extends ChangeNotifier {
     return _unreadLines ??= raw.unread;
   }
 
-  void setRawLevel(String lvl) {
-    rawLevel = lvl;
-    _shownLines = null;
-    rawVersion++;
+  /// How many of the Raw filters are set (the badge on the filter button): the level, the
+  /// Connections switch, the ignored sites. The search is not one, it has its own button.
+  int get rawFilterCount =>
+      (rawLevel != 'all' ? 1 : 0) + (cfg.showConns ? 1 : 0) + (cfg.showIgnored ? 1 : 0);
+
+  /// The Raw filters back to their defaults (level All, no connections, no ignored sites).
+  void resetRawFilter() {
+    final conns = cfg.showConns;
+    rawLevel = 'all';
+    cfg.showIgnored = false;
+    cfg.showConns = false;
+    _save();
+    _rawChanged();
+    rawShape++;
+    if (conns) _reloadRaw();
     notifyListeners();
   }
 
-  /// The «Connections» chip: lines of successful connections shown or not (kept in the state).
+  void setRawLevel(String lvl) {
+    if (rawLevel == lvl) return;
+    rawLevel = lvl;
+    _shownLines = null;
+    rawVersion++;
+    rawShape++;
+    notifyListeners();
+  }
+
+  /// The «Connections» switch: lines of successful connections shown or not (kept in the state).
+  /// The core does not send them while it is off, so the lines are asked for again from the
+  /// start (the numbers are the core's, the list keeps its place by them).
   void setShowConns(bool v) {
     if (cfg.showConns == v) return;
     cfg.showConns = v;
     _save();
-    _shownLines = null;
-    _unreadLines = null;
-    rawVersion++;
+    _reloadRaw();
     notifyListeners();
   }
 
-  /// The «from ignored sites» chip: the failed-connection lines of ignored sites shown or not (kept in the state).
+  /// The raw lines read again, whole, with the current «Connections» switch.
+  void _reloadRaw() {
+    _rawChanged();
+    rawShape++;
+    rawUnseen = 0;
+    if (!_loaded || l10n == null) {
+      raw.lines.clear();
+      raw.next = null;
+      rawHidden = 0;
+      return;
+    }
+    // a feed of its own: its own lines are replaced in one go, no half-cleared list in between
+    final fresh = LogFeed(cfg)..setIgnored(_ign);
+    try {
+      fresh.apply(_logPage());
+      raw = fresh;
+    } catch (_) {
+      // the core is not up: the next poll reads from the start
+      raw.lines.clear();
+      raw.next = null;
+      rawHidden = 0;
+    }
+    _rawChanged();
+  }
+
+  /// The «from ignored sites» switch: the failed-connection lines of ignored sites shown or not (kept in the state).
   void setShowIgnored(bool v) {
     if (cfg.showIgnored == v) return;
     cfg.showIgnored = v;
@@ -505,6 +645,7 @@ class LogsController extends ChangeNotifier {
     _shownLines = null;
     _unreadLines = null;
     rawVersion++;
+    rawShape++;
     notifyListeners();
   }
 
@@ -557,22 +698,37 @@ class LogsController extends ChangeNotifier {
     _syncIgnored();
     _shownLines = null;
     _unreadLines = null;
+    rawShape++;
     notifyListeners();
   }
 
   void setRawQuery(String q) {
+    if (rawQuery == q) return;
     rawQuery = q;
     _shownLines = null;
     rawVersion++;
+    rawShape++;
     notifyListeners();
   }
 
+  /// The search field of the tab on screen opens or closes; closing it clears the search (Events:
+  /// the text of the filter; Raw: [rawQuery]).
   void toggleSearch([bool? on]) {
-    searching = on ?? !searching;
-    if (!searching) {
-      rawQuery = '';
-      _shownLines = null;
-      rawVersion++;
+    if (tab == 'events') {
+      evSearching = on ?? !evSearching;
+      if (!evSearching && filter.q.isNotEmpty) {
+        filter.q = '';
+        _dropGroups();
+        evShape++;
+      }
+    } else {
+      rawSearching = on ?? !rawSearching;
+      if (!rawSearching && rawQuery.isNotEmpty) {
+        rawQuery = '';
+        _shownLines = null;
+        rawVersion++;
+        rawShape++;
+      }
     }
     notifyListeners();
   }
@@ -588,7 +744,9 @@ class LogsController extends ChangeNotifier {
     host.clearLog();
     raw.clear();
     rawUnseen = 0;
+    rawHidden = 0;
     _rawChanged();
+    rawShape++;
     notifyListeners();
     _poll();
   }

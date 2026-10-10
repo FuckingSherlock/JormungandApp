@@ -116,6 +116,19 @@ class VpnChannel {
     }
   }
 
+  /// The device for the support report: `model`, `manufacturer`, `brand`, `androidApi` (int),
+  /// `androidRelease`; empty off Android.
+  Future<Map<String, dynamic>> deviceInfo() async {
+    try {
+      final m = await _channel.invokeMapMethod<String, Object?>('device');
+      return {...?m};
+    } on MissingPluginException {
+      return const {};
+    } on PlatformException {
+      return const {};
+    }
+  }
+
   /// The sing-box version built into libbox; null when unknown.
   Future<String?> libboxVersion() async {
     try {

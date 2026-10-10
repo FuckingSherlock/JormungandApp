@@ -562,9 +562,11 @@ abstract class CoreHost extends ChangeNotifier {
   // ── Logs and connections ──
 
   /// The events journal / the raw log as the core keeps them (`{events, next, first}` /
-  /// `{lines, next}`, from [since]); the raw lines also arrive on [logLines].
+  /// `{lines, next, hidden?}`, from [since]); the raw lines also arrive on [logLines]. With
+  /// `conns: false` the core leaves the connection flood out (connection and found-package lines)
+  /// and says how many it left in `hidden`; numbering stays whole.
   Map<String, dynamic> eventsPage({int? since});
-  Map<String, dynamic> logPage({int? since});
+  Map<String, dynamic> logPage({int? since, bool conns = true});
   Stream<Map<String, dynamic>> get logLines;
   void clearEvents();
 
@@ -642,6 +644,17 @@ abstract class CoreHost extends ChangeNotifier {
 
   /// Core / sing-box versions and the data folder (`CoreApi.version`).
   Future<Map<String, dynamic>> version() async => const {};
+
+  /// The support report (docs/logs.md → Отчёт) with this app's own account of itself filled in
+  /// (`report_info.dart`): the core's one structured map — events, raw log, state — as «Download
+  /// log» writes it. Empty in a host without a core.
+  Future<Map<String, dynamic>> report() async => const {};
+
+  /// «Send report»: the same report with the user's [note] (≤ 500 characters), masked more strictly,
+  /// to the developers. → `{ok: true, id, bytes}` or `{ok: false, error, message?}`; `error` is
+  /// `not-configured` (no receiver is built yet), `network`, `rejected`, `server` or `failed`.
+  /// Never throws.
+  Future<Map<String, dynamic>> sendReport({String note = ''}) async => const {'ok': false, 'error': 'not-configured'};
 
   /// Backup: the whole state as one snapshot, and the reverse (replaces everything; a running
   /// connection restarts with the restored state).

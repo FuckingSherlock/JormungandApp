@@ -165,6 +165,12 @@ void main() {
     expect(notifAllows({'coreCrash': true}, 'coreCrash'), isTrue);
     expect(notifAllows({'autoSwitch': false}, 'autoSwitch'), isFalse);
     expect(eventNotifKind['site/blocked'], 'blocked');
+    expect(eventNotifKind['conn/failing'], 'blocked');
+    expect(eventNotifKind['core/tunTcpDead'], 'connLost');
+    expect(eventNotifKind['core/tunTcpBack'], 'connLost');
+    for (final t in ['updateAvailable', 'updateFailed', 'updateChannelEmpty', 'updateDownloaded', 'updateDeltaFailed', 'updateInstalled']) {
+      expect(eventNotifKind.containsKey('core/$t'), isFalse, reason: 'the app update has its own surface, not a notification');
+    }
   });
 
   test('site/unreachable with a check: only «opens» (not manual) notifies; without a check as before', () {

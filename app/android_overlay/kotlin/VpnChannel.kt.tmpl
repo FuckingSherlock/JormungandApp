@@ -209,6 +209,16 @@ class VpnChannel(private val app: Context) {
             }
             // the update feed's asset keys come from this (docs/updates.md: updatePlatforms)
             "abis" -> result.success(android.os.Build.SUPPORTED_ABIS.toList())
+            // the device for the support report (model, manufacturer, Android release and API level)
+            "device" -> result.success(
+                mapOf(
+                    "model" to android.os.Build.MODEL,
+                    "manufacturer" to android.os.Build.MANUFACTURER,
+                    "brand" to android.os.Build.BRAND,
+                    "androidApi" to android.os.Build.VERSION.SDK_INT,
+                    "androidRelease" to android.os.Build.VERSION.RELEASE,
+                ),
+            )
             // the sing-box version inside libbox (Settings -> Data); null when it cannot be read
             "libboxVersion" -> result.success(runCatching { Libbox.version() }.getOrNull())
             // the installed version (versionName / versionCode) the updater compares against

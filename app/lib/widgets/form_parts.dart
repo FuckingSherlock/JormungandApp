@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show ValueListenable, visibleForTesting;
 import 'package:flutter/scheduler.dart' show Ticker, TickerCallback, TickerProvider;
+import 'package:flutter/services.dart' show TextInputFormatter;
 import 'package:jormungand_core/jormungand_core.dart' show PickState;
 
 import '../l10n/l10n.dart';
@@ -342,6 +343,7 @@ class AppTextField extends StatelessWidget {
     this.autofocus = false,
     this.textInputAction,
     this.onSubmitted,
+    this.inputFormatters,
   });
 
   final TextEditingController controller;
@@ -354,6 +356,7 @@ class AppTextField extends StatelessWidget {
   final bool autofocus;
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onSubmitted;
+  final List<TextInputFormatter>? inputFormatters;
 
   @override
   Widget build(BuildContext context) {
@@ -378,6 +381,7 @@ class AppTextField extends StatelessWidget {
       textInputAction: textInputAction,
       onChanged: onChanged,
       onSubmitted: onSubmitted,
+      inputFormatters: inputFormatters,
       cursorColor: c.accent,
       style: base.copyWith(
         fontSize: mono ? 13 : 15,

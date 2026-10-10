@@ -12,8 +12,17 @@ import 'dart:convert';
 /// credentials of a proxy share link), `uuid`, `secret` (a value named like one), `token` (Bearer,
 /// bot / API tokens, long random strings).
 ///
+/// [strict] (the report that is sent to the developers, docs/logs.md → Отправка) adds two kinds that the
+/// local export keeps: `email` (an address anywhere in the text) and `path` (the user name inside a
+/// home-directory path: `C:\Users\<name>\…`, `/home/<name>/…`). Domains, IPs and package names stay.
+///
 /// Running a result through again changes nothing (placeholders are left alone).
 class Redactor {
+  Redactor({this.strict = false});
+
+  /// The sent report's mode: also e-mail addresses and the user name of home paths.
+  final bool strict;
+
   final _seen = <String, Map<String, int>>{};
 
   /// Replacements made so far, by kind.
@@ -121,6 +130,19 @@ class Redactor {
           return _ph('token', t);
         });
       }
+    }
+    if (strict) s = _strictPass(s);
+    return s;
+  }
+
+  // strict only: an e-mail address, the account name inside a home-directory path
+  static final _emailRe = RegExp(r'(?<![A-Za-z0-9._%+\-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}\b');
+  static final _homeRe = RegExp(r'''([A-Za-z]:[\\/]+[Uu]sers[\\/]+|/home/|/Users/)([^\\/\s"'<>:]+)''');
+
+  String _strictPass(String s) {
+    if (s.contains('@')) s = s.replaceAllMapped(_emailRe, (m) => _ph('email', m[0]!.toLowerCase()));
+    if (s.contains('sers') || s.contains('/home/')) {
+      s = s.replaceAllMapped(_homeRe, (m) => '${m[1]}${_ph('path', m[2]!)}');
     }
     return s;
   }

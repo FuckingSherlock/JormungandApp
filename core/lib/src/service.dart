@@ -25,7 +25,9 @@ import 'parse/links.dart';
 import 'plan.dart';
 import 'pool.dart';
 import 'probe.dart';
+import 'redact.dart';
 import 'report.dart';
+import 'report_upload.dart';
 import 'routing.dart';
 import 'rulenames.dart';
 import 'rulesets.dart';
@@ -77,7 +79,9 @@ class CoreService implements CoreApi {
     this.updateFirstDelay = const Duration(seconds: 10),
     SiteChecker? siteChecker,
     Stream<NetworkQualityTestProgress> Function(String outbound)? currentSpeedSource,
+    ReportUploader? reportUploader,
   })  : _singBoxVer = knownSingBoxVersion,
+        reportUploader = reportUploader ?? const NotConfiguredUploader(),
         _ownPackage = ownPackage,
         _siteCheckerArg = siteChecker,
         _currentSpeedSource = currentSpeedSource,
@@ -131,6 +135,9 @@ class CoreService implements CoreApi {
   final Stream<NetworkQualityTestProgress> Function(String outbound)? _currentSpeedSource;
   Map<String, dynamic>? _lastSpeed; // the last finished test of the connection (`last-speed.json`)
   File get _speedFile => File(p.join(dataDir, 'last-speed.json'));
+
+  /// Where "Send report" delivers the gzipped report (report_upload.dart); by default nowhere.
+  final ReportUploader reportUploader;
 
   /// The main sing-box (the connection).
   late final BoxRunner runner;
@@ -1321,7 +1328,35 @@ class CoreService implements CoreApi {
   /// The support report (report.dart, docs/logs.md → Отчёт): everything the core keeps in memory,
   /// gathered in one pass. [appInfo] is the host's own account of itself, taken as given.
   @override
-  Future<Map<String, dynamic>> report({Map<String, dynamic> appInfo = const {}}) async {
+  Future<Map<String, dynamic>> report({Map<String, dynamic> appInfo = const {}}) => _report(appInfo, Redactor());
+
+  /// The report for the developers: built in the strict masking mode (e-mail addresses and the
+  /// user name of home paths go too), with the user's [note] (also masked), gzipped and handed to
+  /// the [reportUploader]. Never throws for a failed delivery: `{ok: true, id, bytes}` or
+  /// `{ok: false, error, message?}` (`error` is a [ReportUploadException] code, docs/logs.md → Отправка).
+  @override
+  Future<Map<String, dynamic>> sendReport({String note = '', Map<String, dynamic> appInfo = const {}}) async {
+    final redactor = Redactor(strict: true);
+    final PackedReport packed;
+    try {
+      packed = packReport(await _report(appInfo, redactor), note: note, redactor: redactor);
+    } catch (e) {
+      return {'ok': false, 'error': 'failed', 'message': 'the report could not be built: $e'};
+    }
+    try {
+      final receipt = await reportUploader.upload(packed.gzipped, meta: packed.meta);
+      logBook.note('info', 'Report sent: ${receipt.id} (${packed.gzipped.length} bytes)');
+      return {'ok': true, 'id': receipt.id, 'bytes': packed.gzipped.length};
+    } on ReportUploadException catch (e) {
+      if (e.code != 'not-configured') logBook.note('warn', 'Report not sent (${e.code}): ${e.message}');
+      return {'ok': false, 'error': e.code, if (e.message.isNotEmpty) 'message': e.message};
+    } catch (e) {
+      logBook.note('warn', 'Report not sent: $e');
+      return {'ok': false, 'error': 'failed', 'message': '$e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> _report(Map<String, dynamic> appInfo, Redactor redactor) async {
     final snap = await store.read().catchError((Object _) => null);
     final cfg = <String, dynamic>{};
     for (final k in _reportCfgKeys) {
@@ -1373,6 +1408,7 @@ class CoreService implements CoreApi {
       lines: lines,
       failures: failuresSnapshot(),
       tunIngress: tunIngressSnapshot(),
+      redactor: redactor,
     );
   }
 

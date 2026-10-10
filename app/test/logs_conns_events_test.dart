@@ -55,15 +55,18 @@ void main() {
     try {
       c.start();
       await tester.pump();
+      c.setTab('raw');
       c.setOnScreen(true);
       host.addLogLine('[1 5ms] inbound/mixed[mixed-in]: inbound connection to example.com:443');
       host.addLogLine('[1 9ms] outbound/vless[proxy/Alpha]: outbound connection to example.com:443');
       host.addLogLine('[2 5.0s] connection: open outbound connection: dial tcp 1.2.3.4:443: i/o timeout', lvl: 'error');
       host.addLogLine('router: matched rule', lvl: 'info');
       host.addLogLine('[3 1ms] outbound/direct[direct]: outbound connection to 1.1.1.1:53', lvl: 'warn');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 600));
 
-      expect(c.raw.lines.length, 5);
+      // the core leaves the successful connections out itself while the switch is off, and says how many
+      expect(c.raw.lines.length, 3);
+      expect(c.rawHidden, 2);
       expect(c.shownLines.map((l) => l.msg), [
         contains('open outbound connection: dial tcp'),
         'router: matched rule',
@@ -72,7 +75,8 @@ void main() {
       expect(c.raw.visibleCount, 3);
 
       c.setShowConns(true);
-      expect(c.shownLines.length, 5);
+      expect(c.shownLines.length, 5, reason: 'asked for again from the start');
+      expect(c.rawHidden, 0);
       expect((host.catalog.unknown['logCfg'] as Map)['showConns'], true);
       expect(LogCfg.fromJson(host.catalog.unknown['logCfg']).showConns, true);
       expect(LogCfg().showConns, false, reason: 'off by default');

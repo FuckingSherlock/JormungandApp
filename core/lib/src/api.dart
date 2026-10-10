@@ -75,6 +75,13 @@ abstract interface class CoreApi {
   /// Built from memory in one pass (rings of at most 5500 lines); the caller may gzip it.
   Future<Map<String, dynamic>> report({Map<String, dynamic> appInfo = const {}});
 
+  /// "Send report": the same report (built with the strict masking, docs/logs.md → Отправка) plus
+  /// the user's [note] (≤ 500 characters, masked too), gzipped and handed to the core's
+  /// `ReportUploader`. → `{ok: true, id, bytes}` or `{ok: false, error, message?}`; `error` is
+  /// `not-configured` (no receiver plugged in yet), `network`, `rejected`, `server` or `failed`.
+  /// Does not throw for a delivery that failed.
+  Future<Map<String, dynamic>> sendReport({String note = '', Map<String, dynamic> appInfo = const {}});
+
   /// `{protocol, address, port, secret, name, outbound?, unsupported?}` → the node (manual.dart).
   Node manualNode(Map<String, dynamic> body);
 

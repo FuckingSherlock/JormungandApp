@@ -86,6 +86,10 @@ const eventNotifKind = <String, String>{
   'conn/lost': 'connLost', 'conn/restored': 'connLost', 'conn/offline': 'connLost', 'conn/online': 'connLost',
   'core/crashed': 'coreCrash', 'core/restarted': 'coreCrash', 'core/restartFailed': 'coreCrash',
   'core/down': 'connLost',
+  // TCP through the TUN is dead / back: the same family as a lost connection
+  'core/tunTcpDead': 'connLost', 'core/tunTcpBack': 'connLost',
+  // many failing connections of one app: what «Site does not open» is, one level up
+  'conn/failing': 'blocked',
   'site/blocked': 'blocked', 'site/unreachable': 'blocked', 'sub/updated': 'subUpdated',
   'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
   'rules/ruleSetFailed': 'ruleSets',

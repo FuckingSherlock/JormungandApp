@@ -184,7 +184,8 @@ void main() {
     await tester.tap(find.descendant(of: row, matching: find.byType(MiniToggle)));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('evBg')), findsNothing, reason: 'hidden');
-    expect(find.text('Connection lost'), findsOneWidget);
+    // the sheet lists the type too (its category starts unfolded): the row and the type's label
+    expect(find.text('Connection lost'), findsNWidgets(2));
     expect(find.textContaining('no background'), findsOneWidget, reason: 'the filter bar says so');
 
     await tester.tap(find.descendant(of: row, matching: find.byType(MiniToggle)));

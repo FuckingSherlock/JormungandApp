@@ -57,6 +57,15 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Raw'));
     await tester.pumpAndSettle();
+    expect(find.byType(AppIcon), findsNothing, reason: 'the line is connection flood: behind the «Connections» switch');
+    expect(find.text('Connections hidden (1)'), findsOneWidget, reason: 'the status line says what the core left out');
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('rawConns')));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(5, 5)); // closes the filter sheet
+    await tester.pumpAndSettle();
+    expect(find.text('Connections hidden (1)'), findsNothing);
     expect(find.byType(AppIcon), findsOneWidget);
     expect(find.text('Telegram'), findsOneWidget);
     await tester.tap(find.text('Telegram'));

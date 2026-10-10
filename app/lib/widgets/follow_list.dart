@@ -34,11 +34,12 @@ class FollowController {
   }
 
   /// To the bottom; the extent of a builder list is an estimate until the rows are laid out,
-  /// so it looks again for a few frames.
+  /// so it looks again for a few frames - unless the list was left (scrolled up, a row jumped to)
+  /// in the meantime: its next frame must not pull it back.
   void toBottom({bool smooth = false}) {
     follow = true;
     void go(int left) {
-      if (_disposed || !scroll.hasClients) return;
+      if (_disposed || !follow || !scroll.hasClients) return;
       final max = scroll.position.maxScrollExtent;
       if (smooth && left == 4 && scroll.position.pixels < max - 1) {
         _smoothUntil = DateTime.now().add(const Duration(milliseconds: 700));
@@ -80,23 +81,29 @@ class RowMark<T> extends StatelessWidget {
   Widget build(BuildContext context) => child;
 }
 
-/// The values of the [RowMark]s under [list] whose row shows in the viewport of [list] (at least
-/// 8 px of it), the way the mockup reads `getBoundingClientRect`. Built rows only: a builder list
-/// keeps just the ones near the viewport.
-List<T> visibleMarks<T>(BuildContext list) {
-  final out = <T>[];
+/// The place of a row in its data, a number that only grows with the data (a raw line number, an
+/// event id): what [AnchoredList] keeps a list to while rows come and go at its head.
+class RowAnchor {
+  const RowAnchor(this.order);
+
+  final int order;
+}
+
+/// The built `RowMark<T>` rows under [list] with where they sit relative to the top of the
+/// viewport of [list] (the way the mockup reads `getBoundingClientRect`), and the viewport's
+/// height. Built rows only: a builder list keeps just the ones near the viewport.
+({List<({T value, double top, double bottom})> rows, double height}) _builtMarks<T>(BuildContext list) {
+  final out = <({T value, double top, double bottom})>[];
   final viewport = list.findRenderObject();
-  if (viewport is! RenderBox || !viewport.hasSize) return out;
+  if (viewport is! RenderBox || !viewport.hasSize) return (rows: out, height: 0);
   final top = viewport.localToGlobal(Offset.zero).dy;
-  final bottom = top + viewport.size.height;
   void visit(Element e) {
     final w = e.widget;
     if (w is RowMark<T>) {
       final box = e.renderObject;
       if (box is RenderBox && box.hasSize && box.attached) {
-        final t = box.localToGlobal(Offset.zero).dy;
-        final b = t + box.size.height;
-        if (b > top + 8 && t < bottom - 8) out.add(w.value);
+        final t = box.localToGlobal(Offset.zero).dy - top;
+        out.add((value: w.value, top: t, bottom: t + box.size.height));
       }
       return;
     }
@@ -104,7 +111,121 @@ List<T> visibleMarks<T>(BuildContext list) {
   }
 
   (list as Element).visitChildren(visit);
-  return out;
+  return (rows: out, height: viewport.size.height);
+}
+
+/// The values of the [RowMark]s under [list] whose row shows in the viewport of [list] (at least
+/// 8 px of it).
+List<T> visibleMarks<T>(BuildContext list) {
+  final m = _builtMarks<T>(list);
+  return [
+    for (final r in m.rows)
+      if (r.bottom > 8 && r.top < m.height - 8) r.value,
+  ];
+}
+
+/// The topmost row marked with a [RowAnchor] that shows in the viewport of [list] and passes
+/// [where], with where its top is (negative: it starts above the viewport).
+({int order, double top})? firstVisibleRow(BuildContext list, {bool Function(int order)? where}) {
+  final m = _builtMarks<RowAnchor>(list);
+  ({int order, double top})? best;
+  for (final r in m.rows) {
+    if (r.bottom <= 1 || r.top >= m.height) continue;
+    if (where != null && !where(r.value.order)) continue;
+    if (best == null || r.top < best.top) best = (order: r.value.order, top: r.top);
+  }
+  return best;
+}
+
+/// A list of rows in data order, laid out around a pivot instead of from its first row (a
+/// [CustomScrollView] with a `center`): the rows from [pivot] on go below the scroll origin, the
+/// older ones above it. What the user looks at keeps its place when rows fall off the head of the
+/// data or arrive at its tail, however the indices move - the viewport is measured from the pivot,
+/// not from the first row. With no [pivot] it is the plain list from the first row (a list that
+/// follows its end).
+///
+/// [orderAt] gives the data order of row `i` (never decreases); [indexOfKey] finds the row a key
+/// of the built widgets belongs to, so the rows keep their elements while indices move.
+class AnchoredList extends StatelessWidget {
+  const AnchoredList({
+    super.key,
+    required this.controller,
+    required this.count,
+    required this.orderAt,
+    required this.itemBuilder,
+    this.indexOfKey,
+    this.pivot,
+    this.bottomPadding = 64,
+  });
+
+  final ScrollController controller;
+  final int count;
+  final int Function(int i) orderAt;
+  final Widget Function(BuildContext context, int i) itemBuilder;
+  final int? Function(Key key)? indexOfKey;
+  final int? pivot;
+  final double bottomPadding;
+
+  static const _centerKey = ValueKey('anchoredListCenter');
+
+  /// The index of the first row that belongs below the origin.
+  int get split {
+    final p = pivot;
+    if (p == null) return 0;
+    var lo = 0, hi = count;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (orderAt(mid) < p) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cut = split;
+    final find = indexOfKey;
+    return CustomScrollView(
+      controller: controller,
+      center: _centerKey,
+      slivers: [
+        // older rows: the child at 0 is the one next to the origin, the list grows upwards
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, j) => itemBuilder(context, cut - 1 - j),
+            childCount: cut,
+            findChildIndexCallback: find == null
+                ? null
+                : (key) {
+                    final i = find(key);
+                    return i == null || i >= cut ? null : cut - 1 - i;
+                  },
+            addAutomaticKeepAlives: false,
+          ),
+        ),
+        SliverPadding(
+          key: _centerKey,
+          padding: EdgeInsets.only(bottom: bottomPadding),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, j) => itemBuilder(context, cut + j),
+              childCount: count - cut,
+              findChildIndexCallback: find == null
+                  ? null
+                  : (key) {
+                      final i = find(key);
+                      return i == null || i < cut ? null : i - cut;
+                    },
+              addAutomaticKeepAlives: false,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// The pill over the bottom of a list: "↓ Latest", or "↓ 3 new".
@@ -206,18 +327,13 @@ class _HitFlashState extends State<HitFlash> with SingleTickerProviderStateMixin
   }
 }
 
-/// Brings the row of [key] into the middle of the list: a builder list has not built it when it
-/// is far away, so the list is first moved to where the row should be and then the row is asked
-/// again, a few frames.
-Future<void> scrollToRow({
-  required ScrollController scroll,
-  required GlobalKey key,
-  required int index,
-  required int count,
-}) async {
+/// Brings the row of [key] into the middle of the list. The list is expected to have been
+/// pivoted on that row ([AnchoredList.pivot], the origin at 0): it is built where it is looked
+/// for, and appears within a frame or two.
+Future<void> showRow(GlobalKey key) async {
   for (var i = 0; i < 6; i++) {
     final ctx = key.currentContext;
-    if (ctx != null) {
+    if (ctx != null && ctx.mounted) {
       await Scrollable.ensureVisible(
         ctx,
         alignment: .5,
@@ -225,9 +341,20 @@ Future<void> scrollToRow({
       );
       return;
     }
-    if (!scroll.hasClients || count == 0) return;
-    final max = scroll.position.maxScrollExtent;
-    scroll.jumpTo((max * index / count).clamp(0, max).toDouble());
     await WidgetsBinding.instance.endOfFrame;
+  }
+}
+
+/// Moves the scroll origin of [scroll] to [pixels] (in the pivoted list's own coordinates) for a
+/// change of the pivot that is applied in the frame being built. A list that is being scrolled
+/// by a fling is jumped (its simulation holds absolute positions), any other has its position
+/// corrected without a notification: nothing hears of a move that is not one.
+void shiftScroll(ScrollController scroll, double pixels) {
+  if (!scroll.hasClients) return;
+  final p = scroll.position;
+  if (p.isScrollingNotifier.value) {
+    scroll.jumpTo(pixels);
+  } else {
+    p.correctPixels(pixels);
   }
 }

@@ -20,6 +20,10 @@ class RawGroup {
 
   LogLine get first => lines.first;
 
+  /// What the group's text and look come from: its first and last line and how many there are
+  /// (the numbers only grow, so a group that gained or lost a line is another one).
+  (int, int, int) get sig => (lines.first.n, lines.last.n, lines.length);
+
   static String keyOf(LogLine l) => '${l.t ~/ 1000}|${l.lvl}|${l.src}';
 }
 
@@ -53,6 +57,11 @@ final _foundPkg = RegExp(r'found package name: (\S+)\s*$');
 /// `.log-group`: the meta line (time, level tag, `core` tag) over the messages of the group. Each
 /// line is a [RowMark] (its number) so the page can tell which are in view; [hit] is the number of
 /// the line to light up with [hitToken].
+///
+/// A group of the same lines with the same look is the same widget: the Logs page keeps the
+/// [RawGroupView]s it made and hands out the one of an unchanged group again ([RawGroup.sig]), so a
+/// list that is asked for its rows after every batch of lines does not rebuild the rows that did not
+/// change (the framework skips a child that is the identical widget).
 class RawGroupView extends StatelessWidget {
   const RawGroupView({
     super.key,
