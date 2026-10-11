@@ -19,8 +19,10 @@ import { fileURLToPath } from 'node:url';
 
 export const APPLICATION_ID = 'dev.jormungand.app';
 const MIN_SDK = 26;
-// WorkManager: the periodic background update check while the app's process is not running
-const WORK_RUNTIME = 'androidx.work:work-runtime-ktx:2.9.1';
+// WorkManager: the periodic background update check while the app's process is not running.
+// Not below 2.10: older ones pull Room 2.5, whose consumer rule keeps WorkDatabase_Impl without its
+// constructor, and R8 full mode (AGP 9) strips it -> crash in InitializationProvider at every start.
+const WORK_RUNTIME = 'androidx.work:work-runtime-ktx:2.12.0';
 
 const app = join(dirname(fileURLToPath(import.meta.url)), '..');
 const overlay = join(app, 'android_overlay');

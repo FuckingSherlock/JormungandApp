@@ -362,7 +362,9 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   процесса) либо заданием WorkManager при закрытом процессе (`UpdateJob.kt.tmpl`: `UpdateCheckWorker` поднимает
   безголовый FlutterEngine на `updateJobMain`; канал `jormungand/updatejob` — `sync` настроек из приложения,
   `input` / `done` для изолята задания; зависимость `androidx.work:work-runtime-ktx` добавляет
-  `apply_android_overlay.mjs`; `ResumeReceiver` после замены пакета перерегистрирует работу). Фильтр — мастер и
+  `apply_android_overlay.mjs` — не ниже 2.10: старые тянут Room 2.5, и R8 full mode (AGP 9) вырезает конструктор
+  `WorkDatabase_Impl` → падение в `InitializationProvider` на каждом старте (так сломалась 0.1.2-beta.2); страховка —
+  `-keep class * extends androidx.room.RoomDatabase { <init>(); }` в `jormungand-proguard.pro`; `ResumeReceiver` после замены пакета перерегистрирует работу). Фильтр — мастер и
   `notifCfg.updateAvailable` («New version»). Логика и причины — `updates.md`, раздел 6.
 - **Разрешение** (API 33+; ниже — только переключатель системы). Запрос один раз за установку при первом
   успешном подключении (`request(once: true)`, нативный флаг в SharedPreferences; мастер-переключатель

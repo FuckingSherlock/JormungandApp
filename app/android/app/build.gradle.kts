@@ -53,7 +53,7 @@ dependencies {
     implementation(files("libs/libbox.aar"))
 }
 dependencies {
-    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
 }
 // plain key=value parse: in a .kts body `java` is the java extension, so java.util.Properties does not resolve
 val jormKeyProps: Map<String, String> = rootProject.file("key.properties").let { f ->
