@@ -3,13 +3,6 @@
 Правило CLAUDE.md «Android is not a cut-down port». Каждый пункт только здесь (не дублируется в других файлах плана).
 Источник: `archive/_work/parity_*.md` (id `P-..`), ответы пользователя 2026-10-11.
 
-- **Kill switch на Android — приоритетная фича** (P-H1, P-S2, S24). Сейчас `caps.killSwitch => !android`
-  (`app/lib/platform/platform_caps.dart:24`), группа скрыта (`settings_conn.dart:222–291`), плашка blocking не возникает
-  (`vpn_alert.dart:37–39`). Мокап: `50-home.js:27–46, 140–142`, `56-dns.js:241–267`; `docs/rules.md` §7. Нужен дизайн для TUN:
-  держать TUN как blackhole при падении ядра, killOnDisconnect с плашкой «blocking» и Remove, killWhileClosed, подсказка про
-  системные «Постоянный VPN» и «Блокировать соединения без VPN». Решение по дизайну — пользователя.
-  Сюда же исключение «правила с явным Direct в If unavailable пропускаем» (S25, `rules.md:510–513`): блок, кроме таких правил,
-  предупреждение в правиле, пока kill switch вкл.
 - **Запуск при старте системы** (P-H2, P-S1): тумблер есть, но нет `RECEIVE_BOOT_COMPLETED` и приёмника; `runLaunchActions`
   (`live_core_host.dart:1458`) на загрузку не вызывается. Решение пользователя: после загрузки приложение не открывается,
   только поднимается подключение. На Android тумблеры «Launch at startup» и «Connect on launch» объединить в один

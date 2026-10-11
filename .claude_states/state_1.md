@@ -38,6 +38,15 @@
   Проверки: core 927 (красный только известный flaky `delta_test.dart` 50 МБ, один проходит), app 311.
   Перед релизом: `git push origin claude/core-mvp:claude/karing-fork-environment-a45c2c`.
 
+## Разбор отчёта `20261011-6gml6m` (2026-10-12) → план следующей сессии
+
+Пункты 0–4 в начале `features.md` (порядок задан пользователем). Kill switch на Android отложен, перенесён в `features.md`.
+S33 (rule set'ы по таймеру) влит в п. 0. Выводы: сбои Яндекса Direct — настоящие таймауты TCP весь день (версия
+пользователя: атака на ДЦ Яндекса), AdGuard не виноват (IP нормальные); rule set — рвёт наше же двойное подключение;
+«TCP does not pass the tunnel» 11:31 — почти наверняка ложное; таймауты на `vless[route1/src2::n6f50]` — проверки Auto
+запасной Chain 2 (нода 185.130.225.66 правда умирала), трафик пользователя шёл через route0.
+Инструмент: `node workers/reports/tools/fetch.mjs <id>|--latest --open` → `core/.data-dev/reports/<id>.{txt,json}`.
+
 ## Открыто
 
 - Таймер отправки (`docs/logs.md:224–240`): пользователь помнит другое поведение — уточнить, какое.
