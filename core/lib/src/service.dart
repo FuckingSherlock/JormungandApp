@@ -1386,11 +1386,8 @@ class CoreService implements CoreApi {
           cancel.whenCancelled.then<ReportReceipt>((_) => throw const ReportUploadException('cancelled')),
         ]);
         final first = receipt.firstError;
-        final via = receipt.via == 'vpn'
-            ? ' via VPN'
-            : first == null
-                ? ' direct'
-                : ' direct, after the first try failed ($first)';
+        final way = receipt.via == 'vpn' ? ' via VPN' : ' direct';
+        final via = first == null ? way : '$way, after the first way failed ($first)';
         logBook.note('info',
             'Report sent: ${receipt.id} (${packed.gzipped.length} bytes, built in $built ms, sent in ${sw.elapsedMilliseconds - built} ms)$via');
         return {'ok': true, 'id': receipt.id, 'bytes': packed.gzipped.length, 'via': receipt.via, 'firstError': ?first};

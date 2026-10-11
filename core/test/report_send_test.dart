@@ -206,8 +206,8 @@ void main() {
       expect(svc.logBook.since(null)['lines'].toString(), contains('Report not sent (no-route)'));
     });
 
-    test('the default overall deadline is the tunnel try + the probe + the direct upload + a small margin for building', () {
-      expect(reportSendDeadline, reportTunnelTimeout + reportProbeTimeout + reportUploadTimeout + reportBuildMargin);
+    test('the default overall deadline is the probes + an attempt on each of two ways + a small margin for building', () {
+      expect(reportSendDeadline, reportProbeTimeout + reportAttemptTimeout * 2 + reportBuildMargin);
       expect(reportSendDeadline, const Duration(seconds: 28));
     });
 
