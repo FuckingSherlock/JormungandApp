@@ -108,6 +108,7 @@ const notifDefaults = <String, bool>{
   'subUpdated': false,
   'subFailed': true,
   'ruleSets': true,
+  'updateAvailable': true,
   // not one of the toggles of the three groups: failures while the screen is off notify like the others
   'bgErrors': false,
 };

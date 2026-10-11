@@ -347,6 +347,8 @@ class _UpdatesBlockState extends State<_UpdatesBlock> {
         u.checkFailed ? _updError(l10n, u.error) : l10n.downloadFailed2,
     };
     final version = host.appVersion;
+    // the tap on Install here, or the install dialog [UpdateFlow] opened right after the download
+    final installing = (_installing || host.updateInstalling) && host.canInstallUpdate;
 
     Widget? card;
     if (o != null && p != UpdPhase.checking) {
@@ -463,11 +465,11 @@ class _UpdatesBlockState extends State<_UpdatesBlock> {
               if (host.canInstallUpdate)
                 PrimaryButton(
                   label: l10n.install,
-                  onPressed: _installing ? null : () => _install(host),
+                  onPressed: installing ? null : () => _install(host),
                 )
               else if (u.file != null)
                 HintText(u.file!),
-              if (_installing && host.canInstallUpdate) ...[
+              if (installing) ...[
                 const SizedBox(height: 10),
                 Row(
                   children: [

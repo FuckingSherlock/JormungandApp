@@ -120,6 +120,7 @@ class Daemon {
         'POST /api/report' => service.report(appInfo: ((body['appInfo'] as Map?) ?? const {}).cast<String, dynamic>()),
         'POST /api/report/send' => service.sendReport(
             note: '${body['note'] ?? ''}', appInfo: ((body['appInfo'] as Map?) ?? const {}).cast<String, dynamic>()),
+        'POST /api/report/cancel' => service.cancelReport(),
         'POST /api/node' => Future(() => {'node': service.manualNode(body).toJson()}),
         'POST /api/share' => Future.value({'link': service.share(body)}),
         'POST /api/sources/fetch' => service.fetchSource(body),

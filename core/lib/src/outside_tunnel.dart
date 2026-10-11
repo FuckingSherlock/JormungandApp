@@ -89,8 +89,9 @@ const outsideTunnel = <OutsideEntry>[
   OutsideEntry(
     'report-upload',
     'Send report: the encrypted report is POSTed to the receiving Worker (report_upload.dart, '
-        'HttpReportUploader), always direct and never via tunnel-in — it is needed exactly when the '
-        'proxy is broken; the self rule and a DNS that works with every node dead',
+        'HttpReportUploader), direct first — it is needed exactly when the proxy is broken — and, when '
+        'that fails while the tunnel is up, once more via tunnel-in; the self rule and a DNS that works '
+        'with every node dead',
     OutsideHow.ownRule,
     ['core/lib/src/report_upload.dart'],
   ),

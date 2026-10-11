@@ -373,6 +373,13 @@ class NotifSheet extends StatelessWidget {
           l10n.aRuleSetCouldNotBe,
         ),
       ]),
+      (l10n.appUpdates, [
+        (
+          'updateAvailable',
+          l10n.newVersion,
+          l10n.aNewVersionOfTheApp,
+        ),
+      ]),
     ];
     return SheetFrame(
       title: l10n.notifications,

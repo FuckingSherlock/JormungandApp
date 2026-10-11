@@ -80,6 +80,7 @@ class CoreService implements CoreApi {
     SiteChecker? siteChecker,
     Stream<NetworkQualityTestProgress> Function(String outbound)? currentSpeedSource,
     ReportUploader? reportUploader,
+    this.reportDeadline = reportSendDeadline,
   })  : _singBoxVer = knownSingBoxVersion,
         reportUploader = reportUploader ?? const NotConfiguredUploader(),
         _ownPackage = ownPackage,
@@ -1335,25 +1336,79 @@ class CoreService implements CoreApi {
   /// the [reportUploader]. Never throws for a failed delivery: `{ok: true, id, bytes}` or
   /// `{ok: false, error, message?}` (`error` is a [ReportUploadException] code, docs/logs.md → Отправка).
   @override
-  Future<Map<String, dynamic>> sendReport({String note = '', Map<String, dynamic> appInfo = const {}}) async {
-    final redactor = Redactor(strict: true);
-    final PackedReport packed;
-    try {
-      packed = packReport(await _report(appInfo, redactor), note: note, redactor: redactor);
-    } catch (e) {
-      return {'ok': false, 'error': 'failed', 'message': 'the report could not be built: $e'};
+  Future<Map<String, dynamic>> sendReport({String note = '', Map<String, dynamic> appInfo = const {}}) {
+    final going = _sendingReport; // one send at a time: asking again joins the one under way
+    if (going != null && !(_reportCancel?.isCancelled ?? false)) return going;
+    final cancel = _reportCancel = ReportCancel();
+    late final Future<Map<String, dynamic>> mine;
+    mine = _sendReport(note, appInfo, cancel).whenComplete(() {
+      if (identical(_sendingReport, mine)) {
+        _sendingReport = null;
+        _reportCancel = null;
+      }
+    });
+    return _sendingReport = mine;
+  }
+
+  Future<Map<String, dynamic>>? _sendingReport;
+  ReportCancel? _reportCancel;
+
+  /// Stops the send under way (the user's Cancel): it ends with `{ok: false, error: 'cancelled'}`.
+  /// → `{ok: true, cancelled: <whether there was a send>}`.
+  @override
+  Future<Map<String, dynamic>> cancelReport() async {
+    final c = _reportCancel;
+    c?.cancel();
+    return {'ok': true, 'cancelled': c != null};
+  }
+
+  /// How long a whole send may take (tests shorten it).
+  final Duration reportDeadline;
+
+  Future<Map<String, dynamic>> _sendReport(String note, Map<String, dynamic> appInfo, ReportCancel cancel) {
+    var stage = 'building the report';
+    final sw = Stopwatch()..start();
+
+    Future<Map<String, dynamic>> run() async {
+      final redactor = Redactor(strict: true);
+      final PackedReport packed;
+      try {
+        packed = packReport(await _report(appInfo, redactor), note: note, redactor: redactor);
+      } catch (e) {
+        return {'ok': false, 'error': 'failed', 'message': 'the report could not be built: $e'};
+      }
+      final built = sw.elapsedMilliseconds;
+      stage = 'uploading';
+      try {
+        // the race is ours too: an uploader that does not know the token still ends at the cancel
+        final receipt = await Future.any([
+          reportUploader.upload(packed.gzipped, meta: packed.meta, proxyPort: _innerPort, cancel: cancel),
+          cancel.whenCancelled.then<ReportReceipt>((_) => throw const ReportUploadException('cancelled')),
+        ]);
+        final via = receipt.via == 'vpn' ? ' via VPN (direct failed: ${receipt.directError})' : '';
+        logBook.note('info',
+            'Report sent: ${receipt.id} (${packed.gzipped.length} bytes, built in $built ms, sent in ${sw.elapsedMilliseconds - built} ms)$via');
+        return {'ok': true, 'id': receipt.id, 'bytes': packed.gzipped.length, 'via': receipt.via};
+      } on ReportUploadException catch (e) {
+        if (e.code == 'cancelled') {
+          logBook.note('info', 'Report sending cancelled');
+        } else if (e.code != 'not-configured') {
+          logBook.note('warn', 'Report not sent (${e.code}): ${e.message}');
+        }
+        return {'ok': false, 'error': e.code, if (e.message.isNotEmpty) 'message': e.message};
+      } catch (e) {
+        logBook.note('warn', 'Report not sent: $e');
+        return {'ok': false, 'error': 'failed', 'message': '$e'};
+      }
     }
-    try {
-      final receipt = await reportUploader.upload(packed.gzipped, meta: packed.meta);
-      logBook.note('info', 'Report sent: ${receipt.id} (${packed.gzipped.length} bytes)');
-      return {'ok': true, 'id': receipt.id, 'bytes': packed.gzipped.length};
-    } on ReportUploadException catch (e) {
-      if (e.code != 'not-configured') logBook.note('warn', 'Report not sent (${e.code}): ${e.message}');
-      return {'ok': false, 'error': e.code, if (e.message.isNotEmpty) 'message': e.message};
-    } catch (e) {
-      logBook.note('warn', 'Report not sent: $e');
-      return {'ok': false, 'error': 'failed', 'message': '$e'};
-    }
+
+    // The last word: whatever hangs (a stuck read, a connection nobody times out), the send ends.
+    return run().timeout(reportDeadline, onTimeout: () {
+      cancel.cancel();
+      final msg = 'no result in ${reportDeadline.inSeconds} s, stuck while $stage';
+      logBook.note('warn', 'Report not sent (timeout): $msg');
+      return {'ok': false, 'error': 'timeout', 'message': msg};
+    });
   }
 
   Future<Map<String, dynamic>> _report(Map<String, dynamic> appInfo, Redactor redactor) async {

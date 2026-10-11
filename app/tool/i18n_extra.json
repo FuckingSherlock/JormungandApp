@@ -166,10 +166,16 @@
   "No connection to the report server. Check the network and try again.": "Нет связи с сервером отчётов. Проверьте сеть и повторите.",
   "The server did not accept the report: {0}": "Сервер не принял отчёт: {0}",
   "The report server failed. Try again later.": "Сервер отчётов не справился. Повторите позже.",
+  "The report server did not answer in time. Try again.": "Сервер отчётов не ответил вовремя. Повторите.",
   "Could not send the report: {0}": "Не удалось отправить отчёт: {0}",
   "Clear raw log": "Очистить сырой лог",
   "Filter log": "Фильтр лога",
   "Level": "Уровень",
   "Successful connections and DNS answers: one line each, thousands per minute. Hidden by default; failed connections are always shown.": "Успешные соединения и ответы DNS: по строке на каждое, тысячи в минуту. По умолчанию скрыты; неудачные соединения показываются всегда.",
-  "Connections hidden ({#0})": "Соединения скрыты ({#0})"
+  "Connections hidden ({#0})": "Соединения скрыты ({#0})",
+  "Update {0} ready": "Обновление {0} готово",
+  "Tap to install": "Нажмите, чтобы установить",
+  "Tap to see what's new": "Нажмите, чтобы посмотреть, что нового",
+  "New version": "Новая версия",
+  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
 }

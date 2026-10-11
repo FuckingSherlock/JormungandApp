@@ -1471,10 +1471,16 @@
   "noConnectionToTheReportServer": "Нет связи с сервером отчётов. Проверьте сеть и повторите.",
   "theServerDidNotAcceptThe": "Сервер не принял отчёт: {s0}",
   "theReportServerFailedTryAgain": "Сервер отчётов не справился. Повторите позже.",
+  "theReportServerDidNotAnswer": "Сервер отчётов не ответил вовремя. Повторите.",
   "couldNotSendTheReport": "Не удалось отправить отчёт: {s0}",
   "clearRawLog": "Очистить сырой лог",
   "filterLog": "Фильтр лога",
   "level": "Уровень",
   "successfulConnectionsOneLinePerConnectio": "Успешные соединения и ответы DNS: по строке на каждое, тысячи в минуту. По умолчанию скрыты; неудачные соединения показываются всегда.",
-  "connectionsHidden": "Соединения скрыты ({n0})"
+  "connectionsHidden": "Соединения скрыты ({n0})",
+  "updateReady": "Обновление {s0} готово",
+  "tapToInstall": "Нажмите, чтобы установить",
+  "tapToSeeWhatSNew": "Нажмите, чтобы посмотреть, что нового",
+  "newVersion": "Новая версия",
+  "aNewVersionOfTheApp": "Вышла новая версия приложения или скачанная ждёт установки"
 }

@@ -637,6 +637,17 @@ abstract class CoreHost extends ChangeNotifier {
   /// Hands the downloaded file to the installer; false when the platform refused or cannot.
   Future<bool> installUpdate() async => false;
 
+  /// The install dialog is up / the file is on its way to the installer: the card shows «Installing…».
+  bool get updateInstalling => false;
+
+  /// «Download & install» was pressed and the file has not reached the installer yet (an automatic
+  /// download never sets it). [UpdateFlow] hands the file over the moment it is ready and the app is in
+  /// front, else when the app comes back.
+  bool get updateInstallWanted => false;
+
+  /// Reads and clears [updateInstallWanted].
+  bool takeUpdateInstallWanted() => false;
+
   /// The first thing after the core is up: when this start follows the app's own update that
   /// replaced a running VPN, connects again through the entry it used (once). The platform keeps
   /// the record; none = nothing happens.
@@ -652,9 +663,12 @@ abstract class CoreHost extends ChangeNotifier {
 
   /// «Send report»: the same report with the user's [note] (≤ 500 characters), masked more strictly,
   /// to the developers. → `{ok: true, id, bytes}` or `{ok: false, error, message?}`; `error` is
-  /// `not-configured` (no receiver is built yet), `network`, `rejected`, `server` or `failed`.
-  /// Never throws.
+  /// `not-configured` (no receiver is built yet), `network`, `rejected`, `server`, `cancelled`,
+  /// `timeout` or `failed`. Never throws. Goes direct first and through the tunnel when that fails.
   Future<Map<String, dynamic>> sendReport({String note = ''}) async => const {'ok': false, 'error': 'not-configured'};
+
+  /// Stops the send under way: its `sendReport` then answers `cancelled`.
+  Future<void> cancelSendReport() async {}
 
   /// Backup: the whole state as one snapshot, and the reverse (replaces everything; a running
   /// connection restarts with the restored state).

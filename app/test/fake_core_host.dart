@@ -724,10 +724,31 @@ class FakeCoreHost extends CoreHost {
   @override
   Future<bool> installUpdate() async {
     calls.add('installUpdate');
+    installWanted = false;
     final gate = installGate;
     if (gate != null) return gate.future;
-    return true;
+    return installResult;
   }
+
+  /// What installUpdate answers when no [installGate] holds it.
+  bool installResult = true;
+
+  /// The host-side "Download & install was pressed" flag and the "install in progress" one.
+  bool installWanted = false;
+  bool installingNow = false;
+
+  @override
+  bool get updateInstallWanted => installWanted;
+
+  @override
+  bool takeUpdateInstallWanted() {
+    final w = installWanted;
+    installWanted = false;
+    return w;
+  }
+
+  @override
+  bool get updateInstalling => installingNow;
 
   @override
   Future<Map<String, dynamic>> version() async => versionInfo;
@@ -756,7 +777,24 @@ class FakeCoreHost extends CoreHost {
     calls.add('sendReport');
     sentNotes.add(note);
     await sendGate?.future;
+    if (_sendCancelled) {
+      _sendCancelled = false;
+      return {'ok': false, 'error': 'cancelled'};
+    }
     return sendResult;
+  }
+
+  /// Stops a send that waits at [sendGate]: it answers `cancelled`.
+  bool _sendCancelled = false;
+
+  @override
+  Future<void> cancelSendReport() async {
+    calls.add('cancelSendReport');
+    final g = sendGate;
+    if (g != null && !g.isCompleted) {
+      _sendCancelled = true;
+      g.complete();
+    }
   }
 
   @override

@@ -1518,5 +1518,11 @@
   "Level": "level",
   "Successful connections and DNS answers: one line each, thousands per minute. Hidden by default; failed connections are always shown.": "successfulConnectionsOneLinePerConnectio",
   "Connections hidden ({#0})": "connectionsHidden",
-  "{0} added to ignored sites": "addedToIgnoredSites"
+  "{0} added to ignored sites": "addedToIgnoredSites",
+  "The report server did not answer in time. Try again.": "theReportServerDidNotAnswer",
+  "Tap to install": "tapToInstall",
+  "Tap to see what's new": "tapToSeeWhatSNew",
+  "New version": "newVersion",
+  "A new version of the app is out, or a downloaded one waits to be installed": "aNewVersionOfTheApp",
+  "Update {0} ready": "updateReady"
 }

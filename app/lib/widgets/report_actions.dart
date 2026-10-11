@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData, LengthLimi
 import 'package:jormungand_core/jormungand_core.dart' show reportNoteMax, reportToText;
 
 import '../core/logs_controller.dart';
+import '../core/report_send.dart';
 import '../l10n/l10n.dart';
 import '../platform/files_channel.dart';
 import '../theme/app_colors.g.dart';
@@ -29,8 +30,8 @@ Future<void> downloadLog(BuildContext context, LogsController logs) async {
 Future<void> showSendReport(BuildContext context, LogsController logs) =>
     showAppSheet<void>(context, builder: (_) => _SendReportSheet(logs: logs));
 
-enum _Phase { form, sending, sent, failed }
-
+/// The sheet only shows the app's [ReportSendController]: the send runs, and its result stays,
+/// whether the sheet is open or not.
 class _SendReportSheet extends StatefulWidget {
   const _SendReportSheet({required this.logs});
 
@@ -41,65 +42,69 @@ class _SendReportSheet extends StatefulWidget {
 }
 
 class _SendReportSheetState extends State<_SendReportSheet> {
-  final _note = TextEditingController();
-  _Phase _phase = _Phase.form;
-  String _id = '';
-  Map<String, dynamic> _fail = const {};
+  late final TextEditingController _note = TextEditingController(text: _send.note);
+  bool _sawSent = false;
+
+  ReportSendController get _send => widget.logs.reportSend;
+
+  @override
+  void initState() {
+    super.initState();
+    _send.addListener(_changed);
+  }
+
+  void _changed() {
+    if (!mounted) return;
+    if (_send.phase == ReportPhase.sent) _sawSent = true;
+    setState(() {});
+  }
 
   @override
   void dispose() {
+    _send.removeListener(_changed);
+    // the id was shown to the user and the sheet is gone: the next opening is a new, empty form
+    if (_sawSent && _send.phase == ReportPhase.sent) _send.reset();
     _note.dispose();
     super.dispose();
   }
 
-  Future<void> _send() async {
-    setState(() => _phase = _Phase.sending);
-    Map<String, dynamic> r;
-    try {
-      r = await widget.logs.host.sendReport(note: _note.text.trim());
-    } catch (e) {
-      r = {'ok': false, 'error': 'failed', 'message': '$e'};
-    }
-    if (!mounted) return;
-    setState(() {
-      if (r['ok'] == true) {
-        _phase = _Phase.sent;
-        _id = '${r['id'] ?? ''}';
-      } else {
-        _phase = _Phase.failed;
-        _fail = r;
-      }
-    });
-  }
-
   Future<void> _copyId() async {
-    await Clipboard.setData(ClipboardData(text: _id));
+    await Clipboard.setData(ClipboardData(text: _send.id));
     if (mounted) showToast(context, context.l10n.copied);
   }
 
-  bool get _notConfigured => _fail['error'] == 'not-configured';
+  bool get _notConfigured => _send.fail['error'] == 'not-configured';
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final c = context.colors;
-    final sent = _phase == _Phase.sent;
-    final busy = _phase == _Phase.sending;
+    final phase = _send.phase;
+    final sent = phase == ReportPhase.sent;
+    final busy = phase == ReportPhase.sending;
+    final failed = phase == ReportPhase.failed;
     return SheetFrame(
       title: l10n.sendReport,
       footer: [
         if (sent)
-          PrimaryButton(label: l10n.done, onPressed: () => Navigator.of(context).maybePop())
-        else if (busy)
-          PrimaryButton(label: l10n.sending)
-        else if (_phase == _Phase.failed && _notConfigured) ...[
+          PrimaryButton(
+            label: l10n.done,
+            onPressed: () {
+              _send.reset();
+              Navigator.of(context).maybePop();
+            },
+          )
+        else if (busy) ...[
+          PrimaryButton(label: l10n.sending),
+          DangerTextButton(label: l10n.cancel, onPressed: _send.cancel),
+        ] else if (failed && _notConfigured) ...[
           PrimaryButton(
             label: l10n.downloadLog,
             onPressed: () => downloadLog(context, widget.logs),
           ),
           DangerTextButton(label: l10n.close, onPressed: () => Navigator.of(context).maybePop()),
         ] else ...[
-          PrimaryButton(label: _phase == _Phase.failed ? l10n.retry : l10n.sendReport, onPressed: _send),
+          PrimaryButton(label: failed ? l10n.retry : l10n.sendReport, onPressed: _send.send),
           DangerTextButton(label: l10n.cancel, onPressed: () => Navigator.of(context).maybePop()),
         ],
       ],
@@ -118,7 +123,7 @@ class _SendReportSheetState extends State<_SendReportSheet> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: SelectableText(
-                          l10n.sentReportId(_id),
+                          l10n.sentReportId(_send.id),
                           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, height: 1.35, color: c.t1),
                         ),
                       ),
@@ -137,10 +142,10 @@ class _SendReportSheetState extends State<_SendReportSheet> {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (_phase == _Phase.failed)
+                if (failed)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-                    child: WarnNote(_errorText(l10n, _fail)),
+                    child: WarnNote(_errorText(l10n, _send.fail)),
                   ),
                 FormGroup(
                   label: l10n.whatIsSent,
@@ -166,7 +171,10 @@ class _SendReportSheetState extends State<_SendReportSheet> {
                             controller: _note,
                             hint: l10n.whatDoesNotWorkAndSince,
                             lines: 4,
-                            onChanged: (_) => setState(() {}),
+                            onChanged: (v) {
+                              _send.setNote(v);
+                              setState(() {});
+                            },
                             inputFormatters: [LengthLimitingTextInputFormatter(reportNoteMax)],
                           ),
                           Align(
@@ -209,6 +217,7 @@ String _errorText(AppLocalizations l10n, Map<String, dynamic> r) {
   return switch ('${r['error']}') {
     'not-configured' => l10n.sendingIsNotSetUpIn,
     'network' => l10n.noConnectionToTheReportServer,
+    'timeout' => l10n.theReportServerDidNotAnswer,
     'rejected' => l10n.theServerDidNotAcceptThe(msg.isEmpty ? '—' : msg),
     'server' => l10n.theReportServerFailedTryAgain,
     final e => l10n.couldNotSendTheReport(msg.isEmpty ? e : msg),

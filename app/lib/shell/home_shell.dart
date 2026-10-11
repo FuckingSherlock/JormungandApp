@@ -10,6 +10,7 @@ import '../pages/home_page.dart';
 import '../pages/logs_page.dart';
 import '../core/logs_controller.dart';
 import '../core/system_notifier.dart';
+import '../core/update_flow.dart';
 import '../pages/nodes_page.dart';
 import '../pages/route_page.dart';
 import '../pages/rules_page.dart';
@@ -21,6 +22,7 @@ import '../widgets/apps_sheet.dart';
 import '../widgets/ignored_sites.dart';
 import '../widgets/rule_form.dart';
 import '../widgets/rules_extras.dart';
+import '../widgets/settings_data.dart';
 import '../widgets/settings_dns.dart';
 import 'app_links.dart';
 
@@ -68,6 +70,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   /// Android system notifications: events while the app is behind, the permission, the VPN
   /// notification's text; a tap on one comes back through [NotifyIo.eventTaps].
   SystemNotifier? _sys;
+
+  /// The app's own update: the install dialog right after «Download & install», the update
+  /// notifications (docs/updates.md, section 6).
+  UpdateFlow? _flow;
+  StreamSubscription<bool>? _updTaps;
   StreamSubscription<int>? _taps;
   StreamSubscription<NoteActionTap>? _actTaps;
   StreamSubscription<void>? _homeSub;
@@ -96,7 +103,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _sys?.onResumed();
+    if (state == AppLifecycleState.resumed) {
+      _sys?.onResumed();
+      _flow?.onResumed();
+    }
     // behind the app the Logs page is not fed, and the unread raw lines go to the state
     _logs?.setForeground(
       state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
@@ -129,8 +139,26 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       io.takeLaunchAction().then((a) {
         if (a != null) _actFromShade(a);
       });
+      _flow = UpdateFlow(
+        host,
+        io: io,
+        l10n: () => context.l10n,
+        inBackground: () => SystemNotifier.inBackground,
+      )..start();
+      _updTaps = io.updateTaps.listen(_openUpdate);
+      io.takeLaunchUpdate().then((install) {
+        if (install != null) _openUpdate(install);
+      });
     }
   }
+
+  /// A tap on the update notification: the Data sheet (the update card), and the install dialog when the
+  /// notification said «Install». A sheet or a dialog left open is closed first.
+  void _openUpdate(bool install) => _whenReady(() {
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    showDataSheet(_ctx);
+    unawaited(_flow?.openedFromShade(install: install));
+  });
 
   /// A tap on an event notification: Logs -> Events at it (once the journal is loaded). A sheet or a
   /// dialog the user left open is closed first, or the tab would change behind it.
@@ -191,6 +219,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _taps?.cancel();
+    _updTaps?.cancel();
+    _flow?.dispose();
     _actTaps?.cancel();
     _homeSub?.cancel();
     _sys?.dispose();

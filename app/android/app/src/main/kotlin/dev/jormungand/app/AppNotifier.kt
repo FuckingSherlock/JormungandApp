@@ -45,6 +45,18 @@ object AppNotifier {
     const val EXTRA_UNDO_LABEL = "jorm_undo_label"
     private const val CONFIRM_MS = 10_000L
 
+    /**
+     * The app's own update ("Update available" / "Update ready · Install"): one slot, a newer text replaces
+     * the older silently. A tap opens the app at Settings -> Data; with [EXTRA_INSTALL] it goes on to the
+     * system install dialog. Same channel as [ResumeNotifier]'s "Updated - tap to connect" (id 3).
+     */
+    const val UPDATE_CHANNEL = "update"
+    const val ACTION_OPEN_UPDATE = "dev.jormungand.app.notif.OPEN_UPDATE"
+    const val EXTRA_INSTALL = "jorm_install"
+    private const val UPDATE_ID = 4
+    private const val UPDATE_PREFS = "jorm_update"
+    private const val UPDATE_ANNOUNCED = "announced"
+
     private const val GROUP = "jorm.events"
     private const val SUMMARY_ID = 2
     private const val EVENT_BASE = 1000
@@ -92,6 +104,45 @@ object AppNotifier {
                 description = ctx.getString(R.string.jorm_channel_events_desc)
             },
         )
+        nm.createNotificationChannel(
+            NotificationChannel(UPDATE_CHANNEL, ctx.getString(R.string.jorm_channel_update), NotificationManager.IMPORTANCE_DEFAULT),
+        )
+    }
+
+    /** The version the user was last told about by an update notification (null = none): see [postUpdate]. */
+    fun updateAnnounced(ctx: Context): String? =
+        ctx.applicationContext.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE).getString(UPDATE_ANNOUNCED, null)
+
+    fun setUpdateAnnounced(ctx: Context, version: String) {
+        ctx.applicationContext.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE).edit().putString(UPDATE_ANNOUNCED, version).apply()
+    }
+
+    /**
+     * The update notification. [install]: the file is downloaded, so a tap (and the [installLabel] button) lead
+     * to the install dialog; otherwise a tap opens the update block. It replaces a still-shown one without
+     * a second alert (a "ready" right after an "available" is one nudge, not two).
+     */
+    fun postUpdate(ctx: Context, title: String, text: String, install: Boolean, installLabel: String) {
+        val nm = manager(ctx)
+        if (!nm.areNotificationsEnabled()) return
+        ensureChannels(ctx)
+        val tap = openApp(ctx, { setAction(ACTION_OPEN_UPDATE).putExtra(EXTRA_INSTALL, install) }, UPDATE_ID * 2 + (if (install) 1 else 0))
+        val b = Notification.Builder(ctx, UPDATE_CHANNEL)
+            .setSmallIcon(ctx.applicationInfo.icon)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+        if (install && installLabel.isNotEmpty()) {
+            b.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, android.R.drawable.ic_menu_upload), installLabel, tap).build())
+        }
+        nm.notify(UPDATE_ID, b.build())
+    }
+
+    fun cancelUpdate(ctx: Context) {
+        runCatching { manager(ctx).cancel(UPDATE_ID) }
     }
 
     private fun openApp(ctx: Context, extra: Intent.() -> Unit = {}, code: Int = 0): PendingIntent {
@@ -285,6 +336,7 @@ object AppNotifier {
         val nm = manager(ctx)
         for (k in children(nm)) nm.cancel(k.id)
         nm.cancel(SUMMARY_ID)
+        nm.cancel(UPDATE_ID) // the update block is a tap away in the app itself
         burst.set(0)
     }
 }

@@ -94,6 +94,7 @@ class NotifCfg {
     'subUpdated': false,
     'subFailed': true,
     'ruleSets': true,
+    'updateAvailable': true,
     'bgErrors': false,
   };
 
@@ -111,10 +112,13 @@ class NotifCfg {
     'subFailed',
     'ruleSets',
   ];
+  /// «Update available» / «Update ready»: the app's own update (docs/updates.md, section 6).
+  static const List<String> appKeys = ['updateAvailable'];
   static const List<String> allKeys = [
     ...statusKeys,
     ...connectionKeys,
     ...subscriptionKeys,
+    ...appKeys,
   ];
 
   bool flag(String key) => _m[key] is bool ? _m[key] as bool : (defaults[key] ?? false);

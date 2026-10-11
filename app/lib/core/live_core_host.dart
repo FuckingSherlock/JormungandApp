@@ -1254,6 +1254,15 @@ class LiveCoreHost extends CoreHost {
     }
   }
 
+  @override
+  Future<void> cancelSendReport() async {
+    try {
+      await api.cancelReport();
+    } catch (_) {
+      // nothing to stop, or the core is gone: the sheet has let go of the send anyway
+    }
+  }
+
   // ── Rules ──
 
   List<InstalledApp>? _apps;
@@ -1374,32 +1383,60 @@ class LiveCoreHost extends CoreHost {
   @override
   Future<void> downloadUpdate() async {
     if (!_ready || _upd.phase == UpdPhase.downloading) return;
+    // the button is «Download & install»: the file goes to the installer once it is ready ([UpdateFlow])
+    _installWanted = _upd.phase != UpdPhase.ready && installer != null;
     try {
       _upd = AppUpdate.fromJson(await api.updateDownload());
     } catch (e) {
       _notice(HostNotice('updateCheckFailed', '$e', args: ['$e']));
     }
+    if (_upd.phase != UpdPhase.ready) _installWanted = false; // failed / cancelled: nothing to hand over
     _notifyNow();
   }
 
   @override
   void cancelUpdate() {
+    _installWanted = false;
     if (_ready) api.updateCancel();
   }
+
+  bool _installWanted = false;
+  bool _installing = false;
+
+  @override
+  bool get updateInstallWanted => _installWanted;
+
+  @override
+  bool takeUpdateInstallWanted() {
+    final w = _installWanted;
+    _installWanted = false;
+    return w;
+  }
+
+  @override
+  bool get updateInstalling => _installing;
 
   @override
   Future<bool> installUpdate() async {
     final file = _upd.file, install = installer;
-    if (!_ready || file == null || install == null) return false;
-    // the replacement ends this process: what the next start needs is written before it
-    await _flushSave();
+    if (!_ready || file == null || install == null || _installing) return false;
+    _installWanted = false;
+    _installing = true;
+    _notifyNow();
     try {
-      await resume?.save(connected: isOn, entry: catalog.effectiveConnectId() ?? '');
-    } catch (_) {}
-    await api.updateBeginInstall();
-    final ok = await install(file);
-    if (!ok) await api.updateInstallFailed('the installer did not start');
-    return ok;
+      // the replacement ends this process: what the next start needs is written before it
+      await _flushSave();
+      try {
+        await resume?.save(connected: isOn, entry: catalog.effectiveConnectId() ?? '');
+      } catch (_) {}
+      await api.updateBeginInstall();
+      final ok = await install(file);
+      if (!ok) await api.updateInstallFailed('the installer did not start');
+      return ok;
+    } finally {
+      _installing = false;
+      if (!_disposed) _notifyNow();
+    }
   }
 
   @override

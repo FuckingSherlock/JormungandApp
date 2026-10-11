@@ -1,5 +1,6 @@
 // "Send report": the strict masking, the note, the gzip and the uploader seam (report_upload.dart,
 // docs/logs.md → Отправка). The report itself is covered by report_test.dart.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -34,16 +35,22 @@ class _Runner implements BoxRunner {
 }
 
 class _Uploader implements ReportUploader {
-  _Uploader({this.fail});
+  _Uploader({this.fail, this.hang = false});
 
   final Object? fail;
+
+  /// Never answers and ignores the cancel token (an uploader that is stuck for real).
+  final bool hang;
   List<int>? bytes;
   Map<String, dynamic>? meta;
   int calls = 0;
+  int? proxyPort;
 
   @override
-  Future<ReportReceipt> upload(List<int> gzipped, {required Map<String, dynamic> meta}) async {
+  Future<ReportReceipt> upload(List<int> gzipped, {required Map<String, dynamic> meta, int? proxyPort, ReportCancel? cancel}) async {
     calls++;
+    this.proxyPort = proxyPort;
+    if (hang) return Completer<ReportReceipt>().future;
     if (fail != null) throw fail!;
     bytes = gzipped;
     this.meta = meta;
@@ -118,8 +125,9 @@ void main() {
     setUp(() async => tmp = await Directory.systemTemp.createTemp('jorm-send'));
     tearDown(() async => tmp.delete(recursive: true));
 
-    Future<CoreService> open(ReportUploader? up) async {
+    Future<CoreService> open(ReportUploader? up, {Duration? deadline}) async {
       final svc = CoreService(
+        reportDeadline: deadline ?? reportSendDeadline,
         singBox: 'none',
         dataDir: p.join(tmp.path, 'data'),
         runner: _Runner(),
@@ -185,6 +193,45 @@ void main() {
       addTearDown(svc.dispose);
       final r = await svc.sendReport();
       expect([r['ok'], r['error']], [false, 'failed']);
+    });
+
+    test('an uploader that never answers: the send still ends, as a timeout that says where it stuck', () async {
+      final up = _Uploader(hang: true);
+      final svc = await open(up, deadline: const Duration(milliseconds: 300));
+      addTearDown(svc.dispose);
+      final sw = Stopwatch()..start();
+      final r = await svc.sendReport(note: 'x');
+      expect(sw.elapsed, lessThan(const Duration(seconds: 5)));
+      expect([r['ok'], r['error']], [false, 'timeout']);
+      expect(r['message'], contains('uploading'));
+      expect(svc.logBook.since(null)['lines'].toString(), contains('Report not sent (timeout)'));
+      // the core is free for the next send
+      expect((await svc.sendReport()).containsKey('ok'), isTrue);
+    });
+
+    test('Cancel ends a send under way as `cancelled`, even when the uploader ignores the token', () async {
+      final up = _Uploader(hang: true);
+      final svc = await open(up);
+      addTearDown(svc.dispose);
+      final f = svc.sendReport(note: 'x');
+      while (up.calls == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(await svc.cancelReport(), {'ok': true, 'cancelled': true});
+      final r = await f.timeout(const Duration(seconds: 5));
+      expect(r, {'ok': false, 'error': 'cancelled'});
+      expect(await svc.cancelReport(), {'ok': true, 'cancelled': false}, reason: 'nothing under way now');
+    });
+
+    test('a second call while one goes joins it: one upload', () async {
+      final up = _Uploader();
+      final svc = await open(up);
+      addTearDown(svc.dispose);
+      final a = svc.sendReport(note: 'a');
+      final b = svc.sendReport(note: 'b');
+      expect(identical(a, b), isTrue);
+      expect((await a)['ok'], isTrue);
+      expect(up.calls, 1);
     });
   });
 }

@@ -44,6 +44,27 @@ class SystemNote {
   final String ignoredText, undoLabel;
 }
 
+/// A notification about the app's own update (not a journal event: its own slot on the shade, its own
+/// tap). [install] = the update is downloaded: the tap (and the [installLabel] button) lead straight to
+/// the system install dialog; otherwise the tap opens the update block (Settings -> Data).
+class UpdateNote {
+  const UpdateNote({
+    required this.title,
+    this.text = '',
+    required this.version,
+    this.install = false,
+    this.installLabel = '',
+  });
+
+  final String title;
+  final String text;
+
+  /// The offered version: what the native "announced" record keeps (one «available» per version).
+  final String version;
+  final bool install;
+  final String installLabel;
+}
+
 /// A choice made on the shade without the app: «Ignore site» ([ignore]) or its «Undo». They are applied
 /// to the ignored sites list in the order they were made.
 class SiteIgnoreOp {
@@ -143,6 +164,21 @@ abstract class NotifyIo {
   /// The Disconnect button of the VPN notification. The handler answers when it has taken the
   /// request; none set = the native side closes the tunnel itself.
   set onDisconnect(FutureOr<void> Function()? handler);
+
+  /// «Update available» / «Update ready · Install» (one slot: a newer one replaces the older, silently).
+  Future<void> postUpdate(UpdateNote note);
+
+  /// The version the user was last told about by a notification (this app or the background job, which
+  /// keep the same native record); null = none yet.
+  Future<String?> updateAnnounced();
+  Future<void> setUpdateAnnounced(String version);
+
+  /// Taps on the update notification while the app runs: `true` = lead to the install dialog.
+  Stream<bool> get updateTaps;
+
+  /// The update notification that started the app and was not handed over yet (`true` = install);
+  /// null = the app was not started by one.
+  Future<bool?> takeLaunchUpdate();
 }
 
 class PlatformNotifyIo implements NotifyIo {
@@ -156,6 +192,7 @@ class PlatformNotifyIo implements NotifyIo {
   final _taps = StreamController<int>.broadcast();
   final _actTaps = StreamController<NoteActionTap>.broadcast();
   final _ignoreQueued = StreamController<void>.broadcast();
+  final _updateTaps = StreamController<bool>.broadcast();
   FutureOr<void> Function()? _disconnect;
 
   @override
@@ -188,6 +225,9 @@ class PlatformNotifyIo implements NotifyIo {
       case 'eventAct':
         final t = NoteActionTap.fromMap(call.arguments);
         if (t != null) _actTaps.add(t);
+        return null;
+      case 'openUpdate':
+        _updateTaps.add(call.arguments == true);
         return null;
       case 'disconnect':
         final h = _disconnect;
@@ -255,6 +295,46 @@ class PlatformNotifyIo implements NotifyIo {
 
   @override
   Future<void> cancelEvents() => _call('cancelEvents');
+
+  @override
+  Future<void> postUpdate(UpdateNote note) => _call('postUpdate', <String, Object?>{
+    'title': note.title,
+    'text': note.text,
+    'version': note.version,
+    'install': note.install,
+    'installLabel': note.installLabel,
+  });
+
+  @override
+  Future<String?> updateAnnounced() async {
+    if (!available) return null;
+    try {
+      return await _channel.invokeMethod<String>('updateAnnounced');
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> setUpdateAnnounced(String version) =>
+      _call('setUpdateAnnounced', <String, Object?>{'version': version});
+
+  @override
+  Stream<bool> get updateTaps => _updateTaps.stream;
+
+  @override
+  Future<bool?> takeLaunchUpdate() async {
+    if (!available) return null;
+    try {
+      return await _channel.invokeMethod<bool>('takeLaunchUpdate');
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
 
   @override
   Future<void> setVpnNode(String? node) =>

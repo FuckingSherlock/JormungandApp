@@ -3321,6 +3321,7 @@
     }
   },
   "theReportServerFailedTryAgain": "The report server failed. Try again later.",
+  "theReportServerDidNotAnswer": "The report server did not answer in time. Try again.",
   "couldNotSendTheReport": "Could not send the report: {s0}",
   "@couldNotSendTheReport": {
     "placeholders": {
@@ -3340,5 +3341,17 @@
         "type": "num"
       }
     }
-  }
+  },
+  "updateReady": "Update {s0} ready",
+  "@updateReady": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "tapToInstall": "Tap to install",
+  "tapToSeeWhatSNew": "Tap to see what's new",
+  "newVersion": "New version",
+  "aNewVersionOfTheApp": "A new version of the app is out, or a downloaded one waits to be installed"
 }

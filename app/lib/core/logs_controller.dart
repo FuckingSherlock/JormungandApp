@@ -18,6 +18,7 @@ import 'package:jormungand_core/jormungand_core.dart'
 import '../l10n/l10n.dart';
 import 'core_host.dart';
 import 'event_text.dart';
+import 'report_send.dart';
 import 'settings_model.dart';
 
 /// What the Logs tab shows and keeps (mockup 46-logs.js, 47-events.js): the events journal and
@@ -55,6 +56,9 @@ class LogsController extends ChangeNotifier {
   AppLocalizations? l10n;
 
   EventWords get words => EventWords(l10n!, host.catalog);
+
+  /// «Send report»: the send and its result live here, not in the sheet (report_send.dart).
+  late final reportSend = ReportSendController(host);
 
   final feed = EventFeed();
   final filter = EventFilter();
@@ -788,6 +792,7 @@ class LogsController extends ChangeNotifier {
     _debounce?.cancel();
     host.removeListener(_onHost);
     _notify.close();
+    reportSend.dispose();
     super.dispose();
   }
 }

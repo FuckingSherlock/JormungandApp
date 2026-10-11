@@ -29,7 +29,7 @@ class _Up implements ReportUploader {
   Map<String, dynamic>? meta;
 
   @override
-  Future<ReportReceipt> upload(List<int> gzipped, {required Map<String, dynamic> meta}) async {
+  Future<ReportReceipt> upload(List<int> gzipped, {required Map<String, dynamic> meta, int? proxyPort, ReportCancel? cancel}) async {
     if (fail != null) throw fail!;
     bytes = gzipped;
     this.meta = meta;
@@ -92,7 +92,7 @@ void main() {
     final up = _Up();
     await start(up: up);
     final res = await host.sendReport(note: 'no TCP in Telegram');
-    expect(res, {'ok': true, 'id': 'abc-42', 'bytes': up.bytes!.length});
+    expect(res, {'ok': true, 'id': 'abc-42', 'bytes': up.bytes!.length, 'via': 'direct'});
     final rep = jsonDecode(utf8.decode(gzip.decode(up.bytes!))) as Map<String, dynamic>;
     expect(rep['note'], 'no TCP in Telegram');
     expect((rep['app'] as Map)['version'], '1.2.3');

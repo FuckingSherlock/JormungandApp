@@ -78,9 +78,14 @@ abstract interface class CoreApi {
   /// "Send report": the same report (built with the strict masking, docs/logs.md → Отправка) plus
   /// the user's [note] (≤ 500 characters, masked too), gzipped and handed to the core's
   /// `ReportUploader`. → `{ok: true, id, bytes}` or `{ok: false, error, message?}`; `error` is
-  /// `not-configured` (no receiver plugged in yet), `network`, `rejected`, `server` or `failed`.
-  /// Does not throw for a delivery that failed.
+  /// `not-configured` (no receiver plugged in yet), `network`, `rejected`, `server`, `cancelled`,
+  /// `timeout` (no result in a minute: it always ends) or `failed`. Does not throw for a delivery that
+  /// failed. The upload goes direct first and, if that fails while the tunnel is up, through the
+  /// tunnel (`via: 'direct' | 'vpn'` in the answer). A second call while one goes joins it.
   Future<Map<String, dynamic>> sendReport({String note = '', Map<String, dynamic> appInfo = const {}});
+
+  /// Stops the send under way (it answers `cancelled`) → `{ok: true, cancelled: bool}`.
+  Future<Map<String, dynamic>> cancelReport();
 
   /// `{protocol, address, port, secret, name, outbound?, unsupported?}` → the node (manual.dart).
   Node manualNode(Map<String, dynamic> body);

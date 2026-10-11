@@ -349,6 +349,14 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   события группы, а не просто «открыть приложение») → `openEvent` / `takeLaunchEvent` → оболочка закрывает
   оставленные листы и диалоги (`popUntil` первого маршрута) и открывает Logs → Events на событии
   (`LogsController.showEvent`: фильтр сбрасывается, если прячет событие).
+- **Уведомления об обновлении приложения** (не события журнала; `core/update_flow.dart`, `UpdateFlow`): канал
+  `update`, id 4 (один на «Update X available» / «Update X ready · Install»; заменяется, не копится), BigText,
+  кнопка **Install** только у «ready». Dart шлёт `postUpdate {title, text, version, install, installLabel}`
+  (язык приложения), общая запись «объявлено» — `updateAnnounced` / `setUpdateAnnounced` (SharedPreferences
+  `jorm_update/announced`). Тап — `ACTION_OPEN_UPDATE` (+ `EXTRA_INSTALL`) → `openUpdate(install)` /
+  `takeLaunchUpdate` → оболочка открывает Settings → Data (`_openUpdate`) и при `install` запускает установку.
+  Показываются только в фоне; фильтр — мастер и `notifCfg.updateAvailable` («New version»). Логика и причины —
+  `updates.md`, раздел 6.
 - **Разрешение** (API 33+; ниже — только переключатель системы). Запрос один раз за установку при первом
   успешном подключении (`request(once: true)`, нативный флаг в SharedPreferences; мастер-переключатель
   Notifications выключен — не просим) и когда пользователь включает переключатель на странице

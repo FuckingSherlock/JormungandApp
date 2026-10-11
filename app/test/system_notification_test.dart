@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand_core/jormungand_core.dart' show Catalog;
 import 'package:jormungand/app.dart';
+import 'package:jormungand/core/app_update.dart';
 import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/core/system_notifier.dart';
@@ -59,6 +60,34 @@ class FakeNotifyIo implements NotifyIo {
 
   @override
   Future<void> cancelEvents() async => cancels++;
+
+  /// The update notifications asked for, and the version the native record says was announced.
+  final updatePosted = <UpdateNote>[];
+  String? announced;
+  bool? launchUpdate;
+  final _updTaps = StreamController<bool>.broadcast();
+
+  /// A tap on the update notification (`install`: it said «Install»).
+  void tapUpdate({bool install = false}) => _updTaps.add(install);
+
+  @override
+  Future<void> postUpdate(UpdateNote note) async => updatePosted.add(note);
+
+  @override
+  Future<String?> updateAnnounced() async => announced;
+
+  @override
+  Future<void> setUpdateAnnounced(String version) async => announced = version;
+
+  @override
+  Stream<bool> get updateTaps => _updTaps.stream;
+
+  @override
+  Future<bool?> takeLaunchUpdate() async {
+    final l = launchUpdate;
+    launchUpdate = null;
+    return l;
+  }
 
   @override
   Future<void> setVpnNode(String? node) async => vpnNodes.add(node);
@@ -728,5 +757,123 @@ void main() {
         await tester.pumpAndSettle(const Duration(seconds: 5));
       });
     }
+  });
+
+  group('the app update (docs/updates.md, section 6)', () {
+    AppUpdate upd(UpdPhase phase) => AppUpdate(
+      phase: phase,
+      current: '0.1.0',
+      offer: const UpdOffer(version: '0.2.0', channel: 'stable', size: 1024, notes: {}),
+      file: phase == UpdPhase.ready ? '/data/u.apk' : null,
+    );
+
+    Future<void> openDataSettings(WidgetTester tester) async {
+      tester.view.devicePixelRatio = 2;
+      tester.view.physicalSize = const Size(640, 5000);
+      addTearDown(tester.view.reset);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-setdata')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Download & install: the installer gets the file the moment it is ready; a declined dialog leaves the Install button', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      host.installable = true;
+      host.installResult = false;
+      host.update = upd(UpdPhase.available);
+      host.changed();
+      await openDataSettings(tester);
+      host.installWanted = true; // the press on «Download & install»
+      host.update = upd(UpdPhase.downloading);
+      host.changed();
+      await tester.pumpAndSettle();
+      expect(host.calls, isNot(contains('installUpdate')));
+
+      host.update = upd(UpdPhase.ready);
+      host.changed();
+      await tester.pumpAndSettle();
+      expect(host.calls.where((c) => c == 'installUpdate'), hasLength(1));
+      expect(io.updatePosted, isEmpty);
+      // declined: the card still offers Install
+      expect(find.text('Install'), findsOneWidget);
+      await tester.tap(find.text('Install'));
+      await tester.pump();
+      expect(host.calls.where((c) => c == 'installUpdate'), hasLength(2));
+    });
+
+    testWidgets('an automatic download opens no dialog in front of the user', (tester) async {
+      final host = await open(tester);
+      host.installable = true;
+      host.update = upd(UpdPhase.available);
+      host.changed();
+      await tester.pump();
+      host.update = upd(UpdPhase.ready);
+      host.changed();
+      await tester.pumpAndSettle();
+      expect(host.calls, isNot(contains('installUpdate')));
+      expect(io.updatePosted, isEmpty);
+    });
+
+    testWidgets('behind the app: «Update ready · Install» instead of a dialog; the tap installs and opens the card', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      host.installable = true;
+      host.update = upd(UpdPhase.available);
+      host.changed();
+      await tester.pump();
+      host.installWanted = true;
+      goBackground(tester);
+      host.update = upd(UpdPhase.ready);
+      host.changed();
+      await settle(tester);
+      expect(host.calls, isNot(contains('installUpdate')));
+      expect(io.updatePosted, hasLength(1));
+      expect(io.updatePosted.single.title, 'Update 0.2.0 ready');
+      expect(io.updatePosted.single.install, isTrue);
+
+      comeBack(tester);
+      io.tapUpdate(install: true);
+      await tester.pumpAndSettle();
+      expect(host.calls.where((c) => c == 'installUpdate'), hasLength(1));
+      expect(find.text('Install'), findsOneWidget); // the Data sheet is open on the ready card
+    });
+
+    testWidgets('a newer version found behind the app: «Update 0.2.0 available» once; obeys the New version switch', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      goBackground(tester);
+      host.update = upd(UpdPhase.available);
+      host.changed();
+      await settle(tester);
+      expect(io.updatePosted, hasLength(1));
+      expect(io.updatePosted.single.title, 'Update 0.2.0 available');
+      expect(io.updatePosted.single.install, isFalse);
+      expect(io.announced, '0.2.0');
+
+      io.updatePosted.clear();
+      io.announced = null;
+      host.notif.setFlag('updateAvailable', false);
+      host.update = upd(UpdPhase.checking);
+      host.changed();
+      host.update = upd(UpdPhase.available);
+      host.changed();
+      await settle(tester);
+      expect(io.updatePosted, isEmpty);
+    });
+
+    testWidgets('the notification that started the app opens the card', (tester) async {
+      io.launchUpdate = false;
+      final host = FakeCoreHost(android: true);
+      host.update = upd(UpdPhase.available);
+      await tester.pumpWidget(JormungandApp(coreHost: host));
+      await tester.pumpAndSettle();
+      expect(find.text('Update 0.2.0 available'), findsOneWidget);
+    });
   });
 }

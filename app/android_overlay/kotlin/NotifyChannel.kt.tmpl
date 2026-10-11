@@ -35,8 +35,16 @@ import io.flutter.plugin.common.MethodChannel
  *  takeLaunchAction -> Map? {id, act, site, via} of a button that started / raised the app and was not
  *                           handed over yet (what `eventAct` is when Dart is listening)
  *
+ *  postUpdate    -> null    args {title, text, install: Boolean, installLabel}: the app's own update ("Update
+ *                           available" / "Update ready · Install") in its own slot ([AppNotifier.postUpdate]);
+ *                           a tap opens the app at the update block (`install`: and goes on to the install dialog)
+ *  updateAnnounced / setUpdateAnnounced {version} -> String? / null  the version the user was last told about
+ *                           (native record, shared with the background job: one notification per version)
+ *  takeLaunchUpdate -> Bool? the update notification that started the app and was not handed over yet (install?)
+ *
  *  Kotlin -> Dart: `openEvent` (Int; a tap on an event notification while Dart listens), `eventAct`
  *  (Map {id, act, site, via}; a button of an event notification while Dart listens) and
+ *  `openUpdate` (Bool install; a tap on the update notification while Dart listens),
  *  `ignoreQueued` (no args; [EventActionReceiver] queued a choice, Dart reads it with `takeIgnoreOps`) and
  *  `disconnect` (the VPN notification's action; Dart answers true, any error = nobody listens and the
  *  service closes the tunnel itself, see [AppNotifier] / [JormungandVpnService]).
@@ -56,6 +64,7 @@ class NotifyChannel(private val app: Context) {
     private var pendingRequest: MethodChannel.Result? = null
     private var launchEvent: Int? = null
     private var launchAct: Map<String, Any>? = null
+    private var launchUpdate: Boolean? = null // an update notification started the app: lead to install?
     private var dartReady = false
 
     fun register(messenger: BinaryMessenger) {
@@ -127,6 +136,25 @@ class NotifyChannel(private val app: Context) {
                 launchAct = null
             }
             "takeIgnoreOps" -> result.success(IgnoreQueue.take(app))
+            "postUpdate" -> {
+                AppNotifier.postUpdate(
+                    app,
+                    call.argument<String>("title") ?: "",
+                    call.argument<String>("text") ?: "",
+                    call.argument<Boolean>("install") == true,
+                    call.argument<String>("installLabel") ?: "",
+                )
+                result.success(null)
+            }
+            "updateAnnounced" -> result.success(AppNotifier.updateAnnounced(app))
+            "setUpdateAnnounced" -> {
+                call.argument<String>("version")?.let { AppNotifier.setUpdateAnnounced(app, it) }
+                result.success(null)
+            }
+            "takeLaunchUpdate" -> {
+                result.success(launchUpdate)
+                launchUpdate = null
+            }
             else -> result.notImplemented()
         }
     }
@@ -155,6 +183,18 @@ class NotifyChannel(private val app: Context) {
 
     /** From MainActivity (onCreate, onNewIntent): a tap on an event notification, or on a button of one. */
     fun onIntent(intent: Intent?) {
+        if (intent?.action == AppNotifier.ACTION_OPEN_UPDATE) {
+            val install = intent.getBooleanExtra(AppNotifier.EXTRA_INSTALL, false)
+            intent.action = null // a recreated activity must not replay it
+            intent.removeExtra(AppNotifier.EXTRA_INSTALL)
+            val ch = dart
+            if (dartReady && ch != null) {
+                ch.invokeMethod("openUpdate", install)
+            } else {
+                launchUpdate = install || launchUpdate == true
+            }
+            return
+        }
         if (intent?.action == AppNotifier.ACTION_EVENT_ACT && intent.hasExtra(AppNotifier.EXTRA_EVENT)) {
             val id = intent.getIntExtra(AppNotifier.EXTRA_EVENT, -1)
             val act = mapOf(

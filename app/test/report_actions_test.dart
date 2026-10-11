@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/core/logs_controller.dart';
+import 'package:jormungand/core/report_send.dart';
 import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/platform/files_channel.dart';
 import 'package:jormungand/widgets/report_actions.dart';
@@ -113,7 +114,7 @@ void main() {
     await tester.pump();
     expect(host.sentNotes, ['it fails since noon']);
     expect(find.text('Sending…'), findsOneWidget);
-    expect(find.text('Cancel'), findsNothing, reason: 'nothing to cancel while it goes');
+    expect(find.text('Cancel'), findsOneWidget, reason: 'a send that goes can be stopped');
 
     host.sendGate!.complete();
     await tester.pumpAndSettle();
@@ -127,6 +128,114 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
     expect(find.text('Sent. Report id: r-1'), findsNothing);
+    done();
+  });
+
+  testWidgets('Send report: Cancel while sending stops it and gives the form back with the note', (tester) async {
+    final ctx = await start(tester);
+    host.sendGate = Completer<void>();
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'keep me');
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pump();
+    expect(find.text('Sending…'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(host.calls, contains('cancelSendReport'));
+    expect(find.text('Sending…'), findsNothing);
+    expect(find.text('WHAT IS SENT'), findsOneWidget);
+    expect(find.text('keep me'), findsOneWidget);
+    expect(find.textContaining('Could not send'), findsNothing, reason: 'a cancel is not an error');
+    expect(logs.reportSend.phase, ReportPhase.form);
+
+    // and it can be sent again: the old send's late answer does not touch the new one
+    host.sendGate = null;
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Sent. Report id: r-1'), findsOneWidget);
+    expect(host.sentNotes, ['keep me', 'keep me']);
+    done();
+  });
+
+  testWidgets('Send report: closing the sheet does not stop the send; reopening shows it, then its result', (tester) async {
+    final ctx = await start(tester);
+    host.sendGate = Completer<void>();
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'still going');
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pump();
+
+    Navigator.of(ctx).pop(); // the sheet goes away mid-send
+    await tester.pumpAndSettle();
+    expect(find.text('Sending…'), findsNothing);
+    expect(host.calls, isNot(contains('cancelSendReport')));
+    expect(logs.reportSend.sending, isTrue);
+
+    unawaited(showSendReport(ctx, logs));
+    // not pumpAndSettle: the progress bar never settles and fake time would run out the deadline
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Sending…'), findsOneWidget, reason: 'the send under way, not a fresh form');
+    expect(find.text('WHAT IS SENT'), findsOneWidget);
+    expect(host.sentNotes, ['still going'], reason: 'reopening does not send again');
+
+    host.sendGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Sent. Report id: r-1'), findsOneWidget);
+
+    // closed on the result: the next opening is a new, empty form
+    Navigator.of(ctx).pop();
+    await tester.pumpAndSettle();
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    expect(find.text('Sent. Report id: r-1'), findsNothing);
+    expect(find.text('0/500'), findsOneWidget);
+    done();
+  });
+
+  testWidgets('Send report: a result that arrives while the sheet is closed is there on reopening', (tester) async {
+    final ctx = await start(tester);
+    host.sendGate = Completer<void>();
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pump();
+    Navigator.of(ctx).pop();
+    await tester.pumpAndSettle();
+
+    host.sendGate!.complete();
+    await tester.pumpAndSettle();
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    expect(find.text('Sent. Report id: r-1'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(logs.reportSend.phase, ReportPhase.form);
+    done();
+  });
+
+  testWidgets('Send report: a failure that arrives while closed is shown on reopening, with the note', (tester) async {
+    final ctx = await start(tester);
+    host.sendGate = Completer<void>();
+    host.sendResult = {'ok': false, 'error': 'timeout', 'message': 'stuck while uploading'};
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'my note');
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pump();
+    Navigator.of(ctx).pop();
+    await tester.pumpAndSettle();
+    host.sendGate!.complete();
+    await tester.pumpAndSettle();
+
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('did not answer in time'), findsOneWidget);
+    expect(find.text('my note'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
     done();
   });
 

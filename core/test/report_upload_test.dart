@@ -39,11 +39,13 @@ void main() {
   // what the server answers next: (status, body, extra headers); a null body = never answer
   var answer = (status: 200, body: '{"ok":true,"id":"20261010-k3x9qa"}' as String?, headers: const <String, String>{});
 
-  HttpReportUploader up({int? maxBytes, Duration? timeout, String? publicKey, String? endpoint}) => HttpReportUploader(
+  HttpReportUploader up({int? maxBytes, Duration? timeout, Duration? directTimeout, String? publicKey, String? endpoint}) =>
+      HttpReportUploader(
         endpoint: endpoint ?? 'http://127.0.0.1:${server.port}/v1/report',
         publicKey: publicKey ?? keys.publicBase64,
         connectTimeout: const Duration(seconds: 2),
         timeout: timeout ?? const Duration(seconds: 10),
+        directTimeout: directTimeout ?? timeout ?? const Duration(seconds: 10),
         maxBytes: maxBytes ?? reportMaxBytes,
       );
 
@@ -119,7 +121,95 @@ void main() {
       expect(d.publicKey, reportPublicKey);
       expect(d.maxBytes, 4 * 1024 * 1024);
       expect(d.connectTimeout, const Duration(seconds: 10));
-      expect(d.timeout, const Duration(seconds: 60));
+      expect(d.timeout, const Duration(seconds: 30));
+      expect(d.directTimeout, const Duration(seconds: 12));
+    });
+  });
+
+  // The direct path is the app's own and may be blocked or throttled (a connection that opens and
+  // stalls); with the tunnel up the same envelope then goes through the tunnel's local proxy. Here the
+  // "direct" receiver is a socket that accepts and never speaks, the "proxy" is a plain HTTP server
+  // (for an http:// target a proxy gets the absolute URI, which is what Dart sends).
+  group('direct, then via the tunnel', () {
+    late ServerSocket stalled;
+    final held = <Socket>[];
+    late HttpServer proxy;
+    final viaProxy = <Uri>[];
+
+    setUp(() async {
+      held.clear();
+      viaProxy.clear();
+      stalled = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      stalled.listen(held.add);
+      proxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      proxy.listen((req) async {
+        viaProxy.add(req.requestedUri);
+        await req.drain<void>();
+        req.response.write('{"ok":true,"id":"20261010-vpn123"}');
+        await req.response.close();
+      });
+    });
+
+    tearDown(() async {
+      for (final s in held) {
+        s.destroy();
+      }
+      await stalled.close();
+      await proxy.close(force: true);
+    });
+
+    HttpReportUploader stalledUp() => up(
+          endpoint: 'http://127.0.0.1:${stalled.port}/v1/report',
+          directTimeout: const Duration(milliseconds: 400),
+          timeout: const Duration(seconds: 2),
+        );
+
+    test('a direct attempt that stalls falls back to the tunnel proxy and says so', () async {
+      final r = await stalledUp().upload(_gz(), meta: _meta, proxyPort: proxy.port);
+      expect(r.id, '20261010-vpn123');
+      expect(r.via, 'vpn');
+      expect(r.directError, contains('did not answer'));
+      expect(viaProxy.single.port, stalled.port, reason: 'the proxy was asked for the same target');
+    });
+
+    test('not connected (no proxy): the only direct attempt gets the long timeout and ends as network', () async {
+      final sw = Stopwatch()..start();
+      final e = await failure(stalledUp().upload(_gz(), meta: _meta));
+      expect(e.code, 'network');
+      expect(sw.elapsed, greaterThan(const Duration(milliseconds: 1500)), reason: 'the long one, not the short direct one');
+      expect(viaProxy, isEmpty);
+    });
+
+    test('direct fails and the tunnel fails too: network, both reasons in the message', () async {
+      final dead = proxy.port;
+      await proxy.close(force: true);
+      final e = await failure(stalledUp().upload(_gz(), meta: _meta, proxyPort: dead));
+      expect(e.code, 'network');
+      expect(e.message, allOf(contains('direct:'), contains('via VPN:')));
+    });
+
+    test('an answer of the receiver (any status) ends it: no second attempt through the tunnel', () async {
+      answer = (status: 429, body: '{"ok":false,"error":"slow"}', headers: const {});
+      final e = await failure(up().upload(_gz(), meta: _meta, proxyPort: proxy.port));
+      expect(e.code, 'rejected');
+      expect(viaProxy, isEmpty);
+    });
+
+    test('Cancel aborts a stalled upload at once, direct or via the tunnel', () async {
+      final c = ReportCancel();
+      final f = failure(stalledUp().upload(_gz(), meta: _meta, proxyPort: proxy.port, cancel: c));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      c.cancel();
+      final e = await f.timeout(const Duration(seconds: 3));
+      expect(e.code, 'cancelled');
+      expect(viaProxy, isEmpty, reason: 'cancelled before the fallback started');
+    });
+
+    test('already cancelled: nothing is sent', () async {
+      final c = ReportCancel()..cancel();
+      final e = await failure(up().upload(_gz(), meta: _meta, cancel: c));
+      expect(e.code, 'cancelled');
+      expect(got, isEmpty);
     });
   });
 
