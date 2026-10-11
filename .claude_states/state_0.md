@@ -20,6 +20,11 @@
 - Последний коммит с кодом — `8bf1d4a` (Logs + уведомления: raw-флуд, свёрнутые категории, Ignored sites в фильтрах,
   «Ignore site» в шторке без открытия приложения + Undo, тап по уведомлению → событие).
 
+## Приоритет
+
+Android первым (ничего не поменялось); Windows — после. На Android приоритетная фича — kill switch (`apk_losted.md`).
+Каждый пункт плана живёт ровно в одном файле, сделанное удаляется из плана.
+
 ## Баги (найдены пользователем 2026-10-11, делать первыми)
 
 - **Send report висит на «Sending…» бесконечно** (скрин с телефона, 0.1.1-beta.10). Telegram-уведомление об отчёте ни разу не
@@ -43,8 +48,8 @@
 ## Техдолг
 
 - Устаревшие места docs: `connect-model.md:519, 711, 1133–1145`; `core.md:590` (противоречит `config.dart:325`), `core.md:1118` «Не сделано в MVP»;
-  `updates.md:44` (`releaseFeeds` уже задан), `updates.md:703–712`; `rules.md:3`; `platforms.md:36` («пока showModalBottomSheet» — это пробел, см. `apk_losted.md`).
-- Устаревшие TODO в коде: `app/lib/shell/home_shell.dart:48` (точки на Logs уже есть; часть про стек листов — в `apk_losted.md`),
+  `updates.md:44` (`releaseFeeds` уже задан), `updates.md:703–712`; `rules.md:3`.
+- Устаревшие TODO в коде: `app/lib/shell/home_shell.dart:48` (точки на Logs уже есть; часть про стек листов — в `to_think.md`),
   `app/lib/state/app_settings.dart:67` (тема/масштаб/язык уже сохраняются через `app.dart`).
 - `app/flutter_test_output.txt` закоммичен — мусор.
 - Экспорт лога: кольцо шума держит 500 новейших строк соединений (`core.md:510–511`), принятое ограничение.
