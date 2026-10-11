@@ -134,6 +134,8 @@ release signing key) are never written to the repo or read by the agent.
 - A brief states: goal, files to start from (with line hints), constraints (no commit, never read
   `main_screen.html`, CSS vars / theme extension only, 320 px / 120 % fit, new strings in English only — see "Translations"),
   checks to add, docs to update, the exact verify command, "report briefly".
+  Agents already get CLAUDE.md — never write "read CLAUDE.md"; point to doc sections by line range, not whole docs.
+  Report format: ≤ 15 lines — changed (files), checked (commands + result), noticed out of scope; details live in the diff.
 - Parallel agents get told which files the others edit; shared files (`check.mjs`, `04-i18n-ru.js`,
   ARB files, `i18n_extra.json`, `core_host.dart`, `CLAUDE.md`) — small Edit-tool edits only, re-read
   the region first, never rewrite.
@@ -151,8 +153,17 @@ release signing key) are never written to the repo or read by the agent.
   for real design questions or unfamiliar code.
 - Checks in briefs: the coder runs only the tests of what it touched (+ `analyze`); the full suites and
   gradle run once, by the lead via the Haiku `test-runner`, before the commit.
-- At most 4 Sonnet agents at once; avoid parallel agents in the same files. An agent stopped by a limit is
-  resumed with SendMessage (its context survives), not restarted.
+- At most 4 Sonnet agents at once (2 when the 5-hour limit is near its end — a parallel burst ends in several
+  agents cut mid-task, and resuming them after the cache expired costs full price); avoid parallel agents in the
+  same files. An agent stopped by a limit is resumed with SendMessage (its context survives), not restarted.
+- One lead session per stage: a stage (one feature / bug batch) ends with a commit and the state/plan files
+  current, and the next stage starts in a fresh session from them — a long lead session re-reads its whole
+  context every turn and loses facts at each compaction. Before spawning agents, note in-flight work
+  (what, which files) in `state_N.md` so a compaction or a new session can see it.
+- Settle a requirement with the user before briefing an agent on it; a behaviour still being discussed is not
+  implemented "for now" and redone half an hour later.
+- Docs describe behaviour and contracts (what, when, limits, codes), not a retelling of the implementation:
+  every later agent reads them.
 - User decisions go into `.claude_states/state_N.md`; plan items into the plan file they belong to (move an item
   between files when its status changes, delete it from the plan when done).
 
