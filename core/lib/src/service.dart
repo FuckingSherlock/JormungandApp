@@ -34,6 +34,7 @@ import 'rulesets.dart';
 import 'runtime.dart' hide speedTest;
 import 'runtime.dart' as core_speed show speedTest;
 import 'sbapi.dart';
+import 'sentinel/sentinel.dart';
 import 'share.dart';
 import 'sitecheck.dart';
 import 'state.dart';
@@ -101,7 +102,9 @@ class CoreService implements CoreApi {
       _auto?.onLog(line);
       failures.onLog(line);
       tunIngress.onLine(line);
+      if (line.contains('updated default interface')) sentinel.context.interfaceChanged();
     };
+    pool.onChange = (s) => sentinel.context.pool(s, osOffline: pool.osOffline);
     ruleSets.onFailed = (tag, url, error) => _event('rules', 'ruleSetFailed', 'warn', {'tag': tag, 'url': url, 'error': error},
         note: 'Rule set $tag not downloaded ($url): $error');
     ruleSets.onUpdated = (tag) => _event('rules', 'ruleSetUpdated', 'info', {'tag': tag}, note: 'Rule set $tag updated');
@@ -195,6 +198,11 @@ class CoreService implements CoreApi {
   /// network status they share. `direct` = the direct path through the main sing-box's probe
   /// inbound (only asked while Auto runs, so while it is up).
   late final pool = ProbePool(direct: (url, t) async => _probe == null ? -1 : _probe!.delay('direct', url, timeoutMs: t));
+
+  /// Checks a failure against the state of the world before it is reported as one (sentinel/,
+  /// docs/failures.md). Its context follows [pool], the platform ([setNetwork]) and this service's own
+  /// starts and stops; the detectors move onto [Sentinel.suspect] one by one.
+  late final sentinel = Sentinel(clock: SentinelClock(now: _now), book: eventBook, note: logBook.note);
   StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto and the failure book
 
   /// Failed connections of the running sing-box (failures.dart): `conn/failing` and the report's numbers.
@@ -340,6 +348,7 @@ class CoreService implements CoreApi {
     logBook.load(); // last run's warnings and errors
     eventBook.load(); // trims an old journal at start
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
+    sentinel.changes.listen((_) => _changed()); // the network and the core phase are in the status (`context`)
     await store.read(); // a damaged snapshot is recovered (and journaled) now, not at the UI's first request
     try {
       final j = jsonDecode(await _speedFile.readAsString());
@@ -363,6 +372,7 @@ class CoreService implements CoreApi {
     _connectSeq++;
     _wakeUp();
     _stopAuto();
+    sentinel.dispose();
     updater.stop();
     await appUpdater?.dispose();
     await runner.stop();
@@ -658,6 +668,7 @@ class CoreService implements CoreApi {
     if (plan == null) return;
     final seq = _connectSeq, at = _auto?.index;
     _stopAuto();
+    sentinel.context.crashed();
     runner.note('sing-box stopped on its own (exit code $code)');
     eventBook.add('core', 'crashed', 'error', data: {'code': code});
     if (_now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
@@ -698,9 +709,11 @@ class CoreService implements CoreApi {
         final RuleSetFetch lists;
         final warnings = ['sing-box stopped (exit code $code) and was started again'];
         try {
+          sentinel.context.starting('recover');
           final (l, w) = await _startSingBox(plan, sys: _sysWanted); // the same path as a connect
           lists = l;
           warnings.addAll(w);
+          sentinel.context.started();
         } catch (e) {
           runner.note('restart $_attempt failed: $e');
           // the journal gets the first ones only: a dead server retried every 30 s would fill it
@@ -766,6 +779,7 @@ class CoreService implements CoreApi {
     }
     if (seq != _connectSeq) return;
     _downSince = _now();
+    sentinel.context.down();
     _downProxy = _released ? 'released' : (sysProxy.isSet ? 'kept' : 'removed');
     _event('core', 'down', 'error', {'proxy': _downProxy}, note: 'Connection down: sing-box does not start (system proxy $_downProxy)');
   }
@@ -889,6 +903,7 @@ class CoreService implements CoreApi {
         'restarts': _restarts,
         'auto': _autoState(),
         'network': pool.toJson(),
+        'context': sentinel.contextJson(), // the Sentinel's view: network state, core phase, open root causes (docs/failures.md)
         'dns': runner.running ? _dns?.toJson() : null,
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
         'speed': _lastSpeed, // last Speed Test of the connection: {down, up (bit/s), latency (ms), rpm, at (ms)}
@@ -1104,6 +1119,8 @@ class CoreService implements CoreApi {
       _tunnelPort = tunnelPort;
       _sysPort = sysPort;
       _error = null;
+      sentinel.context.starting('adopt');
+      sentinel.context.started(since: _upSince);
       _startAuto(_plan!);
       _recheckExit();
       logBook.note('info', 'Took over the running tunnel (${plan['kind']}, up since $_upSince)');
@@ -1167,7 +1184,9 @@ class CoreService implements CoreApi {
       try {
         _plan = null;
         final sys = body['systemProxy'] == true;
+        sentinel.context.starting(own ? 'userConnect' : 'refreshLists');
         final (lists, warnings) = await _startSingBox(plan, sys: sys);
+        sentinel.context.started();
         _plan = plan;
         _sysWanted = sys;
         _upSince = _now();
@@ -1186,6 +1205,7 @@ class CoreService implements CoreApi {
         eventBook.add('conn', 'connected', 'info', own: own, data: _connectedData(plan));
       } catch (e) {
         _error = '$e';
+        if (!runner.running) sentinel.context.stopped();
         logBook.note('error', 'Connect failed: $e');
         if (e is TunNeedsAdmin) {
           await runner.stop(); // refused before the old sing-box (a connect that switches modes) was stopped: a failed connect = not connected
@@ -1273,7 +1293,10 @@ class CoreService implements CoreApi {
     _released = false;
     _stopAuto();
     await _locked(() async {
-      if (seq == _connectSeq) await runner.stop();
+      if (seq == _connectSeq) {
+        await runner.stop();
+        sentinel.context.stopped();
+      }
     });
     _tunnelPort = null;
     logBook.note('info', 'Disconnected');
@@ -1308,6 +1331,22 @@ class CoreService implements CoreApi {
     if (data is! Map) throw const FormatException('event data must be an object');
     if (jsonEncode(data).length > _eventDataMax) throw const FormatException('event data too large');
     return {'id': eventBook.add(cat, type, level, data: data.cast<String, dynamic>(), own: own == true, link: false)};
+  }
+
+  /// body: `{connected?, validated?, captive?, type?, id?}` — what the platform says of the network now
+  /// (Android: the default network's capabilities and transport), as a whole: a missing field is "not
+  /// said". → the Sentinel's context (`status.context`). Never throws.
+  @override
+  Map<String, dynamic> setNetwork(Map<String, dynamic> body) {
+    final id = body['id'];
+    sentinel.context.platform(
+      connected: body['connected'] is bool ? body['connected'] as bool : null,
+      validated: body['validated'] is bool ? body['validated'] as bool : null,
+      captive: body['captive'] == true,
+      type: body['type'] is String ? body['type'] as String : null,
+      id: id is String || id is num ? '$id' : null,
+    );
+    return sentinel.contextJson();
   }
 
   /// The sing-box version when there is no binary to ask (Android: libbox in the process).

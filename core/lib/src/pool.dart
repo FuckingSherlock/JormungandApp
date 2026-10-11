@@ -168,9 +168,16 @@ class ProbePool {
     if (s != _last) {
       _last = s;
       _changedAt = _clock();
+      onChange?.call(s);
     }
     return s;
   }
+
+  /// Called when [status] moves (the Sentinel's network context follows it, sentinel/context.dart).
+  void Function(NetStatus status)? onChange;
+
+  /// The OS says it has no network (see [offline]).
+  bool get osOffline => _offline;
 
   /// Anything answered: the network is up, whatever was doubted or thought down.
   void answered() {

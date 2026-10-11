@@ -47,6 +47,7 @@ New strings go in English only (no Russian in briefs); before a stable tag all m
 | `docs/subscription-parsing.md` | formats, UA strategy, dedup, latency URL, region rules |
 | `docs/updates.md` | in-app updates: signed manifest, feeds, keys, Windows / Android install |
 | `docs/logs.md` | logs, events catalog, report |
+| `docs/failures.md` | Sentinel: context (network, core phase), suspicion → verdict ladder, root causes, event verdict/why/trail/cause, retry policy |
 | `docs/i18n.md` | translation mechanism and glossary |
 | `app/README.md` | Flutter app layout, conventions, TODO |
 

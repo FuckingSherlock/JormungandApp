@@ -414,6 +414,10 @@ Auto — паузы 1 / 4 / 15 с, потом каждые 30 с, без пре�
 
 ## Неудачные соединения (`failures.dart`, `tun_ingress.dart`)
 
+> Общий шлюз «проверить, потом объявлять» (`sentinel/`, контекст сети и ядра, лестница вердиктов, корни и
+> следствия, поля события `verdict` / `why` / `trail` / `cause`) — `docs/failures.md`. Эти детекторы пока
+> пишут события сами; перевод на шлюз — этап 2.
+
 Тихий отказ 2026-10-10 (на Android-стеках TUN `mixed` / `system` Telegram не работал: приложение
 исключало себя из VPN, sing-box писал `found package name`, а TCP до маршрутизации не доходил; ни
 ошибки, ни закрытого соединения) показал, что «ничего не пришло» ядро должно замечать само и
@@ -840,6 +844,7 @@ Global, hijack вкл / выкл, системные правила первым
 | `POST /api/killswitch` | `{killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — сменить на ходу, без переподключения → status |
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
+| `POST /api/network` | `{connected?, validated?, captive?, type?, id?}` — что платформа знает о сети (Android); заменяет прошлый отчёт → контекст `Sentinel` (`{network, core, roots}`, он же `context` в status). См. `failures.md` |
 | `POST /api/auto` | `{auto?, manual?, entry?}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения. `manual` (bool) — Auto ↔ Manual вживую: план уже держит все маршруты Auto (`plan.manual` — режим на старте), контроллер лишь перестаёт/начинает ходить между ними; `entry` (id записи) — маршрут, на котором стоит Manual: селектор `proxy` переключается туда без перезапуска и без события `auto/switched`. Записи нет в плане — режим применён, маршрут не двигается (хост шлёт новый план). `status.auto`: `manual`, `routes[].server` / `entryServer` — где стоят группы **каждого** маршрута → status |
 | `POST /api/disconnect`, `GET /api/status` | status: `{connected, mode: 'tun'\|'proxy'\|null, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, network, dns, sourcesRev}` — `network: {status: 'up'\|'down'\|'unknown', since, lastAnswer, offline, silent, doubt}` — общее состояние сети пула замеров (см. «Пул замеров»); `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N&conns=0` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next, hidden?}` — строки с номером ≥ N (без `since` — все хранимые: до 5000 + 500 шума); UI опрашивает с `next` прошлого ответа. `conns=0` — шум-кольцо (успешные соединения, `found package name`) не отдаётся, `hidden` = сколько строк пропущено; нумерация и `next` те же. `DELETE /api/log` — очистить (нумерация продолжается). Подробно — `docs/logs.md` |

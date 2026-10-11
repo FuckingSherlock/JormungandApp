@@ -18,6 +18,11 @@ import 'logbook.dart';
 /// the [LogBook] line written at the same moment (a jump to Raw); [data] holds structured
 /// fields only, never a ready sentence (the app words it in the user's language).
 ///
+/// An event the Sentinel judged (sentinel/, docs/failures.md) also carries `verdict` (one of
+/// [verdicts]), `why` (`{code, params}`: the reason, as codes), `trail` (the checks that were run:
+/// `[{code, params, outcome, at}]`) and `cause` (the id of the root event it is a consequence of).
+/// All four are absent on an event nobody judged, and on every event written before they existed.
+///
 /// Kept: the last [maxAge] and at most [cap] events (in memory strictly). With a [file] the
 /// journal is a JSON Lines file written behind the memory: new events are collected and
 /// appended in one write [flushEvery] after the first of them (and by [flush], which the
@@ -55,6 +60,18 @@ class EventBook {
 
   static const cats = {'conn', 'auto', 'site', 'sub', 'rules', 'dns', 'speed', 'core', 'user'};
   static const levels = {'info', 'warn', 'error'};
+
+  /// What the Sentinel can say of a failure it looked into (docs/failures.md → Вердикты).
+  static const verdicts = {'confirmed', 'blip', 'consequence', 'workaround', 'unexplained'};
+
+  /// Whether a notification must stay quiet about [event]: it was judged and is not a confirmed root
+  /// (a blip, a consequence of another event, a workaround, a failure nothing could explain). An event
+  /// nobody judged (no `verdict`) is not quiet here: the notification rules of its type decide.
+  static bool isQuiet(Map<String, dynamic> event) {
+    final v = event['verdict'];
+    if (v == null) return false;
+    return v != 'confirmed' || event['cause'] != null;
+  }
 
   final _events = ListQueue<Map<String, dynamic>>();
   int _next = 0;
@@ -111,7 +128,18 @@ class EventBook {
   /// Writes a new event and returns its id. [link]: put the current [LogBook] number on it
   /// (the caller writes the raw line first; an event without a raw line of its own, like
   /// the UI's, passes false).
-  int add(String cat, String type, String level, {Map<String, dynamic> data = const {}, bool own = false, bool link = true, bool bg = false}) {
+  ///
+  /// [verdict], [why], [trail], [cause]: what the Sentinel found out (see the class comment); codes
+  /// and params only, no sentences.
+  int add(String cat, String type, String level,
+      {Map<String, dynamic> data = const {},
+      bool own = false,
+      bool link = true,
+      bool bg = false,
+      String? verdict,
+      Map<String, dynamic>? why,
+      List<Map<String, dynamic>>? trail,
+      int? cause}) {
     load();
     final n = link ? log?.last : null;
     final e = <String, dynamic>{
@@ -123,6 +151,10 @@ class EventBook {
       'own': own,
       if (bg) 'bg': true,
       'log': ?n,
+      'verdict': ?verdict,
+      'why': ?why,
+      'trail': ?trail,
+      'cause': ?cause,
       'data': data,
     };
     _events.add(e);
@@ -142,14 +174,25 @@ class EventBook {
   /// own, [level] replaces the level when given. The event keeps its id and place, gets `rev`
   /// (the number of changes, absent = 0), is pushed on [stream] again and rides in [since]'s
   /// `updated` for [updatedFor]; the file is rewritten behind the memory like after a prune.
+  /// [verdict], [why], [cause] replace the event's own when given; [appendTrail] is put after its trail.
   /// Returns false when the event is not there any more.
-  bool update(int id, {Map<String, dynamic> data = const {}, String? level}) {
+  bool update(int id,
+      {Map<String, dynamic> data = const {},
+      String? level,
+      String? verdict,
+      Map<String, dynamic>? why,
+      int? cause,
+      List<Map<String, dynamic>>? appendTrail}) {
     load();
     final i = _indexOf(id);
     if (i < 0) return false;
     // the queue has no indexed write: the map changes where it is (readers compare `rev`)
     final e = _events.elementAt(i);
     if (level != null) e['level'] = level;
+    if (verdict != null) e['verdict'] = verdict;
+    if (why != null) e['why'] = why;
+    if (cause != null) e['cause'] = cause;
+    if (appendTrail != null && appendTrail.isNotEmpty) e['trail'] = [...((e['trail'] as List?) ?? const []), ...appendTrail];
     e['rev'] = ((e['rev'] as int?) ?? 0) + 1;
     e['data'] = {...(e['data'] as Map<String, dynamic>), ...data};
     _updatedAt[id] = _clock().millisecondsSinceEpoch;

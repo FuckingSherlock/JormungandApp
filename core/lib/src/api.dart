@@ -28,6 +28,12 @@ abstract interface class CoreApi {
   /// The status (docs/core.md → API, `GET /api/status`).
   Future<Map<String, dynamic>> status();
 
+  /// `{connected?, validated?, captive?, type?, id?}` → the Sentinel's context (`status.context`, docs/failures.md):
+  /// what the platform says of the network now (Android: `NET_CAPABILITY_VALIDATED`, `NET_CAPABILITY_CAPTIVE_PORTAL`,
+  /// the transport, an id of the network), all of it each time; a field left out is "not said". `captive: true` makes the
+  /// network `captive`, `connected: false` makes it `none`; `validated: false` alone is only a doubt.
+  Map<String, dynamic> setNetwork(Map<String, dynamic> body);
+
   /// The status again whenever it changed (state transitions, Auto switches, the exit check,
   /// the network state) and every few seconds for the measurements inside it while someone
   /// listens; identical statuses are not repeated. Broadcast.

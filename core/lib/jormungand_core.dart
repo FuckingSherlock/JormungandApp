@@ -43,6 +43,7 @@ export 'src/rulenames.dart';
 export 'src/rulesets.dart';
 export 'src/runtime.dart';
 export 'src/sbapi.dart';
+export 'src/sentinel/sentinel.dart';
 export 'src/service.dart';
 export 'src/share.dart';
 export 'src/sitecheck.dart';

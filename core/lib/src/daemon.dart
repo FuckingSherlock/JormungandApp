@@ -101,6 +101,7 @@ class Daemon {
         'GET /api/state' => service.state(),
         'PUT /api/state' => service.saveState((body['snapshot'] as Map?)?.cast<String, dynamic>()),
         'GET /api/status' => service.status(),
+        'POST /api/network' => Future(() => service.setNetwork(body)),
         'GET /api/traffic' => service.traffic(),
         'GET /api/log' => Future.value(service.log(since: since, conns: conns)),
         'DELETE /api/log' => Future(() {
