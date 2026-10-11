@@ -721,9 +721,12 @@ class SecondaryButton extends StatelessWidget {
 
 /// `.warn-note`: why the button above stays dimmed, or what went wrong.
 class WarnNote extends StatelessWidget {
-  const WarnNote(this.text, {super.key});
+  const WarnNote(this.text, {super.key, this.detail});
 
   final String text;
+
+  /// A technical second line in smaller type (a raw reason); selectable so it can be quoted.
+  final String? detail;
 
   @override
   Widget build(BuildContext context) {
@@ -737,9 +740,21 @@ class WarnNote extends StatelessWidget {
         borderRadius: BorderRadius.circular(c.radius),
         border: Border.all(color: c.warn.tint(.3)),
       ),
-      child: Text(
-        text,
-        style: TextStyle(fontSize: 13, height: 1.35, color: c.warn),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            text,
+            style: TextStyle(fontSize: 13, height: 1.35, color: c.warn),
+          ),
+          if (detail != null && detail!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            SelectableText(
+              detail!,
+              style: TextStyle(fontSize: 11, height: 1.35, color: c.warn.withValues(alpha: .75)),
+            ),
+          ],
+        ],
       ),
     );
   }

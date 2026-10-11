@@ -1527,5 +1527,6 @@
   "Update {0} ready": "updateReady",
   "No direct path to the report server, and the VPN is off. Turn the VPN on and try again.": "noDirectPathToTheReport",
   "Sent through the VPN: the report server is not reachable directly.": "sentThroughTheVpnTheReport",
-  "Sending… {#0} s": "sendingS"
+  "Sending… {#0} s": "sendingS",
+  "Sent directly: the VPN path did not work.": "sentDirectlyTheVpnPathDid"
 }

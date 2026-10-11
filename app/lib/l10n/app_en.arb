@@ -3339,7 +3339,7 @@
     }
   },
   "noDirectPathToTheReport": "No direct path to the report server, and the VPN is off. Turn the VPN on and try again.",
-  "sentThroughTheVpnTheReport": "Sent through the VPN: the report server is not reachable directly.",
+  "sentDirectlyTheVpnPathDid": "Sent directly: the VPN path did not work.",
   "clearRawLog": "Clear raw log",
   "filterLog": "Filter log",
   "level": "Level",

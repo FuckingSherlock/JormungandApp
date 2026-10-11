@@ -13,6 +13,14 @@ URL: `https://jormungand-reports.slackerwarlock.workers.dev`
 `X-Jorm-Format`, `X-Jorm-Size` клиент шлёт всегда; `X-Jorm-Version`, `X-Jorm-Build`, `X-Jorm-Platform`
 **необязательны** (клиент опускает отсутствующие; Worker их не требует и пустые в metadata не пишет).
 
+Ещё необязательные заголовки (неверные значения молча игнорируются):
+
+| Заголовок | Значение |
+|---|---|
+| `X-Jorm-Note` | заметка пользователя: base64url без паддинга от UTF-8, ≤ 500 символов (заголовок ≤ ~4 KB). Не UTF-8 / не base64url → игнорируется. Текст идёт **только в Telegram**, в KV не пишется |
+| `X-Jorm-Via` | `vpn` или `direct` — каким путём отправлено |
+| `X-Jorm-Vpn` | `on` или `off` — был ли включён VPN |
+
 | Ответ | Когда |
 |---|---|
 | 200 `{"ok":true,"id":"20261010-k3x9ab"}` | сохранено |
@@ -22,7 +30,10 @@ URL: `https://jormungand-reports.slackerwarlock.workers.dev`
 | 429 + `Retry-After` | лимит запросов |
 | 500 | сбой хранилища / не удалось подобрать id |
 
-`GET /v1/ping` → `{"ok":true}`. Всё остальное — 404. Тела и IP не логируются; IP используется только как
+`GET /v1/ping` → `{"ok":true}` (старые приложения). `POST /v1/ping` — пробный обмен: читает тело (≤ 64 KiB,
+иначе 413) и отвечает 200 `application/octet-stream` ровно на 32768 байт; приложение считает пробу
+пройденной только при получении всех 32 KiB (DPI замораживает соединения после ~16 KB). Лимитером ни тот,
+ни другой ping не считаются. Всё остальное — 404. Тела и IP не логируются; IP используется только как
 ключ лимита (усечённый SHA-256 с солью).
 
 `id` = `YYYYMMDD-` + 6 случайных символов из `[a-z2-9]` (crypto-random, без смещения, с проверкой
@@ -34,8 +45,8 @@ Workers KV, namespace `jormungand-reports` (binding `REPORTS`):
 
 - ключ `YYYY/MM/<id>`;
 - значение — конверт как есть (≤ 4 MiB, лимит KV 25 MiB);
-- `metadata`: `format`, `version`, `build`, `platform`, `clientSize` (присутствуют только полученные),
-  `receivedAt` (ISO), `size` (реальный размер);
+- `metadata`: `format`, `version`, `build`, `platform`, `clientSize`, `via`, `vpn`, `noteLength`
+  (присутствуют только полученные; сам текст заметки не хранится), `receivedAt` (ISO), `size` (реальный размер);
 - `expirationTtl` = 90 дней — запись удаляется сама, отдельное lifecycle-правило не нужно.
 
 Лимиты KV на free-плане: 1000 записей и 1000 list-операций в сутки; глобальный лимит Worker'а
@@ -67,11 +78,21 @@ npx wrangler secret put TELEGRAM_BOT_TOKEN   # токен бота от @BotFath
 
 `TELEGRAM_CHAT_ID` — не секрет, лежит в `vars` файла `wrangler.jsonc` (id группы отрицательный,
 `-100…`). Пока токена нет, Worker молча пропускает уведомление — отчёт всё равно сохраняется. Сбой
-Telegram загрузку не ломает. Текст уведомления:
-`Jormungand report <id> · <platform> <version> (<build>) · <size> KB` (отсутствующие поля — `?`).
+Telegram загрузку не ломает. Уведомление — `sendDocument`: конверт файлом `<id>.jrp` и подпись
+(`parse_mode: HTML`, значения экранируются, видимый текст ≤ 1024, заметка при нехватке места режется с «…»):
+
+```
+🐞 Report 20261011-gc75wr
+Android · 0.1.2-beta.3 (3039) · 106 KB
+VPN on · sent via VPN
+> заметка пользователя        (или «no note» курсивом)
+```
+
+Отсутствующие части опускаются. Если `sendDocument` не удался (отказ или сеть) — тот же текст уходит
+`sendMessage`.
 
 Итог последней отправки (без токена) Worker кладёт в KV под ключом `_notify/last` (7 суток):
-`npx wrangler kv key get --binding REPORTS --remote "_notify/last"` → `{at, id, status, ok, description}`;
+`npx wrangler kv key get --binding REPORTS --remote "_notify/last"` → `{at, id, method, status, ok, description}`;
 при отказе Telegram добавляются `bot` (кто это) и `seenChats` (чаты из `getUpdates`, по ним находится
 верный chat id). `chat not found` — бот не знает этот чат: добавить бота в группу и дать право читать
 сообщения / написать в группу.
@@ -84,7 +105,13 @@ node tools/fetch.mjs                                  # 20 новых отчёт
 node tools/fetch.mjs --n 50                           # 50 новых
 node tools/fetch.mjs 20261010-k3x9ab x.bin            # скачать конверт по id в x.bin
 dart run core/tool/decrypt_report.dart x.bin          # из корня репозитория
+node tools/fetch.mjs 20261010-k3x9ab --open           # скачать и расшифровать одной командой
+node tools/fetch.mjs --latest --open                  # то же для самого свежего отчёта
 ```
+
+`--open` кладёт конверт в `core/.data-dev/reports/<id>.jrp` (папка в .gitignore), запускает из `core/`
+`dart run tool/decrypt_report.dart` дважды (`<id>.txt` с `--text` и `<id>.json`) и печатает три пути.
+Приватный ключ читает только decrypt-инструмент, помощник его не трогает.
 
 Без помощника то же вручную (из `workers/reports`):
 

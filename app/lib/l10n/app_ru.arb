@@ -1475,7 +1475,6 @@
   "couldNotSendTheReport": "Не удалось отправить отчёт: {s0}",
   "sendingS": "Отправка… {n0} с",
   "noDirectPathToTheReport": "Нет прямого пути до сервера отчётов, а VPN выключен. Включите VPN и повторите.",
-  "sentThroughTheVpnTheReport": "Отправлено через VPN: сервер отчётов напрямую недоступен.",
   "clearRawLog": "Очистить сырой лог",
   "filterLog": "Фильтр лога",
   "level": "Уровень",

@@ -269,19 +269,39 @@ void main() {
     await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
     await tester.pumpAndSettle();
     expect(find.textContaining('No direct path to the report server, and the VPN is off'), findsOneWidget);
+    expect(find.textContaining('no direct path to the receiver (x)'), findsNothing, reason: 'no-route has its own plain text');
     expect(find.text('Retry'), findsOneWidget);
     done();
   });
 
-  testWidgets('Send report: a report that went through the VPN says so', (tester) async {
+  testWidgets('Send report: the normal paths (VPN first, or direct with the VPN off) have no caption', (tester) async {
     final ctx = await start(tester);
-    host.sendResult = {'ok': true, 'id': 'r-5', 'bytes': 10, 'via': 'vpn'};
+    for (final via in ['vpn', 'direct']) {
+      host.sendResult = {'ok': true, 'id': 'r-5', 'bytes': 10, 'via': via};
+      unawaited(showSendReport(ctx, logs));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Sent. Report id: r-5'), findsOneWidget, reason: via);
+      expect(find.textContaining('Sent directly'), findsNothing, reason: via);
+      expect(find.textContaining('Sent through'), findsNothing, reason: via);
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+    }
+    done();
+  });
+
+  testWidgets('Send report: direct after a failed tunnel try says so, with the raw reason', (tester) async {
+    final ctx = await start(tester);
+    const why = 'via VPN: the receiver did not answer in 10 s (via VPN)';
+    host.sendResult = {'ok': true, 'id': 'r-6', 'bytes': 10, 'via': 'direct', 'firstError': why};
     unawaited(showSendReport(ctx, logs));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
     await tester.pumpAndSettle();
-    expect(find.text('Sent. Report id: r-5'), findsOneWidget);
-    expect(find.textContaining('Sent through the VPN'), findsOneWidget);
+    expect(find.text('Sent. Report id: r-6'), findsOneWidget);
+    expect(find.text('Sent directly: the VPN path did not work.'), findsOneWidget);
+    expect(find.text(why), findsOneWidget);
     done();
   });
 
@@ -330,7 +350,8 @@ void main() {
 
   testWidgets('Send report: a failure keeps the note and offers Retry', (tester) async {
     final ctx = await start(tester);
-    host.sendResult = {'ok': false, 'error': 'network', 'message': 'timeout'};
+    const why = 'via VPN: the receiver did not answer in 10 s (via VPN); direct: no path (no echo in 3 s)';
+    host.sendResult = {'ok': false, 'error': 'network', 'message': why};
     unawaited(showSendReport(ctx, logs));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'note one');
@@ -338,6 +359,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('No connection to the report server'), findsOneWidget);
+    expect(find.text(why), findsOneWidget, reason: 'the raw reason is shown small under the error');
     expect(find.text('Retry'), findsOneWidget);
     expect(find.text('note one'), findsOneWidget);
 

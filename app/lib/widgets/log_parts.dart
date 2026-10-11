@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:jormungand_core/jormungand_core.dart' show LogLine;
 
 import '../core/core_host.dart' show CoreHostScope;
@@ -7,6 +8,7 @@ import '../shell/app_links.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
 import 'app_mark.dart';
+import 'app_sheet.dart' show showToast;
 import 'event_rows.dart' show LogTag;
 import 'follow_list.dart';
 import 'form_parts.dart' show onAccentOf;
@@ -100,40 +102,65 @@ class RawGroupView extends StatelessWidget {
         : f.lvl == 'error'
         ? c.muted
         : null;
-    return Container(
-      decoration: BoxDecoration(
-        color: tone?.tint(f.lvl == 'error' ? .06 : .05),
-        border: Border(
-          left: BorderSide(color: tone ?? Colors.transparent, width: 2),
-          top: first ? BorderSide.none : BorderSide(color: c.border),
+    return GestureDetector(
+      key: const ValueKey('rawGroup'),
+      behavior: HitTestBehavior.translucent,
+      onLongPress: () => _copy(context),
+      child: Container(
+        decoration: BoxDecoration(
+          color: tone?.tint(f.lvl == 'error' ? .06 : .05),
+          border: Border(
+            left: BorderSide(color: tone ?? Colors.transparent, width: 2),
+            top: first ? BorderSide.none : BorderSide(color: c.border),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(12, 4, 14, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text(
+                  logClock(f.t),
+                  style: monoText.copyWith(
+                    fontSize: 12,
+                    height: 1.45,
+                    color: c.t3,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                LogTag(
+                  f.lvl == 'warn' ? 'WARN' : f.lvl.toUpperCase(),
+                  kind: f.lvl,
+                ),
+                if (f.src == 'core') ...[
+                  const SizedBox(width: 6),
+                  const LogTag('core', kind: 'core'),
+                ],
+              ],
+            ),
+            for (final (i, l) in group.lines.indexed)
+              Padding(
+                padding: EdgeInsets.only(top: i > 0 ? 3 : 1),
+                child: _line(context, l),
+              ),
+          ],
         ),
       ),
-      padding: const EdgeInsets.fromLTRB(12, 4, 14, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text(
-                logClock(f.t),
-                style: monoText.copyWith(fontSize: 12, height: 1.45, color: c.t3),
-              ),
-              const SizedBox(width: 6),
-              LogTag(f.lvl == 'warn' ? 'WARN' : f.lvl.toUpperCase(), kind: f.lvl),
-              if (f.src == 'core') ...[
-                const SizedBox(width: 6),
-                const LogTag('core', kind: 'core'),
-              ],
-            ],
-          ),
-          for (final (i, l) in group.lines.indexed)
-            Padding(
-              padding: EdgeInsets.only(top: i > 0 ? 3 : 1),
-              child: _line(context, l),
-            ),
-        ],
-      ),
     );
+  }
+
+  /// Long press: the group as shown (meta line, then its messages) to the clipboard.
+  Future<void> _copy(BuildContext context) async {
+    final f = group.first;
+    final text = [
+      '${logClock(f.t)} ${f.lvl.toUpperCase()}${f.src == 'core' ? ' core' : ''}',
+      for (final l in group.lines) l.msg,
+    ].join('\n');
+    final done = context.l10n.copied;
+    HapticFeedback.selectionClick();
+    await Clipboard.setData(ClipboardData(text: text));
+    if (context.mounted) showToast(context, done);
   }
 
   Widget _line(BuildContext context, LogLine l) {
@@ -151,7 +178,8 @@ class RawGroupView extends StatelessWidget {
     // sing-box says whose connection it is (`found package name: org.x`): the app's icon and name after the line
     final pkg = _foundPkg.firstMatch(l.msg)?.group(1);
     if (pkg != null) {
-      final host = CoreHostScope.read(context), links = AppLinksScope.of(context);
+      final host = CoreHostScope.read(context),
+          links = AppLinksScope.of(context);
       spans.add(
         WidgetSpan(
           alignment: PlaceholderAlignment.middle,
@@ -162,14 +190,22 @@ class RawGroupView extends StatelessWidget {
               name: appDisplayName(context.l10n, host.catalog, pkg),
               size: 14,
               style: base,
-              onTap: links.openAppAct == null ? null : () => links.openAppAct!(pkg),
+              onTap: links.openAppAct == null
+                  ? null
+                  : () => links.openAppAct!(pkg),
             ),
           ),
         ),
       );
     }
     Widget w = Text.rich(TextSpan(children: spans));
-    if (hit == l.n) w = HitFlash(token: hitToken, alpha: .35, duration: const Duration(milliseconds: 2200), child: w);
+    if (hit == l.n)
+      w = HitFlash(
+        token: hitToken,
+        alpha: .35,
+        duration: const Duration(milliseconds: 2200),
+        child: w,
+      );
     if (hit == l.n && hitKey != null) w = KeyedSubtree(key: hitKey, child: w);
     return unread.contains(l.n) ? RowMark<int>(value: l.n, child: w) : w;
   }
@@ -180,7 +216,12 @@ class RawGroupView extends StatelessWidget {
     final out = <InlineSpan>[];
     final m = _cid.firstMatch(rest);
     if (m != null) {
-      out.add(TextSpan(text: '${m.group(0)!.trimRight()} ', style: base.copyWith(color: c.t3)));
+      out.add(
+        TextSpan(
+          text: '${m.group(0)!.trimRight()} ',
+          style: base.copyWith(color: c.t3),
+        ),
+      );
       rest = rest.substring(m.end);
     }
     final q = query.trim().toLowerCase();
@@ -202,7 +243,8 @@ class RawGroupView extends StatelessWidget {
       );
       at = i + q.length;
     }
-    if (at < rest.length) out.add(TextSpan(text: rest.substring(at), style: base));
+    if (at < rest.length)
+      out.add(TextSpan(text: rest.substring(at), style: base));
     return out;
   }
 }
@@ -268,10 +310,18 @@ class LevelChip extends StatelessWidget {
                 constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 alignment: Alignment.center,
-                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(
+                  color: bg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: Text(
                   n > 99 ? '99+' : '$n',
-                  style: TextStyle(fontSize: 10, height: 1.6, fontWeight: FontWeight.w700, color: fg),
+                  style: TextStyle(
+                    fontSize: 10,
+                    height: 1.6,
+                    fontWeight: FontWeight.w700,
+                    color: fg,
+                  ),
                 ),
               ),
             ),

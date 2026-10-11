@@ -170,7 +170,7 @@
   "Could not send the report: {0}": "Не удалось отправить отчёт: {0}",
   "Sending… {#0} s": "Отправка… {#0} с",
   "No direct path to the report server, and the VPN is off. Turn the VPN on and try again.": "Нет прямого пути до сервера отчётов, а VPN выключен. Включите VPN и повторите.",
-  "Sent through the VPN: the report server is not reachable directly.": "Отправлено через VPN: сервер отчётов напрямую недоступен.",
+  "Sent directly: the VPN path did not work.": null,
   "Clear raw log": "Очистить сырой лог",
   "Filter log": "Фильтр лога",
   "Level": "Уровень",

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handle, sanitize, MAX_BYTES, type Env } from '../src/handler.ts';
+import { handle, sanitize, decodeNote, buildCaption, MAX_BYTES, type Env } from '../src/handler.ts';
 import { hit, LIMITS, type Store } from '../src/limiter.ts';
 
 function fakeEnv(extra: Partial<Env> = {}) {
@@ -146,24 +146,130 @@ test('telegram skipped without secrets', async () => {
   assert.equal(called, false);
 });
 
-test('telegram message text and failure does not fail upload', async () => {
-  const { env } = fakeEnv({ TELEGRAM_BOT_TOKEN: 'T', TELEGRAM_CHAT_ID: '7' });
-  let url = '';
-  let sent: { chat_id: string; text: string } | undefined;
+const b64u = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
+
+/** Прогоняет отчёт через Worker с подменённым Telegram; возвращает вызовы и итог. */
+async function tgRun(headers: Record<string, string>, tg: (u: string, init: RequestInit) => Response | Promise<Response> = () => new Response('{}'), size = 2048) {
+  const { env, objects } = fakeEnv({ TELEGRAM_BOT_TOKEN: 'T', TELEGRAM_CHAT_ID: '7' });
+  const calls: { url: string; init: RequestInit }[] = [];
   const c = ctx();
-  let r = await handle(post(body(2048), { 'x-jorm-platform': 'windows', 'x-jorm-version': '0.9', 'x-jorm-build': '5' }), env, c, {
+  const r = await handle(post(body(size), headers), env, c, {
+    now: fixedNow,
     fetch: (async (u: string, init: RequestInit) => {
-      url = u;
-      sent = JSON.parse(init.body as string);
-      return new Response('{}');
+      calls.push({ url: u, init });
+      return tg(u, init);
     }) as unknown as typeof fetch,
   });
   await Promise.all(c.pending);
   const id = ((await r.json()) as { id: string }).id;
-  assert.equal(url, 'https://api.telegram.org/botT/sendMessage');
-  assert.equal(sent!.chat_id, '7');
-  assert.equal(sent!.text, `Jormungand report ${id} · windows 0.9 (5) · 2 KB`);
+  return { calls, id, objects };
+}
 
+test('telegram sendDocument: file, caption, parse mode', async () => {
+  const { calls, id, objects } = await tgRun({
+    'x-jorm-platform': 'windows',
+    'x-jorm-version': '0.9',
+    'x-jorm-build': '5',
+    'x-jorm-via': 'vpn',
+    'x-jorm-vpn': 'on',
+    'x-jorm-note': b64u('Не подключается <b>& всё</b>'),
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, 'https://api.telegram.org/botT/sendDocument');
+  const form = calls[0]!.init.body as FormData;
+  assert.equal(form.get('chat_id'), '7');
+  assert.equal(form.get('parse_mode'), 'HTML');
+  const doc = form.get('document') as File;
+  assert.equal(doc.name, `${id}.jrp`);
+  assert.equal(doc.size, 2052);
+  assert.equal(
+    form.get('caption'),
+    `🐞 <b>Report</b> <code>${id}</code>\nWindows · 0.9 (5) · 2 KB\nVPN on · sent via VPN\n<blockquote>Не подключается &lt;b&gt;&amp; всё&lt;/b&gt;</blockquote>`,
+  );
+  const meta = [...objects.values()][0]!.meta;
+  assert.equal(meta.via, 'vpn');
+  assert.equal(meta.vpn, 'on');
+  assert.equal(meta.noteLength, String([...'Не подключается <b>& всё</b>'].length));
+  assert.ok(!JSON.stringify(meta).includes('подключается'));
+});
+
+test('telegram caption without headers and with bad note', async () => {
+  const { calls, id, objects } = await tgRun({ 'x-jorm-platform': 'android', 'x-jorm-note': '!!!not base64!!!', 'x-jorm-via': 'weird', 'x-jorm-vpn': 'maybe' });
+  const caption = (calls[0]!.init.body as FormData).get('caption');
+  assert.equal(caption, `🐞 <b>Report</b> <code>${id}</code>\nAndroid · 2 KB\n<i>no note</i>`);
+  const meta = [...objects.values()][0]!.meta;
+  assert.deepEqual(Object.keys(meta).sort(), ['platform', 'receivedAt', 'size']);
+  // валидный base64url, но не UTF-8, и слишком длинный заголовок
+  assert.equal(decodeNote(Buffer.from([0xff, 0xfe, 0xfd]).toString('base64url')), '');
+  assert.equal(decodeNote('A'.repeat(5000)), '');
+  assert.equal(decodeNote(null), '');
+  assert.equal(decodeNote(b64u('  hi \r\nthere\u0007 ')), 'hi \nthere');
+});
+
+test('telegram caption truncates a long note to 1024 visible chars', async () => {
+  const visibleLen = (c: string) => c.replace(/<\/?(b|code|i|blockquote)>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').length;
+  // заметка в заголовке режется до 500 символов и целиком влезает в подпись, а экранирование не считается
+  const { calls } = await tgRun({ 'x-jorm-platform': 'android', 'x-jorm-note': b64u('я<'.repeat(400)) });
+  const caption = (calls[0]!.init.body as FormData).get('caption') as string;
+  assert.ok(visibleLen(caption) <= 1024 && !caption.includes('…'));
+  assert.ok(caption.includes('&lt;'));
+  // buildCaption сам режет слишком длинное с «…», не ломая экранирование и суррогатные пары
+  const cut = buildCaption('20261010-aaaaaa', { platform: 'android', version: '1.0', build: '1' }, 2048, '😀<'.repeat(900));
+  assert.ok(cut.includes('…</blockquote>'));
+  assert.ok(visibleLen(cut) <= 1024, String(visibleLen(cut)));
+  assert.ok(!/[\ud800-\udbff]…/.test(cut));
+});
+
+test('telegram falls back to sendMessage when sendDocument fails', async () => {
+  const { calls, id } = await tgRun({ 'x-jorm-note': b64u('hi') }, (u) => (u.endsWith('/sendDocument') ? new Response('{"description":"too big"}', { status: 413 }) : new Response('{}')));
+  assert.deepEqual(calls.map((x) => x.url.split('/').pop()), ['sendDocument', 'sendMessage']);
+  const sent = JSON.parse(calls[1]!.init.body as string);
+  assert.equal(sent.chat_id, '7');
+  assert.equal(sent.parse_mode, 'HTML');
+  assert.ok(sent.text.includes(`<code>${id}</code>`) && sent.text.includes('<blockquote>hi</blockquote>'));
+  // сеть упала на sendDocument: тоже запасной путь
+  const t = await tgRun({}, (u) => {
+    if (u.endsWith('/sendDocument')) throw new Error('net');
+    return new Response('{}');
+  });
+  assert.equal(t.calls.length, 2);
+});
+
+test('telegram diagnostics stay in _notify/last and failure does not fail upload', async () => {
+  const { env, objects } = fakeEnv({ TELEGRAM_BOT_TOKEN: 'T', TELEGRAM_CHAT_ID: '7' });
+  const store: Record<string, string> = {};
+  const put = env.REPORTS.put;
+  env.REPORTS.put = async (k, v, o) => {
+    if (k === '_notify/last') store[k] = v as unknown as string;
+    return put(k, v, o);
+  };
+  const c0 = ctx();
+  await handle(post(body()), env, c0, { fetch: (async () => new Response('{"description":"chat not found"}', { status: 400 })) as unknown as typeof fetch });
+  await Promise.all(c0.pending);
+  const last = JSON.parse(store['_notify/last']!);
+  assert.equal(last.method, 'sendMessage');
+  assert.equal(last.ok, false);
+  assert.equal(last.description, 'chat not found');
+  assert.equal([...objects.keys()].filter((k) => !k.startsWith('_')).length, 1); // отчёт сохранён, несмотря на отказ Telegram
+});
+
+test('POST /v1/ping echoes 32 KiB, is not rate-limited, caps the body', async () => {
+  let limited = 0;
+  const { env } = fakeEnv({ limit: async () => ((limited++), { ok: true }) });
+  const req = (n: number) => new Request('https://x/v1/ping', { method: 'POST', body: new Uint8Array(n), headers: { 'content-type': 'application/octet-stream' } });
+  const r = await handle(req(32768), env, ctx());
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-type'), 'application/octet-stream');
+  assert.equal((await r.arrayBuffer()).byteLength, 32768);
+  assert.equal((await handle(req(64 * 1024), env, ctx())).status, 200);
+  assert.equal((await handle(req(64 * 1024 + 1), env, ctx())).status, 413);
+  assert.equal((await handle(new Request('https://x/v1/ping', { method: 'POST' }), env, ctx())).status, 200);
+  assert.equal(limited, 0);
+});
+
+test('telegram failure does not fail upload', async () => {
+  const { env } = fakeEnv({ TELEGRAM_BOT_TOKEN: 'T', TELEGRAM_CHAT_ID: '7' });
+  let r: Response;
   const c2 = ctx();
   r = await handle(post(body()), env, c2, {
     fetch: (async () => {

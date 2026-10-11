@@ -150,9 +150,10 @@ class _SendReportSheetState extends State<_SendReportSheet> {
                   ),
                   const SizedBox(height: 6),
                   HintText(l10n.quoteThisIdWhenYouWrite),
-                  if (_send.via == 'vpn') ...[
+                  if (_send.via == 'direct' && _send.firstError.isNotEmpty) ...[
                     const SizedBox(height: 4),
-                    HintText(l10n.sentThroughTheVpnTheReport),
+                    HintText(l10n.sentDirectlyTheVpnPathDid),
+                    HintText(_send.firstError), // the raw reason, not translated
                   ],
                   const SizedBox(height: 12),
                   Align(
@@ -168,7 +169,7 @@ class _SendReportSheetState extends State<_SendReportSheet> {
                 if (failed)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-                    child: WarnNote(_errorText(l10n, _send.fail)),
+                    child: WarnNote(_errorText(l10n, _send.fail), detail: _errorDetail(_send.fail)),
                   ),
                 FormGroup(
                   label: l10n.whatIsSent,
@@ -233,6 +234,18 @@ class _Para extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       Text(text, style: TextStyle(fontSize: 13, height: 1.45, color: context.colors.t2));
+}
+
+/// The raw technical reason (the core's `message`, English, not translated) shown small under the
+/// error for the failures where the headline alone does not say what happened; null otherwise.
+/// (`failed` already carries the message in its headline, `rejected` too.)
+String? _errorDetail(Map<String, dynamic> r) {
+  final msg = '${r['message'] ?? ''}'.trim();
+  if (msg.isEmpty) return null;
+  return switch ('${r['error']}') {
+    'network' || 'timeout' || 'server' => msg,
+    _ => null,
+  };
 }
 
 /// What the user reads for a result of `CoreHost.sendReport` that is not `ok`.

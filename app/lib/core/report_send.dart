@@ -39,6 +39,9 @@ class ReportSendController extends ChangeNotifier {
   /// The way the sent report went (`direct` / `vpn`), empty if the host does not say.
   String via = '';
 
+  /// Why the first way (the tunnel) failed, when the report went direct after it; empty otherwise.
+  String firstError = '';
+
   /// When the send under way began (null otherwise).
   DateTime? startedAt;
 
@@ -76,6 +79,7 @@ class ReportSendController extends ChangeNotifier {
     phase = ReportPhase.sending;
     fail = const {};
     via = '';
+    firstError = '';
     startedAt = _now();
     _notify();
     Map<String, dynamic> r;
@@ -98,6 +102,7 @@ class ReportSendController extends ChangeNotifier {
       phase = ReportPhase.sent;
       id = '${r['id'] ?? ''}';
       via = '${r['via'] ?? ''}';
+      firstError = '${r['firstError'] ?? ''}';
       note = '';
     } else if (r['error'] == 'cancelled') {
       phase = ReportPhase.form; // a cancel from elsewhere: the note stays
@@ -124,6 +129,7 @@ class ReportSendController extends ChangeNotifier {
     phase = ReportPhase.form;
     id = '';
     via = '';
+    firstError = '';
     fail = const {};
     _notify();
   }

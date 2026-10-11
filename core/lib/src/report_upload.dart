@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'redact.dart';
@@ -29,26 +30,42 @@ const reportMaxBytes = 4 * 1024 * 1024;
 /// Connecting to the receiver (TCP and the TLS handshake).
 const reportConnectTimeout = Duration(seconds: 10);
 
-/// The reachability probe of the receiver straight from this device (GET [reportProbePath]): TCP,
-/// TLS and a HTTP answer, whatever its status. Short: it only decides the way, direct or via VPN.
-const reportProbeTimeout = Duration(seconds: 3);
+// The seconds of each stage of a send; [reportSendDeadline] is their sum.
+const _tunnelSeconds = 10;
+const _probeSeconds = 3;
+const _uploadSeconds = 10;
+const _marginSeconds = 5;
 
-/// The Worker's health path (workers/reports → `GET /v1/ping`), answered before the rate limit.
+/// The first way, when the tunnel is up: the whole upload through its local proxy.
+const reportTunnelTimeout = Duration(seconds: _tunnelSeconds);
+
+/// The bulk probe of the receiver straight from this device (POST [reportProbePath] with
+/// [reportProbeBytes] of random data, which the Worker echoes back), all of it: TCP, TLS, a body up
+/// and a body down. Short: it only decides whether the direct upload is worth trying.
+const reportProbeTimeout = Duration(seconds: _probeSeconds);
+
+/// The Worker's health path (workers/reports → `POST /v1/ping`), answered before the rate limit.
 const reportProbePath = '/v1/ping';
 
-/// The upload itself (connect, send, the answer), on the one way the probe picked. No second try.
-const reportUploadTimeout = Duration(seconds: 10);
+/// The probe's body, and what a healthy path must bring back. A DPI that freezes a connection to the
+/// CDN after ~16–20 KB lets a tiny request through, but not this one.
+const reportProbeBytes = 32 * 1024;
 
-/// What building, masking and encrypting the report may add on top of the probe and the upload.
-const reportBuildMargin = Duration(seconds: 5);
+/// The direct upload itself (connect, send, the answer), after the probe passed. No second try.
+const reportUploadTimeout = Duration(seconds: _uploadSeconds);
 
-/// Everything "Send report" does (build, mask, encrypt, probe, upload) must end within this, success
-/// or not (CoreService.sendReport): the user is never left on "Sending…". The app counts it down.
-const reportSendDeadline = Duration(seconds: 18); // probe 3 + upload 10 + margin 5
+/// What building, masking and encrypting the report may add on top of the tunnel try, the probe and
+/// the direct upload.
+const reportBuildMargin = Duration(seconds: _marginSeconds);
+
+/// Everything "Send report" does (build, mask, encrypt, tunnel try, probe, direct upload) must end
+/// within this, success or not (CoreService.sendReport): the user is never left on "Sending…". The
+/// app counts it down.
+const reportSendDeadline = Duration(seconds: _tunnelSeconds + _probeSeconds + _uploadSeconds + _marginSeconds);
 
 /// What a finished upload gives back.
 class ReportReceipt {
-  const ReportReceipt({required this.id, this.at, this.via = 'direct', this.directError});
+  const ReportReceipt({required this.id, this.at, this.via = 'direct', this.firstError});
 
   /// The report's id on the receiving side: what the user quotes in a message.
   final String id;
@@ -56,12 +73,11 @@ class ReportReceipt {
   /// When the receiver accepted it (its clock), if it says.
   final DateTime? at;
 
-  /// The way it went: `direct` (outside the tunnel) or `vpn` (through the running tunnel, because
-  /// the probe found no direct path).
+  /// The way it went: `vpn` (through the running tunnel) or `direct` (outside the tunnel).
   final String via;
 
-  /// Why the probe found no direct path, when [via] is `vpn`.
-  final String? directError;
+  /// Why the first way failed, when this one is the second: the tunnel try, when [via] is `direct`.
+  final String? firstError;
 }
 
 /// Stops an upload that is under way (the user's Cancel, the overall deadline): [cancel] makes
@@ -82,7 +98,7 @@ class ReportCancel {
 /// An upload that did not go through. [code] is machine-readable and shown by the app in the
 /// user's language: `not-configured` (no uploader plugged in), `network` (no connection to the
 /// receiver), `rejected` (the receiver refused it: size, rate limit, bad format), `server` (the
-/// receiver failed), `no-route` (the probe found no direct path and the VPN is not up to carry it),
+/// receiver failed), `no-route` (the bulk probe found no direct path and the VPN is not up to carry it),
 /// `cancelled` (the user stopped it), `timeout` (the whole send did not end in
 /// [reportSendDeadline]), `failed` (anything else); [message] is for the log and for the developer.
 class ReportUploadException implements Exception {
@@ -101,10 +117,12 @@ class ReportUploadException implements Exception {
 /// [ReportUploadException] on failure.
 ///
 /// [meta] is what may be read without decrypting: `format`, `createdAt`, `version`, `versionCode`,
-/// `commit`, `platform`, `bytes` (the report as JSON), `gzipBytes`, `noteLength`.
+/// `commit`, `platform`, `bytes` (the report as JSON), `gzipBytes`, `noteLength`, and `note` (the
+/// user's note after the strict redactor; absent when empty).
 ///
-/// [proxyPort]: the running tunnel's local proxy (tunnel-in), null while not connected — the way
-/// to the receiver when the direct one does not work. [cancel] aborts the upload (`cancelled`).
+/// [proxyPort]: the running tunnel's local proxy (tunnel-in), null while not connected — the first
+/// way to the receiver when it is up, the direct one is the fallback. [cancel] aborts the upload
+/// (`cancelled`).
 abstract interface class ReportUploader {
   Future<ReportReceipt> upload(List<int> gzipped, {required Map<String, dynamic> meta, int? proxyPort, ReportCancel? cancel});
 }
@@ -123,19 +141,21 @@ class NotConfiguredUploader implements ReportUploader {
 /// Контракт). `X-Jorm-*` headers carry the plain part of `meta` (format, version, build, platform,
 /// envelope size); there is no auth header, the Worker takes anonymous uploads and limits them.
 ///
-/// The way out is decided first, by a probe: a short GET of the Worker's health path
-/// ([reportProbePath]) straight from this device, outside the tunnel, by the self rule
-/// (outside_tunnel.dart → `report-upload`). Any HTTP answer after a TLS handshake that the system
-/// trusts proves that the direct path to the receiver really works (a block, a captive portal, a
-/// stalled CDN edge gives none). Probe answered → the envelope goes direct ([timeout]); not → through
-/// the running tunnel's local proxy at once (`via: vpn`), and with no tunnel the upload fails as
-/// `no-route`. One upload attempt, on one way: whatever it ends with is final.
+/// The way out: with the tunnel up (`proxyPort != null`) the envelope goes through its local proxy
+/// first ([tunnelTimeout], `via: vpn`) — the direct path to the receiver is the one a DPI chokes.
+/// An answer of the receiver, of any status, is final. A network error or silence → the direct path,
+/// which is checked first by a bulk probe ([_probe]: POST of [reportProbeBytes] to [reportProbePath]
+/// straight from this device by the self rule, outside_tunnel.dart → `report-upload`; the Worker
+/// echoes the body, only an echo of the full size proves the path carries a real upload); passed →
+/// the envelope goes direct ([timeout], `via: direct`). With the tunnel down the probe is the first
+/// step, and a failed probe is `no-route`. Each way is tried once.
 class HttpReportUploader implements ReportUploader {
   HttpReportUploader({
     this.endpoint = reportEndpoint,
     this.publicKey = reportPublicKey,
     this.connectTimeout = reportConnectTimeout,
     this.timeout = reportUploadTimeout,
+    this.tunnelTimeout = reportTunnelTimeout,
     this.probeTimeout = reportProbeTimeout,
     this.maxBytes = reportMaxBytes,
   });
@@ -148,10 +168,13 @@ class HttpReportUploader implements ReportUploader {
   /// Connecting (TCP and TLS) of the upload.
   final Duration connectTimeout;
 
-  /// The whole upload (connecting, sending, the answer).
+  /// The whole direct upload (connecting, sending, the answer).
   final Duration timeout;
 
-  /// The whole reachability probe.
+  /// The whole upload through the tunnel.
+  final Duration tunnelTimeout;
+
+  /// The whole bulk probe.
   final Duration probeTimeout;
 
   /// The envelope is not sent when it is bigger ([reportMaxBytes], the Worker's own limit).
@@ -180,27 +203,43 @@ class HttpReportUploader implements ReportUploader {
     }
     if (cancel != null && cancel.isCancelled) throw const ReportUploadException('cancelled');
 
-    // 1. is the receiver reachable directly?
+    final vpnOn = proxyPort != null;
+    // 1. the tunnel first, when it is up; an answer of the receiver is final
+    String? tunnelError;
+    if (vpnOn) {
+      try {
+        final r = await _attempt(uri, envelope, meta, proxyPort: proxyPort, vpnOn: true, timeout: tunnelTimeout, cancel: cancel);
+        return ReportReceipt(id: r.id, at: r.at, via: 'vpn');
+      } on ReportUploadException catch (e) {
+        if (e.code != 'network') rethrow;
+        tunnelError = e.message;
+      }
+      if (cancel != null && cancel.isCancelled) throw const ReportUploadException('cancelled');
+    }
+    // 2. the direct path: does it carry a real upload?
     final noDirect = await _probe(uri, cancel);
     if (cancel != null && cancel.isCancelled) throw const ReportUploadException('cancelled');
-    // 2. yes: direct, and that is final
-    if (noDirect == null) return _attempt(uri, envelope, meta, proxyPort: null, timeout: timeout, cancel: cancel);
-    // 3. no: through the running tunnel's local proxy, or nowhere
-    if (proxyPort == null) {
-      throw ReportUploadException('no-route', 'no direct path to the receiver ($noDirect) and the VPN is not connected');
+    if (noDirect != null) {
+      if (!vpnOn) {
+        throw ReportUploadException('no-route', 'no direct path to the receiver ($noDirect) and the VPN is not connected');
+      }
+      throw ReportUploadException('network', 'via VPN: $tunnelError; direct: no path ($noDirect)');
     }
+    // 3. yes: direct, and that is final
     final ReportReceipt r;
     try {
-      r = await _attempt(uri, envelope, meta, proxyPort: proxyPort, timeout: timeout, cancel: cancel);
+      r = await _attempt(uri, envelope, meta, proxyPort: null, vpnOn: vpnOn, timeout: timeout, cancel: cancel);
     } on ReportUploadException catch (e) {
-      if (e.code != 'network') rethrow;
-      throw ReportUploadException('network', 'direct: $noDirect; via VPN: ${e.message}');
+      if (e.code != 'network' || tunnelError == null) rethrow;
+      throw ReportUploadException('network', 'via VPN: $tunnelError; direct: ${e.message}');
     }
-    return ReportReceipt(id: r.id, at: r.at, via: 'vpn', directError: noDirect);
+    return ReportReceipt(id: r.id, at: r.at, via: 'direct', firstError: tunnelError == null ? null : 'via VPN: $tunnelError');
   }
 
-  /// The probe: GET [reportProbePath] of the receiver's origin, directly. null = it answered (any
-  /// status, the body is not read); else why not. Ends within [probeTimeout] or at [cancel].
+  /// The bulk probe: POST [reportProbeBytes] of random bytes to [reportProbePath] of the receiver's
+  /// origin, directly. null = it answered 200 with a body of exactly that size (the Worker echoes
+  /// it); anything else — refusal, TLS, a stall after the first KB, another status or length — is why
+  /// not. Ends within [probeTimeout] or at [cancel] (then null: the caller checks the token).
   Future<String?> _probe(Uri uri, ReportCancel? cancel) async {
     final client = HttpClient()
       ..connectionTimeout = probeTimeout
@@ -208,19 +247,27 @@ class HttpReportUploader implements ReportUploader {
       ..userAgent = null;
     try {
       final url = Uri(scheme: uri.scheme, host: uri.host, port: uri.hasPort ? uri.port : null, path: reportProbePath);
+      final rnd = Random.secure();
+      final body = Uint8List.fromList([for (var i = 0; i < reportProbeBytes; i++) rnd.nextInt(256)]);
       final done = () async {
-        final req = await client.getUrl(url);
+        final req = await client.postUrl(url);
         req.followRedirects = false;
+        req.headers.contentType = ContentType.binary;
+        req.contentLength = body.length;
+        req.add(body);
         final res = await req.close();
-        await res.drain<void>();
+        var n = 0;
+        await for (final chunk in res) {
+          n += chunk.length;
+          if (n > reportProbeBytes) break;
+        }
+        if (res.statusCode != 200) return 'the ping answered HTTP ${res.statusCode}';
+        if (n != reportProbeBytes) return 'the ping echoed $n bytes of $reportProbeBytes';
+        return null;
       }()
-          .timeout(probeTimeout, onTimeout: () => throw TimeoutException('no answer in ${probeTimeout.inSeconds} s'));
-      if (cancel == null) {
-        await done;
-      } else {
-        await Future.any<void>([done, cancel.whenCancelled]);
-      }
-      return null;
+          .timeout(probeTimeout, onTimeout: () => throw TimeoutException('no echo in ${probeTimeout.inSeconds} s'));
+      if (cancel == null) return await done;
+      return await Future.any<String?>([done, cancel.whenCancelled.then<String?>((_) => null)]);
     } on TimeoutException catch (e) {
       return e.message ?? 'timeout';
     } catch (e) {
@@ -230,17 +277,18 @@ class HttpReportUploader implements ReportUploader {
     }
   }
 
-  /// One try: a new client, so nothing of a stalled connection is reused; [proxyPort] null = direct.
-  /// Ends within [timeout] or at [cancel], and leaves no connection open.
+  /// One try: a new client, so nothing of a stalled connection is reused; [proxyPort] null = direct;
+  /// [vpnOn]: the tunnel is connected (told to the receiver). Ends within [timeout] or at [cancel],
+  /// and leaves no connection open.
   Future<ReportReceipt> _attempt(Uri uri, Uint8List envelope, Map<String, dynamic> meta,
-      {required int? proxyPort, required Duration timeout, ReportCancel? cancel}) async {
+      {required int? proxyPort, required bool vpnOn, required Duration timeout, ReportCancel? cancel}) async {
     final client = HttpClient()
       ..connectionTimeout = connectTimeout
       ..findProxy = ((_) => proxyPort == null ? 'DIRECT' : 'PROXY 127.0.0.1:$proxyPort')
       ..userAgent = null;
     final way = proxyPort == null ? 'direct' : 'via VPN';
     try {
-      final done = _post(client, uri, envelope, meta).timeout(
+      final done = _post(client, uri, envelope, meta, via: proxyPort == null ? 'direct' : 'vpn', vpnOn: vpnOn).timeout(
         timeout,
         onTimeout: () => throw TimeoutException('the receiver did not answer in ${timeout.inSeconds} s ($way)'),
       );
@@ -262,7 +310,8 @@ class HttpReportUploader implements ReportUploader {
     }
   }
 
-  Future<ReportReceipt> _post(HttpClient client, Uri uri, Uint8List envelope, Map<String, dynamic> meta) async {
+  Future<ReportReceipt> _post(HttpClient client, Uri uri, Uint8List envelope, Map<String, dynamic> meta,
+      {required String via, required bool vpnOn}) async {
     final req = await client.postUrl(uri);
     req.followRedirects = false;
     req.headers.contentType = ContentType.binary;
@@ -277,6 +326,14 @@ class HttpReportUploader implements ReportUploader {
     h('X-Jorm-Build', meta['versionCode']);
     h('X-Jorm-Platform', meta['platform']);
     h('X-Jorm-Size', envelope.length);
+    h('X-Jorm-Via', via);
+    h('X-Jorm-Vpn', vpnOn ? 'on' : 'off');
+    // The user's note, already masked by the strict redactor (packReport), in the open so the
+    // developer reads it without the key; base64url keeps it printable ASCII. It is also in the report.
+    final note = meta['note'];
+    if (note is String && note.isNotEmpty) {
+      req.headers.set('X-Jorm-Note', base64Url.encode(utf8.encode(note)).replaceAll('=', ''));
+    }
     req.add(envelope);
     final res = await req.close();
     final b = BytesBuilder(copy: false);
@@ -371,6 +428,7 @@ PackedReport packReport(Map<String, dynamic> report, {String note = '', Redactor
       'bytes': json.length,
       'gzipBytes': gz.length,
       'noteLength': n.length,
+      if (n.isNotEmpty) 'note': out['note'],
     },
   );
 }

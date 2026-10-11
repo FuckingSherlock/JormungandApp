@@ -93,7 +93,7 @@ async function ipKey(ip: string): Promise<string> {
   return [...new Uint8Array(d).slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function readLimited(req: Request): Promise<Uint8Array | 'toolarge'> {
+async function readLimited(req: Request, max = MAX_BYTES): Promise<Uint8Array | 'toolarge'> {
   if (!req.body) return new Uint8Array(0);
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -102,7 +102,7 @@ async function readLimited(req: Request): Promise<Uint8Array | 'toolarge'> {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_BYTES) {
+    if (total > max) {
       await reader.cancel();
       return 'toolarge';
     }
@@ -117,9 +117,90 @@ async function readLimited(req: Request): Promise<Uint8Array | 'toolarge'> {
   return out;
 }
 
+export const PING_BODY_MAX = 64 * 1024;
+export const PING_REPLY_BYTES = 32768;
+export const NOTE_MAX = 500;
+const NOTE_HEADER_MAX = 4096;
+const CAPTION_MAX = 1024;
+
+/** base64url (без паддинга) → UTF-8 текст заметки; любая ошибка → '' (заметка просто игнорируется). */
+export function decodeNote(header: string | null): string {
+  if (!header || header.length > NOTE_HEADER_MAX || !/^[A-Za-z0-9_-]+={0,2}$/.test(header)) return '';
+  try {
+    const b64 = header.replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    // управляющие символы (кроме перевода строки) в уведомлении не нужны
+    return [...text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '')]
+      .slice(0, NOTE_MAX)
+      .join('')
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function prettyPlatform(p: string): string {
+  const known: Record<string, string> = { android: 'Android', windows: 'Windows', ios: 'iOS', macos: 'macOS', linux: 'Linux' };
+  return known[p.toLowerCase()] ?? (p ? p[0]!.toUpperCase() + p.slice(1) : '');
+}
+
+/** Подпись для Telegram (parse_mode HTML); видимый текст ≤ 1024 символов, заметка режется с «…». */
+export function buildCaption(
+  id: string,
+  m: { platform?: string; version?: string; build?: string; via?: string; vpn?: string },
+  sizeBytes: number,
+  note: string,
+): string {
+  const kb = Math.max(1, Math.round(sizeBytes / 1024));
+  const info: string[] = [];
+  if (m.platform) info.push(prettyPlatform(m.platform));
+  if (m.version) info.push(m.build ? `${m.version} (${m.build})` : m.version);
+  else if (m.build) info.push(`(${m.build})`);
+  info.push(`${kb} KB`);
+  const state: string[] = [];
+  if (m.vpn) state.push(`VPN ${m.vpn}`);
+  if (m.via) state.push(m.via === 'vpn' ? 'sent via VPN' : 'sent direct');
+  const lines = [`🐞 <b>Report</b> <code>${escapeHtml(id)}</code>`, escapeHtml(info.join(' · '))];
+  const visible = [`🐞 Report ${id}`, info.join(' · ')];
+  if (state.length) {
+    lines.push(state.join(' · '));
+    visible.push(state.join(' · '));
+  }
+  if (!note) {
+    lines.push('<i>no note</i>');
+    return lines.join('\n');
+  }
+  const budget = CAPTION_MAX - visible.join('\n').length - 1; // -1: перевод строки перед цитатой
+  let shown = note;
+  if (shown.length > budget) {
+    let cut = Math.max(0, budget - 1);
+    const code = shown.charCodeAt(cut - 1);
+    if (code >= 0xd800 && code <= 0xdbff) cut--; // не рвём суррогатную пару
+    shown = shown.slice(0, cut).trimEnd() + '…';
+  }
+  lines.push(`<blockquote>${escapeHtml(shown)}</blockquote>`);
+  return lines.join('\n');
+}
+
 export async function handle(request: Request, env: Env, ctx: Ctx, deps: Deps = {}): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === '/v1/ping' && request.method === 'GET') return json({ ok: true });
+  if (url.pathname === '/v1/ping' && request.method === 'POST') {
+    // Пробный обмен: клиент считает его пройденным только при полном эхо 32 KiB (DPI режет соединения
+    // после ~16 KB). Лимитером не считается, как и GET.
+    const declaredPing = Number(request.headers.get('content-length') ?? 0);
+    if (Number.isFinite(declaredPing) && declaredPing > PING_BODY_MAX) return json({ ok: false, error: 'too-large' }, 413);
+    if ((await readLimited(request, PING_BODY_MAX)) === 'toolarge') return json({ ok: false, error: 'too-large' }, 413);
+    return new Response(new Uint8Array(PING_REPLY_BYTES), {
+      headers: { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' },
+    });
+  }
   if (url.pathname !== '/v1/report' || request.method !== 'POST') {
     return json({ ok: false, error: 'not-found' }, 404);
   }
@@ -157,6 +238,12 @@ export async function handle(request: Request, env: Env, ctx: Ctx, deps: Deps = 
     const v = sanitize(request.headers.get(header), max);
     if (v) meta[name] = v;
   }
+  const via = (request.headers.get('X-Jorm-Via') ?? '').trim().toLowerCase();
+  if (via === 'vpn' || via === 'direct') meta.via = via;
+  const vpn = (request.headers.get('X-Jorm-Vpn') ?? '').trim().toLowerCase();
+  if (vpn === 'on' || vpn === 'off') meta.vpn = vpn;
+  const note = decodeNote(request.headers.get('X-Jorm-Note'));
+  if (note) meta.noteLength = String([...note].length);
   meta.receivedAt = now.toISOString();
   meta.size = String(body.length);
 
@@ -170,8 +257,7 @@ export async function handle(request: Request, env: Env, ctx: Ctx, deps: Deps = 
   }
 
   if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
-    const kb = Math.max(1, Math.round(body.length / 1024));
-    const text = `Jormungand report ${id} · ${meta.platform || '?'} ${meta.version || '?'} (${meta.build || '?'}) · ${kb} KB`;
+    const caption = buildCaption(id, meta, body.length, note);
     const f = deps.fetch ?? fetch;
     ctx.waitUntil(
       (async () => {
@@ -179,11 +265,32 @@ export async function handle(request: Request, env: Env, ctx: Ctx, deps: Deps = 
         // уведомление не пришло (чат не найден, бот заблокирован, токен отозван).
         let result: Record<string, unknown>;
         try {
-          const r = await f(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
-          });
+          // Основной путь — конверт файлом `<id>.jrp` с подписью; при сбое — тот же текст сообщением.
+          let method = 'sendDocument';
+          let r: Response | undefined;
+          try {
+            const form = new FormData();
+            form.set('chat_id', String(env.TELEGRAM_CHAT_ID));
+            form.set('caption', caption);
+            form.set('parse_mode', 'HTML');
+            form.set('document', new Blob([body.buffer as ArrayBuffer], { type: 'application/octet-stream' }), `${id}.jrp`);
+            r = await f(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendDocument`, { method: 'POST', body: form });
+          } catch {
+            r = undefined;
+          }
+          if (!r || !r.ok) {
+            method = 'sendMessage';
+            r = await f(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: env.TELEGRAM_CHAT_ID,
+                text: caption,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+              }),
+            });
+          }
           let description = '';
           try {
             const j = (await r.json()) as { description?: unknown };
@@ -191,7 +298,7 @@ export async function handle(request: Request, env: Env, ctx: Ctx, deps: Deps = 
           } catch {
             // не JSON — оставим пустым
           }
-          result = { at: now.toISOString(), id, status: r.status, ok: r.ok, description };
+          result = { at: now.toISOString(), id, method, status: r.status, ok: r.ok, description };
           if (!r.ok) {
             // Отказ: добавим, какой это бот и какие чаты он видел (id чатов не секрет) — по этому
             // находится верный TELEGRAM_CHAT_ID, не показывая токен.

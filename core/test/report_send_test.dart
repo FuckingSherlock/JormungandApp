@@ -108,6 +108,7 @@ void main() {
       expect(packed.meta, containsPair('version', '1.2.3'));
       expect(packed.meta, containsPair('commit', 'abc1234'));
       expect(packed.meta['noteLength'], reportNoteMax);
+      expect(packed.meta['note'], n, reason: 'the masked note goes to the uploader for the X-Jorm-Note header');
       expect(packed.meta['gzipBytes'], packed.gzipped.length);
       expect(base.containsKey('note'), isFalse, reason: 'the input is not changed');
     });
@@ -116,6 +117,7 @@ void main() {
       final packed = packReport({'format': 1, 'app': {}});
       expect(packed.report.containsKey('note'), isFalse);
       expect(packed.meta['noteLength'], 0);
+      expect(packed.meta.containsKey('note'), isFalse);
     });
   });
 
@@ -204,9 +206,9 @@ void main() {
       expect(svc.logBook.since(null)['lines'].toString(), contains('Report not sent (no-route)'));
     });
 
-    test('the default overall deadline is the probe + the upload + a small margin for building', () {
-      expect(reportSendDeadline, reportProbeTimeout + reportUploadTimeout + reportBuildMargin);
-      expect(reportSendDeadline, const Duration(seconds: 18));
+    test('the default overall deadline is the tunnel try + the probe + the direct upload + a small margin for building', () {
+      expect(reportSendDeadline, reportTunnelTimeout + reportProbeTimeout + reportUploadTimeout + reportBuildMargin);
+      expect(reportSendDeadline, const Duration(seconds: 28));
     });
 
     test('an uploader that never answers: the send still ends, as a timeout that says where it stuck', () async {
