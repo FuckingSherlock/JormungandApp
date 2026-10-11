@@ -12,7 +12,9 @@ Flutter or build work):
 - **Core** `core/` — Dart package `jormungand_core` shared by both (parsers, catalog, plan, sing-box
   config and runtime, `CoreService`, updates). Design and API: `docs/core.md`.
 
-Where things stand and what's next: the newest `.claude_states/state_N.md`.
+Where things stand: the newest `.claude_states/state_N.md` (counted from `state_0.md`). The plan:
+`features.md` (decided new features), `unfinished.md` (planned in the mockup era, not done), `apk_losted.md`
+(in the mockup, lost on Android), `to_think.md` (needs the user's decision); old states in `archive/`.
 
 ## Priorities (the user's, above everything below)
 
@@ -145,7 +147,8 @@ release signing key) are never written to the repo or read by the agent.
   gradle run once, by the lead via the Haiku `test-runner`, before the commit.
 - At most 4 Sonnet agents at once; avoid parallel agents in the same files. An agent stopped by a limit is
   resumed with SendMessage (its context survives), not restarted.
-- User decisions and the plan go into `.claude_states/state_N.md` ("Дальше").
+- User decisions go into `.claude_states/state_N.md`; plan items into the plan file they belong to (move an item
+  between files when its status changes, delete it from the plan when done).
 
 ## Git, end of session, deploy
 
