@@ -1,0 +1,160 @@
+package dev.jormungand.app
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
+import java.io.File
+import java.security.MessageDigest
+
+/**
+ * The «Install» button of the «Update X ready» notification (docs/updates.md, section 6): it hands the
+ * downloaded APK to the system installer without opening the app. Posted by the live process
+ * ([UpdateFlow]) and by the background job ([UpdateJob]) alike.
+ *
+ * A transparent activity, not a receiver: since Android 12 a notification may not start an activity
+ * from a receiver or service, and the installer's confirmation dialog needs a foreground app. The
+ * activity has no window of its own and stays only until the installer answers ([UpdateInstaller]).
+ *
+ * The file is not trusted because the notification says so: [ReadyUpdate.verified] checks it against the
+ * `ready.json` the updater wrote next to it (name, size, sha256), and [UpdateInstaller] does its usual
+ * checks (our package, newer versionCode, the same certificate). A file that is gone or does not match
+ * (deleted, replaced, the update was installed already), and a package the installer refuses
+ * (`verify`), open the app at the update block instead.
+ */
+class UpdateInstallActivity : Activity() {
+    private val main = Handler(Looper.getMainLooper())
+    private val giveUp = Runnable { finish() }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val path = intent?.getStringExtra(AppNotifier.EXTRA_FILE)
+        if (path.isNullOrEmpty()) return fallback("no file")
+        // sha256 of a few dozen MB: not on the main thread
+        Thread {
+            val ready = runCatching { ReadyUpdate.verified(path) }.getOrNull()
+            main.post {
+                if (isFinishing) return@post
+                if (ready == null) return@post fallback("the file is gone or does not match ready.json")
+                start(path, ready)
+            }
+        }.start()
+    }
+
+    private fun start(path: String, ready: JSONObject) {
+        // the safety net: an installer that never answers must not leave this activity behind
+        main.postDelayed(giveUp, 5 * 60_000L)
+        // what the next start needs to tell «installed» from «failed» (the updater's `beginInstall`)
+        runCatching { ReadyUpdate.markInstalling(this, path, ready) }
+        UpdateInstaller.install(this, path, object : MethodChannel.Result {
+            override fun success(result: Any?) {
+                val why = result as? String
+                Log.i(TAG, "installer: ${why ?: "done"}")
+                if (why != null && why != "busy") runCatching { ReadyUpdate.clearInstalling(path) }
+                if (why == "verify") fallback("the installer refused the file") else finish()
+            }
+
+            override fun error(code: String, message: String?, details: Any?) {
+                runCatching { ReadyUpdate.clearInstalling(path) }
+                fallback("installer error $code")
+            }
+
+            override fun notImplemented() = finish()
+        })
+    }
+
+    private fun fallback(why: String) {
+        Log.i(TAG, "opening the app at the update block: $why")
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .setAction(AppNotifier.ACTION_OPEN_UPDATE)
+                .putExtra(AppNotifier.EXTRA_INSTALL, false)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        )
+        finish()
+    }
+
+    override fun onDestroy() {
+        main.removeCallbacks(giveUp)
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val TAG = "JormungandUpdateInstall"
+    }
+}
+
+/**
+ * The updater's record of a downloaded update, read natively: `ready.json` in the updates folder next to
+ * the APK ({offer, asset: {file, size, sha256}, ...}, written by the core's AppUpdater after the file
+ * passed its own size and sha256 checks) and `state.json` ({lastCheckAt, installing: {from, to, at, file}}).
+ */
+object ReadyUpdate {
+    /** The `ready.json` next to [path] when the file is exactly the one it describes, else null. */
+    fun verified(path: String): JSONObject? {
+        val f = File(path)
+        if (!f.isFile) return null
+        val ready = File(f.parentFile, "ready.json")
+        if (!ready.isFile) return null
+        val j = JSONObject(ready.readText())
+        val asset = j.getJSONObject("asset")
+        if (asset.getString("file") != f.name || asset.getLong("size") != f.length()) return null
+        val sha = MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                sha.update(buf, 0, n)
+            }
+        }
+        val hex = sha.digest().joinToString("") { "%02x".format(it) }
+        return if (hex.equals(asset.getString("sha256"), ignoreCase = true)) j else null
+    }
+
+    private fun stateFile(path: String) = File(File(path).parentFile, "state.json")
+
+    private fun version(name: String, build: Long) = if (build > 0) "$name+$build" else name
+
+    /**
+     * Like the core's `beginInstall`: the next start's `reconcile()` finds the install begun and reports
+     * `updateInstalled` (the version reached the target) or `updateFailed`.
+     */
+    fun markInstalling(ctx: Context, path: String, ready: JSONObject) {
+        val offer = ready.getJSONObject("offer")
+        val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+        val state = stateFile(path)
+        val s = if (state.isFile) runCatching { JSONObject(state.readText()) }.getOrNull() ?: JSONObject() else JSONObject()
+        s.put(
+            "installing",
+            JSONObject()
+                .put("from", version(info.versionName ?: "", ResumeStore.versionCode(ctx)))
+                .put("to", version(offer.getString("version"), offer.optLong("build", 0)))
+                .put("at", System.currentTimeMillis())
+                .put("file", File(path).name),
+        )
+        write(state, s)
+    }
+
+    /** The install did not happen (declined, refused): the record goes, as the core's `installFailed` does. */
+    fun clearInstalling(path: String) {
+        val state = stateFile(path)
+        if (!state.isFile) return
+        val s = JSONObject(state.readText())
+        if (s.remove("installing") != null) write(state, s)
+    }
+
+    private fun write(f: File, j: JSONObject) {
+        val tmp = File(f.path + ".tmp")
+        tmp.writeText(j.toString())
+        if (!tmp.renameTo(f)) {
+            f.delete()
+            tmp.renameTo(f)
+        }
+    }
+}

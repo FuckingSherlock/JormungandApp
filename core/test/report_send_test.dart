@@ -195,6 +195,20 @@ void main() {
       expect([r['ok'], r['error']], [false, 'failed']);
     });
 
+    test('no direct path and the VPN off arrives as the `no-route` result, with its reason', () async {
+      final svc = await open(_Uploader(fail: const ReportUploadException('no-route', 'no direct path (x) and the VPN is not connected')));
+      addTearDown(svc.dispose);
+      final r = await svc.sendReport();
+      expect([r['ok'], r['error']], [false, 'no-route']);
+      expect(r['message'], contains('VPN'));
+      expect(svc.logBook.since(null)['lines'].toString(), contains('Report not sent (no-route)'));
+    });
+
+    test('the default overall deadline is the probe + the upload + a small margin for building', () {
+      expect(reportSendDeadline, reportProbeTimeout + reportUploadTimeout + reportBuildMargin);
+      expect(reportSendDeadline, const Duration(seconds: 18));
+    });
+
     test('an uploader that never answers: the send still ends, as a timeout that says where it stuck', () async {
       final up = _Uploader(hang: true);
       final svc = await open(up, deadline: const Duration(milliseconds: 300));

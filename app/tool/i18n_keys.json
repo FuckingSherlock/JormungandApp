@@ -1524,5 +1524,8 @@
   "Tap to see what's new": "tapToSeeWhatSNew",
   "New version": "newVersion",
   "A new version of the app is out, or a downloaded one waits to be installed": "aNewVersionOfTheApp",
-  "Update {0} ready": "updateReady"
+  "Update {0} ready": "updateReady",
+  "No direct path to the report server, and the VPN is off. Turn the VPN on and try again.": "noDirectPathToTheReport",
+  "Sent through the VPN: the report server is not reachable directly.": "sentThroughTheVpnTheReport",
+  "Sending… {#0} s": "sendingS"
 }

@@ -11,7 +11,7 @@
 //
 // Also: android_overlay/app/** is copied into android/app/ (libs/libbox.aar from
 // core/tool/build_libbox.ps1, proguard rules; text files get __APP_ID__ replaced), and the gradle
-// file gets one managed block at its end (libbox dependency, release signing from
+// file gets one managed block at its end (libbox + WorkManager dependencies, release signing from
 // android/key.properties, see app/tool/build_apk.ps1).
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 
 export const APPLICATION_ID = 'dev.jormungand.app';
 const MIN_SDK = 26;
+// WorkManager: the periodic background update check while the app's process is not running
+const WORK_RUNTIME = 'androidx.work:work-runtime-ktx:2.9.1';
 
 const app = join(dirname(fileURLToPath(import.meta.url)), '..');
 const overlay = join(app, 'android_overlay');
@@ -82,6 +84,10 @@ g = g.replace(/(namespace\s*=?\s*)"[^"]*"/, `$1"${APPLICATION_ID}"`)
 const managed = kts ? [
   MARK + ' (app/tool/apply_android_overlay.mjs rewrites this block)',
   ...(hasLibbox ? ['dependencies {', '    implementation(files("libs/libbox.aar"))', '}'] : []),
+  // the background update check (UpdateJob.kt.tmpl)
+  'dependencies {',
+  `    implementation("${WORK_RUNTIME}")`,
+  '}',
   '// plain key=value parse: in a .kts body `java` is the java extension, so java.util.Properties does not resolve',
   'val jormKeyProps: Map<String, String> = rootProject.file("key.properties").let { f ->',
   '    if (!f.exists()) emptyMap() else f.readLines().mapNotNull { l ->',
@@ -114,6 +120,9 @@ const managed = kts ? [
 ] : [
   MARK + ' (app/tool/apply_android_overlay.mjs rewrites this block)',
   ...(hasLibbox ? ['dependencies {', '    implementation files("libs/libbox.aar")', '}'] : []),
+  'dependencies {',
+  `    implementation "${WORK_RUNTIME}"`,
+  '}',
   'def jormKeyProps = new Properties()',
   'def jormKeyFile = rootProject.file("key.properties")',
   'if (jormKeyFile.exists()) { jormKeyFile.withInputStream { jormKeyProps.load(it) } }',

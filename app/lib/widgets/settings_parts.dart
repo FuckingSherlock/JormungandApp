@@ -574,7 +574,6 @@ Future<void> showHelp(BuildContext context, HelpTopic topic) {
       (l10n.via, l10n.theQueryGoesThroughTheVpn),
       ('ms', l10n.howFastTheServerAnswersTap),
       (l10n.hijackDns, l10n.catchesAppsThatAskTheirOwn),
-      ('FakeIP', l10n.answersAtOnceWithAStand),
     ]),
     HelpTopic.dnsAuto => (l10n.switchAutomatically, [
       (l10n.onText, l10n.aServerThatStopsAnsweringIs),

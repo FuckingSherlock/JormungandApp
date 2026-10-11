@@ -30,6 +30,12 @@ Where things stand: the newest `.claude_states/state_N.md` (counted from `state_
   legitimate only when it is listed in `docs/platforms.md` with a reason; "not done yet" is a gap
   to close, not a difference.
 
+## Translations
+
+Russian UI translations are done only for stable releases, so that text edits between betas do not need re-translating.
+New strings go in English only (no Russian in briefs); before a stable tag all missing Russian is filled in one pass
+(`docs/i18n.md`).
+
 ## Docs (Russian, the knowledge base — keep them current)
 
 | File | What |
@@ -126,7 +132,7 @@ release signing key) are never written to the repo or read by the agent.
   logic, state, tricky bugs, screen ports), `tests` (`.claude/agents/tests.md`; runs, fixes and
   extends checks), `general-purpose` for mixed jobs.
 - A brief states: goal, files to start from (with line hints), constraints (no commit, never read
-  `main_screen.html`, CSS vars / theme extension only, 320 px / 120 % fit, Russian for new strings),
+  `main_screen.html`, CSS vars / theme extension only, 320 px / 120 % fit, new strings in English only — see "Translations"),
   checks to add, docs to update, the exact verify command, "report briefly".
 - Parallel agents get told which files the others edit; shared files (`check.mjs`, `04-i18n-ru.js`,
   ARB files, `i18n_extra.json`, `core_host.dart`, `CLAUDE.md`) — small Edit-tool edits only, re-read

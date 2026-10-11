@@ -177,7 +177,7 @@ Visual Studio с «Desktop development with C++» — пока не устано
 версия sing-box на Android — из libbox (`VpnChannel` `libboxVersion` → `CoreService(knownSingBoxVersion:)`), на десктопе — `sing-box version`.
 `coreVersion` остаётся только в `/api/version` jormd.
 | APK + публикация beta (CI) | push в основную ветку (`app/**`, `core/**`) или `workflow_dispatch` → `.github/workflows/release-android.yml` | релиз `v<версия>-beta.N` в `FuckingSherlock/jormungand-releases` + `manifest-beta.json(.sig)` в релизе `feed`; секреты и разовые шаги — `docs/updates.md` §13 |
-| APK + публикация stable (CI) | `git tag v0.1.0 && git push origin v0.1.0` (версия тега = `X.Y.Z` в `app/pubspec.yaml`) | обычный релиз `v0.1.0` в `jormungand-releases` + `manifest-stable.json(.sig)` в `feed`; beta после stable идёт выше него (`0.1.1-beta.N`), `docs/updates.md` §5, §13 |
+| APK + публикация stable (CI) | `git tag v0.1.0 && git push origin v0.1.0` (версия тега = `X.Y.Z` в `app/pubspec.yaml`); **перед stable-тегом `node app/tool/gen_i18n.mjs --missing` должен быть чист** — русский делается только для stable (`docs/i18n.md`) | обычный релиз `v0.1.0` в `jormungand-releases` + `manifest-stable.json(.sig)` в `feed`; beta после stable идёт выше него (`0.1.1-beta.N`), `docs/updates.md` §5, §13 |
 | Установка | `adb install -r <apk>` (`G:\ANDROID_DEV\android-sdk\platform-tools\adb.exe`) | телефон юзера: Galaxy Note20, arm64-v8a, Android 13 |
 | Flutter Windows | `flutter build windows` в `app/` | нужна VS C++ |
 
@@ -351,12 +351,19 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   (`LogsController.showEvent`: фильтр сбрасывается, если прячет событие).
 - **Уведомления об обновлении приложения** (не события журнала; `core/update_flow.dart`, `UpdateFlow`): канал
   `update`, id 4 (один на «Update X available» / «Update X ready · Install»; заменяется, не копится), BigText,
-  кнопка **Install** только у «ready». Dart шлёт `postUpdate {title, text, version, install, installLabel}`
+  кнопка **Install** только у «ready». Dart шлёт `postUpdate {title, text, version, install, installLabel, file?}`
   (язык приложения), общая запись «объявлено» — `updateAnnounced` / `setUpdateAnnounced` (SharedPreferences
-  `jorm_update/announced`). Тап — `ACTION_OPEN_UPDATE` (+ `EXTRA_INSTALL`) → `openUpdate(install)` /
+  `jorm_update/announced`). Тап по телу — `ACTION_OPEN_UPDATE` (+ `EXTRA_INSTALL`) → `openUpdate(install)` /
   `takeLaunchUpdate` → оболочка открывает Settings → Data (`_openUpdate`) и при `install` запускает установку.
-  Показываются только в фоне; фильтр — мастер и `notifCfg.updateAvailable` («New version»). Логика и причины —
-  `updates.md`, раздел 6.
+  Если в `postUpdate` есть `file` (путь скачанного APK), кнопка Install **не открывает приложение**: это
+  `PendingIntent.getActivity` на прозрачную `UpdateInstallActivity` (`UpdateInstallShade.kt.tmpl`, манифест
+  оверлея: без окна, вне Recents), которая сверяет файл с `ready.json` и зовёт `UpdateInstaller` (системный
+  диалог); нет файла / не совпал — приложение на карточке обновлений. Показываются только в фоне (из живого
+  процесса) либо заданием WorkManager при закрытом процессе (`UpdateJob.kt.tmpl`: `UpdateCheckWorker` поднимает
+  безголовый FlutterEngine на `updateJobMain`; канал `jormungand/updatejob` — `sync` настроек из приложения,
+  `input` / `done` для изолята задания; зависимость `androidx.work:work-runtime-ktx` добавляет
+  `apply_android_overlay.mjs`; `ResumeReceiver` после замены пакета перерегистрирует работу). Фильтр — мастер и
+  `notifCfg.updateAvailable` («New version»). Логика и причины — `updates.md`, раздел 6.
 - **Разрешение** (API 33+; ниже — только переключатель системы). Запрос один раз за установку при первом
   успешном подключении (`request(once: true)`, нативный флаг в SharedPreferences; мастер-переключатель
   Notifications выключен — не просим) и когда пользователь включает переключатель на странице

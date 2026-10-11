@@ -5,3 +5,6 @@ output-localization-file: app_localizations.dart
 output-class: AppLocalizations
 output-dir: lib/l10n/gen
 nullable-getter: false
+# Russian is done only for stable releases: strings without it fall back to English. The list is
+# written here (derived, gitignored); `node app/tool/gen_i18n.mjs --missing` prints the same.
+untranslated-messages-file: lib/l10n/untranslated.json

@@ -9,6 +9,7 @@ import '../platform/files_channel.dart';
 import '../platform/network_channel.dart';
 import '../platform/screen_channel.dart';
 import '../platform/resume_channel.dart';
+import '../platform/update_job_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'core_host.dart';
 import 'libbox_runner.dart';
@@ -137,6 +138,7 @@ Future<CoreHost> openCoreHost() async {
       logNote: core.logBook.note,
       network: const NetworkChannel(),
       screen: const ScreenChannel(),
+      updateJob: const UpdateJobChannel(), // the check while the process is gone (WorkManager)
     );
   }
   final singBox = desktopSingBoxPath();

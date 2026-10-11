@@ -127,6 +127,27 @@ void main() {
     expect(v.groups(v.shown(list)), isNull);
   });
 
+  test('app groups are titled by appName for a package (key stays the package); a process keeps its file name; the search matches the name', () {
+    const tg = 'org.telegram.messenger';
+    final list = [
+      c({...conn('1', 'a.com'), 'pkg': tg}),
+      c({...conn('2', '1.2.3.4'), 'pkg': tg}),
+      c({...conn('3', '1.2.3.5'), 'pkg': 'com.gone.app'}),
+      c(conn('4', '1.2.3.6', process: r'C:\Apps\curl.exe')),
+    ];
+    final v = ConnView()..group = ConnGroupBy.app;
+    var g = v.groups(v.shown(list))!;
+    expect(g.map((x) => x.name).toSet(), {tg, 'com.gone.app', 'curl.exe'}, reason: 'no resolver: the package');
+    v.appName = (p) => p == tg ? 'Tele Gram' : p;
+    g = v.groups(v.shown(list))!;
+    expect(g.map((x) => (x.key, x.name)).toSet(), {('a:$tg', 'Tele Gram'), ('a:com.gone.app', 'com.gone.app'), ('a:curl.exe', 'curl.exe')});
+    v.group = ConnGroupBy.service; // a bare IP falls back to its app, the domain stays a domain
+    g = v.groups(v.shown(list))!;
+    expect(g.map((x) => x.name).toSet(), {'a.com', 'Tele Gram', 'com.gone.app', 'curl.exe'});
+    v.query = 'tele gram';
+    expect(v.shown(list).map((x) => x.id).toSet(), {'1', '2'});
+  });
+
   test('group of Longest sorts by its oldest start, Newest by its newest', () {
     final list = [
       c(conn('1', 'a.youtube.com', start: '2026-01-01T09:00:00Z')),

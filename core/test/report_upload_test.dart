@@ -38,14 +38,17 @@ void main() {
   final got = <_Got>[];
   // what the server answers next: (status, body, extra headers); a null body = never answer
   var answer = (status: 200, body: '{"ok":true,"id":"20261010-k3x9qa"}' as String?, headers: const <String, String>{});
+  // the reachability probe (GET /v1/ping): what it got and how the server answers it (null = never)
+  final probes = <String>[];
+  int? pingStatus = 200;
 
-  HttpReportUploader up({int? maxBytes, Duration? timeout, Duration? directTimeout, String? publicKey, String? endpoint}) =>
+  HttpReportUploader up({int? maxBytes, Duration? timeout, Duration? probeTimeout, String? publicKey, String? endpoint}) =>
       HttpReportUploader(
         endpoint: endpoint ?? 'http://127.0.0.1:${server.port}/v1/report',
         publicKey: publicKey ?? keys.publicBase64,
         connectTimeout: const Duration(seconds: 2),
         timeout: timeout ?? const Duration(seconds: 10),
-        directTimeout: directTimeout ?? timeout ?? const Duration(seconds: 10),
+        probeTimeout: probeTimeout ?? const Duration(seconds: 2),
         maxBytes: maxBytes ?? reportMaxBytes,
       );
 
@@ -53,9 +56,20 @@ void main() {
 
   setUp(() async {
     got.clear();
+    probes.clear();
+    pingStatus = 200;
     answer = (status: 200, body: '{"ok":true,"id":"20261010-k3x9qa"}', headers: const {});
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
+      if (req.method == 'GET') {
+        probes.add(req.uri.toString());
+        final s = pingStatus;
+        if (s == null) return; // never answers
+        req.response.statusCode = s;
+        req.response.write('{"ok":true}');
+        await req.response.close();
+        return;
+      }
       final body = await req.fold<BytesBuilder>(BytesBuilder(copy: false), (b, c) => b..add(c));
       got.add(_Got(req.method, req.uri.path, req.headers, body.takeBytes()));
       final a = answer;
@@ -121,16 +135,19 @@ void main() {
       expect(d.publicKey, reportPublicKey);
       expect(d.maxBytes, 4 * 1024 * 1024);
       expect(d.connectTimeout, const Duration(seconds: 10));
-      expect(d.timeout, const Duration(seconds: 30));
-      expect(d.directTimeout, const Duration(seconds: 12));
+      expect(d.timeout, const Duration(seconds: 10));
+      expect(d.probeTimeout, const Duration(seconds: 3));
+      expect(reportSendDeadline, greaterThanOrEqualTo(d.probeTimeout + d.timeout), reason: 'the overall deadline covers probe + upload');
+      expect(reportSendDeadline, lessThanOrEqualTo(const Duration(seconds: 20)));
     });
   });
 
-  // The direct path is the app's own and may be blocked or throttled (a connection that opens and
-  // stalls); with the tunnel up the same envelope then goes through the tunnel's local proxy. Here the
-  // "direct" receiver is a socket that accepts and never speaks, the "proxy" is a plain HTTP server
-  // (for an http:// target a proxy gets the absolute URI, which is what Dart sends).
-  group('direct, then via the tunnel', () {
+  // A direct probe decides the way: it answers → the upload goes direct and its end is final; it does
+  // not → the upload goes through the tunnel's local proxy at once, or fails as `no-route` when there is
+  // no tunnel. Here the unreachable "direct" receiver is a socket that accepts and never speaks, the
+  // "proxy" is a plain HTTP server (for an http:// target a proxy gets the absolute URI, which is what
+  // Dart sends).
+  group('probe, then direct or via the tunnel', () {
     late ServerSocket stalled;
     final held = <Socket>[];
     late HttpServer proxy;
@@ -160,27 +177,56 @@ void main() {
 
     HttpReportUploader stalledUp() => up(
           endpoint: 'http://127.0.0.1:${stalled.port}/v1/report',
-          directTimeout: const Duration(milliseconds: 400),
+          probeTimeout: const Duration(milliseconds: 400),
           timeout: const Duration(seconds: 2),
         );
 
-    test('a direct attempt that stalls falls back to the tunnel proxy and says so', () async {
-      final r = await stalledUp().upload(_gz(), meta: _meta, proxyPort: proxy.port);
-      expect(r.id, '20261010-vpn123');
-      expect(r.via, 'vpn');
-      expect(r.directError, contains('did not answer'));
-      expect(viaProxy.single.port, stalled.port, reason: 'the proxy was asked for the same target');
-    });
-
-    test('not connected (no proxy): the only direct attempt gets the long timeout and ends as network', () async {
-      final sw = Stopwatch()..start();
-      final e = await failure(stalledUp().upload(_gz(), meta: _meta));
-      expect(e.code, 'network');
-      expect(sw.elapsed, greaterThan(const Duration(milliseconds: 1500)), reason: 'the long one, not the short direct one');
+    test('the probe is a GET of /v1/ping on the receiver\'s origin; answered → direct, the tunnel is not touched', () async {
+      final r = await up().upload(_gz(), meta: _meta, proxyPort: proxy.port);
+      expect(probes, ['/v1/ping']);
+      expect(r.via, 'direct');
+      expect(r.directError, isNull);
+      expect(got.single.method, 'POST');
       expect(viaProxy, isEmpty);
     });
 
-    test('direct fails and the tunnel fails too: network, both reasons in the message', () async {
+    test('any HTTP answer to the probe counts (a 404 of an older Worker too)', () async {
+      pingStatus = 404;
+      final r = await up().upload(_gz(), meta: _meta, proxyPort: proxy.port);
+      expect(r.via, 'direct');
+      expect(viaProxy, isEmpty);
+    });
+
+    test('probe unanswered, tunnel up: the upload goes through the tunnel proxy at once, and says so', () async {
+      final sw = Stopwatch()..start();
+      final r = await stalledUp().upload(_gz(), meta: _meta, proxyPort: proxy.port);
+      expect(r.id, '20261010-vpn123');
+      expect(r.via, 'vpn');
+      expect(r.directError, contains('no answer'));
+      expect(viaProxy.single.port, stalled.port, reason: 'the proxy was asked for the same target');
+      expect(viaProxy, hasLength(1), reason: 'the probe itself stays direct');
+      expect(sw.elapsed, lessThan(const Duration(seconds: 2)), reason: 'probe 0.4 s + a quick proxy, no long direct attempt');
+    });
+
+    test('probe refused (nothing listens), tunnel up: via the tunnel too', () async {
+      final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final port = s.port;
+      await s.close();
+      final r = await up(endpoint: 'http://127.0.0.1:$port/v1/report').upload(_gz(), meta: _meta, proxyPort: proxy.port);
+      expect(r.via, 'vpn');
+      expect(viaProxy.single.port, port);
+    });
+
+    test('probe unanswered and no tunnel: no-route at once, with the reason', () async {
+      final sw = Stopwatch()..start();
+      final e = await failure(stalledUp().upload(_gz(), meta: _meta));
+      expect(e.code, 'no-route');
+      expect(e.message, allOf(contains('no direct path'), contains('VPN')));
+      expect(sw.elapsed, lessThan(const Duration(seconds: 2)), reason: 'right after the probe, no long attempt');
+      expect(viaProxy, isEmpty);
+    });
+
+    test('no direct path and the tunnel fails too: network, both reasons in the message', () async {
       final dead = proxy.port;
       await proxy.close(force: true);
       final e = await failure(stalledUp().upload(_gz(), meta: _meta, proxyPort: dead));
@@ -195,14 +241,33 @@ void main() {
       expect(viaProxy, isEmpty);
     });
 
-    test('Cancel aborts a stalled upload at once, direct or via the tunnel', () async {
+    test('probe ok but the direct upload stalls: network after the upload timeout, no second attempt via the tunnel', () async {
+      answer = (status: 200, body: null, headers: const {});
+      final e = await failure(up(timeout: const Duration(milliseconds: 400)).upload(_gz(), meta: _meta, proxyPort: proxy.port));
+      expect(e.code, 'network');
+      expect(e.message, contains('direct'));
+      expect(viaProxy, isEmpty);
+    });
+
+    test('Cancel aborts a probe under way at once', () async {
       final c = ReportCancel();
-      final f = failure(stalledUp().upload(_gz(), meta: _meta, proxyPort: proxy.port, cancel: c));
+      final f = failure(up(endpoint: 'http://127.0.0.1:${stalled.port}/v1/report', probeTimeout: const Duration(seconds: 2))
+          .upload(_gz(), meta: _meta, proxyPort: proxy.port, cancel: c));
       await Future<void>.delayed(const Duration(milliseconds: 100));
       c.cancel();
-      final e = await f.timeout(const Duration(seconds: 3));
+      final e = await f.timeout(const Duration(seconds: 1));
       expect(e.code, 'cancelled');
-      expect(viaProxy, isEmpty, reason: 'cancelled before the fallback started');
+      expect(viaProxy, isEmpty, reason: 'cancelled before the tunnel was tried');
+    });
+
+    test('Cancel aborts a stalled upload at once', () async {
+      answer = (status: 200, body: null, headers: const {});
+      final c = ReportCancel();
+      final f = failure(up().upload(_gz(), meta: _meta, cancel: c));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      c.cancel();
+      final e = await f.timeout(const Duration(seconds: 1));
+      expect(e.code, 'cancelled');
     });
 
     test('already cancelled: nothing is sent', () async {
@@ -270,12 +335,12 @@ void main() {
       }
     });
 
-    test('no listener on the port: network', () async {
+    test('no listener on the port and no tunnel: no-route', () async {
       final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final port = s.port;
       await s.close();
       final e = await failure(up(endpoint: 'http://127.0.0.1:$port/v1/report').upload(_gz(), meta: _meta));
-      expect(e.code, 'network');
+      expect(e.code, 'no-route');
     });
 
     test('an answer that never comes: network, after the timeout', () async {
@@ -292,6 +357,10 @@ void main() {
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       server.listen((req) async {
         await req.drain<void>();
+        if (req.method == 'GET') {
+          await req.response.close(); // the probe is answered, the upload is not
+          return;
+        }
         final s = await req.response.detachSocket();
         s.destroy();
       });

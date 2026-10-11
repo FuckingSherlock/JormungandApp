@@ -103,4 +103,39 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Save'), findsOneWidget, reason: 'the sheet gave way to the per-app dialog');
   });
+
+  testWidgets('the live connections sheet titles an app group with the app name and icon, the package id only when unknown, and picks the list up when it arrives', (tester) async {
+    final host = FakeCoreHost(); // the installed list not read yet: no name for Telegram
+    await pumpApp(tester, host, width: 560);
+    host.setPhase(ConnectionPhase.connected);
+    host.setTraffic(
+      TrafficInfo(
+        down: 0,
+        up: 0,
+        downTotal: 0,
+        upTotal: 0,
+        tcp: 2,
+        udp: 0,
+        conns: [
+          // bare IPs: the group is the app's
+          LiveConn.fromJson({'id': '1', 'host': '1.2.3.4', 'port': '443', 'net': 'tcp', 'out': const ['direct'], 'process': '', 'pkg': _tg, 'start': '2026-01-01T10:00:00Z'}),
+          LiveConn.fromJson({'id': '2', 'host': '1.2.3.5', 'port': '443', 'net': 'tcp', 'out': const ['direct'], 'process': '', 'pkg': 'com.unknown.app', 'start': '2026-01-01T10:00:00Z'}),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    unawaited(showLiveConnections(tester.element(find.byType(Scaffold).first)));
+    await tester.pumpAndSettle();
+
+    expect(find.text(_tg), findsNWidgets(2), reason: 'group title and row: the list is not here yet');
+
+    host.catalog.appInfo = (p) => p == _tg ? (name: 'Telegram', kind: 'package') : null;
+    host.changed(); // the list arrived
+    await tester.pumpAndSettle();
+    expect(find.text('Telegram'), findsNWidgets(2), reason: 'the group title and the row name the app');
+    expect(find.text(_tg), findsNothing, reason: 'no package id left for a known app');
+    expect(find.text('com.unknown.app'), findsNWidgets(2), reason: 'unknown package: its id');
+    expect(find.byKey(const ValueKey('groupIcon:$_tg')), findsOneWidget);
+    expect(find.byKey(const ValueKey('groupIcon:com.unknown.app')), findsOneWidget);
+  });
 }

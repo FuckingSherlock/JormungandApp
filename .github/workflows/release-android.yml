@@ -190,6 +190,11 @@ jobs:
           echo "BUILD=$((BUILD_OFFSET + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
           echo "Channel $channel, version $version, build $((BUILD_OFFSET + GITHUB_RUN_NUMBER)) (pubspec $pub, published stable ${stable:-none})"
 
+      # Russian is translated only for stable (docs/i18n.md): a stable with strings still without Russian fails here
+      - name: Russian complete (stable)
+        if: env.CHANNEL == 'stable'
+        run: node app/tool/gen_i18n.mjs --missing
+
       - name: Release keystore
         env:
           KS_B64: ${{ secrets.JORM_ANDROID_KEYSTORE_B64 }}

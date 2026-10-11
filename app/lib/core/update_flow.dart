@@ -120,6 +120,7 @@ class UpdateFlow {
         version: v,
         install: host.canInstallUpdate,
         installLabel: t.install,
+        file: host.canInstallUpdate ? u.file : null,
       ),
     );
     await _io.setUpdateAnnounced(v);

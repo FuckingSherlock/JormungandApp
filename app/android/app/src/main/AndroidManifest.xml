@@ -78,6 +78,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- The «Install» button of the «Update X ready» notification: hands the downloaded APK to the system
+             installer with no window of the app (UpdateInstallShade.kt). Transparent, out of Recents, its own task. -->
+        <activity
+            android:name=".UpdateInstallActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+
         <!-- «Ignore site» / «Undo» on an event notification: handled here, no activity starts (EventActionReceiver.kt).
              exported=false: only our own PendingIntents reach it. -->
         <receiver

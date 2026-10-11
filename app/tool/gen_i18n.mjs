@@ -1,6 +1,10 @@
 // design/src/js/04-i18n-ru.js (English text -> Russian)  ->  app/lib/l10n/app_en.arb + app_ru.arb
 //
 //   node app/tool/gen_i18n.mjs
+//   node app/tool/gen_i18n.mjs --missing     list strings without Russian (exit 1 if any), writes nothing
+//
+// Russian is done only for stable releases: an i18n_extra.json entry with the value `null` has no
+// Russian yet — it goes to app_en.arb only and the app shows English in ru (gen-l10n falls back).
 //
 // Source of truth stays the mockup dictionary (docs/i18n.md). Re-run after it changes.
 // - ARB key = stable camelCase id made from the English text. The English text -> key mapping is
@@ -11,7 +15,7 @@
 //   (Russian: one / few / many; `other` = many). English: one / other, with the singular found
 //   among the dictionary's own keys ("{#0} node" for "{#0} nodes"); otherwise `other` only.
 // - Strings only the app has (not in the mockup) go to app/tool/i18n_extra.json
-//   ({ "English": "Русский" } or { "English": ["one", "few", "many"] }); mockup entries win.
+//   ({ "English": "Русский" }, { "English": ["one", "few", "many"] } or { "English": null }); mockup entries win.
 // - Only whole strings are exported. The mockup's DOM layer also translates pieces split by
 //   " · " / " — "; Flutter code composes those from the separate keys.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -40,6 +44,14 @@ if (existsSync(extraFile)) {
     const en = norm(k);
     if (!entries.has(en)) entries.set(en, v);
   }
+}
+
+// ── --missing: strings still without Russian (the check before a stable release) ──
+const untranslated = [...entries].filter(([, v]) => v === null).map(([k]) => k);
+if (process.argv.includes('--missing')) {
+  for (const k of untranslated) console.log(k);
+  console.log(`gen_i18n: ${untranslated.length} string(s) without Russian`);
+  process.exit(untranslated.length ? 1 : 0);
 }
 
 // ── keys (stable) ──
@@ -146,7 +158,7 @@ for (const [text, val] of entries) {
     nPlural++;
   } else {
     en[key] = plain(text, ph, text);
-    ruArb[key] = plain(val, ph, text);
+    if (val !== null) ruArb[key] = plain(val, ph, text);   // null = no Russian yet: English only
   }
   // declared order = Dart parameter order; for a plural the count comes first, as in the message
   const decl = Array.isArray(val) ? [ph.find(p => p.num) || ph[0], ...ph.filter(p => p !== (ph.find(p => p.num) || ph[0]))] : ph;

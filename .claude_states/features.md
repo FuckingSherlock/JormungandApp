@@ -7,11 +7,6 @@
 
 - **gVisor — стек TUN по умолчанию на Android** (S57). Решение пользователя 2026-10-11: делаем точно. Сейчас
   `tunStack = 'mixed'` (`core/lib/src/catalog/settings.dart:55`). Остальные стеки остаются выбором в Settings → Connection.
-- **Проверка обновлений, когда процесса приложения нет** (S46, часть B). Сделано: установка сразу после загрузки,
-  уведомления «Update ready · Install» / «Update available» (раз на версию) из живого процесса, флаг `notifCfg.updateAvailable`
-  (`app/lib/core/update_flow.dart`). Осталось: WorkManager `jorm-update-check` (~24 ч, сеть) → фоновый `FlutterEngine` с
-  Dart-входом `updateJobMain` на существующем `AppUpdater`; зеркалирование настроек в SharedPreferences; пропуск, если процесс жив.
-  Дизайн — `docs/updates.md` §6.
 - **Детектор «не открывается» без опоры на `up > 0`** (S9): повтор сайта в `auto.dart:623` (`_failDests`) запоминает адрес
   только при `c.up > 0`, а ~85 % мгновенных отказов приходят с up=0 и не повторяются на других маршрутах.
 

@@ -37,22 +37,21 @@ String dnsKindLabel(AppLocalizations l10n, String addr) =>
       _ => 'UDP',
     };
 
-/// Settings row: `2 on · hijack · FakeIP`.
+/// Settings row: `2 on · hijack`.
 String dnsSettingsSub(BuildContext context, CoreHost host) {
   final l10n = context.l10n;
   final cat = host.catalog;
   return '${l10n.onText2(cat.dnsActive.length)} · '
-      '${cat.dnsCfg.hijack ? l10n.hijack : l10n.noHijack}'
-      '${cat.dnsCfg.fakeip ? ' · FakeIP' : ''}';
+      '${cat.dnsCfg.hijack ? l10n.hijack : l10n.noHijack}';
 }
 
-/// Home card: `Cloudflare · DoH · FakeIP`.
+/// Home card: `Cloudflare · DoH`.
 String dnsCardSub(BuildContext context, CoreHost host) {
   final l10n = context.l10n;
   final cat = host.catalog;
   final first = cat.dnsActive.isEmpty ? null : cat.dnsActive.first;
   if (first == null) return '—';
-  return '${first.name} · ${dnsKindLabel(l10n, first.addr)}${cat.dnsCfg.fakeip ? ' · FakeIP' : ''}';
+  return '${first.name} · ${dnsKindLabel(l10n, first.addr)}';
 }
 
 class DnsSheet extends StatefulWidget {
@@ -401,153 +400,9 @@ class _DnsSheetState extends State<DnsSheet> {
                   },
                 ),
               ),
-              SetRow(
-                label: 'FakeIP',
-                hint: l10n.fasterNoDnsLeaksSomeApps,
-                trailing: MiniToggle(
-                  on: cfg.fakeip,
-                  onChanged: (v) {
-                    cfg.fakeip = v;
-                    save();
-                  },
-                ),
-                below: cfg.fakeip
-                    ? _FakeipExclude(
-                        values: cfg.fakeipExclude,
-                        onChanged: save,
-                      )
-                    : null,
-              ),
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// "Real answers for": the names FakeIP leaves alone, as removable chips and a field.
-class _FakeipExclude extends StatefulWidget {
-  const _FakeipExclude({required this.values, required this.onChanged});
-
-  final List<String> values;
-  final VoidCallback onChanged;
-
-  @override
-  State<_FakeipExclude> createState() => _FakeipExcludeState();
-}
-
-class _FakeipExcludeState extends State<_FakeipExclude> {
-  final TextEditingController _ctl = TextEditingController();
-  final FocusNode _focus = FocusNode();
-
-  @override
-  void dispose() {
-    _ctl.dispose();
-    _focus.dispose();
-    super.dispose();
-  }
-
-  void _add(String raw) {
-    final v = raw.trim();
-    if (v.isNotEmpty && !widget.values.contains(v)) widget.values.add(v);
-    _ctl.clear();
-    widget.onChanged();
-    _focus.requestFocus();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final c = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        HintText(l10n.realAnswersFor),
-        const SizedBox(height: 6),
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: c.t1.tint(.035),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: c.border),
-          ),
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              for (var i = 0; i < widget.values.length; i++)
-                _ValueChip(
-                  widget.values[i],
-                  onRemove: () {
-                    widget.values.removeAt(i);
-                    widget.onChanged();
-                  },
-                ),
-              ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 120, maxWidth: 220),
-                child: IntrinsicWidth(
-                  child: TextField(
-                    controller: _ctl,
-                    focusNode: _focus,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    cursorColor: c.accent,
-                    onSubmitted: _add,
-                    style: monoText.copyWith(fontSize: 13, color: c.t1),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      border: InputBorder.none,
-                      hintText: '*.example.com',
-                      hintStyle: TextStyle(color: c.t3, fontSize: 13),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 6,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// `.vchip`: a value with a small x.
-class _ValueChip extends StatelessWidget {
-  const _ValueChip(this.text, {required this.onRemove});
-
-  final String text;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: c.accent.tint(.12),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 3, 2, 3),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(text, style: monoText.copyWith(fontSize: 12, color: c.t1)),
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onRemove,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Icon(Icons.close, size: 13, color: c.t3),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

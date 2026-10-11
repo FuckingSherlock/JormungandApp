@@ -1385,7 +1385,7 @@ class CoreService implements CoreApi {
           reportUploader.upload(packed.gzipped, meta: packed.meta, proxyPort: _innerPort, cancel: cancel),
           cancel.whenCancelled.then<ReportReceipt>((_) => throw const ReportUploadException('cancelled')),
         ]);
-        final via = receipt.via == 'vpn' ? ' via VPN (direct failed: ${receipt.directError})' : '';
+        final via = receipt.via == 'vpn' ? ' via VPN (no direct path: ${receipt.directError})' : '';
         logBook.note('info',
             'Report sent: ${receipt.id} (${packed.gzipped.length} bytes, built in $built ms, sent in ${sw.elapsedMilliseconds - built} ms)$via');
         return {'ok': true, 'id': receipt.id, 'bytes': packed.gzipped.length, 'via': receipt.via};

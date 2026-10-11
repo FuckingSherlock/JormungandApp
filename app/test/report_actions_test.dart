@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jormungand_core/jormungand_core.dart' show reportSendDeadline;
 import 'package:jormungand/core/logs_controller.dart';
 import 'package:jormungand/core/report_send.dart';
 import 'package:jormungand/core/settings_model.dart';
@@ -35,6 +36,7 @@ void main() {
   late FakeCoreHost host;
   late LogsController logs;
   final clipboard = <String>[];
+  late DateTime fakeNow;
 
   setUp(() {
     io = _Io();
@@ -64,9 +66,16 @@ void main() {
         {'n': 1, 't': 1760000000000, 'src': 'core', 'lvl': 'info', 'msg': 'hello raw line'},
       ],
     };
-    logs = LogsController(host);
+    fakeNow = DateTime.utc(2026, 10, 11, 12);
+    logs = LogsController(host, reportSend: ReportSendController(host, now: () => fakeNow));
     await pumpApp(tester, host);
     return tester.element(find.byType(Scaffold).first);
+  }
+
+  // the send's clock is the controller's `now`: time passes in the widget tree and on this clock together
+  Future<void> pass(WidgetTester tester, Duration d) async {
+    fakeNow = fakeNow.add(d);
+    await tester.pump(d);
   }
 
   void done() => logs.dispose();
@@ -113,7 +122,7 @@ void main() {
     await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
     await tester.pump();
     expect(host.sentNotes, ['it fails since noon']);
-    expect(find.text('Sending…'), findsOneWidget);
+    expect(find.textContaining('Sending…'), findsOneWidget);
     expect(find.text('Cancel'), findsOneWidget, reason: 'a send that goes can be stopped');
 
     host.sendGate!.complete();
@@ -139,12 +148,12 @@ void main() {
     await tester.enterText(find.byType(TextField), 'keep me');
     await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
     await tester.pump();
-    expect(find.text('Sending…'), findsOneWidget);
+    expect(find.textContaining('Sending…'), findsOneWidget);
 
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(host.calls, contains('cancelSendReport'));
-    expect(find.text('Sending…'), findsNothing);
+    expect(find.textContaining('Sending…'), findsNothing);
     expect(find.text('WHAT IS SENT'), findsOneWidget);
     expect(find.text('keep me'), findsOneWidget);
     expect(find.textContaining('Could not send'), findsNothing, reason: 'a cancel is not an error');
@@ -170,7 +179,7 @@ void main() {
 
     Navigator.of(ctx).pop(); // the sheet goes away mid-send
     await tester.pumpAndSettle();
-    expect(find.text('Sending…'), findsNothing);
+    expect(find.textContaining('Sending…'), findsNothing);
     expect(host.calls, isNot(contains('cancelSendReport')));
     expect(logs.reportSend.sending, isTrue);
 
@@ -178,7 +187,7 @@ void main() {
     // not pumpAndSettle: the progress bar never settles and fake time would run out the deadline
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('Sending…'), findsOneWidget, reason: 'the send under way, not a fresh form');
+    expect(find.textContaining('Sending…'), findsOneWidget, reason: 'the send under way, not a fresh form');
     expect(find.text('WHAT IS SENT'), findsOneWidget);
     expect(host.sentNotes, ['still going'], reason: 'reopening does not send again');
 
@@ -193,6 +202,86 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Sent. Report id: r-1'), findsNothing);
     expect(find.text('0/500'), findsOneWidget);
+    done();
+  });
+
+  testWidgets('Send report: a countdown of the overall deadline runs on the button and the bar, and ends with the send', (tester) async {
+    final ctx = await start(tester);
+    final total = reportSendDeadline.inSeconds;
+    host.sendGate = Completer<void>();
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pump();
+    expect(find.text('Sending… $total s'), findsOneWidget);
+    double bar() => tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value!;
+    expect(bar(), 1.0);
+
+    await pass(tester, const Duration(seconds: 3));
+    expect(find.text('Sending… ${total - 3} s'), findsOneWidget);
+    expect(bar(), closeTo((total - 3) / total, .01));
+    await pass(tester, const Duration(milliseconds: 1500));
+    expect(find.text('Sending… ${total - 4} s'), findsOneWidget, reason: 'rounded up: 13.5 s left reads 14');
+
+    await pass(tester, Duration(seconds: total)); // past the deadline: never below 0
+    expect(find.text('Sending… 0 s'), findsOneWidget);
+    expect(bar(), 0.0);
+
+    host.sendGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Sending…'), findsNothing);
+    expect(find.text('Sent. Report id: r-1'), findsOneWidget);
+    done();
+  });
+
+  testWidgets('Send report: the countdown goes on while the sheet is closed and a reopened sheet shows the time left', (tester) async {
+    final ctx = await start(tester);
+    final total = reportSendDeadline.inSeconds;
+    host.sendGate = Completer<void>();
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pump();
+    await pass(tester, const Duration(seconds: 4));
+    expect(find.text('Sending… ${total - 4} s'), findsOneWidget);
+
+    Navigator.of(ctx).pop();
+    await tester.pumpAndSettle();
+    await pass(tester, const Duration(seconds: 5)); // time passes with no sheet
+    expect(logs.reportSend.secondsLeft, total - 9);
+
+    unawaited(showSendReport(ctx, logs));
+    await pass(tester, const Duration(milliseconds: 100)); // 9.1 s gone: 8.9 left reads 9
+    expect(find.text('Sending… ${total - 9} s'), findsOneWidget, reason: 'not a fresh countdown from the start');
+
+    await pass(tester, const Duration(seconds: 2));
+    expect(find.text('Sending… ${total - 11} s'), findsOneWidget, reason: 'and it keeps going');
+    host.sendGate!.complete();
+    await tester.pumpAndSettle();
+    done();
+  });
+
+  testWidgets('Send report: no direct path and the VPN off is said plainly, with Retry', (tester) async {
+    final ctx = await start(tester);
+    host.sendResult = {'ok': false, 'error': 'no-route', 'message': 'no direct path to the receiver (x) and the VPN is not connected'};
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('No direct path to the report server, and the VPN is off'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    done();
+  });
+
+  testWidgets('Send report: a report that went through the VPN says so', (tester) async {
+    final ctx = await start(tester);
+    host.sendResult = {'ok': true, 'id': 'r-5', 'bytes': 10, 'via': 'vpn'};
+    unawaited(showSendReport(ctx, logs));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(InkWell, 'Send report').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Sent. Report id: r-5'), findsOneWidget);
+    expect(find.textContaining('Sent through the VPN'), findsOneWidget);
     done();
   });
 

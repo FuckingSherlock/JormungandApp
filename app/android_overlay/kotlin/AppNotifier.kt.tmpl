@@ -48,11 +48,14 @@ object AppNotifier {
     /**
      * The app's own update ("Update available" / "Update ready · Install"): one slot, a newer text replaces
      * the older silently. A tap opens the app at Settings -> Data; with [EXTRA_INSTALL] it goes on to the
-     * system install dialog. Same channel as [ResumeNotifier]'s "Updated - tap to connect" (id 3).
+     * system install dialog. The Install button of a downloaded update (with its file) skips the app:
+     * [UpdateInstallActivity]. Same channel as [ResumeNotifier]'s "Updated - tap to connect" (id 3).
      */
     const val UPDATE_CHANNEL = "update"
     const val ACTION_OPEN_UPDATE = "__APP_ID__.notif.OPEN_UPDATE"
     const val EXTRA_INSTALL = "jorm_install"
+    const val ACTION_INSTALL_UPDATE = "__APP_ID__.notif.INSTALL_UPDATE"
+    const val EXTRA_FILE = "jorm_file"
     private const val UPDATE_ID = 4
     private const val UPDATE_PREFS = "jorm_update"
     private const val UPDATE_ANNOUNCED = "announced"
@@ -122,11 +125,14 @@ object AppNotifier {
      * to the install dialog; otherwise a tap opens the update block. It replaces a still-shown one without
      * a second alert (a "ready" right after an "available" is one nudge, not two).
      */
-    fun postUpdate(ctx: Context, title: String, text: String, install: Boolean, installLabel: String) {
+    fun postUpdate(ctx: Context, title: String, text: String, install: Boolean, installLabel: String, file: String = "") {
         val nm = manager(ctx)
         if (!nm.areNotificationsEnabled()) return
         ensureChannels(ctx)
-        val tap = openApp(ctx, { setAction(ACTION_OPEN_UPDATE).putExtra(EXTRA_INSTALL, install) }, UPDATE_ID * 2 + (if (install) 1 else 0))
+        // With the downloaded file the button installs by itself, so the body only opens the update block;
+        // without it the button is the tap (the app opens and starts the installer)
+        val direct = install && file.isNotEmpty()
+        val tap = openApp(ctx, { setAction(ACTION_OPEN_UPDATE).putExtra(EXTRA_INSTALL, install && !direct) }, UPDATE_ID * 2 + (if (install && !direct) 1 else 0))
         val b = Notification.Builder(ctx, UPDATE_CHANNEL)
             .setSmallIcon(ctx.applicationInfo.icon)
             .setContentTitle(title)
@@ -136,9 +142,23 @@ object AppNotifier {
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
         if (install && installLabel.isNotEmpty()) {
-            b.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, android.R.drawable.ic_menu_upload), installLabel, tap).build())
+            val button = if (direct) installNow(ctx, file) else tap
+            b.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, android.R.drawable.ic_menu_upload), installLabel, button).build())
         }
         nm.notify(UPDATE_ID, b.build())
+    }
+
+    /**
+     * The Install button: straight to the system installer with the downloaded APK, no app window
+     * ([UpdateInstallActivity], a transparent activity: a notification may not start an activity from a
+     * receiver on Android 12+, and the installer's confirmation needs a foreground app).
+     */
+    private fun installNow(ctx: Context, file: String): PendingIntent {
+        val intent = Intent(ctx, UpdateInstallActivity::class.java)
+            .setAction(ACTION_INSTALL_UPDATE)
+            .putExtra(EXTRA_FILE, file)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        return PendingIntent.getActivity(ctx, UPDATE_ID * 2 + 2, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     fun cancelUpdate(ctx: Context) {

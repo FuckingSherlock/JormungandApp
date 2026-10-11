@@ -30,6 +30,9 @@ object AppEngine {
     @Volatile
     private var engine: FlutterEngine? = null
 
+    /** The process has the app's engine (a window or the headless start made it): the Dart core lives here. */
+    val isAlive: Boolean get() = engine != null
+
     lateinit var vpn: VpnChannel
         private set
     lateinit var files: FilesChannel
@@ -60,6 +63,7 @@ object AppEngine {
         resume = ResumeChannel(app).also { it.register(messenger) }
         NetworkChannel(app).register(messenger)
         ScreenChannel(app).register(messenger)
+        UpdateJobChannel(app).register(messenger)
         engine = e
         // A process that starts with no tunnel: nothing of an earlier run may stay on show
         // (the service's notification goes with its process, but a stale tile model is cheap to fix).

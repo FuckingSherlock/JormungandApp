@@ -257,13 +257,20 @@ class ConnView {
   /// The route text of a connection for the search ("🇩🇪 Berlin → direct"), from the UI's names.
   String Function(LiveConn c)? via;
 
+  /// The name of an Android package for the UI (the installed list's name, «Android System»); the
+  /// package itself when not set. Desktop connections name their process by its file name.
+  String Function(String pkg)? appName;
+
+  /// The app of [c] as the UI names it: [appName] of the package on Android, else [LiveConn.app].
+  String appTitle(LiveConn c) => c.process.isEmpty && c.pkg.isNotEmpty ? (appName?.call(c.pkg) ?? c.pkg) : c.app;
+
   /// The sort and group are not the defaults (the button is lit).
   bool get sortChanged => sort != ConnSort.newest || group != ConnGroupBy.service;
 
   bool matchesQuery(LiveConn c) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return true;
-    return [c.host, c.process, c.pkg, c.ruleLabel.isEmpty ? 'default / final' : c.ruleLabel, c.raw, via?.call(c) ?? c.out.join(' ')]
+    return [c.host, c.process, c.pkg, appTitle(c), c.ruleLabel.isEmpty ? 'default / final' : c.ruleLabel, c.raw, via?.call(c) ?? c.out.join(' ')]
         .any((v) => v.toLowerCase().contains(q));
   }
 
@@ -299,15 +306,15 @@ class ConnView {
   /// (key, name) of the group of [c]. A service's name is [serviceTitles]; 'Other' / 'Unknown'
   /// are returned as '' (the UI words them).
   (String, String) groupOf(LiveConn c) {
-    final app = c.app;
-    if (group == ConnGroupBy.app) return ('a:$app', app);
+    final app = c.app, title = appTitle(c);
+    if (group == ConnGroupBy.app) return ('a:$app', title);
     final s = connService(c);
     if (s != null) return ('s:$s', serviceTitles[s] ?? s);
     if (!c.isIp) {
       final d = connDomain(c.host.toLowerCase());
       return ('d:$d', d);
     }
-    return app.isNotEmpty ? ('a:$app', app) : ('o', '');
+    return app.isNotEmpty ? ('a:$app', title) : ('o', '');
   }
 
   /// The values of [s] over [src] with their counts, most first; [selected] values with no

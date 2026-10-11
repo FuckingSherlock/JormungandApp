@@ -35,9 +35,11 @@ import io.flutter.plugin.common.MethodChannel
  *  takeLaunchAction -> Map? {id, act, site, via} of a button that started / raised the app and was not
  *                           handed over yet (what `eventAct` is when Dart is listening)
  *
- *  postUpdate    -> null    args {title, text, install: Boolean, installLabel}: the app's own update ("Update
+ *  postUpdate    -> null    args {title, text, install: Boolean, installLabel, file?}: the app's own update ("Update
  *                           available" / "Update ready · Install") in its own slot ([AppNotifier.postUpdate]);
- *                           a tap opens the app at the update block (`install`: and goes on to the install dialog)
+ *                           a tap opens the app at the update block. With `install` and `file` (the downloaded APK)
+ *                           the button goes to the system installer with no window ([UpdateInstallActivity]);
+ *                           `install` alone: the button opens the app, which starts the installer
  *  updateAnnounced / setUpdateAnnounced {version} -> String? / null  the version the user was last told about
  *                           (native record, shared with the background job: one notification per version)
  *  takeLaunchUpdate -> Bool? the update notification that started the app and was not handed over yet (install?)
@@ -67,10 +69,15 @@ class NotifyChannel(private val app: Context) {
     private var launchUpdate: Boolean? = null // an update notification started the app: lead to install?
     private var dartReady = false
 
-    fun register(messenger: BinaryMessenger) {
+    /**
+     * [primary]: the app's engine, the one Kotlin talks to ([dart]). The background update job's own
+     * engine registers the channel only to post its notification and keep the "announced" record
+     * ([UpdateJob]); it must not take [dart] over from the app.
+     */
+    fun register(messenger: BinaryMessenger, primary: Boolean = true) {
         val ch = MethodChannel(messenger, NAME)
         ch.setMethodCallHandler(::onCall)
-        dart = ch
+        if (primary) dart = ch
     }
 
     fun unregister() {
@@ -143,6 +150,7 @@ class NotifyChannel(private val app: Context) {
                     call.argument<String>("text") ?: "",
                     call.argument<Boolean>("install") == true,
                     call.argument<String>("installLabel") ?: "",
+                    call.argument<String>("file") ?: "",
                 )
                 result.success(null)
             }

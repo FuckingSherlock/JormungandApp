@@ -304,48 +304,35 @@ class DnsServerCfg with RoundTrip {
 
 /// Settings → DNS (`dnsCfg`).
 class DnsCfg with RoundTrip {
-  DnsCfg({this.hijack = true, this.fakeip = false, this.auto = true, this.resolve = 'auto', List<String>? fakeipExclude})
-      : fakeipExclude = fakeipExclude ?? [..._defaultFakeipExclude];
+  DnsCfg({this.hijack = true, this.auto = true, this.resolve = 'auto'});
 
   factory DnsCfg.fromJson(Json j) {
     final c = DnsCfg(
       hijack: j['hijack'] != false,
-      fakeip: _get(j, 'fakeip', false),
       auto: _get(j, 'auto', true),
       resolve: _get(j, 'resolve', 'auto'),
-      fakeipExclude: j['fakeipExclude'] is List ? strList(j['fakeipExclude']) : null,
     );
     c.capture(j, _known);
     return c;
   }
 
-  static const _known = {'hijack', 'fakeip', 'auto', 'resolve', 'fakeipExclude'};
-  static const _defaultFakeipExclude = [
-    '*.sberbank.ru',
-    '*.tinkoff.ru',
-    '*.gosuslugi.ru',
-    '*.steamserver.net',
-    '*.xboxlive.com',
-    'time.*.com',
-  ];
+  /// `fakeip` / `fakeipExclude` are listed only so that old saved data drops them instead of
+  /// carrying them as unknown keys: FakeIP is removed until it is redesigned (`docs/rules.md` §DNS).
+  static const _known = {'hijack', 'auto', 'resolve', 'fakeip', 'fakeipExclude'};
 
   /// TUN only: the core answers every DNS query.
   bool hijack;
-  bool fakeip;
 
   /// Switch servers automatically (sent with connect, not in the plan).
   bool auto;
 
   /// `auto` | `off` | a server id: the `resolve` step before IP rules.
   String resolve;
-  List<String> fakeipExclude;
 
   Json toJson() => {
         'hijack': hijack,
-        'fakeip': fakeip,
         'auto': auto,
         'resolve': resolve,
-        'fakeipExclude': [...fakeipExclude],
         ...deepCopy(unknown) as Json,
       };
 }

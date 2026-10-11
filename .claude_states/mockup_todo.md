@@ -3,6 +3,7 @@
 Мокап (`design/src`) заморожен с 2026-10-06 ради экономии токенов: изменения логики и UI идут в core + Flutter,
 а сюда пишется, что перенести в мокап, когда вернёмся к ПК-версии.
 
+- FakeIP убран из core/Flutter до переработки: в мокапе убрать строку FakeIP и «Real answers for» в Settings → DNS, суффиксы « · FakeIP», пункт справки FakeIP, `dnsCfg.fakeip` / `fakeipExclude`; потом перегенерировать golden (тест пока вырезает эти ключи, `_dropFakeip`).
 - `20-profiles.js` `chainExitOrder`: узлы, которым цепочка не задала порядок, идут в порядке `pickOrder`
   юнита выхода (подписки/профиля): `orderRefs(orderRefs(unitRefs(...), unitOwner(c.outId)?.pickOrder), c.exitOrder)`.
   Как в core `catalog.dart` `chainExitOrder`.
@@ -13,6 +14,7 @@
   режим — «Профилей пока нет» + «Создать профиль» / «Добавить подписку или сервер» (закрывает лист,
   Nodes «+» на той вкладке). Док / кнопка питания: текущий режим пуст, другой нет → Route на другом
   режиме (`dockTap`, `toggleMain`); вторую строку дока для этого случая можно переформулировать.
+- Фоновая проверка обновлений при закрытом процессе (WorkManager) и кнопка Install уведомления без открытия приложения — только Android-платформа, UI не менялся; в мокапе (браузер) переносить нечего. Док: `docs/updates.md` §6.
 - Golden: после переноса — перегенерировать `core/test/golden/catalog.json` и очистить `_mockupBehind`
   в `core/test/catalog_golden_test.dart` (пока там пропущены сценарии, где core ушёл вперёд мокапа).
 - Лист Notifications: строка-предупреждение «Уведомления заблокированы» + «Открыть настройки» (на
@@ -60,4 +62,6 @@
   - Группы Raw режутся по 24 строки (серия одной секунды продолжается следующей группой со своей meta-строкой).
   - Плашка «Filtered: … · Reset» под вкладками Events убрана (мокап: `.ev-filterbar`), бейдж на кнопке фильтра остаётся.
 - Send report (Flutter + core, 2026-10-11; `docs/logs.md` → «Отправка»): отправка живёт вне листа (закрыли лист — идёт; открыли — тот же «Sending…» или результат), кнопка «Cancel» во время отправки (назад в форму с заметкой), новое сообщение об ошибке `timeout` («The report server did not answer in time. Try again.», ru «Сервер отчётов не ответил вовремя. Повторите.»); загрузка: сначала напрямую (12 с), при неудаче и поднятом туннеле — через tunnel-in. В макете листа Send report ещё нет.
+  - Обновление того же дня: проба доступности (3 с) выбирает один путь — напрямую или через tunnel-in (10 с, без второй попытки), без туннеля и без прямого пути — `no-route` («No direct path to the report server, and the VPN is off. Turn the VPN on and try again.», ru «Нет прямого пути до сервера отчётов, а VPN выключен. Включите VPN и повторите.»); общий срок 18 с; кнопка «Sending… N s» («Отправка… N с») и убывающая полоска (считает контроллер, лист после переоткрытия показывает остаток); после отправки через VPN под номером «Sent through the VPN: the report server is not reachable directly.» (ru «Отправлено через VPN: сервер отчётов напрямую недоступен.»).
 - App updates на Android (Flutter, 2026-10-11; `docs/updates.md` раздел 6 «Установка сразу после загрузки»): (1) «Download & install» после загрузки сразу открывает системный диалог установки, кнопка Install остаётся запасной (отказ / сбой); пока установщик занят — «Installing…». (2) Загрузка кончилась при свёрнутом приложении (и любая автозагрузка в фоне) — уведомление «Update {version} ready» / «Tap to install» с кнопкой Install, диалога поверх чужого приложения нет. (3) Новая версия найдена в фоне — уведомление «Update {version} available» / «Tap to see what's new», раз на версию. (4) Settings → Notifications: новая группа «App updates» со строкой «New version» («A new version of the app is out, or a downloaded one waits to be installed», ru «Вышла новая версия приложения или скачанная ждёт установки»), `notifCfg.updateAvailable`, по умолчанию вкл. Файлы мокапа: `58-notif.js`, `04-i18n-ru.js`.
+- Live connections, Android (Flutter, 2026-10-11; `docs/connect-model.md` «Лист Live connections»): the group title (Group by App, or an app group of a bare IP under Service) and the App section of the filter / the search name the app (installed list's name, «Android System», the package id only when unknown) instead of the package id; an Android app's group header shows its icon in place of the letter badge. Mockup file: `js/76-conns.js` (demo has no packages, so only the icon-or-letter header is relevant).

@@ -70,6 +70,7 @@ void main() {
       expect(r.io.updatePosted, hasLength(1));
       final n = r.io.updatePosted.single;
       expect(n.install, isTrue);
+      expect(n.file, '/tmp/u.apk'); // the Install button installs by itself, no app window
       expect(n.version, '1.2.0');
       expect(n.title, contains('1.2.0'));
       expect(r.io.announced, '1.2.0');

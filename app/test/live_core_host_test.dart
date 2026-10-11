@@ -10,6 +10,7 @@ import 'package:jormungand/core/live_core_host.dart';
 import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/platform/network_channel.dart';
 import 'package:jormungand/platform/screen_channel.dart';
+import 'package:jormungand/platform/update_job_channel.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
 /// A runner that is not sing-box: starts when told to, counts the starts, has no API service.
@@ -138,6 +139,13 @@ class _FakeNetwork implements NetworkPort {
 
   @override
   Future<String> type() async => 'wifi';
+}
+
+class _FakeJob implements UpdateJobPort {
+  final sent = <UpdateJobSettings>[];
+
+  @override
+  Future<void> sync(UpdateJobSettings settings) async => sent.add(settings);
 }
 
 class _FakeScreen implements ScreenPort {
@@ -602,6 +610,51 @@ void main() {
     expect(rec.closeOnSwitch, isFalse);
     expect(host.phase, isNot(ConnectionPhase.connecting));
     await net.changes.close();
+  });
+
+  test('the background update check gets its settings at start and on every real change', () async {
+    await start();
+    await host.shutdown();
+    host.dispose();
+    final rec = _RecCore(dataDir: dir.path, runner: runner);
+    final job = _FakeJob();
+    host = LiveCoreHost(
+      api: rec,
+      isAndroid: false,
+      updateJob: job,
+      saveDelay: const Duration(milliseconds: 20),
+      reconnectDelay: const Duration(milliseconds: 20),
+      trafficEvery: const Duration(milliseconds: 50),
+    );
+    await host.init();
+    await settle(10);
+    expect(job.sent, hasLength(1));
+    final first = job.sent.single;
+    expect(first.autoCheck, isTrue);
+    expect(first.channel, 'stable');
+    expect(first.autoDownload, 'wifi');
+    expect(first.notify, isTrue);
+
+    host.changed(); // nothing moved: nothing sent
+    await settle(10);
+    expect(job.sent, hasLength(1));
+
+    host.gen.updates = false; // auto-check off: the native side cancels the work
+    host.changed();
+    await settle(10);
+    expect(job.sent.last.autoCheck, isFalse);
+
+    host.gen.updates = true;
+    host.gen.updChannel = 'beta';
+    host.gen.updAutoDownload = 'always';
+    host.gen.lang = 'ru';
+    host.notif.setFlag('updateAvailable', false); // «New version» off
+    host.changed();
+    await settle(10);
+    expect(job.sent.last.channel, 'beta');
+    expect(job.sent.last.autoDownload, 'always');
+    expect(job.sent.last.lang, 'ru');
+    expect(job.sent.last.notify, isFalse);
   });
 
   test('the screen goes to the core: the state at start, then every change; no reconnect', () async {

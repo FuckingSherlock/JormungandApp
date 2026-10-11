@@ -45,8 +45,8 @@ class SystemNote {
 }
 
 /// A notification about the app's own update (not a journal event: its own slot on the shade, its own
-/// tap). [install] = the update is downloaded: the tap (and the [installLabel] button) lead straight to
-/// the system install dialog; otherwise the tap opens the update block (Settings -> Data).
+/// tap). [install] = the update is downloaded: the [installLabel] button leads straight to the system
+/// install dialog; otherwise the tap opens the update block (Settings -> Data).
 class UpdateNote {
   const UpdateNote({
     required this.title,
@@ -54,6 +54,7 @@ class UpdateNote {
     required this.version,
     this.install = false,
     this.installLabel = '',
+    this.file,
   });
 
   final String title;
@@ -63,6 +64,12 @@ class UpdateNote {
   final String version;
   final bool install;
   final String installLabel;
+
+  /// The downloaded, verified APK of an [install] note. With it the button hands the file to the system
+  /// installer by itself (no app window, the native side re-checks the file against `ready.json` next to
+  /// it); a file that is gone or does not match opens the app at the update block instead. Without it
+  /// the button opens the app and the app starts the installer.
+  final String? file;
 }
 
 /// A choice made on the shade without the app: «Ignore site» ([ignore]) or its «Undo». They are applied
@@ -303,6 +310,7 @@ class PlatformNotifyIo implements NotifyIo {
     'version': note.version,
     'install': note.install,
     'installLabel': note.installLabel,
+    if (note.file != null && note.file!.isNotEmpty) 'file': note.file,
   });
 
   @override

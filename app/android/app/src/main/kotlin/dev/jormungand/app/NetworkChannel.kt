@@ -30,6 +30,24 @@ class NetworkChannel(private val app: Context) {
     companion object {
         const val NAME = "jormungand/network"
         const val EVENTS = "jormungand/network_events"
+
+        /** [metered] without a channel: the background update job asks it when it runs (no Dart app to ask). */
+        fun isMetered(app: Context): Boolean = isMetered(app.getSystemService(ConnectivityManager::class.java))
+
+        @Suppress("DEPRECATION")
+        private fun isMetered(cm: ConnectivityManager): Boolean = try {
+            val unmetered = cm.allNetworks.any { n ->
+                val c = cm.getNetworkCapabilities(n)
+                c != null &&
+                    c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    !c.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                    c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+                    c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            }
+            !unmetered
+        } catch (e: Throwable) {
+            true // unknown: do not spend the user's traffic
+        }
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -99,20 +117,7 @@ class NetworkChannel(private val app: Context) {
         "unknown"
     }
 
-    @Suppress("DEPRECATION")
-    private fun metered(): Boolean = try {
-        val unmetered = cm.allNetworks.any { n ->
-            val c = cm.getNetworkCapabilities(n)
-            c != null &&
-                c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                !c.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-                c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
-                c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-        }
-        !unmetered
-    } catch (e: Throwable) {
-        true // unknown: do not spend the user's traffic
-    }
+    private fun metered(): Boolean = isMetered(cm)
 
     private fun recheck() {
         // the callbacks come on a system thread, a capabilities change may be followed by more of them

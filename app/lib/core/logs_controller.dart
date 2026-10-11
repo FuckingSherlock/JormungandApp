@@ -48,7 +48,8 @@ import 'settings_model.dart';
 /// - the unread numbers are written to the state when the tab or the app goes away ([flush]),
 ///   never per line.
 class LogsController extends ChangeNotifier {
-  LogsController(this.host);
+  /// [reportSend]: tests hand in one with their own clock.
+  LogsController(this.host, {ReportSendController? reportSend}) : reportSend = reportSend ?? ReportSendController(host);
 
   final CoreHost host;
 
@@ -58,7 +59,7 @@ class LogsController extends ChangeNotifier {
   EventWords get words => EventWords(l10n!, host.catalog);
 
   /// «Send report»: the send and its result live here, not in the sheet (report_send.dart).
-  late final reportSend = ReportSendController(host);
+  final ReportSendController reportSend;
 
   final feed = EventFeed();
   final filter = EventFilter();

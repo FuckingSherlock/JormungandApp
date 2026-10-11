@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData, LengthLimitingTextInputFormatter;
 import 'package:jormungand_core/jormungand_core.dart' show reportNoteMax, reportToText;
@@ -44,6 +46,7 @@ class _SendReportSheet extends StatefulWidget {
 class _SendReportSheetState extends State<_SendReportSheet> {
   late final TextEditingController _note = TextEditingController(text: _send.note);
   bool _sawSent = false;
+  Timer? _tick;
 
   ReportSendController get _send => widget.logs.reportSend;
 
@@ -51,16 +54,32 @@ class _SendReportSheetState extends State<_SendReportSheet> {
   void initState() {
     super.initState();
     _send.addListener(_changed);
+    _syncTick();
   }
 
   void _changed() {
     if (!mounted) return;
     if (_send.phase == ReportPhase.sent) _sawSent = true;
+    _syncTick();
     setState(() {});
+  }
+
+  // The countdown is the controller's (from its start time), so a reopened sheet shows the same
+  // time; this only repaints it while a send goes.
+  void _syncTick() {
+    if (_send.sending) {
+      _tick ??= Timer.periodic(const Duration(milliseconds: 250), (_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      _tick?.cancel();
+      _tick = null;
+    }
   }
 
   @override
   void dispose() {
+    _tick?.cancel();
     _send.removeListener(_changed);
     // the id was shown to the user and the sheet is gone: the next opening is a new, empty form
     if (_sawSent && _send.phase == ReportPhase.sent) _send.reset();
@@ -95,7 +114,7 @@ class _SendReportSheetState extends State<_SendReportSheet> {
             },
           )
         else if (busy) ...[
-          PrimaryButton(label: l10n.sending),
+          PrimaryButton(label: l10n.sendingS(_send.secondsLeft)),
           DangerTextButton(label: l10n.cancel, onPressed: _send.cancel),
         ] else if (failed && _notConfigured) ...[
           PrimaryButton(
@@ -131,6 +150,10 @@ class _SendReportSheetState extends State<_SendReportSheet> {
                   ),
                   const SizedBox(height: 6),
                   HintText(l10n.quoteThisIdWhenYouWrite),
+                  if (_send.via == 'vpn') ...[
+                    const SizedBox(height: 4),
+                    HintText(l10n.sentThroughTheVpnTheReport),
+                  ],
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerLeft,
@@ -190,6 +213,7 @@ class _SendReportSheetState extends State<_SendReportSheet> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
                     child: LinearProgressIndicator(
+                      value: _send.fractionLeft,
                       minHeight: 3,
                       color: c.accent,
                       backgroundColor: c.border,
@@ -217,6 +241,7 @@ String _errorText(AppLocalizations l10n, Map<String, dynamic> r) {
   return switch ('${r['error']}') {
     'not-configured' => l10n.sendingIsNotSetUpIn,
     'network' => l10n.noConnectionToTheReportServer,
+    'no-route' => l10n.noDirectPathToTheReport,
     'timeout' => l10n.theReportServerDidNotAnswer,
     'rejected' => l10n.theServerDidNotAcceptThe(msg.isEmpty ? '—' : msg),
     'server' => l10n.theReportServerFailedTryAgain,

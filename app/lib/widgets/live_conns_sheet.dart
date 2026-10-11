@@ -21,6 +21,7 @@ import 'app_mark.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
 import 'nodes_menus.dart' show copyText;
+import 'rules_parts.dart' show AppIcon;
 import 'search_field.dart';
 
 /// The Live connections sheet (mockup js/76-conns.js, Home -> Connections card): the open
@@ -158,6 +159,9 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
       _snap = null;
     }
     _view.via = (x) => _via(host, x.out, filter: true);
+    // names of apps in groups and in the search: the installed list's, read at every rebuild
+    // (the host notifies when the list arrives)
+    _view.appName = (p) => appDisplayName(l10n, host.catalog, p);
     final src = _source(host);
     final live = _live(host);
     final shown = _view.shown(src);
@@ -317,6 +321,8 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
         children.add(
           _GroupHeader(
             group: g,
+            // an Android app's group: its icon in place of the letter badge
+            pkg: g.key.startsWith('a:') && g.rows.first.process.isEmpty ? g.rows.first.pkg : '',
             folded: folded,
             rate: _rate,
             onToggle: () => setState(() {
@@ -820,6 +826,7 @@ class _CloseX extends StatelessWidget {
 class _GroupHeader extends StatelessWidget {
   const _GroupHeader({
     required this.group,
+    required this.pkg,
     required this.folded,
     required this.rate,
     required this.onToggle,
@@ -827,6 +834,9 @@ class _GroupHeader extends StatelessWidget {
   });
 
   final ConnGroup group;
+
+  /// The package of an app's group ('' = the letter badge).
+  final String pkg;
   final bool folded;
   final String Function(num) rate;
   final VoidCallback onToggle;
@@ -864,23 +874,26 @@ class _GroupHeader extends StatelessWidget {
                 child: Icon(Icons.keyboard_arrow_down, size: 16, color: c.t3),
               ),
               const SizedBox(width: 8),
-              Container(
-                width: 26,
-                height: 26,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: HSLColor.fromAHSL(.18, hue, .6, .55).toColor(),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  letter,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: HSLColor.fromAHSL(1, hue, .7, .72).toColor(),
+              if (pkg.isNotEmpty)
+                AppIcon(key: ValueKey('groupIcon:$pkg'), pkg: pkg, name: name, size: 26)
+              else
+                Container(
+                  width: 26,
+                  height: 26,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: HSLColor.fromAHSL(.18, hue, .6, .55).toColor(),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    letter,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: HSLColor.fromAHSL(1, hue, .7, .72).toColor(),
+                    ),
                   ),
                 ),
-              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -979,7 +992,8 @@ class _FilterSheetState extends State<_FilterSheet> {
 
   String _label(AppLocalizations l10n, ConnSection s, String v) => switch (s) {
     ConnSection.net => v.toUpperCase(),
-    ConnSection.app => v.isEmpty ? l10n.unknown : v,
+    // an Android package shows as the app's name (a process file name has no entry and stays)
+    ConnSection.app => v.isEmpty ? l10n.unknown : appDisplayName(l10n, widget.host.catalog, v),
     ConnSection.rule => v.isEmpty ? l10n.defaultFinal : v,
     ConnSection.exit => widget.tag(v),
     ConnSection.host => v,

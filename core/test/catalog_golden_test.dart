@@ -269,8 +269,21 @@ const _mockupBehind = <String, String>{
   'op-auto-off': 'a chain exit lives by its pair through the entry, not by its direct ping (mockup_todo.md)',
 };
 
+/// FakeIP is removed from the core until it is redesigned, the frozen mockup still has it:
+/// drop its keys from the golden file until the mockup sync pass (`mockup_todo.md`).
+void _dropFakeip(dynamic v) {
+  if (v is Map) {
+    v.remove('fakeip');
+    v.remove('fakeipExclude');
+    v.values.forEach(_dropFakeip);
+  } else if (v is List) {
+    v.forEach(_dropFakeip);
+  }
+}
+
 void main() {
   final golden = jsonDecode(File('test/golden/catalog.json').readAsStringSync()) as J;
+  _dropFakeip(golden);
   final now = golden['now'] as int;
   final base = golden['base'] as J;
   final apps = (golden['apps'] as Map).cast<String, dynamic>();

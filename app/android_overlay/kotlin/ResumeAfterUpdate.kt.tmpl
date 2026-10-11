@@ -222,6 +222,10 @@ class ResumeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         val app = context.applicationContext
+        // the notification about an update that is installed now (or an older one) is stale; the background
+        // update check is registered again (JobScheduler may lose its jobs when the package is replaced)
+        runCatching { AppNotifier.cancelUpdate(app) }
+        runCatching { UpdateJob.ensure(app) }
         if (!ResumeStore.arm(app)) return
         // No window may be started from here, so the Dart core comes up on the process's engine without one:
         // it takes the record, connects and the foreground service takes the process over.

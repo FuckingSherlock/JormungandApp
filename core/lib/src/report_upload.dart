@@ -29,17 +29,22 @@ const reportMaxBytes = 4 * 1024 * 1024;
 /// Connecting to the receiver (TCP and the TLS handshake).
 const reportConnectTimeout = Duration(seconds: 10);
 
-/// The whole attempt (connect, send, the answer) of the only way to the receiver, and of the
-/// via-VPN way after a direct one failed.
-const reportUploadTimeout = Duration(seconds: 30);
+/// The reachability probe of the receiver straight from this device (GET [reportProbePath]): TCP,
+/// TLS and a HTTP answer, whatever its status. Short: it only decides the way, direct or via VPN.
+const reportProbeTimeout = Duration(seconds: 3);
 
-/// The direct attempt when the VPN is up and can take over: short, because a direct path that is
-/// blocked or throttled (a connection that opens and then stalls mid-body) must not hold the user.
-const reportDirectTimeout = Duration(seconds: 12);
+/// The Worker's health path (workers/reports → `GET /v1/ping`), answered before the rate limit.
+const reportProbePath = '/v1/ping';
 
-/// Everything "Send report" does (build, mask, encrypt, upload) must end within this, success or not
-/// (CoreService.sendReport): the user is never left on "Sending…".
-const reportSendDeadline = Duration(seconds: 60);
+/// The upload itself (connect, send, the answer), on the one way the probe picked. No second try.
+const reportUploadTimeout = Duration(seconds: 10);
+
+/// What building, masking and encrypting the report may add on top of the probe and the upload.
+const reportBuildMargin = Duration(seconds: 5);
+
+/// Everything "Send report" does (build, mask, encrypt, probe, upload) must end within this, success
+/// or not (CoreService.sendReport): the user is never left on "Sending…". The app counts it down.
+const reportSendDeadline = Duration(seconds: 18); // probe 3 + upload 10 + margin 5
 
 /// What a finished upload gives back.
 class ReportReceipt {
@@ -51,11 +56,11 @@ class ReportReceipt {
   /// When the receiver accepted it (its clock), if it says.
   final DateTime? at;
 
-  /// The way it went: `direct` (outside the tunnel) or `vpn` (through the running tunnel, after the
-  /// direct attempt failed).
+  /// The way it went: `direct` (outside the tunnel) or `vpn` (through the running tunnel, because
+  /// the probe found no direct path).
   final String via;
 
-  /// Why the direct attempt failed, when [via] is `vpn`.
+  /// Why the probe found no direct path, when [via] is `vpn`.
   final String? directError;
 }
 
@@ -77,7 +82,8 @@ class ReportCancel {
 /// An upload that did not go through. [code] is machine-readable and shown by the app in the
 /// user's language: `not-configured` (no uploader plugged in), `network` (no connection to the
 /// receiver), `rejected` (the receiver refused it: size, rate limit, bad format), `server` (the
-/// receiver failed), `cancelled` (the user stopped it), `timeout` (the whole send did not end in
+/// receiver failed), `no-route` (the probe found no direct path and the VPN is not up to carry it),
+/// `cancelled` (the user stopped it), `timeout` (the whole send did not end in
 /// [reportSendDeadline]), `failed` (anything else); [message] is for the log and for the developer.
 class ReportUploadException implements Exception {
   const ReportUploadException(this.code, [this.message = '']);
@@ -117,19 +123,20 @@ class NotConfiguredUploader implements ReportUploader {
 /// Контракт). `X-Jorm-*` headers carry the plain part of `meta` (format, version, build, platform,
 /// envelope size); there is no auth header, the Worker takes anonymous uploads and limits them.
 ///
-/// The way out: first the app's own direct connection, outside the tunnel, by the self rule
-/// (outside_tunnel.dart → `report-upload`) — it works when the proxy is broken. A direct path may be
-/// blocked or throttled (the connection opens and stalls mid-body), so while the tunnel is up
-/// ([upload]'s `proxyPort`) the direct attempt is short ([directTimeout]) and, if it fails to
-/// connect or to finish, the same envelope goes through the tunnel's local proxy (`via: vpn`). An
-/// answer of the receiver, whatever it says, ends the matter: no second attempt.
+/// The way out is decided first, by a probe: a short GET of the Worker's health path
+/// ([reportProbePath]) straight from this device, outside the tunnel, by the self rule
+/// (outside_tunnel.dart → `report-upload`). Any HTTP answer after a TLS handshake that the system
+/// trusts proves that the direct path to the receiver really works (a block, a captive portal, a
+/// stalled CDN edge gives none). Probe answered → the envelope goes direct ([timeout]); not → through
+/// the running tunnel's local proxy at once (`via: vpn`), and with no tunnel the upload fails as
+/// `no-route`. One upload attempt, on one way: whatever it ends with is final.
 class HttpReportUploader implements ReportUploader {
   HttpReportUploader({
     this.endpoint = reportEndpoint,
     this.publicKey = reportPublicKey,
     this.connectTimeout = reportConnectTimeout,
     this.timeout = reportUploadTimeout,
-    this.directTimeout = reportDirectTimeout,
+    this.probeTimeout = reportProbeTimeout,
     this.maxBytes = reportMaxBytes,
   });
 
@@ -138,15 +145,14 @@ class HttpReportUploader implements ReportUploader {
   /// Base64 of the recipient's X25519 public key.
   final String publicKey;
 
-  /// Connecting (TCP and TLS) of one attempt.
+  /// Connecting (TCP and TLS) of the upload.
   final Duration connectTimeout;
 
-  /// One whole attempt (connecting, sending, the answer) that has no other way after it: the
-  /// only direct one while not connected, and the via-VPN one.
+  /// The whole upload (connecting, sending, the answer).
   final Duration timeout;
 
-  /// The direct attempt that the via-VPN one can follow.
-  final Duration directTimeout;
+  /// The whole reachability probe.
+  final Duration probeTimeout;
 
   /// The envelope is not sent when it is bigger ([reportMaxBytes], the Worker's own limit).
   final int maxBytes;
@@ -174,22 +180,53 @@ class HttpReportUploader implements ReportUploader {
     }
     if (cancel != null && cancel.isCancelled) throw const ReportUploadException('cancelled');
 
-    // 1. direct; short when the tunnel can take over
+    // 1. is the receiver reachable directly?
+    final noDirect = await _probe(uri, cancel);
+    if (cancel != null && cancel.isCancelled) throw const ReportUploadException('cancelled');
+    // 2. yes: direct, and that is final
+    if (noDirect == null) return _attempt(uri, envelope, meta, proxyPort: null, timeout: timeout, cancel: cancel);
+    // 3. no: through the running tunnel's local proxy, or nowhere
+    if (proxyPort == null) {
+      throw ReportUploadException('no-route', 'no direct path to the receiver ($noDirect) and the VPN is not connected');
+    }
+    final ReportReceipt r;
     try {
-      return await _attempt(uri, envelope, meta, proxyPort: null, timeout: proxyPort == null ? timeout : directTimeout, cancel: cancel);
+      r = await _attempt(uri, envelope, meta, proxyPort: proxyPort, timeout: timeout, cancel: cancel);
     } on ReportUploadException catch (e) {
-      // an answer of the receiver, a refusal of ours, a cancel: final; only "could not get there" has another way
-      if (e.code != 'network' || proxyPort == null) rethrow;
-      final why = e.message;
-      // 2. the same envelope through the running tunnel's local proxy
-      final ReportReceipt r;
-      try {
-        r = await _attempt(uri, envelope, meta, proxyPort: proxyPort, timeout: timeout, cancel: cancel);
-      } on ReportUploadException catch (e2) {
-        if (e2.code != 'network') rethrow;
-        throw ReportUploadException('network', 'direct: $why; via VPN: ${e2.message}');
+      if (e.code != 'network') rethrow;
+      throw ReportUploadException('network', 'direct: $noDirect; via VPN: ${e.message}');
+    }
+    return ReportReceipt(id: r.id, at: r.at, via: 'vpn', directError: noDirect);
+  }
+
+  /// The probe: GET [reportProbePath] of the receiver's origin, directly. null = it answered (any
+  /// status, the body is not read); else why not. Ends within [probeTimeout] or at [cancel].
+  Future<String?> _probe(Uri uri, ReportCancel? cancel) async {
+    final client = HttpClient()
+      ..connectionTimeout = probeTimeout
+      ..findProxy = ((_) => 'DIRECT')
+      ..userAgent = null;
+    try {
+      final url = Uri(scheme: uri.scheme, host: uri.host, port: uri.hasPort ? uri.port : null, path: reportProbePath);
+      final done = () async {
+        final req = await client.getUrl(url);
+        req.followRedirects = false;
+        final res = await req.close();
+        await res.drain<void>();
+      }()
+          .timeout(probeTimeout, onTimeout: () => throw TimeoutException('no answer in ${probeTimeout.inSeconds} s'));
+      if (cancel == null) {
+        await done;
+      } else {
+        await Future.any<void>([done, cancel.whenCancelled]);
       }
-      return ReportReceipt(id: r.id, at: r.at, via: 'vpn', directError: why);
+      return null;
+    } on TimeoutException catch (e) {
+      return e.message ?? 'timeout';
+    } catch (e) {
+      return '$e';
+    } finally {
+      client.close(force: true);
     }
   }
 

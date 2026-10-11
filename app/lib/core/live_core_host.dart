@@ -8,6 +8,7 @@ import '../platform/apps_io.dart';
 import '../platform/network_channel.dart';
 import '../platform/resume_channel.dart';
 import '../platform/screen_channel.dart';
+import '../platform/update_job_channel.dart';
 import '../platform/vpn_channel.dart';
 import 'app_update.dart';
 import 'core_host.dart';
@@ -35,6 +36,7 @@ class LiveCoreHost extends CoreHost {
     this.resume,
     this.network,
     this.screen,
+    this.updateJob,
     this.resumeWindow = const Duration(minutes: 10),
     this.logNote,
     this.ruleSetTimesOf,
@@ -77,6 +79,10 @@ class LiveCoreHost extends CoreHost {
   /// The phone's screen (Android); null = always on (the desktop). Every change goes to the core at
   /// once (`updateSettings {screenOn}`), which marks a site failure found while it is off as background.
   final ScreenPort? screen;
+
+  /// The native side of the background update check (Android WorkManager, lib/core/update_job.dart); null
+  /// = none (the desktop). Gets the update options and the notification switches on every change.
+  final UpdateJobPort? updateJob;
 
   /// How long after the package replacement a resume still counts; a later start leaves the VPN off.
   final Duration resumeWindow;
@@ -184,6 +190,7 @@ class LiveCoreHost extends CoreHost {
         _metered = await network?.metered() ?? false;
       } catch (_) {}
       _syncUpdateSettings();
+      _syncUpdateJob();
       _meteredSub =network?.meteredChanges.listen((m) {
         _metered = m;
         _syncUpdateSettings();
@@ -1048,6 +1055,7 @@ class LiveCoreHost extends CoreHost {
     _scheduleSave();
     _syncAuto();
     _syncUpdateSettings(); // before the mode: a route move reads closeOnSwitch
+    _syncUpdateJob();
     _syncMode();
     _syncKill();
     _scheduleReconnect();
@@ -1360,6 +1368,27 @@ class LiveCoreHost extends CoreHost {
       });
     } catch (_) {}
   }
+
+  /// What the background update check reads with no app running (auto-check, channel, auto-download,
+  /// whether the update notifications may show, the language): mirrored natively on every change, which
+  /// also schedules / cancels the job. Only a real change is sent.
+  void _syncUpdateJob() {
+    final job = updateJob;
+    if (job == null || _disposed) return;
+    final g = gen, n = notif;
+    final s = UpdateJobSettings(
+      autoCheck: g.updates,
+      channel: g.updChannel,
+      autoDownload: g.updAutoDownload,
+      notify: n.enabled && n.flag('updateAvailable'),
+      lang: g.lang,
+    );
+    if (s == _updJobSent) return;
+    _updJobSent = s;
+    unawaited(job.sync(s).catchError((_) {}));
+  }
+
+  UpdateJobSettings? _updJobSent;
 
   @override
   AppUpdate get appUpdate => _upd;

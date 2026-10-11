@@ -168,6 +168,9 @@
   "The report server failed. Try again later.": "Сервер отчётов не справился. Повторите позже.",
   "The report server did not answer in time. Try again.": "Сервер отчётов не ответил вовремя. Повторите.",
   "Could not send the report: {0}": "Не удалось отправить отчёт: {0}",
+  "Sending… {#0} s": "Отправка… {#0} с",
+  "No direct path to the report server, and the VPN is off. Turn the VPN on and try again.": "Нет прямого пути до сервера отчётов, а VPN выключен. Включите VPN и повторите.",
+  "Sent through the VPN: the report server is not reachable directly.": "Отправлено через VPN: сервер отчётов напрямую недоступен.",
   "Clear raw log": "Очистить сырой лог",
   "Filter log": "Фильтр лога",
   "Level": "Уровень",
@@ -176,6 +179,5 @@
   "Update {0} ready": "Обновление {0} готово",
   "Tap to install": "Нажмите, чтобы установить",
   "Tap to see what's new": "Нажмите, чтобы посмотреть, что нового",
-  "New version": "Новая версия",
-  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
+  "New version": "Новая версия",  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
 }
