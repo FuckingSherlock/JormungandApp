@@ -30,6 +30,10 @@
 /// and lists downloaded "via VPN" use it (a Russian probe or GitHub must not go direct
 /// because a rule says so).
 ///
+/// [tunCheckPort]: TUN only; the loopback port of the responder of the active TUN test (tun_check.dart): one
+/// route rule, ahead of the self rule and everything else, takes the test connection that enters the TUN to
+/// [tunCheckAddress]:[tunCheckPort] and sends it `direct` to 127.0.0.1 on that port.
+///
 /// [sysPort]: with `mixedAuth` and the system proxy on, a third mixed inbound (`sys-in`) on
 /// loopback without a password, routed like `mixed-in`: the Windows system proxy cannot pass
 /// a login, so it points here (daemon.dart picks and keeps the port).
@@ -69,6 +73,7 @@ import 'probe.dart';
 import 'routing.dart';
 import 'rulenames.dart';
 import 'svc_in.dart';
+import 'tun_check.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 
@@ -81,6 +86,19 @@ const tunDnsAddress = ['172.19.0.2/32', 'fdfe:dcba:9876::2/128'];
 /// unreachable), so apps fall back to IPv4 instead of hanging. The IPv6 route stays in the TUN on purpose:
 /// without it IPv6 literals would leave past the VPN on a network that has IPv6.
 const ipv6OffRule = {'inbound': [tunTag], 'ip_version': 6, 'action': 'reject', 'no_drop': true};
+
+/// The active TUN test's connection (tun_check.dart) is taken out of the tunnel to the responder on loopback: the
+/// documentation address it aims at exists nowhere, nothing of it can leave.
+Map<String, dynamic> tunCheckRule(int port) => {
+      'inbound': [tunTag],
+      'ip_cidr': ['$tunCheckAddress/32'],
+      'port': [tunCheckPort],
+      'network': ['tcp'],
+      'action': 'route',
+      'outbound': 'direct',
+      'override_address': '127.0.0.1',
+      'override_port': port,
+    };
 
 /// Local networks stay out of the tunnel (the same ground as the `Private networks` rule):
 /// private, link-local, multicast and broadcast, IPv4 and IPv6.
@@ -212,6 +230,7 @@ Map<String, dynamic>? mixedAuthUser(Map<String, dynamic> plan) {
 
 Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     {int? tunnelPort,
+    int? tunCheckPort,
     int? sysPort,
     Probe? probe,
     SvcIn? svc,
@@ -324,6 +343,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     ],
   ];
   final hijack = [if (tun) tunResolverHijack, ...hijackAll];
+  final Map<String, dynamic>? tunCheck = tun && tunCheckPort != null ? tunCheckRule(tunCheckPort) : null;
   final selfRuleList = selfRules(paths: selfPaths, packages: selfPackages);
   // The app's own lookups reach the core's DNS through the hijack: answered by a direct server
   // first of all, whatever `final` and the rules say (they may lead through a proxy that is down)
@@ -344,6 +364,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       info.ruleNames.add(r, const RuleOrigin('system', 'DNS hijack', id: 'dns-hijack'));
     }
     if (tunnelRule != null) info.ruleNames.add(tunnelRule, const RuleOrigin('system', 'Core checks', id: 'tunnel'));
+    if (tunCheck != null) info.ruleNames.add(tunCheck, const RuleOrigin('system', 'TUN check', id: 'tun-check'));
     for (final r in selfRuleList) {
       info.ruleNames.add(r, const RuleOrigin('system', 'Core and speed tests', id: 'core'));
     }
@@ -385,6 +406,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
         {'action': 'sniff'},
         if (tun) tunResolverHijack,
         ?tunnelRule,
+        ?tunCheck, // the test connection of tun_check.dart: ahead of the self rule, which would send it out direct
         ...selfRuleList, // the app's own connections (docs/core.md → «TUN»): direct; behind tunnel-in's rule
         ...hijackAll,
         if (tun && !planIpv6(plan)) ipv6OffRule, // after the DNS hijack: DNS to the tunnel's IPv6 resolver is still answered

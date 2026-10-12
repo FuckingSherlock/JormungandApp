@@ -156,6 +156,9 @@ void main() {
       expect(sw.elapsedMilliseconds, lessThan(500));
       expect(runner.serverOf('route0/s::a'), '10.0.0.1');
       expect(fast!.asked, isEmpty);
+      // the report shows what the config holds for the host and who answered the lookup
+      final msgs = [for (final l in svc.log(since: null)['lines'] as List) '${(l as Map)['msg']}'];
+      expect(msgs.any((m) => m.contains('address: config for connect: a.example → 10.0.0.1 (via seed, ')), isTrue, reason: msgs.join('\n'));
     });
 
     test('missing and slow: waits about 1.5 s, then starts with the name; the answer lands in the book without a restart', () async {

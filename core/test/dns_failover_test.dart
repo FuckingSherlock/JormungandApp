@@ -307,6 +307,129 @@ void main() {
     await r.dispose();
   });
 
+  test('a dead candidate is asked again on the ladder 30 s, 1 min, 2 min; the answer closes its root', () async {
+    final r = _Rig(direct: ['a', 'b']);
+    await r.settle();
+    r.alive['dns-a'] = -1;
+    await r.round(2); // the miss, then the window passes: the root opens
+    expect(r.sentinel.roots.byKey('dns|a'), isNotNull);
+    int askedA() => r.asked.where((q) => q.startsWith('dns-a ')).length;
+    r.asked.clear();
+    await r.svc.checkDue();
+    expect(askedA(), 0, reason: 'its time has not come');
+    await r.time.advanceSeconds(31);
+    await r.svc.checkDue();
+    expect(askedA(), greaterThan(0), reason: '30 s after the root opened');
+    r.asked.clear();
+    await r.time.advanceSeconds(31);
+    await r.svc.checkDue();
+    expect(askedA(), 0, reason: 'the next step is 1 min');
+    await r.time.advanceSeconds(30);
+    await r.svc.checkDue();
+    expect(askedA(), greaterThan(0), reason: '1 min after the last ask');
+    r.asked.clear();
+    r.alive['dns-a'] = 30;
+    await r.time.advanceSeconds(121);
+    await r.svc.checkDue();
+    expect(askedA(), greaterThan(0), reason: '2 min after the last ask');
+    expect(r.sentinel.roots.byKey('dns|a'), isNull, reason: 'it answered: the root is closed');
+    await r.dispose();
+  });
+
+  test('the ladder asks nothing while the network is not up; the dead candidate is asked once it is', () async {
+    final r = _Rig(direct: ['a', 'b']);
+    await r.settle();
+    r.alive['dns-a'] = -1;
+    await r.round(2);
+    expect(r.sentinel.roots.byKey('dns|a'), isNotNull);
+    r.uncertain = true;
+    r.asked.clear();
+    await r.time.advanceSeconds(40);
+    await r.svc.checkDue();
+    expect(r.asked, isEmpty);
+    r.uncertain = false;
+    await r.svc.checkDue();
+    expect(r.asked.where((q) => q.startsWith('dns-a ')), isNotEmpty, reason: 'due since 30 s');
+    await r.dispose();
+  });
+
+  test('alive: a dead candidate (flag off, root open) is not asked for look-ups, back when it answers again; an unknown id is not judged', () async {
+    final r = _Rig(direct: ['a', 'b'], system: true);
+    await r.settle();
+    expect([r.svc.alive('a'), r.svc.alive('b'), r.svc.alive(systemDnsId), r.svc.alive('nope')], [true, true, true, true]);
+    r.alive['dns-a'] = -1;
+    await r.round(2);
+    await r.round(2);
+    expect(r.sentinel.roots.byKey('dns|a'), isNotNull);
+    expect(r.svc.alive('a'), isFalse);
+    expect(r.svc.alive('b'), isTrue);
+    expect(r.svc.alive(systemDnsId), isTrue, reason: 'the OS resolver has no flag');
+    r.alive['dns-a'] = 30;
+    await r.round();
+    await r.round();
+    expect(r.svc.alive('a'), isTrue, reason: 'the root closed and the flag is back');
+    await r.dispose();
+  });
+
+  group('pingProvider', () {
+    test('the network is up: the answer closes the root of a dead candidate and the ladder starts over', () async {
+      final r = _Rig(direct: ['a', 'a2', 'b'], providers: {'a2': 'a'});
+      await r.settle();
+      r.alive['dns-a'] = -1;
+      r.alive['dns-a2'] = -1;
+      await r.round(2);
+      expect(r.sentinel.roots.byKey('dns|a'), isNotNull);
+      r.alive['dns-a'] = 25;
+      r.asked.clear();
+      final got = await r.svc.pingProvider('a');
+      expect([for (final g in got) '${g.id} ${g.side} ${g.kind} ${g.ms}'], ['a direct udp 25', 'a2 direct udp -1']);
+      expect(r.asked.where((q) => q.startsWith('dns-b ')), isEmpty, reason: 'only the provider is asked');
+      expect(r.sentinel.roots.byKey('dns|a'), isNull, reason: 'it answered: not dead any more');
+      expect(r.sentinel.roots.byKey('dns|a2'), isNotNull, reason: 'a2 still misses');
+      await r.dispose();
+    });
+
+    test('the network is up: a miss is evidence like a round\'s (the second one after the window confirms it)', () async {
+      final r = _Rig(direct: ['a', 'b']);
+      await r.settle();
+      r.alive['dns-b'] = -1;
+      expect((await r.svc.pingProvider('b')).single.ms, -1);
+      expect(r.sentinel.roots.byKey('dns|b'), isNull, reason: 'one miss is a suspicion only');
+      await r.time.advanceSeconds(2);
+      await r.svc.pingProvider('b');
+      await r.time.advanceSeconds(2);
+      expect(r.sentinel.roots.byKey('dns|b'), isNotNull);
+      expect(r.writes, ['b off verdict']);
+      await r.dispose();
+    });
+
+    test('the network is not up: it only measures, nothing reaches the Sentinel and no flag moves', () async {
+      final r = _Rig(direct: ['a', 'b'], uncertain: true);
+      await r.settle();
+      r.alive['dns-a'] = -1;
+      for (var i = 0; i < 3; i++) {
+        expect((await r.svc.pingProvider('a')).single.ms, -1);
+        await r.time.advanceSeconds(2);
+      }
+      expect(r.asked, isNotEmpty);
+      expect(r.sentinel.roots.open, isEmpty);
+      expect(r.writes, isEmpty);
+      r.alive['dns-a'] = 40;
+      expect((await r.svc.pingProvider('a')).single.ms, 40);
+      await r.dispose();
+    });
+
+    test('a provider this config does not hold, or a stopped failover: nothing', () async {
+      final r = _Rig(direct: ['a']);
+      await r.settle();
+      expect(await r.svc.pingProvider('zzz'), isEmpty);
+      expect(r.asked, isEmpty);
+      r.svc.stop();
+      expect(await r.svc.pingProvider('a'), isEmpty);
+      await r.dispose();
+    });
+  });
+
   test('nothing is probed while the network may be down; status has every server', () async {
     final r = _Rig(direct: ['a', 'b'], uncertain: true);
     await r.settle();

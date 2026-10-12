@@ -27,6 +27,11 @@
 /// the core settled (the Sentinel's context). With [auto] off the checks still run (Settings → DNS shows which
 /// server fails) but every flag is on; turning it on applies the verdicts at once.
 ///
+/// A candidate with an open root (confirmed dead) is not asked by the periodic rounds: it has its own ladder,
+/// 30 s → 1 min → 2 min → 5 min (then every 5 min, [recheckLadder]) from the moment the root opened; the first
+/// answer closes the root and hands the candidate back to the rounds, which bring its flag on after `failAfter`
+/// answers. A provider ping ([pingProvider]) is the same check, so what it shows and the colour in the list agree.
+///
 /// After each flag write the effective candidate of the side is asked back through the probe inbound
 /// ([flagCheck], the side's flagcheck name that the DNS rules answer with no network): the delay until sing-box
 /// applied the file is logged, a file it did not apply within [flagWait] is a warning.
@@ -44,6 +49,9 @@ import 'watched.dart';
 
 /// Names every ordinary resolver answers: the server works when any of them resolves.
 const dnsCheckNames = ['cp.cloudflare.com', 'www.gstatic.com', 'captive.apple.com'];
+
+/// How long a candidate with a confirmed dead verdict waits before it is asked again; the last step repeats.
+const dnsRecheckLadder = [Duration(seconds: 30), Duration(minutes: 1), Duration(minutes: 2), Duration(minutes: 5)];
 
 /// The Sentinel's key of the suspicion / root of the DNS server [id].
 String dnsRootKey(String id) => 'dns|$id';
@@ -79,6 +87,9 @@ class DnsSwitch {
       };
 }
 
+/// Which servers a round asks: all of them, those without an open root (the timer's), the dead ones that are due.
+enum _Round { all, periodic, ladder }
+
 class _Node {
   _Node(this.entry, this.c, {required this.member});
 
@@ -96,6 +107,10 @@ class _Node {
 
   /// The flag as the core wrote it last.
   bool on = true;
+
+  /// While its root is open: when it is asked next (ms since epoch) and the step of the ladder it is on.
+  int? recheckAt;
+  int recheckStep = 0;
 
   /// Its flag was off in the sing-box before this one (a restart): it returns on a single answer, the
   /// verdict that put it off is not known any more.
@@ -137,6 +152,7 @@ class DnsFailover {
     this.note,
     this.flagWait = const Duration(seconds: 3),
     this.flagPoll = const Duration(milliseconds: 60),
+    this.recheckLadder = dnsRecheckLadder,
   }) : _clock = clock ?? _wallClock {
     _sides = [
       for (final name in dnsSideNames)
@@ -188,13 +204,19 @@ class DnsFailover {
 
   /// How long sing-box may take to apply a flag file, and how often it is asked meanwhile.
   final Duration flagWait, flagPoll;
+
+  /// How long a candidate whose root is open waits before it is asked again (the last step repeats).
+  final List<Duration> recheckLadder;
   final int Function() _clock;
   late final List<_Side> _sides;
   late final List<_Node> _watch;
   final _switches = StreamController<DnsSwitch>.broadcast();
   StreamSubscription<Map<String, dynamic>>? _sub;
-  Timer? _timer;
-  bool _busy = false, _started = false, _stopped = false, _again = false;
+  Timer? _timer, _recheckTimer;
+  bool _busy = false, _busyLadder = false, _started = false, _stopped = false, _again = false;
+
+  /// The ladder's timer does not fire before this (ms since epoch): a tick found the network down or a round busy.
+  int _recheckNotBefore = 0;
   Future<void>? _loop;
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
@@ -209,6 +231,13 @@ class DnsFailover {
 
   /// The id of the candidate that answers [side] now.
   String? activeOf(String side) => _sideOf(side).effective?.id;
+
+  /// Whether lookups of the core's own (node addresses, address_resolver.dart) may ask the candidate [id]: its flag is
+  /// on and no root is open. A server this config does not know is not judged: true.
+  bool alive(String id) {
+    final n = _all.where((x) => x.id == id).firstOrNull;
+    return n == null || n.c == null || (n.on && !_down(n));
+  }
 
   bool get isEmpty => _members.isEmpty;
 
@@ -226,14 +255,55 @@ class DnsFailover {
   void stop() {
     _stopped = true;
     _timer?.cancel();
+    _recheckTimer?.cancel();
     unawaited(_sub?.cancel());
     _switches.close();
   }
 
   void _schedule(Duration d) {
     _timer?.cancel();
-    if (_started && !_stopped) _timer = Timer(d, () => unawaited(check()));
+    if (_started && !_stopped) _timer = Timer(d, () => unawaited(_round(_Round.periodic)));
   }
+
+  // ── the ladder of the dead ──
+
+  // A candidate is parked while its root is open: the periodic rounds leave it alone, the ladder asks it.
+  bool _due(_Node n, int now) => n.recheckAt != null && n.recheckAt! <= now;
+
+  // Gives a candidate that just got its root a place on the ladder, takes it off when the root closed, and sets the
+  // timer for the earliest one due.
+  void _syncPark() {
+    if (_stopped) return;
+    final now = _clock();
+    for (final n in _all) {
+      if (_down(n)) {
+        n.recheckAt ??= now + recheckLadder.first.inMilliseconds;
+      } else if (n.recheckAt != null) {
+        n.recheckAt = null;
+        n.recheckStep = 0;
+      }
+    }
+    _recheckTimer?.cancel();
+    _recheckTimer = null;
+    if (!_started) return;
+    final next = _all.map((n) => n.recheckAt).whereType<int>().fold<int?>(null, (a, b) => a == null || b < a ? b : a);
+    if (next == null) return;
+    final wait = (next > _recheckNotBefore ? next : _recheckNotBefore) - now;
+    _recheckTimer = Timer(Duration(milliseconds: wait < 0 ? 0 : wait), () => unawaited(checkDue()));
+  }
+
+  // A parked candidate was asked: the next step of the ladder, or off it when it answered.
+  void _stepped(_Node n, int now, {bool advance = true}) {
+    if (!_down(n)) {
+      n.recheckAt = null;
+      n.recheckStep = 0;
+      return;
+    }
+    if (advance && n.recheckStep + 1 < recheckLadder.length) n.recheckStep++;
+    n.recheckAt = now + recheckLadder[n.recheckStep].inMilliseconds;
+  }
+
+  bool get _online => (pool == null || pool!.status == NetStatus.up) && sentinel.context.network.state == NetState.up;
 
   void _note(String level, String line) => note?.call(level, line);
 
@@ -257,33 +327,100 @@ class DnsFailover {
     return true;
   }
 
-  /// One round: test every server, hand the misses to the Sentinel, then set the flags by the verdicts.
-  Future<void> check() async {
-    if (_busy || _stopped) return;
-    _busy = true;
+  /// One round over every server, the dead ones too: test them, hand the misses to the Sentinel, then set the flags by
+  /// the verdicts. The timer's rounds skip the candidates with an open root (the ladder asks those, [checkDue]).
+  Future<void> check() => _round(_Round.all);
+
+  /// The ladder's tick: asks the dead candidates whose time has come (30 s, 1 min, 2 min, then every 5 min after
+  /// their root opened); an answer closes the root. Nothing while the network is not up.
+  Future<void> checkDue() => _round(_Round.ladder);
+
+  Future<void> _round(_Round kind) async {
+    final ladder = kind == _Round.ladder;
+    if (_stopped) return;
+    if (ladder ? _busyLadder : _busy) {
+      if (ladder) {
+        _recheckNotBefore = _clock() + 1000;
+        _syncPark();
+      }
+      return;
+    }
+    if (ladder) {
+      _busyLadder = true;
+    } else {
+      _busy = true;
+    }
     try {
-      if (pool != null && pool!.status != NetStatus.up) return;
-      if (sentinel.context.network.state != NetState.up) return;
-      await Future.wait(_all.map(_test));
+      if (!_online) {
+        if (ladder) _recheckNotBefore = _clock() + 10000;
+        return;
+      }
+      final now = _clock();
+      final list = [
+        for (final n in _all)
+          if (switch (kind) { _Round.all => true, _Round.periodic => !_down(n), _Round.ladder => _down(n) && _due(n, now) }) n,
+      ];
+      if (list.isEmpty && ladder) return;
+      final parked = [for (final n in list) if (_down(n)) n];
+      await Future.wait(list.map(_test));
       if (_stopped) return;
-      for (final s in _all) {
-        if (s.w.health.answered) {
-          s.missSince = null;
-          sentinel.recovered(dnsRootKey(s.id), reason: 'dns.answers');
-        } else if (s.w.health.ms == -1) {
-          _suspect(s);
-        }
+      _judge(list);
+      for (final n in parked) {
+        _stepped(n, now);
       }
       await _react();
-      _summary();
+      if (!ladder) _summary();
     } finally {
-      _busy = false;
-      final retry = _sides.any((s) {
-        final a = s.effective;
-        return a != null && a.missSince != null && !_down(a);
-      });
-      _schedule(retry ? settings.retryPause : settings.checkEvery);
+      if (ladder) {
+        _busyLadder = false;
+      } else {
+        _busy = false;
+        final retry = _sides.any((s) {
+          final a = s.effective;
+          return a != null && a.missSince != null && !_down(a);
+        });
+        _schedule(retry ? settings.retryPause : settings.checkEvery);
+      }
+      _syncPark();
     }
+  }
+
+  // The answers close the roots, the misses are evidence for the Sentinel.
+  void _judge(Iterable<_Node> list) {
+    for (final s in list) {
+      if (s.w.health.answered) {
+        s.missSince = null;
+        sentinel.recovered(dnsRootKey(s.id), reason: 'dns.answers');
+      } else if (s.w.health.ms == -1) {
+        _suspect(s);
+      }
+    }
+  }
+
+  /// The latency of every candidate of [provider] in this config, on both sides, by the very check the rounds
+  /// make (the probe inbound, the candidate's own path, the check names in turn): `(id, side, kind, ms)`, -1 =
+  /// no answer. Empty when the config has no such provider. While the network is up the answers count as a round's:
+  /// an answer closes a dead candidate's root, a miss is evidence like any other (so the list's colour and the ping
+  /// agree, and a provider just switched on is checked at once); otherwise it only measures.
+  Future<List<({String id, String side, String kind, int ms})>> pingProvider(String provider) async {
+    final nodes = [for (final n in _all) if (n.c != null && n.provider == provider) n];
+    if (nodes.isEmpty || _stopped) return const [];
+    if (_online) {
+      final now = _clock();
+      final parked = [for (final n in nodes) if (_down(n)) n];
+      await Future.wait(nodes.map(_test));
+      if (!_stopped) {
+        _judge(nodes);
+        for (final n in parked) {
+          _stepped(n, now, advance: false); // asked just now: the next one counts from here, the step stays
+        }
+        await _react();
+        _syncPark();
+      }
+      return [for (final n in nodes) (id: n.id, side: n.side, kind: n.kind, ms: n.w.health.ms)];
+    }
+    final ms = await Future.wait(nodes.map((n) => _ask(n, null)));
+    return [for (var i = 0; i < nodes.length; i++) (id: nodes[i].id, side: nodes[i].side, kind: nodes[i].kind, ms: ms[i])];
   }
 
   Future<void> _test(_Node s) async {
@@ -401,6 +538,7 @@ class DnsFailover {
 
   Future<void> _decide() async {
     if (_stopped) return;
+    _syncPark();
     final wrote = <String>{}, dropped = <String>{};
     String? hint;
     if (!auto) {
@@ -517,7 +655,8 @@ class DnsFailover {
       if (s.members.isEmpty) continue;
       String ms(_Node n) => n.w.health.ms >= 0 ? '${n.id} ${n.w.health.ms} ms' : n.id;
       final live = [for (final n in s.members) if (n.on) ms(n)];
-      final off = [for (final n in s.members) if (!n.on) '${n.id}${_down(n) ? ' (down)' : n.w.health.answered ? ' (answers, returning)' : ''}'];
+      String next(_Node n) => n.recheckAt == null ? '' : ', asked again in ${((n.recheckAt! - _clock()) / 1000).ceil().clamp(0, 86400)} s';
+      final off = [for (final n in s.members) if (!n.on) '${n.id}${_down(n) ? ' (down${next(n)})' : n.w.health.answered ? ' (answers, returning)' : ''}'];
       _note('debug', 'dns ${s.name}: answers ${s.effective?.id}; flags on [${live.join(', ')}]; off [${off.join(', ')}]');
     }
   }

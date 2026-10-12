@@ -134,6 +134,7 @@ class Daemon {
         'POST /api/killswitch' => service.killSwitchSettings(body),
         'POST /api/auto' => service.autoSettings(body),
         'POST /api/dns/auto' => service.dnsAutoSetting(body),
+        'POST /api/dns/ping' => service.pingDnsSides(body),
         'POST /api/exit' => service.recheckExit(),
         _ => null,
       };

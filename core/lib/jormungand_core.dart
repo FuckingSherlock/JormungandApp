@@ -58,5 +58,6 @@ export 'src/sitecheck.dart';
 export 'src/state.dart';
 export 'src/sysproxy.dart';
 export 'src/traffic.dart';
+export 'src/tun_check.dart';
 export 'src/tun_ingress.dart';
 export 'src/updater.dart';

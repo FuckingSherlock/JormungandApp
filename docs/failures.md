@@ -259,7 +259,7 @@ appendTrail)` дополняет событие задним числом, `Even
 | `conn/failing`, `site/blocked`, `site/unreachable` | одно подозрение на назначение, ключ `site\|host:port` — и серия книги сбоев, и замеченный Auto сбой сайта; `scope {host, port, outbound}` | все `Level.destination`, `via` = маршрут: `recovery conn.recovered` (живой трафик через тот же outbound), `alternative conn.otherRoute`, `recovery probe.same` (тот же сервер; проходит, только если после начала пробы соединения приложения к host:port не падали — иначе fail `{opens, appFails}`), `alternative probe.alt` (другие маршруты, `siteAlternates`), `diagnostic site.checker` (внешний чекер, если ничего не открыло). Назначение, на которое пробу не нацелить, — только первые две | событие по вердикту: `workaround` через `probe.alt` — `site/blocked` (уведомляет: приложение предлагает правило); `confirmed` / `unexplained` — `site/unreachable` (чекер `opens` — `confirmed`), а если проба открывает, но приложение падает — `conn/failing`; `blip` / `consequence` — `conn/failing` (`blip` только по замеченному Auto — ничего); дедуп 1 ч на маршрут + назначение |
 | `conn/lost` | `conn.lost` (корень над путём `proxy`) | — | `consequence` (сети нет), `blip`, `confirmed`; `conn/restored` пишется, только если корень стоял |
 | `conn/offline` / `online` | сам корень `net.offline` контекста | — | событие корня пишет сервис по `sentinel.changes`: через `netBlip` — `confirmed` + `attachEvent`; раньше вернулась — `blip` (`info`, `downMs`); `conn/online {downMs}` — только после «стоявшего» `offline` |
-| `core/tunTcpDead` | `tun.tcpDead`, `Scope.none` | активной проверки пока нет (см. TODO ниже) | `confirmed` (корень), `blip` (TCP вернулся в окно), `deferred` (`ownReject`) |
+| `core/tunTcpDead` | `tun.tcpDead`, `Scope.none` | `recovery tun.test` (`Level.core`): активное TCP-соединение через TUN (см. «TUN» ниже); нет ответчика — проверок нет | `confirmed` (корень; тест не прошёл, причина в шаге следа), `blip` (тест прошёл или TCP вернулся в окно), `deferred` (`ownReject`) |
 | `core/crashed` | — (факт) | — | `confirmed`, открывает корень `core.crashed` (не сессионный, с `eventId`) |
 | `core/restartFailed` | — (факт) | — | `consequence`, `info`, `cause` = событие падения, `why core.crashed {attempt}` |
 | `core/restarted` | — | — | без вердикта (это восстановление); закрывает `core.crashed` |
@@ -285,9 +285,23 @@ appendTrail)` дополняет событие задним числом, `Even
   отпускает без записи, `dead` не ставится); в `evidence` — `ownRejects` (какие свои reject-правила включены) и
   `ownRejected`. Адресов назначения в логе sing-box нет, поэтому v4/v6 в свидетельстве нет. Свидетельство: `apps`,
   `appCounts` (запросов на приложение), `synSeen`, `accepted`, `windowMs`, `firstSeen`. `core/tunTcpBack` пишется,
-  только если корень `tun.tcpDead` стоял. **TODO(sentinel):** активная `recovery`-проверка «открыть тестовый
-  TCP-соединение через TUN» (`service.dart`, `_tunDead`, `checks: const []`): удалось — `blip`, отказ/тишина — `diagnostic`;
-  заменит ожидание первого принятого соединения и снимет неразличимость собственного reject'а.
+  только если корень `tun.tcpDead` стоял. Строки лога с `router: pre-match: forward icmp|udp|tcp connection`
+  (ICMP-эхо, UDP-поток, перенаправленные нашим правилом) поиски не осиротевшими не считают.
+- **Активная проверка TUN (`recovery tun.test`).** Подозрение `tun.tcpDead` проверяет само ядро: оно открывает TCP-соединение
+  на адрес `192.0.2.251:44251` (документационный адрес RFC 5737, нигде не существует; в маршрутах TUN) с одноразовым
+  токеном — пакеты входят в TUN, как у любого приложения, проходят настоящий стек (mixed / system / gVisor) и
+  маршрутизацию. Правило конфига `TUN check` (`inbound: tun-in`, этот адрес и порт, `tcp`, `route` в `direct` с
+  `override_address 127.0.0.1` / `override_port` порта ответчика) стоит сразу после правила `tunnel-in` и **раньше**
+  собственных правил приложения (иначе оно ушло бы `direct` наружу) и правил пользователя; наружу тест не выходит. Токен,
+  дошедший до loopback-ответчика, доказывает, что TCP доходит до маршрутизации. На Android собственный пакет из VPN не
+  исключается, поэтому сокеты ядра попадают в TUN. Причины отказа (`reason` в шаге следа): `silent` (соединение принято, токен
+  не пришёл — стек не доводит до маршрутизации), `refused` (соединение отвергнуто), `unrouted` (до ответчика не дошло:
+  нет маршрута / таймаут). Вердикты: тест прошёл — `blip` (один сбой приложения: без ERROR и уведомления; в журнал —
+  один раз в 15 мин на набор приложений, остальное только в сыром логе: `TUN (…): TCP passes the tunnel; N look-ups of
+  <apps> end without a connection`), не прошёл — `confirmed` (корень, причина в следе). Ответчик (loopback, свободный порт)
+  поднимается при плане с TUN, его порт хранится в записи принятия (`tunCheckPort`), при принятии чужого sing-box
+  поднимается заново на этом порту, закрывается при отключении и dispose. Не удалось занять порт — правила и проверки нет,
+  подтверждения «из пустоты» тоже (остаётся только ожидание окна `tunTcpDead`).
 - **Сессия.** `_stopAuto` вызывает `Sentinel.dropAll()`: подозрения прошлой сессии sing-box отпускаются как `deferred`
   (шаг `session.dropped`) без записи; что всё ещё сломано, детектор заподозрит заново. Подозрение, пришедшее при
   `settling` после нашего (пере)запуска, ждёт устоявшегося и отсчитывает окно заново (шаг `self.restarted`).

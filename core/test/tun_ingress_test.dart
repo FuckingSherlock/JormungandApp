@@ -300,6 +300,21 @@ void main() {
       expect(last.data['ownRejected'], TunIngressDetector.minUnpaired);
     });
 
+    test('look-ups that sing-box logs as forwarded ICMP / UDP flows (same id, info level) are explained: not a dead stack', () {
+      final r = _Rig()..d.start('system');
+      r.advance(const Duration(seconds: 6));
+      for (var i = 0; i < TunIngressDetector.minUnpaired + 4; i++) {
+        final id = r.nextId();
+        r.found('com.example.app', id: id);
+        r.d.onLine('INFO  [$id 0ms] router: pre-match: forward ${i.isEven ? 'icmp' : 'udp'} connection from 172.19.0.1 to 77.88.44.55 via outbound/direct[direct]');
+        r.other(8);
+      }
+      r.other(TunIngressDetector.pairLines + 1);
+      expect(r.events, isEmpty);
+      expect(r.d.dead, isFalse);
+      expect(r.d.toJson()['unpairedInWindow'], 0);
+    });
+
     test('a reject line of an id that was never looked at is ignored', () {
       final r = _Rig()..d.start('system');
       r.advance(const Duration(seconds: 6));

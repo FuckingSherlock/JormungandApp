@@ -228,6 +228,11 @@ name: …` (на десктопе `found process path`, ключ — имя фа
 (строка соединения не несёт приложения), поэтому в `packages[]` только `syn` и `orphan`. Окно = то, что ещё
 держат кольца (шум-кольцо 500 строк), накопленные с начала сеанса счётчики — в `counters.tunIngress`.
 
+Строки сырого лога о TUN, которые пишет само ядро (источник `jormd`): `TUN (<стек>): TCP does not reach sing-box: N
+connection attempts in S s, none accepted (<apps>)` — подозрение детектора; `TUN (<стек>): TCP passes the tunnel; N
+look-ups of <apps> end without a connection (that app only)` — активная проверка `tun.test` прошла, повтор для того же набора
+приложений в течение 15 мин в журнал не идёт, только сюда (`docs/failures.md`, «TUN»).
+
 ### Маскирование (`redact.dart`)
 
 `Redactor` заменяет значение стабильной подстановкой `<вид#N>` (одно значение — один номер, чтобы видеть

@@ -1184,6 +1184,28 @@ class LiveCoreHost extends CoreHost {
   DnsHealth? get dnsHealth => _dnsHealth;
 
   @override
+  Future<DnsSidePing> pingDnsSides(String providerId) async {
+    if (_connected) {
+      try {
+        final r = await api.pingDnsSides({'provider': providerId});
+        if (r['live'] == true) {
+          return DnsSidePing(
+            direct: r['direct'] as int?,
+            vpn: r['vpn'] as int?,
+            servers: {
+              for (final s in (r['servers'] as List? ?? const []))
+                if (s is Map && s['ms'] is int) '${s['id']}': s['ms'] as int,
+            },
+          );
+        }
+      } catch (_) {
+        // the core could not measure: the in-process direct ping below
+      }
+    }
+    return super.pingDnsSides(providerId);
+  }
+
+  @override
   SpeedResult? get lastSpeed => _lastSpeed;
 
   @override

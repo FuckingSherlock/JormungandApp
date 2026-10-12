@@ -101,6 +101,15 @@ const outsideTunnel = <OutsideEntry>[
     ['core/lib/src/address_resolver.dart'],
   ),
   OutsideEntry(
+    'tun-check',
+    'The active TUN test (tun_check.dart): a TCP connection made on purpose INTO the tunnel, to a documentation '
+        'address (192.0.2.251:44251, TEST-NET-1, exists nowhere); the dedicated rule (config.dart → tunCheckRule), '
+        'ahead of the self rule, takes it out direct to the responder on 127.0.0.1, so nothing leaves the machine; '
+        'the responder itself only listens on loopback',
+    OutsideHow.ownRule,
+    ['core/lib/src/tun_check.dart'],
+  ),
+  OutsideEntry(
     'singbox-process',
     'Desktop: the sing-box processes the core starts (the connection, throwaway ping / speed-test ones); '
         'their path is in selfProcessPaths, so the helper instances go direct instead of looping',

@@ -127,6 +127,9 @@ class TunIngressDetector {
   static final _foundRe = RegExp(r'^router: found (?:package name|process path): (.+)$');
   // debug level only: `router: pre-match[3] inbound=tun-in ip_version=6 => reject(no_drop)`; the id is the connection's
   static final _rejectRe = RegExp(r'^router: pre-match\[\d+\] .*=> reject\b');
+  // info level: `router: pre-match: forward icmp connection from … to … via outbound/direct[direct]`; the id is the look-up's
+  // (the pre-match gets its own id, the later connection another): a flow the stack hands to routing itself, not a lost TCP
+  static final _forwardRe = RegExp(r'^router: pre-match: forward (?:icmp|udp|tcp) connection\b');
 
   /// A line of sing-box's log.
   void onLine(String raw) {
@@ -145,6 +148,8 @@ class TunIngressDetector {
           _remember(id);
         } else if (_rejectRe.hasMatch(l.body)) {
           _rejected(id);
+        } else if (_forwardRe.hasMatch(l.body)) {
+          _flowed(id);
         } else {
           final f = _foundRe.firstMatch(l.body);
           if (f != null && !_seen.contains(id)) _orphan(id, f[1]!.trim(), now);
@@ -161,6 +166,19 @@ class TunIngressDetector {
     o.own = true;
     _ownTotal++;
     if (o.counted) _ownInWindow++;
+  }
+
+  // The look-up of connection [id] ended in a forwarded flow (ICMP / UDP, logged at `info`): explained, so it is
+  // taken out of the counts, wherever it is (waiting for a real line, or already unpaired).
+  void _flowed(String id) {
+    final o = _byId.remove(id);
+    if (o == null) return;
+    if (_pending.remove(o)) return;
+    if (_unpaired.remove(o)) {
+      o.counted = false;
+      if (o.own) _ownInWindow--;
+      _unpairedTotal--;
+    }
   }
 
   // the first inbound line of an id; false = a second line of it (`from`, then `to`)

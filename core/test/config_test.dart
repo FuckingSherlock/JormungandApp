@@ -3,6 +3,50 @@ import 'package:jormungand_core/jormungand_core.dart';
 import 'package:test/test.dart';
 
 void main() {
+  group('tunCheckRule in buildConfig', () {
+    Map<String, dynamic> plan(String mode) => {
+          'kind': 'unit',
+          'mode': mode,
+          'main': {
+            'pick': 'priority',
+            'chosen': 'k::0',
+            'nodes': [
+              {'key': 'k::0', 'outbound': {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'}},
+            ],
+          },
+        };
+    List<Map> rules(Map<String, dynamic> cfg) => ((cfg['route'] as Map)['rules'] as List).cast<Map>();
+
+    test('TUN with a port: the rule stands right after the tunnel-in rule, before the self rules, with exact fields', () {
+      final r = rules(buildConfig(plan('tun'), tunnelPort: 7001, tunCheckPort: 45678, selfPackages: ['dev.jormungand.app']));
+      final i = r.indexWhere((x) => x['override_port'] == 45678);
+      expect(i, greaterThan(0));
+      expect(r[i], {
+        'inbound': ['tun-in'],
+        'ip_cidr': ['192.0.2.251/32'],
+        'port': [44251],
+        'network': ['tcp'],
+        'action': 'route',
+        'outbound': 'direct',
+        'override_address': '127.0.0.1',
+        'override_port': 45678,
+      });
+      expect(r[i - 1]['inbound'], ['tunnel-in'], reason: 'right after tunnelRule');
+      final self = r.indexWhere((x) => x['package_name'] != null);
+      expect(self, greaterThan(i), reason: 'ahead of the self rules');
+    });
+
+    test('TUN without a port: no rule', () {
+      final r = rules(buildConfig(plan('tun'), tunnelPort: 7001));
+      expect(r.where((x) => x['override_port'] != null), isEmpty);
+    });
+
+    test('not TUN: no rule even with a port', () {
+      final r = rules(buildConfig(plan('proxy'), tunnelPort: 7001, tunCheckPort: 45678));
+      expect(r.where((x) => x['override_port'] != null), isEmpty);
+    });
+  });
+
   group('planCheckers', () {
     test('missing everywhere: defaultCheckers', () {
       expect(planCheckers({}), defaultCheckers);

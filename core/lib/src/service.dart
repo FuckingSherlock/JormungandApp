@@ -48,6 +48,7 @@ import 'sitecheck.dart';
 import 'state.dart';
 import 'sysproxy.dart';
 import 'traffic.dart';
+import 'tun_check.dart';
 import 'tun_ingress.dart';
 import 'updater.dart';
 
@@ -93,6 +94,7 @@ class CoreService implements CoreApi {
     this.windows = const FailureWindows(),
     SentinelClock? sentinelClock,
     this.resolveAddresses = true,
+    this.tunCheckConnect,
     this.addressResolverFor,
   })  : _singBoxVer = knownSingBoxVersion,
         _sentinelClock = sentinelClock,
@@ -251,6 +253,13 @@ class CoreService implements CoreApi {
   /// Does TCP from the TUN reach sing-box (tun_ingress.dart): `core/tunTcpDead` (judged by the [sentinel],
   /// `tun.tcpDead`) and `core/tunTcpBack`.
   late final tunIngress = TunIngressDetector(now: _now, onDead: _tunDead, onBack: _tunBack);
+
+  /// The responder of the active TUN test (tun_check.dart) while a TUN runs; [tunCheckConnect] opens the test
+  /// connection (tests have no TUN).
+  TunCheck? _tunCheck;
+  final TunCheckConnect? tunCheckConnect;
+  bool? _tunCheckPassed; // the last test's outcome
+  final _tunAppReported = <String, int>{}; // apps of a passed test → when it was written to the journal last
   int _connectSeq = 0;
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
@@ -431,6 +440,8 @@ class CoreService implements CoreApi {
     updater.stop();
     await appUpdater?.dispose();
     await runner.stop();
+    unawaited(_tunCheck?.close());
+    _tunCheck = null;
     try {
       if (_killSwitch && _killWhileClosed && sysProxy.isSet) {
         _writeKillMarker(); // left set: the next start reports it as blocking
@@ -775,10 +786,29 @@ class CoreService implements CoreApi {
       why: Why('tun.tcpDead', {'stack': d['stack']}),
       scope: Scope.none,
       level: Level.core,
-      // TODO(sentinel): the active check «open a test TCP connection through the TUN» (a recovery check here:
-      // it works → a blip; refused/silent → the diagnostic) replaces the wait for the first accepted connection.
-      checks: const [],
-      event: SuspicionEvent('core', 'tunTcpDead', level: 'error', note: (kind, e) {
+      // the active test (tun_check.dart): a TCP connection through the TUN reaches routing → the tunnel is alive,
+      // it is one app's failure (a blip: no error, no notification); it does not → the standing failure
+      checks: [
+        if (_tunCheck case final tc?)
+          Check.recovery(tunCheckCode, (c) async {
+            final r = await tc.run(c);
+            _tunCheckPassed = r.outcome == Outcome.pass;
+            return r;
+          }, level: Level.core, timeout: tc.limit),
+      ],
+      event: SuspicionEvent('core', 'tunTcpDead', level: 'error', kindFor: (kind, e) {
+        // a passed test: journal once per 15 min per apps, the rest only in the raw log (an app that pings every
+        // 5 s must not fill the journal)
+        if (kind != VerdictKind.blip || e['accepted'] != 0 || _tunCheckPassed != true) return ('core', 'tunTcpDead');
+        final key = ((e['apps'] as List?) ?? const []).join(',');
+        final now = _nowMs, last = _tunAppReported[key];
+        if (last != null && now - last < 15 * 60 * 1000) {
+          logBook.note('info', 'TUN (${e['stack']}): TCP passes the tunnel; ${e['synSeen']} look-ups of $key end without a connection (that app only)');
+          return null;
+        }
+        _tunAppReported[key] = now;
+        return ('core', 'tunTcpDead');
+      }, note: (kind, e) {
         final apps = (e['apps'] as List?) ?? const [];
         return 'TUN (${e['stack']}): TCP does not reach sing-box: ${e['synSeen']} connection attempts in ${(e['windowMs'] as int) ~/ 1000} s, none accepted'
             '${apps.isEmpty ? '' : ' (${apps.join(', ')})'}${kind == VerdictKind.confirmed ? '' : ' [${kind.name}]'}';
@@ -1579,7 +1609,7 @@ class CoreService implements CoreApi {
         book: addressBook,
         fetch: () => svcFetch,
         settings: _addressSettings,
-        alive: (id) => _dnsFlagMemory[id] ?? true,
+        alive: (id) => _dns?.alive(id) ?? _dnsFlagMemory[id] ?? true, // the running failover judges; its memory only between two sing-boxes
         log: logBook.note,
         now: _now,
       );
@@ -1595,12 +1625,37 @@ class CoreService implements CoreApi {
       final hosts = nodesHostnames([...nodes, for (final p in pairs) p['entry']]);
       if (hosts.isEmpty) return const {};
       unawaited(addresses.ensure(hosts, why: why, wait: const Duration(seconds: 30)));
-      return pinsFor(hosts, addressBook, ipv6: (await _addressSettings()).ipv6);
+      final pins = pinsFor(hosts, addressBook, ipv6: (await _addressSettings()).ipv6);
+      _notePins(why, hosts, pins);
+      return pins;
     } catch (e) {
       logBook.note('warn', 'address: the addresses for $why could not be prepared ($e): the test keeps the names');
       return const {};
     }
   }
+
+  /// What a config (or a test) holds for the hostnames it pins: per host the address, who answered the lookup
+  /// (`cloudflare-doh1`, `system`, …) and how old the answer is — the first [max] hosts, then a count. A server
+  /// whose address came from another resolver than the network's own is the first suspect when a node answers
+  /// for other clients and not here. Host names stay readable in a report (redact.dart keeps domains).
+  /// [summary]: also the line "k of n hostnames pinned" (the connect's own line says it already).
+  void _notePins(String why, Iterable<String> hosts, Pins pins, {bool summary = true, int max = 12}) {
+    if (pins.isEmpty) return;
+    final unresolved = [for (final h in hosts) if (!pins.containsKey(h)) h];
+    if (summary) {
+      logBook.note(unresolved.isEmpty ? 'info' : 'warn',
+          'address: $why: ${pins.length} of ${pins.length + unresolved.length} hostnames pinned to an address'
+          '${unresolved.isEmpty ? '' : ', kept as names (sing-box resolves them): ${unresolved.take(max).join(', ')}${unresolved.length > max ? ' and ${unresolved.length - max} more' : ''}'}');
+    }
+    final now = _now().millisecondsSinceEpoch;
+    final parts = <String>[];
+    for (final e in pins.entries.take(max)) {
+      final entry = addressBook.get(e.key);
+      parts.add(entry == null ? '${e.key} → ${e.value}' : '${e.key} → ${e.value} (via ${entry.via}, ${((now - entry.at) / 1000).round()} s old)');
+    }
+    logBook.note('info', 'address: $why: ${parts.join('; ')}${pins.length > max ? '; and ${pins.length - max} more' : ''}');
+  }
+
   AddressSettings? _addrSettings;
   int _addrSettingsAt = 0;
 
@@ -1697,6 +1752,7 @@ class CoreService implements CoreApi {
       logBook.note(unresolved.isEmpty ? 'info' : 'warn',
           'address: config for $why: ${pins.length} of ${hosts.length} hostnames pinned to an address'
           '${unresolved.isEmpty ? '' : ', kept as names (sing-box resolves them): ${unresolved.join(', ')}'}');
+      _notePins('config for $why', hosts, pins, summary: false);
       return pins;
     } catch (e) {
       logBook.note('warn', 'address: the addresses could not be prepared ($e): the config keeps the names');
@@ -1804,9 +1860,18 @@ class CoreService implements CoreApi {
     final probe = Probe(probePort);
     final svc = SvcIn(svcPort);
     final info = RoutingInfo();
+    TunCheck? tunCheck;
+    if (planTun(plan)) {
+      try {
+        tunCheck = await TunCheck.bind(connect: tunCheckConnect);
+      } catch (e) {
+        logBook.note('warn', 'TUN test: the responder did not start ($e); a dead TUN is judged by the log alone');
+      }
+    }
     try {
       final config = buildConfig(plan,
           tunnelPort: tunnelPort,
+          tunCheckPort: tunCheck?.port,
           sysPort: sysPort,
           probe: probe,
           svc: svc,
@@ -1824,12 +1889,15 @@ class CoreService implements CoreApi {
           on: (c) => memory[c.id] ?? true, reason: memory.isEmpty ? 'connect' : 'restart re-apply', log: logBook.note);
       await runner.start(config);
     } on SingBoxError catch (e) {
+      unawaited(tunCheck?.close());
       // sing-box refused the TUN for a missing permission: the same advice as not being elevated
       if (planTun(plan) && tunAccessDenied(e.message)) throw TunNeedsAdmin(e.message);
       rethrow;
     }
     _sysPort = sysPort;
     _pinned = pins;
+    unawaited(_tunCheck?.close());
+    _tunCheck = tunCheck;
     // what a later sing-box will no longer take in this config
     try {
       for (final w in await runner.api!.deprecatedWarnings()) {
@@ -1851,6 +1919,7 @@ class CoreService implements CoreApi {
         await r.keep({
           'plan': plan,
           'tunnelPort': tunnelPort,
+          'tunCheckPort': tunCheck?.port,
           'probePort': probePort,
           'probeSecret': probe.secret,
           'svc': svc.toJson(),
@@ -1897,10 +1966,12 @@ class CoreService implements CoreApi {
       final RoutingInfo info = RoutingInfo();
       final int tunnelPort;
       final int? sysPort;
+      final int? tunCheckPort;
       final Pins pins;
       try {
         plan = (rec['plan'] as Map).cast<String, dynamic>();
         tunnelPort = (rec['tunnelPort'] as num).toInt();
+        tunCheckPort = (rec['tunCheckPort'] as num?)?.toInt();
         sysPort = (rec['sysPort'] as num?)?.toInt();
         probe = Probe((rec['probePort'] as num).toInt(), rec['probeSecret'] as String);
         pins = {for (final e in ((rec['pins'] as Map?) ?? const {}).entries) '${e.key}': '${e.value}'};
@@ -1909,6 +1980,7 @@ class CoreService implements CoreApi {
         // fallbacks, DNS servers); the config itself is not used
         buildConfig(plan,
             tunnelPort: tunnelPort,
+            tunCheckPort: tunCheckPort,
             sysPort: sysPort,
             probe: probe,
             svc: svc == null ? null : SvcIn(svc.port, svc.secret),
@@ -1924,6 +1996,17 @@ class CoreService implements CoreApi {
         await r.stop();
         return {'adopted': false, 'stopped': true};
       }
+      // the responder of the active TUN test again, on the port the running config names (none: the test is absent)
+      TunCheck? tunCheck;
+      if (tunCheckPort != null) {
+        try {
+          tunCheck = await TunCheck.bind(port: tunCheckPort, connect: tunCheckConnect);
+        } catch (e) {
+          logBook.note('warn', 'TUN test: the responder could not be restarted on $tunCheckPort ($e); a dead TUN is judged by the log alone');
+        }
+      }
+      unawaited(_tunCheck?.close());
+      _tunCheck = tunCheck;
       _connectSeq++;
       _applyKill(body);
       if (body['dnsAuto'] is bool) _dnsAuto = body['dnsAuto'] as bool;
@@ -2172,6 +2255,30 @@ class CoreService implements CoreApi {
     return status();
   }
 
+  /// body: `{provider}` — the latency of a DNS provider per side by the failover's own check (docs/rules.md §6):
+  /// `{provider, live, direct, vpn, servers: [{id, side, kind, ms}]}`. `direct` / `vpn`: the best ms of the provider's
+  /// candidates on that side, -1 = none answered, null = no candidate there. `live: false` (sing-box not running, or
+  /// the provider is not in its config: off, not named by a rule): nothing was measured, both sides null.
+  @override
+  Future<Map<String, dynamic>> pingDnsSides(Map<String, dynamic> body) async {
+    final provider = '${body['provider'] ?? ''}';
+    final got = runner.running ? await _dns?.pingProvider(provider) ?? const [] : const <({String id, String side, String kind, int ms})>[];
+    int? best(String side) {
+      final ms = [for (final g in got) if (g.side == side) g.ms];
+      if (ms.isEmpty) return null;
+      final ok = ms.where((m) => m >= 0);
+      return ok.isEmpty ? -1 : ok.reduce((a, b) => a < b ? a : b);
+    }
+
+    return {
+      'provider': provider,
+      'live': got.isNotEmpty,
+      'direct': best('direct'),
+      'vpn': best('vpn'),
+      'servers': [for (final g in got) {'id': g.id, 'side': g.side, 'kind': g.kind, 'ms': g.ms}],
+    };
+  }
+
   @override
   Future<Map<String, dynamic>> disconnect() async {
     final seq = ++_connectSeq;
@@ -2191,6 +2298,8 @@ class CoreService implements CoreApi {
       }
     });
     _tunnelPort = null;
+    unawaited(_tunCheck?.close());
+    _tunCheck = null;
     logBook.note('info', 'Disconnected');
     if (was) eventBook.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'});
     if (_killSwitch && _killOnDisconnect && sysProxy.isSet && (was || _blocking != null)) {

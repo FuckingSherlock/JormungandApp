@@ -510,8 +510,13 @@ packet`. На мёртвом TCP строк входа нет вовсе — п�
   стек. sing-box 1.14.2 пишет `router: pre-match[N] … => reject` только на уровне debug; на `info` конфига
   такой отказ неотличим от мёртвого стека. Что учтено: строка отказа с тем же id, если она есть, снимает
   поиск со счёта; окно, набранное только своими отказами, уходит в шлюз с `ownReject: true` и отпускается без
-  записи (`dead` не ставится). Активная проверка «открыть тестовое TCP через TUN» — пока TODO
-  (`docs/failures.md`).
+  записи (`dead` не ставится). Строка `router: pre-match: forward icmp|udp|tcp connection` (ICMP-эхо, UDP-поток,
+  перенаправленные правилом) тоже снимает поиск с того же id со счёта — это не сироты.
+- Подозрение до события проходит активную проверку `tun.test` (`tun_check.dart`; контракт — `docs/failures.md`, «TUN»):
+  ядро открывает TCP на `192.0.2.251:44251`, правило конфига `TUN check` (после `tunnel-in`, до правил приложения)
+  отправляет его `direct` на loopback-ответчик с одноразовым токеном. Дошло — это сбой одного приложения (`blip`, в
+  журнал раз в 15 мин на набор приложений); нет (`silent` / `refused` / `unrouted`) — `confirmed`. Ответчик живёт
+  при плане с TUN, его порт — в записи принятия (`tunCheckPort`); не поднялся — проверки нет.
 - `core/tunTcpBack` (info): первое настоящее TCP-соединение после «мёртв»; пишется, только если событие
   `tunTcpDead` было подтверждено. Данные: `{stack, accepted, deadMs}`; потом возможен новый `Dead`.
 
@@ -937,6 +942,7 @@ Global, hijack вкл / выкл, системные правила первым
 | `POST /api/sources/import` | `{name, text}` → `{source}`: локальный источник (`kind: 'file'`, без `id` — его выдаёт владелец каталога) из текста выбранного файла (Nodes → + → Import config file). `name` — имя файла, расширение (`.json` `.yaml` `.yml` `.txt` `.conf` `.list`) отбрасывается. Формат определяется по содержимому, как у подписки (sing-box JSON, Clash YAML, список ссылок, всё это и в base64); серверы дедуплицируются и именуются как у подписки. `source`: `{kind, name, enabled, inAuto, offNodes, disabledNodes, nodes, gone, count, format, updatedAt}`. Ничего не распознано или файл > 16 МБ — 400 `{error}` (`No servers found in the file`), ядро ничего не хранит: источник кладёт в каталог и сохраняет вызывающий (`PUT /api/state`). Источник не обновляется ни таймером, ни `fetchSource` (тот отвечает 400). См. connect-model.md → «Локальный источник» |
 | `POST /api/connect` | `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?, dnsAuto?}` — kill switch, см. «Kill switch»; `dnsAuto` — Settings → DNS → Switch automatically (по умолчанию true), см. «Правила в конфиге» |
 | `POST /api/dns/auto` | `{auto: bool}` — Switch automatically на ходу, без переподключения (выкл — первый сервер сразу) → status |
+| `POST /api/dns/ping` | `{provider}` — задержка DNS-провайдера по сторонам тем же dns-check (`CoreApi.pingDnsSides`): `{provider, live, direct, vpn, servers:[{id,side,kind,ms}]}`; `-1` не ответил, `null` нет стороны; `live:false` — не измерено (`rules.md` §6) |
 | `POST /api/killswitch` | `{killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — сменить на ходу, без переподключения → status |
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |

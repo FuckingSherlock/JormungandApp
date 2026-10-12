@@ -694,6 +694,18 @@ class FakeCoreHost extends CoreHost {
     return dnsPings.containsKey(addr) ? dnsPings[addr] : 24;
   }
 
+  /// Per-side provider ping: [dnsPings] of the provider's address on each active side.
+  @override
+  Future<DnsSidePing> pingDnsSides(String providerId) async {
+    final p = catalog.dnsServers[providerId];
+    if (p == null) return const DnsSidePing();
+    final ms = await pingDns(p.addr);
+    return DnsSidePing(
+      direct: p.activeSides.contains('direct') ? ms : null,
+      vpn: p.activeSides.contains('vpn') ? ms : null,
+    );
+  }
+
   @override
   String get appVersion => '0.1.0';
 

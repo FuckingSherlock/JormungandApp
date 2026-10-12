@@ -611,6 +611,19 @@ abstract class CoreHost extends ChangeNotifier {
   /// be measured here (quic://).
   Future<int?> pingDns(String addr) => dnsLatency(addr);
 
+  /// Latency of the DNS provider [providerId] per side by the core's own dns-check (the sing-box in use, so the side
+  /// chip's colour and the ping agree): `direct` / `vpn` = best ms of the side's transports, -1 no answer, null =
+  /// "—" (side not configured, or nothing could measure it). Without a running core the direct side is measured in
+  /// process (`dnsLatency`, one query per transport, the best counts) and the VPN side is null.
+  Future<DnsSidePing> pingDnsSides(String providerId) async {
+    final p = catalog.dnsServers[providerId];
+    if (p == null || !p.activeSides.contains('direct')) return const DnsSidePing();
+    final ms = await Future.wait([for (final t in p.usedTransports) dnsLatency(t.addr).catchError((_) => -1)]);
+    final known = ms.whereType<int>();
+    final ok = known.where((m) => m >= 0);
+    return DnsSidePing(direct: known.isEmpty ? null : (ok.isEmpty ? -1 : ok.reduce((a, b) => a < b ? a : b)));
+  }
+
   // App updates (docs/updates.md). The core checks and downloads; the platform installs.
 
   /// The running app's version (`0.1.0`), empty when the host does not know it.
@@ -750,6 +763,15 @@ class DnsServerStatus {
 }
 
 /// `status.dns` while connected: who answers each side and which candidates fail.
+/// A provider's latency per side ([CoreHost.pingDnsSides]): ms, -1 no answer, null = not configured / not measurable
+/// (the UI shows "—"). [servers]: ms per candidate id when the core measured them.
+class DnsSidePing {
+  const DnsSidePing({this.direct, this.vpn, this.servers = const {}});
+
+  final int? direct, vpn;
+  final Map<String, int> servers;
+}
+
 class DnsHealth {
   const DnsHealth({
     this.active,

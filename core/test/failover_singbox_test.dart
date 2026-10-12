@@ -15,9 +15,11 @@ import 'package:test/test.dart';
 final _bin = p.join('tool', 'bin', Platform.isWindows ? 'sing-box.exe' : 'sing-box');
 final _skip = File(_bin).existsSync() ? false : 'no sing-box in tool/bin';
 
-/// A UDP DNS server answering every A query with 127.0.0.1 while [answering]; silent otherwise.
+/// A UDP DNS server answering every A query with 127.0.0.1 while [answering]; silent otherwise. [names]: the A queries
+/// it answered, [seen]: every A query that reached it, answered or not.
 class _FakeDns {
   final names = <String>[];
+  final seen = <String>[];
   bool answering = true;
   late RawDatagramSocket sock;
   int get port => sock.port;
@@ -27,7 +29,7 @@ class _FakeDns {
     d.sock = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
     d.sock.listen((e) {
       final dg = e == RawSocketEvent.read ? d.sock.receive() : null;
-      if (dg == null || !d.answering) return;
+      if (dg == null) return;
       final q = dg.data;
       var i = 12;
       final labels = <String>[];
@@ -36,6 +38,8 @@ class _FakeDns {
         i += q[i] + 1;
       }
       final qtype = (q[i + 1] << 8) | q[i + 2];
+      if (qtype == 1) d.seen.add(labels.join('.'));
+      if (!d.answering) return;
       if (qtype == 1) d.names.add(labels.join('.'));
       final r = BytesBuilder()
         ..add(q.sublist(0, 2))
@@ -431,9 +435,15 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 50)); // the Sentinel's checks take their time
       }
       expect(fo.active, 'b-udp1');
+      // `active` moves with the write; sing-box applies the file a moment later (the flagcheck says when): a look-up
+      // before that still goes to a
+      for (var i = 0; i < 100 && !notes.any((n) => n.contains('dns flag check (direct): b-udp1 answers after')); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
       expect(sentinel.roots.byKey('dns|a-udp1'), isNotNull);
       expect((fo.toJson()['servers'] as List).first, containsPair('ok', false));
       expect(await _reached(mixed, 'viaip2', target.port, b), isTrue, reason: 'the flag file moved the DNS list to b (sing-box watches it)');
+      expect(a.seen.where((s) => s.startsWith('viaip2')), isEmpty, reason: 'a candidate that is off gets no real look-ups');
       expect([await flagOf(ca), await flagOf(cb)], [false, true], reason: 'the flagcheck names the effective candidate');
       expect(notes.where((n) => n.contains('dns flag check (direct): b-udp1 answers after')), isNotEmpty, reason: 'the write was verified and the delay logged');
 

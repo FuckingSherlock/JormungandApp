@@ -59,8 +59,13 @@ class _Runner implements BoxRunner {
   SingBoxApi? get api => null;
   @override
   void note(String line) => onLog?.call('[jormd] $line');
+  Map<String, dynamic>? config; // the last one started
   @override
-  Future<void> start(Map<String, dynamic> config) async => up = true;
+  Future<void> start(Map<String, dynamic> config) async {
+    this.config = config;
+    up = true;
+  }
+
   @override
   Future<void> stop() async => up = false;
 }
@@ -105,6 +110,26 @@ void main() {
 
   late FakeTime time;
 
+  /// How the TUN test (tun_check.dart) dials: tests have no TUN. Default = refused; [dialThroughResponder] = a TUN
+  /// that works (the connection ends at the responder the config's rule names).
+  late Future<Socket> Function(String host, int port, Duration timeout) tunDial;
+  final dialed = <String>[];
+
+  int responderPort() {
+    final rules = ((runner.config!['route'] as Map)['rules'] as List).cast<Map>();
+    return (rules.firstWhere((r) => r['override_port'] != null && r['ip_cidr'] != null && '${r['ip_cidr']}'.contains(tunCheckAddress))['override_port'] as num).toInt();
+  }
+
+  Future<Socket> dialThroughResponder(String host, int port, Duration timeout) => Socket.connect('127.0.0.1', responderPort());
+
+  /// Lets the real loopback I/O of the TUN test run (the fake time does not move it) until [done].
+  Future<void> untilReal(bool Function() done) async {
+    for (var i = 0; i < 200 && !done(); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await time.advance(Duration.zero);
+    }
+  }
+
   /// Connects and lets the core settle (5 s after the start).
   Future<void> up([Map<String, dynamic>? body]) async {
     await svc.connect(body ?? _body());
@@ -117,10 +142,16 @@ void main() {
     tmp = await Directory.systemTemp.createTemp('jorm-svc');
     runner = _Runner();
     time = FakeTime();
+    dialed.clear();
+    tunDial = (h, p, t) async => throw const SocketException('no TUN in tests');
     svc = CoreService(
       sentinelClock: time.clock,
       now: () => time.t,
       isElevated: () => true,
+      tunCheckConnect: (h, p, t) {
+        dialed.add('$h:$p');
+        return tunDial(h, p, t);
+      },
       windows: windows,
       singBox: 'none',
       resolveAddresses: false, // hermetic: no real DoH
@@ -583,6 +614,53 @@ void main() {
     expect(trailCodes(e), containsAllInOrder(['suspect', 'blip.recovered']));
     expect(tunEvents('tunTcpBack'), isEmpty, reason: 'it never stood');
     expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+  });
+
+  /// The dead window of tunTcpDead passed with [n] look-ups and no TCP (as in the first TUN test).
+  Future<void> deadWindowPassed() async {
+    await svc.connect(tunBody());
+    await time.advanceSeconds(6);
+    orphans(10);
+    await time.advanceSeconds(10);
+    orphans(1);
+    await time.advanceSeconds(11);
+  }
+
+  test('the active TUN test: the connection goes to the documentation address; it reaches the responder: a blip (no error, no tunTcpBack), the journal says it once per 15 min', () async {
+    await start();
+    tunDial = dialThroughResponder;
+    await deadWindowPassed();
+    await untilReal(() => tunEvents('tunTcpDead').isNotEmpty);
+    expect(dialed, [contains('$tunCheckAddress:$tunCheckPort')]);
+    final e = tunEvents('tunTcpDead').single;
+    expect([e['verdict'], e['level']], ['blip', 'info']);
+    expect(trailCodes(e), contains(tunCheckCode));
+    expect(tunEvents('tunTcpBack'), isEmpty);
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+    // the same app again within 15 minutes (TCP came back in between, so the detector judges anew): the raw log only
+    final before = dialed.length;
+    tcpThroughTun();
+    await time.advanceSeconds(35);
+    orphans(10);
+    await time.advanceSeconds(10);
+    orphans(1);
+    await time.advanceSeconds(11);
+    await untilReal(() => dialed.length > before);
+    // the verdict of the second test is the raw-log line (not a fixed pause): by then the journal decision is made
+    bool said() => ((svc.logBook.since(null)['lines'] as List).cast<Map>()).any((l) => '${l['msg']}'.contains('TCP passes the tunnel'));
+    await untilReal(said);
+    expect(said(), isTrue, reason: 'the second test ran and was let go to the raw log');
+    expect(tunEvents('tunTcpDead').length, 1);
+  });
+
+  test('the active TUN test fails: confirmed, the reason is in the trail', () async {
+    await start(); // the default dial is refused
+    await deadWindowPassed();
+    await untilReal(() => tunEvents('tunTcpDead').isNotEmpty);
+    final e = tunEvents('tunTcpDead').single;
+    expect([e['verdict'], e['level']], ['confirmed', 'error']);
+    final step = ((e['trail'] as List).cast<Map>()).firstWhere((t) => t['code'] == tunCheckCode);
+    expect([step['outcome'], (step['params'] as Map)['reason']], ['fail', 'refused']);
   });
 
   test('look-ups that our own reject rule took are not a dead TUN: no event, the state stays ok, the log says it was let go', () async {

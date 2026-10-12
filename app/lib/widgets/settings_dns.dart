@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
     show DnsServerCfg, DnsTransport, PickState, dnsKindOf, dnsKinds;
@@ -20,8 +22,7 @@ import 'settings_parts.dart';
 
 /// Settings -> DNS (mockup 56-dns.js `renderDns`, `openDnsForm`); the Home card opens the same
 /// sheet. The servers, their order and the options are `catalog.dnsServers` / `dnsOrder` /
-/// `dnsCfg`; a ping is one real query by the core's `dnsLatency` (direct, even for a server the
-/// connection would reach via the VPN).
+/// `dnsCfg`; a ping is per side (`pingDnsSides`): under each side chip its own latency.
 ///
 /// [focus] = `dnsResolve` scrolls to the Resolve for IP rules row and flashes it (the rule
 /// form's link to it).
@@ -65,8 +66,8 @@ class DnsSheet extends StatefulWidget {
 }
 
 class _DnsSheetState extends State<DnsSheet> {
-  /// id -> ms (negative = no answer, null = cannot be measured)
-  final Map<String, int?> _ms = {};
+  /// id -> the last per-side result (ms per side: negative = no answer, null = cannot be measured)
+  final Map<String, DnsSidePing> _res = {};
   final Set<String> _testing = {};
   final GlobalKey _resolveKey = GlobalKey();
   bool _hit = false;
@@ -102,21 +103,32 @@ class _DnsSheetState extends State<DnsSheet> {
     });
   }
 
+  int? _sideMs(String id, String side) {
+    final r = _res[id];
+    return r == null ? null : (side == 'vpn' ? r.vpn : r.direct);
+  }
+
+  /// What the edit form shows as the already known ping: the direct side, else the VPN one.
+  int? _formPing(String id) => _sideMs(id, 'direct') ?? _sideMs(id, 'vpn');
+
   Future<void> _ping(String id) async {
     final host = CoreHostScope.read(context);
     final s = host.catalog.dnsServers[id];
     if (s == null || _testing.contains(id)) return;
     setState(() => _testing.add(id));
-    int? ms;
+    DnsSidePing r;
     try {
-      ms = await host.pingDns(s.addr);
+      r = await host.pingDnsSides(id);
     } catch (_) {
-      ms = -1;
+      r = DnsSidePing(
+        direct: s.activeSides.contains('direct') ? -1 : null,
+        vpn: s.activeSides.contains('vpn') ? -1 : null,
+      );
     }
     if (!mounted) return;
     setState(() {
       _testing.remove(id);
-      _ms[id] = ms;
+      _res[id] = r;
     });
   }
 
@@ -219,7 +231,7 @@ class _DnsSheetState extends State<DnsSheet> {
                   onTap: () => showDnsForm(
                     context,
                     id: id,
-                    ping: _ms[id],
+                    ping: _formPing(id),
                     testing: _testing.contains(id),
                   ),
                   child: Column(
@@ -241,43 +253,48 @@ class _DnsSheetState extends State<DnsSheet> {
                         overflow: TextOverflow.ellipsis,
                         style: monoText.copyWith(fontSize: 12, color: c.t3),
                       ),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          for (final side in s.system
-                              ? const ['direct']
-                              : const ['direct', 'vpn'])
-                            SideChip(
-                              key: ValueKey('dns-$id-$side'),
-                              label: side == 'vpn' ? 'VPN' : 'Direct',
-                              on: s.activeSides.contains(side),
-                              dead:
-                                  s.on &&
-                                  s.activeSides.contains(side) &&
-                                  (health?.dead(id, side) ?? false),
-                              answering:
-                                  s.on && (health?.answers(id, side) ?? false),
-                              onTap: s.system ? null : () => toggleSide(s, side),
-                            ),
-                        ],
-                      ),
                     ],
                   ),
                 ),
               ),
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => _ping(id),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: LatencyView(
-                    ms: _ms[id],
-                    testing: _testing.contains(id),
+              const SizedBox(width: 8),
+              for (final side in s.system
+                  ? const ['direct']
+                  : const ['direct', 'vpn'])
+                Padding(
+                  padding: EdgeInsets.only(left: side == 'direct' ? 0 : 6),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SideChip(
+                        key: ValueKey('dns-$id-$side'),
+                        label: side == 'vpn' ? 'VPN' : 'Direct',
+                        on: s.activeSides.contains(side),
+                        dead:
+                            s.on &&
+                            s.activeSides.contains(side) &&
+                            (health?.dead(id, side) ?? false),
+                        answering: s.on && (health?.answers(id, side) ?? false),
+                        onTap: s.system ? null : () => toggleSide(s, side),
+                      ),
+                      const SizedBox(height: 3),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _ping(id),
+                        child: LatencyView(
+                          key: ValueKey('dns-ping-$id-$side'),
+                          minWidth: 0,
+                          ms: s.activeSides.contains(side)
+                              ? _sideMs(id, side)
+                              : null,
+                          testing:
+                              _testing.contains(id) &&
+                              s.activeSides.contains(side),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -548,15 +565,25 @@ class SideChip extends StatefulWidget {
   State<SideChip> createState() => _SideChipState();
 }
 
-class _SideChipState extends State<SideChip> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 2400),
-  );
+class _SideChipState extends State<SideChip> {
+  /// The pulse is stepped by a timer (not a vsync ticker): a ticker repainted the whole sheet
+  /// at the display rate; here the chip sits in its own [RepaintBoundary] and steps at ~20 fps.
+  static const _step = Duration(milliseconds: 50);
+  static const _half = 2400; // ms, one way of the pulse
+
+  final ValueNotifier<double> _phase = ValueNotifier(0);
+  ValueListenable<TickerModeData>? _tickerMode;
+  Timer? _timer;
+  int _elapsed = 0;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final mode = TickerMode.getValuesNotifier(context);
+    if (!identical(mode, _tickerMode)) {
+      _tickerMode?.removeListener(_sync);
+      _tickerMode = mode..addListener(_sync);
+    }
     _sync();
   }
 
@@ -567,19 +594,29 @@ class _SideChipState extends State<SideChip> with SingleTickerProviderStateMixin
   }
 
   void _sync() {
-    final run = widget.answering && widget.on && !widget.dead;
-    if (run && !_ctl.isAnimating) {
-      _ctl.repeat(reverse: true);
-    } else if (!run && _ctl.isAnimating) {
-      _ctl
-        ..stop()
-        ..value = 0;
+    final run =
+        widget.answering && widget.on && !widget.dead && (_tickerMode?.value.enabled ?? true);
+    if (run && _timer == null) {
+      _timer = Timer.periodic(_step, (_) {
+        _elapsed = (_elapsed + _step.inMilliseconds) % (2 * _half);
+        // 0 -> 1 -> 0 over two halves, eased in/out
+        _phase.value = 0.5 - 0.5 * math.cos(_elapsed / _half * math.pi);
+      });
+      setState(() {});
+    } else if (!run && _timer != null) {
+      _timer!.cancel();
+      _timer = null;
+      _elapsed = 0;
+      _phase.value = 0;
+      if (mounted) setState(() {});
     }
   }
 
   @override
   void dispose() {
-    _ctl.dispose();
+    _tickerMode?.removeListener(_sync);
+    _timer?.cancel();
+    _phase.dispose();
     super.dispose();
   }
 
@@ -588,14 +625,22 @@ class _SideChipState extends State<SideChip> with SingleTickerProviderStateMixin
     final c = context.colors;
     final w = widget;
     final tone = w.dead ? c.danger : c.accent;
+    final run = _timer != null;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: w.onTap,
-      child: AnimatedBuilder(
-        animation: _ctl,
-        builder: (_, child) {
-          final run = _ctl.isAnimating;
-          return Container(
+      child: RepaintBoundary(
+        child: ValueListenableBuilder<double>(
+          valueListenable: _phase,
+          child: Text(
+            w.label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: w.on ? tone.tint(w.dead ? .85 : 1) : c.t3,
+            ),
+          ),
+          builder: (_, v, child) => Container(
             padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
             decoration: BoxDecoration(
               color: w.on ? tone.tint(w.dead ? .08 : .14) : Colors.transparent,
@@ -603,21 +648,13 @@ class _SideChipState extends State<SideChip> with SingleTickerProviderStateMixin
               border: Border.all(
                 width: run ? 1.5 : 1,
                 color: run
-                    ? Color.lerp(c.accent.tint(.3), c.accent, _ctl.value)!
+                    ? Color.lerp(c.accent.tint(.3), c.accent, v)!
                     : w.on
                     ? tone.tint(w.dead ? .45 : .4)
                     : c.border,
               ),
             ),
             child: child,
-          );
-        },
-        child: Text(
-          w.label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: w.on ? tone.tint(w.dead ? .85 : 1) : c.t3,
           ),
         ),
       ),
