@@ -2,9 +2,10 @@
 # Body of the beta release notes (docs/updates.md section 13, "Заметки к релизу"), printed to stdout.
 #   beta_notes.sh <previous beta manifest.json or ''>
 # The previous beta's commit is read from the first line of its English notes ("... commit abc1234)").
-# Notes = every version of release-notes/beta.txt committed since that commit, newest first (a beta
-# run cancelled by a newer push loses nothing). Unknown previous commit (first beta, foreign history)
-# -> the file as it is. Nothing (the file was not updated / is empty) -> exit 1.
+# release-notes/beta.txt always holds the whole summary since the previous published beta, so the notes
+# are the file as it is now - provided it was committed since that commit (a cancelled run loses nothing,
+# an edit of the text before the beta is out makes no duplicates). Unknown previous commit (first beta,
+# foreign history) -> the file as it is. Not updated since the previous beta / empty -> exit 1.
 # Needs the full history (actions/checkout fetch-depth: 0).
 set -euo pipefail
 
@@ -15,23 +16,11 @@ if [ -n "$manifest" ] && [ -s "$manifest" ]; then
   prev=$(jq -r '.notes.en // ""' "$manifest" | head -n 1 | sed -n 's/.*commit \([0-9a-f]\{7,40\}\).*/\1/p')
 fi
 
-trimmed() { sed -e 's/[[:space:]]*$//'; }
-out=""
+[ -f "$file" ] || exit 1
 if [ -n "$prev" ] && git cat-file -e "$prev^{commit}" 2> /dev/null && git merge-base --is-ancestor "$prev" HEAD; then
-  seen=()
-  while IFS= read -r h; do
-    [ -n "$h" ] || continue
-    body=$(git show "$h:$file" 2> /dev/null | trimmed) || continue
-    [ -n "${body//[[:space:]]/}" ] || continue
-    dup=false
-    for s in "${seen[@]+"${seen[@]}"}"; do [ "$s" = "$body" ] && dup=true; done
-    $dup && continue
-    seen+=("$body")
-    out+="${out:+$'\n\n'}$body"
-  done < <(git log --format=%H "$prev..HEAD" -- "$file")
-elif [ -f "$file" ]; then
-  out=$(trimmed < "$file")
+  [ -n "$(git log -n 1 --format=%H "$prev..HEAD" -- "$file")" ] || exit 1
 fi
+out=$(sed -e 's/[[:space:]]*$//' "$file")
 
 [ -n "${out//[[:space:]]/}" ] || exit 1
 printf '%s\n' "$out"
