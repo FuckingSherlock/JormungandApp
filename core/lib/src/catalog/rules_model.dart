@@ -357,6 +357,9 @@ class DnsServerCfg with RoundTrip {
   /// The OS resolver.
   bool get system => transports.length == 1 && transports.first.kind == dnsKindSystem;
 
+  /// One of [defaultDnsServers] (by id): it can be switched off, never deleted. Derived, not stored.
+  bool get builtin => dnsBuiltinIds.contains(id);
+
   /// [sides] as they count: Local is direct only (the OS resolver is on the machine, not through the tunnel).
   Set<String> get activeSides => system ? {'direct'} : sides.where(dnsSidesAll.contains).toSet();
 
@@ -412,6 +415,9 @@ List<DnsServerCfg> defaultDnsServers() => [
       DnsServerCfg(id: 'local', name: 'Local', sides: ['direct'], transports: [DnsTransport(dnsKindSystem, 'system')]),
     ];
 
+/// The ids of [defaultDnsServers]: the built-in providers ([DnsServerCfg.builtin]).
+final Set<String> dnsBuiltinIds = {for (final s in defaultDnsServers()) s.id};
+
 /// The ids of the list before the rework that the migration replaces by [defaultDnsServers].
 const _oldBuiltinDns = {'remote', 'local', 'google'};
 
@@ -463,8 +469,8 @@ class DnsCfg with RoundTrip {
   /// carrying them as unknown keys: FakeIP is removed until it is redesigned (`docs/rules.md` §DNS).
   static const _known = {'hijack', 'auto', 'resolve', 'directPolicy', 'listVersion', 'fakeip', 'fakeipExclude'};
 
-  /// `localFirst` (default): the direct side tries Local first, then the list order; `priority`: the
-  /// direct side follows the list order like the VPN side.
+  /// Where Local (the OS resolver) stands on the direct side, whatever its place in the list: `localFirst`
+  /// (default) = always first; `priority` = always last. The other providers keep the list order.
   String directPolicy;
 
   /// Which version of the list the stored `dnsServers` is ([dnsListVersion]); a store without the

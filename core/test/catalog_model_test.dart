@@ -273,6 +273,13 @@ void main() {
       expect(DnsServerCfg(id: 'x', addr: 'system').activeSides, {'direct'}, reason: 'unless it is the OS resolver');
     });
 
+    test('builtin is derived from the id of the defaults, never stored', () {
+      final c = make();
+      expect([for (final s in c.dnsServers.values) '${s.id}:${s.builtin}'], ['cloudflare:true', 'google:true', 'adguard:true', 'local:true']);
+      expect(DnsServerCfg(id: 'dns1', addr: 'tls://1.1.1.1').builtin, isFalse);
+      expect(c.dnsServers['google']!.toJson().containsKey('builtin'), isFalse);
+    });
+
     test('directPolicy: localFirst by default, priority when stored; an unknown value is the default', () {
       expect(make().dnsCfg.directPolicy, 'localFirst');
       expect(make(snap(over: {'dnsCfg': {'directPolicy': 'priority', 'listVersion': 2}})).dnsCfg.directPolicy, 'priority');

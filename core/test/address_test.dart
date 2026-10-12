@@ -210,6 +210,10 @@ void main() {
       expect(good.asked, isEmpty);
     });
 
+    test('no direct server on (every provider off, Local too): the OS resolver still answers', () async {
+      expect((await resolver(const []).lookup('localhost', why: 'test'))!.via, 'system');
+    });
+
     test('ensure: cache first, missing waited for, stale refreshed in the background, a failed name left alone for a while', () async {
       final r = resolver([doh('g', good.url)]);
       book.put('cached.example', AddressEntry(v4: ['198.51.100.1'], v6: const [], at: clock.millisecondsSinceEpoch, ttl: 300, via: 'old'));

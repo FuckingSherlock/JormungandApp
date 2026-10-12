@@ -16,7 +16,9 @@ import 'package:jormungand/platform/platform_caps.dart';
 import 'package:jormungand/shell/app_links.dart';
 import 'package:jormungand/state/app_settings.dart';
 import 'package:jormungand/theme/app_colors.g.dart';
+import 'package:jormungand/widgets/catalog_card.dart' show GripHandle;
 import 'package:jormungand/widgets/settings_dns.dart' show DnsForm;
+import 'package:jormungand/widgets/settings_parts.dart' show DimWhen;
 import 'package:jormungand/widgets/form_parts.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
@@ -199,19 +201,18 @@ void main() {
       expect(dnsKind('system'), 'system');
     });
 
-    test('DNS: at least one server stays on', () {
+    test('DNS: any server can be switched off, built-ins cannot be deleted', () {
       final c = Catalog();
-      final on = c.dnsActive;
-      expect(on, isNotEmpty);
-      while (c.dnsActive.length > 1) {
-        expect(c.dnsToggle(c.dnsActive.last.id), isTrue);
+      expect(c.dnsActive, isNotEmpty);
+      for (final s in c.dnsActive.toList()) {
+        c.dnsToggle(s.id);
       }
-      final last = c.dnsActive.single;
-      expect(c.dnsToggle(last.id), isFalse);
-      expect(c.dnsDelete(last.id), isFalse);
-      expect(c.dnsActive.single.id, last.id);
-      final id = c.dnsSave(null, name: '', addr: 'tls://9.9.9.9', via: 'direct');
+      expect(c.dnsActive, isEmpty);
+      expect(c.dnsDelete('cloudflare'), isFalse);
+      expect(c.dnsServers.containsKey('cloudflare'), isTrue);
+      final id = c.dnsSave(null, name: '', addr: 'tls://9.9.9.9', sides: ['direct']);
       expect(c.dnsServers[id]!.name, '9.9.9.9');
+      expect(c.dnsServers[id]!.activeSides, ['direct']);
       expect(c.dnsDelete(id), isTrue);
       expect(c.dnsServers.containsKey(id), isFalse);
     });
@@ -313,6 +314,232 @@ void main() {
       await tester.pumpAndSettle();
       expect(host.catalog.dnsCfg.auto, !before);
       expect(host.changes, greaterThan(changes));
+    });
+
+    group('DNS list', () {
+      Finder rowOf(String id) => find.byKey(ValueKey(id));
+      Finder chip(String id, String side) => find.byKey(ValueKey('dns-$id-$side'));
+
+      /// Only [keep] stays on, the other providers (Local too) are off.
+      void only(FakeCoreHost host, String keep) {
+        for (final s in host.catalog.dnsServers.values) {
+          s.on = s.id == keep;
+        }
+      }
+
+      Future<void> openDns(WidgetTester tester, FakeCoreHost host) async {
+        await _pump(tester, host);
+        await _open(tester, 'setdns');
+      }
+
+      testWidgets('a side chip toggles the side of the provider', (tester) async {
+        final host = FakeCoreHost();
+        await openDns(tester, host);
+        final g = host.catalog.dnsServers['google']!;
+        expect(g.activeSides, containsAll(['direct', 'vpn']));
+        final changes = host.changes;
+        await tester.tap(chip('google', 'vpn'));
+        await tester.pumpAndSettle();
+        expect(g.activeSides, {'direct'});
+        expect(host.changes, greaterThan(changes));
+        await tester.tap(chip('google', 'vpn'));
+        await tester.pumpAndSettle();
+        expect(g.activeSides, {'direct', 'vpn'});
+      });
+
+      testWidgets('dead on every active side -> Unavailable block; on one side -> main list', (
+        tester,
+      ) async {
+        final host = FakeCoreHost();
+        host.dnsHealthValue = const DnsHealth(
+          servers: [
+            DnsServerStatus(id: 'c1', provider: 'cloudflare', side: 'direct', ok: false),
+            DnsServerStatus(id: 'c2', provider: 'cloudflare', side: 'vpn', ok: false),
+            DnsServerStatus(id: 'g1', provider: 'google', side: 'direct', ok: false),
+            DnsServerStatus(id: 'g2', provider: 'google', side: 'vpn', ok: true),
+          ],
+        );
+        await openDns(tester, host);
+        expect(find.byKey(const ValueKey('dns-dead')), findsOneWidget);
+        expect(find.text('Unavailable · 1'), findsOneWidget);
+        expect(rowOf('cloudflare'), findsNothing); // the block is folded
+        expect(rowOf('google'), findsOneWidget);
+
+        // cloudflare restricted to the dead-direct side only is dead there too
+        host.dnsHealthValue = const DnsHealth(
+          servers: [
+            DnsServerStatus(id: 'g1', provider: 'google', side: 'direct', ok: false),
+            DnsServerStatus(id: 'g2', provider: 'google', side: 'vpn', ok: true),
+          ],
+        );
+        host.changed();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(const ValueKey('dns-dead')), findsNothing);
+        expect(rowOf('cloudflare'), findsOneWidget);
+        expect(rowOf('google'), findsOneWidget);
+
+        // an unfolded block shows its rows
+        host.dnsHealthValue = const DnsHealth(
+          servers: [
+            DnsServerStatus(id: 'c1', provider: 'cloudflare', side: 'direct', ok: false),
+            DnsServerStatus(id: 'c2', provider: 'cloudflare', side: 'vpn', ok: false),
+          ],
+        );
+        host.changed();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('Unavailable · 1'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(rowOf('cloudflare'), findsOneWidget);
+      });
+
+      testWidgets('switching off the last provider of a side asks first (checkbox)', (
+        tester,
+      ) async {
+        final host = FakeCoreHost();
+        only(host, 'google');
+        await openDns(tester, host);
+        final g = host.catalog.dnsServers['google']!;
+        final box = find.descendant(of: rowOf('google'), matching: find.byType(SubCheckbox));
+
+        await tester.tap(box);
+        await tester.pumpAndSettle();
+        expect(find.text('Switch off'), findsOneWidget);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        expect(g.on, isTrue);
+        expect(find.text('Switch off'), findsNothing);
+
+        await tester.tap(box);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Switch off'));
+        await tester.pumpAndSettle();
+        expect(g.on, isFalse);
+      });
+
+      testWidgets('switching off the last provider of a side asks first (side chip)', (
+        tester,
+      ) async {
+        final host = FakeCoreHost();
+        only(host, 'google');
+        await openDns(tester, host);
+        final g = host.catalog.dnsServers['google']!;
+
+        await tester.tap(chip('google', 'vpn'));
+        await tester.pumpAndSettle();
+        expect(find.text('Switch off'), findsOneWidget);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        expect(g.activeSides, containsAll(['direct', 'vpn']));
+
+        await tester.tap(chip('google', 'vpn'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Switch off'));
+        await tester.pumpAndSettle();
+        expect(g.activeSides, {'direct'});
+
+        // another provider covers the side: no dialog
+        host.catalog.dnsServers['cloudflare']!.on = true;
+        host.changed();
+        await tester.pumpAndSettle();
+        await tester.tap(chip('google', 'direct'));
+        await tester.pumpAndSettle();
+        expect(find.text('Switch off'), findsNothing);
+        expect(g.activeSides, isEmpty);
+      });
+
+      testWidgets('Local is first under localFirst, last under priority, no drag handle', (
+        tester,
+      ) async {
+        final first = FakeCoreHost();
+        await openDns(tester, first);
+        expect(first.catalog.dnsCfg.directPolicy, 'localFirst');
+        expect(
+          tester.getTopLeft(rowOf('local')).dy,
+          lessThan(tester.getTopLeft(rowOf('cloudflare')).dy),
+        );
+        expect(
+          find.descendant(of: rowOf('local'), matching: find.byType(GripHandle)),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: rowOf('cloudflare'), matching: find.byType(GripHandle)),
+          findsOneWidget,
+        );
+
+        final last = FakeCoreHost();
+        last.catalog.dnsSetDirectPolicy('priority');
+        await openDns(tester, last);
+        expect(
+          tester.getTopLeft(rowOf('local')).dy,
+          greaterThan(tester.getTopLeft(rowOf('adguard')).dy),
+        );
+        expect(
+          find.descendant(of: rowOf('local'), matching: find.byType(GripHandle)),
+          findsNothing,
+        );
+      });
+
+      testWidgets('a built-in provider has no Delete button, an own server has', (
+        tester,
+      ) async {
+        final host = FakeCoreHost();
+        final id = host.catalog.dnsSave(null, name: 'Mine', addr: 'tls://9.9.9.9', sides: ['direct']);
+        await openDns(tester, host);
+
+        await tester.tap(
+          find.descendant(of: rowOf('cloudflare'), matching: find.text('Cloudflare')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(DnsForm), findsOneWidget);
+        expect(find.text('Delete server'), findsNothing);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.descendant(of: rowOf(id), matching: find.text('Mine')));
+        await tester.pumpAndSettle();
+        expect(find.byType(DnsForm), findsOneWidget);
+        expect(find.text('Delete server'), findsOneWidget);
+      });
+
+      testWidgets('the direct policy row is disabled while Local is off', (tester) async {
+        bool dim() => tester
+            .widget<DimWhen>(
+              find.ancestor(
+                of: find.text('Local for direct traffic'),
+                matching: find.byType(DimWhen),
+              ),
+            )
+            .dim;
+
+        final on = FakeCoreHost();
+        await openDns(tester, on);
+        expect(dim(), isFalse);
+
+        final off = FakeCoreHost();
+        off.catalog.dnsServers['local']!.on = false;
+        await openDns(tester, off);
+        expect(dim(), isTrue);
+        final policy = off.catalog.dnsCfg.directPolicy;
+        await tester.tap(find.text('First'), warnIfMissed: false);
+        await tester.pumpAndSettle();
+        expect(off.catalog.dnsCfg.directPolicy, policy);
+        expect(find.text('Last'), findsNothing); // no dropdown opened
+      });
+
+      testWidgets('an answering chip animates without breaking the sheet', (tester) async {
+        final host = FakeCoreHost();
+        host.dnsHealthValue = const DnsHealth(answering: {'vpn': 'cloudflare'});
+        await _pump(tester, host);
+        await tester.tap(find.byKey(const ValueKey('settings-setdns')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump(const Duration(seconds: 1));
+        expect(chip('cloudflare', 'vpn'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
     });
 
     testWidgets('Connection: IPv6 is off by default, the toggle lands in the catalog and is saved (both platforms)', (

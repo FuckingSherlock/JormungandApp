@@ -495,7 +495,7 @@ extension CatalogPlan on Catalog {
                 'transports': [for (final t in dnsServers[id]!.transports) {'kind': t.kind, 'addr': t.addr}],
               },
         ],
-        if (!mockupPlan) 'directPolicy': dnsCfg.directPolicy, // 'localFirst' | 'priority': the order of the direct side
+        if (!mockupPlan) 'directPolicy': dnsCfg.directPolicy, // 'localFirst' | 'priority': Local first / last on the direct side
         'resolve': dnsCfg.resolve, // 'auto' | 'off' | a server id: the `resolve` step before IP rules
         'hijack': dnsCfg.hijack, // TUN only: the core answers every DNS query
       };

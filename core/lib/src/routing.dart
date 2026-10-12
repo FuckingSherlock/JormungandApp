@@ -20,7 +20,7 @@
 ///   geo: { geosite: {via, every}, geoip: {via, every} },  // the built-in lists
 ///   dns: { servers: [{ id, on, sides: ['direct','vpn'], use: ['doh','dot'],          // providers, in priority order
 ///                       transports: [{ kind: 'doh'|'dot'|'doq'|'udp'|'system', addr }] }],
-///          directPolicy?: 'localFirst'|'priority',   // the direct side: Local first (default) or the list order
+///          directPolicy?: 'localFirst'|'priority',   // Local on the direct side: always first (default) or always last
 ///          resolve: 'auto'|'off'|<dns id>,    // `resolve` before IP rules (proxy ports only, also in TUN); default 'auto'
 ///          hijack?: bool }                    // TUN: the core answers every DNS query; default on (config.dart)
 /// }
@@ -626,11 +626,13 @@ class _Builder {
     out.dnsFinal = _catchChain?.list.first.tag ?? _boot;
   }
 
-  /// The providers in use, as the plan lists them, with Local first on the direct side under `localFirst`.
+  /// The providers in use, as the plan lists them. Local (when on) is pinned on the direct side by the policy,
+  /// wherever the list has it: first under `localFirst`, last under `priority`. A side with nothing on is empty.
   List<DnsCandidate> _side(String side) {
     final all = [for (final p in _providers) if (p.on) ..._candidates(p, side)];
-    if (side != 'direct' || !_localFirst) return all;
-    return [...all.where((c) => c.kind == dnsKindSystem), ...all.where((c) => c.kind != dnsKindSystem)];
+    if (side != 'direct') return all;
+    final local = all.where((c) => c.kind == dnsKindSystem), rest = all.where((c) => c.kind != dnsKindSystem);
+    return _localFirst ? [...local, ...rest] : [...rest, ...local];
   }
 
   final _made = <String, DnsCandidate>{};

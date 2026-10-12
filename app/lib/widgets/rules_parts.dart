@@ -512,14 +512,12 @@ Future<T?> showAppDialog<T>(
               const SizedBox(height: 12),
               Flexible(child: SingleChildScrollView(child: builder(ctx))),
               const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  for (final (i, a) in actions(ctx).indexed) ...[
-                    if (i > 0) const SizedBox(width: 8),
-                    a,
-                  ],
-                ],
+              // wraps on a narrow screen / large text instead of overflowing
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
+                children: actions(ctx),
               ),
             ],
           ),

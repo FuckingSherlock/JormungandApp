@@ -425,12 +425,51 @@ extension DnsOfCatalog on Catalog {
       if (dnsServers[id]?.on == true) dnsServers[id]!,
   ];
 
-  /// The server a rule's DNS "Auto" resolves to: the first ticked one with this route.
+  /// The server a rule's DNS "Auto" resolves to: the first ticked one answering on this side.
   DnsServerCfg? dnsAutoFor(String via) {
     for (final s in dnsActive) {
-      if (s.via == via) return s;
+      if (s.activeSides.contains(via)) return s;
     }
     return null;
+  }
+
+  /// The ids in the order the list shows and the core asks: `dnsOrder`, with Local (the OS
+  /// resolver) pinned first (`localFirst`) or last (`priority`) by `dnsCfg.directPolicy`.
+  List<String> get dnsDisplayOrder {
+    final pinned = [
+      for (final id in dnsOrder)
+        if (dnsServers[id]?.system == true) id,
+    ];
+    final rest = [
+      for (final id in dnsOrder)
+        if (dnsServers[id]?.system != true) id,
+    ];
+    return dnsCfg.directPolicy == 'priority'
+        ? [...rest, ...pinned]
+        : [...pinned, ...rest];
+  }
+
+  /// Local on: the direct-side policy means something.
+  bool get dnsLocalOn => dnsServers.values.any((s) => s.system && s.on);
+
+  /// Sets `directPolicy` and moves Local to its pinned place.
+  void dnsSetDirectPolicy(String v) {
+    dnsCfg.directPolicy = v;
+    final order = dnsDisplayOrder;
+    dnsOrder
+      ..clear()
+      ..addAll(order);
+  }
+
+  /// The sides on which [id] is the only enabled provider: switching it off (or deleting it)
+  /// leaves them without DNS.
+  List<String> dnsSolePathSides(String id) {
+    final s = dnsServers[id];
+    if (s == null || !s.on) return const [];
+    return [
+      for (final side in s.activeSides)
+        if (!dnsActive.any((o) => o.id != id && o.activeSides.contains(side))) side,
+    ]..sort();
   }
 
   /// "Resolve for IP rules" as it works now: `off`, a ticked server's id, or `auto`.
@@ -440,50 +479,66 @@ extension DnsOfCatalog on Catalog {
     return dnsActive.any((s) => s.id == r) ? r : 'auto';
   }
 
-  /// Ticks / unticks; false when it would leave no server on.
-  bool dnsToggle(String id) {
+  /// Ticks / unticks (the UI asks first when it leaves a side without DNS).
+  void dnsToggle(String id) {
     final s = dnsServers[id];
-    if (s == null) return false;
-    if (s.on && dnsActive.length == 1) return false;
-    s.on = !s.on;
-    return true;
+    if (s != null) s.on = !s.on;
   }
 
-  /// Adds ([id] null) or edits a server; returns its id.
+  /// Turns one side of a provider on / off (Local is direct only: nothing to turn).
+  void dnsToggleSide(String id, String side) {
+    final s = dnsServers[id];
+    if (s == null || s.system) return;
+    final sides = {...s.activeSides};
+    if (!sides.remove(side)) sides.add(side);
+    s.sides = sides;
+  }
+
+  /// Adds ([id] null) or edits a server; returns its id. [addr] null = keep the provider's
+  /// transports (a built-in one has several); [sides] null = keep the sides.
   String dnsSave(
     String? id, {
     required String name,
-    required String addr,
-    required String via,
+    String? addr,
+    Iterable<String>? sides,
   }) {
-    final n = name.trim().isEmpty ? dnsNameFromAddr(addr) : name.trim();
     final s = id == null ? null : dnsServers[id];
     if (s != null) {
-      s
-        ..name = n
-        ..addr = addr
-        ..via = via;
+      s.name = name.trim().isEmpty ? (addr == null ? s.name : dnsNameFromAddr(addr)) : name.trim();
+      if (addr != null && addr != s.addr) s.addr = addr;
+      if (sides != null && !s.system) s.sides = {...sides};
       return s.id;
     }
+    final a = addr ?? '';
     final nid = 'dns${dnsSeq++}';
-    dnsServers[nid] = DnsServerCfg(id: nid, name: n, addr: addr, via: via);
+    dnsServers[nid] = DnsServerCfg(
+      id: nid,
+      name: name.trim().isEmpty ? dnsNameFromAddr(a) : name.trim(),
+      addr: a,
+      sides: sides ?? const ['vpn'],
+    );
     dnsOrder.add(nid);
     return nid;
   }
 
-  /// Deletes a server; false when it is the only one on.
+  /// Deletes a server; false for a built-in one (it can only be switched off).
   bool dnsDelete(String id) {
     final s = dnsServers[id];
     if (s == null) return true;
-    if (s.on && dnsActive.length == 1) return false;
+    if (s.builtin) return false;
     dnsServers.remove(id);
     dnsOrder.remove(id);
     return true;
   }
 
+  /// Takes the full new order; Local stays where `directPolicy` pins it.
   void dnsReorder(List<String> order) {
     dnsOrder
       ..clear()
       ..addAll(order.where(dnsServers.containsKey));
+    final pinned = dnsDisplayOrder;
+    dnsOrder
+      ..clear()
+      ..addAll(pinned);
   }
 }

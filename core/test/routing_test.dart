@@ -47,6 +47,7 @@ Map<String, dynamic> _g(Map<String, List<String>> v, {bool not = false, bool fla
 List<Map> _rules(Map<String, dynamic> config) => ((config['route'] as Map)['rules'] as List).cast<Map>().skip(2).toList();
 const _lan = {'ip_is_private': true, 'domain_suffix': lanSuffixes, 'action': 'route', 'outbound': 'direct'};
 Map _lanRule(Map<String, dynamic> config) => ((config['route'] as Map)['rules'] as List).cast<Map>()[1];
+Iterable<Object?> _servers(Map r) => [r['server'], for (final s in (r['rules'] as List? ?? const [])) ..._servers(s as Map)];
 Map? _out(Map<String, dynamic> config, String tag) => (config['outbounds'] as List).cast<Map>().where((o) => o['tag'] == tag).firstOrNull;
 
 const _defaultDns = {
@@ -668,11 +669,102 @@ void main() {
         expect(sets.firstWhere((s) => s['tag'] == 'flag-dns-local'), {'type': 'local', 'tag': 'flag-dns-local', 'format': 'source', 'path': p.join('F', 'dns-local.json')});
         expect(info.dnsCandidates.firstWhere((c) => c.provider == 'local').flagPath, p.join('F', 'dns-local.json'));
 
-        // `priority`: the direct side follows the list too, Local where the list has it
+        // `priority`: Local last on the direct side, the rest in the list order
         final byList = RoutingInfo();
         final c2 = buildConfig(_plan({'dns': dnsOf([cf, gg, local], policy: 'priority')}), info: byList);
         expect(ids(byList.dnsSides['direct']!), ['cf-doh1', 'cf-doh2', 'cf-dot1', 'gg-doh1', 'gg-dot1', 'local']);
         expect(c2['route']['default_domain_resolver'], 'dns-cf-doh1');
+      });
+
+      test('Local is pinned by the direct policy wherever the list has it: localFirst = first, priority = last', () {
+        for (final order in [
+          [local, cf, gg],
+          [cf, local, gg],
+          [cf, gg, local],
+        ]) {
+          final first = RoutingInfo(), last = RoutingInfo();
+          buildConfig(_plan({'dns': dnsOf(order)}), info: first);
+          buildConfig(_plan({'dns': dnsOf(order, policy: 'priority')}), info: last);
+          final rest = [for (final c in first.dnsSides['direct']!) if (c.provider != 'local') c.id];
+          expect(ids(first.dnsSides['direct']!), ['local', ...rest], reason: 'localFirst: ${[for (final s in order) s['id']]}');
+          expect(ids(last.dnsSides['direct']!), [...rest, 'local'], reason: 'priority: ${[for (final s in order) s['id']]}');
+          expect(rest, [if (order.indexOf(cf) < order.indexOf(gg)) ...['cf-doh1', 'cf-doh2', 'cf-dot1', 'gg-doh1', 'gg-dot1'] else ...['gg-doh1', 'gg-dot1', 'cf-doh1', 'cf-doh2', 'cf-dot1']]);
+          expect(ids(first.dnsSides['vpn']!), isNot(contains('local')));
+        }
+      });
+
+      test('any provider can be off, Local too: Local off is no candidate and the OS resolver stays only as the bootstrap', () {
+        for (final policy in ['localFirst', 'priority']) {
+          final info = RoutingInfo();
+          final c = buildConfig(_plan({'dns': dnsOf([cf, {...local, 'on': false}, gg], policy: policy)}), info: info);
+          expect(info.dnsSides['direct']!.where((c) => c.provider == 'local'), isEmpty);
+          expect(ids(info.dnsSides['direct']!).first, 'cf-doh1');
+          final servers = ((c['dns'] as Map)['servers'] as List).cast<Map>();
+          expect(servers.first, {'type': 'local', 'tag': 'local'}, reason: 'hostnames of DoH / DoT servers are still found');
+          expect(servers.where((s) => s['tag'] == 'dns-local'), isEmpty);
+          expect(servers.firstWhere((s) => s['tag'] == 'dns-gg-dot1')['domain_resolver'], 'local');
+        }
+      });
+
+      group('a side with no provider on', () {
+        final ipRule = _rule({'ip': _g({'ip_cidr': ['10.0.0.0/8']})}, action: 'direct');
+        final bank = _rule({'domain': _g({'domain_suffix': ['bank.ru']})}, action: 'direct', id: 'r2');
+        final site = _rule({'domain': _g({'domain_suffix': ['x.com']})}, id: 'r3');
+
+        // every DNS server a rule, `final`, the resolver or a `resolve` step names is in the list
+        void wellFormed(Map<String, dynamic> c) {
+          final tags = {for (final s in ((c['dns'] as Map)['servers'] as List).cast<Map>()) s['tag']};
+          final named = <Object?>[
+            (c['dns'] as Map)['final'],
+            (c['route'] as Map)['default_domain_resolver'],
+            for (final r in (((c['dns'] as Map)['rules']) as List? ?? const []).cast<Map>()) ..._servers(r),
+            for (final r in ((c['route'] as Map)['rules'] as List).cast<Map>()) ..._servers(r),
+          ].where((s) => s != null);
+          for (final s in named) {
+            expect(tags, contains(s), reason: 'server $s is not defined');
+          }
+        }
+
+        test('direct side empty: the VPN side answers whatever is asked, Local off leaves the OS resolver as the bootstrap', () {
+          final info = RoutingInfo();
+          final c = buildConfig(
+              _plan({'dns': dnsOf([{...cf, 'sides': ['vpn']}, {...gg, 'sides': ['vpn']}, {...local, 'on': false}]), 'rules': [bank, ipRule, site]}),
+              info: info);
+          expect(info.dnsSides['direct']!, isEmpty);
+          expect(ids(info.dnsSides['vpn']!), ['cf-doh1-v', 'cf-doh2-v', 'cf-dot1-v', 'gg-doh1-v', 'gg-dot1-v']);
+          expect(c['route']['default_domain_resolver'], 'local', reason: 'no direct candidate: the bootstrap resolves');
+          expect((c['dns'] as Map)['final'], 'dns-cf-doh1-v');
+          expect(info.dnsFlagChecks.every((k) => k.candidate.side == 'vpn'), isTrue, reason: 'no flagcheck of the empty side');
+          expect(dnsRules(c).where((r) => '${r['server']}'.endsWith('-v')), isNotEmpty, reason: 'the VPN side answers the catch-all and the direct rule\'s names');
+          wellFormed(c);
+        });
+
+        test('VPN side empty: the direct side answers the rest; "Resolve for IP rules" has no VPN server and warns', () {
+          final info = RoutingInfo();
+          final w = <String>[];
+          final c = buildConfig(_plan({'dns': dnsOf([{...cf, 'sides': ['direct']}, local]), 'rules': [bank, ipRule, site]}), info: info, warnings: w);
+          expect(info.dnsSides['vpn']!, isEmpty);
+          expect(ids(info.dnsSides['direct']!).first, 'local');
+          expect((c['dns'] as Map)['final'], 'dns-local', reason: 'nothing via VPN: the direct side answers the rest');
+          expect(w.where((s) => s.contains('no DNS server via VPN')), hasLength(1));
+          expect(_rules(c).any((r) => r['action'] == 'resolve' && !r.containsKey('server')), isTrue);
+          wellFormed(c);
+        });
+
+        test('both sides empty (every provider off): the OS resolver alone answers; no DNS rules, no flags', () {
+          final info = RoutingInfo();
+          final c = buildConfig(_plan({'dns': dnsOf([{...cf, 'on': false}, {...gg, 'on': false}, {...local, 'on': false}]), 'rules': [bank, ipRule, site]}), info: info);
+          expect(info.dnsSides['direct']!, isEmpty);
+          expect(info.dnsSides['vpn']!, isEmpty);
+          expect(info.dnsCandidates, isEmpty);
+          expect(info.dnsServers, isEmpty);
+          expect((c['dns'] as Map)['servers'], [{'type': 'local', 'tag': 'local'}]);
+          expect((c['dns'] as Map)['final'], 'local');
+          expect(c['route']['default_domain_resolver'], 'local');
+          expect(dnsRules(c), isEmpty);
+          expect(((c['route'] as Map)['rule_set'] as List? ?? const []).where((s) => '${(s as Map)['tag']}'.startsWith('flag-')), isEmpty);
+          wellFormed(c);
+        });
       });
 
       test('Local never goes through the VPN; a provider with no sides is VPN only; a provider that is off is no candidate', () {
@@ -1057,6 +1149,34 @@ void main() {
       final r = await Process.run(_bin, ['check', '-c', f.path, '--disable-color']);
       expect(r.exitCode, 0, reason: '${r.stderr}${r.stdout}\n${const JsonEncoder.withIndent(' ').convert(config)}');
       expect('${r.stderr}${r.stdout}', isNot(contains('deprecated')));
+    }, skip: _skip);
+
+    test('a side with no provider on (direct / VPN / both) is a config sing-box accepts', () async {
+      Map<String, dynamic> prov(String id, String addr, List<String> sides, {bool on = true}) => {
+            'id': id,
+            'on': on,
+            'sides': sides,
+            'use': ['doh'],
+            'transports': [{'kind': 'doh', 'addr': addr}],
+          };
+      final rules = [
+        _rule({'domain': _g({'domain_suffix': ['bank.ru']})}, action: 'direct', id: 'r2'),
+        _rule({'ip': _g({'ip_cidr': ['10.0.0.0/8']})}, action: 'direct', id: 'r3'),
+      ];
+      final cases = {
+        'direct empty': [prov('cf', 'https://1.1.1.1/dns-query', ['vpn']), {'id': 'local', 'on': false, 'sides': ['direct'], 'use': <String>[], 'transports': [{'kind': 'system', 'addr': 'system'}]}],
+        'vpn empty': [prov('cf', 'https://1.1.1.1/dns-query', ['direct'])],
+        'both empty': [prov('cf', 'https://1.1.1.1/dns-query', ['direct', 'vpn'], on: false)],
+      };
+      for (final e in cases.entries) {
+        final plan = _plan({'dns': {'servers': e.value}, 'rules': rules});
+        final info = RoutingInfo();
+        final config = buildConfig(plan, tunnelPort: await freePort(), dnsFlagDir: p.join(tmp.path, 'flags'), info: info);
+        writeDnsFlags(info.dnsCandidates);
+        final f = File(p.join(tmp.path, 'c.json'))..writeAsStringSync(jsonEncode(config));
+        final r = await Process.run(_bin, ['check', '-c', f.path, '--disable-color']);
+        expect(r.exitCode, 0, reason: '${e.key}: ${r.stderr}${r.stdout}\n${const JsonEncoder.withIndent(' ').convert(config)}');
+      }
     }, skip: _skip);
 
     test('loopback: a rule\'s DNS server, block, an IP rule after resolve, the main flow', () async {

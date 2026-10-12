@@ -183,5 +183,15 @@
   "Update {0} ready": "Обновление {0} готово",
   "Tap to install": "Нажмите, чтобы установить",
   "Tap to see what's new": "Нажмите, чтобы посмотреть, что нового",
+  "Leave a side without DNS?": null,
+  "No DNS server will be left for direct traffic: it will have no internet.": null,
+  "No DNS server will be left through the VPN: traffic through it will have no internet.": null,
+  "Local for direct traffic": null,
+  "Where Local (the OS resolver) stands for direct traffic: before the list or after it.": null,
+  "Switch Local on to choose its place.": null,
+  "First": null,
+  "Last": null,
+  "No answer on any of their sides": null,
+  "Built-in servers cannot be deleted, only switched off.": null,
   "New version": "Новая версия",  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
 }

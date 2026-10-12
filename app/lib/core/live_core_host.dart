@@ -403,13 +403,27 @@ class LiveCoreHost extends CoreHost {
     }
     if (st['error'] != null) _error = '${st['error']}';
     final dns = st['dns'];
-    _dnsHealth = _connected && dns is Map && dns['active'] != null
+    _dnsHealth = _connected && dns is Map
         ? DnsHealth(
-            active: '${dns['active']}',
-            failed: {
-              for (final s in (dns['servers'] as List? ?? const []))
-                if (s is Map && s['ok'] == false) '${s['id']}',
+            active: dns['active'] == null ? null : '${dns['active']}',
+            answering: {
+              for (final side in const ['direct', 'vpn'])
+                if (dns['sides'] is Map &&
+                    (dns['sides'] as Map)[side] is Map &&
+                    ((dns['sides'] as Map)[side] as Map)['provider'] != null)
+                  side: '${((dns['sides'] as Map)[side] as Map)['provider']}',
             },
+            servers: [
+              for (final s in (dns['servers'] as List? ?? const []))
+                if (s is Map && s['provider'] != null && s['side'] != null)
+                  DnsServerStatus(
+                    id: '${s['id']}',
+                    provider: '${s['provider']}',
+                    side: '${s['side']}',
+                    ok: s['ok'] is bool ? s['ok'] as bool : null,
+                    watched: s['watched'] == true,
+                  ),
+            ],
           )
         : null;
     _syncTrafficTimer();
@@ -429,7 +443,7 @@ class LiveCoreHost extends CoreHost {
     final e = _exit, d = _down, b = _blocking, r = catalog.coreRoute, h = _dnsHealth;
     return '$_connected|${d?.since}|${d?.proxy}|${b?.since}|${b?.proxy}|${b?.reason}|'
         '${e.checking}|${e.error}|${e.ip}|${e.country}|${e.city}|$_error|'
-        '${r?.id}|${r?.server}|${r?.entryServer}|${h?.active}|${h?.failed.length}';
+        '${r?.id}|${r?.server}|${r?.entryServer}|${h?.sig}';
   }
 
   /// `sid::nid` -> the server, like `catalog.nodeOfKey` but one map per source, built when the

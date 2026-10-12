@@ -335,6 +335,34 @@ void main() {
     await r.dispose();
   });
 
+  test('a side with no candidate (every provider off): no active server, a null answer in the status, nothing probed or written', () async {
+    final r = _Rig();
+    await r.settle();
+    await r.round(2);
+    expect(r.svc.active, isNull);
+    expect(r.asked, isEmpty);
+    expect(r.writes, isEmpty);
+    expect(r.svc.toJson(), {
+      'active': null,
+      'auto': true,
+      'sides': {
+        'direct': {'active': null, 'provider': null},
+        'vpn': {'active': null, 'provider': null},
+      },
+      'servers': <Object>[],
+    });
+    await r.dispose();
+    // one side empty, the other works: the empty one stays null
+    final d = _Rig(vpn: ['v']);
+    await d.settle();
+    d.alive['dns-v'] = -1;
+    await d.round(2);
+    await d.round(2);
+    expect((d.svc.toJson()['sides'] as Map)['direct'], {'active': null, 'provider': null});
+    expect(d.svc.active, 'v');
+    await d.dispose();
+  });
+
   test('the network goes down while a miss is being judged: parked behind net.offline, nothing confirmed, no flag written', () async {
     final r = _Rig(direct: ['a', 'b']);
     await r.settle();

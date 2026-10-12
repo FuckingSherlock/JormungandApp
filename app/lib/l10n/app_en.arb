@@ -3373,6 +3373,16 @@
   },
   "tapToInstall": "Tap to install",
   "tapToSeeWhatSNew": "Tap to see what's new",
+  "leaveASideWithoutDns": "Leave a side without DNS?",
+  "noDnsServerWillBeLeft": "No DNS server will be left for direct traffic: it will have no internet.",
+  "noDnsServerWillBeLeft2": "No DNS server will be left through the VPN: traffic through it will have no internet.",
+  "localForDirectTraffic": "Local for direct traffic",
+  "whereLocalTheOsResolverStands": "Where Local (the OS resolver) stands for direct traffic: before the list or after it.",
+  "switchLocalOnToChooseIts": "Switch Local on to choose its place.",
+  "first": "First",
+  "last2": "Last",
+  "noAnswerOnAnyOfTheir": "No answer on any of their sides",
+  "builtInServersCannotBeDeleted": "Built-in servers cannot be deleted, only switched off.",
   "newVersion": "New version",
   "aNewVersionOfTheApp": "A new version of the app is out, or a downloaded one waits to be installed"
 }

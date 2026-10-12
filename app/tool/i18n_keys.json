@@ -1532,5 +1532,15 @@
   "Subscription answers differ": "subscriptionAnswersDiffer",
   "The VPN answer is used.": "theVpnAnswerIsUsed",
   "{0}: the direct and the VPN answers differ": "theDirectAndTheVpnAnswers",
-  "DNS server does not answer": "dnsServerDoesNotAnswer"
+  "DNS server does not answer": "dnsServerDoesNotAnswer",
+  "Leave a side without DNS?": "leaveASideWithoutDns",
+  "No DNS server will be left for direct traffic: it will have no internet.": "noDnsServerWillBeLeft",
+  "No DNS server will be left through the VPN: traffic through it will have no internet.": "noDnsServerWillBeLeft2",
+  "Local for direct traffic": "localForDirectTraffic",
+  "Where Local (the OS resolver) stands for direct traffic: before the list or after it.": "whereLocalTheOsResolverStands",
+  "Switch Local on to choose its place.": "switchLocalOnToChooseIts",
+  "First": "first",
+  "Last": "last2",
+  "No answer on any of their sides": "noAnswerOnAnyOfTheir",
+  "Built-in servers cannot be deleted, only switched off.": "builtInServersCannotBeDeleted"
 }

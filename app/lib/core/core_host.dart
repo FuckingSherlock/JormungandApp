@@ -726,12 +726,60 @@ class InstalledApp {
   final bool system;
 }
 
-/// `status.dns` while connected: the server in use and the ones that fail.
+/// One candidate of `status.dns.servers`: a provider's transport on one side.
+class DnsServerStatus {
+  const DnsServerStatus({
+    required this.id,
+    required this.provider,
+    required this.side,
+    this.ok,
+    this.watched = false,
+  });
+
+  final String id;
+  final String provider;
+
+  /// `direct` | `vpn`.
+  final String side;
+
+  /// false = it does not answer; null = not checked yet.
+  final bool? ok;
+
+  /// Only observed, never switched to.
+  final bool watched;
+}
+
+/// `status.dns` while connected: who answers each side and which candidates fail.
 class DnsHealth {
-  const DnsHealth({this.active, this.failed = const {}});
+  const DnsHealth({
+    this.active,
+    this.answering = const {},
+    this.servers = const [],
+  });
 
   final String? active;
-  final Set<String> failed;
+
+  /// side (`direct` / `vpn`) -> the provider answering it now; a side with nobody is absent.
+  final Map<String, String> answering;
+  final List<DnsServerStatus> servers;
+
+  /// [provider] is the one answering [side] now.
+  bool answers(String provider, String side) => answering[side] == provider;
+
+  /// Every candidate of [provider] on [side] fails (and there is at least one).
+  bool dead(String provider, String side) {
+    var any = false;
+    for (final s in servers) {
+      if (s.watched || s.provider != provider || s.side != side) continue;
+      if (s.ok != false) return false;
+      any = true;
+    }
+    return any;
+  }
+
+  /// What of it the page shows: a change rebuilds the page at once.
+  String get sig => '$active|${answering.entries.map((e) => '${e.key}=${e.value}').join(',')}|'
+      '${servers.where((s) => s.ok == false).map((s) => s.id).join(',')}';
 }
 
 /// The host for the widgets below. [listenTo] (default: the host itself) is what rebuilds the
