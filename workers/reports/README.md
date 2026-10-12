@@ -1,7 +1,8 @@
 # jormungand-reports
 
 Cloudflare Worker, принимающий зашифрованные отчёты поддержки из приложения («Send report»), кладущий их
-в Workers KV и уведомляющий разработчика в Telegram. Worker **ничего не расшифровывает**: тело — непрозрачные
+в Workers KV и уведомляющий разработчика в Telegram; ещё он по вызову из CI постит анонсы релизов
+(changelog beta/stable) в ту же группу. Worker **ничего не расшифровывает**: тело — непрозрачные
 байты (конверт `JRP1…`), открыть его может только приватный ключ разработчика.
 
 URL: `https://jormungand-reports.slackerwarlock.workers.dev`
@@ -33,7 +34,7 @@ URL: `https://jormungand-reports.slackerwarlock.workers.dev`
 `GET /v1/ping` → `{"ok":true}` (старые приложения). `POST /v1/ping` — пробный обмен: читает тело (≤ 64 KiB,
 иначе 413) и отвечает 200 `application/octet-stream` ровно на 32768 байт; приложение считает пробу
 пройденной только при получении всех 32 KiB (DPI замораживает соединения после ~16 KB). Лимитером ни тот,
-ни другой ping не считаются. Всё остальное — 404. Тела и IP не логируются; IP используется только как
+ни другой ping не считаются. Всё остальное (кроме `POST /v1/release`, см. ниже) — 404. Тела и IP не логируются; IP используется только как
 ключ лимита (усечённый SHA-256 с солью).
 
 `id` = `YYYYMMDD-` + 6 случайных символов из `[a-z2-9]` (crypto-random, без смещения, с проверкой
@@ -97,6 +98,54 @@ VPN on · sent via VPN
 верный chat id). `chat not found` — бот не знает этот чат: добавить бота в группу и дать право читать
 сообщения / написать в группу.
 
+## Анонсы релизов
+
+Вызывает CI (`release-android.yml`) после публикации beta/stable-релиза Android; Worker шлёт changelog в
+Telegram-группу.
+
+`POST /v1/release`, `Authorization: Bearer <токен>`, `Content-Type: application/json`, тело ≤ 64 KiB:
+
+```json
+{"channel":"beta","version":"0.1.2-beta.3","build":3039,"notes":"многострочный\nтекст","url":"https://…"}
+```
+
+- `channel` — `beta` или `stable`; `version` — `x.y.z` или `x.y.z-beta.N`; `build` — целое ≥ 1;
+  `notes` — непустой простой текст; `url` необязателен, принимается только `https://…` (иначе игнорируется).
+- Токен сравнивается за постоянное время с секретом `RELEASE_NOTIFY_TOKEN`. Лимитером запрос не считается.
+
+| Ответ | Когда |
+|---|---|
+| 200 `{"ok":true}` | анонс отправлен |
+| 200 `{"ok":true,"duplicate":true}` | этот релиз уже анонсирован, ничего не отправлено |
+| 400 | не JSON / неверные поля (`bad-json`, `bad-request`) |
+| 401 | нет или неверный токен |
+| 413 | тело > 64 KiB |
+| 415 | не `application/json` |
+| 502 `{"ok":false,"error":"telegram","description":…}` | Telegram отказал или сеть; маркер не пишется, повтор вызова повторит отправку |
+| 503 `{"ok":false,"error":"disabled"}` | не задан `RELEASE_NOTIFY_TOKEN` или токен бота / чат |
+
+Сообщение — `sendMessage`, `parse_mode: HTML`, значения экранируются, `disable_web_page_preview`, видимый
+текст ≤ 4096 символов (заметки при нехватке места режутся с «…»). Ссылка добавляется только при `url`:
+
+```
+🧪 Beta 0.1.2-beta.3 · build 3039          🚀 Jormungand 0.2.0 — стабильная версия
+
+заметки                                     заметки
+
+Скачать (ссылка)                            Скачать (ссылка)
+```
+
+Идемпотентность: после успешной отправки в KV ставится ключ `_release/<channel>/<version>+<build>` (30 суток);
+повторный вызов (перезапуск CI) при наличии ключа отвечает `duplicate` и ничего не шлёт.
+
+Чат: переменная `RELEASE_CHAT_ID` (необязательна, в `vars` `wrangler.jsonc`), иначе `TELEGRAM_CHAT_ID`.
+Секрет ставится из этой папки; то же значение лежит в GitHub-секрете `JORM_NOTIFY_TOKEN` основного репозитория:
+
+```sh
+cd workers/reports
+npx wrangler secret put RELEASE_NOTIFY_TOKEN
+```
+
 ## Получение отчёта разработчиком
 
 ```sh
@@ -129,4 +178,5 @@ npx wrangler deploy   # из этой папки
 ```
 
 Namespace создан командой `npx wrangler kv namespace create jormungand-reports`, его id записан в
-`wrangler.jsonc`. В GitHub-workflow деплоя макета этот Worker не подключён.
+`wrangler.jsonc`. В workflow деплоя макета этот Worker не участвует; `release-android.yml` вызывает
+`/v1/release` (см. «Анонсы релизов»).

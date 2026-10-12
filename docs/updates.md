@@ -727,13 +727,39 @@ git tag v0.1.0 && git push origin v0.1.0
    версии и уходят вместе с ним.
 5. `release_manifest.dart --channel <beta|stable>` с `--signer-sha256` (SHA-256 сертификата из keytool),
    `--url-base https://github.com/FuckingSherlock/jormungand-releases/releases/download/v<версия>` и
-   `--delta …` на каждую строку `deltas.txt`.
+   `--delta …` на каждую строку `deltas.txt`, заметки — ниже, «Заметки к релизу».
 6. Публикация через `gh` в **FuckingSherlock/jormungand-releases**: релиз `v<версия>` с APK
    `jormungand-<версия>-<abi>.apk` и патчами из `deltas.txt` (beta — prerelease, stable — обычный,
    `--latest`); релиз `feed`
    создаётся, если его нет; **после** APK в `feed` заливаются `manifest-<канал>.json` и `.sig`
    (`--clobber`). Чистка — только после beta: остаются 10 новейших beta-релизов
    (`^v\d+\.\d+\.\d+-beta\.\d+$`), старые удаляются вместе с тегами — `feed` и stable не трогаются.
+7. «Announce in Telegram» (`continue-on-error`): анонс в Telegram-группу через Worker отчётов
+   (`POST /v1/release`, `workers/reports/README.md` → «Анонсы релизов»): русские заметки (у beta — без
+   строки-заголовка). Нет секрета `JORM_NOTIFY_TOKEN` → шаг пропускается. Повторный
+   запуск того же выпуска (та же версия + build) второй раз не постит.
+
+#### Заметки к релизу
+
+Один текст и в приложении (карточка обновления, «What's new», `notes` манифеста), и в GitHub-релизе, и
+в Telegram. Простой текст (приложение показывает его как есть), строки списка — `• `. Файлы — в
+`release-notes/` (правила там же, `README.md`):
+
+Шаг «Release notes» идёт до сборки (нет заметок — запуск падает за минуту, а не после сборки) и пишет
+`notes.txt` (en) и `notes.ru.txt`; в манифест идут оба, в GitHub-релиз и Telegram — русский.
+
+- **beta** — `release-notes/beta.txt`: **русское** саммари беты (тот же текст, которым ведущий сообщает
+  пользователю, что вошло в сборку), для обоих языков. Ведущий **перезаписывает** его в каждом пуше в
+  основную ветку, который соберёт beta (`app/**`, `core/**`, сам файл — тоже триггер). Заметки = строка
+  `Beta <версия> (build N, commit abc1234)` (в `ru` — `Бета … (сборка N, коммит …)`), пустая строка и тело —
+  `.github/scripts/beta_notes.sh`: все версии `beta.txt`, закоммиченные после коммита прошлой beta (он
+  берётся из строки-заголовка `notes.en` в `manifest-beta.json` ленты), новые сверху, без повторов — так
+  пуш, чей запуск отменил следующий, ничего не теряет; прошлый коммит неизвестен — файл как есть.
+  `beta.txt` с прошлой beta не менялся / пуст → **beta не выпускается** (ошибка с подсказкой; запушить
+  саммари — это и перезапустит сборку). Темы коммитов в заметки не идут.
+- **stable** — `release-notes/X.Y.Z.ru.txt`, кратко обо всём, что изменилось с прошлого stable. Пишется в
+  тот же проход, что русский перевод интерфейса (`docs/i18n.md`); без него stable не выпускается.
+  `X.Y.Z.en.txt` пока не пишется (тестируют только русскоязычные): нет его — русский текст идёт и в `en`.
 
 Секреты основного репозитория (Settings → Secrets → Actions):
 
@@ -743,6 +769,7 @@ git tag v0.1.0 && git push origin v0.1.0
 | `JORM_ANDROID_KS_PASS` | пароль хранилища и ключа (одинаковый) |
 | `JORM_RELEASE_KEY` | приватный ключ подписи манифеста (раздел 3; уже задан) |
 | `JORM_RELEASES_TOKEN` | fine-grained PAT, `Contents: write` на `FuckingSherlock/jormungand-releases` |
+| `JORM_NOTIFY_TOKEN` | необязательный: тот же случайный токен, что секрет `RELEASE_NOTIFY_TOKEN` Worker'а `jormungand-reports` (анонс в Telegram); в `secrets-ready` не проверяется |
 
 Артефакты workflow не выкладываются. Один раз руками:
 

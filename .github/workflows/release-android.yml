@@ -9,14 +9,15 @@
 #
 # Repo secrets: JORM_ANDROID_KEYSTORE_B64 (base64 of the release .jks), JORM_ANDROID_KS_PASS (its
 # store + key password), JORM_RELEASE_KEY (Ed25519 manifest-signing key file), JORM_RELEASES_TOKEN
-# (fine-grained PAT, contents:write on jormungand-releases). No artifacts are uploaded: the
+# (fine-grained PAT, contents:write on jormungand-releases); optional JORM_NOTIFY_TOKEN (the Telegram
+# announcement, workers/reports POST /v1/release; unset = no announcement). No artifacts are uploaded: the
 # keystore and the key live in $RUNNER_TEMP only and are deleted at the end.
 name: Release Android
 
 on:
   push:
     branches: [claude/karing-fork-environment-a45c2c]
-    paths: ['app/**', 'core/**', '.github/workflows/release-android.yml']
+    paths: ['app/**', 'core/**', '.github/workflows/release-android.yml', '.github/scripts/beta_notes.sh', 'release-notes/beta.txt']
     # path filters are not evaluated for tag pushes: a tag always builds the tagged commit
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
@@ -76,6 +77,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        # the full history: the beta notes collect the commits since the previous beta
+        with: { fetch-depth: 0 }
 
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17', cache: gradle }
@@ -195,6 +198,30 @@ jobs:
         if: env.CHANNEL == 'stable'
         run: node app/tool/gen_i18n.mjs --missing
 
+      # Release notes (docs/updates.md section 13, "Заметки к релизу"), before the build so a missing
+      # one fails in a minute. dist/notes.txt (en) and dist/notes.ru.txt: stable - release-notes/X.Y.Z.ru.txt (+ optional .en.txt)
+      # (written in the Russian translation pass); beta - a header line (its commit is where the next
+      # beta's notes start) + the Russian summary release-notes/beta.txt as committed since the previous
+      # beta (.github/scripts/beta_notes.sh), the same text in both
+      - name: Release notes
+        run: |
+          dist="$RUNNER_TEMP/dist"; mkdir -p "$dist"
+          if [ "$CHANNEL" = stable ]; then
+            f="release-notes/$VERSION.ru.txt"
+            [ -n "$(tr -d '[:space:]' < "$f" 2> /dev/null)" ] || { echo "::error::$f is missing or empty - write the stable release notes (release-notes/README.md)"; exit 1; }
+            cp "$f" "$dist/notes.ru.txt"
+            # English is optional for now (the testers are Russian): without it the Russian text is the default
+            en="release-notes/$VERSION.en.txt"
+            if [ -n "$(tr -d '[:space:]' < "$en" 2> /dev/null)" ]; then cp "$en" "$dist/notes.txt"; else cp "$f" "$dist/notes.txt"; fi
+          else
+            if ! body=$(bash .github/scripts/beta_notes.sh "$RUNNER_TEMP/manifest-beta.json"); then
+              echo "::error::release-notes/beta.txt was not updated since the previous beta - write the summary of this beta (release-notes/README.md) and push it"; exit 1
+            fi
+            printf 'Beta %s (build %s, commit %s)\n\n%s\n' "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$body" > "$dist/notes.txt"
+            printf 'Бета %s (сборка %s, коммит %s)\n\n%s\n' "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$body" > "$dist/notes.ru.txt"
+          fi
+          { echo "Notes:"; sed 's/^/  /' "$dist/notes.ru.txt"; } >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Release keystore
         env:
           KS_B64: ${{ secrets.JORM_ANDROID_KEYSTORE_B64 }}
@@ -286,9 +313,6 @@ jobs:
           key="$RUNNER_TEMP/jorm-release-signing.key"   # outside the workspace: the tool refuses a key inside a git tree
           ( umask 077; printf '%s\n' "$JORM_RELEASE_KEY" > "$key" )
           dist="$RUNNER_TEMP/dist"
-          subject=$(git log -1 --format=%s | cut -c1-200)
-          label=$([ "$CHANNEL" = stable ] && echo Release || echo Beta)
-          printf '%s %s (build %s, commit %s)\n%s\n' "$label" "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$subject" > "$dist/notes.txt"
           # the deltas the previous step kept (`<platform>=<patch>,<sha256 of the old APK>` per line)
           delta_args=()
           if [ -s "$dist/deltas.txt" ]; then
@@ -306,7 +330,7 @@ jobs:
             --url-base "https://github.com/$FEED_REPO/releases/download/v$VERSION" \
             --signer-sha256 "$SIGNER" \
             --page "https://github.com/$FEED_REPO/releases" \
-            --notes-en "$dist/notes.txt"
+            --notes-en "$dist/notes.txt" --notes-ru "$dist/notes.ru.txt"
           rm -f "$key"
 
       - name: Publish to the feed repo
@@ -329,7 +353,7 @@ jobs:
           else
             kind=$([ "$CHANNEL" = beta ] && echo --prerelease || echo --latest)
             gh release create "$tag" "${files[@]}" --repo "$FEED_REPO" $kind \
-              --title "Jormungand $VERSION" --notes-file notes.txt
+              --title "Jormungand $VERSION" --notes-file notes.ru.txt
           fi
           # 2. the feed release (fixed tag) and, only after the APKs are up, the signed manifest
           if ! gh release view feed --repo "$FEED_REPO" > /dev/null 2>&1; then
@@ -350,6 +374,27 @@ jobs:
                 done
           fi
           echo "Published $VERSION (build $BUILD) to the $CHANNEL channel" >> "$GITHUB_STEP_SUMMARY"
+
+      # Telegram announcement through the reports Worker (workers/reports/README.md, "Анонсы релизов"):
+      # the Russian notes (beta: without their header line). Never fails the release;
+      # the Worker skips a version+build it has already announced, so a re-run does not post twice
+      - name: Announce in Telegram
+        continue-on-error: true
+        env:
+          NOTIFY_TOKEN: ${{ secrets.JORM_NOTIFY_TOKEN }}
+        run: |
+          [ -n "$NOTIFY_TOKEN" ] || { echo "::notice::JORM_NOTIFY_TOKEN is not set - no Telegram announcement"; exit 0; }
+          dist="$RUNNER_TEMP/dist"
+          if [ "$CHANNEL" = stable ]; then notes=$(cat "$dist/notes.ru.txt"); else notes=$(tail -n +3 "$dist/notes.ru.txt"); fi
+          jq -n --arg c "$CHANNEL" --arg v "$VERSION" --argjson b "$BUILD" --arg n "$notes" \
+            --arg u "https://github.com/$FEED_REPO/releases/tag/v$VERSION" \
+            '{channel: $c, version: $v, build: $b, notes: $n, url: $u}' > "$RUNNER_TEMP/announce.json"
+          if ! out=$(curl -sS --fail-with-body --retry 3 --retry-all-errors --max-time 30 -X POST \
+              -H "Authorization: Bearer $NOTIFY_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary "@$RUNNER_TEMP/announce.json" https://jormungand-reports.slackerwarlock.workers.dev/v1/release); then
+            echo "::warning::Telegram announcement failed: $out"; exit 1
+          fi
+          echo "Telegram: $out"
 
       - name: Remove the keystore and the key
         if: always()

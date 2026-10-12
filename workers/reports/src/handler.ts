@@ -7,7 +7,7 @@ export const TTL_SECONDS = 90 * 24 * 3600;
 export interface Env {
   /** Workers KV (подмножество API): ключ `YYYY/MM/<id>`, значение — конверт, metadata — мета-поля. */
   REPORTS: {
-    get(key: string, type: 'stream'): Promise<unknown | null>;
+    get(key: string, type: 'stream' | 'text'): Promise<unknown | null>;
     put(
       key: string,
       value: ArrayBuffer,
@@ -18,6 +18,10 @@ export interface Env {
   limit(ipKey: string): Promise<Verdict>;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
+  /** Токен, которым CI вызывает `POST /v1/release`; не задан — анонсы выключены (503). */
+  RELEASE_NOTIFY_TOKEN?: string;
+  /** Чат для анонсов релизов; не задан — `TELEGRAM_CHAT_ID`. */
+  RELEASE_CHAT_ID?: string;
 }
 
 export interface Ctx {
@@ -188,8 +192,139 @@ export function buildCaption(
   return lines.join('\n');
 }
 
+export const RELEASE_BODY_MAX = 64 * 1024;
+export const RELEASE_TEXT_MAX = 4096;
+const RELEASE_MARKER_TTL = 30 * 24 * 3600;
+const VERSION_RE = /^\d+\.\d+\.\d+(-beta\.\d+)?$/;
+
+export interface ReleaseInfo {
+  channel: 'beta' | 'stable';
+  version: string;
+  build: number;
+  notes: string;
+  url?: string;
+}
+
+/** Текст анонса (parse_mode HTML); видимый текст ≤ 4096 символов, заметки при нехватке места режутся с «…». */
+export function buildReleaseText(r: ReleaseInfo): string {
+  const beta = r.channel === 'beta';
+  const head = beta ? `🧪 Beta ${r.version} · build ${r.build}` : `🚀 Jormungand ${r.version} — стабильная версия`;
+  const headHtml = beta
+    ? `🧪 <b>Beta ${escapeHtml(r.version)}</b> · build ${r.build}`
+    : `🚀 <b>Jormungand ${escapeHtml(r.version)}</b> — стабильная версия`;
+  const label = 'Скачать';
+  const tail = r.url ? `\n\n${label}` : '';
+  const budget = RELEASE_TEXT_MAX - head.length - 2 - tail.length; // -2: пустая строка перед заметками
+  let shown = r.notes;
+  if (shown.length > budget) {
+    let cut = Math.max(0, budget - 1);
+    const code = shown.charCodeAt(cut - 1);
+    if (code >= 0xd800 && code <= 0xdbff) cut--; // не рвём суррогатную пару
+    shown = shown.slice(0, cut).trimEnd() + '…';
+  }
+  let out = `${headHtml}\n\n${escapeHtml(shown)}`;
+  if (r.url) out += `\n\n<a href="${escapeHtml(r.url).replace(/"/g, '&quot;')}">${label}</a>`;
+  return out;
+}
+
+async function sameSecret(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(a)),
+    crypto.subtle.digest('SHA-256', enc.encode(b)),
+  ]);
+  const x = new Uint8Array(da);
+  const y = new Uint8Array(db);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i]! ^ y[i]!;
+  return diff === 0;
+}
+
+function parseRelease(raw: unknown): ReleaseInfo | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (o.channel !== 'beta' && o.channel !== 'stable') return null;
+  if (typeof o.version !== 'string' || !VERSION_RE.test(o.version)) return null;
+  if (typeof o.build !== 'number' || !Number.isSafeInteger(o.build) || o.build < 1) return null;
+  if (typeof o.notes !== 'string') return null;
+  const notes = o.notes.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').trim();
+  if (!notes) return null;
+  const info: ReleaseInfo = { channel: o.channel, version: o.version, build: o.build, notes };
+  if (typeof o.url === 'string' && /^https:\/\/\S+$/.test(o.url.trim())) info.url = o.url.trim();
+  return info;
+}
+
+async function handleRelease(request: Request, env: Env, deps: Deps): Promise<Response> {
+  if (!env.RELEASE_NOTIFY_TOKEN) return json({ ok: false, error: 'disabled' }, 503);
+  const auth = /^Bearer (.+)$/.exec(request.headers.get('authorization') ?? '');
+  if (!auth || !(await sameSecret(auth[1]!, env.RELEASE_NOTIFY_TOKEN))) {
+    return json({ ok: false, error: 'unauthorized' }, 401);
+  }
+  const chat = env.RELEASE_CHAT_ID || env.TELEGRAM_CHAT_ID;
+  if (!env.TELEGRAM_BOT_TOKEN || !chat) return json({ ok: false, error: 'disabled' }, 503);
+
+  const ctype = (request.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+  if (ctype !== 'application/json') return json({ ok: false, error: 'unsupported-media-type' }, 415);
+  const declared = Number(request.headers.get('content-length') ?? 0);
+  if (Number.isFinite(declared) && declared > RELEASE_BODY_MAX) return json({ ok: false, error: 'too-large' }, 413);
+  const bytes = await readLimited(request, RELEASE_BODY_MAX);
+  if (bytes === 'toolarge') return json({ ok: false, error: 'too-large' }, 413);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    return json({ ok: false, error: 'bad-json' }, 400);
+  }
+  const rel = parseRelease(raw);
+  if (!rel) return json({ ok: false, error: 'bad-request' }, 400);
+
+  const marker = `_release/${rel.channel}/${rel.version}+${rel.build}`;
+  let seen = false;
+  try {
+    seen = (await env.REPORTS.get(marker, 'text')) !== null;
+  } catch {
+    // без маркера в худшем случае повторный анонс, но не потерянный
+  }
+  if (seen) return json({ ok: true, duplicate: true });
+
+  const f = deps.fetch ?? fetch;
+  let description = '';
+  try {
+    const r = await f(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chat,
+        text: buildReleaseText(rel),
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+    if (!r.ok) {
+      try {
+        const j = (await r.json()) as { description?: unknown };
+        description = typeof j.description === 'string' ? j.description.slice(0, 200) : `HTTP ${r.status}`;
+      } catch {
+        description = `HTTP ${r.status}`;
+      }
+      return json({ ok: false, error: 'telegram', description }, 502);
+    }
+  } catch (e) {
+    return json({ ok: false, error: 'telegram', description: String(e).slice(0, 200) }, 502);
+  }
+  try {
+    await env.REPORTS.put(marker, new TextEncoder().encode('1').buffer as ArrayBuffer, {
+      expirationTtl: RELEASE_MARKER_TTL,
+    });
+  } catch {
+    // анонс ушёл; потеря маркера = возможный повтор при перезапуске CI
+  }
+  return json({ ok: true });
+}
+
 export async function handle(request: Request, env: Env, ctx: Ctx, deps: Deps = {}): Promise<Response> {
   const url = new URL(request.url);
+  if (url.pathname === '/v1/release' && request.method === 'POST') return handleRelease(request, env, deps);
   if (url.pathname === '/v1/ping' && request.method === 'GET') return json({ ok: true });
   if (url.pathname === '/v1/ping' && request.method === 'POST') {
     // Пробный обмен: клиент считает его пройденным только при полном эхо 32 KiB (DPI режет соединения
