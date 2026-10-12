@@ -356,9 +356,15 @@ class Sentinel {
     final lvl = _levelOf(s, c);
     Root? best;
     for (final r in roots.open) {
-      if (r.level == Level.destination || r.level.index > lvl.index || r.key == s.key) continue;
-      if (r.level == Level.route && (c.via == null || r.subject['route'] != c.via)) continue;
-      if (r.level == Level.dns && (c.resolver == null || r.subject['dns'] != c.resolver)) continue;
+      if (r.level == Level.destination || r.key == s.key) continue;
+      // an explicit binding beats the level order: a check that resolves through a server depends on it
+      // whatever its level (a route whose server is a domain name resolves it through the default resolver)
+      final bound = r.level == Level.dns && c.resolver != null && r.subject['dns'] == c.resolver;
+      if (!bound) {
+        if (r.level.index > lvl.index) continue;
+        if (r.level == Level.route && (c.via == null || r.subject['route'] != c.via)) continue;
+        if (r.level == Level.dns) continue;
+      }
       if (best == null || r.level.index < best.level.index || (r.level == best.level && r.since.isBefore(best.since))) best = r;
     }
     return best;

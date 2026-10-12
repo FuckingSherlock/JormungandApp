@@ -40,7 +40,7 @@ class _Runner implements BoxRunner {
   Future<void> stop() async => up = false;
 }
 
-Map<String, dynamic> _body({Map<String, dynamic>? routing}) => {
+Map<String, dynamic> _body({Map<String, dynamic>? routing, String server = '127.0.0.1', bool global = true}) => {
       'plan': {
         'routing': ?routing,
         'routes': [
@@ -53,19 +53,21 @@ Map<String, dynamic> _body({Map<String, dynamic>? routing}) => {
               'nodes': [
                 {
                   'key': 's::a',
-                  'outbound': {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'},
+                  'outbound': {'type': 'shadowsocks', 'server': server, 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'},
                 },
               ],
             },
           },
         ],
         'mixedPort': 2080,
-        'global': true,
+        'global': global,
       },
     };
 
-ClosedConnection _closed({String dest = 'example.org:443', int down = 0, int? ms = 5000, String outbound = 'route0/s::a', String inbound = 'tun-in'}) =>
+ClosedConnection _closed(
+        {String dest = 'example.org:443', int down = 0, int? ms = 5000, String outbound = 'route0/s::a', String inbound = 'tun-in', String rule = ''}) =>
     ClosedConnection(
+      rule: rule,
       outbound: outbound,
       chain: [outbound, 'route0', 'proxy'],
       destination: dest,
@@ -84,7 +86,8 @@ void main() {
   late _Runner runner;
   late FakeTime time;
 
-  Future<void> start({FailureWindows windows = const FailureWindows(), bool connected = true, Map<String, dynamic>? routing}) async {
+  Future<void> start(
+      {FailureWindows windows = const FailureWindows(), bool connected = true, Map<String, dynamic>? routing, String server = '127.0.0.1', bool global = true}) async {
     tmp = await Directory.systemTemp.createTemp('jorm-sfail');
     runner = _Runner();
     time = FakeTime();
@@ -104,7 +107,7 @@ void main() {
     );
     await svc.init();
     if (connected) {
-      await svc.connect(_body(routing: routing));
+      await svc.connect(_body(routing: routing, server: server, global: global));
       await time.advanceSeconds(6); // settled: 5 s after the start
     }
   }
@@ -379,6 +382,91 @@ void main() {
       expect((e['why'] as Map)['code'], 'conn.timeout');
       final dnsStep = (e['trail'] as List).cast<Map>().firstWhere((s) => s['code'] == 'dns.resolve');
       expect(dnsStep['outcome'], 'pass');
+    });
+
+    int openDnsRoot(String id) {
+      final root = svc.sentinel.openRoot(
+        kind: 'dns.down',
+        key: 'dns|$id',
+        subject: {'dns': id, 'path': 'direct'},
+        scope: Scope.of({'dns': id}),
+        level: Level.dns,
+      );
+      final cause = svc.eventBook.add('dns', 'failed', 'warn', data: {'server': id});
+      svc.sentinel.attachEvent(root, cause);
+      return cause;
+    }
+
+    test('a rule with its own DNS server: the rule kept from the closed record finds it, an open root of it explains the streak', () async {
+      await start(global: false, routing: {
+        'dns': {
+          'servers': [
+            {'id': 'g', 'addr': 'udp://127.0.0.1:5353', 'via': 'direct', 'on': true},
+            {'id': 'g2', 'addr': 'udp://127.0.0.1:5454', 'via': 'direct', 'on': false},
+          ],
+        },
+        'rules': [
+          {
+            'id': 'r1',
+            'name': 'Work',
+            'action': 'proxy',
+            'target': '',
+            'fallback': 'default',
+            'block': 'drop',
+            'dns': 'g2',
+            'groups': {
+              'domain': {
+                'not': false,
+                'v': {'domain_suffix': ['example.org']},
+              },
+            },
+          },
+        ],
+      });
+      final cause = openDnsRoot('g2');
+      for (var i = 0; i < 3; i++) {
+        svc.failures.onClosed(_closed(rule: 'domain_suffix=example.org'));
+      }
+      await time.advanceSeconds(11);
+      final e = events('conn', 'failing').single;
+      expect([e['level'], e['verdict'], e['cause']], ['info', 'consequence', cause]);
+      expect((e['data'] as Map)['rule'], {'kind': 'user', 'name': 'Work', 'id': 'r1'});
+    });
+
+    test('the same streak with no rule is the default resolver\'s: the rule server\'s root does not explain it', () async {
+      await start(routing: dns);
+      svc.dnsQuery = (tag, name, t) async => 12;
+      openDnsRoot('g2');
+      fail(3);
+      await time.advanceSeconds(11);
+      expect(events('conn', 'failing').single['verdict'], isNot('consequence'));
+    });
+
+    test('a route with a domain-named server depends on the resolver of the domain: its dead root explains auto/unstable and conn/lost', () async {
+      await start(routing: dns, server: 'node.example.com');
+      final cause = openDnsRoot('g');
+      await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
+      final u = events('auto', 'unstable').single;
+      expect([u['level'], u['verdict'], u['cause']], ['info', 'consequence', cause]);
+      svc.routesLost(AutoNet(kind: 'lost', at: time.t.millisecondsSinceEpoch), 1);
+      await time.advanceSeconds(1);
+      final l = events('conn', 'lost').single;
+      expect([l['verdict'], l['cause']], ['consequence', cause]);
+    });
+
+    test('a route whose servers are addresses does not depend on it: the same dead root leaves auto/unstable confirmed', () async {
+      await start(routing: dns);
+      openDnsRoot('g');
+      await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
+      expect(events('auto', 'unstable').single['verdict'], 'confirmed');
+    });
+
+    test('no direct server set: the OS resolver is the one the domain servers resolve through, under the id system', () async {
+      await start(server: 'node.example.com');
+      final cause = openDnsRoot('system');
+      await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
+      final u = events('auto', 'unstable').single;
+      expect([u['verdict'], u['cause']], ['consequence', cause]);
     });
   });
 

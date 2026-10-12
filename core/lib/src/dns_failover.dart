@@ -303,17 +303,20 @@ class DnsFailover {
 
   /// `{active: server id, auto, servers: [{id, ok, ms}]}` in priority order. `ok`: null = not
   /// tested yet, false = the last probe missed or the Sentinel has an open root for the server;
-  /// `ms`: the last result, -1 = no answer, -2 = not tested. The watched servers are not listed.
+  /// `ms`: the last result, -1 = no answer, -2 = not tested. The watched-only servers (a rule's own, the OS
+  /// resolver `system`) follow the ones in use with `watched: true`: never `active`, never switched to.
   Map<String, dynamic> toJson() => {
         'active': active,
         'auto': auto,
         'servers': [
-          for (final s in _servers)
-            {
-              'id': s.id,
-              'ok': s.w.health.ms == -2 ? null : s.w.health.answered && sentinel.roots.byKey(dnsRootKey(s.id)) == null,
-              'ms': s.w.health.ms,
-            },
+          for (final s in _servers) _json(s),
+          for (final s in _watch) {..._json(s), 'watched': true},
         ],
+      };
+
+  Map<String, dynamic> _json(_Server s) => {
+        'id': s.id,
+        'ok': s.w.health.ms == -2 ? null : s.w.health.answered && sentinel.roots.byKey(dnsRootKey(s.id)) == null,
+        'ms': s.w.health.ms,
       };
 }

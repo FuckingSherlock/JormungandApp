@@ -561,7 +561,12 @@ class CoreService implements CoreApi {
     Map<String, dynamic>? result;
     (String, String)? wrote;
 
-    Map<String, dynamic> connData(Map<String, dynamic> e) => {for (final x in e.entries) if (x.key != 'noticed') x.key: x.value};
+    // the raw rule text of the evidence becomes the event's rule (as in `site/*`)
+    Map<String, dynamic> connData(Map<String, dynamic> e) => {
+          for (final x in e.entries)
+            if (x.key != 'noticed')
+              x.key: x.key == 'rule' && x.value is String ? ruleEventData(_ruleNames, x.value as String) : x.value,
+        };
     bool fromConn(Map<String, dynamic> e) => e['count'] != null;
     // the probe opened the site through the same server while the app's own connections went on failing: not a
     // recovery, the site is not the culprit (docs/failures.md → Проверки сайтов)
@@ -659,7 +664,7 @@ class CoreService implements CoreApi {
               return CheckResult('probe.same', Outcome.fail, {'outbound': outbound, 'opens': true, 'appFails': true});
             }
             return CheckResult('probe.same', opens ? Outcome.pass : Outcome.fail, {'outbound': outbound});
-          }, timeout: const Duration(seconds: 15), level: Level.destination, via: onRoute),
+          }, timeout: const Duration(seconds: 15), level: Level.destination, via: onRoute, resolver: onRoute == null ? null : _routeResolver(onRoute)),
           Check.alternative('probe.alt', (cancel) async {
             alt = null; // a parked ladder runs again from the top: nothing of the last pass is left
             if (diverged) return const CheckResult('probe.alt', Outcome.inconclusive, {'reason': 'sameOpens'});
@@ -850,7 +855,7 @@ class CoreService implements CoreApi {
     final v = await sentinel.suspect(Suspicion(
       kind: 'auto.unstable',
       key: key,
-      subject: {'route': u.id, 'path': 'proxy'},
+      subject: {'route': u.id, 'path': 'proxy', 'dns': ?_routeResolver(u.id)},
       evidence: {'id': u.id, 'strikes': u.strikes, 'holdMs': u.holdMs},
       window: windows.autoUnstable,
       why: Why('route.unstable', {'strikes': u.strikes, 'holdMs': u.holdMs}),
@@ -868,7 +873,7 @@ class CoreService implements CoreApi {
     unawaited(sentinel.suspect(Suspicion(
       kind: 'conn.lost',
       key: 'conn.lost',
-      subject: const {'path': 'proxy'},
+      subject: {'path': 'proxy', 'dns': ?_routesResolver()},
       evidence: {'routes': routes},
       window: windows.connLost,
       firstSeen: DateTime.fromMillisecondsSinceEpoch(n.at),
@@ -1040,7 +1045,7 @@ class CoreService implements CoreApi {
 
   /// The DNS server a connection resolved through (docs/rules.md §6): the user rule's own server; for a direct
   /// outbound the server of its `domain_resolver` (`direct@dns-<id>`) or the default one; else the server in use.
-  /// Null when it is not one of the config's servers by id (the OS resolver `local`) or there is none.
+  /// The OS resolver (`local`) is the server `system`. Null when there is none.
   ({String id, String tag, bool vpn})? _resolverFor(String outbound, Map<String, dynamic> evidence) {
     final text = evidence['rule'] is String ? evidence['rule'] as String : '${(evidence['noticed'] as Map?)?['rule'] ?? ''}';
     final origin = text.isEmpty ? null : _ruleNames?.of(text);
@@ -1056,6 +1061,42 @@ class CoreService implements CoreApi {
     DnsEntry? e = tag == null ? null : all.where((s) => s.tag == tag).firstOrNull;
     if (e == null && tag == null) e = all.where((s) => s.id == _dns?.active).firstOrNull ?? _dnsServers.firstOrNull;
     return e == null ? null : (id: e.id, tag: e.tag, vpn: _dnsVpn.contains(e.id));
+  }
+
+  /// The id of the DNS server that resolves the domain-named servers of route [routeId] (`default_domain_resolver`,
+  /// the OS resolver `system` when no direct server is set); null when every server of the route is an address
+  /// or the plan has no such route. A route depends on it (docs/failures.md → DNS-серверы как узлы).
+  String? _routeResolver(String routeId) {
+    final plan = _plan;
+    if (plan == null) return null;
+    final rs = planRoutes(plan);
+    for (var i = 0; i < rs.length; i++) {
+      if ('${rs[i]['id'] ?? routeTag(i)}' == routeId) return _hasDomainServer(rs[i]) ? _domainResolverId() : null;
+    }
+    return null;
+  }
+
+  /// The resolver every route depends on: set only when each route has a domain-named server (one reachable
+  /// by address would still answer, so the resolver would not explain «no route answers»).
+  String? _routesResolver() {
+    final plan = _plan;
+    if (plan == null) return null;
+    final rs = planRoutes(plan);
+    return rs.isNotEmpty && rs.every(_hasDomainServer) ? _domainResolverId() : null;
+  }
+
+  String? _domainResolverId() => [..._dnsServers, ..._dnsExtra].where((s) => s.tag == _domainResolver).firstOrNull?.id;
+
+  static bool _hasDomainServer(Map<String, dynamic> route) {
+    for (final g in [route['entry'], route['main']]) {
+      if (g is! Map) continue;
+      for (final n in (g['nodes'] as List? ?? const [])) {
+        final o = n is Map ? n['outbound'] : null;
+        final s = o is Map ? o['server'] : null;
+        if (s is String && s.isNotEmpty && InternetAddress.tryParse(s) == null) return true;
+      }
+    }
+    return false;
   }
 
   void _stopAuto({bool park = false}) {

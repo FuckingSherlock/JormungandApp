@@ -358,7 +358,10 @@ void main() {
       expect(sw['data'], {'from': 'a', 'to': 'b', 'reason': 'failover'});
       var dns = (await call('/api/status'))['dns'] as Map;
       expect([dns['active'], dns['auto']], ['b', true]);
-      expect((dns['servers'] as List).map((s) => (s as Map)['ok']), [false, true]);
+      // the servers in use; the watched-only ones (the system resolver) follow with `watched: true`
+      final inUse = [for (final s in dns['servers'] as List) if ((s as Map)['watched'] != true) s];
+      expect(inUse.map((s) => (s as Map)['ok']), [false, true]);
+      expect((dns['servers'] as List).where((s) => (s as Map)['watched'] == true).map((s) => (s as Map)['id']), contains('system'));
       expect(await _get(mixed, 'dead.test', target.port), isNull, reason: 'Block');
 
       // Switch automatically off: the first server is back at once

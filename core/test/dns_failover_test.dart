@@ -301,7 +301,10 @@ void main() {
     expect(r.sentinel.roots.byKey('dns|x'), isNotNull);
     expect(r.svc.active, 'a');
     expect(r.modes, isEmpty);
-    expect((r.svc.toJson()['servers'] as List).map((s) => (s as Map)['id']), ['a', 'b'], reason: 'status.dns lists the servers in use only');
+    final listed = (r.svc.toJson()['servers'] as List).cast<Map>();
+    expect(listed.map((s) => s['id']), ['a', 'b', 'x'], reason: 'status.dns lists the watched-only servers after the ones in use');
+    expect(listed.map((s) => s['watched']), [null, null, true]);
+    expect(listed.last, containsPair('ok', false));
     r.alive['dns-x'] = 10;
     await r.round();
     expect(r.sentinel.roots.byKey('dns|x'), isNull);
@@ -330,6 +333,27 @@ void main() {
     ]);
     svc.stop();
     sentinel.dispose();
+  });
+
+  test('the OS resolver has the id system and is watched only when no `system` server is set', () {
+    List<String> extra(List<Map<String, dynamic>> servers) {
+      final info = RoutingInfo();
+      buildConfig({
+        'kind': 'unit',
+        'main': {
+          'pick': 'priority',
+          'chosen': 'k::0',
+          'nodes': [
+            {'key': 'k::0', 'outbound': {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'}},
+          ],
+        },
+        'routing': {'dns': {'servers': servers}},
+      }, info: info);
+      return [for (final s in info.dnsExtra) '${s.id}=${s.tag}'];
+    }
+
+    expect(extra([{'id': 'g', 'addr': 'udp://127.0.0.1:5353', 'via': 'direct', 'on': true}]), ['$systemDnsId=local']);
+    expect(extra([{'id': 's', 'addr': 'system', 'via': 'direct', 'on': true}]), isEmpty, reason: 'a server of its own is watched as any other');
   });
 
   test('a mode sing-box refuses is no switch', () async {

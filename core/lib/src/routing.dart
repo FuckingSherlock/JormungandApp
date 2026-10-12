@@ -222,6 +222,10 @@ class TargetFallback {
 /// checks each one and switches between them (dns_failover.dart).
 typedef DnsEntry = ({String id, String tag});
 
+/// The Sentinel's id of the OS resolver (`local`) when the settings have no `system` server: it resolves the
+/// DNS servers' hostnames and what goes out directly, so it is watched like the others (never switched to).
+const systemDnsId = 'system';
+
 /// What [buildConfig] learned besides the config, for the services that run beside sing-box.
 class RoutingInfo {
   /// One per selector, in the order the rules use them.
@@ -347,7 +351,11 @@ class _Builder {
     final system = _dnsOn.where(_isSystem).firstOrNull;
     // the bootstrap: resolves DoH / DoT hostnames and, without a direct server, the rest
     _boot = system != null ? _dnsTag(system) : 'local';
-    if (system == null) out.dnsServers.add({'type': 'local', 'tag': 'local'});
+    if (system == null) {
+      out.dnsServers.add({'type': 'local', 'tag': 'local'});
+      // the OS resolver has no entry of its own in the settings: watched by the Sentinel under a stable id
+      out.dnsExtra.add((id: systemDnsId, tag: 'local'));
+    }
     for (final s in _dnsOn) {
       _addDnsServer(s);
     }

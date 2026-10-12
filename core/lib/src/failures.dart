@@ -197,6 +197,10 @@ class _Entry {
   final String who, process, host, outbound, inbound, network;
   final int port;
   final buckets = _Buckets();
+
+  /// The raw text of the rule the last connection of the entry matched (`rule` of the closed record): the judge
+  /// finds the rule's own DNS server from it.
+  String rule = '';
   int okSince = 0, failedSince = 0, bgSince = 0;
   final kinds = <ConnKind, int>{};
   int lastAt = 0, lastFailAt = 0, lastOkAt = 0;
@@ -415,6 +419,7 @@ class FailureBook {
     final at = _now().millisecondsSinceEpoch, minute = at ~/ 60000;
     final e = _entryFor(c, h, port, at);
     e.lastAt = at;
+    if (c.rule.isNotEmpty) e.rule = c.rule;
     _total.add(minute, failed: out.failed);
     e.buckets.add(minute, failed: out.failed);
     if (out.ok) {
@@ -532,6 +537,7 @@ class FailureBook {
         'count': e.streak.length,
         'windowMs': streakWindow.inMilliseconds,
         'source': 'closed',
+        if (e.rule.isNotEmpty) 'rule': e.rule,
       },
       bg: bg,
       firstSeen: DateTime.fromMillisecondsSinceEpoch(e.streak.first.$1, isUtc: true),

@@ -196,6 +196,48 @@ void main() {
       expect(v.kind, VerdictKind.blip);
     });
 
+    Root deadDns(String id) => sentinel.openRoot(kind: 'dns.down', key: 'dns|$id', subject: {'dns': id, 'path': 'direct'}, scope: Scope.of({'dns': id}), level: Level.dns);
+
+    Check probeVia(String? resolver, void Function() ran, {String via = 'B'}) => Check.recovery('probe.target', (_) async {
+          ran();
+          return const CheckResult('probe.target', Outcome.pass);
+        }, level: Level.route, via: via, resolver: resolver);
+
+    test('a dns root stops a check bound to its server at any level (a route resolving its domain servers), by the binding, not the level', () async {
+      await settledCore();
+      final root = deadDns('g');
+      var ran = 0;
+      final v = await sentinel.suspect(failing(checks: [probeVia('g', () => ran++)]));
+      expect(v.kind, VerdictKind.consequence);
+      expect(ran, 0);
+      expect(v.trail.firstWhere((t) => t.code == 'check.skipped').params['root'], root.id);
+    });
+
+    test('a check bound to another server, or to none, is not stopped by a dns root', () async {
+      await settledCore();
+      deadDns('g');
+      var ran = 0;
+      for (final r in ['h', null]) {
+        await sentinel.suspect(failing(
+            checks: [probeVia(r, () => ran++, via: 'C')], scope: Scope.none, subject: {'host': 'a.com', 'route': 'C'}, key: 'k|$r'));
+      }
+      expect(ran, 2);
+    });
+
+    test('a dead route stops the check of a via-VPN dns server (the route is the cause, as before)', () async {
+      await settledCore();
+      deadRoute();
+      var ran = 0;
+      final v = await sentinel.suspect(failing(checks: [
+        Check.recovery('dns.answers', (_) async {
+          ran++;
+          return const CheckResult('dns.answers', Outcome.pass);
+        }, level: Level.dns, via: 'B', resolver: 'v')
+      ]));
+      expect(v.kind, VerdictKind.consequence);
+      expect(ran, 0);
+    });
+
     test('a core restart cancels the running check; it is run again once the core has settled', () async {
       await settledCore();
       final runs = <Cancel>[];
