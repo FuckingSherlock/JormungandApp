@@ -1,7 +1,7 @@
-# Builds the release APKs (one per ABI) of the Android app, all local:
+# Builds the release APK (arm64-v8a only) of the Android app, all local:
 #   android/ project (flutter create, first time) -> libbox.aar (core/tool/build_libbox.ps1,
 #   when missing) -> overlay (node tool/apply_android_overlay.mjs) -> release keystore ->
-#   flutter build apk --release --split-per-abi
+#   flutter build apk --release --split-per-abi --target-platform android-arm64
 #
 #   pwsh app/tool/build_apk.ps1 [-DryRun] [-BuildName 0.1.0 -BuildNumber 2] [-RebuildLibbox]
 #
@@ -236,7 +236,8 @@ $props = Join-Path $app 'android/key.properties'
 
 # ── build ────────────────────────────────────────────────────────────────────────────────
 Run $flutter @('pub', 'get') $app
-$build = @('build', 'apk', '--release', '--split-per-abi')
+# arm64-v8a only (every current phone; 32-bit ARM and x86_64 dropped 2026-10-12, docs/updates.md)
+$build = @('build', 'apk', '--release', '--split-per-abi', '--target-platform', 'android-arm64')
 if ($BuildName) { $build += @('--build-name', $BuildName) }
 # versionCode = build for every ABI (docs/updates.md section 5)
 if ($BuildNumber) { $build += @('--build-number', $BuildNumber, '--android-project-arg', 'force-version-code-ignoring-abi=true') }

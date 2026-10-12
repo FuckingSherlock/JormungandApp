@@ -1,7 +1,7 @@
 # Builds libbox.aar (sing-box's Android library, gomobile) for the app: the sing-box release that
 # core/tool/bin pins, the build tags and linker flags sing-box's own Android build uses
 # (cmd/internal/build_libbox/main.go + release/LDFLAGS are READ from the checkout, so a version
-# bump does not drift), arm64 + armv7 + x86_64 (the emulator).
+# bump does not drift), arm64 only (the app ships arm64-v8a only; -Targets adds others).
 #
 #   pwsh core/tool/build_libbox.ps1                 # version of core/tool/bin/sing-box
 #   pwsh core/tool/build_libbox.ps1 -Version 1.14.3 # an explicit one
@@ -22,7 +22,7 @@
 [CmdletBinding()]
 param(
     [string]$Version,
-    [string[]]$Targets = @('android/arm64', 'android/arm', 'android/amd64'),
+    [string[]]$Targets = @('android/arm64'),
     [int]$AndroidApi = 24,
     [string]$Root = 'G:\ANDROID_DEV',
     [switch]$LocalGo,   # do not pin Go to the version sing-box's CI uses (GOTOOLCHAIN)

@@ -45,7 +45,7 @@ env:
   # that only grows. Above every versionCode a local build has used (the old per-ABI offsets
   # reached 2000 + n), and it must never go down (docs/updates.md section 5)
   BUILD_OFFSET: '3000'
-  KEEP_BETAS: '10'
+  KEEP_BETAS: '3'
   # delta updates (docs/updates.md, "Дельта-обновления"): patches from the APKs of this many latest
   # releases of the same channel (must stay <= KEEP_BETAS: the cleanup below keeps that many), and a
   # patch bigger than this share of the whole APK is not worth publishing
@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      # The runner image is ~90 % full; three ABI builds + libbox + delta patches ran it out of disk
+      # The runner image is ~90 % full; the APK build + libbox + delta patches ran it out of disk
       # (run 38278579444: "No space left on device", job log lost). Drop toolchains this job never uses
       # (the Android SDK, Java, Node, Go, Flutter and PowerShell - pwsh runs build_libbox / build_apk - stay).
       - name: Free disk space
@@ -259,7 +259,7 @@ jobs:
           echo "SIGNER=$signer" >> "$GITHUB_ENV"
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
           mkdir -p "$RUNNER_TEMP/dist"
-          for abi in arm64-v8a armeabi-v7a x86_64; do
+          for abi in arm64-v8a; do
             src="app/build/app/outputs/flutter-apk/app-$abi-release.apk"
             dst="$RUNNER_TEMP/dist/jormungand-$VERSION-$abi.apk"
             cp "$src" "$dst"
@@ -295,7 +295,7 @@ jobs:
           ( cd core && dart pub get ) || { echo "::warning::dart pub get failed, no deltas"; exit 0; }
           for tag in $tags; do
             oldver="${tag#v}"
-            for abi in arm64-v8a armeabi-v7a x86_64; do
+            for abi in arm64-v8a; do
               new="$dist/jormungand-$VERSION-$abi.apk"
               old="$work/$tag/jormungand-$oldver-$abi.apk"
               patch="$dist/jormungand-$VERSION-$abi-from-$oldver.delta"
@@ -337,8 +337,6 @@ jobs:
           dart pub get
           dart run tool/release_manifest.dart --key "$key" --version "$VERSION" --build "$BUILD" --channel "$CHANNEL" --out "$dist" \
             --asset "android-arm64-v8a=$dist/jormungand-$VERSION-arm64-v8a.apk" \
-            --asset "android-armeabi-v7a=$dist/jormungand-$VERSION-armeabi-v7a.apk" \
-            --asset "android-x86_64=$dist/jormungand-$VERSION-x86_64.apk" \
             "${delta_args[@]}" \
             --url-base "https://github.com/$FEED_REPO/releases/download/v$VERSION" \
             --signer-sha256 "$SIGNER" \

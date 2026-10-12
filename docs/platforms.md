@@ -182,7 +182,8 @@ Visual Studio с «Desktop development with C++» — пока не устано
 | Flutter Windows | `flutter build windows` в `app/` | нужна VS C++ |
 
 `build_apk.ps1`: `flutter create` (если нет `android/`) → libbox (если нет aar) → `apply_android_overlay.mjs`
-→ ключ → `flutter build apk --release --split-per-abi`. Debug-подписанных сборок нет: и локальные, и
+→ ключ → `flutter build apk --release --split-per-abi --target-platform android-arm64` (только arm64-v8a;
+libbox тоже только `android/arm64`). Debug-подписанных сборок нет: и локальные, и
 CI-сборки подписаны одним релизным ключом, поэтому они обновляют друг друга; отсутствующее
 хранилище — ошибка (новый ключ ломает обновления; создаёт только `-NewKeystore`). Оба скрипта (`build_libbox.ps1`, `build_apk.ps1`)
 работают и на Linux под `pwsh` (CI): пути берутся из `JAVA_HOME` / `ANDROID_HOME` / `ANDROID_NDK_HOME` /
