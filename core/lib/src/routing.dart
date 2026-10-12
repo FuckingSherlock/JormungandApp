@@ -489,6 +489,15 @@ List<Map<String, dynamic>> resolveRules(List<DnsCandidate> l, {List<Map<String, 
 Routing buildRouting(Map plan, GroupEmitter group, {Map<String, String> ruleSetFiles = const {}, String dnsFlagDir = 'dns-flags'}) =>
     _Builder(plan, group, ruleSetFiles, dnsFlagDir).build();
 
+/// The DNS candidates of each side (`direct` / `vpn`) that a `routing.dns` plan ([dns]: the `dns` block of a plan's
+/// `routing`) makes, in the order the DNS rules try them, without building a config. The address resolver
+/// (address_resolver.dart) reads the direct side of it.
+Map<String, List<DnsCandidate>> dnsSidesOf(Map dns, {String dnsFlagDir = 'dns-flags'}) {
+  final b = _Builder({'routing': {'dns': dns}}, (tag, g, {detour}) {}, const {}, dnsFlagDir);
+  b._dns();
+  return {for (final e in b.out.dnsSides.entries) e.key: [...e.value]};
+}
+
 /// A DNS provider of the plan (the old single-address server too), as the builder reads it.
 class _Provider {
   _Provider(this.id, {required this.on, required this.system, required this.sides, required this.use, required this.transports});

@@ -4,9 +4,14 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'address_book.dart';
+import 'address_pin.dart';
+import 'address_resolver.dart';
 import 'api.dart';
 import 'appupdate.dart';
 import 'auto.dart';
+import 'catalog/catalog.dart' show Catalog;
+import 'catalog/plan_builder.dart' show CatalogPlan;
 import 'config.dart';
 import 'device.dart';
 import 'dns_failover.dart';
@@ -182,6 +187,7 @@ class CoreService implements CoreApi {
     svc: () => svcFetch,
     onSvcFailed: _subFailed,
     onDiverged: _subDiverged,
+    onNodes: (sid, nodes) => _warmNodes(nodes, 'subscription update'),
     onEvent: (type, data) {
       _event('sub', type, type == 'failed' ? 'error' : 'info', data,
           note: type == 'failed'
@@ -1511,17 +1517,19 @@ class CoreService implements CoreApi {
   @override
   Future<Map<String, dynamic>> fetchSource(Map<String, dynamic> body) async {
     final s = ((body['source'] as Map?) ?? const {}).cast<String, dynamic>();
-    return updater.guard(
-      body['sid'] as String?,
-      () async => updateSubscription(
+    return updater.guard(body['sid'] as String?, () async {
+      final r = await updateSubscription(
         s,
         hwid: s['hwid'] == true ? await _hwid : null,
         svc: svcFetch,
         sid: body['sid'] as String?,
         rediscover: body['rediscover'] == true,
         onDiverged: _subDiverged,
-      ),
-    );
+      );
+      final nodes = (r['patch'] as Map?)?['nodes'];
+      if (nodes is List) _warmNodes(nodes, 'subscription update');
+      return r;
+    });
   }
 
   /// `sub/diverged`: in Auto the direct and the tunnel's answers for a subscription differ; the tunnel's was used.
@@ -1554,6 +1562,59 @@ class CoreService implements CoreApi {
   @override
   Map<String, dynamic> addSourceFromText(Map<String, dynamic> body) =>
       {'source': localSourceFromText('${body['name'] ?? ''}', '${body['text'] ?? ''}')};
+
+  // ── addresses of the servers (address_resolver.dart, docs/rules.md §6) ──
+
+  /// The last known addresses of the hostnames the config needs (`<dataDir>/addresses.json`).
+  late final addressBook = AddressBook(File(p.join(dataDir, 'addresses.json')), now: _now);
+
+  /// Resolves the hostnames of the servers through the direct side's DNS servers; an id the DNS failover
+  /// switched off is not asked.
+  late final addresses = AddressResolver(
+    book: addressBook,
+    fetch: () => svcFetch,
+    settings: _addressSettings,
+    alive: (id) => _dnsFlagMemory[id] ?? true,
+    log: logBook.note,
+    now: _now,
+  );
+  AddressSettings? _addrSettings;
+  int _addrSettingsAt = 0;
+
+  /// What a lookup reads: the connected plan's DNS block and IPv6 setting; nothing connected — the saved
+  /// snapshot's. A connected plan without a DNS block (tests) has no servers: only the OS resolver answers.
+  /// Kept for 10 s (the snapshot is parsed into a catalog).
+  Future<AddressSettings> _addressSettings() async {
+    final cached = _addrSettings;
+    if (cached != null && _now().millisecondsSinceEpoch - _addrSettingsAt < 10000) return cached;
+    final plan = _plan;
+    Map? dns;
+    var ipv6 = false;
+    if (plan != null) {
+      dns = (plan['routing'] as Map?)?['dns'] as Map?;
+      ipv6 = planIpv6(plan);
+    } else {
+      try {
+        final c = Catalog.fromJson(await store.read());
+        dns = c.dnsPlan();
+        ipv6 = c.connCfg.ipv6;
+      } catch (e) {
+        logBook.note('warn', 'address: the saved DNS settings could not be read ($e): only the OS resolver is used');
+      }
+    }
+    final st = AddressSettings(candidates: dns == null ? const [] : (dnsSidesOf(dns)['direct'] ?? const []), ipv6: ipv6);
+    _addrSettings = st;
+    _addrSettingsAt = _now().millisecondsSinceEpoch;
+    return st;
+  }
+
+  /// A server list arrived (a subscription update, timer or UI): its hostnames are resolved in the background,
+  /// the fresh ones again too (an address may have moved).
+  void _warmNodes(List nodes, String why) {
+    final hosts = nodesHostnames(nodes);
+    if (hosts.isEmpty) return;
+    unawaited(addresses.ensure(hosts, why: why, wait: const Duration(seconds: 30), refreshAll: true));
+  }
 
   /// The one way sing-box is started, by a connect and by a restart after a crash: the
   /// rule lists on disk first (ones via VPN that are missing wait for the tunnel — the

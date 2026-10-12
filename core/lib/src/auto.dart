@@ -319,7 +319,7 @@ typedef DelayTest = Future<int> Function(String tag, String url, int timeoutMs);
 
 class AutoService {
   AutoService(this.api, Map<String, dynamic> plan,
-      {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, ProbePool? pool})
+      {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, this.onDown, ProbePool? pool})
       : settings = settings ?? AutoSettings.fromPlan(plan),
         pool = pool ?? ProbePool.solo(),
         manual = plan['manual'] == true,
@@ -346,6 +346,11 @@ class AutoService {
 
   /// A line for the log (jormd: the Logs tab, as `[jormd] auto: …`).
   final void Function(String line)? note;
+
+  /// A server of a group missed `failAfter` tests in a row (and again with every further miss): the group's tag
+  /// (`route0`, `route1-entry`) and the server's key. The owner decides what a dead server asks for (the core
+  /// looks at its address, service.dart); Auto's own failover does not wait for it.
+  final void Function(String groupTag, String key)? onDown;
 
   /// Replaceable while running (Settings → Auto mode changed): the next round uses it.
   AutoSettings settings;
@@ -815,7 +820,10 @@ class AutoService {
     final ms = await _ping(g, key);
     if (!_stopped) {
       g.of(key).record(ms, _clock());
-      if (ms < 0) g.missed.add(key);
+      if (ms < 0) {
+        g.missed.add(key);
+        if (onDown != null && g.of(key).fails >= settings.failAfter) onDown!(g.tag, key);
+      }
     }
     return ms;
   }
@@ -877,7 +885,9 @@ class AutoService {
     if (res != null && res.isNotEmpty) {
       for (final k in g.keys) {
         if (k == failed) continue;
-        g.of(k).record(res[g.member(k)] ?? -1, now);
+        final ms = res[g.member(k)] ?? -1;
+        g.of(k).record(ms, now);
+        if (ms < 0 && onDown != null && g.of(k).fails >= settings.failAfter) onDown!(g.tag, k);
       }
     }
     await refresh();

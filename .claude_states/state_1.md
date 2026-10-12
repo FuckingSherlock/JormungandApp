@@ -86,7 +86,10 @@
   приоритету, sing-box берёт первый живой; ядро только выключает мёртвые / включает ожившие (flap guard). clash_mode для
   DNS убирается. Выход direct (порт прокси) — шаг `resolve` перед прямыми правилами. Обильная отладка (видна в отчёте),
   проверить fswatch на Android. Вариант «резолвить у себя на ПК» — в `to_think.md`.
-  **D1a сделан** (`05f5119`). **В работе: D1b** (coder-deep): `dns_failover.dart`, `dns_flags.dart`, `service.dart`
+  **D1b сделан** (`3af87af`). **В работе: D2** (coder-deep): пре-резолв адресов нод и hostname DoH/DoT —
+  новый модуль резолвера + кэш, `config.dart` (IP в server, домен в SNI/Host), подписки/подключение, Sentinel/Auto
+  (перерезолв по сбою ноды). Дальше D3 приложение.
+  **D1a сделан** (`05f5119`). Было: D1b (coder-deep): `dns_failover.dart`, `dns_flags.dart`, `service.dart`
   (status.dns, события), `sentinel/`, `routing.dart` (оставшиеся фиксированные пути), тесты, docs.
   Было D1a (coder-deep): модель провайдер+транспорты+стороны, умолчания, разовая миграция, настройка
   прямого трафика, конфиг с флажками (все вкл.), `resolve` перед direct; файлы `rules_model.dart`, `catalog.dart`,

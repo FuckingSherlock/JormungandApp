@@ -138,6 +138,7 @@ class SubscriptionUpdater {
     this.onEvent,
     this.onSvcFailed,
     this.onDiverged,
+    this.onNodes,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
@@ -167,6 +168,10 @@ class SubscriptionUpdater {
 
   /// Auto: the direct and the tunnel's answers differ (the tunnel's was used): `{source, name, host, ua, …}`.
   final void Function(Map<String, dynamic> data)? onDiverged;
+
+  /// An update that landed brought a server list (not a 304): the source's id and the nodes it now holds. The
+  /// core resolves their hostnames then (address_resolver.dart); the UI's own updates do the same in the service.
+  final void Function(String sid, List<Map<String, dynamic>> nodes)? onNodes;
 
   /// What the timer's updates did, for the events journal: `('updated', {source, name,
   /// added, removed, total})` when the server list changed, `('failed', {source, name,
@@ -253,6 +258,8 @@ class SubscriptionUpdater {
         if (await store.patchSource(sid, _expect(s), patch)) {
           done.add(sid);
           _report(sid, s, patch);
+          final nodes = patch['nodes'];
+          if (nodes is List) onNodes?.call(sid, [for (final n in nodes) if (n is Map) n.cast<String, dynamic>()]);
         }
       } catch (e) {
         stderr.writeln('[updater] ${s['name'] ?? sid}: $e');

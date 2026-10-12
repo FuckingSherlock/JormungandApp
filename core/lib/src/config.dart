@@ -41,6 +41,10 @@
 /// [svc]: the loopback inbound the core's own service traffic goes out through, a user per path
 /// (svc_in.dart): the route rules of its users go first too; [svc] receives the table of the paths.
 ///
+/// [pins]: hostname (lower case) → the address the core resolved for it (address_resolver.dart): servers and
+/// DNS servers named by a host get the address in `server` and keep the name where the protocol needs it
+/// (address_pin.dart); a host without a pin keeps today's form (the name, resolved by sing-box itself).
+///
 /// [info] receives what the services beside sing-box need to know about the routing: the
 /// "If unavailable" selectors (fallback.dart) and the DNS servers in use (dns_failover.dart).
 ///
@@ -59,6 +63,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 
+import 'address_pin.dart';
 import 'plan.dart';
 import 'probe.dart';
 import 'routing.dart';
@@ -215,7 +220,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     List<String>? warnings,
     RoutingInfo? info,
     List<String> selfPaths = const [],
-    List<String> selfPackages = const []}) {
+    List<String> selfPackages = const [],
+    Map<String, String> pins = const {}}) {
   final outs = <Map<String, dynamic>>[];
   final tun = planTun(plan);
   final test = (plan['urlTest'] as Map?) ?? const {};
@@ -228,7 +234,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
       final t = '$tag/${n['key']}';
       if (members.contains(t)) continue;
-      outs.add({...(n['outbound'] as Map).cast<String, dynamic>(), 'tag': t, 'detour': ?detour});
+      outs.add({...pinOutbound((n['outbound'] as Map).cast<String, dynamic>(), pins), 'tag': t, 'detour': ?detour});
       members.add(t);
     }
     if (members.isEmpty) throw ArgumentError('No usable servers for "$tag"');
@@ -276,6 +282,12 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   });
   outs.add({'type': 'direct', 'tag': 'direct'});
   final routing = buildRouting(plan, group, ruleSetFiles: ruleSetFiles, dnsFlagDir: dnsFlagDir);
+  // a DNS server named by a host holds the address the core resolved (address_pin.dart)
+  if (pins.isNotEmpty) {
+    for (var i = 0; i < routing.dnsServers.length; i++) {
+      routing.dnsServers[i] = pinDnsServer(routing.dnsServers[i], pins);
+    }
+  }
   outs.addAll(routing.outbounds);
   warnings?.addAll(routing.warnings);
   info?.fallbacks.addAll(routing.fallbacks);

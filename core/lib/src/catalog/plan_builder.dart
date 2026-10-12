@@ -474,7 +474,13 @@ extension CatalogPlan on Catalog {
             },
       ],
       'geo': {'geosite': geo('geosite'), 'geoip': geo('geoip')},
-      'dns': {
+      'dns': dnsPlan(),
+    };
+  }
+
+  /// Settings → DNS as `routing.dns` of the plan; the address resolver reads the same block from the saved
+  /// snapshot when nothing is connected (address_resolver.dart).
+  Json dnsPlan() => {
         'servers': [
           for (final id in dnsOrder)
             if (dnsServers[id] != null && mockupPlan)
@@ -492,7 +498,5 @@ extension CatalogPlan on Catalog {
         if (!mockupPlan) 'directPolicy': dnsCfg.directPolicy, // 'localFirst' | 'priority': the order of the direct side
         'resolve': dnsCfg.resolve, // 'auto' | 'off' | a server id: the `resolve` step before IP rules
         'hijack': dnsCfg.hijack, // TUN only: the core answers every DNS query
-      },
-    };
-  }
+      };
 }

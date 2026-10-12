@@ -93,6 +93,14 @@ const outsideTunnel = <OutsideEntry>[
     ['core/lib/src/dns_probe.dart'],
   ),
   OutsideEntry(
+    'address-resolve',
+    'The core resolves the hostnames of its servers itself (address_resolver.dart): DoH through the service fetcher\'s '
+        'direct path, DoT / UDP / TCP straight to the direct side\'s DNS servers and the OS resolver as the last resort; '
+        'must reach them without the tunnel, so the self rule and a DNS that works with every node dead',
+    OutsideHow.ownRule,
+    ['core/lib/src/address_resolver.dart'],
+  ),
+  OutsideEntry(
     'singbox-process',
     'Desktop: the sing-box processes the core starts (the connection, throwaway ping / speed-test ones); '
         'their path is in selfProcessPaths, so the helper instances go direct instead of looping',
