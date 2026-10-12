@@ -63,12 +63,6 @@ const outsideTunnel = <OutsideEntry>[
     ['core/lib/src/fetch.dart'],
   ),
   OutsideEntry(
-    'ruleset-download',
-    'Rule lists (rule sets, geo) downloaded by the core, direct or via tunnel-in',
-    OutsideHow.ownRule,
-    ['core/lib/src/rulesets.dart'],
-  ),
-  OutsideEntry(
     'app-update',
     'App update: feed manifest, delta and full download, direct or via tunnel-in',
     OutsideHow.ownRule,

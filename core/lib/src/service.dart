@@ -110,8 +110,8 @@ class CoreService implements CoreApi {
       if (line.contains('updated default interface')) sentinel.context.interfaceChanged();
     };
     pool.onChange = (s) => sentinel.context.pool(s, osOffline: pool.osOffline);
-    ruleSets.onFailed = (tag, url, error) => _event('rules', 'ruleSetFailed', 'warn', {'tag': tag, 'url': url, 'error': error},
-        note: 'Rule set $tag not downloaded ($url): $error');
+    ruleSets.fetchSource = () => svcFetch;
+    ruleSets.onFailed = _ruleSetFailed;
     ruleSets.onUpdated = (tag) => _event('rules', 'ruleSetUpdated', 'info', {'tag': tag}, note: 'Rule set $tag updated');
   }
 
@@ -388,6 +388,7 @@ class CoreService implements CoreApi {
     _wakeUp();
     _stopAuto();
     _netTimer?.cancel();
+    _listsTimer?.cancel();
     sentinel.dispose();
     updater.stop();
     await appUpdater?.dispose();
@@ -1288,7 +1289,7 @@ class CoreService implements CoreApi {
   Future<(RuleSetFetch, List<String>)> _startSingBox(Map<String, dynamic> plan, {required bool sys}) async {
     // TUN needs administrator rights: said before anything starts (a connect and a restart alike)
     if (planTun(plan) && !_isElevated()) throw TunNeedsAdmin();
-    final lists = await ruleSets.ensureFor(plan, proxyPort: runner.running ? _tunnelPort : null);
+    final lists = await ruleSets.ensureFor(plan, tunnel: runner.running);
     final warnings = <String>[];
     final mixed = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     final tunnelPort = await freePort(exclude: {mixed});
@@ -1428,6 +1429,7 @@ class CoreService implements CoreApi {
       sentinel.context.started(since: _upSince);
       _startAuto(_plan!);
       _recheckExit();
+      _refreshLists(_connectSeq, plan, RuleSetFetch(((rec['ruleSetFiles'] as Map?) ?? const {}).cast<String, String>(), [], []));
       logBook.note('info', 'Took over the running tunnel (${plan['kind']}, up since $_upSince)');
       _changed();
       return {'adopted': true, 'plan': plan, 'status': _statusMap()};
@@ -1453,15 +1455,71 @@ class CoreService implements CoreApi {
     return port;
   }
 
-  /// Through the tunnel now: missing lists (then a restart picks them up, on the route
-  /// Auto is on), stale ones (replaced in place, sing-box reloads a local rule set itself).
+  /// `rules/ruleSetFailed`. No path answered: the Sentinel judges it, and the event is written only for a
+  /// `confirmed` verdict (the rest stays in the log; a repeat of a standing root says nothing again). A
+  /// server's answer that is no rule set is the list's own failure: told at once. `hasCopy`: the list on
+  /// disk, from an earlier download, is the one in use. A failure of an own restart never gets here.
+  void _ruleSetFailed(RuleSetFailure f) {
+    final data = {'tag': f.tag, 'url': f.url, 'error': f.error, 'hasCopy': f.hasCopy};
+    final note = 'Rule set ${f.tag} not downloaded (${f.url}): ${f.error}';
+    final s = f.svc?.suspicion(why: Why('svc.fetch', {'purpose': 'ruleset', 'tag': f.tag}));
+    if (s == null) {
+      _event('rules', 'ruleSetFailed', 'warn', data, note: note);
+      return;
+    }
+    s.evidence.addAll({'tag': f.tag, 'url': f.url, 'hasCopy': f.hasCopy});
+    unawaited(sentinel.suspect(s).then((v) {
+      if (v.kind != VerdictKind.confirmed || v.repeat) return;
+      _event('rules', 'ruleSetFailed', 'warn', data, note: note, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause);
+    }));
+  }
+
+  Timer? _listsTimer;
+  Set<String> _listTags = {}; // the lists the running sing-box's config has
+  static const _listsEvery = Duration(minutes: 1); // how often the lists are looked at (each has its own `every`)
+  static const _listsWait = Duration(seconds: 10); // the core is not quiet yet
+
+  /// The lists while connected. Missing ones (a list via VPN had no tunnel at the start) are fetched through
+  /// the tunnel now, and a restart picks them up, on the route Auto is on. Stale ones are replaced in place on
+  /// a timer ([_listsTick]): sing-box reloads a local rule set by itself, so no restart. [lists]: what the
+  /// running config has.
   void _refreshLists(int seq, Map<String, dynamic> plan, RuleSetFetch lists) {
-    ruleSets.ensureFor(plan, proxyPort: _tunnelPort, refresh: true).then((now) {
-      if (seq == _connectSeq && runner.running && now.files.keys.any((t) => !lists.files.containsKey(t))) {
+    _listTags = lists.files.keys.toSet();
+    _listsTimer?.cancel();
+    _listsTimer = null;
+    if (ruleSetsNeeded(plan).isEmpty) return;
+    if (lists.pending.isEmpty) {
+      _listsTimer = _timer(_listsEvery, () => _listsTick(seq, plan));
+    } else {
+      unawaited(_listsRound(seq, plan, refresh: false));
+    }
+  }
+
+  /// Only when the Sentinel's context is settled (a refresh ~200 ms after Connected would meet our own
+  /// start), and never while sing-box is being restarted.
+  void _listsTick(int seq, Map<String, dynamic> plan) {
+    _listsTimer = null;
+    if (seq != _connectSeq || !runner.running) return;
+    if (!sentinel.context.settled || _recovering != null) {
+      _listsTimer = _timer(_listsWait, () => _listsTick(seq, plan));
+      return;
+    }
+    unawaited(_listsRound(seq, plan, refresh: true));
+  }
+
+  Future<void> _listsRound(int seq, Map<String, dynamic> plan, {required bool refresh}) async {
+    if (seq != _connectSeq || !runner.running) return;
+    try {
+      final now = await ruleSets.ensureFor(plan, tunnel: true, refresh: refresh);
+      if (seq != _connectSeq || !runner.running) return;
+      if (now.files.keys.any((t) => !_listTags.contains(t))) {
+        // only a list that is new to the config needs a restart (its _connect starts the timer again)
         final at = _auto?.index;
-        _connect({'plan': at == null ? plan : {...plan, 'current': at}, 'systemProxy': _sysWanted}, own: false).then((_) {}, onError: (_) {});
+        unawaited(_connect({'plan': at == null ? plan : {...plan, 'current': at}, 'systemProxy': _sysWanted}, own: false).then((_) {}, onError: (_) {}));
+        return;
       }
-    }, onError: (_) {});
+    } catch (_) {}
+    if (seq == _connectSeq) _listsTimer = _timer(_listsEvery, () => _listsTick(seq, plan));
   }
 
   @override

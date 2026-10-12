@@ -4,14 +4,21 @@
 ///
 /// - fresh (younger than its `every`): used as is;
 /// - stale: used as is; replaced when [RuleSetCache.ensure] runs with `refresh` (the daemon
-///   does that once the tunnel is up; sing-box reloads a replaced local file by itself);
+///   does that on a timer while connected, once the Sentinel's context is settled; sing-box
+///   reloads a replaced local file by itself, so a refresh never restarts it);
 /// - missing: downloaded before the config is built. A list "via VPN" needs a running
-///   tunnel ([proxyPort]); without one it stays pending, its rules are left out with a
-///   warning, and the daemon fetches it through the new tunnel and reconnects.
+///   tunnel ([RuleSetCache.ensure]'s `tunnel`); without one it stays pending, its rules are left
+///   out with a warning, and the daemon fetches it through the new tunnel and reconnects.
 ///
-/// URLs are tried in order and only a 404 / 410 moves on (runetfreedom → SagerNet for a
-/// category runetfreedom does not build). A body that is not a rule set (a captive portal's
-/// page) is refused, so it never replaces a good copy.
+/// The download is the core's service traffic ([ServiceFetch], purpose `ruleset`): it races the paths
+/// (a list "via VPN" only the tunnel's). URLs are tried in order and only a 404 / 410 moves on
+/// (runetfreedom → SagerNet for a category runetfreedom does not build). A body that is not a rule set
+/// (a captive portal's page) is refused, so it never replaces a good copy.
+///
+/// A failed list waits as the [RetryPolicy] advises (1 → 2 → 5 → 15 min, the network's return, or the
+/// core's settle after an own restart) before it is asked for again. A failure of an own restart is
+/// not reported at all. The sources are data ([RuleSetSource]: tag, urls, format, via, every), so a
+/// list the user adds later is one more source in the list [RuleSetCache.ensure] gets.
 library;
 
 import 'dart:async';
@@ -22,6 +29,9 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 
 import 'routing.dart';
+import 'sentinel/retry.dart';
+import 'svc_fetch.dart';
+import 'svc_in.dart';
 
 class RuleSetFetch {
   RuleSetFetch(this.files, this.errors, this.pending);
@@ -36,28 +46,50 @@ class RuleSetFetch {
   final List<String> pending;
 }
 
+/// A download that failed, as the journal and the Sentinel get it.
+class RuleSetFailure {
+  RuleSetFailure(this.tag, this.url, this.error, {required this.hasCopy, this.svc});
+
+  final String tag;
+
+  /// The last URL tried.
+  final String url;
+  final String error;
+
+  /// A previous copy of the list is on disk (and is used).
+  final bool hasCopy;
+
+  /// Set when no path brought an answer: the suspicion to judge ([SvcFailure.suspicion]) comes from it.
+  /// Null = the server answered, with something that is no rule set (the failure is the list's own).
+  final SvcFailure? svc;
+}
+
 class RuleSetCache {
-  RuleSetCache(
-    this.dir, {
-    this.timeout = const Duration(seconds: 20),
-    this.retryAfter = const Duration(minutes: 5),
-    DateTime Function()? now,
-  }) : _now = now ?? DateTime.now;
+  /// [fetch]: the service traffic ([CoreService.svcFetch]); without one (and without [fetchSource]) the
+  /// requests go over one plain direct socket (the tests, a cache used alone).
+  RuleSetCache(this.dir, {ServiceFetch? fetch, DateTime Function()? now})
+      : fetchSource = fetch == null ? null : (() => fetch),
+        _now = now ?? DateTime.now;
 
   final String dir;
 
-  /// Per step of a download (connect, headers, body).
-  final Duration timeout;
-
-  /// A failed list is not asked for again sooner (a blocked source must not slow every connect).
-  final Duration retryAfter;
+  /// Where the [ServiceFetch] comes from (the service sets it lazily).
+  ServiceFetch Function()? fetchSource;
+  ServiceFetch? _plain;
   final DateTime Function() _now;
-  final _failedAt = <String, DateTime>{};
+
+  /// A failed list waits here until the retry advice is over.
+  final _hold = <String, Future<void>>{};
   final _running = <String, Future<void>>{};
 
-  /// A download that failed (once per download, however many callers waited on it): the
-  /// tag, the last URL tried and the reason. The daemon writes the events journal from it.
-  void Function(String tag, String url, String error)? onFailed;
+  // lists whose last download failed (the next success is told as an update)
+  final _failed = <String>{};
+
+  ServiceFetch get _fetchApi => fetchSource?.call() ?? (_plain ??= ServiceFetch(endpoint: () => null));
+
+  /// A download that failed (once per download, however many callers waited on it). Not told for a
+  /// failure of our own restart (the retry comes after the settle). The daemon writes the journal from it.
+  void Function(RuleSetFailure failure)? onFailed;
 
   /// A list replaced by a newer copy, or downloaded after a failure (not the first
   /// download of a missing one: that is what a connect does anyway).
@@ -84,9 +116,9 @@ class RuleSetCache {
     return out;
   }
 
-  /// [proxyPort]: a loopback mixed inbound that always goes through the tunnel; lists "via
-  /// VPN" download only through it. Direct lists use the system's proxy from the environment.
-  Future<RuleSetFetch> ensure(List<RuleSetSource> sets, {int? proxyPort, bool refresh = false}) async {
+  /// [tunnel]: the core's sing-box runs, so the way "via VPN" exists; lists via VPN download only
+  /// through it and stay pending without it. Direct lists prefer the direct path.
+  Future<RuleSetFetch> ensure(List<RuleSetSource> sets, {bool tunnel = false, bool refresh = false}) async {
     final files = <String, String>{}, errors = <String>[], pending = <String>[];
     if (sets.isEmpty) return RuleSetFetch(files, errors, pending);
     await Directory(dir).create(recursive: true);
@@ -95,17 +127,15 @@ class RuleSetCache {
         final f = File(pathOf(s));
         final have = await f.exists();
         final stale = !have || _now().difference(await f.lastModified()) >= s.every;
-        final canFetch = !s.viaVpn || proxyPort != null;
-        final failed = _failedAt[s.tag];
-        final backoff = failed != null && _now().difference(failed) < retryAfter;
-        if (stale && canFetch && !backoff && (!have || refresh)) {
+        final canFetch = !s.viaVpn || tunnel;
+        if (stale && canFetch && !_hold.containsKey(s.tag) && (!have || refresh)) {
           try {
-            await (_running[s.tag] ??= _fetch(s, f, s.viaVpn ? proxyPort : null, notable: have || failed != null).whenComplete(() {
+            await (_running[s.tag] ??= _fetch(s, f, notable: have || _failed.contains(s.tag)).whenComplete(() {
               _running.remove(s.tag); // not returned: whenComplete would wait on this very future
             }));
-            _failedAt.remove(s.tag);
+            _failed.remove(s.tag);
           } catch (e) {
-            _failedAt[s.tag] = _now();
+            _failed.add(s.tag);
             errors.add('${s.tag}: $e');
           }
         }
@@ -120,53 +150,63 @@ class RuleSetCache {
   }
 
   /// [ensure] for everything [plan]'s routing uses.
-  Future<RuleSetFetch> ensureFor(Map plan, {int? proxyPort, bool refresh = false}) =>
-      ensure(ruleSetsNeeded(plan), proxyPort: proxyPort, refresh: refresh);
+  Future<RuleSetFetch> ensureFor(Map plan, {bool tunnel = false, bool refresh = false}) =>
+      ensure(ruleSetsNeeded(plan), tunnel: tunnel, refresh: refresh);
 
-  Future<void> _fetch(RuleSetSource s, File f, int? proxyPort, {required bool notable}) async {
+  Future<void> _fetch(RuleSetSource s, File f, {required bool notable}) async {
     try {
-      await _download(s, f, proxyPort);
+      await _download(s, f);
     } catch (e) {
-      final url = e is _DownloadFailed ? e.url : s.urls.last;
-      onFailed?.call(s.tag, url, '${e is _DownloadFailed ? e.cause : e}');
-      rethrow;
+      final d = e is _DownloadFailed ? e : _DownloadFailed(s.urls.isEmpty ? '' : s.urls.last, e);
+      final api = _fetchApi;
+      // when to ask again: the policy's advice for a path failure; a server's answer that is no list
+      // counts as a failure of the network kind (the escalating wait)
+      final advice = d.svc?.advice ?? api.retryFor('ruleset').advise(RetryKind.network);
+      _hold[s.tag] = api.retryFor('ruleset').wait(advice).whenComplete(() => _hold.remove(s.tag));
+      // our own restart cut it: the settle brings the retry, nothing is told
+      if (advice.waitFor != RetryWait.settled) {
+        onFailed?.call(RuleSetFailure(s.tag, d.url, '${d.cause}', hasCopy: await f.exists(), svc: d.svc));
+      }
+      throw d;
     }
     if (notable) onUpdated?.call(s.tag);
   }
 
-  Future<void> _download(RuleSetSource s, File f, int? proxyPort) async {
-    final c = HttpClient()
-      ..connectionTimeout = timeout
-      ..findProxy = proxyPort == null ? HttpClient.findProxyFromEnvironment : (_) => 'PROXY 127.0.0.1:$proxyPort';
+  Future<void> _download(RuleSetSource s, File f) async {
+    final api = _fetchApi;
+    // "via VPN" is the main flow or a route; a direct list takes whichever path works, the direct one first
+    final policy = s.viaVpn ? const SvcPolicy.race(kinds: {SvcKind.main, SvcKind.route}) : const SvcPolicy.race();
+    final prefer = s.viaVpn ? SvcPrefer.tunnel : SvcPrefer.direct;
     var tried = s.urls.isEmpty ? '' : s.urls.first;
-    try {
-      var last = '';
-      for (final url in s.urls) {
-        tried = url;
-        final res = await (await c.getUrl(Uri.parse(url)).timeout(timeout)).close().timeout(timeout);
-        if (res.statusCode == 404 || res.statusCode == 410) {
-          await res.drain<void>();
-          last = 'HTTP ${res.statusCode}';
-          continue;
-        }
-        if (res.statusCode != 200) {
-          await res.drain<void>();
-          throw HttpException('HTTP ${res.statusCode}', uri: Uri.parse(url));
-        }
-        final b = await res.fold<BytesBuilder>(BytesBuilder(copy: false), (b, d) => b..add(d)).timeout(timeout * 3);
-        final data = b.takeBytes();
-        _check(s, data);
-        final part = File('${f.path}.part');
-        await part.writeAsBytes(data, flush: true);
-        await part.rename(f.path);
-        return;
+    var last = '';
+    for (final url in s.urls) {
+      tried = url;
+      final SvcResult res;
+      try {
+        res = await api.get(Uri.parse(url), purpose: 'ruleset', policy: policy, prefer: prefer);
+      } catch (e) {
+        throw _DownloadFailed(tried, e);
       }
-      throw HttpException('not found ($last)');
-    } catch (e) {
-      throw _DownloadFailed(tried, e);
-    } finally {
-      c.close(force: true);
+      final fail = res.failure;
+      if (fail != null) throw _DownloadFailed(tried, fail, svc: fail.code == 'allFailed' ? fail : null);
+      final r = res.response!;
+      if (r.status == 404 || r.status == 410) {
+        last = 'HTTP ${r.status}';
+        continue;
+      }
+      if (r.status != 200) throw _DownloadFailed(tried, 'HTTP ${r.status}');
+      try {
+        _check(s, r.body);
+        // atomically: sing-box reloads the file when it changes, and must never read a half-written one
+        final part = File('${f.path}.part');
+        await part.writeAsBytes(r.body, flush: true);
+        await part.rename(f.path);
+      } catch (e) {
+        throw _DownloadFailed(tried, e);
+      }
+      return;
     }
+    throw _DownloadFailed(tried, 'not found ($last)');
   }
 
   static void _check(RuleSetSource s, Uint8List data) {
@@ -189,9 +229,10 @@ class RuleSetCache {
 
 // A failed download with the URL it stopped at; reads as the plain reason.
 class _DownloadFailed implements Exception {
-  _DownloadFailed(this.url, this.cause);
+  _DownloadFailed(this.url, this.cause, {this.svc});
   final String url;
   final Object cause;
+  final SvcFailure? svc;
   @override
   String toString() => '$cause';
 }

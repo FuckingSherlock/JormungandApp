@@ -98,7 +98,7 @@ void main() {
 
   test('a page that is not a rule set is refused and never replaces a good copy', () async {
     var now = DateTime.now();
-    final cache = RuleSetCache(tmp.path, now: () => now, retryAfter: Duration.zero);
+    final cache = RuleSetCache(tmp.path, now: () => now);
     final bad = await cache.ensure([
       set('geosite-p', ['/page.srs']),
     ]);
@@ -117,35 +117,76 @@ void main() {
     expect(json.errors.single, contains('JSON rule set'));
   });
 
-  test('via VPN: pending without a tunnel, then only through the tunnel port', () async {
-    final cache = RuleSetCache(tmp.path);
+  test('via VPN: pending without a tunnel, then only through the main / route paths of the service inbound', () async {
+    SvcIn? ep;
     final s = set('geoip-ru', ['/rf/a.srs'], vpn: true);
+    final cache = RuleSetCache(tmp.path, fetch: ServiceFetch(endpoint: () => ep));
     final before = await cache.ensure([s]);
     expect(before.pending, ['geoip-ru']);
     expect(before.errors, isEmpty);
     expect(hits, isEmpty);
-    final after = await cache.ensure([s], proxyPort: tunnel.port);
+    // sing-box runs, but offers only the direct path: a list via VPN is never fetched that way
+    ep = SvcIn(tunnel.port, 'pw', [const SvcPath('direct', SvcKind.direct, 'direct', 'u0')]);
+    final onlyDirect = await RuleSetCache(p.join(tmp.path, 'a'), fetch: ServiceFetch(endpoint: () => ep)).ensure([s], tunnel: true);
+    expect(onlyDirect.pending, ['geoip-ru']);
+    expect(onlyDirect.errors, hasLength(1));
+    expect(hits, isEmpty);
+    expect(tunnelHits, isEmpty);
+    ep = SvcIn(tunnel.port, 'pw', [const SvcPath('direct', SvcKind.direct, 'direct', 'u0'), const SvcPath('main', SvcKind.main, 'proxy', 'u1')]);
+    final after = await cache.ensure([s], tunnel: true);
     expect(after.files, contains('geoip-ru'));
     expect(hits, isEmpty, reason: 'never direct');
     expect(tunnelHits.single, endsWith('/rf/a.srs'));
-    // a direct list ignores the tunnel
-    await cache.ensure([
+    // a direct list needs no tunnel: without sing-box one plain direct socket
+    await RuleSetCache(p.join(tmp.path, 'b')).ensure([
       set('geosite-a', ['/rf/a.srs']),
-    ], proxyPort: tunnel.port);
+    ]);
     expect(hits, ['/rf/a.srs']);
     expect(tunnelHits, hasLength(1));
   });
 
-  test('a failed list is not asked for again before retryAfter', () async {
-    var now = DateTime.now();
-    final cache = RuleSetCache(tmp.path, now: () => now, retryAfter: const Duration(minutes: 5));
+  test('a failed list is not asked for again until the retry advice is over (here: the network changed)', () async {
+    final ctx = ContextTracker();
+    final cache = RuleSetCache(tmp.path, fetch: ServiceFetch(endpoint: () => null, context: ctx));
     final s = set('geosite-x', ['/nope.srs']);
     expect((await cache.ensure([s])).errors.single, contains('not found'));
     expect((await cache.ensure([s])).errors, isEmpty);
     expect(hits, ['/nope.srs']);
-    now = now.add(const Duration(minutes: 6));
+    ctx.interfaceChanged();
+    await Future<void>.delayed(Duration.zero);
     await cache.ensure([s]);
     expect(hits, ['/nope.srs', '/nope.srs']);
+  });
+
+  test('a failure of our own restart is not told and waits for the settle; a plain one is told with hasCopy', () async {
+    final ctx = ContextTracker();
+    final failures = <RuleSetFailure>[];
+    final dead = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final deadPort = dead.port;
+    await dead.close(force: true); // nothing listens there: every path fails
+    RuleSetSource gone(String tag) => RuleSetSource(tag, ['http://127.0.0.1:$deadPort/a.srs'], viaVpn: false, every: Duration.zero);
+    final cache = RuleSetCache(tmp.path, fetch: ServiceFetch(endpoint: () => null, context: ctx))..onFailed = failures.add;
+
+    ctx.starting('refreshLists'); // sing-box is being (re)started
+    final x = gone('geosite-x');
+    expect((await cache.ensure([x], refresh: true)).errors, hasLength(1));
+    expect(failures, isEmpty, reason: 'own restart: nothing told');
+    expect((await cache.ensure([x], refresh: true)).errors, isEmpty, reason: 'held until the core settles');
+    ctx.started();
+    ctx.stopped(); // the retry waits for settled / stopped / down
+    await Future<void>.delayed(Duration.zero);
+
+    // a failure outside any restart: told, with its suspicion and whether a copy exists
+    File(cache.pathOf(x))
+      ..createSync(recursive: true)
+      ..writeAsBytesSync([..._srs, 1]);
+    expect((await cache.ensure([x], refresh: true)).errors, hasLength(1));
+    final f = failures.single;
+    expect([f.tag, f.hasCopy, f.svc?.code], ['geosite-x', true, 'allFailed']);
+    expect(f.svc!.suspicion()!.kind, 'svc.fetch');
+    final y = gone('geosite-y');
+    await cache.ensure([y]);
+    expect(failures.last.hasCopy, isFalse);
   });
 
   test('updatedTimes: a user list by its name, geosite / geoip by their newest file; nothing downloaded = absent', () async {

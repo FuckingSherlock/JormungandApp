@@ -385,7 +385,7 @@ void main() {
       final ev = (await call('GET', '/api/events')).$2;
       final e = types(ev).single;
       expect(['${e['cat']}/${e['type']}', e['level'], e['own']], ['rules/ruleSetFailed', 'warn', false]);
-      expect(e['data'], {'tag': 'geosite-x', 'url': url('/x.srs'), 'error': contains('not found')});
+      expect(e['data'], {'tag': 'geosite-x', 'url': url('/x.srs'), 'error': contains('not found'), 'hasCopy': false});
       final raw = (d.log.since(null)['lines'] as List).cast<Map>();
       expect(raw[e['log'] as int]['msg'], contains('geosite-x'), reason: 'the event links to its raw line');
 
@@ -397,12 +397,15 @@ void main() {
     test('a list that failed and then came, and a stale one that was replaced, are ruleSetUpdated; the first download of a missing one is not', () async {
       final s = RuleSetSource('geosite-y', ['http://127.0.0.1:${origin.port}/y.srs'], viaVpn: false, every: Duration.zero);
       final got = <String>[];
-      final cache = RuleSetCache(p.join(tmp.path, 'rulesets2'), retryAfter: Duration.zero)
-        ..onFailed = ((tag, url, error) => got.add('failed $tag'))
+      final ctx = ContextTracker();
+      final cache = RuleSetCache(p.join(tmp.path, 'rulesets2'), fetch: ServiceFetch(endpoint: () => null, context: ctx))
+        ..onFailed = ((f) => got.add('failed ${f.tag}'))
         ..onUpdated = ((tag) => got.add('updated $tag'));
       hit = 404;
       await cache.ensure([s]);
       hit = 200;
+      ctx.interfaceChanged(); // the retry wait of the failed list ends with a change of the network
+      await Future<void>.delayed(Duration.zero);
       await cache.ensure([s]);
       await cache.ensure([s], refresh: true);
       expect(got, ['failed geosite-y', 'updated geosite-y', 'updated geosite-y']);
