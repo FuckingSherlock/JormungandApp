@@ -387,7 +387,7 @@ test('release: beta text, escaping, link only for https', async () => {
   assert.equal(
     b.text,
     '🧪 <b>Beta 0.1.2-beta.3</b> · build 3039\n\nFix &lt;a&gt; &amp; b\nsecond line\n\n' +
-      '<a href="https://example.com/a?x=1&amp;y=&quot;2&quot;">Download</a>',
+      '<a href="https://example.com/a?x=1&amp;y=&quot;2&quot;">Скачать</a>',
   );
   const marker = objects.get('_release/beta/0.1.2-beta.3+3039');
   assert.ok(marker);

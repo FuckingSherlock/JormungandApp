@@ -176,8 +176,9 @@ default branch (`git ls-remote --symref origin HEAD` shows it):
 pushed and merged into the default branch — a new session starts from it.
 
 Release notes (`release-notes/README.md`): a push to the default branch touching `app/` or `core/` builds a
-beta and announces it in Telegram — before it, overwrite `release-notes/beta.txt` (English, what changes for
-the user since the previous push). A stable tag needs `release-notes/X.Y.Z.{en,ru}.txt` (everything since
+beta and announces it in Telegram — before it, overwrite `release-notes/beta.txt` with the Russian summary of
+what this beta brings (the same text the lead reports to the user; an exception to "Translations"); not
+updated → no beta. A stable tag needs `release-notes/X.Y.Z.{en,ru}.txt` (everything since
 the previous stable, briefly), written in the same pass as the Russian translation.
 
 Every push touching `design/` redeploys the mockup to the Cloudflare Worker `jormungand-design`

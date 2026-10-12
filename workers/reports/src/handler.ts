@@ -212,7 +212,7 @@ export function buildReleaseText(r: ReleaseInfo): string {
   const headHtml = beta
     ? `🧪 <b>Beta ${escapeHtml(r.version)}</b> · build ${r.build}`
     : `🚀 <b>Jormungand ${escapeHtml(r.version)}</b> — стабильная версия`;
-  const label = beta ? 'Download' : 'Скачать';
+  const label = 'Скачать';
   const tail = r.url ? `\n\n${label}` : '';
   const budget = RELEASE_TEXT_MAX - head.length - 2 - tail.length; // -2: пустая строка перед заметками
   let shown = r.notes;
