@@ -99,10 +99,15 @@ class AddressResolver {
   /// Resolves [host] now (the cache is not asked) and puts the answer in the book; null = nobody answered, the
   /// old entry (if any) stays. A lookup already running for the name is joined. [why] goes into the log
   /// (`subscription`, `connect`, `node down`, …). Never throws.
-  Future<AddressEntry?> lookup(String host, {required String why}) {
+  ///
+  /// [race]: the direct side's servers are asked all at once (not one after another): the answer of the
+  /// highest-priority server that arrives within [race] wins, when none came in that time — the first answer
+  /// (the OS resolver stays the last resort, asked only when every server failed). The lookup goes on after
+  /// the caller stopped waiting; its answer lands in the book.
+  Future<AddressEntry?> lookup(String host, {required String why, Duration? race}) {
     final k = AddressBook.key(host);
     // a block body: `remove` returns this very future, which whenComplete would then wait for forever
-    return _inflight.putIfAbsent(k, () => _limited(() => _run(k, why)).whenComplete(() {
+    return _inflight.putIfAbsent(k, () => _limited(() => _run(k, why, race)).whenComplete(() {
           _inflight.remove(k);
         }));
   }
@@ -128,17 +133,26 @@ class AddressResolver {
   /// and not waited for. The hosts of [first] (DNS servers named by a host: a lookup may use them) go before the
   /// rest. A name nobody answered a short time ago is not asked again. Never throws.
   /// [refreshAll]: the fresh ones are refreshed too (a new server list: an address may have moved).
+  /// [need]: only the missing hosts among these (and [first]) are waited for, the other missing ones resolve in
+  /// the background; null = all the missing. [race]: a lookup asks its servers in parallel within [wait] (see [lookup]).
   Future<void> ensure(Iterable<String> hosts,
-      {required String why, Duration wait = const Duration(seconds: 8), Iterable<String> first = const [], bool refreshAll = false}) async {
+      {required String why,
+      Duration wait = const Duration(seconds: 8),
+      Iterable<String> first = const [],
+      bool refreshAll = false,
+      Iterable<String>? need,
+      bool race = false}) async {
     final st = await settings();
     final all = {for (final h in [...first, ...hosts]) AddressBook.key(h)};
     final firstKeys = {for (final h in first) AddressBook.key(h)};
-    final missing = <String>[], stale = <String>[];
+    final needKeys = need == null ? null : {for (final h in need) AddressBook.key(h), ...firstKeys};
+    final missing = <String>[], later = <String>[], stale = <String>[];
     var cached = 0;
     for (final h in all) {
       final e = book.get(h);
       if (e == null) {
-        if (!_recentlyFailed(h)) missing.add(h);
+        if (_recentlyFailed(h)) continue;
+        (needKeys == null || needKeys.contains(h) ? missing : later).add(h);
       } else if (refreshAll || !book.fresh(h) || (st.ipv6 && !e.with6)) {
         stale.add(h);
       } else {
@@ -147,7 +161,12 @@ class AddressResolver {
     }
     if (all.isNotEmpty) {
       _note('info', 'address: ${all.length} host${all.length == 1 ? '' : 's'} for $why: $cached from the cache, ${stale.length} stale (refreshed in the background), '
-          '${missing.length} to resolve${missing.isEmpty ? '' : ' (waiting up to ${wait.inSeconds} s)'}');
+          '${missing.length} to resolve${missing.isEmpty ? '' : ' (waiting up to ${wait.inMilliseconds} ms)'}'
+          '${later.isEmpty ? '' : ', ${later.length} more in the background'}');
+    }
+    final window = race ? wait : null;
+    for (final h in later) {
+      unawaited(lookup(h, why: '$why, background'));
     }
     for (final h in stale) {
       if (!_recentlyFailed(h)) unawaited(lookup(h, why: '$why, refresh'));
@@ -155,11 +174,11 @@ class AddressResolver {
     if (missing.isEmpty) return;
     final work = (() async {
       final a = [for (final h in missing) if (firstKeys.contains(h)) h];
-      if (a.isNotEmpty) await Future.wait([for (final h in a) lookup(h, why: why)]);
-      await Future.wait([for (final h in missing) if (!firstKeys.contains(h)) lookup(h, why: why)]);
+      if (a.isNotEmpty) await Future.wait([for (final h in a) lookup(h, why: why, race: window)]);
+      await Future.wait([for (final h in missing) if (!firstKeys.contains(h)) lookup(h, why: why, race: window)]);
     })();
     await work.timeout(wait, onTimeout: () {
-      _note('warn', 'address: not everything resolved within ${wait.inSeconds} s for $why; the config keeps the names that are still unresolved');
+      _note('warn', 'address: not everything resolved within ${wait.inMilliseconds} ms for $why; the config keeps the names that are still unresolved');
     });
   }
 
@@ -168,11 +187,73 @@ class AddressResolver {
     return t != null && _now().millisecondsSinceEpoch - t < negativeFor.inMilliseconds;
   }
 
-  Future<AddressEntry?> _run(String host, String why) async {
+  /// All the servers at once (see [lookup] `race`): returns the winner's entry, null when every one failed.
+  /// The servers still running when it returns finish on their own (their timeouts); a late answer is only logged.
+  Future<AddressEntry?> _race(String host, String why, List<_Try> tries, AddressSettings st, Duration window, Stopwatch sw) {
+    final done = Completer<AddressEntry?>();
+    final pending = {for (var i = 0; i < tries.length; i++) i};
+    var best = -1;
+    AddressEntry? bestEntry;
+    var windowOver = false;
+    final per = attempt < budget ? attempt : budget;
+
+    void finish() {
+      if (done.isCompleted) return;
+      if (bestEntry != null && (windowOver || !pending.any((j) => j < best))) {
+        done.complete(bestEntry);
+      } else if (pending.isEmpty) {
+        done.complete(bestEntry);
+      }
+    }
+
+    final timer = Timer(window, () {
+      windowOver = true;
+      finish();
+    });
+    for (var i = 0; i < tries.length; i++) {
+      final t = tries[i];
+      final ts = Stopwatch()..start();
+      () async {
+        try {
+          final g = await t.run().timeout(per, onTimeout: () => throw _Fail('timeout'));
+          pending.remove(i);
+          if (done.isCompleted) {
+            _note('info', 'address: $host via ${t.id} (${t.label}) answered late (${ts.elapsedMilliseconds} ms): not used [$why]');
+          } else if (bestEntry == null || i < best) {
+            final e = _store(host, g, t.id);
+            best = i;
+            bestEntry = e;
+            _failedAt.remove(host);
+            _note('info', 'address: $host → ${e.ips(st.ipv6).join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds} ms [fresh, $why, parallel]');
+          } else {
+            _note('info', 'address: $host via ${t.id} (${t.label}) answered in ${ts.elapsedMilliseconds} ms, a higher-priority server already did');
+          }
+        } on _Fail catch (f) {
+          pending.remove(i);
+          _note('info', 'address: $host via ${t.id} (${t.label}) failed: ${f.reason} (${ts.elapsedMilliseconds} ms)');
+        } catch (e) {
+          pending.remove(i);
+          _note('info', 'address: $host via ${t.id} (${t.label}) failed: $e (${ts.elapsedMilliseconds} ms)');
+        }
+        finish();
+      }();
+    }
+    if (tries.isEmpty) done.complete(null);
+    return done.future.whenComplete(timer.cancel);
+  }
+
+  Future<AddressEntry?> _run(String host, String why, Duration? race) async {
     final sw = Stopwatch()..start();
     try {
       final st = await settings();
-      final tries = _tries(host, st);
+      var tries = _tries(host, st);
+      if (race != null && tries.length > 1) {
+        // the OS resolver stays the last resort: asked after the servers all failed
+        final servers = tries.sublist(0, tries.length - 1);
+        tries = tries.sublist(tries.length - 1);
+        final e = await _race(host, why, servers, st, race, sw);
+        if (e != null) return e;
+      }
       var n = 0;
       for (final t in tries) {
         final left = budget - sw.elapsed;

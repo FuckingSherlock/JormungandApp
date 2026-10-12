@@ -126,6 +126,22 @@ Set<String> planHostnames(Map<String, dynamic> plan) {
   return out;
 }
 
+/// The hostnames a connect waits for: the servers the selected route needs to start — the members of its main
+/// group, a chain's entry group (the exit dials through the entry). The other routes (Auto's fallbacks), the rule
+/// targets and the DNS servers are not waited for. A subset of [planHostnames].
+Set<String> startHostnames(Map<String, dynamic> plan) {
+  final rs = planRoutes(plan);
+  final r = rs[planCurrent(plan, rs.length)];
+  final out = <String>{};
+  for (final n in ((r['kind'] == 'chain' ? r['entry'] : r['main']) as Map?)?['nodes'] as List? ?? const []) {
+    final ob = n is Map ? n['outbound'] : null;
+    if (ob is! Map || ob['detour'] != null || _notServers.contains(ob['type'])) continue;
+    final h = hostnameOf(ob['server']);
+    if (h != null) out.add(h);
+  }
+  return out;
+}
+
 /// The hostnames of the servers in [nodes] (nodes as the catalog keeps them: `outbound`, `unsupported`).
 Set<String> nodesHostnames(Iterable<Object?> nodes) {
   final out = <String>{};

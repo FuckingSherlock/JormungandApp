@@ -836,7 +836,7 @@ class CoreService implements CoreApi {
         pool: pool,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
-        onDown: _serverDown,
+        onDown: serverDown,
         note: runner.note);
     // requests that failed: sing-box's API service streams every closed connection
     _closed = api.closedConnections().listen((c) {
@@ -1018,7 +1018,7 @@ class CoreService implements CoreApi {
         settings: auto.settings,
         pool: pool,
         mainIdentity: auto.identityOf,
-        onDown: _serverDown,
+        onDown: serverDown,
         note: runner.note);
     fb.changes.listen((c) {
       // the journal names the first rule (else the first app) and counts the rest
@@ -1660,8 +1660,14 @@ class CoreService implements CoreApi {
   Duration reresolveEvery = const Duration(minutes: 5);
   static const _addrRestartDelay = Duration(seconds: 2);
 
-  /// The addresses for [plan]'s hostnames: the cache first, what is missing resolved and waited for (up to ~8 s,
-  /// all at once) when [wait]; otherwise only the cache (a restart after a crash must not wait for the network).
+  /// How long a connect waits for the addresses of the servers it needs to start (missing from the cache).
+  Duration connectWait = const Duration(milliseconds: 1500);
+
+  /// The addresses for [plan]'s hostnames: the cache first; when [wait], the hosts of the servers the selected
+  /// route starts with ([startHostnames]) that are missing are resolved and waited for, at most [connectWait] in
+  /// all (every DNS server of the direct side asked at once, the best answer in time wins). Everything else
+  /// missing resolves in the background (the next config has it; never a restart just for that). Without [wait]
+  /// only the cache is used (a restart after a crash must not wait for the network).
   /// What stays unresolved keeps its name in the config (sing-box resolves it by `domain_resolver`: the old way).
   Future<Pins> _pinsFor(Map<String, dynamic> plan, {required String why, required bool wait}) async {
     _starting = plan;
@@ -1672,7 +1678,17 @@ class CoreService implements CoreApi {
       if (hosts.isEmpty) return const {};
       final first = dnsHostnames((plan['routing'] as Map?)?['dns']);
       if (wait) {
-        await addresses.ensure(hosts, why: why, first: first);
+        final need = startHostnames(plan);
+        final missing = [for (final h in {...need, ...first}) if (addressBook.get(h) == null) h];
+        final sw = Stopwatch()..start();
+        await addresses.ensure(hosts, why: why, first: first, need: need, wait: connectWait, race: true);
+        if (missing.isNotEmpty) {
+          final left = [for (final h in missing) if (addressBook.get(h) == null) h];
+          logBook.note(left.isEmpty ? 'info' : 'warn',
+              'address: connect waited ${sw.elapsedMilliseconds} ms (up to ${connectWait.inMilliseconds} ms) for ${missing.length} host${missing.length == 1 ? '' : 's'} '
+              'of the servers it starts with: ${missing.length - left.length} resolved'
+              '${left.isEmpty ? '' : ', not in time (kept as names, resolved in the background for the next start): ${left.join(', ')}'}');
+        }
       } else {
         unawaited(addresses.ensure(hosts, why: why, first: first));
       }
@@ -1697,7 +1713,9 @@ class CoreService implements CoreApi {
   /// cached address is tried, then the name is looked up again; a different address needs a restart of sing-box
   /// (the config holds the IP). Per host at most once per [reresolveEvery]; never while the network is not up,
   /// the core is not settled or sing-box is being restarted.
-  void _serverDown(String groupTag, String key) {
+  ///
+  /// Public for the tests: Auto and the fallback service need a sing-box API a fake runner has not.
+  void serverDown(String groupTag, String key) {
     final plan = _plan;
     if (plan == null || !resolveAddresses) return;
     final host = memberHostname(plan, groupTag, key);

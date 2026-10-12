@@ -12,15 +12,21 @@ import 'package:test/test.dart';
 /// A DoH server on loopback: `answers[name]` = the IPs (v4 and v6 mixed) it answers with; a name not in the map
 /// is NXDOMAIN. Every question is counted by `name/type`.
 class MockDoh {
-  MockDoh(this.answers, {this.ttl = 300});
+  MockDoh(this.answers, {this.ttl = 300, this.delay = Duration.zero});
   final Map<String, List<String>> answers;
   final int ttl;
+
+  /// How long the server takes to answer.
+  final Duration delay;
+
+  /// A different delay for some names.
+  final delays = <String, Duration>{};
   final asked = <String>[];
   late HttpServer server;
 
   Future<MockDoh> start() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen((req) {
+    server.listen((req) async {
       final q = base64Url.decode(base64Url.normalize(req.uri.queryParameters['dns']!));
       var i = 12;
       final labels = <String>[];
@@ -31,6 +37,8 @@ class MockDoh {
       final type = q[i + 1] << 8 | q[i + 2];
       final name = labels.join('.');
       asked.add('$name/$type');
+      final wait = delays[name] ?? delay;
+      if (wait > Duration.zero) await Future<void>.delayed(wait);
       final ips = answers[name];
       final rr = <int>[];
       var count = 0;
@@ -218,6 +226,74 @@ void main() {
       clock = clock.add(const Duration(minutes: 3));
       await r.ensure(['gone.invalid'], why: 'connect');
       expect(good.count('gone.invalid', 1), greaterThan(before));
+    });
+
+    group('race (the connect wait)', () {
+      late MockDoh slow, fast;
+      setUp(() async {
+        slow = await MockDoh({'node.example': ['203.0.113.1']}, delay: const Duration(milliseconds: 400)).start();
+        fast = await MockDoh({'node.example': ['203.0.113.2']}).start();
+      });
+      tearDown(() async {
+        await slow.stop();
+        await fast.stop();
+      });
+
+      test('all servers are asked at once; the higher-priority one answering within the window wins over a faster one', () async {
+        final r = resolver([doh('slow', slow.url), doh('fast', fast.url)]);
+        final sw = Stopwatch()..start();
+        final e = (await r.lookup('node.example', why: 'test', race: const Duration(milliseconds: 1500)))!;
+        expect(e.via, 'slow');
+        expect(e.v4, ['203.0.113.1']);
+        expect(sw.elapsedMilliseconds, lessThan(1200)); // parallel, and no waiting out the window
+        expect(fast.count('node.example', 1), 1, reason: 'the second server was asked without waiting for the first');
+        expect(book.get('node.example')!.via, 'slow');
+      });
+
+      test('a higher-priority server too slow for the window: the answer that came in time is used', () async {
+        final r = resolver([doh('slow', slow.url), doh('fast', fast.url)]);
+        final sw = Stopwatch()..start();
+        final e = (await r.lookup('node.example', why: 'test', race: const Duration(milliseconds: 150)))!;
+        expect(e.via, 'fast');
+        expect(sw.elapsedMilliseconds, inInclusiveRange(100, 350));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        expect(book.get('node.example')!.via, 'fast', reason: 'a late answer does not replace it');
+        expect(log.any((l) => l.contains('via slow') && l.contains('answered late')), isTrue);
+      });
+
+      test('nobody in time: the first answer wins, whenever it comes; every server failing falls to the next try', () async {
+        final r = resolver([doh('slow', slow.url)]);
+        final e = (await r.lookup('node.example', why: 'test', race: const Duration(milliseconds: 50)))!;
+        expect(e.via, 'slow');
+
+        final dead = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        final deadUrl = 'http://127.0.0.1:${dead.port}/dns-query';
+        await dead.close();
+        final none = resolver([doh('d1', deadUrl), doh('d2', deadUrl)]);
+        expect(await none.lookup('nope.invalid', why: 'test', race: const Duration(milliseconds: 500)), isNull);
+        expect((await none.lookup('localhost', why: 'test', race: const Duration(milliseconds: 500)))!.via, 'system'); // the OS resolver, last
+      });
+
+      test('ensure(need, race): the missing hosts of the needed ones are waited for, the others resolve in the background', () async {
+        final r = resolver([doh('slow', slow.url)]);
+        slow.answers['other.example'] = ['203.0.113.3'];
+        await r.ensure(['node.example', 'other.example'], why: 'connect', need: ['node.example'], wait: const Duration(milliseconds: 1500), race: true);
+        expect(book.get('node.example'), isNotNull);
+        expect(log.any((l) => l.contains('1 to resolve') && l.contains('1 more in the background')), isTrue, reason: 'only the needed one is waited for');
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        expect(book.get('other.example')!.v4, ['203.0.113.3'], reason: 'resolved in the background');
+        expect(log.any((l) => l.contains('other.example') && l.contains('background]')), isTrue);
+      });
+
+      test('ensure: the wait is capped; the hosts not done keep going and land in the book', () async {
+        final r = resolver([doh('slow', slow.url)]);
+        final sw = Stopwatch()..start();
+        await r.ensure(['node.example'], why: 'connect', wait: const Duration(milliseconds: 100), race: true);
+        expect(sw.elapsedMilliseconds, lessThan(350));
+        expect(book.get('node.example'), isNull);
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        expect(book.get('node.example')!.via, 'slow');
+      });
     });
 
     test('simultaneous lookups of one name share one query; the same set keeps the cursor', () async {

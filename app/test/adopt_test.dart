@@ -156,6 +156,7 @@ void main() {
       boxFactory: (_) => AdoptRunner(HeldTunnel()),
       sysProxy: NoSystemProxy(),
       isElevated: () => true,
+      resolveAddresses: false, // hermetic: no real DoH
       exitCheck: (port) async => {'ip': '203.0.113.7', 'country': 'DE'},
     );
     final host = LiveCoreHost(

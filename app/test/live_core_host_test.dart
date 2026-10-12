@@ -95,7 +95,7 @@ Map<String, dynamic> snapshot() => {
 /// A core that remembers what the app told its updater.
 class _RecCore extends CoreService {
   _RecCore({required super.dataDir, required super.runner})
-    : super(singBox: '', boxFactory: (_) => FakeRunner(), sysProxy: NoSystemProxy(), isElevated: () => true);
+    : super(singBox: '', boxFactory: (_) => FakeRunner(), sysProxy: NoSystemProxy(), isElevated: () => true, resolveAddresses: false);
 
   final updateBodies = <Map<String, dynamic>>[];
 
@@ -116,6 +116,7 @@ class _AutoRecCore extends CoreService {
     required super.sysProxy,
     required super.isElevated,
     required super.exitCheck,
+    super.resolveAddresses,
   });
 
   final autoBodies = <Map<String, dynamic>>[];
@@ -179,6 +180,7 @@ void main() {
       boxFactory: (_) => FakeRunner()..failWith = boxFails,
       sysProxy: NoSystemProxy(),
       isElevated: () => elevated,
+      resolveAddresses: false, // hermetic: no real DoH
       exitCheck: (port) async => {
         'ip': '203.0.113.7',
         'country': 'DE',

@@ -54,7 +54,15 @@
   alive skip, vpn side unused, OS resolver last, ensure cache-first/stale/negative cache, in-flight dedupe, cursor), pins table, planHostnames /
   memberHostname (routes + targets) / pinsFor, buildConfig / buildTesterConfig pins.
 
-## Remaining
+## D2e (done, no commit)
+- Connect wait: `_pinsFor` waits `connectWait` (1.5 s) only for the missing hosts of `startHostnames(plan)` (selected route: main group / chain entry) + DNS-server hosts;
+  `AddressResolver.ensure(need:, race:)`; `lookup(race: window)` asks all direct-side servers in parallel (best priority within the window wins, else first
+  answer; OS resolver only after all failed; late answers logged, not stored). Other missing hosts: background lookup, no restart. Log `address: connect waited N ms ...`.
+- `CoreService.serverDown` is public (tests' entry). Tests: address_test (race group), service_address_test (connect wait x4, serverDown x4 with a fake resolver + FakeTime),
+  fallback_test (onDown), address_singbox_test (live loopback: pinned hysteria2 / tuic / trojan pass traffic, SNI from the pin, control by IP fails). Docs: rules.md section 6, core.md, failures.md, logs.md.
+- NOT covered: crash `_recover` cache-only path, adopt reading `pins`, ws/Host live check. subscription-parsing.md / platforms.md (address-resolve entry) not touched.
+
+## Remaining (older list; the service-level / FallbackService / live items above are done)
 - Tests still to write: service-level `_serverDown` policy (it is private: make it public for tests or drive it through Auto; needs
   `resolveAddresses: true` + `addressResolverFor` fake + an injected timer): not pinned -> nothing, rate limit via reresolveEvery, no restart while
   offline / unsettled / recovering, IP-set change restarts with reason 'reresolve', unchanged does not; pins land in the config handed to the fake

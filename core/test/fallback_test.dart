@@ -42,7 +42,8 @@ Map<String, dynamic> _plan(List<Map<String, dynamic>> rules, {Map<String, Map<St
     };
 
 class _Rig {
-  _Rig(Map<String, dynamic> plan, Map<String, int> alive, {AutoSettings? settings, bool uncertain = false, int Function()? clock}) {
+  _Rig(Map<String, dynamic> plan, Map<String, int> alive,
+      {AutoSettings? settings, bool uncertain = false, int Function()? clock, void Function(String groupTag, String key)? onDown}) {
     final info = RoutingInfo();
     fake = FakeBox(buildConfig(plan, info: info), alive);
     this.uncertain = uncertain;
@@ -50,7 +51,8 @@ class _Rig {
         delay: fake.delayTest,
         settings: settings ?? const AutoSettings(failAfter: 2, flapGuard: false, stallAfter: Duration(milliseconds: 30)),
         pool: pool,
-        clock: clock);
+        clock: clock,
+        onDown: onDown);
     svc.changes.listen(changes.add);
   }
 
@@ -88,6 +90,19 @@ void main() {
     expect(r.svc.isDown('src:x'), isTrue);
     await Future<void>.delayed(Duration.zero);
     expect([for (final c in r.changes) '${c.target}>${c.to} ${c.rules.join('/')} ${c.back}'], ['src:x>block Video false', 'src:x>direct rule r2 false']);
+  });
+
+  test('onDown: a target whose current server missed failAfter times names that server (a chain: the entry and the exit)', () async {
+    final down = <String>[];
+    final r = _Rig(_plan([_rule('r1', 'src:p', 'block'), _rule('r2', 'chain:c', 'block')]), {'s::p1': 40, 's::p2': 60, 's::e': 30, 's::t': 30},
+        onDown: (tag, key) => down.add('$tag/$key'));
+    await r.svc.check();
+    expect(down, isEmpty);
+    r.fake.alive.clear();
+    await r.svc.check();
+    expect(down, isEmpty, reason: 'one miss is not enough with failAfter 2');
+    await r.svc.check();
+    expect(down, containsAll(['src:p/s::p1', 'chain:c>entry/s::e', 'chain:c/s::t']));
   });
 
   test('a Fastest group whose server missed is tested again first: another server answering keeps the target', () async {

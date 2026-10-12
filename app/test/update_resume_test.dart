@@ -93,6 +93,7 @@ class _ReadyCore extends CoreService {
         boxFactory: (_) => _Runner(),
         sysProxy: NoSystemProxy(),
         isElevated: () => true,
+        resolveAddresses: false, // hermetic: no real DoH
         exitCheck: (port) async => {'ip': '203.0.113.7', 'country': 'DE'},
       );
 
@@ -198,6 +199,7 @@ void main() {
             boxFactory: (_) => _Runner(),
             sysProxy: NoSystemProxy(),
             isElevated: () => true,
+            resolveAddresses: false, // hermetic: no real DoH
             exitCheck: (port) async => {'ip': '203.0.113.7', 'country': 'DE'},
           );
     final h = LiveCoreHost(

@@ -52,6 +52,7 @@ void main() {
         boxFactory: (_) => FakeRunner(),
         sysProxy: NoSystemProxy(),
         isElevated: () => true,
+        resolveAddresses: false, // hermetic: no real DoH
         reportUploader: up,
       ),
       isAndroid: true,
