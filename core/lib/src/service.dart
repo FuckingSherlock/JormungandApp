@@ -280,7 +280,15 @@ class CoreService implements CoreApi {
   List<DnsEntry> _dnsExtra = const []; // servers a rule names that are not in use: watched, never switched to
   Set<String> _dnsVpn = const {}; // ids of the servers set «via VPN»
   Map<String, String> _ruleDns = const {}; // user rule id → the tag of its DNS server
+  Map<String, List<String>> _ruleChains = const {}; // user rule id → the tags of its DNS chain, in priority order
   String _domainResolver = 'local'; // the tag that resolves what goes out directly
+  Map<String, List<DnsCandidate>> _dnsSides = const {}; // the candidates of each side, in the order the DNS rules try them
+  List<DnsCandidate> _dnsCandidates = const []; // every DNS server of the config with a flag
+
+  /// The DNS flags of the last run as the failover left them (candidate id → on): given again to a sing-box
+  /// started by the core itself (a crash, a restart for new lists), so the verdicts are not lost with it. Empty
+  /// after a connect the user asked for and after a disconnect: flags start on.
+  Map<String, bool> _dnsFlagMemory = const {};
 
   /// Where the DNS flag files live (dns_flags.dart): the same path for every config of this core, so a sing-box
   /// taken over after the core restarted reads the files the new core writes.
@@ -291,7 +299,10 @@ class CoreService implements CoreApi {
     _dnsExtra = info.dnsExtra;
     _dnsVpn = info.dnsVpn;
     _ruleDns = info.ruleDns;
+    _ruleChains = info.ruleChains;
     _domainResolver = info.domainResolver;
+    _dnsSides = info.dnsSides;
+    _dnsCandidates = info.dnsCandidates;
   }
   bool _dnsAuto = true; // Settings → DNS → Switch automatically (connect body `dnsAuto`, POST /api/dns/auto)
   final Timer Function(Duration, void Function()) _timer;
@@ -1016,26 +1027,66 @@ class CoreService implements CoreApi {
     fb.start();
   }
 
-  /// DNS failover: the servers in use are checked and judged (dns_failover.dart). D1b: it must move the DNS
-  /// flags (dns_flags.dart, `RoutingInfo.dnsSides` / `dnsCandidates` of the config); for now it only watches (`activate` refuses), a new
-  /// sing-box answers by the config's priority with every flag on.
+  /// DNS failover: the DNS servers of the config are checked and judged (dns_failover.dart) and their flags
+  /// (dns_flags.dart) follow the verdicts. The flags of the sing-box before this one ([_dnsFlagMemory]: a crash, an
+  /// own restart) were written into the new one by [_startSingBox]; they are the failover's start state.
   void _startDnsFailover(SingBoxApi api, AutoService auto) {
     if (_dnsServers.isEmpty && _dnsExtra.isEmpty) return;
     final probe = _probe;
     if (probe == null) return;
-    final dns = _dns = DnsFailover(_dnsServers,
-        activate: (tag) async => false,
+    final byId = {for (final c in _dnsCandidates) c.id: c};
+    final off = {for (final e in _dnsFlagMemory.entries) if (!e.value && byId.containsKey(e.key)) e.key};
+    final dns = _dns = DnsFailover(
+        sides: _dnsSides,
+        candidates: _dnsCandidates,
+        watch: _dnsExtra,
+        off: off,
+        setFlag: _setDnsFlag,
         query: _dnsAsk,
+        flagCheck: _dnsFlagCheck,
         settings: auto.settings,
         sentinel: sentinel,
-        vpn: _dnsVpn,
-        watch: _dnsExtra,
         window: windows.dnsDown,
         auto: _dnsAuto,
         pool: pool,
-        note: runner.note);
-    dns.switches.listen((s) => _event('dns', 'switched', 'info', {'from': s.from, 'to': s.to, 'reason': s.reason}, own: s.reason == 'off'));
+        note: logBook.note,
+        flagWait: dnsFlagWait,
+        flagPoll: dnsFlagPoll);
+    if (off.isNotEmpty) logBook.note('info', 'dns: flags off again after the restart: ${off.join(', ')}');
+    dns.switches.listen((s) => _event('dns', 'switched', 'info', {
+          'side': s.side,
+          'from': s.from,
+          'to': s.to,
+          'fromProvider': s.fromProvider,
+          'toProvider': s.toProvider,
+          'reason': s.reason,
+        }, own: s.reason == 'off'));
     dns.start();
+  }
+
+  /// How long sing-box may take to apply a flag file before the core warns, and the pause between its questions
+  /// (tests shorten them).
+  Duration dnsFlagWait = const Duration(seconds: 3), dnsFlagPoll = const Duration(milliseconds: 60);
+
+  /// Writes a flag file for the failover (dns_flags.dart), told to the core log with its reason.
+  Future<bool> _setDnsFlag(DnsCandidate c, bool on, String reason) async {
+    try {
+      setDnsFlag(c, on, reason: reason, log: logBook.note);
+      return true;
+    } catch (_) {
+      return false; // setDnsFlag has told why
+    }
+  }
+
+  /// The test seam of the flag check ([probeFlag] through the probe inbound by default): whether the candidate is
+  /// the one its side answers with; null = cannot be told.
+  Future<bool?> Function(DnsCandidate c)? dnsFlagProbe;
+
+  Future<bool?> _dnsFlagCheck(DnsCandidate c) {
+    final q = dnsFlagProbe;
+    if (q != null) return q(c);
+    final probe = _probe;
+    return probe == null ? Future.value(null) : probeFlag(probe, c.tag, dnsFlagcheckName(c.side));
   }
 
   /// The test seam of the DNS queries (`probeDns` through the probe inbound by default): ms until the server [tag] resolved [name].
@@ -1048,17 +1099,26 @@ class CoreService implements CoreApi {
     return probe == null ? Future.value(-1) : probeDns(probe, tag, name, timeoutMs: timeoutMs);
   }
 
-  /// The DNS server a connection resolved through (docs/rules.md §6): the user rule's own server; for a direct
-  /// outbound the default one (the direct side's top candidate); else the server in use.
+  /// The DNS server a connection resolved through (docs/rules.md §6): the user rule's own chain, the first
+  /// candidate whose flag is on; for a direct outbound the direct side's answering server; else the VPN side's.
   /// The OS resolver (`local`) is the server `system`. Null when there is none.
   ({String id, String tag, bool vpn})? _resolverFor(String outbound, Map<String, dynamic> evidence) {
     final text = evidence['rule'] is String ? evidence['rule'] as String : '${(evidence['noticed'] as Map?)?['rule'] ?? ''}';
     final origin = text.isEmpty ? null : _ruleNames?.of(text);
-    String? tag = origin != null && origin.kind == 'user' ? _ruleDns[origin.id] : null;
-    if (tag == null && outbound == 'direct') tag = _domainResolver;
+    final flags = _dns?.flags ?? const <String, bool>{};
+    String? tag;
+    if (origin != null && origin.kind == 'user') {
+      final chain = _ruleChains[origin.id] ?? const <String>[];
+      tag = chain.where((t) => flags[t.startsWith('dns-') ? t.substring(4) : t] ?? true).firstOrNull ?? chain.firstOrNull ?? _ruleDns[origin.id];
+    }
     final all = [..._dnsServers, ..._dnsExtra];
     DnsEntry? e = tag == null ? null : all.where((s) => s.tag == tag).firstOrNull;
-    if (e == null && tag == null) e = all.where((s) => s.id == _dns?.active).firstOrNull ?? _dnsServers.firstOrNull;
+    if (e == null && tag == null) {
+      final id = _dns?.activeOf(outbound == 'direct' ? 'direct' : 'vpn');
+      e = all.where((s) => s.id == id).firstOrNull;
+      if (e == null && outbound == 'direct') e = all.where((s) => s.tag == _domainResolver).firstOrNull;
+      e ??= all.where((s) => s.id == _dns?.active).firstOrNull ?? _dnsServers.firstOrNull;
+    }
     return e == null ? null : (id: e.id, tag: e.tag, vpn: _dnsVpn.contains(e.id));
   }
 
@@ -1108,7 +1168,9 @@ class CoreService implements CoreApi {
     _auto = null;
     _fallback?.stop();
     _fallback = null;
-    _dns?.stop();
+    final dns = _dns;
+    if (dns != null) _dnsFlagMemory = dns.flags; // a sing-box the core starts next is given these flags again
+    dns?.stop();
     _dns = null;
     pool.resetNetwork(); // no sing-box, no status to hold on to
     _changed();
@@ -1526,8 +1588,11 @@ class CoreService implements CoreApi {
           info: info,
           selfPaths: _selfPaths,
           selfPackages: _selfPackages);
-      // every DNS server's flag file must exist before sing-box reads the config; all on at a start
-      writeDnsFlags(info.dnsCandidates);
+      // every DNS server's flag file must exist before sing-box reads the config; all on at a connect, the last
+      // state again at a restart of ours (the files of the run before hold nothing we rely on)
+      final memory = _dnsFlagMemory;
+      writeDnsFlags(info.dnsCandidates,
+          on: (c) => memory[c.id] ?? true, reason: memory.isEmpty ? 'connect' : 'restart re-apply', log: logBook.note);
       await runner.start(config);
     } on SingBoxError catch (e) {
       // sing-box refused the TUN for a missing permission: the same advice as not being elevated
@@ -1638,6 +1703,13 @@ class CoreService implements CoreApi {
       _fallbacks = info.fallbacks;
       _ruleNames = info.ruleNames;
       _takeDns(info);
+      // the files of the core before this one are not relied on: every flag on, the failover starts from there
+      _dnsFlagMemory = const {};
+      try {
+        writeDnsFlags(info.dnsCandidates, reason: 'adopt', log: logBook.note);
+      } catch (e) {
+        logBook.note('warn', 'dns: the flags were not written on taking over ($e)');
+      }
       _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
       _tunnelPort = tunnelPort;
       _sysPort = sysPort;
@@ -1756,6 +1828,7 @@ class CoreService implements CoreApi {
     _applyKill(body);
     if (body['dnsAuto'] is bool) _dnsAuto = body['dnsAuto'] as bool;
     _stopAuto();
+    if (own) _dnsFlagMemory = const {}; // a connect the user asked for: every DNS flag starts on; a restart of ours keeps them
     _closeCrashRoot('reconnected');
     _error = null;
     _warning = null;
@@ -1873,6 +1946,7 @@ class CoreService implements CoreApi {
     _downSince = null;
     _released = false;
     _stopAuto();
+    _dnsFlagMemory = const {};
     _closeCrashRoot('disconnected');
     await _locked(() async {
       if (seq == _connectSeq) {

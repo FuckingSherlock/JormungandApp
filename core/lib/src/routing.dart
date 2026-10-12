@@ -301,6 +301,22 @@ class DnsCandidate {
   DnsEntry get entry => (id: id, tag: tag);
 }
 
+/// The name the flags of a side are checked with (docs/rules.md §6 → flagcheck): the DNS rules answer it,
+/// without any network, with the address of the side's effective candidate ([DnsFlagCheck.address]).
+String dnsFlagcheckName(String side) => '$side.flagcheck.jorm.invalid';
+
+/// One candidate's answer to the side's flagcheck name: `127.77.<side>.<n>` (side 1 = direct, 2 = vpn; n = the
+/// place in the side's list from 1). Reached through the probe inbound (probe.dart `flagChecks`).
+class DnsFlagCheck {
+  const DnsFlagCheck({required this.candidate, required this.address});
+
+  final DnsCandidate candidate;
+  final String address;
+
+  String get side => candidate.side;
+  String get name => dnsFlagcheckName(side);
+}
+
 /// The Sentinel's id of the OS resolver (`local`) when the settings have no `system` server: it resolves the
 /// DNS servers' hostnames and what goes out directly, so it is watched like the others (never switched to).
 const systemDnsId = 'system';
@@ -325,6 +341,9 @@ class RoutingInfo {
   /// flags (dns_flags.dart).
   final dnsCandidates = <DnsCandidate>[];
 
+  /// The flagcheck of every candidate of a side (the probe inbound asks them, see [DnsFlagCheck]).
+  final dnsFlagChecks = <DnsFlagCheck>[];
+
   /// Servers of the config that are not in use (provider off) but a rule names: the Sentinel still
   /// watches them (docs/rules.md §6). Also the OS resolver `system` when no Local provider is on.
   final dnsExtra = <DnsEntry>[];
@@ -332,8 +351,12 @@ class RoutingInfo {
   /// The ids of the config's DNS servers that go through the VPN (`detour`).
   final dnsVpn = <String>{};
 
-  /// A user rule's id → the tag of the DNS server its traffic resolves through.
+  /// A user rule's id → the tag of the DNS server its traffic resolves through (the top one of its chain).
   final ruleDns = <String, String>{};
+
+  /// A user rule's id → the tags of its chain of DNS servers, in the order the DNS rules try them (the first
+  /// whose flag is on answers).
+  final ruleChains = <String, List<String>>{};
 
   /// The tag of the server that resolves what goes out directly (`default_domain_resolver`); `local` is the OS resolver.
   String domainResolver = 'local';
@@ -371,12 +394,14 @@ class Routing {
   final dnsEnabled = <DnsEntry>[];
   final dnsSides = <String, List<DnsCandidate>>{'direct': [], 'vpn': []};
   final dnsCandidates = <DnsCandidate>[];
+  final dnsFlagChecks = <DnsFlagCheck>[];
 
   /// Servers named by a rule but not in use ([RoutingInfo.dnsExtra]), the ids of those via VPN, and each
   /// rule's first server.
   final dnsExtra = <DnsEntry>[];
   final dnsVpn = <String>{};
   final ruleDns = <String, String>{};
+  final ruleChains = <String, List<String>>{};
 
   /// Resolves the servers' own hostnames (proxy outbounds, DoH hosts) and what goes out
   /// directly: the direct side's top candidate, never one that needs the tunnel.
@@ -387,6 +412,75 @@ class Routing {
 
   /// Rules left out or narrowed (a list not downloaded, a bad value) — told to the user.
   final warnings = <String>[];
+}
+
+/// The DNS rules that send what [match] (null = every query) asks to the candidates [l], in priority order: with
+/// several, one rule per candidate `AND(match, its flag)` — the first one whose flag is on answers — and then
+/// [match] with the top candidate and no flag (every flag off: the top one answers); one candidate needs no flag.
+/// [fallback] false (no [match]: the catch-all, `dns.final` does it) leaves the last step out.
+/// [action] makes the rule's action for a candidate (default: route to its server).
+List<Map<String, dynamic>> dnsChainRules(Map<String, dynamic>? match, List<DnsCandidate> l,
+    {bool fallback = true, Map<String, dynamic> Function(DnsCandidate c, int i)? action}) {
+  if (l.isEmpty) return const [];
+  Map<String, dynamic> act(int i) => action?.call(l[i], i) ?? {'action': 'route', 'server': l[i].tag};
+  return [
+    if (l.length > 1)
+      for (var i = 0; i < l.length; i++)
+        match == null
+            ? {'rule_set': [l[i].flagTag], ...act(i)}
+            : {
+                'type': 'logical',
+                'mode': 'and',
+                'rules': [match, {'rule_set': [l[i].flagTag]}],
+                ...act(i),
+              },
+    if (fallback && match != null) {...match, ...act(0)},
+  ];
+}
+
+const _dnsMatchKeys = {
+  'process_name', 'process_path', 'process_path_regex', 'package_name', 'network', 'inbound', //
+  'source_ip_cidr', 'source_ip_is_private', 'source_port', 'source_port_range',
+  'domain', 'domain_suffix', 'domain_keyword', 'domain_regex',
+  'type', 'mode', 'rules', 'invert',
+};
+
+/// Whether a DNS rule can tell the connections [m] matches by the query of a route `resolve`: only what the query
+/// carries (the process / package, network, inbound, source, the name), no destination port, IP or rule set of an
+/// unknown content (a geosite list is names).
+bool dnsMatchable(Object? m) => switch (m) {
+      Map m => m.entries.every((e) => switch (e.key) {
+            'rule_set' => (e.value as List).every((t) => '$t'.startsWith('geosite-')),
+            'rules' => dnsMatchable(e.value),
+            final k => _dnsMatchKeys.contains(k),
+          }),
+      List l => l.every(dnsMatchable),
+      _ => false,
+    };
+
+/// The route rules `resolve` that resolve what [match] (conditions ANDed; empty = every connection) names through
+/// the first live candidate of [l]: with several, a rule per candidate that holds only while its flag is on and
+/// no flag above it is (so exactly one of them acts, whatever the connection already holds), and a last one for
+/// every flag off (the top candidate). One candidate: a plain `resolve` with its server; none: `resolve` without a
+/// server (the DNS rules and `dns.final` decide).
+List<Map<String, dynamic>> resolveRules(List<DnsCandidate> l, {List<Map<String, dynamic>> match = const []}) {
+  Map<String, dynamic> make(List<Map<String, dynamic>> parts, Map<String, dynamic> act) => parts.isEmpty
+      ? act
+      : parts.length == 1
+          ? {...parts.first, ...act}
+          : {'type': 'logical', 'mode': 'and', 'rules': parts, ...act};
+  Map<String, dynamic> resolve(DnsCandidate c) => {'action': 'resolve', 'server': c.tag};
+  if (l.isEmpty) return [make(match, {'action': 'resolve'})];
+  if (l.length == 1) return [make(match, resolve(l.first))];
+  return [
+    for (var i = 0; i < l.length; i++)
+      make([
+        ...match,
+        {'rule_set': [l[i].flagTag]},
+        if (i > 0) {'rule_set': [for (final c in l.take(i)) c.flagTag], 'invert': true},
+      ], resolve(l[i])),
+    make([...match, {'rule_set': [for (final c in l) c.flagTag], 'invert': true}], resolve(l.first)),
+  ];
 }
 
 /// Builds the routing part of a config. [group] adds a target's server group(s) the same
@@ -612,8 +706,8 @@ class _Builder {
   /// DNS rule for the domains a rule matches (for the resolve step and, with TUN, the
   /// apps' own queries). Only domain conditions: DNS sees names, not IPs. What the catch-all side
   /// answers anyway needs none.
-  void _dnsRule(List<Map<String, dynamic>> domainAlts, _Chain? chain) {
-    if (chain == null || domainAlts.isEmpty || chain.key == _catchChain?.key) return;
+  void _dnsRule(List<Map<String, dynamic>> domainAlts, _Chain? chain, {bool force = false}) {
+    if (chain == null || domainAlts.isEmpty || (chain.key == _catchChain?.key && !force)) return;
     final last = _groups.lastOrNull;
     if (last != null && last.chain.key == chain.key) {
       last.alts.addAll(domainAlts);
@@ -629,27 +723,27 @@ class _Builder {
   /// so the first live one answers; with every flag off the chain's top candidate does (a rule without a
   /// flag after them, `dns.final` for the catch-all). One candidate needs no flag.
   void _dnsRules() {
+    _flagChecks();
     for (final g in _groups) {
-      final match = _or(g.alts);
-      final l = g.chain.list;
-      if (l.length > 1) {
-        for (final c in l) {
-          out.dnsRules.add({
-            'type': 'logical',
-            'mode': 'and',
-            'rules': [match, {'rule_set': [c.flagTag]}],
-            'action': 'route',
-            'server': c.tag,
-          });
-        }
-      }
-      out.dnsRules.add({...match, 'action': 'route', 'server': l.first.tag});
+      out.dnsRules.addAll(dnsChainRules(_or(g.alts), g.chain.list));
     }
     final catchList = _catchChain?.list ?? const <DnsCandidate>[];
-    if (catchList.length > 1) {
-      for (final c in catchList) {
-        out.dnsRules.add({'rule_set': [c.flagTag], 'action': 'route', 'server': c.tag});
-      }
+    if (catchList.length > 1) out.dnsRules.addAll(dnsChainRules(null, catchList, fallback: false));
+  }
+
+  /// The flagcheck of each side that has several candidates (first among the DNS rules): [dnsFlagcheckName] is answered, with no network, by
+  /// a predefined A record naming the side's effective candidate; the core asks it through the probe inbound
+  /// after each flag write to see that sing-box applied the file (probe.dart `flagChecks`).
+  void _flagChecks() {
+    for (final side in dnsSidesAll) {
+      final l = out.dnsSides[side]!;
+      final checks = [for (var i = 0; i < l.length && i < 253; i++) DnsFlagCheck(candidate: l[i], address: '127.77.${dnsSidesAll.indexOf(side) + 1}.${i + 1}')];
+      if (checks.length < 2) continue; // a side with one candidate has no flag rule to look at
+      out.dnsFlagChecks.addAll(checks);
+      final name = dnsFlagcheckName(side);
+      out.dnsRules.addAll(dnsChainRules({'domain': [name]}, [for (final k in checks) k.candidate], action: (c, i) {
+        return {'action': 'predefined', 'rcode': 'NOERROR', 'answer': ['$name. IN A ${checks[i].address}']};
+      }));
     }
   }
 
@@ -657,6 +751,25 @@ class _Builder {
   /// the DNS rules (so by the flags and the rule's provider), and the direct outbound uses the addresses.
   /// Without it the direct outbound resolves with `default_domain_resolver`, which no rule can move.
   void _resolveFirst(Map<String, dynamic> match) => out._add({...match, 'action': 'resolve'});
+
+  /// The same for what [match] names without domains (an app, a source, a network): the DNS rules can tell it too,
+  /// as a query of a route `resolve` carries the connection's own process / package / network / inbound / source
+  /// (measured on sing-box 1.14.2; not its destination port), so [match] becomes one more alternative of the
+  /// rule group of [chain] (`AND(OR(matches), flag) → server` per candidate) and the step in front of the rule is
+  /// the same plain `resolve`: the number of rules grows with the candidates, not with the apps and rules.
+  /// What the DNS rules cannot tell (a port, an unknown rule set, an IP) is resolved explicitly, through a ladder
+  /// over the chain's flags ([resolveRules]: a rule per candidate), which is the only part that multiplies.
+  /// No chain: the DNS rules decide ([chain] null → the plain step).
+  void _resolveDirect(_Chain? chain, Map<String, dynamic> match) {
+    if (chain == null || dnsMatchable(match)) {
+      _resolveFirst(match);
+      if (chain != null) _dnsRule([match], chain, force: true);
+      return;
+    }
+    for (final step in resolveRules(chain.list, match: [match])) {
+      out._add(step);
+    }
+  }
 
   /* ── Targets and actions ── */
 
@@ -798,15 +911,25 @@ class _Builder {
       final label = '${a['name'] ?? ''}'.isNotEmpty ? '${a['name']}' : id;
       void half(Map h, List<String>? network) {
         final fallback = '${h['fallback'] ?? 'default'}';
+        var direct = false;
         final act = switch (h['act']) {
           'block' => _reject(),
-          'direct' => _route('direct'),
-          'proxy' => _proxyAction('${h['target'] ?? ''}', fallback, label, app: true).action,
+          'direct' => () {
+              direct = true;
+              return _route('direct');
+            }(),
+          'proxy' => () {
+              final p = _proxyAction('${h['target'] ?? ''}', fallback, label, app: true);
+              direct = p.direct;
+              return p.action;
+            }(),
           // Default has a rule only to give the main flow an "If unavailable" (it then goes by
           // the selector, not by the rules below); none asked for = by the rules below
           _ => switch (_mainFlowAction(fallback, label, true)) { {'outbound': topTag} => null, final a => a },
         };
         final name = network == null ? label : '$label (${network.first.toUpperCase()})';
+        // an app that goes direct has its names resolved by the first live candidate of the direct side
+        if (act != null && direct) _resolveDirect(_autoChain('direct'), {...match, 'network': ?network});
         if (act != null) out._add({...match, 'network': ?network, ...act}, RuleOrigin('app', name, id: id));
       }
 
@@ -856,42 +979,50 @@ class _Builder {
       // ports (mixed-in, sys-in) stay open in TUN and bring domains, so the step is limited to them.
       if (!resolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
         resolved = true;
-        final step = _resolveAction();
-        if (step != null) out._add({if (plan['mode'] == 'tun') 'inbound': const ['mixed-in', 'sys-in'], ...step});
+        for (final step in _resolveStep([if (plan['mode'] == 'tun') {'inbound': const ['mixed-in', 'sys-in']}])) {
+          out._add(step);
+        }
       }
-      // a direct rule's names are resolved here, by the DNS rules (so by the rule's DNS provider and the flags):
-      // the direct outbound uses the addresses and never asks a resolver of its own
-      if (direct && built.domainAlts.isNotEmpty) _resolveFirst(built.match);
+      final chain = action == 'block' ? null : _dnsFor(dns, direct: direct);
+      // a direct rule's names are resolved here (the direct outbound uses the addresses and never asks a resolver
+      // of its own): by the DNS rules when the rule names domains (so by the rule's DNS provider and the flags),
+      // else by the first live candidate of its DNS chain; a rule that needs the IP has it already
+      if (direct) {
+        if (built.domainAlts.isNotEmpty) {
+          _resolveFirst(built.match);
+        } else if (!_needsIp(built.match)) {
+          _resolveDirect(chain, built.match);
+        }
+      }
       out._add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()},
           RuleOrigin('user', '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}', id: '${rule['id'] ?? ''}'));
       if (action != 'block') {
-        final chain = _dnsFor(dns, direct: direct);
         _dnsRule(built.domainAlts, chain);
         final id = '${rule['id'] ?? ''}';
-        if (id.isNotEmpty) out.ruleDns[id] = chain?.list.first.tag ?? out.dnsFinal;
+        if (id.isNotEmpty) {
+          out.ruleDns[id] = chain?.list.first.tag ?? out.dnsFinal;
+          out.ruleChains[id] = [for (final c in chain?.list ?? const <DnsCandidate>[]) c.tag];
+        }
       }
     }
   }
 
   /// The `resolve` step before the IP rules (Settings → DNS "Resolve for IP rules",
   /// `dns.resolve`): null = off. `auto` (also a provider that is deleted or off) = the top candidate of
-  /// the VPN side, so the name never goes to the provider's DNS; a provider id = its first candidate (on the
-  /// VPN side when it has one). The server is named explicitly, so the flags and the rules' own DNS servers do
-  /// not apply to this step (D1b: it should follow the VPN side's flags). No VPN candidate: `resolve` without
-  /// a server (the DNS rules and `dns.final` decide), with a warning.
-  Map<String, dynamic>? _resolveAction() {
+  /// the VPN side, so the name never goes to the provider's DNS; a provider id = its candidates (on the
+  /// VPN side when it has one). The server is named explicitly (the rules' own DNS servers do not apply to this
+  /// step) but it follows the flags: the first live candidate of the list resolves ([resolveRules]). No VPN
+  /// candidate: `resolve` without a server (the DNS rules and `dns.final` decide), with a warning.
+  List<Map<String, dynamic>> _resolveStep(List<Map<String, dynamic>> match) {
     final pick = '${((r['dns'] as Map?) ?? const {})['resolve'] ?? 'auto'}';
-    if (pick == 'off') return null;
+    if (pick == 'off') return const [];
     final named = pick == 'auto' ? null : _providerById[pick];
-    final fromNamed = named != null && named.on ? _dnsFor(pick, direct: false)?.list.firstOrNull : null;
-    final server = fromNamed ?? out.dnsSides['vpn']!.firstOrNull;
-    if (server == null) {
-      if (out.dnsEnabled.isNotEmpty) {
-        out.warnings.add('Resolve for IP rules: no DNS server via VPN is on, the first one in use resolves and its query may leave outside the tunnel');
-      }
-      return {'action': 'resolve'};
+    final fromNamed = named != null && named.on ? _dnsFor(pick, direct: false)?.list : null;
+    final list = fromNamed != null && fromNamed.isNotEmpty ? fromNamed : out.dnsSides['vpn']!;
+    if (list.isEmpty && out.dnsEnabled.isNotEmpty) {
+      out.warnings.add('Resolve for IP rules: no DNS server via VPN is on, the first one in use resolves and its query may leave outside the tunnel');
     }
-    return {'action': 'resolve', 'server': server.tag};
+    return resolveRules(list, match: match);
   }
 
   bool _needsIp(Object? o) => switch (o) {

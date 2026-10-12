@@ -322,22 +322,22 @@ void main() {
 
     test('the resolve step in TUN is only for the proxy ports (tun-in brings the IP); the proxy mode has it for all; IP-only-in-TUN rules apply in both', () {
       final tun = _build(_plan(routing: routing)), proxy = _build(_plan(mode: 'proxy', routing: routing));
-      final tunResolve = _rules(tun).where((r) => r['action'] == 'resolve' && r.containsKey('server')).toList();
+      final tunResolve = _rules(tun).where((r) => r['action'] == 'resolve' && r.containsKey('server') && !r.containsKey('process_name')).toList();
       expect(tunResolve, hasLength(1));
       expect(tunResolve.single['inbound'], ['mixed-in', 'sys-in'], reason: 'never tun-in');
-      final proxyResolve = _rules(proxy).where((r) => r['action'] == 'resolve' && r.containsKey('server')).toList();
+      final proxyResolve = _rules(proxy).where((r) => r['action'] == 'resolve' && r.containsKey('server') && !r.containsKey('process_name')).toList();
       expect(proxyResolve, hasLength(1));
       expect(proxyResolve.single.containsKey('inbound'), isFalse, reason: 'proxy mode: unchanged, for every inbound');
       expect({...tunResolve.single}..remove('inbound'), proxyResolve.single);
       // in the same place: right before the first IP rule without the flag
-      expect(_rules(tun).indexWhere((r) => r['action'] == 'resolve' && r.containsKey('server')) + 1, _rules(tun).indexWhere((r) => '${r['ip_cidr']}' == '[8.8.8.0/24]'));
+      expect(_rules(tun).indexWhere((r) => r['action'] == 'resolve' && r.containsKey('server') && !r.containsKey('process_name')) + 1, _rules(tun).indexWhere((r) => '${r['ip_cidr']}' == '[8.8.8.0/24]'));
       expect(_rules(tun).any((r) => '${r['ip_cidr']}' == '[9.9.9.0/24]'), isTrue);
       expect(_rules(tun).any((r) => '${r['ip_cidr']}' == '[8.8.8.0/24]'), isTrue);
     });
 
     test('Resolve for IP rules = off: no step in TUN either', () {
       final r = Map<String, dynamic>.from(routing)..['dns'] = {...(routing['dns'] as Map<String, dynamic>), 'resolve': 'off'};
-      expect(_rules(_build(_plan(routing: r))).where((x) => x['action'] == 'resolve' && x.containsKey('server')), isEmpty);
+      expect(_rules(_build(_plan(routing: r))).where((x) => x['action'] == 'resolve' && x.containsKey('server') && !x.containsKey('process_name')), isEmpty);
     });
 
     test('the "no VPN DNS server" warning of the resolve step comes in TUN too (the step is there for the proxy ports)', () {

@@ -20,7 +20,7 @@ class _MockDns {
     _sock.listen((e) {
       if (e != RawSocketEvent.read) return;
       final d = _sock.receive();
-      if (d == null || d.data.length < 17) return;
+      if (d == null || d.data.length < 17 || !answering) return;
       queries++;
       final q = d.data;
       var i = 12;
@@ -40,6 +40,9 @@ class _MockDns {
   final RawDatagramSocket _sock;
   final int k;
   int queries = 0;
+
+  /// Silent while false: the server is dead.
+  bool answering = true;
 
   static Future<_MockDns> start(String ip, int port, int k) async => _MockDns(await RawDatagramSocket.bind(InternetAddress(ip), port), k);
   void close() => _sock.close();
@@ -338,4 +341,281 @@ void main() {
       await lab.down();
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 60)));
+
+  test('both sides live: the flagcheck names each side\'s candidate, the resolve step and a direct rule follow the flags, a dead server moves only its side', () async {
+    final lab = _Lab();
+    await lab.up();
+    final web = <HttpServer>[];
+    final sb = SingBoxProcess(_bin, p.join(lab.tmp.path, 'built'));
+    final sentinel = Sentinel(settle: Duration.zero)..context.started();
+    DnsFailover? fo;
+    try {
+      final taken = {lab.dnsIn, lab.ssPort, ...lab.dp, ...lab.vp};
+      final mixed = await freePort(exclude: taken);
+      final httpPort = await freePort(exclude: {...taken, mixed});
+      final probe = Probe(await freePort(exclude: {...taken, mixed, httpPort}));
+      // one HTTP server per answer address: the body tells which DNS server's answer the connection used
+      for (final (name, ip) in [('d0', '127.0.10.10'), ('d1', '127.0.11.11'), ('v0', '127.0.100.100'), ('v1', '127.0.101.101')]) {
+        final s = await HttpServer.bind(InternetAddress(ip), httpPort);
+        s.listen((r) => r.response
+          ..write(name)
+          ..close());
+        web.add(s);
+      }
+      Map<String, dynamic> prov(String id, String host, int port, String side) => {
+            'id': id,
+            'on': true,
+            'sides': [side],
+            'use': ['udp'],
+            'transports': [{'kind': 'udp', 'addr': 'udp://$host:$port'}],
+          };
+      Map<String, dynamic> rule(String id, String action, String group, Map<String, List<String>> v) => {
+            'id': id,
+            'name': id,
+            'action': action,
+            'target': '',
+            'fallback': 'default',
+            'dns': 'auto',
+            'groups': {group: {'not': false, 'v': v}},
+          };
+      final info = RoutingInfo();
+      final plan = {
+        'kind': 'unit',
+        'main': {
+          'pick': 'priority',
+          'chosen': 'm::0',
+          'nodes': [{'key': 'm::0', 'outbound': {'type': 'direct'}}],
+        },
+        'mixedPort': mixed,
+        'routing': {
+          'dns': {
+            'servers': [
+              prov('a', '127.0.0.1', lab.dp[0], 'direct'),
+              prov('b', '127.0.0.1', lab.dp[1], 'direct'),
+              prov('c', '127.0.0.2', lab.vp[0], 'vpn'),
+              prov('d', '127.0.0.2', lab.vp[1], 'vpn'),
+            ],
+            'directPolicy': 'priority',
+          },
+          // a direct rule by name (the DNS rules of the direct side answer it), then an IP rule (the resolve step
+          // in front of it asks the VPN side)
+          'rules': [
+            rule('rd', 'direct', 'domain', {'domain_suffix': ['dir.test']}),
+            rule('ri', 'proxy', 'ip', {'ip_cidr': ['127.0.0.0/8']}),
+          ],
+          'quick': {'lan': false, 'final': 'proxy'},
+        },
+      };
+      final cfg = buildConfig(plan, probe: probe, info: info, dnsFlagDir: p.join(lab.tmp.path, 'flags'));
+      expect(info.dnsSides['direct']!.map((c) => c.id), ['a-udp1', 'b-udp1']);
+      expect(info.dnsSides['vpn']!.map((c) => c.id), ['c-udp1-v', 'd-udp1-v']);
+      writeDnsFlags(info.dnsCandidates);
+      await sb.start(cfg);
+      DnsCandidate cand(String id) => info.dnsCandidates.firstWhere((c) => c.id == id);
+      final ca = cand('a-udp1'), cb = cand('b-udp1'), cc = cand('c-udp1-v'), cd = cand('d-udp1-v');
+      Future<String> flagged(String side) async {
+        // the effective candidate of a side as the flagcheck tells it
+        final on = [for (final c in info.dnsSides[side]!) if (await probeFlag(probe, c.tag, dnsFlagcheckName(side)) == true) c.id];
+        return on.join(',');
+      }
+
+      Future<String> get(String host) async {
+        final h = HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:$mixed';
+        try {
+          final res = await (await h.getUrl(Uri.parse('http://$host:$httpPort/'))).close().timeout(const Duration(seconds: 4));
+          return await res.transform(utf8.decoder).join();
+        } catch (_) {
+          return '';
+        } finally {
+          h.close(force: true);
+        }
+      }
+
+      var n = 0;
+      // [suffix]: `dir.test` is the direct rule's (the direct side answers), anything else goes to the IP rule (the VPN side)
+      Future<void> until(String suffix, String want) async {
+        final t = Stopwatch()..start();
+        while (t.elapsed < const Duration(seconds: 6)) {
+          if (await get('n${n++}.$suffix') == want) return;
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        fail('$suffix was not answered by $want within 6 s');
+      }
+
+      expect([await get('x0.dir.test'), await get('x0.other.test')], ['d0', 'v0'], reason: 'all flags on: each side\'s top candidate');
+      expect([await flagged('direct'), await flagged('vpn')], ['a-udp1', 'c-udp1-v']);
+
+      setDnsFlag(cc, false);
+      await until('other.test', 'v1'); // the resolve step moved to the next VPN candidate
+      expect(await get('y0.dir.test'), 'd0', reason: 'the direct side did not move');
+      expect([await flagged('direct'), await flagged('vpn')], ['a-udp1', 'd-udp1-v']);
+      setDnsFlag(cc, true);
+      await until('other.test', 'v0');
+      setDnsFlag(ca, false);
+      await until('dir.test', 'd1');
+      expect(await get('y1.other.test'), 'v0', reason: 'the VPN side did not move');
+      expect([await flagged('direct'), await flagged('vpn')], ['b-udp1', 'c-udp1-v']);
+      // every flag of a side off: its top candidate answers (the config's last rule has no flag)
+      setDnsFlag(cb, false);
+      await until('dir.test', 'd0');
+      expect(await flagged('direct'), 'a-udp1');
+      setDnsFlag(cc, false);
+      setDnsFlag(cd, false);
+      await until('other.test', 'v0');
+      expect(await flagged('vpn'), 'c-udp1-v');
+      for (final c in [ca, cb, cc, cd]) {
+        setDnsFlag(c, true);
+      }
+
+      // the failover on the same sing-box: a server that dies turns its flag off, only its side moves
+      final notes = <String>[];
+      fo = DnsFailover(
+          sides: info.dnsSides,
+          candidates: info.dnsCandidates,
+          watch: info.dnsExtra,
+          setFlag: (c, on, reason) async {
+            setDnsFlag(c, on, reason: reason, log: (l, t) => notes.add('$l $t'));
+            return true;
+          },
+          flagCheck: (c) => probeFlag(probe, c.tag, dnsFlagcheckName(c.side)),
+          query: (tag, name, t) => probeDns(probe, tag, name, timeoutMs: t),
+          sentinel: sentinel,
+          settings: const AutoSettings(failAfter: 2, flapGuard: false, timeoutMs: 1500),
+          note: (l, t) => notes.add('$l $t'));
+      final moves = <DnsSwitch>[];
+      fo.switches.listen(moves.add);
+      await fo.check();
+      expect([fo.activeOf('direct'), fo.activeOf('vpn')], ['a-udp1', 'c-udp1-v']);
+      lab.dns['d0']!.answering = false;
+      await fo.check();
+      for (var i = 0; i < 400 && fo.activeOf('direct') != 'b-udp1'; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50)); // the Sentinel's checks take their time
+      }
+      expect([fo.activeOf('direct'), fo.activeOf('vpn')], ['b-udp1', 'c-udp1-v']);
+      expect(fo.flags, {'a-udp1': false, 'b-udp1': true, 'c-udp1-v': true, 'd-udp1-v': true});
+      await until('dir.test', 'd1');
+      expect(await get('z0.other.test'), 'v0', reason: 'the VPN side did not notice');
+      expect([await flagged('direct'), await flagged('vpn')], ['b-udp1', 'c-udp1-v']);
+      expect(notes.where((l) => l.contains('dns flag: a-udp1 (direct) off (verdict)')), hasLength(1));
+      expect(notes.where((l) => l.contains('dns flag check (direct): b-udp1 answers after')), hasLength(1), reason: notes.join('\n'));
+      expect(notes.where((l) => l.startsWith('warn')), isEmpty, reason: notes.join('\n'));
+      final st = fo.toJson();
+      expect((st['sides'] as Map)['direct'], {'active': 'b-udp1', 'provider': 'b'});
+      expect((st['sides'] as Map)['vpn'], {'active': 'c-udp1-v', 'provider': 'c'});
+      final a = (st['servers'] as List).cast<Map>().firstWhere((s) => s['id'] == 'a-udp1');
+      expect(a, containsPair('flag', false));
+      expect([a['provider'], a['side'], a['kind']], ['a', 'direct', 'udp']);
+
+      lab.dns['d0']!.answering = true; // it answers again: back after failAfter answers
+      await fo.check();
+      expect(fo.activeOf('direct'), 'b-udp1');
+      await fo.check();
+      expect(fo.activeOf('direct'), 'a-udp1');
+      await until('dir.test', 'd0');
+      await Future<void>.delayed(Duration.zero);
+      expect([for (final m in moves) '${m.side} ${m.from}>${m.to} ${m.reason}'], ['direct a-udp1>b-udp1 failover', 'direct b-udp1>a-udp1 back']);
+      expect([moves.first.fromProvider, moves.first.toProvider], ['a', 'b']);
+    } finally {
+      fo?.stop();
+      sentinel.dispose();
+      await sb.stop();
+      for (final s in web) {
+        await s.close(force: true);
+      }
+      await lab.down();
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 120)));
+
+  test('a direct app: one plain resolve in front, the DNS rules over the connection\'s process choose the server by the flags (no ladder per app)', () async {
+    final lab = _Lab();
+    await lab.up();
+    final web = <HttpServer>[];
+    final sb = SingBoxProcess(_bin, p.join(lab.tmp.path, 'app'));
+    try {
+      final taken = {lab.dnsIn, lab.ssPort, ...lab.dp, ...lab.vp};
+      final mixed = await freePort(exclude: taken);
+      final httpPort = await freePort(exclude: {...taken, mixed});
+      for (final (name, ip) in [('d0', '127.0.10.10'), ('d1', '127.0.11.11')]) {
+        final s = await HttpServer.bind(InternetAddress(ip), httpPort);
+        s.listen((r) => r.response
+          ..write(name)
+          ..close());
+        web.add(s);
+      }
+      Map<String, dynamic> prov(String id, String host, int port, String side) => {
+            'id': id,
+            'on': true,
+            'sides': [side],
+            'use': ['udp'],
+            'transports': [{'kind': 'udp', 'addr': 'udp://$host:$port'}],
+          };
+      // this very process is the app: its connections to the mixed inbound carry its name
+      final exe = p.basename(Platform.resolvedExecutable);
+      final self = Platform.isWindows ? 'dartvm.exe' : exe;
+      final info = RoutingInfo();
+      final plan = {
+        'kind': 'unit',
+        'main': {
+          'pick': 'priority',
+          'chosen': 'm::0',
+          'nodes': [{'key': 'm::0', 'outbound': {'type': 'direct'}}],
+        },
+        'mixedPort': mixed,
+        'routing': {
+          'dns': {
+            'servers': [
+              prov('a', '127.0.0.1', lab.dp[0], 'direct'),
+              prov('b', '127.0.0.1', lab.dp[1], 'direct'),
+              prov('c', '127.0.0.2', lab.vp[0], 'vpn'),
+            ],
+            'directPolicy': 'priority',
+          },
+          'apps': [{'id': self, 'kind': 'process', 'act': 'direct'}],
+          'quick': {'lan': false, 'final': 'proxy'},
+        },
+      };
+      final cfg = buildConfig(plan, info: info, dnsFlagDir: p.join(lab.tmp.path, 'flags'));
+      final resolves = ((cfg['route'] as Map)['rules'] as List).cast<Map>().where((r) => r['action'] == 'resolve').toList();
+      expect(resolves, [{'process_name': [self], 'action': 'resolve'}]);
+      writeDnsFlags(info.dnsCandidates);
+      await sb.start(cfg);
+      DnsCandidate cand(String id) => info.dnsCandidates.firstWhere((c) => c.id == id);
+      var n = 0;
+      Future<String> get() async {
+        final h = HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:$mixed';
+        try {
+          final res = await (await h.getUrl(Uri.parse('http://n${n++}.app.test:$httpPort/'))).close().timeout(const Duration(seconds: 4));
+          return await res.transform(utf8.decoder).join();
+        } catch (_) {
+          return '';
+        } finally {
+          h.close(force: true);
+        }
+      }
+
+      Future<void> until(String want) async {
+        final t = Stopwatch()..start();
+        while (t.elapsed < const Duration(seconds: 6)) {
+          if (await get() == want) return;
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        fail('the app was not answered by $want within 6 s');
+      }
+
+      expect(await get(), 'd0', reason: 'all flags on: the top candidate');
+      setDnsFlag(cand('a-udp1'), false);
+      await until('d1');
+      setDnsFlag(cand('a-udp1'), true);
+      await until('d0');
+      setDnsFlag(cand('a-udp1'), false);
+      setDnsFlag(cand('b-udp1'), false);
+      await until('d0'); // every flag off: the top candidate
+    } finally {
+      await sb.stop();
+      for (final s in web) {
+        await s.close(force: true);
+      }
+      await lab.down();
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 120)));
 }

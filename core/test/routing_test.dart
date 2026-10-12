@@ -126,7 +126,7 @@ void main() {
           }, action: 'direct'),
         ],
       }));
-      expect(_rules(c).first, {
+      final match = {
         'type': 'logical',
         'mode': 'and',
         'rules': [
@@ -141,9 +141,9 @@ void main() {
             ],
           },
         ],
-        'action': 'route',
-        'outbound': 'direct',
-      });
+      };
+      expect(_rules(c).first, {...match, 'action': 'resolve'}, reason: 'a direct rule\'s names are resolved by the DNS rules (the flags) first');
+      expect(_rules(c)[1], {...match, 'action': 'route', 'outbound': 'direct'});
     });
 
     test('targets: one group per target, shared by rules and apps; a chain dials through its entry', () {
@@ -244,13 +244,14 @@ void main() {
           {'id': 'com.none', 'kind': 'package', 'act': 'default', 'split': true, 'udp': {'act': 'default'}},
         ],
       }), info: info);
-      expect(_rules(c).take(5), [
+      expect(_rules(c).take(6), [
         {'package_name': ['com.tg'], 'network': ['tcp'], 'action': 'route', 'outbound': 'src:a~block'},
         {'package_name': ['com.tg'], 'network': ['udp'], 'action': 'route', 'outbound': 'chain:c~direct'},
         {'process_name': ['chrome.exe'], 'network': ['udp'], 'action': 'reject'},
+        {'process_name': ['a.exe'], 'network': ['tcp'], 'action': 'resolve'},
         {'process_name': ['a.exe'], 'network': ['tcp'], 'action': 'route', 'outbound': 'direct'},
         {'package_name': ['com.d'], 'action': 'route', 'outbound': 'src:a~proxy'},
-      ]);
+      ], reason: 'an app half that goes straight to direct has its names resolved by the DNS rules first');
       expect(_rules(c).where((r) => '${r['package_name']}'.contains('com.none')), isEmpty);
       expect(_out(c, 'chain:c~direct')!['outbounds'], ['chain:c', 'direct']);
       // the rule and the app share src:a~block; the journal names both
@@ -267,8 +268,9 @@ void main() {
           {'id': 'com.q', 'kind': 'package', 'act': 'proxy', 'target': 'src:off', 'fallback': 'block', 'split': true, 'udp': {'act': 'proxy', 'target': 'src:off'}},
         ],
       }));
-      expect(_rules(gone).take(2), [
+      expect(_rules(gone).take(3), [
         {'package_name': ['com.q'], 'network': ['tcp'], 'action': 'reject'},
+        {'package_name': ['com.q'], 'network': ['udp'], 'action': 'resolve'},
         {'package_name': ['com.q'], 'network': ['udp'], 'action': 'route', 'outbound': 'direct'},
       ]);
     });
@@ -285,11 +287,12 @@ void main() {
         'apps': [{'id': 'org.telegram.messenger', 'act': 'proxy', 'target': 'src:off'}],
       }));
       final rules = _rules(c);
-      expect(rules[0], {'package_name': ['org.telegram.messenger'], 'action': 'route', 'outbound': 'direct'});
-      expect(rules[1], {'domain_suffix': ['a.com'], 'action': 'reject'});
-      expect(rules[2]['outbound'], 'proxy');
-      expect(rules[3], {'domain_suffix': ['c.com'], 'action': 'resolve'}, reason: 'the global fallback is Direct: its names are resolved by the DNS rules');
-      expect(rules[4]['outbound'], 'direct');
+      expect(rules[0], {'package_name': ['org.telegram.messenger'], 'action': 'resolve'}, reason: 'the app goes direct: resolved by the DNS rules first');
+      expect(rules[1], {'package_name': ['org.telegram.messenger'], 'action': 'route', 'outbound': 'direct'});
+      expect(rules[2], {'domain_suffix': ['a.com'], 'action': 'reject'});
+      expect(rules[3]['outbound'], 'proxy');
+      expect(rules[4], {'domain_suffix': ['c.com'], 'action': 'resolve'}, reason: 'the global fallback is Direct: its names are resolved by the DNS rules');
+      expect(rules[5]['outbound'], 'direct');
     });
 
     test('no `targets` key at all: the main flow keeps its "If unavailable", a catalog target is simply unavailable (no crash)', () {
@@ -307,11 +310,12 @@ void main() {
       }));
       final rules = _rules(c);
       expect(rules[0], {'process_name': ['a.exe'], 'action': 'route', 'outbound': 'proxy~block'});
-      expect(rules[1], {'process_name': ['b.exe'], 'action': 'route', 'outbound': 'direct'}, reason: 'unavailable target → its If unavailable');
-      expect(rules[2], {'domain_suffix': ['a.com'], 'action': 'reject'});
-      expect(rules[3], {'domain_suffix': ['b.com'], 'action': 'resolve'});
-      expect(rules[4], {'domain_suffix': ['b.com'], 'action': 'route', 'outbound': 'direct'}, reason: 'the fallback target is unavailable too → the global default');
-      expect(rules[5], {'domain_suffix': ['c.com'], 'action': 'route', 'outbound': 'proxy~block'});
+      expect(rules[1], {'process_name': ['b.exe'], 'action': 'resolve'});
+      expect(rules[2], {'process_name': ['b.exe'], 'action': 'route', 'outbound': 'direct'}, reason: 'unavailable target → its If unavailable');
+      expect(rules[3], {'domain_suffix': ['a.com'], 'action': 'reject'});
+      expect(rules[4], {'domain_suffix': ['b.com'], 'action': 'resolve'});
+      expect(rules[5], {'domain_suffix': ['b.com'], 'action': 'route', 'outbound': 'direct'}, reason: 'the fallback target is unavailable too → the global default');
+      expect(rules[6], {'domain_suffix': ['c.com'], 'action': 'route', 'outbound': 'proxy~block'});
       expect(_out(c, 'proxy~block'), isNotNull);
     });
 
@@ -436,6 +440,7 @@ void main() {
         '[g.exe] proxy',
         '[i.exe] proxy',
         '[j.exe][tcp] proxy~block',
+        '[j.exe][udp] null', // the resolve step of the direct half
         '[j.exe][udp] direct',
       ]);
       expect(_out(c, 'proxy~block'), containsPair('outbounds', ['proxy', 'block']));
@@ -637,6 +642,11 @@ void main() {
       };
       Map<String, dynamic> dnsOf(List<Map> servers, {String? policy}) => {'servers': servers, 'directPolicy': ?policy};
       List<String> ids(Iterable<DnsCandidate> l) => [for (final c in l) c.id];
+      // the DNS rules without the flagchecks (predefined answers of a side's check name)
+      List<Map> dnsRules(Map<String, dynamic> c) => [
+            for (final r in (((c['dns'] as Map)['rules']) as List? ?? const []).cast<Map>())
+              if (r['action'] != 'predefined') r,
+          ];
 
       test('a candidate per enabled transport and side: tags, detour on the VPN side, the order of each side', () {
         final info = RoutingInfo();
@@ -688,7 +698,7 @@ void main() {
             _rule({'domain': _g({'domain_suffix': ['x.com']})}, id: 'r3'),
           ],
         }));
-        final rules = (((c['dns'] as Map)['rules']) as List).cast<Map>();
+        final rules = dnsRules(c);
         // bank.ru + gov.ru: one group (adjacent, the same chain), 6 candidates + the plain rule; then 5 catch-all flags
         final names = {'type': 'logical', 'mode': 'or', 'rules': [{'domain_suffix': ['bank.ru']}, {'domain_suffix': ['gov.ru']}]};
         expect(rules, hasLength(6 + 1 + 5));
@@ -706,12 +716,41 @@ void main() {
         expect((c['dns'] as Map)['final'], 'dns-cf-doh1-v', reason: 'and with every VPN flag off, the top VPN candidate');
       });
 
+      test('the flagcheck of a side with several candidates: a predefined answer naming the one in use, the same ladder, in front of every other DNS rule', () {
+        final info = RoutingInfo();
+        final c = buildConfig(_plan({'dns': dnsOf([cf, gg, local])}), info: info);
+        final all = (((c['dns'] as Map)['rules']) as List).cast<Map>();
+        final checks = all.where((r) => r['action'] == 'predefined').toList();
+        expect(checks, hasLength(6 + 1 + 5 + 1), reason: 'a rule per candidate and the one with every flag off, per side');
+        expect(all.take(checks.length).every((r) => r['action'] == 'predefined'), isTrue, reason: 'first, so no other rule answers the check name');
+        expect(checks.first, {
+          'type': 'logical',
+          'mode': 'and',
+          'rules': [{'domain': ['direct.flagcheck.jorm.invalid']}, {'rule_set': ['flag-dns-local']}],
+          'action': 'predefined',
+          'rcode': 'NOERROR',
+          'answer': ['direct.flagcheck.jorm.invalid. IN A 127.77.1.1'],
+        });
+        expect(checks[6], {
+          'domain': ['direct.flagcheck.jorm.invalid'],
+          'action': 'predefined',
+          'rcode': 'NOERROR',
+          'answer': ['direct.flagcheck.jorm.invalid. IN A 127.77.1.1'],
+        }, reason: 'every flag off: the top candidate');
+        expect([for (final k in info.dnsFlagChecks) '${k.candidate.id}=${k.address}'].take(2), ['local=127.77.1.1', 'cf-doh1=127.77.1.2']);
+        expect(info.dnsFlagChecks.where((k) => k.side == 'vpn').map((k) => k.name), everyElement('vpn.flagcheck.jorm.invalid'));
+        // one candidate per side: nothing to look at
+        final one = RoutingInfo();
+        buildConfig(_plan({'dns': _defaultDns}), info: one);
+        expect(one.dnsFlagChecks, isEmpty);
+      });
+
       test('Everything else Direct: the direct side is the catch-all, everything left is resolved by the DNS rules', () {
         final info = RoutingInfo();
         final c = buildConfig(_plan({'dns': dnsOf([cf, local]), 'quick': {'final': 'direct'}}), info: info);
         final dns = c['dns'] as Map;
         expect(dns['final'], 'dns-local');
-        expect([for (final r in (dns['rules'] as List).cast<Map>()) r['server']], ['dns-local', 'dns-cf-doh1', 'dns-cf-doh2', 'dns-cf-dot1']);
+        expect([for (final r in dnsRules(c)) r['server']], ['dns-local', 'dns-cf-doh1', 'dns-cf-doh2', 'dns-cf-dot1']);
         expect((c['route'] as Map)['final'], 'direct');
         expect(_rules(c).last, {'action': 'resolve'});
       });
@@ -726,7 +765,7 @@ void main() {
             _rule({'domain': _g({'domain_suffix': ['b.com']})}, dns: 'cf', id: 'r3'),
           ],
         }), info: info);
-        final rules = (((c['dns'] as Map)['rules']) as List).cast<Map>();
+        final rules = dnsRules(c);
         // a.com goes via VPN but ya has only the direct side: it serves there (the same chain: one rule); one candidate: no flag
         expect(rules.first, {
           'type': 'logical',
@@ -743,6 +782,92 @@ void main() {
         expect(info.ruleDns, {'r1': 'dns-ya-doh1', 'r2': 'dns-ya-doh1', 'r3': 'dns-cf-doh1-v'});
       });
 
+      test('direct apps and rules without a domain are one more alternative of the direct side\'s DNS rule group: a plain resolve in front, the rules per candidate, not per app', () {
+        final info = RoutingInfo();
+        final c = buildConfig(_plan({
+          'dns': dnsOf([cf, local]),
+          'apps': [
+            {'id': 'a.exe', 'kind': 'process', 'act': 'direct'},
+            {'id': 'b.exe', 'kind': 'process', 'act': 'direct', 'split': true, 'udp': {'act': 'direct'}},
+            {'id': 'com.c', 'kind': 'package', 'act': 'direct'},
+          ],
+          'rules': [
+            _rule({'domain': _g({'domain_suffix': ['gov.ru']})}, action: 'direct', id: 'rd'),
+            _rule({'process': _g({'process': ['d.exe']})}, action: 'direct', id: 'rp'),
+          ],
+        }), info: info);
+        final rules = _rules(c);
+        expect(rules.where((r) => r['action'] == 'resolve').every((r) => !r.containsKey('server')), isTrue, reason: 'the DNS rules choose the server');
+        expect(rules.take(2), [
+          {'process_name': ['a.exe'], 'action': 'resolve'},
+          {'process_name': ['a.exe'], 'action': 'route', 'outbound': 'direct'},
+        ]);
+        expect(rules.length, 6 * 2, reason: 'a resolve and a route per app half and rule, and nothing per candidate');
+        final dns = dnsRules(c).where((r) => !'${r['server']}'.endsWith('-v')).toList();
+        // 4 candidates: one rule per candidate over ALL the alternatives (apps, halves, the rules), then the top one without a flag
+        expect(dns, hasLength(5));
+        final alts = ((dns.first['rules'] as List).first as Map)['rules'] as List;
+        expect(alts.map((a) => jsonEncode(a)), [
+          jsonEncode({'process_name': ['a.exe']}),
+          jsonEncode({'process_name': ['b.exe'], 'network': ['tcp']}),
+          jsonEncode({'process_name': ['b.exe'], 'network': ['udp']}),
+          jsonEncode({'package_name': ['com.c']}),
+          jsonEncode({'domain_suffix': ['gov.ru']}),
+          jsonEncode({'process_name': ['d.exe']}),
+        ]);
+        expect(dns.map((r) => r['server']), ['dns-local', 'dns-cf-doh1', 'dns-cf-doh2', 'dns-cf-dot1', 'dns-local']);
+      });
+
+      test('what a DNS rule cannot tell (a destination port, an IP, a rule set of unknown content) keeps a ladder over the chain\'s flags: the first live one, the top one when all are off', () {
+        final info = RoutingInfo();
+        final c = buildConfig(_plan({
+          'dns': dnsOf([cf, local]),
+          'rules': [_rule({'port': _g({'port': ['8080']})}, action: 'direct', id: 'rp')],
+        }), info: info);
+        final steps = _rules(c).where((r) => r['action'] == 'resolve').toList();
+        // the direct side: local, cf-doh1, cf-doh2, cf-dot1 = 4 flags + 1 for none
+        expect(steps, hasLength(5));
+        expect(steps.first, {
+          'type': 'logical',
+          'mode': 'and',
+          'rules': [{'port': [8080]}, {'rule_set': ['flag-dns-local']}],
+          'action': 'resolve',
+          'server': 'dns-local',
+        });
+        expect(steps[1], {
+          'type': 'logical',
+          'mode': 'and',
+          'rules': [
+            {'port': [8080]},
+            {'rule_set': ['flag-dns-cf-doh1']},
+            {'rule_set': ['flag-dns-local'], 'invert': true},
+          ],
+          'action': 'resolve',
+          'server': 'dns-cf-doh1',
+        }, reason: 'exclusive: only when no higher flag is on');
+        expect(steps[4], {
+          'type': 'logical',
+          'mode': 'and',
+          'rules': [
+            {'port': [8080]},
+            {'rule_set': ['flag-dns-local', 'flag-dns-cf-doh1', 'flag-dns-cf-doh2', 'flag-dns-cf-dot1'], 'invert': true},
+          ],
+          'action': 'resolve',
+          'server': 'dns-local',
+        }, reason: 'every flag off: the top candidate');
+        expect(info.ruleChains['rp'], ['dns-local', 'dns-cf-doh1', 'dns-cf-doh2', 'dns-cf-dot1']);
+        expect(dnsRules(c).where((r) => !'${r['server']}'.endsWith('-v')), isEmpty, reason: 'a DNS rule cannot see the port: nothing to add on the direct side');
+      });
+
+      test('dnsMatchable: the conditions a resolve query carries; not a port, an IP, an unknown list', () {
+        expect(dnsMatchable({'process_name': ['a']}), isTrue);
+        expect(dnsMatchable({'type': 'logical', 'mode': 'and', 'rules': [{'package_name': ['a']}, {'network': ['udp'], 'invert': true}]}), isTrue);
+        expect(dnsMatchable({'rule_set': ['geosite-youtube']}), isTrue);
+        expect(dnsMatchable({'rule_set': ['set-mine']}), isFalse);
+        expect(dnsMatchable({'port': [80]}), isFalse);
+        expect(dnsMatchable({'type': 'logical', 'mode': 'or', 'rules': [{'process_name': ['a']}, {'ip_cidr': ['10.0.0.0/8']}]}), isFalse);
+      });
+
       test('a direct rule resolves its names by the DNS rules first: a resolve step, no outbound of its own', () {
         final c = buildConfig(_plan({
           'dns': dnsOf([cf, local]),
@@ -752,7 +877,7 @@ void main() {
         expect(rules[0], {'domain_suffix': ['gov.ru'], 'action': 'resolve'});
         expect(rules[1], {'domain_suffix': ['gov.ru'], 'action': 'route', 'outbound': 'direct'});
         expect((c['outbounds'] as List).cast<Map>().where((o) => '${o['tag']}'.startsWith('direct@')), isEmpty);
-        expect(((c['dns'] as Map)['rules'] as List).cast<Map>().first['server'], 'dns-cf-doh1');
+        expect(dnsRules(c).first['server'], 'dns-cf-doh1');
       });
     });
 

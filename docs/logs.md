@@ -88,8 +88,8 @@ to …` — раньше такие строки не распознавалис
 | rules | fallback / targetBack | `target`, `to?` — «If unavailable» сработал / цель вернулась |
 | rules | ruleSetFailed | `tag`, `url`, `error` |
 | rules | ruleSetUpdated | `tag` |
-| dns | switched | `from`, `to`, `reason` |
-| dns | failed | `server`, `path` (`direct` / `proxy`), `since` — DNS-сервер подтверждённо не отвечает (Sentinel, `dns.down`), причины выше нет |
+| dns | switched | `side` (`direct` / `vpn`), `from`, `to` (id кандидатов), `fromProvider`, `toProvider`, `reason` (`failover` — отвечавший упал, `back` — вернулся более приоритетный, `off` — выключили «Switch automatically»); `own` у `off`. На сторону, когда меняется её отвечающий кандидат |
+| dns | failed | `server`, `path` (`direct` / `proxy`), `since`, `provider`, `side`, `servers` (id упавших транспортов) — DNS-сервер подтверждённо не отвечает (Sentinel, `dns.down`), причины выше нет. На провайдера и сторону: упал один транспорт, а провайдер на этой стороне ещё отвечает — только строка журнала |
 | speed | done / failed | результат / `error` |
 | core | crashed | `code` |
 | core | restarted | `attempt`, `downMs?` |
@@ -108,6 +108,22 @@ to …` — раньше такие строки не распознавалис
 | core | tunTcpDead / tunTcpBack | TCP через TUN не доходит до маршрутизации / снова идёт (детектор «осиротевших» SYN) |
 
 (Поля `data` у `conn/failing`, `core/tunTcpDead`, `core/tunTcpBack` описывает `failures.dart`.)
+
+**Строки журнала DNS-флагов** (основное кольцо ядра, `logBook.note`; события выше — только итог, ход дела — здесь):
+- `dns flag: <кандидат> (<сторона>) on|off (<причина>): written to <файл>` — каждая запись флага (info; при старте
+  sing-box — debug, по строке на кандидата). Причина: `verdict`, `back`, `auto off`, `connect`, `restart re-apply`,
+  `adopt`. Не записался файл — error `… not written to <файл>: <ошибка>`; не удалось в исполнителе —
+  warn `dns flag: <кандидат> stays on|off (<причина>): the write failed` (ничего не переключается).
+- `dns flag check (<сторона>): <кандидат> answers after N ms (<почему>)` (info) — sing-box подхватил файл (flagcheck
+  отвечает именем кандидата, что должен отвечать); `dns flag not applied after N s (<сторона>): expected X, Y answers`
+  (warn) — не подхватил за `flagWait` (3 с); `… cannot be told, this sing-box has no flagcheck` (debug) — старый sing-box.
+  Проверка идёт после записи, одна — после старта для обеих сторон.
+- `dns <сторона>: A → B (failover|back|off)` (info) — смена отвечающего кандидата (рядом событие `dns/switched`).
+- `dns <сторона>: answers <кандидат>; flags on [id мс, …]; off [id (down) …]` (debug) — по строке на сторону в каждом
+  раунде проверок.
+- `dns: <id> (<провайдер>, <сторона>) does not answer, its provider still does through …: not an event` (info) — упал
+  один транспорт, события нет. `dns: switch automatically on|off …` (info) — переключатель; `dns: flags off again
+  after the restart: …` (info) — перезапуск sing-box применил погашенные флаги заново.
 
 Уведомления (`eventNotifKind`): `conn/failing` → «Сайт не открывается» (`blocked`); `core/tunTcpDead` и
 `core/tunTcpBack` → «Соединение потеряно» (`connLost`); события обновления приложения (`core/update*`)

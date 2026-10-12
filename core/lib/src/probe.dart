@@ -31,19 +31,29 @@ class Probe {
   /// The user name that has a name resolved through the DNS server [tag] and nothing else.
   static String dnsUser(String tag) => 'dns-check/$tag';
 
+  /// The user name that asks whether the DNS flags make the candidate [tag] the one that answers its side
+  /// ([flagChecks] of [inbound], [probeFlag]).
+  static String flagUser(String tag) => 'flag-check/$tag';
+
   /// The inbound and its route rules (to go first) for [tags]; [dnsServers] (DNS server
   /// tags): per server a rule resolving the requested name through it alone (`resolve`
   /// with its own `server`, no cache) and then ending the connection at the inbound
   /// itself: the SOCKS reply is a success exactly when the name resolved ([probeDns]).
-  ({Map<String, dynamic> inbound, List<Map<String, dynamic>> rules}) inbound(Iterable<String> tags, {Iterable<String> dnsServers = const []}) {
+  /// [flagChecks] (candidate tag → the address the DNS rules answer the side's flagcheck name with, routing.dart
+  /// [DnsFlagCheck]): the name is resolved by the DNS rules as any query is (no `server`, no cache) and the
+  /// connection ends at the inbound only when the answer is that candidate's address, else it is refused:
+  /// the reply is a success exactly when the candidate is the side's effective one ([probeFlag]).
+  ({Map<String, dynamic> inbound, List<Map<String, dynamic>> rules}) inbound(Iterable<String> tags,
+      {Iterable<String> dnsServers = const [], Map<String, String> flagChecks = const {}}) {
     final ts = tags.toSet().toList(), ds = dnsServers.toSet().toList();
+    final fs = flagChecks.keys.map(flagUser).toList();
     return (
       inbound: {
         'type': 'socks',
         'tag': probeInboundTag,
         'listen': '127.0.0.1',
         'listen_port': port,
-        'users': [for (final t in [...ts, ...ds.map(dnsUser)]) {'username': t, 'password': secret}],
+        'users': [for (final t in [...ts, ...ds.map(dnsUser), ...fs]) {'username': t, 'password': secret}],
       },
       rules: [
         for (final t in ts)
@@ -51,6 +61,12 @@ class Probe {
         for (final s in ds) ...[
           {'inbound': [probeInboundTag], 'auth_user': [dnsUser(s)], 'action': 'resolve', 'server': s, 'strategy': 'ipv4_only', 'disable_cache': true},
           {'inbound': [probeInboundTag], 'auth_user': [dnsUser(s)], 'action': 'route', 'outbound': 'direct', 'override_address': '127.0.0.1', 'override_port': port},
+        ],
+        if (fs.isNotEmpty) ...[
+          {'inbound': [probeInboundTag], 'auth_user': fs, 'action': 'resolve', 'strategy': 'ipv4_only', 'disable_cache': true},
+          for (final e in flagChecks.entries)
+            {'inbound': [probeInboundTag], 'auth_user': [flagUser(e.key)], 'ip_cidr': ['${e.value}/32'], 'action': 'route', 'outbound': 'direct', 'override_address': '127.0.0.1', 'override_port': port},
+          {'inbound': [probeInboundTag], 'auth_user': fs, 'action': 'reject'},
         ],
       ],
     );
@@ -221,6 +237,31 @@ Future<int> probeDns(Probe probe, String server, String name, {int timeoutMs = 5
     return sw.elapsedMilliseconds;
   } catch (_) {
     return -1;
+  } finally {
+    w?.close();
+  }
+}
+
+/// Whether the DNS flags make the candidate [tag] the one that answers [name] (the side's flagcheck name,
+/// routing.dart `dnsFlagcheckName`) right now: true = it does, false = another one answers, or nothing did;
+/// null = it cannot be told (the probe inbound is not there, or it has no flagcheck user: a sing-box started
+/// by an older core). See [Probe.inbound] `flagChecks`.
+Future<bool?> probeFlag(Probe probe, String tag, String name, {int timeoutMs = 1500}) async {
+  final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+  Duration left() => deadline.difference(DateTime.now());
+  _Wire? w;
+  try {
+    try {
+      w = await _Wire.connect(probe.port).timeout(left());
+    } catch (_) {
+      return null;
+    }
+    await w.socks(Probe.flagUser(tag), probe.secret, name, 80).timeout(left());
+    return true;
+  } on ProbeRefused {
+    return null;
+  } catch (_) {
+    return false;
   } finally {
     w?.close();
   }

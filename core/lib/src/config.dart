@@ -153,16 +153,27 @@ List<Map<String, dynamic>> selfRules({List<String> paths = const [], List<String
 /// hijack hands to the core's DNS ([inbound], the TUN) are answered by [server], a DNS server
 /// that resolves outside the tunnel (`Routing.domainResolver`). Without it a refresh of a
 /// subscription with every node dead would fail on its own DNS: the core's DNS `final` may go
-/// through the very proxy that is down.
-List<Map<String, dynamic>> selfDnsRules(List<Map<String, dynamic>> rules, {required String server, String inbound = tunTag}) => [
+/// through the very proxy that is down. [chain] (the direct side's candidates) makes the answering server
+/// follow the DNS flags like the other rules: with several, the first live one answers; [server] alone when the
+/// chain has none or one.
+List<Map<String, dynamic>> selfDnsRules(List<Map<String, dynamic>> rules,
+        {required String server, String inbound = tunTag, List<DnsCandidate> chain = const []}) =>
+    [
       for (final r in rules)
-        {
-          'inbound': [inbound],
-          for (final e in r.entries)
-            if (e.key != 'action' && e.key != 'outbound') e.key: e.value,
-          'action': 'route',
-          'server': server,
-        },
+        if (chain.length > 1)
+          ...dnsChainRules({
+            'inbound': [inbound],
+            for (final e in r.entries)
+              if (e.key != 'action' && e.key != 'outbound') e.key: e.value,
+          }, chain)
+        else
+          {
+            'inbound': [inbound],
+            for (final e in r.entries)
+              if (e.key != 'action' && e.key != 'outbound') e.key: e.value,
+            'action': 'route',
+            'server': server,
+          },
     ];
 
 /// Backup checks (Settings → Connection): services of different owners tried when the
@@ -272,15 +283,19 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   info?.dnsSides.addAll({for (final e in routing.dnsSides.entries) e.key: [...e.value]});
   info?.dnsCandidates.addAll(routing.dnsCandidates);
   info?.dnsExtra.addAll(routing.dnsExtra);
+  info?.dnsFlagChecks.addAll(routing.dnsFlagChecks);
   info?.dnsVpn.addAll(routing.dnsVpn);
   info?.ruleDns.addAll(routing.ruleDns);
+  info?.ruleChains.addAll(routing.ruleChains);
   if (info != null) info.domainResolver = routing.domainResolver;
   // cache_file keeps a selector's pick made over the API across restarts, over the
   // config's `default`: keyed by the defaults, a new pick from the UI starts clean.
   final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
   // 'direct' is tested too, always: the network check of the probe pool (pool.dart) tells a
   // dead network from dead routes by the direct path answering
-  final pr = probe?.inbound([..._servers(outs), 'direct'], dnsServers: [for (final s in [...routing.dnsEnabled, ...routing.dnsExtra]) s.tag]);
+  final pr = probe?.inbound([..._servers(outs), 'direct'],
+      dnsServers: [for (final s in [...routing.dnsEnabled, ...routing.dnsExtra]) s.tag],
+      flagChecks: {for (final k in routing.dnsFlagChecks) k.candidate.tag: k.address});
   // svc-in: one user per path (direct, the main flow, each route), its rules go first like the probe's
   final sv = svc?.inbound(direct: 'direct', main: topTag, routes: tags);
   final Map<String, dynamic>? tunnelRule = tunnelPort == null ? null : {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag};
@@ -301,13 +316,13 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   // The app's own lookups reach the core's DNS through the hijack: answered by a direct server
   // first of all, whatever `final` and the rules say (they may lead through a proxy that is down)
   final dnsRules = [
-    if (tun) ...selfDnsRules(selfRuleList, server: routing.domainResolver),
+    if (tun) ...selfDnsRules(selfRuleList, server: routing.domainResolver, chain: routing.dnsSides['direct'] ?? const []),
     ...routing.dnsRules,
   ];
   if (info != null) {
     // the route rules in the config's order, named for Live connections (rulenames.dart)
     for (final r in pr?.rules ?? const <Map<String, dynamic>>[]) {
-      final dns = r.containsKey('server') || r.containsKey('override_address');
+      final dns = r.containsKey('server') || r.containsKey('override_address') || '${r['auth_user']}'.contains('flag-check/');
       info.ruleNames.add(r, dns ? const RuleOrigin('system', 'DNS check', id: 'dns-check') : const RuleOrigin('system', 'Latency check', id: 'probe'));
     }
     for (final r in sv?.rules ?? const <Map<String, dynamic>>[]) {

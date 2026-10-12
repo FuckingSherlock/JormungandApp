@@ -305,7 +305,7 @@ void main() {
       expect((st['dns'] as Map)['active'], 'a-udp1');
       expect((st['network'] as Map)['status'], 'up', reason: 'the probe pool\'s network status is in /api/status');
       List<Map> fell = [], moved = [];
-      for (var i = 0; i < 100 && (fell.isEmpty || moved.isEmpty); i++) {
+      for (var i = 0; i < 100 && (fell.isEmpty || moved.length < 2); i++) {
         await Future<void>.delayed(const Duration(milliseconds: 300));
         fell = await events('rules');
         moved = await events('dns');
@@ -313,12 +313,14 @@ void main() {
       expect(fell, hasLength(1));
       expect([fell.single['type'], fell.single['level']], ['fallback', 'warn']);
       expect(fell.single['data'], {'rule': 'Dead rule', 'target': 'src:dead', 'to': 'block'});
-      // the Sentinel confirms the server down (dns/failed). The service does not switch on the flags yet
-      // (the next stage): the failover's decision is refused, nothing moves
-      expect(moved.map((e) => e['type']), ['failed']);
+      // the Sentinel confirms the server down (dns/failed), its flag goes off and the side moves to the other (dns/switched)
+      expect(moved.map((e) => e['type']), ['failed', 'switched']);
       expect(moved.first['data'], containsPair('server', 'a-udp1'));
+      expect(moved.first['data'], containsPair('side', 'direct'));
+      expect(moved.last['data'], {'side': 'direct', 'from': 'a-udp1', 'to': 'b-udp1', 'fromProvider': 'a', 'toProvider': 'b', 'reason': 'failover'});
       var dns = (await call('/api/status'))['dns'] as Map;
-      expect([dns['active'], dns['auto']], ['a-udp1', true]);
+      expect([dns['active'], dns['auto']], ['b-udp1', true]);
+      expect((dns['sides'] as Map)['direct'], {'active': 'b-udp1', 'provider': 'b'});
       // the servers in use; the watched-only ones (the system resolver) follow with `watched: true`
       final inUse = [for (final s in dns['servers'] as List) if ((s as Map)['watched'] != true) s];
       expect(inUse.map((s) => s['ok']), [false, true]);
@@ -328,7 +330,10 @@ void main() {
       // Switch automatically off
       await call('/api/dns/auto', {'auto': false});
       dns = (await call('/api/status'))['dns'] as Map;
-      expect([dns['active'], dns['auto']], ['a-udp1', false]);
+      expect([dns['active'], dns['auto']], ['a-udp1', false], reason: 'off: every flag on again, the first one answers');
+      final off = await events('dns');
+      expect(off.last['type'], 'switched');
+      expect(off.last['data'], containsPair('reason', 'off'));
     } finally {
       await daemon.shutdown();
       await api.close(force: true);
@@ -392,28 +397,31 @@ void main() {
       a.names.clear();
       b.names.clear();
 
-      // the stand-in for the flag switching of the next stage: the candidates before [tag] go off, the rest on
-      Future<bool> activate(String tag) async {
-        var seen = false;
-        for (final c in info.dnsSides['direct']!) {
-          seen = seen || c.tag == tag;
-          setDnsFlag(c, seen);
-        }
-        return true;
-      }
-
       // the Sentinel judges the misses (no window here: its own check confirms), the failover acts on its verdicts
-      fo = DnsFailover(info.dnsServers,
-          activate: activate,
+      // and writes the flags; sing-box is asked back which candidate answers the side (the flagcheck name)
+      final notes = <String>[];
+      fo = DnsFailover(
+          sides: info.dnsSides,
+          candidates: info.dnsCandidates,
+          watch: info.dnsExtra,
+          setFlag: (c, on, reason) async {
+            setDnsFlag(c, on, reason: reason);
+            return true;
+          },
+          flagCheck: (c) => probeFlag(probe, c.tag, dnsFlagcheckName(c.side)),
           query: (tag, name, t) => probeDns(probe, tag, name, timeoutMs: t),
           sentinel: sentinel,
-          settings: const AutoSettings(failAfter: 2, flapGuard: false, timeoutMs: 1500));
+          settings: const AutoSettings(failAfter: 2, flapGuard: false, timeoutMs: 1500),
+          note: (level, line) => notes.add('$level $line'));
       final moves = <DnsSwitch>[];
       fo.switches.listen(moves.add);
+      final ca = info.dnsCandidates.firstWhere((c) => c.id == 'a-udp1'), cb = info.dnsCandidates.firstWhere((c) => c.id == 'b-udp1');
+      Future<bool?> flagOf(DnsCandidate c) => probeFlag(probe, c.tag, dnsFlagcheckName(c.side));
+      expect([await flagOf(ca), await flagOf(cb)], [true, false], reason: 'every flag on: the top candidate answers the flagcheck');
 
       await fo.check();
       expect(fo.active, 'a-udp1');
-      expect((fo.toJson()['servers'] as List).map((s) => (s as Map)['ok']), [true, true]);
+      expect((fo.toJson()['servers'] as List).map((s) => (s as Map)['ok']), [true, true, true], reason: 'the two in use, then the watched OS resolver');
       expect(await _getOk(mixed, 'viaip1.test', target.port), 'hello');
       expect(a.names, contains('viaip1.test'));
 
@@ -426,6 +434,8 @@ void main() {
       expect(sentinel.roots.byKey('dns|a-udp1'), isNotNull);
       expect((fo.toJson()['servers'] as List).first, containsPair('ok', false));
       expect(await _reached(mixed, 'viaip2', target.port, b), isTrue, reason: 'the flag file moved the DNS list to b (sing-box watches it)');
+      expect([await flagOf(ca), await flagOf(cb)], [false, true], reason: 'the flagcheck names the effective candidate');
+      expect(notes.where((n) => n.contains('dns flag check (direct): b-udp1 answers after')), isNotEmpty, reason: 'the write was verified and the delay logged');
 
       a.answering = true;
       await fo.check();
@@ -434,7 +444,8 @@ void main() {
       expect(fo.active, 'a-udp1');
       expect(await _reached(mixed, 'viaip3', target.port, a), isTrue, reason: 'and back to a');
       await Future<void>.delayed(Duration.zero);
-      expect([for (final m in moves) '${m.from}>${m.to} ${m.reason}'], ['a-udp1>b-udp1 failover', 'b-udp1>a-udp1 back']);
+      expect([for (final m in moves) '${m.side} ${m.from}>${m.to} ${m.reason}'], ['direct a-udp1>b-udp1 failover', 'direct b-udp1>a-udp1 back']);
+      expect(notes.where((n) => n.startsWith('warn')), isEmpty, reason: notes.join('\n'));
     } finally {
       fo?.stop();
       sentinel.dispose();
