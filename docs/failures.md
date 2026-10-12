@@ -199,8 +199,10 @@ appendTrail)` дополняет событие задним числом, `Even
 `svc.fetch`, событие только при `confirmed`, `hasCopy` в данных; сбой своего перезапуска молчит до `settled`; счёт повторов по списку: `ruleset:<tag>`), `sub/failed`
 (`fetch.dart` на `ServiceFetch`, `updater.dart` → `service.dart` `_subFailed`: то же правило; счёт повторов по
 источнику: `subscription:<id>`; сбой своего перезапуска молчит, повтор на следующем тике).
-Не сделано: `core/updateFailed`, отправка отчёта (общий служебный трафик с
-`RetryPolicy`); проверки запасных маршрутов Auto (`[auto]`, повтор для мёртвого запасного сервера) — этап 4.
+`core/updateFailed` (`appupdate.dart` на `ServiceFetch`, `service.dart` `_updateCheckFailed`: то же правило, только
+плановая проверка — ручная пишет сразу; счёт повторов: `appupdate`; сбой своего перезапуска молчит). Отправка
+отчёта остаётся как есть (решение: свой сокет с общим стражем зависания, не через `ServiceFetch`).
+Не сделано: проверки запасных маршрутов Auto (`[auto]`, повтор для мёртвого запасного сервера) — этап 4.
 
 ### Окна (`FailureWindows`, `sentinel/windows.dart`)
 

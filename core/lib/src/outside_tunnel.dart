@@ -56,12 +56,6 @@ class OutsideEntry {
 const outsideTunnel = <OutsideEntry>[
   // ── the app's own process: the self rule ──
   OutsideEntry(
-    'app-update',
-    'App update: feed manifest, delta and full download, direct or via tunnel-in',
-    OutsideHow.ownRule,
-    ['core/lib/src/appupdate.dart'],
-  ),
-  OutsideEntry(
     'exit-ip-check',
     'Public-IP services asked through the proxy port, or directly while disconnected',
     OutsideHow.ownRule,

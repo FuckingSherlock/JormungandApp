@@ -68,6 +68,7 @@ class Host {
           return;
         }
         res.statusCode = 206;
+        res.headers.set('content-range', 'bytes $from-${body.length - 1}/${body.length}');
       }
       var chunk = body.sublist(from);
       if (cutAfter != null && chunk.length > cutAfter!) {
@@ -93,18 +94,95 @@ class Host {
 /// The getter the updater is given: really fetches (over loopback), but refuses hosts that
 /// are "blocked" - directly only, or on every route - and records every try.
 class Net {
+  Net(this.tunnelUp);
+  final bool Function() tunnelUp;
   final blockedDirect = <int>{};
   final blockedAll = <int>{};
   final calls = <String>[];
-  final _real = httpUpdateGet();
+  final _real = serviceUpdateGet(ServiceFetch(endpoint: () => null));
 
-  UpdateGet get get => (Uri url, UpdateRoute route, {int rangeFrom = 0, Duration timeout = const Duration(seconds: 5)}) {
-        calls.add('${route.name}:${url.port}${url.path.replaceFirst('/feed', '')}');
-        if (blockedAll.contains(url.port) || (route == UpdateRoute.direct && blockedDirect.contains(url.port))) {
-          return Future.error(SocketException('blocked ${url.port}'));
+  SvcResult _down(Uri url) => SvcResult.failed(SvcFailure('allFailed', url.host, [SvcPathFailure('direct', SvcKind.direct, 'connect', 0)]));
+
+  /// The race of the real thing played by hand (the race itself: svc_fetch_test, and below against a fake svc-in):
+  /// direct unless it is blocked, then the tunnel when one is up, as the path `main`.
+  UpdateGet get get => (Uri url, {SvcRange? range, int? maxBytes, void Function(List<int> chunk)? onData, Future<void>? cancel}) async {
+        final name = '${url.port}${url.path.replaceFirst('/feed', '')}';
+        final direct = !blockedDirect.contains(url.port) && !blockedAll.contains(url.port);
+        calls.add('direct:$name');
+        if (!direct) {
+          if (!tunnelUp() || blockedAll.contains(url.port)) return _down(url);
+          calls.add('tunnel:$name');
         }
-        return _real(url, UpdateRoute.direct, rangeFrom: rangeFrom, timeout: timeout);
+        final r = await _real(url, range: range, maxBytes: maxBytes, onData: onData, cancel: cancel);
+        final x = r.response;
+        if (direct || x == null) return r;
+        return SvcResult.answer(SvcResponse(status: x.status, headers: x.headers, body: x.body, bytes: x.bytes, via: 'main', kind: SvcKind.main, took: x.took));
       };
+}
+
+/// A fake svc-in: one HTTP proxy; the login (the path id) picks the behaviour of that path: [delay] before the
+/// answer, [stallAfter] body bytes and then silence. Forwards to the origin straight.
+class FakeSvcIn {
+  late HttpServer server;
+  final delay = <String, Duration>{};
+  final stallAfter = <String, int>{};
+  final hits = <String>[]; // `login:range`
+
+  static Future<FakeSvcIn> start() async {
+    final f = FakeSvcIn()..server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    f.server.listen(f._serve);
+    return f;
+  }
+
+  SvcIn svc(List<String> ids) => SvcIn(server.port, 'sec', [
+        for (final id in ids) SvcPath(id, id == 'direct' ? SvcKind.direct : SvcKind.main, 'tag-$id', id),
+      ]);
+
+  Future<void> _serve(HttpRequest req) async {
+    final login = utf8.decode(base64.decode(req.headers.value('proxy-authorization')!.substring(6))).split(':').first;
+    final range = req.headers.value('range');
+    hits.add('$login:${range ?? ''}');
+    final d = delay[login];
+    if (d != null) await Future<void>.delayed(d);
+    final c = HttpClient()..findProxy = ((_) => 'DIRECT');
+    try {
+      final up = await c.getUrl(req.uri);
+      if (range != null) up.headers.set('range', range);
+      final ur = await up.close();
+      req.response.statusCode = ur.statusCode;
+      for (final h in ['content-length', 'content-range']) {
+        final v = ur.headers.value(h);
+        if (v != null) req.response.headers.set(h, v);
+      }
+      final stall = stallAfter[login];
+      var sent = 0, hang = false;
+      if (stall == null) {
+        await ur.pipe(req.response);
+        return;
+      }
+      await for (final ch in ur) {
+        final take = ch.length < stall - sent ? ch.length : stall - sent;
+        req.response.add(ch.sublist(0, take));
+        sent += take;
+        if (sent >= stall) {
+          hang = true;
+          break;
+        }
+      }
+      if (!hang) {
+        await req.response.close();
+        return;
+      }
+      await req.response.flush();
+      await Completer<void>().future; // silence, until the server is closed
+    } catch (_) {
+      // a cut path
+    } finally {
+      c.close(force: true);
+    }
+  }
+
+  Future<void> close() => server.close(force: true);
 }
 
 /// A signed release: a manifest (+ signature) and its installer bytes.
@@ -172,7 +250,7 @@ void main() {
     tmp = await Directory.systemTemp.createTemp('jorm_upd_');
     a = await Host.start();
     b = await Host.start();
-    net = Net();
+    net = Net(() => tunnel);
     tunnel = false;
   });
 
@@ -190,17 +268,17 @@ void main() {
     }
   });
 
-  AppUpdater updater({String current = '0.1.0+1', List<String>? feeds, List<String>? publicKeys, List<String>? platforms, UpdateEventSink? onEvent, String? installedPackage}) => AppUpdater(
+  AppUpdater updater({String current = '0.1.0+1', List<String>? feeds, List<String>? publicKeys, List<String>? platforms, UpdateEventSink? onEvent, String? installedPackage, ServiceFetch? svc, void Function(SvcFailure, Map<String, dynamic>)? onSvcFailed}) => AppUpdater(
         dir: Directory(p.join(tmp.path, 'updates')),
         current: v(current),
         platforms: platforms ?? ['android-arm64-v8a', 'android-armeabi-v7a'],
         feeds: feeds ?? [a.base],
         publicKeys: publicKeys ?? [keys.publicBase64],
-        get: net.get,
-        tunnelUp: () => tunnel,
+        get: svc == null ? net.get : null,
+        svc: svc,
         onEvent: onEvent,
+        onSvcFailed: onSvcFailed,
         installedPackage: installedPackage,
-        stallTimeout: const Duration(seconds: 5),
       );
 
   group('AppVersion', () {
@@ -568,7 +646,7 @@ void main() {
       expect(s.phase, UpdatePhase.failed);
     });
 
-    test('direct first on every feed, then the tunnel: direct fails -> through the tunnel', () async {
+    test('the feeds in order, each over all the paths: direct fails -> through the tunnel', () async {
       publish(a, await release(keys));
       publish(b, await release(keys));
       net.blockedDirect.addAll([a.port, b.port]);
@@ -577,16 +655,14 @@ void main() {
       expect(s.phase, UpdatePhase.available);
       expect(s.offer!.route, UpdateRoute.tunnel);
       expect(s.offer!.feed, a.base);
-      expect(net.calls.where((c) => c.startsWith('direct')).length, 2); // both feeds tried direct first
-      expect(net.calls.indexOf(net.calls.firstWhere((c) => c.startsWith('tunnel'))), 2);
+      expect(net.calls.every((c) => c.contains(':${a.port}/')), isTrue, reason: 'the second feed is not asked');
+      expect(net.calls.where((c) => c.startsWith('tunnel')), hasLength(2)); // manifest + signature
     });
 
-    test('a feed that works directly beats the tunnel even when it is the second', () async {
-      publish(b, await release(keys));
-      net.blockedDirect.add(a.port);
+    test('a feed answered directly keeps the tunnel out of it', () async {
+      publish(a, await release(keys));
       tunnel = true;
-      final s = await updater(feeds: [a.base, b.base]).check(manual: true);
-      expect(s.offer!.feed, b.base);
+      final s = await updater().check(manual: true);
       expect(s.offer!.route, UpdateRoute.direct);
       expect(net.calls.any((c) => c.startsWith('tunnel')), isFalse);
     });
@@ -607,7 +683,9 @@ void main() {
       tunnel = true;
       final s = await updater(feeds: [a.base, b.base]).check(manual: true);
       expect(s.error!.code, UpdateError.network);
-      expect(s.error!.attempts, hasLength(4));
+      // one try per feed: a feed is raced over all its paths at once (the path outcomes are
+      // inside the try), not asked path after path
+      expect(s.error!.attempts, hasLength(2));
     });
 
     test('no key built in / no feeds configured', () async {
@@ -708,6 +786,25 @@ void main() {
     });
 
     test('a cut connection leaves a .part, the next try resumes it with Range', () async {
+      // the cut is past the ~64 KiB sample every path reads first, so the winner has handed bytes on
+      final r = await release(keys, size: 300000);
+      final u = await offered(r: r);
+      a.cutAfter = 100000;
+      var s = await u.download();
+      expect(s.phase, UpdatePhase.failed);
+      expect(s.error!.code, UpdateError.network);
+      final part = File(p.join(u.dir.path, '${r.file}.part'));
+      expect(part.existsSync(), isTrue);
+      expect(part.lengthSync(), 100000);
+      a.cutAfter = null;
+      a.ranges.clear();
+      s = await u.download();
+      expect(s.phase, UpdatePhase.ready);
+      expect(File(s.file!).readAsBytesSync(), r.installer);
+      expect(a.ranges.single, 'bytes=100000-');
+    });
+
+    test('a cut inside the sample leaves no .part (up to 64 KiB is lost), the next try starts over', () async {
       final r = await release(keys, size: 100000);
       final u = await offered(r: r);
       a.cutAfter = 30000;
@@ -715,14 +812,13 @@ void main() {
       expect(s.phase, UpdatePhase.failed);
       expect(s.error!.code, UpdateError.network);
       final part = File(p.join(u.dir.path, '${r.file}.part'));
-      expect(part.existsSync(), isTrue);
-      expect(part.lengthSync(), 30000);
+      expect(part.existsSync() ? part.lengthSync() : 0, 0, reason: 'nothing was handed on from the sample');
       a.cutAfter = null;
       a.ranges.clear();
       s = await u.download();
       expect(s.phase, UpdatePhase.ready);
       expect(File(s.file!).readAsBytesSync(), r.installer);
-      expect(a.ranges.single, 'bytes=30000-');
+      expect(a.ranges, [null], reason: 'no Range: a whole new request');
     });
 
     test('a server that ignores Range sends the whole file: start over', () async {
@@ -774,9 +870,9 @@ void main() {
       net.calls.clear();
       final s = await u.download();
       expect(s.phase, UpdatePhase.ready);
-      // the manifest came through the tunnel, so the file is asked that way first: the
-      // manifest's own feed (b) first, then a (wrong content, hash refused)
-      expect(net.calls.first, startsWith('tunnel:${b.port}'));
+      // the manifest's own feed (b) first, the file came over the tunnel there
+      expect(net.calls.first, startsWith('direct:${b.port}'));
+      expect(net.calls.any((c) => c.startsWith('tunnel:${b.port}')), isTrue);
     });
 
     test('cancel keeps the part and goes back to available', () async {
@@ -813,8 +909,9 @@ void main() {
 
     setUp(() {
       oldApk = noise(400000);
-      // the next release: 20 KB new in the middle, the rest the same
-      newApk = Uint8List.fromList([...oldApk.sublist(0, 150000), ...noise(20000), ...oldApk.sublist(150000)]);
+      // the next release: 90 KB new in the middle (the patch is bigger than the ~64 KiB sample the
+      // service fetcher reads first, so a cut patch download still leaves a resumable .part), the rest the same
+      newApk = Uint8List.fromList([...oldApk.sublist(0, 150000), ...noise(90000), ...oldApk.sublist(150000)]);
       installed = File(p.join(tmp.path, 'installed.apk'))..writeAsBytesSync(oldApk);
     });
 
@@ -843,7 +940,7 @@ void main() {
 
     test('the patch for the installed file is fetched instead of the installer and applied', () async {
       final patch = await patchOf(oldApk, newApk);
-      expect(patch.length, lessThan(40000));
+      expect(patch.length, lessThan(newApk.length ~/ 4));
       final d = entry(patch);
       final r = await publishWith(d, patch);
       final events = <String>[];
@@ -879,19 +976,19 @@ void main() {
       await publishWith(d, patch);
       final u = updater(installedPackage: installed.path);
       await u.check(manual: true);
-      a.cutAfter = 3000;
+      a.cutAfter = 80000;
       var s = await u.download(); // the patch is cut, the whole file is cut as well: failed, parts stay
       expect(s.phase, UpdatePhase.failed);
       final part = File(p.join(u.dir.path, '${d.file}.part'));
       expect(part.existsSync(), isTrue);
-      expect(part.lengthSync(), 3000);
+      expect(part.lengthSync(), 80000);
       a.cutAfter = null;
       a.ranges.clear();
       a.hits.clear();
       s = await u.download();
       expect(s.phase, UpdatePhase.ready);
       expect(File(s.file!).readAsBytesSync(), newApk);
-      expect(a.ranges.first, 'bytes=3000-');
+      expect(a.ranges.first, 'bytes=80000-');
       expect(a.hits.where((h) => h.endsWith('.apk')), isEmpty);
       expect(listing(u).where((n) => n.endsWith('.part')), isEmpty, reason: 'the cut whole-file .part is gone too');
     });
@@ -1267,42 +1364,102 @@ void main() {
     });
   });
 
-  group('http', () {
-    test('httpUpdateGet: tunnel goes through the proxy port, no tunnel fails at once, Range is sent', () async {
-      final body = noise(5000);
-      a.files['f.bin'] = body;
-      // a loopback forward proxy: remembers what it forwarded
-      final seen = <String>[];
-      final proxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      proxy.listen((req) async {
-        seen.add(req.uri.toString());
-        final c = HttpClient()..findProxy = ((_) => 'DIRECT');
-        final up = await c.getUrl(req.uri);
-        final ur = await up.close();
-        req.response.statusCode = ur.statusCode;
-        await ur.pipe(req.response);
-        c.close();
+  group('over the service paths (a fake svc-in)', () {
+    late FakeSvcIn proxy;
+    late ServiceFetch svc;
+    setUp(() async {
+      proxy = await FakeSvcIn.start();
+      svc = ServiceFetch(
+        endpoint: () => proxy.svc(['direct', 'main']),
+        sample: 16 * 1024,
+        preferGrace: const Duration(milliseconds: 1500),
+        stall: const Duration(milliseconds: 600),
+        timeout: const Duration(seconds: 8),
+      );
+    });
+    tearDown(() => proxy.close());
+
+    test('direct is preferred after the sample even when the tunnel was faster', () async {
+      final r = await release(keys);
+      publish(a, r);
+      proxy.delay['direct'] = const Duration(milliseconds: 400);
+      final events = <Map<String, dynamic>>[];
+      final u = updater(svc: svc, onEvent: (t, l, d) {
+        if (t == 'updateDownloaded') events.add(d);
       });
-      int? port = proxy.port;
-      final get = httpUpdateGet(proxyPort: () => port);
-      final target = a.url('f.bin');
+      final s = await u.check(manual: true);
+      expect(s.offer!.route, UpdateRoute.direct);
+      expect((await u.download()).phase, UpdatePhase.ready);
+      expect(File(u.status.file!).readAsBytesSync(), r.installer);
+      expect(events.single['via'], 'direct');
+      expect(events.single['path'], 'direct');
+    });
 
-      final viaTunnel = await get(target, UpdateRoute.tunnel);
-      final got = BytesBuilder();
-      await viaTunnel.body.forEach(got.add);
-      viaTunnel.onClose?.call();
-      expect(got.takeBytes(), body);
-      expect(seen, [target.toString()]);
+    test('a stall of direct mid-file: the rest comes with Range over the tunnel', () async {
+      final r = await release(keys);
+      publish(a, r);
+      proxy.stallAfter['direct'] = 30 * 1024;
+      proxy.delay['main'] = const Duration(milliseconds: 200);
+      final events = <Map<String, dynamic>>[];
+      final u = updater(svc: svc, onEvent: (t, l, d) {
+        if (t == 'updateDownloaded') events.add(d);
+      });
+      await u.check(manual: true);
+      expect((await u.download()).phase, UpdatePhase.ready);
+      expect(File(u.status.file!).readAsBytesSync(), r.installer);
+      expect(events.single['via'], 'tunnel');
+      final resume = proxy.hits.lastWhere((h) => h.startsWith('main:bytes='));
+      expect(int.parse(RegExp(r'bytes=(\d+)-').firstMatch(resume)!.group(1)!), inInclusiveRange(16 * 1024, 30 * 1024));
+    });
+  });
 
-      final direct = await get(target, UpdateRoute.direct, rangeFrom: 1000);
-      expect(direct.status, 206);
-      expect(a.ranges.last, 'bytes=1000-');
-      direct.onClose?.call();
-      expect(seen, hasLength(1));
+  group('failures of a check', () {
+    test('a manual check writes and shows its error at once; a scheduled one goes to the Sentinel hook, not the journal', () async {
+      net.blockedAll.add(a.port);
+      final events = <String>[];
+      final judged = <SvcFailure>[];
+      final u = updater(onEvent: (t, l, d) => events.add('$t/$l'), onSvcFailed: (f, d) => judged.add(f));
+      var s = await u.check(manual: true);
+      expect(s.phase, UpdatePhase.failed);
+      expect(events, ['updateFailed/warn']);
+      expect(judged, isEmpty);
 
-      port = null;
-      await expectLater(get(target, UpdateRoute.tunnel), throwsA(isA<SocketException>()));
-      await proxy.close(force: true);
+      events.clear();
+      s = await u.check();
+      expect(s.lastError!.code, UpdateError.network);
+      expect(events, isEmpty, reason: 'the event waits for a confirmed verdict');
+      expect(judged.single.code, 'allFailed');
+    });
+
+    test('our own restart cut a scheduled check: silent, no lastError, asked again once the core has settled', () async {
+      var calls = 0;
+      final events = <String>[];
+      final judged = <SvcFailure>[];
+      final u = AppUpdater(
+        dir: Directory(p.join(tmp.path, 'updates')),
+        current: v('0.1.0+1'),
+        platforms: ['android-arm64-v8a'],
+        feeds: [a.base],
+        publicKeys: [keys.publicBase64],
+        get: (Uri url, {SvcRange? range, int? maxBytes, void Function(List<int> chunk)? onData, Future<void>? cancel}) async {
+          calls++;
+          return SvcResult.failed(SvcFailure('allFailed', url.host, [SvcPathFailure('direct', SvcKind.direct, 'connect', 0)],
+              advice: calls == 1 ? const RetryAdvice(RetryWait.settled) : null));
+        },
+        onEvent: (t, l, d) => events.add(t),
+        onSvcFailed: (f, d) => judged.add(f),
+      );
+      final s = await u.check();
+      expect(s.phase, UpdatePhase.idle);
+      expect(s.lastError, isNull);
+      expect(events, isEmpty);
+      expect(judged, isEmpty);
+      // the settle wait is over at once here (no core to wait for): the second ask is a real failure and is judged
+      for (var i = 0; i < 100 && judged.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(calls, 2);
+      expect(judged, hasLength(1));
     });
   });
 }

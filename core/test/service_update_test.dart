@@ -65,7 +65,7 @@ void main() {
       updatePlatformKeys: const ['android-arm64-v8a'],
       updateFeeds: [feed.base],
       updatePublicKeys: [keys.publicBase64],
-      updateGet: Net().get,
+      updateGet: Net(() => false).get,
       updateFirstDelay: const Duration(hours: 1),
     );
     await s.init();

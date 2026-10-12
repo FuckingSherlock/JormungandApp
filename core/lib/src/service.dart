@@ -2111,10 +2111,25 @@ class CoreService implements CoreApi {
           installedPackage: installedPackage,
           feeds: updateFeeds,
           publicKeys: updatePublicKeys,
-          get: updateGet ?? httpUpdateGet(proxyPort: () => _innerPort),
-          tunnelUp: () => _innerPort != null,
+          get: updateGet,
+          svc: svcFetch,
           onEvent: (type, level, data) => _event('core', type, level, data),
+          onSvcFailed: _updateCheckFailed,
         );
+
+  /// `core/updateFailed` (stage check) of a scheduled check that no path answered: the Sentinel judges it and
+  /// the event is written only for a `confirmed` verdict (as `sub/failed`). A failure of our own restart never gets here.
+  void _updateCheckFailed(SvcFailure f, Map<String, dynamic> data) {
+    final s = f.suspicion(why: Why('svc.fetch', {'purpose': 'appupdate'}));
+    if (s == null) {
+      _event('core', 'updateFailed', 'info', data);
+      return;
+    }
+    unawaited(sentinel.suspect(s).then((v) {
+      if (v.kind != VerdictKind.confirmed || v.repeat) return;
+      _event('core', 'updateFailed', 'info', data, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause);
+    }));
+  }
   bool _updAuto = true;
   UpdateChannel _updChannel = UpdateChannel.stable;
   UpdateAutoDownload _updAutoDownload = UpdateAutoDownload.wifi;

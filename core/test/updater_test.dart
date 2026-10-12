@@ -146,6 +146,39 @@ void main() {
       expect([s['lastError'], s['count']], [null, 1]);
     });
 
+    SvcFailure allFailed({RetryAdvice? advice}) => SvcFailure('allFailed', 'sub.example', [SvcPathFailure('direct', SvcKind.direct, 'connect', 0)], advice: advice, purpose: 'subscription');
+
+    SubscriptionUpdater failingWith(SvcFailure f, List<String> events, List<SvcFailure> judged) => SubscriptionUpdater(
+          store: store,
+          clock: () => DateTime.fromMillisecondsSinceEpoch(100 * _h),
+          update: (s, {hwid, svc, sid, rediscover = false, now, onDiverged}) async => throw SubscriptionFetchException(f, 'https://sub.example/x'),
+          onEvent: (t, d) => events.add(t),
+          onSvcFailed: (failure, d) => judged.add(failure),
+        );
+
+    test('no path brought it: the failure goes to the Sentinel hook (not the journal), lastError is noted', () async {
+      await store.save(_snap(_sub('u', updatedAt: 80 * _h)));
+      final events = <String>[], judged = <SvcFailure>[];
+      final f = allFailed(advice: const RetryAdvice(RetryWait.time, after: Duration(minutes: 5), attempt: 1));
+      expect(await failingWith(f, events, judged).runDue(), isEmpty);
+      expect(judged, [f]);
+      expect(events, isEmpty, reason: 'the event is written by the hook owner, for a confirmed verdict only');
+      final s = (await store.read())!['sourcesData']['src1'];
+      expect('${s['lastError']['msg']}', contains('allFailed'));
+    });
+
+    test('our own restart cut it: nothing judged, nothing told, no lastError, asked again at the next tick', () async {
+      await store.save(_snap(_sub('u', updatedAt: 80 * _h)));
+      final events = <String>[], judged = <SvcFailure>[];
+      final u = failingWith(allFailed(advice: const RetryAdvice(RetryWait.settled)), events, judged);
+      expect(await u.runDue(), isEmpty);
+      expect(await u.runDue(), isEmpty); // not "tried": due again at once, without the retry wait
+      expect(judged, isEmpty);
+      expect(events, isEmpty);
+      expect((await store.read())!['sourcesData']['src1']['lastError'], isNull);
+      expect(store.rev, 0);
+    });
+
     test('a source the UI is updating is skipped', () async {
       await store.save(_snap(_sub('u', updatedAt: 80 * _h)));
       final u = updater(null);

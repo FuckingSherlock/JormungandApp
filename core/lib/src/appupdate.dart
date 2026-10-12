@@ -9,10 +9,13 @@ import 'package:path/path.dart' as p;
 
 import 'delta.dart';
 import 'durable.dart';
+import 'sentinel/retry.dart';
+import 'svc_fetch.dart';
+import 'svc_in.dart';
 
 // The app's self-update, platform-free half (docs/updates.md): the signed manifest, the
-// feeds with direct -> tunnel fallback, the version rules, the download with size and
-// sha256 checks. Installing (PackageInstaller on Android, the updater on Windows) is the
+// feeds over the service paths (svc_fetch.dart: direct preferred, the tunnel when direct
+// fails or stalls), the version rules, the download with size and sha256 checks. Installing (PackageInstaller on Android, the updater on Windows) is the
 // platform side and is not here.
 
 /// Ed25519 public keys of the release signature, base64 (32 bytes each). A manifest is
@@ -186,7 +189,7 @@ class UpdateException implements Exception {
   final UpdateError code;
   final String message;
 
-  /// Every try that failed on the way: `{url, route, code, error}`.
+  /// Every try that failed on the way: `{url, code, error}` (+ `paths`: the reason per path when none answered).
   final List<Map<String, dynamic>> attempts;
 
   /// When several tries failed, the one that says most is reported: a forged or damaged
@@ -507,48 +510,37 @@ Future<bool> verifyManifestSignature(List<int> manifestBytes, String sigFile, Li
 
 // ───────────────────────────── http seam ─────────────────────────────
 
-/// How a request goes: straight, or through the running tunnel (the core's own `tunnel-in`
-/// inbound, the same way subscriptions go through the proxy, fetch.dart).
+/// Which way a thing came: straight, or through the tunnel (the main flow or a route of svc-in).
+/// The JSON of the offer and the journal keep these two words; the path id is in `path`.
 enum UpdateRoute { direct, tunnel }
 
-class UpdateReply {
-  UpdateReply(this.status, this.body, {this.length, this.onClose});
-  final int status;
+UpdateRoute _routeOf(SvcResponse r) => r.kind == SvcKind.direct ? UpdateRoute.direct : UpdateRoute.tunnel;
 
-  /// Bytes the body will have (of this reply, not the whole file for a 206); null = unknown.
-  final int? length;
-  final Stream<List<int>> body;
+/// One GET over the service paths ([ServiceFetch.get], purpose `appupdate`, [SvcPrefer.direct]: once
+/// direct has brought the sample it carries the file; the tunnel only when direct failed or went quiet,
+/// then the rest is fetched with `Range`). A failure of every path is a [SvcFailure] in the result; an
+/// HTTP error status is an answer. The tests give their own, over loopback.
+typedef UpdateGet = Future<SvcResult> Function(Uri url, {SvcRange? range, int? maxBytes, void Function(List<int> chunk)? onData, Future<void>? cancel});
 
-  /// Frees the connection; also cancels a body still coming.
-  final void Function()? onClose;
-}
+/// The real [UpdateGet].
+UpdateGet serviceUpdateGet(ServiceFetch svc) => (Uri url, {SvcRange? range, int? maxBytes, void Function(List<int> chunk)? onData, Future<void>? cancel}) => svc.get(
+      url,
+      purpose: 'appupdate',
+      prefer: SvcPrefer.direct,
+      range: range,
+      maxBytes: maxBytes,
+      onData: onData,
+      cancel: cancel,
+      headers: const {'User-Agent': 'Jormungand-updater'},
+    );
 
-/// One GET. Fails (throws) when the host cannot be reached; an HTTP error status is a
-/// reply, not an exception. [rangeFrom] > 0 asks for `Range: bytes=N-`. The tests give
-/// their own, over loopback.
-typedef UpdateGet = Future<UpdateReply> Function(Uri url, UpdateRoute route, {int rangeFrom, Duration timeout});
+/// Every path failed ([failure]); thrown inside the updater and turned into [UpdateException]s there.
+class _FetchFailed implements Exception {
+  _FetchFailed(this.failure);
+  final SvcFailure failure;
 
-/// The real [UpdateGet]. [proxyPort] = the tunnel-in port of the running sing-box (null =
-/// no tunnel: the `tunnel` route fails at once). `direct` follows the environment's proxy
-/// like subscriptions do.
-UpdateGet httpUpdateGet({int? Function()? proxyPort}) {
-  return (Uri url, UpdateRoute route, {int rangeFrom = 0, Duration timeout = const Duration(seconds: 20)}) async {
-    final port = route == UpdateRoute.tunnel ? proxyPort?.call() : null;
-    if (route == UpdateRoute.tunnel && port == null) throw const SocketException('No tunnel is up');
-    final c = HttpClient()
-      ..findProxy = port == null ? HttpClient.findProxyFromEnvironment : ((_) => 'PROXY 127.0.0.1:$port')
-      ..connectionTimeout = timeout
-      ..userAgent = 'Jormungand-updater';
-    try {
-      final req = await c.getUrl(url).timeout(timeout);
-      if (rangeFrom > 0) req.headers.set(HttpHeaders.rangeHeader, 'bytes=$rangeFrom-');
-      final res = await req.close().timeout(timeout);
-      return UpdateReply(res.statusCode, res, length: res.contentLength < 0 ? null : res.contentLength, onClose: () => c.close(force: true));
-    } catch (_) {
-      c.close(force: true);
-      rethrow;
-    }
-  };
+  @override
+  String toString() => 'No way brought ${failure.host}: ${[for (final p in failure.paths) '${p.id} ${p.code}'].join(', ')}';
 }
 
 // ───────────────────────────── status ─────────────────────────────
@@ -665,17 +657,16 @@ class AppUpdater {
     List<String>? feeds,
     List<String>? publicKeys,
     UpdateGet? get,
-    this.tunnelUp,
+    ServiceFetch? svc,
     this.onEvent,
+    this.onSvcFailed,
     this.installedPackage,
     int Function()? now,
-    this.manifestTimeout = const Duration(seconds: 15),
-    this.requestTimeout = const Duration(seconds: 20),
-    this.stallTimeout = const Duration(seconds: 30),
   })  : feeds = List.unmodifiable(feeds ?? releaseFeeds),
         publicKeys = List.unmodifiable(publicKeys ?? releasePublicKeys),
-        _get = get ?? httpUpdateGet(),
+        _svc = svc ?? ServiceFetch(endpoint: () => null),
         _now = now ?? (() => DateTime.now().millisecondsSinceEpoch) {
+    _get = get ?? serviceUpdateGet(_svc);
     _status = UpdateStatus(UpdatePhase.idle, current: current);
   }
 
@@ -689,21 +680,30 @@ class AppUpdater {
   final List<String> platforms;
   final List<String> feeds;
   final List<String> publicKeys;
-  final UpdateGet _get;
+  late final UpdateGet _get;
 
-  /// Is the tunnel up now (the `tunnel` route is only tried then).
-  final bool Function()? tunnelUp;
+  /// Only for the retry advice of a failed scheduled check ([ServiceFetch.waitRetry]).
+  final ServiceFetch _svc;
 
   /// The events journal: `('updateAvailable' | 'updateDownloaded' | 'updateFailed' |
   /// 'updateInstalled', level, data)` in category `core`.
   final UpdateEventSink? onEvent;
+
+  /// A scheduled check that no path answered: handed over to be judged (the Sentinel) instead of written
+  /// to the journal at once; [data] is the `updateFailed` payload. Null: written as `info` at once. A manual
+  /// check always shows and writes its error immediately; a failure that our own restart caused is silent
+  /// (the check is asked again once the core has settled).
+  final void Function(SvcFailure failure, Map<String, dynamic> data)? onSvcFailed;
 
   /// The file the running app was installed from (Android: `applicationInfo.sourceDir`), when the
   /// platform can read it: its sha256 picks a delta of the offer ([UpdateDelta.from]). Null: always
   /// the whole file (the desktop, for now).
   final String? installedPackage;
   final int Function() _now;
-  final Duration manifestTimeout, requestTimeout, stallTimeout;
+
+  /// The last failure of every path in the running check / download (what the error was caused by).
+  SvcFailure? _svcFail;
+  Completer<void> _cancelSignal = Completer<void>();
 
   late UpdateStatus _status;
   final _changes = StreamController<UpdateStatus>.broadcast();
@@ -735,7 +735,18 @@ class AppUpdater {
     }
   }
 
-  List<UpdateRoute> get _routes => [UpdateRoute.direct, if (tunnelUp?.call() ?? false) UpdateRoute.tunnel];
+  /// The answer of [r], or the exception it stands for (every path failed: [_FetchFailed], remembered in [_svcFail]).
+  SvcResponse _answer(SvcResult r, Uri url) {
+    final f = r.failure;
+    if (f == null) return r.response!;
+    if (f.code == 'cancelled') throw UpdateException(UpdateError.cancelled, 'Cancelled');
+    if (f.code == 'tooBig') throw HttpException('Too big', uri: url);
+    if (f.code == 'allFailed') _svcFail = f;
+    throw _FetchFailed(f);
+  }
+
+  /// The failed paths of [e] for an attempts entry (the journal).
+  static Map<String, dynamic> _failInfo(Object e) => e is _FetchFailed ? {'paths': [for (final p in e.failure.paths) p.toJson()]} : const {};
 
   // ── check ──
 
@@ -747,8 +758,9 @@ class AppUpdater {
     return _checking ??= _check(channel, manual).whenComplete(() => _checking = null);
   }
 
-  Future<UpdateStatus> _check(UpdateChannel channel, bool manual) async {
+  Future<UpdateStatus> _check(UpdateChannel channel, bool manual, {bool afterSettle = false}) async {
     final before = _status;
+    _svcFail = null;
     _set(UpdateStatus(UpdatePhase.checking, current: current, offer: before.offer, checkedAt: _checkedAt, lastError: _lastError));
     try {
       if (publicKeys.isEmpty) throw UpdateException(UpdateError.noKey, 'No release key is built into this app');
@@ -796,7 +808,28 @@ class AppUpdater {
       }
       return _status;
     } on UpdateException catch (e) {
-      _event('updateFailed', manual ? 'warn' : 'info', {'stage': 'check', 'code': e.code.name, 'error': e.message, if (e.attempts.isNotEmpty) 'attempts': e.attempts});
+      final data = {'stage': 'check', 'code': e.code.name, 'error': e.message, if (e.attempts.isNotEmpty) 'attempts': e.attempts};
+      final fail = !manual && e.code == UpdateError.network ? _svcFail : null; // every path failed: the Sentinel judges a scheduled check
+      if (fail?.advice?.waitFor == RetryWait.settled && !afterSettle) {
+        // our own restart cut it: nothing is told, no error is kept, the check is asked again once the core has settled
+        _set(UpdateStatus(before.phase == UpdatePhase.checking ? UpdatePhase.idle : before.phase,
+            current: current, offer: before.offer, file: before.file, checkedAt: _checkedAt, lastError: _lastError));
+        unawaited(_svc.waitRetry(fail!).then((_) async {
+          if (_downloading != null || _checking != null || _changes.isClosed) return;
+          await (_checking = _check(channel, false, afterSettle: true).whenComplete(() => _checking = null));
+          await _maybeAutoDownload();
+        }));
+        return _status;
+      }
+      if (fail != null && onSvcFailed != null) {
+        try {
+          onSvcFailed!(fail, data);
+        } catch (_) {
+          // the journal must not break an update
+        }
+      } else {
+        _event('updateFailed', manual ? 'warn' : 'info', data);
+      }
       if (manual) {
         _set(UpdateStatus(UpdatePhase.failed, current: current, error: e, checkedAt: _checkedAt));
       } else {
@@ -810,7 +843,7 @@ class AppUpdater {
 
   static String _base(String feed) => feed.endsWith('/') ? feed : '$feed/';
 
-  /// Direct pass over all feeds, then tunnel pass; the first verified manifest wins.
+  /// The feeds in order, each over all the paths at once (direct preferred); the first verified manifest wins.
   /// Null: the channel is empty (nothing was ever published there) - a reachable feed
   /// answered 404 / 410 for the manifest itself and no feed failed in a way that says more
   /// than "unreachable" (a bad signature / manifest anywhere stays an error).
@@ -819,27 +852,27 @@ class AppUpdater {
     final errors = <UpdateException>[];
     final attempts = <Map<String, dynamic>>[];
     var absent = false;
-    for (final route in _routes) {
-      for (final feed in feeds) {
-        final name = 'manifest-${channel.name}.json';
-        final url = Uri.parse('${_base(feed)}$name');
-        try {
-          final bytes = await _readBody(url, route, maxManifestBytes, absentIsEmpty: true);
-          final sig = utf8.decode(await _readBody(Uri.parse('${_base(feed)}$name.sig'), route, 8 * 1024), allowMalformed: true);
-          if (!await verifyManifestSignature(bytes, sig, publicKeys)) {
-            throw UpdateException(UpdateError.badSignature, 'The manifest signature is not valid');
-          }
-          return _Found(UpdateManifest.parse(bytes, expectChannel: channel), feed, route);
-        } on _ManifestAbsent catch (e) {
-          absent = true;
-          attempts.add({'url': url.toString(), 'route': route.name, 'code': 'notFound', 'error': 'HTTP ${e.status}'});
-        } on UpdateException catch (e) {
-          errors.add(e);
-          attempts.add({'url': url.toString(), 'route': route.name, 'code': e.code.name, 'error': e.message});
-        } catch (e) {
-          errors.add(UpdateException(UpdateError.network, '$e'));
-          attempts.add({'url': url.toString(), 'route': route.name, 'code': 'network', 'error': '$e'});
+    for (final feed in feeds) {
+      final name = 'manifest-${channel.name}.json';
+      final url = Uri.parse('${_base(feed)}$name');
+      UpdateRoute? route;
+      try {
+        final got = await _readBody(url, maxManifestBytes, absentIsEmpty: true);
+        route = got.route;
+        final sig = utf8.decode((await _readBody(Uri.parse('${_base(feed)}$name.sig'), 8 * 1024)).bytes, allowMalformed: true);
+        if (!await verifyManifestSignature(got.bytes, sig, publicKeys)) {
+          throw UpdateException(UpdateError.badSignature, 'The manifest signature is not valid');
         }
+        return _Found(UpdateManifest.parse(got.bytes, expectChannel: channel), feed, got.route);
+      } on _ManifestAbsent catch (e) {
+        absent = true;
+        attempts.add({'url': url.toString(), 'code': 'notFound', 'error': 'HTTP ${e.status}'});
+      } on UpdateException catch (e) {
+        errors.add(e);
+        attempts.add({'url': url.toString(), if (route != null) 'route': route.name, 'code': e.code.name, 'error': e.message});
+      } catch (e) {
+        errors.add(UpdateException(UpdateError.network, '$e'));
+        attempts.add({'url': url.toString(), 'code': 'network', 'error': '$e', ..._failInfo(e)});
       }
     }
     // a 404 is not a failure; only real errors beyond "unreachable" override it
@@ -852,21 +885,11 @@ class AppUpdater {
     throw UpdateException(err.code, err.message, attempts: attempts);
   }
 
-  Future<List<int>> _readBody(Uri url, UpdateRoute route, int max, {bool absentIsEmpty = false}) async {
-    final r = await _get(url, route, timeout: requestTimeout);
-    try {
-      if (absentIsEmpty && (r.status == 404 || r.status == 410)) throw _ManifestAbsent(r.status);
-      if (r.status != 200) throw HttpException('HTTP ${r.status}', uri: url);
-      if ((r.length ?? 0) > max) throw HttpException('Too big', uri: url);
-      final b = BytesBuilder(copy: false);
-      await for (final chunk in r.body.timeout(manifestTimeout)) {
-        b.add(chunk);
-        if (b.length > max) throw HttpException('Too big', uri: url);
-      }
-      return b.takeBytes();
-    } finally {
-      r.onClose?.call();
-    }
+  Future<({Uint8List bytes, UpdateRoute route})> _readBody(Uri url, int max, {bool absentIsEmpty = false}) async {
+    final r = _answer(await _get(url, maxBytes: max), url);
+    if (absentIsEmpty && (r.status == 404 || r.status == 410)) throw _ManifestAbsent(r.status);
+    if (r.status != 200) throw HttpException('HTTP ${r.status}', uri: url);
+    return (bytes: r.body, route: _routeOf(r));
   }
 
   // ── schedule ──
@@ -944,10 +967,15 @@ class AppUpdater {
   }
 
   /// Stops a download in progress; the `.part` stays for a resume. Status goes back to `available`.
-  void cancelDownload() => _cancel = true;
+  void cancelDownload() {
+    _cancel = true;
+    if (!_cancelSignal.isCompleted) _cancelSignal.complete();
+  }
 
   Future<UpdateStatus> _download(UpdateOffer offer) async {
     _cancel = false;
+    _cancelSignal = Completer<void>();
+    _svcFail = null;
     final a = offer.asset;
     _set(UpdateStatus(UpdatePhase.downloading, current: current, offer: offer, total: offer.delta?.size ?? a.size, checkedAt: _checkedAt));
     final errors = <UpdateException>[];
@@ -955,16 +983,10 @@ class AppUpdater {
     var plan = offer; // what the statuses show while downloading
     try {
       await dir.create(recursive: true);
-      final routes = _routes;
-      if (offer.route == UpdateRoute.tunnel && routes.contains(UpdateRoute.tunnel)) {
-        routes
-          ..remove(UpdateRoute.tunnel)
-          ..insert(0, UpdateRoute.tunnel);
-      }
       // the patch for the installed file first; whatever goes wrong there, the whole file is next
       final delta = offer.delta;
       if (delta != null) {
-        final got = await _downloadDelta(offer, delta, routes);
+        final got = await _downloadDelta(offer, delta);
         if (got != null) {
           await _writeReady(offer, got.file);
           _set(UpdateStatus(UpdatePhase.ready, current: current, offer: offer, file: got.file.path, checkedAt: _checkedAt));
@@ -976,22 +998,20 @@ class AppUpdater {
         _set(UpdateStatus(UpdatePhase.downloading, current: current, offer: plan, total: a.size, checkedAt: _checkedAt));
       }
       final urls = _urlsOf(plan, a.urls, a.file);
-      for (final route in routes) {
-        for (final url in urls) {
-          try {
-            final file = await _downloadOne(plan, url, route, file: a.file, size: a.size, sha: a.sha256);
-            await _writeReady(plan, file);
-            _set(UpdateStatus(UpdatePhase.ready, current: current, offer: plan, file: file.path, checkedAt: _checkedAt));
-            _event('updateDownloaded', 'info', {'version': plan.version.semver, 'build': plan.version.build, 'size': a.size, 'via': route.name});
-            return _status;
-          } on UpdateException catch (e) {
-            if (e.code == UpdateError.cancelled) rethrow;
-            errors.add(e);
-            attempts.add({'url': url.toString(), 'route': route.name, 'code': e.code.name, 'error': e.message});
-          } catch (e) {
-            errors.add(UpdateException(UpdateError.network, '$e'));
-            attempts.add({'url': url.toString(), 'route': route.name, 'code': 'network', 'error': '$e'});
-          }
+      for (final url in urls) {
+        try {
+          final got = await _downloadOne(plan, url, file: a.file, size: a.size, sha: a.sha256);
+          await _writeReady(plan, got.file);
+          _set(UpdateStatus(UpdatePhase.ready, current: current, offer: plan, file: got.file.path, checkedAt: _checkedAt));
+          _event('updateDownloaded', 'info', {'version': plan.version.semver, 'build': plan.version.build, 'size': a.size, 'via': got.route.name, if (got.path != null) 'path': got.path});
+          return _status;
+        } on UpdateException catch (e) {
+          if (e.code == UpdateError.cancelled) rethrow;
+          errors.add(e);
+          attempts.add({'url': url.toString(), 'code': e.code.name, 'error': e.message});
+        } catch (e) {
+          errors.add(UpdateException(UpdateError.network, '$e'));
+          attempts.add({'url': url.toString(), 'code': 'network', 'error': '$e', ..._failInfo(e)});
         }
       }
       final w = errors.isEmpty ? UpdateException(UpdateError.network, 'No address to download from') : UpdateException.worst(errors);
@@ -1035,48 +1055,72 @@ class AppUpdater {
     return out;
   }
 
-  /// One address over one route, resuming a `.part`; the verified file at the end. [file], [size]
-  /// and [sha] are what is fetched: the installer, or a delta of the offer.
-  Future<File> _downloadOne(UpdateOffer offer, Uri url, UpdateRoute route, {required String file, required int size, required String sha, bool retried = false}) async {
+  /// One address over the service paths (direct preferred; a stall mid-file is resumed with `Range` on
+  /// another path inside the call), resuming a `.part` left by an earlier try; the verified file at the
+  /// end and the way it came ([path]: the id of the path that finished it; null when nothing was fetched).
+  /// [file], [size] and [sha] are what is fetched: the installer, or a delta of the offer.
+  Future<({File file, UpdateRoute route, String? path})> _downloadOne(UpdateOffer offer, Uri url, {required String file, required int size, required String sha, bool retried = false}) async {
     final part = File(p.join(dir.path, '$file.part'));
     var have = part.existsSync() ? part.lengthSync() : 0;
     if (have > size) {
       part.deleteSync();
       have = 0;
     }
+    var route = offer.route;
+    String? via;
     if (have < size) {
-      final r = await _get(url, route, rangeFrom: have, timeout: requestTimeout);
+      final start = have;
+      final sink = part.openWrite(mode: start > 0 ? FileMode.append : FileMode.write);
+      var got = start;
+      var over = false;
+      late SvcResult res;
       try {
-        if (r.status == 416 && have > 0 && !retried) {
-          part.deleteSync();
-          return await _downloadOne(offer, url, route, file: file, size: size, sha: sha, retried: true);
-        }
-        if (r.status != 200 && r.status != 206) throw HttpException('HTTP ${r.status}', uri: url);
-        final resume = r.status == 206 && have > 0;
-        if (!resume) have = 0; // the server sent the whole file: start over
-        final sink = part.openWrite(mode: resume ? FileMode.append : FileMode.write);
-        var got = have;
-        try {
-          await for (final chunk in r.body.timeout(stallTimeout)) {
-            if (_cancel) throw UpdateException(UpdateError.cancelled, 'Cancelled');
+        res = await _get(
+          url,
+          range: start > 0 ? SvcRange(start) : null,
+          cancel: _cancelSignal.future,
+          onData: (chunk) {
+            if (over) return;
             got += chunk.length;
-            if (got > size) throw UpdateException(UpdateError.size, 'The file is bigger than the $size bytes announced');
+            if (got > size) {
+              over = true;
+              return;
+            }
             sink.add(chunk);
             if (_status.phase == UpdatePhase.downloading && (got - _status.received >= 65536 || got == size)) {
               _set(UpdateStatus(UpdatePhase.downloading, current: current, offer: offer, received: got, total: size, checkedAt: _checkedAt));
             }
-          }
-          await sink.flush();
-        } catch (e) {
-          // keep what came, for a resume - except the file that is already wrong
-          await sink.close().catchError((_) {});
-          if (e is UpdateException && e.code == UpdateError.size) _drop(part);
-          rethrow;
-        }
-        await sink.close();
-      } finally {
-        r.onClose?.call();
+          },
+        );
+        await sink.flush();
+      } catch (e) {
+        await sink.close().catchError((_) {});
+        rethrow;
       }
+      await sink.close();
+      if (over) {
+        _drop(part);
+        throw UpdateException(UpdateError.size, 'The file is bigger than the $size bytes announced');
+      }
+      final r = res.response;
+      if (r != null && !r.ok) {
+        // an error page of the server went into the file: take it out again, what came before stays
+        _truncate(part, start);
+        if (r.status == 416 && start > 0 && !retried) {
+          _drop(part);
+          return await _downloadOne(offer, url, file: file, size: size, sha: sha, retried: true);
+        }
+        throw HttpException('HTTP ${r.status}', uri: url);
+      }
+      if (_cancel) throw UpdateException(UpdateError.cancelled, 'Cancelled');
+      if (r == null) {
+        // the paths gave up (or the call was cut): keep what came, the next try resumes it
+        final f = res.failure!;
+        if (f.code == 'cancelled' || _cancel) throw UpdateException(UpdateError.cancelled, 'Cancelled');
+        _answer(res, url); // throws
+      }
+      route = _routeOf(r!);
+      via = r.via;
     }
     if (part.lengthSync() != size) {
       final n = part.lengthSync();
@@ -1090,7 +1134,23 @@ class AppUpdater {
     }
     final done = File(p.join(dir.path, file));
     if (done.existsSync()) done.deleteSync();
-    return part.renameSync(done.path);
+    return (file: part.renameSync(done.path), route: route, path: via);
+  }
+
+  /// Cuts [f] back to [length] bytes (0 = removes it).
+  void _truncate(File f, int length) {
+    try {
+      if (length == 0) {
+        f.deleteSync();
+        return;
+      }
+      final raf = f.openSync(mode: FileMode.append);
+      try {
+        raf.truncateSync(length);
+      } finally {
+        raf.closeSync();
+      }
+    } catch (_) {}
   }
 
   // ── delta ──
@@ -1146,7 +1206,7 @@ class AppUpdater {
   /// against the asset's size and sha256. The finished installer and the route it came by; null =
   /// no delta this time (nothing matched / unreachable / damaged patch / wrong result / disk): the
   /// caller downloads the whole file and the journal has the reason. A cancel is rethrown.
-  Future<({File file, UpdateRoute route})?> _downloadDelta(UpdateOffer offer, UpdateDelta d, List<UpdateRoute> routes) async {
+  Future<({File file, UpdateRoute route})?> _downloadDelta(UpdateOffer offer, UpdateDelta d) async {
     final a = offer.asset;
     final base = installedPackage;
     final failures = <Map<String, dynamic>>[];
@@ -1155,43 +1215,42 @@ class AppUpdater {
     }
 
     if (base == null) return null;
-    for (final route in routes) {
-      for (final url in _urlsOf(offer, d.urls, d.file)) {
-        File patch;
-        try {
-          patch = await _downloadOne(offer, url, route, file: d.file, size: d.size, sha: d.sha256);
-        } on UpdateException catch (e) {
-          if (e.code == UpdateError.cancelled) rethrow;
-          failures.add({'url': url.toString(), 'route': route.name, 'code': e.code.name, 'error': e.message});
-          continue;
-        } on FileSystemException catch (e) {
-          giveUp('disk', 'Cannot write ${e.path ?? dir.path}: ${e.message}');
-          return null;
-        } catch (e) {
-          failures.add({'url': url.toString(), 'route': route.name, 'code': 'network', 'error': '$e'});
-          continue;
-        }
-        // the patch is the signed one (sha256 checked): if it does not apply, other addresses would not help
-        final out = File(p.join(dir.path, '${a.file}.new.part'));
-        try {
-          await applyDelta(oldPath: base, patchPath: patch.path, outPath: out.path, expectOldSha256: d.from, expectNewSha256: a.sha256);
-          if (out.lengthSync() != a.size) throw DeltaException('The result is not ${a.size} bytes');
-          final done = File(p.join(dir.path, a.file));
-          if (done.existsSync()) done.deleteSync();
-          _drop(File(p.join(dir.path, '${a.file}.part'))); // a whole-file try that was cut earlier
-          return (file: out.renameSync(done.path), route: route);
-        } on DeltaException catch (e) {
-          giveUp('delta', e.message);
-        } on FileSystemException catch (e) {
-          giveUp('disk', 'Cannot write ${e.path ?? dir.path}: ${e.message}');
-        } catch (e) {
-          giveUp('delta', '$e');
-        } finally {
-          _drop(patch);
-          _drop(out);
-        }
+    for (final url in _urlsOf(offer, d.urls, d.file)) {
+      ({File file, UpdateRoute route, String? path}) got;
+      try {
+        got = await _downloadOne(offer, url, file: d.file, size: d.size, sha: d.sha256);
+      } on UpdateException catch (e) {
+        if (e.code == UpdateError.cancelled) rethrow;
+        failures.add({'url': url.toString(), 'code': e.code.name, 'error': e.message});
+        continue;
+      } on FileSystemException catch (e) {
+        giveUp('disk', 'Cannot write ${e.path ?? dir.path}: ${e.message}');
         return null;
+      } catch (e) {
+        failures.add({'url': url.toString(), 'code': 'network', 'error': '$e', ..._failInfo(e)});
+        continue;
       }
+      final patch = got.file;
+      // the patch is the signed one (sha256 checked): if it does not apply, other addresses would not help
+      final out = File(p.join(dir.path, '${a.file}.new.part'));
+      try {
+        await applyDelta(oldPath: base, patchPath: patch.path, outPath: out.path, expectOldSha256: d.from, expectNewSha256: a.sha256);
+        if (out.lengthSync() != a.size) throw DeltaException('The result is not ${a.size} bytes');
+        final done = File(p.join(dir.path, a.file));
+        if (done.existsSync()) done.deleteSync();
+        _drop(File(p.join(dir.path, '${a.file}.part'))); // a whole-file try that was cut earlier
+        return (file: out.renameSync(done.path), route: got.route);
+      } on DeltaException catch (e) {
+        giveUp('delta', e.message);
+      } on FileSystemException catch (e) {
+        giveUp('disk', 'Cannot write ${e.path ?? dir.path}: ${e.message}');
+      } catch (e) {
+        giveUp('delta', '$e');
+      } finally {
+        _drop(patch);
+        _drop(out);
+      }
+      return null;
     }
     giveUp('network', 'The patch could not be downloaded');
     return null;
