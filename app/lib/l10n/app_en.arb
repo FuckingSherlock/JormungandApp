@@ -3340,6 +3340,16 @@
   },
   "noDirectPathToTheReport": "No direct path to the report server, and the VPN is off. Turn the VPN on and try again.",
   "sentDirectlyTheVpnPathDid": "Sent directly: the VPN path did not work.",
+  "subscriptionAnswersDiffer": "Subscription answers differ",
+  "theDirectAndTheVpnAnswers": "{s0}: the direct and the VPN answers differ",
+  "@theDirectAndTheVpnAnswers": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "theVpnAnswerIsUsed": "The VPN answer is used.",
   "clearRawLog": "Clear raw log",
   "filterLog": "Filter log",
   "level": "Level",

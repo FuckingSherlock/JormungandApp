@@ -178,7 +178,9 @@ class CoreService implements CoreApi {
   late final updater = SubscriptionUpdater(
     store: store,
     hwid: () => _hwid,
-    proxyPort: () => _innerPort,
+    svc: () => svcFetch,
+    onSvcFailed: _subFailed,
+    onDiverged: _subDiverged,
     onEvent: (type, data) {
       _event('sub', type, type == 'failed' ? 'error' : 'info', data,
           note: type == 'failed'
@@ -1267,10 +1269,35 @@ class CoreService implements CoreApi {
       () async => updateSubscription(
         s,
         hwid: s['hwid'] == true ? await _hwid : null,
-        proxyPort: _innerPort,
+        svc: svcFetch,
+        sid: body['sid'] as String?,
         rediscover: body['rediscover'] == true,
+        onDiverged: _subDiverged,
       ),
     );
+  }
+
+  /// `sub/diverged`: in Auto the direct and the tunnel's answers for a subscription differ; the tunnel's was used.
+  /// Codes and hashes only; the journal, no notification.
+  void _subDiverged(Map<String, dynamic> data) =>
+      _event('sub', 'diverged', 'warn', data, note: 'Subscription ${data['name']}: the direct and the tunnel answers differ, the tunnel one is used');
+
+  /// `sub/failed` of the timer's update when no path brought the subscription: the Sentinel judges it and the event
+  /// is written only for a `confirmed` verdict (as for the rule sets). A failure of our own restart never gets here.
+  void _subFailed(SvcFailure f, Map<String, dynamic> data) {
+    final note = 'Subscription ${data['name']} not updated: ${data['error']}';
+    final s = f.suspicion(why: Why('svc.fetch', {'purpose': 'subscription', 'source': data['source']}));
+    if (s == null) {
+      _event('sub', 'failed', 'error', data, note: note);
+      _changed();
+      return;
+    }
+    s.evidence.addAll({'source': data['source'], 'name': data['name']});
+    unawaited(sentinel.suspect(s).then((v) {
+      if (v.kind != VerdictKind.confirmed || v.repeat) return;
+      _event('sub', 'failed', 'error', data, note: note, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause);
+      _changed();
+    }));
   }
 
   @override

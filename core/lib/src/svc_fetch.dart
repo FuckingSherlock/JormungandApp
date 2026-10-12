@@ -23,6 +23,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' show sha256;
+
 import 'sentinel/context.dart';
 import 'sentinel/model.dart';
 import 'sentinel/retry.dart';
@@ -55,6 +57,21 @@ class SvcRange {
 /// The path taken without sing-box: a plain socket of the core's own process.
 const svcPlainId = 'plain';
 
+/// The same request answered whole by a path of the other side (direct vs tunnel) within the grace after the
+/// winner finished ([ServiceFetch.get] with `collect`): lets the caller compare what the two ways return.
+class SvcPeer {
+  const SvcPeer(this.via, this.kind, this.status, this.headers, this.body);
+
+  final String via;
+  final SvcKind kind;
+  final int status;
+  final Map<String, String> headers;
+  final Uint8List body;
+
+  /// SHA-256 of the body, hex.
+  String get hash => sha256.convert(body).toString();
+}
+
 class SvcResponse {
   SvcResponse({
     required this.status,
@@ -65,7 +82,14 @@ class SvcResponse {
     required this.kind,
     this.resumes = 0,
     this.took = Duration.zero,
+    this.peers = const [],
   });
+
+  /// With `collect`: good answers of the other side that arrived whole in time (empty otherwise).
+  final List<SvcPeer> peers;
+
+  /// SHA-256 of the body, hex (a body that went to `onData` is empty).
+  String get hash => sha256.convert(body).toString();
 
   final int status;
 
@@ -109,11 +133,15 @@ class SvcPathFailure {
 /// No path brought an answer. [code]: `allFailed`, `noPath` (the policy names no path that exists),
 /// `tooBig` (more than `maxBytes`), `cancelled`.
 class SvcFailure {
-  SvcFailure(this.code, this.host, this.paths, {this.received = 0, this.advice, this.purpose = 'misc', this.tunnelTried = false});
+  SvcFailure(this.code, this.host, this.paths, {this.received = 0, this.advice, this.purpose = 'misc', this.tunnelTried = false, String? retryKey})
+      : retryKey = retryKey ?? purpose;
 
   final String code;
   final String host;
   final String purpose;
+
+  /// The retry rules this failure was counted in ([ServiceFetch.retryFor]); the purpose unless the call named one.
+  final String retryKey;
   final List<SvcPathFailure> paths;
 
   /// Bytes of the body delivered before it broke.
@@ -161,6 +189,7 @@ class ServiceFetch {
     this.sample = 64 * 1024,
     this.tieGrace = const Duration(milliseconds: 300),
     this.preferGrace = const Duration(seconds: 2),
+    this.collectGrace = const Duration(seconds: 2),
     this.connectTimeout = const Duration(seconds: 10),
     this.headerTimeout = const Duration(seconds: 15),
     this.stall = const Duration(seconds: 3),
@@ -181,6 +210,9 @@ class ServiceFetch {
 
   /// The direct path's grace when the tunnel answered first and [SvcPrefer.direct] is asked.
   final Duration preferGrace;
+
+  /// `collect`: how long after the winner finished a path of the other side may still bring its whole answer.
+  final Duration collectGrace;
 
   /// Connecting to the inbound (or, without sing-box, to the server).
   final Duration connectTimeout;
@@ -205,7 +237,7 @@ class ServiceFetch {
   RetryPolicy retryFor(String purpose) => _retry.putIfAbsent(purpose, () => RetryPolicy(context ?? ContextTracker()));
 
   /// Waits as a [SvcFailure.advice] says. Null advice: at once.
-  Future<void> waitRetry(SvcFailure f) => f.advice == null ? Future.value() : retryFor(f.purpose).wait(f.advice!);
+  Future<void> waitRetry(SvcFailure f) => f.advice == null ? Future.value() : retryFor(f.retryKey).wait(f.advice!);
 
   /// The path last remembered as the winner for [uri]'s host (tests, diagnostics); null = none valid.
   String? remembered(Uri uri, {SvcPrefer prefer = SvcPrefer.tunnel}) => _recall(_memoKey(uri, prefer))?.pathId;
@@ -217,9 +249,15 @@ class ServiceFetch {
   /// the retry count and the subject of the suspicion. [range]: a part of the file. [maxBytes]: more than
   /// this is a failure `tooBig` (default [defaultMaxBytes]; unlimited with [onData]). [onData]: the body
   /// is handed over in pieces instead of being collected (downloads to a file); [cancel] ends the call.
+  /// [retryKey]: the key of the retry count when it must be finer than the purpose (a subscription, a list).
+  /// [collect] (small answers, not with [onData] or a range): the remembered winner is not used (the whole race
+  /// runs), and after the winner finished the paths of the other side (direct vs tunnel) get [collectGrace] to
+  /// bring their whole answer too — it comes back in [SvcResponse.peers] to be compared with the winner's.
   Future<SvcResult> get(
     Uri uri, {
     String purpose = 'misc',
+    String? retryKey,
+    bool collect = false,
     SvcPolicy policy = const SvcPolicy.race(),
     SvcPrefer prefer = SvcPrefer.tunnel,
     SvcRange? range,
@@ -228,7 +266,9 @@ class ServiceFetch {
     void Function(List<int> chunk)? onData,
     Future<void>? cancel,
   }) =>
-      _Call(this, uri, purpose, policy, prefer, range, maxBytes ?? (onData == null ? defaultMaxBytes : null), headers ?? const {}, onData, cancel).run();
+      _Call(this, uri, purpose, policy, prefer, range, maxBytes ?? (onData == null ? defaultMaxBytes : null), headers ?? const {}, onData, cancel,
+              retryKey: retryKey ?? purpose, collect: collect && onData == null && range == null)
+          .run();
 
   String _memoKey(Uri uri, SvcPrefer prefer) => '${prefer.name}|${uri.host.toLowerCase()}:${uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80)}';
 
@@ -458,7 +498,8 @@ class _Attempt {
 }
 
 class _Call {
-  _Call(this.f, this.uri, this.purpose, this.policy, this.prefer, this.range, this.maxBytes, this.extra, this.onData, this.cancel)
+  _Call(this.f, this.uri, this.purpose, this.policy, this.prefer, this.range, this.maxBytes, this.extra, this.onData, this.cancel,
+      {required this.retryKey, required this.collect})
       : key = f._memoKey(uri, prefer),
         net0 = f._net,
         core0 = f._core;
@@ -473,8 +514,13 @@ class _Call {
   final Map<String, String> extra;
   final void Function(List<int>)? onData;
   final Future<void>? cancel;
+  final String retryKey;
+  final bool collect;
   final String key;
   final int net0, core0;
+
+  /// Attempts of the other side kept alive past the race for [_collectPeers].
+  final _peers = <_Attempt>[];
 
   final sw = Stopwatch()..start();
   final failures = <SvcPathFailure>[];
@@ -509,7 +555,7 @@ class _Call {
         if (cands.isEmpty) break;
         // the first round: the remembered winner alone, when it is still a path
         var memoOnly = false;
-        if (round++ == 0) {
+        if (round++ == 0 && !collect) {
           final m = f._recall(key);
           final one = m == null ? const <SvcPath>[] : [for (final p in cands) if (p.id == m.pathId) p];
           if (one.isNotEmpty) {
@@ -533,9 +579,11 @@ class _Call {
         if (cancelled || tooBig) break;
         if (err == null) {
           if (won.path.id != svcPlainId) f._memo[key] = _Memo(won.path.id, net0, core0);
-          f.retryFor(purpose).reset();
-          return SvcResult.answer(_response(won, out.takeBytes()));
+          f.retryFor(retryKey).reset();
+          final peers = await _collectPeers();
+          return SvcResult.answer(_response(won, out.takeBytes(), peers));
         }
+        _dropPeers();
         // the transfer broke on this path: on from where it stopped, on the next one
         failures.add(SvcPathFailure(won.path.id, won.path.kind, err, won.sw.elapsedMilliseconds, won.detail));
         excluded.add(won.path.id);
@@ -564,12 +612,58 @@ class _Call {
       final ctx = f.context;
       final restart = ctx != null &&
           (ctx.coreEpoch != core0 || const {CorePhase.starting, CorePhase.settling, CorePhase.recovering}.contains(ctx.phase));
-      advice = f.retryFor(purpose).advise(restart ? RetryKind.ownRestart : RetryKind.network);
+      advice = f.retryFor(retryKey).advise(restart ? RetryKind.ownRestart : RetryKind.network);
     }
-    return SvcFailure(code, uri.host.toLowerCase(), failures, received: got, advice: advice, purpose: purpose, tunnelTried: tunnelTried);
+    return SvcFailure(code, uri.host.toLowerCase(), failures,
+        received: got, advice: advice, purpose: purpose, tunnelTried: tunnelTried, retryKey: retryKey);
   }
 
-  SvcResponse _response(_Attempt a, Uint8List body) => SvcResponse(
+  void _dropPeers() {
+    for (final a in _peers) {
+      a.kill();
+      _live.remove(a);
+    }
+    _peers.clear();
+  }
+
+  /// The winner is done: the attempts of the other side still alive get [ServiceFetch.collectGrace] (from now) to
+  /// bring their whole good answer. Whatever is not whole by then is cut (the call's `finally`).
+  Future<List<SvcPeer>> _collectPeers() async {
+    final peers = List.of(_peers);
+    _peers.clear();
+    if (peers.isEmpty) return const [];
+    final until = DateTime.now().add(f.collectGrace);
+    Duration left() => until.difference(DateTime.now());
+    Future<SvcPeer?> one(_Attempt a) async {
+      if (a.st == _St.running) {
+        final changed = Completer<void>();
+        a.onChange = () {
+          if (!changed.isCompleted) changed.complete();
+        };
+        await changed.future.timeout(left(), onTimeout: () {});
+        a.onChange = null;
+      }
+      if (a.st != _St.ready) return null;
+      final b = BytesBuilder(copy: false);
+      final m = maxBytes;
+      a.promote((c) {
+        b.add(c);
+        if (m != null && b.length > m) a.kill();
+      });
+      await a.finished.future.timeout(left(), onTimeout: () {});
+      if (a.st != _St.ready || !a.bodyDone) return null;
+      return SvcPeer(a.path.id, a.path.kind, a.status, a.headers, b.takeBytes());
+    }
+
+    final done = await Future.wait(peers.map(one));
+    return [
+      for (final p in done)
+        if (p != null) p,
+    ];
+  }
+
+  SvcResponse _response(_Attempt a, Uint8List body, [List<SvcPeer> peers = const []]) => SvcResponse(
+        peers: peers,
         status: (_first ?? a).status,
         headers: (_first ?? a).headers,
         body: body,
@@ -695,6 +789,11 @@ class _Call {
       for (final a in attempts) {
         a.onChange = null;
         if (a != winner) {
+          // collect: the other side's paths that may still bring a whole answer stay for [_collectPeers]
+          if (collect && winner != null && got == 0 && a.tunnel != winner.tunnel && (a.st == _St.running || a.st == _St.ready)) {
+            _peers.add(a);
+            continue;
+          }
           a.kill();
           _live.remove(a);
         }

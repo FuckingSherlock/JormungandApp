@@ -196,8 +196,10 @@ appendTrail)` дополняет событие задним числом, `Even
 **Сделано (этап 2)** — детекторы соединений и ядра: ни один не пишет событие сбоя сам, все идут через
 `suspect` (код: `service.dart`, `failures.dart`, `tun_ingress.dart`, `auto.dart`). **Этап 3:** сделано —
 `rules/ruleSetFailed` (`rulesets.dart` на `ServiceFetch`, `service.dart` `_ruleSetFailed`: подозрение
-`svc.fetch`, событие только при `confirmed`, `hasCopy` в данных; сбой своего перезапуска молчит до `settled`).
-Не сделано: `sub/failed`, `core/updateFailed`, отправка отчёта (общий служебный трафик с
+`svc.fetch`, событие только при `confirmed`, `hasCopy` в данных; сбой своего перезапуска молчит до `settled`; счёт повторов по списку: `ruleset:<tag>`), `sub/failed`
+(`fetch.dart` на `ServiceFetch`, `updater.dart` → `service.dart` `_subFailed`: то же правило; счёт повторов по
+источнику: `subscription:<id>`; сбой своего перезапуска молчит, повтор на следующем тике).
+Не сделано: `core/updateFailed`, отправка отчёта (общий служебный трафик с
 `RetryPolicy`); проверки запасных маршрутов Auto (`[auto]`, повтор для мёртвого запасного сервера) — этап 4.
 
 ### Окна (`FailureWindows`, `sentinel/windows.dart`)

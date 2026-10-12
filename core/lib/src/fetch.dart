@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'node.dart';
 import 'parse/build.dart';
 import 'parse/subscription.dart';
+import 'svc_fetch.dart';
+import 'svc_in.dart';
 
 /// User-Agents of the first fetch (discovery): each may get a different format and a
 /// different set of servers from the provider (docs/subscription-parsing.md).
@@ -27,20 +28,35 @@ String userAgentFor(String chip) => switch (chip) {
       _ => chip,
     };
 
-/// "Download via" of the subscription form. Proxy = the running tunnel's own inbound (tunnel-in, no password); with
-/// no tunnel up every choice goes direct.
+/// "Download via" of the subscription form (docs/subscription-parsing.md). [auto]: one request over direct and
+/// the tunnel's paths at once, a tie goes to the tunnel; [proxy]: the tunnel's paths only (main flow and routes),
+/// never direct — with no tunnel up it fails (`noPath`); [direct]: direct only. The old `Direct first` /
+/// `Proxy first` and a missing value are [auto].
 enum Channel {
-  directFirst,
-  proxyFirst,
-  direct,
-  proxy;
+  auto,
+  proxy,
+  direct;
 
   static Channel of(String? chip) => switch (chip) {
-        'Proxy first' => proxyFirst,
-        'Direct' => direct,
         'Proxy' => proxy,
-        _ => directFirst,
+        'Direct' => direct,
+        _ => auto,
       };
+
+  SvcPolicy get policy => switch (this) {
+        auto => const SvcPolicy.race(),
+        proxy => const SvcPolicy.race(kinds: {SvcKind.main, SvcKind.route}),
+        direct => const SvcPolicy.strict('direct'),
+      };
+}
+
+/// No path brought the subscription ([failure]: the codes per path; the Sentinel's suspicion comes from it).
+class SubscriptionFetchException extends HttpException {
+  SubscriptionFetchException(this.failure, String url)
+      : super('Subscription did not answer: ${failure.code}${failure.paths.isEmpty ? '' : ' (${[for (final p in failure.paths) '${p.id}:${p.code}'].join(' ')})'}',
+            uri: Uri.tryParse(url));
+
+  final SvcFailure failure;
 }
 
 const _rediscoverAfter = Duration(days: 7);
@@ -154,16 +170,28 @@ class _Resp {
   final String ua;
   final int status;
   final String body;
-  final HttpHeaders headers;
+
+  /// Lower-case names.
+  final Map<String, String> headers;
 }
 
-HttpClient _client({int? proxyPort}) => HttpClient()
-  ..findProxy = proxyPort == null ? HttpClient.findProxyFromEnvironment : ((_) => 'PROXY 127.0.0.1:$proxyPort')
-  ..connectionTimeout = const Duration(seconds: 15)
-  ..userAgent = null;
+/// How the requests of one [fetchSubscription] go: the service traffic, the paths [policy] allows, whether a second
+/// whole answer of the other side is compared ([compare], Auto only), and what came out of it.
+class _Way {
+  _Way(this.svc, this.policy, {required this.compare, this.retryKey, this.onDiverged});
+
+  final ServiceFetch svc;
+  final SvcPolicy policy;
+  final bool compare;
+  final String? retryKey;
+  final void Function(Map<String, dynamic> data)? onDiverged;
+
+  /// A tunnel path carried at least one of the answers (`via` of the result).
+  bool tunnel = false;
+}
 
 Future<_Resp> _get(
-  HttpClient c,
+  _Way w,
   String url,
   String ua, {
   Map<String, String> headers = const {},
@@ -171,32 +199,63 @@ Future<_Resp> _get(
   String? lastModified,
   required Duration timeout,
   required int maxBytes,
-}) {
-  Future<_Resp> go() async {
-    final req = await c.getUrl(Uri.parse(url));
-    req.headers.set(HttpHeaders.userAgentHeader, ua);
-    headers.forEach(req.headers.set);
-    if (etag != null) req.headers.set(HttpHeaders.ifNoneMatchHeader, etag);
-    if (lastModified != null) req.headers.set(HttpHeaders.ifModifiedSinceHeader, lastModified);
-    final res = await req.close();
-    if (res.statusCode >= 400) {
-      unawaited(res.listen(null).cancel());
-      throw HttpException('HTTP ${res.statusCode} for UA $ua', uri: Uri.parse(url));
-    }
-    final tooBig = HttpException('Subscription is over ${maxBytes ~/ 1048576} MB', uri: Uri.parse(url));
-    if (res.contentLength > maxBytes) {
-      unawaited(res.listen(null).cancel());
-      throw tooBig;
-    }
-    final b = BytesBuilder(copy: false);
-    await for (final chunk in res) {
-      b.add(chunk);
-      if (b.length > maxBytes) throw tooBig;
-    }
-    return _Resp(ua, res.statusCode, utf8.decode(b.takeBytes(), allowMalformed: true), res.headers);
+}) async {
+  final uri = Uri.parse(url);
+  final cancel = Completer<void>();
+  final SvcResult res = await w.svc
+      .get(
+        uri,
+        purpose: 'subscription',
+        retryKey: w.retryKey,
+        policy: w.policy,
+        maxBytes: maxBytes,
+        collect: w.compare,
+        cancel: cancel.future,
+        headers: {
+          HttpHeaders.userAgentHeader: ua,
+          ...headers,
+          HttpHeaders.ifNoneMatchHeader: ?etag,
+          HttpHeaders.ifModifiedSinceHeader: ?lastModified,
+        },
+      )
+      .timeout(timeout, onTimeout: () {
+    cancel.complete();
+    throw TimeoutException('Subscription did not answer in ${timeout.inSeconds} s');
+  });
+  final fail = res.failure;
+  if (fail != null) {
+    if (fail.code == 'tooBig') throw HttpException('Subscription is over ${maxBytes ~/ 1048576} MB', uri: uri);
+    throw SubscriptionFetchException(fail, url);
   }
-
-  return go().timeout(timeout, onTimeout: () => throw TimeoutException('Subscription did not answer in ${timeout.inSeconds} s'));
+  final r = res.response!;
+  if (!r.ok) throw HttpException('HTTP ${r.status} for UA $ua', uri: uri);
+  var status = r.status, body = r.body, hdrs = r.headers, kind = r.kind;
+  // Auto: both sides answered whole. When they differ the tunnel's is the one used (the provider may serve
+  // another list to the visible address of the machine, or something in the way may alter it).
+  final peer = r.peers.isEmpty ? null : r.peers.first;
+  if (peer != null && peer.hash != r.hash) {
+    final tunnelWon = r.kind != SvcKind.direct;
+    final (dVia, dLen, dHash) = tunnelWon ? (peer.via, peer.body.length, peer.hash) : (r.via, r.bytes, r.hash);
+    final (tVia, tLen, tHash) = tunnelWon ? (r.via, r.bytes, r.hash) : (peer.via, peer.body.length, peer.hash);
+    w.onDiverged?.call({
+      'host': uri.host.toLowerCase(),
+      'ua': ua,
+      'directBytes': dLen,
+      'tunnelBytes': tLen,
+      'directHash': dHash.substring(0, 12),
+      'tunnelHash': tHash.substring(0, 12),
+      'tunnelPath': tVia,
+      'directPath': dVia,
+    });
+    if (!tunnelWon) {
+      status = peer.status;
+      body = peer.body;
+      hdrs = peer.headers;
+      kind = peer.kind;
+    }
+  }
+  if (kind != SvcKind.direct) w.tunnel = true;
+  return _Resp(ua, status, utf8.decode(body, allowMalformed: true), hdrs);
 }
 
 /// Fetches a subscription the way docs/subscription-parsing.md describes: discovery with
@@ -206,9 +265,12 @@ Future<_Resp> _get(
 ///
 /// [headers] go with every request (the HWID set, see device.dart). [filter] (a regex on
 /// the server name, flag included) keeps only the matching servers; it is part of a
-/// cached answer, so a changed filter reads the subscription in full. [channel] with
-/// [proxyPort] (the running tunnel's tunnel-in port, null when not connected) says how to
-/// reach the provider; a "first" channel tries the other way when the first one fails.
+/// cached answer, so a changed filter reads the subscription in full. [channel] says how to
+/// reach the provider ([Channel]); every request goes through [svc] (the service traffic of
+/// the core, svc_fetch.dart; without one a plain direct socket, so [Channel.proxy] has no way).
+/// [retryKey] (the source id) keeps the retry count of this subscription apart. [onDiverged]:
+/// in Auto both sides answered whole and the bodies differ (the tunnel's is used), told once per
+/// request with codes and hashes.
 Future<SubscriptionResult> fetchSubscription(
   String url, {
   String userAgent = 'Auto',
@@ -218,48 +280,28 @@ Future<SubscriptionResult> fetchSubscription(
   bool rediscover = false,
   String filter = '',
   Map<String, String> headers = const {},
-  Channel channel = Channel.directFirst,
-  int? proxyPort,
-  HttpClient? client,
+  Channel channel = Channel.auto,
+  ServiceFetch? svc,
+  String? retryKey,
+  void Function(Map<String, dynamic> data)? onDiverged,
   Duration timeout = subscriptionTimeout,
   int maxBytes = maxSubscriptionBytes,
 }) async {
   final re = filterRegExp(filter);
-  final routes = proxyPort == null
-      ? ['direct']
-      : switch (channel) {
-          Channel.direct => ['direct'],
-          Channel.proxy => ['proxy'],
-          Channel.proxyFirst => ['proxy', 'direct'],
-          Channel.directFirst => ['direct', 'proxy'],
-        };
-  Object? error;
-  StackTrace? trace;
-  for (final via in routes) {
-    final own = via == 'proxy' || client == null;
-    final c = via == 'proxy' ? _client(proxyPort: proxyPort) : (client ?? _client());
-    try {
-      final r = await _fetch(c, url,
-          userAgent: userAgent,
-          strategy: strategy,
-          discoveredAt: discoveredAt,
-          prevCount: prevCount,
-          rediscover: rediscover,
-          filter: filter,
-          re: re,
-          headers: headers,
-          timeout: timeout,
-          maxBytes: maxBytes);
-      return r._via(via);
-    } catch (e, st) {
-      // the first way's error says more (the proxy is only the fallback)
-      error ??= e;
-      trace ??= st;
-    } finally {
-      if (own) c.close(force: true);
-    }
-  }
-  Error.throwWithStackTrace(error!, trace!);
+  final way = _Way(svc ?? ServiceFetch(endpoint: () => null), channel.policy,
+      compare: channel == Channel.auto, retryKey: retryKey == null ? null : 'subscription:$retryKey', onDiverged: onDiverged);
+  final r = await _fetch(way, url,
+      userAgent: userAgent,
+      strategy: strategy,
+      discoveredAt: discoveredAt,
+      prevCount: prevCount,
+      rediscover: rediscover,
+      filter: filter,
+      re: re,
+      headers: headers,
+      timeout: timeout,
+      maxBytes: maxBytes);
+  return r._via(way.tunnel ? 'proxy' : 'direct');
 }
 
 /// The subscription filter as a RegExp; null when empty. Throws a FormatException the UI
@@ -279,7 +321,7 @@ bool _keep(RegExp re, Node n) => filterKeeps(re, n.name, n.flag);
 bool filterKeeps(RegExp re, String name, String flag) => re.hasMatch(name) || re.hasMatch('$flag $name');
 
 Future<SubscriptionResult> _fetch(
-  HttpClient c,
+  _Way c,
   String url, {
   required String userAgent,
   required List<Map<String, dynamic>> strategy,
@@ -322,7 +364,7 @@ Future<SubscriptionResult> _fetch(
 }
 
 Future<SubscriptionResult> _run(
-  HttpClient c,
+  _Way c,
   String url,
   List<Map<String, dynamic>> plan, {
   required bool discovery,
@@ -385,7 +427,7 @@ Future<SubscriptionResult> _run(
   String? format;
   for (final r in resps) {
     if (r == null) continue;
-    final (fmt, nodes) = parseSubscription(r.body, contentType: r.headers.value(HttpHeaders.contentTypeHeader));
+    final (fmt, nodes) = parseSubscription(r.body, contentType: r.headers[HttpHeaders.contentTypeHeader]);
     var unique = 0;
     for (final n in nodes) {
       // First UA wins a conflict: sing-box is asked first, its outbounds are the fullest.
@@ -399,8 +441,8 @@ Future<SubscriptionResult> _run(
         'unique': unique,
         'parser': parserVersion,
         if (filter.isNotEmpty) 'filter': filter,
-        if (r.headers.value(HttpHeaders.etagHeader) != null) 'etag': r.headers.value(HttpHeaders.etagHeader),
-        if (r.headers.value(HttpHeaders.lastModifiedHeader) != null) 'lastModified': r.headers.value(HttpHeaders.lastModifiedHeader),
+        if (r.headers[HttpHeaders.etagHeader] != null) 'etag': r.headers[HttpHeaders.etagHeader],
+        if (r.headers[HttpHeaders.lastModifiedHeader] != null) 'lastModified': r.headers[HttpHeaders.lastModifiedHeader],
       });
     }
   }
@@ -440,7 +482,7 @@ typedef _Meta = ({
 SubscriptionResult _withMeta(List<_Resp> resps, SubscriptionResult Function(_Meta) make) {
   String? h(String name) {
     for (final r in resps) {
-      final v = r.headers.value(name);
+      final v = r.headers[name];
       if (v != null && v.trim().isNotEmpty) return v.trim();
     }
     return null;

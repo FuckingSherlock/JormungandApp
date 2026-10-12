@@ -56,6 +56,7 @@ class EventWords {
     'sub/removed' => l10n.serversRemoved,
     'sub/back' => l10n.serversBack,
     'sub/dead' => l10n.serversDoNotRespond,
+    'sub/diverged' => l10n.subscriptionAnswersDiffer,
     'rules/fallback' => l10n.ruleTargetUnavailable,
     'rules/targetBack' => l10n.ruleTargetBack,
     'rules/ruleSetFailed' => l10n.ruleSetNotDownloaded,
@@ -310,6 +311,7 @@ class EventWords {
         l10n.previousSettingsRestored,
       ),
       ('sub', 'dead') => r(l10n.itsServersDoNotRespond(source(d['source'], d['name'])), l10n.contactTheSubscriptionProviderSSupport),
+      ('sub', 'diverged') => r(l10n.theDirectAndTheVpnAnswers(source(d['source'], d['name'])), l10n.theVpnAnswerIsUsed),
       ('rules', 'ruleSetFailed') => r(
         l10n.ruleSetNotDownloaded2('${d['tag']}'),
         _lines([d['error'] != null ? '${d['error']}' : null, l10n.theLastCopyIsUsed], ' — '),

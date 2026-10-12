@@ -59,7 +59,7 @@ void main() {
     expect(vis(info), isTrue);
     expect(f.count, 2);
     f.toggleCat('sub');
-    expect(f.off.where((k) => k.startsWith('sub/')).length, 5);
+    expect(f.off.where((k) => k.startsWith('sub/')).length, 6);
     f.toggleCat('sub');
     expect(f.off.any((k) => k.startsWith('sub/')), isFalse);
     f.reset();

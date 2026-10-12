@@ -473,7 +473,7 @@ void main() {
         await SubscriptionUpdater(
           store: store,
           clock: () => DateTime.fromMillisecondsSinceEpoch(1000 * 3600 * 1000),
-          update: (s, {hwid, proxyPort, rediscover = false, now, client}) async {
+          update: (s, {hwid, svc, sid, rediscover = false, now, onDiverged}) async {
             if (fail[0]) throw const SocketException('refused');
             return {
               'patch': {

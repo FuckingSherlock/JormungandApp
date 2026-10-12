@@ -247,23 +247,107 @@ void main() {
           throwsA(isA<TimeoutException>()));
     });
 
-    test('Direct first falls back to the tunnel; with no tunnel everything goes direct', () async {
-      // the provider is unreachable directly (closed port); the "tunnel" is an HTTP proxy
-      final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final deadUrl = 'http://127.0.0.1:${closed.port}/sub';
-      await closed.close();
-      pr = await Provider.start((req) {
-        expect(req.uri.toString(), deadUrl); // the proxy got the absolute URL
-        req.response.write(_b64(ssSip002));
+    // A fake svc-in: one HTTP proxy that answers by the login (the path id) of Proxy-Authorization, as sing-box's
+    // auth_user does. [byLogin] has the behaviour of each path; [logins] the paths asked, in order.
+    final logins = <String>[];
+    final dropped = <HttpRequest>{};
+    FutureOr<void> Function(HttpRequest) drop() => (req) {
+          dropped.add(req);
+          req.response.detachSocket().then((s) => s.destroy());
+        };
+    Future<ServiceFetch> fakeSvc(Map<String, FutureOr<void> Function(HttpRequest req)> byLogin, {String? url}) async {
+      logins.clear();
+      pr = await Provider.start((_) {}); // (the group's tearDown closes it)
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((req) async {
+        final auth = req.headers.value('proxy-authorization') ?? '';
+        final login = utf8.decode(base64.decode(auth.substring(6))).split(':').first;
+        logins.add(login);
+        final b = byLogin[login];
+        if (b == null) {
+          req.response.detachSocket().then((s) => s.destroy());
+          return;
+        }
+        await b(req);
+        if (!dropped.remove(req)) await req.response.close();
       });
-      final r = await fetchSubscription(deadUrl, userAgent: 'sing-box', channel: Channel.directFirst, proxyPort: pr.port);
+      final ids = byLogin.keys.toList();
+      final svcIn = SvcIn(server.port, 'sec', [
+        for (final id in ids) SvcPath(id, id == 'direct' ? SvcKind.direct : (id == 'main' ? SvcKind.main : SvcKind.route), 'tag-$id', id),
+      ]);
+      return ServiceFetch(endpoint: () => svcIn, tieGrace: const Duration(milliseconds: 300), collectGrace: const Duration(milliseconds: 800));
+    }
+
+    FutureOr<void> Function(HttpRequest) body(String links, {Duration delay = Duration.zero}) => (req) async {
+          if (delay > Duration.zero) await Future<void>.delayed(delay);
+          req.response.write(_b64(links));
+        };
+    const dead = 'http://sub.test/sub';
+
+    test('Download via: three options, the old Direct first / Proxy first and a missing value are Auto', () {
+      expect(Channel.values, [Channel.auto, Channel.proxy, Channel.direct]);
+      for (final old in ['Direct first', 'Proxy first', 'Auto', null, '']) {
+        expect(Channel.of(old), Channel.auto, reason: '$old');
+      }
+      expect(Channel.of('Proxy'), Channel.proxy);
+      expect(Channel.of('Direct'), Channel.direct);
+    });
+
+    test('Proxy never uses the direct path; with no tunnel it has no way (noPath)', () async {
+      final svc = await fakeSvc({'direct': body(_b64(ssSip002)), 'main': body(ssSip002), 'route0': body(ssSip002)});
+      final r = await fetchSubscription(dead, userAgent: 'sing-box', channel: Channel.proxy, svc: svc);
       expect([r.via, r.nodes.length], ['proxy', 1]);
-      final viaProxy = await fetchSubscription(deadUrl, userAgent: 'sing-box', channel: Channel.proxy, proxyPort: pr.port);
-      expect(viaProxy.via, 'proxy');
-      expect(fetchSubscription(deadUrl, userAgent: 'sing-box', channel: Channel.direct, proxyPort: pr.port), throwsA(isA<SocketException>()));
-      expect(fetchSubscription(deadUrl, userAgent: 'sing-box', channel: Channel.proxy), throwsA(isA<SocketException>()));
-      expect(Channel.of('Proxy first'), Channel.proxyFirst);
-      expect(Channel.of(null), Channel.directFirst);
+      expect(logins, isNot(contains('direct')));
+      // a tunnel that fails does not fall back to direct
+      final broken = await fakeSvc({'direct': body(ssSip002), 'main': drop()});
+      await expectLater(
+          fetchSubscription(dead, userAgent: 'sing-box', channel: Channel.proxy, svc: broken), throwsA(isA<SubscriptionFetchException>()));
+      expect(logins, isNot(contains('direct')));
+      // no sing-box: only the plain direct socket exists, which Proxy must not use
+      final err = await fetchSubscription(dead, userAgent: 'sing-box', channel: Channel.proxy).then<Object>((_) => 'ok', onError: (Object e) => e);
+      expect(err, isA<SubscriptionFetchException>().having((e) => e.failure.code, 'code', 'noPath'));
+    });
+
+    test('Direct asks the direct path only', () async {
+      final svc = await fakeSvc({'direct': body(ssSip002), 'main': body(ssSip002)});
+      final r = await fetchSubscription(dead, userAgent: 'sing-box', channel: Channel.direct, svc: svc);
+      expect([r.via, r.nodes.length, logins.toSet()], ['direct', 1, {'direct'}]);
+    });
+
+    test('Auto: one request over both sides; a tie goes to the tunnel; direct alone works when the tunnel fails', () async {
+      final svc = await fakeSvc({'direct': body(ssSip002), 'main': body(ssSip002)});
+      final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc);
+      expect(logins.toSet(), {'direct', 'main'});
+      expect(r.via, 'proxy');
+      final noTunnel = await fakeSvc({'direct': body(ssSip002)});
+      expect((await fetchSubscription(dead, userAgent: 'sing-box', svc: noTunnel)).via, 'direct');
+    });
+
+    test('Auto: two good answers that differ are journaled once with codes, and the tunnel one is used', () async {
+      final tunnelLinks = '$ssSip002\n$ss2022';
+      final svc = await fakeSvc({'direct': body(ssSip002), 'main': body(tunnelLinks, delay: const Duration(milliseconds: 100))});
+      final told = <Map<String, dynamic>>[];
+      final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: told.add);
+      expect(r.nodes.length, 2); // the tunnel's list
+      expect(told, hasLength(1));
+      expect(told.single, containsPair('tunnelBytes', greaterThan(told.single['directBytes'] as int)));
+      expect(told.single['directHash'], isNot(told.single['tunnelHash']));
+      // the same body on both sides says nothing
+      final same = await fakeSvc({'direct': body(ssSip002), 'main': body(ssSip002)});
+      told.clear();
+      await fetchSubscription(dead, userAgent: 'sing-box', svc: same, onDiverged: told.add);
+      expect(told, isEmpty);
+    });
+
+    test('the retry count is per subscription', () async {
+      final svc = await fakeSvc({'direct': drop()});
+      for (final sid in ['a', 'a', 'b']) {
+        await expectLater(fetchSubscription(dead, userAgent: 'sing-box', svc: svc, retryKey: sid, channel: Channel.direct),
+            throwsA(isA<SubscriptionFetchException>()));
+      }
+      expect(svc.retryFor('subscription:a').failures, 2);
+      expect(svc.retryFor('subscription:b').failures, 1);
     });
   });
 

@@ -18,7 +18,7 @@ class SubscriptionSettings {
     this.password = '',
     this.website = '',
     this.userAgent = 'Auto',
-    this.channel = 'Direct first',
+    this.channel = 'Auto',
   });
 
   /// What the form shows for [s] (the mockup's defaults for what it never set).
@@ -35,7 +35,7 @@ class SubscriptionSettings {
       password: '${u['password'] ?? ''}',
       website: '${u['website'] ?? ''}',
       userAgent: '${u['userAgent'] ?? 'Auto'}',
-      channel: '${u['channel'] ?? 'Direct first'}',
+      channel: normalizeSubscriptionChannel(u['channel']),
     );
   }
 
@@ -54,7 +54,7 @@ class SubscriptionSettings {
   /// `Auto` | `sing-box` | `mihomo` | `v2ray`.
   final String userAgent;
 
-  /// `Direct first` | `Proxy first` | `Direct` | `Proxy`.
+  /// `Auto` | `Proxy` | `Direct` (the old `Direct first` / `Proxy first` count as `Auto`).
   final String channel;
 
   Map<String, dynamic> toJson() => {
@@ -75,7 +75,10 @@ class SubscriptionSettings {
 }
 
 const subscriptionUserAgents = ['Auto', 'sing-box', 'mihomo', 'v2ray'];
-const subscriptionChannels = ['Direct first', 'Proxy first', 'Direct', 'Proxy'];
+const subscriptionChannels = ['Auto', 'Proxy', 'Direct'];
+
+/// A stored "Download via" value as one of [subscriptionChannels]: `Direct first`, `Proxy first` and a missing one are `Auto`.
+String normalizeSubscriptionChannel(Object? v) => v == 'Proxy' || v == 'Direct' ? '$v' : 'Auto';
 
 /// The protocol chips of the manual server form (`PROTO_CHIP`): UI protocol -> label.
 const protocolChips = <String, String>{

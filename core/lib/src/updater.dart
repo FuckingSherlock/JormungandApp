@@ -5,7 +5,9 @@ import 'dart:math';
 import 'fetch.dart';
 import 'localsource.dart';
 import 'merge.dart';
+import 'sentinel/retry.dart';
 import 'state.dart';
+import 'svc_fetch.dart';
 
 /// Fetches subscription [s] (a source as the UI keeps it: url, userAgent, uaStrategy,
 /// discoveredAt, nodes, gone, hwid, filter, channel) with its own settings and returns
@@ -16,13 +18,17 @@ import 'state.dart';
 /// A full answer replaces the provider's page / support / announce / interval (one that
 /// stopped sending an announce clears it); a 304 only adds what it carries. Usage and
 /// expiry are taken whenever `subscription-userinfo` came, 304 included.
+///
+/// The request goes through [svc] (the service traffic, "Download via" says which paths); [sid] keys its retry
+/// count; [onDiverged] gets `{source, name, host, ua, …}` when in Auto the direct and the tunnel's answers differ.
 Future<Map<String, dynamic>> updateSubscription(
   Map<String, dynamic> s, {
   Map<String, String>? hwid,
-  int? proxyPort,
+  ServiceFetch? svc,
+  String? sid,
   bool rediscover = false,
   DateTime? now,
-  HttpClient? client,
+  void Function(Map<String, dynamic> data)? onDiverged,
 }) async {
   // a local source has no URL: nothing to fetch, it changes only by importing the file again
   if (s['kind'] == localSourceKind) throw const FormatException('A local file has nothing to update: import the file again');
@@ -38,8 +44,9 @@ Future<Map<String, dynamic>> updateSubscription(
     filter: (s['filter'] as String?) ?? '',
     headers: s['hwid'] == true && hwid != null ? hwid : const {},
     channel: Channel.of(s['channel'] as String?),
-    proxyPort: proxyPort,
-    client: client,
+    svc: svc,
+    retryKey: sid,
+    onDiverged: onDiverged == null ? null : (d) => onDiverged({'source': sid, 'name': '${s['name'] ?? sid ?? ''}', ...d}),
   );
   final patch = <String, dynamic>{'updatedAt': (now ?? DateTime.now()).millisecondsSinceEpoch};
   if (!r.notModified) {
@@ -124,11 +131,13 @@ class SubscriptionUpdater {
   SubscriptionUpdater({
     required this.store,
     this.hwid,
-    this.proxyPort,
+    this.svc,
     this.tick = const Duration(minutes: 1),
     this.firstRun = const Duration(seconds: 20),
     this.update = updateSubscription,
     this.onEvent,
+    this.onSvcFailed,
+    this.onDiverged,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
@@ -137,13 +146,27 @@ class SubscriptionUpdater {
   /// Device headers for sources with HWID on (device.dart).
   final Future<Map<String, String>> Function()? hwid;
 
-  /// The running tunnel's mixed port, null when not connected ("Download via" Proxy).
-  final int? Function()? proxyPort;
+  /// The core's service traffic ("Download via" picks the paths); null = a plain direct socket.
+  final ServiceFetch? Function()? svc;
   final Duration tick;
   final Duration firstRun;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic> s,
-      {Map<String, String>? hwid, int? proxyPort, bool rediscover, DateTime? now, HttpClient? client}) update;
+      {Map<String, String>? hwid,
+      ServiceFetch? svc,
+      String? sid,
+      bool rediscover,
+      DateTime? now,
+      void Function(Map<String, dynamic> data)? onDiverged}) update;
   final DateTime Function() clock;
+
+  /// No path brought the subscription (every one failed): the failure to judge ([SvcFailure.suspicion]) and the
+  /// data of the `failed` event. Set, it replaces the `failed` event of [onEvent] for such a failure (the owner
+  /// writes it, for a confirmed verdict only); a failure of our own restart reaches neither (retried at the next
+  /// tick, nothing told).
+  final void Function(SvcFailure failure, Map<String, dynamic> data)? onSvcFailed;
+
+  /// Auto: the direct and the tunnel's answers differ (the tunnel's was used): `{source, name, host, ua, …}`.
+  final void Function(Map<String, dynamic> data)? onDiverged;
 
   /// What the timer's updates did, for the events journal: `('updated', {source, name,
   /// added, removed, total})` when the server list changed, `('failed', {source, name,
@@ -215,12 +238,15 @@ class SubscriptionUpdater {
       final s = await store.source(sid);
       if (s == null) continue;
       _busy.add(sid);
+      var retrySoon = false;
       try {
         final r = await update(
           s,
           hwid: s['hwid'] == true ? await hwid?.call() : null,
-          proxyPort: proxyPort?.call(),
+          svc: svc?.call(),
+          sid: sid,
           now: clock(),
+          onDiverged: onDiverged,
         );
         final patch = Map<String, dynamic>.of((r['patch'] as Map).cast<String, dynamic>());
         if (s['lastError'] != null) patch['lastError'] = null; // the card's error strip goes
@@ -230,15 +256,26 @@ class SubscriptionUpdater {
         }
       } catch (e) {
         stderr.writeln('[updater] ${s['name'] ?? sid}: $e');
-        if (s['lastError'] == null) onEvent?.call('failed', {'source': sid, 'name': '${s['name'] ?? sid}', 'error': '$e'});
-        // the card shows it with Retry (33-source-error.js); updatedAt stays, so the UI's
-        // own save still wins over it
-        await store.patchSource(sid, _expect(s), {
-          'lastError': {'msg': '$e', 'at': clock().millisecondsSinceEpoch},
-        });
+        final data = {'source': sid, 'name': '${s['name'] ?? sid}', 'error': '$e'};
+        final svcFail = e is SubscriptionFetchException && e.failure.code == 'allFailed' ? e.failure : null;
+        if (svcFail?.advice?.waitFor == RetryWait.settled) {
+          // our own restart cut it: nothing is told, no error on the card, the next tick asks again
+          retrySoon = true;
+        } else {
+          if (svcFail != null && onSvcFailed != null) {
+            onSvcFailed!(svcFail, data); // the Sentinel judges every failure (a standing root says nothing twice)
+          } else if (s['lastError'] == null) {
+            onEvent?.call('failed', data);
+          }
+          // the card shows it with Retry (33-source-error.js); updatedAt stays, so the UI's
+          // own save still wins over it
+          await store.patchSource(sid, _expect(s), {
+            'lastError': {'msg': '$e', 'at': clock().millisecondsSinceEpoch},
+          });
+        }
       } finally {
         _busy.remove(sid);
-        _triedAt[sid] = clock().millisecondsSinceEpoch;
+        if (!retrySoon) _triedAt[sid] = clock().millisecondsSinceEpoch;
       }
     }
     return done;

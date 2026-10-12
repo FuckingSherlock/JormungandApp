@@ -56,13 +56,6 @@ class OutsideEntry {
 const outsideTunnel = <OutsideEntry>[
   // ── the app's own process: the self rule ──
   OutsideEntry(
-    'subscription-fetch',
-    'Subscription download and refresh (fetch.dart), direct or "via proxy" through tunnel-in: the direct '
-        'one is the app\'s own connection, so it needs the self rule and a DNS that works with every node dead',
-    OutsideHow.ownRule,
-    ['core/lib/src/fetch.dart'],
-  ),
-  OutsideEntry(
     'app-update',
     'App update: feed manifest, delta and full download, direct or via tunnel-in',
     OutsideHow.ownRule,

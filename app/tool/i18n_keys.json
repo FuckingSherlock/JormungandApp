@@ -1528,5 +1528,8 @@
   "No direct path to the report server, and the VPN is off. Turn the VPN on and try again.": "noDirectPathToTheReport",
   "Sent through the VPN: the report server is not reachable directly.": "sentThroughTheVpnTheReport",
   "Sending… {#0} s": "sendingS",
-  "Sent directly: the VPN path did not work.": "sentDirectlyTheVpnPathDid"
+  "Sent directly: the VPN path did not work.": "sentDirectlyTheVpnPathDid",
+  "Subscription answers differ": "subscriptionAnswersDiffer",
+  "The VPN answer is used.": "theVpnAnswerIsUsed",
+  "{0}: the direct and the VPN answers differ": "theDirectAndTheVpnAnswers"
 }

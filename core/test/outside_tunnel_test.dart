@@ -26,7 +26,7 @@ void main() {
 
   test('the scan is not blind: it finds the known network files and ignores comments', () {
     final found = scanScope(root, coreScope).keys.toSet();
-    expect(found, containsAll(['core/lib/src/fetch.dart', 'core/lib/src/dns_probe.dart', 'core/lib/src/runtime.dart', 'core/lib/src/probe.dart']));
+    expect(found, containsAll(['core/lib/src/svc_fetch.dart','core/lib/src/dns_probe.dart', 'core/lib/src/runtime.dart', 'core/lib/src/probe.dart']));
     expect(found, isNot(contains('core/lib/src/outside_tunnel.dart')), reason: 'names in comments are not usage');
 
     final tmp = Directory.systemTemp.createTempSync('jorm-scan');

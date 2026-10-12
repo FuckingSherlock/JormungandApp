@@ -72,7 +72,7 @@ const eventCats = <(String, List<String>)>[
   ('conn', ['connected', 'disconnected', 'connectFailed', 'lost', 'restored', 'offline', 'online', 'failing']),
   ('auto', ['switched', 'fastest', 'unstable']),
   ('site', ['blocked', 'unreachable']),
-  ('sub', ['updated', 'failed', 'removed', 'back', 'dead']),
+  ('sub', ['updated', 'failed', 'removed', 'back', 'dead', 'diverged']),
   ('rules', ['fallback', 'targetBack', 'ruleSetFailed', 'ruleSetUpdated']),
   ('dns', ['switched']),
   ('speed', ['done', 'failed']),

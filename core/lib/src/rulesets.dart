@@ -161,8 +161,9 @@ class RuleSetCache {
       final api = _fetchApi;
       // when to ask again: the policy's advice for a path failure; a server's answer that is no list
       // counts as a failure of the network kind (the escalating wait)
-      final advice = d.svc?.advice ?? api.retryFor('ruleset').advise(RetryKind.network);
-      _hold[s.tag] = api.retryFor('ruleset').wait(advice).whenComplete(() => _hold.remove(s.tag));
+      // (the count is per list: one list that keeps failing does not slow the others)
+      final advice = d.svc?.advice ?? api.retryFor('ruleset:${s.tag}').advise(RetryKind.network);
+      _hold[s.tag] = api.retryFor('ruleset:${s.tag}').wait(advice).whenComplete(() => _hold.remove(s.tag));
       // our own restart cut it: the settle brings the retry, nothing is told
       if (advice.waitFor != RetryWait.settled) {
         onFailed?.call(RuleSetFailure(s.tag, d.url, '${d.cause}', hasCopy: await f.exists(), svc: d.svc));
@@ -183,7 +184,7 @@ class RuleSetCache {
       tried = url;
       final SvcResult res;
       try {
-        res = await api.get(Uri.parse(url), purpose: 'ruleset', policy: policy, prefer: prefer);
+        res = await api.get(Uri.parse(url), purpose: 'ruleset', retryKey: 'ruleset:${s.tag}', policy: policy, prefer: prefer);
       } catch (e) {
         throw _DownloadFailed(tried, e);
       }

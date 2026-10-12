@@ -75,7 +75,7 @@ void main() {
     SubscriptionUpdater updater(Completer<void>? release, {int now = 100 * _h}) => SubscriptionUpdater(
           store: store,
           clock: () => DateTime.fromMillisecondsSinceEpoch(now),
-          update: (s, {hwid, proxyPort, rediscover = false, now, client}) async {
+          update: (s, {hwid, svc, sid, rediscover = false, now, onDiverged}) async {
             await release?.future;
             return {
               'patch': {
@@ -135,7 +135,7 @@ void main() {
       final failing = SubscriptionUpdater(
         store: store,
         clock: () => DateTime.fromMillisecondsSinceEpoch(100 * _h),
-        update: (s, {hwid, proxyPort, rediscover = false, now, client}) async => throw const SocketException('refused'),
+        update: (s, {hwid, svc, sid, rediscover = false, now, onDiverged}) async => throw const SocketException('refused'),
       );
       expect(await failing.runDue(), isEmpty);
       var s = (await store.read())!['sourcesData']['src1'];

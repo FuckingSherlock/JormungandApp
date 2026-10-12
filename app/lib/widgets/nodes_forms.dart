@@ -401,12 +401,9 @@ class _SubscriptionFormState extends State<_SubscriptionForm> {
     );
   }
 
-  /// Direct / Proxy stay English in Russian too (the mockup's dictionary has no entry).
-  String _channelLabel(AppLocalizations l10n, String ch) => switch (ch) {
-    'Direct first' => l10n.directFirst,
-    'Proxy first' => l10n.proxyFirst,
-    _ => ch,
-  };
+  /// Auto / Proxy / Direct stay English in Russian too (the mockup's dictionary has no entry); a stored old
+  /// `Direct first` / `Proxy first` shows as Auto.
+  String _channelLabel(AppLocalizations l10n, String ch) => normalizeSubscriptionChannel(ch);
 }
 
 // ── Manual server ──
