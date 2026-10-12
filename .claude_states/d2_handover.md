@@ -40,10 +40,27 @@
 - address_pin.dart: ws `headers.Host` and httpupgrade `host` now `name:port` (sing-box's own default, measured).
 - Verified: pinned outbounds (vless ws+tls, vless httpupgrade, trojan http, DoH/DoT DNS) pass `sing-box check`.
 
+## D2c (done, no commit)
+- buildTesterConfig(pins:) / measureLatency(pins:) / speedTest(pins:): nodes and pair entries pinned (exit not); service `_testerPins` = cache only
+  (missing hosts resolve in the background, never waited), used by ping and speed test.
+- memberHostname covers rule targets (`<id>`, `<id>>entry`); FallbackService(onDown:) fires when a target's current server (and a chain
+  target's entry) has `failAfter` misses, wired to `_serverDown` (same policy). Not covered by a test yet.
+- h2 `http` transport measured (loopback, node http2 server): over TLS sing-box sends `:authority: www.example.com` whatever the server -> NOT pinned any
+  more; without TLS the Host is the bare name -> pinned as `host: [name]` only without TLS (address_pin.dart).
+- BUG FIXED in address_resolver.lookup: `whenComplete(() => _inflight.remove(k))` returned the future itself -> every awaited lookup() hung forever
+  (ensure() masked it by its timeout; `_reresolve`'s step 2 would have hung). Now a block body.
+- Seam: `CoreService(addressResolverFor: (book) => AddressResolver)` (a subclass overriding lookup / ensure in tests).
+- test/address_test.dart (15 tests, pass): wire codec, AddressBook, AddressResolver against a loopback mock DoH (A/AAAA, ipv6 on/off, dead -> next,
+  alive skip, vpn side unused, OS resolver last, ensure cache-first/stale/negative cache, in-flight dedupe, cursor), pins table, planHostnames /
+  memberHostname (routes + targets) / pinsFor, buildConfig / buildTesterConfig pins.
+
 ## Remaining
-- Not done: buildTesterConfig is not pinned (optional); targets' groups (routing.targets) are not covered by `memberHostname` (route groups only), so a
-  node of a rule target group never triggers re-resolve (still pinned from the cache); http (h2) transport `host` is the bare name (default not measured).
-- Tests (none written in D2): dns_wire codec (A/AAAA, compression, ipv6 text); AddressResolver with a mock DoH (plain http seam,
+- Tests still to write: service-level `_serverDown` policy (it is private: make it public for tests or drive it through Auto; needs
+  `resolveAddresses: true` + `addressResolverFor` fake + an injected timer): not pinned -> nothing, rate limit via reresolveEvery, no restart while
+  offline / unsettled / recovering, IP-set change restarts with reason 'reresolve', unchanged does not; pins land in the config handed to the fake
+  runner, cache-only on recover, adopt reads `pins`; FallbackService onDown (fallback_test.dart); a live sing-box test that a pinned config starts
+  (vless ws + tls pinned to 127.0.0.1, capture SNI / Host at a loopback server; the h2 / ws measurements above were done by hand).
+- (old list, partly done in test/address_test.dart) dns_wire codec (A/AAAA, compression, ipv6 text); AddressResolver with a mock DoH (plain http seam,
   `DnsCandidate(kind:'doh', addr:'http://127.0.0.1:p/dns-query')`): order DoH->DoT->UDP/TCP->system, dead-skip, ipv6 on/off, negative cache, in-flight dedupe;
   AddressBook persist/expiry/fresh; pinOutbound / pinDnsServer table per type (incl. detour, ss plugin, grpc plain, own server_name, case-insensitive Host);
   planHostnames / memberHostname / pinsFor; service: pins land in the config handed to a fake runner, cache-only on recover, adopt reads `pins`,

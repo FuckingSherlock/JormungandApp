@@ -101,7 +101,10 @@ class AddressResolver {
   /// (`subscription`, `connect`, `node down`, …). Never throws.
   Future<AddressEntry?> lookup(String host, {required String why}) {
     final k = AddressBook.key(host);
-    return _inflight.putIfAbsent(k, () => _limited(() => _run(k, why)).whenComplete(() => _inflight.remove(k)));
+    // a block body: `remove` returns this very future, which whenComplete would then wait for forever
+    return _inflight.putIfAbsent(k, () => _limited(() => _run(k, why)).whenComplete(() {
+          _inflight.remove(k);
+        }));
   }
 
   Future<T> _limited<T>(Future<T> Function() f) async {

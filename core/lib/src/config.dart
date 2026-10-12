@@ -448,20 +448,23 @@ List<String> tunDirectPackages(Map<String, dynamic> plan) {
 
 /// A config that only exists to measure latency (through its probe inbound, probe.dart):
 /// every node as `t/<key>`, every entry → exit pair as `p/<key>` (the exit dialing
-/// through its own copy of the entry, `pe/<key>`).
+/// through its own copy of the entry, `pe/<key>`). [pins]: the addresses of the servers named by a host
+/// (address_pin.dart), so a test dials the same address a connect would; an exit is not pinned (it is reached
+/// through its entry).
 Map<String, dynamic> buildTesterConfig({
   required List<Map> nodes,
   List<Map> pairs = const [],
   Probe? probe,
+  Map<String, String> pins = const {},
 }) {
   final outs = <Map<String, dynamic>>[
     {'type': 'direct', 'tag': 'direct'},
     for (final n in {for (final n in nodes) '${n['key']}': n}.values)
-      {...(n['outbound'] as Map).cast<String, dynamic>(), 'tag': 't/${n['key']}'},
+      {...pinOutbound((n['outbound'] as Map).cast<String, dynamic>(), pins), 'tag': 't/${n['key']}'},
   ];
   for (final p in pairs) {
     final entry = p['entry'] as Map, exit = p['exit'] as Map;
-    outs.add({...(entry['outbound'] as Map).cast<String, dynamic>(), 'tag': 'pe/${p['key']}'});
+    outs.add({...pinOutbound((entry['outbound'] as Map).cast<String, dynamic>(), pins), 'tag': 'pe/${p['key']}'});
     outs.add({...(exit['outbound'] as Map).cast<String, dynamic>(), 'tag': 'p/${p['key']}', 'detour': 'pe/${p['key']}'});
   }
   final pr = probe?.inbound([..._servers(outs), 'direct']); // direct: the network check (pool.dart)

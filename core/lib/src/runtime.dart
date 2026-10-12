@@ -288,6 +288,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
   void Function(String kind, String key, int ms)? onResult,
   void Function(String tag, String reason)? onFail,
   BoxFactory? boxFactory,
+  Map<String, String> pins = const {},
 }) async {
   final pl = pool ?? ProbePool.solo();
   final jobs = <(String, String, String)>[ // kind, key, pool identity
@@ -305,7 +306,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
         final pr = Probe(await freePort())..onFail = onFail;
         final box = boxFactory != null ? boxFactory(workDir) : SingBoxProcess(binary, workDir);
         sb = box;
-        await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr));
+        await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr, pins: pins));
         return pr;
       }();
   try {
@@ -356,9 +357,10 @@ Future<void> speedTest({
   required void Function(NetworkQualityTestProgress p) onProgress,
   Future<void>? cancel,
   BoxFactory? boxFactory,
+  Map<String, String> pins = const {},
 }) async {
   final sb = boxFactory != null ? boxFactory(workDir) : SingBoxProcess(binary, workDir);
-  await sb.start(buildTesterConfig(nodes: [?node], pairs: [?pair]));
+  await sb.start(buildTesterConfig(nodes: [?node], pairs: [?pair], pins: pins));
   try {
     final tag = node != null ? 't/${node['key']}' : 'p/${pair!['key']}';
     final stream = sb.api!.speedTest(tag, configUrl: configUrl);

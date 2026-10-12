@@ -402,9 +402,11 @@ List<DnsServerCfg> defaultDnsServers() => [
         ..._transports('udp', ['8.8.8.8', '8.8.4.4']),
       ]),
       DnsServerCfg(id: 'adguard', name: 'AdGuard (unfiltered)', sides: dnsSidesAll, transports: [
-        ..._transports('doh', ['https://94.140.14.140/dns-query', 'https://94.140.14.141/dns-query']),
-        ..._transports('dot', ['tls://94.140.14.140', 'tls://94.140.14.141']),
-        ..._transports('doq', ['quic://94.140.14.140', 'quic://94.140.14.141']),
+        // AdGuard publishes its encrypted endpoints by hostname only (the IPs serve plain DNS); the core
+        // pre-resolves the hostname and pins the IP with the name as SNI (docs/rules.md §6)
+        ..._transports('doh', ['https://unfiltered.adguard-dns.com/dns-query']),
+        ..._transports('dot', ['tls://unfiltered.adguard-dns.com']),
+        ..._transports('doq', ['quic://unfiltered.adguard-dns.com']),
         ..._transports('udp', ['94.140.14.140', '94.140.14.141']),
       ]),
       DnsServerCfg(id: 'local', name: 'Local', sides: ['direct'], transports: [DnsTransport(dnsKindSystem, 'system')]),

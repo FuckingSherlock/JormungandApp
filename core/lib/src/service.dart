@@ -93,6 +93,7 @@ class CoreService implements CoreApi {
     this.windows = const FailureWindows(),
     SentinelClock? sentinelClock,
     this.resolveAddresses = true,
+    this.addressResolverFor,
   })  : _singBoxVer = knownSingBoxVersion,
         _sentinelClock = sentinelClock,
         reportUploader = reportUploader ?? const NotConfiguredUploader(),
@@ -1017,6 +1018,7 @@ class CoreService implements CoreApi {
         settings: auto.settings,
         pool: pool,
         mainIdentity: auto.identityOf,
+        onDown: _serverDown,
         note: runner.note);
     fb.changes.listen((c) {
       // the journal names the first rule (else the first app) and counts the rest
@@ -1572,14 +1574,33 @@ class CoreService implements CoreApi {
 
   /// Resolves the hostnames of the servers through the direct side's DNS servers; an id the DNS failover
   /// switched off is not asked.
-  late final addresses = AddressResolver(
-    book: addressBook,
-    fetch: () => svcFetch,
-    settings: _addressSettings,
-    alive: (id) => _dnsFlagMemory[id] ?? true,
-    log: logBook.note,
-    now: _now,
-  );
+  late final AddressResolver addresses = addressResolverFor?.call(addressBook) ??
+      AddressResolver(
+        book: addressBook,
+        fetch: () => svcFetch,
+        settings: _addressSettings,
+        alive: (id) => _dnsFlagMemory[id] ?? true,
+        log: logBook.note,
+        now: _now,
+      );
+
+  /// The tests' seam: the resolver the service uses instead of the real one (given the service's book).
+  final AddressResolver Function(AddressBook book)? addressResolverFor;
+
+  /// The addresses a throwaway test sing-box (ping, speed test) dials: the cache only, never waited for — what
+  /// is missing resolves in the background for the next test (a test must not wait for a lookup).
+  Future<Pins> _testerPins(Iterable<Map> nodes, Iterable<Map> pairs, String why) async {
+    if (!resolveAddresses) return const {};
+    try {
+      final hosts = nodesHostnames([...nodes, for (final p in pairs) p['entry']]);
+      if (hosts.isEmpty) return const {};
+      unawaited(addresses.ensure(hosts, why: why, wait: const Duration(seconds: 30)));
+      return pinsFor(hosts, addressBook, ipv6: (await _addressSettings()).ipv6);
+    } catch (e) {
+      logBook.note('warn', 'address: the addresses for $why could not be prepared ($e): the test keeps the names');
+      return const {};
+    }
+  }
   AddressSettings? _addrSettings;
   int _addrSettingsAt = 0;
 
@@ -2421,6 +2442,7 @@ class CoreService implements CoreApi {
             pool: pool,
             maxAge: Duration(milliseconds: (body['maxAgeMs'] as num?)?.toInt() ?? 0),
             boxFactory: _loggedBoxes('ping'),
+            pins: await _testerPins(nodes, pairs, 'ping'),
             onResult: (kind, key, ms) => line({'kind': kind, 'key': key, 'ms': ms}),
             onFail: (tag, reason) => why[reason] = (why[reason] ?? 0) + 1,
           );
@@ -2468,11 +2490,13 @@ class CoreService implements CoreApi {
 
     () async {
       try {
+        final node = body['node'] as Map?, pair = body['pair'] as Map?;
         await core_speed.speedTest(
           binary: singBox,
           workDir: p.join(dataDir, 'run', 'speed'),
-          node: body['node'] as Map?,
-          pair: body['pair'] as Map?,
+          node: node,
+          pair: pair,
+          pins: await _testerPins([?node], [?pair], 'speed test'),
           configUrl: '${body['configUrl'] ?? ''}',
           cancel: gone.future,
           boxFactory: _loggedBoxes('speed'),

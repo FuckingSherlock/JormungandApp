@@ -58,8 +58,10 @@ Map<String, dynamic> pinOutbound(Map<String, dynamic> ob, Pins pins) {
       case 'httpupgrade':
         if ('${tr['host'] ?? ''}'.isEmpty) out['transport'] = {...tr, 'host': '$name:$port'};
       case 'http':
+        // over TLS sing-box sends `:authority: www.example.com` whatever the server (measured on 1.14.2): nothing to
+        // keep; without TLS the Host is the bare server name
         final h = tr['host'];
-        if (h == null || (h is List && h.isEmpty) || h == '') out['transport'] = {...tr, 'host': [name]};
+        if (!tlsOn && (h == null || (h is List && h.isEmpty) || h == '')) out['transport'] = {...tr, 'host': [name]};
     }
   }
   return out;
@@ -137,22 +139,12 @@ Set<String> nodesHostnames(Iterable<Object?> nodes) {
   return out;
 }
 
-/// The hostname of the server behind the group member `<groupTag>/<key>` of the plan's routes (the tags of
-/// config.dart: `route<i>` and a chain's `route<i>-entry`), when the config pins it: null for an IP, a chain's
-/// exit (it dials through its entry) and a member that is not in the plan.
+/// The hostname of the server behind the group member `<groupTag>/<key>` of the plan, when the config pins it:
+/// the tags of config.dart — a route's `route<i>` and a chain's `route<i>-entry`, a rule target's `<id>` and a
+/// chain target's `<id>>entry` (routing.dart). Null for an IP, a chain's exit (it dials through its entry) and a
+/// member that is not in the plan.
 String? memberHostname(Map<String, dynamic> plan, String groupTag, String key) {
-  final rs = planRoutes(plan);
-  for (var i = 0; i < rs.length; i++) {
-    final r = rs[i];
-    final chain = r['kind'] == 'chain';
-    final Object? g;
-    if (groupTag == routeEntryTag(i)) {
-      g = chain ? r['entry'] : null;
-    } else if (groupTag == routeTag(i)) {
-      g = chain ? null : r['main'];
-    } else {
-      continue;
-    }
+  String? find(Object? g) {
     if (g is! Map) return null;
     for (final n in (g['nodes'] as List? ?? const [])) {
       if (n is Map && '${n['key']}' == key) {
@@ -162,7 +154,21 @@ String? memberHostname(Map<String, dynamic> plan, String groupTag, String key) {
     }
     return null;
   }
-  return null;
+
+  final rs = planRoutes(plan);
+  for (var i = 0; i < rs.length; i++) {
+    final r = rs[i];
+    final chain = r['kind'] == 'chain';
+    if (groupTag == routeEntryTag(i)) return find(chain ? r['entry'] : null);
+    if (groupTag == routeTag(i)) return find(chain ? null : r['main']);
+  }
+  final targets = (plan['routing'] as Map?)?['targets'];
+  if (targets is! Map) return null;
+  final entry = groupTag.endsWith('>entry');
+  final t = targets[entry ? groupTag.substring(0, groupTag.length - '>entry'.length) : groupTag];
+  if (t is! Map) return null;
+  final chain = t['kind'] == 'chain';
+  return find(entry ? (chain ? t['entry'] : null) : (chain ? null : t['main']));
 }
 
 /// The DNS servers of a `routing.dns` plan named by a host (lower case).

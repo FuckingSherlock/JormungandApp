@@ -125,6 +125,26 @@ to …` — раньше такие строки не распознавалис
   один транспорт, события нет. `dns: switch automatically on|off …` (info) — переключатель; `dns: flags off again
   after the restart: …` (info) — перезапуск sing-box применил погашенные флаги заново.
 
+**Строки журнала предрезолва адресов** (основное кольцо ядра, `logBook.note`; событий нет, `rules.md` §6):
+- `address: N hosts for <причина>: K from the cache, M stale (refreshed in the background), …` (info) — итог
+  подготовки списка имён; `address: config for <причина>: N of M hostnames pinned to an address …` (info) — что
+  легло в конфиг и какие имена остались именами (резерв: домен + `domain_resolver`). Причина: `connect`,
+  `reresolve`, `subscription update`, `manual fetch` и т.п.
+- `address: <имя> → <IP…> via <сервер> (<метка>) in N ms [fresh, <причина>]` (info) — имя разрешено;
+  `address: <имя> via <сервер> failed: <причина> (N ms), next` (info) — один сервер не ответил, пробуется
+  следующий; `address: <имя>: <сервер> skipped (judged dead)` (info); `address: DoQ servers are not used …` (info,
+  один раз).
+- Не разрешилось: `address: <имя> not resolved by any server in N ms [<причина>]` (warn; «the cached address
+  stays», если кэш есть), `address: <имя>: out of time (N ms), K servers not tried` (warn),
+  `address: not everything resolved within 8 s for <причина>; the config keeps the names …` (warn — резерв
+  на старое поведение для этих имён), `address: the saved DNS settings could not be read …` /
+  `the addresses could not be prepared …` (warn — только системный резолвер / имена в конфиге).
+- Сбой узла: `address: <имя> (<группа>/<узел> is down) on <IP>: another cached address <IP> is tried (N of M
+  tried)` / `… every cached address was tried, looked up again` (info); `address: <имя>: the same addresses …
+  (IP set unchanged): no restart` / `the addresses changed (… → …): restart` (info); `… not looked at now
+  (network not up, core not settled or restarting)` (info); `address: restarting sing-box for <что>` и
+  `restart for <что> skipped …` (info) — собственный перезапуск с причиной `reresolve` (не падение sing-box).
+
 Уведомления (`eventNotifKind`): `conn/failing` → «Сайт не открывается» (`blocked`); `core/tunTcpDead` и
 `core/tunTcpBack` → «Соединение потеряно» (`connLost`); события обновления приложения (`core/update*`)
 не уведомляют — у обновления своя поверхность.

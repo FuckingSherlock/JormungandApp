@@ -116,7 +116,7 @@ class _Target {
 
 class FallbackService {
   FallbackService(this.api, Iterable<TargetFallback> fallbacks,
-      {required this.delay, required this.settings, ProbePool? pool, this.mainIdentity, int Function()? clock, this.note})
+      {required this.delay, required this.settings, ProbePool? pool, this.mainIdentity, int Function()? clock, this.note, this.onDown})
       : pool = pool ?? ProbePool.solo(),
         _clock = clock ?? _wallClock {
     final by = <String, _Target>{};
@@ -145,6 +145,10 @@ class FallbackService {
   /// The pool identity of a main-flow server by its outbound tag (AutoService.identityOf):
   /// the main flow is Auto's, its servers are not in the targets. null = not shared.
   final String? Function(String tag)? mainIdentity;
+
+  /// A target's server (its group tag and key; a chain target's entry too) missed `failAfter` tests in a row,
+  /// like Auto's: the core may look at its address again (service.dart `_serverDown`). Not for the main flow.
+  final void Function(String groupTag, String key)? onDown;
 
   /// A line for the log (jormd: `[jormd] rules: …`).
   final void Function(String line)? note;
@@ -225,6 +229,12 @@ class FallbackService {
     final now = _clock();
     t.w.health.record(ms, now);
     if (!t.down) t.w.forgetIfStable(settings, now);
+    if (ms < 0 && !t.isMain && onDown != null && t.w.health.fails >= settings.failAfter) {
+      for (final g in [?t.entry, t.main]) {
+        final key = g.keyOf(api.selected[g.tag] ?? g.initial);
+        if (key != null) onDown!(g.tag, key);
+      }
+    }
   }
 
   // The server the main flow stands on now: down the selectors from `proxy` to a server.
