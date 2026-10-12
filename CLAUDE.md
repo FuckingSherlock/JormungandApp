@@ -175,6 +175,11 @@ default branch (`git ls-remote --symref origin HEAD` shows it):
 `git push origin <branch>:<default branch>`. Before finishing a session everything is committed,
 pushed and merged into the default branch — a new session starts from it.
 
+Release notes (`release-notes/README.md`): a push to the default branch touching `app/` or `core/` builds a
+beta and announces it in Telegram — before it, overwrite `release-notes/beta.txt` (English, what changes for
+the user since the previous push). A stable tag needs `release-notes/X.Y.Z.{en,ru}.txt` (everything since
+the previous stable, briefly), written in the same pass as the Russian translation.
+
 Every push touching `design/` redeploys the mockup to the Cloudflare Worker `jormungand-design`
 (`.github/workflows/deploy.yml`; CI fails if `main_screen.html` was not rebuilt). Manual:
 `npm run deploy`. URL: https://jormungand-design.slackerwarlock.workers.dev

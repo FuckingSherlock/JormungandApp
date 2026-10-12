@@ -300,6 +300,169 @@ test('meta is sanitized and length-limited', async () => {
   assert.equal(sanitize(null, 5), '');
 });
 
+// ---- POST /v1/release ----
+
+const REL_ENV = { RELEASE_NOTIFY_TOKEN: 'sekret', TELEGRAM_BOT_TOKEN: 'bot', TELEGRAM_CHAT_ID: '-100' };
+
+function rel(payload: unknown, headers: Record<string, string> = { authorization: 'Bearer sekret' }) {
+  return new Request('https://x/v1/release', {
+    method: 'POST',
+    body: typeof payload === 'string' ? payload : JSON.stringify(payload),
+    headers: { 'content-type': 'application/json', ...headers },
+  });
+}
+
+const goodBeta = { channel: 'beta', version: '0.1.2-beta.3', build: 3039, notes: 'Fix <a> & b\nsecond line' };
+
+function tgStub(ok = true) {
+  const calls: { url: string; body: Record<string, unknown> }[] = [];
+  const fetchStub = (async (u: string, init?: RequestInit) => {
+    calls.push({ url: String(u), body: JSON.parse(String(init?.body)) });
+    return ok
+      ? new Response(JSON.stringify({ ok: true }), { status: 200 })
+      : new Response(JSON.stringify({ ok: false, description: 'chat not found' }), { status: 400 });
+  }) as typeof fetch;
+  return { calls, fetchStub };
+}
+
+test('release: disabled without secret, 401 on bad or missing token, limiter untouched', async () => {
+  let limited = 0;
+  const lim = async () => (limited++, { ok: true as const });
+  const off = fakeEnv({ ...REL_ENV, RELEASE_NOTIFY_TOKEN: undefined, limit: lim });
+  const r0 = await handle(rel(goodBeta), off.env, ctx());
+  assert.equal(r0.status, 503);
+  assert.deepEqual(await r0.json(), { ok: false, error: 'disabled' });
+  const { env } = fakeEnv({ ...REL_ENV, limit: lim });
+  assert.equal((await handle(rel(goodBeta, {}), env, ctx())).status, 401);
+  assert.equal((await handle(rel(goodBeta, { authorization: 'Bearer nope' }), env, ctx())).status, 401);
+  assert.equal((await handle(rel(goodBeta, { authorization: 'sekret' }), env, ctx())).status, 401);
+  const noBot = fakeEnv({ ...REL_ENV, TELEGRAM_BOT_TOKEN: undefined, limit: lim });
+  assert.equal((await handle(rel(goodBeta), noBot.env, ctx())).status, 503);
+  assert.equal(limited, 0);
+});
+
+test('release: validation', async () => {
+  const { env } = fakeEnv(REL_ENV);
+  const { fetchStub, calls } = tgStub();
+  const bad: unknown[] = [
+    'not json',
+    [],
+    { ...goodBeta, channel: 'alpha' },
+    { ...goodBeta, version: '1.2' },
+    { ...goodBeta, version: '1.2.3-rc.1' },
+    { ...goodBeta, build: 0 },
+    { ...goodBeta, build: 1.5 },
+    { ...goodBeta, build: '7' },
+    { ...goodBeta, notes: '  \n ' },
+    { ...goodBeta, notes: 5 },
+  ];
+  for (const b of bad) {
+    const r = await handle(rel(b), env, ctx(), { fetch: fetchStub });
+    assert.equal(r.status, 400, JSON.stringify(b));
+    assert.equal(((await r.json()) as { ok: boolean }).ok, false);
+  }
+  const wrongType = new Request('https://x/v1/release', {
+    method: 'POST',
+    body: 'x',
+    headers: { 'content-type': 'text/plain', authorization: 'Bearer sekret' },
+  });
+  assert.equal((await handle(wrongType, env, ctx(), { fetch: fetchStub })).status, 415);
+  const huge = rel(JSON.stringify({ ...goodBeta, notes: 'x'.repeat(70 * 1024) }));
+  assert.equal((await handle(huge, env, ctx(), { fetch: fetchStub })).status, 413);
+  assert.equal(calls.length, 0);
+});
+
+test('release: beta text, escaping, link only for https', async () => {
+  const { env, objects } = fakeEnv(REL_ENV);
+  const { fetchStub, calls } = tgStub();
+  const r = await handle(rel({ ...goodBeta, url: 'https://example.com/a?x=1&y="2"' }), env, ctx(), { fetch: fetchStub });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { ok: true });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!.url, /\/botbot\/sendMessage$/);
+  const b = calls[0]!.body;
+  assert.equal(b.chat_id, '-100');
+  assert.equal(b.parse_mode, 'HTML');
+  assert.equal(b.disable_web_page_preview, true);
+  assert.equal(
+    b.text,
+    '🧪 <b>Beta 0.1.2-beta.3</b> · build 3039\n\nFix &lt;a&gt; &amp; b\nsecond line\n\n' +
+      '<a href="https://example.com/a?x=1&amp;y=&quot;2&quot;">Download</a>',
+  );
+  const marker = objects.get('_release/beta/0.1.2-beta.3+3039');
+  assert.ok(marker);
+  assert.equal(marker.ttl, 30 * 24 * 3600);
+
+  const http = tgStub();
+  await handle(rel({ ...goodBeta, build: 4, url: 'http://example.com/a' }), env, ctx(), { fetch: http.fetchStub });
+  assert.ok(!String(http.calls[0]!.body.text).includes('<a '));
+});
+
+test('release: stable text', async () => {
+  const { env } = fakeEnv(REL_ENV);
+  const { fetchStub, calls } = tgStub();
+  const r = await handle(
+    rel({ channel: 'stable', version: '0.2.0', build: 4000, notes: 'Big one', url: 'https://example.com/r' }),
+    env,
+    ctx(),
+    { fetch: fetchStub },
+  );
+  assert.equal(r.status, 200);
+  assert.equal(
+    calls[0]!.body.text,
+    '🚀 <b>Jormungand 0.2.0</b> — стабильная версия\n\nBig one\n\n<a href="https://example.com/r">Скачать</a>',
+  );
+});
+
+test('release: visible text is cut to 4096 with an ellipsis', async () => {
+  const { env } = fakeEnv(REL_ENV);
+  const { fetchStub, calls } = tgStub();
+  await handle(rel({ ...goodBeta, notes: 'ab '.repeat(3000), url: 'https://example.com/r' }), env, ctx(), { fetch: fetchStub });
+  const html = String(calls[0]!.body.text);
+  const visible = html.replace(/<[^>]+>/g, '');
+  assert.ok(visible.length <= 4096, String(visible.length));
+  assert.ok(visible.length > 4000);
+  assert.match(html, /…\n\n<a href=/);
+  // экранируемые символы считаются как один видимый
+  const amp = tgStub();
+  await handle(rel({ ...goodBeta, build: 5, notes: '&'.repeat(5000) }), env, ctx(), { fetch: amp.fetchStub });
+  const t = String(amp.calls[0]!.body.text);
+  assert.ok(t.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').length <= 4096);
+  assert.ok(t.endsWith('…'));
+});
+
+test('release: duplicate is not sent twice', async () => {
+  const { env } = fakeEnv(REL_ENV);
+  const { fetchStub, calls } = tgStub();
+  assert.equal((await handle(rel(goodBeta), env, ctx(), { fetch: fetchStub })).status, 200);
+  const r = await handle(rel(goodBeta), env, ctx(), { fetch: fetchStub });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { ok: true, duplicate: true });
+  assert.equal(calls.length, 1);
+});
+
+test('release: telegram failure is 502 and leaves no marker', async () => {
+  const { env, objects } = fakeEnv(REL_ENV);
+  const { fetchStub } = tgStub(false);
+  const r = await handle(rel(goodBeta), env, ctx(), { fetch: fetchStub });
+  assert.equal(r.status, 502);
+  assert.deepEqual(await r.json(), { ok: false, error: 'telegram', description: 'chat not found' });
+  assert.equal(objects.size, 0);
+  const boom = (async () => {
+    throw new Error('net down');
+  }) as unknown as typeof fetch;
+  const r2 = await handle(rel(goodBeta), env, ctx(), { fetch: boom });
+  assert.equal(r2.status, 502);
+  assert.equal(objects.size, 0);
+});
+
+test('release: RELEASE_CHAT_ID overrides the chat', async () => {
+  const { env } = fakeEnv({ ...REL_ENV, RELEASE_CHAT_ID: '-200' });
+  const { fetchStub, calls } = tgStub();
+  await handle(rel(goodBeta), env, ctx(), { fetch: fetchStub });
+  assert.equal(calls[0]!.body.chat_id, '-200');
+});
+
 function memStore(): Store & { m: Map<string, number> } {
   const m = new Map<string, number>();
   return {

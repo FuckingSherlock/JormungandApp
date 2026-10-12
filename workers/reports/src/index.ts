@@ -9,6 +9,8 @@ interface RuntimeEnv {
   };
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
+  RELEASE_NOTIFY_TOKEN?: string;
+  RELEASE_CHAT_ID?: string;
 }
 
 export default {
@@ -18,6 +20,8 @@ export default {
       REPORTS: env.REPORTS,
       TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
       TELEGRAM_CHAT_ID: env.TELEGRAM_CHAT_ID,
+      RELEASE_NOTIFY_TOKEN: env.RELEASE_NOTIFY_TOKEN,
+      RELEASE_CHAT_ID: env.RELEASE_CHAT_ID,
       async limit(ipKey: string): Promise<Verdict> {
         try {
           const r = await limiter.fetch(`https://limiter/hit?k=${ipKey}`);
