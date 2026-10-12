@@ -63,6 +63,16 @@ class _Rig {
     d.onLine('INFO  [$id 1ms] router: found package name: com.example.app');
   }
 
+  /// [n] look-ups that end in one of our reject rules (the debug-level `pre-match … => reject` line of the same id).
+  void rejected(int n, {String app = 'org.telegram.messenger.web', int gap = 8}) {
+    for (var i = 0; i < n; i++) {
+      final id = nextId();
+      found(app, id: id);
+      d.onLine('DEBUG [$id 0ms] router: pre-match[0] inbound=tun-in ip_version=6 => reject(no_drop)');
+      other(gap);
+    }
+  }
+
   /// [n] look-ups that no connection follows, [gap] other lines after each so none can be paired late.
   void orphans(int n, {String app = 'org.telegram.messenger.web', int gap = 8}) {
     for (var i = 0; i < n; i++) {
@@ -256,6 +266,48 @@ void main() {
       expect(r.d.dead, isFalse);
       final j = r.d.toJson();
       expect([j['state'], j['tcp'], j['lookedAt'], j['deadEvents']], ['ok', 0, 0, 0]);
+    });
+
+    test('look-ups our own reject rules took are not a dead stack: said once as ownReject, the state stays ok', () {
+      final r = _Rig()..d.start('system', ownRejects: ['ipv6Off']);
+      r.advance(const Duration(seconds: 6));
+      r.rejected(TunIngressDetector.minUnpaired + 4);
+      expect(r.events.map((e) => e.kind), ['dead']);
+      final e = r.events.single;
+      expect(e.data['ownReject'], isTrue);
+      expect(e.data['ownRejects'], ['ipv6Off']);
+      expect(e.data['ownRejected'], greaterThanOrEqualTo(TunIngressDetector.minUnpaired));
+      expect(r.d.dead, isFalse);
+      expect(r.d.toJson()['state'], 'ok');
+      expect(r.d.toJson()['deadEvents'], 0);
+      r.rejected(10);
+      expect(r.events.length, 1, reason: 'latched while the own rejects alone fill the window');
+    });
+
+    test('own rejects do not hide a stack that also ignores the rest: the other look-ups still make it dead', () {
+      final r = _Rig()..d.start('system');
+      r.advance(const Duration(seconds: 6));
+      r.rejected(TunIngressDetector.minUnpaired);
+      r.orphans(TunIngressDetector.minUnpaired - 1);
+      r.other(TunIngressDetector.pairLines + 1);
+      expect(r.events.every((e) => e.data['ownReject'] == true), isTrue, reason: 'seven of the others are not enough');
+      expect(r.d.dead, isFalse);
+      r.orphans(2);
+      r.other(TunIngressDetector.pairLines + 1);
+      expect(r.d.dead, isTrue);
+      final last = r.events.last;
+      expect(last.data.containsKey('ownReject'), isFalse);
+      expect(last.data['ownRejected'], TunIngressDetector.minUnpaired);
+    });
+
+    test('a reject line of an id that was never looked at is ignored', () {
+      final r = _Rig()..d.start('system');
+      r.advance(const Duration(seconds: 6));
+      r.d.onLine('DEBUG [999999 0ms] router: pre-match[0] inbound=tun-in => reject(no_drop)');
+      r.orphans(TunIngressDetector.minUnpaired);
+      r.other(TunIngressDetector.pairLines + 1);
+      expect(r.events.map((e) => e.kind), ['dead']);
+      expect(r.events.single.data.containsKey('ownReject'), isFalse);
     });
 
     test('its memory is bounded: a long flood of unique ids does not grow it', () {

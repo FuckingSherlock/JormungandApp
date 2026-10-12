@@ -8,8 +8,9 @@
 не отдельная ошибка. `Sentinel` — общий шлюз: детектор сообщает **подозрение**, шлюз прогоняет его по
 лестнице проверок и возвращает **вердикт**; в журнал и в уведомления попадает только подтверждённое.
 
-Статус: этап 1 — ядро механизма, контекст подключён к сервису. Детекторы пока пишут события сами
-(список на перевод — внизу, «Перенос детекторов»).
+Статус: этапы 1–2 готовы — механизм, контекст, детекторы соединений и ядра (`conn/*`, `site/*`, `core/tunTcp*`,
+`core/crashed|restartFailed|down`, `auto/unstable`) идут через шлюз. Служебный трафик (rule set'ы, подписки,
+обновления, отчёт) — этап 3, решение об уведомлениях в приложении — этап 4 (внизу, «Перенос детекторов»).
 
 ## Контекст
 
@@ -188,20 +189,89 @@ appendTrail)` дополняет событие задним числом, `Even
 `workaround`, `unexplained` остаются в журнале (Logs → Events) без уведомления; следствия приложение
 может сворачивать под событие-причину по `cause`.
 
-## Перенос детекторов (этап 2)
+## Перенос детекторов
 
-Сейчас эти места пишут события сами, без шлюза; переводятся на `suspect`:
+**Сделано (этап 2)** — детекторы соединений и ядра: ни один не пишет событие сбоя сам, все идут через
+`suspect` (код: `service.dart`, `failures.dart`, `tun_ingress.dart`, `auto.dart`). **Не сделано (этап 3):**
+`rules/ruleSetFailed`, `sub/failed`, `core/updateFailed`, отправка отчёта (общий служебный трафик с
+`RetryPolicy`); проверки запасных маршрутов Auto (`[auto]`, повтор для мёртвого запасного сервера) — этап 4.
 
-- `conn/failing` (`failures.dart`, `FailureBook`) и `TunIngressDetector` («TCP из TUN не доходит») — окно,
-  `recovery`-проверка, диагностика прямым путём; `ownReject` из правил блокировки.
-- `conn/lost` / `restored`, `conn/offline` / `online` — это сам контекст сети (`net.offline` корень); события
-  привязать через `attachEvent`.
-- `site/blocked`, `site/unreachable` — `alternative`-проверка (другой маршрут), `diagnostic` (SiteChecker).
-- `core/crashed`, `restartFailed`, `down` — `core.down` корень, `restartFailed` с `ownRestart`.
-- `auto/unstable`, проверки запасных маршрутов Auto (`[auto]`, повтор для мёртвого запасного сервера).
-- `sub/failed`, `rules/ruleSetFailed`, обновления и отправка отчёта — через общий служебный трафик с
-  `RetryPolicy`.
+### Окна (`FailureWindows`, `sentinel/windows.dart`)
+
+Все пороги постоянства — именованные константы одного класса; `CoreService(windows:)` подменяет их (в тестах
+`FailureWindows.instant()` — все окна нулевые).
+
+| константа | по умолчанию | чьё |
+|---|---|---|
+| `connFailing` | 10 с | `conn/failing`: сбой должен длиться столько от первой неудачи серии (до этого сама серия — 3 неудачи за 60 с, `FailureBook.failAfter` / `streakWindow`) |
+| `connLost` | 12 с | `conn/lost`: ни один маршрут не отвечает |
+| `tunTcpDead` | 10 с | `core/tunTcpDead`: от первого необработанного запроса окна детектора |
+| `netBlip` | 10 с | `conn/offline`: сети нет меньше этого — запись-`blip`, дольше — `warn` и `conn/online` потом |
+| `autoUnstable`, `siteBlocked`, `siteUnreachable` | 0 | Auto уже сам выдержал свой срок; шлюз только проверяет и записывает |
+| `siteChecker` | 40 с | потолок внешней проверки сайта (`site.checker`) |
+
+### Что и как идёт через шлюз
+
+| событие | подозрение (`kind`) | проверки по порядку | вердикты |
+|---|---|---|---|
+| `conn/failing` | `conn.failing`, ключ `conn.failing\|приложение\|host:port\|outbound\|inbound`, `scope {host, port, outbound}` | `recovery conn.recovered` (то же назначение снова открылось через тот же outbound, по живому трафику `FailureBook.okOutbounds`), `alternative conn.otherRoute` (через другой outbound открылось), `diagnostic probe.same` (тот же сервер, пробой Auto `reachSame`), `alternative probe.alt` (другие маршруты, `reachAlternates`; пропускается, если тот же сервер открывает) | `blip` / `workaround` / `consequence` / `confirmed` |
+| `site/blocked` | `site.blocked` | уже сделанное Auto, как записанные проверки (`Check.recorded`): `probe.same` fail, `probe.alt` pass | всегда `workaround` (тихо; приложение по-прежнему предлагает правило) |
+| `site/unreachable` | `site.unreachable` | записанные: `probe.same` fail, `probe.alt` (fail, или inconclusive при `retriesOff`); живая `diagnostic site.checker` (внешний чекер; запускается и при `retriesOff`) | чекер `opens` — `confirmed` (`why site.checker`, уведомляет); `down` / не смог / выключен — `unexplained` |
+| `conn/lost` | `conn.lost` (корень над путём `proxy`) | — | `consequence` (сети нет), `blip`, `confirmed`; `conn/restored` пишется, только если корень стоял |
+| `conn/offline` / `online` | сам корень `net.offline` контекста | — | событие корня пишет сервис по `sentinel.changes`: через `netBlip` — `confirmed` + `attachEvent`; раньше вернулась — `blip` (`info`, `downMs`); `conn/online {downMs}` — только после «стоявшего» `offline` |
+| `core/tunTcpDead` | `tun.tcpDead`, `Scope.none` | активной проверки пока нет (см. TODO ниже) | `confirmed` (корень), `blip` (TCP вернулся в окно), `deferred` (`ownReject`) |
+| `core/crashed` | — (факт) | — | `confirmed`, открывает корень `core.crashed` (не сессионный, с `eventId`) |
+| `core/restartFailed` | — (факт) | — | `consequence`, `info`, `cause` = событие падения, `why core.crashed {attempt}` |
+| `core/restarted` | — | — | без вердикта (это восстановление); закрывает `core.crashed` |
+| `core/down` | корень `core.down` контекста | — | `confirmed`, `attachEvent` к корню; покрывает всё, что идёт через ядро (`Scope.all`) |
+| `auto/unstable` | `auto.unstable\|<route>` | — | `confirmed` (корень закрывается сразу — это объявление, а не стоячий сбой) или `consequence` |
+
+Подробности:
+
+- **`conn/failing`**. `FailureBook` больше не пишет событие: он собирает серию и отдаёт `FailureReport` на `report`
+  (ответ — id события, если сбой подтвердился, иначе `null`). Группировка (`more`) осталась в книге: следующие
+  назначения того же приложения через тот же outbound присоединяются к событию (`update(id, {more})`, когда
+  id известен). Не подтвердилось (blip / workaround / consequence / unexplained / deferred) — группа
+  закрывается, запись не повторяется `FailureBook.recheckAfter` (60 с). Успех на «объявленной» записи вызывает
+  `recovered(key)`: подозрение в работе становится `blip`, открытый корень закрывается. Запросы `probe-in`
+  (проверки запасных маршрутов самим Auto) и `tunnel-in` не считаются вовсе. Прямой путь **не** проверяется
+  (приватность: сеть не должна узнавать интерес к сайту). Данные события те же (`app`, `process`, `host`, `port`,
+  `outbound`, `route`, `kind`, `count`, `windowMs`, `source`).
+- **TUN.** `TunIngressDetector.start(stack, ownRejects:)`. Отказ нашим `reject`-правилом (IPv6 выключен в плане,
+  правило блокировки пользователя) выглядит как мёртвый стек. sing-box 1.14 пишет `router: pre-match[N] … =>
+  reject` **только на уровне debug**, в конфиге стоит `info` — на практике такой отказ неотличим от мёртвого стека
+  (одинокая строка `router: found package name`). Что сделано: окно постоянства; разбор debug-строки по id соединения
+  (отказ нашим правилом не считается; если им одним набрано окно — `onDead({…, ownReject: true})` один раз, Sentinel
+  отпускает без записи, `dead` не ставится); в `evidence` — `ownRejects` (какие свои reject-правила включены) и
+  `ownRejected`. Адресов назначения в логе sing-box нет, поэтому v4/v6 в свидетельстве нет. Свидетельство: `apps`,
+  `appCounts` (запросов на приложение), `synSeen`, `accepted`, `windowMs`, `firstSeen`. `core/tunTcpBack` пишется,
+  только если корень `tun.tcpDead` стоял. **TODO(sentinel):** активная `recovery`-проверка «открыть тестовый
+  TCP-соединение через TUN» (`service.dart`, `_tunDead`, `checks: const []`): удалось — `blip`, отказ/тишина — `diagnostic`;
+  заменит ожидание первого принятого соединения и снимет неразличимость собственного reject'а.
+- **Сессия.** `_stopAuto` вызывает `Sentinel.dropAll()`: подозрения прошлой сессии sing-box отпускаются как `deferred`
+  (шаг `session.dropped`) без записи; что всё ещё сломано, детектор заподозрит заново. Подозрение, пришедшее при
+  `settling` после нашего (пере)запуска, ждёт устоявшегося и отсчитывает окно заново (шаг `self.restarted`).
+- **Сеть.** `conn/offline` берётся только из корня `net.offline` (ОС, платформа, пробы — один источник, второго
+  нет). `captive` события не имеет (в каталоге нет такого типа): все подозрения под ним — `consequence` корня
+  `net.captive` без `cause`.
+- **Падение ядра.** `core/crashed` открывает корень `core.crashed` (`Scope.none`, не сессионный), `restartFailed` —
+  его следствие; корень закрывается при `restarted` / новом подключении / отключении. Через 30 с `core/down` —
+  событие корня `core.down`, который покрывает всё через ядро.
+
+### Дополнения к API шлюза
+
+- `Check.recorded(role, result)` — уже сделанная проверка (Auto проверил сам): попадает в `trail` и решает вердикт
+  как обычная, но не запускается.
+- `SuspicionEvent.note(kind, evidence)` — одна строка в сыром логе при записи события (для людей; в событие не
+  идёт).
+- `Sentinel.dropAll({reason})` — отпустить все подозрения в работе (конец сессии).
+- Коды `trail` сверх таблицы выше: `conn.recovered`, `conn.otherRoute`, `probe.same`, `probe.alt` (`role`,
+  `outbound` / `via` / `tried` / `reason`), `site.checker` (`state`: `opens` / `down` / `failed` / `off`),
+  `session.dropped` (`reason`), `core.exit` (`code`), `restart.failed` (`attempt`, `reason`), `ctx.core`
+  (`phase: down` у `core/down`). `why.code` сверх таблицы: `conn.<kind>` (`refused` / `timeout` / `reset` /
+  `stalled` / `instantRefusal` / `dnsFail`), `routes.silent`, `tun.tcpDead`, `route.unstable`, `net.offline`,
+  `core.exit`, `core.crashed`, `core.down`, `site.blocked`.
 
 Для перевода ничего менять в Sentinel не нужно: `subject` / `scope` задаёт детектор, события записывает
 сам Sentinel через `book.add`, поэтому каталог типов (`event_catalog_test`) пополняется только вызовом
-`SuspicionEvent` на стороне детектора.
+`SuspicionEvent` на стороне детектора (тест читает и его).

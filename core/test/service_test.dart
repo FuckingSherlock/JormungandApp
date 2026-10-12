@@ -9,6 +9,8 @@ import 'package:jormungand_core/jormungand_core.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import 'sentinel_fakes.dart';
+
 /// A runner that is not sing-box: starts when told to, has no API service.
 class _Runner implements BoxRunner {
   bool up = false;
@@ -69,10 +71,25 @@ void main() {
   late CoreService svc;
   late _Runner runner;
 
-  Future<void> start({SystemProxyBackend? sys, SiteChecker? checker}) async {
+  late FakeTime time;
+
+  /// Connects and lets the core settle (5 s after the start).
+  Future<void> up([Map<String, dynamic>? body]) async {
+    await svc.connect(body ?? _body());
+    await time.advanceSeconds(6);
+  }
+
+  /// A service whose Sentinel runs on [time]; [connected] brings the (fake) core up and lets it settle, as the
+  /// site detectors only report while it runs.
+  Future<void> start({SystemProxyBackend? sys, SiteChecker? checker, bool connected = false, FailureWindows windows = const FailureWindows()}) async {
     tmp = await Directory.systemTemp.createTemp('jorm-svc');
     runner = _Runner();
+    time = FakeTime();
     svc = CoreService(
+      sentinelClock: time.clock,
+      now: () => time.t,
+      isElevated: () => true,
+      windows: windows,
       singBox: 'none',
       dataDir: p.join(tmp.path, 'data'),
       runner: runner,
@@ -83,7 +100,11 @@ void main() {
       siteChecker: checker ?? SiteChecker(get: (_, {proxyPort, timeout = Duration.zero}) async => throw const SocketException('no network in tests'), delay: (_) async {}),
     );
     await svc.init();
+    if (connected) await up();
   }
+
+  /// Lets the Sentinel finish what it is judging (windows of the site detectors are zero).
+  Future<void> settle() => time.advance(Duration.zero);
 
   tearDown(() async {
     await svc.dispose();
@@ -179,7 +200,7 @@ void main() {
   });
 
   test('ignored sites: no site/* event for the host or a subdomain, others still get one; no reconnect', () async {
-    await start();
+    await start(connected: true);
     AutoBlocked blocked(String dest) => AutoBlocked(route: 'A', server: 's', dest: dest, via: 'B', viaServer: 't', at: 1);
     AutoUnreachable gone(String dest) => AutoUnreachable(route: 'A', server: 's', dest: dest, tried: const [], at: 1);
     List<String> hosts() => [
@@ -193,30 +214,33 @@ void main() {
     svc.siteUnreachable(gone('cdn.other.org:80'));
     svc.siteBlocked(blocked('notdead.example.com:443')); // not a subdomain: a different host
     svc.siteUnreachable(gone('example.com:443'));
+    await settle();
     expect(hosts(), ['blocked notdead.example.com', 'unreachable example.com']);
     svc.updateSettings({'ignoredSites': []});
     svc.siteBlocked(blocked('dead.example.com:443'));
+    await settle();
     expect(hosts().last, 'blocked dead.example.com');
-    expect(runner.running, isFalse, reason: 'changing the list does not touch the connection');
+    expect(runner.running, isTrue, reason: 'changing the list does not touch the connection');
   });
 
   test('site events carry the Android package of the app as data.app (none = no key), next to data.process', () async {
-    await start();
+    await start(connected: true);
     svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'a.example:443', via: 'B', viaServer: 't', at: 1, pkg: 'org.telegram.messenger'));
     svc.siteUnreachable(AutoUnreachable(route: 'A', server: 's', dest: 'b.example:443', tried: const [], at: 1, pkg: 'android'));
     svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'c.example:443', via: 'B', viaServer: 't', at: 1, process: r'C:\x\Discord.exe'));
-    final data = [for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site') e['data'] as Map];
-    expect(data[0]['app'], 'org.telegram.messenger');
-    expect(data[1]['app'], 'android');
-    expect(data[2].containsKey('app'), isFalse);
-    expect(data[2]['process'], {'name': 'Discord.exe', 'path': r'C:\x\Discord.exe'});
+    await settle();
+    final data = {for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site') (e['data'] as Map)['host']: e['data'] as Map};
+    expect(data['a.example']!['app'], 'org.telegram.messenger');
+    expect(data['b.example']!['app'], 'android');
+    expect(data['c.example']!.containsKey('app'), isFalse);
+    expect(data['c.example']!['process'], {'name': 'Discord.exe', 'path': r'C:\x\Discord.exe'});
   });
 
   test('screen off: a site/* event is marked bg at the moment it is found; screen on again: unmarked', () async {
-    await start();
+    await start(connected: true);
     AutoBlocked blocked(String dest) => AutoBlocked(route: 'A', server: 's', dest: dest, via: 'B', viaServer: 't', at: 1);
     AutoUnreachable gone(String dest) => AutoUnreachable(route: 'A', server: 's', dest: dest, tried: const [], at: 1);
-    List<bool> flags() => [for (final e in (svc.events()['events'] as List).cast<Map>()) e['bg'] == true];
+    Map<String, bool> flags() => {for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site') '${(e['data'] as Map)['host']}': e['bg'] == true};
     expect(svc.screenOn, isTrue, reason: 'never reported = on');
     svc.siteBlocked(blocked('a.example:443'));
     svc.updateSettings({'screenOn': false});
@@ -224,8 +248,9 @@ void main() {
     svc.siteUnreachable(gone('c.example:443'));
     svc.updateSettings({'screenOn': true});
     svc.siteUnreachable(gone('d.example:443'));
-    expect(flags(), [false, true, true, false]);
-    expect(runner.running, isFalse, reason: 'the screen is no reason to touch the connection');
+    await settle();
+    expect(flags(), {'a.example': false, 'b.example': true, 'c.example': true, 'd.example': false});
+    expect(runner.running, isTrue, reason: 'the screen is no reason to touch the connection');
   });
 
   test('updateSettings {closeOnSwitch}: on by default, set live; other keys leave it', () async {
@@ -255,92 +280,120 @@ void main() {
   List<Map> siteEvents() => [for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site') e];
   bool notifies(Map e) => eventNotifies(null, EventRecord.fromJson(e));
 
-  test('a site down on every route is quiet while the checker asks, loud when it opens elsewhere, quiet when down for the checker too', () async {
+  Map<String, dynamic> noCheckBody() => _body()..['plan'] = {...(_body()['plan'] as Map), 'auto': {'siteCheck': false}};
+  List<String> trailCodes(Map e) => [for (final s in (e['trail'] as List).cast<Map>()) '${s['code']}'];
+
+  test('a site down on every route: the checker says it opens elsewhere → confirmed, notifies, check and trail in the event; down for the checker too → unexplained, quiet', () async {
     final asked = <Uri>[];
-    await start(checker: fakeChecker(asked, opens: true));
-    final changed = svc.eventStream.firstWhere((e) => e['rev'] != null);
+    await start(checker: fakeChecker(asked, opens: true), connected: true);
     svc.siteUnreachable(gone('a.example:443'));
+    await settle();
     var e = siteEvents().single;
-    expect((e['data'] as Map)['check']['state'], 'pending');
-    expect(notifies(e), isFalse, reason: 'quiet while the check is pending');
-    final id = e['id'];
-    final pushed = await changed;
-    expect(pushed['id'], id, reason: 'the same event, pushed again');
-    e = siteEvents().single;
-    expect([e['id'], e['rev']], [id, 1]);
+    expect([e['verdict'], e['level']], ['confirmed', 'warn']);
+    expect(e['rev'], 2, reason: 'the result of the checker is added after the verdict, then the root of the announcement closes');
     final check = (e['data'] as Map)['check'] as Map;
     expect([check['state'], check['ok'], check['total'], check['via']], ['opens', 3, 3, 'direct']);
     expect((check['nodes'] as List).first, containsPair('country', 'Germany'));
     expect(notifies(e), isTrue, reason: 'opens from the checker\'s nodes: notify');
-    expect((svc.events()['updated'] as List).single['id'], id, reason: 'a reader that already has the event learns of the change');
+    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.alt', 'site.checker']));
+    expect((e['why'] as Map)['code'], 'site.checker');
+    expect(svc.sentinel.roots.open, isEmpty, reason: 'an announcement: Auto repeats it at its own pace');
+    expect((svc.events()['updated'] as List).single['id'], e['id'], reason: 'a reader that already has the event learns of the change');
     expect(asked.map((u) => u.queryParameters['host']).whereType<String>(), ['https://a.example']);
 
     // the same on a checker that finds it down
     final down = <Uri>[];
     await svc.dispose();
     await tmp.delete(recursive: true);
-    await start(checker: fakeChecker(down, opens: false));
-    final changed2 = svc.eventStream.firstWhere((e) => e['rev'] != null);
+    await start(checker: fakeChecker(down, opens: false), connected: true);
     svc.siteUnreachable(gone('b.example:443'));
-    await changed2;
+    await settle();
     e = siteEvents().single;
     expect(((e['data'] as Map)['check'] as Map)['state'], 'down');
+    expect([e['verdict'], e['level']], ['unexplained', 'warn']);
     expect(notifies(e), isFalse, reason: 'down everywhere: the journal only');
   });
 
-  test('check trouble, a switched-off check and retries off: only the last notifies as before; a partial failure (blocked) asks nobody', () async {
+  test('check trouble, a switched-off check: quiet, unexplained; the checker is asked also when retries are off; a partial failure (blocked) is a workaround and asks nobody', () async {
     final asked = <Uri>[];
     await start(checker: fakeChecker(asked, opens: true));
     // check switched off in Settings → Auto mode (plan.auto.siteCheck)
-    final body = _body();
-    ((body['plan'] as Map)['auto'] = {'siteCheck': false});
-    await svc.connect(body);
+    await up(noCheckBody());
     expect(svc.siteCheckOn, isFalse);
     svc.siteUnreachable(gone('off.example:443'));
     svc.siteUnreachable(gone('retries.example:443', off: true));
     svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'part.example:443', via: 'B', viaServer: 't', at: 1));
-    await Future<void>.delayed(Duration.zero);
+    await settle();
     final byHost = {for (final e in siteEvents()) '${(e['data'] as Map)['host']}': e};
     expect(((byHost['off.example']!['data'] as Map)['check'] as Map)['state'], 'off');
     expect(notifies(byHost['off.example']!), isFalse);
-    expect((byHost['retries.example']!['data'] as Map).containsKey('check'), isFalse);
-    expect(notifies(byHost['retries.example']!), isTrue, reason: 'only the current route was tried: as before');
+    expect(byHost['off.example']!['verdict'], 'unexplained');
+    expect(((byHost['retries.example']!['data'] as Map)['check'] as Map)['state'], 'off', reason: 'the switch is off: not asked, whatever the retries');
     expect((byHost['part.example']!['data'] as Map).containsKey('check'), isFalse);
-    expect(notifies(byHost['part.example']!), isTrue);
+    expect(byHost['part.example']!['verdict'], 'workaround');
+    expect(trailCodes(byHost['part.example']!), containsAllInOrder(['suspect', 'probe.same', 'probe.alt']));
     expect(asked, isEmpty, reason: 'nothing was sent to the checker');
   });
 
+  test('retries off (only the current route was tried): the checker is asked all the same, and the event has the verdict and the check', () async {
+    final asked = <Uri>[];
+    await start(checker: fakeChecker(asked, opens: true), connected: true);
+    svc.siteUnreachable(gone('retries.example:443', off: true));
+    await settle();
+    final e = siteEvents().single;
+    expect(asked, isNotEmpty);
+    expect(e['verdict'], 'confirmed');
+    expect(((e['data'] as Map)['check'] as Map)['state'], 'opens');
+    expect((e['data'] as Map)['retries'], 'off');
+    expect(notifies(e), isTrue);
+    final alt = (e['trail'] as List).cast<Map>().firstWhere((s) => s['code'] == 'probe.alt');
+    expect((alt['params'] as Map)['reason'], 'off');
+  });
+
   test('a checker that fails leaves the event quiet with the reason; an ignored host is never sent', () async {
-    await start(); // the default test checker fails every request
+    await start(connected: true); // the default test checker fails every request
     svc.updateSettings({'ignoredSites': ['secret.example']});
-    final changed = svc.eventStream.firstWhere((e) => e['rev'] != null);
     svc.siteUnreachable(gone('api.secret.example:443'));
     svc.siteUnreachable(gone('open.example:443'));
-    await changed;
+    await settle();
     final e = siteEvents().single;
     final check = (e['data'] as Map)['check'] as Map;
     expect([check['state'], check['error']], ['failed', contains('no network in tests')]);
+    expect(e['verdict'], 'unexplained');
     expect(notifies(e), isFalse);
   });
 
   test('automatic checks are cached per site: the same site again within 10 minutes is not asked again', () async {
     final asked = <Uri>[];
-    await start(checker: fakeChecker(asked, opens: true));
+    await start(checker: fakeChecker(asked, opens: true), connected: true);
     for (var i = 0; i < 2; i++) {
-      final changed = svc.eventStream.firstWhere((e) => e['rev'] != null && e['rev'] == 1 && e['id'] == siteEvents().last['id']);
       svc.siteUnreachable(gone('again.example:443'));
-      await changed;
+      await settle();
     }
     expect(siteEvents().length, 2);
     expect(asked.where((u) => u.pathSegments.last == 'check-http').length, 1);
     expect(siteEvents().map((e) => ((e['data'] as Map)['check'] as Map)['state']), ['opens', 'opens']);
   });
 
+  test('a site/* report while the core is still settling waits for it (our own start is not the site\'s fault); before any connection it is let go without a record', () async {
+    await start();
+    svc.siteUnreachable(gone('early.example:443'));
+    await settle();
+    expect(siteEvents(), isEmpty, reason: 'the core is stopped: deferred');
+    await svc.connect(_body());
+    svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'wait.example:443', via: 'B', viaServer: 't', at: 1));
+    await settle();
+    expect(siteEvents(), isEmpty, reason: 'settling');
+    await time.advanceSeconds(6);
+    expect(siteEvents().single['verdict'], 'workaround');
+  });
+
   test('«Check with checker»: the same event goes pending, then gets the result with manual: true (no notification); a bad id is a FormatException', () async {
     final asked = <Uri>[];
     await start(checker: fakeChecker(asked, opens: true));
-    await svc.connect(_body()..['plan'] = {...(_body()['plan'] as Map), 'auto': {'siteCheck': false}});
+    await up(noCheckBody());
     svc.siteUnreachable(gone('hand.example:443'));
+    await settle();
     final id = siteEvents().single['id'] as int;
     expect(asked, isEmpty);
     final states = <String>[];
@@ -352,69 +405,127 @@ void main() {
     expect((r['check'] as Map)['state'], 'opens');
     final e = siteEvents().single;
     expect(siteEvents().length, 1, reason: 'no new event');
-    expect([e['id'], e['rev'], ((e['data'] as Map)['check'] as Map)['manual']], [id, 2, true]);
+    expect([e['id'], e['rev'], ((e['data'] as Map)['check'] as Map)['manual']], [id, 3, true]);
     expect(notifies(e), isFalse);
     expect(() => svc.siteCheck({'event': 9999}), throwsFormatException);
     final other = svc.postEvent({'cat': 'user', 'type': 'hello', 'level': 'info'})['id'];
     expect(() => svc.siteCheck({'event': other}), throwsFormatException);
   });
 
+  Map<String, dynamic> tunBody() {
+    final body = _body();
+    body['plan'] = {...(body['plan'] as Map<String, dynamic>), 'mode': 'tun', 'tunStack': 'system'};
+    return body;
+  }
+
+  List<Map> tunEvents(String type) => [
+        for (final e in (svc.events()['events'] as List).cast<Map>())
+          if (e['cat'] == 'core' && e['type'] == type) e,
+      ];
+  void orphans(int n) {
+    for (var i = 0; i < n; i++) {
+      runner.onLog!('INFO[0010] [${700 + i} 0ms] router: found package name: org.telegram.messenger.web');
+      for (var k = 0; k < 8; k++) {
+        runner.onLog!('INFO[0010] outbound/direct[direct]: other');
+      }
+    }
+  }
+
+  void tcpThroughTun() {
+    runner.onLog!('INFO[0020] [5000 0ms] router: found package name: org.telegram.messenger.web');
+    runner.onLog!('INFO[0020] [5001 0ms] inbound/tun[tun-in]: inbound connection from 172.19.0.1:50000');
+    runner.onLog!('INFO[0020] [5001 0ms] inbound/tun[tun-in]: inbound connection to 1.1.1.1:443');
+  }
+
   test('a TUN that takes no TCP: core/tunTcpDead from the raw log, once; the snapshots follow the connection', () async {
-    tmp = await Directory.systemTemp.createTemp('jorm-svc');
-    runner = _Runner();
-    var t = DateTime.utc(2026, 10, 10, 12);
-    svc = CoreService(
-      singBox: 'none',
-      dataDir: p.join(tmp.path, 'data'),
-      runner: runner,
-      boxFactory: (_) => _NoisyRunner(),
-      sysProxy: NoSystemProxy(),
-      exitCheck: (_) async => {'ip': '127.0.0.1'},
-      isElevated: () => true,
-      now: () => t,
-    );
-    await svc.init();
+    await start();
     expect(svc.failuresSnapshot()['active'], isFalse);
     expect(svc.tunIngressSnapshot()['state'], 'off');
 
-    final body = _body();
-    body['plan'] = {...(body['plan'] as Map<String, dynamic>), 'mode': 'tun', 'tunStack': 'system'};
-    await svc.connect(body);
+    await svc.connect(tunBody());
     expect(svc.failuresSnapshot()['active'], isTrue);
     final snap = svc.tunIngressSnapshot();
     expect([snap['state'], snap['stack']], ['ok', 'system']);
 
-    List<Map> dead() => [
-          for (final e in (svc.events()['events'] as List).cast<Map>())
-            if (e['cat'] == 'core' && e['type'] == 'tunTcpDead') e,
-        ];
-    void orphans(int n) {
-      for (var i = 0; i < n; i++) {
-        runner.onLog!('INFO[0010] [${700 + i} 0ms] router: found package name: org.telegram.messenger.web');
-        for (var k = 0; k < 8; k++) {
-          runner.onLog!('INFO[0010] outbound/direct[direct]: other');
-        }
-      }
-    }
-
     orphans(10);
-    expect(dead(), isEmpty, reason: 'grace: the first seconds are not judged');
-    t = t.add(const Duration(seconds: 10));
+    await settle();
+    expect(tunEvents('tunTcpDead'), isEmpty, reason: 'grace: the first seconds are not judged');
+    await time.advanceSeconds(10);
     orphans(1);
-    final e = dead().single;
-    expect(e['level'], 'error');
+    expect(tunEvents('tunTcpDead'), isEmpty, reason: 'the dead window has not passed since our own start settled');
+    await time.advanceSeconds(11);
+    final e = tunEvents('tunTcpDead').single;
+    expect([e['level'], e['verdict']], ['error', 'confirmed']);
     final d = e['data'] as Map;
     expect([d['stack'], d['accepted']], ['system', 0]);
     expect(d['synSeen'], greaterThanOrEqualTo(TunIngressDetector.minUnpaired));
     expect(d['apps'], ['org.telegram.messenger.web']);
+    expect(d['appCounts'], isNotEmpty, reason: 'the evidence: which apps, how many look-ups');
+    expect(trailCodes(e), containsAllInOrder(['suspect', 'persist.window']));
     orphans(10);
-    expect(dead().length, 1);
+    await settle();
+    expect(tunEvents('tunTcpDead').length, 1);
     expect(svc.tunIngressSnapshot()['state'], 'dead');
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNotNull, reason: 'a standing failure is a root');
     expect((svc.log()['lines'] as List).any((l) => '${(l as Map)['msg']}'.contains('TUN')), isTrue, reason: 'it is said in the journal too');
+
+    // a TCP connection through the tunnel again: the root closes, tunTcpBack says so
+    tcpThroughTun();
+    await settle();
+    expect(tunEvents('tunTcpBack').length, 1);
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
 
     await svc.disconnect();
     expect(svc.failuresSnapshot()['active'], isFalse);
     expect(svc.tunIngressSnapshot()['state'], 'off');
+  });
+
+  test('a TUN that takes no TCP, but TCP is back inside the window: a blip of the same event, no tunTcpBack', () async {
+    await start(windows: const FailureWindows(tunTcpDead: Duration(seconds: 30)));
+    await svc.connect(tunBody());
+    await time.advanceSeconds(6);
+    orphans(10);
+    await settle();
+    expect(tunEvents('tunTcpDead'), isEmpty, reason: 'the window has not passed');
+    await time.advanceSeconds(8);
+    tcpThroughTun();
+    await time.advanceSeconds(1);
+    final e = tunEvents('tunTcpDead').single;
+    expect([e['verdict'], e['level']], ['blip', 'info']);
+    expect((e['why'] as Map)['code'], 'recovered');
+    expect(trailCodes(e), containsAllInOrder(['suspect', 'blip.recovered']));
+    expect(tunEvents('tunTcpBack'), isEmpty, reason: 'it never stood');
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+  });
+
+  test('look-ups that our own reject rule took are not a dead TUN: no event, the state stays ok, the log says it was let go', () async {
+    await start();
+    await svc.connect(tunBody());
+    await time.advanceSeconds(6);
+    for (var i = 0; i < TunIngressDetector.minUnpaired + 2; i++) {
+      runner.onLog!('INFO[0010] [${900 + i} 0ms] router: found package name: org.telegram.messenger.web');
+      runner.onLog!('DEBUG[0010] [${900 + i} 0ms] router: pre-match[0] inbound=tun-in ip_version=6 => reject(no_drop)');
+      for (var k = 0; k < 8; k++) {
+        runner.onLog!('INFO[0010] outbound/direct[direct]: other');
+      }
+    }
+    await time.advanceSeconds(1);
+    expect(tunEvents('tunTcpDead'), isEmpty);
+    expect(svc.tunIngressSnapshot()['state'], 'ok');
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+    expect((svc.log()['lines'] as List).any((l) => '${(l as Map)['msg']}'.contains('tun.tcpDead let go: self.reject')), isTrue);
+  });
+
+  test('a suspicion about the TUN still under way when the core is stopped is let go without a record', () async {
+    await start(windows: const FailureWindows(tunTcpDead: Duration(seconds: 30)));
+    await svc.connect(tunBody());
+    await time.advanceSeconds(6);
+    orphans(10);
+    await time.advanceSeconds(2);
+    await svc.disconnect();
+    await time.advanceSeconds(60);
+    expect(tunEvents('tunTcpDead'), isEmpty, reason: 'the session ended: nothing was confirmed');
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
   });
 
   test('dispose stops the box and ends the streams', () async {

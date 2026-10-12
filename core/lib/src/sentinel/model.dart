@@ -69,6 +69,10 @@ class Check {
   const Check.alternative(String code, Future<CheckResult> Function() run, {Duration? timeout}) : this(CheckRole.alternative, code, run, timeout: timeout);
   const Check.diagnostic(String code, Future<CheckResult> Function() run, {Duration? timeout}) : this(CheckRole.diagnostic, code, run, timeout: timeout);
 
+  /// A check the detector has already made (Auto re-tried the site before it told): the Sentinel only
+  /// puts [result] into the trail, in its [role].
+  factory Check.recorded(CheckRole role, CheckResult result) => Check(role, result.code, () async => result);
+
   final CheckRole role;
   final String code;
   final Future<CheckResult> Function() run;
@@ -113,7 +117,7 @@ class Scope {
 /// The journal entry a [Suspicion] becomes when it is judged (the Sentinel writes it, with the
 /// verdict, why, trail and cause; the evidence is its `data`).
 class SuspicionEvent {
-  const SuspicionEvent(this.cat, this.type, {this.level = 'warn', this.own = false, this.bg = false, this.link = true});
+  const SuspicionEvent(this.cat, this.type, {this.level = 'warn', this.own = false, this.bg = false, this.link = true, this.note});
 
   final String cat;
   final String type;
@@ -123,6 +127,10 @@ class SuspicionEvent {
   final bool own;
   final bool bg;
   final bool link;
+
+  /// The raw-log line for the verdict (`kind`, the evidence): written first, so the event links to it.
+  /// Null result = no line. A line of the log is prose by design; the event itself holds codes only.
+  final String? Function(VerdictKind kind, Map<String, dynamic> evidence)? note;
 }
 
 /// A detector's report: "something failed, find out whether it is real".

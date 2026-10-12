@@ -82,7 +82,10 @@ class CoreService implements CoreApi {
     Stream<NetworkQualityTestProgress> Function(String outbound)? currentSpeedSource,
     ReportUploader? reportUploader,
     this.reportDeadline = reportSendDeadline,
+    this.windows = const FailureWindows(),
+    SentinelClock? sentinelClock,
   })  : _singBoxVer = knownSingBoxVersion,
+        _sentinelClock = sentinelClock,
         reportUploader = reportUploader ?? const NotConfiguredUploader(),
         _ownPackage = ownPackage,
         _siteCheckerArg = siteChecker,
@@ -202,32 +205,28 @@ class CoreService implements CoreApi {
   /// Checks a failure against the state of the world before it is reported as one (sentinel/,
   /// docs/failures.md). Its context follows [pool], the platform ([setNetwork]) and this service's own
   /// starts and stops; the detectors move onto [Sentinel.suspect] one by one.
-  late final sentinel = Sentinel(clock: SentinelClock(now: _now), book: eventBook, note: logBook.note);
+  late final sentinel = Sentinel(clock: _sentinelClock ?? SentinelClock(now: _now), book: eventBook, note: logBook.note);
+  final SentinelClock? _sentinelClock;
+
+  /// How long each detector's failure must last before it is called real (sentinel/windows.dart): the
+  /// tests use [FailureWindows.instant].
+  final FailureWindows windows;
   StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto and the failure book
 
-  /// Failed connections of the running sing-box (failures.dart): `conn/failing` and the report's numbers.
+  /// Failed connections of the running sing-box (failures.dart): `conn/failing` (judged by the [sentinel])
+  /// and the report's numbers.
   late final failures = FailureBook(
     now: _now,
     ignored: (host) => ignoredSites.matches(host),
     background: () => !screenOn,
-    emit: (data, {required bg}) {
-      final app = data['app'] ?? (data['process'] as Map?)?['name'];
-      logBook.note('warn',
-          '${app == null ? 'Requests' : 'Requests of $app'} to ${data['host']}${data['port'] == null ? '' : ':${data['port']}'} through ${data['outbound']} failed ${data['count']} times in a row (${data['kind']})');
-      return eventBook.add('conn', 'failing', 'warn', data: data, bg: bg);
-    },
+    report: _reportFailing,
+    recovered: (key) => sentinel.recovered(key),
     update: (id, data) => eventBook.update(id, data: data),
   );
 
-  /// Does TCP from the TUN reach sing-box (tun_ingress.dart): `core/tunTcpDead` and `core/tunTcpBack`.
-  late final tunIngress = TunIngressDetector(
-    now: _now,
-    onDead: (d) => _event('core', 'tunTcpDead', 'error', d,
-        note: 'TUN (${d['stack']}): TCP does not reach sing-box: ${d['synSeen']} connection attempts in ${(d['windowMs'] as int) ~/ 1000} s, none accepted'
-            '${(d['apps'] as List).isEmpty ? '' : ' (${(d['apps'] as List).join(', ')})'}'),
-    onBack: (d) => _event('core', 'tunTcpBack', 'info', d,
-        note: 'TUN (${d['stack']}): TCP reaches sing-box again after ${((d['deadMs'] as int) / 1000).round()} s'),
-  );
+  /// Does TCP from the TUN reach sing-box (tun_ingress.dart): `core/tunTcpDead` (judged by the [sentinel],
+  /// `tun.tcpDead`) and `core/tunTcpBack`.
+  late final tunIngress = TunIngressDetector(now: _now, onDead: _tunDead, onBack: _tunBack);
   int _connectSeq = 0;
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
@@ -348,7 +347,10 @@ class CoreService implements CoreApi {
     logBook.load(); // last run's warnings and errors
     eventBook.load(); // trims an old journal at start
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
-    sentinel.changes.listen((_) => _changed()); // the network and the core phase are in the status (`context`)
+    sentinel.changes.listen((_) {
+      _syncNetEvents(); // `net.offline` opened / closed: conn/offline, conn/online
+      _changed(); // the network and the core phase are in the status (`context`)
+    });
     await store.read(); // a damaged snapshot is recovered (and journaled) now, not at the UI's first request
     try {
       final j = jsonDecode(await _speedFile.readAsString());
@@ -372,6 +374,7 @@ class CoreService implements CoreApi {
     _connectSeq++;
     _wakeUp();
     _stopAuto();
+    _netTimer?.cancel();
     sentinel.dispose();
     updater.stop();
     await appUpdater?.dispose();
@@ -432,9 +435,112 @@ class CoreService implements CoreApi {
   }
 
   /// One journal entry; [note] also goes to the raw log first, so the event links to it.
-  int _event(String cat, String type, String level, Map<String, dynamic> data, {bool own = false, String? note}) {
+  int _event(String cat, String type, String level, Map<String, dynamic> data,
+      {bool own = false, String? note, String? verdict, Why? why, List<TrailStep>? trail, int? cause}) {
     if (note != null) logBook.note(level, note);
-    return eventBook.add(cat, type, level, data: data, own: own);
+    return eventBook.add(cat, type, level,
+        data: data, own: own, verdict: verdict, why: why?.toJson(), trail: trail == null ? null : [for (final t in trail) t.toJson()], cause: cause);
+  }
+
+  int get _nowMs => _now().millisecondsSinceEpoch;
+
+  // ---- the detectors that go through the Sentinel (docs/failures.md → Перенос детекторов) ----
+
+  /// `conn/failing`: the failure book's streak of one entry becomes a suspicion. The checks, in order: the
+  /// destination worked again through the same outbound (recovery) or through another one (a workaround), as
+  /// the live traffic shows; the same server tried by a probe (it only explains: a server that opens it while
+  /// the app's connections fail is in the trail); the other answering routes tried (Auto's `siteAlternates`,
+  /// the same machinery as the site check). The direct path is never tried: that would tell the network the
+  /// user's interest in the site. Completes with the event's id when the failure stands.
+  Future<int?> _reportFailing(FailureReport r) async {
+    final d = r.data;
+    final host = '${d['host']}', port = (d['port'] as num?)?.toInt(), outbound = '${d['outbound']}', route = '${d['route']}';
+    final dest = port == null ? host : '$host:$port';
+    final since = r.firstSeen.millisecondsSinceEpoch;
+    bool? sameOpens;
+    final v = await sentinel.suspect(Suspicion(
+      kind: 'conn.failing',
+      key: r.key,
+      subject: r.subject,
+      evidence: d,
+      window: windows.connFailing,
+      firstSeen: r.firstSeen,
+      why: Why('conn.${r.kind.name}', {'count': d['count'], 'route': route}),
+      scope: Scope.of({'host': host, 'port': ?port, 'outbound': outbound}),
+      checks: [
+        Check.recovery('conn.recovered', () async {
+          final ok = failures.okOutbounds(host, port ?? 0, since).contains(outbound);
+          return CheckResult('conn.recovered', ok ? Outcome.pass : Outcome.fail, {'outbound': outbound});
+        }),
+        Check.alternative('conn.otherRoute', () async {
+          final others = failures.okOutbounds(host, port ?? 0, since).where((o) => o != outbound).toList();
+          return CheckResult('conn.otherRoute', others.isEmpty ? Outcome.inconclusive : Outcome.pass, {'outbounds': others.take(3).toList()});
+        }),
+        Check.diagnostic('probe.same', () async {
+          final opens = await _auto?.reachSame(outbound, dest);
+          sameOpens = opens;
+          return CheckResult('probe.same', opens == null ? Outcome.inconclusive : (opens ? Outcome.pass : Outcome.fail), {'outbound': outbound});
+        }, timeout: const Duration(seconds: 15)),
+        Check.alternative('probe.alt', () async {
+          final auto = _auto;
+          if (auto == null || sameOpens == true) return CheckResult('probe.alt', Outcome.inconclusive, {'reason': sameOpens == true ? 'sameOpens' : 'noAuto'});
+          final a = await auto.reachAlternates(dest, skipRoute: route);
+          if (a.via != null) return CheckResult('probe.alt', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
+          final routes = [for (final t in a.tried) t.route];
+          if (routes.isEmpty || a.unsure) return CheckResult('probe.alt', Outcome.inconclusive, {'reason': a.off ? 'off' : 'none', 'tried': routes});
+          return CheckResult('probe.alt', Outcome.fail, {'tried': routes});
+        }, timeout: const Duration(seconds: 45)),
+      ],
+      event: SuspicionEvent('conn', 'failing', level: 'warn', bg: r.bg, note: (kind, e) => _failingNote(kind, e)),
+    ));
+    return v.kind == VerdictKind.confirmed ? (v.eventId ?? v.cause) : null;
+  }
+
+  static String _failingNote(VerdictKind kind, Map<String, dynamic> e) {
+    final app = e['app'] ?? (e['process'] as Map?)?['name'];
+    final who = app == null ? 'Requests' : 'Requests of $app';
+    final to = '${e['host']}${e['port'] == null ? '' : ':${e['port']}'} through ${e['outbound']}';
+    final n = '${e['count']} times in a row (${e['kind']})';
+    return switch (kind) {
+      VerdictKind.confirmed => '$who to $to failed $n',
+      VerdictKind.blip => '$who to $to failed $n, then worked again',
+      VerdictKind.consequence => '$who to $to failed $n: because of another failure',
+      VerdictKind.workaround => '$who to $to failed $n: it opens another way',
+      _ => '$who to $to failed $n: no reason found',
+    };
+  }
+
+  /// `core/tunTcpDead` from the TUN detector: the first orphaned look-up of the dead window is when it began.
+  void _tunDead(Map<String, dynamic> d) {
+    final first = (d['firstSeen'] as num?)?.toInt();
+    unawaited(sentinel.suspect(Suspicion(
+      kind: 'tun.tcpDead',
+      key: 'tun.tcpDead',
+      subject: const {'ingress': 'tun'},
+      evidence: d,
+      window: windows.tunTcpDead,
+      firstSeen: first == null ? null : DateTime.fromMillisecondsSinceEpoch(first),
+      why: Why('tun.tcpDead', {'stack': d['stack']}),
+      scope: Scope.none,
+      // TODO(sentinel): the active check «open a test TCP connection through the TUN» (a recovery check here:
+      // it works → a blip; refused/silent → the diagnostic) replaces the wait for the first accepted connection.
+      checks: const [],
+      event: SuspicionEvent('core', 'tunTcpDead', level: 'error', note: (kind, e) {
+        final apps = (e['apps'] as List?) ?? const [];
+        return 'TUN (${e['stack']}): TCP does not reach sing-box: ${e['synSeen']} connection attempts in ${(e['windowMs'] as int) ~/ 1000} s, none accepted'
+            '${apps.isEmpty ? '' : ' (${apps.join(', ')})'}${kind == VerdictKind.confirmed ? '' : ' [${kind.name}]'}';
+      }),
+    )));
+  }
+
+  /// A TCP connection arrived through the TUN again: the suspicion under way is a blip; a standing one closes
+  /// and `core/tunTcpBack` says so.
+  void _tunBack(Map<String, dynamic> d) {
+    final stood = sentinel.roots.byKey('tun.tcpDead') != null;
+    sentinel.recovered('tun.tcpDead');
+    if (stood) {
+      _event('core', 'tunTcpBack', 'info', d, note: 'TUN (${d['stack']}): TCP reaches sing-box again after ${((d['deadMs'] as int) / 1000).round()} s');
+    }
   }
 
   /// The system proxy on / back off, each one written to the journal (`core/sysProxy`,
@@ -469,7 +575,7 @@ class CoreService implements CoreApi {
     _stopAuto();
     // what a sing-box that just started does is counted from its first line, with or without the API
     failures.start();
-    if (planTun(plan)) tunIngress.start(planTunStack(plan));
+    if (planTun(plan)) tunIngress.start(planTunStack(plan), ownRejects: [if (!planIpv6(plan)) 'ipv6Off']);
     final api = runner.api;
     if (api == null) return; // no API service (a test's fake process)
     pool.resetNetwork(); // a new sing-box: the network is presumed up again
@@ -494,18 +600,18 @@ class CoreService implements CoreApi {
     });
     auto.unstable.listen((u) {
       runner.note('auto: ${u.id} is unstable (${u.strikes} drops), back to it after ${u.holdMs ~/ 60000} min of answers');
-      eventBook.add('auto', 'unstable', 'warn', data: {'id': u.id, 'strikes': u.strikes, 'holdMs': u.holdMs});
+      unawaited(routeUnstable(u));
     });
     auto.blocked.listen(siteBlocked);
     auto.unreachable.listen(siteUnreachable);
+    // `lost` / `restored` are Auto's (no route answers); `offline` / `online` are the Sentinel's network
+    // context (_syncNetEvents): the OS, the platform and the probes all feed one root, no second source
     auto.net.listen((n) {
-      final (type, level) = switch (n.kind) {
-        'lost' => ('lost', 'warn'),
-        'restored' => ('restored', 'info'),
-        'offline' => ('offline', 'warn'),
-        _ => ('online', 'info'),
-      };
-      eventBook.add('conn', type, level, data: {'downMs': ?n.downMs});
+      if (n.kind == 'lost') {
+        routesLost(n, auto.routeIds.length);
+      } else if (n.kind == 'restored') {
+        routesRestored(n);
+      }
     });
     auto.start();
     _startFallback(api, auto);
@@ -514,52 +620,200 @@ class CoreService implements CoreApi {
   }
 
   /// Auto found a site that does not open through the route but opens through another one: the
-  /// journal says so (`site/blocked`), unless the site is ignored. Public for the tests.
+  /// journal says so (`site/blocked`), unless the site is ignored. Auto has tried the site itself (the
+  /// same server failed, the other route opened it): the Sentinel gets those as the checks already made
+  /// and ends with a `workaround` (the event is quiet; the app still offers the rule). Public for the tests.
   void siteBlocked(AutoBlocked b) {
     final (host, port) = _hostPort(b.dest);
     if (ignoredSites.matches(host)) return;
     failures.noteSite(host); // this is the event of the site: no `conn/failing` besides it
-    eventBook.add('site', 'blocked', 'warn', bg: !screenOn, data: {
-      'host': host,
-      'port': ?port,
-      'entry': b.route,
-      'server': b.server,
-      'dest': b.dest,
-      'via': b.via,
-      'viaServer': b.viaServer,
-      'rule': ruleEventData(_ruleNames, b.rule),
-      'process': ?processEventData(b.process),
-      if (b.pkg.isNotEmpty) 'app': b.pkg,
-    });
+    unawaited(sentinel.suspect(Suspicion(
+      kind: 'site.blocked',
+      subject: {'host': host, 'port': ?port, 'route': b.route, 'path': 'proxy'},
+      evidence: {
+        'host': host,
+        'port': ?port,
+        'entry': b.route,
+        'server': b.server,
+        'dest': b.dest,
+        'via': b.via,
+        'viaServer': b.viaServer,
+        'rule': ruleEventData(_ruleNames, b.rule),
+        'process': ?processEventData(b.process),
+        if (b.pkg.isNotEmpty) 'app': b.pkg,
+      },
+      window: windows.siteBlocked,
+      why: Why('site.blocked', {'route': b.route, 'via': b.via}),
+      scope: Scope.none,
+      checks: [
+        Check.recorded(CheckRole.recovery, CheckResult('probe.same', Outcome.fail, {'route': b.route, 'server': b.server})),
+        Check.recorded(CheckRole.alternative, CheckResult('probe.alt', Outcome.pass, {'via': b.via, 'viaServer': b.viaServer})),
+      ],
+      event: SuspicionEvent('site', 'blocked', level: 'warn', bg: !screenOn),
+    )));
   }
 
   /// Settings → Auto mode → «Check with an external checker» (`plan.auto.siteCheck`, default on).
   bool get siteCheckOn => (_plan?['auto'] is Map ? (_plan!['auto'] as Map)['siteCheck'] : null) != false;
 
-  /// A site that opens through no route (`site/unreachable`), unless it is ignored. When every route
-  /// failed (not [AutoUnreachable.retriesOff]) the event carries `check` and is quiet (no toast, no
-  /// notification) until the external checker says the site opens elsewhere (sitecheck.dart): `pending`
-  /// while it asks, the result after (the same event, changed in place); `off` when the switch is off.
+  /// A site that opens through no route (`site/unreachable`), unless it is ignored. Auto has tried the site
+  /// itself; the Sentinel then asks the external checker (sitecheck.dart; also when the retries through
+  /// other routes are off) whether the site opens for others: it does — a confirmed failure (the one that
+  /// notifies); it is down for everyone, or the checker could not tell, or the switch is off — `unexplained`
+  /// (the journal only). The event is written with the verdict, and gets `check` (the checker's result, or
+  /// `{state: off}`) after it; the manual «Check with checker» ([siteCheck]) works on it as before.
   void siteUnreachable(AutoUnreachable u) {
     final (host, port) = _hostPort(u.dest);
     if (ignoredSites.matches(host)) return;
     failures.noteSite(host);
-    final checks = !u.retriesOff;
-    final on = checks && siteCheckOn;
-    final id = eventBook.add('site', 'unreachable', 'warn', bg: !screenOn, data: {
-      'host': host,
-      'port': ?port,
-      'entry': u.route,
-      'server': u.server,
-      'dest': u.dest,
-      'tried': [for (final t in u.tried) {'entry': t.route, 'server': t.server}],
-      if (u.retriesOff) 'retries': 'off',
-      'rule': ruleEventData(_ruleNames, u.rule),
-      'process': ?processEventData(u.process),
-      if (u.pkg.isNotEmpty) 'app': u.pkg,
-      if (checks) 'check': on ? {'state': 'pending', 'at': _now().millisecondsSinceEpoch} : {'state': 'off'},
-    });
-    if (on) unawaited(_checkSiteEvent(id, host, port, manual: false));
+    final on = siteCheckOn;
+    var asked = false;
+    Map<String, dynamic>? result;
+    unawaited(sentinel
+        .suspect(Suspicion(
+          kind: 'site.unreachable',
+          subject: {'host': host, 'port': ?port, 'route': u.route, 'path': 'proxy'},
+          evidence: {
+            'host': host,
+            'port': ?port,
+            'entry': u.route,
+            'server': u.server,
+            'dest': u.dest,
+            'tried': [for (final t in u.tried) {'entry': t.route, 'server': t.server}],
+            if (u.retriesOff) 'retries': 'off',
+            'rule': ruleEventData(_ruleNames, u.rule),
+            'process': ?processEventData(u.process),
+            if (u.pkg.isNotEmpty) 'app': u.pkg,
+          },
+          window: windows.siteUnreachable,
+          scope: Scope.none,
+          checks: [
+            Check.recorded(CheckRole.recovery, CheckResult('probe.same', Outcome.fail, {'route': u.route, 'server': u.server})),
+            Check.recorded(
+                CheckRole.alternative,
+                CheckResult('probe.alt', u.retriesOff || u.tried.isEmpty ? Outcome.inconclusive : Outcome.fail,
+                    {if (u.retriesOff) 'reason': 'off', 'tried': [for (final t in u.tried) t.route]})),
+            Check.diagnostic('site.checker', () async {
+              if (!on) {
+                result = {'state': 'off'};
+                return const CheckResult('site.checker', Outcome.inconclusive, {'state': 'off'});
+              }
+              asked = true;
+              final r = await siteChecker.check(host, port, manual: false);
+              result = r.toJson();
+              return CheckResult('site.checker', switch (r.state) { 'opens' => Outcome.fail, 'down' => Outcome.pass, _ => Outcome.inconclusive }, {'state': r.state});
+            }, timeout: windows.siteChecker),
+          ],
+          event: SuspicionEvent('site', 'unreachable', level: 'warn', bg: !screenOn),
+        ))
+        .then((v) {
+      final id = v.eventId;
+      if (id == null || _disposed) return;
+      final check = result ?? (asked ? {'state': 'failed', 'at': _nowMs, 'error': 'timeout'} : null);
+      if (check != null) eventBook.update(id, data: {'check': check});
+      // an announcement, as `auto/unstable`: Auto keeps its own pace of repeating it, a root would swallow the repeats
+      if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(v.key, reason: 'reported');
+    }));
+  }
+
+  /// `auto/unstable`: Auto's flap guard held a route back. An announcement, not a standing failure: the
+  /// root the Sentinel opens for it is closed at once (Auto itself keeps the route on hold), so the next
+  /// one for the same route is judged and written again. Public for the tests.
+  Future<void> routeUnstable(AutoUnstable u) async {
+    final key = 'auto.unstable|${u.id}';
+    final v = await sentinel.suspect(Suspicion(
+      kind: 'auto.unstable',
+      key: key,
+      subject: {'route': u.id, 'path': 'proxy'},
+      evidence: {'id': u.id, 'strikes': u.strikes, 'holdMs': u.holdMs},
+      window: windows.autoUnstable,
+      why: Why('route.unstable', {'strikes': u.strikes, 'holdMs': u.holdMs}),
+      scope: Scope.none,
+      event: SuspicionEvent('auto', 'unstable', level: 'warn'),
+    ));
+    if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(key, reason: 'reported');
+  }
+
+  /// `conn/lost`: no route answers. A suspicion: it is a consequence of `net.offline` when the direct path is
+  /// silent too, a `blip` when a route answers again inside the window; a standing one is a root that
+  /// covers every failure through the proxy (`path: proxy`) until [routesRestored]. Public for the tests.
+  void routesLost(AutoNet n, int routes) {
+    unawaited(sentinel.suspect(Suspicion(
+      kind: 'conn.lost',
+      key: 'conn.lost',
+      subject: const {'path': 'proxy'},
+      evidence: {'routes': routes},
+      window: windows.connLost,
+      firstSeen: DateTime.fromMillisecondsSinceEpoch(n.at),
+      why: const Why('routes.silent'),
+      scope: Scope.of(const {'path': 'proxy'}),
+      event: SuspicionEvent('conn', 'lost', level: 'warn', note: (kind, e) => switch (kind) {
+            VerdictKind.confirmed => 'No route answers (${e['routes']} tried)',
+            VerdictKind.blip => 'No route answered for a moment (${e['routes']} tried), then one did',
+            VerdictKind.consequence => 'No route answers (${e['routes']} tried): because of another failure',
+            _ => 'No route answers (${e['routes']} tried): no reason found',
+          }),
+    )));
+  }
+
+  void routesRestored(AutoNet n) {
+    final stood = sentinel.roots.byKey('conn.lost') != null;
+    sentinel.recovered('conn.lost');
+    if (stood) eventBook.add('conn', 'restored', 'info', data: {'downMs': ?n.downMs});
+  }
+
+  // `conn/offline` / `conn/online`: written from the Sentinel's `net.offline` root, so the OS, the platform and
+  // the probes are one source. The root stands for [FailureWindows.netBlip] before it is an event; gone
+  // sooner, the journal gets a `blip` that says how long. Consequences written meanwhile get the event as `cause`.
+  Root? _netRoot;
+  bool _netStanding = false;
+  Timer? _netTimer;
+
+  void _syncNetEvents() {
+    final root = sentinel.roots.byKind(rootNetOffline);
+    final mine = _netRoot;
+    if (root != null && mine == null) {
+      _netRoot = root;
+      _netStanding = false;
+      if (windows.netBlip <= Duration.zero) {
+        _netOfflineStands(root);
+      } else {
+        _netTimer = sentinel.clock.timer(windows.netBlip, () {
+          final r = sentinel.roots.byKind(rootNetOffline);
+          if (identical(r, root) && !_disposed) _netOfflineStands(root);
+        });
+      }
+    } else if (root == null && mine != null) {
+      _netTimer?.cancel();
+      _netTimer = null;
+      _netRoot = null;
+      final downMs = _nowMs - mine.since.millisecondsSinceEpoch;
+      if (_netStanding) {
+        _event('conn', 'online', 'info', {'downMs': downMs});
+      } else {
+        final id = _event('conn', 'offline', 'info', {'downMs': downMs, 'source': mine.subject['source']},
+            verdict: 'blip',
+            why: Why('recovered', {'afterMs': downMs, 'by': 'net.restored'}),
+            trail: [
+              TrailStep('ctx.net', Outcome.fail, mine.since.millisecondsSinceEpoch, {'state': 'none', 'source': mine.subject['source']}),
+              TrailStep('blip.recovered', Outcome.pass, _nowMs, {'afterMs': downMs, 'by': 'net.restored'}),
+            ],
+            note: 'The network was gone for ${(downMs / 1000).round()} s');
+        sentinel.attachEvent(mine, id);
+      }
+      _netStanding = false;
+    }
+  }
+
+  void _netOfflineStands(Root root) {
+    _netStanding = true;
+    final src = root.subject['source'];
+    final id = _event('conn', 'offline', 'warn', {'source': src},
+        verdict: 'confirmed',
+        why: Why('net.offline', {'source': src}),
+        trail: [TrailStep('ctx.net', Outcome.fail, root.since.millisecondsSinceEpoch, {'state': 'none', 'source': src})],
+        note: 'The network is gone ($src)');
+    sentinel.attachEvent(root, id);
   }
 
   // Asks the checker and writes the answer into the event [id].
@@ -646,6 +900,7 @@ class CoreService implements CoreApi {
   void _stopAuto() {
     unawaited(_closed?.cancel());
     _closed = null;
+    sentinel.dropAll(); // what was seen in this sing-box session is void: its detectors suspect again in the next
     failures.stop();
     tunIngress.stop();
     _auto?.stop();
@@ -670,7 +925,10 @@ class CoreService implements CoreApi {
     _stopAuto();
     sentinel.context.crashed();
     runner.note('sing-box stopped on its own (exit code $code)');
-    eventBook.add('core', 'crashed', 'error', data: {'code': code});
+    // the crash is a root cause until sing-box is back: the restart that fails is its consequence
+    final id = _event('core', 'crashed', 'error', {'code': code},
+        verdict: 'confirmed', why: Why('core.exit', {'code': code}), trail: [TrailStep('core.exit', Outcome.fail, _nowMs, {'code': code})]);
+    _crashRoot = sentinel.openRoot(kind: 'core.crashed', subject: const {'core': 'sing-box'}, scope: Scope.none, eventId: id, session: false);
     if (_now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
     _downSince = null;
     _released = false;
@@ -717,7 +975,15 @@ class CoreService implements CoreApi {
         } catch (e) {
           runner.note('restart $_attempt failed: $e');
           // the journal gets the first ones only: a dead server retried every 30 s would fill it
-          if (_attempt <= _backoff.length) eventBook.add('core', 'restartFailed', 'error', data: {'attempt': _attempt, 'error': '$e'});
+          if (_attempt <= _backoff.length) {
+            // our own restart that failed, after the crash: a consequence of it (cause = the crash event)
+            final crash = _crashRoot;
+            _event('core', 'restartFailed', 'info', {'attempt': _attempt, 'error': '$e'},
+                verdict: 'consequence',
+                why: Why('core.crashed', {'attempt': _attempt}),
+                trail: [TrailStep('restart.failed', Outcome.fail, _nowMs, {'attempt': _attempt, 'reason': 'recover'})],
+                cause: crash?.eventId);
+          }
           return false;
         }
         _plan = plan;
@@ -728,6 +994,7 @@ class CoreService implements CoreApi {
         final downMs = _now().difference(crashed).inMilliseconds;
         _downSince = null;
         _released = false;
+        _closeCrashRoot('restarted');
         _event('core', 'restarted', 'info', {'attempt': _attempt, if (wasDown) 'downMs': downMs},
             note: 'sing-box started again (attempt $_attempt)');
         if (_sysWanted && !sysProxy.isSet) {
@@ -781,7 +1048,23 @@ class CoreService implements CoreApi {
     _downSince = _now();
     sentinel.context.down();
     _downProxy = _released ? 'released' : (sysProxy.isSet ? 'kept' : 'removed');
-    _event('core', 'down', 'error', {'proxy': _downProxy}, note: 'Connection down: sing-box does not start (system proxy $_downProxy)');
+    // `core.down` (the Sentinel's context root) covers every failure through the core: the event is its event
+    final id = _event('core', 'down', 'error', {'proxy': _downProxy},
+        verdict: 'confirmed',
+        why: const Why('core.down'),
+        trail: [TrailStep('ctx.core', Outcome.fail, _nowMs, const {'phase': 'down'})],
+        note: 'Connection down: sing-box does not start (system proxy $_downProxy)');
+    final root = sentinel.roots.byKind(rootCoreDown);
+    if (root != null) sentinel.attachEvent(root, id);
+  }
+
+  Root? _crashRoot;
+
+  void _closeCrashRoot(String reason) {
+    final r = _crashRoot;
+    if (r == null) return;
+    _crashRoot = null;
+    sentinel.closeRoot(r.id, reason: reason);
   }
 
   /// The kill switch's same four fields as a connect's, changed while connected (or
@@ -1176,6 +1459,7 @@ class CoreService implements CoreApi {
     _applyKill(body);
     if (body['dnsAuto'] is bool) _dnsAuto = body['dnsAuto'] as bool;
     _stopAuto();
+    _closeCrashRoot('reconnected');
     _error = null;
     _warning = null;
     _changed();
@@ -1292,6 +1576,7 @@ class CoreService implements CoreApi {
     _downSince = null;
     _released = false;
     _stopAuto();
+    _closeCrashRoot('disconnected');
     await _locked(() async {
       if (seq == _connectSeq) {
         await runner.stop();

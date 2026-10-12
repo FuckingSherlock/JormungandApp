@@ -265,6 +265,16 @@ class AutoNet {
   Map<String, dynamic> toJson() => {'kind': kind, 'at': at, 'downMs': ?downMs};
 }
 
+/// Where a destination opens when the failing route cannot ([AutoService.reachAlternates]): [via] the route
+/// that opens it (and its current server), else the answering routes [tried] that did not. [unsure]: one
+/// could not be tried, so [tried] alone proves nothing; [off]: the setting that allows the tries is off.
+class AltReach {
+  const AltReach({this.via, this.viaServer, this.tried = const [], this.unsure = false, this.off = false});
+  final String? via, viaServer;
+  final List<({String route, String server})> tried;
+  final bool unsure, off;
+}
+
 class _Group {
   _Group(this.tag, Map g, {this.entry})
       : priority = g['pick'] == 'priority',
@@ -642,7 +652,7 @@ class AutoService {
     // each try is a request to the user's real site through a server they did not pick:
     // how many is the setting ([AutoSettings.siteAlternates], 0 = none)
     // (Manual: only the entry the user picked, no other route is tried)
-    final alts = [for (var i = 0; !manual && i < _routes.length; i++) if (i != index && _routes[i].health.answered) _routes[i]].take(settings.siteAlternates).toList();
+    final alts = _alternates(cur.id);
     final off = settings.siteAlternates == 0;
     for (final MapEntry(key: dest, value: fail) in dests.entries) {
       if (_stopped) return;
@@ -650,22 +660,9 @@ class AutoService {
       if (tag == null) continue; // not a server we can aim a test at: no evidence either way
       final here = await reach!(tag, dest);
       if (here != false) continue; // opens now, or cannot be told
-      _Route? via;
-      var unsure = false; // an alternate that could not be tried tells nothing
-      final tried = <({String route, String server})>[];
-      for (final alt in alts) {
-        if (_stopped) return;
-        final there = await reach!(alt.main.member(alt.main.current), dest);
-        if (there == true) {
-          via = alt;
-          break;
-        }
-        if (there == false) {
-          tried.add((route: alt.id, server: alt.main.current));
-        } else {
-          unsure = true;
-        }
-      }
+      final r = await _tryAlternates(alts, dest);
+      if (_stopped) return;
+      final via = r.via, tried = r.tried, unsure = r.unsure; // an alternate that could not be tried tells nothing
       final key = '${cur.id} $dest', now = _clock();
       if (via != null) {
         if (now - (_blockedAt[key] ?? -3600000) < 3600000) continue;
@@ -688,6 +685,53 @@ blockedCount++;
       lastUnreachable = u;
       if (!_unreachable.isClosed) _unreachable.add(u);
     }
+  }
+
+  // The answering routes other than [skip] (an entry id), in Auto's order, at most [AutoSettings.siteAlternates].
+  List<_Route> _alternates(String? skip) =>
+      [for (var i = 0; !manual && i < _routes.length; i++) if (_routes[i].id != skip && _routes[i].health.answered) _routes[i]].take(settings.siteAlternates).toList();
+
+  // [dest] through each of [alts] up to the first that opens it. `unsure`: one could not be tried (tells nothing).
+  Future<({_Route? via, List<({String route, String server})> tried, bool unsure})> _tryAlternates(List<_Route> alts, String dest) async {
+    _Route? via;
+    var unsure = false;
+    final tried = <({String route, String server})>[];
+    for (final alt in alts) {
+      if (_stopped) break;
+      final there = await reach!(alt.main.member(alt.main.current), dest);
+      if (there == true) {
+        via = alt;
+        break;
+      }
+      if (there == false) {
+        tried.add((route: alt.id, server: alt.main.current));
+      } else {
+        unsure = true;
+      }
+    }
+    return (via: via, tried: tried, unsure: unsure);
+  }
+
+  /// Whether [dest] (`host:port`) opens through the server a failed connection went out of ([outbound], a
+  /// server of any route of the plan, or `direct`): true / false = the test really went through it; null =
+  /// cannot be told (no probe, a port other than 443 / 80, not a server a test can aim at).
+  Future<bool?> reachSame(String outbound, String dest) async {
+    final r = reach;
+    if (r == null || _stopped) return null;
+    String? tag = outbound == 'direct' ? 'direct' : null;
+    for (final route in _routes) {
+      tag ??= _serverTag(route, outbound);
+    }
+    return tag == null ? null : r(tag, dest);
+  }
+
+  /// [dest] through the answering routes other than [skipRoute] (the failing one's entry id), as the site
+  /// check does it (the same setting; Manual tries none): see [AltReach].
+  Future<AltReach> reachAlternates(String dest, {String? skipRoute}) async {
+    final off = settings.siteAlternates == 0;
+    if (reach == null || _stopped) return AltReach(off: off, unsure: true);
+    final r = await _tryAlternates(_alternates(skipRoute), dest);
+    return AltReach(via: r.via?.id, viaServer: r.via?.main.current, tried: r.tried, unsure: r.unsure, off: off);
   }
 
   // The server tag a site test can go through for a failed connection's outbound [tag]: a

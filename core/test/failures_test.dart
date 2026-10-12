@@ -33,13 +33,20 @@ class _Rig {
       now: () => t,
       ignored: (h) => ignored.contains(h),
       background: () => bg,
-      emit: (data, {required bg}) {
-        emitted.add((data, bg));
-        return emitted.length;
+      report: (r) async {
+        emitted.add((r.data, r.bg));
+        reports.add(r);
+        return verdictId ? emitted.length : null;
       },
+      recovered: recoveredKeys.add,
       update: (id, data) => updates.add((id, data)),
     )..start();
   }
+
+  /// What the judge answers: an event id (the suspicion stood) or null (it did not).
+  bool verdictId = true;
+  final reports = <FailureReport>[];
+  final recoveredKeys = <String>[];
 
   late final FailureBook book;
   final Set<String> ignored;
@@ -189,10 +196,11 @@ void main() {
       expect(r.emitted.single.$1['kind'], 'timeout');
     });
 
-    test('a destination of the same app through the same outbound joins the event (more), a different outbound is its own', () {
+    test('a destination of the same app through the same outbound joins the event (more), a different outbound is its own', () async {
       final r = _Rig();
       r.fail(3, dest: 'a.example:443');
       expect(r.emitted.length, 1);
+      await pumpEventQueue(); // the judge found the failure standing: the event has an id
       r.fail(3, dest: 'b.example:443');
       r.fail(3, dest: 'c.example:5222');
       expect(r.emitted.length, 1);
@@ -205,6 +213,71 @@ void main() {
       r.fail(3, dest: 'd.example:443', pkg: 'org.other.app');
       expect(r.emitted.length, 3);
       expect(r.emitted.last.$1['app'], 'org.other.app');
+    });
+
+    test('destinations that join while the judge is still deciding are added to the event once it stands', () async {
+      final r = _Rig();
+      r.fail(3, dest: 'a.example:443');
+      r.fail(3, dest: 'b.example:443');
+      r.fail(3, dest: 'c.example:443');
+      expect(r.updates, isEmpty);
+      await pumpEventQueue();
+      expect(r.updates.map((u) => [u.$1, u.$2]).toList(), [
+        [1, {'more': 2}],
+      ]);
+    });
+
+    test('a suspicion that did not stand is no event and no group; the entry waits recheckAfter, then may be suspected again', () async {
+      final r = _Rig()..verdictId = false;
+      r.fail(3);
+      await pumpEventQueue();
+      expect(r.emitted.length, 1);
+      r.fail(5);
+      expect(r.emitted.length, 1, reason: 'held');
+      r.advance(FailureBook.recheckAfter);
+      r.fail(3);
+      expect(r.emitted.length, 2);
+    });
+
+    test('a destination joining a group that did not stand makes its own suspicion later', () async {
+      final r = _Rig()..verdictId = false;
+      r.fail(3, dest: 'a.example:443');
+      r.fail(3, dest: 'b.example:443');
+      await pumpEventQueue();
+      expect(r.emitted.length, 1);
+      r.advance(FailureBook.recheckAfter);
+      r.fail(3, dest: 'b.example:443');
+      expect(r.emitted.length, 2);
+    });
+
+    test('the report carries the key, scalar subject, old data fields and the first failure of the streak', () {
+      final r = _Rig();
+      final first = r.t;
+      r.fail(3);
+      final rep = r.reports.single;
+      expect(rep.key, 'conn.failing|org.example.app|example.org:443|route0/s::a|tun-in');
+      expect(rep.subject, {'app': 'org.example.app', 'host': 'example.org', 'port': 443, 'outbound': 'route0/s::a', 'route': 'route0', 'path': 'proxy'});
+      expect(rep.firstSeen, first);
+      expect(rep.kind, ConnKind.timeout);
+    });
+
+    test('a success after a reported failure tells the judge (recovered); a success of an unreported entry does not', () {
+      final r = _Rig();
+      r.ok();
+      expect(r.recoveredKeys, isEmpty);
+      r.fail(3);
+      r.ok();
+      expect(r.recoveredKeys, ['conn.failing|org.example.app|example.org:443|route0/s::a|tun-in']);
+    });
+
+    test('okOutbounds: where the destination worked since a moment, from the live traffic', () {
+      final r = _Rig();
+      final t0 = r.t.millisecondsSinceEpoch;
+      r.fail(3);
+      r.ok(outbound: 'route1/s::b');
+      expect(r.book.okOutbounds('Example.org', 443, t0), {'route1/s::b'});
+      expect(r.book.okOutbounds('example.org', 443, r.t.millisecondsSinceEpoch), isEmpty);
+      expect(r.book.okOutbounds('other.example', 443, t0), isEmpty);
     });
 
     test('a group that is older than its window is a new event', () {
@@ -276,11 +349,12 @@ void main() {
       expect(d['process'], {'name': 'app.exe', 'path': r'C:\Program Files\App\app.exe'});
     });
 
-    test('an emit that wrote nothing (null) is no event and no group', () {
-      final book = FailureBook(now: () => DateTime.utc(2026), emit: (d, {required bg}) => null)..start();
+    test('an emit that wrote nothing (null) is no event and no group', () async {
+      final book = FailureBook(now: () => DateTime.utc(2026), report: (r) async => null)..start();
       for (var i = 0; i < 5; i++) {
         book.onClosed(cc());
       }
+      await pumpEventQueue();
       expect(book.toJson()['events'], 0);
     });
   });

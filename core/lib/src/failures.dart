@@ -195,13 +195,16 @@ class _Entry {
   final buckets = _Buckets();
   int okSince = 0, failedSince = 0, bgSince = 0;
   final kinds = <ConnKind, int>{};
-  int lastAt = 0, lastFailAt = 0;
+  int lastAt = 0, lastFailAt = 0, lastOkAt = 0;
   ConnKind? lastKind;
   int? lastDurationMs;
 
   // the event rule: failures within the streak window with no success between; `reported` until one
   final streak = <(int, ConnKind)>[];
   bool reported = false;
+
+  // after a suspicion that did not stand: no new one before this (ms since epoch)
+  int holdUntil = 0;
 
   String get route {
     final at = outbound.indexOf('/');
@@ -224,21 +227,49 @@ class _Hint {
 }
 
 class _Group {
-  _Group(this.id, this.at);
-  final int id;
+  _Group(this.at);
   final int at;
   final hosts = <String>{};
+
+  /// The journal event, once the judge has found the failure standing; null while it is judged.
+  int? id;
+
+  /// The entries that joined the group while it was judged.
+  final joined = <_Entry>[];
+}
+
+/// What the book hands to the judge (the Sentinel, in the service) when an entry's failures make a
+/// suspicion: [key] / [subject] identify it, [data] is the event's data, [firstSeen] the first failure
+/// of the streak.
+class FailureReport {
+  const FailureReport({required this.key, required this.subject, required this.data, required this.bg, required this.firstSeen, required this.kind});
+
+  /// `conn.failing|app|host:port|outbound|inbound`: one per entry.
+  final String key;
+
+  /// `{app?, process?, host, port, outbound, route, path}`: scalars only (the Sentinel's roots match on them).
+  final Map<String, dynamic> subject;
+  final Map<String, dynamic> data;
+  final bool bg;
+  final DateTime firstSeen;
+
+  /// The failure kind the streak mostly had (`refused`, `timeout`, …).
+  final ConnKind kind;
 }
 
 /// The book of failed connections of the running sing-box: per (app, destination, outbound, inbound,
 /// tcp/udp) the successes and failures of the last 10 minutes and since sing-box started, by kind;
 /// bounded ([maxEntries]); fed by the closed-connection stream ([onClosed]) and the log ([onLog]).
 ///
-/// `conn/failing` ([emit]): [failAfter] failures of one entry within [streakWindow] with no success
-/// between. One event per entry until a success resets it; entries of the same app and outbound that
-/// fail while the event is [groupWindow] fresh change it in place (`more`) instead of making new
-/// ones; at most [maxEvents] per [window] overall. Not raised for UDP, for the core's own
-/// requests, for an ignored site, or for a site Auto already reported ([noteSite]).
+/// `conn/failing`: [failAfter] failures of one entry within [streakWindow] with no success between make
+/// a suspicion ([report]): the book never writes the event, the judge does (docs/failures.md); it answers
+/// with the event's id when the failure stands, null when it does not (a blip, a consequence of something
+/// else, a workaround, our own restart). One suspicion per entry until a success resets it ([recovered]
+/// tells the judge); entries of the same app and outbound that fail while the event is [groupWindow]
+/// fresh change it in place (`more`) instead of making new ones; at most [maxEvents] suspicions per
+/// [window] overall; an entry whose suspicion did not stand waits [recheckAfter] before the next. Not
+/// raised for UDP, for the core's own requests (`probe-in`, Auto's checks of the spare routes among them,
+/// and `tunnel-in`), for an ignored site, or for a site Auto already reported ([noteSite]).
 ///
 /// The caller owns the clock and the lifetime: [start] when sing-box starts (counters begin), [stop]
 /// when it ends; nothing here runs on a timer.
@@ -247,7 +278,8 @@ class FailureBook {
     DateTime Function()? now,
     bool Function(String host)? ignored,
     bool Function()? background,
-    this.emit,
+    this.report,
+    this.recovered,
     this.update,
   })  : _now = now ?? DateTime.now,
         _ignored = ignored,
@@ -266,6 +298,9 @@ class FailureBook {
   /// At most this many `conn/failing` per [window]; the rest are only counted.
   static const maxEvents = 6;
 
+  /// An entry whose suspicion did not stand is not suspected again for this long.
+  static const recheckAfter = Duration(seconds: 60);
+
   /// Entries kept (least recently seen without a failure go first).
   static const maxEntries = 400;
 
@@ -282,10 +317,14 @@ class FailureBook {
   final bool Function(String host)? _ignored;
   final bool Function()? _background;
 
-  /// Writes the journal entry; returns its id (null = not written). `bg`: the screen was off.
-  final int? Function(Map<String, dynamic> data, {required bool bg})? emit;
+  /// A suspicion for the judge; completes with the id of the journal event when the failure stands (the
+  /// event a group's `more` goes to), null otherwise.
+  final Future<int?> Function(FailureReport report)? report;
 
-  /// Changes the data of an entry [emit] wrote (a group's `more`).
+  /// The entry of that key works again: the suspicion under way ends, the standing failure closes.
+  final void Function(String key)? recovered;
+
+  /// Changes the data of an event [report] answered with (a group's `more`).
   final void Function(int id, Map<String, dynamic> data)? update;
 
   bool _active = false;
@@ -395,8 +434,12 @@ class FailureBook {
     if (out.ok) {
       e.okSince++;
       _okSince++;
+      e.lastOkAt = at;
       e.streak.clear();
-      e.reported = false;
+      if (e.reported) {
+        e.reported = false;
+        recovered?.call(_keyOf(e));
+      }
       return;
     }
     final bg = _background?.call() ?? false;
@@ -449,7 +492,7 @@ class FailureBook {
     final from = at - streakWindow.inMilliseconds;
     e.streak.removeWhere((s) => s.$1 < from);
     e.streak.add((at, kind));
-    if (e.reported || e.streak.length < failAfter) return;
+    if (e.reported || e.streak.length < failAfter || at < e.holdUntil) return;
     if (e.network == 'udp' || e.inbound == _tunnelInbound || e.inbound == _probeInbound) return;
     if (_isCovered(host, at)) return;
     e.reported = true;
@@ -457,7 +500,7 @@ class FailureBook {
   }
 
   void _raise(_Entry e, int at, bool bg) {
-    final send = emit;
+    final send = report;
     if (send == null) return;
     final gKey = '${e.who}\u0000${e.process}\u0000${e.outbound}';
     final g = _groups[gKey], dest = '${e.host}:${e.port}';
@@ -465,7 +508,9 @@ class FailureBook {
     // failing again after a success is a new outage and a new event
     if (g != null && at - g.at <= groupWindow.inMilliseconds && !g.hosts.contains(dest)) {
       g.hosts.add(dest);
-      update?.call(g.id, {'more': g.hosts.length - 1});
+      g.joined.add(e);
+      final id = g.id;
+      if (id != null) update?.call(id, {'more': g.hosts.length - 1});
       return;
     }
     final recent = at - window.inMilliseconds;
@@ -479,24 +524,69 @@ class FailureBook {
     for (final k in counts.entries) {
       if (k.value > counts[kind]!) kind = k.key;
     }
-    final id = send({
-      if (e.who.isNotEmpty) 'app': e.who,
-      'process': ?processEventData(e.process),
-      'host': e.host,
-      if (e.port > 0) 'port': e.port,
-      'outbound': e.outbound,
-      'route': e.route,
-      'kind': kind.name,
-      'count': e.streak.length,
-      'windowMs': streakWindow.inMilliseconds,
-      'source': 'closed',
-    }, bg: bg);
-    if (id == null) return;
+    final process = processEventData(e.process);
+    final r = FailureReport(
+      key: _keyOf(e),
+      subject: {
+        if (e.who.isNotEmpty) 'app': e.who,
+        if (process != null) 'process': process['name'],
+        'host': e.host,
+        if (e.port > 0) 'port': e.port,
+        'outbound': e.outbound,
+        'route': e.route,
+        'path': e.route == 'direct' ? 'direct' : 'proxy',
+      },
+      data: {
+        if (e.who.isNotEmpty) 'app': e.who,
+        'process': ?process,
+        'host': e.host,
+        if (e.port > 0) 'port': e.port,
+        'outbound': e.outbound,
+        'route': e.route,
+        'kind': kind.name,
+        'count': e.streak.length,
+        'windowMs': streakWindow.inMilliseconds,
+        'source': 'closed',
+      },
+      bg: bg,
+      firstSeen: DateTime.fromMillisecondsSinceEpoch(e.streak.first.$1, isUtc: true),
+      kind: kind,
+    );
     _emitted.add(at);
-    _events++;
-    final ng = _Group(id, at)..hosts.add('${e.host}:${e.port}');
+    final ng = _Group(at)..hosts.add(dest);
     _groups[gKey] = ng;
     if (_groups.length > 100) _groups.remove(_groups.keys.first);
+    void settle(int? id) {
+      if (id != null) {
+        ng.id = id;
+        _events++;
+        if (ng.hosts.length > 1) update?.call(id, {'more': ng.hosts.length - 1});
+        return;
+      }
+      // it did not stand: the group ends; its entries may be suspected again after a pause
+      if (identical(_groups[gKey], ng)) _groups.remove(gKey);
+      final hold = _now().millisecondsSinceEpoch + recheckAfter.inMilliseconds;
+      for (final x in [e, ...ng.joined]) {
+        x.reported = false;
+        x.holdUntil = hold;
+      }
+    }
+
+    send(r).then(settle, onError: (Object _) => settle(null));
+  }
+
+  /// The judge's key of an entry: one suspicion per (app, destination, outbound, inbound).
+  static String _keyOf(_Entry e) => 'conn.failing|${e.who.isNotEmpty ? e.who : e.process}|${e.host}:${e.port}|${e.outbound}|${e.inbound}';
+
+  /// The outbounds through which [host]:[port] worked (for any app) after [sinceMs]: «did it recover by
+  /// itself» (the failing outbound is among them) and «does it open another way» (another is), read from
+  /// the live traffic, no request is made.
+  Set<String> okOutbounds(String host, int port, int sinceMs) {
+    final h = host.toLowerCase();
+    return {
+      for (final e in _entries.values)
+        if (e.host == h && e.port == port && e.lastOkAt > sinceMs) e.outbound,
+    };
   }
 
   /// The numbers for the report: the totals, the apps and destinations that fail most (by the last

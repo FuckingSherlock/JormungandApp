@@ -27,8 +27,6 @@ const dynamicSites = <String, String>{
   'service.dart|_event|core|type': 'state.dart _report(…) and appupdate.dart _event(…): category core',
   // the subscription updater's `onEvent('updated' | 'failed', …)` (updater.dart)
   'service.dart|_event|sub|type': 'updater.dart onEvent(…): category sub',
-  // the network state of Auto: `final (type, level) = switch (n.kind) { 'lost' => ('lost', 'warn'), … }`
-  'service.dart|eventBook.add|conn|type': 'the (type, level) tuples of the switch right before the call',
   // what the app / the page posts (POST /api/events): validated at run time (EventBook.cats, level, shape)
   'service.dart|eventBook.add|cat|type': 'postEvent: whatever the UI posted',
 };
@@ -265,7 +263,8 @@ final _implied = <String, (String cat, RegExp call)>{
   'updater.dart': ('sub', RegExp(r'(?<![A-Za-z0-9_])onEvent(?:!\(|\?\.call\()')),
 };
 
-final _withCat = RegExp(r'(?<![A-Za-z0-9_.])(_event|eventBook\.add)\(');
+// `SuspicionEvent('cat', 'type', …)`: the event a detector hands to the Sentinel, which writes it with its verdict
+final _withCat = RegExp(r'(?<![A-Za-z0-9_.])(_event|eventBook\.add|SuspicionEvent)\(');
 
 _Found _coreEmits(Directory dir) {
   final f = _Found();
@@ -284,6 +283,7 @@ _Found _coreEmits(Directory dir) {
       if (inner == null) continue;
       final a = _splitArgs(inner);
       if (a.isEmpty) continue;
+      if (a[0].startsWith('this.')) continue; // the constructor of SuspicionEvent itself
       final where = '$name:${_line(src, m.start)}';
       final implied = _implied[name];
       final first = _literal(a[0]);

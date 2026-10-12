@@ -22,6 +22,7 @@ export 'context.dart';
 export 'model.dart';
 export 'retry.dart';
 export 'roots.dart';
+export 'windows.dart';
 
 class _Job {
   _Job(this.s, this.since) : evidence = {...s.evidence};
@@ -33,6 +34,7 @@ class _Job {
   final trail = <TrailStep>[];
   bool recovered = false;
   String? recoveredBy;
+  String? droppedBy;
   Duration deferred = Duration.zero;
   int restarts = 0;
   int joined = 0;
@@ -184,6 +186,15 @@ class Sentinel {
       any = true;
     }
     return any;
+  }
+
+  /// The sing-box session the suspicions under way were seen in is over (a stop, a crash, a new start): they
+  /// are let go as `deferred` without a record; what is still wrong is suspected again by its detector.
+  void dropAll({String reason = 'session.ended'}) {
+    for (final j in _byKey.values.toList()) {
+      j.droppedBy = reason;
+      j.poke();
+    }
   }
 
   // ── roots ──
@@ -376,6 +387,11 @@ class Sentinel {
     });
     while (true) {
       if (_closed) return _verdict(j, VerdictKind.deferred, const Why('sentinel.closed'));
+      final dropped = j.droppedBy;
+      if (dropped != null) {
+        _step(j, 'session.dropped', Outcome.info, {'reason': dropped});
+        return _deferred(j, Why(dropped));
+      }
       if (j.recovered) return _blip(j, since, j.recoveredBy ?? 'recovered');
 
       // a. an external cause: no network, a captive portal
@@ -444,14 +460,14 @@ class Sentinel {
       for (final c in s.checks) {
         final r = await _runCheck(c);
         _step(j, r.code, r.outcome, {'role': c.role.name, ...r.params});
-        if (j.recovered) break;
+        if (j.recovered || j.droppedBy != null) break;
         if (r.outcome == Outcome.pass && c.role == CheckRole.recovery) return _blip(j, since, r.code);
         if (r.outcome == Outcome.pass && c.role == CheckRole.alternative) {
           return _emit(j, VerdictKind.workaround, Why('workaround', {'by': r.code}));
         }
         if (r.outcome == Outcome.fail && c.role == CheckRole.diagnostic) diag ??= Why(r.code, r.params);
       }
-      if (j.recovered) continue;
+      if (j.recovered || j.droppedBy != null) continue;
       // the checks took time: the world may have changed under them
       final late = _external(j);
       if (late != null) return late;
@@ -558,6 +574,8 @@ class Sentinel {
         _ => 'info',
       };
       final cause = kind == VerdictKind.consequence ? root?.eventId : null;
+      final line = e.note?.call(kind, j.evidence);
+      if (line != null) note?.call(level, line);
       eventId = b.add(e.cat, e.type, level,
           data: j.evidence,
           own: e.own,

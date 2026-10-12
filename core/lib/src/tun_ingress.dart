@@ -21,6 +21,13 @@
 /// stays at 4 or fewer unpaired orphans in any window of 10–60 s without TCP; the dead system and
 /// mixed stacks reach 8 within 2–3 s and 10 within 4 s. One `tunTcpDead` per dead period; the first TCP
 /// connection that arrives after it is `tunTcpBack`.
+///
+/// Our own `reject` rules (the plan's IPv6 off, [ownRejects]; a user's block rule) look exactly like a dead
+/// stack at the log level `info`: the look-up is logged, no connection follows. At `debug` sing-box also
+/// writes `router: pre-match[N] … => reject` with the same id: an orphan with such a line is ours, is not
+/// counted, and a window the own rejects alone fill is reported with `ownReject: true` (the Sentinel lets it
+/// go, never an error). At `info` the two cannot be told apart here; the Sentinel's persistence window and,
+/// later, an active test connection through the TUN (a Check on `tun.tcpDead`) are what separate them.
 library;
 
 import 'dart:collection';
@@ -54,7 +61,9 @@ class TunIngressDetector {
 
   final DateTime Function() _now;
 
-  /// `tunTcpDead`'s data: `{stack, synSeen, accepted, windowMs, apps}`.
+  /// `tunTcpDead`'s data: `{stack, synSeen, accepted, windowMs, apps, appCounts, firstSeen, ownRejects, ownRejected,
+  /// udp, dns, ownReject?}`; `ownReject: true` = the own reject rules alone explain the unpaired look-ups
+  /// (not dead; said once per such period).
   final void Function(Map<String, dynamic> data)? onDead;
 
   /// `tunTcpBack`'s data: `{stack, accepted, deadMs}`.
@@ -62,6 +71,10 @@ class TunIngressDetector {
 
   bool _active = false;
   String _stack = '';
+  List<String> _ownRejects = const [];
+  int _ownInWindow = 0, _ownTotal = 0;
+  bool _ownLatch = false;
+  final _byId = <String, _Orphan>{}; // the latest orphans by connection id, to mark them rejected by us
   DateTime _startedAt = DateTime.fromMillisecondsSinceEpoch(0);
   int _line = 0;
   final _seen = <String>{}; // ids that have an inbound line, in insertion order
@@ -79,14 +92,16 @@ class TunIngressDetector {
   bool get active => _active;
   bool get dead => _dead;
 
-  /// The tunnel is up with [stack] (`mixed` / `system` / `gvisor`): counting begins.
-  void start(String stack) {
+  /// The tunnel is up with [stack] (`mixed` / `system` / `gvisor`): counting begins. [ownRejects]: the plan's
+  /// own reject rules that are in the config (`ipv6Off`): named in the dead event's data.
+  void start(String stack, {List<String> ownRejects = const []}) {
     stop();
     _active = true;
     _stack = stack;
+    _ownRejects = ownRejects;
     _startedAt = _now();
     _line = 0;
-    _tcpTotal = _udpTotal = _dnsTotal = _orphanTotal = _unpairedTotal = 0;
+    _tcpTotal = _udpTotal = _dnsTotal = _orphanTotal = _unpairedTotal = _ownTotal = 0;
     _dead = false;
     _deadAt = null;
     _deadEvents = 0;
@@ -99,6 +114,9 @@ class TunIngressDetector {
     _pending.clear();
     _unpaired.clear();
     _tcp.clear();
+    _byId.clear();
+    _ownInWindow = 0;
+    _ownLatch = false;
   }
 
   // `inbound/tun[tun-in]: inbound connection from …` | `… inbound packet connection to …` | `… inbound DNS packet from …`
@@ -107,14 +125,16 @@ class TunIngressDetector {
   static final _inRe = RegExp(r'^inbound/\w+\[[^\]]*\]: .*?\binbound (?:DNS packet|packet connection|connection)\b');
   // `router: found package name: org.telegram.messenger` / `router: found process path: C:\…`
   static final _foundRe = RegExp(r'^router: found (?:package name|process path): (.+)$');
+  // debug level only: `router: pre-match[3] inbound=tun-in ip_version=6 => reject(no_drop)`; the id is the connection's
+  static final _rejectRe = RegExp(r'^router: pre-match\[\d+\] .*=> reject\b');
 
   /// A line of sing-box's log.
   void onLine(String raw) {
     if (!_active) return;
     _line++;
     final now = _now();
-    // the flood is mostly lines of no interest: the two words the patterns need, before any regex
-    if (raw.contains('inbound') || raw.contains('found p')) {
+    // the flood is mostly lines of no interest: the words the patterns need, before any regex
+    if (raw.contains('inbound') || raw.contains('found p') || raw.contains('pre-match')) {
       final l = SbLine.parse(raw);
       final id = l.id;
       if (id != null) {
@@ -123,13 +143,24 @@ class TunIngressDetector {
           if (_remember(id)) _real(t[1]!, now);
         } else if (_inRe.hasMatch(l.body)) {
           _remember(id);
+        } else if (_rejectRe.hasMatch(l.body)) {
+          _rejected(id);
         } else {
           final f = _foundRe.firstMatch(l.body);
-          if (f != null && !_seen.contains(id)) _orphan(f[1]!.trim(), now);
+          if (f != null && !_seen.contains(id)) _orphan(id, f[1]!.trim(), now);
         }
       }
     }
     _judge(now);
+  }
+
+  // The look-up of connection [id] ended in one of our reject rules: not a stack that takes nothing.
+  void _rejected(String id) {
+    final o = _byId[id];
+    if (o == null || o.own) return;
+    o.own = true;
+    _ownTotal++;
+    if (o.counted) _ownInWindow++;
   }
 
   // the first inbound line of an id; false = a second line of it (`from`, then `to`)
@@ -163,7 +194,7 @@ class TunIngressDetector {
     if (room > 0) _reals.add(_Real(_line, room));
   }
 
-  void _orphan(String who, DateTime now) {
+  void _orphan(String id, String who, DateTime now) {
     _orphanTotal++;
     _forget();
     // a real line just before it with capacity left takes it
@@ -174,7 +205,12 @@ class TunIngressDetector {
         return;
       }
     }
-    _pending.add(_Orphan(_line, now, who));
+    final o = _Orphan(_line, now, who);
+    _pending.add(o);
+    _byId[id] = o;
+    while (_byId.length > _seenCap) {
+      _byId.remove(_byId.keys.first);
+    }
   }
 
   // what is out of reach: reals that can no longer take an orphan, orphans no later real can take
@@ -184,8 +220,10 @@ class TunIngressDetector {
     }
     while (_pending.isNotEmpty && _line - _pending.first.line > pairLines) {
       final o = _pending.removeFirst();
+      o.counted = true;
       _unpaired.add(o);
       _unpairedTotal++;
+      if (o.own) _ownInWindow++;
     }
   }
 
@@ -193,30 +231,57 @@ class TunIngressDetector {
     _forget();
     final from = now.subtract(window);
     while (_unpaired.isNotEmpty && _unpaired.first.at.isBefore(from)) {
-      _unpaired.removeFirst();
+      final o = _unpaired.removeFirst();
+      o.counted = false;
+      if (o.own) _ownInWindow--;
     }
     while (_tcp.isNotEmpty && _tcp.first.isBefore(from)) {
       _tcp.removeFirst();
     }
     if (_dead || now.difference(_startedAt) < grace) return;
-    if (_tcp.isNotEmpty || _unpaired.length < minUnpaired) return;
+    if (_tcp.isNotEmpty || _unpaired.length < minUnpaired) {
+      _ownLatch = false;
+      return;
+    }
+    // what our own reject rules took does not count: a stack is dead when it ignores the rest
+    final dead = _unpaired.length - _ownInWindow >= minUnpaired;
+    if (!dead) {
+      if (_ownLatch) return;
+      _ownLatch = true;
+      onDead?.call({..._deadData(), 'ownReject': true});
+      return;
+    }
+    _ownLatch = false;
     _dead = true;
     _deadAt = now;
     _deadEvents++;
-    onDead?.call({
-      'stack': _stack,
-      'synSeen': _unpaired.length,
-      'accepted': _tcp.length,
-      'windowMs': window.inMilliseconds,
-      'apps': _topApps(),
-    });
+    onDead?.call(_deadData());
   }
+
+  Map<String, dynamic> _deadData() => {
+        'stack': _stack,
+        'synSeen': _unpaired.length,
+        'accepted': _tcp.length,
+        'windowMs': window.inMilliseconds,
+        'apps': _topApps(),
+        'appCounts': _appCounts(),
+        'firstSeen': _unpaired.first.at.millisecondsSinceEpoch,
+        if (_ownRejects.isNotEmpty) 'ownRejects': _ownRejects,
+        'ownRejected': _ownInWindow,
+        'udp': _udpTotal,
+        'dns': _dnsTotal,
+      };
 
   void _back(DateTime now) {
     final at = _deadAt;
     _dead = false;
     _deadAt = null;
+    for (final o in _unpaired) {
+      o.counted = false;
+    }
     _unpaired.clear();
+    _ownInWindow = 0;
+    _ownLatch = false;
     onBack?.call({
       'stack': _stack,
       'accepted': _tcpTotal,
@@ -224,14 +289,19 @@ class TunIngressDetector {
     });
   }
 
-  List<String> _topApps() {
+  // the unpaired look-ups per app, those with most first
+  List<MapEntry<String, int>> _perApp() {
     final n = <String, int>{};
     for (final o in _unpaired) {
+      if (o.own) continue;
       n[o.who] = (n[o.who] ?? 0) + 1;
     }
-    final l = n.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-    return [for (final e in l.take(maxApps)) e.key];
+    return n.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
   }
+
+  List<String> _topApps() => [for (final e in _perApp().take(maxApps)) e.key];
+
+  Map<String, int> _appCounts() => {for (final e in _perApp().take(maxApps)) e.key: e.value};
 
   /// The numbers for the report.
   Map<String, dynamic> toJson() {
@@ -250,6 +320,7 @@ class TunIngressDetector {
       'dns': _dnsTotal,
       'lookedAt': _orphanTotal,
       'unpaired': _unpairedTotal,
+      'ownRejected': _ownTotal,
       'deadEvents': _deadEvents,
       if (_dead && _deadAt != null) 'deadForMs': now.difference(_deadAt!).inMilliseconds,
       if (_dead) 'apps': _topApps(),
@@ -269,4 +340,10 @@ class _Orphan {
   final int line;
   final DateTime at;
   final String who;
+
+  /// Ended in one of our reject rules (a debug line said so).
+  bool own = false;
+
+  /// In the unpaired queue (the window counts it).
+  bool counted = false;
 }
