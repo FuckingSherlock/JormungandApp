@@ -3350,6 +3350,7 @@
     }
   },
   "theVpnAnswerIsUsed": "The VPN answer is used.",
+  "dnsServerDoesNotAnswer": "DNS server does not answer",
   "clearRawLog": "Clear raw log",
   "filterLog": "Filter log",
   "level": "Level",

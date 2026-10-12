@@ -16,6 +16,7 @@ class FailureWindows {
     this.siteUnreachable = Duration.zero,
     this.netBlip = const Duration(seconds: 10),
     this.siteChecker = const Duration(seconds: 40),
+    this.dnsDown = const Duration(seconds: 1),
   });
 
   /// Every window zero: a failure is judged at once (the tests).
@@ -27,7 +28,8 @@ class FailureWindows {
         siteBlocked = Duration.zero,
         siteUnreachable = Duration.zero,
         netBlip = Duration.zero,
-        siteChecker = const Duration(seconds: 40);
+        siteChecker = const Duration(seconds: 40),
+        dnsDown = Duration.zero;
 
   /// `conn/failing`: counted from the first failure of the streak (the streak itself is up to 60 s).
   final Duration connFailing;
@@ -50,7 +52,12 @@ class FailureWindows {
   /// The external site checker's own limit (it polls for up to 20 s).
   final Duration siteChecker;
 
+  /// `dns/failed`: a DNS server missed; counted from its first miss. The same as the failover's old rule
+  /// «down after `failAfter` misses, `retryPause` apart» at the defaults (2 x 0.5 s).
+  final Duration dnsDown;
+
   Map<String, dynamic> toJson() => {
+        'dnsDown': dnsDown.inMilliseconds,
         'connFailing': connFailing.inMilliseconds,
         'connLost': connLost.inMilliseconds,
         'tunTcpDead': tunTcpDead.inMilliseconds,

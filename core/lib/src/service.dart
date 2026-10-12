@@ -276,6 +276,18 @@ class CoreService implements CoreApi {
   /// the route left. Auto's own moves keep their stalled-connection sweep.
   bool closeOnSwitch = true;
   List<DnsEntry> _dnsServers = const [];
+  List<DnsEntry> _dnsExtra = const []; // servers a rule names that are not in use: watched, never switched to
+  Set<String> _dnsVpn = const {}; // ids of the servers set «via VPN»
+  Map<String, String> _ruleDns = const {}; // user rule id → the tag of its DNS server
+  String _domainResolver = 'local'; // the tag that resolves what goes out directly
+
+  void _takeDns(RoutingInfo info) {
+    _dnsServers = info.dnsServers;
+    _dnsExtra = info.dnsExtra;
+    _dnsVpn = info.dnsVpn;
+    _ruleDns = info.ruleDns;
+    _domainResolver = info.domainResolver;
+  }
   bool _dnsAuto = true; // Settings → DNS → Switch automatically (connect body `dnsAuto`, POST /api/dns/auto)
   final Timer Function(Duration, void Function()) _timer;
   final DateTime Function() _now;
@@ -554,10 +566,14 @@ class CoreService implements CoreApi {
     // the probe opened the site through the same server while the app's own connections went on failing: not a
     // recovery, the site is not the culprit (docs/failures.md → Проверки сайтов)
     var diverged = false;
+    // the resolver the connection went through could not resolve the host either: the failure is the resolver's,
+    // not the site's (a `dns.down` root of it covers the failure; this is the live check, docs/failures.md → DNS)
+    var resolverDown = false;
+    final resolver = InternetAddress.tryParse(host) != null ? null : _resolverFor(outbound, evidence);
     (String, String)? pick(VerdictKind kind, Map<String, dynamic> e) {
       if (!aimable) return _siteKind('conn', 'failing');
       return switch (kind) {
-        VerdictKind.confirmed || VerdictKind.unexplained when diverged => _siteKind('conn', 'failing'),
+        VerdictKind.confirmed || VerdictKind.unexplained when diverged || resolverDown => _siteKind('conn', 'failing'),
         VerdictKind.confirmed || VerdictKind.unexplained => _siteKind('site', 'unreachable'),
         VerdictKind.workaround when alt?.via != null => _siteKind('site', 'blocked'),
         VerdictKind.blip when !fromConn(e) => null,
@@ -603,7 +619,7 @@ class CoreService implements CoreApi {
     final v = await sentinel.suspect(Suspicion(
       kind: aimable ? 'site.failing' : 'conn.failing',
       key: FailureBook.siteKey(host, port),
-      subject: subject ?? {'host': host, 'port': ?port, 'route': route, 'path': 'proxy'},
+      subject: {...(subject ?? {'host': host, 'port': ?port, 'route': route, 'path': 'proxy'}), if (resolver != null) 'dns': resolver.id},
       evidence: evidence,
       window: window,
       firstSeen: firstSeen,
@@ -620,6 +636,17 @@ class CoreService implements CoreApi {
           final others = failures.okOutbounds(host, port ?? 0, since).where((o) => o != outbound).toList();
           return CheckResult('conn.otherRoute', others.isEmpty ? Outcome.inconclusive : Outcome.pass, {'outbounds': others.take(3).toList()});
         }, level: Level.destination, via: onRoute),
+        // the first live check: the host resolves through the same server. Fails -> the resolver's failure (why `dns.resolve`).
+        if (resolver != null)
+          Check.diagnostic('dns.resolve', (cancel) async {
+            resolverDown = false; // a parked ladder runs again from the top
+            final ms = await Future.any([_dnsAsk(resolver.tag, host, 5000), cancel.done.then((_) => -2)]);
+            if (ms == -2) return CheckResult('dns.resolve', Outcome.inconclusive, {'server': resolver.id});
+            if (ms >= 0) return CheckResult('dns.resolve', Outcome.pass, {'server': resolver.id});
+            resolverDown = true;
+            _dns?.suspectServer(resolver.id); // the resolver's own suspicion, with this evidence
+            return CheckResult('dns.resolve', Outcome.fail, {'server': resolver.id, 'path': resolver.vpn ? 'proxy' : 'direct'});
+          }, timeout: const Duration(seconds: 10), level: Level.dns, via: resolver.vpn ? topTag : null, resolver: resolver.id),
         if (aimable) ...[
           Check.recovery('probe.same', (cancel) async {
             diverged = false; // a parked ladder runs again from the top
@@ -649,6 +676,7 @@ class CoreService implements CoreApi {
             asked = false;
             result = null;
             if (diverged) return const CheckResult('site.checker', Outcome.inconclusive, {'reason': 'sameOpens'});
+            if (resolverDown) return const CheckResult('site.checker', Outcome.inconclusive, {'reason': 'resolverDown'});
             if (!siteCheckOn) {
               result = {'state': 'off'};
               return const CheckResult('site.checker', Outcome.inconclusive, {'state': 'off'});
@@ -982,18 +1010,52 @@ class CoreService implements CoreApi {
   /// that answers (dns_failover.dart). A new sing-box starts on the mode `Rule` = the first
   /// server in use (`dns.final`), which is where the service starts too.
   void _startDnsFailover(SingBoxApi api, AutoService auto) {
-    if (_dnsServers.isEmpty) return;
+    if (_dnsServers.isEmpty && _dnsExtra.isEmpty) return;
     final probe = _probe;
     if (probe == null) return;
     final dns = _dns = DnsFailover(_dnsServers,
         setMode: api.setClashMode,
-        query: (tag, name, t) => probeDns(probe, tag, name, timeoutMs: t),
+        query: _dnsAsk,
         settings: auto.settings,
+        sentinel: sentinel,
+        vpn: _dnsVpn,
+        watch: _dnsExtra,
+        window: windows.dnsDown,
         auto: _dnsAuto,
         pool: pool,
         note: runner.note);
     dns.switches.listen((s) => _event('dns', 'switched', 'info', {'from': s.from, 'to': s.to, 'reason': s.reason}, own: s.reason == 'off'));
     dns.start();
+  }
+
+  /// The test seam of the DNS queries (`probeDns` through the probe inbound by default): ms until the server [tag] resolved [name].
+  Future<int> Function(String tag, String name, int timeoutMs)? dnsQuery;
+
+  Future<int> _dnsAsk(String tag, String name, int timeoutMs) {
+    final q = dnsQuery;
+    if (q != null) return q(tag, name, timeoutMs);
+    final probe = _probe;
+    return probe == null ? Future.value(-1) : probeDns(probe, tag, name, timeoutMs: timeoutMs);
+  }
+
+  /// The DNS server a connection resolved through (docs/rules.md §6): the user rule's own server; for a direct
+  /// outbound the server of its `domain_resolver` (`direct@dns-<id>`) or the default one; else the server in use.
+  /// Null when it is not one of the config's servers by id (the OS resolver `local`) or there is none.
+  ({String id, String tag, bool vpn})? _resolverFor(String outbound, Map<String, dynamic> evidence) {
+    final text = evidence['rule'] is String ? evidence['rule'] as String : '${(evidence['noticed'] as Map?)?['rule'] ?? ''}';
+    final origin = text.isEmpty ? null : _ruleNames?.of(text);
+    String? tag = origin != null && origin.kind == 'user' ? _ruleDns[origin.id] : null;
+    if (tag == null) {
+      if (outbound.startsWith('direct@')) {
+        tag = outbound.substring(7);
+      } else if (outbound == 'direct') {
+        tag = _domainResolver;
+      }
+    }
+    final all = [..._dnsServers, ..._dnsExtra];
+    DnsEntry? e = tag == null ? null : all.where((s) => s.tag == tag).firstOrNull;
+    if (e == null && tag == null) e = all.where((s) => s.id == _dns?.active).firstOrNull ?? _dnsServers.firstOrNull;
+    return e == null ? null : (id: e.id, tag: e.tag, vpn: _dnsVpn.contains(e.id));
   }
 
   void _stopAuto({bool park = false}) {
@@ -1286,7 +1348,7 @@ class CoreService implements CoreApi {
         'auto': _autoState(),
         'network': pool.toJson(),
         'context': sentinel.contextJson(), // the Sentinel's view: network state, core phase, open root causes (docs/failures.md)
-        'dns': runner.running ? _dns?.toJson() : null,
+        'dns': runner.running && _dns?.isEmpty == false ? _dns!.toJson() : null,
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
         'speed': _lastSpeed, // last Speed Test of the connection: {down, up (bit/s), latency (ms), rpm, at (ms)}
       };
@@ -1440,7 +1502,7 @@ class CoreService implements CoreApi {
     _svc = svc;
     _fallbacks = info.fallbacks;
     _ruleNames = info.ruleNames;
-    _dnsServers = info.dnsServers;
+    _takeDns(info);
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     _tunnelPort = tunnelPort;
     // what a core made later needs to take this sing-box over (see [adopt])
@@ -1530,7 +1592,7 @@ class CoreService implements CoreApi {
       _svc = svc;
       _fallbacks = info.fallbacks;
       _ruleNames = info.ruleNames;
-      _dnsServers = info.dnsServers;
+      _takeDns(info);
       _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
       _tunnelPort = tunnelPort;
       _sysPort = sysPort;

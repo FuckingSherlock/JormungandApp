@@ -40,8 +40,9 @@ class _Runner implements BoxRunner {
   Future<void> stop() async => up = false;
 }
 
-Map<String, dynamic> _body() => {
+Map<String, dynamic> _body({Map<String, dynamic>? routing}) => {
       'plan': {
+        'routing': ?routing,
         'routes': [
           {
             'id': 'A',
@@ -83,7 +84,7 @@ void main() {
   late _Runner runner;
   late FakeTime time;
 
-  Future<void> start({FailureWindows windows = const FailureWindows(), bool connected = true}) async {
+  Future<void> start({FailureWindows windows = const FailureWindows(), bool connected = true, Map<String, dynamic>? routing}) async {
     tmp = await Directory.systemTemp.createTemp('jorm-sfail');
     runner = _Runner();
     time = FakeTime();
@@ -103,7 +104,7 @@ void main() {
     );
     await svc.init();
     if (connected) {
-      await svc.connect(_body());
+      await svc.connect(_body(routing: routing));
       await time.advanceSeconds(6); // settled: 5 s after the start
     }
   }
@@ -320,6 +321,64 @@ void main() {
       fail(3);
       await time.advanceSeconds(12);
       expect(events('conn', 'failing').length, 2);
+    });
+  });
+
+  group('the DNS server a failure resolved through', () {
+    final dns = {
+      'dns': {
+        'servers': [
+          {'id': 'g', 'addr': 'udp://127.0.0.1:5353', 'via': 'direct', 'on': true},
+        ],
+      },
+    };
+
+    test('an open dns.down root of the resolver explains the failure: a consequence with its cause, no root of its own', () async {
+      await start(routing: dns);
+      final root = svc.sentinel.openRoot(
+        kind: 'dns.down',
+        key: 'dns|g',
+        subject: {'dns': 'g', 'path': 'direct'},
+        scope: Scope.of({'dns': 'g'}),
+        level: Level.dns,
+      );
+      final cause = svc.eventBook.add('dns', 'failed', 'warn', data: {'server': 'g'});
+      svc.sentinel.attachEvent(root, cause);
+      fail(3);
+      await time.advanceSeconds(11);
+      final e = events('conn', 'failing').single;
+      expect([e['level'], e['verdict']], ['info', 'consequence']);
+      expect(e['cause'], cause);
+      expect((e['why'] as Map)['code'], 'dns.down');
+      expect(svc.sentinel.roots.byKey('site|example.org:443'), isNull);
+    });
+
+    test('the host does not resolve through the same server: the failure is the resolver\'s (why dns.resolve), not the site\'s', () async {
+      await start(routing: dns);
+      final asked = <String>[];
+      svc.dnsQuery = (tag, name, t) async {
+        asked.add('$tag $name');
+        return -1;
+      };
+      fail(3);
+      await time.advanceSeconds(11);
+      expect(asked, ['dns-g example.org']);
+      final e = events('conn', 'failing').single;
+      expect([e['level'], e['verdict']], ['warn', 'confirmed']);
+      expect((e['why'] as Map)['code'], 'dns.resolve');
+      expect(events('site', 'unreachable'), isEmpty);
+      expect(trailCodes(e), containsAllInOrder(['conn.recovered', 'conn.otherRoute', 'dns.resolve']));
+    });
+
+    test('the host resolves: the check passes and the failure goes on as before', () async {
+      await start(routing: dns);
+      svc.dnsQuery = (tag, name, t) async => 12;
+      fail(3);
+      await time.advanceSeconds(11);
+      final e = events('conn', 'failing').single;
+      expect((e['why'] as Map)['code'], 'conn.timeout');
+      final dnsStep = (e['trail'] as List).cast<Map>().firstWhere((s) => s['code'] == 'dns.resolve');
+      expect(dnsStep['outcome'], 'pass');
     });
   });
 

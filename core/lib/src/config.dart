@@ -268,12 +268,16 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   warnings?.addAll(routing.warnings);
   info?.fallbacks.addAll(routing.fallbacks);
   info?.dnsServers.addAll(routing.dnsEnabled);
+  info?.dnsExtra.addAll(routing.dnsExtra);
+  info?.dnsVpn.addAll(routing.dnsVpn);
+  info?.ruleDns.addAll(routing.ruleDns);
+  if (info != null) info.domainResolver = routing.domainResolver;
   // cache_file keeps a selector's pick made over the API across restarts, over the
   // config's `default`: keyed by the defaults, a new pick from the UI starts clean.
   final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
   // 'direct' is tested too, always: the network check of the probe pool (pool.dart) tells a
   // dead network from dead routes by the direct path answering
-  final pr = probe?.inbound([..._servers(outs), 'direct'], dnsServers: [for (final s in routing.dnsEnabled) s.tag]);
+  final pr = probe?.inbound([..._servers(outs), 'direct'], dnsServers: [for (final s in [...routing.dnsEnabled, ...routing.dnsExtra]) s.tag]);
   // svc-in: one user per path (direct, the main flow, each route), its rules go first like the probe's
   final sv = svc?.inbound(direct: 'direct', main: topTag, routes: tags);
   final Map<String, dynamic>? tunnelRule = tunnelPort == null ? null : {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag};

@@ -350,9 +350,12 @@ void main() {
       expect(fell, hasLength(1));
       expect([fell.single['type'], fell.single['level']], ['fallback', 'warn']);
       expect(fell.single['data'], {'rule': 'Dead rule', 'target': 'src:dead', 'to': 'block'});
-      expect(moved, hasLength(1));
-      expect([moved.single['type'], moved.single['level'], moved.single['own']], ['switched', 'info', false]);
-      expect(moved.single['data'], {'from': 'a', 'to': 'b', 'reason': 'failover'});
+      // the Sentinel confirms the server down (dns/failed), then the failover moves on its verdict
+      expect(moved.map((e) => e['type']), ['failed', 'switched']);
+      expect(moved.first['data'], containsPair('server', 'a'));
+      final sw = moved.last;
+      expect([sw['type'], sw['level'], sw['own']], ['switched', 'info', false]);
+      expect(sw['data'], {'from': 'a', 'to': 'b', 'reason': 'failover'});
       var dns = (await call('/api/status'))['dns'] as Map;
       expect([dns['active'], dns['auto']], ['b', true]);
       expect((dns['servers'] as List).map((s) => (s as Map)['ok']), [false, true]);
@@ -383,6 +386,7 @@ void main() {
     final mixed = await freePort();
     final sb = SingBoxProcess(_bin, p.join(tmp.path, 'sb'));
     DnsFailover? fo;
+    final sentinel = Sentinel(settle: Duration.zero)..context.started();
     try {
       final probe = Probe(await freePort());
       final info = RoutingInfo();
@@ -425,9 +429,11 @@ void main() {
       a.names.clear();
       b.names.clear();
 
+      // the Sentinel judges the misses (no window here: its own check confirms), the failover acts on its verdicts
       fo = DnsFailover(info.dnsServers,
           setMode: api.setClashMode,
           query: (tag, name, t) => probeDns(probe, tag, name, timeoutMs: t),
+          sentinel: sentinel,
           settings: const AutoSettings(failAfter: 2, flapGuard: false, timeoutMs: 1500));
       final moves = <DnsSwitch>[];
       fo.switches.listen(moves.add);
@@ -440,9 +446,11 @@ void main() {
 
       a.answering = false;
       await fo.check();
-      expect(fo.active, 'a', reason: 'one miss');
-      await fo.check();
+      for (var i = 0; i < 400 && fo.active != 'b'; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50)); // the Sentinel's checks take their time
+      }
       expect(fo.active, 'b');
+      expect(sentinel.roots.byKey('dns|a'), isNotNull);
       expect((await api.clashMode())?.current, 'dns-b');
       expect((fo.toJson()['servers'] as List).first, containsPair('ok', false));
       expect(await _getOk(mixed, 'viaip2.test', target.port), 'hello');
@@ -461,6 +469,7 @@ void main() {
       expect([for (final m in moves) '${m.from}>${m.to} ${m.reason}'], ['a>b failover', 'b>a back']);
     } finally {
       fo?.stop();
+      sentinel.dispose();
       await sb.stop();
       await target.close(force: true);
       a.close();

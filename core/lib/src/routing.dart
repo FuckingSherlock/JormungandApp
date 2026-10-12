@@ -233,6 +233,19 @@ class RoutingInfo {
 
   /// The enabled DNS servers by priority: the first is `dns.final`.
   final dnsServers = <DnsEntry>[];
+
+  /// Servers of the config that are not in use (not ticked) but a rule names: nothing switches to them,
+  /// the Sentinel still watches them (docs/rules.md §6).
+  final dnsExtra = <DnsEntry>[];
+
+  /// The ids of the config's DNS servers that go through the VPN (`detour`).
+  final dnsVpn = <String>{};
+
+  /// A user rule's id → the tag of the DNS server its traffic resolves through.
+  final ruleDns = <String, String>{};
+
+  /// The tag of the server that resolves what goes out directly (`default_domain_resolver`); `local` is the OS resolver.
+  String domainResolver = 'local';
 }
 
 /// What [buildRouting] adds to a config.
@@ -265,6 +278,11 @@ class Routing {
   /// The servers in use, by priority; with two or more, each also has a DNS rule for its
   /// own clash mode (its tag), so the core can make any of them the default ([dnsModeOf]).
   final dnsEnabled = <DnsEntry>[];
+
+  /// Servers named by a rule but not in use ([RoutingInfo.dnsExtra]), the ids of those via VPN, and each rule's server.
+  final dnsExtra = <DnsEntry>[];
+  final dnsVpn = <String>{};
+  final ruleDns = <String, String>{};
 
   /// Resolves the servers' own hostnames (proxy outbounds, DoH hosts) and what goes out
   /// directly: a direct DNS server, never one that needs the tunnel.
@@ -345,7 +363,10 @@ class _Builder {
     final tag = _dnsTag(s);
     if (!_dnsAdded.add(tag)) return;
     final j = dnsServerJson(tag, '${s['addr']}')!;
-    if (_viaVpn(s)) j['detour'] = topTag;
+    if (_viaVpn(s)) {
+      j['detour'] = topTag;
+      out.dnsVpn.add('${s['id']}');
+    }
     if (j['server'] is String && InternetAddress.tryParse(j['server'] as String) == null) j['domain_resolver'] = _boot;
     out.dnsServers.add(j);
   }
@@ -357,6 +378,9 @@ class _Builder {
     final named = pick == null || pick == 'auto' ? null : _dnsById[pick];
     if (named != null && dnsServerJson('x', '${named['addr']}') != null) {
       _addDnsServer(named);
+      if (!_dnsOn.contains(named) && !out.dnsExtra.any((e) => e.id == '${named['id']}')) {
+        out.dnsExtra.add((id: '${named['id']}', tag: _dnsTag(named)));
+      }
       return _dnsTag(named);
     }
     final auto = _dnsOn.where((s) => _viaVpn(s) != direct).firstOrNull;
@@ -595,7 +619,12 @@ class _Builder {
       }
       out._add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()},
           RuleOrigin('user', '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}', id: '${rule['id'] ?? ''}'));
-      if (action != 'block') _dnsRule(built.domainAlts, _dnsFor(dns, direct: direct));
+      if (action != 'block') {
+        final server = _dnsFor(dns, direct: direct);
+        _dnsRule(built.domainAlts, server);
+        final id = '${rule['id'] ?? ''}';
+        if (id.isNotEmpty) out.ruleDns[id] = server;
+      }
     }
   }
 

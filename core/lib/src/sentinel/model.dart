@@ -62,8 +62,11 @@ enum CheckRole {
 }
 
 /// Where a check (or a root) sits, top-down: a failure higher up explains everything below it.
-/// network -> core (the tunnel) -> route -> destination.
-enum Level { network, core, route, destination }
+/// network -> core (the tunnel) -> route -> dns -> destination. A DNS server sits below the route: one
+/// set «via VPN» goes out through the main flow, so a dead route explains it (its root carries `route`);
+/// a site resolves through a server, so a dead server explains the site. A `dns` root only stops the
+/// checks that resolve through that server ([Check.resolver]).
+enum Level { network, core, route, dns, destination }
 
 /// Handed to a running [Check]: the Sentinel cancels it when the context makes it moot (the network
 /// went, the core restarts, a root opened on the level it goes through) or when it times out.
@@ -90,14 +93,14 @@ class Cancel {
 /// An active check, run after the window. [code] is what the trail says when [run] throws or
 /// takes longer than [timeout] (then the step is `inconclusive`, the check never breaks the ladder).
 class Check {
-  const Check(this.role, this.code, this.run, {this.timeout, this.level, this.via});
+  const Check(this.role, this.code, this.run, {this.timeout, this.level, this.via, this.resolver});
 
-  const Check.recovery(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via})
-      : this(CheckRole.recovery, code, run, timeout: timeout, level: level, via: via);
-  const Check.alternative(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via})
-      : this(CheckRole.alternative, code, run, timeout: timeout, level: level, via: via);
-  const Check.diagnostic(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via})
-      : this(CheckRole.diagnostic, code, run, timeout: timeout, level: level, via: via);
+  const Check.recovery(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via, String? resolver})
+      : this(CheckRole.recovery, code, run, timeout: timeout, level: level, via: via, resolver: resolver);
+  const Check.alternative(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via, String? resolver})
+      : this(CheckRole.alternative, code, run, timeout: timeout, level: level, via: via, resolver: resolver);
+  const Check.diagnostic(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via, String? resolver})
+      : this(CheckRole.diagnostic, code, run, timeout: timeout, level: level, via: via, resolver: resolver);
 
   /// A check the detector has already made (Auto re-tried the site before it told): the Sentinel only
   /// puts [result] into the trail, in its [role].
@@ -117,6 +120,9 @@ class Check {
 
   /// The route (outbound) the check goes through: an open `route`-level root of that route blocks it.
   final String? via;
+
+  /// The id of the DNS server the check resolves through: an open `dns`-level root of that server blocks it.
+  final String? resolver;
 }
 
 /// Which later subjects a root covers: they become its consequences.

@@ -62,6 +62,7 @@ class EventWords {
     'rules/ruleSetFailed' => l10n.ruleSetNotDownloaded,
     'rules/ruleSetUpdated' => l10n.ruleSetUpdated,
     'dns/switched' => l10n.dnsServerSwitched,
+    'dns/failed' => l10n.dnsServerDoesNotAnswer,
     'speed/done' => l10n.speedTestFinished,
     'speed/failed' => l10n.speedTestFailed,
     'core/crashed' => l10n.singBoxStopped,
@@ -330,6 +331,7 @@ class EventWords {
             ? l10n.answersAgainReturnedToIt(dnsName(d['to']))
             : l10n.switchAutomaticallyIsOffTheFirst,
       ),
+      ('dns', 'failed') => r(l10n.doesNotAnswer(dnsName(d['server']))),
       ('speed', 'done') => () {
         String mbps(Object? bps) {
           final v = ((bps as num?) ?? 0) / 1e6;

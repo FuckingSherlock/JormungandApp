@@ -350,13 +350,15 @@ class Sentinel {
   Level _levelOf(Suspicion s, Check c) => c.level ?? (s.viaCore ? Level.destination : Level.network);
 
   /// The open root that stops [c] (network -> core -> route -> destination): one on its level or above, that
-  /// it goes through. A `route` root only stops the checks `via` that route. The highest, then the oldest.
+  /// it goes through. A `route` root only stops the checks `via` that route, a `dns` root those that resolve
+  /// through that server. The highest, then the oldest.
   Root? _blocker(Suspicion s, Check c) {
     final lvl = _levelOf(s, c);
     Root? best;
     for (final r in roots.open) {
       if (r.level == Level.destination || r.level.index > lvl.index || r.key == s.key) continue;
       if (r.level == Level.route && (c.via == null || r.subject['route'] != c.via)) continue;
+      if (r.level == Level.dns && (c.resolver == null || r.subject['dns'] != c.resolver)) continue;
       if (best == null || r.level.index < best.level.index || (r.level == best.level && r.since.isBefore(best.since))) best = r;
     }
     return best;

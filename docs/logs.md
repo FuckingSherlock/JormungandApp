@@ -89,6 +89,7 @@ to …` — раньше такие строки не распознавалис
 | rules | ruleSetFailed | `tag`, `url`, `error` |
 | rules | ruleSetUpdated | `tag` |
 | dns | switched | `from`, `to`, `reason` |
+| dns | failed | `server`, `path` (`direct` / `proxy`), `since` — DNS-сервер подтверждённо не отвечает (Sentinel, `dns.down`), причины выше нет |
 | speed | done / failed | результат / `error` |
 | core | crashed | `code` |
 | core | restarted | `attempt`, `downMs?` |
