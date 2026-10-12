@@ -78,13 +78,14 @@ jobs:
     steps:
       # The runner image is ~90 % full; three ABI builds + libbox + delta patches ran it out of disk
       # (run 38278579444: "No space left on device", job log lost). Drop toolchains this job never uses
-      # (the Android SDK, Java, Node, Go and Flutter stay).
+      # (the Android SDK, Java, Node, Go, Flutter and PowerShell - pwsh runs build_libbox / build_apk - stay).
       - name: Free disk space
         run: |
           df -h /
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift \
             /usr/local/julia* /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/PyPy /opt/hostedtoolcache/Ruby \
-            /usr/local/share/powershell /usr/local/share/chromium /opt/microsoft /opt/google/chrome || true
+            /usr/local/share/chromium /opt/google/chrome || true
+          command -v pwsh > /dev/null || { echo "::error::pwsh is gone - the cleanup removed it"; exit 1; }
           sudo docker image prune --all --force > /dev/null 2>&1 || true
           df -h /
 
