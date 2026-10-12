@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
     show DnsServerCfg, DnsTransport, PickState, dnsKindOf, dnsKinds;
@@ -548,15 +550,25 @@ class SideChip extends StatefulWidget {
   State<SideChip> createState() => _SideChipState();
 }
 
-class _SideChipState extends State<SideChip> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 2400),
-  );
+class _SideChipState extends State<SideChip> {
+  /// The pulse is stepped by a timer (not a vsync ticker): a ticker repainted the whole sheet
+  /// at the display rate; here the chip sits in its own [RepaintBoundary] and steps at ~20 fps.
+  static const _step = Duration(milliseconds: 50);
+  static const _half = 2400; // ms, one way of the pulse
+
+  final ValueNotifier<double> _phase = ValueNotifier(0);
+  ValueListenable<TickerModeData>? _tickerMode;
+  Timer? _timer;
+  int _elapsed = 0;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final mode = TickerMode.getValuesNotifier(context);
+    if (!identical(mode, _tickerMode)) {
+      _tickerMode?.removeListener(_sync);
+      _tickerMode = mode..addListener(_sync);
+    }
     _sync();
   }
 
@@ -567,19 +579,29 @@ class _SideChipState extends State<SideChip> with SingleTickerProviderStateMixin
   }
 
   void _sync() {
-    final run = widget.answering && widget.on && !widget.dead;
-    if (run && !_ctl.isAnimating) {
-      _ctl.repeat(reverse: true);
-    } else if (!run && _ctl.isAnimating) {
-      _ctl
-        ..stop()
-        ..value = 0;
+    final run =
+        widget.answering && widget.on && !widget.dead && (_tickerMode?.value.enabled ?? true);
+    if (run && _timer == null) {
+      _timer = Timer.periodic(_step, (_) {
+        _elapsed = (_elapsed + _step.inMilliseconds) % (2 * _half);
+        // 0 -> 1 -> 0 over two halves, eased in/out
+        _phase.value = 0.5 - 0.5 * math.cos(_elapsed / _half * math.pi);
+      });
+      setState(() {});
+    } else if (!run && _timer != null) {
+      _timer!.cancel();
+      _timer = null;
+      _elapsed = 0;
+      _phase.value = 0;
+      if (mounted) setState(() {});
     }
   }
 
   @override
   void dispose() {
-    _ctl.dispose();
+    _tickerMode?.removeListener(_sync);
+    _timer?.cancel();
+    _phase.dispose();
     super.dispose();
   }
 
@@ -588,14 +610,22 @@ class _SideChipState extends State<SideChip> with SingleTickerProviderStateMixin
     final c = context.colors;
     final w = widget;
     final tone = w.dead ? c.danger : c.accent;
+    final run = _timer != null;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: w.onTap,
-      child: AnimatedBuilder(
-        animation: _ctl,
-        builder: (_, child) {
-          final run = _ctl.isAnimating;
-          return Container(
+      child: RepaintBoundary(
+        child: ValueListenableBuilder<double>(
+          valueListenable: _phase,
+          child: Text(
+            w.label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: w.on ? tone.tint(w.dead ? .85 : 1) : c.t3,
+            ),
+          ),
+          builder: (_, v, child) => Container(
             padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
             decoration: BoxDecoration(
               color: w.on ? tone.tint(w.dead ? .08 : .14) : Colors.transparent,
@@ -603,21 +633,13 @@ class _SideChipState extends State<SideChip> with SingleTickerProviderStateMixin
               border: Border.all(
                 width: run ? 1.5 : 1,
                 color: run
-                    ? Color.lerp(c.accent.tint(.3), c.accent, _ctl.value)!
+                    ? Color.lerp(c.accent.tint(.3), c.accent, v)!
                     : w.on
                     ? tone.tint(w.dead ? .45 : .4)
                     : c.border,
               ),
             ),
             child: child,
-          );
-        },
-        child: Text(
-          w.label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: w.on ? tone.tint(w.dead ? .85 : 1) : c.t3,
           ),
         ),
       ),
