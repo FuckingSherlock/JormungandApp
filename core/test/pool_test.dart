@@ -157,6 +157,27 @@ void main() {
       expect(pool.status, NetStatus.up, reason: 'an answer proves the network, whatever the OS said');
     });
 
+    test('onChange is pushed by the call that changes a flag, nobody has to read the status', () async {
+      final seen = <NetStatus>[];
+      pool.onChange = seen.add;
+      pool.offline(true);
+      expect(seen, [NetStatus.down]);
+      pool.silent(true);
+      expect(seen, [NetStatus.down, NetStatus.down], reason: 'a flag moved (os vs probes) although the status did not');
+      pool.silent(true);
+      expect(seen.length, 2, reason: 'nothing changed: nothing pushed');
+      await pool.probe('s1', one(40), url: _url); // an answer anywhere
+      expect(seen.last, NetStatus.up);
+      expect(seen.length, 3);
+      pool.answered();
+      pool.resetNetwork();
+      expect(seen.length, 3, reason: 'already clean');
+      pool.doubt(true);
+      expect(seen.last, NetStatus.unknown);
+      pool.resetNetwork();
+      expect(seen.last, NetStatus.up);
+    });
+
     test('toJson: status and the signs behind it', () {
       pool.doubt(true);
       final j = pool.toJson();

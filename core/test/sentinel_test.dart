@@ -44,8 +44,10 @@ void main() {
     Scope? scope,
     Map<String, dynamic>? subject,
     SuspicionEvent? event = _ev,
+    DateTime? firstSeen,
   }) =>
       Suspicion(
+        firstSeen: firstSeen,
         kind: 'conn.failing',
         subject: subject ?? {'app': 'org.x', 'host': host, 'route': 'A'},
         evidence: evidence,
@@ -90,25 +92,183 @@ void main() {
       expect(v.trail.firstWhere((t) => t.code == 'ctx.net').outcome, Outcome.inconclusive);
     });
 
-    test('the network goes while the failure is inside its window: still a consequence', () async {
+    test('the network goes while the failure is inside its window: the failure began first, so it is parked, not a consequence', () async {
       await settledCore();
       final f = sentinel.suspect(failing(window: const Duration(seconds: 20)));
       await time.advanceSeconds(5);
       sentinel.context.pool(NetStatus.down, osOffline: false);
+      await time.advanceSeconds(30);
+      expect(book.length, 0, reason: 'parked: nothing is written');
+      sentinel.context.pool(NetStatus.up, osOffline: false);
       final v = await f;
-      expect(v.kind, VerdictKind.consequence); // (only 5 s passed: it did not wait out the window)
+      expect(v.kind, VerdictKind.confirmed, reason: 'the network is back and the failure is still there');
+      expect(codes(v), containsAllInOrder(['suspect', 'ctx.net', 'park', 'resume', 'persist.window']));
+      expect(v.trail.firstWhere((t) => t.code == 'park').params['root'], startsWith('net.offline#'));
     });
 
-    test('the network goes under the checks: the late look finds it', () async {
+    test('the network goes under the checks: the running check is cancelled at once and re-run when the network is back', () async {
       await settledCore();
-      final gate = Completer<CheckResult>();
-      final f = sentinel.suspect(failing(checks: [Check.recovery('probe.target', () => gate.future)]));
+      final runs = <Cancel>[];
+      final f = sentinel.suspect(failing(checks: [
+        Check.recovery('probe.target', (cancel) {
+          runs.add(cancel);
+          return runs.length == 1 ? Completer<CheckResult>().future : Future.value(const CheckResult('probe.target', Outcome.pass));
+        })
+      ]));
       await time.advanceSeconds(1);
+      expect(runs.length, 1);
       sentinel.context.pool(NetStatus.down, osOffline: true);
-      gate.complete(const CheckResult('probe.target', Outcome.fail));
+      await time.advanceSeconds(1); // far less than the check's timeout
+      expect(runs[0].cancelled, isTrue);
+      expect(runs[0].reason, startsWith('net.offline#'));
+      expect(runs.length, 1, reason: 'not started again while the network is gone');
+      sentinel.context.pool(NetStatus.up, osOffline: false);
       final v = await f;
+      expect(runs.length, 2);
+      expect(v.kind, VerdictKind.blip);
+      expect(codes(v), containsAllInOrder(['suspect', 'persist.window', 'probe.target', 'park', 'resume', 'probe.target', 'blip.recovered']));
+      final aborted = v.trail.firstWhere((t) => t.code == 'probe.target');
+      expect((aborted.outcome, aborted.params['reason']), (Outcome.inconclusive, 'aborted'));
+    });
+
+    test('a failure that began after the outage is its consequence, whatever the checks', () async {
+      await settledCore();
+      sentinel.context.pool(NetStatus.down, osOffline: true);
+      await time.advanceSeconds(5);
+      var ran = false;
+      final v = await sentinel.suspect(failing(checks: [
+        Check.recovery('probe.target', (_) async {
+          ran = true;
+          return const CheckResult('probe.target', Outcome.pass);
+        })
+      ]));
       expect(v.kind, VerdictKind.consequence);
-      expect(codes(v), contains('probe.target'));
+      expect(ran, isFalse);
+    });
+  });
+
+  group('parking behind a failed node (levels)', () {
+    Check viaB(void Function() ran) => Check.recovery('probe.target', (_) async {
+          ran();
+          return const CheckResult('probe.target', Outcome.pass);
+        }, via: 'B');
+
+    Root deadRoute() => sentinel.openRoot(kind: 'route.dead', subject: const {'route': 'B'}, scope: const Scope.of({'route': 'B'}), level: Level.route);
+
+    test('a check via a route with an open root is not started: the trail says which root; a failure after the root is its consequence', () async {
+      await settledCore();
+      final root = deadRoute();
+      var ran = 0;
+      final v = await sentinel.suspect(failing(checks: [viaB(() => ran++)]));
+      expect(v.kind, VerdictKind.consequence);
+      expect(ran, 0);
+      final skip = v.trail.firstWhere((t) => t.code == 'check.skipped');
+      expect((skip.params['check'], skip.params['root']), ('probe.target', root.id));
+    });
+
+    test('a failure that began before the route died is parked, and re-checks when the root closes', () async {
+      await settledCore();
+      final before = time.t.subtract(const Duration(minutes: 1));
+      final root = deadRoute();
+      var ran = 0;
+      final f = sentinel.suspect(failing(firstSeen: before, checks: [viaB(() => ran++)]));
+      await time.advanceSeconds(30);
+      expect(ran, 0);
+      expect(book.length, 0);
+      sentinel.closeRoot(root.id, reason: 'route.back');
+      final v = await f;
+      expect(ran, 1);
+      expect(v.kind, VerdictKind.blip);
+      expect(codes(v), containsAllInOrder(['check.skipped', 'park', 'resume', 'probe.target', 'blip.recovered']));
+    });
+
+    test('a check of another route is not stopped by it', () async {
+      await settledCore();
+      deadRoute();
+      var ran = 0;
+      final v = await sentinel.suspect(failing(checks: [
+        Check.recovery('probe.target', (_) async {
+          ran++;
+          return const CheckResult('probe.target', Outcome.pass);
+        }, via: 'C')
+      ], scope: Scope.none, subject: const {'host': 'a.com', 'route': 'C'}));
+      expect(ran, 1);
+      expect(v.kind, VerdictKind.blip);
+    });
+
+    test('a core restart cancels the running check; it is run again once the core has settled', () async {
+      await settledCore();
+      final runs = <Cancel>[];
+      final f = sentinel.suspect(failing(checks: [
+        Check.recovery('probe.target', (cancel) {
+          runs.add(cancel);
+          return runs.length == 1 ? Completer<CheckResult>().future : Future.value(const CheckResult('probe.target', Outcome.pass));
+        })
+      ]));
+      await time.advanceSeconds(1);
+      sentinel.context.starting('refreshLists');
+      await time.advanceSeconds(1);
+      expect(runs[0].reason, 'core.starting');
+      sentinel.context.started();
+      await time.advanceSeconds(10);
+      final v = await f;
+      expect(runs.length, 2);
+      expect(v.kind, VerdictKind.blip);
+    });
+
+    test('parking is bounded: after parkMax the suspicion is let go as deferred, nothing written', () async {
+      await settledCore();
+      final f = sentinel.suspect(failing(window: const Duration(seconds: 20)));
+      await time.advanceSeconds(5);
+      sentinel.context.pool(NetStatus.down, osOffline: true);
+      await time.advance(parkLimit - const Duration(minutes: 1));
+      sentinel.context.pool(NetStatus.up, osOffline: false);
+      final v = await f;
+      expect(v.kind, VerdictKind.confirmed, reason: 'back inside the bound');
+
+      final g = sentinel.suspect(failing(host: 'b.com', window: const Duration(seconds: 20)));
+      await time.advanceSeconds(5);
+      sentinel.context.pool(NetStatus.down, osOffline: true);
+      await time.advance(parkLimit + const Duration(seconds: 1));
+      final w = await g;
+      expect(w.kind, VerdictKind.deferred);
+      expect(w.why!.code, 'parked.expired');
+      expect(codes(w), containsAllInOrder(['park', 'park.expired']));
+      expect(book.length, 1, reason: 'only the first one was written');
+    });
+
+    test('recovered() while parked is a blip', () async {
+      await settledCore();
+      final f = sentinel.suspect(failing(window: const Duration(seconds: 20), key: 'k1'));
+      await time.advanceSeconds(5);
+      sentinel.context.pool(NetStatus.down, osOffline: true);
+      await time.advanceSeconds(5);
+      expect(sentinel.recovered('k1'), isTrue);
+      final v = await f;
+      expect(v.kind, VerdictKind.blip);
+    });
+
+    test('a user disconnect (dropAll) still drops a parked suspicion; an own restart or recovery (park: true) does not', () async {
+      await settledCore();
+      final kept = sentinel.suspect(failing(window: const Duration(seconds: 20), key: 'kept'));
+      final dropped = sentinel.suspect(failing(host: 'b.com', window: const Duration(seconds: 20), key: 'dropped'));
+      await time.advanceSeconds(5);
+      sentinel.context.pool(NetStatus.down, osOffline: true);
+      await time.advanceSeconds(5);
+      sentinel.dropAll(park: true);
+      await time.advanceSeconds(1);
+      sentinel.context.pool(NetStatus.up, osOffline: false);
+      await time.advanceSeconds(20); // the rest of the window
+      final k = await kept;
+      expect(k.kind, VerdictKind.confirmed, reason: "${k.why?.code} ${codes(k)}");
+      sentinel.context.pool(NetStatus.down, osOffline: true);
+      await time.advanceSeconds(1);
+      final d = sentinel.suspect(failing(host: 'c.com', window: const Duration(seconds: 20), key: 'again', firstSeen: time.t.subtract(const Duration(minutes: 1))));
+      await time.advanceSeconds(1);
+      sentinel.dropAll();
+      final v = await d;
+      expect((v.kind, v.why!.code), (VerdictKind.deferred, 'session.ended'));
+      await dropped;
     });
   });
 
@@ -141,7 +301,7 @@ void main() {
       await settledCore();
       sentinel.context.starting('refreshLists');
       sentinel.context.started();
-      final v = sentinel.suspect(failing(checks: [Check.recovery('probe.target', () async => const CheckResult('probe.target', Outcome.pass))]));
+      final v = sentinel.suspect(failing(checks: [Check.recovery('probe.target', (_) async => const CheckResult('probe.target', Outcome.pass))]));
       await time.advanceSeconds(6);
       expect((await v).kind, VerdictKind.blip);
     });
@@ -254,8 +414,8 @@ void main() {
     test('another path works: a workaround, with the check in the trail, no root', () async {
       await settledCore();
       final v = await sentinel.suspect(failing(checks: [
-        Check.recovery('probe.same', () async => const CheckResult('probe.same', Outcome.fail, {'ms': -1})),
-        Check.alternative('probe.direct', () async => const CheckResult('probe.direct', Outcome.pass, {'ms': 120})),
+        Check.recovery('probe.same', (_) async => const CheckResult('probe.same', Outcome.fail, {'ms': -1})),
+        Check.alternative('probe.direct', (_) async => const CheckResult('probe.direct', Outcome.pass, {'ms': 120})),
       ]));
       expect(v.kind, VerdictKind.workaround);
       expect(v.why, isA<Why>().having((w) => w.params['by'], 'by', 'probe.direct'));
@@ -275,9 +435,9 @@ void main() {
       }
 
       final v = await sentinel.suspect(failing(checks: [
-        Check.diagnostic('dns.resolve', () async => r('dns.resolve', Outcome.pass)),
-        Check.alternative('probe.a', () async => r('probe.a', Outcome.pass)),
-        Check.alternative('probe.b', () async => r('probe.b', Outcome.pass)),
+        Check.diagnostic('dns.resolve', (_) async => r('dns.resolve', Outcome.pass)),
+        Check.alternative('probe.a', (_) async => r('probe.a', Outcome.pass)),
+        Check.alternative('probe.b', (_) async => r('probe.b', Outcome.pass)),
       ]));
       expect(ran, ['dns.resolve', 'probe.a']);
       expect(v.kind, VerdictKind.workaround);
@@ -286,7 +446,7 @@ void main() {
     test('a failing diagnostic is the reason, and wins over the detector\'s own reading', () async {
       await settledCore();
       final v = await sentinel.suspect(failing(checks: [
-        Check.diagnostic('dns.resolve', () async => const CheckResult('dns.resolve', Outcome.fail, {'host': 'a.com'})),
+        Check.diagnostic('dns.resolve', (_) async => const CheckResult('dns.resolve', Outcome.fail, {'host': 'a.com'})),
       ]));
       expect(v.kind, VerdictKind.confirmed);
       expect(v.why!.code, 'dns.resolve');
@@ -296,8 +456,8 @@ void main() {
     test('a check that throws or hangs is inconclusive and does not stop the ladder', () async {
       await settledCore();
       final f = sentinel.suspect(failing(checks: [
-        Check.alternative('probe.boom', () async => throw StateError('x')),
-        Check.alternative('probe.hang', () => Completer<CheckResult>().future, timeout: const Duration(seconds: 2)),
+        Check.alternative('probe.boom', (_) async => throw StateError('x')),
+        Check.alternative('probe.hang', (_) => Completer<CheckResult>().future, timeout: const Duration(seconds: 2)),
       ]));
       await time.advanceSeconds(3);
       final v = await f;
@@ -333,7 +493,7 @@ void main() {
     test('a recovery check that passes at the end of the window is a blip too', () async {
       await settledCore();
       final f = sentinel.suspect(failing(window: const Duration(seconds: 10), checks: [
-        Check.recovery('probe.target', () async => const CheckResult('probe.target', Outcome.pass, {'ms': 80})),
+        Check.recovery('probe.target', (_) async => const CheckResult('probe.target', Outcome.pass, {'ms': 80})),
       ]));
       await time.advanceSeconds(10);
       final v = await f;
@@ -511,7 +671,7 @@ void main() {
     final fs = [
       for (var i = 0; i < 5; i++)
         sentinel.suspect(failing(subject: {'host': 'h$i.com'}, checks: [
-          Check.recovery('probe.$i', () {
+          Check.recovery('probe.$i', (_) {
             started.add(i);
             return gates[i].future;
           }),

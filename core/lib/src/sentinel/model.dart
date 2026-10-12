@@ -3,6 +3,7 @@
 /// comes back ([Verdict]). Codes and params only, never a ready sentence.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 /// How one step of the trail ended. `info` = a fact noted, not a test.
@@ -60,25 +61,62 @@ enum CheckRole {
   diagnostic,
 }
 
+/// Where a check (or a root) sits, top-down: a failure higher up explains everything below it.
+/// network -> core (the tunnel) -> route -> destination.
+enum Level { network, core, route, destination }
+
+/// Handed to a running [Check]: the Sentinel cancels it when the context makes it moot (the network
+/// went, the core restarts, a root opened on the level it goes through) or when it times out.
+/// A check that can stop early (a probe) watches [cancelled] / [done]; one that cannot is simply not awaited any more.
+class Cancel {
+  final _done = Completer<void>();
+  String? _reason;
+
+  bool get cancelled => _reason != null;
+
+  /// Why: a root id, `core.<phase>`, `timeout`, `session.ended`.
+  String? get reason => _reason;
+
+  /// Completes when cancelled.
+  Future<void> get done => _done.future;
+
+  void cancel(String reason) {
+    if (_reason != null) return;
+    _reason = reason;
+    _done.complete();
+  }
+}
+
 /// An active check, run after the window. [code] is what the trail says when [run] throws or
 /// takes longer than [timeout] (then the step is `inconclusive`, the check never breaks the ladder).
 class Check {
-  const Check(this.role, this.code, this.run, {this.timeout});
+  const Check(this.role, this.code, this.run, {this.timeout, this.level, this.via});
 
-  const Check.recovery(String code, Future<CheckResult> Function() run, {Duration? timeout}) : this(CheckRole.recovery, code, run, timeout: timeout);
-  const Check.alternative(String code, Future<CheckResult> Function() run, {Duration? timeout}) : this(CheckRole.alternative, code, run, timeout: timeout);
-  const Check.diagnostic(String code, Future<CheckResult> Function() run, {Duration? timeout}) : this(CheckRole.diagnostic, code, run, timeout: timeout);
+  const Check.recovery(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via})
+      : this(CheckRole.recovery, code, run, timeout: timeout, level: level, via: via);
+  const Check.alternative(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via})
+      : this(CheckRole.alternative, code, run, timeout: timeout, level: level, via: via);
+  const Check.diagnostic(String code, Future<CheckResult> Function(Cancel cancel) run, {Duration? timeout, Level? level, String? via})
+      : this(CheckRole.diagnostic, code, run, timeout: timeout, level: level, via: via);
 
   /// A check the detector has already made (Auto re-tried the site before it told): the Sentinel only
   /// puts [result] into the trail, in its [role].
-  factory Check.recorded(CheckRole role, CheckResult result) => Check(role, result.code, () async => result);
+  factory Check.recorded(CheckRole role, CheckResult result) => Check(role, result.code, (_) async => result);
 
   final CheckRole role;
   final String code;
-  final Future<CheckResult> Function() run;
+  final Future<CheckResult> Function(Cancel cancel) run;
 
   /// Null = the Sentinel's default.
   final Duration? timeout;
+
+  /// The deepest level the check goes through; null = `destination` for a suspicion that goes through the
+  /// core, `network` for one that does not ([Suspicion.viaCore]). A check whose level has an open root
+  /// (`net.offline`, `core.down`, a dead route's root) is not started; one running is cancelled when it opens.
+  final Level? level;
+
+  /// The route (outbound) the check goes through: an open `route`-level root of that route blocks it.
+  final String? via;
 }
 
 /// Which later subjects a root covers: they become its consequences.
@@ -148,6 +186,7 @@ class Suspicion {
     this.scope,
     this.event,
     this.session = true,
+    this.level = Level.destination,
   }) : key = key ?? defaultKey(kind, subject);
 
   /// What failed, as a code: `conn.failing`, `tun.tcpDead`, `svc.fetch`, `site.blocked`, …
@@ -188,6 +227,10 @@ class Suspicion {
 
   /// The root made of this ends with the sing-box session (a stop, a new start).
   final bool session;
+
+  /// The level of the root made of this: what it blocks (checks at its level or below that go through
+  /// it; a `route` root only the checks `via` its `subject['route']`). `destination` blocks nothing.
+  final Level level;
 
   static String defaultKey(String kind, Map<String, dynamic> subject) {
     final keys = subject.keys.toList()..sort();

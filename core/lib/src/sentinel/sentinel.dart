@@ -16,6 +16,7 @@ import 'clock.dart';
 import 'context.dart';
 import 'model.dart';
 import 'roots.dart';
+import 'windows.dart';
 
 export 'clock.dart';
 export 'context.dart';
@@ -23,6 +24,14 @@ export 'model.dart';
 export 'retry.dart';
 export 'roots.dart';
 export 'windows.dart';
+
+class _Running {
+  _Running(this.check, this.cancel, this.done);
+
+  final Check check;
+  final Cancel cancel;
+  final Completer<CheckResult> done;
+}
 
 class _Job {
   _Job(this.s, this.since) : evidence = {...s.evidence};
@@ -36,8 +45,14 @@ class _Job {
   String? recoveredBy;
   String? droppedBy;
   Duration deferred = Duration.zero;
+
+  /// How long the suspicion has been parked behind failed nodes in all (bounded by [Sentinel.parkMax]).
+  Duration parked = Duration.zero;
   int restarts = 0;
   int joined = 0;
+
+  /// The check that is running now (the context may make it moot).
+  _Running? running;
 
   Completer<void>? _wake;
   Timer? _timer;
@@ -72,6 +87,7 @@ class Sentinel {
     this.deferMax = const Duration(seconds: 60),
     this.checkTimeout = const Duration(seconds: 10),
     this.maxActive = 32,
+    this.parkMax = parkLimit,
     RootRegistry? roots,
   })  : clock = clock ?? context?.clock ?? SentinelClock(),
         roots = roots ?? RootRegistry() {
@@ -99,6 +115,9 @@ class Sentinel {
 
   /// How many suspicions are judged at once; the rest wait in the queue.
   final int maxActive;
+
+  /// The longest a suspicion waits parked behind a failed node (all parks together); then `deferred`.
+  final Duration parkMax;
 
   final _queue = Queue<_Job>();
   final _byKey = <String, _Job>{};
@@ -188,11 +207,15 @@ class Sentinel {
     return any;
   }
 
-  /// The sing-box session the suspicions under way were seen in is over (a stop, a crash, a new start): they
+  /// The sing-box session the suspicions under way were seen in is over (a stop, a new connect): they
   /// are let go as `deferred` without a record; what is still wrong is suspected again by its detector.
-  void dropAll({String reason = 'session.ended'}) {
+  /// [park]: an own restart or a crash-recovery instead: nothing is lost, the suspicions go on (the context
+  /// makes them wait for the core to settle, or parks them behind `core.down`).
+  void dropAll({String reason = 'session.ended', bool park = false}) {
+    if (park) return;
     for (final j in _byKey.values.toList()) {
       j.droppedBy = reason;
+      _abort(j, reason);
       j.poke();
     }
   }
@@ -209,6 +232,7 @@ class Sentinel {
     Scope? scope,
     int? eventId,
     bool session = true,
+    Level level = Level.destination,
     List<TrailStep>? trail,
   }) {
     final k = key ?? kind;
@@ -226,6 +250,7 @@ class Sentinel {
       since: clock.now(),
       eventId: eventId,
       session: session,
+      level: level,
       trail: trail,
     );
     roots.add(r);
@@ -262,6 +287,7 @@ class Sentinel {
     if (id != null) {
       book?.update(id, appendTrail: [TrailStep('root.closed', Outcome.pass, now.millisecondsSinceEpoch, {'reason': reason, 'afterMs': after.inMilliseconds}).toJson()]);
     }
+    _pokeAll(); // the suspicions parked behind it go on
     _changed();
   }
 
@@ -307,11 +333,48 @@ class Sentinel {
     _changed();
   }
 
-  // The suspicions under way look at the world again.
+  // The suspicions under way look at the world again; a check that has become moot is cancelled at once.
   void _pokeAll() {
     for (final j in _byKey.values.toList()) {
+      final r = j.running;
+      if (r != null) {
+        final by = _moot(j.s, r.check);
+        if (by != null) _abort(j, by);
+      }
       j.poke();
     }
+  }
+
+  // ── levels ──
+
+  Level _levelOf(Suspicion s, Check c) => c.level ?? (s.viaCore ? Level.destination : Level.network);
+
+  /// The open root that stops [c] (network -> core -> route -> destination): one on its level or above, that
+  /// it goes through. A `route` root only stops the checks `via` that route. The highest, then the oldest.
+  Root? _blocker(Suspicion s, Check c) {
+    final lvl = _levelOf(s, c);
+    Root? best;
+    for (final r in roots.open) {
+      if (r.level == Level.destination || r.level.index > lvl.index || r.key == s.key) continue;
+      if (r.level == Level.route && (c.via == null || r.subject['route'] != c.via)) continue;
+      if (best == null || r.level.index < best.level.index || (r.level == best.level && r.since.isBefore(best.since))) best = r;
+    }
+    return best;
+  }
+
+  /// Why [c] is moot now (a root id, or `core.<phase>` while our own sing-box is not settled); null = it is not.
+  String? _moot(Suspicion s, Check c) {
+    final b = _blocker(s, c);
+    if (b != null) return b.id;
+    if (s.viaCore && _levelOf(s, c) != Level.network && !context.settled) return 'core.${context.phase.name}';
+    return null;
+  }
+
+  void _abort(_Job j, String by) {
+    final r = j.running;
+    if (r == null || r.done.isCompleted) return;
+    r.cancel.cancel(by);
+    r.done.complete(CheckResult(r.check.code, Outcome.inconclusive, {'reason': 'aborted', 'by': by}));
   }
 
   void _closeSession(String reason) {
@@ -322,12 +385,14 @@ class Sentinel {
 
   void _syncContextRoots() {
     final net = context.network;
-    _contextRoot(rootNetOffline, net.state == NetState.none, 'net.restored', {'source': net.source});
-    _contextRoot(rootNetCaptive, net.state == NetState.captive, 'net.restored', const {});
-    _contextRoot(rootCoreDown, context.phase == CorePhase.down, 'core.up', const {});
+    final netSince = DateTime.fromMillisecondsSinceEpoch(net.since);
+    _contextRoot(rootNetOffline, net.state == NetState.none, 'net.restored', {'source': net.source}, Level.network, netSince);
+    _contextRoot(rootNetCaptive, net.state == NetState.captive, 'net.restored', const {}, Level.network, netSince);
+    // the core failed when it stopped being settled (the crash), not when the 30 s of retries ran out
+    _contextRoot(rootCoreDown, context.phase == CorePhase.down, 'core.up', const {}, Level.core, context.unsettledSince);
   }
 
-  void _contextRoot(String kind, bool want, String closeReason, Map<String, dynamic> subject) {
+  void _contextRoot(String kind, bool want, String closeReason, Map<String, dynamic> subject, Level level, DateTime? since) {
     final have = roots.byKind(kind);
     if (want && have == null) {
       final r = Root(
@@ -336,9 +401,10 @@ class Sentinel {
         key: kind,
         subject: subject,
         scope: Scope.all,
-        since: clock.now(),
+        since: since ?? clock.now(),
         session: false,
         fromContext: true,
+        level: level,
       );
       roots.add(r);
       note?.call('info', 'sentinel: root ${r.id} opened');
@@ -396,7 +462,11 @@ class Sentinel {
 
       // a. an external cause: no network, a captive portal
       final external = _external(j);
-      if (external != null) return external;
+      if (external != null) {
+        final v = await _park(j, external);
+        if (v != null) return v;
+        continue;
+      }
       final net = context.network;
       _step(j, 'ctx.net', net.state == NetState.up ? Outcome.pass : Outcome.inconclusive, {'state': net.state.name, 'since': net.since}, true);
 
@@ -442,7 +512,10 @@ class Sentinel {
       final root = roots.covering(s.subject, except: s.key);
       if (root != null) {
         _step(j, 'root.covers', Outcome.fail, {'root': root.id, 'kind': root.kind});
-        return _consequence(j, root);
+        if (root.level == Level.destination) return _consequence(j, root);
+        final v = await _park(j, root);
+        if (v != null) return v;
+        continue;
       }
 
       // e. persistence
@@ -457,25 +530,46 @@ class Sentinel {
 
       // d. the active checks, in the order given
       Why? diag;
+      var again = false; // a check was skipped or cancelled: the context moved, look at it again
       for (final c in s.checks) {
-        final r = await _runCheck(c);
+        if (_closed) break;
+        final blocker = _blocker(s, c);
+        if (blocker != null) {
+          _step(j, 'check.skipped', Outcome.inconclusive, {'check': c.code, 'role': c.role.name, 'root': blocker.id});
+          final v = await _park(j, blocker);
+          if (v != null) return v;
+          again = true;
+          break;
+        }
+        final r = await _runCheck(j, c);
         _step(j, r.code, r.outcome, {'role': c.role.name, ...r.params});
         if (j.recovered || j.droppedBy != null) break;
+        if (r.params['reason'] == 'aborted') {
+          again = true;
+          break;
+        }
         if (r.outcome == Outcome.pass && c.role == CheckRole.recovery) return _blip(j, since, r.code);
         if (r.outcome == Outcome.pass && c.role == CheckRole.alternative) {
           return _emit(j, VerdictKind.workaround, Why('workaround', {'by': r.code}));
         }
         if (r.outcome == Outcome.fail && c.role == CheckRole.diagnostic) diag ??= Why(r.code, r.params);
       }
-      if (j.recovered || j.droppedBy != null) continue;
+      if (j.recovered || j.droppedBy != null || again) continue;
       // the checks took time: the world may have changed under them
       final late = _external(j);
-      if (late != null) return late;
+      if (late != null) {
+        final v = await _park(j, late);
+        if (v != null) return v;
+        continue;
+      }
       if (s.viaCore && !context.settled && context.phase != CorePhase.down && j.restarts++ < 3) continue;
       final lateRoot = roots.covering(s.subject, except: s.key);
       if (lateRoot != null) {
         _step(j, 'root.covers', Outcome.fail, {'root': lateRoot.id, 'kind': lateRoot.kind});
-        return _consequence(j, lateRoot);
+        if (lateRoot.level == Level.destination) return _consequence(j, lateRoot);
+        final v = await _park(j, lateRoot);
+        if (v != null) return v;
+        continue;
       }
 
       // f. nothing says why: the journal only
@@ -488,29 +582,61 @@ class Sentinel {
     }
   }
 
-  // The network is known to be missing: a consequence of that root.
-  Verdict? _external(_Job j) {
+  // The network is known to be missing: the root that says so (the suspicion is its consequence, or parked behind it).
+  Root? _external(_Job j) {
     final net = context.network;
     if (net.state != NetState.none && net.state != NetState.captive) return null;
     _step(j, 'ctx.net', Outcome.fail, {'state': net.state.name, 'since': net.since, 'source': net.source});
     _syncContextRoots();
-    final root = roots.byKind(net.state == NetState.none ? rootNetOffline : rootNetCaptive);
-    return root == null ? null : _consequence(j, root);
+    return roots.byKind(net.state == NetState.none ? rootNetOffline : rootNetCaptive);
   }
 
-  Future<CheckResult> _runCheck(Check c) async {
+  /// A failed node ([root]: the network, the core, a dead route, any root above the suspicion) stands in the
+  /// way. If the failure began after the node failed, it is the node's consequence. If it began before, the
+  /// node did not cause it and what was being tested must not be lost: the suspicion is parked until the root
+  /// closes (at most [parkMax] altogether, then `deferred`), and the ladder starts again with the checks to re-run.
+  /// Null = the wait is over, look at the world again.
+  Future<Verdict?> _park(_Job j, Root root) async {
+    if (!j.since.isBefore(root.since)) return _consequence(j, root);
+    final t0 = clock.now();
+    _step(j, 'park', Outcome.info, {'root': root.id, 'since': t0.millisecondsSinceEpoch});
+    while (!_closed && j.droppedBy == null && !j.recovered && root.open) {
+      final left = parkMax - j.parked - clock.now().difference(t0);
+      if (left <= Duration.zero) {
+        j.parked += clock.now().difference(t0);
+        _step(j, 'park.expired', Outcome.fail, {'root': root.id, 'maxMs': parkMax.inMilliseconds});
+        return _deferred(j, const Why('parked.expired'));
+      }
+      await j.sleep(clock, left);
+    }
+    final after = clock.now().difference(t0);
+    j.parked += after;
+    _step(j, 'resume', Outcome.info, {'root': root.id, 'afterMs': after.inMilliseconds});
+    return null;
+  }
+
+  Future<CheckResult> _runCheck(_Job j, Check c) async {
     final limit = c.timeout ?? checkTimeout;
+    final cancel = Cancel();
     final done = Completer<CheckResult>();
+    j.running = _Running(c, cancel, done);
     final t = clock.timer(limit, () {
-      if (!done.isCompleted) done.complete(CheckResult(c.code, Outcome.inconclusive, {'reason': 'timeout', 'afterMs': limit.inMilliseconds}));
+      if (!done.isCompleted) {
+        cancel.cancel('timeout');
+        done.complete(CheckResult(c.code, Outcome.inconclusive, {'reason': 'timeout', 'afterMs': limit.inMilliseconds}));
+      }
     });
-    Future.sync(c.run).then((r) {
+    Future.sync(() => c.run(cancel)).then((r) {
       if (!done.isCompleted) done.complete(r);
     }, onError: (Object e) {
       if (!done.isCompleted) done.complete(CheckResult(c.code, Outcome.inconclusive, {'reason': 'error', 'error': '$e'}));
     });
+    // the context may have moved while the check was being started
+    final by = _moot(j.s, c);
+    if (by != null) _abort(j, by);
     final r = await done.future;
     t.cancel();
+    j.running = null;
     return r;
   }
 
@@ -550,6 +676,7 @@ class Sentinel {
       scope: s.scope ?? (s.subject.isEmpty ? Scope.none : Scope.of(s.subject)),
       since: since,
       session: s.session,
+      level: s.level,
       trail: List.of(j.trail),
     );
     roots.add(root);

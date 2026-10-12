@@ -2,6 +2,10 @@
 /// windows (docs/failures.md → Окна). One place, one constant per kind; the tests use [instant].
 library;
 
+/// The longest a suspicion is parked behind a failed node (docs/failures.md -> Парковка); after it: `deferred`,
+/// `parked.expired`, nothing is written.
+const parkLimit =Duration(minutes: 10);
+
 class FailureWindows {
   const FailureWindows({
     this.connFailing = const Duration(seconds: 10),

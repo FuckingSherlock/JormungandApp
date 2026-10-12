@@ -20,6 +20,7 @@ class Root {
     this.eventId,
     this.session = true,
     this.fromContext = false,
+    this.level = Level.destination,
     List<TrailStep>? trail,
   }) : trail = trail ?? [];
 
@@ -40,6 +41,10 @@ class Root {
 
   /// Opened and closed by the context (network, core down).
   final bool fromContext;
+
+  /// Where it sits (network -> core -> route -> destination): checks on or below it that go through it are
+  /// not started while it is open, and suspicions older than it are parked, not judged its consequences.
+  final Level level;
   final List<TrailStep> trail;
 
   /// The root this one turned out to be a consequence of (a wider root opened after it).
@@ -60,6 +65,7 @@ class Root {
         'key': key,
         'subject': subject,
         'scope': scope.toJson(),
+        'level': level.name,
         'since': since.millisecondsSinceEpoch,
         'eventId': ?eventId,
         'parent': ?parent,

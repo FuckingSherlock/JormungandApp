@@ -163,17 +163,29 @@ class ProbePool {
   int? _upAt, _changedAt;
   NetStatus _last = NetStatus.up;
 
-  NetStatus get status {
+  NetStatus get status => _refresh();
+
+  // The flags as last pushed: a change of any of them is pushed, even when the status stays (`os` vs `probes`).
+  (bool, bool, bool) _pushed = (false, false, false);
+
+  // Every mutator ends here: the Sentinel learns of a change when it happens, not when someone reads.
+  NetStatus _refresh() {
     final s = _offline || _silent ? NetStatus.down : (_doubt ? NetStatus.unknown : NetStatus.up);
-    if (s != _last) {
+    final flags = (_offline, _silent, _doubt);
+    final moved = s != _last;
+    if (moved) {
       _last = s;
       _changedAt = _clock();
+    }
+    if (moved || flags != _pushed) {
+      _pushed = flags;
       onChange?.call(s);
     }
     return s;
   }
 
-  /// Called when [status] moves (the Sentinel's network context follows it, sentinel/context.dart).
+  /// Called whenever the status or the flags behind it change, from the call that changed them (the
+  /// Sentinel's network context follows it, sentinel/context.dart).
   void Function(NetStatus status)? onChange;
 
   /// The OS says it has no network (see [offline]).
@@ -183,32 +195,32 @@ class ProbePool {
   void answered() {
     _upAt = _clock();
     _offline = _silent = _doubt = false;
-    status;
+    _refresh();
   }
 
   /// The route in use missed (a failing route is not yet a failing network): `unknown` until
   /// something answers. [on] false takes the doubt back (the route answers).
   void doubt(bool on) {
     _doubt = on;
-    status;
+    _refresh();
   }
 
   /// The OS says it has no network (sing-box: `missing default interface`), or has it again.
   void offline(bool on) {
     _offline = on;
-    status;
+    _refresh();
   }
 
   /// Every route is silent and so is the direct path (see [directAnswers]): no network.
   void silent(bool on) {
     _silent = on;
-    status;
+    _refresh();
   }
 
   /// A new connection starts from a clean slate (results are kept: servers are the same).
   void resetNetwork() {
     _offline = _silent = _doubt = false;
-    status;
+    _refresh();
   }
 
   /// `{status, since (ms), lastAnswer (ms), offline, silent, doubt}` for /api/status.

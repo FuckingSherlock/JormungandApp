@@ -84,7 +84,7 @@
 
 | | шаг | результат |
 |---|---|---|
-| a | **внешняя причина**: сеть `none` / `captive` | `consequence` корня `net.offline` / `net.captive` |
+| a | **внешняя причина**: сеть `none` / `captive` | `consequence` корня `net.offline` / `net.captive`; если сбой начался раньше корня — парковка (ниже) |
 | b | **мы сами**: наш reject-правилом (`evidence.ownReject`) → сразу `deferred`; ядро `stopped` → `deferred`; ядро не устоялось (`starting` / `settling` / `recovering`) → ждать устоявшегося, но не дольше `deferMax` (60 с) → иначе `deferred`; после устоявшегося, если был наш перезапуск, окно сбоя считается заново от его конца | — |
 | c | **корень уже есть**: открытый корень покрывает `subject` (в т. ч. `core.down`) | `consequence` |
 | e | **постоянство**: ждать `window` от первого появления (от конца нашего перезапуска); сбой прошёл сам внутри окна (`Sentinel.recovered`) | `blip` |
@@ -100,6 +100,33 @@
 `inconclusive`, лестницу не останавливает. Проверки идут только после окна. После проверок контекст
 смотрится снова (опоздавшая внешняя причина, перезапуск за это время — не более 3 кругов, опоздавший
 корень).
+
+### Уровни, отмена, парковка
+
+Уровни сверху вниз: `network` → `core` (туннель) → `route` → `destination` (`Level`). У корня есть `level`
+(`net.offline` / `net.captive` — `network`, `core.down` — `core`; подтверждённый корень — `Suspicion.level`,
+по умолчанию `destination`, ничего не блокирует). Проверка (`Check`) заявляет уровень, через который идёт
+(`level`; по умолчанию `destination`, а у подозрения с `viaCore: false` — `network`), и маршрут (`via`).
+Корень блокирует проверку, если его уровень не глубже уровня проверки; корень `route` — только проверки
+с `via` = его `subject['route']`. Механизм общий: сеть — лишь один из корней.
+
+- **Не запускать.** Проверка под открытым корнем не стартует: в trail `check.skipped` {`check`, `role`, `root`}.
+- **Отмена.** Запущенной проверке передаётся `Cancel` (`cancelled`, `reason`, `done`). Когда контекст делает её
+  бессмысленной — сеть `none` / `captive`, ядро не устоялось (наш перезапуск, крэш), откры́лся корень на её уровне,
+  конец сессии — проверка прерывается сразу (шаг с `reason: aborted`, `by` = id корня / `core.<фаза>`), по тайм-ауту
+  `Cancel` тоже срабатывает (`timeout`). Проба, умеющая останавливаться, смотрит на `cancel`; остальные просто
+  перестают ждать.
+- **Парковка** — ничего из проверяемого не теряется. Если сбой начался (`firstSeen`) **до** отказа узла
+  (`root.since`; у `core.down` — с момента, когда ядро перестало быть устоявшимся), прерывание или пропуск из-за
+  узла не делает сбой следствием и не отбрасывает его: подозрение паркуется (`park` {`root`, `since`}), и когда
+  корень закрылся, лестница идёт заново с того же места (`resume` {`root`, `afterMs`}; проверки выполняются
+  снова). Пока припарковано, `recovered(key)` → `blip`. Если узел отказал раньше сбоя — следствие, как раньше.
+  Корень выше `destination`, покрывающий подозрение (шаг c), паркует так же. Предел — `parkLimit` (10 мин,
+  `sentinel/windows.dart`, суммарно по всем парковкам): дальше `deferred`, `why: parked.expired`, шаг `park.expired`,
+  в журнал ничего.
+- **Конец сессии.** `dropAll()` (остановка, новое подключение пользователя) по-прежнему отпускает подозрения как
+  `deferred`; `dropAll(park: true)` (наш перезапуск, восстановление после крэша — `_stopAuto(park: true)`) их
+  не трогает: ядро не устоялось → шаг b ждёт, `core.down` → парковка.
 
 ### Вердикты
 
@@ -158,6 +185,10 @@ appendTrail)` дополняет событие задним числом, `Even
 | `self.reject` | fail | — |
 | `defer.timeout` | fail | `maxMs` |
 | `root.covers` | fail | `root`, `kind` |
+| `check.skipped` | inconclusive | `check`, `role`, `root` — проверка под открытым корнем не запускалась |
+| `park` | info | `root`, `since` — припарковано за упавшим узлом |
+| `resume` | info | `root`, `afterMs` — узел вернулся, лестница идёт заново |
+| `park.expired` | fail | `root`, `maxMs` — `parkLimit` вышел → `deferred` |
 | `persist.wait` | info | `windowMs` |
 | `persist.window` | fail | `windowMs`, `elapsedMs` |
 | код проверки | pass / fail / inconclusive | `role` (`recovery` / `alternative` / `diagnostic`) + её параметры; `reason: timeout` / `error` у неотвеченной |
@@ -168,7 +199,7 @@ appendTrail)` дополняет событие задним числом, `Even
 
 Значения `why.code` вердиктов Sentinel: `recovered`, `workaround`, `why.unknown`, код упавшей диагностической
 проверки или `why` детектора, у следствия — `kind` корня (`net.offline`, `net.captive`, `core.down`, …) с
-`{root}`; у `deferred` (не пишется) — `self.reject`, `core.stopped`, `self.notSettled`, `sentinel.closed`.
+`{root}`; у `deferred` (не пишется) — `self.reject`, `core.stopped`, `self.notSettled`, `parked.expired`, `sentinel.closed`.
 
 ## Повторы (`RetryPolicy`)
 

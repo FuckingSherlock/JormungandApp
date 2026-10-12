@@ -340,6 +340,12 @@ class ContextTracker {
     return best;
   }
 
+  /// Since when the core has not been settled (our own start, a crash and its restarts); null = it is settled.
+  DateTime? get unsettledSince {
+    _roll(clock.now());
+    return _openFrom;
+  }
+
   /// Time until the settle (null when the core is not running).
   Duration? untilSettled() {
     if (_core != 'running') return null;

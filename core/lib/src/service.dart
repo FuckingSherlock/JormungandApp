@@ -484,20 +484,20 @@ class CoreService implements CoreApi {
       why: Why('conn.${r.kind.name}', {'count': d['count'], 'route': route}),
       scope: Scope.of({'host': host, 'port': ?port, 'outbound': outbound}),
       checks: [
-        Check.recovery('conn.recovered', () async {
+        Check.recovery('conn.recovered', (_) async {
           final ok = failures.okOutbounds(host, port ?? 0, since).contains(outbound);
           return CheckResult('conn.recovered', ok ? Outcome.pass : Outcome.fail, {'outbound': outbound});
         }),
-        Check.alternative('conn.otherRoute', () async {
+        Check.alternative('conn.otherRoute', (_) async {
           final others = failures.okOutbounds(host, port ?? 0, since).where((o) => o != outbound).toList();
           return CheckResult('conn.otherRoute', others.isEmpty ? Outcome.inconclusive : Outcome.pass, {'outbounds': others.take(3).toList()});
         }),
-        Check.diagnostic('probe.same', () async {
+        Check.diagnostic('probe.same', (_) async {
           final opens = await _auto?.reachSame(outbound, dest);
           sameOpens = opens;
           return CheckResult('probe.same', opens == null ? Outcome.inconclusive : (opens ? Outcome.pass : Outcome.fail), {'outbound': outbound});
         }, timeout: const Duration(seconds: 15)),
-        Check.alternative('probe.alt', () async {
+        Check.alternative('probe.alt', (_) async {
           final auto = _auto;
           if (auto == null || sameOpens == true) return CheckResult('probe.alt', Outcome.inconclusive, {'reason': sameOpens == true ? 'sameOpens' : 'noAuto'});
           final a = await auto.reachAlternates(dest, skipRoute: route);
@@ -588,7 +588,7 @@ class CoreService implements CoreApi {
   /// Auto in the core while connected (auto.dart). A move to another route or server
   /// changes where traffic leaves: the exit is checked again.
   void _startAuto(Map<String, dynamic> plan) {
-    _stopAuto();
+    _stopAuto(park: true); // a user connect has dropped already (connect)
     // what a sing-box that just started does is counted from its first line, with or without the API
     failures.start();
     if (planTun(plan)) tunIngress.start(planTunStack(plan), ownRejects: [if (!planIpv6(plan)) 'ipv6Off']);
@@ -709,7 +709,7 @@ class CoreService implements CoreApi {
                 CheckRole.alternative,
                 CheckResult('probe.alt', u.retriesOff || u.tried.isEmpty ? Outcome.inconclusive : Outcome.fail,
                     {if (u.retriesOff) 'reason': 'off', 'tried': [for (final t in u.tried) t.route]})),
-            Check.diagnostic('site.checker', () async {
+            Check.diagnostic('site.checker', (_) async {
               if (!on) {
                 result = {'state': 'off'};
                 return const CheckResult('site.checker', Outcome.inconclusive, {'state': 'off'});
@@ -913,10 +913,10 @@ class CoreService implements CoreApi {
     dns.start();
   }
 
-  void _stopAuto() {
+  void _stopAuto({bool park = false}) {
     unawaited(_closed?.cancel());
     _closed = null;
-    sentinel.dropAll(); // what was seen in this sing-box session is void: its detectors suspect again in the next
+    sentinel.dropAll(park: park); // a stop or a new connect: what was seen in this session is void, its detectors suspect again in the next; an own restart or a crash-recovery parks
     failures.stop();
     tunIngress.stop();
     _auto?.stop();
@@ -938,7 +938,7 @@ class CoreService implements CoreApi {
     final plan = _plan;
     if (plan == null) return;
     final seq = _connectSeq, at = _auto?.index;
-    _stopAuto();
+    _stopAuto(park: true);
     sentinel.context.crashed();
     runner.note('sing-box stopped on its own (exit code $code)');
     // the crash is a root cause until sing-box is back: the restart that fails is its consequence
