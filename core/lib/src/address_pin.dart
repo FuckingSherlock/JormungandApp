@@ -48,12 +48,15 @@ Map<String, dynamic> pinOutbound(Map<String, dynamic> ob, Pins pins) {
     out['tls'] = {...tls, 'server_name': name}; // an own server_name (Reality's included) is never touched
   }
   if (tr != null) {
+    // sing-box sends `domain:port` as the Host of a domain-named server whatever the port (measured on 1.14.2,
+    // docs: .claude_states/d2_handover.md): the same value, so a server that matches it still does
+    final port = (ob['server_port'] as num?)?.toInt() ?? 443;
     switch (tr['type']) {
       case 'ws':
         final h = (tr['headers'] is Map ? (tr['headers'] as Map).cast<String, dynamic>() : <String, dynamic>{});
-        if (!h.keys.any((k) => k.toLowerCase() == 'host')) out['transport'] = {...tr, 'headers': {...h, 'Host': name}};
+        if (!h.keys.any((k) => k.toLowerCase() == 'host')) out['transport'] = {...tr, 'headers': {...h, 'Host': '$name:$port'}};
       case 'httpupgrade':
-        if ('${tr['host'] ?? ''}'.isEmpty) out['transport'] = {...tr, 'host': name};
+        if ('${tr['host'] ?? ''}'.isEmpty) out['transport'] = {...tr, 'host': '$name:$port'};
       case 'http':
         final h = tr['host'];
         if (h == null || (h is List && h.isEmpty) || h == '') out['transport'] = {...tr, 'host': [name]};

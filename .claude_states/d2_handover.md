@@ -1,6 +1,6 @@
-# D2 handover (node address pre-resolve) - stage stopped at budget; no commit, no tests, no docs yet
+# D2 handover (node address pre-resolve) - D2b wired; tests and docs left (see "Remaining")
 
-`dart analyze` in core: clean (one old info in svc_fetch.dart:661). outside_tunnel/config/updater tests pass.
+`dart analyze` in core: clean (one old info in svc_fetch.dart:661). Service tests pass.
 
 ## Done (all in core/lib/src, exported from jormungand_core.dart)
 - dns_wire.dart: dnsQueryOf(name,type,id) A/AAAA, parseDnsAnswer (compression, TTL, IPv6 text), dohParam.
@@ -23,29 +23,49 @@
 - service.dart: addressBook, addresses, _addressSettings (plan routing.dns or snapshot via Catalog; plan without dns = OS only,
   keeps tests hermetic), _warmNodes (timer path via updater.onNodes, manual via fetchSource).
 
-## NOT wired yet
-- _startSingBox: collect planHostnames(plan), `await addresses.ensure(hosts, first: dnsHostnames(dns), wait ~8 s)` (cache-only /
-  unawaited for the crash `_recover` call, line ~1234), `pins = pinsFor(hosts, addressBook, ipv6: planIpv6(plan))`, pass `pins:` to buildConfig;
-  keep `_pinned` (host->ip) and store `pins` in `r.keep({...})`, read it back in adopt. Log a summary (cached/fresh/unresolved).
-  `_plan` is null while connecting: _addressSettings must read the plan being started (add a `_starting` field).
-- Auto hook in _startAuto: `onDown: _serverDown`. Handler plan: host = memberHostname(_plan,tag,key); act only if _pinned has host;
-  rate limit per host (`reresolveEvery`, 5 min, public field for tests); gates: runner.running, sentinel.context.settled, net state up,
-  _recovering == null; step 1 untried IP (cursor+1 in book entry) -> setCursor + restart; step 2 addresses.lookup(host,'node down'),
-  `before.sameSet(after)` false -> restart (cursor 0), true -> log "unchanged". Restart = debounced (~2 s) `_connect({'plan': current
-  index merged, 'systemProxy': _sysWanted}, own:false, reason:'reresolve')` - `_connect` needs a `reason` param for
-  sentinel.context.starting. Log every re-resolve and restart (logBook.note).
-- Tester configs (buildTesterConfig) not pinned (optional).
+## D2b: wired (service.dart), analyze clean, service tests pass (no commit)
+- `_startSingBox(plan, sys, why, waitAddresses)`: `_pinsFor` = `addresses.ensure(planHostnames, first: dnsHostnames(dns), wait 8 s)` (cache first;
+  crash `_recover` passes waitAddresses:false = cache only, ensure unawaited), `pinsFor(.., ipv6: planIpv6)`, `buildConfig(pins:)`, summary line
+  "address: config for <why>: N of M hostnames pinned ... kept as names: ...". `_pinned` (host->ip) set after start; stored in `r.keep({'pins':..})`,
+  adopt reads it back (`pins:` to its buildConfig, `_pinned`). `_starting` makes `_addressSettings` read the plan being started.
+- `_connect(body, {own, reason})`: reason -> `sentinel.context.starting(reason)` and the pins `why`; own connect clears `_triedAddrs`.
+- Auto `onDown: _serverDown`: host = memberHostname(plan, tag, key); only if `_pinned` has it; per-host rate limit `reresolveEvery` (public, 5 min);
+  gate `_addrReady` = runner.running && _recovering==null && sentinel.context.settled && network.state==up. `_reresolve`: step 1 next cached
+  address not yet tried (`_triedAddrs`) -> setCursor + restart; step 2 (all tried) `addresses.lookup(host,'node down')`: same set -> log "unchanged", no restart;
+  changed -> cursor 0, tried cleared, restart. Restart = `_restartForAddresses` (2 s debounce, gates rechecked, `_connect(.., own:false, reason:'reresolve')`
+  with the current Auto index). Every step is a logBook.note (info).
+- Seam: `CoreService(resolveAddresses: true)`; false = no pre-resolve at all (configs keep names). Set false in the service/report tests that build a CoreService
+  (service_test, service_failures, sentinel_service, service_update, service_rulesets, speed_current, report_send, report_test). `Daemon` has no such param
+  (report_test's Daemon tests do not connect with hostnames).
+- address_pin.dart: ws `headers.Host` and httpupgrade `host` now `name:port` (sing-box's own default, measured).
+- Verified: pinned outbounds (vless ws+tls, vless httpupgrade, trojan http, DoH/DoT DNS) pass `sing-box check`.
 
-## To do after wiring
-- Tests: dns_wire codec; resolver with a mock DoH (plain http seam, DnsCandidate(kind:'doh', addr:'http://127.0.0.1:p/dns-query')),
-  fallback order, dead-skip, ipv6 on/off, cache persist/expiry; pin/config table per outbound; re-resolve policy (in-use only, rate
-  limit, no restart offline/unsettled); live sing-box: `sing-box check` + start of a pinned config, and capture of Host/SNI (ws plain:
-  Host header; ws+TLS needs `sing-box generate tls-keypair`; DoH DNS server `headers.Host` + `tls.server_name` field names are
-  UNVERIFIED - run `sing-box check`). Check sing-box's default ws Host for a domain server (may be `domain:port`) vs ours (bare name).
-- Verify cert IP SANs for 1.1.1.1, 8.8.8.8, 94.140.14.140 with a one-off Dart SecureSocket; if none, use official hostname as TLS name.
-- Docs (Russian): rules.md section 6 (lines ~475-478 say pre-resolve is D2), core.md (lines ~889, ~913 say D2 pending), logs.md (log lines),
-  subscription-parsing.md (update warms addresses), platforms.md "Работа вне туннеля" (address-resolve).
-- Check existing service tests stay hermetic (no real DoH); run service_test, service_update_test, sentinel_service_test, auto_test.
+## Remaining
+- Not done: buildTesterConfig is not pinned (optional); targets' groups (routing.targets) are not covered by `memberHostname` (route groups only), so a
+  node of a rule target group never triggers re-resolve (still pinned from the cache); http (h2) transport `host` is the bare name (default not measured).
+- Tests (none written in D2): dns_wire codec (A/AAAA, compression, ipv6 text); AddressResolver with a mock DoH (plain http seam,
+  `DnsCandidate(kind:'doh', addr:'http://127.0.0.1:p/dns-query')`): order DoH->DoT->UDP/TCP->system, dead-skip, ipv6 on/off, negative cache, in-flight dedupe;
+  AddressBook persist/expiry/fresh; pinOutbound / pinDnsServer table per type (incl. detour, ss plugin, grpc plain, own server_name, case-insensitive Host);
+  planHostnames / memberHostname / pinsFor; service: pins land in the config handed to a fake runner, cache-only on recover, adopt reads `pins`,
+  `_serverDown` policy (not pinned -> nothing, rate limit via reresolveEvery, no restart while offline/unsettled/recovering, IP-set change restarts with
+  reason 'reresolve', unchanged does not) using `resolveAddresses:true` + a mock DoH + injected timer; live sing-box: start a pinned config and capture the
+  Host/SNI at a loopback server (ws plain Host header measured manually: `domain:port` default, explicit value sent as is).
+- Docs (Russian): rules.md section 6 (lines ~475-478 say pre-resolve is D2; add the SNI/Host table and the experiment results), core.md (~889, ~913 say D2
+  pending; resolveAddresses seam, adopt record `pins`), logs.md (the `address:` log lines), subscription-parsing.md (update warms addresses),
+  platforms.md "Работа вне туннеля" (address-resolve entry).
+- Full suites to be run by the lead (test-runner): `dart test` in core.
+- Noticed: AdGuard unfiltered 94.140.14.140/.141 time out from this network (443 and 853), only .14.14 answers; with the default list the AdGuard DoH/DoT
+  there are dead from here.
+
+## D2b experiment results (sing-box 1.14.2, 2026-10-12)
+- `sing-box check` accepts DoH/DoT/DoQ DNS server with `tls.server_name` and (https) `headers: {Host: ...}`: field names confirmed.
+- Default Host sing-box sends for a DOMAIN-named server, captured on loopback: ws `Host: domain:port` and httpupgrade `Host: domain:port`
+  (port always included, also 80/443, no TLS). With an explicit headers.Host / host the value is sent as is. So pinning sets
+  ws headers.Host / httpupgrade host = `name:port` to keep the old wire behaviour (changed in address_pin.dart). http (h2) host list: bare name (not measured).
+- Certs with IP SANs (Dart SecureSocket verified as IP literal, TLS 443+853): 1.1.1.1 (cloudflare-dns.com), 8.8.8.8 (dns.google),
+  94.140.14.14 (dns.adguard-dns.com). 94.140.14.140/.141 (unfiltered) are unreachable from this net (timeout), cert not seen; same AdGuard
+  cert family, so no provider-hostname fallback was added. The defaults are IP literals: nothing is pinned for them anyway; the IP
+  literal path matters only for our own DoT lookups (SecureSocket.secure(host: ip) verifies the IP SAN: works for CF/Google/AdGuard .14.14).
 
 ## Per-outbound table (implemented in pinOutbound; `server` becomes the IP in all pinned cases)
 - tls.enabled (vless, vmess, trojan, anytls, hysteria, hysteria2, tuic, http over TLS, ws/grpc/h2/httpupgrade/quic over TLS):

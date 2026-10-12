@@ -92,6 +92,7 @@ class CoreService implements CoreApi {
     this.reportDeadline = reportSendDeadline,
     this.windows = const FailureWindows(),
     SentinelClock? sentinelClock,
+    this.resolveAddresses = true,
   })  : _singBoxVer = knownSingBoxVersion,
         _sentinelClock = sentinelClock,
         reportUploader = reportUploader ?? const NotConfiguredUploader(),
@@ -834,6 +835,7 @@ class CoreService implements CoreApi {
         pool: pool,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
+        onDown: _serverDown,
         note: runner.note);
     // requests that failed: sing-box's API service streams every closed connection
     _closed = api.closedConnections().listen((c) {
@@ -1237,7 +1239,7 @@ class CoreService implements CoreApi {
         final warnings = ['sing-box stopped (exit code $code) and was started again'];
         try {
           sentinel.context.starting('recover');
-          final (l, w) = await _startSingBox(plan, sys: _sysWanted); // the same path as a connect
+          final (l, w) = await _startSingBox(plan, sys: _sysWanted, why: 'recover', waitAddresses: false); // the same path as a connect (cached addresses only)
           lists = l;
           warnings.addAll(w);
           sentinel.context.started();
@@ -1587,7 +1589,7 @@ class CoreService implements CoreApi {
   Future<AddressSettings> _addressSettings() async {
     final cached = _addrSettings;
     if (cached != null && _now().millisecondsSinceEpoch - _addrSettingsAt < 10000) return cached;
-    final plan = _plan;
+    final plan = _starting ?? _plan;
     Map? dns;
     var ipv6 = false;
     if (plan != null) {
@@ -1616,15 +1618,141 @@ class CoreService implements CoreApi {
     unawaited(addresses.ensure(hosts, why: why, wait: const Duration(seconds: 30), refreshAll: true));
   }
 
+  /// Off: no hostname is resolved in advance, the configs keep the names (sing-box resolves them itself). The
+  /// tests' seam, so that a service test never reaches a real DoH server.
+  final bool resolveAddresses;
+
+  /// The plan [_startSingBox] is building a config for (`_plan` is null while connecting): what a lookup reads.
+  Map<String, dynamic>? _starting;
+
+  /// hostname → the address the running config holds for it (`pins` of config.dart); kept in the adoption record.
+  Pins _pinned = const {};
+
+  /// The addresses of a host a restart already tried since the user's connect, so every cached address is tried
+  /// once before the name is looked up again.
+  final _triedAddrs = <String, Set<String>>{};
+  final _reresolveAt = <String, int>{};
+  final _reresolving = <String>{};
+  Timer? _addrRestart;
+
+  /// How often a node's address is looked at again after it stopped answering (per host).
+  Duration reresolveEvery = const Duration(minutes: 5);
+  static const _addrRestartDelay = Duration(seconds: 2);
+
+  /// The addresses for [plan]'s hostnames: the cache first, what is missing resolved and waited for (up to ~8 s,
+  /// all at once) when [wait]; otherwise only the cache (a restart after a crash must not wait for the network).
+  /// What stays unresolved keeps its name in the config (sing-box resolves it by `domain_resolver`: the old way).
+  Future<Pins> _pinsFor(Map<String, dynamic> plan, {required String why, required bool wait}) async {
+    _starting = plan;
+    _addrSettings = null; // the lookups read the plan being started
+    try {
+      if (!resolveAddresses) return const {};
+      final hosts = planHostnames(plan);
+      if (hosts.isEmpty) return const {};
+      final first = dnsHostnames((plan['routing'] as Map?)?['dns']);
+      if (wait) {
+        await addresses.ensure(hosts, why: why, first: first);
+      } else {
+        unawaited(addresses.ensure(hosts, why: why, first: first));
+      }
+      final pins = pinsFor(hosts, addressBook, ipv6: planIpv6(plan));
+      final unresolved = [for (final h in hosts) if (!pins.containsKey(h)) h];
+      logBook.note(unresolved.isEmpty ? 'info' : 'warn',
+          'address: config for $why: ${pins.length} of ${hosts.length} hostnames pinned to an address'
+          '${unresolved.isEmpty ? '' : ', kept as names (sing-box resolves them): ${unresolved.join(', ')}'}');
+      return pins;
+    } catch (e) {
+      logBook.note('warn', 'address: the addresses could not be prepared ($e): the config keeps the names');
+      return const {};
+    } finally {
+      _starting = null;
+      _addrSettings = null;
+    }
+  }
+
+  bool get _addrReady => runner.running && _recovering == null && sentinel.context.settled && sentinel.context.network.state == NetState.up;
+
+  /// Auto's word that a server missed `failAfter` tests in a row: when its name is pinned in the config, another
+  /// cached address is tried, then the name is looked up again; a different address needs a restart of sing-box
+  /// (the config holds the IP). Per host at most once per [reresolveEvery]; never while the network is not up,
+  /// the core is not settled or sing-box is being restarted.
+  void _serverDown(String groupTag, String key) {
+    final plan = _plan;
+    if (plan == null || !resolveAddresses) return;
+    final host = memberHostname(plan, groupTag, key);
+    if (host == null || !_pinned.containsKey(host) || _reresolving.contains(host)) return;
+    final last = _reresolveAt[host];
+    if (last != null && _now().millisecondsSinceEpoch - last < reresolveEvery.inMilliseconds) return;
+    if (!_addrReady) {
+      logBook.note('info', 'address: $host ($groupTag/$key is down): not looked at now (network not up, core not settled or restarting)');
+      return;
+    }
+    _reresolveAt[host] = _now().millisecondsSinceEpoch;
+    _reresolving.add(host);
+    unawaited(_reresolve(host, '$groupTag/$key', _connectSeq).whenComplete(() => _reresolving.remove(host)));
+  }
+
+  Future<void> _reresolve(String host, String member, int seq) async {
+    try {
+      final ipv6 = _plan != null && planIpv6(_plan!);
+      final pinned = _pinned[host];
+      final entry = addressBook.get(host);
+      if (pinned == null || entry == null) return;
+      final tried = _triedAddrs.putIfAbsent(host, () => {})..add(pinned);
+      final ips = entry.ips(ipv6);
+      final next = ips.indexWhere((a) => !tried.contains(a));
+      if (next >= 0) {
+        addressBook.setCursor(host, next);
+        logBook.note('info', 'address: $host ($member is down) on $pinned: another cached address ${ips[next]} is tried (${tried.length} of ${ips.length} tried)');
+        _restartForAddresses(seq, '$host → ${ips[next]}');
+        return;
+      }
+      logBook.note('info', 'address: $host ($member is down) on $pinned: every cached address was tried, looked up again');
+      final before = entry;
+      final after = await addresses.lookup(host, why: 'node down');
+      if (seq != _connectSeq) return;
+      if (after == null) {
+        logBook.note('info', 'address: $host: the lookup gave nothing, the config stays on $pinned');
+      } else if (before.sameSet(after)) {
+        logBook.note('info', 'address: $host: the same addresses ${after.ips(ipv6).join(', ')} (IP set unchanged): no restart');
+      } else {
+        addressBook.setCursor(host, 0);
+        _triedAddrs.remove(host);
+        logBook.note('info', 'address: $host: the addresses changed (${before.ips(ipv6).join(', ')} → ${after.ips(ipv6).join(', ')}): restart');
+        _restartForAddresses(seq, '$host changed');
+      }
+    } catch (e) {
+      logBook.note('warn', 'address: $host: looking again failed: $e');
+    }
+  }
+
+  /// One restart for all the hosts that asked within a moment; the gates are checked again when it runs.
+  void _restartForAddresses(int seq, String what) {
+    _addrRestart?.cancel();
+    _addrRestart = _timer(_addrRestartDelay, () {
+      _addrRestart = null;
+      final plan = _plan;
+      if (seq != _connectSeq || plan == null) return;
+      if (!_addrReady) {
+        logBook.note('info', 'address: restart for $what skipped (network not up, core not settled or restarting); the next config uses the new address');
+        return;
+      }
+      logBook.note('info', 'address: restarting sing-box for $what');
+      final at = _auto?.index;
+      unawaited(_connect({'plan': at == null ? plan : {...plan, 'current': at}, 'systemProxy': _sysWanted}, own: false, reason: 'reresolve').then((_) {}, onError: (_) {}));
+    });
+  }
+
   /// The one way sing-box is started, by a connect and by a restart after a crash: the
   /// rule lists on disk first (ones via VPN that are missing wait for the tunnel — the
   /// old one, if it still runs), a fresh tunnel-in port, the config. The lists used and
   /// the config's warnings. [sys]: the system proxy is asked for; with a password on the
   /// user port it needs its own open inbound (`sys-in`, [_sysInPort]).
-  Future<(RuleSetFetch, List<String>)> _startSingBox(Map<String, dynamic> plan, {required bool sys}) async {
+  Future<(RuleSetFetch, List<String>)> _startSingBox(Map<String, dynamic> plan, {required bool sys, String why = 'connect', bool waitAddresses = true}) async {
     // TUN needs administrator rights: said before anything starts (a connect and a restart alike)
     if (planTun(plan) && !_isElevated()) throw TunNeedsAdmin();
     final lists = await ruleSets.ensureFor(plan, tunnel: runner.running);
+    final pins = await _pinsFor(plan, why: why, wait: waitAddresses);
     final warnings = <String>[];
     final mixed = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     final tunnelPort = await freePort(exclude: {mixed});
@@ -1647,6 +1775,7 @@ class CoreService implements CoreApi {
           dnsFlagDir: _dnsFlagDir,
           warnings: warnings,
           info: info,
+          pins: pins,
           selfPaths: _selfPaths,
           selfPackages: _selfPackages);
       // every DNS server's flag file must exist before sing-box reads the config; all on at a connect, the last
@@ -1661,6 +1790,7 @@ class CoreService implements CoreApi {
       rethrow;
     }
     _sysPort = sysPort;
+    _pinned = pins;
     // what a later sing-box will no longer take in this config
     try {
       for (final w in await runner.api!.deprecatedWarnings()) {
@@ -1687,6 +1817,7 @@ class CoreService implements CoreApi {
           'svc': svc.toJson(),
           'sysPort': sysPort,
           'sysWanted': sys,
+          'pins': pins,
           'ruleSetFiles': lists.files,
           'upSince': _now().millisecondsSinceEpoch,
         });
@@ -1727,11 +1858,13 @@ class CoreService implements CoreApi {
       final RoutingInfo info = RoutingInfo();
       final int tunnelPort;
       final int? sysPort;
+      final Pins pins;
       try {
         plan = (rec['plan'] as Map).cast<String, dynamic>();
         tunnelPort = (rec['tunnelPort'] as num).toInt();
         sysPort = (rec['sysPort'] as num?)?.toInt();
         probe = Probe((rec['probePort'] as num).toInt(), rec['probeSecret'] as String);
+        pins = {for (final e in ((rec['pins'] as Map?) ?? const {}).entries) '${e.key}': '${e.value}'};
         svc = SvcIn.fromJson(rec['svc']); // null: a record of a core before svc-in; the old sing-box has no such inbound
         // the config again with the same inputs, for what it says about itself (rules by name,
         // fallbacks, DNS servers); the config itself is not used
@@ -1744,6 +1877,7 @@ class CoreService implements CoreApi {
             dnsFlagDir: _dnsFlagDir,
             warnings: <String>[],
             info: info,
+            pins: pins,
             selfPaths: _selfPaths,
             selfPackages: _selfPackages);
       } catch (e) {
@@ -1757,6 +1891,7 @@ class CoreService implements CoreApi {
       final auto = body['auto'];
       _plan = auto is Map ? {...plan, 'auto': auto} : plan;
       _sysWanted = rec['sysWanted'] == true;
+      _pinned = pins;
       _upSince = DateTime.fromMillisecondsSinceEpoch((rec['upSince'] as num?)?.toInt() ?? _now().millisecondsSinceEpoch);
       _attempt = 0;
       _probe = probe;
@@ -1877,8 +2012,9 @@ class CoreService implements CoreApi {
 
   /// body: {plan (see config.dart), systemProxy: bool}. [own]: the user asked (the journal
   /// marks it so no notification comes of it); the reconnect that picks up lists is not.
-  Future<Map<String, dynamic>> _connect(Map<String, dynamic> body, {bool own = true}) async {
+  Future<Map<String, dynamic>> _connect(Map<String, dynamic> body, {bool own = true, String? reason}) async {
     final plan = (body['plan'] as Map).cast<String, dynamic>();
+    if (own) _triedAddrs.clear(); // the addresses a node was tried on belong to the run the user started
     final seq = ++_connectSeq;
     _wakeUp();
     _recovering = null;
@@ -1899,8 +2035,8 @@ class CoreService implements CoreApi {
       try {
         _plan = null;
         final sys = body['systemProxy'] == true;
-        sentinel.context.starting(own ? 'userConnect' : 'refreshLists');
-        final (lists, warnings) = await _startSingBox(plan, sys: sys);
+        sentinel.context.starting(reason ?? (own ? 'userConnect' : 'refreshLists'));
+        final (lists, warnings) = await _startSingBox(plan, sys: sys, why: reason ?? 'connect');
         sentinel.context.started();
         _plan = plan;
         _sysWanted = sys;

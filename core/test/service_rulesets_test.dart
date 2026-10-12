@@ -105,6 +105,7 @@ void main() {
     runner = _Runner();
     svc = CoreService(
       singBox: 'none',
+      resolveAddresses: false, // hermetic: no real DoH
       dataDir: p.join(tmp.path, 'data'),
       runner: runner,
       boxFactory: (_) => _Runner(),

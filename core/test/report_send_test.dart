@@ -131,6 +131,7 @@ void main() {
       final svc = CoreService(
         reportDeadline: deadline ?? reportSendDeadline,
         singBox: 'none',
+        resolveAddresses: false, // hermetic: no real DoH
         dataDir: p.join(tmp.path, 'data'),
         runner: _Runner(),
         sysProxy: NoSystemProxy(),

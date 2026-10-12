@@ -77,6 +77,7 @@ void main() {
     src = StreamController<NetworkQualityTestProgress>(onCancel: () => cancelled = true);
     svc = CoreService(
       singBox: 'none',
+      resolveAddresses: false, // hermetic: no real DoH
       dataDir: p.join(tmp.path, 'data'),
       runner: _Runner(),
       boxFactory: (_) => _Runner(),

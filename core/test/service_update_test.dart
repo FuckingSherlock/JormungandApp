@@ -57,6 +57,7 @@ void main() {
   Future<CoreService> start({AppVersion? version}) async {
     final s = CoreService(
       singBox: 'none',
+      resolveAddresses: false, // hermetic: no real DoH
       dataDir: p.join(tmp.path, 'data'),
       runner: _Runner(),
       sysProxy: NoSystemProxy(),

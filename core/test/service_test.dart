@@ -123,6 +123,7 @@ void main() {
       isElevated: () => true,
       windows: windows,
       singBox: 'none',
+      resolveAddresses: false, // hermetic: no real DoH
       dataDir: p.join(tmp.path, 'data'),
       runner: runner,
       boxFactory: (_) => _NoisyRunner(),
@@ -147,6 +148,7 @@ void main() {
     tmp = await Directory.systemTemp.createTemp('jorm-svc');
     svc = CoreService(
       singBox: 'does-not-exist',
+      resolveAddresses: false, // hermetic: no real DoH
       dataDir: p.join(tmp.path, 'data'),
       runner: _Runner(),
       knownSingBoxVersion: '1.12.0',
