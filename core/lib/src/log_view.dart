@@ -20,6 +20,8 @@ class EventRecord {
     required this.data,
     this.bg = false,
     this.rev = 0,
+    this.verdict,
+    this.cause,
   });
 
   factory EventRecord.fromJson(Map m) => EventRecord(
@@ -33,6 +35,8 @@ class EventRecord {
     rev: (m['rev'] as num?)?.toInt() ?? 0,
     log: (m['log'] as num?)?.toInt(),
     data: m['data'] is Map ? Map<String, dynamic>.from(m['data'] as Map) : <String, dynamic>{},
+    verdict: m['verdict'] is String ? m['verdict'] as String : null,
+    cause: (m['cause'] as num?)?.toInt(),
   );
 
   final int id, at;
@@ -48,6 +52,10 @@ class EventRecord {
   /// The number of the raw line written at the same moment (null = none).
   final int? log;
   final Map<String, dynamic> data;
+
+  /// What the Sentinel found (docs/failures.md): null = not judged; [cause] = the root event of a consequence.
+  final String? verdict;
+  final int? cause;
 
   String get key => '$cat/$type';
   bool get isProblem => level != 'info';
@@ -126,6 +134,10 @@ bool notifAllows(Object? cfg, String kind) {
 bool eventNotifies(Object? cfg, EventRecord e) {
   final kind = eventNotifKind[e.key];
   if (kind == null || !notifAllows(cfg, kind)) return false;
+  // judged by the Sentinel: only a confirmed root cause notifies (a blip, a consequence, a workaround, an unexplained failure stay
+  // in the journal); site/blocked is always a workaround and notifies as before: it offers a rule for the route that opens it
+  final v = e.verdict;
+  if (v != null && e.key != 'site/blocked' && (v != 'confirmed' || e.cause != null)) return false;
   // A site that failed through every route is quiet until the external checker says it opens elsewhere
   // (pending, off, failed and "down everywhere" stay in the journal); a manual check is the user's own.
   final check = e.key == 'site/unreachable' ? e.data['check'] : null;

@@ -173,6 +173,18 @@ void main() {
     }
   });
 
+  test('judged events: only a confirmed root notifies; site/blocked (a workaround) as before', () {
+    EventRecord j(String type, String? verdict, {int? cause}) =>
+        e({...ev(1, type == 'blocked' ? 'site' : 'conn', type, level: 'warn'), 'verdict': ?verdict, 'cause': ?cause});
+    expect(eventNotifies(null, j('failing', 'confirmed')), isTrue);
+    expect(eventNotifies(null, j('failing', 'confirmed', cause: 7)), isFalse, reason: 'a consequence');
+    for (final v in ['blip', 'consequence', 'workaround', 'unexplained']) {
+      expect(eventNotifies(null, j('failing', v)), isFalse, reason: v);
+    }
+    expect(eventNotifies(null, j('failing', null)), isTrue, reason: 'not judged: the type decides');
+    expect(eventNotifies(null, j('blocked', 'workaround')), isTrue);
+  });
+
   test('site/unreachable with a check: only «opens» (not manual) notifies; without a check as before', () {
     EventRecord gone(Object? check) => e(ev(1, 'site', 'unreachable', level: 'warn', data: {'host': 'a.com', 'check': ?check}));
     expect(eventNotifies(null, gone(null)), isTrue, reason: 'retries off / an older event: as before');
