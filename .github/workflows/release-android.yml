@@ -199,7 +199,7 @@ jobs:
         run: node app/tool/gen_i18n.mjs --missing
 
       # Release notes (docs/updates.md section 13, "Заметки к релизу"), before the build so a missing
-      # one fails in a minute. dist/notes.txt (en) and dist/notes.ru.txt: stable - release-notes/X.Y.Z.{en,ru}.txt
+      # one fails in a minute. dist/notes.txt (en) and dist/notes.ru.txt: stable - release-notes/X.Y.Z.ru.txt (+ optional .en.txt)
       # (written in the Russian translation pass); beta - a header line (its commit is where the next
       # beta's notes start) + the Russian summary release-notes/beta.txt as committed since the previous
       # beta (.github/scripts/beta_notes.sh), the same text in both
@@ -207,12 +207,12 @@ jobs:
         run: |
           dist="$RUNNER_TEMP/dist"; mkdir -p "$dist"
           if [ "$CHANNEL" = stable ]; then
-            for l in en ru; do
-              f="release-notes/$VERSION.$l.txt"
-              [ -n "$(tr -d '[:space:]' < "$f" 2> /dev/null)" ] || { echo "::error::$f is missing or empty - write the stable release notes (release-notes/README.md)"; exit 1; }
-            done
-            cp "release-notes/$VERSION.en.txt" "$dist/notes.txt"
-            cp "release-notes/$VERSION.ru.txt" "$dist/notes.ru.txt"
+            f="release-notes/$VERSION.ru.txt"
+            [ -n "$(tr -d '[:space:]' < "$f" 2> /dev/null)" ] || { echo "::error::$f is missing or empty - write the stable release notes (release-notes/README.md)"; exit 1; }
+            cp "$f" "$dist/notes.ru.txt"
+            # English is optional for now (the testers are Russian): without it the Russian text is the default
+            en="release-notes/$VERSION.en.txt"
+            if [ -n "$(tr -d '[:space:]' < "$en" 2> /dev/null)" ]; then cp "$en" "$dist/notes.txt"; else cp "$f" "$dist/notes.txt"; fi
           else
             if ! body=$(bash .github/scripts/beta_notes.sh "$RUNNER_TEMP/manifest-beta.json"); then
               echo "::error::release-notes/beta.txt was not updated since the previous beta - write the summary of this beta (release-notes/README.md) and push it"; exit 1
