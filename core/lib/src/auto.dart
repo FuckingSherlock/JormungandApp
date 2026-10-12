@@ -53,7 +53,9 @@ import 'config.dart' show defaultTestUrl, planCheckers;
 import 'failures.dart' show ConnOutcome;
 import 'plan.dart';
 import 'pool.dart';
+import 'probe.dart' show canProbeDest;
 import 'sbapi.dart' show BoxControl, ClosedConnection;
+import 'sentinel/model.dart' show Cancel;
 import 'stall.dart';
 
 /// When a route above the current one takes the traffic back.
@@ -215,41 +217,20 @@ class AutoUnstable {
   Map<String, dynamic> toJson() => {'id': id, 'strikes': strikes, 'hold': holdMs, 'at': at};
 }
 
-/// A site ([dest], `host:port`) that does not open through [route]'s server [server]
-/// while the node passes traffic, and opens through the route [via] (its server
-/// [viaServer]): the app offers a rule (the site → [via]). [rule] is the rule sing-box matched for
-/// the failed request (its text, raw; '' = none, the final route), [process] the path of the app
-/// that made it ('' = unknown): why the request went that way, and who sent it.
-class AutoBlocked {
-  const AutoBlocked({required this.route, required this.server, required this.dest, required this.via, required this.viaServer, required this.at, this.rule = '', this.process = '', this.pkg = ''});
-  final String route, server, dest, via, viaServer, rule, process, pkg;
-  final int at;
-  Map<String, dynamic> toJson() => {'route': route, 'server': server, 'dest': dest, 'via': via, 'viaServer': viaServer, 'rule': rule, 'process': process, 'pkg': pkg, 'at': at};
-}
-
-/// A site ([dest], `host:port`) that does not open through [route]'s server [server] while
-/// the node passes traffic, nor through any of the other answering routes [tried] (entry id
-/// and current server each; empty = no other route answers): the user may simply have no
-/// node that suits the site. [retriesOff]: the other routes were not tried because the
-/// setting is off (so [tried] is empty for that reason, not for lack of routes). [rule] and
-/// [process]: as on [AutoBlocked].
-class AutoUnreachable {
-  const AutoUnreachable({required this.route, required this.server, required this.dest, required this.tried, required this.at, this.retriesOff = false, this.rule = '', this.process = '', this.pkg = ''});
-  final String route, server, dest, rule, process, pkg;
-  final List<({String route, String server})> tried;
-  final bool retriesOff;
-  final int at;
-  Map<String, dynamic> toJson() => {
-        'route': route,
-        'server': server,
-        'dest': dest,
-        'tried': [for (final t in tried) {'route': t.route, 'server': t.server}],
-        'retriesOff': retriesOff,
-        'rule': rule,
-        'process': process,
-        'pkg': pkg,
-        'at': at,
-      };
+/// Requests to a site ([dest], `host:port`) got nothing back through [route]'s server [server] while the node
+/// itself passes traffic: the Sentinel judges it (service.dart: one suspicion per destination, with the
+/// connection failures of the same site) with the probes [AutoService.reachSame] / [AutoService.reachAlternates].
+/// [tag] is the failed connection's own outbound (as the failure book records it; a test is aimed at the server
+/// it resolves to, [AutoService.reachSame]); [rule] is the
+/// rule sing-box matched for the failed request (its text, raw; '' = none, the final route), [process] the path
+/// of the app that made it ('' = unknown), [pkg] its Android package: why the request went that way, and who
+/// sent it. [firstSeen]: the first failed request of the window (ms).
+class AutoSiteFail {
+  const AutoSiteFail({required this.route, required this.server, required this.tag, required this.dest, required this.at, int? firstSeen, this.rule = '', this.process = '', this.pkg = ''})
+      : firstSeen = firstSeen ?? at;
+  final String route, server, tag, dest, rule, process, pkg;
+  final int at, firstSeen;
+  Map<String, dynamic> toJson() => {'route': route, 'server': server, 'tag': tag, 'dest': dest, 'rule': rule, 'process': process, 'pkg': pkg, 'firstSeen': firstSeen, 'at': at};
 }
 
 // A failed request: the server's outbound tag, the rule sing-box matched and the app's path.
@@ -438,13 +419,9 @@ class AutoService {
   int requestFails = 0;
   Map<String, dynamic>? lastRequestFail;
 
-  /// Sites found blocked on a node (as on [blocked]) and the last.
-  int blockedCount = 0;
-  AutoBlocked? lastBlocked;
-
-  /// Sites that open through no route that was tried (as on [unreachable]) and the last.
-  int unreachableCount = 0;
-  AutoUnreachable? lastUnreachable;
+  /// Sites that got nothing back through a node that passes traffic (as on [siteFails]) and the last.
+  int siteFailCount = 0;
+  AutoSiteFail? lastSiteFail;
 
   /// Connections closed as stalled on a route / server left for a dead one.
   int stalledClosed = 0;
@@ -454,8 +431,7 @@ class AutoService {
 
   final _switches = StreamController<AutoSwitch>.broadcast();
   final _unstable = StreamController<AutoUnstable>.broadcast();
-  final _blocked = StreamController<AutoBlocked>.broadcast();
-  final _unreachable = StreamController<AutoUnreachable>.broadcast();
+  final _siteFails = StreamController<AutoSiteFail>.broadcast();
   final _net = StreamController<AutoNet>.broadcast();
   int? _lostAt, _offlineAt; // since when: no route answers / the OS has no network
   Timer? _timer;
@@ -466,8 +442,6 @@ class AutoService {
   bool _failCheck = false; // the running / next check was asked for by failed requests
   int? _failAt; // the first failed request of the current window
   final _failDests = <String, _Fail>{}; // sites that got nothing back → the server's outbound tag, the rule and the app of the request
-  final _blockedAt = <String, int>{}; // 'route site' → when it was reported
-  final _unreachableAt = <String, int>{}; // the same for unreachable sites
   int? _warmedAt; // when the spares were tested last
   bool _directOk = false; // no route answers, but the direct path does (see _decide)
 
@@ -477,11 +451,9 @@ class AutoService {
   /// A route that keeps dropping (flap guard).
   Stream<AutoUnstable> get unstable => _unstable.stream;
 
-  /// A site that does not open through the current node but does through another route.
-  Stream<AutoBlocked> get blocked => _blocked.stream;
-
-  /// A site that does not open through the current node nor through the other routes tried.
-  Stream<AutoUnreachable> get unreachable => _unreachable.stream;
+  /// A site the requests to which got nothing back through the current node while it passes traffic. Auto only
+  /// notices: the Sentinel decides what it is.
+  Stream<AutoSiteFail> get siteFails => _siteFails.stream;
 
   /// No route answers, and answers again; the OS offline and back.
   Stream<AutoNet> get net => _net.stream;
@@ -506,8 +478,7 @@ class AutoService {
     _stall.stop();
     _switches.close();
     _unstable.close();
-    _blocked.close();
-    _unreachable.close();
+    _siteFails.close();
     _net.close();
   }
 
@@ -639,51 +610,24 @@ class AutoService {
     _kickNow();
   }
 
-  // The node passes traffic, yet requests through it got nothing back: each site again
-  // through it; opens now — one-off; not — through the other routes that answer, in Auto's
-  // order, at most [siteAlternates] of them, up to the first that opens it: there — the site
-  // is blocked on this node ([blocked], once an hour per site and route); nowhere — the
-  // site is down, or no route suits it ([unreachable], the same dedupe; empty `tried` = no
-  // other route answers). Both also get a log line.
+  // The node passes traffic, yet requests through it got nothing back: each site they went to is
+  // told to the Sentinel ([siteFails]) with the server it went through, unless a test cannot be aimed at it.
+  // What it is (one-off, blocked on this node, down) is the Sentinel's to find out with [reachSame] /
+  // [reachAlternates], together with the failures the connection book saw of the same site.
   Future<void> _sites(_Route cur) async {
     final dests = Map.of(_failDests);
     _failDests.clear();
     if (reach == null || dests.isEmpty) return;
-    // each try is a request to the user's real site through a server they did not pick:
-    // how many is the setting ([AutoSettings.siteAlternates], 0 = none)
-    // (Manual: only the entry the user picked, no other route is tried)
-    final alts = _alternates(cur.id);
-    final off = settings.siteAlternates == 0;
+    final first = _failAt;
     for (final MapEntry(key: dest, value: fail) in dests.entries) {
       if (_stopped) return;
       final tag = _serverTag(cur, fail.tag);
-      if (tag == null) continue; // not a server we can aim a test at: no evidence either way
-      final here = await reach!(tag, dest);
-      if (here != false) continue; // opens now, or cannot be told
-      final r = await _tryAlternates(alts, dest);
-      if (_stopped) return;
-      final via = r.via, tried = r.tried, unsure = r.unsure; // an alternate that could not be tried tells nothing
-      final key = '${cur.id} $dest', now = _clock();
-      if (via != null) {
-        if (now - (_blockedAt[key] ?? -3600000) < 3600000) continue;
-        _blockedAt[key] = now;
-        final b = AutoBlocked(route: cur.id, server: cur.main.current, dest: dest, via: via.id, viaServer: via.main.current, at: now, rule: fail.rule, process: fail.process, pkg: fail.pkg);
-blockedCount++;
-        lastBlocked = b;
-        note?.call('auto: $dest does not open through ${cur.id}, opens through ${via.id}');
-        if (!_blocked.isClosed) _blocked.add(b);
-        continue;
-      }
-      note?.call(off
-          ? 'auto: $dest does not open through ${cur.id}: retries through other routes are off'
-          : 'auto: $dest does not open through ${cur.id}${tried.isEmpty ? '' : ' nor ${tried.map((t) => t.route).join(', ')}'}: the site is down or blocked everywhere');
-      if (unsure && tried.isEmpty) continue; // nothing was told for sure: no claim to the user
-      if (now - (_unreachableAt[key] ?? -3600000) < 3600000) continue;
-      _unreachableAt[key] = now;
-      final u = AutoUnreachable(route: cur.id, server: cur.main.current, dest: dest, tried: tried, retriesOff: off, at: now, rule: fail.rule, process: fail.process, pkg: fail.pkg);
-      unreachableCount++;
-      lastUnreachable = u;
-      if (!_unreachable.isClosed) _unreachable.add(u);
+      if (tag == null || !canProbeDest(dest)) continue; // not a server / a site we can aim a test at: no evidence either way
+      final f = AutoSiteFail(route: cur.id, server: cur.main.current, tag: fail.tag, dest: dest, at: _clock(), firstSeen: first, rule: fail.rule, process: fail.process, pkg: fail.pkg);
+      siteFailCount++;
+      lastSiteFail = f;
+      note?.call('auto: $dest got nothing back through ${cur.id}');
+      if (!_siteFails.isClosed) _siteFails.add(f);
     }
   }
 
@@ -691,19 +635,30 @@ blockedCount++;
   List<_Route> _alternates(String? skip) =>
       [for (var i = 0; !manual && i < _routes.length; i++) if (_routes[i].id != skip && _routes[i].health.answered) _routes[i]].take(settings.siteAlternates).toList();
 
-  // [dest] through each of [alts] up to the first that opens it. `unsure`: one could not be tried (tells nothing).
-  Future<({_Route? via, List<({String route, String server})> tried, bool unsure})> _tryAlternates(List<_Route> alts, String dest) async {
+  // A probe that gives up when [cancel] fires (null then: nothing was told; the request itself runs out by its timeout).
+  Future<bool?> _reachCancellable(String tag, String dest, Cancel? cancel) {
+    final r = reach!(tag, dest);
+    return cancel == null ? r : Future.any<bool?>([r, cancel.done.then((_) => null)]);
+  }
+
+  // [dest] through each of [alts] up to the first that opens it, stopping between them when [cancel] fires.
+  // `unsure`: one could not be tried (tells nothing).
+  Future<({_Route? via, List<({String route, String server})> tried, bool unsure})> _tryAlternates(List<_Route> alts, String dest, [Cancel? cancel]) async {
     _Route? via;
     var unsure = false;
     final tried = <({String route, String server})>[];
     for (final alt in alts) {
       if (_stopped) break;
-      final there = await reach!(alt.main.member(alt.main.current), dest);
+      if (cancel?.cancelled == true) {
+        unsure = true;
+        break;
+      }
+      final there = await _reachCancellable(alt.main.member(alt.main.current), dest, cancel);
       if (there == true) {
         via = alt;
         break;
       }
-      if (there == false) {
+      if (there == false && cancel?.cancelled != true) {
         tried.add((route: alt.id, server: alt.main.current));
       } else {
         unsure = true;
@@ -712,25 +667,35 @@ blockedCount++;
     return (via: via, tried: tried, unsure: unsure);
   }
 
-  /// Whether [dest] (`host:port`) opens through the server a failed connection went out of ([outbound], a
-  /// server of any route of the plan, or `direct`): true / false = the test really went through it; null =
-  /// cannot be told (no probe, a port other than 443 / 80, not a server a test can aim at).
-  Future<bool?> reachSame(String outbound, String dest) async {
-    final r = reach;
-    if (r == null || _stopped) return null;
-    String? tag = outbound == 'direct' ? 'direct' : null;
+  /// Whether a test can be aimed at [dest] (`host:port`) through the server a failed connection went out of
+  /// ([outbound]); what [reachSame] would try.
+  bool canReachSame(String outbound, String dest) => reach != null && !_stopped && canProbeDest(dest) && _tagOf(outbound) != null;
+
+  String? _tagOf(String outbound) {
+    if (outbound == 'direct') return 'direct';
     for (final route in _routes) {
-      tag ??= _serverTag(route, outbound);
+      final t = _serverTag(route, outbound);
+      if (t != null) return t;
     }
-    return tag == null ? null : r(tag, dest);
+    return null;
   }
 
-  /// [dest] through the answering routes other than [skipRoute] (the failing one's entry id), as the site
-  /// check does it (the same setting; Manual tries none): see [AltReach].
-  Future<AltReach> reachAlternates(String dest, {String? skipRoute}) async {
+  /// Whether [dest] (`host:port`) opens through the server a failed connection went out of ([outbound], a
+  /// server of any route of the plan, or `direct`): true / false = the test really went through it; null =
+  /// cannot be told (no probe, a port other than 443 / 80, not a server a test can aim at, [cancel] fired).
+  Future<bool?> reachSame(String outbound, String dest, {Cancel? cancel}) async {
+    if (reach == null || _stopped) return null;
+    final tag = _tagOf(outbound);
+    return tag == null ? null : _reachCancellable(tag, dest, cancel);
+  }
+
+  /// [dest] through the answering routes other than [skipRoute] (the failing one's entry id), in Auto's order, at
+  /// most `siteAlternates` of them (the setting; Manual tries none), up to the first that opens it, stopping
+  /// between them when [cancel] fires: see [AltReach].
+  Future<AltReach> reachAlternates(String dest, {String? skipRoute, Cancel? cancel}) async {
     final off = settings.siteAlternates == 0;
     if (reach == null || _stopped) return AltReach(off: off, unsure: true);
-    final r = await _tryAlternates(_alternates(skipRoute), dest);
+    final r = await _tryAlternates(_alternates(skipRoute), dest, cancel);
     return AltReach(via: r.via?.id, viaServer: r.via?.main.current, tried: r.tried, unsure: r.unsure, off: off);
   }
 
@@ -1098,10 +1063,8 @@ blockedCount++;
       'offline': offline,
       'requestFails': requestFails,
       'lastRequestFail': lastRequestFail,
-      'blocked': blockedCount,
-      'lastBlocked': lastBlocked?.toJson(),
-      'unreachable': unreachableCount,
-      'lastUnreachable': lastUnreachable?.toJson(),
+      'siteFails': siteFailCount,
+      'lastSiteFail': lastSiteFail?.toJson(),
       'stalledClosed': stalledClosed,
       'checkedAt': checkedAt,
     };

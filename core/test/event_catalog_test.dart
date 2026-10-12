@@ -264,7 +264,8 @@ final _implied = <String, (String cat, RegExp call)>{
 };
 
 // `SuspicionEvent('cat', 'type', …)`: the event a detector hands to the Sentinel, which writes it with its verdict
-final _withCat = RegExp(r'(?<![A-Za-z0-9_.])(_event|eventBook\.add|SuspicionEvent)\(');
+// `_siteKind('cat', 'type')`: the (cat, type) a verdict of the site judge (service.dart) picks for its SuspicionEvent
+final _withCat = RegExp(r'(?<![A-Za-z0-9_.])(_event|eventBook\.add|SuspicionEvent|_siteKind)\(');
 
 _Found _coreEmits(Directory dir) {
   final f = _Found();
@@ -284,6 +285,7 @@ _Found _coreEmits(Directory dir) {
       final a = _splitArgs(inner);
       if (a.isEmpty) continue;
       if (a[0].startsWith('this.')) continue; // the constructor of SuspicionEvent itself
+      if (a[0].startsWith('String ')) continue; // the definition of `_siteKind`
       final where = '$name:${_line(src, m.start)}';
       final implied = _implied[name];
       final first = _literal(a[0]);

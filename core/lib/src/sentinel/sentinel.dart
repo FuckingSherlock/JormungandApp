@@ -573,7 +573,7 @@ class Sentinel {
       }
 
       // f. nothing says why: the journal only
-      final why = diag ?? s.why;
+      final why = diag ?? s.why ?? s.whyLate?.call(j.evidence);
       if (why == null) {
         _step(j, 'why.unknown', Outcome.inconclusive, const {});
         return _emit(j, VerdictKind.unexplained, const Why('why.unknown'));
@@ -701,10 +701,12 @@ class Sentinel {
         _ => 'info',
       };
       final cause = kind == VerdictKind.consequence ? root?.eventId : null;
+      final pick = e.kindFor == null ? (e.cat, e.type) : e.kindFor!(kind, j.evidence);
+      if (pick == null) return _verdict(j, kind, why, root: root);
       final line = e.note?.call(kind, j.evidence);
       if (line != null) note?.call(level, line);
-      eventId = b.add(e.cat, e.type, level,
-          data: j.evidence,
+      eventId = b.add(pick.$1, pick.$2, level,
+          data: e.dataFor?.call(kind, j.evidence) ?? j.evidence,
           own: e.own,
           bg: e.bg,
           link: e.link,

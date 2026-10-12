@@ -273,7 +273,8 @@ class FailureReport {
 /// fresh change it in place (`more`) instead of making new ones; at most [maxEvents] suspicions per
 /// [window] overall; an entry whose suspicion did not stand waits [recheckAfter] before the next. Not
 /// raised for UDP, for the core's own requests (`probe-in`, Auto's checks of the spare routes among them,
-/// `svc-in` and `tunnel-in`), for an ignored site, or for a site Auto already reported ([noteSite]).
+/// `svc-in` and `tunnel-in`) and for an ignored site. The judge key is the destination's ([siteKey]): Auto's
+/// notice of the same site joins the same suspicion.
 ///
 /// The caller owns the clock and the lifetime: [start] when sing-box starts (counters begin), [stop]
 /// when it ends; nothing here runs on a timer.
@@ -311,9 +312,6 @@ class FailureBook {
   /// A log hint is used for the connection that closes within this of it.
   static const hintTtl = Duration(seconds: 20);
 
-  /// A site Auto reported ([noteSite]) gets no `conn/failing` for this long.
-  static const coveredFor = Duration(minutes: 10);
-
   /// The destinations whose resolving failed (`dns: exchange failed for …`), kept.
   static const maxDns = 50;
 
@@ -335,7 +333,6 @@ class FailureBook {
   int _since = 0;
   final _entries = <String, _Entry>{}; // insertion order: the newest last
   final _hints = <String, _Hint>{};
-  final _covered = <String, int>{};
   final _groups = <String, _Group>{};
   final _emitted = <int>[];
   final _total = _Buckets();
@@ -349,7 +346,6 @@ class FailureBook {
   void start() {
     _entries.clear();
     _hints.clear();
-    _covered.clear();
     _groups.clear();
     _emitted.clear();
     _dns.clear();
@@ -369,22 +365,8 @@ class FailureBook {
     _hints.clear();
   }
 
-  /// Auto reported [host] (`site/blocked` / `site/unreachable`): no `conn/failing` for it soon.
-  void noteSite(String host) {
-    _covered.remove(host);
-    _covered[host.toLowerCase()] = _now().millisecondsSinceEpoch;
-    while (_covered.length > 100) {
-      _covered.remove(_covered.keys.first);
-    }
-  }
-
-  bool _isCovered(String host, int ms) {
-    for (final e in _covered.entries) {
-      if (ms - e.value > coveredFor.inMilliseconds) continue;
-      if (host == e.key || host.endsWith('.${e.key}')) return true;
-    }
-    return false;
-  }
+  /// The judge's key of a destination: one suspicion per site, whoever reports it (this book, Auto).
+  static String siteKey(String host, int? port) => 'site|${host.toLowerCase()}${port == null || port <= 0 ? '' : ':$port'}';
 
   /// A line of sing-box's log: a failed dial's reason (the hint for the closed record that follows) and
   /// a name that did not resolve.
@@ -498,7 +480,6 @@ class FailureBook {
     e.streak.add((at, kind));
     if (e.reported || e.streak.length < failAfter || at < e.holdUntil) return;
     if (e.network == 'udp' || e.inbound == _tunnelInbound || e.inbound == _probeInbound || e.inbound == _svcInbound) return;
-    if (_isCovered(host, at)) return;
     e.reported = true;
     _raise(e, at, bg);
   }
@@ -579,8 +560,9 @@ class FailureBook {
     send(r).then(settle, onError: (Object _) => settle(null));
   }
 
-  /// The judge's key of an entry: one suspicion per (app, destination, outbound, inbound).
-  static String _keyOf(_Entry e) => 'conn.failing|${e.who.isNotEmpty ? e.who : e.process}|${e.host}:${e.port}|${e.outbound}|${e.inbound}';
+  /// The judge's key of an entry: its destination's ([siteKey]); [recovered] is told only when the very entry
+  /// (app, outbound, inbound) that was reported works again.
+  static String _keyOf(_Entry e) => siteKey(e.host, e.port);
 
   /// The outbounds through which [host]:[port] worked (for any app) after [sinceMs]: «did it recover by
   /// itself» (the failing outbound is among them) and «does it open another way» (another is), read from
@@ -591,6 +573,16 @@ class FailureBook {
       for (final e in _entries.values)
         if (e.host == h && e.port == port && e.lastOkAt > sinceMs) e.outbound,
     };
+  }
+
+  /// Whether any connection to [host]:[port] (any app, any outbound) failed at or after [sinceMs]: «the live traffic
+  /// still fails», read from the book, no request is made.
+  bool failedSince(String host, int port, int sinceMs) {
+    final h = host.toLowerCase();
+    for (final e in _entries.values) {
+      if (e.host == h && e.port == port && e.lastFailAt >= sinceMs) return true;
+    }
+    return false;
   }
 
   /// The numbers for the report: the totals, the apps and destinations that fail most (by the last

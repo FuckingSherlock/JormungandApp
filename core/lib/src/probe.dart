@@ -162,17 +162,26 @@ class ProbeRefused extends SocketException {
 /// An error as one short phrase for the log ("SocketException: socks: reply 4" -> "socks: reply 4").
 String _why(Object e) => e is SocketException ? (e.message.isEmpty ? '${e.osError ?? e}' : e.message) : '$e';
 
+/// Whether a site test ([probeReach]) can be aimed at [dest] (`host:port`) at all: port 443 (a name, not an
+/// IP address) or 80.
+bool canProbeDest(String dest) {
+  final i = dest.lastIndexOf(':');
+  final host = i > 0 ? dest.substring(0, i).replaceAll(RegExp(r'^\[|\]$'), '') : dest;
+  final port = int.tryParse(i > 0 ? dest.substring(i + 1) : '');
+  if (port != 443 && port != 80) return false;
+  return !(port == 443 && InternetAddress.tryParse(host) != null);
+}
+
 /// Whether the site [dest] (`host:port`) opens through [tag]: port 443 — a TLS handshake
 /// with it (its certificate valid for the host), port 80 — an answer to HEAD /. null when
 /// it cannot be told: another port, an IP address on 443, or the test never ran (the
 /// inbound is not there, or it refused the user name [tag] — no such outbound to test);
 /// false only when the request really went through [tag] and failed.
 Future<bool?> probeReach(Probe probe, String tag, String dest, {int timeoutMs = 5000}) async {
+  if (!canProbeDest(dest)) return null;
   final i = dest.lastIndexOf(':');
   final host = i > 0 ? dest.substring(0, i).replaceAll(RegExp(r'^\[|\]$'), '') : dest;
   final port = int.tryParse(i > 0 ? dest.substring(i + 1) : '');
-  if (port != 443 && port != 80) return null;
-  if (port == 443 && InternetAddress.tryParse(host) != null) return null;
   final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
   Duration left() => deadline.difference(DateTime.now());
   _Wire? w;

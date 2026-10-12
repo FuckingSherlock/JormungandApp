@@ -806,271 +806,172 @@ void main() {
       expect(auto.lastRequestFail!['dest'], 'other.example:443');
     });
 
-    test('a node that answers again: the failed site is reachable through it now — no AutoBlocked', () async {
+    test('a node that answers again: the failed site is told (server, rule, app) — Auto probes nothing itself', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
       final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
-      var t = 0;
-      final reached = <(String, String)>[];
-      Future<bool?> reach(String tag, String dest) async {
-        reached.add((tag, dest));
-        return true; // the site opens through A again: a one-off, nothing to report
-      }
-
-      final events = <AutoBlocked>[];
-      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
-      auto.blocked.listen(events.add);
+      final asked = <String>[];
+      final fails = <AutoSiteFail>[];
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 7, reach: (tag, dest) async {
+        asked.add(tag);
+        return false;
+      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      auto.siteFails.listen(fails.add);
       await auto.check();
-      auto.onClosed(cc());
+      auto.onClosed(cc(rule: 'domain_suffix=blocked.example', process: r'C:\Apps\Discord\Discord.exe', pkg: 'org.x'));
       await auto.check();
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(reached, [('route0/s::a', 'blocked.example:443')]);
-      expect(auto.blockedCount, 0);
-      expect(events, isEmpty);
+      expect(asked, isEmpty, reason: 'the probes are the Sentinel\'s checks now');
+      expect(fails.single.toJson(), {
+        'route': 'A',
+        'server': 's::a',
+        'tag': 'route0/s::a',
+        'dest': 'blocked.example:443',
+        'rule': 'domain_suffix=blocked.example',
+        'process': r'C:\Apps\Discord\Discord.exe',
+        'pkg': 'org.x',
+        'firstSeen': 7,
+        'at': 7,
+      });
+      expect(auto.siteFailCount, 1);
+      expect(auto.toJson()['siteFails'], 1);
     });
 
-    test('a node that answers again: the site stays unreachable through it, opens through another route — AutoBlocked, once an hour', () async {
+    test('a site a test cannot be aimed at (another port, an IP on 443) is not told', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
       final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
-      var t = 0;
-      Future<bool?> reach(String tag, String dest) async => tag == 'route0/s::a' ? false : true;
-      final events = <AutoBlocked>[];
-      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t, reach: reach, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
-      auto.blocked.listen(events.add);
+      final fails = <AutoSiteFail>[];
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) async => false, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      auto.siteFails.listen(fails.add);
       await auto.check();
-      auto.onClosed(cc());
-      await auto.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-
-      expect(auto.blockedCount, 1);
-      expect(auto.lastBlocked?.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'B', 'viaServer': 's::b', 'rule': '', 'process': '', 'pkg': '', 'at': 0});
-      expect(events.length, 1);
-
-      // the same route + site again, still within the hour: not reported again
-      t += 5000;
-      auto.onClosed(cc());
+      auto.onClosed(cc(dest: 'blocked.example:8443'));
+      auto.onClosed(cc(dest: '1.2.3.4:443'));
       await auto.check();
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(auto.blockedCount, 1);
-      expect(events.length, 1);
+      expect(fails, isEmpty);
     });
 
     // Right after a start sing-box tells no member of a urltest yet, so a failed connection
     // names the GROUP (`route0`): the probe inbound has no user for a group — the site test
     // must go to the member in use, or not run at all, never "fail" on a refusal.
-    test('the failed connection names the route group: the site test goes to the member in use', () async {
-      final p = plan([unit('A', ['s::a', 's::a2']), unit('B', ['s::b'])]);
-      final fake = FakeBox(buildConfig(p), {'s::a': 50, 's::a2': 20, 's::b': 60});
-      final asked = <String>[];
-      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) async {
-        asked.add(tag);
-        return true;
-      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
-      await auto.check();
-      auto.onClosed(cc(outbound: 'route0', chain: const ['route0', 'proxy']));
-      await auto.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(asked, ['route0/s::a2']);
-    });
+    test('the failed connection names the route group: the notice has the member in use; unknown member / a stranger tag: no notice', () async {
+      final reached = <String>[];
+      Future<List<AutoSiteFail>> told(FakeBox Function(Map<String, dynamic> p) box, String outbound, List<String> chain) async {
+        final p = plan([unit('A', ['s::a', 's::a2']), unit('B', ['s::b'])]);
+        final fake = box(p);
+        final fails = <AutoSiteFail>[];
+        final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) async {
+          reached.add(tag);
+          return false;
+        }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+        auto.siteFails.listen(fails.add);
+        await auto.check();
+        auto.onClosed(cc(outbound: outbound, chain: chain));
+        await auto.check();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        // the Sentinel aims its probe at the notice's tag
+        if (fails.isNotEmpty) await auto.reachSame(fails.single.tag, fails.single.dest);
+        return fails;
+      }
 
-    test('the failed connection names the route group, the member in use is unknown: no site test, no claim', () async {
-      final p = plan([unit('A', ['s::a', 's::a2']), unit('B', ['s::b'])]);
-      final fake = _NoUrltestNow(buildConfig(p), {'s::a': 30, 's::a2': 40, 's::b': 60}); // urltest.Now() = ""
-      final asked = <String>[];
-      final events = <Object>[];
-      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) async {
-        asked.add(tag);
-        return false; // would be taken for "does not open" were it asked
-      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
-      auto.blocked.listen(events.add);
-      auto.unreachable.listen(events.add);
-      await auto.check();
-      auto.onClosed(cc(outbound: 'route0', chain: const ['route0', 'proxy']));
-      await auto.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(asked, isEmpty);
-      expect(events, isEmpty);
-      expect(auto.blockedCount + auto.unreachableCount, 0);
-    });
-
-    test('the failed connection names something that is no server of the route (a stranger tag): skipped', () async {
-      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
-      final asked = <String>[];
-      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) async {
-        asked.add(tag);
-        return true;
-      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
-      await auto.check();
-      auto.onClosed(cc(outbound: 'route0/nope', chain: const ['route0/nope', 'route0', 'proxy']));
-      await auto.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(asked, isEmpty);
+      final known = await told((p) => FakeBox(buildConfig(p), {'s::a': 50, 's::a2': 20, 's::b': 60}), 'route0', const ['route0', 'proxy']);
+      expect(known.single.tag, 'route0', reason: 'the failed connection\'s own outbound, as the failure book records it');
+      expect(reached, ['route0/s::a2'], reason: 'the probe goes to the member in use');
+      final unknown = await told((p) => _NoUrltestNow(buildConfig(p), {'s::a': 30, 's::a2': 40, 's::b': 60}), 'route0', const ['route0', 'proxy']);
+      expect(unknown, isEmpty);
+      final stranger = await told((p) => FakeBox(buildConfig(p), {'s::a': 30, 's::a2': 40, 's::b': 60}), 'route0/nope', const ['route0/nope', 'route0', 'proxy']);
+      expect(stranger, isEmpty);
     });
 
     // A current; B, C, D, E answer, so any of them may be tried
-    (AutoService, FakeBox, List<(String, String)>, List<AutoBlocked>, List<AutoUnreachable>, List<String>) five(Future<bool?> Function(String, String) reach,
-        {String? siteRetry, int Function()? clock}) {
+    (AutoService, List<String>) five(Future<bool?> Function(String) reach, {String? siteRetry}) {
       final p = plan([for (final k in ['a', 'b', 'c', 'd', 'e']) unit(k.toUpperCase(), ['s::$k'])], auto: {'standby': 5, 'siteRetry': ?siteRetry});
       final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60, 's::c': 70, 's::d': 80, 's::e': 90});
-      final asked = <(String, String)>[], notes = <String>[];
-      final blocked = <AutoBlocked>[], gone = <AutoUnreachable>[];
-      final auto = AutoService(fake, p,
-          delay: fake.delayTest,
-          clock: clock ?? () => 0,
-          reach: (tag, dest) {
-            asked.add((tag, dest));
-            return reach(tag, dest);
-          },
-          note: notes.add,
-          settings: AutoSettings.fromPlan(p));
-      auto.blocked.listen(blocked.add);
-      auto.unreachable.listen(gone.add);
-      return (auto, fake, asked, blocked, gone, notes);
-    }
-
-    Future<void> fail(AutoService auto) async {
-      auto.onClosed(cc());
-      await auto.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    }
-
-    test('the site opens on the 2nd other route: AutoBlocked with that route, the ones after it are not tried', () async {
-      final (auto, _, asked, blocked, gone, _) = five((tag, dest) async => tag == 'route2/s::c');
-      await auto.check();
-      await fail(auto);
-      expect(asked.map((a) => a.$1), ['route0/s::a', 'route1/s::b', 'route2/s::c']);
-      expect(blocked.length, 1);
-      expect(blocked.single.toJson(), {'route': 'A', 'server': 's::a', 'dest': 'blocked.example:443', 'via': 'C', 'viaServer': 's::c', 'rule': '', 'process': '', 'pkg': '', 'at': 0});
-      expect(gone, isEmpty);
-    });
-
-    test('opens through no other route: AutoUnreachable lists the routes tried (the first 3), once an hour', () async {
-      var t = 0;
-      final (auto, _, asked, blocked, gone, notes) = five((tag, dest) async => false, clock: () => t);
-      await auto.check();
-      await fail(auto);
-      expect(asked.map((a) => a.$1), ['route0/s::a', 'route1/s::b', 'route2/s::c', 'route3/s::d'], reason: 'at most 3 other routes');
-      expect(blocked, isEmpty);
-      expect(gone.length, 1);
-      expect(auto.unreachableCount, 1);
-      expect(gone.single.toJson(), {
-        'route': 'A',
-        'server': 's::a',
-        'dest': 'blocked.example:443',
-        'tried': [
-          {'route': 'B', 'server': 's::b'},
-          {'route': 'C', 'server': 's::c'},
-          {'route': 'D', 'server': 's::d'},
-        ],
-        'retriesOff': false,
-        'rule': '',
-        'process': '',
-        'pkg': '',
-        'at': 0,
-      });
-      expect(notes.any((n) => n.contains('down or blocked everywhere')), isTrue);
-
-      t += 20000; // the same route + site within the hour: the note again, no second event
-      await fail(auto);
-      expect(gone.length, 1);
-      t += 3600000; // after the hour: reported again
-      await fail(auto);
-      expect(gone.length, 2);
-      expect(auto.toJson()['unreachable'], 2);
-    });
-
-    test('no other route answers: AutoUnreachable with an empty tried list', () async {
-      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeBox(buildConfig(p), {'s::a': 30}); // B is dead
-      final gone = <AutoUnreachable>[];
       final asked = <String>[];
       final auto = AutoService(fake, p,
           delay: fake.delayTest,
-          reach: (tag, dest) async {
+          clock: () => 0,
+          reach: (tag, dest) {
             asked.add(tag);
-            return false;
+            return reach(tag);
           },
-          settings: const AutoSettings(failWindow: Duration(seconds: 10)));
-      auto.unreachable.listen(gone.add);
+          settings: AutoSettings.fromPlan(p));
+      return (auto, asked);
+    }
+
+    test('reachAlternates: opens on the 2nd other route — that route (and its server), the ones after it are not tried', () async {
+      final (auto, asked) = five((tag) async => tag == 'route2/s::c');
       await auto.check();
-      await fail(auto);
-      expect(asked, ['route0/s::a']);
-      expect(gone.length, 1);
-      expect(gone.single.tried, isEmpty);
-      expect(gone.single.retriesOff, isFalse);
+      final a = await auto.reachAlternates('blocked.example:443', skipRoute: 'A');
+      expect(asked, ['route1/s::b', 'route2/s::c']);
+      expect([a.via, a.viaServer, a.unsure, a.off], ['C', 's::c', false, false]);
+      expect(a.tried.map((t) => t.route), ['B']);
     });
 
-    test('both events carry the rule sing-box matched and the app of the failed request; no rule = ""', () async {
-      // blocked: the site opens through B only
-      final (auto, _, _, blocked, _, _) = five((tag, dest) async => tag == 'route1/s::b');
+    test('reachAlternates: opens through none — the routes tried (at most 3)', () async {
+      final (auto, asked) = five((tag) async => false);
       await auto.check();
-      auto.onClosed(cc(rule: 'domain_suffix=blocked.example', process: r'C:\Apps\Discord\Discord.exe'));
-      await auto.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(blocked.single.rule, 'domain_suffix=blocked.example');
-      expect(blocked.single.process, r'C:\Apps\Discord\Discord.exe');
-      expect(auto.lastBlocked!.toJson()['rule'], 'domain_suffix=blocked.example');
-
-      // unreachable: two sites in one window, each keeps its own rule / app (the second has none)
-      final (auto2, _, _, _, gone, _) = five((tag, dest) async => false);
-      await auto2.check();
-      auto2.onClosed(cc(dest: 'a.example:443', rule: 'process_name=tg.exe', process: '/usr/bin/tg.exe'));
-      auto2.onClosed(cc(dest: 'a.example:443', rule: 'process_name=tg.exe', process: '/usr/bin/tg.exe'));
-      await auto2.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(gone.single.dest, 'a.example:443');
-      expect(gone.single.rule, 'process_name=tg.exe');
-      expect(gone.single.process, '/usr/bin/tg.exe');
-      expect(gone.single.toJson()['process'], '/usr/bin/tg.exe');
-
-      final (auto3, _, _, _, gone3, _) = five((tag, dest) async => false);
-      await auto3.check();
-      await fail(auto3);
-      expect(gone3.single.rule, '');
-      expect(gone3.single.process, '');
-      expect(gone3.single.pkg, '');
-
-      // Android: the package of the owner rides along, to both events
-      final (auto4, _, _, blocked4, _, _) = five((tag, dest) async => tag == 'route1/s::b');
-      await auto4.check();
-      auto4.onClosed(cc(pkg: 'org.telegram.messenger'));
-      await auto4.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(blocked4.single.pkg, 'org.telegram.messenger');
-      expect(blocked4.single.toJson()['pkg'], 'org.telegram.messenger');
-      final (auto5, _, _, _, gone5, _) = five((tag, dest) async => false);
-      await auto5.check();
-      auto5.onClosed(cc(pkg: 'com.x.y'));
-      await auto5.check();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(gone5.single.pkg, 'com.x.y');
+      final a = await auto.reachAlternates('blocked.example:443', skipRoute: 'A');
+      expect(asked, ['route1/s::b', 'route2/s::c', 'route3/s::d']);
+      expect(a.via, isNull);
+      expect(a.tried.map((t) => '${t.route}:${t.server}'), ['B:s::b', 'C:s::c', 'D:s::d']);
+      expect(a.unsure, isFalse);
     });
 
-    test('siteRetry: off — no request through other routes, AutoUnreachable says the retries are off; all — every route up to the first that opens', () async {
-      final (off, _, askedOff, blockedOff, goneOff, notesOff) = five((tag, dest) async => tag != 'route0/s::a', siteRetry: 'off');
+    test('reachAlternates: no other route answers — nothing tried; siteRetry off — not asked at all, off; all — up to the first that opens', () async {
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30}); // B is dead
+      final asked = <String>[];
+      final auto = AutoService(fake, p, delay: fake.delayTest, reach: (tag, dest) async {
+        asked.add(tag);
+        return false;
+      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      await auto.check();
+      final none = await auto.reachAlternates('blocked.example:443', skipRoute: 'A');
+      expect([asked, none.tried, none.off], [<String>[], isEmpty, false]);
+
+      final (off, askedOff) = five((tag) async => true, siteRetry: 'off');
       await off.check();
-      await fail(off);
-      expect(askedOff.map((a) => a.$1), ['route0/s::a']);
-      expect(blockedOff, isEmpty);
-      expect(goneOff.single.tried, isEmpty);
-      expect(goneOff.single.retriesOff, isTrue);
-      expect(notesOff.any((n) => n.contains('retries through other routes are off')), isTrue);
+      final o = await off.reachAlternates('blocked.example:443', skipRoute: 'A');
+      expect([askedOff, o.via, o.tried, o.off], [<String>[], null, isEmpty, true]);
 
-      final (all, _, askedAll, blockedAll, goneAll, _) = five((tag, dest) async => tag == 'route4/s::e', siteRetry: 'all');
+      final (all, askedAll) = five((tag) async => tag == 'route4/s::e', siteRetry: 'all');
       await all.check();
-      await fail(all);
-      expect(askedAll.map((a) => a.$1), ['route0/s::a', 'route1/s::b', 'route2/s::c', 'route3/s::d', 'route4/s::e']);
-      expect(blockedAll.single.via, 'E');
-      expect(goneAll, isEmpty);
+      final e = await all.reachAlternates('blocked.example:443', skipRoute: 'A');
+      expect(askedAll, ['route1/s::b', 'route2/s::c', 'route3/s::d', 'route4/s::e']);
+      expect(e.via, 'E');
     });
 
-    test('an alternate that cannot be tried (null) is not a claim: nothing tried for sure — no event, a note only', () async {
-      final (auto, _, asked, blocked, gone, _) = five((tag, dest) async => tag == 'route0/s::a' ? false : null);
+    test('reachAlternates: an alternate that cannot be tried (null) is unsure — tells nothing', () async {
+      final (auto, asked) = five((tag) async => null);
       await auto.check();
-      await fail(auto);
-      expect(asked.length, 4);
-      expect(blocked, isEmpty);
-      expect(gone, isEmpty);
+      final a = await auto.reachAlternates('blocked.example:443', skipRoute: 'A');
+      expect(asked.length, 3);
+      expect([a.via, a.tried, a.unsure], [null, isEmpty, true]);
+    });
+
+    test('reachSame: through the server a failed connection went out of; a stranger tag cannot be told', () async {
+      final (auto, asked) = five((tag) async => tag == 'route1/s::b');
+      await auto.check();
+      expect(await auto.reachSame('route1/s::b', 'blocked.example:443'), isTrue);
+      expect(await auto.reachSame('route0/s::a', 'blocked.example:443'), isFalse);
+      expect(await auto.reachSame('route0/nope', 'blocked.example:443'), isNull);
+      expect(auto.canReachSame('route0/s::a', 'blocked.example:443'), isTrue);
+      expect(auto.canReachSame('route0/s::a', 'blocked.example:8443'), isFalse);
+      expect(auto.canReachSame('route0/nope', 'blocked.example:443'), isFalse);
+      expect(asked, ['route1/s::b', 'route0/s::a']);
+    });
+
+    test('a Cancel stops the alternates: the probe in flight is given up, the ones after it are not started (unsure)', () async {
+      final hang = Completer<bool?>();
+      final (auto, asked) = five((tag) => hang.future);
+      await auto.check();
+      final cancel = Cancel();
+      final f = auto.reachAlternates('blocked.example:443', skipRoute: 'A', cancel: cancel);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      cancel.cancel('net.offline');
+      final a = await f;
+      expect(asked, ['route1/s::b']);
+      expect([a.via, a.tried, a.unsure], [null, isEmpty, true]);
     });
 
     test('node does not answer at all: no _sites lookup, just the usual retries', () async {

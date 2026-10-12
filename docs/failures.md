@@ -253,9 +253,7 @@ appendTrail)` дополняет событие задним числом, `Even
 
 | событие | подозрение (`kind`) | проверки по порядку | вердикты |
 |---|---|---|---|
-| `conn/failing` | `conn.failing`, ключ `conn.failing\|приложение\|host:port\|outbound\|inbound`, `scope {host, port, outbound}` | `recovery conn.recovered` (то же назначение снова открылось через тот же outbound, по живому трафику `FailureBook.okOutbounds`), `alternative conn.otherRoute` (через другой outbound открылось), `diagnostic probe.same` (тот же сервер, пробой Auto `reachSame`), `alternative probe.alt` (другие маршруты, `reachAlternates`; пропускается, если тот же сервер открывает) | `blip` / `workaround` / `consequence` / `confirmed` |
-| `site/blocked` | `site.blocked` | уже сделанное Auto, как записанные проверки (`Check.recorded`): `probe.same` fail, `probe.alt` pass | всегда `workaround` (тихо; приложение по-прежнему предлагает правило) |
-| `site/unreachable` | `site.unreachable` | записанные: `probe.same` fail, `probe.alt` (fail, или inconclusive при `retriesOff`); живая `diagnostic site.checker` (внешний чекер; запускается и при `retriesOff`) | чекер `opens` — `confirmed` (`why site.checker`, уведомляет); `down` / не смог / выключен — `unexplained` |
+| `conn/failing`, `site/blocked`, `site/unreachable` | одно подозрение на назначение, ключ `site\|host:port` — и серия книги сбоев, и замеченный Auto сбой сайта; `scope {host, port, outbound}` | все `Level.destination`, `via` = маршрут: `recovery conn.recovered` (живой трафик через тот же outbound), `alternative conn.otherRoute`, `recovery probe.same` (тот же сервер; проходит, только если после начала пробы соединения приложения к host:port не падали — иначе fail `{opens, appFails}`), `alternative probe.alt` (другие маршруты, `siteAlternates`), `diagnostic site.checker` (внешний чекер, если ничего не открыло). Назначение, на которое пробу не нацелить, — только первые две | событие по вердикту: `workaround` через `probe.alt` — `site/blocked` (уведомляет: приложение предлагает правило); `confirmed` / `unexplained` — `site/unreachable` (чекер `opens` — `confirmed`), а если проба открывает, но приложение падает — `conn/failing`; `blip` / `consequence` — `conn/failing` (`blip` только по замеченному Auto — ничего); дедуп 1 ч на маршрут + назначение |
 | `conn/lost` | `conn.lost` (корень над путём `proxy`) | — | `consequence` (сети нет), `blip`, `confirmed`; `conn/restored` пишется, только если корень стоял |
 | `conn/offline` / `online` | сам корень `net.offline` контекста | — | событие корня пишет сервис по `sentinel.changes`: через `netBlip` — `confirmed` + `attachEvent`; раньше вернулась — `blip` (`info`, `downMs`); `conn/online {downMs}` — только после «стоявшего» `offline` |
 | `core/tunTcpDead` | `tun.tcpDead`, `Scope.none` | активной проверки пока нет (см. TODO ниже) | `confirmed` (корень), `blip` (TCP вернулся в окно), `deferred` (`ownReject`) |
@@ -314,3 +312,37 @@ appendTrail)` дополняет событие задним числом, `Even
 Для перевода ничего менять в Sentinel не нужно: `subject` / `scope` задаёт детектор, события записывает
 сам Sentinel через `book.add`, поэтому каталог типов (`event_catalog_test`) пополняется только вызовом
 `SuspicionEvent` на стороне детектора (тест читает и его).
+
+## Проверки сайтов в Sentinel (этап 3e-2)
+
+Auto больше не проверяет сайты сам: он только замечает (запросы к сайту через узел, который пропускает трафик,
+ничего не вернули) и сообщает уведомление (сайт, маршрут, сервер, правило, приложение). Проверки — сами пробы
+`reachSame` / `reachAlternates` (настройка «Повтор сайта»: off / 3 / all; Manual — других маршрутов не пробуем) —
+выполняет Sentinel как обычные проверки.
+
+**Один сайт — одно подозрение.** Ключ `site|<host>:<port>` общий для уведомления Auto и для серии `conn/failing`
+книги отказов: второй сообщивший присоединяется к уже идущему разбору, улики сливаются. Раньше `noteSite`
+глушил `conn/failing` на 10 минут — теперь это не нужно. Фильтр игнорируемых сайтов остался.
+
+**Проверки** (все `level: destination`, `via: <маршрут>`, уважают `Cancel`, идемпотентны — парковка запускает
+лестницу заново с начала): восстановление (`conn.recovered` по живому трафику, `probe.same` прошла), обходной путь
+(`conn.otherRoute` по живому трафику, `probe.alt` — другие отвечающие маршруты, не более `siteAlternates`, между
+маршрутами останавливается по отмене), диагностика `site.checker` (внешний чекер, только если ничто не открыло
+сайт и включена настройка). Если пробу навести нельзя (порт не 443/80, IP на 443, нет Auto) — только живые
+проверки и обычный `conn/failing`.
+
+**Событие по вердикту:** обходной путь через другой маршрут — `site/blocked` (предлагает правило); ничто не
+открывает, а чекер говорит «у других открывается» — подтверждённый `site/unreachable`; сайт лежит у всех / чекер
+не уверен или выключен — `site/unreachable` unexplained (только журнал); blip или следствие — `conn/failing`
+(у уведомления Auto без серии отказов blip ничего не пишет). `site/*` пишется не чаще раза в час на пару
+сайт + маршрут. «Проверить чекером» вручную работает на `site/*` как прежде.
+
+**`probe.same` — восстановление только если живой трафик молчит.** Проба открыла сайт через тот же сервер, но
+соединения самого приложения к этому host:port после старта пробы продолжают падать (`FailureBook.failedSince`; для
+серии — она не растёт) — это не восстановление, а улика («проба открывается, соединения приложения нет»): шаг
+`probe.same` fail с `opens` и `appFails`, лестница идёт дальше (`probe.alt` и `site.checker` пропускаются как
+бессмысленные — `reason: sameOpens`), стоящая серия подтверждается как `conn/failing` (`why conn.<kind>`, как до 3e-2).
+Уведомление Auto без дальнейших отказов и с прошедшей пробой остаётся blip и ничего не пишет. Выходной `outbound`
+уведомления — собственный тег соединения (`AutoSiteFail.tag`), как в книге отказов; пробу Auto наводит на сервер сам.
+
+**Уровни.** `tun.tcpDead` — `core`; `auto.unstable` — `route` (с `subject['route']`).

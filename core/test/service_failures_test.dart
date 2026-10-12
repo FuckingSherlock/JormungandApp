@@ -2,6 +2,7 @@
 // Перенос детекторов): `conn/failing`, `conn/offline` / `online`, `conn/lost` / `restored`, `auto/unstable`
 // and the core events (`crashed`, `restartFailed`, `down`). A fake sing-box runner (no process, no API), time
 // by hand (FakeTime): the Sentinel's clock, the service's clock and its waits are one.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:jormungand_core/jormungand_core.dart';
@@ -97,6 +98,8 @@ void main() {
       timer: time.clock.timer,
       sentinelClock: time.clock,
       windows: windows,
+      // never the real check-host.net: a checker whose every request fails
+      siteChecker: SiteChecker(get: (_, {proxyPort, timeout = Duration.zero}) async => throw const SocketException('no network in tests'), delay: (_) async {}),
     );
     await svc.init();
     if (connected) {
@@ -149,9 +152,58 @@ void main() {
       expect(e['data'], containsPair('host', 'example.org'));
       expect(e['data'], containsPair('count', 3));
       expect(e['data'], containsPair('source', 'closed'));
-      expect(trailCodes(e), containsAllInOrder(['suspect', 'persist.window', 'conn.recovered', 'conn.otherRoute', 'probe.same', 'probe.alt']));
+      expect(trailCodes(e), containsAllInOrder(['suspect', 'persist.window', 'conn.recovered', 'conn.otherRoute']));
       expect(quiet(e), isFalse);
-      expect(svc.sentinel.roots.byKey('conn.failing|org.example.app|example.org:443|route0/s::a|tun-in'), isNotNull);
+      expect(svc.sentinel.roots.byKey('site|example.org:443'), isNotNull);
+    });
+
+    test('the probe opens the site through the same server but the app\'s connections go on failing: not a recovery, confirmed conn/failing with the probe in the trail', () async {
+      await start();
+      svc.probeSame = (o, d, c) async {
+        fail(1); // the app's own request fails while the probe goes
+        return true;
+      };
+      fail(3);
+      await time.advanceSeconds(11);
+      expect(events('site', 'unreachable'), isEmpty);
+      final e = events('conn', 'failing').single;
+      expect([e['level'], e['verdict']], ['warn', 'confirmed']);
+      expect((e['why'] as Map)['code'], 'conn.timeout');
+      expect(e['data'], containsPair('count', 3));
+      expect(trailCodes(e), containsAllInOrder(['suspect', 'persist.window', 'conn.recovered', 'conn.otherRoute', 'probe.same', 'probe.alt', 'site.checker']));
+      final same = (e['trail'] as List).cast<Map>().firstWhere((s) => s['code'] == 'probe.same');
+      expect([same['outcome'], (same['params'] as Map)['opens'], (same['params'] as Map)['appFails']], ['fail', true, true]);
+      expect(quiet(e), isFalse);
+    });
+
+    test('the probe opens the site and the app\'s connections stay quiet: a recovery, a blip', () async {
+      await start();
+      svc.probeSame = (o, d, c) async => true;
+      fail(3);
+      await time.advanceSeconds(11);
+      final e = events('conn', 'failing').single;
+      expect(e['verdict'], 'blip');
+      expect(trailCodes(e), containsAllInOrder(['persist.window', 'probe.same', 'blip.recovered']));
+      expect(quiet(e), isTrue);
+    });
+
+    test('the network goes while probe.same runs (the failure began before): the probe is cancelled, the suspicion parked, and judged again when the network is back', () async {
+      await start();
+      var runs = 0;
+      svc.probeSame = (o, d, c) => ++runs == 1 ? Completer<bool?>().future : Future.value(true);
+      fail(3);
+      await time.advanceSeconds(11);
+      expect(runs, 1);
+      svc.setNetwork({'connected': false});
+      await time.advanceSeconds(20);
+      expect(events('conn', 'failing'), isEmpty, reason: 'parked: nothing is written while the network is gone');
+      expect(runs, 1, reason: 'not started again behind the network root');
+      svc.setNetwork({'connected': true, 'validated': true});
+      await time.advanceSeconds(2);
+      expect(runs, 2);
+      final e = events('conn', 'failing').single;
+      expect(e['verdict'], 'blip');
+      expect(trailCodes(e), containsAllInOrder(['persist.window', 'probe.same', 'park', 'resume', 'probe.same', 'blip.recovered']));
     });
 
     test('it worked again inside the window: a blip that says what failed and when it recovered', () async {
@@ -208,7 +260,7 @@ void main() {
       expect(e['cause'], offline['id']);
       expect((e['why'] as Map)['code'], 'net.offline');
       expect(quiet(e), isTrue);
-      expect(svc.sentinel.roots.byKey('conn.failing|org.example.app|example.org:443|route0/s::a|tun-in'), isNull, reason: 'a consequence opens no root');
+      expect(svc.sentinel.roots.byKey('site|example.org:443'), isNull, reason: 'a consequence opens no root');
       expect(types().where((t) => t == 'conn/failing').length, 1);
       // the network is back: conn/online with the time
       svc.setNetwork({'connected': true, 'validated': true});

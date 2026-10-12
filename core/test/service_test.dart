@@ -11,6 +11,38 @@ import 'package:test/test.dart';
 
 import 'sentinel_fakes.dart';
 
+// What Auto used to probe and report itself, as the tests' wording of a site failure: the probes are the
+// Sentinel's checks now (the service's probe seams answer them), Auto only notices.
+class AutoBlocked {
+  const AutoBlocked({required this.route, required this.server, required this.dest, required this.via, required this.viaServer, required this.at, this.rule = '', this.process = '', this.pkg = ''});
+  final String route, server, dest, via, viaServer, rule, process, pkg;
+  final int at;
+}
+
+class AutoUnreachable {
+  const AutoUnreachable({required this.route, required this.server, required this.dest, required this.tried, required this.at, this.retriesOff = false, this.rule = '', this.process = '', this.pkg = ''});
+  final String route, server, dest, rule, process, pkg;
+  final List<({String route, String server})> tried;
+  final bool retriesOff;
+  final int at;
+}
+
+final _alts = Expando<Map<String, AltReach>>();
+
+extension SiteTestWording on CoreService {
+  void _fail(String route, String server, String dest, AltReach alt, String rule, String process, String pkg) {
+    (_alts[this] ??= {})[dest] = alt;
+    probeSame = (o, d, c) async => false;
+    probeAlt = (d, r, c) async => _alts[this]![d] ?? const AltReach(unsure: true);
+    siteFailed(AutoSiteFail(route: route, server: server, tag: server, dest: dest, at: 1, rule: rule, process: process, pkg: pkg));
+  }
+
+  void siteBlocked(AutoBlocked b) => _fail(b.route, b.server, b.dest, AltReach(via: b.via, viaServer: b.viaServer), b.rule, b.process, b.pkg);
+
+  void siteUnreachable(AutoUnreachable u) =>
+      _fail(u.route, u.server, u.dest, AltReach(tried: u.tried, off: u.retriesOff, unsure: u.tried.isEmpty), u.rule, u.process, u.pkg);
+}
+
 /// A runner that is not sing-box: starts when told to, has no API service.
 class _Runner implements BoxRunner {
   bool up = false;
@@ -366,13 +398,66 @@ void main() {
   test('automatic checks are cached per site: the same site again within 10 minutes is not asked again', () async {
     final asked = <Uri>[];
     await start(checker: fakeChecker(asked, opens: true), connected: true);
-    for (var i = 0; i < 2; i++) {
-      svc.siteUnreachable(gone('again.example:443'));
+    for (final route in ['A', 'B']) {
+      // another route: the hour of the first report does not hold it back
+      svc.siteUnreachable(AutoUnreachable(route: route, server: 's', dest: 'again.example:443', tried: const [], at: 1));
       await settle();
     }
     expect(siteEvents().length, 2);
     expect(asked.where((u) => u.pathSegments.last == 'check-http').length, 1);
     expect(siteEvents().map((e) => ((e['data'] as Map)['check'] as Map)['state']), ['opens', 'opens']);
+  });
+
+  test('Auto\'s notice and the connection book\'s streak for the same host:port are one suspicion: one event, the evidence merged; another route opens it -> site/blocked', () async {
+    await start(connected: true);
+    svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'same.example:443', via: 'B', viaServer: 't', at: 1, rule: 'domain=same.example'));
+    final report = FailureReport(
+      key: FailureBook.siteKey('same.example', 443),
+      subject: {'host': 'same.example', 'port': 443, 'outbound': 's', 'route': 'A', 'path': 'proxy'},
+      data: {'host': 'same.example', 'port': 443, 'outbound': 's', 'route': 'A', 'kind': 'refused', 'count': 3, 'windowMs': 60000, 'source': 'closed'},
+      bg: false,
+      firstSeen: DateTime.now(),
+      kind: ConnKind.refused,
+    );
+    final id = await svc.failures.report!(report);
+    await settle();
+    final events = [for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site' || e['type'] == 'failing') e];
+    expect(events.map((e) => '${e['cat']}/${e['type']} ${e['verdict']}'), ['site/blocked workaround'], reason: 'one suspicion, one event');
+    expect([events.single['cat'], events.single['type'], events.single['verdict']], ['site', 'blocked', 'workaround']);
+    final data = events.single['data'] as Map;
+    expect([data['via'], data['viaServer'], data['entry'], data['dest']], ['B', 't', 'A', 'same.example:443']);
+    expect(data['rule'], isNotNull);
+    expect(id, isNull, reason: 'a workaround is no standing failure for the book');
+    svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'same.example:443', via: 'B', viaServer: 't', at: 1));
+    await settle();
+    final again = [for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site' || e['type'] == 'failing') e];
+    expect(again.length, events.length, reason: 'the hour per site and route: not written again');
+  });
+
+  test('another route opens the site: exactly one site/blocked, a workaround; the checker is not asked', () async {
+    final asked = <Uri>[];
+    await start(checker: fakeChecker(asked, opens: true), connected: true);
+    svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'alt.example:443', via: 'B', viaServer: 't', at: 1, rule: 'domain=alt.example'));
+    await settle();
+    final e = siteEvents().single;
+    expect([e['type'], e['verdict'], e['level']], ['blocked', 'workaround', 'info']);
+    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.alt']));
+    expect(asked, isEmpty);
+    expect(svc.sentinel.roots.open, isEmpty);
+  });
+
+  test('nothing opens the site and the checker says it opens elsewhere: a confirmed site/unreachable with the routes tried and the checker\'s answer', () async {
+    final asked = <Uri>[];
+    await start(checker: fakeChecker(asked, opens: true), connected: true);
+    svc.siteUnreachable(AutoUnreachable(route: 'A', server: 's', dest: 'none.example:443', tried: const [(route: 'B', server: 't'), (route: 'C', server: 'u')], at: 1));
+    await settle();
+    final e = siteEvents().single;
+    expect([e['type'], e['verdict']], ['unreachable', 'confirmed']);
+    final data = e['data'] as Map;
+    expect((data['tried'] as List).map((t) => (t as Map)['entry']), ['B', 'C']);
+    expect((data['check'] as Map)['state'], 'opens');
+    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.alt', 'site.checker']));
+    expect(notifies(e), isTrue);
   });
 
   test('a site/* report while the core is still settling waits for it (our own start is not the site\'s fault); before any connection it is let go without a record', () async {

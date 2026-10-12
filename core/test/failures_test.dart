@@ -255,7 +255,7 @@ void main() {
       final first = r.t;
       r.fail(3);
       final rep = r.reports.single;
-      expect(rep.key, 'conn.failing|org.example.app|example.org:443|route0/s::a|tun-in');
+      expect(rep.key, 'site|example.org:443');
       expect(rep.subject, {'app': 'org.example.app', 'host': 'example.org', 'port': 443, 'outbound': 'route0/s::a', 'route': 'route0', 'path': 'proxy'});
       expect(rep.firstSeen, first);
       expect(rep.kind, ConnKind.timeout);
@@ -267,7 +267,7 @@ void main() {
       expect(r.recoveredKeys, isEmpty);
       r.fail(3);
       r.ok();
-      expect(r.recoveredKeys, ['conn.failing|org.example.app|example.org:443|route0/s::a|tun-in']);
+      expect(r.recoveredKeys, ['site|example.org:443']);
     });
 
     test('okOutbounds: where the destination worked since a moment, from the live traffic', () {
@@ -318,16 +318,12 @@ void main() {
       expect(r.book.toJson()['entries'], 0);
     });
 
-    test('a site Auto already reported (noteSite) gets no second event, its subdomains too; the numbers still count', () {
+    test('the report is keyed by the destination (the key Auto\'s notice of the same site uses), not by the entry', () {
       final r = _Rig();
-      r.book.noteSite('Blocked.Example');
-      r.fail(4, dest: 'blocked.example:443');
-      r.fail(4, dest: 'cdn.blocked.example:443');
-      expect(r.emitted, isEmpty);
-      expect(r.book.toJson()['failed'], 8);
-      r.advance(FailureBook.coveredFor + const Duration(seconds: 1));
-      r.fail(3, dest: 'blocked.example:443');
+      r.fail(3, dest: 'Blocked.Example:443');
       expect(r.emitted.length, 1);
+      expect(FailureBook.siteKey('Blocked.Example', 443), 'site|blocked.example:443');
+      expect(FailureBook.siteKey('x.example', null), 'site|x.example');
     });
 
     test('background: the event carries the flag and the book counts them apart', () {

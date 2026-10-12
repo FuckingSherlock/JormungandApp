@@ -155,7 +155,7 @@ class Scope {
 /// The journal entry a [Suspicion] becomes when it is judged (the Sentinel writes it, with the
 /// verdict, why, trail and cause; the evidence is its `data`).
 class SuspicionEvent {
-  const SuspicionEvent(this.cat, this.type, {this.level = 'warn', this.own = false, this.bg = false, this.link = true, this.note});
+  const SuspicionEvent(this.cat, this.type, {this.level = 'warn', this.own = false, this.bg = false, this.link = true, this.note, this.kindFor, this.dataFor});
 
   final String cat;
   final String type;
@@ -169,6 +169,14 @@ class SuspicionEvent {
   /// The raw-log line for the verdict (`kind`, the evidence): written first, so the event links to it.
   /// Null result = no line. A line of the log is prose by design; the event itself holds codes only.
   final String? Function(VerdictKind kind, Map<String, dynamic> evidence)? note;
+
+  /// The journal entry by the verdict: `(cat, type)` instead of [cat] / [type] (a failure that is a
+  /// `site/blocked` when another route opens it and a `conn/failing` when it only blipped). Null result =
+  /// nothing is written for that verdict. Called at the same moment as [note] and [dataFor].
+  final (String, String)? Function(VerdictKind kind, Map<String, dynamic> evidence)? kindFor;
+
+  /// The `data` of the entry by the verdict (default: the evidence as it is).
+  final Map<String, dynamic> Function(VerdictKind kind, Map<String, dynamic> evidence)? dataFor;
 }
 
 /// A detector's report: "something failed, find out whether it is real".
@@ -183,6 +191,7 @@ class Suspicion {
     this.firstSeen,
     this.viaCore = true,
     this.why,
+    this.whyLate,
     this.scope,
     this.event,
     this.session = true,
@@ -218,6 +227,10 @@ class Suspicion {
   /// The detector's own reading of the evidence (`conn.refused`, …): without it and without a failing
   /// diagnostic the failure is `unexplained`.
   final Why? why;
+
+  /// The detector's reading of the evidence as it stands at the end of the ladder (merged with what joined it
+  /// meanwhile), asked only when nothing else says why; null result = none.
+  final Why? Function(Map<String, dynamic> evidence)? whyLate;
 
   /// What a root made of this covers; null = its own subject exactly.
   final Scope? scope;

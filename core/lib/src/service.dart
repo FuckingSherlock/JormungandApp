@@ -462,61 +462,240 @@ class CoreService implements CoreApi {
 
   // ---- the detectors that go through the Sentinel (docs/failures.md → Перенос детекторов) ----
 
-  /// `conn/failing`: the failure book's streak of one entry becomes a suspicion. The checks, in order: the
-  /// destination worked again through the same outbound (recovery) or through another one (a workaround), as
-  /// the live traffic shows; the same server tried by a probe (it only explains: a server that opens it while
-  /// the app's connections fail is in the trail); the other answering routes tried (Auto's `siteAlternates`,
-  /// the same machinery as the site check). The direct path is never tried: that would tell the network the
-  /// user's interest in the site. Completes with the event's id when the failure stands.
+  /// `conn/failing`: the failure book's streak of one entry becomes a suspicion of its destination ([_judgeSite]).
+  /// Completes with the event's id when the failure stands.
   Future<int?> _reportFailing(FailureReport r) async {
     final d = r.data;
     final host = '${d['host']}', port = (d['port'] as num?)?.toInt(), outbound = '${d['outbound']}', route = '${d['route']}';
-    final dest = port == null ? host : '$host:$port';
-    final since = r.firstSeen.millisecondsSinceEpoch;
-    bool? sameOpens;
-    final v = await sentinel.suspect(Suspicion(
-      kind: 'conn.failing',
-      key: r.key,
-      subject: r.subject,
+    final v = await _judgeSite(
+      host: host,
+      port: port,
+      route: route,
+      outbound: outbound,
       evidence: d,
-      window: windows.connFailing,
+      subject: r.subject,
       firstSeen: r.firstSeen,
-      why: Why('conn.${r.kind.name}', {'count': d['count'], 'route': route}),
-      scope: Scope.of({'host': host, 'port': ?port, 'outbound': outbound}),
+      bg: r.bg,
+      window: windows.connFailing,
+      connWhy: Why('conn.${r.kind.name}', {'count': d['count'], 'route': route}),
+    );
+    return v != null && v.kind == VerdictKind.confirmed ? (v.eventId ?? v.cause) : null;
+  }
+
+  /// Auto noticed that requests to a site got nothing back through a node that passes traffic: the same
+  /// suspicion as the connection book's `conn/failing` of that site (one key, the evidence merges). Public
+  /// for the tests.
+  void siteFailed(AutoSiteFail f) {
+    final (host, port) = _hostPort(f.dest);
+    if (ignoredSites.matches(host)) return;
+    unawaited(_judgeSite(
+      host: host,
+      port: port,
+      route: f.route,
+      outbound: f.tag,
+      evidence: {
+        'host': host,
+        'port': ?port,
+        'outbound': f.tag,
+        'route': f.route,
+        if (f.pkg.isNotEmpty) 'app': f.pkg,
+        'noticed': {'server': f.server, 'rule': f.rule, 'process': f.process},
+      },
+      firstSeen: DateTime.fromMillisecondsSinceEpoch(f.firstSeen),
+      bg: !screenOn,
+      window: windows.siteUnreachable,
+    ));
+  }
+
+  /// Settings → Auto mode → «Check with an external checker» (`plan.auto.siteCheck`, default on).
+  bool get siteCheckOn => (_plan?['auto'] is Map ? (_plan!['auto'] as Map)['siteCheck'] : null) != false;
+
+  /// The probes behind the site checks (default: Auto's `reachSame` / `reachAlternates`); the tests' seam.
+  Future<bool?> Function(String outbound, String dest, Cancel cancel)? probeSame;
+  Future<AltReach> Function(String dest, String? skipRoute, Cancel cancel)? probeAlt;
+  final _siteReportedAt = <String, int>{}; // 'route dest' → when a `site/*` event was written
+
+  bool _canAim(String outbound, String dest) => canProbeDest(dest) && (probeSame != null || (_auto?.canReachSame(outbound, dest) ?? false));
+
+  /// One suspicion per destination (`site|host:port`), whoever reports it: the connection book's streak
+  /// (`conn/failing`) and Auto's notice (requests through a node that passes traffic got nothing back) join and
+  /// their evidence merges. Where a test can be aimed at the site ([_canAim]) the checks, in order: the
+  /// destination worked again through the same outbound (live traffic) or a probe through the same server
+  /// (recovery); it works through another outbound (live traffic) or a probe through the other answering routes
+  /// (`siteAlternates`; a workaround); the external checker (only when nothing opened it; `siteCheckOn`). The
+  /// event by the verdict: another route opens it -> `site/blocked`; nothing does and the checker says it opens
+  /// for others -> a confirmed `site/unreachable`, down for everyone / the checker unsure or off -> an unexplained
+  /// one; a blip or a consequence -> `conn/failing`. Where no test can be aimed (a port other than 443 / 80, no
+  /// Auto) it is the plain `conn/failing` streak. A `site/*` event is written once an hour per site and route.
+  /// The direct path is never tried: that would tell the network the user's interest in the site.
+  Future<Verdict?> _judgeSite({
+    required String host,
+    required int? port,
+    required String route,
+    required String outbound,
+    required Map<String, dynamic> evidence,
+    Map<String, dynamic>? subject,
+    required DateTime firstSeen,
+    required bool bg,
+    required Duration window,
+    Why? connWhy,
+  }) async {
+    final dest = port == null ? host : '$host:$port';
+    final aimable = _canAim(outbound, dest);
+    final since = firstSeen.millisecondsSinceEpoch;
+    if (aimable && _nowMs - (_siteReportedAt['$route $dest'] ?? -3600000) < 3600000) return null; // reported within the hour
+    AltReach? alt;
+    var asked = false;
+    Map<String, dynamic>? result;
+    (String, String)? wrote;
+
+    Map<String, dynamic> connData(Map<String, dynamic> e) => {for (final x in e.entries) if (x.key != 'noticed') x.key: x.value};
+    bool fromConn(Map<String, dynamic> e) => e['count'] != null;
+    // the probe opened the site through the same server while the app's own connections went on failing: not a
+    // recovery, the site is not the culprit (docs/failures.md → Проверки сайтов)
+    var diverged = false;
+    (String, String)? pick(VerdictKind kind, Map<String, dynamic> e) {
+      if (!aimable) return _siteKind('conn', 'failing');
+      return switch (kind) {
+        VerdictKind.confirmed || VerdictKind.unexplained when diverged => _siteKind('conn', 'failing'),
+        VerdictKind.confirmed || VerdictKind.unexplained => _siteKind('site', 'unreachable'),
+        VerdictKind.workaround when alt?.via != null => _siteKind('site', 'blocked'),
+        VerdictKind.blip when !fromConn(e) => null,
+        VerdictKind.consequence when !fromConn(e) => _siteKind('site', 'unreachable'),
+        _ => _siteKind('conn', 'failing'),
+      };
+    }
+
+    Map<String, dynamic> siteData(Map<String, dynamic> e, String type) {
+      final n = (e['noticed'] as Map?) ?? const {};
+      final proc = e['process'] is Map ? e['process'] : processEventData('${n['process'] ?? ''}');
+      final tried = alt?.tried ?? const [];
+      return {
+        'host': host,
+        'port': ?port,
+        'entry': route,
+        'server': n['server'] ?? outbound,
+        'dest': dest,
+        if (type == 'blocked') ...{'via': alt!.via, 'viaServer': alt!.viaServer} else ...{
+          'tried': [for (final t in tried) {'entry': t.route, 'server': t.server}],
+          if (alt?.off == true) 'retries': 'off',
+        },
+        'rule': ruleEventData(_ruleNames, '${n['rule'] ?? ''}'),
+        'process': ?proc,
+        if (e['app'] != null) 'app': e['app'],
+      };
+    }
+
+    String? siteNote(VerdictKind kind, Map<String, dynamic> e, String type) {
+      if (type == 'blocked') return '$dest does not open through $route, opens through ${alt!.via}';
+      final tried = alt?.tried ?? const [];
+      final t = tried.isEmpty ? '' : ' nor ${tried.map((x) => x.route).join(', ')}';
+      return switch (kind) {
+        VerdictKind.confirmed => '$dest does not open through $route$t: the site is down or blocked everywhere, the checker says it opens elsewhere',
+        VerdictKind.unexplained => alt?.off == true
+            ? '$dest does not open through $route: retries through other routes are off'
+            : '$dest does not open through $route$t: the site is down or blocked everywhere',
+        _ => '$dest does not open through $route: because of another failure',
+      };
+    }
+
+    final onRoute = route.isEmpty ? null : route;
+    final v = await sentinel.suspect(Suspicion(
+      kind: aimable ? 'site.failing' : 'conn.failing',
+      key: FailureBook.siteKey(host, port),
+      subject: subject ?? {'host': host, 'port': ?port, 'route': route, 'path': 'proxy'},
+      evidence: evidence,
+      window: window,
+      firstSeen: firstSeen,
+      // an aimable one is judged by its checks (the checker's word, else nothing says why)
+      why: aimable ? null : connWhy,
+      whyLate: !aimable ? null : (e) => diverged && e['count'] != null ? Why('conn.${e['kind']}', {'count': e['count'], 'route': e['route']}) : null,
+      scope: aimable ? Scope.none : Scope.of({'host': host, 'port': ?port, 'outbound': outbound}),
       checks: [
         Check.recovery('conn.recovered', (_) async {
           final ok = failures.okOutbounds(host, port ?? 0, since).contains(outbound);
           return CheckResult('conn.recovered', ok ? Outcome.pass : Outcome.fail, {'outbound': outbound});
-        }),
+        }, level: Level.destination, via: onRoute),
         Check.alternative('conn.otherRoute', (_) async {
           final others = failures.okOutbounds(host, port ?? 0, since).where((o) => o != outbound).toList();
           return CheckResult('conn.otherRoute', others.isEmpty ? Outcome.inconclusive : Outcome.pass, {'outbounds': others.take(3).toList()});
-        }),
-        Check.diagnostic('probe.same', (_) async {
-          final opens = await _auto?.reachSame(outbound, dest);
-          sameOpens = opens;
-          return CheckResult('probe.same', opens == null ? Outcome.inconclusive : (opens ? Outcome.pass : Outcome.fail), {'outbound': outbound});
-        }, timeout: const Duration(seconds: 15)),
-        Check.alternative('probe.alt', (_) async {
-          final auto = _auto;
-          if (auto == null || sameOpens == true) return CheckResult('probe.alt', Outcome.inconclusive, {'reason': sameOpens == true ? 'sameOpens' : 'noAuto'});
-          final a = await auto.reachAlternates(dest, skipRoute: route);
-          if (a.via != null) return CheckResult('probe.alt', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
-          final routes = [for (final t in a.tried) t.route];
-          if (routes.isEmpty || a.unsure) return CheckResult('probe.alt', Outcome.inconclusive, {'reason': a.off ? 'off' : 'none', 'tried': routes});
-          return CheckResult('probe.alt', Outcome.fail, {'tried': routes});
-        }, timeout: const Duration(seconds: 45)),
+        }, level: Level.destination, via: onRoute),
+        if (aimable) ...[
+          Check.recovery('probe.same', (cancel) async {
+            diverged = false; // a parked ladder runs again from the top
+            final started = _nowMs;
+            final opens = await (probeSame ?? (o, d, c) async => _auto?.reachSame(o, d, cancel: c))(outbound, dest, cancel);
+            if (opens == null) return CheckResult('probe.same', Outcome.inconclusive, {'outbound': outbound});
+            // the probe opens it, the app's own connections keep failing: evidence, not a recovery
+            if (opens && failures.failedSince(host, port ?? 0, started)) {
+              diverged = true;
+              return CheckResult('probe.same', Outcome.fail, {'outbound': outbound, 'opens': true, 'appFails': true});
+            }
+            return CheckResult('probe.same', opens ? Outcome.pass : Outcome.fail, {'outbound': outbound});
+          }, timeout: const Duration(seconds: 15), level: Level.destination, via: onRoute),
+          Check.alternative('probe.alt', (cancel) async {
+            alt = null; // a parked ladder runs again from the top: nothing of the last pass is left
+            if (diverged) return const CheckResult('probe.alt', Outcome.inconclusive, {'reason': 'sameOpens'});
+            final auto = _auto;
+            if (probeAlt == null && auto == null) return const CheckResult('probe.alt', Outcome.inconclusive, {'reason': 'noAuto'});
+            final a = await (probeAlt ?? (d, r, c) => auto!.reachAlternates(d, skipRoute: r, cancel: c))(dest, route, cancel);
+            alt = a;
+            if (a.via != null) return CheckResult('probe.alt', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
+            final routes = [for (final t in a.tried) t.route];
+            if (routes.isEmpty || a.unsure) return CheckResult('probe.alt', Outcome.inconclusive, {'reason': a.off ? 'off' : 'none', 'tried': routes});
+            return CheckResult('probe.alt', Outcome.fail, {'tried': routes});
+          }, timeout: const Duration(seconds: 45), level: Level.destination, via: onRoute),
+          Check.diagnostic('site.checker', (cancel) async {
+            asked = false;
+            result = null;
+            if (diverged) return const CheckResult('site.checker', Outcome.inconclusive, {'reason': 'sameOpens'});
+            if (!siteCheckOn) {
+              result = {'state': 'off'};
+              return const CheckResult('site.checker', Outcome.inconclusive, {'state': 'off'});
+            }
+            asked = true;
+            final r = await siteChecker.check(host, port, manual: false);
+            result = r.toJson();
+            return CheckResult('site.checker', switch (r.state) { 'opens' => Outcome.fail, 'down' => Outcome.pass, _ => Outcome.inconclusive }, {'state': r.state});
+          }, timeout: windows.siteChecker, level: Level.destination, via: onRoute),
+        ],
       ],
-      event: SuspicionEvent('conn', 'failing', level: 'warn', bg: r.bg, note: (kind, e) => _failingNote(kind, e)),
+      event: SuspicionEvent('conn', 'failing',
+          level: 'warn',
+          bg: bg,
+          kindFor: (kind, e) => wrote = pick(kind, e),
+          dataFor: (kind, e) {
+            final k = pick(kind, e);
+            return k == null || k.$1 == 'conn' ? connData(e) : siteData(e, k.$2);
+          },
+          note: (kind, e) {
+            final k = pick(kind, e);
+            if (k == null) return null;
+            return k.$1 == 'conn' ? _failingNote(kind, connData(e)) : siteNote(kind, e, k.$2);
+          }),
     ));
-    return v.kind == VerdictKind.confirmed ? (v.eventId ?? v.cause) : null;
+    final w = wrote;
+    if (w != null && w.$1 == 'site' && v.eventId != null) {
+      _siteReportedAt['$route $dest'] = _nowMs;
+      final id = v.eventId!;
+      if (!_disposed) {
+        final check = result ?? (asked ? {'state': 'failed', 'at': _nowMs, 'error': 'timeout'} : null);
+        if (check != null && w.$2 == 'unreachable') eventBook.update(id, data: {'check': check});
+      }
+      // an announcement: the event is the report, a root would swallow the next one (the hour is kept above)
+      if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(v.key, reason: 'reported');
+    }
+    return v;
   }
+
+  // The journal entry a verdict of [_judgeSite] is written as; the plain literals are what the events catalog test reads.
+  static (String, String) _siteKind(String cat, String type) => (cat, type);
 
   static String _failingNote(VerdictKind kind, Map<String, dynamic> e) {
     final app = e['app'] ?? (e['process'] as Map?)?['name'];
     final who = app == null ? 'Requests' : 'Requests of $app';
     final to = '${e['host']}${e['port'] == null ? '' : ':${e['port']}'} through ${e['outbound']}';
-    final n = '${e['count']} times in a row (${e['kind']})';
+    final n = e['count'] == null ? 'repeatedly' : '${e['count']} times in a row (${e['kind']})';
     return switch (kind) {
       VerdictKind.confirmed => '$who to $to failed $n',
       VerdictKind.blip => '$who to $to failed $n, then worked again',
@@ -538,6 +717,7 @@ class CoreService implements CoreApi {
       firstSeen: first == null ? null : DateTime.fromMillisecondsSinceEpoch(first),
       why: Why('tun.tcpDead', {'stack': d['stack']}),
       scope: Scope.none,
+      level: Level.core,
       // TODO(sentinel): the active check «open a test TCP connection through the TUN» (a recovery check here:
       // it works → a blip; refused/silent → the diagnostic) replaces the wait for the first accepted connection.
       checks: const [],
@@ -618,8 +798,7 @@ class CoreService implements CoreApi {
       runner.note('auto: ${u.id} is unstable (${u.strikes} drops), back to it after ${u.holdMs ~/ 60000} min of answers');
       unawaited(routeUnstable(u));
     });
-    auto.blocked.listen(siteBlocked);
-    auto.unreachable.listen(siteUnreachable);
+    auto.siteFails.listen(siteFailed);
     // `lost` / `restored` are Auto's (no route answers); `offline` / `online` are the Sentinel's network
     // context (_syncNetEvents): the OS, the platform and the probes all feed one root, no second source
     auto.net.listen((n) {
@@ -635,103 +814,6 @@ class CoreService implements CoreApi {
     _changed();
   }
 
-  /// Auto found a site that does not open through the route but opens through another one: the
-  /// journal says so (`site/blocked`), unless the site is ignored. Auto has tried the site itself (the
-  /// same server failed, the other route opened it): the Sentinel gets those as the checks already made
-  /// and ends with a `workaround` (the event is quiet; the app still offers the rule). Public for the tests.
-  void siteBlocked(AutoBlocked b) {
-    final (host, port) = _hostPort(b.dest);
-    if (ignoredSites.matches(host)) return;
-    failures.noteSite(host); // this is the event of the site: no `conn/failing` besides it
-    unawaited(sentinel.suspect(Suspicion(
-      kind: 'site.blocked',
-      subject: {'host': host, 'port': ?port, 'route': b.route, 'path': 'proxy'},
-      evidence: {
-        'host': host,
-        'port': ?port,
-        'entry': b.route,
-        'server': b.server,
-        'dest': b.dest,
-        'via': b.via,
-        'viaServer': b.viaServer,
-        'rule': ruleEventData(_ruleNames, b.rule),
-        'process': ?processEventData(b.process),
-        if (b.pkg.isNotEmpty) 'app': b.pkg,
-      },
-      window: windows.siteBlocked,
-      why: Why('site.blocked', {'route': b.route, 'via': b.via}),
-      scope: Scope.none,
-      checks: [
-        Check.recorded(CheckRole.recovery, CheckResult('probe.same', Outcome.fail, {'route': b.route, 'server': b.server})),
-        Check.recorded(CheckRole.alternative, CheckResult('probe.alt', Outcome.pass, {'via': b.via, 'viaServer': b.viaServer})),
-      ],
-      event: SuspicionEvent('site', 'blocked', level: 'warn', bg: !screenOn),
-    )));
-  }
-
-  /// Settings → Auto mode → «Check with an external checker» (`plan.auto.siteCheck`, default on).
-  bool get siteCheckOn => (_plan?['auto'] is Map ? (_plan!['auto'] as Map)['siteCheck'] : null) != false;
-
-  /// A site that opens through no route (`site/unreachable`), unless it is ignored. Auto has tried the site
-  /// itself; the Sentinel then asks the external checker (sitecheck.dart; also when the retries through
-  /// other routes are off) whether the site opens for others: it does — a confirmed failure (the one that
-  /// notifies); it is down for everyone, or the checker could not tell, or the switch is off — `unexplained`
-  /// (the journal only). The event is written with the verdict, and gets `check` (the checker's result, or
-  /// `{state: off}`) after it; the manual «Check with checker» ([siteCheck]) works on it as before.
-  void siteUnreachable(AutoUnreachable u) {
-    final (host, port) = _hostPort(u.dest);
-    if (ignoredSites.matches(host)) return;
-    failures.noteSite(host);
-    final on = siteCheckOn;
-    var asked = false;
-    Map<String, dynamic>? result;
-    unawaited(sentinel
-        .suspect(Suspicion(
-          kind: 'site.unreachable',
-          subject: {'host': host, 'port': ?port, 'route': u.route, 'path': 'proxy'},
-          evidence: {
-            'host': host,
-            'port': ?port,
-            'entry': u.route,
-            'server': u.server,
-            'dest': u.dest,
-            'tried': [for (final t in u.tried) {'entry': t.route, 'server': t.server}],
-            if (u.retriesOff) 'retries': 'off',
-            'rule': ruleEventData(_ruleNames, u.rule),
-            'process': ?processEventData(u.process),
-            if (u.pkg.isNotEmpty) 'app': u.pkg,
-          },
-          window: windows.siteUnreachable,
-          scope: Scope.none,
-          checks: [
-            Check.recorded(CheckRole.recovery, CheckResult('probe.same', Outcome.fail, {'route': u.route, 'server': u.server})),
-            Check.recorded(
-                CheckRole.alternative,
-                CheckResult('probe.alt', u.retriesOff || u.tried.isEmpty ? Outcome.inconclusive : Outcome.fail,
-                    {if (u.retriesOff) 'reason': 'off', 'tried': [for (final t in u.tried) t.route]})),
-            Check.diagnostic('site.checker', (_) async {
-              if (!on) {
-                result = {'state': 'off'};
-                return const CheckResult('site.checker', Outcome.inconclusive, {'state': 'off'});
-              }
-              asked = true;
-              final r = await siteChecker.check(host, port, manual: false);
-              result = r.toJson();
-              return CheckResult('site.checker', switch (r.state) { 'opens' => Outcome.fail, 'down' => Outcome.pass, _ => Outcome.inconclusive }, {'state': r.state});
-            }, timeout: windows.siteChecker),
-          ],
-          event: SuspicionEvent('site', 'unreachable', level: 'warn', bg: !screenOn),
-        ))
-        .then((v) {
-      final id = v.eventId;
-      if (id == null || _disposed) return;
-      final check = result ?? (asked ? {'state': 'failed', 'at': _nowMs, 'error': 'timeout'} : null);
-      if (check != null) eventBook.update(id, data: {'check': check});
-      // an announcement, as `auto/unstable`: Auto keeps its own pace of repeating it, a root would swallow the repeats
-      if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(v.key, reason: 'reported');
-    }));
-  }
-
   /// `auto/unstable`: Auto's flap guard held a route back. An announcement, not a standing failure: the
   /// root the Sentinel opens for it is closed at once (Auto itself keeps the route on hold), so the next
   /// one for the same route is judged and written again. Public for the tests.
@@ -745,6 +827,7 @@ class CoreService implements CoreApi {
       window: windows.autoUnstable,
       why: Why('route.unstable', {'strikes': u.strikes, 'holdMs': u.holdMs}),
       scope: Scope.none,
+      level: Level.route,
       event: SuspicionEvent('auto', 'unstable', level: 'warn'),
     ));
     if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(key, reason: 'reported');
