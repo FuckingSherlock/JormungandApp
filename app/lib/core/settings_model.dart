@@ -486,12 +486,16 @@ extension DnsOfCatalog on Catalog {
   }
 
   /// Turns one side of a provider on / off (Local is direct only: nothing to turn).
-  void dnsToggleSide(String id, String side) {
+  /// Taking the provider's last side flips it to the other one (a provider always has a side).
+  /// False for an unknown provider / Local.
+  bool dnsToggleSide(String id, String side) {
     final s = dnsServers[id];
-    if (s == null || s.system) return;
+    if (s == null || s.system) return false;
     final sides = {...s.activeSides};
     if (!sides.remove(side)) sides.add(side);
+    if (sides.isEmpty) sides.add(side == 'vpn' ? 'direct' : 'vpn');
     s.sides = sides;
+    return true;
   }
 
   /// Adds ([id] null) or edits a server; returns its id. [addr] null = keep the provider's
@@ -506,7 +510,7 @@ extension DnsOfCatalog on Catalog {
     if (s != null) {
       s.name = name.trim().isEmpty ? (addr == null ? s.name : dnsNameFromAddr(addr)) : name.trim();
       if (addr != null && addr != s.addr) s.addr = addr;
-      if (sides != null && !s.system) s.sides = {...sides};
+      if (sides != null && sides.isNotEmpty && !s.system) s.sides = {...sides};
       return s.id;
     }
     final a = addr ?? '';
@@ -515,7 +519,7 @@ extension DnsOfCatalog on Catalog {
       id: nid,
       name: name.trim().isEmpty ? dnsNameFromAddr(a) : name.trim(),
       addr: a,
-      sides: sides ?? const ['vpn'],
+      sides: sides == null || sides.isEmpty ? const ['vpn'] : sides,
     );
     dnsOrder.add(nid);
     return nid;

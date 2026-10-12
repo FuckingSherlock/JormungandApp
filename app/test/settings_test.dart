@@ -440,14 +440,77 @@ void main() {
         await tester.pumpAndSettle();
         expect(g.activeSides, {'direct'});
 
-        // another provider covers the side: no dialog
+        // another provider covers the side: no dialog; the last side of a provider stays
         host.catalog.dnsServers['cloudflare']!.on = true;
         host.changed();
         await tester.pumpAndSettle();
         await tester.tap(chip('google', 'direct'));
         await tester.pumpAndSettle();
         expect(find.text('Switch off'), findsNothing);
-        expect(g.activeSides, isEmpty);
+        expect(g.activeSides, {'vpn'}); // the last side flips to the other one
+      });
+
+      testWidgets('the last lit side chip of a provider flips it to the other side', (tester) async {
+        final host = FakeCoreHost();
+        final id = host.catalog.dnsSave(null, name: 'Mine', addr: 'tls://9.9.9.9', sides: ['direct']);
+        await openDns(tester, host);
+        await tester.tap(chip(id, 'direct'));
+        await tester.pumpAndSettle();
+        expect(host.catalog.dnsServers[id]!.activeSides, {'vpn'});
+        host.catalog.dnsSave(id, name: 'Mine', sides: const []);
+        expect(host.catalog.dnsServers[id]!.activeSides, {'vpn'});
+      });
+
+      testWidgets('the form flips the last side instead of emptying it', (tester) async {
+        final host = FakeCoreHost();
+        final id = host.catalog.dnsSave(null, name: 'Mine', addr: 'tls://9.9.9.9', sides: ['direct']);
+        await openDns(tester, host);
+        await tester.tap(find.descendant(of: rowOf(id), matching: find.text('Mine')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.descendant(of: find.byType(DnsForm), matching: find.text('Direct')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(host.catalog.dnsServers[id]!.activeSides, {'vpn'});
+      });
+
+      testWidgets('the confirm text says which side is left empty', (tester) async {
+        const direct = 'DNS for direct traffic will go through the VPN servers.';
+        const vpn =
+            'DNS for traffic through the VPN will bypass the tunnel: your ISP will see which sites you open.';
+        const both =
+            'DNS will go through the system resolver only. For traffic through the VPN that bypasses the tunnel: your ISP will see which sites you open.';
+
+        // both sides: the only provider
+        final h1 = FakeCoreHost();
+        only(h1, 'google');
+        await openDns(tester, h1);
+        await tester.tap(
+          find.descendant(of: rowOf('google'), matching: find.byType(SubCheckbox)),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(both), findsOneWidget);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+
+        // vpn only: the chip of the sole vpn provider
+        await tester.tap(chip('google', 'vpn'));
+        await tester.pumpAndSettle();
+        expect(find.text(vpn), findsOneWidget);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+
+        // direct only: cloudflare covers vpn alone, google is the sole direct one
+        final h2 = FakeCoreHost();
+        only(h2, 'google');
+        final cf = h2.catalog.dnsServers['cloudflare']!;
+        cf.on = true;
+        cf.sides = {'vpn'};
+        await openDns(tester, h2);
+        await tester.tap(chip('google', 'direct'));
+        await tester.pumpAndSettle();
+        expect(find.text(direct), findsOneWidget);
+        expect(find.text(both), findsNothing);
       });
 
       testWidgets('Local is first under localFirst, last under priority, no drag handle', (

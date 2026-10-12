@@ -502,16 +502,14 @@ Future<bool> _confirmNoDns(
     builder: (_) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final side in sides)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(
-              side == 'vpn'
-                  ? l10n.noDnsServerWillBeLeft2
-                  : l10n.noDnsServerWillBeLeft,
-              style: TextStyle(fontSize: 14, color: c.t2),
-            ),
-          ),
+        Text(
+          sides.length > 1
+              ? l10n.dnsWillGoThroughTheSystem
+              : sides.first == 'vpn'
+              ? l10n.dnsForTrafficThroughTheVpn
+              : l10n.dnsForDirectTrafficWillGo,
+          style: TextStyle(fontSize: 14, color: c.t2),
+        ),
       ],
     ),
     actions: (ctx) => [
@@ -869,6 +867,9 @@ class _DnsFormState extends State<DnsForm> {
                       active: _sides.contains(side),
                       onTap: () => setState(() {
                         if (!_sides.remove(side)) _sides.add(side);
+                        if (_sides.isEmpty) {
+                          _sides.add(side == 'vpn' ? 'direct' : 'vpn');
+                        }
                       }),
                     ),
                 ],

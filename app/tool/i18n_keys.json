@@ -1542,5 +1542,9 @@
   "First": "first",
   "Last": "last2",
   "No answer on any of their sides": "noAnswerOnAnyOfTheir",
-  "Built-in servers cannot be deleted, only switched off.": "builtInServersCannotBeDeleted"
+  "Built-in servers cannot be deleted, only switched off.": "builtInServersCannotBeDeleted",
+  "DNS for direct traffic will go through the VPN servers.": "dnsForDirectTrafficWillGo",
+  "DNS for traffic through the VPN will bypass the tunnel: your ISP will see which sites you open.": "dnsForTrafficThroughTheVpn",
+  "DNS will go through the system resolver only. For traffic through the VPN that bypasses the tunnel: your ISP will see which sites you open.": "dnsWillGoThroughTheSystem",
+  "To turn the server off, untick it": "toTurnTheServerOffUntick"
 }
