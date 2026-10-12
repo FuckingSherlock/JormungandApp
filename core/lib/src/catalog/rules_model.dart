@@ -5,6 +5,7 @@
 library;
 
 import '../routing.dart' as core show services;
+import '../routing.dart' show dnsKindOf, dnsKindSystem, dnsKinds, dnsSidesAll, dnsUseDefault;
 import 'json_util.dart';
 
 T _get<T>(Json j, String k, T def) => j[k] is T ? j[k] as T : def;
@@ -271,46 +272,186 @@ class RuleSetCfg with RoundTrip {
   }
 }
 
-/// A DNS server (`dnsServers[id]`).
+/// Version of the stored DNS list: below it the list is migrated once on load ([migrateDnsList]).
+const dnsListVersion = 2;
+
+/// One address of a DNS provider, in one transport.
+class DnsTransport with RoundTrip {
+  DnsTransport(this.kind, this.addr);
+
+  factory DnsTransport.fromJson(Json j) {
+    final addr = _get(j, 'addr', '');
+    final t = DnsTransport(_get(j, 'kind', dnsKindOf(addr)), addr);
+    t.capture(j, _known);
+    return t;
+  }
+
+  static const _known = {'kind', 'addr'};
+
+  /// `doh` | `dot` | `doq` | `udp` | `system`.
+  final String kind;
+
+  /// `https://1.1.1.1/dns-query`, `tls://1.1.1.1`, `quic://…`, `1.1.1.1`, `system`.
+  final String addr;
+
+  Json toJson() => {'kind': kind, 'addr': addr, ...deepCopy(unknown) as Json};
+}
+
+/// A DNS provider (`dnsServers[id]`, docs/rules.md §6): several addresses in different transports,
+/// each usable on the direct side and / or through the VPN. The list's order (`dnsOrder`) is the
+/// priority; inside a provider the [transports] are tried in their own order, only the kinds in [use].
+/// The OS resolver (Local) is a provider with the one `system` transport and is direct only.
 class DnsServerCfg with RoundTrip {
-  DnsServerCfg({required this.id, this.name = '', this.addr = '', this.via = 'vpn', this.on = true});
+  /// With [addr] (and [via]): the one-address provider the list had before the rework (use = its kind,
+  /// sides = [via], `vpn` when not said: a server the user adds is VPN-only). Else [transports], [use]
+  /// and [sides] as given (the defaults of a provider: `doh` + `dot`, VPN only).
+  DnsServerCfg({
+    required this.id,
+    this.name = '',
+    String? addr,
+    String? via,
+    this.on = true,
+    List<DnsTransport>? transports,
+    Iterable<String>? sides,
+    Iterable<String>? use,
+  }) {
+    this.transports = transports ?? [if (addr != null && addr.isNotEmpty) DnsTransport(dnsKindOf(addr), addr)];
+    final kind = addr == null || addr.isEmpty ? null : dnsKindOf(addr);
+    this.use = {...(use ?? (kind != null ? [kind] : dnsUseDefault))};
+    this.sides = {...(sides ?? [via ?? 'vpn'])};
+  }
 
   factory DnsServerCfg.fromJson(Json j) {
+    final legacy = j['transports'] is! List;
+    final addr = _get(j, 'addr', '');
     final s = DnsServerCfg(
       id: '${j['id']}',
       name: _get(j, 'name', ''),
-      addr: _get(j, 'addr', ''),
-      via: _get(j, 'via', 'vpn'),
       on: truthy(j['on']),
+      transports: legacy ? null : [for (final t in j['transports'] as List) DnsTransport.fromJson(asJson(t))],
+      addr: legacy ? addr : null,
+      via: legacy ? _get(j, 'via', 'vpn') : null,
+      sides: j['sides'] is List ? strList(j['sides']) : null,
+      use: j['use'] is List ? strList(j['use']) : null,
     );
     s.capture(j, _known);
     return s;
   }
 
-  static const _known = {'id', 'name', 'addr', 'via', 'on'};
+  /// `addr` / `via` are the single-address form of the list before the rework: read, never written back.
+  static const _known = {'id', 'name', 'on', 'transports', 'sides', 'use', 'addr', 'via'};
 
   final String id;
   String name;
-
-  /// `https://…`, `tls://…`, `system`…
-  String addr;
-
-  /// `vpn` | `direct`.
-  String via;
   bool on;
 
-  Json toJson() => {'id': id, 'name': name, 'addr': addr, 'via': via, 'on': on, ...deepCopy(unknown) as Json};
+  /// The addresses, in the order they are tried inside the provider.
+  late List<DnsTransport> transports;
+
+  /// The enabled kinds (`doh` / `dot` / `doq` / `udp`); a kind with no address does nothing.
+  late Set<String> use;
+
+  /// `direct` and / or `vpn`. Read it through [activeSides]: Local never has `vpn`.
+  late Set<String> sides;
+
+  /// The OS resolver.
+  bool get system => transports.length == 1 && transports.first.kind == dnsKindSystem;
+
+  /// [sides] as they count: Local is direct only (the OS resolver is on the machine, not through the tunnel).
+  Set<String> get activeSides => system ? {'direct'} : sides.where(dnsSidesAll.contains).toSet();
+
+  /// The transports that count, in their order: only the enabled kinds (Local's `system` always).
+  List<DnsTransport> get usedTransports => [for (final t in transports) if (system || use.contains(t.kind)) t];
+
+  /// The first address (the list before the rework had one): what the old Settings → DNS shows.
+  String get addr => transports.isEmpty ? '' : transports.first.addr;
+  set addr(String v) {
+    transports = [if (v.isNotEmpty) DnsTransport(dnsKindOf(v), v)];
+    use = {if (v.isNotEmpty) dnsKindOf(v)};
+  }
+
+  /// `vpn` | `direct`: one of the sides (the old form had one); `vpn` when both.
+  String get via => activeSides.contains('vpn') ? 'vpn' : 'direct';
+  set via(String v) => sides = {v};
+
+  Json toJson() => {
+        'id': id,
+        'name': name,
+        'on': on,
+        'sides': [for (final s in dnsSidesAll) if (activeSides.contains(s)) s],
+        'use': [for (final k in [...dnsKinds, dnsKindSystem]) if (use.contains(k)) k, ...use.where((k) => ![...dnsKinds, dnsKindSystem].contains(k))],
+        'transports': [for (final t in transports) t.toJson()],
+        ...deepCopy(unknown) as Json,
+      };
+}
+
+List<DnsTransport> _transports(String kind, List<String> addrs) => [for (final a in addrs) DnsTransport(kind, a)];
+
+/// The list a fresh install has, and the one a migration puts in place of the old built-ins, in
+/// priority order: Cloudflare, Google, AdGuard (unfiltered), Local. Providers use DoH + DoT (UDP is
+/// plain text: off by default) on both sides; Local is the OS resolver, direct only.
+List<DnsServerCfg> defaultDnsServers() => [
+      DnsServerCfg(id: 'cloudflare', name: 'Cloudflare', sides: dnsSidesAll, transports: [
+        ..._transports('doh', ['https://1.1.1.1/dns-query', 'https://1.0.0.1/dns-query']),
+        ..._transports('dot', ['tls://1.1.1.1', 'tls://1.0.0.1']),
+        ..._transports('udp', ['1.1.1.1', '1.0.0.1']),
+      ]),
+      DnsServerCfg(id: 'google', name: 'Google', sides: dnsSidesAll, transports: [
+        ..._transports('doh', ['https://8.8.8.8/dns-query', 'https://8.8.4.4/dns-query']),
+        ..._transports('dot', ['tls://8.8.8.8', 'tls://8.8.4.4']),
+        ..._transports('udp', ['8.8.8.8', '8.8.4.4']),
+      ]),
+      DnsServerCfg(id: 'adguard', name: 'AdGuard (unfiltered)', sides: dnsSidesAll, transports: [
+        ..._transports('doh', ['https://94.140.14.140/dns-query', 'https://94.140.14.141/dns-query']),
+        ..._transports('dot', ['tls://94.140.14.140', 'tls://94.140.14.141']),
+        ..._transports('doq', ['quic://94.140.14.140', 'quic://94.140.14.141']),
+        ..._transports('udp', ['94.140.14.140', '94.140.14.141']),
+      ]),
+      DnsServerCfg(id: 'local', name: 'Local', sides: ['direct'], transports: [DnsTransport(dnsKindSystem, 'system')]),
+    ];
+
+/// The ids of the list before the rework that the migration replaces by [defaultDnsServers].
+const _oldBuiltinDns = {'remote', 'local', 'google'};
+
+/// The one-time migration of the stored list to [dnsListVersion] (docs/rules.md §6): the old built-ins
+/// (`remote`, `local`, `google`) are replaced by [defaultDnsServers]; the user's own servers follow
+/// them in their old order, converted by [DnsServerCfg.fromJson] (one address = one transport of its kind,
+/// `via` = the side; a `system` one is direct only). [renamed]: old id → new id of what changed
+/// (`remote` → `cloudflare`, an own server whose id the defaults took): ids that rules and the
+/// "Resolve for IP rules" pick refer to.
+({Map<String, DnsServerCfg> servers, List<String> order, Map<String, String> renamed}) migrateDnsList(
+    Map<String, DnsServerCfg> old, List<String> oldOrder) {
+  final servers = <String, DnsServerCfg>{for (final s in defaultDnsServers()) s.id: s};
+  final order = [...servers.keys];
+  final renamed = <String, String>{'remote': 'cloudflare'};
+  final own = [...oldOrder.where(old.containsKey), ...old.keys.where((k) => !oldOrder.contains(k))];
+  for (final id in own) {
+    if (_oldBuiltinDns.contains(id)) continue;
+    var nid = id;
+    while (servers.containsKey(nid)) {
+      nid = '$nid-2';
+    }
+    if (nid != id) renamed[id] = nid;
+    final o = old[id]!;
+    final s = DnsServerCfg(id: nid, name: o.name, on: o.on, transports: [...o.transports], sides: o.activeSides, use: o.use);
+    s.unknown = deepCopy(o.unknown) as Json;
+    servers[nid] = s;
+    order.add(nid);
+  }
+  return (servers: servers, order: order, renamed: renamed);
 }
 
 /// Settings → DNS (`dnsCfg`).
 class DnsCfg with RoundTrip {
-  DnsCfg({this.hijack = true, this.auto = true, this.resolve = 'auto'});
+  DnsCfg({this.hijack = true, this.auto = true, this.resolve = 'auto', this.directPolicy = 'localFirst', this.listVersion = dnsListVersion});
 
   factory DnsCfg.fromJson(Json j) {
     final c = DnsCfg(
       hijack: j['hijack'] != false,
       auto: _get(j, 'auto', true),
       resolve: _get(j, 'resolve', 'auto'),
+      directPolicy: j['directPolicy'] == 'priority' ? 'priority' : 'localFirst',
+      listVersion: j['listVersion'] is num ? (j['listVersion'] as num).toInt() : 1,
     );
     c.capture(j, _known);
     return c;
@@ -318,7 +459,15 @@ class DnsCfg with RoundTrip {
 
   /// `fakeip` / `fakeipExclude` are listed only so that old saved data drops them instead of
   /// carrying them as unknown keys: FakeIP is removed until it is redesigned (`docs/rules.md` §DNS).
-  static const _known = {'hijack', 'auto', 'resolve', 'fakeip', 'fakeipExclude'};
+  static const _known = {'hijack', 'auto', 'resolve', 'directPolicy', 'listVersion', 'fakeip', 'fakeipExclude'};
+
+  /// `localFirst` (default): the direct side tries Local first, then the list order; `priority`: the
+  /// direct side follows the list order like the VPN side.
+  String directPolicy;
+
+  /// Which version of the list the stored `dnsServers` is ([dnsListVersion]); a store without the
+  /// key is version 1 and is migrated once on load.
+  int listVersion;
 
   /// TUN only: the core answers every DNS query.
   bool hijack;
@@ -333,6 +482,8 @@ class DnsCfg with RoundTrip {
         'hijack': hijack,
         'auto': auto,
         'resolve': resolve,
+        'directPolicy': directPolicy,
+        'listVersion': listVersion,
         ...deepCopy(unknown) as Json,
       };
 }

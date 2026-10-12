@@ -10,6 +10,7 @@ import 'auto.dart';
 import 'config.dart';
 import 'device.dart';
 import 'dns_failover.dart';
+import 'dns_flags.dart';
 import 'durable.dart';
 import 'elevation.dart';
 import 'eventbook.dart';
@@ -280,6 +281,10 @@ class CoreService implements CoreApi {
   Set<String> _dnsVpn = const {}; // ids of the servers set «via VPN»
   Map<String, String> _ruleDns = const {}; // user rule id → the tag of its DNS server
   String _domainResolver = 'local'; // the tag that resolves what goes out directly
+
+  /// Where the DNS flag files live (dns_flags.dart): the same path for every config of this core, so a sing-box
+  /// taken over after the core restarted reads the files the new core writes.
+  String get _dnsFlagDir => p.join(dataDir, 'dns-flags');
 
   void _takeDns(RoutingInfo info) {
     _dnsServers = info.dnsServers;
@@ -1011,15 +1016,15 @@ class CoreService implements CoreApi {
     fb.start();
   }
 
-  /// DNS failover: the servers in use are checked and the clash mode set to the best one
-  /// that answers (dns_failover.dart). A new sing-box starts on the mode `Rule` = the first
-  /// server in use (`dns.final`), which is where the service starts too.
+  /// DNS failover: the servers in use are checked and judged (dns_failover.dart). D1b: it must move the DNS
+  /// flags (dns_flags.dart, `RoutingInfo.dnsSides` / `dnsCandidates` of the config); for now it only watches (`activate` refuses), a new
+  /// sing-box answers by the config's priority with every flag on.
   void _startDnsFailover(SingBoxApi api, AutoService auto) {
     if (_dnsServers.isEmpty && _dnsExtra.isEmpty) return;
     final probe = _probe;
     if (probe == null) return;
     final dns = _dns = DnsFailover(_dnsServers,
-        setMode: api.setClashMode,
+        activate: (tag) async => false,
         query: _dnsAsk,
         settings: auto.settings,
         sentinel: sentinel,
@@ -1044,19 +1049,13 @@ class CoreService implements CoreApi {
   }
 
   /// The DNS server a connection resolved through (docs/rules.md §6): the user rule's own server; for a direct
-  /// outbound the server of its `domain_resolver` (`direct@dns-<id>`) or the default one; else the server in use.
+  /// outbound the default one (the direct side's top candidate); else the server in use.
   /// The OS resolver (`local`) is the server `system`. Null when there is none.
   ({String id, String tag, bool vpn})? _resolverFor(String outbound, Map<String, dynamic> evidence) {
     final text = evidence['rule'] is String ? evidence['rule'] as String : '${(evidence['noticed'] as Map?)?['rule'] ?? ''}';
     final origin = text.isEmpty ? null : _ruleNames?.of(text);
     String? tag = origin != null && origin.kind == 'user' ? _ruleDns[origin.id] : null;
-    if (tag == null) {
-      if (outbound.startsWith('direct@')) {
-        tag = outbound.substring(7);
-      } else if (outbound == 'direct') {
-        tag = _domainResolver;
-      }
-    }
+    if (tag == null && outbound == 'direct') tag = _domainResolver;
     final all = [..._dnsServers, ..._dnsExtra];
     DnsEntry? e = tag == null ? null : all.where((s) => s.tag == tag).firstOrNull;
     if (e == null && tag == null) e = all.where((s) => s.id == _dns?.active).firstOrNull ?? _dnsServers.firstOrNull;
@@ -1516,16 +1515,20 @@ class CoreService implements CoreApi {
     final svc = SvcIn(svcPort);
     final info = RoutingInfo();
     try {
-      await runner.start(buildConfig(plan,
+      final config = buildConfig(plan,
           tunnelPort: tunnelPort,
           sysPort: sysPort,
           probe: probe,
           svc: svc,
           ruleSetFiles: lists.files,
+          dnsFlagDir: _dnsFlagDir,
           warnings: warnings,
           info: info,
           selfPaths: _selfPaths,
-          selfPackages: _selfPackages));
+          selfPackages: _selfPackages);
+      // every DNS server's flag file must exist before sing-box reads the config; all on at a start
+      writeDnsFlags(info.dnsCandidates);
+      await runner.start(config);
     } on SingBoxError catch (e) {
       // sing-box refused the TUN for a missing permission: the same advice as not being elevated
       if (planTun(plan) && tunAccessDenied(e.message)) throw TunNeedsAdmin(e.message);
@@ -1612,6 +1615,7 @@ class CoreService implements CoreApi {
             probe: probe,
             svc: svc == null ? null : SvcIn(svc.port, svc.secret),
             ruleSetFiles: ((rec['ruleSetFiles'] as Map?) ?? const {}).cast<String, String>(),
+            dnsFlagDir: _dnsFlagDir,
             warnings: <String>[],
             info: info,
             selfPaths: _selfPaths,

@@ -340,12 +340,12 @@ void main() {
       await start(routing: dns);
       final root = svc.sentinel.openRoot(
         kind: 'dns.down',
-        key: 'dns|g',
-        subject: {'dns': 'g', 'path': 'direct'},
-        scope: Scope.of({'dns': 'g'}),
+        key: 'dns|g-udp1',
+        subject: {'dns': 'g-udp1', 'path': 'direct'},
+        scope: Scope.of({'dns': 'g-udp1'}),
         level: Level.dns,
       );
-      final cause = svc.eventBook.add('dns', 'failed', 'warn', data: {'server': 'g'});
+      final cause = svc.eventBook.add('dns', 'failed', 'warn', data: {'server': 'g-udp1'});
       svc.sentinel.attachEvent(root, cause);
       fail(3);
       await time.advanceSeconds(11);
@@ -365,7 +365,7 @@ void main() {
       };
       fail(3);
       await time.advanceSeconds(11);
-      expect(asked, ['dns-g example.org']);
+      expect(asked, ['dns-g-udp1 example.org']);
       final e = events('conn', 'failing').single;
       expect([e['level'], e['verdict']], ['warn', 'confirmed']);
       expect((e['why'] as Map)['code'], 'dns.resolve');
@@ -423,7 +423,7 @@ void main() {
           },
         ],
       });
-      final cause = openDnsRoot('g2');
+      final cause = openDnsRoot('g2-udp1');
       for (var i = 0; i < 3; i++) {
         svc.failures.onClosed(_closed(rule: 'domain_suffix=example.org'));
       }
@@ -436,7 +436,7 @@ void main() {
     test('the same streak with no rule is the default resolver\'s: the rule server\'s root does not explain it', () async {
       await start(routing: dns);
       svc.dnsQuery = (tag, name, t) async => 12;
-      openDnsRoot('g2');
+      openDnsRoot('g2-udp1');
       fail(3);
       await time.advanceSeconds(11);
       expect(events('conn', 'failing').single['verdict'], isNot('consequence'));
@@ -444,7 +444,7 @@ void main() {
 
     test('a route with a domain-named server depends on the resolver of the domain: its dead root explains auto/unstable and conn/lost', () async {
       await start(routing: dns, server: 'node.example.com');
-      final cause = openDnsRoot('g');
+      final cause = openDnsRoot('g-udp1');
       await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
       final u = events('auto', 'unstable').single;
       expect([u['level'], u['verdict'], u['cause']], ['info', 'consequence', cause]);
@@ -456,7 +456,7 @@ void main() {
 
     test('a route whose servers are addresses does not depend on it: the same dead root leaves auto/unstable confirmed', () async {
       await start(routing: dns);
-      openDnsRoot('g');
+      openDnsRoot('g-udp1');
       await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
       expect(events('auto', 'unstable').single['verdict'], 'confirmed');
     });

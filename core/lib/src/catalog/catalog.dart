@@ -178,12 +178,8 @@ class Catalog {
           'updated': 'with the first connect',
         }),
     ];
-    dnsServers = {
-      'remote': DnsServerCfg(id: 'remote', name: 'Cloudflare', addr: 'https://1.1.1.1/dns-query'),
-      'local': DnsServerCfg(id: 'local', name: 'Local', addr: 'system', via: 'direct'),
-      'google': DnsServerCfg(id: 'google', name: 'Google', addr: 'tls://8.8.8.8', on: false),
-    };
-    dnsOrder = ['remote', 'local', 'google'];
+    dnsServers = {for (final s in defaultDnsServers()) s.id: s};
+    dnsOrder = [...dnsServers.keys];
     dnsCfg = DnsCfg();
     modeState = {'profiles': ModeSlot()};
   }
@@ -238,7 +234,25 @@ class Catalog {
       dnsOrder = s['dnsOrder'] is List ? strList(s['dnsOrder']) : dnsServers.keys.toList();
       dnsSeq = seq(s['dnsSeq']);
     }
-    if (s['dnsCfg'] is Map) dnsCfg = DnsCfg.fromJson(asJson(s['dnsCfg']));
+    if (s['dnsCfg'] is Map) {
+      dnsCfg = DnsCfg.fromJson(asJson(s['dnsCfg']));
+    } else if (s['dnsServers'] is Map) {
+      dnsCfg.listVersion = 1; // a list without settings next to it: from before the marker
+    }
+    // the stored DNS list of an older version is replaced once by the defaults (the user's own servers stay,
+    // docs/rules.md §6); the marker in dnsCfg says it was done, so every later load keeps the list as it is
+    if (dnsCfg.listVersion < dnsListVersion) {
+      if (s['dnsServers'] is Map) {
+        final m = migrateDnsList(dnsServers, dnsOrder);
+        dnsServers = m.servers;
+        dnsOrder = m.order;
+        if (m.renamed.containsKey(dnsCfg.resolve)) dnsCfg.resolve = m.renamed[dnsCfg.resolve]!;
+        for (final r in rulesData.values) {
+          if (r.dns != null && m.renamed.containsKey(r.dns)) r.dns = m.renamed[r.dns];
+        }
+      }
+      dnsCfg.listVersion = dnsListVersion;
+    }
     pings.restore(s['pings'], [for (final x in sourcesData.values) ...[...x.nodes, ...x.gone]]);
     pairs.restore(s['pairs']);
     unknown = {for (final e in s.entries) if (!_known.contains(e.key)) e.key: deepCopy(e.value)};

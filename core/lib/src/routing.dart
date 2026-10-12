@@ -18,11 +18,15 @@
 ///   targets: { '<target>': { kind: 'unit'|'chain', main: Group, entry?: Group } },
 ///   ruleSets: [{ name, url, format: 'srs'|'json', via, every /*s*/ }],   // the user's lists
 ///   geo: { geosite: {via, every}, geoip: {via, every} },  // the built-in lists
-///   dns: { servers: [{ id, addr, via: 'direct'|'vpn', on }],            // in priority order
+///   dns: { servers: [{ id, on, sides: ['direct','vpn'], use: ['doh','dot'],          // providers, in priority order
+///                       transports: [{ kind: 'doh'|'dot'|'doq'|'udp'|'system', addr }] }],
+///          directPolicy?: 'localFirst'|'priority',   // the direct side: Local first (default) or the list order
 ///          resolve: 'auto'|'off'|<dns id>,    // `resolve` before IP rules (proxy ports only, also in TUN); default 'auto'
 ///          hijack?: bool }                    // TUN: the core answers every DNS query; default on (config.dart)
 /// }
 /// ```
+/// A DNS server of the older plan, `{ id, addr, via: 'direct'|'vpn', on }`, is read as a provider with one
+/// transport (its kind from the address) on the one side `via` names.
 /// A target missing from `targets` is unavailable now (off in Nodes, no usable server,
 /// deleted): its rules take their "If unavailable" when the config is built.
 ///
@@ -42,11 +46,18 @@
 /// `[target, fallback]` (with a target as the fallback: `[target, fallback target, main
 /// flow]`, the last for both being down; [TargetFallback], listed in [RoutingInfo]), so the
 /// core can move its traffic to the fallback and back with no restart when the target stops
-/// answering (fallback.dart). With two or more DNS servers in use each also has a DNS rule for its own
-/// clash mode, for the DNS failover (dns_failover.dart).
+/// answering (fallback.dart).
+///
+/// DNS (docs/rules.md §6): every enabled transport of every enabled provider on each of its sides is one
+/// sing-box DNS server ([DnsCandidate]), with a flag: a local rule set that matches every name (on) or
+/// none (off). The DNS rules of a side are `AND(what the side answers, flag) → server` in priority order,
+/// so the first candidate whose flag is on answers; with every flag off the side's top candidate does.
+/// The core flips a flag by rewriting its file (dns_flags.dart), with no restart.
 library;
 
 import 'dart:io';
+
+import 'package:path/path.dart' as pth;
 
 import 'plan.dart';
 import 'rulenames.dart';
@@ -199,7 +210,7 @@ class TargetFallback {
   /// `target`, and `target>entry` for a chain).
   final Map spec;
 
-  /// `proxy` (the main flow), `direct` / `direct@dns-<id>`, or `block`; for a target as the
+  /// `proxy` (the main flow), `direct`, or `block`; for a target as the
   /// fallback, that target's group (= its id).
   final String fallbackTag;
 
@@ -218,9 +229,77 @@ class TargetFallback {
   String get to => fallbackTarget ?? (fallbackTag == 'block' ? 'block' : (fallbackTag == topTag ? 'main' : 'direct'));
 }
 
-/// A DNS server in use ([id] = the UI's, [tag] = `dns-<id>` in the config) — the core
-/// checks each one and switches between them (dns_failover.dart).
+/// Transport kinds of a DNS provider (not `system`), in the order the defaults list them.
+const dnsKinds = ['doh', 'dot', 'doq', 'udp'];
+
+/// The kind of the OS resolver: a provider with this one transport and no other (Local).
+const dnsKindSystem = 'system';
+
+/// The sides a provider's queries can take: out directly, or through the main flow.
+const dnsSidesAll = ['direct', 'vpn'];
+
+/// A provider's `use` when it is not said (the defaults).
+const dnsUseDefault = ['doh', 'dot'];
+
+/// The kind of a Settings → DNS address: `system`, `https://` = doh, `tls://` = dot, `quic://` = doq,
+/// anything else (`udp://`, `tcp://`, a bare IP) = udp.
+String dnsKindOf(String addr) {
+  addr = addr.trim();
+  if (addr == 'system') return dnsKindSystem;
+  return switch (RegExp(r'^([a-z]+)://').firstMatch(addr)?.group(1)) {
+    'https' => 'doh',
+    'tls' => 'dot',
+    'quic' => 'doq',
+    _ => 'udp',
+  };
+}
+
+/// A DNS server in use ([id] = the Sentinel's node id, the candidate's tag without `dns-`; [tag] = the DNS
+/// server in the config) — the core checks each one (dns_failover.dart).
 typedef DnsEntry = ({String id, String tag});
+
+/// One DNS server of the config: a transport of a provider on one side. Its [flagTag] rule set (the file
+/// at [flagPath]) matches every name while the candidate is live and none when it is judged dead; the
+/// DNS rules take the first live one of a side's list.
+class DnsCandidate {
+  DnsCandidate({
+    required this.side,
+    required this.provider,
+    required this.kind,
+    required this.n,
+    required this.tag,
+    required this.addr,
+    required this.flagTag,
+    required this.flagPath,
+    required this.inUse,
+  });
+
+  /// `direct` | `vpn`.
+  final String side;
+
+  /// The catalog's provider id.
+  final String provider;
+
+  /// `doh` | `dot` | `doq` | `udp` | `system`.
+  final String kind;
+
+  /// The number among the provider's addresses of this kind, from 1 (0: the OS resolver).
+  final int n;
+
+  /// The DNS server's tag: `dns-<provider>-<kind><n>`, `-v` added on the VPN side; `dns-<provider>` for `system`.
+  final String tag;
+  final String addr;
+
+  /// The rule set tag (in `route.rule_set`) and the file of the flag.
+  final String flagTag, flagPath;
+
+  /// The provider is on (a candidate of a provider that is off exists only because a rule names it).
+  final bool inUse;
+
+  bool get vpn => side == 'vpn';
+  String get id => tag.startsWith('dns-') ? tag.substring(4) : tag;
+  DnsEntry get entry => (id: id, tag: tag);
+}
 
 /// The Sentinel's id of the OS resolver (`local`) when the settings have no `system` server: it resolves the
 /// DNS servers' hostnames and what goes out directly, so it is watched like the others (never switched to).
@@ -235,11 +314,19 @@ class RoutingInfo {
   /// Live connections name the rule a connection went by with it.
   final ruleNames = RuleNames();
 
-  /// The enabled DNS servers by priority: the first is `dns.final`.
+  /// The DNS servers in use (enabled providers' transports on each side), the direct side first, each side by
+  /// its priority.
   final dnsServers = <DnsEntry>[];
 
-  /// Servers of the config that are not in use (not ticked) but a rule names: nothing switches to them,
-  /// the Sentinel still watches them (docs/rules.md §6).
+  /// The same by side: `direct` / `vpn`, each list in the order the DNS rules try its candidates.
+  final dnsSides = <String, List<DnsCandidate>>{};
+
+  /// Every DNS server the config holds with its flag (in use or named by a rule), for the core that drives the
+  /// flags (dns_flags.dart).
+  final dnsCandidates = <DnsCandidate>[];
+
+  /// Servers of the config that are not in use (provider off) but a rule names: the Sentinel still
+  /// watches them (docs/rules.md §6). Also the OS resolver `system` when no Local provider is on.
   final dnsExtra = <DnsEntry>[];
 
   /// The ids of the config's DNS servers that go through the VPN (`detour`).
@@ -268,8 +355,8 @@ class Routing {
     origins.add(origin);
   }
 
-  /// Outbounds besides the target groups (added through the emitter): direct ones with
-  /// their own DNS server.
+  /// Outbounds besides the target groups (added through the emitter): the "If unavailable"
+  /// selectors and `block`.
   final outbounds = <Map<String, dynamic>>[];
 
   /// The "If unavailable" selectors rules and apps route to (see [TargetFallback]).
@@ -279,20 +366,23 @@ class Routing {
   final dnsRules = <Map<String, dynamic>>[];
   String dnsFinal = 'local';
 
-  /// The servers in use, by priority; with two or more, each also has a DNS rule for its
-  /// own clash mode (its tag), so the core can make any of them the default ([dnsModeOf]).
+  /// The servers in use (direct side first, each by priority), by side, and all with their flags
+  /// ([RoutingInfo.dnsServers], [RoutingInfo.dnsSides], [RoutingInfo.dnsCandidates]).
   final dnsEnabled = <DnsEntry>[];
+  final dnsSides = <String, List<DnsCandidate>>{'direct': [], 'vpn': []};
+  final dnsCandidates = <DnsCandidate>[];
 
-  /// Servers named by a rule but not in use ([RoutingInfo.dnsExtra]), the ids of those via VPN, and each rule's server.
+  /// Servers named by a rule but not in use ([RoutingInfo.dnsExtra]), the ids of those via VPN, and each
+  /// rule's first server.
   final dnsExtra = <DnsEntry>[];
   final dnsVpn = <String>{};
   final ruleDns = <String, String>{};
 
   /// Resolves the servers' own hostnames (proxy outbounds, DoH hosts) and what goes out
-  /// directly: a direct DNS server, never one that needs the tunnel.
+  /// directly: the direct side's top candidate, never one that needs the tunnel.
   String domainResolver = 'local';
 
-  /// `route.rule_set`: local files only.
+  /// `route.rule_set`: local files only (the lists, and the DNS flags).
   final ruleSets = <Map<String, dynamic>>[];
 
   /// Rules left out or narrowed (a list not downloaded, a bad value) — told to the user.
@@ -300,22 +390,78 @@ class Routing {
 }
 
 /// Builds the routing part of a config. [group] adds a target's server group(s) the same
-/// way as the main flow; [ruleSetFiles] = rule-set tag → local file, only the ones on disk.
-Routing buildRouting(Map plan, GroupEmitter group, {Map<String, String> ruleSetFiles = const {}}) =>
-    _Builder(plan, group, ruleSetFiles).build();
+/// way as the main flow; [ruleSetFiles] = rule-set tag → local file, only the ones on disk;
+/// [dnsFlagDir] = the directory of the DNS flag files (dns_flags.dart writes them).
+Routing buildRouting(Map plan, GroupEmitter group, {Map<String, String> ruleSetFiles = const {}, String dnsFlagDir = 'dns-flags'}) =>
+    _Builder(plan, group, ruleSetFiles, dnsFlagDir).build();
+
+/// A DNS provider of the plan (the old single-address server too), as the builder reads it.
+class _Provider {
+  _Provider(this.id, {required this.on, required this.system, required this.sides, required this.use, required this.transports});
+
+  final String id;
+  final bool on, system;
+  final Set<String> sides, use;
+
+  /// `n`: the number among the addresses of its kind, from 1 (0 for the OS resolver).
+  final List<({String kind, String addr, int n})> transports;
+
+  factory _Provider.of(Map s) {
+    final id = '${s['id']}';
+    final List<({String kind, String addr})> raw;
+    Set<String> sides, use;
+    if (s['transports'] is List) {
+      raw = [for (final t in _list(s['transports'])) (kind: '${t['kind'] ?? dnsKindOf('${t['addr'] ?? ''}')}', addr: '${t['addr'] ?? ''}'.trim())];
+      sides = {...(s['sides'] is List ? _strs(s['sides']) : const ['vpn'])};
+      use = {...(s['use'] is List ? _strs(s['use']) : dnsUseDefault)};
+    } else {
+      final addr = '${s['addr'] ?? ''}'.trim();
+      raw = [if (addr.isNotEmpty) (kind: dnsKindOf(addr), addr: addr)];
+      sides = {s['via'] == 'direct' ? 'direct' : 'vpn'};
+      use = {for (final t in raw) t.kind};
+    }
+    final system = raw.length == 1 && raw.first.kind == dnsKindSystem;
+    if (system) sides = {'direct'}; // the OS resolver is not reached through the tunnel
+    final counts = <String, int>{};
+    return _Provider(id,
+        on: s['on'] != false,
+        system: system,
+        sides: sides,
+        use: use,
+        transports: [for (final t in raw) (kind: t.kind, addr: t.addr, n: system ? 0 : (counts[t.kind] = (counts[t.kind] ?? 0) + 1))]);
+  }
+}
+
+/// The DNS servers one kind of query goes through, in the order the DNS rules try them: a side's
+/// candidates, or the candidates of one named provider on a side.
+class _Chain {
+  _Chain(this.list);
+
+  final List<DnsCandidate> list;
+
+  /// The same candidates in the same order are the same chain, whoever named them.
+  late final String key = list.map((c) => c.tag).join(',');
+}
+
+/// The names one DNS rule group answers and the chain it goes through.
+class _DnsGroup {
+  _DnsGroup(this.chain, this.alts);
+
+  final _Chain chain;
+  final List<Map<String, dynamic>> alts;
+}
 
 class _Builder {
-  _Builder(this.plan, this.group, this.files) : r = _routing(plan);
+  _Builder(this.plan, this.group, this.files, this.flagDir) : r = _routing(plan);
 
   final Map plan;
   final Map<String, dynamic> r;
   final GroupEmitter group;
   final Map<String, String> files;
+  final String flagDir;
   final out = Routing._();
   final _usedSets = <String>{};
   final _targetTags = <String, String?>{};
-  late final Map<String, Map> _dnsById;
-  late final List<Map> _dnsOn;
 
   Routing build() {
     _dns();
@@ -324,105 +470,193 @@ class _Builder {
     if (plan['global'] == true) {
       // Global: everything else through the main flow, rules included (docs/rules.md).
       out.finalOutbound = topTag;
-      _dnsModes();
+      _dnsRules();
+      _flagSets();
       return out;
     }
     _apps();
     _ownRules();
     _quick();
-    _dnsModes();
+    _dnsRules();
     for (final tag in _usedSets) {
       final path = files[tag]!;
       out.ruleSets.add({'type': 'local', 'tag': tag, 'format': path.endsWith('.json') ? 'source' : 'binary', 'path': path});
     }
+    _flagSets();
     return out;
   }
 
   /* ── DNS ── */
 
-  String _dnsTag(Map s) => 'dns-${s['id']}';
-  bool _isSystem(Map s) => '${s['addr']}'.trim() == 'system';
-  bool _viaVpn(Map s) => s['via'] == 'vpn' && !_isSystem(s);
+  late final List<_Provider> _providers;
+  late final Map<String, _Provider> _providerById;
+  late final bool _localFirst;
+
+  /// The side that answers the queries no DNS rule claims (`dns.final`): the VPN side, with the main flow as
+  /// the route's final; the direct side when "Everything else" is Direct.
+  late final String _catchSide;
+  _Chain? _catchChain;
+
+  /// The bootstrap: resolves the hostnames of DoH / DoT servers.
+  String _boot = 'local';
 
   void _dns() {
-    final all = _list(((r['dns'] as Map?) ?? const {})['servers']);
-    _dnsById = {for (final s in all) '${s['id']}': s};
-    _dnsOn = all.where((s) => s['on'] != false && dnsServerJson('x', '${s['addr']}') != null).toList();
-    final system = _dnsOn.where(_isSystem).firstOrNull;
-    // the bootstrap: resolves DoH / DoT hostnames and, without a direct server, the rest
-    _boot = system != null ? _dnsTag(system) : 'local';
+    final dns = (r['dns'] as Map?) ?? const {};
+    _providers = [for (final s in _list(dns['servers'])) _Provider.of(s)];
+    _providerById = {for (final p in _providers) p.id: p};
+    _localFirst = dns['directPolicy'] != 'priority';
+    final q = (r['quick'] as Map?) ?? const {};
+    _catchSide = plan['global'] != true && q['final'] == 'direct' ? 'direct' : 'vpn';
+    final system = _providers.where((p) => p.on && p.system).firstOrNull;
+    _boot = system != null ? 'dns-${system.id}' : 'local';
     if (system == null) {
       out.dnsServers.add({'type': 'local', 'tag': 'local'});
-      // the OS resolver has no entry of its own in the settings: watched by the Sentinel under a stable id
+      // the OS resolver has no provider of its own in the settings: watched by the Sentinel under a stable id
       out.dnsExtra.add((id: systemDnsId, tag: 'local'));
     }
-    for (final s in _dnsOn) {
-      _addDnsServer(s);
+    for (final side in dnsSidesAll) {
+      out.dnsSides[side]!.addAll(_side(side));
     }
-    out.dnsFinal = _dnsOn.isEmpty ? _boot : _dnsTag(_dnsOn.first);
-    out.dnsEnabled.addAll([for (final s in _dnsOn) (id: '${s['id']}', tag: _dnsTag(s))]);
-    final direct = _dnsOn.where((s) => !_viaVpn(s)).firstOrNull;
-    out.domainResolver = direct != null ? _dnsTag(direct) : _boot;
+    out.dnsEnabled.addAll([for (final c in [...out.dnsSides['direct']!, ...out.dnsSides['vpn']!]) c.entry]);
+    out.domainResolver = out.dnsSides['direct']!.isNotEmpty ? out.dnsSides['direct']!.first.tag : _boot;
+    _catchChain = _autoChain(_catchSide);
+    out.dnsFinal = _catchChain?.list.first.tag ?? _boot;
   }
 
-  String _boot = 'local';
-  final _dnsAdded = <String>{};
-  void _addDnsServer(Map s) {
-    final tag = _dnsTag(s);
-    if (!_dnsAdded.add(tag)) return;
-    final j = dnsServerJson(tag, '${s['addr']}')!;
-    if (_viaVpn(s)) {
+  /// The providers in use, as the plan lists them, with Local first on the direct side under `localFirst`.
+  List<DnsCandidate> _side(String side) {
+    final all = [for (final p in _providers) if (p.on) ..._candidates(p, side)];
+    if (side != 'direct' || !_localFirst) return all;
+    return [...all.where((c) => c.kind == dnsKindSystem), ...all.where((c) => c.kind != dnsKindSystem)];
+  }
+
+  final _made = <String, DnsCandidate>{};
+
+  /// The candidates of [p] on [side]: its enabled transports with a usable address, in the provider's order.
+  /// Each becomes a DNS server of the config (once) with its flag.
+  List<DnsCandidate> _candidates(_Provider p, String side) {
+    if (!p.sides.contains(side)) return const [];
+    return [
+      for (final t in p.transports)
+        if ((p.system ? t.kind == dnsKindSystem : t.kind != dnsKindSystem && p.use.contains(t.kind)) && dnsServerJson('x', t.addr) != null)
+          _made.putIfAbsent(_tagOf(p, t.kind, t.n, side), () => _candidate(p, t, side)),
+    ];
+  }
+
+  String _tagOf(_Provider p, String kind, int n, String side) =>
+      p.system ? 'dns-${p.id}' : 'dns-${p.id}-$kind$n${side == 'vpn' ? '-v' : ''}';
+
+  DnsCandidate _candidate(_Provider p, ({String kind, String addr, int n}) t, String side) {
+    final tag = _tagOf(p, t.kind, t.n, side);
+    final c = DnsCandidate(
+      side: side,
+      provider: p.id,
+      kind: t.kind,
+      n: t.n,
+      tag: tag,
+      addr: t.addr,
+      flagTag: 'flag-$tag',
+      flagPath: pth.join(flagDir, '$tag.json'),
+      inUse: p.on,
+    );
+    final j = dnsServerJson(tag, t.addr)!;
+    if (c.vpn) {
       j['detour'] = topTag;
-      out.dnsVpn.add('${s['id']}');
+      out.dnsVpn.add(c.id);
     }
     if (j['server'] is String && InternetAddress.tryParse(j['server'] as String) == null) j['domain_resolver'] = _boot;
     out.dnsServers.add(j);
+    out.dnsCandidates.add(c);
+    return c;
   }
 
-  /// A rule's DNS server: "Auto" = the first server in use whose route matches the
-  /// traffic's (direct → a direct one, VPN → one via VPN); or the one the rule names
-  /// (ticked in Settings → DNS or not).
-  String _dnsFor(String? pick, {required bool direct}) {
-    final named = pick == null || pick == 'auto' ? null : _dnsById[pick];
-    if (named != null && dnsServerJson('x', '${named['addr']}') != null) {
-      _addDnsServer(named);
-      if (!_dnsOn.contains(named) && !out.dnsExtra.any((e) => e.id == '${named['id']}')) {
-        out.dnsExtra.add((id: '${named['id']}', tag: _dnsTag(named)));
+  /// The flags as local rule sets (`route.rule_set`), after the lists.
+  void _flagSets() {
+    for (final c in out.dnsCandidates) {
+      out.ruleSets.add({'type': 'local', 'tag': c.flagTag, 'format': 'source', 'path': c.flagPath});
+    }
+  }
+
+  /// "Auto": the side's candidates in use; the other side's when it has none (a rule must still be answered).
+  /// null = no server at all.
+  _Chain? _autoChain(String side) {
+    for (final s in [side, if (side == 'direct') 'vpn' else 'direct']) {
+      final l = out.dnsSides[s]!;
+      if (l.isNotEmpty) return _Chain(l);
+    }
+    return null;
+  }
+
+  /// A rule's DNS chain: "Auto" = the side of its traffic (direct → the direct side, VPN → the VPN side);
+  /// or the provider the rule names (on in Settings → DNS or not) on that side, on its other side when it has
+  /// no such. null = nothing can answer (no server is on).
+  _Chain? _dnsFor(String? pick, {required bool direct}) {
+    final side = direct ? 'direct' : 'vpn';
+    final named = pick == null || pick == 'auto' ? null : _providerById[pick];
+    if (named != null) {
+      final s = named.sides.contains(side) ? side : dnsSidesAll.where(named.sides.contains).firstOrNull;
+      final list = s == null ? const <DnsCandidate>[] : _candidates(named, s);
+      if (list.isNotEmpty) {
+        for (final c in list) {
+          if (!c.inUse && !out.dnsExtra.any((e) => e.tag == c.tag)) out.dnsExtra.add(c.entry);
+        }
+        return _Chain(list);
       }
-      return _dnsTag(named);
     }
-    final auto = _dnsOn.where((s) => _viaVpn(s) != direct).firstOrNull;
-    return auto != null ? _dnsTag(auto) : out.dnsFinal;
+    return _autoChain(side);
   }
 
-  /// The failover switch: a DNS rule per server for the clash mode named like it, after
-  /// every other DNS rule: a rule with its own server keeps it, the mode replaces only the
-  /// default (`dns.final`, which is also what the initial mode `Rule` gives). The core
-  /// sets the mode over the API (dns_failover.dart). One server has nothing to switch to.
-  void _dnsModes() {
-    if (_dnsOn.length < 2) return;
-    for (final s in _dnsOn) {
-      out.dnsRules.add({'clash_mode': dnsModeOf(_dnsTag(s)), 'action': 'route', 'server': _dnsTag(s)});
-    }
-  }
+  /// The DNS rule groups of the rules, in the rules' order; adjacent groups of one chain are one.
+  final _groups = <_DnsGroup>[];
 
   /// DNS rule for the domains a rule matches (for the resolve step and, with TUN, the
-  /// apps' own queries). Only domain conditions: DNS sees names, not IPs.
-  void _dnsRule(List<Map<String, dynamic>> domainAlts, String server) {
-    if (server == out.dnsFinal || domainAlts.isEmpty) return;
-    final match = domainAlts.length == 1 ? domainAlts.first : {'type': 'logical', 'mode': 'or', 'rules': domainAlts};
-    out.dnsRules.add({...match, 'action': 'route', 'server': server});
+  /// apps' own queries). Only domain conditions: DNS sees names, not IPs. What the catch-all side
+  /// answers anyway needs none.
+  void _dnsRule(List<Map<String, dynamic>> domainAlts, _Chain? chain) {
+    if (chain == null || domainAlts.isEmpty || chain.key == _catchChain?.key) return;
+    final last = _groups.lastOrNull;
+    if (last != null && last.chain.key == chain.key) {
+      last.alts.addAll(domainAlts);
+    } else {
+      _groups.add(_DnsGroup(chain, [...domainAlts]));
+    }
   }
 
-  /// Where direct traffic goes: plain `direct` resolves with the default direct DNS
-  /// server; a rule naming another server gets a direct outbound of its own (the direct
-  /// outbound never asks the DNS rules — only its domain_resolver).
-  String _directVia(String dnsTag) {
-    if (dnsTag == out.domainResolver) return 'direct';
-    final tag = 'direct@$dnsTag';
-    if (!out.outbounds.any((o) => o['tag'] == tag)) out.outbounds.add({'type': 'direct', 'tag': tag, 'domain_resolver': dnsTag});
-    return tag;
+  Map<String, dynamic> _or(List<Map<String, dynamic>> alts) => alts.length == 1 ? alts.first : {'type': 'logical', 'mode': 'or', 'rules': alts};
+
+  /// The DNS rules: first the groups of the rules, then the queries nobody claimed (the catch-all side).
+  /// A chain of several candidates is a rule per candidate, `AND(names, flag) → server`, in priority order,
+  /// so the first live one answers; with every flag off the chain's top candidate does (a rule without a
+  /// flag after them, `dns.final` for the catch-all). One candidate needs no flag.
+  void _dnsRules() {
+    for (final g in _groups) {
+      final match = _or(g.alts);
+      final l = g.chain.list;
+      if (l.length > 1) {
+        for (final c in l) {
+          out.dnsRules.add({
+            'type': 'logical',
+            'mode': 'and',
+            'rules': [match, {'rule_set': [c.flagTag]}],
+            'action': 'route',
+            'server': c.tag,
+          });
+        }
+      }
+      out.dnsRules.add({...match, 'action': 'route', 'server': l.first.tag});
+    }
+    final catchList = _catchChain?.list ?? const <DnsCandidate>[];
+    if (catchList.length > 1) {
+      for (final c in catchList) {
+        out.dnsRules.add({'rule_set': [c.flagTag], 'action': 'route', 'server': c.tag});
+      }
+    }
   }
+
+  /// A route rule `resolve` (no server) in front of a rule that sends names direct: the names are resolved by
+  /// the DNS rules (so by the flags and the rule's provider), and the direct outbound uses the addresses.
+  /// Without it the direct outbound resolves with `default_domain_resolver`, which no rule can move.
+  void _resolveFirst(Map<String, dynamic> match) => out._add({...match, 'action': 'resolve'});
 
   /* ── Targets and actions ── */
 
@@ -453,9 +687,9 @@ class _Builder {
   /// another target: see the library comment). Unavailable now = the config's choice; a target
   /// that goes down later is the core's (fallback.dart): the route leads to a selector
   /// [target, fallback outbound] it flips. [label] names the rule / app ([app]) in the journal.
-  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String? dns, String label, {bool app = false}) {
+  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String label, {bool app = false}) {
     final tag = _target(target);
-    if (tag == topTag) return (action: _mainFlowAction(fallback, dns, label, app), direct: false);
+    if (tag == topTag) return (action: _mainFlowAction(fallback, label, app), direct: false);
     // default = the global one; a target that is not usable now = the global one too; the
     // target itself (a fallback to itself) or empty = the main flow
     String? fbTarget;
@@ -473,20 +707,20 @@ class _Builder {
     }
     if (tag == null && fbTarget != null) {
       // the target is out now: straight to the fallback target (the main flow behind it)
-      return _proxyAction(fbTarget, 'main', dns, label, app: app);
+      return _proxyAction(fbTarget, 'main', label, app: app);
     }
     if (tag != null) {
       final fb = fbTarget ??
           switch (fallback) {
             'block' => _blockOutbound(),
-            'direct' => _directVia(_dnsFor(dns, direct: true)),
+            'direct' => 'direct',
             _ => topTag,
           };
       return (action: _route(_fallbackSelector(target, fb, label, app, fbTarget: fbTarget)), direct: false);
     }
     return switch (fallback) {
       'block' => (action: _reject(), direct: false),
-      'direct' => (action: _route(_directVia(_dnsFor(dns, direct: true))), direct: true),
+      'direct' => (action: _route('direct'), direct: true),
       _ => (action: _route(topTag), direct: false),
     };
   }
@@ -495,14 +729,14 @@ class _Builder {
   /// (never the global default; `default` / `main` / empty / a target that is not available
   /// = none, the last with a warning): `block`, `direct` or a target of the catalog, as a
   /// selector [main flow, fallback] the core flips when the main flow dies (fallback.dart).
-  Map<String, dynamic> _mainFlowAction(String fallback, String? dns, String label, bool app) {
+  Map<String, dynamic> _mainFlowAction(String fallback, String label, bool app) {
     switch (fallback) {
       case '' || 'default' || 'main':
         break;
       case 'block':
         return _route(_fallbackSelector('', _blockOutbound(), label, app));
       case 'direct':
-        return _route(_fallbackSelector('', _directVia(_dnsFor(dns, direct: true)), label, app));
+        return _route(_fallbackSelector('', 'direct', label, app));
       default:
         if (_target(fallback) != null) return _route(_fallbackSelector('', fallback, label, app, fbTarget: fallback));
         out.warnings.add('$label: "If unavailable" target $fallback is not available, the main flow has none');
@@ -567,10 +801,10 @@ class _Builder {
         final act = switch (h['act']) {
           'block' => _reject(),
           'direct' => _route('direct'),
-          'proxy' => _proxyAction('${h['target'] ?? ''}', fallback, null, label, app: true).action,
+          'proxy' => _proxyAction('${h['target'] ?? ''}', fallback, label, app: true).action,
           // Default has a rule only to give the main flow an "If unavailable" (it then goes by
           // the selector, not by the rules below); none asked for = by the rules below
-          _ => switch (_mainFlowAction(fallback, null, label, true)) { {'outbound': topTag} => null, final a => a },
+          _ => switch (_mainFlowAction(fallback, label, true)) { {'outbound': topTag} => null, final a => a },
         };
         final name = network == null ? label : '$label (${network.first.toUpperCase()})';
         if (act != null) out._add({...match, 'network': ?network, ...act}, RuleOrigin('app', name, id: id));
@@ -608,10 +842,10 @@ class _Builder {
         case 'block':
           act = _reject(drop: rule['block'] != 'reject');
         case 'direct':
-          act = _route(_directVia(_dnsFor(dns, direct: true)));
+          act = _route('direct');
           direct = true;
         default:
-          final p = _proxyAction('${rule['target'] ?? ''}', fallback, dns, '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}');
+          final p = _proxyAction('${rule['target'] ?? ''}', fallback, '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}');
           act = p.action;
           direct = p.direct;
       }
@@ -625,35 +859,39 @@ class _Builder {
         final step = _resolveAction();
         if (step != null) out._add({if (plan['mode'] == 'tun') 'inbound': const ['mixed-in', 'sys-in'], ...step});
       }
+      // a direct rule's names are resolved here, by the DNS rules (so by the rule's DNS provider and the flags):
+      // the direct outbound uses the addresses and never asks a resolver of its own
+      if (direct && built.domainAlts.isNotEmpty) _resolveFirst(built.match);
       out._add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()},
           RuleOrigin('user', '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}', id: '${rule['id'] ?? ''}'));
       if (action != 'block') {
-        final server = _dnsFor(dns, direct: direct);
-        _dnsRule(built.domainAlts, server);
+        final chain = _dnsFor(dns, direct: direct);
+        _dnsRule(built.domainAlts, chain);
         final id = '${rule['id'] ?? ''}';
-        if (id.isNotEmpty) out.ruleDns[id] = server;
+        if (id.isNotEmpty) out.ruleDns[id] = chain?.list.first.tag ?? out.dnsFinal;
       }
     }
   }
 
   /// The `resolve` step before the IP rules (Settings → DNS "Resolve for IP rules",
-  /// `dns.resolve`): null = off. `auto` (also a server that is deleted or unticked) = the first
-  /// ticked server via VPN, so the name never goes to the provider's DNS; a server id = that
-  /// one. The server is named explicitly, so the DNS failover (clash modes) and the rules' own
-  /// DNS servers do not apply to this step. No VPN server on: `resolve` without a server
-  /// (the DNS rules and `dns.final` decide), with a warning.
+  /// `dns.resolve`): null = off. `auto` (also a provider that is deleted or off) = the top candidate of
+  /// the VPN side, so the name never goes to the provider's DNS; a provider id = its first candidate (on the
+  /// VPN side when it has one). The server is named explicitly, so the flags and the rules' own DNS servers do
+  /// not apply to this step (D1b: it should follow the VPN side's flags). No VPN candidate: `resolve` without
+  /// a server (the DNS rules and `dns.final` decide), with a warning.
   Map<String, dynamic>? _resolveAction() {
     final pick = '${((r['dns'] as Map?) ?? const {})['resolve'] ?? 'auto'}';
     if (pick == 'off') return null;
-    final named = pick == 'auto' ? null : _dnsOn.where((s) => '${s['id']}' == pick).firstOrNull;
-    final server = named ?? _dnsOn.where(_viaVpn).firstOrNull;
+    final named = pick == 'auto' ? null : _providerById[pick];
+    final fromNamed = named != null && named.on ? _dnsFor(pick, direct: false)?.list.firstOrNull : null;
+    final server = fromNamed ?? out.dnsSides['vpn']!.firstOrNull;
     if (server == null) {
-      if (_dnsOn.isNotEmpty) {
+      if (out.dnsEnabled.isNotEmpty) {
         out.warnings.add('Resolve for IP rules: no DNS server via VPN is on, the first one in use resolves and its query may leave outside the tunnel');
       }
       return {'action': 'resolve'};
     }
-    return {'action': 'resolve', 'server': _dnsTag(server)};
+    return {'action': 'resolve', 'server': server.tag};
   }
 
   bool _needsIp(Object? o) => switch (o) {
@@ -834,6 +1072,7 @@ class _Builder {
       ];
       final ips = s.geoip.map((n) => _set(geoipTag(n))).nonNulls.toList();
       final alts = [...domains, if (ips.isNotEmpty) {'rule_set': ips}];
+      if (direct) _resolveFirst(_or(domains));
       out._add({...(alts.length == 1 ? alts.first : {'type': 'logical', 'mode': 'or', 'rules': alts}), ..._route(direct ? 'direct' : topTag)},
           RuleOrigin('service', serviceTitles[key] ?? key, id: key));
       _dnsRule(domains, _dnsFor('auto', direct: direct));
@@ -847,6 +1086,7 @@ class _Builder {
         if (sites.isNotEmpty) {'rule_set': sites},
       ];
       final alts = [...domains, if (ips.isNotEmpty) {'rule_set': ips}];
+      _resolveFirst(_or(domains));
       out._add({'type': 'logical', 'mode': 'or', 'rules': alts, ..._route('direct')}, const RuleOrigin('quick', 'My region direct', id: 'region'));
       _dnsRule(domains, _dnsFor('auto', direct: true));
       if (sites.length < reg.geosite.length || ips.length < reg.geoip.length) {
@@ -855,6 +1095,8 @@ class _Builder {
     }
     switch (q['final']) {
       case 'direct':
+        // everything else goes direct: its names are resolved by the DNS rules (the direct side answers them)
+        out._add({'action': 'resolve'});
         out.finalOutbound = 'direct';
       case 'block':
         out._add(_reject());
@@ -865,9 +1107,6 @@ class _Builder {
 }
 
 /* ── Values ── */
-
-/// The clash mode that makes the DNS server [tag] the default (see `_dnsModes`).
-String dnsModeOf(String tag) => tag;
 
 /// A typed DNS server from a Settings → DNS address: `system`, `1.1.1.1[:53]`,
 /// `udp|tcp|tls|quic|https://host[:port][/path]`. null = not an address.

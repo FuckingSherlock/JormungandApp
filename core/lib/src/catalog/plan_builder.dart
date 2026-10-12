@@ -9,6 +9,7 @@ library;
 
 import 'dart:convert';
 
+import '../routing.dart' show dnsSidesAll;
 import 'catalog.dart';
 import 'json_util.dart';
 import 'models.dart';
@@ -476,8 +477,19 @@ extension CatalogPlan on Catalog {
       'dns': {
         'servers': [
           for (final id in dnsOrder)
-            if (dnsServers[id] != null) {'id': dnsServers[id]!.id, 'addr': dnsServers[id]!.addr, 'via': dnsServers[id]!.via, 'on': dnsServers[id]!.on},
+            if (dnsServers[id] != null && mockupPlan)
+              // the frozen mockup's plan: one address and one side per server (what the golden files hold)
+              {'id': dnsServers[id]!.id, 'addr': dnsServers[id]!.addr, 'via': dnsServers[id]!.via, 'on': dnsServers[id]!.on}
+            else if (dnsServers[id] != null)
+              {
+                'id': dnsServers[id]!.id,
+                'on': dnsServers[id]!.on,
+                'sides': [for (final s in dnsSidesAll) if (dnsServers[id]!.activeSides.contains(s)) s],
+                'use': [...dnsServers[id]!.use],
+                'transports': [for (final t in dnsServers[id]!.transports) {'kind': t.kind, 'addr': t.addr}],
+              },
         ],
+        if (!mockupPlan) 'directPolicy': dnsCfg.directPolicy, // 'localFirst' | 'priority': the order of the direct side
         'resolve': dnsCfg.resolve, // 'auto' | 'off' | a server id: the `resolve` step before IP rules
         'hijack': dnsCfg.hijack, // TUN only: the core answers every DNS query
       },

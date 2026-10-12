@@ -200,6 +200,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     Probe? probe,
     SvcIn? svc,
     Map<String, String> ruleSetFiles = const {},
+    String dnsFlagDir = 'dns-flags',
     List<String>? warnings,
     RoutingInfo? info,
     List<String> selfPaths = const [],
@@ -263,11 +264,13 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     'interrupt_exist_connections': false,
   });
   outs.add({'type': 'direct', 'tag': 'direct'});
-  final routing = buildRouting(plan, group, ruleSetFiles: ruleSetFiles);
+  final routing = buildRouting(plan, group, ruleSetFiles: ruleSetFiles, dnsFlagDir: dnsFlagDir);
   outs.addAll(routing.outbounds);
   warnings?.addAll(routing.warnings);
   info?.fallbacks.addAll(routing.fallbacks);
   info?.dnsServers.addAll(routing.dnsEnabled);
+  info?.dnsSides.addAll({for (final e in routing.dnsSides.entries) e.key: [...e.value]});
+  info?.dnsCandidates.addAll(routing.dnsCandidates);
   info?.dnsExtra.addAll(routing.dnsExtra);
   info?.dnsVpn.addAll(routing.dnsVpn);
   info?.ruleDns.addAll(routing.ruleDns);

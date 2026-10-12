@@ -26,6 +26,7 @@ export 'src/log_view.dart';
 export 'src/logbook.dart';
 export 'src/manual.dart';
 export 'src/merge.dart';
+export 'src/dns_flags.dart';
 export 'src/node.dart';
 export 'src/outside_tunnel.dart';
 export 'src/parse/build.dart' show tryBase64, unsupportedNode;

@@ -1,8 +1,9 @@
 /// DNS failover while sing-box runs (docs/rules.md §6): sing-box has no fallback between DNS
-/// servers (one is `dns.final`), so the core does it. With two or more servers in use every
-/// one has a DNS rule for its own clash mode (routing.dart `_dnsModes`); this service sets the
-/// mode of the highest-priority one that is not down, through the API service (sbapi.dart
-/// `setClashMode`), with no restart and no clash_api in the config.
+/// servers, so the core does it. D1b TODO: this service still works on the flat list of the servers in use
+/// and asks [DnsFailover.activate] to make one of them the answering one; the config now moves the answers
+/// with the DNS flags (dns_flags.dart: a candidate's flag file, per side, routing.dart [DnsCandidate]), and
+/// D1b rebuilds the switching on them (a server per side and transport, the flags set by the verdicts). Until
+/// then `activate` is not wired to the flags (service.dart answers false): nothing switches.
 ///
 /// Whether a server is down is not decided here: the Sentinel judges it (docs/failures.md → DNS).
 /// A round (every `checkEvery`, the first after `firstCheck`; after a miss the next comes after
@@ -33,7 +34,7 @@ import 'auto.dart' show AutoSettings;
 import 'plan.dart' show topTag;
 import 'pool.dart' show NetStatus, ProbePool;
 import 'probe.dart' show withCheckers;
-import 'routing.dart' show DnsEntry, dnsModeOf;
+import 'routing.dart' show DnsEntry;
 import 'sentinel/sentinel.dart';
 import 'watched.dart';
 
@@ -73,7 +74,7 @@ class _Server {
 class DnsFailover {
   DnsFailover(
     List<DnsEntry> servers, {
-    required this.setMode,
+    required this.activate,
     required this.query,
     required this.settings,
     required this.sentinel,
@@ -92,8 +93,8 @@ class DnsFailover {
     _sub = sentinel.changes.listen((_) => unawaited(_react()));
   }
 
-  /// Sets sing-box's clash mode; false when it refused.
-  final Future<bool> Function(String mode) setMode;
+  /// Makes the DNS server [tag] the answering one; false when that was not done.
+  final Future<bool> Function(String tag) activate;
 
   /// ms until the DNS server [tag] resolved [name] (probe.dart `probeDns`); -1 = no answer.
   final Future<int> Function(String tag, String name, int timeoutMs) query;
@@ -293,7 +294,7 @@ class DnsFailover {
 
   Future<bool> _switchTo(_Server to, String reason) async {
     final from = _active;
-    if (from == null || _stopped || !await setMode(dnsModeOf(to.entry.tag))) return false;
+    if (from == null || _stopped || !await activate(to.entry.tag)) return false;
     _active = to;
     to.w.usedSince = _clock();
     note?.call('dns: ${from.id} → ${to.id} ($reason)');

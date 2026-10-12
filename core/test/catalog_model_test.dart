@@ -131,10 +131,21 @@ void main() {
           {'id': 'geosite', 'name': 'geosite', 'builtin': true, 'url': 'built-in', 'format': 'srs', 'via': 'vpn', 'every': 604800, 'updated': '2 d ago'},
         ],
         'dnsServers': {
-          'remote': {'id': 'remote', 'name': 'Cloudflare', 'addr': 'https://1.1.1.1/dns-query', 'via': 'vpn', 'on': true, 'tag': 't'},
+          'cloudflare': {
+            'id': 'cloudflare',
+            'name': 'Cloudflare',
+            'on': true,
+            'sides': ['direct', 'vpn'],
+            'use': ['doh', 'dot'],
+            'transports': [
+              {'kind': 'doh', 'addr': 'https://1.1.1.1/dns-query', 'tt': 1},
+              {'kind': 'dot', 'addr': 'tls://1.1.1.1'},
+            ],
+            'tag': 't',
+          },
         },
-        'dnsOrder': ['remote'],
-        'dnsCfg': {'resolve': 'remote', 'hijack': false, 'extra': 1},
+        'dnsOrder': ['cloudflare'],
+        'dnsCfg': {'resolve': 'cloudflare', 'hijack': false, 'directPolicy': 'priority', 'listVersion': 2, 'extra': 1},
         'pings': [
           ['vless://a1.example:443#a1', {'ms': 41, 'at': t0 - 5, 'fails': 0}],
         ],
@@ -153,8 +164,15 @@ void main() {
       expect(c.autoConnect, isTrue);
       expect(c.ruleSets.map((r) => r.id), ['geosite', 'geoip']);
       expect(c.ruleSets.every((r) => r.builtin && r.every == 604800), isTrue);
-      expect(c.dnsOrder, ['remote', 'local', 'google']);
-      expect(c.dnsServers['google']!.on, isFalse);
+      expect(c.dnsOrder, ['cloudflare', 'google', 'adguard', 'local']);
+      expect(c.dnsServers.values.every((s) => s.on), isTrue);
+      expect(c.dnsServers['local']!.system, isTrue);
+      expect(c.dnsServers['local']!.activeSides, {'direct'});
+      expect(c.dnsServers['cloudflare']!.activeSides, {'direct', 'vpn'});
+      expect(c.dnsServers['cloudflare']!.use, {'doh', 'dot'});
+      expect(c.dnsServers['adguard']!.transports.map((t) => t.kind).toSet(), {'doh', 'dot', 'doq', 'udp'});
+      expect(c.dnsCfg.directPolicy, 'localFirst');
+      expect(c.dnsCfg.listVersion, 2);
       expect(c.dnsCfg.hijack, isTrue);
       expect(c.quickCfg.services.keys, containsAll(['telegram', 'x']));
       expect(c.quickCfg.services.values.toSet(), {'default'});
@@ -177,6 +195,89 @@ void main() {
       final s = snap();
       ((s['sourcesData'] as Map)['a'] as Map)['updating'] = true;
       expect((make(s).toJson()['sourcesData'] as Map)['a'], isNot(contains('updating')));
+    });
+  });
+
+  group('dns list', () {
+    Map<String, dynamic> oldList() => snap(over: {
+          'dnsServers': {
+            'remote': {'id': 'remote', 'name': 'Cloudflare', 'addr': 'https://1.1.1.1/dns-query', 'via': 'vpn', 'on': true},
+            'local': {'id': 'local', 'name': 'Local', 'addr': 'system', 'via': 'direct', 'on': true},
+            'google': {'id': 'google', 'name': 'Google', 'addr': 'tls://dns.google', 'via': 'vpn', 'on': false},
+            'ya': {'id': 'ya', 'name': 'Yandex', 'addr': 'https://common.dot.dns.yandex.net/dns-query', 'via': 'direct', 'on': true, 'tag': 't'},
+            'mine': {'id': 'mine', 'name': 'Mine', 'addr': '9.9.9.9', 'via': 'vpn', 'on': false},
+          },
+          'dnsOrder': ['ya', 'remote', 'local', 'google', 'mine'],
+          'dnsCfg': {'resolve': 'remote', 'hijack': true},
+          'rulesData': {
+            'r1': {'id': 'r1', 'name': 'R', 'enabled': true, 'action': 'direct', 'dns': 'remote', 'groups': {'domain': {'not': false, 'v': {'domain': ['a.com']}}}},
+            'r2': {'id': 'r2', 'name': 'R2', 'enabled': true, 'action': 'direct', 'dns': 'ya', 'groups': {'domain': {'not': false, 'v': {'domain': ['b.com']}}}},
+          },
+          'ruleOrder': ['r1', 'r2'],
+        });
+
+    test('the old list is migrated once: the built-ins are replaced by the new defaults, the user\'s own servers follow, converted', () {
+      final c = make(oldList());
+      expect(c.dnsOrder, ['cloudflare', 'google', 'adguard', 'local', 'ya', 'mine']);
+      expect(c.dnsServers['google']!.on, isTrue, reason: 'the defaults replace the old google (which was off)');
+      final ya = c.dnsServers['ya']!;
+      expect(ya.name, 'Yandex');
+      expect([for (final t in ya.transports) '${t.kind} ${t.addr}'], ['doh https://common.dot.dns.yandex.net/dns-query']);
+      expect(ya.use, {'doh'});
+      expect(ya.activeSides, {'direct'});
+      expect(ya.unknown['tag'], 't', reason: 'unknown fields travel');
+      final mine = c.dnsServers['mine']!;
+      expect(mine.on, isFalse);
+      expect([for (final t in mine.transports) t.kind], ['udp']);
+      expect(mine.activeSides, {'vpn'});
+      // what referred to the old ids follows
+      expect(c.dnsCfg.resolve, 'cloudflare');
+      expect(c.rulesData['r1']!.dns, 'cloudflare');
+      expect(c.rulesData['r2']!.dns, 'ya');
+      expect(c.dnsCfg.listVersion, 2);
+    });
+
+    test('a later load leaves the list as it is: the user\'s edits stay, nothing is added back', () {
+      final first = make(oldList());
+      final out = jsonDecode(jsonEncode(first.toJson())) as Map<String, dynamic>;
+      expect(jsonEncode(make(out).toJson()), jsonEncode(first.toJson()), reason: 'a second load changes nothing');
+      // the user removes AdGuard, switches Cloudflare off, reorders
+      (out['dnsServers'] as Map).remove('adguard');
+      ((out['dnsServers'] as Map)['cloudflare'] as Map)['on'] = false;
+      out['dnsOrder'] = ['local', 'cloudflare', 'ya', 'google', 'mine'];
+      final again = make(out);
+      expect(again.dnsOrder, ['local', 'cloudflare', 'ya', 'google', 'mine']);
+      expect(again.dnsServers.containsKey('adguard'), isFalse);
+      expect(again.dnsServers['cloudflare']!.on, isFalse);
+      expect(jsonEncode(make(jsonDecode(jsonEncode(again.toJson())) as Map<String, dynamic>).toJson()), jsonEncode(again.toJson()));
+    });
+
+    test('Local is direct only whatever is stored; a server the user adds is VPN only; the OS resolver needs no sides', () {
+      final c = make(snap(over: {
+        'dnsServers': {
+          'local': {'id': 'local', 'on': true, 'sides': ['direct', 'vpn'], 'use': <String>[], 'transports': [{'kind': 'system', 'addr': 'system'}]},
+          'new': {'id': 'new', 'on': true, 'transports': [{'kind': 'doh', 'addr': 'https://9.9.9.9/dns-query'}]},
+        },
+        'dnsOrder': ['local', 'new'],
+        'dnsCfg': {'listVersion': 2},
+      }));
+      expect(c.dnsServers['local']!.activeSides, {'direct'});
+      expect(c.dnsServers['local']!.via, 'direct');
+      final plan = (c.routingPlan()['dns'] as Map)['servers'] as List;
+      expect((plan[0] as Map)['sides'], ['direct']);
+      expect(c.dnsServers['new']!.activeSides, {'vpn'}, reason: 'a provider with no sides: VPN only');
+      expect((plan[1] as Map)['sides'], ['vpn']);
+      expect((plan[1] as Map)['use'], ['doh', 'dot']);
+      // a server added by hand through the old single-address constructor: VPN only too
+      expect(DnsServerCfg(id: 'x', addr: 'tls://dns.example').activeSides, {'vpn'});
+      expect(DnsServerCfg(id: 'x', addr: 'system').activeSides, {'direct'}, reason: 'unless it is the OS resolver');
+    });
+
+    test('directPolicy: localFirst by default, priority when stored; an unknown value is the default', () {
+      expect(make().dnsCfg.directPolicy, 'localFirst');
+      expect(make(snap(over: {'dnsCfg': {'directPolicy': 'priority', 'listVersion': 2}})).dnsCfg.directPolicy, 'priority');
+      expect(make(snap(over: {'dnsCfg': {'directPolicy': 'bogus', 'listVersion': 2}})).dnsCfg.directPolicy, 'localFirst');
+      expect((make(snap(over: {'dnsCfg': {'directPolicy': 'priority', 'listVersion': 2}})).routingPlan()['dns'] as Map)['directPolicy'], 'priority');
     });
   });
 
@@ -765,7 +866,12 @@ void main() {
       expect((t['chain:c1'] as Map)['kind'], 'chain');
       expect(((t['src:a'] as Map)['main'] as Map)['pick'], 'fastest');
       expect((r['geo'] as Map)['geosite'], {'via': 'vpn', 'every': 604800});
-      expect(((r['dns'] as Map)['servers'] as List).map((s) => s['id']), ['remote', 'local', 'google']);
+      expect(((r['dns'] as Map)['servers'] as List).map((s) => s['id']), ['cloudflare', 'google', 'adguard', 'local']);
+      expect((r['dns'] as Map)['directPolicy'], 'localFirst');
+      final cf = ((r['dns'] as Map)['servers'] as List).first as Map;
+      expect(cf['sides'], ['direct', 'vpn']);
+      expect(cf['use'], ['doh', 'dot']);
+      expect((cf['transports'] as List).first, {'kind': 'doh', 'addr': 'https://1.1.1.1/dns-query'});
     });
 
     test('a target that is off, gone or has no usable server is null', () {

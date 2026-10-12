@@ -1,4 +1,4 @@
-// DnsFailover (dns_failover.dart) with a fake clash mode and fake DNS queries, the Sentinel judging the misses
+// DnsFailover (dns_failover.dart) with a fake activation of the answering server (D1b rebuilds it on the DNS flags) and fake DNS queries, the Sentinel judging the misses
 // (time by hand): a miss is evidence for `dns.down`, the failover acts on the verdicts.
 import 'dart:async';
 
@@ -25,7 +25,7 @@ class _Rig {
       [for (final id in ids) (id: id, tag: 'dns-$id')],
       watch: [for (final id in watch) (id: id, tag: 'dns-$id')],
       vpn: vpn,
-      setMode: (m) async {
+      activate: (m) async {
         if (refuseMode) return false;
         modes.add(m);
         return true;
@@ -127,7 +127,7 @@ void main() {
     await r.dispose();
   });
 
-  test('a higher server whose root closed takes the mode back after failAfter answers', () async {
+  test('a higher server whose root closed goes back after failAfter answers', () async {
     final r = _Rig(['a', 'b']);
     await r.settle();
     r.alive['dns-a'] = -1;
@@ -317,7 +317,7 @@ void main() {
     final sentinel = Sentinel(clock: time.clock);
     final svc = DnsFailover(
       [(id: 'a', tag: 'dns-a'), (id: 'b', tag: 'dns-b')],
-      setMode: (m) async => true,
+      activate: (m) async => true,
       query: (tag, name, t) async {
         tried.add('$tag $name');
         return name == dnsCheckNames.last ? 10 : -1;
@@ -356,7 +356,7 @@ void main() {
     expect(extra([{'id': 's', 'addr': 'system', 'via': 'direct', 'on': true}]), isEmpty, reason: 'a server of its own is watched as any other');
   });
 
-  test('a mode sing-box refuses is no switch', () async {
+  test('an activation that is refused is no switch', () async {
     final r = _Rig(['a', 'b'], refuseMode: true);
     await r.settle();
     r.alive['dns-a'] = -1;

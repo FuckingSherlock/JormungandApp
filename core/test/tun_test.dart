@@ -322,22 +322,22 @@ void main() {
 
     test('the resolve step in TUN is only for the proxy ports (tun-in brings the IP); the proxy mode has it for all; IP-only-in-TUN rules apply in both', () {
       final tun = _build(_plan(routing: routing)), proxy = _build(_plan(mode: 'proxy', routing: routing));
-      final tunResolve = _rules(tun).where((r) => r['action'] == 'resolve').toList();
+      final tunResolve = _rules(tun).where((r) => r['action'] == 'resolve' && r.containsKey('server')).toList();
       expect(tunResolve, hasLength(1));
       expect(tunResolve.single['inbound'], ['mixed-in', 'sys-in'], reason: 'never tun-in');
-      final proxyResolve = _rules(proxy).where((r) => r['action'] == 'resolve').toList();
+      final proxyResolve = _rules(proxy).where((r) => r['action'] == 'resolve' && r.containsKey('server')).toList();
       expect(proxyResolve, hasLength(1));
       expect(proxyResolve.single.containsKey('inbound'), isFalse, reason: 'proxy mode: unchanged, for every inbound');
       expect({...tunResolve.single}..remove('inbound'), proxyResolve.single);
       // in the same place: right before the first IP rule without the flag
-      expect(_rules(tun).indexWhere((r) => r['action'] == 'resolve') + 1, _rules(tun).indexWhere((r) => '${r['ip_cidr']}' == '[8.8.8.0/24]'));
+      expect(_rules(tun).indexWhere((r) => r['action'] == 'resolve' && r.containsKey('server')) + 1, _rules(tun).indexWhere((r) => '${r['ip_cidr']}' == '[8.8.8.0/24]'));
       expect(_rules(tun).any((r) => '${r['ip_cidr']}' == '[9.9.9.0/24]'), isTrue);
       expect(_rules(tun).any((r) => '${r['ip_cidr']}' == '[8.8.8.0/24]'), isTrue);
     });
 
     test('Resolve for IP rules = off: no step in TUN either', () {
       final r = Map<String, dynamic>.from(routing)..['dns'] = {...(routing['dns'] as Map<String, dynamic>), 'resolve': 'off'};
-      expect(_rules(_build(_plan(routing: r))).where((x) => x['action'] == 'resolve'), isEmpty);
+      expect(_rules(_build(_plan(routing: r))).where((x) => x['action'] == 'resolve' && x.containsKey('server')), isEmpty);
     });
 
     test('the "no VPN DNS server" warning of the resolve step comes in TUN too (the step is there for the proxy ports)', () {
@@ -424,7 +424,7 @@ void main() {
           final def = (dns['servers'] as List).cast<Map>().firstWhere((s) => s['tag'] == server);
           expect(def.containsKey('detour'), isFalse, reason: 'the server answers outside the tunnel: $def');
           expect(server, isNot(dns['final']), reason: 'final is the VPN server (via vpn, first enabled): the point is not to depend on it');
-          expect(dns['final'], 'dns-remote');
+          expect(dns['final'], 'dns-remote-doh1-v');
         }
       }
     });
@@ -454,6 +454,11 @@ void main() {
       final dir = await Directory.systemTemp.createTemp('jorm-tun');
       try {
         final f = File(p.join(dir.path, 'config.json'));
+        // the DNS flag files must exist for sing-box: put them in the temp directory
+        for (final s in (((config['route'] as Map)['rule_set'] as List?) ?? const []).cast<Map>().where((s) => '${s['tag']}'.startsWith('flag-'))) {
+          s['path'] = p.join(dir.path, '${s['tag']}.json');
+          File('${s['path']}').writeAsStringSync(dnsFlagJson(true));
+        }
         await f.writeAsString(jsonEncode(config));
         final r = await Process.run(_bin, ['check', '-c', f.path, '--disable-color']);
         expect(r.exitCode, 0, reason: '$name: ${r.stdout}${r.stderr}');

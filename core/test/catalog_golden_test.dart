@@ -30,12 +30,35 @@ String? hashOf(String? s) {
 
 Object? plain(Object? v) => jsonDecode(jsonEncode(v));
 
+/// The mockup's list of DNS servers is the one it had before the DNS rework (one address and one side per server,
+/// no migration marker): the snapshots are read as a list already at the current version, and the new fields are
+/// folded back into `addr` / `via` when compared (until the mockup sync pass, `mockup_todo.md`).
+J _mockupDns(J snapshot) => {
+      ...snapshot,
+      'dnsCfg': {...?(snapshot['dnsCfg'] as Map?)?.cast<String, dynamic>(), 'listVersion': dnsListVersion},
+    };
+
+Map<String, dynamic> _legacyDnsServer(Map v) {
+  final ts = v['transports'] as List;
+  final sides = (v['sides'] as List?) ?? const ['vpn'];
+  return {
+    for (final e in v.entries)
+      if (!const {'transports', 'sides', 'use'}.contains(e.key)) '${e.key}': e.value,
+    'addr': ts.isEmpty ? '' : (ts.first as Map)['addr'],
+    'via': sides.contains('vpn') ? 'vpn' : 'direct',
+  };
+}
+
 /// Null and empty list = absent; pings as a map.
 Object? norm(Object? v, [String? key]) {
   if (v is Map) {
+    if (v['transports'] is List && v.containsKey('id')) v = _legacyDnsServer(v);
     return {
       for (final e in v.entries)
-        if (e.value != null && !(e.value is List && (e.value as List).isEmpty)) '${e.key}': norm(e.value, '${e.key}'),
+        if (e.value != null &&
+            !(e.value is List && (e.value as List).isEmpty) &&
+            !(key == 'dnsCfg' && (e.key == 'directPolicy' || e.key == 'listVersion')))
+          '${e.key}': norm(e.value, '${e.key}'),
     };
   }
   if (key == 'pings' && v is List) return {for (final p in v) (p as List)[0]: norm(p[1])};
@@ -290,7 +313,7 @@ void main() {
   final scenarios = [for (final s in golden['scenarios'] as List) s as J];
 
   Catalog load(J snapshot, J meta) {
-    final c = Catalog.fromJson(snapshot, now: () => now);
+    final c = Catalog.fromJson(_mockupDns(snapshot), now: () => now);
     c.mockupPlan = true; // the mockup's plan: Manual = the anchor alone
     c.appInfo = (pkg) {
       final a = apps[pkg];
@@ -321,7 +344,7 @@ void main() {
         final got = compute(c, full: want.containsKey('targets'), rt: want.containsKey('routingTargets'));
         expect(mismatches(want, got), isEmpty);
         // the same state read and written again
-        expect(firstDiff(norm(snap), norm(plain(Catalog.fromJson(snap, now: () => now).toJson()))), isNull, reason: 'snapshot round trip');
+        expect(firstDiff(norm(snap), norm(plain(Catalog.fromJson(_mockupDns(snap), now: () => now).toJson()))), isNull, reason: 'snapshot round trip');
         // the planSig string itself, not only its hash, must not depend on pings: reorder and compare
         if (want['planSig'] != null) {
           final plan = c.livePlan(c.liveSigAnchor());
