@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
-    show DnsServerCfg, PickState;
+    show DnsServerCfg, DnsTransport, PickState, dnsKindOf, dnsKinds;
 
 import '../core/core_host.dart';
 import '../core/settings_model.dart';
@@ -709,15 +709,33 @@ class DnsForm extends StatefulWidget {
 
 class _DnsFormState extends State<DnsForm> {
   late final TextEditingController _name;
-  late final TextEditingController _addr;
+
+  /// The address fields of an own server, in the try order.
+  final List<TextEditingController> _rows = [];
   late Set<String> _sides;
+
+  /// The enabled kinds; always a subset of [_present], never empty while there is an address.
+  Set<String> _use = {};
+
+  /// [_present] at the last [_sync]: tells a kind that just appeared (turned on) from one that was
+  /// switched off by hand.
+  Set<String> _seen = {};
   DnsServerCfg? _cfg;
   int? _ping;
   bool _testing = false;
 
-  /// A provider with several addresses (the built-in ones, Local) is shown, not edited as one.
-  bool get _fixedAddr =>
-      _cfg != null && (_cfg!.system || _cfg!.transports.length != 1);
+  /// An own server: its addresses are a list of fields. The built-in ones and Local show theirs.
+  bool get _own => _cfg == null || (!_cfg!.system && !_cfg!.builtin);
+
+  static bool _validAddr(String a) => a != 'system' && dnsAddrRe.hasMatch(a);
+
+  /// The kinds the provider has an address for (own server: a valid address in a field).
+  Set<String> get _present => _own
+      ? {
+          for (final c in _rows)
+            if (_validAddr(c.text.trim())) dnsKindOf(c.text.trim()),
+        }
+      : {for (final t in _cfg!.transports) t.kind};
 
   @override
   void initState() {
@@ -727,23 +745,69 @@ class _DnsFormState extends State<DnsForm> {
         : CoreHostScope.read(context).catalog.dnsServers[widget.id];
     _cfg = s;
     _name = TextEditingController(text: s?.name ?? '');
-    _addr = TextEditingController(text: s?.addr ?? '');
     _sides = {...(s?.activeSides ?? const ['vpn'])};
     _ping = widget.ping;
+    if (_own) {
+      for (final t in s?.transports ?? const <DnsTransport>[]) {
+        _rows.add(TextEditingController(text: t.addr));
+      }
+      if (_rows.isEmpty) _rows.add(TextEditingController());
+    }
+    _seen = _present;
+    _use = {...?s?.use.where(_seen.contains)};
+    if (_use.isEmpty) _use = {..._seen};
   }
 
   @override
   void dispose() {
     _name.dispose();
-    _addr.dispose();
+    for (final c in _rows) {
+      c.dispose();
+    }
     super.dispose();
+  }
+
+  /// After the address fields changed: a kind that appeared is turned on, one that is gone is
+  /// dropped, and at least one stays on.
+  void _sync() {
+    final now = _present;
+    _use = {..._use.where(now.contains), ...now.difference(_seen)};
+    if (_use.isEmpty) _use = {...now};
+    _seen = now;
+  }
+
+  void _toggleKind(String kind) => setState(() {
+    if (!_use.contains(kind)) {
+      _use.add(kind);
+    } else if (_use.length > 1) {
+      _use.remove(kind);
+    }
+  });
+
+  static String _kindName(String kind) => switch (kind) {
+    'doh' => 'DoH',
+    'dot' => 'DoT',
+    'doq' => 'DoQ',
+    _ => 'UDP',
+  };
+
+  /// The address a ping tries: the first one of an enabled kind (Local: `system`); null = none valid.
+  String? get _pingAddr {
+    if (_cfg?.system == true) return _cfg!.addr;
+    final addrs = _own
+        ? [for (final c in _rows) c.text.trim()]
+        : [for (final t in _cfg!.transports) t.addr];
+    for (final a in addrs) {
+      if (_validAddr(a) && _use.contains(dnsKindOf(a))) return a;
+    }
+    return null;
   }
 
   Future<void> _pingDraft() async {
     final l10n = context.l10n;
     final host = CoreHostScope.read(context);
-    final addr = _fixedAddr ? _cfg!.addr : _addr.text.trim();
-    if (!dnsAddrRe.hasMatch(addr)) {
+    final addr = _pingAddr;
+    if (addr == null) {
       showToast(context, l10n.enterAValidAddressFirst);
       return;
     }
@@ -764,18 +828,30 @@ class _DnsFormState extends State<DnsForm> {
   void _save() {
     final l10n = context.l10n;
     final host = CoreHostScope.read(context);
-    final addr = _addr.text.trim();
-    if (!_fixedAddr && !dnsAddrRe.hasMatch(addr)) {
-      showToast(
-        context,
-        l10n.addressHttpsTlsQuicUdpAn,
-      );
-      return;
+    List<DnsTransport>? transports;
+    if (_own) {
+      // empty fields are skipped, a filled invalid one stops the save; the same address twice counts once
+      final addrs = <String>[];
+      for (final c in _rows) {
+        final a = c.text.trim();
+        if (a.isEmpty) continue;
+        if (!_validAddr(a)) {
+          showToast(context, l10n.addressHttpsTlsQuicUdpAn);
+          return;
+        }
+        if (!addrs.contains(a)) addrs.add(a);
+      }
+      if (addrs.isEmpty) {
+        showToast(context, l10n.addressHttpsTlsQuicUdpAn);
+        return;
+      }
+      transports = [for (final a in addrs) DnsTransport(dnsKindOf(a), a)];
     }
     host.catalog.dnsSave(
       widget.id,
       name: _name.text,
-      addr: _fixedAddr ? null : addr,
+      transports: transports,
+      use: _cfg?.system == true ? null : _use,
       sides: _cfg?.system == true ? null : _sides,
     );
     host.changed();
@@ -816,13 +892,13 @@ class _DnsFormState extends State<DnsForm> {
           ),
           FormGroup(
             label: l10n.address,
-            child: _fixedAddr
+            child: !_own
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       for (final t in _cfg!.transports)
                         Opacity(
-                          opacity: _cfg!.usedTransports.contains(t) ? 1 : .5,
+                          opacity: _cfg!.system || _use.contains(t.kind) ? 1 : .5,
                           child: Text(
                             '${dnsKindLabel(l10n, t.addr)}  ${t.addr}',
                             maxLines: 1,
@@ -842,11 +918,53 @@ class _DnsFormState extends State<DnsForm> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      AppTextField(
-                        controller: _addr,
-                        mono: true,
-                        hint: 'https://1.1.1.1/dns-query',
-                        keyboardType: TextInputType.url,
+                      for (final c in _rows)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: AppTextField(
+                                  controller: c,
+                                  mono: true,
+                                  hint: 'https://1.1.1.1/dns-query',
+                                  keyboardType: TextInputType.url,
+                                  onChanged: (_) => setState(_sync),
+                                ),
+                              ),
+                              if (_validAddr(c.text.trim())) ...[
+                                const SizedBox(width: 8),
+                                Text(
+                                  _kindName(dnsKindOf(c.text.trim())),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: context.colors.t2,
+                                  ),
+                                ),
+                              ],
+                              if (_rows.length > 1)
+                                IconBtn(
+                                  tooltip: l10n.remove,
+                                  kind: IconBtnKind.ghost,
+                                  onTap: () => setState(() {
+                                    _rows.remove(c);
+                                    c.dispose();
+                                    _sync();
+                                  }),
+                                  icon: const Icon(Icons.close, size: 18),
+                                ),
+                            ],
+                          ),
+                        ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: SecondaryButton(
+                          label: l10n.address2,
+                          onPressed: () => setState(
+                            () => _rows.add(TextEditingController()),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 6),
                       HintText(
@@ -855,6 +973,22 @@ class _DnsFormState extends State<DnsForm> {
                     ],
                   ),
           ),
+          if (_cfg?.system != true && _seen.isNotEmpty)
+            FormGroup(
+              label: l10n.transports,
+              child: ChipRow(
+                padding: EdgeInsets.zero,
+                children: [
+                  for (final kind in dnsKinds)
+                    if (_seen.contains(kind))
+                      AppChip(
+                        label: _kindName(kind),
+                        active: _use.contains(kind),
+                        onTap: () => _toggleKind(kind),
+                      ),
+                ],
+              ),
+            ),
           if (_cfg?.system != true)
             FormGroup(
               label: l10n.via,

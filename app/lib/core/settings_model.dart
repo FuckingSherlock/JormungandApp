@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:jormungand_core/jormungand_core.dart'
-    show Catalog, DnsServerCfg;
+    show Catalog, DnsServerCfg, DnsTransport;
 
 import '../l10n/l10n.dart';
 import 'core_host.dart';
@@ -498,31 +498,49 @@ extension DnsOfCatalog on Catalog {
     return true;
   }
 
-  /// Adds ([id] null) or edits a server; returns its id. [addr] null = keep the provider's
-  /// transports (a built-in one has several); [sides] null = keep the sides.
+  /// Adds ([id] null) or edits a server; returns its id. [transports] (the addresses in their
+  /// try order) null / empty = keep the provider's (a built-in one has several; its addresses are
+  /// not edited); [use] (the enabled kinds) null / empty = keep, a new server uses the kinds of its
+  /// addresses; [sides] null / empty = keep. Whatever [use] says, it is cut to the kinds the provider
+  /// has an address for, and never ends empty. Local (the OS resolver) takes the name only.
   String dnsSave(
     String? id, {
     required String name,
-    String? addr,
+    List<DnsTransport>? transports,
+    Set<String>? use,
     Iterable<String>? sides,
   }) {
     final s = id == null ? null : dnsServers[id];
+    final tr = transports == null || transports.isEmpty ? null : [...transports];
     if (s != null) {
-      s.name = name.trim().isEmpty ? (addr == null ? s.name : dnsNameFromAddr(addr)) : name.trim();
-      if (addr != null && addr != s.addr) s.addr = addr;
+      if (!s.system) {
+        if (tr != null) s.transports = tr;
+        _dnsFixUse(s, use == null || use.isEmpty ? null : use);
+      }
+      s.name = name.trim().isEmpty ? (tr == null ? s.name : dnsNameFromAddr(tr.first.addr)) : name.trim();
       if (sides != null && sides.isNotEmpty && !s.system) s.sides = {...sides};
       return s.id;
     }
-    final a = addr ?? '';
     final nid = 'dns${dnsSeq++}';
-    dnsServers[nid] = DnsServerCfg(
+    final n = DnsServerCfg(
       id: nid,
-      name: name.trim().isEmpty ? dnsNameFromAddr(a) : name.trim(),
-      addr: a,
+      name: name.trim().isEmpty ? (tr == null ? '' : dnsNameFromAddr(tr.first.addr)) : name.trim(),
+      transports: tr ?? const [],
       sides: sides == null || sides.isEmpty ? const ['vpn'] : sides,
     );
+    _dnsFixUse(n, use == null || use.isEmpty ? {for (final t in n.transports) t.kind} : use);
+    dnsServers[nid] = n;
     dnsOrder.add(nid);
     return nid;
+  }
+
+  /// Sets [DnsServerCfg.use] to [want] (null = the current one, a new server: every kind it has an
+  /// address for), cut to the kinds with an address; when nothing is left, every such kind.
+  void _dnsFixUse(DnsServerCfg s, Set<String>? want) {
+    final has = {for (final t in s.transports) t.kind};
+    var u = {...(want ?? s.use)}.where(has.contains).toSet();
+    if (u.isEmpty) u = has;
+    s.use = u;
   }
 
   /// Deletes a server; false for a built-in one (it can only be switched off).

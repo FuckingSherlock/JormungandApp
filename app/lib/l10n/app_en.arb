@@ -3384,6 +3384,8 @@
   "last2": "Last",
   "noAnswerOnAnyOfTheir": "No answer on any of their sides",
   "builtInServersCannotBeDeleted": "Built-in servers cannot be deleted, only switched off.",
+  "address2": "+ Address",
+  "transports": "Transports",
   "newVersion": "New version",
   "aNewVersionOfTheApp": "A new version of the app is out, or a downloaded one waits to be installed"
 }

@@ -210,11 +210,68 @@ void main() {
       expect(c.dnsActive, isEmpty);
       expect(c.dnsDelete('cloudflare'), isFalse);
       expect(c.dnsServers.containsKey('cloudflare'), isTrue);
-      final id = c.dnsSave(null, name: '', addr: 'tls://9.9.9.9', sides: ['direct']);
+      final id = c.dnsSave(null, name: '', transports: [DnsTransport('dot', 'tls://9.9.9.9')], sides: ['direct']);
       expect(c.dnsServers[id]!.name, '9.9.9.9');
       expect(c.dnsServers[id]!.activeSides, ['direct']);
       expect(c.dnsDelete(id), isTrue);
       expect(c.dnsServers.containsKey(id), isFalse);
+    });
+
+    group('dnsSave: transports and use', () {
+      List<DnsTransport> tr(List<String> a) => [for (final x in a) DnsTransport(dnsKindOf(x), x)];
+
+      test('a new server uses the kinds of its addresses, sides default to VPN', () {
+        final c = Catalog();
+        final id = c.dnsSave(null, name: '', transports: tr(['https://9.9.9.9/dns-query', 'tls://9.9.9.9', '9.9.9.9']));
+        final s = c.dnsServers[id]!;
+        expect(s.transports.map((t) => t.addr), ['https://9.9.9.9/dns-query', 'tls://9.9.9.9', '9.9.9.9']);
+        expect(s.use, {'doh', 'dot', 'udp'});
+        expect(s.name, '9.9.9.9');
+        expect(s.activeSides, {'vpn'});
+      });
+
+      test('use is cut to the kinds with an address and never ends empty', () {
+        final c = Catalog();
+        final id = c.dnsSave(null, name: 'M', transports: tr(['tls://9.9.9.9', '9.9.9.9']), use: {'dot', 'doq'});
+        expect(c.dnsServers[id]!.use, {'dot'});
+        c.dnsSave(id, name: 'M', use: {'doq'}); // nothing left of it: every kind with an address
+        expect(c.dnsServers[id]!.use, {'dot', 'udp'});
+        c.dnsSave(id, name: 'M', use: {'udp'});
+        expect(c.dnsServers[id]!.use, {'udp'});
+      });
+
+      test('null / empty transports and use keep the current ones', () {
+        final c = Catalog();
+        final id = c.dnsSave(null, name: 'M', transports: tr(['tls://9.9.9.9', '9.9.9.9']), use: {'udp'});
+        c.dnsSave(id, name: 'M2', transports: const [], use: <String>{});
+        final s = c.dnsServers[id]!;
+        expect(s.name, 'M2');
+        expect(s.transports.map((t) => t.addr), ['tls://9.9.9.9', '9.9.9.9']);
+        expect(s.use, {'udp'});
+      });
+
+      test('replacing the addresses drops the kinds that are gone from use', () {
+        final c = Catalog();
+        final id = c.dnsSave(null, name: 'M', transports: tr(['tls://9.9.9.9', '9.9.9.9']));
+        c.dnsSave(id, name: 'M', transports: tr(['https://9.9.9.9/dns-query', '9.9.9.9']), use: {'dot', 'doh'});
+        final s = c.dnsServers[id]!;
+        expect(s.transports.first.addr, 'https://9.9.9.9/dns-query');
+        expect(s.use, {'doh'});
+      });
+
+      test('a built-in provider keeps its addresses and takes use; Local takes the name only', () {
+        final c = Catalog();
+        final n = c.dnsServers['cloudflare']!.transports.length;
+        c.dnsSave('cloudflare', name: 'Cloudflare', use: {'doh', 'udp', 'doq'});
+        final cf = c.dnsServers['cloudflare']!;
+        expect(cf.transports.length, n);
+        expect(cf.use, {'doh', 'udp'}); // Cloudflare has no DoQ address
+        c.dnsSave('local', name: 'Mine', transports: tr(['9.9.9.9']), use: {'udp'}, sides: ['vpn']);
+        final l = c.dnsServers['local']!;
+        expect(l.system, isTrue);
+        expect(l.name, 'Mine');
+        expect(l.activeSides, {'direct'});
+      });
     });
 
     test('what Android hides', () {
@@ -452,7 +509,7 @@ void main() {
 
       testWidgets('the last lit side chip of a provider flips it to the other side', (tester) async {
         final host = FakeCoreHost();
-        final id = host.catalog.dnsSave(null, name: 'Mine', addr: 'tls://9.9.9.9', sides: ['direct']);
+        final id = host.catalog.dnsSave(null, name: 'Mine', transports: [DnsTransport('dot', 'tls://9.9.9.9')], sides: ['direct']);
         await openDns(tester, host);
         await tester.tap(chip(id, 'direct'));
         await tester.pumpAndSettle();
@@ -463,7 +520,7 @@ void main() {
 
       testWidgets('the form flips the last side instead of emptying it', (tester) async {
         final host = FakeCoreHost();
-        final id = host.catalog.dnsSave(null, name: 'Mine', addr: 'tls://9.9.9.9', sides: ['direct']);
+        final id = host.catalog.dnsSave(null, name: 'Mine', transports: [DnsTransport('dot', 'tls://9.9.9.9')], sides: ['direct']);
         await openDns(tester, host);
         await tester.tap(find.descendant(of: rowOf(id), matching: find.text('Mine')));
         await tester.pumpAndSettle();
@@ -549,7 +606,7 @@ void main() {
         tester,
       ) async {
         final host = FakeCoreHost();
-        final id = host.catalog.dnsSave(null, name: 'Mine', addr: 'tls://9.9.9.9', sides: ['direct']);
+        final id = host.catalog.dnsSave(null, name: 'Mine', transports: [DnsTransport('dot', 'tls://9.9.9.9')], sides: ['direct']);
         await openDns(tester, host);
 
         await tester.tap(

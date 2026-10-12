@@ -194,5 +194,7 @@
   "Last": null,
   "No answer on any of their sides": null,
   "Built-in servers cannot be deleted, only switched off.": null,
+  "+ Address": null,
+  "Transports": null,
   "New version": "Новая версия",  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
 }
