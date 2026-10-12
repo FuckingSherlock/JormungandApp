@@ -96,6 +96,14 @@ const outsideTunnel = <OutsideEntry>[
     ['core/lib/src/report_upload.dart'],
   ),
   OutsideEntry(
+    'service-fetch',
+    'The common fetcher of the core\'s own traffic (svc_fetch.dart): with sing-box running every path (direct, '
+        'the main flow, each route) goes in through the loopback svc-in inbound and leaves from sing-box; without '
+        'it the one plain direct socket is the app\'s own connection, so it needs the self rule and a DNS that works with every node dead',
+    OutsideHow.ownRule,
+    ['core/lib/src/svc_fetch.dart'],
+  ),
+  OutsideEntry(
     'dns-probe',
     'Settings → DNS pings: a real query from this machine straight to the server (UDP / TCP / DoT / DoH) '
         'and the system resolver; must reach the tested server, so the self rule stands before the '

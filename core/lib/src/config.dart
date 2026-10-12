@@ -38,6 +38,9 @@
 /// route rule per server first of all, and per DNS server in use a rule that resolves a
 /// name through that server alone (the DNS check, dns_failover.dart).
 ///
+/// [svc]: the loopback inbound the core's own service traffic goes out through, a user per path
+/// (svc_in.dart): the route rules of its users go first too; [svc] receives the table of the paths.
+///
 /// [info] receives what the services beside sing-box need to know about the routing: the
 /// "If unavailable" selectors (fallback.dart) and the DNS servers in use (dns_failover.dart).
 ///
@@ -60,6 +63,7 @@ import 'plan.dart';
 import 'probe.dart';
 import 'routing.dart';
 import 'rulenames.dart';
+import 'svc_in.dart';
 
 const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 
@@ -194,6 +198,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     {int? tunnelPort,
     int? sysPort,
     Probe? probe,
+    SvcIn? svc,
     Map<String, String> ruleSetFiles = const {},
     List<String>? warnings,
     RoutingInfo? info,
@@ -269,6 +274,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   // 'direct' is tested too, always: the network check of the probe pool (pool.dart) tells a
   // dead network from dead routes by the direct path answering
   final pr = probe?.inbound([..._servers(outs), 'direct'], dnsServers: [for (final s in routing.dnsEnabled) s.tag]);
+  // svc-in: one user per path (direct, the main flow, each route), its rules go first like the probe's
+  final sv = svc?.inbound(direct: 'direct', main: topTag, routes: tags);
   final Map<String, dynamic>? tunnelRule = tunnelPort == null ? null : {'inbound': ['tunnel-in'], 'action': 'route', 'outbound': topTag};
   // TUN: DNS the core answers itself. Aimed at the tunnel's own resolver (what the system's DNS
   // points at on the TUN interface) it always does — nothing else could answer it, the app's own
@@ -295,6 +302,9 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     for (final r in pr?.rules ?? const <Map<String, dynamic>>[]) {
       final dns = r.containsKey('server') || r.containsKey('override_address');
       info.ruleNames.add(r, dns ? const RuleOrigin('system', 'DNS check', id: 'dns-check') : const RuleOrigin('system', 'Latency check', id: 'probe'));
+    }
+    for (final r in sv?.rules ?? const <Map<String, dynamic>>[]) {
+      info.ruleNames.add(r, const RuleOrigin('system', 'Service traffic', id: 'svc'));
     }
     for (final r in hijack) {
       info.ruleNames.add(r, const RuleOrigin('system', 'DNS hijack', id: 'dns-hijack'));
@@ -331,11 +341,13 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       if (tunnelPort != null) {'type': 'mixed', 'tag': 'tunnel-in', 'listen': '127.0.0.1', 'listen_port': tunnelPort},
       if (tun) _tunInbound(plan),
       ?pr?.inbound,
+      ?sv?.inbound,
     ],
     'outbounds': outs,
     'route': {
       'rules': [
         ...?pr?.rules,
+        ...?sv?.rules,
         {'action': 'sniff'},
         if (tun) tunResolverHijack,
         ?tunnelRule,

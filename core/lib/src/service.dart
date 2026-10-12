@@ -25,6 +25,8 @@ import 'parse/links.dart';
 import 'plan.dart';
 import 'pool.dart';
 import 'probe.dart';
+import 'svc_fetch.dart';
+import 'svc_in.dart';
 import 'redact.dart';
 import 'report.dart';
 import 'report_upload.dart';
@@ -196,6 +198,17 @@ class CoreService implements CoreApi {
   // port: it may ask for a password.
   int? get _innerPort => runner.running ? _tunnelPort ?? _mixedPort : null;
   Probe? _probe; // probe-in: Auto's latency tests (probe.dart)
+  SvcIn? _svc; // svc-in: the service traffic's paths (svc_in.dart)
+
+  /// svc-in of the running sing-box: its port, secret and the table of paths; null while sing-box does not run.
+  SvcIn? get svcInbound => runner.running ? _svc : null;
+
+  /// The paths a service request can take now (direct, the main flow, each route); empty while sing-box
+  /// does not run — then only a plain direct socket is left ([ServiceFetch]).
+  List<SvcPath> get svcPaths => svcInbound?.paths ?? const [];
+
+  /// The core's own requests raced over [svcPaths] (svc_fetch.dart, docs/core.md → «Служебный трафик»).
+  late final svcFetch = ServiceFetch(endpoint: () => svcInbound, context: sentinel.context);
 
   /// Every server test of the core's modules and of the UI's pings (pool.dart), and the
   /// network status they share. `direct` = the direct path through the main sing-box's probe
@@ -1280,17 +1293,20 @@ class CoreService implements CoreApi {
     final mixed = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
     final tunnelPort = await freePort(exclude: {mixed});
     final probePort = await freePort(exclude: {mixed, tunnelPort});
-    final sysPort = sys && plan['mixedAuth'] != null ? await _sysInPort({mixed, tunnelPort, probePort}) : null;
+    final svcPort = await freePort(exclude: {mixed, tunnelPort, probePort});
+    final sysPort = sys && plan['mixedAuth'] != null ? await _sysInPort({mixed, tunnelPort, probePort, svcPort}) : null;
     if (Platform.isAndroid && _selfPackages.isEmpty) {
       logBook.note('warn', "The app's own package is unknown: its own connections are routed like any app's, not direct");
     }
     final probe = Probe(probePort);
+    final svc = SvcIn(svcPort);
     final info = RoutingInfo();
     try {
       await runner.start(buildConfig(plan,
           tunnelPort: tunnelPort,
           sysPort: sysPort,
           probe: probe,
+          svc: svc,
           ruleSetFiles: lists.files,
           warnings: warnings,
           info: info,
@@ -1310,6 +1326,7 @@ class CoreService implements CoreApi {
       }
     } catch (_) {}
     _probe = probe;
+    _svc = svc;
     _fallbacks = info.fallbacks;
     _ruleNames = info.ruleNames;
     _dnsServers = info.dnsServers;
@@ -1324,6 +1341,7 @@ class CoreService implements CoreApi {
           'tunnelPort': tunnelPort,
           'probePort': probePort,
           'probeSecret': probe.secret,
+          'svc': svc.toJson(),
           'sysPort': sysPort,
           'sysWanted': sys,
           'ruleSetFiles': lists.files,
@@ -1362,6 +1380,7 @@ class CoreService implements CoreApi {
       if (rec == null) return {'adopted': false};
       final Map<String, dynamic> plan;
       final Probe probe;
+      final SvcIn? svc;
       final RoutingInfo info = RoutingInfo();
       final int tunnelPort;
       final int? sysPort;
@@ -1370,12 +1389,14 @@ class CoreService implements CoreApi {
         tunnelPort = (rec['tunnelPort'] as num).toInt();
         sysPort = (rec['sysPort'] as num?)?.toInt();
         probe = Probe((rec['probePort'] as num).toInt(), rec['probeSecret'] as String);
+        svc = SvcIn.fromJson(rec['svc']); // null: a record of a core before svc-in; the old sing-box has no such inbound
         // the config again with the same inputs, for what it says about itself (rules by name,
         // fallbacks, DNS servers); the config itself is not used
         buildConfig(plan,
             tunnelPort: tunnelPort,
             sysPort: sysPort,
             probe: probe,
+            svc: svc == null ? null : SvcIn(svc.port, svc.secret),
             ruleSetFiles: ((rec['ruleSetFiles'] as Map?) ?? const {}).cast<String, String>(),
             warnings: <String>[],
             info: info,
@@ -1395,6 +1416,7 @@ class CoreService implements CoreApi {
       _upSince = DateTime.fromMillisecondsSinceEpoch((rec['upSince'] as num?)?.toInt() ?? _now().millisecondsSinceEpoch);
       _attempt = 0;
       _probe = probe;
+      _svc = svc;
       _fallbacks = info.fallbacks;
       _ruleNames = info.ruleNames;
       _dnsServers = info.dnsServers;

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'redact.dart';
 import 'report_crypto.dart';
+import 'stall_guard.dart';
 
 /// Sending the support report to the developers (docs/logs.md → Отправка). The core builds the
 /// report, adds the user's note, masks it in the strict mode and gzips it; what happens to the bytes
@@ -398,8 +399,7 @@ class HttpReportUploader implements ReportUploader {
     // overall cap.
     for (var i = 0; i < envelope.length; i += _chunk) {
       req.add(Uint8List.sublistView(envelope, i, min(i + _chunk, envelope.length)));
-      await req.flush().timeout(stallTimeout,
-          onTimeout: () => throw TimeoutException('the upload stalled: no bytes accepted for ${_dur(stallTimeout)} ($way)'));
+      await stallWatch(req.flush(), stallTimeout, 'the upload stalled: no bytes accepted for ${_dur(stallTimeout)} ($way)');
     }
     // Everything went out; now the response must start (and be read) in time.
     final answer = () async {
@@ -415,7 +415,7 @@ class HttpReportUploader implements ReportUploader {
   }
 
   /// A span for a message: whole seconds as «3 s», else milliseconds.
-  static String _dur(Duration d) => d.inMilliseconds % 1000 == 0 ? '${d.inSeconds} s' : '${d.inMilliseconds} ms';
+  static String _dur(Duration d) => spanText(d);
 
   /// The size of one piece of the body ([_post]).
   static const _chunk = 16 * 1024;

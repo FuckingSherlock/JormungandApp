@@ -154,6 +154,10 @@ class SbLine {
 /// The inbound the core's own measurements go in through (probe.dart): never counted.
 const _probeInbound = 'probe-in';
 
+/// The core's own service traffic (svc_fetch.dart): a failing path of the race is not a failed connection
+/// of a user's app; a request that failed on every path is reported by the fetcher itself (`svc.fetch`).
+const _svcInbound = 'svc-in';
+
 /// The core's own requests through the tunnel (subscriptions, the exit check): counted, never an event.
 const _tunnelInbound = 'tunnel-in';
 
@@ -269,7 +273,7 @@ class FailureReport {
 /// fresh change it in place (`more`) instead of making new ones; at most [maxEvents] suspicions per
 /// [window] overall; an entry whose suspicion did not stand waits [recheckAfter] before the next. Not
 /// raised for UDP, for the core's own requests (`probe-in`, Auto's checks of the spare routes among them,
-/// and `tunnel-in`), for an ignored site, or for a site Auto already reported ([noteSite]).
+/// `svc-in` and `tunnel-in`), for an ignored site, or for a site Auto already reported ([noteSite]).
 ///
 /// The caller owns the clock and the lifetime: [start] when sing-box starts (counters begin), [stop]
 /// when it ends; nothing here runs on a timer.
@@ -419,7 +423,7 @@ class FailureBook {
 
   /// A connection sing-box closed.
   void onClosed(ClosedConnection c) {
-    if (!_active || c.inbound == _probeInbound) return;
+    if (!_active || c.inbound == _probeInbound || c.inbound == _svcInbound) return;
     final (host, port) = splitDest(c.destination);
     final h = host.toLowerCase();
     if (_ignored?.call(h) == true) return;
@@ -493,7 +497,7 @@ class FailureBook {
     e.streak.removeWhere((s) => s.$1 < from);
     e.streak.add((at, kind));
     if (e.reported || e.streak.length < failAfter || at < e.holdUntil) return;
-    if (e.network == 'udp' || e.inbound == _tunnelInbound || e.inbound == _probeInbound) return;
+    if (e.network == 'udp' || e.inbound == _tunnelInbound || e.inbound == _probeInbound || e.inbound == _svcInbound) return;
     if (_isCovered(host, at)) return;
     e.reported = true;
     _raise(e, at, bg);
