@@ -52,7 +52,12 @@ Map<String, dynamic> _legacyDnsServer(Map v) {
 /// Null and empty list = absent; pings as a map.
 Object? norm(Object? v, [String? key]) {
   if (v is Map) {
-    if (v['transports'] is List && v.containsKey('id')) v = _legacyDnsServer(v);
+    if (v.containsKey('id') && dnsBuiltinIds.contains(v['id']) && (v.containsKey('addr') || v.containsKey('sides') || v.containsKey('transports'))) {
+      // a built-in's addresses are the code's, not stored (the mockup still holds one stored address): compare the rest
+      v = {for (final e in v.entries) if (!const {'addr', 'via', 'transports', 'sides', 'use'}.contains(e.key)) e.key: e.value};
+    } else if (v['transports'] is List && v.containsKey('id')) {
+      v = _legacyDnsServer(v);
+    }
     return {
       for (final e in v.entries)
         if (e.value != null &&
@@ -314,6 +319,13 @@ void main() {
 
   Catalog load(J snapshot, J meta) {
     final c = Catalog.fromJson(_mockupDns(snapshot), now: () => now);
+    // the mockup's built-ins hold their one stored address (the app takes it from the code): put it back for its plan
+    for (final e in ((snapshot['dnsServers'] as Map?) ?? const {}).entries) {
+      final addr = (e.value as Map)['addr'];
+      if (addr is String && addr.isNotEmpty && dnsBuiltinIds.contains(e.key)) {
+        c.dnsServers[e.key]?.transports = [DnsTransport(dnsKindOf(addr), addr)];
+      }
+    }
     c.mockupPlan = true; // the mockup's plan: Manual = the anchor alone
     c.appInfo = (pkg) {
       final a = apps[pkg];

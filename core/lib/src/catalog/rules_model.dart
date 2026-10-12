@@ -383,7 +383,8 @@ class DnsServerCfg with RoundTrip {
         'on': on,
         'sides': [for (final s in dnsSidesAll) if (activeSides.contains(s)) s],
         'use': [for (final k in [...dnsKinds, dnsKindSystem]) if (use.contains(k)) k, ...use.where((k) => ![...dnsKinds, dnsKindSystem].contains(k))],
-        'transports': [for (final t in transports) t.toJson()],
+        // a built-in's addresses come from the code on every load ([applyBuiltinDnsAddresses]), never from the store
+        if (!builtin) 'transports': [for (final t in transports) t.toJson()],
         ...deepCopy(unknown) as Json,
       };
 }
@@ -417,6 +418,20 @@ List<DnsServerCfg> defaultDnsServers() => [
 
 /// The ids of [defaultDnsServers]: the built-in providers ([DnsServerCfg.builtin]).
 final Set<String> dnsBuiltinIds = {for (final s in defaultDnsServers()) s.id};
+
+/// Puts the addresses of [defaultDnsServers] into the built-in providers of a loaded list (what was
+/// stored in their `transports`, by an older version, is dropped): an update that changes a built-in's
+/// addresses reaches every install with no migration. Only `transports` are replaced: `on`, `sides`, `use`
+/// (a kind the code added is off until the user turns it on; a kind the code dropped is ignored by
+/// [DnsServerCfg.usedTransports]), `name` and the place in the order are the user's. A built-in missing
+/// from [servers] is not added back. Not for a list still to be migrated ([migrateDnsList] takes the old
+/// ids as they are).
+void applyBuiltinDnsAddresses(Map<String, DnsServerCfg> servers) {
+  for (final d in defaultDnsServers()) {
+    final s = servers[d.id];
+    if (s != null) s.transports = d.transports;
+  }
+}
 
 /// The ids of the list before the rework that the migration replaces by [defaultDnsServers].
 const _oldBuiltinDns = {'remote', 'local', 'google'};

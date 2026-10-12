@@ -253,6 +253,8 @@ class Catalog {
       }
       dnsCfg.listVersion = dnsListVersion;
     }
+    applyBuiltinDnsAddresses(dnsServers); // after the migration: its input keeps the old stored addresses
+
     pings.restore(s['pings'], [for (final x in sourcesData.values) ...[...x.nodes, ...x.gone]]);
     pairs.restore(s['pairs']);
     unknown = {for (final e in s.entries) if (!_known.contains(e.key)) e.key: deepCopy(e.value)};

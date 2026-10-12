@@ -137,14 +137,22 @@ void main() {
             'on': true,
             'sides': ['direct', 'vpn'],
             'use': ['doh', 'dot'],
-            'transports': [
-              {'kind': 'doh', 'addr': 'https://1.1.1.1/dns-query', 'tt': 1},
-              {'kind': 'dot', 'addr': 'tls://1.1.1.1'},
-            ],
             'tag': 't',
           },
+          'own': {
+            'id': 'own',
+            'name': 'Own',
+            'on': false,
+            'sides': ['vpn'],
+            'use': ['doh', 'dot'],
+            'transports': [
+              {'kind': 'doh', 'addr': 'https://9.9.9.9/dns-query', 'tt': 1},
+              {'kind': 'dot', 'addr': 'tls://9.9.9.9'},
+            ],
+            'tag': 'o',
+          },
         },
-        'dnsOrder': ['cloudflare'],
+        'dnsOrder': ['cloudflare', 'own'],
         'dnsCfg': {'resolve': 'cloudflare', 'hijack': false, 'directPolicy': 'priority', 'listVersion': 2, 'extra': 1},
         'pings': [
           ['vless://a1.example:443#a1', {'ms': 41, 'at': t0 - 5, 'fails': 0}],
@@ -278,6 +286,100 @@ void main() {
       expect([for (final s in c.dnsServers.values) '${s.id}:${s.builtin}'], ['cloudflare:true', 'google:true', 'adguard:true', 'local:true']);
       expect(DnsServerCfg(id: 'dns1', addr: 'tls://1.1.1.1').builtin, isFalse);
       expect(c.dnsServers['google']!.toJson().containsKey('builtin'), isFalse);
+    });
+
+    group('built-in addresses come from the code', () {
+      Map<String, dynamic> stored() => snap(over: {
+            'dnsServers': {
+              'cloudflare': {
+                'id': 'cloudflare',
+                'name': 'CF mine',
+                'on': false,
+                'sides': ['vpn'],
+                'use': ['dot', 'udp'],
+                'transports': [
+                  {'kind': 'doh', 'addr': 'https://stale.example/dns-query'},
+                  {'kind': 'dot', 'addr': 'tls://stale.example'},
+                ],
+                'tag': 't',
+              },
+              'google': {
+                'id': 'google',
+                'on': true,
+                'sides': ['direct', 'vpn'],
+                'use': ['doh', 'doq'], // doq: a kind the code has not (for Google)
+                'transports': [
+                  {'kind': 'doq', 'addr': 'quic://old.example'},
+                ],
+              },
+              'local': {'id': 'local', 'on': true, 'sides': ['direct'], 'use': <String>[], 'transports': [{'kind': 'system', 'addr': 'elsewhere'}]},
+              'own': {'id': 'own', 'on': true, 'sides': ['vpn'], 'use': ['dot'], 'transports': [{'kind': 'dot', 'addr': 'tls://9.9.9.9', 'tt': 1}]},
+            },
+            'dnsOrder': ['own', 'local', 'cloudflare', 'google'],
+            'dnsCfg': {'listVersion': 2},
+          });
+
+      List<String> addrs(DnsServerCfg s) => [for (final t in s.transports) '${t.kind} ${t.addr}'];
+
+      test('a stored built-in loads with the transports of the code; the user\'s settings stay', () {
+        final c = make(stored());
+        final defaults = {for (final s in defaultDnsServers()) s.id: s};
+        for (final id in ['cloudflare', 'google', 'local']) {
+          expect(addrs(c.dnsServers[id]!), addrs(defaults[id]!), reason: id);
+        }
+        final cf = c.dnsServers['cloudflare']!;
+        expect([cf.name, cf.on, cf.sides, cf.use], ['CF mine', false, {'vpn'}, {'dot', 'udp'}]);
+        expect(cf.unknown['tag'], 't');
+        expect(c.dnsOrder, ['own', 'local', 'cloudflare', 'google']);
+        expect(addrs(c.dnsServers['own']!), ['dot tls://9.9.9.9'], reason: 'an own server keeps its stored addresses');
+        // the plan (and so the sing-box config) gets the full transports
+        final plan = ((c.routingPlan()['dns'] as Map)['servers'] as List).cast<Map>();
+        final cfPlan = plan.firstWhere((s) => s['id'] == 'cloudflare');
+        expect([for (final t in cfPlan['transports'] as List) '${(t as Map)['kind']} ${t['addr']}'], addrs(defaults['cloudflare']!));
+        expect(cfPlan['use'], ['dot', 'udp']);
+      });
+
+      test('a kind the code dropped is ignored; a kind the code added is off for a stored built-in', () {
+        final c = make(stored());
+        final g = c.dnsServers['google']!;
+        expect(g.use, {'doh', 'doq'}, reason: 'stored use stays');
+        expect(g.usedTransports.map((t) => t.kind).toSet(), {'doh'}, reason: 'doq has no address now');
+        // the code gives Cloudflare a kind this store never had: not in use
+        final cf = c.dnsServers['cloudflare']!;
+        expect(cf.transports.map((t) => t.kind), contains('doh'));
+        expect(cf.use.contains('doh'), isFalse);
+        expect(cf.usedTransports.map((t) => t.kind).toSet(), {'dot', 'udp'});
+      });
+
+      test('the write omits the transports of a built-in, keeps those of an own server; settings survive a round trip', () {
+        final c = make(stored());
+        final out = jsonDecode(jsonEncode(c.toJson())) as Map<String, dynamic>;
+        final ds = out['dnsServers'] as Map;
+        for (final id in ['cloudflare', 'google', 'local']) {
+          expect((ds[id] as Map).containsKey('transports'), isFalse, reason: id);
+        }
+        expect((ds['own'] as Map)['transports'], [
+          {'kind': 'dot', 'addr': 'tls://9.9.9.9', 'tt': 1},
+        ]);
+        expect(ds['cloudflare'], containsPair('name', 'CF mine'));
+        expect(ds['cloudflare'], containsPair('on', false));
+        expect(ds['cloudflare'], containsPair('sides', ['vpn']));
+        expect(ds['cloudflare'], containsPair('use', ['dot', 'udp']));
+        expect(ds['cloudflare'], containsPair('tag', 't'));
+        expect(out['dnsOrder'], ['own', 'local', 'cloudflare', 'google']);
+        final again = make(out);
+        expect(jsonEncode(again.toJson()), jsonEncode(c.toJson()));
+        expect(addrs(again.dnsServers['cloudflare']!), addrs(c.dnsServers['cloudflare']!));
+      });
+
+      test('a list migrated from the old version gets the code\'s addresses too, and writes none for the built-ins', () {
+        final c = make(oldList());
+        final out = jsonDecode(jsonEncode(c.toJson())) as Map<String, dynamic>;
+        final ds = out['dnsServers'] as Map;
+        expect((ds['cloudflare'] as Map).containsKey('transports'), isFalse);
+        expect((ds['ya'] as Map).containsKey('transports'), isTrue);
+        expect(c.dnsServers['cloudflare']!.transports.length, defaultDnsServers().first.transports.length);
+      });
     });
 
     test('directPolicy: localFirst by default, priority when stored; an unknown value is the default', () {

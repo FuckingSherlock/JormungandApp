@@ -373,6 +373,166 @@ void main() {
       expect(host.changes, greaterThan(changes));
     });
 
+    group('DNS form', () {
+      Finder chipOf(String kind) =>
+          find.descendant(of: find.byType(DnsForm), matching: find.widgetWithText(AppChip, kind));
+      Finder fields() => find.descendant(of: find.byType(DnsForm), matching: find.byType(TextField));
+      Finder removes() => find.descendant(of: find.byType(DnsForm), matching: find.byTooltip('Remove'));
+      bool lit(WidgetTester t, String kind) => t.widget<AppChip>(chipOf(kind)).active;
+
+      Future<void> openNew(WidgetTester tester, FakeCoreHost host, {double scale = 1.0}) async {
+        await _pump(tester, host, textScale: scale);
+        await _open(tester, 'setdns');
+        await tester.tap(find.text('Add DNS server'));
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> openEdit(WidgetTester tester, FakeCoreHost host, String name) async {
+        await _pump(tester, host);
+        await _open(tester, 'setdns');
+        await tester.tap(find.text(name).first);
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> type(WidgetTester tester, int row, String text) async {
+        await tester.enterText(fields().at(row + 1), text); // field 0 is the name
+        await tester.pump();
+      }
+
+      testWidgets('chips only for kinds with an address; Local has none', (tester) async {
+        final host = FakeCoreHost();
+        await openEdit(tester, host, 'Cloudflare');
+        expect(chipOf('DoH'), findsOneWidget);
+        expect(chipOf('DoT'), findsOneWidget);
+        expect(chipOf('UDP'), findsOneWidget);
+        expect(chipOf('DoQ'), findsNothing);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('AdGuard (unfiltered)').first);
+        await tester.pumpAndSettle();
+        expect(chipOf('DoQ'), findsOneWidget);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Local').first);
+        await tester.pumpAndSettle();
+        expect(find.byType(DnsForm), findsOneWidget);
+        for (final k in ['DoH', 'DoT', 'DoQ', 'UDP']) {
+          expect(chipOf(k), findsNothing, reason: k);
+        }
+      });
+
+      testWidgets('an own server: chips follow the addresses, the last lit one ignores taps', (tester) async {
+        await openNew(tester, FakeCoreHost());
+        expect(chipOf('DoH'), findsNothing); // no valid address yet
+        await type(tester, 0, 'https://9.9.9.9/dns-query');
+        expect(lit(tester, 'DoH'), isTrue);
+        await tester.tap(chipOf('DoH'));
+        await tester.pump();
+        expect(lit(tester, 'DoH'), isTrue); // the only lit one stays
+
+        // a new kind appears and turns on
+        await tester.tap(find.text('+ Address'));
+        await tester.pump();
+        await type(tester, 1, 'tls://9.9.9.9');
+        expect(lit(tester, 'DoT'), isTrue);
+        expect(lit(tester, 'DoH'), isTrue);
+        await tester.tap(chipOf('DoH'));
+        await tester.pump();
+        expect(lit(tester, 'DoH'), isFalse);
+        expect(lit(tester, 'DoT'), isTrue);
+        await tester.tap(chipOf('DoT')); // last lit now
+        await tester.pump();
+        expect(lit(tester, 'DoT'), isTrue);
+
+        // the last address of a kind goes: its chip goes
+        await tester.tap(removes().last);
+        await tester.pump();
+        expect(chipOf('DoT'), findsNothing);
+        expect(lit(tester, 'DoH'), isTrue); // something stays on
+        expect(removes(), findsNothing); // one row left
+      });
+
+      testWidgets('+ Address adds a row, the kind tag shows for a valid address', (tester) async {
+        await openNew(tester, FakeCoreHost());
+        expect(fields(), findsNWidgets(2)); // name + one address
+        expect(removes(), findsNothing);
+        expect(find.text('UDP'), findsNothing);
+        await tester.tap(find.text('+ Address'));
+        await tester.pump();
+        expect(fields(), findsNWidgets(3));
+        expect(removes(), findsNWidgets(2));
+        await type(tester, 1, '9.9.9.9');
+        // the tag and the chip both read UDP
+        expect(find.text('UDP'), findsNWidgets(2));
+        await type(tester, 1, 'nonsense');
+        expect(find.text('UDP'), findsNothing);
+      });
+
+      testWidgets('save: an invalid address stops it, a duplicate counts once, order and use kept', (tester) async {
+        final host = FakeCoreHost();
+        await openNew(tester, host);
+        final before = host.catalog.dnsServers.length;
+        await type(tester, 0, 'bad address');
+        await tester.tap(find.text('Save'));
+        await tester.pump();
+        expect(find.text('Address: https://…, tls://…, quic://…, udp://…, an IP or system'), findsOneWidget);
+        expect(find.byType(DnsForm), findsOneWidget);
+        expect(host.catalog.dnsServers.length, before);
+
+        await type(tester, 0, 'tls://9.9.9.9');
+        await tester.tap(find.text('+ Address'));
+        await tester.pump();
+        await type(tester, 1, 'https://9.9.9.9/dns-query');
+        await tester.tap(find.text('+ Address'));
+        await tester.pump();
+        await type(tester, 2, 'tls://9.9.9.9');
+        await tester.tap(find.text('+ Address'));
+        await tester.pump(); // an empty row is skipped
+        await tester.enterText(fields().at(1), 'tls://9.9.9.9');
+        await tester.pump();
+        await tester.tap(chipOf('DoT')); // DoT off, DoH stays
+        await tester.pump();
+        await tester.enterText(fields().first, 'Mine');
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(find.byType(DnsForm), findsNothing);
+        final s = host.catalog.dnsServers.values.firstWhere((s) => s.name == 'Mine');
+        expect([for (final t in s.transports) t.addr], ['tls://9.9.9.9', 'https://9.9.9.9/dns-query']);
+        expect([for (final t in s.transports) t.kind], ['dot', 'doh']);
+        expect(s.use.toSet(), {'doh'});
+      });
+
+      testWidgets('an edited built-in keeps its addresses and saves the transports in use', (tester) async {
+        final host = FakeCoreHost();
+        final c = host.catalog.dnsServers['cloudflare']!;
+        final addrs = [for (final t in c.transports) t.addr];
+        await openEdit(tester, host, 'Cloudflare');
+        final wasUdp = lit(tester, 'UDP');
+        await tester.tap(chipOf('UDP'));
+        await tester.pump();
+        expect(lit(tester, 'UDP'), !wasUdp);
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect([for (final t in c.transports) t.addr], addrs);
+        expect(c.use.contains('udp'), !wasUdp);
+        expect(c.use, isNotEmpty);
+      });
+
+      testWidgets('three address rows fit 320 dp at 120 %', (tester) async {
+        await openNew(tester, FakeCoreHost(), scale: 1.2);
+        for (var i = 0; i < 2; i++) {
+          await tester.tap(find.text('+ Address'));
+          await tester.pump();
+        }
+        await type(tester, 0, 'https://unfiltered.adguard-dns.com/dns-query');
+        await type(tester, 1, 'quic://unfiltered.adguard-dns.com');
+        await type(tester, 2, 'tls://unfiltered.adguard-dns.com');
+        expect(tester.takeException(), isNull);
+      });
+    });
+
     group('DNS list', () {
       Finder rowOf(String id) => find.byKey(ValueKey(id));
       Finder chip(String id, String side) => find.byKey(ValueKey('dns-$id-$side'));
