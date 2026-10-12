@@ -205,6 +205,9 @@ export interface ReleaseInfo {
   url?: string;
 }
 
+/** Подпись кнопки загрузки под анонсом (inline-кнопка со ссылкой на релиз). */
+export const RELEASE_BUTTON = 'Скачать';
+
 /** Текст анонса (parse_mode HTML); видимый текст ≤ 4096 символов, заметки при нехватке места режутся с «…». */
 export function buildReleaseText(r: ReleaseInfo): string {
   const beta = r.channel === 'beta';
@@ -212,9 +215,7 @@ export function buildReleaseText(r: ReleaseInfo): string {
   const headHtml = beta
     ? `🧪 <b>Beta ${escapeHtml(r.version)}</b> · build ${r.build}`
     : `🚀 <b>Jormungand ${escapeHtml(r.version)}</b> — стабильная версия`;
-  const label = 'Скачать';
-  const tail = r.url ? `\n\n${label}` : '';
-  const budget = RELEASE_TEXT_MAX - head.length - 2 - tail.length; // -2: пустая строка перед заметками
+  const budget = RELEASE_TEXT_MAX - head.length - 2; // -2: пустая строка перед заметками; ссылка — кнопкой, не в тексте
   let shown = r.notes;
   if (shown.length > budget) {
     let cut = Math.max(0, budget - 1);
@@ -222,9 +223,7 @@ export function buildReleaseText(r: ReleaseInfo): string {
     if (code >= 0xd800 && code <= 0xdbff) cut--; // не рвём суррогатную пару
     shown = shown.slice(0, cut).trimEnd() + '…';
   }
-  let out = `${headHtml}\n\n${escapeHtml(shown)}`;
-  if (r.url) out += `\n\n<a href="${escapeHtml(r.url).replace(/"/g, '&quot;')}">${label}</a>`;
-  return out;
+  return `${headHtml}\n\n${escapeHtml(shown)}`;
 }
 
 async function sameSecret(a: string, b: string): Promise<boolean> {
@@ -298,6 +297,7 @@ async function handleRelease(request: Request, env: Env, deps: Deps): Promise<Re
         text: buildReleaseText(rel),
         parse_mode: 'HTML',
         disable_web_page_preview: true,
+        ...(rel.url ? { reply_markup: { inline_keyboard: [[{ text: RELEASE_BUTTON, url: rel.url }]] } } : {}),
       }),
     });
     if (!r.ok) {

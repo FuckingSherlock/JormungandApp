@@ -179,7 +179,8 @@ pushed and merged into the default branch — a new session starts from it.
 Release notes (`release-notes/README.md`): a push to the default branch touching `app/` or `core/` builds a
 beta and announces it in Telegram — before it, overwrite `release-notes/beta.txt` with the Russian summary of
 what this beta brings (the same text the lead reports to the user; an exception to "Translations"); not
-updated → no beta. A stable tag needs `release-notes/X.Y.Z.ru.txt` (everything since
+updated → no beta. One text, written once: the lead writes `beta.txt` and reports it to the user as is (or
+writes the chat summary and saves that same text) — never a second, separately composed summary. A stable tag needs `release-notes/X.Y.Z.ru.txt` (everything since
 the previous stable, briefly), written in the same pass as the Russian translation; no `.en.txt` for now.
 
 Every push touching `design/` redeploys the mockup to the Cloudflare Worker `jormungand-design`

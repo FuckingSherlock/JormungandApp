@@ -372,7 +372,7 @@ test('release: validation', async () => {
   assert.equal(calls.length, 0);
 });
 
-test('release: beta text, escaping, link only for https', async () => {
+test('release: beta text, escaping, download button only for https', async () => {
   const { env, objects } = fakeEnv(REL_ENV);
   const { fetchStub, calls } = tgStub();
   const r = await handle(rel({ ...goodBeta, url: 'https://example.com/a?x=1&y="2"' }), env, ctx(), { fetch: fetchStub });
@@ -386,16 +386,16 @@ test('release: beta text, escaping, link only for https', async () => {
   assert.equal(b.disable_web_page_preview, true);
   assert.equal(
     b.text,
-    '🧪 <b>Beta 0.1.2-beta.3</b> · build 3039\n\nFix &lt;a&gt; &amp; b\nsecond line\n\n' +
-      '<a href="https://example.com/a?x=1&amp;y=&quot;2&quot;">Скачать</a>',
+    '🧪 <b>Beta 0.1.2-beta.3</b> · build 3039\n\nFix &lt;a&gt; &amp; b\nsecond line',
   );
+  assert.deepEqual(b.reply_markup, { inline_keyboard: [[{ text: 'Скачать', url: 'https://example.com/a?x=1&y="2"' }]] });
   const marker = objects.get('_release/beta/0.1.2-beta.3+3039');
   assert.ok(marker);
   assert.equal(marker.ttl, 30 * 24 * 3600);
 
   const http = tgStub();
   await handle(rel({ ...goodBeta, build: 4, url: 'http://example.com/a' }), env, ctx(), { fetch: http.fetchStub });
-  assert.ok(!String(http.calls[0]!.body.text).includes('<a '));
+  assert.equal(http.calls[0]!.body.reply_markup, undefined);
 });
 
 test('release: stable text', async () => {
@@ -410,7 +410,7 @@ test('release: stable text', async () => {
   assert.equal(r.status, 200);
   assert.equal(
     calls[0]!.body.text,
-    '🚀 <b>Jormungand 0.2.0</b> — стабильная версия\n\nBig one\n\n<a href="https://example.com/r">Скачать</a>',
+    '🚀 <b>Jormungand 0.2.0</b> — стабильная версия\n\nBig one',
   );
 });
 
@@ -422,7 +422,7 @@ test('release: visible text is cut to 4096 with an ellipsis', async () => {
   const visible = html.replace(/<[^>]+>/g, '');
   assert.ok(visible.length <= 4096, String(visible.length));
   assert.ok(visible.length > 4000);
-  assert.match(html, /…\n\n<a href=/);
+  assert.ok(html.endsWith('…'));
   // экранируемые символы считаются как один видимый
   const amp = tgStub();
   await handle(rel({ ...goodBeta, build: 5, notes: '&'.repeat(5000) }), env, ctx(), { fetch: amp.fetchStub });
