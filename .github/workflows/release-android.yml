@@ -53,26 +53,44 @@ env:
   DELTA_MAX_PERCENT: '60'
 
 jobs:
-  # Until the one-time secrets are set (docs/updates.md section 13) a push only notes it and
-  # stops, instead of failing every commit.
-  secrets-ready:
+  # A push only notes it and stops (a green run, no failure mail) instead of failing when:
+  # - the one-time secrets are not set yet (docs/updates.md section 13);
+  # - a branch push (beta) has release-notes/beta.txt not updated since the previous beta: code is merged
+  #   into the default branch between betas on purpose, the beta goes out with the push that updates the notes.
+  # A tag (stable) or a manual run is never skipped here: a missing note fails it in "Release notes".
+  gate:
     runs-on: ubuntu-latest
     outputs:
       ok: ${{ steps.c.outputs.ok }}
     steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        with: { fetch-depth: 0 }
       - id: c
         env:
           A: ${{ secrets.JORM_ANDROID_KEYSTORE_B64 }}
           B: ${{ secrets.JORM_ANDROID_KS_PASS }}
           C: ${{ secrets.JORM_RELEASE_KEY }}
           D: ${{ secrets.JORM_RELEASES_TOKEN }}
+          BRANCH_PUSH: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
         run: |
-          if [ -n "$A" ] && [ -n "$B" ] && [ -n "$C" ] && [ -n "$D" ]; then echo ok=true >> "$GITHUB_OUTPUT"
-          else echo "::notice::Release secrets not set yet - skipping the release"; echo ok=false >> "$GITHUB_OUTPUT"; fi
+          if [ -z "$A" ] || [ -z "$B" ] || [ -z "$C" ] || [ -z "$D" ]; then
+            echo "::notice::Release secrets not set yet - skipping the release"; echo ok=false >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$BRANCH_PUSH" = true ]; then
+            m="$RUNNER_TEMP/manifest-beta.json"
+            code=$(curl -sSL -o "$m" -w '%{http_code}' "https://github.com/$FEED_REPO/releases/download/feed/manifest-beta.json") || code=000
+            [ "$code" = 200 ] || : > "$m"   # no feed answer: the release job decides and reports it
+            if ! bash .github/scripts/beta_notes.sh "$m" > /dev/null; then
+              echo "::notice::release-notes/beta.txt not updated since the previous beta - no beta for this push"
+              echo ok=false >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          fi
+          echo ok=true >> "$GITHUB_OUTPUT"
 
   release:
-    needs: secrets-ready
-    if: needs.secrets-ready.outputs.ok == 'true'
+    needs: gate
+    if: needs.gate.outputs.ok == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

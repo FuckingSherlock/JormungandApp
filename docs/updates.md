@@ -780,7 +780,7 @@ git tag v0.1.0 && git push origin v0.1.0
 | `JORM_ANDROID_KS_PASS` | пароль хранилища и ключа (одинаковый) |
 | `JORM_RELEASE_KEY` | приватный ключ подписи манифеста (раздел 3; уже задан) |
 | `JORM_RELEASES_TOKEN` | fine-grained PAT, `Contents: write` на `FuckingSherlock/jormungand-releases` |
-| `JORM_NOTIFY_TOKEN` | необязательный: тот же случайный токен, что секрет `RELEASE_NOTIFY_TOKEN` Worker'а `jormungand-reports` (анонс в Telegram); в `secrets-ready` не проверяется |
+| `JORM_NOTIFY_TOKEN` | необязательный: тот же случайный токен, что секрет `RELEASE_NOTIFY_TOKEN` Worker'а `jormungand-reports` (анонс в Telegram); в задании `gate` не проверяется |
 
 Артефакты workflow не выкладываются. Один раз руками:
 
