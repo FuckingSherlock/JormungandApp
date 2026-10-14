@@ -143,6 +143,20 @@ class _Rig {
 }
 
 void main() {
+  test('the first round runs `firstCheck` after start, not after the regular interval (all candidates, in parallel)', () async {
+    // report 20261014-phmbw7: the first dns-check lines looked late (+30 s); the round itself began at firstCheck, the
+    // verdict came after the round's own misses and the Sentinel's re-asks
+    final rig = _Rig(
+        direct: ['a', 'b'],
+        vpn: ['a-v'],
+        settings: const AutoSettings(failAfter: 2, flapGuard: false, checkEvery: Duration(hours: 1), firstCheck: Duration(milliseconds: 20)));
+    expect(rig.asked, isEmpty);
+    rig.svc.start();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect({for (final q in rig.asked) q.split(' ').first}, {'dns-a', 'dns-b', 'dns-a-v'}, reason: 'every candidate asked by the first round');
+    rig.svc.stop();
+  });
+
   test('a miss streak is judged by the Sentinel: dns/failed, the flag goes off, the side moves to the highest candidate that answers', () async {
     final r = _Rig(direct: ['a', 'b', 'c']);
     await r.settle();

@@ -649,6 +649,42 @@ void main() {
               if (r['action'] != 'predefined') r,
           ];
 
+      test('the core\'s own requests to direct (service traffic, the network check) are resolved by the live candidate, not by default_domain_resolver', () {
+        // report 20261014-phmbw7: a service request out `direct` asked the first candidate (`default_domain_resolver`)
+        // for a name after its flag had gone off
+        final info = RoutingInfo();
+        final svc = SvcIn(1082, 'secret');
+        final c = buildConfig(_plan({'dns': dnsOf([cf, gg], policy: 'priority')}), info: info, probe: Probe(1081, 'x'), svc: svc);
+        final rules = ((c['route'] as Map)['rules'] as List).cast<Map>();
+        final direct = info.dnsSides['direct']!;
+        final top = direct.first;
+        expect((c['route'] as Map)['default_domain_resolver'], top.tag, reason: 'the fixed fallback stays the top candidate');
+        for (final inbound in [probeInboundTag, svcInboundTag]) {
+          final route = rules.indexWhere((r) =>
+              (r['inbound'] as List?)?.first == inbound && r['action'] == 'route' && r['outbound'] == 'direct' && !r.containsKey('override_address'));
+          expect(route, greaterThan(0), reason: '$inbound has a rule to direct');
+          final user = rules[route]['auth_user'];
+          // the ladder: a rule per candidate holding while its flag is on and none above, the last for every flag off
+          final ladder = rules.sublist(route - (direct.length + 1), route);
+          expect(ladder.every((r) => r['action'] == 'resolve' && r['server'] != null), isTrue, reason: '$inbound: explicit servers, by flag');
+          final servers = <String>[];
+          for (final r in ladder) {
+            final parts = r['rules'] as List;
+            expect(parts.first, {'inbound': [inbound], 'auth_user': user}, reason: 'only this user');
+            servers.add('${r['server']}');
+          }
+          expect(servers, [for (final d in direct) d.tag, top.tag], reason: 'every candidate behind its own flag, then the top with all flags off');
+          for (var i = 0; i < direct.length; i++) {
+            expect(((ladder[i]['rules'] as List)[1] as Map)['rule_set'], [direct[i].flagTag]);
+          }
+        }
+        // the DNS check ends at the probe inbound itself (override_address): nothing in front of it
+        final check = rules.indexWhere((r) => r.containsKey('override_address'));
+        expect(rules[check - 1]['action'], 'resolve');
+        expect(rules[check - 1]['server'], isNotNull);
+        expect(rules[check - 1].containsKey('rules'), isFalse, reason: 'the check names its own server, no ladder');
+      });
+
       test('a candidate per enabled transport and side: tags, detour on the VPN side, the order of each side', () {
         final info = RoutingInfo();
         final c = buildConfig(_plan({'dns': dnsOf([cf, gg, local])}), info: info, dnsFlagDir: 'F');

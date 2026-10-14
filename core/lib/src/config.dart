@@ -345,6 +345,11 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   final hijack = [if (tun) tunResolverHijack, ...hijackAll];
   final Map<String, dynamic>? tunCheck = tun && tunCheckPort != null ? tunCheckRule(tunCheckPort) : null;
   final selfRuleList = selfRules(paths: selfPaths, packages: selfPackages);
+  // The core's own requests that end at `direct` with a name (service traffic, the probe's network check) are resolved
+  // by the direct side's live candidate, not by `default_domain_resolver` (a fixed server no flag can turn off)
+  final directSide = routing.dnsSides['direct'] ?? const <DnsCandidate>[];
+  final probeRules = directResolveFirst(pr?.rules ?? const [], directSide);
+  final svcRules = directResolveFirst(sv?.rules ?? const [], directSide);
   // The app's own lookups reach the core's DNS through the hijack: answered by a direct server
   // first of all, whatever `final` and the rules say (they may lead through a proxy that is down)
   final dnsRules = [
@@ -401,8 +406,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     'outbounds': outs,
     'route': {
       'rules': [
-        ...?pr?.rules,
-        ...?sv?.rules,
+        ...probeRules,
+        ...svcRules,
         {'action': 'sniff'},
         if (tun) tunResolverHijack,
         ?tunnelRule,
@@ -427,6 +432,26 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     },
   };
 }
+
+/// [rules] (an inbound's route rules, one user each) with a flag-aware `resolve` in front of every rule that sends a
+/// user to the `direct` outbound: the outbound resolves a name by `default_domain_resolver` only, the first candidate
+/// of the direct side whatever its flag says (docs/rules.md §6), so the name is resolved first by [direct], the
+/// candidate whose flag is on ([resolveRules]). The rules that end at the probe inbound itself (`override_address`:
+/// the DNS and flag checks) and every other rule are kept as they are; no [direct] candidate leaves [rules] alone.
+List<Map<String, dynamic>> directResolveFirst(List<Map<String, dynamic>> rules, List<DnsCandidate> direct) => [
+      for (final r in rules) ...[
+        if (direct.isNotEmpty &&
+            r['action'] == 'route' &&
+            r['outbound'] == 'direct' &&
+            !r.containsKey('override_address') &&
+            r['inbound'] != null &&
+            r['auth_user'] != null)
+          ...resolveRules(direct, match: [
+            {'inbound': r['inbound'], 'auth_user': r['auth_user']},
+          ]),
+        r,
+      ],
+    ];
 
 const tunTag = 'tun-in';
 
