@@ -235,7 +235,7 @@ void main() {
       expect([book[idA()]!.ip, book[idA()]!.country, book[idA()]!.at], ['203.0.113.9', 'FR', now]);
     });
 
-    test('the same result keeps what is shown and only moves the time', () async {
+    test('a good check always replaces the shown answer with the fresh one, the same IP or not', () async {
       make();
       auto.start();
       gates[0].complete({'ip': '203.0.113.1', 'country': 'DE', 'city': 'Berlin'});
@@ -245,10 +245,46 @@ void main() {
       await auto.setManual(true, entry: 'B');
       await auto.setManual(true, entry: 'A');
       expect(asked, ['route0/s::a', 'route1/s::b', 'route0/s::a'], reason: 'the hour passed');
-      gates[2].complete({'ip': '203.0.113.1', 'country': 'DE'}); // the geo services lost the city this time
+      gates[2].complete({'ip': '203.0.113.1', 'country': 'DE', 'city': 'Frankfurt', 'org': 'Example'});
       await settle();
-      expect(auto.exitInUse(), allOf(containsPair('ip', '203.0.113.1'), containsPair('city', 'Berlin'), containsPair('at', now)));
+      expect(auto.exitInUse(), allOf(containsPair('ip', '203.0.113.1'), containsPair('city', 'Frankfurt'), containsPair('org', 'Example'), containsPair('at', now)));
       expect(book[idA()]!.at, greaterThan(first));
+    });
+
+    test('an answer from the book (ip and country only) is replaced whole by the fresh one of the same IP', () async {
+      make(storedAgo: hour.inMilliseconds + 1);
+      auto.start();
+      expect(auto.exitInUse(), isNot(contains('city')), reason: 'the book keeps ip and country only');
+      gates[0].complete({'ip': '203.0.113.1', 'country': 'DE', 'city': 'Berlin', 'org': 'Example'});
+      await settle();
+      expect(auto.exitInUse(), allOf(containsPair('city', 'Berlin'), containsPair('org', 'Example')));
+    });
+
+    test('nodes of one host: each check is asked through its own tag and its answer stays with its node (Manual picks, rechecks)', () async {
+      // three nodes behind one bridge host (as the Remnawave "HY2 NL / HY2 DE / REALITY DE"): different outbounds, one address
+      final p = plan([for (final k in ['s::hy2nl', 's::hy2de', 's::realde']) unit(k.split('::')[1], [k], pick: 'priority', chosen: k)]);
+      final fake = FakeBox(buildConfig(p), {'s::hy2nl': 10, 's::hy2de': 10, 's::realde': 10});
+      final ips = {'route0/s::hy2nl': '185.130.225.66', 'route1/s::hy2de': '37.1.194.233', 'route2/s::realde': '37.1.194.234'};
+      final asked = <String>[];
+      final lines = <String>[];
+      auto = AutoService(fake, p, delay: fake.delayTest, pool: everyRound(), exits: ExitBook(), trace: lines.add, exitCheck: (tag) async {
+        asked.add(tag);
+        return {'ip': ips[tag]};
+      });
+      auto.start();
+      await settle();
+      expect(auto.exitInUse(), containsPair('ip', '185.130.225.66'));
+      for (final (entry, ip) in [('hy2de', '37.1.194.233'), ('realde', '37.1.194.234')]) {
+        await auto.setManual(true, entry: entry);
+        await settle();
+        expect(auto.exitInUse(), containsPair('ip', ip), reason: '$entry: its own answer, not the one of the node picked before');
+        auto.recheckExit();
+        await settle();
+        expect(auto.exitInUse(), containsPair('ip', ip), reason: '$entry: a re-check asks through its own tag');
+      }
+      expect(asked.where((t) => t.startsWith('route2')), hasLength(2), reason: 'the pick and the re-check');
+      expect(asked.where((t) => t == 'route0/s::hy2nl'), hasLength(1), reason: 'the first node is not asked again for the others');
+      expect(lines.where((l) => l.contains('route2/s::realde') && l.contains('37.1.194.234')), hasLength(2), reason: 'every check leaves a line: tag, node, answer');
     });
 
     test('the timer runs from the last completed check', () async {
@@ -408,5 +444,23 @@ void main() {
       expect(auto.exitInUse(), containsPair('ip', '203.0.113.9'));
       expect(book[idA()]!.ip, '203.0.113.9');
     });
+  });
+
+  test('a manual pick the group cannot hold is a connection warning, never a quiet fallback to the first server', () {
+    final p = plan([unit('A', ['s::a', 's::b'], pick: 'priority', chosen: 's::gone')]);
+    ((p['routes'] as List)[0]['main'] as Map)['pinned'] = true;
+    final warnings = <String>[];
+    buildConfig(p, warnings: warnings);
+    expect(warnings, [contains('s::gone')], reason: 'the pick is named, with the server the tunnel is on instead');
+    final ok = plan([unit('A', ['s::a', 's::b'], pick: 'priority', chosen: 's::b')]);
+    ((ok['routes'] as List)[0]['main'] as Map)['pinned'] = true;
+    final none = <String>[];
+    buildConfig(ok, warnings: none);
+    expect(none, isEmpty);
+    final lost = plan([unit('A', ['s::a', 's::b'])]);
+    ((lost['routes'] as List)[0]['main'] as Map)['pinLost'] = 's::x';
+    final w2 = <String>[];
+    buildConfig(lost, warnings: w2);
+    expect(w2, [contains('s::x')]);
   });
 }

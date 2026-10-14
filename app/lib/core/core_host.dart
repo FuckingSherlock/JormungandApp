@@ -161,12 +161,14 @@ class ExitState {
     String? city,
     bool rechecking = false,
     bool error = false,
+    DateTime? at,
   }) : this._(
          ip: ip,
          country: country,
          city: city,
          rechecking: rechecking,
          error: error,
+         at: at,
        );
   const ExitState._({
     this.checking = false,
@@ -175,6 +177,7 @@ class ExitState {
     this.ip,
     this.country,
     this.city,
+    this.at,
   });
 
   final bool checking;
@@ -188,18 +191,21 @@ class ExitState {
   /// The same answer, a check running.
   ExitState get asRechecking => ip == null
       ? const ExitState.checking()
-      : ExitState.found(ip: ip!, country: country, city: city, rechecking: true);
+      : ExitState.found(ip: ip!, country: country, city: city, rechecking: true, at: at);
 
   /// The same answer, the check failed.
   ExitState get asFailed => ip == null
       ? const ExitState.error()
-      : ExitState.found(ip: ip!, country: country, city: city, error: true);
+      : ExitState.found(ip: ip!, country: country, city: city, error: true, at: at);
 
   final String? ip;
 
   /// ISO 3166 alpha-2.
   final String? country;
   final String? city;
+
+  /// When the last completed check finished (null: unknown).
+  final DateTime? at;
 }
 
 /// Speed (bytes / s) and the session totals (bytes), open connections.
@@ -839,11 +845,6 @@ class DnsHealth {
   bool deadOnNode(String provider, String side) =>
       dead(provider, side) &&
       servers.every((s) => s.watched || s.provider != provider || s.side != side || s.deadOnNode);
-
-  /// A check of a candidate of [provider] on [side] runs.
-  bool rechecking(String provider, String side) => servers.any(
-    (s) => !s.watched && s.provider == provider && s.side == side && s.rechecking,
-  );
 
   /// What of it the page shows: a change rebuilds the page at once.
   String get sig => '$active|${answering.entries.map((e) => '${e.key}=${e.value}').join(',')}|'

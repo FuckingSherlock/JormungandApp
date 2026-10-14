@@ -115,6 +115,8 @@ extension CatalogPlan on Catalog {
     final refs = unitPickRefs(id), n = coreGroupNode(id, 'server', refs) ?? unitNode(id), pin = pinnedRef(id);
     final main = planGroup(refs, pin != null || unitPriority(id) ? 'priority' : 'fastest', pin ?? _refOf(refs, n));
     if (pin != null) main['pinned'] = true; // Manual on a server: held there, the core never moves it
+    // the pick is no longer a server of the entry (off, gone, renamed by a refresh): the entry chooses by itself, and says so
+    if (pin == null && !autoConnect && id == activeConnectId && pinnedNode != null) main['pinLost'] = pinnedNode;
     return {'id': id, 'kind': 'unit', 'main': main};
   }
 

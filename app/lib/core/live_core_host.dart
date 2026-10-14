@@ -403,6 +403,9 @@ class LiveCoreHost extends CoreHost {
         city: e['city'] as String?,
         rechecking: e['rechecking'] == true,
         error: e['error'] != null,
+        at: e['at'] is num
+            ? DateTime.fromMillisecondsSinceEpoch((e['at'] as num).toInt())
+            : null,
       );
     }
     if (st['error'] != null) _error = '${st['error']}';
@@ -448,7 +451,7 @@ class LiveCoreHost extends CoreHost {
   String _statusSig() {
     final e = _exit, d = _down, b = _blocking, r = catalog.coreRoute, h = _dnsHealth;
     return '$_connected|${d?.since}|${d?.proxy}|${b?.since}|${b?.proxy}|${b?.reason}|'
-        '${e.checking}|${e.error}|${e.rechecking}|${e.ip}|${e.country}|${e.city}|$_error|'
+        '${e.checking}|${e.error}|${e.rechecking}|${e.ip}|${e.country}|${e.city}|${e.at?.millisecondsSinceEpoch}|$_error|'
         '${r?.id}|${r?.server}|${r?.entryServer}|${h?.sig}';
   }
 

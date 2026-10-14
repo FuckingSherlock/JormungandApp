@@ -295,6 +295,7 @@ const _mockupBehind = <String, String>{
   'op-route-node-drag': 'chainExitOrder follows the exit unit pickOrder (mockup_todo.md)',
   'src1-dead': 'a chain exit lives by its pair through the entry, not by its direct ping (mockup_todo.md)',
   'op-auto-off': 'a chain exit lives by its pair through the entry, not by its direct ping (mockup_todo.md)',
+  'manual-pin-stale': 'a lost manual pick is named in the plan (main.pinLost), so the planSig differs (mockup_todo.md)',
 };
 
 /// FakeIP is removed from the core until it is redesigned, the frozen mockup still has it:
