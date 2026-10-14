@@ -794,9 +794,10 @@ class EventWords {
   /// Every field of the event in words: time(s), the event's name, then its data.
   List<(String, String)> fields(EventGroup g) {
     final e = g.ev;
+    final times = [for (final x in g.items) ...x.occurrences];
     final out = <(String, String)>[
-      if (g.items.length > 1)
-        (l10n.times, g.items.map((x) => clock(x.at, seconds: true)).join(', '))
+      if (times.length > 1)
+        (l10n.times, times.map((t) => clock(t, seconds: true)).join(', '))
       else
         (l10n.time, stamp(e.at)),
       (l10n.event, '${e.cat} / ${e.type}${e.own ? ' ${l10n.yours}' : ''}'),
@@ -805,6 +806,7 @@ class EventWords {
       final v = x.value;
       if (v == null || (v is String && v.isEmpty)) continue;
       if (x.key == 'source' && e.cat == 'conn') continue; // 'closed': where the core saw it, not a subscription
+      if (x.key == 'repeat') continue; // shown as the row's times
       if (x.key == 'check' && v is Map) {
         out.addAll(checkFields(v));
         continue;

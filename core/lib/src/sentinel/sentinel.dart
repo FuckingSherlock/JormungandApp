@@ -712,21 +712,27 @@ class Sentinel {
       final pick = e.kindFor == null ? (e.cat, e.type) : e.kindFor!(kind, j.evidence);
       if (pick == null) return _verdict(j, kind, why, root: root);
       final line = e.note?.call(kind, j.evidence);
-      if (line != null) note?.call(level, line);
-      eventId = b.add(pick.$1, pick.$2, level,
-          data: e.dataFor?.call(kind, j.evidence) ?? j.evidence,
-          own: e.own,
-          bg: e.bg,
-          link: e.link,
-          verdict: kind.name,
-          why: why?.toJson(),
-          trail: [for (final t in j.trail) t.toJson()],
-          cause: cause);
+      final data = e.dataFor?.call(kind, j.evidence) ?? j.evidence;
+      // the same thing again within the window: the earlier event says so (count, times) instead of a second one
+      final by = e.collapseBy['${pick.$1}/${pick.$2}'], within = e.collapseWithin;
+      final prev = by == null || within == null ? null : b.recent(pick.$1, pick.$2, {for (final k in by) k: data[k]}, within);
+      if (line != null) {
+        final n = prev == null ? 0 : ((((prev['data'] as Map)['repeat'] as Map?)?['count'] as num?)?.toInt() ?? 1) + 1;
+        note?.call(level, prev == null ? line : '$line (again, $n times)');
+      }
+      final trail = [for (final t in j.trail) t.toJson()];
+      if (prev != null) {
+        eventId = prev['id'] as int;
+        b.repeated(eventId, data: data, level: level, verdict: kind.name, why: why?.toJson(), trail: trail, cause: cause);
+      } else {
+        eventId = b.add(pick.$1, pick.$2, level,
+            data: data, own: e.own, bg: e.bg, link: e.link, verdict: kind.name, why: why?.toJson(), trail: trail, cause: cause);
+      }
       if (root != null) {
         if (kind == VerdictKind.confirmed) {
           root.eventId = eventId;
         } else if (kind == VerdictKind.consequence) {
-          root.consequences.add(eventId);
+          if (!root.consequences.contains(eventId)) root.consequences.add(eventId);
         }
       }
     }

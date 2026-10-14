@@ -161,7 +161,8 @@ class Scope {
 /// The journal entry a [Suspicion] becomes when it is judged (the Sentinel writes it, with the
 /// verdict, why, trail and cause; the evidence is its `data`).
 class SuspicionEvent {
-  const SuspicionEvent(this.cat, this.type, {this.level = 'warn', this.own = false, this.bg = false, this.link = true, this.note, this.kindFor, this.dataFor});
+  const SuspicionEvent(this.cat, this.type,
+      {this.level = 'warn', this.own = false, this.bg = false, this.link = true, this.note, this.kindFor, this.dataFor, this.collapseBy = const {}, this.collapseWithin});
 
   final String cat;
   final String type;
@@ -183,6 +184,13 @@ class SuspicionEvent {
 
   /// The `data` of the entry by the verdict (default: the evidence as it is).
   final Map<String, dynamic> Function(VerdictKind kind, Map<String, dynamic> evidence)? dataFor;
+
+  /// Entries (`cat/type`) whose repeat folds into the earlier one: the `data` fields that make two of them
+  /// the same. A verdict that would write such an entry while one with the same field values was first written
+  /// less than [collapseWithin] ago says so in that event ([EventBook.repeated]: count, times, the newest
+  /// verdict and trail) instead of writing another; the raw line is written either way. Nothing is dropped.
+  final Map<String, List<String>> collapseBy;
+  final Duration? collapseWithin;
 }
 
 /// A detector's report: "something failed, find out whether it is real".

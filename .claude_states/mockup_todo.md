@@ -76,3 +76,7 @@
 
 - DNS: dead candidates are re-asked on a 30 s / 1 / 2 / 5 min ladder; `pingDnsSides` per-side provider ping (design/src/js/56-dns.js dnsPing is one per provider) - docs/rules.md section 6, "Повторная проверка мёртвого".
 - Settings -> DNS list, Flutter (2026-10-13; `docs/rules.md` §6, item 1): the side chips (Direct / VPN) moved to the right of the provider row, and under each chip its own ping (`pingDnsSides`: ms / warning / `—` / spinner) instead of one ping at the row end; the address takes the free width. Mockup file: `js/56-dns.js` (`renderDns`, `dnsPing` is one per provider).
+
+## Site events fold repeats (2026-10-14)
+
+site/blocked and site/unreachable are no longer dropped once an hour per site + route: a repeat within the hour of the first occurrence changes the event in place (data.repeat = {count, firstAt, lastAt, at[<=50]}, newest verdict/trail/check, rev bump, a raw line each time). The Events row shows the sum as x N and the last time; the detail rows list every time (design/src/js/47-events.js, docs/failures.md "Проверки сайтов", docs/connect-model.md "Проверка сайта"). A notification fires once per event id (EventFeed.markNotified), not on every rev bump.

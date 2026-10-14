@@ -182,7 +182,9 @@ class EventBook {
       String? verdict,
       Map<String, dynamic>? why,
       int? cause,
-      List<Map<String, dynamic>>? appendTrail}) {
+      List<Map<String, dynamic>>? trail,
+      List<Map<String, dynamic>>? appendTrail,
+      bool replaceData = false}) {
     load();
     final i = _indexOf(id);
     if (i < 0) return false;
@@ -192,9 +194,10 @@ class EventBook {
     if (verdict != null) e['verdict'] = verdict;
     if (why != null) e['why'] = why;
     if (cause != null) e['cause'] = cause;
+    if (trail != null) e['trail'] = trail;
     if (appendTrail != null && appendTrail.isNotEmpty) e['trail'] = [...((e['trail'] as List?) ?? const []), ...appendTrail];
     e['rev'] = ((e['rev'] as int?) ?? 0) + 1;
-    e['data'] = {...(e['data'] as Map<String, dynamic>), ...data};
+    e['data'] = replaceData ? data : {...(e['data'] as Map<String, dynamic>), ...data};
     _updatedAt[id] = _clock().millisecondsSinceEpoch;
     if (_updatedAt.length > 50) _updatedAt.remove(_updatedAt.keys.first);
     if (file != null) {
@@ -206,6 +209,62 @@ class EventBook {
     }
     if (!_added.isClosed) _added.add(e);
     return true;
+  }
+
+  /// How many occurrence times `data.repeat.at` keeps (the newest).
+  static const repeatKeep = 50;
+
+  /// The newest event `cat/type` whose `data` holds every [match] value and whose first occurrence is less than
+  /// [within] ago (the event a repeat of it folds into, see [repeated]); null = none.
+  Map<String, dynamic>? recent(String cat, String type, Map<String, dynamic> match, Duration within) {
+    load();
+    final now = _clock().millisecondsSinceEpoch;
+    for (var i = _events.length - 1; i >= 0; i--) {
+      final e = _events.elementAt(i);
+      if (e['cat'] != cat || e['type'] != type) continue;
+      final d = e['data'] as Map<String, dynamic>;
+      if (match.entries.any((m) => d[m.key] != m.value)) continue;
+      final first = ((d['repeat'] as Map?)?['firstAt'] as num?)?.toInt() ?? e['at'] as int;
+      if (now - first < within.inMilliseconds) return e;
+    }
+    return null;
+  }
+
+  /// The same thing happened again: event [id] says so in place instead of a second event being written. Its
+  /// `data.repeat` becomes `{count, firstAt, lastAt, at}` (ms since epoch; `at`: every occurrence, the newest
+  /// [repeatKeep]; the event's own `at` stays the first one). What the newest occurrence found out replaces the
+  /// event's [data] (so the old `check` or `via` does not outlive its evidence), [level], [verdict], [why], [trail]
+  /// and [cause] (absent = none). `rev` moves like in [update]. Returns the new count, 0 when the event is gone.
+  int repeated(int id,
+      {Map<String, dynamic> data = const {},
+      required String level,
+      String? verdict,
+      Map<String, dynamic>? why,
+      List<Map<String, dynamic>>? trail,
+      int? cause}) {
+    final e = byId(id);
+    if (e == null) return 0;
+    final now = _clock().millisecondsSinceEpoch;
+    final old = (e['data'] as Map<String, dynamic>)['repeat'] as Map?;
+    final times = [...((old?['at'] as List?)?.cast<int>() ?? [e['at'] as int]), now];
+    if (times.length > repeatKeep) times.removeRange(0, times.length - repeatKeep);
+    final count = ((old?['count'] as num?)?.toInt() ?? 1) + 1;
+    e.remove('verdict');
+    e.remove('why');
+    e.remove('trail');
+    e.remove('cause');
+    update(id,
+        data: {
+          ...data,
+          'repeat': {'count': count, 'firstAt': old?['firstAt'] ?? e['at'], 'lastAt': now, 'at': times},
+        },
+        level: level,
+        verdict: verdict,
+        why: why,
+        trail: trail,
+        cause: cause,
+        replaceData: true);
+    return count;
   }
 
   /// The event with this id, or null.

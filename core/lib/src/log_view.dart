@@ -59,6 +59,24 @@ class EventRecord {
 
   String get key => '$cat/$type';
   bool get isProblem => level != 'info';
+
+  /// The times the same thing happened (`data.repeat.at`, the newest 50: eventbook.dart → `repeated`), [at] alone for
+  /// an event that was not repeated.
+  List<int> get occurrences {
+    final r = data['repeat'];
+    final at = r is Map ? r['at'] : null;
+    return at is List && at.isNotEmpty ? [for (final t in at) (t as num).toInt()] : [this.at];
+  }
+
+  /// How often it happened (`data.repeat.count`; more than [occurrences] once that list was capped), 1 = once.
+  int get times {
+    final r = data['repeat'];
+    final n = r is Map ? r['count'] : null;
+    return n is num && n > 1 ? n.toInt() : 1;
+  }
+
+  /// The last time it happened.
+  int get lastAt => occurrences.last;
 }
 
 /// Categories of the journal and their types, in the filter's order (the labels are the UI's).
@@ -192,6 +210,10 @@ class EventGroup {
 
   int get key => items.first.id;
   bool get problem => level != 'info';
+
+  /// How often the row's events happened in all (a repeated event counts its repeats) and the last time of it.
+  int get times => items.fold(0, (n, x) => n + x.times);
+  int get lastAt => items.last.lastAt;
 }
 
 int _rank(String l) => l == 'error' ? 2 : l == 'warn' ? 1 : 0;
@@ -405,6 +427,13 @@ class EventFeed {
   /// What was there when the page first looked is history: only ids from here on notify.
   int? notifyFrom;
 
+  final _told = <int>{};
+
+  /// Records that event [id] was notified; false when it already was. An event notifies once, whatever changes it
+  /// afterwards in place (a repeat of the same site event, a finished check): the caller asks this after
+  /// [eventNotifies] said yes.
+  bool markNotified(int id) => _told.add(id);
+
   /// Applies an `events()` answer. Returns the events that are new (to notify: not own, from
   /// [notifyFrom]); `reset` = the numbering started over, the list was dropped (ask again).
   ({List<EventRecord> fresh, List<EventRecord> notify, bool reset, bool changed}) apply(Map r) {
@@ -413,11 +442,15 @@ class EventFeed {
     if (!first && rNext < next!) {
       next = null;
       list.clear();
+      _told.clear();
       return (fresh: const [], notify: const [], reset: true, changed: true);
     }
     final n0 = list.length;
     final firstId = r['first'];
-    if (firstId is num) list.removeWhere((e) => e.id < firstId.toInt());
+    if (firstId is num) {
+      list.removeWhere((e) => e.id < firstId.toInt());
+      _told.removeWhere((id) => id < firstId.toInt());
+    }
     final fresh = [
       for (final m in (r['events'] as List? ?? const []))
         if (first || (m['id'] as num).toInt() >= next!) EventRecord.fromJson(m as Map),
@@ -441,7 +474,10 @@ class EventFeed {
     return (fresh: fresh, notify: notify, reset: false, changed: fresh.isNotEmpty || first || list.length != n0 || moved);
   }
 
-  void clear() => list.clear();
+  void clear() {
+    list.clear();
+    _told.clear();
+  }
 }
 
 /// The raw lines the Logs tab keeps, with the unread numbers (a line is read once it was in view).

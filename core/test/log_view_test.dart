@@ -217,6 +217,25 @@ void main() {
     expect(r.changed, isFalse, reason: 'an event the list does not hold is ignored');
   });
 
+  test('EventFeed: a repeat of an event (data.repeat) changes it in place, notifies once at most; the row counts and lists the times', () {
+    final feed = EventFeed();
+    Map page({List<Map> events = const [], List<Map> updated = const []}) => {'events': events, 'updated': updated, 'next': 2, 'first': 0};
+    Map blocked(int rev, {List<int>? at}) => {
+          ...ev(1, 'site', 'blocked', at: 100, level: 'info', data: {'host': 'a.com', 'entry': 'A', if (at != null) 'repeat': {'count': at.length, 'firstAt': at.first, 'lastAt': at.last, 'at': at}}),
+          'verdict': 'workaround',
+          'rev': rev,
+        };
+    feed.apply({'events': [], 'next': 1, 'first': 0});
+    var r = feed.apply(page(events: [blocked(0)]));
+    expect(feed.markNotified(r.notify.single.id), isTrue, reason: 'the first occurrence notifies');
+    r = feed.apply(page(updated: [blocked(1, at: [100, 700])]));
+    expect(feed.markNotified(r.notify.single.id), isFalse, reason: 'its repeat does not notify again, though eventNotifies is still yes');
+    expect(eventNotifies(null, r.notify.single), isTrue);
+    final g = foldEvents(feed.list).single;
+    expect([g.times, g.lastAt, feed.list.single.occurrences], [2, 700, [100, 700]]);
+    expect(feed.list.single.at, 100);
+  });
+
   test('background events (screen off): notify only with «bgErrors»; the filter hides them', () {
     final bg = e({...ev(1, 'site', 'blocked', level: 'warn', data: {'host': 'a.com'}), 'bg': true});
     final fg = e(ev(2, 'site', 'blocked', level: 'warn', data: {'host': 'a.com'}));

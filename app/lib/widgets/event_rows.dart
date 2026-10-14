@@ -185,7 +185,7 @@ class EventRow extends StatelessWidget {
     final g = group, e = g.ev;
     final d = words.describe(e);
     final open = logs.openRows.contains(g.key);
-    final rep = g.items.length;
+    final rep = g.times;
     final hit = logs.hitEvent != null && g.items.any((x) => x.id == logs.hitEvent!.id)
         ? logs.hitEvent!.token
         : null;
@@ -247,7 +247,7 @@ class EventRow extends StatelessWidget {
         Row(
           children: [
             Text(
-              words.clock(g.at),
+              words.clock(g.lastAt),
               style: TextStyle(
                 fontSize: 11.5,
                 height: 1.3,

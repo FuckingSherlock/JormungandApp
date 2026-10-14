@@ -161,6 +161,9 @@ release signing key) are never written to the repo or read by the agent.
   current, and the next stage starts in a fresh session from them — a long lead session re-reads its whole
   context every turn and loses facts at each compaction. Before spawning agents, note in-flight work
   (what, which files) in `state_N.md` so a compaction or a new session can see it.
+- Never hide a problem to cut noise: no throttling, "once per N", silent dedupe or muting of events, errors or log
+  lines. Repeats are collapsed visibly (one entry, counter, last time, every occurrence in the journal) and the cause is
+  fixed; anything that shows the user less needs the user's explicit approval.
 - Settle a requirement with the user before briefing an agent on it; a behaviour still being discussed is not
   implemented "for now" and redone half an hour later.
 - Docs describe behaviour and contracts (what, when, limits, codes), not a retelling of the implementation:

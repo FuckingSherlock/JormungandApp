@@ -264,7 +264,8 @@ class LogsController extends ChangeNotifier {
         // an event of a site ignored a moment ago (the core was not told yet) stays silent too
         if (e.cat == 'site' && _ign.matches('${e.data['host'] ?? ''}')) continue;
         // a background event (found while the screen was off) goes by its own flag, not by the screen now
-        if (eventNotifies(host.catalog.unknown['notifCfg'], e)) _notify.add(e);
+        // once per event: a repeat of it, or a finished check, changes it in place and does not notify again
+        if (eventNotifies(host.catalog.unknown['notifCfg'], e) && feed.markNotified(e.id)) _notify.add(e);
       }
       if (visible && tab == 'events' && !evFollow) {
         evUnseen += r.fresh.where(_visible).length;

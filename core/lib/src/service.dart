@@ -179,7 +179,7 @@ class CoreService implements CoreApi {
   late final logBook = LogBook(file: File(p.join(dataDir, 'problems.jsonl')));
 
   /// What happened, structured (eventbook.dart): the Events tab and the notifications.
-  late final eventBook = EventBook(File(p.join(dataDir, 'events.jsonl')), log: logBook);
+  late final eventBook = EventBook(File(p.join(dataDir, 'events.jsonl')), log: logBook, clock: _now);
 
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
   // A damaged ui-state.json is replaced by its backup (or the state starts empty): the journal says so.
@@ -560,7 +560,9 @@ class CoreService implements CoreApi {
   /// The probes behind the site checks (default: Auto's `reachSame` / `reachAlternates`); the tests' seam.
   Future<bool?> Function(String outbound, String dest, Cancel cancel)? probeSame;
   Future<AltReach> Function(String dest, String? skipRoute, Cancel cancel)? probeAlt;
-  final _siteReportedAt = <String, int>{}; // 'route dest' → when a `site/*` event was written
+  /// A `site/*` event again for the same site and route within this long of the first one is that event, changed in
+  /// place (`data.repeat`, docs/failures.md → Проверки сайтов), not a second one.
+  static const siteCollapse = Duration(hours: 1);
 
   bool _canAim(String outbound, String dest) => canProbeDest(dest) && (probeSame != null || (_auto?.canReachSame(outbound, dest) ?? false));
 
@@ -573,7 +575,8 @@ class CoreService implements CoreApi {
   /// event by the verdict: another route opens it -> `site/blocked`; nothing does and the checker says it opens
   /// for others -> a confirmed `site/unreachable`, down for everyone / the checker unsure or off -> an unexplained
   /// one; a blip or a consequence -> `conn/failing`. Where no test can be aimed (a port other than 443 / 80, no
-  /// Auto) it is the plain `conn/failing` streak. A `site/*` event is written once an hour per site and route.
+  /// Auto) it is the plain `conn/failing` streak. A `site/*` event again for the same site and route within an hour
+  /// of the first is that event changed in place ([siteCollapse]), never dropped.
   /// The direct path is never tried: that would tell the network the user's interest in the site.
   Future<Verdict?> _judgeSite({
     required String host,
@@ -590,7 +593,6 @@ class CoreService implements CoreApi {
     final dest = port == null ? host : '$host:$port';
     final aimable = _canAim(outbound, dest);
     final since = firstSeen.millisecondsSinceEpoch;
-    if (aimable && _nowMs - (_siteReportedAt['$route $dest'] ?? -3600000) < 3600000) return null; // reported within the hour
     AltReach? alt;
     var asked = false;
     Map<String, dynamic>? result;
@@ -731,6 +733,8 @@ class CoreService implements CoreApi {
       event: SuspicionEvent('conn', 'failing',
           level: 'warn',
           bg: bg,
+          collapseBy: const {'site/blocked': ['dest', 'entry'], 'site/unreachable': ['dest', 'entry']},
+          collapseWithin: siteCollapse,
           kindFor: (kind, e) => wrote = pick(kind, e),
           dataFor: (kind, e) {
             final k = pick(kind, e);
@@ -744,13 +748,12 @@ class CoreService implements CoreApi {
     ));
     final w = wrote;
     if (w != null && w.$1 == 'site' && v.eventId != null) {
-      _siteReportedAt['$route $dest'] = _nowMs;
       final id = v.eventId!;
       if (!_disposed) {
         final check = result ?? (asked ? {'state': 'failed', 'at': _nowMs, 'error': 'timeout'} : null);
         if (check != null && w.$2 == 'unreachable') eventBook.update(id, data: {'check': check});
       }
-      // an announcement: the event is the report, a root would swallow the next one (the hour is kept above)
+      // an announcement: the event is the report, a root would swallow the next one (a repeat folds into the event)
       if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(v.key, reason: 'reported');
     }
     return v;

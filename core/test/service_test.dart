@@ -464,7 +464,45 @@ void main() {
     svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'same.example:443', via: 'B', viaServer: 't', at: 1));
     await settle();
     final again = [for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'site' || e['type'] == 'failing') e];
-    expect(again.length, events.length, reason: 'the hour per site and route: not written again');
+    expect(again.length, events.length, reason: 'the same site and route within the hour: the event changes in place, no second one');
+    expect(((again.single['data'] as Map)['repeat'] as Map)['count'], 2);
+  });
+
+  test('a repeat of a site/* event within the hour folds into it (count, times, raw line), notifies nobody again; another kind is its own event; after the hour a new event', () async {
+    await start(checker: fakeChecker(<Uri>[], opens: true), connected: true);
+    Map repeat(Map e) => (e['data'] as Map)['repeat'] as Map;
+    svc.siteUnreachable(gone('rep.example:443'));
+    await settle();
+    final first = siteEvents().single;
+    final id = first['id'] as int;
+    final t0 = first['at'] as int, rev0 = first['rev'] as int; // the maps are live
+    expect((first['data'] as Map).containsKey('repeat'), isFalse);
+    final lines = (svc.log()['lines'] as List).cast<Map>().where((l) => '${l['msg']}'.contains('rep.example')).length;
+    await time.advanceSeconds(600);
+    svc.siteUnreachable(gone('rep.example:443'));
+    await settle();
+    final e = siteEvents().single;
+    expect(e['id'], id, reason: 'the same event, changed in place');
+    expect(e['at'], t0, reason: 'its time stays the first one');
+    expect([repeat(e)['count'], repeat(e)['firstAt'], (repeat(e)['at'] as List).length], [2, t0, 2]);
+    expect(repeat(e)['lastAt'], greaterThan(t0));
+    expect(e['rev'], greaterThan(rev0), reason: 'readers learn of the change by rev');
+    expect(((e['data'] as Map)['check'] as Map)['state'], 'opens');
+    expect((svc.log()['lines'] as List).cast<Map>().where((l) => '${l['msg']}'.contains('rep.example')).length, greaterThan(lines), reason: 'the repeat is in Raw');
+    expect((svc.events()['updated'] as List).single['id'], id);
+    // another route is another event (the key is the pair); another kind (blocked) is another event too
+    svc.siteUnreachable(AutoUnreachable(route: 'B', server: 's', dest: 'rep.example:443', tried: const [], at: 1));
+    await settle();
+    svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'rep.example:443', via: 'B', viaServer: 't', at: 1));
+    await settle();
+    expect(siteEvents().map((x) => '${x['type']} ${(x['data'] as Map)['entry']}'), ['unreachable A', 'unreachable B', 'blocked A']);
+    // after the hour the next one is a new event
+    await time.advanceSeconds(3600);
+    svc.siteUnreachable(gone('rep.example:443'));
+    await settle();
+    final all = siteEvents().where((x) => x['type'] == 'unreachable' && (x['data'] as Map)['entry'] == 'A').toList();
+    expect(all.length, 2);
+    expect((all.last['data'] as Map).containsKey('repeat'), isFalse);
   });
 
   test('another route opens the site: exactly one site/blocked, a workaround; the checker is not asked', () async {
