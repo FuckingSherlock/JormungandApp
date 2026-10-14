@@ -1,6 +1,6 @@
 /// The ladder of dead nodes (docs/core.md → Auto → «Недоступные узлы»): a node that Auto (auto.dart) or the
 /// "If unavailable" service (fallback.dart) found dead (`failAfter` misses in a row) and does not use now is
-/// not tested every round any more: it is *unavailable*, asked again after 1, 2, 4, 8 and then every 15
+/// not tested every round any more: it is *unavailable*, asked again after 1, 2, 4, 8, 15 and then every 20
 /// minutes, by one light request (the test URL alone, no backup checks). One answer takes it off the ladder.
 ///
 /// The memory is the probe pool's ([ProbePool.ladder]): it lives as long as the core, so a reconnect, a
@@ -25,10 +25,10 @@ import 'dart:io';
 import 'durable.dart';
 
 /// How long an unavailable node waits after each miss: the step it is on (the last one repeats).
-const deadLadderSteps = [Duration(minutes: 1), Duration(minutes: 2), Duration(minutes: 4), Duration(minutes: 8), Duration(minutes: 15)];
+const deadLadderSteps = [Duration(minutes: 1), Duration(minutes: 2), Duration(minutes: 4), Duration(minutes: 8), Duration(minutes: 15), Duration(minutes: 20)];
 
 /// How far ahead of its turn an unavailable node may be asked with a batch (the window of [DeadLadder.gate] `ahead`).
-const batchAhead = Duration(seconds: 60);
+const batchAhead = Duration(minutes: 2);
 
 /// What a round may do about one node.
 enum LadderGate {

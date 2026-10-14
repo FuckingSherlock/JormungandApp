@@ -1,4 +1,4 @@
-// The ladder of dead nodes (ladder.dart): 1, 2, 4, 8, then every 15 minutes, one light request per step, never
+// The ladder of dead nodes (ladder.dart): 1, 2, 4, 8, 15, then every 20 minutes, one light request per step, never
 // started over (a reconnect, a restart of the app), an out-of-turn check after a reconnect / a network change.
 import 'dart:convert';
 import 'dart:io';
@@ -13,7 +13,7 @@ const _min = 60000;
 
 void main() {
   group('DeadLadder', () {
-    test('the steps are 1, 2, 4, 8 and then every 15 min; an answer takes the node off', () {
+    test('the steps are 1, 2, 4, 8, 15 and then every 20 min; an answer takes the node off', () {
       final l = DeadLadder();
       expect(l.gate('n', 0), LadderGate.free);
       expect(l.enter('n', 0), isTrue);
@@ -28,7 +28,7 @@ void main() {
         now = due;
         l.observe('n', -1, now);
       }
-      expect(waits, [for (final m in [1, 2, 4, 8, 15, 15, 15]) m * _min]);
+      expect(waits, [for (final m in [1, 2, 4, 8, 15, 20, 20]) m * _min]);
       expect(l['n']!.misses, 7);
       expect(l.observe('n', 80, now), isTrue);
       expect(l.has('n'), isFalse);
@@ -100,7 +100,7 @@ void main() {
       final store = DeadLadderStore(file, l, clock: () => now, debounce: Duration.zero);
       expect(store.load(), 1);
       expect(l.ids, ['new']);
-      expect([l['new']!.step, l['new']!.nextAt], [4, now + 15 * _min], reason: 'a step beyond the ladder is the last; a turn too far is brought in');
+      expect([l['new']!.step, l['new']!.nextAt], [5, now + 20 * _min], reason: 'a step beyond the ladder is the last; a turn too far is brought in');
       l.enter('x', now);
       await store.close();
       expect([for (final n in (jsonDecode(file.readAsStringSync()) as Map)['nodes'] as List) n['id']], ['new', 'x']);
@@ -124,7 +124,7 @@ void main() {
       expect(l.pending('a', 60 * 1000), isTrue);
       expect(l.gate('a', 60 * 1000, ahead: batchAhead), LadderGate.light);
       expect(l.gate('b', 60 * 1000, ahead: batchAhead), LadderGate.light);
-      expect(l.gate('c', 60 * 1000, ahead: batchAhead), LadderGate.skip, reason: '140 s away');
+      expect(l.gate('c', 60 * 1000, ahead: batchAhead), LadderGate.skip, reason: '140 s away, the window is 2 min');
       l.observe('a', -1, 60 * 1000);
       l.observe('b', -1, 60 * 1000);
       expect([l['a']!.step, l['a']!.nextAt], [1, 60 * 1000 + 2 * _min]);
@@ -132,7 +132,7 @@ void main() {
       expect(l['b']!.misses, 1);
     });
 
-    test('Auto: three dead nodes due within 60 s are asked in one round, in parallel; none due = none asked', () async {
+    test('Auto: three dead nodes due within 2 min are asked in one round, in parallel; none due = none asked', () async {
       var t = 0;
       final pool = ProbePool.solo(clock: () => t);
       // D1..D3 are above C, which is in use; they are dead from the start
@@ -150,7 +150,7 @@ void main() {
       t = 30000;
       await auto.check();
       expect(dead(), 0, reason: 'nobody is due: no wake for the ones due soon');
-      t = 60000; // the first is due; the other two come due within the next 60 s
+      t = 60000; // the first is due; the other two come due within the next 2 min
       await auto.check();
       expect(dead(), 3, reason: 'one batch');
       expect([for (final id in ids) pool.ladder[id]!.step], [1, 1, 1]);
