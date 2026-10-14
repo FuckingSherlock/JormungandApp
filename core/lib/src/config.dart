@@ -228,6 +228,11 @@ Map<String, dynamic>? mixedAuthUser(Map<String, dynamic> plan) {
   return {'username': user, 'password': pass};
 }
 
+/// Is [o] a server outbound that sing-box itself must look the name up for: its `server` is still a host (not pinned)
+/// and it dials directly. With a `detour` the name travels to that outbound as it is and is resolved on its far side.
+bool _resolvedByCore(Map<String, dynamic> o) =>
+    o['detour'] == null && hostnameOf(o['server']) != null && !const {'selector', 'urltest', 'direct', 'block', 'dns', 'local'}.contains(o['type']);
+
 Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     {int? tunnelPort,
     int? tunCheckPort,
@@ -240,7 +245,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     RoutingInfo? info,
     List<String> selfPaths = const [],
     List<String> selfPackages = const [],
-    Map<String, String> pins = const {}}) {
+    Map<String, String> pins = const {},
+    bool Function(DnsCandidate c)? nodeResolverUsable}) {
   final outs = <Map<String, dynamic>>[];
   final tun = planTun(plan);
   final test = (plan['urlTest'] as Map?) ?? const {};
@@ -288,6 +294,13 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     } else {
       group(routeTag(i), r['main'] as Map, auto: true);
     }
+    // The servers sing-box looks up itself: a chain's entry and a single route's nodes still named by a host. A chain's
+    // main group dials through the entry, which resolves the name on its far side: no local lookup, no `domain_resolver`
+    // (measured on 1.14.2: with one, the detoured outbound would resolve locally and dial the entry by the address)
+    if (info != null) {
+      final head = '${r['kind'] == 'chain' ? routeEntryTag(i) : routeTag(i)}/';
+      if (outs.any((o) => '${o['tag']}'.startsWith(head) && _resolvedByCore(o))) info.nameRoutes.add('${r['id'] ?? routeTag(i)}');
+    }
     tags.add(routeTag(i));
   }
   // Auto moves between the routes by switching this selector (auto.dart), no restart and
@@ -308,6 +321,17 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     }
   }
   outs.addAll(routing.outbounds);
+  // A node still named by a host (not pre-resolved in time) is resolved by the system chain's top server, never by
+  // the user's DNS rules or settings (docs/rules.md §6 → «Адреса серверов»). A detoured outbound (a chain's exit) gets
+  // none: it is not looked up here at all (see nameRoutes above)
+  if (nodeResolverUsable != null) {
+    final tag = nodeResolverOf(routing, nodeResolverUsable);
+    info?.nodeResolver = tag;
+    for (var i = 0; i < outs.length; i++) {
+      final o = outs[i];
+      if (o['domain_resolver'] == null && _resolvedByCore(o)) outs[i] = {...o, 'domain_resolver': tag};
+    }
+  }
   warnings?.addAll(routing.warnings);
   info?.fallbacks.addAll(routing.fallbacks);
   info?.dnsServers.addAll(routing.dnsEnabled);

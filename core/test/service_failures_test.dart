@@ -40,20 +40,32 @@ class _Runner implements BoxRunner {
   Future<void> stop() async => up = false;
 }
 
-Map<String, dynamic> _body({Map<String, dynamic>? routing, String server = '127.0.0.1', bool global = true}) => {
+/// [exitServer]: the route is a chain, [server] is its entry and [exitServer] its exit (dialed through the entry).
+Map<String, dynamic> _body({Map<String, dynamic>? routing, String server = '127.0.0.1', bool global = true, String? exitServer}) => {
       'plan': {
         'routing': ?routing,
         'routes': [
           {
             'id': 'A',
-            'kind': 'unit',
+            'kind': exitServer == null ? 'unit' : 'chain',
+            if (exitServer != null)
+              'entry': {
+                'pick': 'priority',
+                'chosen': 's::e',
+                'nodes': [
+                  {
+                    'key': 's::e',
+                    'outbound': {'type': 'shadowsocks', 'server': server, 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'},
+                  },
+                ],
+              },
             'main': {
               'pick': 'priority',
               'chosen': 's::a',
               'nodes': [
                 {
                   'key': 's::a',
-                  'outbound': {'type': 'shadowsocks', 'server': server, 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'},
+                  'outbound': {'type': 'shadowsocks', 'server': exitServer ?? server, 'server_port': 1, 'method': 'aes-128-gcm', 'password': 'x'},
                 },
               ],
             },
@@ -87,7 +99,7 @@ void main() {
   late FakeTime time;
 
   Future<void> start(
-      {FailureWindows windows = const FailureWindows(), bool connected = true, Map<String, dynamic>? routing, String server = '127.0.0.1', bool global = true}) async {
+      {FailureWindows windows = const FailureWindows(), bool connected = true, Map<String, dynamic>? routing, String server = '127.0.0.1', bool global = true, String? exitServer}) async {
     tmp = await Directory.systemTemp.createTemp('jorm-sfail');
     runner = _Runner();
     time = FakeTime();
@@ -108,7 +120,7 @@ void main() {
     );
     await svc.init();
     if (connected) {
-      await svc.connect(_body(routing: routing, server: server, global: global));
+      await svc.connect(_body(routing: routing, server: server, global: global, exitServer: exitServer));
       await time.advanceSeconds(6); // settled: 5 s after the start
     }
   }
@@ -458,8 +470,9 @@ void main() {
     });
 
     test('a route with a domain-named server depends on the resolver of the domain: its dead root explains auto/unstable and conn/lost', () async {
+      // the user's own server is not the node resolver (the top of the system chain is the OS resolver without a built-in one)
       await start(routing: dns, server: 'node.example.com');
-      final cause = openDnsRoot('g-udp1');
+      final cause = openDnsRoot('system');
       await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
       final u = events('auto', 'unstable').single;
       expect([u['level'], u['verdict'], u['cause']], ['info', 'consequence', cause]);
@@ -469,11 +482,44 @@ void main() {
       expect([l['verdict'], l['cause']], ['consequence', cause]);
     });
 
+    test('the domain-named node is blamed on the top of the system chain (the node outbounds\' domain_resolver), not on the user\'s default resolver', () async {
+      await start(server: 'node.example.com', routing: {
+        'dns': {
+          'servers': [
+            {'id': 'g', 'addr': 'udp://127.0.0.1:5353', 'via': 'direct', 'on': true},
+            {'id': 'cloudflare', 'addr': '1.1.1.1', 'via': 'direct', 'on': true},
+          ],
+        },
+      });
+      openDnsRoot('g-udp1'); // the default resolver's root: the node does not go through it
+      await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
+      expect(events('auto', 'unstable').last['verdict'], 'confirmed');
+      final cause = openDnsRoot('cloudflare-udp1');
+      await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
+      final u = events('auto', 'unstable').last;
+      expect([u['verdict'], u['cause']], ['consequence', cause]);
+    });
+
     test('a route whose servers are addresses does not depend on it: the same dead root leaves auto/unstable confirmed', () async {
       await start(routing: dns);
       openDnsRoot('g-udp1');
       await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
       expect(events('auto', 'unstable').single['verdict'], 'confirmed');
+    });
+
+    test('a chain\'s exit named by a host is resolved on the entry\'s far side: the route does not depend on the node resolver', () async {
+      await start(routing: dns, exitServer: 'exit.example.com'); // the entry is an address
+      openDnsRoot('system');
+      await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
+      expect(events('auto', 'unstable').single['verdict'], 'confirmed');
+    });
+
+    test('a chain\'s entry named by a host depends on it', () async {
+      await start(routing: dns, server: 'entry.example.com', exitServer: 'exit.example.com');
+      final cause = openDnsRoot('system');
+      await svc.routeUnstable(AutoUnstable(id: 'A', strikes: 3, holdMs: 60000, at: time.t.millisecondsSinceEpoch));
+      final u = events('auto', 'unstable').single;
+      expect([u['verdict'], u['cause']], ['consequence', cause]);
     });
 
     test('no direct server set: the OS resolver is the one the domain servers resolve through, under the id system', () async {

@@ -41,6 +41,11 @@
 ///
 /// The selectors keep their choice across a sing-box restart (`cache_file`): the service
 /// starts from what sing-box says each one is on.
+///
+/// A selector whose fallback is Direct has a flag file ([TargetFallback.flagPath], written through [FallbackService.setFlag]):
+/// on while the selector sits on Direct, off otherwise. The flag turns on before the selector moves and off after it came
+/// back, so the resolve ladder in front of the rules that route there (routing.dart) holds exactly while their names go
+/// direct; sing-box reads the file itself, no restart.
 library;
 
 import 'dart:async';
@@ -117,7 +122,7 @@ class _Target {
 
 class FallbackService {
   FallbackService(this.api, Iterable<TargetFallback> fallbacks,
-      {required this.delay, required this.settings, ProbePool? pool, this.mainIdentity, int Function()? clock, this.note, this.onDown})
+      {required this.delay, required this.settings, ProbePool? pool, this.mainIdentity, int Function()? clock, this.note, this.onDown, this.setFlag})
       : pool = pool ?? ProbePool.solo(),
         _clock = clock ?? _wallClock {
     final by = <String, _Target>{};
@@ -127,6 +132,7 @@ class FallbackService {
       if (fb != null) (by[fb] ??= _Target(fb, f.fallbackSpec!)).asFallback.add(f);
     }
     _by = by;
+    _flagged = [for (final f in fallbacks) if (f.flagPath != null) f];
     _targets = by.values.toList();
     _stall = StallSweeper(api);
   }
@@ -150,6 +156,11 @@ class FallbackService {
   /// A target's server (its group tag and key; a chain target's entry too) missed `failAfter` tests in a row,
   /// like Auto's: the core may look at its address again (service.dart `_serverDown`). Not for the main flow.
   final void Function(String groupTag, String key)? onDown;
+
+  /// Writes the flag of a selector that falls back to Direct (service.dart: the file); null = none.
+  final void Function(TargetFallback s, bool on)? setFlag;
+  late final List<TargetFallback> _flagged;
+  final _flagOn = <String, bool>{}; // selector tag → the flag as last written
 
   /// A line for the log (jormd: `[jormd] rules: …`).
   final void Function(String line)? note;
@@ -226,7 +237,21 @@ class FallbackService {
       // a selector on the main flow: both are down (the fallback target never ran its own selector)
       if (t.asFallback.any((s) => s.target != topTag && by[s.tag] == topTag)) t.down = true;
     }
+    for (final s in _flagged) {
+      _flag(s, by[s.tag] == s.fallbackTag);
+    }
     return true;
+  }
+
+  // Sets the flag of [s] when it is not as written last (the first look after a start writes whatever sing-box says).
+  void _flag(TargetFallback s, bool on) {
+    if (setFlag == null || s.flagPath == null || _flagOn[s.tag] == on) return;
+    try {
+      setFlag!(s, on);
+      _flagOn[s.tag] = on;
+    } catch (e) {
+      note?.call('rules: the Direct flag of ${s.tag} was not written: $e');
+    }
   }
 
   Future<void> _test(_Target t) async {
@@ -367,11 +392,14 @@ class FallbackService {
       if (_stopped) return;
       final want = _want(s), cur = api.selected[s.tag] ?? s.target;
       if (cur == want) continue;
+      if (want == s.fallbackTag) _flag(s, true); // the ladder is ready before the traffic arrives
       if (!await api.select(s.tag, want)) {
         failed++;
+        _flag(s, cur == s.fallbackTag);
         continue;
       }
       moved++;
+      _flag(s, want == s.fallbackTag);
       // 0 = the target, 1 = the fallback, 2 = the main flow behind a target fallback
       int rank(String x) => x == s.target ? 0 : x == s.fallbackTag ? 1 : 2;
       final names = [...s.rules, ...s.apps.map((a) => 'app $a')].join(', ');

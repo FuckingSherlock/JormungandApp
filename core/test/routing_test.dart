@@ -214,7 +214,18 @@ void main() {
         'src:a~direct src:a direct rule r3|',
         'chain:c~proxy chain:c main rule r4|',
       ]);
-      expect(_rules(c).map((r) => r['outbound']).skip(1), ['src:a~block', 'src:a~block', 'src:a~direct', 'chain:c~proxy']);
+      expect(_rules(c).map((r) => r['outbound']).skip(1), ['src:a~block', 'src:a~block', null, 'src:a~direct', 'chain:c~proxy'],
+          reason: 'null: the resolve ladder in front of the Direct fallback rule');
+      expect(_rules(c).singleWhere((r) => r['action'] == 'resolve'), {
+        'type': 'logical',
+        'mode': 'and',
+        'rules': [
+          {'domain_suffix': ['c.com']},
+          {'rule_set': ['flag-fb2']},
+        ],
+        'action': 'resolve',
+      }, reason: 'only while the selector sits on Direct (its flag); the flag is a rule set of the config');
+      expect(c['route']['rule_set'].map((s) => s['tag']), contains('flag-fb2'));
       // the main flow is no target: no selector, no fallback to watch
       final main = RoutingInfo();
       buildConfig(_plan({'rules': [_rule({'domain': _g({'domain_suffix': ['a.com']})}, target: '')]}), info: main);
@@ -245,8 +256,15 @@ void main() {
           {'id': 'com.none', 'kind': 'package', 'act': 'default', 'split': true, 'udp': {'act': 'default'}},
         ],
       }), info: info);
-      expect(_rules(c).take(6), [
+      expect(_rules(c).take(7), [
         {'package_name': ['com.tg'], 'network': ['tcp'], 'action': 'route', 'outbound': 'src:a~block'},
+        // a selector that falls back to Direct: its names are resolved by the DNS ladder while its flag is on
+        {
+          'type': 'logical',
+          'mode': 'and',
+          'rules': [{'package_name': ['com.tg'], 'network': ['udp']}, {'rule_set': ['flag-fb1']}],
+          'action': 'resolve',
+        },
         {'package_name': ['com.tg'], 'network': ['udp'], 'action': 'route', 'outbound': 'chain:c~direct'},
         {'process_name': ['chrome.exe'], 'network': ['udp'], 'action': 'reject'},
         {'process_name': ['a.exe'], 'network': ['tcp'], 'action': 'resolve'},
@@ -396,7 +414,8 @@ void main() {
           _rule({'domain': _g({'domain_suffix': ['d.com']})}, target: 'src:off', fallback: 'chain:deleted', id: 'r4'),
         ],
       }), info: info, warnings: w);
-      expect(_rules(c).map((r) => r['outbound']), ['src:a~direct', 'src:a~direct', 'src:b~proxy', null, 'direct'], reason: 'null: the resolve step of the direct one');
+      expect(_rules(c).map((r) => r['outbound']), [null, 'src:a~direct', null, 'src:a~direct', 'src:b~proxy', null, 'direct'],
+          reason: 'null: the resolve step of a Direct fallback selector / of the direct one');
       expect(_out(c, 'src:a~direct')!['outbounds'], ['src:a', 'direct']);
       expect(info.fallbacks.every((f) => f.fallbackTarget == null), isTrue);
       expect(w, [
@@ -435,6 +454,7 @@ void main() {
       final c = buildConfig(plan, info: info, warnings: w);
       expect(_rules(c).map((r) => '${r['process_name']}${r['network'] ?? ''} ${r['outbound']}'), [
         '[a.exe] proxy~block',
+        'null null', // the resolve ladder in front of the Direct fallback selector
         '[b.exe] proxy~direct',
         '[c.exe] proxy~src:b',
         '[d.exe] proxy~block',
@@ -698,7 +718,7 @@ void main() {
         expect(servers.firstWhere((s) => s['tag'] == 'dns-gg-dot1'), {'type': 'tls', 'tag': 'dns-gg-dot1', 'server': 'dns.google', 'domain_resolver': 'dns-local'},
             reason: 'a hostname is found by the OS resolver, itself the first direct candidate');
         expect((c['dns'] as Map)['final'], 'dns-cf-doh1-v');
-        expect(c['route']['default_domain_resolver'], 'dns-local');
+        expect(c['route']['default_domain_resolver'], 'dns-cf-doh1', reason: 'the OS resolver is the last resort, not the default');
         expect(info.dnsCandidates, hasLength(11));
         final sets = ((c['route'] as Map)['rule_set'] as List).cast<Map>();
         expect(sets, hasLength(11), reason: 'a flag per candidate');
@@ -955,34 +975,36 @@ void main() {
         final steps = _rules(c).where((r) => r['action'] == 'resolve').toList();
         // the direct side: local, cf-doh1, cf-doh2, cf-dot1 = 4 flags + 1 for none
         expect(steps, hasLength(5));
+        // the addresses of a rule's own traffic are resolved by the OS resolver last (docs/rules.md §6)
         expect(steps.first, {
           'type': 'logical',
           'mode': 'and',
-          'rules': [{'port': [8080]}, {'rule_set': ['flag-dns-local']}],
+          'rules': [{'port': [8080]}, {'rule_set': ['flag-dns-cf-doh1']}],
           'action': 'resolve',
-          'server': 'dns-local',
+          'server': 'dns-cf-doh1',
         });
         expect(steps[1], {
           'type': 'logical',
           'mode': 'and',
           'rules': [
             {'port': [8080]},
-            {'rule_set': ['flag-dns-cf-doh1']},
-            {'rule_set': ['flag-dns-local'], 'invert': true},
+            {'rule_set': ['flag-dns-cf-doh2']},
+            {'rule_set': ['flag-dns-cf-doh1'], 'invert': true},
           ],
           'action': 'resolve',
-          'server': 'dns-cf-doh1',
+          'server': 'dns-cf-doh2',
         }, reason: 'exclusive: only when no higher flag is on');
+        expect(steps[3]['server'], 'dns-local', reason: 'the OS resolver is the last of the ladder');
         expect(steps[4], {
           'type': 'logical',
           'mode': 'and',
           'rules': [
             {'port': [8080]},
-            {'rule_set': ['flag-dns-local', 'flag-dns-cf-doh1', 'flag-dns-cf-doh2', 'flag-dns-cf-dot1'], 'invert': true},
+            {'rule_set': ['flag-dns-cf-doh1', 'flag-dns-cf-doh2', 'flag-dns-cf-dot1', 'flag-dns-local'], 'invert': true},
           ],
           'action': 'resolve',
-          'server': 'dns-local',
-        }, reason: 'every flag off: the top candidate');
+          'server': 'dns-cf-doh1',
+        }, reason: 'every flag off: the top candidate (not the OS resolver)');
         expect(info.ruleChains['rp'], ['dns-local', 'dns-cf-doh1', 'dns-cf-doh2', 'dns-cf-dot1']);
         expect(dnsRules(c).where((r) => !'${r['server']}'.endsWith('-v')), isEmpty, reason: 'a DNS rule cannot see the port: nothing to add on the direct side');
       });
@@ -1006,6 +1028,35 @@ void main() {
         expect(rules[1], {'domain_suffix': ['gov.ru'], 'action': 'route', 'outbound': 'direct'});
         expect((c['outbounds'] as List).cast<Map>().where((o) => '${o['tag']}'.startsWith('direct@')), isEmpty);
         expect(dnsRules(c).first['server'], 'dns-cf-doh1');
+      });
+
+      test('If unavailable → Direct: a flag per such selector and a flag-aware resolve ladder in front of its rules, the OS resolver last; the target\'s other selectors have none', () {
+        final targets = {'src:a': {'kind': 'unit', 'main': _grp([_node, _node2], prefix: 'a')}};
+        final info = RoutingInfo();
+        final c = buildConfig(_plan({
+          'dns': dnsOf([cf, local]),
+          'targets': targets,
+          'rules': [
+            _rule({'domain': _g({'domain_suffix': ['c.com']})}, target: 'src:a', fallback: 'direct', id: 'r3'),
+            _rule({'domain': _g({'domain_suffix': ['b.com']})}, target: 'src:a', fallback: 'block', id: 'r2'),
+          ],
+        }), info: info, dnsFlagDir: 'F');
+        final f = info.fallbacks.firstWhere((x) => x.tag == 'src:a~direct');
+        expect(f.flagTag, 'flag-fb0');
+        expect(f.flagPath, p.join('F', 'fb0.json'));
+        expect(info.fallbacks.firstWhere((x) => x.tag == 'src:a~block').flagTag, isNull);
+        final sets = ((c['route'] as Map)['rule_set'] as List).cast<Map>();
+        expect(sets.firstWhere((s) => s['tag'] == 'flag-fb0'), {'type': 'local', 'tag': 'flag-fb0', 'format': 'source', 'path': p.join('F', 'fb0.json')});
+        final rules = _rules(c);
+        final at = rules.indexWhere((r) => r['outbound'] == 'src:a~direct');
+        final steps = rules.sublist(0, at).where((r) => r['action'] == 'resolve' && jsonEncode(r).contains('c.com')).toList();
+        expect(rules[at - 1], steps.last, reason: 'the ladder sits right in front of the rule');
+        expect(steps.map((r) => r['server']), ['dns-cf-doh1', 'dns-cf-doh2', 'dns-cf-dot1', 'dns-local', 'dns-cf-doh1'], reason: 'the OS resolver is the last of the ladder');
+        for (final r in steps) {
+          expect(jsonEncode(r), contains('flag-fb0'), reason: 'it holds only while the selector sits on Direct');
+        }
+        // the rule with Block as the fallback resolves nothing of its own
+        expect(rules.where((r) => jsonEncode(r).contains('b.com') && r['action'] == 'resolve'), isEmpty);
       });
     });
 
@@ -1181,6 +1232,9 @@ void main() {
       final info = RoutingInfo();
       final config = buildConfig(plan, ruleSetFiles: files, tunnelPort: await freePort(), dnsFlagDir: p.join(tmp.path, 'flags'), info: info);
       writeDnsFlags(info.dnsCandidates);
+      for (final f in info.fallbacks) {
+        if (f.flagPath != null) setFallbackFlag(f, false);
+      }
       final f = File(p.join(tmp.path, 'c.json'))..writeAsStringSync(jsonEncode(config));
       final r = await Process.run(_bin, ['check', '-c', f.path, '--disable-color']);
       expect(r.exitCode, 0, reason: '${r.stderr}${r.stdout}\n${const JsonEncoder.withIndent(' ').convert(config)}');

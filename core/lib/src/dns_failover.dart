@@ -13,8 +13,17 @@
 /// candidate's own path, direct or through the VPN as it is set (probe.dart `probeDns`, the probe
 /// inbound) — with backup names as with the node checks. A miss is evidence for the suspicion
 /// `dns.down` of that candidate (the Sentinel's window, then its checks: does it answer now; does
-/// another candidate of the same path), an answer ends it (a blip, or the open root closes). The
-/// failover acts on the verdicts: it listens to the Sentinel's changes.
+/// another candidate of the same path), an answer ends it (a blip, or the open root closes). A miss of the
+/// last [fresh] counts as the answer to "does it answer now" (the round's own query is that ask), and the other
+/// candidates of the path are not asked again when their verdict is known: dead ones by their verdict, the ones the
+/// round just asked by that answer. The failover acts on the verdicts: it listens to the Sentinel's changes.
+///
+/// The verdicts are kept ([DnsVerdictBook], dns_verdicts.dart) per server (address + transport + side; the VPN side
+/// also per exit node) and only a new check of the same object changes one: a reconnect, a change of the settings,
+/// a restart of the core, a provider switched off and on keep them. A new failover starts with the flags by the stored
+/// verdicts ([dnsStartFlags]) and checks the servers stored as dead at once; moving to another exit node applies the
+/// verdicts of that node and checks the VPN side again ([nodeChanged]); another network checks the servers that
+/// answer now ([networkChanged]). One check runs per server at a time, whoever asks.
 ///
 /// A side whose flags are all off is answered by its top candidate (the config's last rule has no flag):
 /// nothing is flipped then, a candidate that answers again turns its flag on. The candidates a rule names
@@ -40,6 +49,7 @@ library;
 import 'dart:async';
 
 import 'auto.dart' show AutoSettings;
+import 'dns_verdicts.dart';
 import 'plan.dart' show topTag;
 import 'pool.dart' show NetStatus, ProbePool;
 import 'probe.dart' show withCheckers;
@@ -53,6 +63,9 @@ const dnsCheckNames = ['cp.cloudflare.com', 'www.gstatic.com', 'captive.apple.co
 /// How long a candidate with a confirmed dead verdict waits before it is asked again; the last step repeats.
 const dnsRecheckLadder = [Duration(seconds: 30), Duration(minutes: 1), Duration(minutes: 2), Duration(minutes: 5)];
 
+/// How long an answer or a miss of a round counts for the Sentinel's checks of the same server (no second ask).
+const dnsFreshResult = Duration(seconds: 10);
+
 /// The Sentinel's key of the suspicion / root of the DNS server [id].
 String dnsRootKey(String id) => 'dns|$id';
 
@@ -61,7 +74,8 @@ const dnsSideNames = ['direct', 'vpn'];
 
 /// The DNS server a side answers with changed. [from] / [to] are the candidates' ids (the Sentinel's node ids),
 /// [fromProvider] / [toProvider] their providers'; [reason]: `failover` (the one in use is down), `back` (a higher one
-/// answers again) or `off` (Switch automatically was turned off: every flag is on, the top candidate answers).
+/// answers again), `node` (another exit node: its stored verdicts apply) or `off` (Switch automatically was turned
+/// off: every flag is on, the top candidate answers).
 class DnsSwitch {
   const DnsSwitch({
     required this.side,
@@ -87,8 +101,9 @@ class DnsSwitch {
       };
 }
 
-/// Which servers a round asks: all of them, those without an open root (the timer's), the dead ones that are due.
-enum _Round { all, periodic, ladder }
+/// Which servers a round asks: all of them, those without an open root (the timer's), the dead ones that are due,
+/// every dead one (the start).
+enum _Round { all, periodic, ladder, dead }
 
 class _Node {
   _Node(this.entry, this.c, {required this.member});
@@ -100,10 +115,19 @@ class _Node {
 
   /// In a side's list (switched between); else watched only (its flag still moves a rule's chain).
   final bool member;
-  final w = Watched();
+  Watched w = Watched();
 
   /// When the current run of misses began (ms since epoch); null = it answered last.
   int? missSince;
+
+  /// When the last probe of it ended with a miss / an answer (ms since epoch); the other is null.
+  int? missAt, okAt;
+
+  /// The one check in flight; a second ask joins it.
+  Future<void>? testing;
+
+  /// The Sentinel is judging a miss of it.
+  bool suspecting = false;
 
   /// The flag as the core wrote it last.
   bool on = true;
@@ -112,8 +136,8 @@ class _Node {
   int? recheckAt;
   int recheckStep = 0;
 
-  /// Its flag was off in the sing-box before this one (a restart): it returns on a single answer, the
-  /// verdict that put it off is not known any more.
+  /// Its flag was off in the sing-box before this one (a restart) or since the stored verdicts: it returns on a single
+  /// answer, the verdict that put it off is not known any more.
   bool restored = false;
 
   String get id => entry.id;
@@ -153,7 +177,11 @@ class DnsFailover {
     this.flagWait = const Duration(seconds: 3),
     this.flagPoll = const Duration(milliseconds: 60),
     this.recheckLadder = dnsRecheckLadder,
-  }) : _clock = clock ?? _wallClock {
+    this.fresh = dnsFreshResult,
+    DnsVerdictBook? book,
+    this.node,
+  })  : _clock = clock ?? _wallClock,
+        book = book ?? DnsVerdictBook() {
     _sides = [
       for (final name in dnsSideNames)
         _Side(name, [for (final c in sides[name] ?? const <DnsCandidate>[]) _Node(c.entry, c, member: true)]),
@@ -170,6 +198,15 @@ class DnsFailover {
         n.restored = true;
       }
     }
+    _lastNode = node?.call();
+    // the flags by the verdicts of the last time: the dead ones off, the best that worked answers
+    final stored = dnsStartFlags(sides, this.book, node: _lastNode, others: [for (final n in _watch) ?n.c]);
+    for (final n in _flagged) {
+      if (stored[n.id] == false && n.on) {
+        n.on = false;
+        n.restored = true;
+      }
+    }
     for (final s in _sides) {
       s.effective = _pick(s);
     }
@@ -177,7 +214,7 @@ class DnsFailover {
   }
 
   /// Writes the flag of [c] (dns_flags.dart `setDnsFlag`, with the log line); false = not written. [reason]: `verdict`
-  /// (its root is confirmed), `back` (it answers again), `auto off`.
+  /// (its root is confirmed), `back` (it answers again), `node` (another exit node), `auto off`.
   final Future<bool> Function(DnsCandidate c, bool on, String reason) setFlag;
 
   /// ms until the DNS server [tag] resolved [name] (probe.dart `probeDns`); -1 = no answer.
@@ -191,6 +228,15 @@ class DnsFailover {
   AutoSettings settings;
 
   final Sentinel sentinel;
+
+  /// The verdicts of the servers (dns_verdicts.dart); kept by the owner across failovers.
+  final DnsVerdictBook book;
+
+  /// The exit node the VPN side is checked through now (its pool identity); null = not bound to a node.
+  final String? Function()? node;
+
+  /// How long a result of a round counts for the Sentinel's checks of the same server ([dnsFreshResult]).
+  final Duration fresh;
 
   /// How long a server must keep missing before the Sentinel may call it down (windows.dart `dnsDown`).
   final Duration window;
@@ -214,6 +260,7 @@ class DnsFailover {
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _timer, _recheckTimer;
   bool _busy = false, _busyLadder = false, _started = false, _stopped = false, _again = false;
+  String? _lastNode, _hintNext;
 
   /// The ladder's timer does not fire before this (ms since epoch): a tick found the network down or a round busy.
   int _recheckNotBefore = 0;
@@ -225,6 +272,9 @@ class DnsFailover {
   Iterable<_Node> get _all => [..._members, ..._watch];
   Iterable<_Node> get _flagged => _all.where((n) => n.c != null);
   _Side _sideOf(String name) => _sides.firstWhere((s) => s.name == name);
+
+  /// The key of the verdict about [n] now (dns_verdicts.dart).
+  String _key(_Node n) => dnsVerdictKey(n.c, n.vpn ? node?.call() : null);
 
   /// The id of the server that answers what goes through the VPN now (the VPN side's), else the direct side's.
   String? get active => _sideOf('vpn').effective?.id ?? _sideOf('direct').effective?.id;
@@ -239,6 +289,15 @@ class DnsFailover {
     return n == null || n.c == null || (n.on && !_down(n));
   }
 
+  /// A lookup of the core's own (address_resolver.dart) got no answer from the candidate [id]: evidence for ITS suspicion
+  /// (the server's own check decides, [_suspect]); never a verdict by itself. A server this config does not watch, and a
+  /// network that is not up (the miss may be the network's), are left alone.
+  void lookupMissed(String id) {
+    final n = _all.where((x) => x.id == id && x.c != null).firstOrNull;
+    if (n == null || _stopped || !_online) return;
+    _suspect(n, from: _clock());
+  }
+
   bool get isEmpty => _members.isEmpty;
 
   /// Every candidate's flag as the core wrote it (id → on): what a restarted sing-box is given again.
@@ -250,6 +309,7 @@ class DnsFailover {
     _started = true;
     _schedule(settings.firstCheck);
     unawaited(_verifyAll('start'));
+    if (_all.any(_down)) unawaited(_round(_Round.dead)); // stored as dead: checked at once, not after `firstCheck`
   }
 
   void stop() {
@@ -335,8 +395,58 @@ class DnsFailover {
   /// their root opened); an answer closes the root. Nothing while the network is not up.
   Future<void> checkDue() => _round(_Round.ladder);
 
+  /// The exit node of the VPN side changed (Auto moved, Manual): the verdicts of the new node apply at once (the dead
+  /// ones off, the best that worked answers) and the VPN side is checked again; the verdicts of the old node stay.
+  Future<void> nodeChanged() async {
+    final cur = node?.call();
+    if (_stopped || node == null || cur == _lastNode) return;
+    _lastNode = cur;
+    final vpn = [for (final n in _flagged) if (n.vpn) n];
+    if (vpn.isEmpty) return;
+    for (final n in vpn) {
+      sentinel.closeRoot(dnsRootKey(n.id), reason: 'node'); // the root was about the other node
+      n.w = Watched();
+      n.missSince = n.missAt = n.okAt = null;
+    }
+    final members = [for (final n in vpn) if (n.member) n.c!];
+    final stored = dnsStartFlags({'vpn': members}, book, node: cur, others: [for (final n in vpn) if (!n.member) n.c!]);
+    if (auto && _ready) {
+      for (final n in vpn) {
+        final want = stored[n.id];
+        if (want != null && want != n.on && await _flag(n, want, 'node', strike: false)) n.restored = !want;
+      }
+    }
+    _note('info', 'dns: exit node changed: the verdicts of the new node apply, the VPN side is checked');
+    _hintNext = 'node';
+    await _react();
+    unawaited(_checkNodes(vpn));
+  }
+
+  /// Another network: the servers that answer now (each side's effective one) are asked at once; the dead ones keep
+  /// their verdict until their own re-check.
+  Future<void> networkChanged() async {
+    if (_stopped || !_started) return;
+    final active = {for (final s in _sides) ?s.effective}.toList();
+    if (active.isEmpty) return;
+    if (!_online) {
+      _note('debug', 'dns: network changed, not checked: the network is not up (the rounds will)');
+      return;
+    }
+    _note('info', 'dns: network changed: checking ${active.map((n) => n.id).join(', ')}');
+    await _checkNodes(active);
+  }
+
+  Future<void> _checkNodes(List<_Node> list) async {
+    if (list.isEmpty || _stopped || !_online) return;
+    await Future.wait(list.map(_test));
+    if (_stopped) return;
+    _judge(list);
+    await _react();
+    _syncPark();
+  }
+
   Future<void> _round(_Round kind) async {
-    final ladder = kind == _Round.ladder;
+    final ladder = kind == _Round.ladder || kind == _Round.dead;
     if (_stopped) return;
     if (ladder ? _busyLadder : _busy) {
       if (ladder) {
@@ -355,10 +465,11 @@ class DnsFailover {
         if (ladder) _recheckNotBefore = _clock() + 10000;
         return;
       }
+      if (!ladder && node != null && node!() != _lastNode) await nodeChanged();
       final now = _clock();
       final list = [
         for (final n in _all)
-          if (switch (kind) { _Round.all => true, _Round.periodic => !_down(n), _Round.ladder => _down(n) && _due(n, now) }) n,
+          if (switch (kind) { _Round.all => true, _Round.periodic => !_down(n), _Round.ladder => _down(n) && _due(n, now), _Round.dead => _down(n) }) n,
       ];
       if (list.isEmpty && ladder) return;
       final parked = [for (final n in list) if (_down(n)) n];
@@ -366,7 +477,7 @@ class DnsFailover {
       if (_stopped) return;
       _judge(list);
       for (final n in parked) {
-        _stepped(n, now);
+        _stepped(n, now, advance: kind == _Round.ladder);
       }
       await _react();
       if (!ladder) _summary();
@@ -385,12 +496,13 @@ class DnsFailover {
     }
   }
 
-  // The answers close the roots, the misses are evidence for the Sentinel.
+  // The answers close the roots and make the verdict, the misses are evidence for the Sentinel.
   void _judge(Iterable<_Node> list) {
     for (final s in list) {
       if (s.w.health.answered) {
         s.missSince = null;
         sentinel.recovered(dnsRootKey(s.id), reason: 'dns.answers');
+        book.record(_key(s), dead: false, at: _clock());
       } else if (s.w.health.ms == -1) {
         _suspect(s);
       }
@@ -423,15 +535,22 @@ class DnsFailover {
     return [for (var i = 0; i < nodes.length; i++) (id: nodes[i].id, side: nodes[i].side, kind: nodes[i].kind, ms: ms[i])];
   }
 
-  Future<void> _test(_Node s) async {
+  // One check per server at a time: a second ask joins the one in flight.
+  Future<void> _test(_Node s) => s.testing ??= _testOnce(s).whenComplete(() => s.testing = null);
+
+  Future<void> _testOnce(_Node s) async {
     final ms = await _ask(s, null);
     if (_stopped) return;
     final now = _clock();
     s.w.health.record(ms, now);
     if (ms < 0) {
       s.missSince ??= now;
+      s.missAt = now;
+      s.okAt = null;
     } else {
       s.missSince = null;
+      s.missAt = null;
+      s.okAt = now;
     }
     if (s.on) s.w.forgetIfStable(settings, now);
   }
@@ -442,10 +561,18 @@ class DnsFailover {
     return cancel == null ? q : Future.any([q, cancel.done.then((_) => -1)]);
   }
 
-  // The root of the server is open and no wider failure explains it.
+  // Whether [at] (ms since epoch) is recent enough to stand for a new ask.
+  bool _fresh(int? at) => at != null && _clock() - at <= fresh.inMilliseconds;
+
+  // The server is dead: its root is open and no wider failure explains it, or the last check of it said so (the book).
+  // A root that opened after the last answer makes the verdict; an answer after it unmakes it.
   bool _down(_Node s) {
-    final r = sentinel.roots.byKey(dnsRootKey(s.id));
-    return r != null && r.parent == null;
+    final key = _key(s), r = sentinel.roots.byKey(dnsRootKey(s.id)), v = book[key];
+    if (r != null && r.parent == null && (v == null || v.dead || r.since.millisecondsSinceEpoch >= v.at)) {
+      if (v == null || !v.dead) book.record(key, dead: true, at: r.since.millisecondsSinceEpoch);
+      return true;
+    }
+    return v?.dead == true;
   }
 
   /// The other transports of the same provider on the same side.
@@ -454,60 +581,86 @@ class DnsFailover {
           if (!identical(o, s) && o.c != null && s.c != null && o.provider == s.provider && o.side == s.side) o,
       ];
 
-  void _suspect(_Node s) {
+  void _suspect(_Node s, {int? from}) {
     final key = dnsRootKey(s.id);
     if (sentinel.roots.byKey(key) != null) return;
-    final since = s.missSince ?? _clock();
+    if (book[_key(s)]?.dead == true) {
+      // Dead already (stored, a reconnect or a restart did not forget it): a miss re-checks it and the verdict stands, so
+      // there is nothing to judge and no new event. Only an answer changes it.
+      book.record(_key(s), dead: true, at: _clock());
+      return;
+    }
+    final since = from ?? s.missSince ?? _clock();
     final others = _all.where((o) => !identical(o, s) && o.vpn == s.vpn).toList();
     final via = s.vpn ? topTag : null;
-    unawaited(sentinel.suspect(Suspicion(
-      kind: 'dns.down',
-      key: key,
-      subject: {'dns': s.id, 'path': s.path, if (s.vpn) 'route': topTag},
-      scope: Scope.of({'dns': s.id}),
-      level: Level.dns,
-      evidence: {'server': s.id, 'path': s.path, 'since': since},
-      window: window,
-      firstSeen: DateTime.fromMillisecondsSinceEpoch(since),
-      why: Why('dns.down', {'server': s.id, 'path': s.path}),
-      checks: [
-        // it answers now: a blip
-        Check.recovery('dns.answers', (cancel) async {
-          final ms = await _ask(s, cancel);
-          return CheckResult('dns.answers', ms >= 0 ? Outcome.pass : Outcome.fail, {'server': s.id});
-        }, timeout: const Duration(seconds: 20), level: Level.dns, via: via, resolver: s.id),
-        // another server of the same path answers: it is this server, not the path
-        if (others.isNotEmpty)
-          Check.diagnostic('dns.path', (cancel) async {
-            final asked = await Future.wait(others.map((o) => _ask(o, cancel)));
-            if (cancel.cancelled) return const CheckResult('dns.path', Outcome.inconclusive, {'reason': 'aborted'});
-            final ok = [for (var i = 0; i < others.length; i++) if (asked[i] >= 0) others[i].id];
-            return CheckResult('dns.path', ok.isNotEmpty ? Outcome.pass : Outcome.fail, {'path': s.path, 'answering': ok});
-          }, timeout: const Duration(seconds: 20), level: Level.dns, via: via),
-      ],
-      // The event is per provider and side: a transport that is down while another transport of its provider
-      // answers is a line in the log, not an entry in the journal (the provider works).
-      event: SuspicionEvent('dns', 'failed',
-          level: 'warn',
-          kindFor: (kind, e) {
-            if (kind != VerdictKind.confirmed) return null;
-            final alive = _siblings(s).where((o) => !_down(o)).toList();
-            if (alive.isNotEmpty) {
-              _note('info', 'dns: ${s.id} (${s.provider}, ${s.side}) does not answer, its provider still does through ${alive.map((o) => o.id).join(', ')}: not an event');
-              return null;
-            }
-            return ('dns', 'failed');
-          },
-          dataFor: (kind, e) => {
-                'server': e['server'],
-                'path': e['path'],
-                'since': e['since'],
-                'provider': s.provider,
-                'side': s.side,
-                'servers': [s.id, for (final o in _siblings(s)) o.id],
+    s.suspecting = true;
+    unawaited(sentinel
+        .suspect(Suspicion(
+          kind: 'dns.down',
+          key: key,
+          subject: {'dns': s.id, 'path': s.path, if (s.vpn) 'route': topTag},
+          scope: Scope.of({'dns': s.id}),
+          level: Level.dns,
+          evidence: {'server': s.id, 'path': s.path, 'since': since},
+          window: window,
+          firstSeen: DateTime.fromMillisecondsSinceEpoch(since),
+          why: Why('dns.down', {'server': s.id, 'path': s.path}),
+          checks: [
+            // it answers now: a blip. A miss of the round just made is that ask: the server is not asked a second time.
+            Check.recovery('dns.answers', (cancel) async {
+              if (_fresh(s.missAt)) {
+                return CheckResult('dns.answers', Outcome.fail, {'server': s.id, 'fresh': true, 'ageMs': _clock() - s.missAt!});
+              }
+              final ms = await _ask(s, cancel);
+              return CheckResult('dns.answers', ms >= 0 ? Outcome.pass : Outcome.fail, {'server': s.id});
+            }, timeout: const Duration(seconds: 20), level: Level.dns, via: via, resolver: s.id),
+            // another server of the same path answers: it is this server, not the path. The ones known dead are not
+            // asked (their verdict stands), nor the ones a round has just asked (their result stands).
+            if (others.isNotEmpty)
+              Check.diagnostic('dns.path', (cancel) async {
+                final answering = <String>[], dead = <String>[], ask = <_Node>[];
+                for (final o in others) {
+                  if (_down(o)) {
+                    dead.add(o.id);
+                  } else if (_fresh(o.okAt)) {
+                    answering.add(o.id);
+                  } else if (!_fresh(o.missAt)) {
+                    ask.add(o);
+                  }
+                }
+                final asked = await Future.wait(ask.map((o) => _ask(o, cancel)));
+                if (cancel.cancelled) return const CheckResult('dns.path', Outcome.inconclusive, {'reason': 'aborted'});
+                for (var i = 0; i < ask.length; i++) {
+                  if (asked[i] >= 0) answering.add(ask[i].id);
+                }
+                return CheckResult('dns.path', answering.isNotEmpty ? Outcome.pass : Outcome.fail,
+                    {'path': s.path, 'answering': answering, if (dead.isNotEmpty) 'dead': dead});
+              }, timeout: const Duration(seconds: 20), level: Level.dns, via: via),
+          ],
+          // The event is per provider and side: a transport that is down while another transport of its provider
+          // answers is a line in the log, not an entry in the journal (the provider works).
+          event: SuspicionEvent('dns', 'failed',
+              level: 'warn',
+              kindFor: (kind, e) {
+                if (kind != VerdictKind.confirmed) return null;
+                final alive = _siblings(s).where((o) => !_down(o)).toList();
+                if (alive.isNotEmpty) {
+                  _note('info', 'dns: ${s.id} (${s.provider}, ${s.side}) does not answer, its provider still does through ${alive.map((o) => o.id).join(', ')}: not an event');
+                  return null;
+                }
+                return ('dns', 'failed');
               },
-          note: (kind, e) => 'DNS server ${e['server']} (${e['path'] == 'proxy' ? 'via VPN' : 'direct'}) does not answer'),
-    )));
+              dataFor: (kind, e) => {
+                    'server': e['server'],
+                    'path': e['path'],
+                    'since': e['since'],
+                    'provider': s.provider,
+                    'side': s.side,
+                    'servers': [s.id, for (final o in _siblings(s)) o.id],
+                  },
+              note: (kind, e) => 'DNS server ${e['server']} (${e['path'] == 'proxy' ? 'via VPN' : 'direct'}) does not answer'),
+        ))
+        .whenComplete(() => s.suspecting = false));
   }
 
   // The Sentinel's context moved (a root opened or closed, the network, the core), or a round ended.
@@ -540,7 +693,8 @@ class DnsFailover {
     if (_stopped) return;
     _syncPark();
     final wrote = <String>{}, dropped = <String>{};
-    String? hint;
+    String? hint = _hintNext;
+    _hintNext = null;
     if (!auto) {
       for (final n in _flagged.where((n) => !n.on).toList()) {
         if (await _flag(n, true, 'auto off')) wrote.add(n.side);
@@ -567,7 +721,7 @@ class DnsFailover {
       if (wrote.contains(s.name) && now != null) await _verify(s, 'after a flag write');
       if (was == null || now == null || identical(was, now)) continue;
       // `failover`: a flag went off on this side in this pass; `back`: a flag came on again (or the side's state
-      // changed without a verdict); `off`: automatic switching was turned off.
+      // changed without a verdict); `node`: another exit node's verdicts; `off`: automatic switching was turned off.
       final reason = hint ?? (dropped.contains(s.name) ? 'failover' : 'back');
       _note('info', 'dns ${s.name}: ${was.id} → ${now.id} ($reason)');
       if (!_switches.isClosed) {
@@ -584,7 +738,7 @@ class DnsFailover {
     }
   }
 
-  Future<bool> _flag(_Node n, bool on, String reason) async {
+  Future<bool> _flag(_Node n, bool on, String reason, {bool strike = true}) async {
     final c = n.c;
     if (c == null || _stopped) return false;
     bool ok;
@@ -602,7 +756,7 @@ class DnsFailover {
     n.restored = false;
     if (on) {
       n.w.usedSince = _clock();
-    } else {
+    } else if (strike) {
       n.w.struck();
     }
     return true;
@@ -665,9 +819,10 @@ class DnsFailover {
   /// server that answers what goes through the VPN (the direct side's when the VPN side has none); `sides`: the
   /// candidate and the provider that answer each side now. `servers`, the direct side's in priority order, then
   /// the VPN side's, then the watched-only ones with `watched: true` (a rule's own, the OS resolver `system`):
-  /// `ok`: null = not tested yet, false = the last probe missed or the Sentinel has an open root for the server;
-  /// `ms`: the last result, -1 = no answer, -2 = not tested; `provider`, `side`, `kind` (doh / dot / doq / udp /
-  /// system); `flag`: the DNS flag as written (the watched `system` has none).
+  /// `ok`: the verdict, false = dead (an open root or the last check said so), true = answers, null = never checked
+  /// (a server without a verdict falls back to its last probe); `rechecking`: a check of it is under way (the verdict
+  /// shown is the old one until it ends); `ms`: the last result, -1 = no answer, -2 = not tested; `provider`, `side`,
+  /// `kind` (doh / dot / doq / udp / system); `flag`: the DNS flag as written (the watched `system` has none).
   Map<String, dynamic> toJson() => {
         'active': active,
         'auto': auto,
@@ -680,13 +835,17 @@ class DnsFailover {
         ],
       };
 
-  Map<String, dynamic> _json(_Node s) => {
-        'id': s.id,
-        'ok': s.w.health.ms == -2 ? null : s.w.health.answered && sentinel.roots.byKey(dnsRootKey(s.id)) == null,
-        'ms': s.w.health.ms,
-        'provider': s.provider,
-        'side': s.side,
-        'kind': s.kind,
-        if (s.c != null) 'flag': s.on,
-      };
+  Map<String, dynamic> _json(_Node s) {
+    final dead = _down(s), known = book[_key(s)] != null;
+    return {
+      'id': s.id,
+      'ok': dead ? false : known ? true : (s.w.health.ms == -2 ? null : s.w.health.answered),
+      'rechecking': s.testing != null || s.suspecting,
+      'ms': s.w.health.ms,
+      'provider': s.provider,
+      'side': s.side,
+      'kind': s.kind,
+      if (s.c != null) 'flag': s.on,
+    };
+  }
 }

@@ -22,7 +22,11 @@ String flagOfCountry(String code) {
 
 /// What the exit check found about one node.
 class NodeExit {
-  const NodeExit(this.ip, this.country, this.at);
+  const NodeExit(this.ip, this.country, this.at, {this.refresh = false});
+
+  /// The node's subscription was updated since the last check: the next background check ignores the hourly timer
+  /// ([ExitBook.markRefresh]). Kept in the file, not in [toJson] (the status' view of the entry).
+  final bool refresh;
 
   /// The exit IP.
   final String ip;
@@ -61,8 +65,26 @@ class ExitBook {
   void record(String id, {required String ip, String? country, required int at}) {
     final c = (country ?? '').trim().toUpperCase(), had = _nodes[id];
     final code = RegExp(r'^[A-Z]{2}$').hasMatch(c) ? c : had?.country ?? '';
-    _nodes[id] = NodeExit(ip, code, at);
+    _nodes[id] = NodeExit(ip, code, at, refresh: had?.refresh ?? false);
     onChange?.call();
+  }
+
+  /// The subscription of node [id] was updated: its next background check ignores the hourly timer (kept across a
+  /// restart, also when no controller runs). A node never checked has no entry and is due anyway.
+  void markRefresh(String id) {
+    final e = _nodes[id];
+    if (e == null || e.refresh) return;
+    _nodes[id] = NodeExit(e.ip, e.country, e.at, refresh: true);
+    onChange?.call();
+  }
+
+  /// Whether node [id] carries the [markRefresh] mark; takes it off (the check that starts now is the one it was for).
+  bool takeRefresh(String id) {
+    final e = _nodes[id];
+    if (e == null || !e.refresh) return false;
+    _nodes[id] = NodeExit(e.ip, e.country, e.at);
+    onChange?.call();
+    return true;
   }
 
   /// Forgets the nodes not checked for [keepFor] and, over [cap], the oldest. True when some went.
@@ -89,15 +111,15 @@ class ExitBook {
       final at = (e['at'] as num).toInt();
       if (at < cut) continue;
       final c = '${e['country'] ?? ''}';
-      _nodes[e['id'] as String] = NodeExit(e['ip'] as String, RegExp(r'^[A-Z]{2}$').hasMatch(c) ? c : '', at);
+      _nodes[e['id'] as String] = NodeExit(e['ip'] as String, RegExp(r'^[A-Z]{2}$').hasMatch(c) ? c : '', at, refresh: e['refresh'] == true);
       taken++;
     }
     return taken;
   }
 
-  /// `[{id, ip, country, at}]`.
+  /// `[{id, ip, country, at, refresh?}]`.
   List<Map<String, dynamic>> toJson() => [
-        for (final e in _nodes.entries) {'id': e.key, ...e.value.toJson()},
+        for (final e in _nodes.entries) {'id': e.key, ...e.value.toJson(), if (e.value.refresh) 'refresh': true},
       ];
 }
 

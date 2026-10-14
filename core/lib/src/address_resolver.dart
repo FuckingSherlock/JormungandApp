@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'address_book.dart';
+import 'dns_verdicts.dart';
 import 'dns_wire.dart';
 import 'routing.dart' show DnsCandidate;
 import 'svc_fetch.dart';
@@ -13,18 +14,29 @@ import 'svc_in.dart';
 // `domain_resolver` is fixed per outbound and cannot follow the DNS switching, so the config holds an address
 // (address_pin.dart) and this resolver keeps the addresses fresh in the [AddressBook].
 //
-// A lookup goes through the direct side's DNS servers of Settings → DNS (what is reached without the
-// tunnel): the encrypted ones first (DoH, then DoT, each in the side's order), then the plain ones (UDP /
-// TCP), the OS resolver last. A server the failover judged dead is skipped. DoQ has no Dart client: skipped.
+// A lookup is system work: no user DNS rule, rule choice or routing rule applies (docs/rules.md §6 → «Адреса
+// серверов»). It goes through the DNS servers of Settings → DNS in this order:
+//  1. the ENABLED ones on the direct side (what is reached without the tunnel): the encrypted (DoH, then DoT, each in
+//     the side's order), then the plain (UDP / TCP), the OS resolver (Local) last whatever place the list gives it; a
+//     server whose stored verdict ([DnsVerdictBook]) is dead is skipped;
+//  2. when all of those failed, the DISABLED built-in servers ([AddressSettings.disabled], the same order, Local last),
+//     one after another: nobody checks them periodically, so the attempt is the check, its outcome goes to the book.
+// DoQ has no Dart client: skipped.
 // A and AAAA go together (AAAA only with IPv6 on). DoH goes through the service fetcher's direct path
 // ([ServiceFetch], with or without sing-box); DoT, UDP and the OS resolver are the core's own connections
 // (outside_tunnel.dart → address-resolve).
 
-/// What a lookup reads from the settings: the direct side's candidates in the DNS rules' order and the IPv6 setting.
+/// What a lookup reads from the settings: the enabled servers of the direct side, the built-in servers that are not
+/// enabled for it, and the IPv6 setting.
 class AddressSettings {
-  const AddressSettings({this.candidates = const [], this.ipv6 = false});
+  const AddressSettings({this.candidates = const [], this.disabled = const [], this.ipv6 = false});
 
+  /// The direct side's candidates in the DNS rules' order (the lookup reorders: Local last).
   final List<DnsCandidate> candidates;
+
+  /// The built-in servers the user has switched off (a provider off, a kind not in use, not on the direct side), tried
+  /// only when every enabled one failed (`dnsDisabledOf`).
+  final List<DnsCandidate> disabled;
   final bool ipv6;
 }
 
@@ -36,8 +48,15 @@ class _Got {
 }
 
 class _Fail implements Exception {
-  _Fail(this.reason);
+  _Fail(this.reason, {this.dead, this.nx = false});
   final String reason;
+
+  /// The server answered that the name does not exist or has no address (NXDOMAIN, an empty answer).
+  final bool nx;
+
+  /// What the failure says about the server itself: true = it did not answer, false = it answered (the name has no
+  /// address), null = nothing (a bad address, a name without an address yet).
+  final bool? dead;
   @override
   String toString() => reason;
 }
@@ -49,9 +68,31 @@ class _Resp {
 }
 
 class _Try {
-  _Try(this.id, this.label, this.run);
+  _Try(this.id, this.label, this.run, [this.cand]);
   final String id, label;
   final Future<_Got> Function() run;
+
+  /// The server (null: the OS resolver nobody listed).
+  final DnsCandidate? cand;
+}
+
+/// What the servers of one lookup said besides addresses: how many answered "no such name" and how many answered
+/// otherwise (SERVFAIL, REFUSED, …).
+class _Seen {
+  int nx = 0, other = 0;
+}
+
+/// The servers of one lookup in the order they are asked.
+class _Ladder {
+  _Ladder(this.servers, this.local, this.disabled, this.disabledLocal);
+
+  /// Step 1: the enabled servers, then [local] (the OS resolver).
+  final List<_Try> servers;
+  final _Try? local;
+
+  /// Step 2: the disabled built-in servers, then [disabledLocal] when Local is switched off.
+  final List<_Try> disabled;
+  final _Try? disabledLocal;
 }
 
 final _rnd = Random();
@@ -61,7 +102,9 @@ class AddressResolver {
     required this.book,
     required this.fetch,
     required this.settings,
-    this.alive,
+    this.verdicts,
+    this.onNoAnswer,
+    this.onNameMissing,
     this.log,
     this.attempt = const Duration(seconds: 3),
     this.budget = const Duration(seconds: 8),
@@ -76,8 +119,17 @@ class AddressResolver {
   final ServiceFetch Function() fetch;
   final Future<AddressSettings> Function() settings;
 
-  /// A candidate (by id) the Sentinel judged dead is not asked; null = all are.
-  final bool Function(String candidateId)? alive;
+  /// The stored verdicts (dns_verdicts.dart): an enabled server judged dead is not asked; an attempt through a disabled
+  /// one is a check, its outcome is recorded here. Null = no verdicts, all are asked.
+  final DnsVerdictBook? verdicts;
+
+  /// A server did not answer a lookup (timeout, failed connection): evidence for that server's own check (the DNS
+  /// failover's suspicion), not a verdict. Never called for an answer of any kind.
+  final void Function(DnsCandidate c)? onNoAnswer;
+
+  /// Nobody gave an address and every server that answered said the name does not exist (NXDOMAIN or an empty answer):
+  /// the node's address is wrong (node / provider level), the DNS is fine.
+  final void Function(String host)? onNameMissing;
 
   /// `(level, text)` into the log (logs.md).
   final void Function(String level, String text)? log;
@@ -189,7 +241,7 @@ class AddressResolver {
 
   /// All the servers at once (see [lookup] `race`): returns the winner's entry, null when every one failed.
   /// The servers still running when it returns finish on their own (their timeouts); a late answer is only logged.
-  Future<AddressEntry?> _race(String host, String why, List<_Try> tries, AddressSettings st, Duration window, Stopwatch sw) {
+  Future<AddressEntry?> _race(String host, String why, List<_Try> tries, AddressSettings st, Duration window, Stopwatch sw, _Seen seen) {
     final done = Completer<AddressEntry?>();
     final pending = {for (var i = 0; i < tries.length; i++) i};
     var best = -1;
@@ -215,7 +267,7 @@ class AddressResolver {
       final ts = Stopwatch()..start();
       () async {
         try {
-          final g = await t.run().timeout(per, onTimeout: () => throw _Fail('timeout'));
+          final g = await t.run().timeout(per, onTimeout: () => throw _Fail('timeout', dead: true));
           pending.remove(i);
           if (done.isCompleted) {
             _note('info', 'address: $host via ${t.id} (${t.label}) answered late (${ts.elapsedMilliseconds} ms): not used [$why]');
@@ -230,6 +282,7 @@ class AddressResolver {
           }
         } on _Fail catch (f) {
           pending.remove(i);
+          _judged(t, f, seen, check: false);
           _note('info', 'address: $host via ${t.id} (${t.label}) failed: ${f.reason} (${ts.elapsedMilliseconds} ms)');
         } catch (e) {
           pending.remove(i);
@@ -246,41 +299,59 @@ class AddressResolver {
     final sw = Stopwatch()..start();
     try {
       final st = await settings();
-      var tries = _tries(host, st);
-      if (race != null && tries.length > 1) {
-        // the OS resolver stays the last resort: asked after the servers all failed
-        final servers = tries.sublist(0, tries.length - 1);
-        tries = tries.sublist(tries.length - 1);
-        final e = await _race(host, why, servers, st, race, sw);
+      final lad = _ladder(host, st);
+      final seen = _Seen();
+      // step 1: the enabled servers (in parallel when [race]), the OS resolver after them
+      final raced = race != null && lad.servers.isNotEmpty;
+      var e = raced ? await _race(host, why, lad.servers, st, race, sw, seen) : null;
+      e ??= await _walk(host, why, [if (!raced) ...lad.servers, ?lad.local], st, sw, seen, check: false);
+      if (e != null) return e;
+      // step 2: nobody enabled gave an address: the disabled built-in servers, one at a time; the attempt is their check
+      final off = [...lad.disabled, ?lad.disabledLocal];
+      if (off.isNotEmpty) {
+        _note('info', 'address: $host: no enabled server gave an address, trying the disabled built-in servers (${off.map((t) => t.id).join(', ')})');
+        e = await _walk(host, why, off, st, Stopwatch()..start(), seen, check: true);
         if (e != null) return e;
-      }
-      var n = 0;
-      for (final t in tries) {
-        final left = budget - sw.elapsed;
-        if (left <= Duration.zero) {
-          _note('warn', 'address: $host: out of time (${budget.inMilliseconds} ms), ${tries.length - n} server${tries.length - n == 1 ? '' : 's'} not tried');
-          break;
-        }
-        n++;
-        final ts = Stopwatch()..start();
-        try {
-          final g = await t.run().timeout(left < attempt ? left : attempt, onTimeout: () => throw _Fail('timeout'));
-          final e = _store(host, g, t.id);
-          _failedAt.remove(host);
-          final ips = e.ips(st.ipv6);
-          _note('info', 'address: $host → ${ips.join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds} ms [fresh, $why]'
-              '${n > 1 ? ', after $n tries' : ''}');
-          return e;
-        } on _Fail catch (f) {
-          _note('info', 'address: $host via ${t.id} (${t.label}) failed: ${f.reason} (${ts.elapsedMilliseconds} ms)${n < tries.length ? ', next' : ''}');
-        } catch (e) {
-          _note('info', 'address: $host via ${t.id} (${t.label}) failed: $e (${ts.elapsedMilliseconds} ms)${n < tries.length ? ', next' : ''}');
-        }
       }
       _failedAt[host] = _now().millisecondsSinceEpoch;
       _note('warn', 'address: $host not resolved by any server in ${sw.elapsedMilliseconds} ms [$why]${book.get(host) == null ? '' : ': the cached address stays'}');
+      if (seen.nx > 0 && seen.other == 0) {
+        // every server that answered says the name has no address: the name is wrong, not the DNS
+        _note('warn', 'address: $host: every server that answered says the name does not exist (${seen.nx} answer${seen.nx == 1 ? '' : 's'}): a problem with the node\'s address, not with DNS');
+        onNameMissing?.call(host);
+      }
     } catch (e) {
       _note('warn', 'address: $host: lookup failed: $e [$why]');
+    }
+    return null;
+  }
+
+  /// [tries] one after another within [budget] (a fresh stopwatch [sw] per step); the first address wins.
+  Future<AddressEntry?> _walk(String host, String why, List<_Try> tries, AddressSettings st, Stopwatch sw, _Seen seen, {required bool check}) async {
+    var n = 0;
+    for (final t in tries) {
+      final left = budget - sw.elapsed;
+      if (left <= Duration.zero) {
+        _note('warn', 'address: $host: out of time (${budget.inMilliseconds} ms), ${tries.length - n} server${tries.length - n == 1 ? '' : 's'} not tried');
+        break;
+      }
+      n++;
+      final ts = Stopwatch()..start();
+      try {
+        final g = await t.run().timeout(left < attempt ? left : attempt, onTimeout: () => throw _Fail('timeout', dead: true));
+        final e = _store(host, g, t.id);
+        _failedAt.remove(host);
+        if (check) _alive(t);
+        final ips = e.ips(st.ipv6);
+        _note('info', 'address: $host → ${ips.join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds} ms [fresh, $why]'
+            '${n > 1 ? ', after $n tries' : ''}');
+        return e;
+      } on _Fail catch (f) {
+        _judged(t, f, seen, check: check);
+        _note('info', 'address: $host via ${t.id} (${t.label}) failed: ${f.reason} (${ts.elapsedMilliseconds} ms)${n < tries.length ? ', next' : ''}');
+      } catch (e) {
+        _note('info', 'address: $host via ${t.id} (${t.label}) failed: $e (${ts.elapsedMilliseconds} ms)${n < tries.length ? ', next' : ''}');
+      }
     }
     return null;
   }
@@ -296,29 +367,63 @@ class AddressResolver {
     return e;
   }
 
-  /// The servers to ask, in order: encrypted, plain, the OS resolver.
-  List<_Try> _tries(String host, AddressSettings st) {
-    final enc = <_Try>[], plain = <_Try>[];
-    for (final c in st.candidates) {
-      if (c.side != 'direct' || c.kind == 'system') continue; // the OS resolver is always the last try
-      if (c.kind == 'doq') {
-        if (_skippedKinds.add('doq')) _note('info', 'address: DoQ servers are not used for lookups (no client for it)');
-        continue;
+  /// An attempt through [t] failed with [f]: what it says about the server. A server that did not answer (a timeout, a
+  /// failed connection) is evidence for ITS OWN check ([onNoAnswer]), never a verdict by itself; one that answered with
+  /// anything (NXDOMAIN, an empty answer, SERVFAIL) works. [check]: [t] is a disabled server nobody checks, so an answer
+  /// is recorded as its verdict (alive).
+  void _judged(_Try t, _Fail f, _Seen seen, {required bool check}) {
+    if (f.nx) {
+      seen.nx++;
+    } else if (f.dead == false) {
+      seen.other++;
+    }
+    final c = t.cand;
+    if (f.dead == true && c != null) onNoAnswer?.call(c);
+    if (f.dead == false && check) _alive(t);
+  }
+
+  void _alive(_Try t) => verdicts?.record(dnsVerdictKey(t.cand, null), dead: false, at: _now().millisecondsSinceEpoch);
+
+  /// The servers to ask: step 1, the enabled ones of the direct side (encrypted, plain; those with a dead verdict
+  /// skipped) and the OS resolver after them whatever place Local has in the list; step 2, the built-in ones that are
+  /// not enabled (the same order, Local last). With no Local anywhere in the settings the OS resolver still is the
+  /// last of step 1.
+  _Ladder _ladder(String host, AddressSettings st) {
+    _Try mk(DnsCandidate c) => switch (c.kind) {
+          'doh' => _Try(c.id, 'DoH', () => _viaDoh(c, host, st.ipv6), c),
+          'dot' => _Try(c.id, 'DoT', () => _viaStream(c, host, st.ipv6, tls: true), c),
+          _ => _Try(c.id, c.addr.startsWith('tcp://') ? 'TCP' : 'UDP',
+              () => c.addr.startsWith('tcp://') ? _viaStream(c, host, st.ipv6, tls: false) : _viaUdp(c, host, st.ipv6), c),
+        };
+    List<_Try> order(Iterable<DnsCandidate> cs, {required bool skipDead}) {
+      final enc = <_Try>[], plain = <_Try>[];
+      for (final c in cs) {
+        if (c.side != 'direct' || c.kind == 'system') continue;
+        if (c.kind == 'doq') {
+          if (_skippedKinds.add('doq')) _note('info', 'address: DoQ servers are not used for lookups (no client for it)');
+          continue;
+        }
+        if (skipDead && verdicts?.deadOf(dnsVerdictKey(c, null)) == true) {
+          _note('info', 'address: $host: ${c.id} skipped (stored verdict: dead)');
+          continue;
+        }
+        (c.kind == 'doh' || c.kind == 'dot' ? enc : plain).add(mk(c));
       }
-      if (alive != null && !alive!(c.id)) {
-        _note('info', 'address: $host: ${c.id} skipped (judged dead)');
-        continue;
-      }
-      switch (c.kind) {
-        case 'doh':
-          enc.add(_Try(c.id, 'DoH', () => _viaDoh(c, host, st.ipv6)));
-        case 'dot':
-          enc.add(_Try(c.id, 'DoT', () => _viaStream(c, host, st.ipv6, tls: true)));
-        default:
-          plain.add(_Try(c.id, c.addr.startsWith('tcp://') ? 'TCP' : 'UDP', () => c.addr.startsWith('tcp://') ? _viaStream(c, host, st.ipv6, tls: false) : _viaUdp(c, host, st.ipv6)));
+      return [...enc, ...plain];
+    }
+
+    _Try system(DnsCandidate? c) => _Try(c?.id ?? 'system', 'OS resolver', () => _viaSystem(host, st.ipv6), c);
+    final localOn = st.candidates.where((c) => c.kind == 'system').firstOrNull;
+    final localOff = st.disabled.where((c) => c.kind == 'system').firstOrNull;
+    _Try? local;
+    if (localOff == null || localOn != null) {
+      if (verdicts?.deadOf(dnsVerdictKey(localOn, null)) == true) {
+        _note('info', 'address: $host: ${localOn?.id ?? 'system'} skipped (stored verdict: dead)');
+      } else {
+        local = system(localOn);
       }
     }
-    return [...enc, ...plain, _Try('system', 'OS resolver', () => _viaSystem(host, st.ipv6))];
+    return _Ladder(order(st.candidates, skipDead: true), local, order(st.disabled, skipDead: false), localOn == null && localOff != null ? system(localOff) : null);
   }
 
   // ── transports ──
@@ -328,6 +433,7 @@ class AddressResolver {
     final v4 = <String>[], v6 = <String>[];
     var ttl = -1, with6 = false;
     String? why;
+    var answered = false, nx = true; // any parsed reply = the server works; nx: every reply says "no such name / no address"
     for (var i = 0; i < r.length; i++) {
       final data = r[i].data;
       if (data == null) {
@@ -339,6 +445,8 @@ class AddressResolver {
         why ??= 'malformed answer';
         continue;
       }
+      answered = true;
+      if (a.rcode != 0 && a.rcode != 3) nx = false;
       if (a.rcode != 0) {
         why ??= a.rcode == 3 ? 'NXDOMAIN' : 'rcode ${a.rcode}';
         continue;
@@ -348,7 +456,7 @@ class AddressResolver {
       v6.addAll(a.v6);
       if (!a.empty) ttl = ttl < 0 ? a.ttl : min(ttl, a.ttl);
     }
-    if (v4.isEmpty && (v6.isEmpty || !ipv6)) throw _Fail(why ?? 'no addresses in the answer');
+    if (v4.isEmpty && (v6.isEmpty || !ipv6)) throw _Fail(why ?? 'no addresses in the answer', dead: !answered, nx: answered && nx);
     return _Got(v4, ipv6 ? v6 : const [], ttl < 0 ? 0 : ttl, with6 && ipv6);
   }
 
@@ -417,11 +525,11 @@ class AddressResolver {
       // the certificate is checked against the server's name (an address literal: against the address)
       s = tls ? await SecureSocket.secure(raw, host: u.host) : raw;
     } on HandshakeException catch (e) {
-      throw _Fail('tls: ${e.message}');
+      throw _Fail('tls: ${e.message}', dead: true);
     } on SocketException catch (e) {
-      throw _Fail('connect: ${e.message}');
+      throw _Fail('connect: ${e.message}', dead: true);
     } on TlsException catch (e) {
-      throw _Fail('tls: ${e.message}');
+      throw _Fail('tls: ${e.message}', dead: true);
     }
     try {
       for (final q in qs) {

@@ -41,3 +41,17 @@ void setDnsFlag(DnsCandidate c, bool on, {String reason = '', DnsFlagLog? log, S
   }
   log?.call(level, 'dns flag: ${c.id} (${c.side}) ${on ? 'on' : 'off'}${reason.isEmpty ? '' : ' ($reason)'}: written to ${c.flagPath}');
 }
+
+/// Sets the flag file of an "If unavailable → Direct" selector ([TargetFallback.flagPath]): on = the selector sits on Direct.
+/// The same atomic rewrite; the flag is a name every query has (on) or none (off).
+void setFallbackFlag(TargetFallback f, bool on, {String reason = '', DnsFlagLog? log, String level = 'info'}) {
+  final file = File(f.flagPath!);
+  try {
+    file.parent.createSync(recursive: true);
+    writeFileDurableSync(file, dnsFlagJson(on));
+  } catch (e) {
+    log?.call('error', 'rules flag: ${f.tag} ${on ? 'on' : 'off'}${reason.isEmpty ? '' : ' ($reason)'}: not written to ${f.flagPath}: $e');
+    rethrow;
+  }
+  log?.call(level, 'rules flag: ${f.tag} ${on ? 'on' : 'off'}${reason.isEmpty ? '' : ' ($reason)'}: written to ${f.flagPath}');
+}

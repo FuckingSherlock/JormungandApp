@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'probe.dart';
+
 /// One "what is my IP" service: where to ask and how to read the answer.
 /// [read] returns {ip, country?, city?, org?} or null when the body has no IP.
 typedef ExitProbe = ({String name, String url, Map<String, dynamic>? Function(String body) read});
@@ -68,11 +70,42 @@ Future<Map<String, dynamic>> checkExitIp(
   Duration grace = const Duration(milliseconds: 1500),
   String? proxyAuth,
 }) async {
-  probes ??= exitProbes;
   // [proxyAuth] `user:pass` of a user port with a password (the daemon itself asks tunnel-in, which has none)
   final client = HttpClient()
     ..findProxy = ((_) => proxyPort == null ? 'DIRECT' : 'PROXY ${proxyAuth == null ? '' : '$proxyAuth@'}127.0.0.1:$proxyPort')
     ..connectionTimeout = timeout;
+  try {
+    return await _checkExit(probes ?? exitProbes, timeout, grace, (uri, _) async {
+      final req = await client.getUrl(uri);
+      final res = await req.close();
+      if (res.statusCode != 200) {
+        await res.drain<void>();
+        throw HttpException('HTTP ${res.statusCode}', uri: uri);
+      }
+      return const Utf8Decoder(allowMalformed: true).bind(res).join();
+    });
+  } finally {
+    client.close(force: true);
+  }
+}
+
+/// [checkExitIp] pinned to one node: asked through the probe inbound's rule of the outbound [tag] (probe.dart
+/// [probeGet]), so the answer is that node's exit by construction, whatever the main flow or the user's rules do.
+/// A pinned check is system traffic: it is never subject to the user's rules.
+Future<Map<String, dynamic>> checkExitVia(
+  Probe probe,
+  String tag, {
+  List<ExitProbe>? probes,
+  Duration timeout = const Duration(seconds: 7),
+  Duration grace = const Duration(milliseconds: 1500),
+}) =>
+    _checkExit(probes ?? exitProbes, timeout, grace, (uri, abort) => probeGet(probe, tag, '$uri', timeout: timeout, abort: abort));
+
+/// The body of a GET of [uri]; [abort] completes when the check is decided (the request can stop).
+typedef _Get = Future<String> Function(Uri uri, Future<void> abort);
+
+Future<Map<String, dynamic>> _checkExit(List<ExitProbe> probes, Duration timeout, Duration grace, _Get get) async {
+  final abort = Completer<void>();
   final done = Completer<Map<String, dynamic>>();
   final errors = <String>[];
   Map<String, dynamic>? best;
@@ -90,7 +123,7 @@ Future<Map<String, dynamic>> checkExitIp(
 
   final deadline = Timer(timeout, finish);
   for (final p in probes) {
-    _ask(client, p, timeout).then((r) {
+    _ask(get, abort.future, p, timeout).then((r) {
       best = _better(best, r);
       if (best!['country'] != null && best!['city'] != null) finish();
       graceTimer ??= Timer(grace, finish);
@@ -105,19 +138,12 @@ Future<Map<String, dynamic>> checkExitIp(
   } finally {
     deadline.cancel();
     graceTimer?.cancel();
-    client.close(force: true);
+    abort.complete();
   }
 }
 
-Future<Map<String, dynamic>> _ask(HttpClient client, ExitProbe p, Duration timeout) => Future(() async {
-      final uri = Uri.parse(p.url);
-      final req = await client.getUrl(uri);
-      final res = await req.close();
-      if (res.statusCode != 200) {
-        await res.drain<void>();
-        throw HttpException('HTTP ${res.statusCode}', uri: uri);
-      }
-      final r = _clean(p.read(await const Utf8Decoder(allowMalformed: true).bind(res).join()));
+Future<Map<String, dynamic>> _ask(_Get get, Future<void> abort, ExitProbe p, Duration timeout) => Future(() async {
+      final r = _clean(p.read(await get(Uri.parse(p.url), abort)));
       if (r == null) throw const FormatException('no ip in the answer');
       return {...r, 'source': p.name};
     }).timeout(timeout);

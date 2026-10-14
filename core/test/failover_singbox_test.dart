@@ -191,6 +191,9 @@ void main() {
       };
       final cfg = buildConfig(plan, probe: probe, info: info, dnsFlagDir: p.join(tmp.path, 'flags'));
       writeDnsFlags(info.dnsCandidates);
+      for (final f in info.fallbacks) {
+        if (f.flagPath != null) setFallbackFlag(f, false);
+      }
       await client.start(cfg);
       final api = client.api!;
       await _untilSelected(api);
@@ -237,6 +240,77 @@ void main() {
       dns.close();
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+
+  test('the Direct fallback flag: on = the rule\'s names are resolved by the DNS ladder, off = nothing of the rule is resolved locally', () async {
+    final dns = await _FakeDns.start();
+    final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    target.listen((r) => r.response
+      ..write('hello')
+      ..close());
+    final ssPort = await freePort(), mixed = await freePort();
+    final server = SingBoxProcess(_bin, p.join(tmp.path, 'server')), client = SingBoxProcess(_bin, p.join(tmp.path, 'client'));
+    try {
+      await server.start(_ssServer(ssPort));
+      final info = RoutingInfo();
+      final plan = {
+        'kind': 'unit',
+        'main': _group([{'type': 'direct'}], 'main'),
+        'mixedPort': mixed,
+        'routing': {
+          'dns': {
+            'servers': [
+              {'id': 'a', 'addr': 'udp://127.0.0.1:${dns.port}', 'via': 'direct', 'on': true},
+            ],
+          },
+          'targets': {
+            'src:x': {
+              'kind': 'unit',
+              'main': _group([
+                {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': ssPort, 'method': 'aes-128-gcm', 'password': 'loopback'},
+              ], 'x'),
+            },
+          },
+          'rules': [_rule('r1', {'domain_suffix': ['fb.test']}, target: 'src:x', fallback: 'direct')],
+          'quick': {'lan': false, 'final': 'proxy'},
+        },
+      };
+      final cfg = buildConfig(plan, probe: Probe(await freePort()), info: info, dnsFlagDir: p.join(tmp.path, 'flags'));
+      writeDnsFlags(info.dnsCandidates);
+      final fb = info.fallbacks.single;
+      expect(fb.tag, 'src:x~direct');
+      setFallbackFlag(fb, false);
+      await client.start(cfg);
+
+      bool asked(String stem) => dns.seen.any((s) => s.startsWith(stem));
+      // off: the selector sits on the target, the names go to the server as they are
+      for (var n = 0; n < 4; n++) {
+        await _get(mixed, 'off$n.fb.test', 1);
+      }
+      expect(asked('off'), isFalse, reason: 'flag off: no local resolve of the rule\'s names; seen ${dns.seen}');
+      // on: the ladder answers them (the flag file is read by sing-box a moment after the rewrite)
+      setFallbackFlag(fb, true);
+      var on = false;
+      for (var n = 0; n < 100 && !on; n++) {
+        await _get(mixed, 'on$n.fb.test', 1);
+        on = asked('on');
+        if (!on) await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(on, isTrue, reason: 'flag on: the ladder resolves the names; seen ${dns.seen}');
+      // off again: back to nothing
+      setFallbackFlag(fb, false);
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      dns.seen.clear();
+      for (var n = 0; n < 4; n++) {
+        await _get(mixed, 'back$n.fb.test', 1);
+      }
+      expect(asked('back'), isFalse, reason: 'flag off again; seen ${dns.seen}');
+    } finally {
+      await client.stop();
+      await server.stop();
+      await target.close(force: true);
+      dns.close();
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 60)));
 
   test('daemon: rules/fallback and dns/failed events, status.dns, POST /api/dns/auto', () async {
     final a = await _FakeDns.start(), b = await _FakeDns.start();

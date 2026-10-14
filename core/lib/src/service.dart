@@ -11,11 +11,13 @@ import 'api.dart';
 import 'appupdate.dart';
 import 'auto.dart';
 import 'catalog/catalog.dart' show Catalog;
+import 'catalog/rules_model.dart' show dnsBuiltinIds;
 import 'catalog/plan_builder.dart' show CatalogPlan;
 import 'config.dart';
 import 'device.dart';
 import 'dns_failover.dart';
 import 'dns_flags.dart';
+import 'dns_verdicts.dart';
 import 'durable.dart';
 import 'elevation.dart';
 import 'eventbook.dart';
@@ -93,6 +95,7 @@ class CoreService implements CoreApi {
     BoxFactory? boxFactory,
     SystemProxyBackend? sysProxy,
     this.exitCheck = checkExitIp,
+    this.exitVia,
     Timer Function(Duration, void Function())? timer,
     DateTime Function()? now,
     bool Function()? isElevated,
@@ -192,6 +195,12 @@ class CoreService implements CoreApi {
   final RuleSetCache ruleSets;
   final Future<Map<String, dynamic>> Function(int? proxyPort) exitCheck;
 
+  /// The exit check pinned to a node's outbound [tag] through the probe inbound (exitip.dart [checkExitVia]); Auto
+  /// runs these while connected. Not given: the real one, unless [exitCheck] was replaced (tests): then that stands in.
+  final Future<Map<String, dynamic>> Function(Probe probe, String tag)? exitVia;
+  Future<Map<String, dynamic>> Function(Probe probe, String tag) get _pinnedExit =>
+      exitVia ?? (identical(exitCheck, checkExitIp) ? checkExitVia : (_, _) => exitCheck(null));
+
   /// sing-box output and the core's own notes (the Logs tab).
   /// Warnings and errors also live in `problems.jsonl` (they survive a restart and the flood of connection lines).
   late final logBook = LogBook(file: File(p.join(dataDir, 'problems.jsonl')));
@@ -209,7 +218,10 @@ class CoreService implements CoreApi {
     svc: () => svcFetch,
     onSvcFailed: _subFailed,
     onDiverged: _subDiverged,
-    onNodes: (sid, nodes) => _warmNodes(nodes, 'subscription update'),
+    onNodes: (sid, nodes) {
+      _warmNodes(nodes, 'subscription update');
+      _exitSourceRefreshed(sid, nodes);
+    },
     onEvent: (type, data) {
       _event('sub', type, type == 'failed' ? 'error' : 'info', data,
           note: type == 'failed'
@@ -252,6 +264,11 @@ class CoreService implements CoreApi {
   /// Where each node leaves to by the exit check through it (exits.dart), kept in `<dataDir>/exit-nodes.json`.
   late final exitBook = ExitBook();
   late final exitStore = ExitBookStore(File(p.join(dataDir, 'exit-nodes.json')), exitBook, clock: () => _now().millisecondsSinceEpoch);
+
+  /// What the last check of each DNS server found (dns_verdicts.dart), kept in `<dataDir>/dns-verdicts.json`: a reconnect,
+  /// a restart or a change of the settings does not forget it, only a new check changes a verdict.
+  final dnsBook = DnsVerdictBook();
+  late final dnsStore = DnsVerdictStore(File(p.join(dataDir, 'dns-verdicts.json')), dnsBook, clock: () => _now().millisecondsSinceEpoch);
 
   /// Checks a failure against the state of the world before it is reported as one (sentinel/,
   /// docs/failures.md). Its context follows [pool], the platform ([setNetwork]) and this service's own
@@ -352,6 +369,8 @@ class CoreService implements CoreApi {
   Map<String, String> _ruleDns = const {}; // user rule id → the tag of its DNS server
   Map<String, List<String>> _ruleChains = const {}; // user rule id → the tags of its DNS chain, in priority order
   String _domainResolver = 'local'; // the tag that resolves what goes out directly
+  String _nodeResolver = 'local'; // the tag that resolves the names of nodes (the top of the system chain)
+  Set<String> _nameRoutes = const {}; // ids of the routes with a server sing-box looks up by name (RoutingInfo.nameRoutes)
   Map<String, List<DnsCandidate>> _dnsSides = const {}; // the candidates of each side, in the order the DNS rules try them
   List<DnsCandidate> _dnsCandidates = const []; // every DNS server of the config with a flag
 
@@ -371,6 +390,8 @@ class CoreService implements CoreApi {
     _ruleDns = info.ruleDns;
     _ruleChains = info.ruleChains;
     _domainResolver = info.domainResolver;
+    _nodeResolver = info.nodeResolver ?? info.domainResolver;
+    _nameRoutes = {...info.nameRoutes};
     _dnsSides = info.dnsSides;
     _dnsCandidates = info.dnsCandidates;
   }
@@ -462,6 +483,7 @@ class CoreService implements CoreApi {
     final dead = deadStore.load(); // the nodes found dead before: the ladder goes on from the step each was on
     if (dead > 0) logBook.note('info', 'auto: $dead unavailable nodes from the last run, each asked once at the first round, then on the ladder as before');
     exitStore.load(); // where the nodes leave to, as the last exit checks found
+    dnsStore.load(); // which DNS servers answered / were dead at the last check
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     sentinel.changes.listen((_) {
       _syncNetEvents(); // `net.offline` opened / closed: conn/offline, conn/online
@@ -488,6 +510,7 @@ class CoreService implements CoreApi {
   @override
   Future<void> dispose() async {
     _connectSeq++;
+    _exitSeq++; // an exit check still in flight is dropped when it ends: nothing is saved after the dispose
     _wakeUp();
     _stopAuto();
     _netTimer?.cancel();
@@ -513,6 +536,8 @@ class CoreService implements CoreApi {
       eventBook.close();
       await deadStore.close();
       await exitStore.close();
+      await dnsStore.close();
+      await _directWrite;
       await logBook.flush();
       await eventBook.flush(); // the journal is written behind the memory: what waits goes to the file now
     }
@@ -1087,12 +1112,21 @@ class CoreService implements CoreApi {
     failures.start();
     if (planTun(plan)) tunIngress.start(planTunStack(plan), ownRejects: [if (!planIpv6(plan)) 'ipv6Off']);
     final api = runner.api;
-    if (api == null) return; // no API service (a test's fake process)
+    if (api == null) {
+      _recheckExit(); // no controller (a test's fake process): the exit is asked of the tunnel port, unattributed
+      return;
+    }
     pool.resetNetwork(); // a new sing-box: the network is presumed up again
     final auto = _auto = AutoService(api, plan,
         pool: pool,
         exits: exitBook,
-        delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
+        exitCheck: (tag) async {
+          final pr = _probe;
+          if (pr == null) throw StateError('no probe inbound');
+          return _pinnedExit(pr, tag);
+        },
+        onExit: _changed,
+        delay:(tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         onDown: serverDown,
         note: runner.note,
@@ -1109,7 +1143,7 @@ class CoreService implements CoreApi {
       } else {
         eventBook.add('auto', 'switched', 'info', data: {'route': ?s.route, 'from': s.from, 'to': s.to, 'reason': s.reason});
       }
-      _recheckExit();
+      unawaited(_dns?.nodeChanged()); // another node: its stored DNS verdicts apply (no-op when the identity did not change)
     });
     auto.unstable.listen((u) {
       runner.note('auto: ${u.id} is unstable (${u.strikes} drops), back to it after ${u.holdMs ~/ 60000} min of answers');
@@ -1122,7 +1156,10 @@ class CoreService implements CoreApi {
       if (sentinel.context.netEpoch == netEpoch) return;
       netEpoch = sentinel.context.netEpoch;
       final s = sentinel.context.network.state;
-      if (s != NetState.none && s != NetState.captive) auto.networkChanged();
+      if (s != NetState.none && s != NetState.captive) {
+        auto.networkChanged();
+        unawaited(_dns?.networkChanged()); // the DNS in use is asked at once, in parallel
+      }
       _siteMemos.removeWhere((_, m) => !m.dead); // another network: the verdicts of the ladder are void, it starts over
     });
     // `lost` / `restored` are Auto's (no route answers); `offline` / `online` are the Sentinel's network
@@ -1287,6 +1324,7 @@ class CoreService implements CoreApi {
         pool: pool,
         mainIdentity: auto.identityOf,
         onDown: serverDown,
+        setFlag: (f, on) => setFallbackFlag(f, on, reason: on ? 'on Direct' : 'back', log: logBook.note),
         note: runner.note);
     fb.changes.listen((c) {
       // the journal names the first rule (else the first app) and counts the rest
@@ -1319,6 +1357,8 @@ class CoreService implements CoreApi {
         candidates: _dnsCandidates,
         watch: _dnsExtra,
         off: off,
+        book: dnsBook,
+        node: _dnsNode,
         setFlag: _setDnsFlag,
         query: _dnsAsk,
         flagCheck: _dnsFlagCheck,
@@ -1341,6 +1381,9 @@ class CoreService implements CoreApi {
         }, own: s.reason == 'off'));
     dns.start();
   }
+
+  /// The exit node the VPN side of the DNS is checked through: Auto's server in use, else the one the plan starts on.
+  String? _dnsNode() => _auto?.exitNodeIdentity() ?? dnsPlanNode(_plan);
 
   /// How long sing-box may take to apply a flag file before the core warns, and the pause between its questions
   /// (tests shorten them).
@@ -1400,41 +1443,30 @@ class CoreService implements CoreApi {
     return e == null ? null : (id: e.id, tag: e.tag, vpn: _dnsVpn.contains(e.id));
   }
 
-  /// The id of the DNS server that resolves the domain-named servers of route [routeId] (`default_domain_resolver`,
-  /// the OS resolver `system` when no direct server is set); null when every server of the route is an address
-  /// or the plan has no such route. A route depends on it (docs/failures.md → DNS-серверы как узлы).
+  /// The id of the DNS server that resolves the domain-named servers of route [routeId] (the `domain_resolver` of the
+  /// node outbounds: the top of the system chain, the OS resolver `system` when it has no server); null when no server
+  /// of the route is looked up by name by sing-box (all addresses or pinned to one; a chain's exit is resolved on the
+  /// entry's far side) or the plan has no such route. A route depends on it (docs/failures.md → DNS-серверы как узлы).
   String? _routeResolver(String routeId) {
     final plan = _plan;
     if (plan == null) return null;
     final rs = planRoutes(plan);
     for (var i = 0; i < rs.length; i++) {
-      if ('${rs[i]['id'] ?? routeTag(i)}' == routeId) return _hasDomainServer(rs[i]) ? _domainResolverId() : null;
+      if ('${rs[i]['id'] ?? routeTag(i)}' == routeId) return _nameRoutes.contains(routeId) ? _domainResolverId() : null;
     }
     return null;
   }
 
-  /// The resolver every route depends on: set only when each route has a domain-named server (one reachable
+  /// The resolver every route depends on: set only when each route has a server looked up by name (one reachable
   /// by address would still answer, so the resolver would not explain «no route answers»).
   String? _routesResolver() {
     final plan = _plan;
     if (plan == null) return null;
     final rs = planRoutes(plan);
-    return rs.isNotEmpty && rs.every(_hasDomainServer) ? _domainResolverId() : null;
+    return rs.isNotEmpty && [for (var i = 0; i < rs.length; i++) '${rs[i]['id'] ?? routeTag(i)}'].every(_nameRoutes.contains) ? _domainResolverId() : null;
   }
 
-  String? _domainResolverId() => [..._dnsServers, ..._dnsExtra].where((s) => s.tag == _domainResolver).firstOrNull?.id;
-
-  static bool _hasDomainServer(Map<String, dynamic> route) {
-    for (final g in [route['entry'], route['main']]) {
-      if (g is! Map) continue;
-      for (final n in (g['nodes'] as List? ?? const [])) {
-        final o = n is Map ? n['outbound'] : null;
-        final s = o is Map ? o['server'] : null;
-        if (s is String && s.isNotEmpty && InternetAddress.tryParse(s) == null) return true;
-      }
-    }
-    return false;
-  }
+  String? _domainResolverId() => [..._dnsServers, ..._dnsExtra].where((s) => s.tag == _nodeResolver).firstOrNull?.id;
 
   void _stopAuto({bool park = false}) {
     unawaited(_closed?.cancel());
@@ -1551,7 +1583,6 @@ class CoreService implements CoreApi {
         }
         _warning = joinWarnings(warnings);
         _startAuto(plan);
-        _recheckExit();
         _refreshLists(seq, plan, lists);
         return true;
       });
@@ -1721,7 +1752,7 @@ class CoreService implements CoreApi {
         'sysPort': runner.running || _recovering != null ? _sysPort : null,
         'error': _error,
         'warning': _warning,
-        'exit': _exit,
+        'exit': _exitStatus(),
         'recovering': _recovering,
         'down': _downSince == null
             ? null
@@ -1735,6 +1766,14 @@ class CoreService implements CoreApi {
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
         'speed': _lastSpeed, // last Speed Test of the connection: {down, up (bit/s), latency (ms), rpm, at (ms)}
       };
+
+  /// The exit shown as «your IP»: while connected with the controller, the latest answer of the node in use, the stored
+  /// one at once (null = nothing known yet / the user's re-check is running); else the direct / unattributed check
+  /// ([_recheckExit]).
+  Map<String, dynamic>? _exitStatus() {
+    final auto = _auto;
+    return runner.running && auto != null ? auto.exitInUse() : _exit;
+  }
 
   Map<String, dynamic>? _autoState() {
     final auto = _auto;
@@ -1755,24 +1794,53 @@ class CoreService implements CoreApi {
   /// Every service failing at once, fast, means the tunnel itself is not carrying yet (a
   /// urltest group still on an untested dead server right after connect): ask again in a
   /// couple of seconds, for up to 15 s, before reporting the error.
-  void _recheckExit() {
+  ///
+  /// The direct check (no tunnel) is not repeated while the network is the one the stored result was taken on
+  /// (same type and id, no move or loss since: the Sentinel context's `netEpoch`; the result and its network are kept in
+  /// `exit-direct.json`, so a restart keeps it too); [force] (the user's request) asks anyway.
+  void _recheckExit({bool force = false}) {
+    final auto = _auto;
+    if (runner.running && auto != null) {
+      // connected: the controller asks, pinned to the node in use (auto.dart); the status' exit is its answer
+      auto.recheckExit();
+      _changed();
+      return;
+    }
+    final direct0 = !runner.running;
+    if (direct0 && !force) {
+      _loadDirect();
+      final d = _directStored;
+      final k = _directNetKey(); // '|' = the platform has not said which network yet (a start): the stored one stands
+      if (d != null && (_directNet == k || k == '|') && (_directEpoch == null || _directEpoch == sentinel.context.netEpoch)) {
+        if (_exit == null || _exit!['direct'] != true) {
+          _exit = d;
+          _changed();
+        }
+        return;
+      }
+    }
     final seq = ++_exitSeq;
-    _exit = null;
-    _changed();
     final direct = !runner.running;
+    // the direct check keeps the last answer shown (as the node's re-check does): `rechecking` until the new one
+    Map<String, dynamic>? kept;
+    if (direct) {
+      _loadDirect();
+      final cur = _exit;
+      final base = cur != null && cur['direct'] == true && cur['error'] == null && cur['ip'] != null ? cur : _directStored;
+      if (base != null) kept = {...base, 'direct': true}..remove('error')..remove('rechecking');
+    }
+    _exit = kept == null ? null : {...kept, 'rechecking': true};
+    _changed();
     final since = Stopwatch()..start();
-    final node = direct ? null : _auto?.exitNode(); // the node the check goes through (null: not known, nothing is kept)
     Future<void> attempt() async {
       final sw = Stopwatch()..start();
       try {
+        // direct (no tunnel): the machine's own IP, nothing is kept per node; a connection with no controller (no API
+        // service) asks the tunnel port, also unattributed
         final e = await exitCheck(direct ? null : _tunnelPort ?? _mixedPort);
         if (seq == _exitSeq) {
           _exit = {...e, 'direct': direct, 'at': DateTime.now().millisecondsSinceEpoch};
-          // the node is the check's only if Auto's server in use did not move meanwhile
-          final ip = e['ip'];
-          if (node != null && ip is String && _auto?.exitNode() == node) {
-            exitBook.record(node, ip: ip, country: e['country'] as String?, at: _now().millisecondsSinceEpoch);
-          }
+          if (direct) _saveDirect(_exit!);
         }
       } catch (e) {
         if (seq != _exitSeq) return;
@@ -1781,7 +1849,7 @@ class CoreService implements CoreApi {
           if (seq == _exitSeq) return attempt();
           return;
         }
-        _exit = {'error': '$e', 'direct': direct};
+        _exit = {...?kept, 'error': '$e', 'direct': direct}; // a kept answer stays, the error next to it
       }
       _changed();
     }
@@ -1789,9 +1857,44 @@ class CoreService implements CoreApi {
     attempt();
   }
 
+  Map<String, dynamic>? _directStored; // the last completed direct check
+  String? _directNet; // the network (type|id) it was taken on
+  int? _directEpoch; // the Sentinel's netEpoch at that time; null = read from the file (another run)
+  bool _directLoaded = false;
+  File get _directFile => File(p.join(dataDir, 'exit-direct.json'));
+
+  String _directNetKey() {
+    final n = sentinel.context.network;
+    return '${n.type ?? ''}|${n.id ?? ''}';
+  }
+
+  void _loadDirect() {
+    if (_directLoaded) return;
+    _directLoaded = true;
+    try {
+      final j = jsonDecode(_directFile.readAsStringSync());
+      if (j is Map && j['result'] is Map && j['net'] is String) {
+        _directStored = (j['result'] as Map).cast<String, dynamic>();
+        _directNet = j['net'] as String;
+      }
+    } catch (_) {}
+  }
+
+  void _saveDirect(Map<String, dynamic> result) {
+    _directLoaded = true;
+    _directStored = result;
+    _directNet = _directNetKey();
+    _directEpoch = sentinel.context.netEpoch;
+    final text = jsonEncode({'v': 1, 'net': _directNet, 'result': result});
+    // one write after another, and dispose waits for the last: a file still open would hold the data dir
+    _directWrite = _directWrite.then((_) => writeFileDurable(_directFile, text)).catchError((_) {});
+  }
+
+  Future<void> _directWrite = Future.value();
+
   @override
   Future<Map<String, dynamic>> recheckExit() {
-    _recheckExit();
+    _recheckExit(force: true);
     return status();
   }
 
@@ -1810,9 +1913,24 @@ class CoreService implements CoreApi {
         onDiverged: _subDiverged,
       );
       final nodes = (r['patch'] as Map?)?['nodes'];
-      if (nodes is List) _warmNodes(nodes, 'subscription update');
+      if (nodes is List) {
+        _warmNodes(nodes, 'subscription update');
+        final sid = body['sid'];
+        if (sid is String) _exitSourceRefreshed(sid, nodes);
+      }
       return r;
     });
+  }
+
+  /// A subscription was updated: its nodes are asked where they leave to, whatever the hourly timer says. The mark is
+  /// set in the exit book here, running controller or not (the next check of the node, whenever it comes, takes it);
+  /// a running controller also asks the node in use at once.
+  void _exitSourceRefreshed(String sid, List nodes) {
+    for (final n in nodes) {
+      final o = n is Map ? n['outbound'] : null;
+      if (o is Map && n['unsupported'] == null) exitBook.markRefresh(serverIdentity(o));
+    }
+    _auto?.exitSourceRefreshed(sid);
   }
 
   /// `sub/diverged`: in Auto the direct and the tunnel's copies of a subscription have different sets of servers;
@@ -1858,7 +1976,9 @@ class CoreService implements CoreApi {
         book: addressBook,
         fetch: () => svcFetch,
         settings: _addressSettings,
-        alive: (id) => _dns?.alive(id) ?? _dnsFlagMemory[id] ?? true, // the running failover judges; its memory only between two sing-boxes
+        verdicts: dnsBook, // stored verdicts: dead enabled servers are skipped; attempts through disabled ones are checks
+        onNoAnswer: (c) => _dns?.lookupMissed(c.id), // evidence for the server's own check, never a verdict
+        onNameMissing: (h) => logBook.note('warn', 'address: node server name $h does not exist (every DNS server that answered says so): a problem with the node\'s address (provider / subscription), not with DNS'),
         log: logBook.note,
         now: _now,
       );
@@ -1929,7 +2049,10 @@ class CoreService implements CoreApi {
         logBook.note('warn', 'address: the saved DNS settings could not be read ($e): only the OS resolver is used');
       }
     }
-    final st = AddressSettings(candidates: dns == null ? const [] : (dnsSidesOf(dns)['direct'] ?? const []), ipv6: ipv6);
+    final st = AddressSettings(
+        candidates: dns == null ? const [] : (dnsSidesOf(dns)['direct'] ?? const []),
+        disabled: dns == null ? const [] : dnsDisabledOf(dns, dnsBuiltinIds),
+        ipv6: ipv6);
     _addrSettings = st;
     _addrSettingsAt = _now().millisecondsSinceEpoch;
     return st;
@@ -2129,13 +2252,20 @@ class CoreService implements CoreApi {
           warnings: warnings,
           info: info,
           pins: pins,
+          nodeResolverUsable: (c) => dnsBuiltinIds.contains(c.provider) && dnsBook.deadOf(dnsVerdictKey(c, null)) != true,
           selfPaths: _selfPaths,
           selfPackages: _selfPackages);
       // every DNS server's flag file must exist before sing-box reads the config; all on at a connect, the last
       // state again at a restart of ours (the files of the run before hold nothing we rely on)
+      // the stored verdicts (dns_verdicts.dart): the dead ones start off, the best that worked answers
       final memory = _dnsFlagMemory;
+      final stored = dnsStartFlags(info.dnsSides, dnsBook, node: dnsPlanNode(plan), others: info.dnsCandidates);
       writeDnsFlags(info.dnsCandidates,
-          on: (c) => memory[c.id] ?? true, reason: memory.isEmpty ? 'connect' : 'restart re-apply', log: logBook.note);
+          on: (c) => memory[c.id] ?? stored[c.id] ?? true, reason: memory.isEmpty ? 'connect' : 'restart re-apply', log: logBook.note);
+      // the files of the "If unavailable → Direct" flags must exist too; off until the fallback service has seen the selectors
+      for (final f in info.fallbacks) {
+        if (f.flagPath != null) setFallbackFlag(f, false, reason: 'start', log: logBook.note, level: 'debug');
+      }
       await runner.start(config);
     } on SingBoxError catch (e) {
       unawaited(tunCheck?.close());
@@ -2284,7 +2414,6 @@ class CoreService implements CoreApi {
       sentinel.context.starting('adopt');
       sentinel.context.started(since: _upSince);
       _startAuto(_plan!);
-      _recheckExit();
       _refreshLists(_connectSeq, plan, RuleSetFetch(((rec['ruleSetFiles'] as Map?) ?? const {}).cast<String, String>(), [], []));
       logBook.note('info', 'Took over the running tunnel (${plan['kind']}, up since $_upSince)');
       _changed();
@@ -2414,7 +2543,6 @@ class CoreService implements CoreApi {
         _upSince = _now();
         _attempt = 0;
         _startAuto(plan);
-        _recheckExit();
         if (_sysWanted) {
           warnings.add(await _sysOn(own: own) ?? '');
         } else {
@@ -2485,7 +2613,9 @@ class CoreService implements CoreApi {
       final was = a?.index;
       final ok = a == null || await a.setManual(manual, entry: entry is String ? entry : null, closeOld: closeOnSwitch);
       _plan = {..._plan!, 'manual': manual, if (a != null) 'current': a.index};
-      if (a != null && a.index != was) _recheckExit(); // another route = another exit
+      if (a != null && a.index != was) {
+        unawaited(_dns?.nodeChanged());
+      }
       if (!ok) runner.note('auto: manual on ${entry ?? '?'}: not a route of this plan, a new plan is needed');
     }
     _changed();

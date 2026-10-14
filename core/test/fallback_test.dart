@@ -47,6 +47,7 @@ class _Rig {
       bool uncertain = false,
       int Function()? clock,
       void Function(String groupTag, String key)? onDown,
+      void Function(TargetFallback s, bool on)? setFlag,
       List<Duration> steps = const [Duration.zero]}) {
     // a zero ladder: a dead target is asked every round (the ladder itself: ladder_test.dart and the test of its own below)
     pool = ProbePool.solo(clock: clock, ladder: DeadLadder(steps: steps));
@@ -58,7 +59,8 @@ class _Rig {
         settings: settings ?? const AutoSettings(failAfter: 2, flapGuard: false, stallAfter: Duration(milliseconds: 30)),
         pool: pool,
         clock: clock,
-        onDown: onDown);
+        onDown: onDown,
+        setFlag: setFlag);
     svc.changes.listen(changes.add);
   }
 
@@ -96,6 +98,30 @@ void main() {
     expect(r.svc.isDown('src:x'), isTrue);
     await Future<void>.delayed(Duration.zero);
     expect([for (final c in r.changes) '${c.target}>${c.to} ${c.rules.join('/')} ${c.back}'], ['src:x>block Video false', 'src:x>direct rule r2 false']);
+  });
+
+  test('the Direct flag: on before the selector moves to direct, off after it is back; block selectors have none', () async {
+    late _Rig r;
+    final log = <String>[];
+    r = _Rig(_plan([_rule('r1', 'src:x', 'block'), _rule('r2', 'src:x', 'direct')]), {'s::x1': 40, 's::x2': 60},
+        setFlag: (s, on) => log.add('${s.tag} ${on ? 'on' : 'off'} while on ${r.fake.groups[s.tag]!.now}'));
+    await r.svc.check();
+    expect(log, ['src:x~direct off while on src:x'], reason: 'the first look writes what sing-box says; only the Direct selector has a flag');
+    await r.svc.check();
+    expect(log, hasLength(1), reason: 'nothing changed: nothing written');
+    r.fake.alive.clear();
+    await r.svc.check();
+    expect(log, hasLength(1), reason: 'one miss');
+    await r.svc.check();
+    expect(r.on('src:x~direct'), 'direct');
+    expect(log.last, 'src:x~direct on while on src:x', reason: 'the flag is up while the selector still sits on the target');
+    expect(log, hasLength(2));
+    r.fake.alive.addAll({'s::x1': 40, 's::x2': 60});
+    await r.svc.check();
+    await r.svc.check();
+    expect(r.on('src:x~direct'), 'src:x');
+    expect(log.last, 'src:x~direct off while on src:x', reason: 'the flag goes down after the selector is back');
+    expect(log, hasLength(3));
   });
 
   test('onDown: a target whose current server missed failAfter times names that server (a chain: the entry and the exit)', () async {

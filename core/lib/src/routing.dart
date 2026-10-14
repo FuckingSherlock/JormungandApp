@@ -220,6 +220,12 @@ class TargetFallback {
   final String? fallbackTarget;
   final Map? fallbackSpec;
 
+  /// Only a selector whose fallback is Direct: its flag rule set (the file at [flagPath], on = the selector sits on
+  /// Direct, fallback.dart flips it). The resolve ladder in front of the rules that route here holds only while it is on
+  /// (docs/rules.md §6), so the names a rule sends direct after its target died are resolved by the flagged DNS servers,
+  /// not by `route.default_domain_resolver`; what still goes through the proxy is never resolved here.
+  String? flagTag, flagPath;
+
   /// The rules and the apps that route here (their names, for the journal).
   final rules = <String>[];
   final apps = <String>[];
@@ -360,6 +366,15 @@ class RoutingInfo {
 
   /// The tag of the server that resolves what goes out directly (`default_domain_resolver`); `local` is the OS resolver.
   String domainResolver = 'local';
+
+  /// The tag of the server that resolves the names of node outbounds (`domain_resolver` of each, [nodeResolverOf]): the
+  /// top of the system chain. Null when the config was built without a node resolver; then nodes use [domainResolver].
+  String? nodeResolver;
+
+  /// The ids of the routes (plan `id`, else `route<i>`) with a server sing-box looks up by name itself: still named by
+  /// a host (not pinned) in the group it dials directly (a chain's entry, a single route's nodes). Such a route depends
+  /// on [nodeResolver] (or [domainResolver] without one); a chain's exit does not (the entry resolves it).
+  final nameRoutes = <String>{};
 }
 
 /// What [buildRouting] adds to a config.
@@ -406,6 +421,9 @@ class Routing {
   /// Resolves the servers' own hostnames (proxy outbounds, DoH hosts) and what goes out
   /// directly: the direct side's top candidate, never one that needs the tunnel.
   String domainResolver = 'local';
+
+  /// The bootstrap server (the OS resolver's tag): what resolves a DoH / DoT host when nothing better is on.
+  String bootResolver = 'local';
 
   /// `route.rule_set`: local files only (the lists, and the DNS flags).
   final ruleSets = <Map<String, dynamic>>[];
@@ -458,12 +476,36 @@ bool dnsMatchable(Object? m) => switch (m) {
       _ => false,
     };
 
+/// [l] with the OS resolver (`system`) moved behind the others, the order otherwise kept: the core resolves the addresses
+/// of rules and its own destinations preferably NOT through the local resolver (it knows nothing of our flags and may
+/// be the one that fails), which stays the last resort (docs/rules.md §6). The DNS rules that answer the apps' own
+/// queries keep the user's order (Local first / last).
+List<DnsCandidate> localLast(List<DnsCandidate> l) => [
+      ...l.where((c) => c.kind != dnsKindSystem),
+      ...l.where((c) => c.kind == dnsKindSystem),
+    ];
+
+/// The DNS server (its tag) that resolves the names of nodes the core could not pre-resolve in time: the top of the system
+/// chain (docs/rules.md §6 → «Адреса серверов»), never the user's rule DNS. The first enabled direct-side server for
+/// which [usable] says yes (the caller keeps it to built-in servers whose stored verdict is not dead), encrypted before
+/// plain like the address resolver's ladder, DoQ left out; the OS resolver only when there is none.
+String nodeResolverOf(Routing r, bool Function(DnsCandidate c) usable) {
+  final direct = r.dnsSides['direct'] ?? const <DnsCandidate>[];
+  final ok = [for (final c in direct) if (c.kind != dnsKindSystem && c.kind != 'doq' && usable(c)) c];
+  final l = [...ok.where((c) => c.kind == 'doh' || c.kind == 'dot'), ...ok.where((c) => c.kind != 'doh' && c.kind != 'dot')];
+  if (l.isNotEmpty) return l.first.tag;
+  final local = direct.where((c) => c.kind == dnsKindSystem).firstOrNull;
+  if (local != null) return local.tag;
+  return r.dnsServers.any((s) => s['tag'] == 'local') ? 'local' : r.bootResolver;
+}
+
 /// The route rules `resolve` that resolve what [match] (conditions ANDed; empty = every connection) names through
 /// the first live candidate of [l]: with several, a rule per candidate that holds only while its flag is on and
 /// no flag above it is (so exactly one of them acts, whatever the connection already holds), and a last one for
 /// every flag off (the top candidate). One candidate: a plain `resolve` with its server; none: `resolve` without a
 /// server (the DNS rules and `dns.final` decide).
 List<Map<String, dynamic>> resolveRules(List<DnsCandidate> l, {List<Map<String, dynamic>> match = const []}) {
+  l = localLast(l);
   Map<String, dynamic> make(List<Map<String, dynamic>> parts, Map<String, dynamic> act) => parts.isEmpty
       ? act
       : parts.length == 1
@@ -496,6 +538,35 @@ Map<String, List<DnsCandidate>> dnsSidesOf(Map dns, {String dnsFlagDir = 'dns-fl
   final b = _Builder({'routing': {'dns': dns}}, (tag, g, {detour}) {}, const {}, dnsFlagDir);
   b._dns();
   return {for (final e in b.out.dnsSides.entries) e.key: [...e.value]};
+}
+
+/// The addresses of the BUILT-IN providers ([builtin]: their ids) of a `routing.dns` plan that are not enabled for the
+/// direct side: a provider that is off, a kind not in use, a provider without the direct side. Candidates on the direct
+/// side with `inUse: false`, in the provider's order. The address resolver tries them only when every enabled server
+/// failed (address_resolver.dart); they are not in the config and nobody checks them periodically.
+List<DnsCandidate> dnsDisabledOf(Map dns, Set<String> builtin, {String dnsFlagDir = 'dns-flags'}) {
+  final b = _Builder({'routing': {'dns': dns}}, (tag, g, {detour}) {}, const {}, dnsFlagDir);
+  b._dns();
+  final enabled = {for (final c in b.out.dnsSides['direct'] ?? const <DnsCandidate>[]) '${c.provider}|${c.kind}|${c.addr}'};
+  return [
+    for (final p in b._providers)
+      if (builtin.contains(p.id))
+        for (final t in p.transports)
+          if ((p.system ? t.kind == dnsKindSystem : t.kind != dnsKindSystem) &&
+              dnsServerJson('x', t.addr) != null &&
+              !enabled.contains('${p.id}|${t.kind}|${t.addr}'))
+            DnsCandidate(
+              side: 'direct',
+              provider: p.id,
+              kind: t.kind,
+              n: t.n,
+              tag: b._tagOf(p, t.kind, t.n, 'direct'),
+              addr: t.addr,
+              flagTag: 'flag-${b._tagOf(p, t.kind, t.n, 'direct')}',
+              flagPath: pth.join(dnsFlagDir, '${b._tagOf(p, t.kind, t.n, 'direct')}.json'),
+              inUse: false,
+            ),
+  ];
 }
 
 /// A DNS provider of the plan (the old single-address server too), as the builder reads it.
@@ -621,7 +692,9 @@ class _Builder {
       out.dnsSides[side]!.addAll(_side(side));
     }
     out.dnsEnabled.addAll([for (final c in [...out.dnsSides['direct']!, ...out.dnsSides['vpn']!]) c.entry]);
-    out.domainResolver = out.dnsSides['direct']!.isNotEmpty ? out.dnsSides['direct']!.first.tag : _boot;
+    final directList = localLast(out.dnsSides['direct']!); // the OS resolver only when nothing else is on the side
+    out.domainResolver = directList.isNotEmpty ? directList.first.tag : _boot;
+    out.bootResolver = _boot;
     _catchChain = _autoChain(_catchSide);
     out.dnsFinal = _catchChain?.list.first.tag ?? _boot;
   }
@@ -679,6 +752,20 @@ class _Builder {
   void _flagSets() {
     for (final c in out.dnsCandidates) {
       out.ruleSets.add({'type': 'local', 'tag': c.flagTag, 'format': 'source', 'path': c.flagPath});
+    }
+    for (final f in out.fallbacks) {
+      if (f.flagTag != null) out.ruleSets.add({'type': 'local', 'tag': f.flagTag, 'format': 'source', 'path': f.flagPath});
+    }
+  }
+
+  /// In front of a rule that routes to a selector falling back to Direct: the names it sends direct once its target died
+  /// are resolved by the flag-aware ladder of [chain] (the OS resolver last, [resolveRules]), only while the selector's
+  /// flag is on; while it sits on the target nothing is resolved here. [act]: the rule's action; [match]: its conditions.
+  void _resolveOnFallback(Map<String, dynamic>? act, _Chain? chain, Map<String, dynamic> match) {
+    final f = act == null ? null : out.fallbacks.where((x) => x.tag == act['outbound'] && x.flagTag != null).firstOrNull;
+    if (f == null || _needsIp(match)) return; // a rule that needs the IP has it already
+    for (final step in resolveRules(chain?.list ?? const [], match: [match, {'rule_set': [f.flagTag]}])) {
+      out._add(step);
     }
   }
 
@@ -891,6 +978,11 @@ class _Builder {
       f = TargetFallback(tag, target, main ? const {} : (targets[target] as Map?) ?? const {}, fallbackTag,
           fallbackTarget: fbTarget, fallbackSpec: fbTarget == null ? null : (targets[fbTarget] as Map?) ?? const {});
       out.fallbacks.add(f);
+      if (fallbackTag == 'direct') {
+        final i = out.fallbacks.length - 1;
+        f.flagTag = 'flag-fb$i';
+        f.flagPath = pth.join(flagDir, 'fb$i.json');
+      }
       out.outbounds.add({
         'type': 'selector',
         'tag': tag,
@@ -941,6 +1033,7 @@ class _Builder {
         final name = network == null ? label : '$label (${network.first.toUpperCase()})';
         // an app that goes direct has its names resolved by the first live candidate of the direct side
         if (act != null && direct) _resolveDirect(_autoChain('direct'), {...match, 'network': ?network});
+        _resolveOnFallback(act, _autoChain('direct'), {...match, 'network': ?network});
         if (act != null) out._add({...match, 'network': ?network, ...act}, RuleOrigin('app', name, id: id));
       }
 
@@ -1005,6 +1098,7 @@ class _Builder {
           _resolveDirect(chain, built.match);
         }
       }
+      if (action != 'block') _resolveOnFallback(act, _dnsFor(dns, direct: true), built.match);
       out._add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()},
           RuleOrigin('user', '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}', id: '${rule['id'] ?? ''}'));
       if (action != 'block') {

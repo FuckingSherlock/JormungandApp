@@ -21,6 +21,9 @@ class MockDoh {
 
   /// A different delay for some names.
   final delays = <String, Duration>{};
+
+  /// Names it answers with SERVFAIL (rcode 2) instead of their addresses.
+  final servfail = <String>{};
   final asked = <String>[];
   late HttpServer server;
 
@@ -49,7 +52,7 @@ class MockDoh {
         rr.addAll([0xC0, 0x0C, 0, type, 0, 1, ttl >> 24 & 255, ttl >> 16 & 255, ttl >> 8 & 255, ttl & 255, 0, a.rawAddress.length, ...a.rawAddress]);
       }
       final question = q.sublist(12, i + 5);
-      final head = [q[0], q[1], 0x81, ips == null ? 0x83 : 0x80, 0, 1, count >> 8, count & 255, 0, 0, 0, 0];
+      final head = [q[0], q[1], 0x81, ips == null ? 0x83 : (servfail.contains(name) ? 0x82 : 0x80), 0, 1, count >> 8, count & 255, 0, 0, 0, 0];
       req.response
         ..headers.contentType = ContentType('application', 'dns-message')
         ..headers.set('connection', 'close')
@@ -69,6 +72,20 @@ final _sf = ServiceFetch(endpoint: () => null);
 DnsCandidate doh(String id, String url, {String side = 'direct'}) => DnsCandidate(
     side: side, provider: id, kind: 'doh', n: 1, tag: 'dns-$id', addr: url, flagTag: 'f-$id', flagPath: 'f-$id', inUse: true);
 
+DnsCandidate localC({String side = 'direct'}) =>
+    DnsCandidate(side: side, provider: 'local', kind: 'system', n: 0, tag: 'dns-local', addr: 'system', flagTag: 'f-local', flagPath: 'f-local', inUse: true);
+
+DnsCandidate udp(String id, String addr) =>
+    DnsCandidate(side: 'direct', provider: id, kind: 'udp', n: 1, tag: 'dns-$id', addr: addr, flagTag: 'f-$id', flagPath: 'f-$id', inUse: true);
+
+/// A port nothing listens on (a server that does not answer).
+Future<String> deadDohUrl() async {
+  final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+  final url = 'http://127.0.0.1:${s.port}/dns-query';
+  await s.close();
+  return url;
+}
+
 void main() {
   late Directory tmp;
   late AddressBook book;
@@ -86,11 +103,15 @@ void main() {
     return tmp.delete(recursive: true);
   });
 
-  AddressResolver resolver(List<DnsCandidate> cs, {bool ipv6 = false, bool Function(String)? alive, Duration? attempt}) => AddressResolver(
+  AddressResolver resolver(List<DnsCandidate> cs,
+          {bool ipv6 = false, DnsVerdictBook? verdicts, List<DnsCandidate> disabled = const [], Duration? attempt, void Function(DnsCandidate)? onNoAnswer, void Function(String)? onNameMissing}) =>
+      AddressResolver(
         book: book,
         fetch: () => _sf,
-        settings: () async => AddressSettings(candidates: cs, ipv6: ipv6),
-        alive: alive,
+        settings: () async => AddressSettings(candidates: cs, disabled: disabled, ipv6: ipv6),
+        verdicts: verdicts,
+        onNoAnswer: onNoAnswer,
+        onNameMissing: onNameMissing,
         log: (l, t) => log.add('$l $t'),
         attempt: attempt ?? const Duration(seconds: 2),
         budget: const Duration(seconds: 6),
@@ -195,10 +216,11 @@ void main() {
       expect((await r.lookup('node.example', why: 'test'))!.via, 'g');
       expect(log.any((l) => l.contains('via dead') && l.contains('failed')), isTrue);
 
-      final skip = resolver([doh('g', good.url), doh('g2', good.url)], alive: (id) => id != 'g');
+      final vb = DnsVerdictBook()..record(dnsVerdictKey(doh('g', good.url), null), dead: true, at: 1);
+      final skip = resolver([doh('g', good.url), doh('g2', '${good.url}?b=1')], verdicts: vb);
       good.asked.clear();
       expect((await skip.lookup('node.example', why: 'test'))!.via, 'g2');
-      expect(log.any((l) => l.contains('g skipped (judged dead)')), isTrue);
+      expect(log.any((l) => l.contains('g skipped (stored verdict: dead)')), isTrue);
 
       // nobody answers: the OS resolver (localhost is always known)
       final sys = resolver([doh('dead', deadUrl)]);
@@ -212,6 +234,130 @@ void main() {
 
     test('no direct server on (every provider off, Local too): the OS resolver still answers', () async {
       expect((await resolver(const []).lookup('localhost', why: 'test'))!.via, 'system');
+    });
+
+    group('system work: the ladder, verdicts, evidence (docs/rules.md §6)', () {
+      late MockDoh nx; // knows no name: NXDOMAIN to everything
+      late String deadUrl;
+      final missed = <String>[], missing = <String>[];
+      setUp(() async {
+        nx = await MockDoh({}).start();
+        deadUrl = await deadDohUrl();
+        missed.clear();
+        missing.clear();
+      });
+      tearDown(() => nx.stop());
+
+      AddressResolver res(List<DnsCandidate> cs, {List<DnsCandidate> disabled = const [], DnsVerdictBook? verdicts}) =>
+          resolver(cs,
+              disabled: disabled,
+              verdicts: verdicts,
+              attempt: const Duration(milliseconds: 400),
+              onNoAnswer: (c) => missed.add(c.id),
+              onNameMissing: missing.add);
+
+      test('order: encrypted before plain, the OS resolver last whatever place the list gives it', () async {
+        good.answers['order.example'] = ['203.0.113.9'];
+        // Local first and a plain server (nothing listens there) before the DoH one: the DoH one answers first
+        final r = res([localC(), udp('plain', '127.0.0.1:9'), doh('g', good.url)]);
+        expect((await r.lookup('order.example', why: 'test'))!.via, 'g');
+        expect(log.any((l) => l.contains('via plain')), isFalse, reason: 'the plain server was never asked');
+        // a name only the OS resolver knows: the DoH server is asked (NXDOMAIN), then Local answers
+        expect((await r.lookup('localhost', why: 'test'))!.via, 'local');
+        expect(good.count('localhost', 1), 1);
+        expect(missing, isEmpty);
+      });
+
+      test('a server judged dead is skipped, an alive or unknown one is asked, nothing is recorded for the skipped', () async {
+        final vb = DnsVerdictBook()..record(dnsVerdictKey(doh('d', deadUrl), null), dead: true, at: 1);
+        final r = res([doh('d', deadUrl), doh('g', good.url)], verdicts: vb);
+        expect((await r.lookup('node.example', why: 'test'))!.via, 'g');
+        expect(log.any((l) => l.contains('d skipped (stored verdict: dead)')), isTrue);
+        expect(missed, isEmpty, reason: 'a skipped server is not asked, so it cannot miss');
+        expect(vb.deadOf(dnsVerdictKey(doh('d', deadUrl), null)), isTrue);
+      });
+
+      test('every enabled server failed: the disabled ones, in order, Local last; an answer is their verdict (alive)', () async {
+        final off = await MockDoh({'node.example': ['203.0.113.77']}).start();
+        addTearDown(off.stop);
+        final vb = DnsVerdictBook();
+        final r = res([doh('d', deadUrl)], disabled: [localC(), doh('off', off.url)], verdicts: vb);
+        final e = (await r.lookup('node.example', why: 'test'))!;
+        expect(e.via, 'off', reason: 'Local is the last of the disabled ones');
+        expect(e.v4, ['203.0.113.77']);
+        expect(vb.deadOf(dnsVerdictKey(doh('off', off.url), null)), isFalse);
+        expect(log.any((l) => l.contains('no enabled server gave an address, trying the disabled')), isTrue);
+
+        // the OS resolver among the disabled ones answers a name only it knows
+        final r2 = res([doh('d', deadUrl)], disabled: [doh('off', off.url), localC()], verdicts: vb);
+        expect((await r2.lookup('localhost', why: 'test'))!.via, 'local');
+        expect(vb.deadOf('system|system|direct'), isFalse);
+        expect(vb.deadOf(dnsVerdictKey(doh('d', deadUrl), null)), isNull, reason: 'the enabled one that missed got no verdict');
+
+        // an enabled server that answers: the disabled ones are not asked at all
+        off.asked.clear();
+        expect((await res([doh('g', good.url)], disabled: [doh('off', off.url)], verdicts: vb).lookup('node.example', why: 'test'))!.via, 'g');
+        expect(off.asked, isEmpty);
+      });
+
+      test('no answer is evidence for the server\'s own check (onNoAnswer), never a verdict; the same racing', () async {
+        final vb = DnsVerdictBook();
+        final r = res([doh('d', deadUrl), doh('g', good.url)], verdicts: vb);
+        expect((await r.lookup('node.example', why: 'test'))!.via, 'g');
+        expect(missed, ['d']);
+        expect(vb.length, 0);
+        missed.clear();
+        expect((await r.lookup('node.example', why: 'test', race: const Duration(milliseconds: 500)))!.via, 'g');
+        await Future<void>.delayed(const Duration(milliseconds: 800)); // the dead server's miss lands after the winner
+        expect(missed, ['d']);
+        expect(vb.length, 0);
+        // a disabled server that does not answer: evidence too, and still no verdict (only an answer is one)
+        missed.clear();
+        final off = await MockDoh({'node.example': ['203.0.113.77']}).start();
+        addTearDown(off.stop);
+        final r2 = res([], disabled: [doh('d2', deadUrl), doh('off', off.url), localC()], verdicts: vb);
+        expect((await r2.lookup('node.example', why: 'test'))!.via, 'off');
+        expect(missed, ['d2']);
+        expect(vb.deadOf(dnsVerdictKey(doh('d2', deadUrl), null)), isNull);
+        expect(vb.deadOf(dnsVerdictKey(doh('off', off.url), null)), isFalse);
+      });
+
+      test('NXDOMAIN or an empty answer is "the server works": the next server is asked, onNoAnswer and onNameMissing stay quiet', () async {
+        final empty = await MockDoh({'node.example': <String>[]}).start();
+        addTearDown(empty.stop);
+        final r = res([doh('n', nx.url), doh('e', empty.url), doh('g', good.url)]);
+        expect((await r.lookup('node.example', why: 'test'))!.via, 'g');
+        expect(nx.count('node.example', 1), 1);
+        expect(empty.count('node.example', 1), 1);
+        expect(missed, isEmpty);
+        expect(missing, isEmpty);
+      });
+
+      test('onNameMissing: every server that answered said the name does not exist (NXDOMAIN / empty), and only then', () async {
+        final empty = await MockDoh({'gone.invalid': <String>[]}).start();
+        addTearDown(empty.stop);
+        expect(await res([doh('n', nx.url), doh('e', empty.url)]).lookup('gone.invalid', why: 'test'), isNull);
+        expect(missing, ['gone.invalid']);
+        expect(missed, isEmpty);
+
+        // a server that does not answer is not an answer: the ones that did still say so
+        missing.clear();
+        expect(await res([doh('d', deadUrl), doh('n', nx.url)]).lookup('gone.invalid', why: 'test'), isNull);
+        expect(missing, ['gone.invalid']);
+        expect(missed, ['d']);
+
+        // SERVFAIL is an answer, but not "no such name": the name may exist
+        missing.clear();
+        final sf = await MockDoh({'gone.invalid': <String>[]}).start();
+        sf.servfail.add('gone.invalid');
+        addTearDown(sf.stop);
+        expect(await res([doh('n', nx.url), doh('sf', sf.url)]).lookup('gone.invalid', why: 'test'), isNull);
+        expect(missing, isEmpty);
+
+        // nobody answered at all: a DNS problem, not the node's name
+        expect(await res([doh('d', deadUrl)]).lookup('gone.invalid', why: 'test'), isNull);
+        expect(missing, isEmpty);
+      });
     });
 
     test('ensure: cache first, missing waited for, stale refreshed in the background, a failed name left alone for a while', () async {
@@ -309,6 +455,40 @@ void main() {
       expect(again.cursor, 1);
       good.answers['node.example'] = ['203.0.113.50'];
       expect((await r.lookup('node.example', why: 'd'))!.cursor, 0); // a different set starts over
+    });
+  });
+
+  group('dnsDisabledOf', () {
+    Map<String, dynamic> prov(String id, bool on, List<String> sides, List<Map<String, String>> transports, List<String> use) =>
+        {'id': id, 'on': on, 'sides': sides, 'use': use, 'transports': transports};
+    final dns = {
+      'servers': [
+        prov('cloudflare', true, ['direct', 'vpn'], [
+          {'kind': 'doh', 'addr': 'https://1.1.1.1/dns-query'},
+          {'kind': 'udp', 'addr': '1.1.1.1'},
+        ], ['doh']),
+        prov('google', false, ['direct'], [{'kind': 'doh', 'addr': 'https://8.8.8.8/dns-query'}], ['doh']),
+        prov('adguard', true, ['vpn'], [{'kind': 'doh', 'addr': 'https://unfiltered.adguard-dns.com/dns-query'}], ['doh']),
+        prov('mine', false, ['direct'], [{'kind': 'doh', 'addr': 'https://dns.mine.test/dns-query'}], ['doh']),
+        prov('local', false, ['direct'], [{'kind': 'system', 'addr': 'system'}], ['system']),
+      ],
+    };
+
+    test('built-in providers that are off, a kind not in use, or without the direct side; never a custom one, never an enabled one', () {
+      expect([for (final c in dnsSidesOf(dns)['direct']!) c.id], ['cloudflare-doh1']);
+      final off = dnsDisabledOf(dns, {'cloudflare', 'google', 'adguard', 'local'});
+      expect([for (final c in off) c.id], ['cloudflare-udp1', 'google-doh1', 'adguard-doh1', 'local']);
+      expect(off.every((c) => c.side == 'direct' && !c.inUse), isTrue);
+      expect(off.last.kind, 'system');
+      expect(off.first.addr, '1.1.1.1');
+    });
+
+    test('Local on: it is enabled, not disabled; nothing built-in left off: empty', () {
+      final on = {
+        'servers': [prov('local', true, ['direct'], [{'kind': 'system', 'addr': 'system'}], ['system'])]
+      };
+      expect(dnsDisabledOf(on, {'local'}), isEmpty);
+      expect(dnsDisabledOf(dns, <String>{}), isEmpty);
     });
   });
 

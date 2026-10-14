@@ -365,7 +365,17 @@ typedef DelayTest = Future<int> Function(String tag, String url, int timeoutMs);
 
 class AutoService {
   AutoService(this.api, Map<String, dynamic> plan,
-      {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, this.trace, this.onDown, ProbePool? pool, ExitBook? exits})
+      {required this.delay,
+      AutoSettings? settings,
+      int Function()? clock,
+      this.reach,
+      this.note,
+      this.trace,
+      this.onDown,
+      ProbePool? pool,
+      ExitBook? exits,
+      this.exitCheck,
+      this.onExit})
       : settings = settings ?? AutoSettings.fromPlan(plan),
         pool = pool ?? ProbePool.solo(),
         exits = exits ?? ExitBook(),
@@ -389,9 +399,21 @@ class AutoService {
   final ProbePool pool;
 
   /// Where each node leaves to, by the last exit check through it (exits.dart): the country of a node the provider
-  /// gave no flag to ([SiteNode.country]), and `exit` of the node state ([toJson]). The owner fills it
-  /// ([exitNode] says which node a check went through) and keeps it across restarts.
+  /// gave no flag to ([SiteNode.country]), and `exit` of the node state ([toJson]). The controller fills it itself
+  /// (the exit checks below, each pinned to the node it asks about); the owner keeps it across restarts.
   final ExitBook exits;
+
+  /// The exit check through the outbound [tag] (probe.dart [probeGet] via the probe inbound: system traffic, the
+  /// user's rules never apply, the answer is that node's by construction). null = Auto runs none.
+  final Future<Map<String, dynamic>> Function(String tag)? exitCheck;
+
+  /// An exit result arrived or the node in use changed: the status' exit ([exitInUse]) may differ.
+  final void Function()? onExit;
+
+  /// The least time between two background exit checks of one node (from the last completed check, kept with the
+  /// [exits] entry): a switch to a node, the start and the scouts ask only when it has passed. The user's re-check
+  /// ([recheckExit]) and an update of the node's subscription ([exitSourceRefreshed]) do not wait for it.
+  static const exitEvery = Duration(hours: 1);
 
   /// Whether a site (`host:port`) opens through an outbound tag (probe.dart probeReach);
   /// null = cannot be told. Without it the sites of failed requests are not tried again.
@@ -446,6 +468,7 @@ class AutoService {
       }
     }
     if (!on) _kickNow();
+    _syncExit();
     return ok;
   }
 
@@ -539,6 +562,7 @@ class AutoService {
   void networkChanged() {
     if (_stopped) return;
     pool.ladder.owe();
+    // (a node's exit does not depend on the user's network: no exit check starts here, only the hourly timer asks)
     if (_started) _kickNow();
   }
 
@@ -547,6 +571,7 @@ class AutoService {
     _started = true;
     // urltest re-picks on its own after its rounds: the groups stream tells at once
     _groupsSub = api.groupsChanged.listen((_) => refresh());
+    _syncExit();
     _schedule(settings.firstCheck);
   }
 
@@ -633,6 +658,7 @@ class AutoService {
       }
       checkedAt = _clock();
       _rounds++;
+      _scoutExits();
       if (_failCheck) {
         _failCheck = false;
         if (identical(_routes[index], cur) && cur.health.answered) {
@@ -870,12 +896,212 @@ class AutoService {
     return g.real.contains(key) ? flagOfCountry(exits.countryOf(g.ids[key]!)) : '';
   }
 
-  /// The identity ([exits] key) of the server the main flow leaves through now: the route in use's main group,
-  /// the server sing-box reported for it. null = not known yet (a Fastest group before urltest picked) or not shareable.
-  /// An exit check is the node's only if this is the same before and after it.
-  String? exitNode() {
+  // ── exit checks (docs/core.md → Проверка выхода) ──
+  // The controller asks where a node leaves to, pinned to the node's own outbound (the probe inbound), so the answer is
+  // the node's by construction. A running check is never cancelled by a switch: it ends and is recorded for its node;
+  // the node now in use gets its own, in parallel. Background checks run at most once per [exitEvery] per node.
+
+  final _exitResults = <String, Map<String, dynamic>>{}; // subject key → the latest answer ({ip, …} or {error})
+  final _exitRunning = <String, int>{}; // subject key → the newest running check (its number)
+  final _exitStored = <String, int>{}; // subject key → the number of the check whose answer is kept
+  final _exitDoneAt = <String, int>{}; // subject key → when its last check answered (the ones with no [exits] entry)
+  final _exitFailAt = <String, int>{}; // subject key → when its last check failed (a scout is not asked again within [exitEvery])
+  final _exitLoud = <int>{}; // numbers of the checks the user asked for: a failure is shown, the answer is waited for
+  final _exitRechecking = <String>{}; // keys whose status shows the kept answer as `rechecking` until the user's check answers
+  final _exitError = <String, String>{}; // key → the user's check failed while an answer is kept: shown next to it
+  String? _exitCur; // the key of the node in use at the last look
+  int _exitSeq = 0;
+
+  /// The node in use as an exit check sees it: [tag] its outbound (route's main group member), [id] its [exits] key
+  /// (null = not a shareable node), [key] what the results are kept by. null = not known yet (a Fastest group before
+  /// urltest picked).
+  ({String key, String tag, String? id})? _exitSubject() {
     final g = _routes[index].main, k = g.now;
-    return k != null && g.real.contains(k) ? g.ids[k] : null;
+    if (k == null || !g.keys.contains(k)) return null;
+    final id = g.real.contains(k) ? g.ids[k] : null;
+    final tag = g.member(k);
+    return (key: id ?? tag, tag: tag, id: id);
+  }
+
+  /// The latest exit answer of the node in use, as the status shows it (`direct: false`, `at`); `{error}` when
+  /// the check failed. A node answered before (this run, or an earlier one: its [exits] entry) shows that answer at once,
+  /// the check for it runs in the background; null = nothing known yet (being checked, or the node is not known yet).
+  /// The user's re-check keeps the answer on and adds `rechecking: true` until the new one arrives; when that check
+  /// fails the answer stays with `error` (the message) next to it.
+  Map<String, dynamic>? exitInUse() {
+    final s = _exitSubject();
+    if (s == null) return null;
+    var out = _exitResults[s.key] ?? _exitKnown(s.id);
+    final err = _exitError[s.key];
+    if (err != null && out != null && out['ip'] is String) out = {...out, 'error': err};
+    if (out != null && _exitRechecking.contains(s.key)) out = {...out, 'rechecking': true};
+    return out;
+  }
+
+  /// What the [exits] book holds for [id] as a status answer; null = nothing.
+  Map<String, dynamic>? _exitKnown(String? id) {
+    final e = id == null ? null : exits[id];
+    return e == null ? null : {'ip': e.ip, if (e.country.isNotEmpty) 'country': e.country, 'direct': false, 'at': e.at};
+  }
+
+  /// The answer shown for a node now (not an error): this run's latest, else the book's.
+  Map<String, dynamic>? _exitShown(String key, String? id) {
+    final r = _exitResults[key];
+    return r != null && r['ip'] is String ? r : _exitKnown(id);
+  }
+
+  /// Whether a background check of a node may start: none yet, or the last completed one is [exitEvery] old.
+  /// [failed]: a failed check counts too (the scouts do not ask a node that does not answer again at once).
+  bool _exitDue(String key, String? id, {bool failed = false}) {
+    int? last = id == null ? null : exits[id]?.at;
+    for (final t in [_exitDoneAt[key], if (failed) _exitFailAt[key]]) {
+      if (t != null && (last == null || t > last)) last = t;
+    }
+    return last == null || _clock() - last >= exitEvery.inMilliseconds;
+  }
+
+  /// Asks again where the node in use leaves to (the user's request): the timer does not apply; the status shows
+  /// the answer known stays shown with `rechecking` until the new one. A check already running for it answers; none runs, a new one does.
+  void recheckExit() {
+    final s = _exitSubject();
+    if (s == null) return;
+    _exitCur = s.key;
+    _startExit(s, loud: true);
+  }
+
+  /// A subscription ([sid]) was updated: its nodes are asked regardless of the timer, the one in use at once, the
+  /// scouts (below) when their turn comes. The mark lives in the [exits] book (the owner sets it also while no
+  /// controller runs); the check that starts takes it off, the timer moves to that check.
+  void exitSourceRefreshed(String sid) {
+    if (_stopped || exitCheck == null) return;
+    for (final r in _routes) {
+      final g = r.main;
+      for (final k in g.real) {
+        if (g.keys.contains(k) && _subOf(k) == sid) exits.markRefresh(g.ids[k]!);
+      }
+    }
+    final s = _exitSubject();
+    final now = _routes[index].main.now;
+    if (s != null && _started && s.id != null && now != null && _subOf(now) == sid) {
+      exits.takeRefresh(s.id!);
+      _exitCur = s.key;
+      _startExit(s, again: true);
+    }
+  }
+
+  // The node in use changed (a switch, a pick of the groups, the start): it gets its check when the timer allows
+  // (or its subscription was updated); else the status shows what is known of it.
+  void _syncExit() {
+    if (_stopped || exitCheck == null) return;
+    final s = _exitSubject();
+    if (s == null || s.key == _exitCur) return;
+    _exitCur = s.key;
+    final forced = s.id != null && exits.takeRefresh(s.id!);
+    if (forced || _exitDue(s.key, s.id)) {
+      _startExit(s, again: forced);
+    } else {
+      onExit?.call();
+    }
+  }
+
+  // [again]: a check runs for it already, but not a fresh one (its subscription was updated): both go on.
+  // [loud]: the user asked: the known answer shows `rechecking` until it answers, a failure is shown next to it.
+  void _startExit(({String key, String tag, String? id}) s, {bool again = false, bool loud = false}) {
+    if (_stopped || exitCheck == null) return;
+    final running = _exitRunning[s.key];
+    if (!again && running != null) {
+      if (loud) {
+        _exitLoud.add(running);
+        if (_exitRechecking.add(s.key)) onExit?.call();
+      }
+      return;
+    }
+    final n = ++_exitSeq;
+    _exitRunning[s.key] = n;
+    if (loud) _exitLoud.add(n);
+    _exitError.remove(s.key);
+    if (_exitCur == s.key) {
+      if (loud) _exitRechecking.add(s.key);
+      if (_exitResults[s.key]?.containsKey('error') == true) _exitResults.remove(s.key); // a stale error is not shown while it is asked again
+      onExit?.call();
+    }
+    unawaited(_runExit(s, n));
+  }
+
+  Future<void> _runExit(({String key, String tag, String? id}) s, int n) async {
+    final since = Stopwatch()..start();
+    Map<String, dynamic> out;
+    var ok = false;
+    for (;;) {
+      final sw = Stopwatch()..start();
+      try {
+        final e = await exitCheck!(s.tag);
+        out = {...e, 'direct': false, 'at': _clock()};
+        ok = true;
+        break;
+      } catch (e) {
+        // every service failing at once, fast, means the tunnel is not carrying yet (a urltest group still on an untested
+        // dead server right after the connect): ask again in a couple of seconds, for up to 15 s, while the node is in use
+        if (!_stopped && _exitCur == s.key && sw.elapsed < const Duration(seconds: 3) && since.elapsed < const Duration(seconds: 15)) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+          if (!_stopped && _exitRunning[s.key] == n && _exitCur == s.key) continue; // the node left meanwhile: the error stands
+        }
+        out = {'error': '$e', 'direct': false};
+        break;
+      }
+    }
+    if (_exitRunning[s.key] == n) _exitRunning.remove(s.key);
+    final loud = _exitLoud.remove(n);
+    if (n > (_exitStored[s.key] ?? 0)) {
+      final at = _clock();
+      if (ok) {
+        _exitStored[s.key] = n;
+        _exitDoneAt[s.key] = at;
+        _exitError.remove(s.key);
+        // the same IP (and country, when the check named one) as shown: only the time moves; another one replaces the answer
+        final before = _exitShown(s.key, s.id), ip = out['ip'];
+        final c = '${out['country'] ?? ''}'.trim().toUpperCase();
+        final same = before != null && before['ip'] == ip && (c.isEmpty || before['country'] == c);
+        if (s.id != null && ip is String) exits.record(s.id!, ip: ip, country: out['country'] as String?, at: out['at'] as int);
+        _exitResults[s.key] = same ? {...before, 'at': out['at']} : out;
+      } else {
+        _exitFailAt[s.key] = at;
+        final shown = loud || _exitShown(s.key, s.id) == null; // else the earlier answer stays on the status
+        if (shown) {
+          _exitStored[s.key] = n;
+          if (_exitShown(s.key, s.id) != null) {
+            _exitError[s.key] = '${out['error']}'; // the answer stays, the failure is shown next to it
+          } else {
+            _exitResults[s.key] = out;
+          }
+        }
+        if (!shown || _exitCur != s.key) trace?.call('auto: exit check through ${s.tag} failed${shown ? '' : ', the earlier answer stays'}: ${out['error']}');
+      }
+    }
+    if (loud) _exitRechecking.remove(s.key);
+    if (!_stopped) onExit?.call();
+  }
+
+  // The nodes that work now and have no country (the provider gave no flag, no check named one) are asked, each at most
+  // once per [exitEvery] (a failed ask counts), up to [_scoutExitsPerRound] a round: the scout of a failed site ranks by
+  // country ([scoutFor]). A node of an updated subscription ([exitSourceRefreshed]) is asked regardless.
+  static const _scoutExitsPerRound = 3;
+
+  void _scoutExits() {
+    if (_stopped || manual || exitCheck == null) return;
+    var left = _scoutExitsPerRound;
+    for (final n in workingNodes()) {
+      if (left == 0) return;
+      if (n.country.isNotEmpty) continue;
+      final g = _routes.firstWhere((r) => r.id == n.route).main;
+      if (!g.real.contains(n.server)) continue;
+      final id = g.ids[n.server]!;
+      if (_exitRunning.containsKey(id)) continue;
+      final forced = exits.takeRefresh(id);
+      if (!forced && !_exitDue(id, id, failed: true)) continue;
+      left--;
+      _startExit((key: id, tag: n.tag, id: id));
+    }
   }
 
   static String _subOf(String key) {
@@ -1039,6 +1265,7 @@ class AutoService {
       }
     }
     refreshedAt = _clock();
+    _syncExit();
     return true;
   }
 
@@ -1093,6 +1320,13 @@ class AutoService {
       }
     }
     return null;
+  }
+
+  /// The pool identity of the exit server the main flow leaves through now (the main group's node in use; null = not
+  /// known yet): what the DNS verdicts of the VPN side are bound to (dns_verdicts.dart). Read-only.
+  String? exitNodeIdentity() {
+    final g = _routes[index].main, k = g.now;
+    return k == null ? null : g.ids[k];
   }
 
   /// The one test of a server: ms through the group member [key], -1 = no answer. The
@@ -1261,6 +1495,7 @@ class AutoService {
     switchCount++;
     switchedAt = s.at;
     lastSwitch = s;
+    _syncExit(); // the node in use changed: it gets its own exit check
     if (!_switches.isClosed) _switches.add(s);
   }
 

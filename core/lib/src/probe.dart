@@ -223,6 +223,32 @@ Future<bool?> probeReach(Probe probe, String tag, String dest, {int timeoutMs = 
   }
 }
 
+/// The body (text) of a GET of [url] made through the outbound [tag] (the exit check, exitip.dart): the request
+/// leaves the probe inbound on the rule of [tag], past every user rule. Throws when nothing answers within [timeout] or
+/// the answer is not 200. [abort] completing closes the connection (the check has its answer already).
+Future<String> probeGet(Probe probe, String tag, String url, {Duration timeout = const Duration(seconds: 7), Future<void>? abort}) async {
+  final u = Uri.parse(url);
+  final https = u.scheme == 'https';
+  final port = u.hasPort ? u.port : (https ? 443 : 80);
+  final path = '${u.path.isEmpty ? '/' : u.path}${u.hasQuery ? '?${u.query}' : ''}';
+  final req = utf8.encode('GET $path HTTP/1.1\r\nHost: ${u.host}\r\nUser-Agent: Jormungand\r\nAccept: */*\r\nConnection: close\r\n\r\n');
+  final deadline = DateTime.now().add(timeout);
+  Duration left() => deadline.difference(DateTime.now());
+  _Wire? w;
+  try {
+    w = await _Wire.connect(probe.port).timeout(left());
+    final wire = w;
+    if (abort != null) unawaited(abort.then((_) => wire.close()));
+    await wire.socks(tag, probe.secret, u.host, port).timeout(left());
+    if (https) await wire.secure(u.host).timeout(left());
+    final (status, body) = await wire.get(req).timeout(left());
+    if (status != 200) throw HttpException('HTTP $status', uri: u);
+    return body;
+  } finally {
+    w?.close();
+  }
+}
+
 /// ms until the DNS server [server] (its tag in the config) has resolved [name] — a real
 /// query on the server's own path, direct or through the VPN as the server is set (see
 /// [Probe.inbound]); -1 = no answer with an address (so [name] must be one that exists).
@@ -367,6 +393,58 @@ class _Wire {
     final close = RegExp(r'^connection:\s*close', multiLine: true).hasMatch(head);
     final keep = RegExp(r'^connection:\s*keep-alive', multiLine: true).hasMatch(head);
     return head.startsWith('http/1.1') ? !close : keep;
+  }
+
+  /// Sends a GET, reads the whole answer (a body over 256 KiB is an error): the status and the body as text.
+  Future<(int, String)> get(List<int> req) async {
+    await _write(req);
+    int end;
+    while ((end = _headEnd()) < 0) {
+      await _wait();
+    }
+    final head = latin1.decode(_buf.sublist(0, end)).toLowerCase();
+    _buf.removeRange(0, end + 4);
+    final status = int.tryParse(RegExp(r'^http/1\.\d (\d{3})').firstMatch(head)?[1] ?? '');
+    if (status == null) throw const SocketException('not http');
+    const cap = 256 * 1024;
+    final body = <int>[];
+    if (RegExp(r'^transfer-encoding:.*chunked', multiLine: true).hasMatch(head)) {
+      for (;;) {
+        final size = int.tryParse((await _line()).split(';').first.trim(), radix: 16);
+        if (size == null) throw const SocketException('bad chunk');
+        if (size == 0) break;
+        if (body.length + size > cap) throw const SocketException('answer too long');
+        body.addAll(await _take(size));
+        await _take(2);
+      }
+    } else {
+      final len = int.tryParse(RegExp(r'^content-length:\s*(\d+)', multiLine: true).firstMatch(head)?[1] ?? '');
+      if (len != null) {
+        if (len > cap) throw const SocketException('answer too long');
+        body.addAll(await _take(len));
+      } else {
+        // no length: the body ends where the server closes
+        while (!_closed) {
+          await _wait();
+          if (_buf.length > cap) throw const SocketException('answer too long');
+        }
+        body.addAll(_buf);
+        _buf.clear();
+      }
+    }
+    return (status, utf8.decode(body, allowMalformed: true));
+  }
+
+  Future<String> _line() async {
+    for (;;) {
+      final i = _buf.indexOf(10);
+      if (i >= 0) {
+        final line = latin1.decode(_buf.sublist(0, i));
+        _buf.removeRange(0, i + 1);
+        return line.trim();
+      }
+      await _wait();
+    }
   }
 
   int _headEnd() {

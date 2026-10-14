@@ -127,7 +127,10 @@ to …` — раньше такие строки не распознавалис
   отвечает именем кандидата, что должен отвечать); `dns flag not applied after N s (<сторона>): expected X, Y answers`
   (warn) — не подхватил за `flagWait` (3 с); `… cannot be told, this sing-box has no flagcheck` (debug) — старый sing-box.
   Проверка идёт после записи, одна — после старта для обеих сторон.
-- `dns <сторона>: A → B (failover|back|off)` (info) — смена отвечающего кандидата (рядом событие `dns/switched`).
+- `dns <сторона>: A → B (failover|back|node|off)` (info) — смена отвечающего кандидата (рядом событие `dns/switched`;
+  `node` — сменилась нода выхода, применились вердикты новой). `dns/failed` пишется только при **смене** вердикта сервера на
+  «мёртв» (`docs/failures.md`, «Вердикт меняется только после перепроверки»): промах уже мёртвого сервера события не даёт.
+  `dns: exit node changed: …`, `dns: network changed: checking …` (info) — внеочередные проверки по смене ноды и сети.
 - `dns <сторона>: answers <кандидат>; flags on [id мс, …]; off [id (down) …]` (debug) — по строке на сторону в каждом
   раунде проверок.
 - `dns: <id> (<провайдер>, <сторона>) does not answer, its provider still does through …: not an event` (info) — упал

@@ -22,6 +22,34 @@ void main() {
     expect(b.countryOf('none'), '');
   });
 
+  test('refresh mark: set on a checked node only, taken once, kept by a new answer set meanwhile, saved in the file', () async {
+    final b = ExitBook();
+    b.markRefresh('none'); // never checked: no entry, due anyway
+    expect(b.takeRefresh('none'), isFalse);
+    b.record('n1', ip: '1.1.1.1', country: 'DE', at: 10);
+    expect(b.takeRefresh('n1'), isFalse);
+    b.markRefresh('n1');
+    expect(b.toJson().single, containsPair('refresh', true));
+    expect(b['n1']!.toJson().containsKey('refresh'), isFalse, reason: 'not a part of the status view');
+
+    final dir = Directory('.data-dev/exits_test')..createSync(recursive: true);
+    final file = File('${dir.path}/exit-nodes-refresh.json');
+    if (file.existsSync()) file.deleteSync();
+    final now = 20;
+    final store = ExitBookStore(file, b, clock: () => now, debounce: Duration.zero);
+    b.markRefresh('n1'); // already marked: nothing changes
+    b.record('n2', ip: '2.2.2.2', at: 15);
+    await store.close();
+    final again = ExitBook();
+    expect(ExitBookStore(file, again, clock: () => now).load(), 2);
+    expect(again['n1']!.refresh, isTrue);
+    expect(again['n2']!.refresh, isFalse);
+
+    expect(again.takeRefresh('n1'), isTrue);
+    expect(again.takeRefresh('n1'), isFalse, reason: 'once');
+    expect(again['n1']!.ip, '1.1.1.1');
+  });
+
   test('store: written after a change, read back by a new book; stale and damaged entries are left out', () async {
     final dir = Directory('.data-dev/exits_test')..createSync(recursive: true);
     final file = File('${dir.path}/exit-nodes.json');

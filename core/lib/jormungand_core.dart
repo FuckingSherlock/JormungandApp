@@ -15,6 +15,7 @@ export 'src/conn_view.dart';
 export 'src/daemon.dart';
 export 'src/device.dart';
 export 'src/dns_failover.dart';
+export 'src/dns_verdicts.dart';
 export 'src/dns_probe.dart';
 export 'src/dns_wire.dart';
 export 'src/elevation.dart';

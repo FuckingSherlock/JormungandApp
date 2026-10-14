@@ -2,6 +2,7 @@
 // the files and sing-box reading them), fake DNS queries, the Sentinel judging the misses (time by hand). A miss is
 // evidence for `dns.down`; a confirmed root turns the candidate's flag off, a closed one that answered again turns it on.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:jormungand_core/jormungand_core.dart';
 import 'package:test/test.dart';
@@ -15,7 +16,7 @@ DnsCandidate _c(String id, {String side = 'direct', String? provider, String kin
       kind: kind,
       n: 1,
       tag: 'dns-$id',
-      addr: 'udp://127.0.0.1:1',
+      addr: 'udp://127.0.0.1:1/$id', // the verdict is about the address: one per candidate
       flagTag: 'flag-dns-$id',
       flagPath: 'flags/dns-$id.json',
       inUse: inUse,
@@ -35,7 +36,10 @@ class _Rig {
     this.refuseMode = false,
     this.flagNull = false,
     this.neverApplied = false,
+    DnsVerdictBook? verdicts,
+    this.nodeId,
   }) {
+    this.verdicts = verdicts ?? DnsVerdictBook();
     this.uncertain = uncertain;
     DnsCandidate make(String id, String side, {bool inUse = true}) => _c(id, side: side, provider: providers[id], inUse: inUse);
     final d = [for (final id in direct) make(id, 'direct')], v = [for (final id in vpn) make(id, 'vpn')];
@@ -78,6 +82,8 @@ class _Rig {
       auto: auto,
       pool: pool,
       clock: () => time.t.millisecondsSinceEpoch,
+      book: this.verdicts,
+      node: () => nodeId,
       note: (level, line) => notes.add('$level $line'),
       flagWait: const Duration(milliseconds: 30),
       flagPoll: Duration.zero,
@@ -86,6 +92,8 @@ class _Rig {
   }
 
   final time = FakeTime();
+  late final DnsVerdictBook verdicts;
+  String? nodeId;
   late final Sentinel sentinel;
   late final EventBook book;
   late final DnsFailover svc;
@@ -293,7 +301,7 @@ void main() {
     expect(r.events('failed'), hasLength(1));
     expect(r.checks, isEmpty, reason: 'a single candidate has no flag rule in the config to look at');
     expect(r.svc.toJson()['servers'], [
-      {'id': 'a', 'ok': false, 'ms': -1, 'provider': 'a', 'side': 'direct', 'kind': 'udp', 'flag': false},
+      {'id': 'a', 'ok': false, 'rechecking': false, 'ms': -1, 'provider': 'a', 'side': 'direct', 'kind': 'udp', 'flag': false},
     ]);
     await r.dispose();
   });
@@ -385,6 +393,45 @@ void main() {
     await r.dispose();
   });
 
+  test('lookupMissed: a lookup that got no answer opens the server\'s suspicion (its own check decides), never a verdict by itself', () async {
+    final r = _Rig(direct: ['a', 'b']);
+    await r.settle();
+    await r.round();
+    final key = dnsVerdictKey(r.members['a'], null);
+    expect(r.verdicts.deadOf(key), isFalse);
+
+    // the server really is down: the suspicion runs its checks and confirms after the window
+    r.alive['dns-a'] = -1;
+    r.svc.lookupMissed('a');
+    await r.time.advanceSeconds(0);
+    expect((r.svc.toJson()['servers'] as List).first, containsPair('rechecking', true), reason: 'a suspicion is open');
+    expect(r.events('failed'), isEmpty);
+    expect(r.writes, isEmpty);
+    expect(r.verdicts.deadOf(key), isFalse, reason: 'the miss alone changed nothing');
+    await r.time.advanceSeconds(3);
+    expect(r.events('failed'), hasLength(1));
+    expect(r.writes, ['a off verdict']);
+    expect(r.verdicts.deadOf(key), isTrue);
+
+    // an unknown id, a server this config does not watch: left alone
+    r.svc.lookupMissed('nope');
+    await r.dispose();
+  });
+
+  test('lookupMissed: the server answers its own check: a blip, nothing written, no verdict', () async {
+    final r = _Rig(direct: ['a', 'b']);
+    await r.settle();
+    await r.round();
+    final key = dnsVerdictKey(r.members['a'], null);
+    r.svc.lookupMissed('a'); // the lookup missed, the server is fine
+    await r.time.advanceSeconds(3);
+    expect(r.events('failed'), isEmpty);
+    expect(r.writes, isEmpty);
+    expect(r.verdicts.deadOf(key), isFalse);
+    expect(r.svc.active, 'a');
+    await r.dispose();
+  });
+
   group('pingProvider', () {
     test('the network is up: the answer closes the root of a dead candidate and the ladder starts over', () async {
       final r = _Rig(direct: ['a', 'a2', 'b'], providers: {'a2': 'a'});
@@ -461,8 +508,8 @@ void main() {
         'vpn': {'active': null, 'provider': null},
       },
       'servers': [
-        {'id': 'a', 'ok': null, 'ms': -2, 'provider': 'a', 'side': 'direct', 'kind': 'udp', 'flag': true},
-        {'id': 'b', 'ok': null, 'ms': -2, 'provider': 'b', 'side': 'direct', 'kind': 'udp', 'flag': true},
+        {'id': 'a', 'ok': null, 'rechecking': false, 'ms': -2, 'provider': 'a', 'side': 'direct', 'kind': 'udp', 'flag': true},
+        {'id': 'b', 'ok': null, 'rechecking': false, 'ms': -2, 'provider': 'b', 'side': 'direct', 'kind': 'udp', 'flag': true},
       ],
     });
     r.uncertain = false;
@@ -732,5 +779,106 @@ void main() {
 
     expect(extra([{'id': 'g', 'addr': 'udp://127.0.0.1:5353', 'via': 'direct', 'on': true}]), ['$systemDnsId=local']);
     expect(extra([{'id': 's', 'addr': 'system', 'via': 'direct', 'on': true}]), isEmpty, reason: 'a server of its own is watched as any other');
+  });
+
+  group('verdicts that outlive a failover (dns_verdicts.dart)', () {
+    String key(String id, {String side = 'direct', String? node}) => dnsVerdictKey(_c(id, side: side), node);
+
+    test('a server stored as dead that misses again after a reconnect: the verdict stands, no new dns/failed', () async {
+      final book = DnsVerdictBook()..record(key('a'), dead: true, at: 1);
+      final r = _Rig(direct: ['a', 'b'], verdicts: book);
+      await r.settle();
+      r.alive['dns-a'] = -1;
+      await r.round(2);
+      await r.round(2);
+      await r.round(2);
+      expect(r.events('failed'), isEmpty);
+      expect(book.deadOf(key('a')), isTrue);
+      expect(r.svc.toJson()['servers'][0]['ok'], isFalse);
+      expect(r.svc.active, 'b');
+      // an answer after a re-check changes it
+      r.alive['dns-a'] = 20;
+      await r.svc.check();
+      expect(book.deadOf(key('a')), isFalse);
+      await r.dispose();
+    });
+
+    test('a fresh miss of a round is the confirmation: the server is not asked a second time', () async {
+      final r = _Rig(direct: ['a', 'b']);
+      await r.settle();
+      r.alive['dns-a'] = -1;
+      await r.round();
+      final asked = r.asked.where((s) => s.startsWith('dns-a ')).length;
+      await r.time.advanceSeconds(5);
+      expect(r.asked.where((s) => s.startsWith('dns-a ')).length, asked, reason: 'the round was the ask');
+      expect(r.events('failed'), hasLength(1));
+      expect(r.verdicts.deadOf(key('a')), isTrue);
+      await r.dispose();
+    });
+
+    test('start: the best that worked answers, the ones above it that never did are off; the stored dead is checked at once', () async {
+      final book = DnsVerdictBook()
+        ..record(key('b'), dead: false, at: 1)
+        ..record(key('c'), dead: true, at: 1);
+      final r = _Rig(direct: ['a', 'b', 'c'], verdicts: book);
+      expect(r.svc.flags, {'a': false, 'b': true, 'c': false});
+      expect(r.svc.active, 'b');
+      await r.settle();
+      r.svc.start();
+      await pumpEventQueue();
+      expect(r.asked.map((s) => s.split(' ').first).toSet(), {'dns-c'}, reason: 'only the stored dead one, before firstCheck');
+      await r.dispose();
+    });
+
+    test('the VPN side is bound to the exit node: the verdict of one node is not the other\'s; a move applies the new node\'s', () async {
+      final book = DnsVerdictBook()
+        ..record(key('v1', side: 'vpn', node: 'N1'), dead: true, at: 1)
+        ..record(key('v2', side: 'vpn', node: 'N1'), dead: false, at: 1);
+      final r = _Rig(vpn: ['v1', 'v2'], verdicts: book, nodeId: 'N1');
+      expect(r.svc.active, 'v2', reason: 'N1: v1 is dead');
+      await r.settle();
+      r.nodeId = 'N2';
+      await r.svc.nodeChanged();
+      expect(r.svc.active, 'v1', reason: 'N2 has no verdict about v1: it answers until proven otherwise');
+      await r.dispose();
+    });
+
+    test('one check per server at a time: a ping and a round at once ask it once; a network change asks the active server only', () async {
+      final r = _Rig(direct: ['a', 'b']);
+      await r.settle();
+      r.gate = Completer<void>();
+      final round = r.svc.check();
+      final ping = r.svc.pingProvider('a');
+      await pumpEventQueue();
+      expect(r.asked.where((s) => s.startsWith('dns-a ')), hasLength(1));
+      expect(r.svc.toJson()['servers'][0]['rechecking'], isTrue);
+      r.gate!.complete();
+      await Future.wait([round, ping]);
+      expect(r.svc.toJson()['servers'][0]['rechecking'], isFalse);
+
+      r.svc.start();
+      await pumpEventQueue();
+      r.asked.clear();
+      await r.svc.networkChanged();
+      expect(r.asked.map((s) => s.split(' ').first).toSet(), {'dns-a'});
+      await r.dispose();
+    });
+
+    test('the book survives a restart: written to the file, read back', () async {
+      final dir = Directory('.data-dev/dns-verdicts-test')..createSync(recursive: true);
+      final file = File('${dir.path}/dns-verdicts.json');
+      if (file.existsSync()) file.deleteSync();
+      final book = DnsVerdictBook();
+      final store = DnsVerdictStore(file, book, debounce: Duration.zero);
+      book.record('x|doh|direct', dead: true, at: DateTime.now().millisecondsSinceEpoch);
+      book.record('y|doh|vpn|N1', dead: false, at: DateTime.now().millisecondsSinceEpoch);
+      await store.close();
+      final back = DnsVerdictBook();
+      expect(DnsVerdictStore(file, back).load(), 2);
+      expect(back.deadOf('x|doh|direct'), isTrue);
+      expect(back.deadOf('y|doh|vpn|N1'), isFalse);
+      expect(back.deadOf('z|doh|direct'), isNull);
+      dir.deleteSync(recursive: true);
+    });
   });
 }
