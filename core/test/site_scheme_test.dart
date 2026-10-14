@@ -96,6 +96,9 @@ void main() {
   late AltReach scoutSays, elsewhereSays;
   late bool checkerOpens;
   AltReach? scoutGiven;
+  // the checker's polls (`check-result` requests), and a gate that holds their answers while it is set
+  late int polls;
+  Completer<void>? pollGate;
 
   int count(String what) => calls.where((c) => c == what).length;
 
@@ -108,6 +111,8 @@ void main() {
     elsewhereSays = const AltReach();
     checkerOpens = true;
     scoutGiven = null;
+    polls = 0;
+    pollGate = null;
     svc = CoreService(
       singBox: 'none',
       resolveAddresses: false, // hermetic: no real DoH
@@ -127,6 +132,9 @@ void main() {
             calls.add('checker');
             return (status: 200, body: jsonEncode({'ok': 1, 'request_id': 'r', 'nodes': nodes}));
           }
+          polls++;
+          final gate = pollGate;
+          if (gate != null) await gate.future;
           final one = checkerOpens ? [[1, 0.2, 'OK', '200', '1.1.1.1']] : [[0, 5.0, 'Connection timed out']];
           return (status: 200, body: jsonEncode({for (final k in nodes.keys) k: one}));
         },
@@ -197,13 +205,45 @@ void main() {
       expect([e['type'], e['verdict']], ['unreachable', 'confirmed']);
     });
 
-    test('the scout opens the site: site/blocked, the other subscriptions are not asked (the checker still is, beside the scout)', () async {
+    test('the scout opens the site: site/blocked, the other subscriptions are not asked, the checker (started beside the scout) is cancelled', () async {
       await start();
       scoutSays = const AltReach(via: 'B', viaServer: 'y::b');
       await autoFail('scout.example:443');
       expect(calls, isNot(contains('elsewhere')));
-      expect(count('checker'), 1);
+      expect(count('checker'), 1, reason: 'it started beside the scout');
       expect(siteEvents().single['type'], 'blocked');
+    });
+
+    test('the scout opens the site while the checker waits for its nodes: no further request, no check in the event, nothing cached', () async {
+      await start();
+      pollGate = Completer<void>(); // the checker's nodes have not answered yet
+      scoutSays = const AltReach(via: 'B', viaServer: 'y::b');
+      await autoFail('cancel.example:443');
+      final e = siteEvents().single;
+      expect(e['type'], 'blocked');
+      expect((e['data'] as Map).containsKey('check'), isFalse);
+      expect((e['trail'] as List).any((t) => '${(t as Map)['code']}' == 'site.checker'), isFalse);
+      expect(rawLines('cancel.example').any((l) => l.contains('checker') && l.contains('cancelled')), isTrue);
+      final seen = (calls.length, polls);
+      pollGate!.complete(); // the answer that was in flight comes: nothing is asked after it
+      pollGate = null;
+      await time.advanceSeconds(60);
+      expect((calls.length, polls), seen);
+      expect((siteEvents().single['data'] as Map).containsKey('check'), isFalse);
+      // the dropped run left nothing in the cache: the next ask goes to the network again
+      final r = await svc.siteChecker.check('cancel.example', 443);
+      expect(r.state, 'opens');
+      expect(count('checker'), 2);
+    });
+
+    test('the scout does not open it: the checker\'s answer is used as before (the event carries it)', () async {
+      await start();
+      scoutSays = const AltReach(tried: [(route: 'B', server: 'y::b')]);
+      await autoFail('used.example:443');
+      expect(polls, greaterThan(0));
+      final e = siteEvents().single;
+      expect(((e['data'] as Map)['check'] as Map)['state'], 'opens');
+      expect(rawLines('used.example').any((l) => l.contains('cancelled')), isFalse);
     });
 
     test('the checker says it does not open: the other subscriptions are skipped, the verdict is «dead», quiet', () async {

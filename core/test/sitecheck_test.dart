@@ -1,4 +1,5 @@
 // The external checker (sitecheck.dart): check-host.net's answers parsed and judged, with no network.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,7 +14,7 @@ class _Checker {
   final List<Map<String, Object?>> rounds;
   final calls = <Uri>[];
   final ports = <int?>[];
-  var polls = 0;
+  int polls = 0;
   bool tunnelDown = false;
   int status = 200;
 
@@ -168,6 +169,87 @@ void main() {
       expect((await ch.check('c.example', 443, manual: true)).state, 'opens');
       t = t.add(const Duration(seconds: 61));
       expect((await ch.check('d.example', 443)).state, 'opens');
+    });
+
+    group('cancel', () {
+      final allOk = {'de1': _okHttp(0.2), 'fr1': _okHttp(0.2), 'nl1': _okHttp(0.2), 'us1': _okHttp(0.2)};
+      final pending = {'de1': null, 'fr1': null, 'nl1': null, 'us1': null};
+
+      test('cancelled before the ask: no request at all', () async {
+        final c = _Checker(_nodes, [allOk]);
+        final cancel = Cancel()..cancel('x');
+        final r = await _make(c).check('example.com', 443, cancel: cancel);
+        expect(r.state, 'cancelled');
+        expect(c.calls, isEmpty);
+      });
+
+      test('cancelled while it polls: the ask completes at once, no further poll, nothing cached', () async {
+        final cancel = Cancel();
+        late _Checker c;
+        c = _Checker(_nodes, [pending]);
+        final ch = SiteChecker(
+          get: (url, {proxyPort, timeout = Duration.zero}) {
+            // the second poll is the one that finds the asker gone
+            if (url.pathSegments.contains('check-result') && c.polls == 1) cancel.cancel('opened');
+            return c.call(url, proxyPort: proxyPort, timeout: timeout);
+          },
+          delay: (_) async {},
+        );
+        final r = await ch.check('example.com', 443, cancel: cancel);
+        expect(r.state, 'cancelled');
+        final n = c.calls.length;
+        expect(c.polls, 2);
+        await pumpEventQueue();
+        expect(c.calls.length, n, reason: 'no request after the cancel');
+        // not cached: a new ask starts a new run
+        c.rounds
+          ..clear()
+          ..add(allOk);
+        c.polls = 0;
+        final again = await ch.check('example.com', 443);
+        expect(again.state, 'opens');
+        expect(c.calls.length, greaterThan(n));
+      });
+
+      test('a request that hangs is not waited for', () async {
+        final cancel = Cancel();
+        final hang = Completer<({int status, String body})>();
+        var calls = 0;
+        final ch = SiteChecker(get: (url, {proxyPort, timeout = Duration.zero}) {
+          calls++;
+          return hang.future;
+        }, delay: (_) async {});
+        final f = ch.check('example.com', 443, cancel: cancel);
+        await pumpEventQueue();
+        cancel.cancel('opened');
+        expect((await f).state, 'cancelled');
+        hang.complete((status: 200, body: jsonEncode({'ok': 1, 'request_id': 'r', 'nodes': _nodes})));
+        await pumpEventQueue();
+        expect(calls, 1, reason: 'the answer that comes late starts nothing');
+      });
+
+      test('a run shared with an ask that cannot be cancelled goes on; the run is dropped only when every asker has cancelled', () async {
+        final c = _Checker(_nodes, [pending, allOk]);
+        final ch = _make(c);
+        final cancelA = Cancel(), cancelB = Cancel();
+        final a = ch.check('example.com', 443, cancel: cancelA);
+        final plain = ch.check('example.com', 443, manual: true);
+        cancelA.cancel('opened');
+        expect((await a).state, 'cancelled');
+        expect((await plain).state, 'opens', reason: 'the other asker still wants it');
+
+        final c2 = _Checker(_nodes, [pending]);
+        final ch2 = _make(c2);
+        final x = ch2.check('other.example', 443, cancel: cancelB);
+        final cancelC = Cancel();
+        final y = ch2.check('other.example', 443, cancel: cancelC);
+        cancelB.cancel('opened');
+        cancelC.cancel('opened');
+        expect([(await x).state, (await y).state], ['cancelled', 'cancelled']);
+        final n = c2.calls.length;
+        await pumpEventQueue();
+        expect(c2.calls.length, n);
+      });
     });
 
     test('two asks for one site at once share one run', () async {

@@ -3,6 +3,8 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
+import 'sentinel/model.dart' show Cancel;
+
 /// One GET of the checker's API: the status and the text of the answer. Fails (throws) when
 /// the host cannot be reached; an HTTP error status is an answer. The tests give their own.
 typedef CheckGet = Future<({int status, String body})> Function(Uri url, {int? proxyPort, Duration timeout});
@@ -35,7 +37,8 @@ Future<({int status, String body})> httpCheckGet(Uri url, {int? proxyPort, Durat
 /// `{state, at, kind: 'http' | 'tcp', via: 'tunnel' | 'direct', ok, total, nodes: [{cc, country, city, ok, code?, ms?, error?}], error?}`.
 /// [state]: `opens` (at least [SiteChecker.needOk] nodes reach it: it is down only for the user's
 /// routes), `down` (the checker's nodes do not reach it either), `failed` (no answer from the
-/// checker: [error] says why). The events add `pending` / `off` themselves.
+/// checker: [error] says why), `cancelled` (the asker withdrew: nobody records it, it is never cached).
+/// The events add `pending` / `off` themselves.
 class SiteCheckResult {
   SiteCheckResult({required this.state, required this.at, required this.kind, required this.via, this.nodes = const [], this.error});
 
@@ -84,6 +87,16 @@ class SiteCheckResult {
   return (pending: false, ok: false, code: null, ms: null, error: r.length > 2 && r[2] != null && '${r[2]}'.isNotEmpty ? '${r[2]}' : 'failed');
 }
 
+/// One run of the checker for one site, shared by every ask that came while it lasts; [abort] stops it
+/// (when [waiters] that can cancel have all done so).
+class _Run {
+  late Future<SiteCheckResult> future;
+  final abort = Cancel();
+  int waiters = 0;
+}
+
+class _Aborted implements Exception {}
+
 /// Asks check-host.net whether a site opens from its nodes around the world (docs/connect-model.md →
 /// «Фоновые ошибки», «Внешний чекер»): a site that fails through every route of the user is either down
 /// or blocked from where they are; this tells which. The request goes through [proxyPort] (the
@@ -119,16 +132,21 @@ class SiteChecker {
   final DateTime Function() _now;
 
   final _cache = <String, SiteCheckResult>{};
-  final _running = <String, Future<SiteCheckResult>>{};
+  final _running = <String, _Run>{};
   final _starts = Queue<int>();
 
   /// The checker asked about [host] (and [port], default 443): the cached answer, a run in progress, or a
   /// new run. [manual]: a new run at once, not counted against the limit. Never throws: a trouble is a
   /// `failed` result.
-  Future<SiteCheckResult> check(String host, int? port, {bool manual = false}) {
+  ///
+  /// [cancel]: the asker no longer needs the answer. The ask then completes at once with state `cancelled`;
+  /// the run itself is dropped when every asker sharing it has cancelled (no further request is sent, the
+  /// polling stops), and a dropped run is never cached. An ask without [cancel] keeps the run alive.
+  Future<SiteCheckResult> check(String host, int? port, {bool manual = false, Cancel? cancel}) {
+    if (cancel != null && cancel.cancelled) return Future.value(_cancelled());
     final key = '$host:${port ?? 443}';
     final run = _running[key];
-    if (run != null) return run;
+    if (run != null && !run.abort.cancelled) return _wait(run, cancel);
     final cached = _cache[key];
     if (!manual && cached != null && _now().millisecondsSinceEpoch - cached.at < cacheFor.inMilliseconds) return Future.value(cached);
     if (!manual) {
@@ -141,16 +159,32 @@ class SiteChecker {
       }
       _starts.add(t);
     }
-    final f = _run(host, port).then((r) {
-      if (r.state != 'failed') _cache[key] = r;
-      return r;
+    final r = _Run();
+    r.future = _run(host, port, r.abort).then((res) {
+      if (res.state == 'opens' || res.state == 'down') _cache[key] = res; // never a failed or a cancelled one
+      return res;
     }).whenComplete(() {
-      _running.remove(key); // (a block: the removed future must not be returned, it would wait for itself)
+      if (identical(_running[key], r)) _running.remove(key); // (a block: the removed future must not be returned, it would wait for itself)
     });
-    return _running[key] = f;
+    _running[key] = r;
+    return _wait(r, cancel);
   }
 
-  Future<SiteCheckResult> _run(String host, int? port) async {
+  Future<SiteCheckResult> _wait(_Run run, Cancel? cancel) {
+    if (cancel == null) {
+      run.waiters++; // never released: this asker keeps the run alive
+      return run.future;
+    }
+    run.waiters++;
+    cancel.done.then((_) {
+      if (--run.waiters <= 0) run.abort.cancel('cancelled');
+    });
+    return Future.any([run.future, cancel.done.then((_) => _cancelled())]);
+  }
+
+  SiteCheckResult _cancelled() => SiteCheckResult(state: 'cancelled', at: _now().millisecondsSinceEpoch, kind: 'http', via: 'direct', error: 'cancelled');
+
+  Future<SiteCheckResult> _run(String host, int? port, Cancel abort) async {
     final tcp = _tcpWanted(host, port);
     final kind = tcp ? 'tcp' : 'http';
     var via = proxyPort?.call() == null ? 'direct' : 'tunnel';
@@ -160,11 +194,11 @@ class SiteChecker {
       final start = Uri.parse('$base/${tcp ? 'check-tcp' : 'check-http'}').replace(queryParameters: {'host': target, 'max_nodes': '$maxNodes'});
       Map? first;
       try {
-        first = await _json(start, via == 'tunnel' ? proxyPort!() : null);
+        first = await _json(start, via == 'tunnel' ? proxyPort!() : null, abort);
       } catch (e) {
-        if (via == 'direct') rethrow;
+        if (via == 'direct' || e is _Aborted) rethrow;
         via = 'direct'; // the tunnel does not reach the checker: the machine's own path
-        first = await _json(start, null);
+        first = await _json(start, null, abort);
       }
       final id = first['request_id'];
       final meta = first['nodes'];
@@ -175,12 +209,13 @@ class SiteChecker {
       final deadline = _now().millisecondsSinceEpoch + pollFor.inMilliseconds;
       var elapsed = Duration.zero;
       while (true) {
-        await _delay(pollEvery);
+        await _guard(_delay(pollEvery), abort);
         elapsed += pollEvery;
         Map? r;
         try {
-          r = await _json(result, port0);
-        } catch (_) {
+          r = await _json(result, port0, abort);
+        } catch (e) {
+          if (e is _Aborted) rethrow;
           r = null; // a poll that fails is asked again
         }
         if (r != null) {
@@ -212,12 +247,18 @@ class SiteChecker {
       if (nodes.isEmpty || (ok < needOk && nodes.length < needOk)) return failed('${nodes.length} of ${meta.length} nodes answered in ${pollFor.inSeconds} s');
       return SiteCheckResult(state: ok >= needOk ? 'opens' : 'down', at: _now().millisecondsSinceEpoch, kind: kind, via: via, nodes: nodes);
     } catch (e) {
+      if (e is _Aborted) return _cancelled();
       return failed(e is TimeoutException ? 'timeout' : e);
     }
   }
 
-  Future<Map> _json(Uri url, int? proxy) async {
-    final r = await _get(url, proxyPort: proxy, timeout: const Duration(seconds: 12));
+  /// [f], or [_Aborted] as soon as [abort] is cancelled (a request in flight is not waited for).
+  static Future<T> _guard<T>(Future<T> f, Cancel abort) =>
+      Future.any([f, abort.done.then<T>((_) => throw _Aborted())]);
+
+  Future<Map> _json(Uri url, int? proxy, Cancel abort) async {
+    if (abort.cancelled) throw _Aborted(); // no further request after the cancel
+    final r = await _guard(_get(url, proxyPort: proxy, timeout: const Duration(seconds: 12)), abort);
     if (r.status != 200) throw HttpException('HTTP ${r.status}', uri: url);
     final j = jsonDecode(r.body);
     if (j is! Map) throw const FormatException('not an object');

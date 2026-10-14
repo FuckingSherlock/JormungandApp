@@ -722,18 +722,33 @@ class CoreService implements CoreApi {
     // not the site's (a `dns.down` root of it covers the failure; this is the live check, docs/failures.md → DNS)
     var resolverDown = false;
     // the external checker, asked once per judgement beside the scout (or by its own step when the scout never ran)
+    final checkerCancel = Cancel();
+    var checkerInFlight = false;
     Future<void> askChecker() => checkerRun ??= () async {
           asked = false;
           result = null;
-          if (diverged || resolverDown) return;
+          if (diverged || resolverDown || checkerCancel.cancelled) return;
           if (!siteCheckOn) {
             result = {'state': 'off'};
             return;
           }
           asked = true;
-          final r = await siteChecker.check(host, port, manual: false);
+          checkerInFlight = true;
+          final r = await siteChecker.check(host, port, manual: false, cancel: checkerCancel);
+          checkerInFlight = false;
+          if (r.state == 'cancelled') {
+            asked = false; // withdrawn, not asked in vain: nothing of it goes to the event
+            return;
+          }
           result = r.toJson();
         }();
+    // one of our routes opened the site: the checker's answer is not needed, its request is dropped (the polling stops,
+    // nothing is cached)
+    void dropChecker(String by) {
+      if (!checkerInFlight || checkerCancel.cancelled) return;
+      checkerCancel.cancel(by);
+      logBook.note('info', '$dest opens through $by: the external checker\'s request is cancelled');
+    }
     void mergeAlt() {
       final a = scout, b = elsewhere;
       alt = AltReach(
@@ -838,6 +853,7 @@ class CoreService implements CoreApi {
               diverged = true;
               return CheckResult('probe.same', Outcome.fail, {'outbound': outbound, 'opens': true, 'appFails': true});
             }
+            if (opens) dropChecker(entry); // (a parked ladder run again: the last pass's checker may still be asking)
             return CheckResult('probe.same', opens ? Outcome.pass : Outcome.fail, {'outbound': outbound});
           }, timeout: const Duration(seconds: 15), level: Level.destination, via: onRoute, resolver: onRoute == null ? null : _routeResolver(onRoute)),
           // step 2: the controller's one working node (the same subscription, another country first); the checker asks beside it
@@ -851,7 +867,10 @@ class CoreService implements CoreApi {
             final a = await (probeScout ?? (o, d, c) => auto!.reachScout(o, d, cancel: c))(outbound, dest, cancel);
             scout = a;
             mergeAlt();
-            if (a.via != null) return CheckResult('probe.scout', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
+            if (a.via != null) {
+              dropChecker(a.via!);
+              return CheckResult('probe.scout', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
+            }
             final routes = [for (final t in a.tried) t.route];
             if (routes.isEmpty || a.unsure) return CheckResult('probe.scout', Outcome.inconclusive, {'reason': a.off ? 'off' : 'none', 'tried': routes});
             return CheckResult('probe.scout', Outcome.fail, {'tried': routes});
@@ -875,7 +894,10 @@ class CoreService implements CoreApi {
             final a = await (probeElsewhere ?? (o, d, s, c) => auto!.reachElsewhere(o, d, scout: s, cancel: c))(outbound, dest, scout, cancel);
             elsewhere = a;
             mergeAlt();
-            if (a.via != null) return CheckResult('probe.elsewhere', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
+            if (a.via != null) {
+              dropChecker(a.via!); // (the checker may still be asking when its step timed out)
+              return CheckResult('probe.elsewhere', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
+            }
             final routes = [for (final t in a.tried) t.route];
             if (routes.isEmpty || a.unsure) return CheckResult('probe.elsewhere', Outcome.inconclusive, {'reason': a.off ? 'off' : 'none', 'tried': routes});
             return CheckResult('probe.elsewhere', Outcome.fail, {'tried': routes});
