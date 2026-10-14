@@ -105,6 +105,7 @@ class AddressResolver {
     this.verdicts,
     this.onNoAnswer,
     this.onNameMissing,
+    this.onResolved,
     this.log,
     this.attempt = const Duration(seconds: 3),
     this.budget = const Duration(seconds: 8),
@@ -130,6 +131,9 @@ class AddressResolver {
   /// Nobody gave an address and every server that answered said the name does not exist (NXDOMAIN or an empty answer):
   /// the node's address is wrong (node / provider level), the DNS is fine.
   final void Function(String host)? onNameMissing;
+
+  /// A lookup of [host] got an address (any server, any step): a name reported missing is no longer.
+  final void Function(String host)? onResolved;
 
   /// `(level, text)` into the log (logs.md).
   final void Function(String level, String text)? log;
@@ -276,6 +280,7 @@ class AddressResolver {
             best = i;
             bestEntry = e;
             _failedAt.remove(host);
+            onResolved?.call(host);
             _note('info', 'address: $host → ${e.ips(st.ipv6).join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds} ms [fresh, $why, parallel]');
           } else {
             _note('info', 'address: $host via ${t.id} (${t.label}) answered in ${ts.elapsedMilliseconds} ms, a higher-priority server already did');
@@ -341,6 +346,7 @@ class AddressResolver {
         final g = await t.run().timeout(left < attempt ? left : attempt, onTimeout: () => throw _Fail('timeout', dead: true));
         final e = _store(host, g, t.id);
         _failedAt.remove(host);
+        onResolved?.call(host);
         if (check) _alive(t);
         final ips = e.ips(st.ipv6);
         _note('info', 'address: $host → ${ips.join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds} ms [fresh, $why]'

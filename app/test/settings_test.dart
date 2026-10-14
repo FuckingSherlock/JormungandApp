@@ -599,6 +599,48 @@ void main() {
         expect(rowOf('cloudflare'), findsOneWidget);
       });
 
+      testWidgets('a ring beside the chip while rechecking; the verdict stays', (
+        tester,
+      ) async {
+        final host = FakeCoreHost();
+        host.dnsHealthValue = const DnsHealth(
+          servers: [
+            DnsServerStatus(id: 'g2', provider: 'google', side: 'vpn', ok: true),
+          ],
+        );
+        await openDns(tester, host);
+        const ring = ValueKey('dns-rechecking-google-vpn');
+        expect(find.byKey(ring), findsNothing);
+        host.dnsHealthValue = const DnsHealth(
+          servers: [
+            DnsServerStatus(
+              id: 'g2',
+              provider: 'google',
+              side: 'vpn',
+              ok: true,
+              rechecking: true,
+            ),
+          ],
+        );
+        host.changed();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(ring), findsOneWidget);
+        expect(chip('google', 'vpn'), findsOneWidget);
+        expect(find.byKey(const ValueKey('dns-rechecking-google-direct')), findsNothing);
+
+        host.dnsHealthValue = const DnsHealth(
+          servers: [
+            DnsServerStatus(id: 'g2', provider: 'google', side: 'vpn', ok: true),
+          ],
+        );
+        host.changed();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(ring), findsNothing);
+        expect(chip('google', 'vpn'), findsOneWidget);
+      });
+
       testWidgets('switching off the last provider of a side asks first (checkbox)', (
         tester,
       ) async {

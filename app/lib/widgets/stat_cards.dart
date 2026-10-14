@@ -5,6 +5,7 @@ import '../core/format.dart';
 import '../l10n/l10n.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
+import 'form_parts.dart' show PingSpinner;
 import 'live_conns_sheet.dart';
 
 /// Row 1 of Home (`.row1`): the Speed card on the left, Exit IP over Connections on the right.
@@ -280,12 +281,25 @@ class ExitIpCard extends StatelessWidget {
               const SizedBox(width: 6),
               SizedBox(
                 width: 20,
-                child: Text(
-                  flag,
-                  textAlign: TextAlign.right,
-                  maxLines: 1,
-                  overflow: TextOverflow.clip,
-                  style: const TextStyle(fontSize: 15, height: 1),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Text(
+                      flag,
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      overflow: TextOverflow.clip,
+                      style: const TextStyle(fontSize: 15, height: 1),
+                    ),
+                    // a check runs while the last answer stays: a small ring under the flag
+                    if (e.rechecking)
+                      const Positioned(
+                        key: ValueKey('exit-rechecking'),
+                        right: 3,
+                        top: 14,
+                        child: PingSpinner(size: 8),
+                      ),
+                  ],
                 ),
               ),
             ],

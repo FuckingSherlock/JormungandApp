@@ -28,6 +28,7 @@ import 'ignored_sites.dart';
 import 'localsource.dart';
 import 'logbook.dart';
 import 'manual.dart' as manual;
+import 'name_watch.dart';
 import 'node.dart';
 import 'parse/links.dart';
 import 'plan.dart';
@@ -503,6 +504,7 @@ class CoreService implements CoreApi {
       await _sysOff(); // left set by a crash
     }
     _recheckExit(); // the direct IP, shown on Home before any connect
+    pool.ladder.onBack = _nameBack;
     updater.start();
     await _startAppUpdater();
   }
@@ -515,6 +517,7 @@ class CoreService implements CoreApi {
     _stopAuto();
     _netTimer?.cancel();
     _listsTimer?.cancel();
+    _names.dispose();
     sentinel.dispose();
     updater.stop();
     await appUpdater?.dispose();
@@ -1978,10 +1981,124 @@ class CoreService implements CoreApi {
         settings: _addressSettings,
         verdicts: dnsBook, // stored verdicts: dead enabled servers are skipped; attempts through disabled ones are checks
         onNoAnswer: (c) => _dns?.lookupMissed(c.id), // evidence for the server's own check, never a verdict
-        onNameMissing: (h) => logBook.note('warn', 'address: node server name $h does not exist (every DNS server that answered says so): a problem with the node\'s address (provider / subscription), not with DNS'),
+        onNameMissing: nameMissing,
+        onResolved: nameResolved,
         log: logBook.note,
         now: _now,
       );
+
+  // ── a node's server name that does not exist (name_watch.dart, docs/failures.md → «Имя сервера узла не существует») ──
+
+  /// How long after the first report the name is asked again; the verdict comes only from that second answer.
+  Duration get nameRecheckAfter => _names.after;
+  set nameRecheckAfter(Duration d) => _names.after = d;
+
+  late final _names = NameMissingWatch(
+    timer: _timer,
+    recheck: (h) => addresses.lookup(h, why: 'name recheck'),
+    confirm: _nameConfirm,
+    repeat: (h) async {
+      await _nameSuspect(h);
+    },
+    cleared: _nameCleared,
+    log: logBook.note,
+  );
+
+  /// host (lower case) → the nodes of the catalog on that server name, for the ladder and the event.
+  final _nameNodes = <String, List<({String name, String source, String id})>>{};
+
+  static String _nameKey(String host) => 'node.addressMissing|${AddressBook.key(host)}';
+
+  /// The resolver's word that every DNS server that answered says [host] does not exist: one observation, the
+  /// verdict is made by [NameMissingWatch] after a re-check. Public for the tests (a fake resolver calls it).
+  void nameMissing(String host) {
+    logBook.note('warn', 'address: node server name $host does not exist (every DNS server that answered says so): a problem with the node\'s address (provider / subscription), not with DNS');
+    _names.missing(host);
+  }
+
+  /// A lookup got an address for [host]: the name is not missing (closes a standing verdict). Public for the tests.
+  void nameResolved(String host) => _names.resolved(host);
+
+  /// The ladder took a node off (it answered): a missing-name verdict about it is void.
+  void _nameBack(String id) {
+    for (final e in _nameNodes.entries.toList()) {
+      if (e.value.any((n) => n.id == id)) _names.resolved(e.key, reason: 'node answered');
+    }
+  }
+
+  Set<String> _nodesInUse() => _auto?.nodesInUse() ?? {?dnsPlanNode(_plan)};
+
+  Future<List<({String name, String source, String id})>> _hostNodes(String host) async {
+    final k = AddressBook.key(host);
+    final out = <({String name, String source, String id})>[];
+    try {
+      final c = Catalog.fromJson(await store.read());
+      for (final sid in c.sourceOrder) {
+        final s = c.sourcesData[sid];
+        if (s == null) continue;
+        for (final n in c.liveNodes(s)) {
+          final o = n.outbound;
+          if (o == null || n.unsupported != null || n.goneAt != null || hostnameOf(o['server']) != k) continue;
+          out.add((name: n.name, source: s.name, id: serverIdentity(o)));
+        }
+      }
+    } catch (e) {
+      logBook.note('warn', 'address: the nodes of $host could not be read from the catalog ($e)');
+    }
+    return out;
+  }
+
+  /// The re-check said it again: the nodes of that name are dead — on the ladder of unavailable nodes (the same as any
+  /// dead node; it is asked again there and takes itself off when it answers), and the Sentinel writes the event.
+  Future<bool> _nameConfirm(String host) async {
+    final nodes = await _hostNodes(host);
+    if (nodes.isEmpty) {
+      logBook.note('info', 'address: $host is the server name of no node of the catalog (a DNS server, or a node that is off / gone): no event');
+      return false;
+    }
+    _nameNodes[AddressBook.key(host)] = nodes;
+    final now = _nowMs;
+    for (final n in nodes) {
+      pool.ladder.enter(n.id, now);
+    }
+    return _nameSuspect(host);
+  }
+
+  /// `node/addressMissing`: a standing verdict about the name; the same one again is a repeat on the root's event
+  /// (counted, in the raw log), never a new event. `inUse` (a node of the main flow) is what lets the app notify.
+  Future<bool> _nameSuspect(String host) async {
+    final k = AddressBook.key(host), nodes = _nameNodes[k];
+    if (nodes == null) return false;
+    final use = _nodesInUse();
+    final shown = nodes.where((n) => use.contains(n.id)).firstOrNull ?? nodes.first;
+    final v = await sentinel.suspect(Suspicion(
+      kind: 'node.addressMissing',
+      key: _nameKey(host),
+      subject: {'host': k},
+      evidence: {'host': k, 'node': shown.name, 'source': shown.source, 'nodes': nodes.length, 'inUse': nodes.any((n) => use.contains(n.id))},
+      viaCore: false,
+      session: false,
+      why: Why('node.addressMissing', {'host': k}),
+      scope: Scope.none,
+      level: Level.route,
+      event: SuspicionEvent('node', 'addressMissing', level: 'warn', note: (kind, e) {
+        final more = (e['nodes'] as int) > 1 ? ' and ${(e['nodes'] as int) - 1} more' : '';
+        return switch (kind) {
+          VerdictKind.confirmed => 'Server address ${e['host']} of ${e['node']}$more does not exist: the provider\'s subscription has an error',
+          _ => null,
+        };
+      }),
+    ));
+    final stands = v.kind == VerdictKind.confirmed;
+    if (!stands) _nameNodes.remove(k);
+    return stands;
+  }
+
+  void _nameCleared(String host, String reason) {
+    _nameNodes.remove(AddressBook.key(host));
+    sentinel.recovered(_nameKey(host));
+    logBook.note('info', 'address: node server name $host is no longer missing ($reason)');
+  }
 
   /// The tests' seam: the resolver the service uses instead of the real one (given the service's book).
   final AddressResolver Function(AddressBook book)? addressResolverFor;

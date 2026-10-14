@@ -926,15 +926,15 @@ class AutoService {
   /// The latest exit answer of the node in use, as the status shows it (`direct: false`, `at`); `{error}` when
   /// the check failed. A node answered before (this run, or an earlier one: its [exits] entry) shows that answer at once,
   /// the check for it runs in the background; null = nothing known yet (being checked, or the node is not known yet).
-  /// The user's re-check keeps the answer on and adds `rechecking: true` until the new one arrives; when that check
-  /// fails the answer stays with `error` (the message) next to it.
+  /// Any check of the node in use (the user's, a switch, the hourly one) keeps the answer on and adds `rechecking: true`
+  /// until it answers; a failed check puts `error` (the message) next to the kept answer, and the app shows the error.
   Map<String, dynamic>? exitInUse() {
     final s = _exitSubject();
     if (s == null) return null;
     var out = _exitResults[s.key] ?? _exitKnown(s.id);
     final err = _exitError[s.key];
     if (err != null && out != null && out['ip'] is String) out = {...out, 'error': err};
-    if (out != null && _exitRechecking.contains(s.key)) out = {...out, 'rechecking': true};
+    if (out != null && (_exitRechecking.contains(s.key) || _exitRunning.containsKey(s.key))) out = {...out, 'rechecking': true};
     return out;
   }
 
@@ -1066,16 +1066,15 @@ class AutoService {
         _exitResults[s.key] = same ? {...before, 'at': out['at']} : out;
       } else {
         _exitFailAt[s.key] = at;
-        final shown = loud || _exitShown(s.key, s.id) == null; // else the earlier answer stays on the status
-        if (shown) {
-          _exitStored[s.key] = n;
-          if (_exitShown(s.key, s.id) != null) {
-            _exitError[s.key] = '${out['error']}'; // the answer stays, the failure is shown next to it
-          } else {
-            _exitResults[s.key] = out;
-          }
+        // any failed check is shown (the user's decision 2026-10-14: the error, not the stored answer); the stored answer
+        // stays in the book and comes back with the next good check
+        _exitStored[s.key] = n;
+        if (_exitShown(s.key, s.id) != null) {
+          _exitError[s.key] = '${out['error']}';
+        } else {
+          _exitResults[s.key] = out;
         }
-        if (!shown || _exitCur != s.key) trace?.call('auto: exit check through ${s.tag} failed${shown ? '' : ', the earlier answer stays'}: ${out['error']}');
+        if (_exitCur != s.key) trace?.call('auto: exit check through ${s.tag} failed: ${out['error']}');
       }
     }
     if (loud) _exitRechecking.remove(s.key);
@@ -1327,6 +1326,17 @@ class AutoService {
   String? exitNodeIdentity() {
     final g = _routes[index].main, k = g.now;
     return k == null ? null : g.ids[k];
+  }
+
+  /// The pool identities of the servers the main flow leaves through now: the main group's node in use and, for a chain,
+  /// the entry's one (it is dialled by its own name). Read-only.
+  Set<String> nodesInUse() {
+    if (_routes.isEmpty) return const {};
+    final r = _routes[index];
+    return {
+      for (final g in [r.main, r.entry])
+        if (g != null && g.now != null && g.ids[g.now] != null) g.ids[g.now]!,
+    };
   }
 
   /// The one test of a server: ms through the group member [key], -1 = no answer. The

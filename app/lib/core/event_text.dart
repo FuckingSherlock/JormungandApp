@@ -63,6 +63,7 @@ class EventWords {
     'rules/ruleSetUpdated' => l10n.ruleSetUpdated,
     'dns/switched' => l10n.dnsServerSwitched,
     'dns/failed' => l10n.dnsServerDoesNotAnswer,
+    'node/addressMissing' => l10n.serverAddressDoesNotExist,
     'speed/done' => l10n.speedTestFinished,
     'speed/failed' => l10n.speedTestFailed,
     'core/crashed' => l10n.singBoxStopped,
@@ -272,6 +273,12 @@ class EventWords {
           d['holdMs'] is num ? ((d['holdMs'] as num) / 60000).round().clamp(1, 1 << 30) : 1,
         ),
       ),
+      ('node', 'addressMissing') => r(() {
+        final more = d['nodes'] is num ? (d['nodes'] as num) - 1 : 0;
+        return more > 0
+            ? l10n.serverAddressOfAndMoreDoes('${d['host'] ?? ''}', '${d['node'] ?? ''}', more)
+            : l10n.serverAddressOfDoesNotExist('${d['host'] ?? ''}', '${d['node'] ?? ''}');
+      }()),
       ('site', 'blocked') => r(
         l10n.doesNotOpen(host(d)),
         _lines([

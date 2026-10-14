@@ -198,6 +198,17 @@ void main() {
         reason: 'only unreachable has a check');
   });
 
+  test('node/addressMissing: the subscription-failure toggle, and only for the node in use', () {
+    EventRecord miss(Object? inUse) =>
+        e({...ev(1, 'node', 'addressMissing', level: 'warn', data: {'host': 'gone.example', 'node': 'N', 'source': 'S', 'nodes': 1, 'inUse': ?inUse}), 'verdict': 'confirmed'});
+    expect(eventNotifKind['node/addressMissing'], 'subFailed');
+    expect(eventNotifies(null, miss(true)), isTrue);
+    expect(eventNotifies(null, miss(false)), isFalse, reason: 'a node not in use: the journal only');
+    expect(eventNotifies(null, miss(null)), isFalse);
+    expect(eventNotifies({'subFailed': false}, miss(true)), isFalse, reason: 'the toggle of subscription failures');
+    expect(eventNotifies({'enabled': false}, miss(true)), isFalse);
+  });
+
   test('EventFeed: an event changed in place is replaced by its newer rev, notified once when it newly may', () {
     final feed = EventFeed();
     Map page({List<Map> events = const [], List<Map> updated = const [], int next = 2}) => {'events': events, 'updated': updated, 'next': next, 'first': 0};

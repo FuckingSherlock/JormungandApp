@@ -58,7 +58,7 @@ class EventBook {
   final int cap;
   final DateTime Function() _clock;
 
-  static const cats = {'conn', 'auto', 'site', 'sub', 'rules', 'dns', 'speed', 'core', 'user'};
+  static const cats = {'conn', 'auto', 'site', 'sub', 'rules', 'dns', 'node', 'speed', 'core', 'user'};
   static const levels = {'info', 'warn', 'error'};
 
   /// What the Sentinel can say of a failure it looked into (docs/failures.md → Вердикты).

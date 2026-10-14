@@ -392,13 +392,17 @@ class LiveCoreHost extends CoreHost {
     final e = st['exit'];
     if (e is! Map) {
       _exit = const ExitState.checking();
-    } else if (e['error'] != null) {
+    } else if (e['ip'] == null && e['error'] != null) {
       _exit = const ExitState.error();
+    } else if (e['ip'] == null && e['rechecking'] == true) {
+      _exit = const ExitState.checking();
     } else {
       _exit = ExitState.found(
         ip: '${e['ip'] ?? ''}',
         country: e['country'] as String?,
         city: e['city'] as String?,
+        rechecking: e['rechecking'] == true,
+        error: e['error'] != null,
       );
     }
     if (st['error'] != null) _error = '${st['error']}';
@@ -422,6 +426,7 @@ class LiveCoreHost extends CoreHost {
                     side: '${s['side']}',
                     ok: s['ok'] is bool ? s['ok'] as bool : null,
                     watched: s['watched'] == true,
+                    rechecking: s['rechecking'] == true,
                   ),
             ],
           )
@@ -442,7 +447,7 @@ class LiveCoreHost extends CoreHost {
   String _statusSig() {
     final e = _exit, d = _down, b = _blocking, r = catalog.coreRoute, h = _dnsHealth;
     return '$_connected|${d?.since}|${d?.proxy}|${b?.since}|${b?.proxy}|${b?.reason}|'
-        '${e.checking}|${e.error}|${e.ip}|${e.country}|${e.city}|$_error|'
+        '${e.checking}|${e.error}|${e.rechecking}|${e.ip}|${e.country}|${e.city}|$_error|'
         '${r?.id}|${r?.server}|${r?.entryServer}|${h?.sig}';
   }
 
@@ -883,12 +888,12 @@ class LiveCoreHost extends CoreHost {
   @override
   Future<void> refreshExit() async {
     if (_connecting || !_ready) return;
-    _exit = const ExitState.checking();
+    _exit = _exit.asRechecking;
     _notifyNow();
     try {
       _applyStatus(Map<String, dynamic>.from(await api.recheckExit()));
     } catch (_) {
-      _exit = const ExitState.error();
+      _exit = _exit.asFailed;
       _notifyNow();
     }
   }

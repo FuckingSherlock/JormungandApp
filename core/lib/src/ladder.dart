@@ -91,6 +91,9 @@ class DeadLadder {
   /// Called when the ladder changed in a way that is worth keeping ([DeadLadderStore]).
   void Function()? onChange;
 
+  /// Called with the id of a node that an answer took off the ladder ([observe]).
+  void Function(String id)? onBack;
+
   final _nodes = <String, DeadNode>{};
   final _owed = <String>{};
 
@@ -148,6 +151,7 @@ class DeadLadder {
     if (ms >= 0) {
       _nodes.remove(id);
       onChange?.call();
+      onBack?.call(id);
       return true;
     }
     if (batched || now >= n.nextAt - slack.inMilliseconds) {

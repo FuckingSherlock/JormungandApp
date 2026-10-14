@@ -155,18 +155,46 @@ class KillBlock {
 class ExitState {
   const ExitState.checking() : this._(checking: true);
   const ExitState.error() : this._(error: true);
-  const ExitState.found({required String ip, String? country, String? city})
-    : this._(ip: ip, country: country, city: city);
+  const ExitState.found({
+    required String ip,
+    String? country,
+    String? city,
+    bool rechecking = false,
+    bool error = false,
+  }) : this._(
+         ip: ip,
+         country: country,
+         city: city,
+         rechecking: rechecking,
+         error: error,
+       );
   const ExitState._({
     this.checking = false,
     this.error = false,
+    this.rechecking = false,
     this.ip,
     this.country,
     this.city,
   });
 
   final bool checking;
+
+  /// The last check failed: shown instead of the answer ([ip] may still be set, it is kept only for the next check).
   final bool error;
+
+  /// A check runs while the last answer is kept (no blanking).
+  final bool rechecking;
+
+  /// The same answer, a check running.
+  ExitState get asRechecking => ip == null
+      ? const ExitState.checking()
+      : ExitState.found(ip: ip!, country: country, city: city, rechecking: true);
+
+  /// The same answer, the check failed.
+  ExitState get asFailed => ip == null
+      ? const ExitState.error()
+      : ExitState.found(ip: ip!, country: country, city: city, error: true);
+
   final String? ip;
 
   /// ISO 3166 alpha-2.
@@ -747,10 +775,14 @@ class DnsServerStatus {
     required this.side,
     this.ok,
     this.watched = false,
+    this.rechecking = false,
   });
 
   final String id;
   final String provider;
+
+  /// A check of this server runs; [ok] stays the stored verdict.
+  final bool rechecking;
 
   /// `direct` | `vpn`.
   final String side;
@@ -799,9 +831,15 @@ class DnsHealth {
     return any;
   }
 
+  /// A check of a candidate of [provider] on [side] runs.
+  bool rechecking(String provider, String side) => servers.any(
+    (s) => !s.watched && s.provider == provider && s.side == side && s.rechecking,
+  );
+
   /// What of it the page shows: a change rebuilds the page at once.
   String get sig => '$active|${answering.entries.map((e) => '${e.key}=${e.value}').join(',')}|'
-      '${servers.where((s) => s.ok == false).map((s) => s.id).join(',')}';
+      '${servers.where((s) => s.ok == false).map((s) => s.id).join(',')}|'
+      '${servers.where((s) => s.rechecking).map((s) => s.id).join(',')}';
 }
 
 /// The host for the widgets below. [listenTo] (default: the host itself) is what rebuilds the

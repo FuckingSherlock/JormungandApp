@@ -93,6 +93,7 @@ const eventCats = <(String, List<String>)>[
   ('sub', ['updated', 'failed', 'removed', 'back', 'dead', 'diverged']),
   ('rules', ['fallback', 'targetBack', 'ruleSetFailed', 'ruleSetUpdated']),
   ('dns', ['switched', 'failed']),
+  ('node', ['addressMissing']),
   ('speed', ['done', 'failed']),
   (
     'core',
@@ -120,6 +121,8 @@ const eventNotifKind = <String, String>{
   'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
   'rules/ruleSetFailed': 'ruleSets',
   'rules/fallback': 'autoSwitch', 'rules/targetBack': 'autoSwitch', 'dns/switched': 'autoSwitch',
+  // the node's server name does not exist: the provider's subscription is wrong
+  'node/addressMissing': 'subFailed',
 };
 
 /// Settings → Notifications as they start (`notifCfg` of the snapshot, names as in the mockup).
@@ -158,6 +161,8 @@ bool eventNotifies(Object? cfg, EventRecord e) {
   if (v != null && e.key != 'site/blocked' && (v != 'confirmed' || e.cause != null)) return false;
   // A site that failed through every route is quiet until the external checker says it opens elsewhere
   // (pending, off, failed and "down everywhere" stay in the journal); a manual check is the user's own.
+  // a node that is not in use is a journal entry only (the user does not lean on it)
+  if (e.key == 'node/addressMissing' && e.data['inUse'] != true) return false;
   final check = e.key == 'site/unreachable' ? e.data['check'] : null;
   if (check is Map && (check['state'] != 'opens' || check['manual'] == true)) return false;
   return !e.bg || (cfg is Map && cfg['bgErrors'] is bool ? cfg['bgErrors'] as bool : notifDefaults['bgErrors']!);
@@ -177,6 +182,7 @@ const _keyFields = <String, List<String>>{
   'rules/targetBack': ['target'],
   'dns/switched': ['from', 'to'],
   'dns/failed': ['server'],
+  'node/addressMissing': ['host'],
   'rules/ruleSetFailed': ['tag'],
   'rules/ruleSetUpdated': ['tag'],
 };

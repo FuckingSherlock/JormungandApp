@@ -377,8 +377,23 @@ void main() {
       auto.start();
       await Future<void>.delayed(const Duration(milliseconds: 3300));
       expect(asked.where((t) => t.endsWith('s::a')), hasLength(1));
-      expect(auto.exitInUse(), containsPair('ip', '203.0.113.1'));
-      expect(notes.where((n) => n.contains('the earlier answer stays')), hasLength(1));
+      expect(auto.exitInUse(), allOf(containsPair('ip', '203.0.113.1'), containsPair('error', 'Exception: no answer')), reason: 'any failed check is shown next to the kept answer');
+      expect(auto.exitInUse(), isNot(contains('rechecking')));
+    });
+
+    test('a switch to a node with a stored answer shows it as rechecking until the check ends', () async {
+      make(storedAgo: const Duration(minutes: 10).inMilliseconds);
+      book.record(_idOf(p, 1), ip: '198.51.100.7', country: 'FR', at: now - hour.inMilliseconds - 1);
+      auto.start();
+      expect(asked, isEmpty);
+      await auto.setManual(true, entry: 'B');
+      expect(asked, ['route1/s::b']);
+      expect(auto.exitInUse(), allOf(containsPair('ip', '198.51.100.7'), containsPair('rechecking', true)));
+      gates[0].complete({'ip': '198.51.100.8', 'country': 'FR'});
+      await settle();
+      final done = auto.exitInUse();
+      expect(done, containsPair('ip', '198.51.100.8'));
+      expect(done, isNot(contains('rechecking')));
     });
 
     test('an older check never replaces a newer answer', () async {

@@ -3373,6 +3373,32 @@
     }
   },
   "dnsServerDoesNotAnswer": "DNS server does not answer",
+  "serverAddressDoesNotExist": "Server address does not exist",
+  "serverAddressOfDoesNotExist": "Server address {s0} of {s1} does not exist — the provider's subscription has an error",
+  "@serverAddressOfDoesNotExist": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "serverAddressOfAndMoreDoes": "Server address {s0} of {s1} and {n2} more does not exist — the provider's subscription has an error",
+  "@serverAddressOfAndMoreDoes": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "n2": {
+        "type": "num"
+      }
+    }
+  },
   "clearRawLog": "Clear raw log",
   "filterLog": "Filter log",
   "level": "Level",

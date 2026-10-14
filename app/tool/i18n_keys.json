@@ -1571,5 +1571,8 @@
   "Save as…": "saveAs",
   "The folder you saved to before is gone or no longer allowed. Choose another one.": "theFolderYouSavedToBefore",
   "The folder you saved to before is gone. Pick where to save the file.": "theFolderYouSavedToBefore2",
-  "Save {0} to {1}?": "saveTo"
+  "Save {0} to {1}?": "saveTo",
+  "Server address does not exist": "serverAddressDoesNotExist",
+  "Server address {0} of {1} does not exist — the provider's subscription has an error": "serverAddressOfDoesNotExist",
+  "Server address {0} of {1} and {#2} more does not exist — the provider's subscription has an error": "serverAddressOfAndMoreDoes"
 }

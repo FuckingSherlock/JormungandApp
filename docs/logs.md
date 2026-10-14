@@ -99,6 +99,7 @@ to …` — раньше такие строки не распознавалис
 | rules | ruleSetUpdated | `tag` |
 | dns | switched | `side` (`direct` / `vpn`), `from`, `to` (id кандидатов), `fromProvider`, `toProvider`, `reason` (`failover` — отвечавший упал, `back` — вернулся более приоритетный, `off` — выключили «Switch automatically»); `own` у `off`. На сторону, когда меняется её отвечающий кандидат |
 | dns | failed | `server`, `path` (`direct` / `proxy`), `since`, `provider`, `side`, `servers` (id упавших транспортов) — DNS-сервер подтверждённо не отвечает (Sentinel, `dns.down`), причины выше нет. На провайдера и сторону: упал один транспорт, а провайдер на этой стороне ещё отвечает — только строка журнала |
+| node | addressMissing | `host`, `node`, `source`, `nodes`, `inUse` — имя сервера узла не существует: все ответившие DNS-серверы сказали «имени нет» и в перепроверке через минуту сказали то же (Sentinel, `node.addressMissing`, `docs/failures.md`). Одно событие на **имя** (`node` — один из его узлов, `nodes` — сколько узлов на этом имени); повтор, пока вердикт стоит, — счётчик на событии. Уведомление — только при `inUse` (узел основного потока), выключатель — «ошибки подписок» (`subFailed`) |
 | speed | done / failed | результат / `error` |
 | core | crashed | `code` |
 | core | restarted | `attempt`, `downMs?` |
