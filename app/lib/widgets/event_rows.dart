@@ -458,16 +458,20 @@ class _Vias extends StatelessWidget {
       );
     }
 
+    // the checker could not open the site either: it is down, our routes are no part of the event
+    final routes = !(e.type == 'unreachable' && words.downEverywhere(d));
     final rows = <Widget>[
       for (final w in words.whyRows(d)) _WhyRow(row: w, event: e, logs: logs),
-      if (entry.isNotEmpty) via('⚠️', entry, d['server']),
-      if (e.type == 'blocked' && d['via'] != null && '${d['via']}'.isNotEmpty)
-        via('✅', '${d['via']}', d['viaServer']),
-      if (e.type == 'unreachable')
-        for (final x in tried)
-          if (x is Map) via('⚠️', '${x['entry']}', x['server']),
+      if (routes) ...[
+        if (entry.isNotEmpty) via('⚠️', entry, d['server']),
+        if (e.type == 'blocked' && d['via'] != null && '${d['via']}'.isNotEmpty)
+          via('✅', '${d['via']}', d['viaServer']),
+        if (e.type == 'unreachable')
+          for (final x in tried)
+            if (x is Map) via('⚠️', '${x['entry']}', x['server']),
+      ],
     ];
-    final note = e.type == 'unreachable' && tried.isEmpty
+    final note = routes && e.type == 'unreachable' && tried.isEmpty
         ? (d['retries'] == 'off'
               ? l10n.retriesThroughOtherRoutesAreOff
               : l10n.noOtherWorkingRouteToTry)

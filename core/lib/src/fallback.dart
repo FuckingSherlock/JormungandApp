@@ -46,6 +46,7 @@ library;
 import 'dart:async';
 
 import 'auto.dart' show AutoSettings, DelayTest;
+import 'ladder.dart' show LadderGate;
 import 'plan.dart' show topTag;
 import 'pool.dart';
 import 'routing.dart' show TargetFallback;
@@ -159,6 +160,7 @@ class FallbackService {
   final _changes = StreamController<FallbackChange>.broadcast();
   Timer? _timer;
   bool _busy = false, _started = false, _stopped = false;
+  Duration _ahead = Duration.zero; // the running round asks the unavailable targets due within it too
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 
@@ -200,11 +202,15 @@ class FallbackService {
       final st = pool.status;
       final judged = [for (final t in _targets) if (t.isMain ? st != NetStatus.down : st == NetStatus.up) t];
       if (judged.isEmpty) return;
+      // some unavailable target is asked in this round anyway: the ones due within the window go with it (ladder.dart)
+      final now = _clock();
+      _ahead = judged.any((t) => !t.isMain && pool.ladder.pending(_identity(t, _current(t)), now)) ? settings.ladderAhead : Duration.zero;
       await Future.wait(judged.map(_test));
       if (_stopped) return;
       await _decide(judged);
     } finally {
       _busy = false;
+      _ahead = Duration.zero;
       final retry = _targets.any((t) => !t.down && t.w.health.fails > 0 && !t.w.isDown(settings));
       _schedule(retry ? settings.retryPause : settings.checkEvery);
     }
@@ -228,6 +234,14 @@ class FallbackService {
     if (_stopped || ms == null) return;
     final now = _clock();
     t.w.health.record(ms, now);
+    if (!t.isMain) {
+      final id = _identity(t, _current(t));
+      if (ms >= 0) {
+        pool.ladder.observe(id, ms, now);
+      } else if (t.w.health.fails >= settings.failAfter) {
+        pool.ladder.enter(id, now); // dead: asked on the ladder from now on
+      }
+    }
     if (!t.down) t.w.forgetIfStable(settings, now);
     if (ms < 0 && !t.isMain && onDown != null && t.w.health.fails >= settings.failAfter) {
       for (final g in [?t.entry, t.main]) {
@@ -280,11 +294,27 @@ class FallbackService {
 
   /// One test of [tag] through the pool: a fresh enough answer of the same server (Auto's, the
   /// UI's ping) is the result.
-  Future<int> _ping(String identity, String tag) => pool.probe(identity, (url) => delay(tag, url, settings.timeoutMs),
-      url: settings.url, checkers: settings.checkers, maxAge: settings.reuse);
+  Future<int> _ping(String identity, String tag, {bool light = false}) => pool.probe(identity, (url) => delay(tag, url, settings.timeoutMs),
+      url: settings.url, checkers: light ? const [] : settings.checkers, maxAge: settings.reuse);
 
-  Future<int> _probe(_Target t) async {
-    final ms = await _ping(_identity(t, _current(t)), _current(t));
+  // A target whose server is unavailable (ladder.dart: found dead, asked on a ladder) is asked on its turn by one
+  // light request, no group test; between the turns it is not judged (null) and stays as it is.
+  Future<int?> _probe(_Target t) async {
+    final id = _identity(t, _current(t)), ladder = pool.ladder;
+    final gate = ladder.gate(id, _clock(), ahead: _ahead);
+    if (gate == LadderGate.skip) {
+      // unavailable from an earlier connection: this service has not tested it, but knows it is dead
+      for (var i = t.w.health.fails; i < settings.failAfter; i++) {
+        t.w.health.record(-1, ladder[id]!.lastAt);
+      }
+      return null;
+    }
+    if (gate == LadderGate.light) {
+      final ms = await _ping(id, _current(t), light: true);
+      if (!_stopped) ladder.observe(id, ms, _clock());
+      return ms;
+    }
+    final ms = await _ping(id, _current(t));
     if (ms >= 0 || _stopped) return ms;
     // urltest groups have all their servers tested again and pick one that answers
     var healed = false;

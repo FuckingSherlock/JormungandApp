@@ -35,6 +35,7 @@ void main() {
     await tester.tap(find.byIcon(AppTab.logs.icon));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('evCheck')), findsNothing);
+    expect(find.textContaining('No other working route to try'), findsWidgets, reason: 'before the checker answers the event speaks of our routes');
 
     await tester.tap(find.text('Check with checker'));
     await tester.pump(const Duration(milliseconds: 400));
@@ -48,10 +49,14 @@ void main() {
     expect(find.text('Down everywhere (check-host)'), findsOneWidget);
     expect(find.text('Check with checker'), findsOneWidget, reason: 'it can be asked again');
     expect(host.journal.length, 1, reason: 'the event is changed in place, not repeated');
+    expect(find.textContaining('No other working route to try'), findsNothing, reason: 'down everywhere: our routes are not part of the event');
 
     // an opened row lists the checker's nodes
     await tester.tap(find.text('Down everywhere (check-host)'));
     await tester.pumpAndSettle();
+    expect(find.text('Also tried'), findsNothing);
+    expect(find.text('Entry'), findsNothing);
+    expect(find.textContaining('No other working route to try'), findsNothing);
     expect(find.text('Germany, Frankfurt'), findsOneWidget);
     expect(find.text('OK 200 · 200 ms'), findsOneWidget);
     expect(find.text('Connection timed out'), findsOneWidget);

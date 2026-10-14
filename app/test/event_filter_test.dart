@@ -2,6 +2,7 @@
 // each type, and an opened event can hide its type or show it alone.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:jormungand/core/event_text.dart';
 import 'package:jormungand/l10n/l10n.dart';
 import 'package:jormungand/shell/home_shell.dart';
@@ -55,6 +56,40 @@ void main() {
     final unstable = ev('auto', 'unstable', {'id': 'x'});
     expect(w.searchText(unstable).toLowerCase(), contains('unstable entry'));
     expect(w.searchText(unstable).toLowerCase(), contains('auto'));
+  });
+
+  test('sub/diverged says the servers differ and which copy is used; the lists are one item per line', () async {
+    await initializeDateFormatting('en');
+    final w = EventWords(lookupAppLocalizations(const Locale('en')), FakeCoreHost().catalog);
+    EventGroup group(String used) {
+      final e = EventRecord(id: 1, at: 0, cat: 'sub', type: 'diverged', level: 'warn', own: false, log: null, data: {
+        'name': 'Prov',
+        'directNodes': 12,
+        'tunnelNodes': 15,
+        'onlyDirect': const <String>[],
+        'onlyTunnel': const ['a (1.1.1.1:443)', 'b (2.2.2.2:443)'],
+        'onlyTunnelCount': 12,
+        'directStatus': 200,
+        'tunnelStatus': 200,
+        'directMs': 1200,
+        'tunnelMs': 300,
+        'directPath': 'direct',
+        'tunnelPath': 'proxy',
+        'used': used,
+      });
+      return EventGroup(e);
+    }
+
+    final tunnel = group('tunnel').ev;
+    expect(w.describe(tunnel).title, contains('different servers'));
+    expect(w.describe(tunnel).detail, 'The VPN copy is used.');
+    expect(w.describe(group('direct').ev).detail, 'The direct copy is used.');
+    final f = Map.fromEntries(w.fields(group('tunnel')).map((x) => MapEntry(x.$1, x.$2)));
+    expect(f['Only via VPN'], '12\na (1.1.1.1:443)\nb (2.2.2.2:443)\n… and 10 more');
+    expect(f['Servers (direct)'], '12');
+    expect(f['Copy used'], 'VPN copy');
+    expect(f.keys, isNot(contains('OnlyTunnelCount')));
+    expect(f['Only direct'], '0');
   });
 
   testWidgets('filter sheet: categories start folded, an unfolded one is remembered; no «Filtered» bar', (tester) async {

@@ -65,7 +65,7 @@ Map<String, dynamic> _body({Map<String, dynamic>? routing, String server = '127.
     };
 
 ClosedConnection _closed(
-        {String dest = 'example.org:443', int down = 0, int? ms = 5000, String outbound = 'route0/s::a', String inbound = 'tun-in', String rule = ''}) =>
+        {String dest = 'example.org:443', int down = 0, int? ms = 5000, String outbound = 'route0/s::a', String inbound = 'tun-in', String rule = '', String pkg = 'org.example.app'}) =>
     ClosedConnection(
       rule: rule,
       outbound: outbound,
@@ -73,7 +73,7 @@ ClosedConnection _closed(
       destination: dest,
       up: 0,
       down: down,
-      pkg: 'org.example.app',
+      pkg: pkg,
       process: '',
       network: 'tcp',
       inbound: inbound,
@@ -135,9 +135,9 @@ void main() {
   }
 
   bool quiet(Map e) => EventBook.isQuiet(e.cast<String, dynamic>());
-  void fail(int n, {String dest = 'example.org:443'}) {
+  void fail(int n, {String dest = 'example.org:443', String pkg = 'org.example.app'}) {
     for (var i = 0; i < n; i++) {
-      svc.failures.onClosed(_closed(dest: dest));
+      svc.failures.onClosed(_closed(dest: dest, pkg: pkg));
     }
   }
 
@@ -325,6 +325,22 @@ void main() {
       fail(3);
       await time.advanceSeconds(12);
       expect(events('conn', 'failing').length, 2);
+    });
+
+    test('a series beyond maxEvents per 10 min is not silent: counted on the latest conn/failing (count, times), a raw line says why, no new event', () async {
+      await start();
+      for (var i = 0; i <= FailureBook.maxEvents; i++) {
+        fail(3, dest: 'h$i.example:443', pkg: 'org.app.n$i');
+      }
+      await time.advanceSeconds(12);
+      final all = events('conn', 'failing');
+      expect(all.length, FailureBook.maxEvents, reason: 'the seventh series has no event of its own');
+      final last = all.last;
+      expect(((last['data'] as Map)['repeat'] as Map)['count'], 4, reason: 'its three failures are on the latest event');
+      expect((((last['data'] as Map)['repeat'] as Map)['at'] as List).length, 4);
+      final line = (svc.log()['lines'] as List).cast<Map>().where((l) => '${l['msg']}'.contains('beyond the limit')).toList();
+      expect(line.length, 1);
+      expect('${line.single['msg']}', allOf(contains('h${FailureBook.maxEvents}.example'), contains('folded onto the latest conn/failing event')));
     });
   });
 

@@ -320,6 +320,7 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
         final tag = '${kind == 'n' ? 't' : 'p'}/$key';
         final ms = await pl.probe(id, (u) async => (await ensure()).delay(tag, u, timeoutMs: timeoutMs),
             url: url, checkers: checkers, maxAge: maxAge, checkerFanOut: 2);
+        pl.ladder.observe(id, ms, pl.now); // a check of the user's: an unavailable node that answers is back (ladder.dart)
         (kind == 'n' ? res.nodes : res.pairs)[key] = ms;
         onResult?.call(kind, key, ms);
       }

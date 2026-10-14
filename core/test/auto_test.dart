@@ -145,9 +145,13 @@ Map<String, dynamic> plan(List<Map<String, dynamic>> routes, {int current = 0, M
       'auto': {'failAfter': 2, 'threshold': 50, 'checkEvery': 60, 'standby': 2, 'warmEvery': 60, 'flapGuard': false, ...auto},
     };
 
+/// A pool whose dead nodes are asked every round (a zero ladder): for the tests of failover, return and heal, which
+/// re-test a dead route round after round on a clock that hardly moves. The ladder itself is in ladder_test.dart.
+ProbePool everyRound() => ProbePool.solo(ladder: DeadLadder(steps: const [Duration.zero]));
+
 (AutoService, FakeBox) setup(Map<String, dynamic> p, Map<String, int> alive) {
   final fake = FakeBox(buildConfig(p), alive);
-  return (AutoService(fake, p, delay: fake.delayTest), fake);
+  return (AutoService(fake, p, delay: fake.delayTest, pool: everyRound()), fake);
 }
 
 void main() {
@@ -640,6 +644,7 @@ void main() {
     await auto.check();
     expect(auto.toJson()['now'], 'B');
     fake.alive['s::a'] = 30;
+    t += 60000; // the dead A is asked again after its first step of the ladder (1 min)
     await auto.check();
     expect(auto.toJson()['now'], 'A');
   });
@@ -688,6 +693,9 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(fake.closed, isEmpty, reason: 'no switch: nothing is closed');
     fake.alive.remove('s::a');
+    // the "moving" connection stands in for what an old route still moves; a failed request is what makes the route
+    // not proven alive by it (live traffic would skip the test)
+    auto.onClosed(const ClosedConnection(outbound: 'route0/s::a', chain: ['route0/s::a', 'route0', 'proxy'], destination: 'x.example:443', up: 5, down: 0));
     await auto.check();
     expect(auto.toJson()['now'], 'B');
     expect(fake.closed, isEmpty, reason: 'not at the switch: after stallAfter');
@@ -1076,6 +1084,83 @@ void main() {
       expect(routes['A'], ['s::a1', null]);
       expect(routes['B'], ['s::b2', null], reason: 'a standby route: the server its group is on, not its first');
       expect(routes['X'], ['s::x1', 's::e1']);
+    });
+  });
+
+  group('live traffic proves the current node alive', () {
+    const chainA = ['route0/s::a', 'route0', 'proxy'];
+    final notes = <String>[];
+    late FakeBox fake;
+    late AutoService auto;
+
+    ClosedConnection closed(int down, {int up = 5, String id = ''}) =>
+        ClosedConnection(outbound: 'route0/s::a', chain: chainA, destination: 'x.example:443', up: up, down: down, id: id);
+
+    bool aTested() => fake.tested.any((x) => x.contains('s::a'));
+
+    setUp(() async {
+      notes.clear();
+      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
+      fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});
+      auto = AutoService(fake, p, delay: fake.delayTest, pool: everyRound(), trace: notes.add);
+      await auto.check(); // the first look: everything is tested, the connections table is the baseline
+      expect(aTested(), isTrue);
+      fake.tested.clear();
+    });
+
+    Map<String, dynamic> routeA() => (auto.toJson()['routes'] as List).cast<Map<String, dynamic>>().first;
+
+    test('data back through the current server: not tested, counted as an answer, one line in the log', () async {
+      fake.conns.add(_conn('c1', chainA, up: 10, down: 100));
+      fake.conns.add(_conn('c2', chainA, up: 10, down: 0)); // nothing back on this one, it does not count
+      await auto.check();
+      expect(aTested(), isFalse);
+      expect([routeA()['ms'], routeA()['oks'], routeA()['fails']], [30, 2, 0], reason: 'the last delay stays, the answer is counted');
+      expect(notes.where((n) => n.contains('live traffic')), hasLength(1));
+      expect(notes.single, allOf(contains('route0/s::a'), contains('1 connection'), contains('100 bytes')));
+      expect(auto.toJson()['now'], 'A');
+    });
+
+    test('no traffic since the last look: tested as always', () async {
+      fake.conns.add(_conn('c1', chainA, down: 100));
+      await auto.check(); // skipped
+      fake.tested.clear();
+      await auto.check(); // the same totals: nothing moved
+      expect(aTested(), isTrue);
+      expect(notes, hasLength(1));
+      fake.tested.clear();
+      fake.conns.single.down += 7; // moved again
+      await auto.check();
+      expect(aTested(), isFalse);
+    });
+
+    test('a closed connection that got data back counts; the core\'s own tests and other servers do not', () async {
+      fake.conns.add(LiveConnection(Connection(id: 'p', chainList: chainA, downlinkTotal: Int64(50), inbound: 'probe-in')));
+      fake.conns.add(_conn('o', ['route1/s::b', 'route1', 'proxy'], down: 90));
+      await auto.check();
+      expect(aTested(), isTrue, reason: 'a probe and the server below are no evidence');
+      fake.tested.clear();
+      auto.onClosed(closed(300, id: 'c9'));
+      await auto.check();
+      expect(aTested(), isFalse);
+    });
+
+    test('a failed request through the current route: tested, even with other traffic moving', () async {
+      fake.conns.add(_conn('c1', chainA, down: 100));
+      auto.onClosed(closed(0));
+      await auto.check();
+      expect(aTested(), isTrue);
+      expect(notes.where((n) => n.contains('live traffic')), isEmpty);
+    });
+
+    test('a server that missed before is not cleared by traffic; the spares below are tested as before', () async {
+      fake.alive.remove('s::a');
+      await auto.check(); // one miss
+      expect(routeA()['fails'], 1);
+      fake.tested.clear();
+      fake.conns.add(_conn('c1', chainA, down: 100));
+      await auto.check();
+      expect(aTested(), isTrue, reason: 'it missed: the retry test runs');
     });
   });
 }

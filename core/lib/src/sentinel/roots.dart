@@ -55,6 +55,15 @@ class Root {
   DateTime? closedAt;
   String? closeReason;
 
+  /// How often the same failure was reported while this root was open (each is on its event, see
+  /// [Sentinel.suspect]).
+  int repeats = 0;
+
+  /// The repeats that came before the root had an event ([unwrittenCount], their times: the newest ones): the
+  /// event gets them when it is attached.
+  final unwritten = <int>[];
+  int unwrittenCount = 0;
+
   bool get open => closedAt == null;
 
   bool covers(Map<String, dynamic> subject) => scope.covers(subject);
@@ -69,6 +78,7 @@ class Root {
         'since': since.millisecondsSinceEpoch,
         'eventId': ?eventId,
         'parent': ?parent,
+        if (repeats > 0) 'repeats': repeats,
         if (fromContext) 'context': true,
         if (closedAt != null) 'closedAt': closedAt!.millisecondsSinceEpoch,
         'closeReason': ?closeReason,

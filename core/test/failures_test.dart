@@ -40,6 +40,7 @@ class _Rig {
       },
       recovered: recoveredKeys.add,
       update: (id, data) => updates.add((id, data)),
+      repeated: repeats.add,
     )..start();
   }
 
@@ -47,6 +48,7 @@ class _Rig {
   bool verdictId = true;
   final reports = <FailureReport>[];
   final recoveredKeys = <String>[];
+  final repeats = <FailureRepeat>[];
 
   late final FailureBook book;
   final Set<String> ignored;
@@ -72,6 +74,32 @@ class _Rig {
 }
 
 void main() {
+  test('a reported series that goes on failing: every failure is handed over in one batch with the series\' event; a success hands over the rest first', () async {
+    var t = DateTime.utc(2026, 10, 10, 12);
+    final got = <FailureRepeat>[];
+    final b = FailureBook(now: () => t, report: (r) async => 7, repeated: got.add)..start();
+    void fail() {
+      b.onClosed(cc(dest: 'example.org:443', pkg: 'org.x', outbound: 'route0/s::a', inbound: 'tun-in', network: 'tcp', ms: 5000));
+      t = t.add(const Duration(seconds: 1));
+    }
+
+    for (var i = 0; i < 3; i++) {
+      fail();
+    }
+    await Future<void>.delayed(Duration.zero); // the judge answered: event 7
+    for (var i = 0; i < 4; i++) {
+      fail();
+    }
+    expect(got, isEmpty, reason: 'handed over in batches');
+    b.flushRepeats();
+    expect([got.single.n, got.single.eventId, got.single.at.length], [4, 7, 4]);
+    fail();
+    b.onClosed(cc(dest: 'example.org:443', pkg: 'org.x', outbound: 'route0/s::a', inbound: 'tun-in', network: 'tcp', down: 2000, ms: 300));
+    expect(got.length, 2, reason: 'the success hands over what came before it');
+    expect(got.last.n, 1);
+    b.stop();
+  });
+
   group('ConnOutcome', () {
     test('down > 0 is a success, whatever else; down == 0 is the failure Auto judges by', () {
       expect(ConnOutcome.isFailure(cc(down: 1)), isFalse);
@@ -288,13 +316,26 @@ void main() {
       expect(r.emitted.length, 2);
     });
 
-    test('at most maxEvents per 10 minutes; the numbers keep counting', () {
+    test('at most maxEvents per 10 minutes; the numbers keep counting; the series beyond it are handed over as limited repeats, never dropped', () async {
       final r = _Rig();
       for (var i = 0; i < FailureBook.maxEvents + 4; i++) {
         r.fail(3, dest: 'h$i.example:443', pkg: 'org.app.n$i');
       }
       expect(r.emitted.length, FailureBook.maxEvents);
       expect(r.book.toJson()['failed'], 3 * (FailureBook.maxEvents + 4));
+      expect(r.repeats, isEmpty, reason: 'the events being judged are waited for: that is what the limited series are counted on');
+      await Future<void>.delayed(Duration.zero); // the judge answered
+      expect(r.repeats.length, 4, reason: 'each series beyond the limit is handed over as soon as the events are in');
+      expect(r.repeats.every((x) => x.limited && x.eventId == null && x.n == 3 && x.at.length == 3), isTrue);
+      expect(r.repeats.first.host, 'h${FailureBook.maxEvents}.example');
+      // it goes on failing: its later failures are limited repeats too, in a batch; a success ends the series
+      r.fail(2, dest: 'h${FailureBook.maxEvents}.example:443', pkg: 'org.app.n${FailureBook.maxEvents}');
+      r.book.flushRepeats();
+      expect([r.repeats.last.limited, r.repeats.last.n], [true, 2]);
+      r.ok(dest: 'h${FailureBook.maxEvents}.example:443', pkg: 'org.app.n${FailureBook.maxEvents}');
+      r.fail(3, dest: 'h${FailureBook.maxEvents}.example:443', pkg: 'org.app.n${FailureBook.maxEvents}');
+      expect(r.repeats.last.limited, isTrue, reason: 'after the success it is a new series, the limit still holds');
+      expect(r.repeats.last.n, 3);
       r.advance(FailureBook.window + const Duration(seconds: 1));
       r.fail(3, dest: 'late.example:443', pkg: 'org.app.late');
       expect(r.emitted.length, FailureBook.maxEvents + 1);

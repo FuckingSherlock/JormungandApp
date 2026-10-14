@@ -495,7 +495,9 @@ void main() {
     await settle();
     svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'rep.example:443', via: 'B', viaServer: 't', at: 1));
     await settle();
-    expect(siteEvents().map((x) => '${x['type']} ${(x['data'] as Map)['entry']}'), ['unreachable A', 'unreachable B', 'blocked A']);
+    expect(siteEvents().map((x) => '${x['type']} ${(x['data'] as Map)['entry']}'), ['unreachable A', 'unreachable B'],
+        reason: 'a verdict is fresh for the site and route whatever its kind: no second, different event inside the window');
+    expect(repeat(siteEvents().first)['count'], 3, reason: 'the blocked report is one more occurrence of the first event');
     // after the hour the next one is a new event
     await time.advanceSeconds(3600);
     svc.siteUnreachable(gone('rep.example:443'));
@@ -503,6 +505,38 @@ void main() {
     final all = siteEvents().where((x) => x['type'] == 'unreachable' && (x['data'] as Map)['entry'] == 'A').toList();
     expect(all.length, 2);
     expect((all.last['data'] as Map).containsKey('repeat'), isFalse);
+  });
+
+  test('a site with a fresh verdict fails again: only the event counts it (raw line, no notification), no probe and no checker; after the window the ladder runs again', () async {
+    final asked = <Uri>[];
+    await start(checker: fakeChecker(asked, opens: true), connected: true);
+    var same = 0, alt = 0;
+    void again() => svc.siteFailed(AutoSiteFail(route: 'A', server: 's', tag: 's', dest: 'fresh.example:443', at: 1, rule: '', process: '', pkg: ''));
+    svc
+      ..probeSame = ((o, d, c) async { same++; return false; })
+      ..probeAlt = ((d, r, c) async { alt++; return const AltReach(tried: [], unsure: true); });
+    again();
+    await settle();
+    final id = siteEvents().single['id'] as int;
+    final probed = [same, alt, asked.length];
+    expect(probed.every((n) => n > 0), isTrue, reason: 'the first failure runs the whole ladder');
+    final lines = (svc.log()['lines'] as List).cast<Map>().where((l) => '${l['msg']}'.contains('fresh.example')).length;
+    for (var i = 0; i < 3; i++) {
+      await time.advanceSeconds(300);
+      again();
+      await settle();
+    }
+    final e = siteEvents().single;
+    expect([same, alt, asked.length], probed, reason: 'the repeats probe nothing');
+    expect(((e['data'] as Map)['repeat'] as Map)['count'], 4);
+    expect((svc.log()['lines'] as List).cast<Map>().where((l) => '${l['msg']}'.contains('fresh.example') && '${l['msg']}'.contains('again, ')).length, 3);
+    expect((svc.log()['lines'] as List).cast<Map>().where((l) => '${l['msg']}'.contains('fresh.example')).length, lines + 3);
+    expect(e['id'], id);
+    await time.advanceSeconds(3600);
+    again();
+    await settle();
+    expect(siteEvents().length, 2, reason: 'after the window a new event, judged by the full ladder');
+    expect(same, greaterThan(probed[0]));
   });
 
   test('another route opens the site: exactly one site/blocked, a workaround; the checker is not asked', () async {
@@ -689,6 +723,8 @@ void main() {
     await untilReal(said);
     expect(said(), isTrue, reason: 'the second test ran and was let go to the raw log');
     expect(tunEvents('tunTcpDead').length, 1);
+    expect((tunEvents('tunTcpDead').single['data'] as Map)['repeat'], isA<Map>().having((r) => r['count'], 'count', 2), reason: 'the repeat is counted on the earlier event');
+    expect(((svc.logBook.since(null)['lines'] as List).cast<Map>()).any((l) => '${l['msg']}'.contains('again, 2 times')), isTrue);
   });
 
   test('the active TUN test fails: confirmed, the reason is in the trail', () async {

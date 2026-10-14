@@ -3340,16 +3340,38 @@
   },
   "noDirectPathToTheReport": "No direct path to the report server, and the VPN is off. Turn the VPN on and try again.",
   "sentDirectlyTheVpnPathDid": "Sent directly: the VPN path did not work.",
-  "subscriptionAnswersDiffer": "Subscription answers differ",
-  "theDirectAndTheVpnAnswers": "{s0}: the direct and the VPN answers differ",
-  "@theDirectAndTheVpnAnswers": {
+  "subscriptionServersDiffer": "Subscription servers differ",
+  "theDirectAndTheVpnCopies": "{s0}: the direct and the VPN copies list different servers",
+  "@theDirectAndTheVpnCopies": {
     "placeholders": {
       "s0": {
         "type": "String"
       }
     }
   },
-  "theVpnAnswerIsUsed": "The VPN answer is used.",
+  "theVpnCopyIsUsed": "The VPN copy is used.",
+  "theDirectCopyIsUsed": "The direct copy is used.",
+  "serversDirect": "Servers (direct)",
+  "serversViaVpn": "Servers (via VPN)",
+  "onlyDirect": "Only direct",
+  "onlyViaVpn": "Only via VPN",
+  "directStatus": "Direct status",
+  "vpnStatus": "VPN status",
+  "directTime": "Direct time",
+  "vpnTime": "VPN time",
+  "directPath": "Direct path",
+  "vpnPath": "VPN path",
+  "copyUsed": "Copy used",
+  "directCopy": "Direct copy",
+  "vpnCopy": "VPN copy",
+  "andMore2": "… and {n0} more",
+  "@andMore2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
   "dnsServerDoesNotAnswer": "DNS server does not answer",
   "clearRawLog": "Clear raw log",
   "filterLog": "Filter log",

@@ -6,6 +6,8 @@ import 'dart:io';
 import 'durable.dart';
 import 'ignored_sites.dart';
 
+const _probeIn = 'probe-in'; // probe.dart probeInboundTag
+
 /// The core's own version (pubspec `version`), shown in Settings → Data → About.
 const coreVersion = '0.1.0';
 
@@ -124,6 +126,9 @@ class LogBook {
   static final _stamped = RegExp(r'^[+-]\d{4} \d{4}-\d\d-\d\d \d\d:\d\d:\d\d (TRACE|DEBUG|INFO|WARN|ERROR|FATAL|PANIC) (.*)$');
   static final _bare = RegExp(r'^(TRACE|DEBUG|INFO|WARN|ERROR|FATAL|PANIC)\[\d+\] ?(.*)$');
 
+  // a probe-inbound line that names its check by the SOCKS user (probe.dart dnsUser / flagUser): `[dns-check/<server>]`
+  static final _checkUser = RegExp(r'\[((?:dns|flag)-check)/');
+
   // libbox hands its lines over coloured ("\x1b[33mWARN\x1b[0m[0003] …"): the colours go, the level stays
   static final _ansi = RegExp(r'\x1B\[[0-9;]*m');
 
@@ -136,6 +141,12 @@ class LogBook {
     final c = raw.isEmpty ? 0 : raw.codeUnitAt(0);
     final m = (c == 0x2B || c == 0x2D ? _stamped.firstMatch(raw) : null) ?? _bare.firstMatch(raw);
     final text = m == null ? raw : m[2]!;
+    // the core's own checks (Auto's tests, "If unavailable", the site, DNS and flag checks) enter through the probe
+    // inbound: marked `[check]` (or by the check they name), so they are not taken for the user's traffic or for real errors
+    if (tag == null && text.contains('[$_probeIn]')) {
+      final named = _checkUser.firstMatch(text);
+      tag = named == null ? 'check' : named[1]!;
+    }
     _add('sing-box', m == null ? 'info' : _level(m[1]!), tag == null ? text : '[$tag] $text');
   }
 

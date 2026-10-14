@@ -3,6 +3,9 @@
 Мокап (`design/src`) заморожен с 2026-10-06 ради экономии токенов: изменения логики и UI идут в core + Flutter,
 а сюда пишется, что перенести в мокап, когда вернёмся к ПК-версии.
 
+- `site/unreachable` с `data.check.state == 'down'` (недоступен и для чекера): карточка не упоминает наши маршруты (нет строк entry/server, списка tried, заметок «нет другого маршрута» / retries, поля скрыты и в раскрытой карточке); в `data`/`trail` они остаются. Мокап: карточка site-unreachable в `design/src/js`; docs/failures.md (Проверки сайтов), connect-model.md (внешний чекер).
+- Серии `conn/failing` сверх `FailureBook.maxEvents` (6 за 10 мин) больше не молчат: прибавляются к новейшему `conn/failing` (`data.repeat`) со строкой в сыром логе, нового события нет. Docs: failures.md.
+
 - FakeIP убран из core/Flutter до переработки: в мокапе убрать строку FakeIP и «Real answers for» в Settings → DNS, суффиксы « · FakeIP», пункт справки FakeIP, `dnsCfg.fakeip` / `fakeipExclude`; потом перегенерировать golden (тест пока вырезает эти ключи, `_dropFakeip`).
 - `20-profiles.js` `chainExitOrder`: узлы, которым цепочка не задала порядок, идут в порядке `pickOrder`
   юнита выхода (подписки/профиля): `orderRefs(orderRefs(unitRefs(...), unitOwner(c.outId)?.pickOrder), c.exitOrder)`.
@@ -77,6 +80,16 @@
 - DNS: dead candidates are re-asked on a 30 s / 1 / 2 / 5 min ladder; `pingDnsSides` per-side provider ping (design/src/js/56-dns.js dnsPing is one per provider) - docs/rules.md section 6, "Повторная проверка мёртвого".
 - Settings -> DNS list, Flutter (2026-10-13; `docs/rules.md` §6, item 1): the side chips (Direct / VPN) moved to the right of the provider row, and under each chip its own ping (`pingDnsSides`: ms / warning / `—` / spinner) instead of one ping at the row end; the address takes the free width. Mockup file: `js/56-dns.js` (`renderDns`, `dnsPing` is one per provider).
 
+## sub/diverged only for different server sets (2026-10-14)
+
+Auto subscription download: a side with an empty body, no servers, a 304 or an HTTP error is no answer (the other copy is used, no event). `sub/diverged` (warn) only when both copies have servers and the node sets differ; data: directNodes/tunnelNodes, onlyDirect/onlyTunnel (<=10 names) + counts, directStatus/tunnelStatus, directMs/tunnelMs, directPath/tunnelPath, used. The mockup's sub/diverged event text still says "answers differ / the VPN answer is used"; details stay collapsed. docs/subscription-parsing.md "Download via".
+
 ## Site events fold repeats (2026-10-14)
 
 site/blocked and site/unreachable are no longer dropped once an hour per site + route: a repeat within the hour of the first occurrence changes the event in place (data.repeat = {count, firstAt, lastAt, at[<=50]}, newest verdict/trail/check, rev bump, a raw line each time). The Events row shows the sum as x N and the last time; the detail rows list every time (design/src/js/47-events.js, docs/failures.md "Проверки сайтов", docs/connect-model.md "Проверка сайта"). A notification fires once per event id (EventFeed.markNotified), not on every rev bump.
+
+- Repeats made visible (core only, no mockup UI change): a site/* event inside its 1 h window is only counted (data.repeat, raw line), no probes; root-covered failures, a reported conn/failing series (batch every 5 s) and the 15 min TUN-app events count on their event too (docs/failures.md, root / series / site sections). The mockup's events would show "xN, last HH:MM" for these kinds.
+
+- Auto: dead nodes on a ladder (core only, 2026-10-14; `docs/core.md` -> "Недоступные узлы", `docs/connect-model.md` Auto point 4): a server that missed `failAfter` times in a row and is not in use is not tested every round but asked by one light request after 1, 2, 4, 8, then every 15 min; the ladder is never reset (a reconnect and a network change give one out-of-turn check; a UI ping counts; kept in `<dataDir>/dead-nodes.json`); the same for a dead "If unavailable" target. The mockup's Auto simulation (`design/src/js/`) still tests dead routes every round. Raw: sing-box lines of the `probe-in` inbound are marked `[check]` (or `[dns-check]` / `[flag-check]`), `docs/logs.md` "Свои проверки ядра в Raw".
+
+- Auto: live traffic instead of a probe of the current node, and ladder batches (core only, 2026-10-14; `docs/core.md` Auto step 2 and "Недоступные узлы" -> "Пачки", `docs/connect-model.md` Auto): a round does not test the current server when the user's connections through it got bytes back since the last check and no request through the route failed (counted as an answer, ms kept, one raw line `auto: ... not tested this round: live traffic ...` per round). Unavailable nodes due within 60 s ride in the same parallel batch as one that is due. The mockup's Auto simulation still tests the current route every round.

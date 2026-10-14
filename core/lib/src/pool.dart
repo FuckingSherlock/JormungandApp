@@ -27,6 +27,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'ladder.dart';
 import 'probe.dart' show withCheckers;
 
 enum NetStatus { up, down, unknown }
@@ -69,14 +70,16 @@ class PoolResult {
 }
 
 class ProbePool {
-  ProbePool({int Function()? clock, this.direct, bool share = true, this.missCap = const Duration(seconds: 3)})
+  ProbePool({int Function()? clock, this.direct, bool share = true, this.missCap = const Duration(seconds: 3), DeadLadder? ladder})
       : _clock = clock ?? _wallClock,
-        _share = share;
+        _share = share,
+        ladder = ladder ?? DeadLadder();
 
   /// A pool for one module run alone: it never reuses a result.
-  ProbePool.solo({int Function()? clock, this.direct})
+  ProbePool.solo({int Function()? clock, this.direct, DeadLadder? ladder})
       : _clock = clock ?? _wallClock,
         _share = false,
+        ladder = ladder ?? DeadLadder(),
         missCap = const Duration(seconds: 3);
 
   /// Measures the direct path (through the probe inbound's `direct`): ms, -1 = no answer.
@@ -89,6 +92,13 @@ class ProbePool {
   final bool _share;
   final _results = <String, PoolResult>{};
   final _inflight = <String, Future<int>>{};
+
+  /// The nodes found dead and asked again on a ladder instead of every round (ladder.dart). Kept for as long
+  /// as the pool is (and across the app's restarts, [DeadLadderStore]), so a new connection does not start them over.
+  final DeadLadder ladder;
+
+  /// The pool's clock, ms since epoch.
+  int get now => _clock();
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 
@@ -129,7 +139,10 @@ class ProbePool {
   }
 
   /// A result measured elsewhere (the UI's ping): the pool has it from now on.
-  void record(String identity, int ms, {required String url, List<String> checkers = const []}) => _put(keyOf(identity, url, checkers), ms);
+  void record(String identity, int ms, {required String url, List<String> checkers = const []}) {
+    _put(keyOf(identity, url, checkers), ms);
+    ladder.observe(identity, ms, _clock());
+  }
 
   /// The last result of [identity] for this kind of test, or null.
   PoolResult? peek(String identity, {required String url, List<String> checkers = const []}) => _results[keyOf(identity, url, checkers)];

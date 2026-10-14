@@ -29,6 +29,7 @@ import 'manual.dart' as manual;
 import 'node.dart';
 import 'parse/links.dart';
 import 'plan.dart';
+import 'ladder.dart' show DeadLadderStore;
 import 'pool.dart';
 import 'probe.dart';
 import 'svc_fetch.dart';
@@ -228,6 +229,9 @@ class CoreService implements CoreApi {
   /// inbound (only asked while Auto runs, so while it is up).
   late final pool = ProbePool(direct: (url, t) async => _probe == null ? -1 : _probe!.delay('direct', url, timeoutMs: t));
 
+  /// The nodes Auto found dead and asks on a ladder (ladder.dart), kept in `<dataDir>/dead-nodes.json`.
+  late final deadStore = DeadLadderStore(File(p.join(dataDir, 'dead-nodes.json')), pool.ladder, clock: () => _now().millisecondsSinceEpoch);
+
   /// Checks a failure against the state of the world before it is reported as one (sentinel/,
   /// docs/failures.md). Its context follows [pool], the platform ([setNetwork]) and this service's own
   /// starts and stops; the detectors move onto [Sentinel.suspect] one by one.
@@ -238,6 +242,7 @@ class CoreService implements CoreApi {
   /// tests use [FailureWindows.instant].
   final FailureWindows windows;
   StreamSubscription<ClosedConnection>? _closed; // sing-box API: closed connections → Auto and the failure book
+  StreamSubscription<void>? _netChanged; // the Sentinel's network context: another network → Auto (ladder.dart)
 
   /// Failed connections of the running sing-box (failures.dart): `conn/failing` (judged by the [sentinel])
   /// and the report's numbers.
@@ -248,7 +253,33 @@ class CoreService implements CoreApi {
     report: _reportFailing,
     recovered: (key) => sentinel.recovered(key),
     update: (id, data) => eventBook.update(id, data: data),
+    repeated: _failedAgain,
+    timer: (d, f) => sentinel.clock.timer(d, f),
   );
+
+  /// The series of `conn/failing` went on failing (or failed inside the hold after a suspicion that did not stand): the
+  /// series' event counts the failures (`data.repeat`), the raw log says so, once per batch (failures.dart →
+  /// [FailureBook.repeatEvery]). No notification: the event is the report.
+  ///
+  /// A series beyond the failure book's limit of `conn/failing` per 10 min ([FailureRepeat.limited]) has no event of
+  /// its own: its failures go to the latest `conn/failing` event and the raw line says it was folded because of the
+  /// limit.
+  void _failedAgain(FailureRepeat r) {
+    if (_disposed) return;
+    final int? id = r.limited ? (eventBook.recent('conn', 'failing', const {}, const Duration(days: 1))?['id'] as int?) : r.eventId;
+    final total = id == null ? 0 : eventBook.tally(id, r.at, r.n - r.at.length);
+    final kinds = r.kinds.entries.map((k) => '${k.key.name} ${k.value}').join(', ');
+    final what = '${r.app.isEmpty ? 'Requests' : 'Requests of ${r.app}'} to ${r.host}${r.port > 0 ? ':${r.port}' : ''} through ${r.outbound} failed';
+    if (r.limited) {
+      logBook.note(total > 0 ? '${eventBook.byId(id!)?['level']}' : 'warn',
+          '$what: ${r.n} more ($kinds); this series is beyond the limit of ${FailureBook.maxEvents} failing-connection events per ${FailureBook.window.inMinutes} min, '
+          '${total > 0 ? 'folded onto the latest conn/failing event ($total in all on it)' : 'there is no conn/failing event to fold it onto'}');
+      return;
+    }
+    logBook.note(total > 0 ? '${eventBook.byId(id!)?['level']}' : 'info',
+        '$what again: ${r.n} more ($kinds)'
+        '${total > 0 ? ', $total in all on the event' : id == null ? ', no event' : ''}');
+  }
 
   /// Does TCP from the TUN reach sing-box (tun_ingress.dart): `core/tunTcpDead` (judged by the [sentinel],
   /// `tun.tcpDead`) and `core/tunTcpBack`.
@@ -259,7 +290,7 @@ class CoreService implements CoreApi {
   TunCheck? _tunCheck;
   final TunCheckConnect? tunCheckConnect;
   bool? _tunCheckPassed; // the last test's outcome
-  final _tunAppReported = <String, int>{}; // apps of a passed test → when it was written to the journal last
+  final _tunAppReported = <String, ({int at, int? id})>{}; // apps of a passed test → when and as which event it was written last
   int _connectSeq = 0;
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
@@ -406,6 +437,8 @@ class CoreService implements CoreApi {
     await Directory(dataDir).create(recursive: true);
     logBook.load(); // last run's warnings and errors
     eventBook.load(); // trims an old journal at start
+    final dead = deadStore.load(); // the nodes found dead before: the ladder goes on from the step each was on
+    if (dead > 0) logBook.note('info', 'auto: $dead unavailable nodes from the last run, each asked once at the first round, then on the ladder as before');
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     sentinel.changes.listen((_) {
       _syncNetEvents(); // `net.offline` opened / closed: conn/offline, conn/online
@@ -455,6 +488,7 @@ class CoreService implements CoreApi {
       unawaited(_statusCtl.close());
       logBook.close();
       eventBook.close();
+      await deadStore.close();
       await logBook.flush();
       await eventBook.flush(); // the journal is written behind the memory: what waits goes to the file now
     }
@@ -593,6 +627,12 @@ class CoreService implements CoreApi {
     final dest = port == null ? host : '$host:$port';
     final aimable = _canAim(outbound, dest);
     final since = firstSeen.millisecondsSinceEpoch;
+    // the site has a verdict of this route that is still fresh: this is its repeat, it is on that event and in the
+    // raw log; nothing is probed again (no request to the site, no external checker) until the window is over
+    if (aimable) {
+      final prev = _siteEventNow(dest, route);
+      if (prev != null) return _siteAgain(prev, FailureBook.siteKey(host, port), dest, route, evidence);
+    }
     AltReach? alt;
     var asked = false;
     Map<String, dynamic>? result;
@@ -759,6 +799,28 @@ class CoreService implements CoreApi {
     return v;
   }
 
+  /// The `site/*` event of [dest] through [route] whose verdict is still fresh (first written less than [siteCollapse]
+  /// ago), the newest of its kinds; null = none, the site is judged anew.
+  Map<String, dynamic>? _siteEventNow(String dest, String route) {
+    final match = {'dest': dest, 'entry': route};
+    final a = eventBook.recent('site', 'blocked', match, siteCollapse), b = eventBook.recent('site', 'unreachable', match, siteCollapse);
+    if (a == null || b == null) return a ?? b;
+    return (a['id'] as int) > (b['id'] as int) ? a : b;
+  }
+
+  /// The site failed again inside the window of its verdict: the event [prev] counts it (`data.repeat`), the raw log
+  /// says so, the verdict is the event's own. No probe, no checker: they run again for a failure after the window.
+  Verdict _siteAgain(Map<String, dynamic> prev, String key, String dest, String route, Map<String, dynamic> evidence) {
+    final id = prev['id'] as int;
+    final n = eventBook.tally(id);
+    final noticed = (evidence['noticed'] as Map?) ?? const {};
+    final app = '${evidence['app'] ?? (evidence['process'] as Map?)?['name'] ?? noticed['process'] ?? ''}';
+    logBook.note('${prev['level']}',
+        '$dest does not open through $route: again, $n times${app.isEmpty ? '' : ' ($app)'}; the verdict of the last check stands, the site is checked again after ${siteCollapse.inMinutes} min');
+    final kind = VerdictKind.values.asNameMap()['${prev['verdict']}'] ?? VerdictKind.confirmed;
+    return Verdict(kind: kind, key: key, eventId: id, repeat: true);
+  }
+
   // The journal entry a verdict of [_judgeSite] is written as; the plain literals are what the events catalog test reads.
   static (String, String) _siteKind(String cat, String type) => (cat, type);
 
@@ -779,6 +841,7 @@ class CoreService implements CoreApi {
   /// `core/tunTcpDead` from the TUN detector: the first orphaned look-up of the dead window is when it began.
   void _tunDead(Map<String, dynamic> d) {
     final first = (d['firstSeen'] as num?)?.toInt();
+    String? wroteKey; // the apps of the event this suspicion wrote as the 15 min one
     unawaited(sentinel.suspect(Suspicion(
       kind: 'tun.tcpDead',
       key: 'tun.tcpDead',
@@ -800,23 +863,31 @@ class CoreService implements CoreApi {
           }, level: Level.core, timeout: tc.limit),
       ],
       event: SuspicionEvent('core', 'tunTcpDead', level: 'error', kindFor: (kind, e) {
-        // a passed test: journal once per 15 min per apps, the rest only in the raw log (an app that pings every
-        // 5 s must not fill the journal)
+        // a passed test: one event per 15 min per apps; the repeats within it are counted on that event (its
+        // `data.repeat`) and are in the raw log (an app that pings every 5 s must not fill the journal)
         if (kind != VerdictKind.blip || e['accepted'] != 0 || _tunCheckPassed != true) return ('core', 'tunTcpDead');
         final key = ((e['apps'] as List?) ?? const []).join(',');
         final now = _nowMs, last = _tunAppReported[key];
-        if (last != null && now - last < 15 * 60 * 1000) {
-          logBook.note('info', 'TUN (${e['stack']}): TCP passes the tunnel; ${e['synSeen']} look-ups of $key end without a connection (that app only)');
-          return null;
+        final id = last?.id;
+        if (last != null && id != null && now - last.at < 15 * 60 * 1000) {
+          final n = eventBook.tally(id);
+          if (n > 0) {
+            logBook.note('info', 'TUN (${e['stack']}): TCP passes the tunnel; ${e['synSeen']} look-ups of $key end without a connection (that app only), again, $n times');
+            return null;
+          }
         }
-        _tunAppReported[key] = now;
+        _tunAppReported[key] = (at: now, id: null);
+        wroteKey = key;
         return ('core', 'tunTcpDead');
       }, note: (kind, e) {
         final apps = (e['apps'] as List?) ?? const [];
         return 'TUN (${e['stack']}): TCP does not reach sing-box: ${e['synSeen']} connection attempts in ${(e['windowMs'] as int) ~/ 1000} s, none accepted'
             '${apps.isEmpty ? '' : ' (${apps.join(', ')})'}${kind == VerdictKind.confirmed ? '' : ' [${kind.name}]'}';
       }),
-    )));
+    )).then((v) {
+      final k = wroteKey, at = k == null ? null : _tunAppReported[k]?.at;
+      if (k != null && at != null && v.eventId != null) _tunAppReported[k] = (at: at, id: v.eventId);
+    }));
   }
 
   /// A TCP connection arrived through the TUN again: the suspicion under way is a blip; a standing one closes
@@ -870,7 +941,8 @@ class CoreService implements CoreApi {
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         onDown: serverDown,
-        note: runner.note);
+        note: runner.note,
+        trace: (l) => logBook.note('info', l));
     // requests that failed: sing-box's API service streams every closed connection
     _closed = api.closedConnections().listen((c) {
       failures.onClosed(c);
@@ -890,6 +962,14 @@ class CoreService implements CoreApi {
       unawaited(routeUnstable(u));
     });
     auto.siteFails.listen(siteFailed);
+    // another network: the unavailable nodes are asked once out of turn (ladder.dart)
+    var netEpoch = sentinel.context.netEpoch;
+    _netChanged = sentinel.context.changes.listen((_) {
+      if (sentinel.context.netEpoch == netEpoch) return;
+      netEpoch = sentinel.context.netEpoch;
+      final s = sentinel.context.network.state;
+      if (s != NetState.none && s != NetState.captive) auto.networkChanged();
+    });
     // `lost` / `restored` are Auto's (no route answers); `offline` / `online` are the Sentinel's network
     // context (_syncNetEvents): the OS, the platform and the probes all feed one root, no second source
     auto.net.listen((n) {
@@ -1204,6 +1284,8 @@ class CoreService implements CoreApi {
   void _stopAuto({bool park = false}) {
     unawaited(_closed?.cancel());
     _closed = null;
+    unawaited(_netChanged?.cancel());
+    _netChanged = null;
     sentinel.dropAll(park: park); // a stop or a new connect: what was seen in this session is void, its detectors suspect again in the next; an own restart or a crash-recovery parks
     failures.stop();
     tunIngress.stop();
@@ -1569,10 +1651,10 @@ class CoreService implements CoreApi {
     });
   }
 
-  /// `sub/diverged`: in Auto the direct and the tunnel's answers for a subscription differ; the tunnel's was used.
-  /// Codes and hashes only; the journal, no notification.
-  void _subDiverged(Map<String, dynamic> data) =>
-      _event('sub', 'diverged', 'warn', data, note: 'Subscription ${data['name']}: the direct and the tunnel answers differ, the tunnel one is used');
+  /// `sub/diverged`: in Auto the direct and the tunnel's copies of a subscription have different sets of servers;
+  /// `used` says which copy was applied. Counts, the servers that differ, statuses and times; the journal, no notification.
+  void _subDiverged(Map<String, dynamic> data) => _event('sub', 'diverged', 'warn', data,
+      note: 'Subscription ${data['name']}: the direct and the tunnel copies have different servers, the ${data['used']} one is used');
 
   /// `sub/failed` of the timer's update when no path brought the subscription: the Sentinel judges it and the event
   /// is written only for a `confirmed` verdict (as for the rule sets). A failure of our own restart never gets here.

@@ -30,6 +30,12 @@
 ///   a strike, and it must answer for 1, 2, 4 … `flapMax` minutes in a row before it gets
 ///   the traffic back; the strikes are forgotten after `flapReset` of stable work on it.
 ///
+/// The current route's server is not tested when the user's own traffic proves it alive: since the last round
+/// connections through it (not the core's own tests) got bytes back and no request through it failed. That round
+/// counts as an answer with the last delay kept, and says so in the log ([_liveTraffic]). Without such traffic, with
+/// a failed request, or with the route missing before, the test runs as always; the routes above and the spares
+/// (no traffic goes through them) are tested as before.
+///
 /// A round in which no route answered strikes and marks no one: the misses of every route
 /// but the current one are put back as they were.
 ///
@@ -51,12 +57,14 @@ import 'dart:math';
 
 import 'config.dart' show defaultTestUrl, planCheckers;
 import 'failures.dart' show ConnOutcome;
+import 'ladder.dart';
 import 'plan.dart';
 import 'pool.dart';
-import 'probe.dart' show canProbeDest;
+import 'probe.dart' show canProbeDest, probeInboundTag;
 import 'sbapi.dart' show BoxControl, ClosedConnection;
 import 'sentinel/model.dart' show Cancel;
 import 'stall.dart';
+import 'svc_in.dart' show svcInboundTag;
 
 /// When a route above the current one takes the traffic back.
 enum ReturnTo { always, faster, never }
@@ -82,6 +90,7 @@ class AutoSettings {
     this.batch = 10,
     this.failWindow = const Duration(seconds: 10),
     this.siteAlternates = 3,
+    this.ladderAhead = batchAhead,
   });
 
   /// From a plan: `auto` = {failAfter, threshold (ms), checkEvery (s), standby, warmEvery (s),
@@ -131,6 +140,9 @@ class AutoSettings {
   final int batch; // routes / servers tested at once when looking for one that answers
   final Duration failWindow; // failed requests of the current route within it = one check
 
+  /// A round that has to ask some unavailable node (ladder.dart) asks the ones whose turn comes within this too.
+  final Duration ladderAhead;
+
   /// How many of the other answering routes (in Auto's order) a failed site is tried through
   /// before it counts as unreachable: 0 = none, [allSiteAlternates] = every one.
   final int siteAlternates;
@@ -178,6 +190,15 @@ class Health {
       oks = 0;
       since = null;
     }
+  }
+
+  /// A node known dead from before (the ladder, ladder.dart) that this service has not tested yet.
+  void markDead(int misses, int when) {
+    ms = -1;
+    fails = misses;
+    oks = 0;
+    at = when;
+    since = null;
   }
 
   List<int?> _save() => [ms, fails, oks, at, since];
@@ -305,6 +326,7 @@ class _Route {
   late final _Group main;
   final health = Health();
   bool checked = false; // tested in the running round
+  bool skipped = false; // … but its server is unavailable and was not asked (ladder.dart): it is not known to be dead right now
   bool up = false; // answered since its last strike: a drop from here is a strike
   int strikes = 0; // drops (flap guard)
   int inUseSince = 0; // when it became the current route
@@ -319,7 +341,7 @@ typedef DelayTest = Future<int> Function(String tag, String url, int timeoutMs);
 
 class AutoService {
   AutoService(this.api, Map<String, dynamic> plan,
-      {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, this.onDown, ProbePool? pool})
+      {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, this.trace, this.onDown, ProbePool? pool})
       : settings = settings ?? AutoSettings.fromPlan(plan),
         pool = pool ?? ProbePool.solo(),
         manual = plan['manual'] == true,
@@ -328,6 +350,7 @@ class AutoService {
     _routes = [for (var i = 0; i < rs.length; i++) _Route(i, rs[i])];
     index = planCurrent(plan, _routes.length);
     _routes[index].inUseSince = _clock();
+    this.pool.ladder.owe(); // a new connection: each unavailable node is asked once out of turn (the ladder itself goes on)
   }
 
   final BoxControl api;
@@ -346,6 +369,10 @@ class AutoService {
 
   /// A line for the log (jormd: the Logs tab, as `[jormd] auto: …`).
   final void Function(String line)? note;
+
+  /// A routine line for the log, one per round that skipped a test (info level in the core's book, not a warning:
+  /// [note] is the runtime's `[jormd]` line, which the book keeps as one). null = [note].
+  final void Function(String line)? trace;
 
   /// A server of a group missed `failAfter` tests in a row (and again with every further miss): the group's tag
   /// (`route0`, `route1-entry`) and the server's key. The owner decides what a dead server asks for (the core
@@ -449,6 +476,15 @@ class AutoService {
   final _failDests = <String, _Fail>{}; // sites that got nothing back → the server's outbound tag, the rule and the app of the request
   int? _warmedAt; // when the spares were tested last
   bool _directOk = false; // no route answers, but the direct path does (see _decide)
+  Duration _ahead = Duration.zero; // the running round asks the unavailable nodes due within it too (ladder.dart)
+
+  // Live traffic (see _liveTraffic): the bytes down each open connection of the user's had at the last look, what the
+  // closed ones moved since (chain tag → connections, bytes), and whether a request of the user's through the current
+  // route failed.
+  var _downSeen = <String, int>{};
+  final _closedLive = <String, ({int conns, int bytes})>{};
+  int? _lookAt;
+  bool _userFailed = false;
 
   /// Every move between routes and between Priority servers.
   Stream<AutoSwitch> get switches => _switches.stream;
@@ -466,6 +502,14 @@ class AutoService {
   void _emitNet(String kind, int? since) {
     final now = _clock();
     if (!_net.isClosed) _net.add(AutoNet(kind: kind, at: now, downMs: since == null ? null : now - since));
+  }
+
+  /// The device moved to another network: the unavailable nodes (ladder.dart) are asked once out of turn,
+  /// in a round now. The ladder itself goes on from the step each is on.
+  void networkChanged() {
+    if (_stopped) return;
+    pool.ladder.owe();
+    if (_started) _kickNow();
   }
 
   /// Checks on a timer from now on (the first one after `firstCheck`).
@@ -516,6 +560,10 @@ class AutoService {
             for (final h in g.health.values) h: h._save(),
         },
       }..removeWhere((h, _) => keep.contains(h));
+      final ladderSaved = pool.ladder.snapshot();
+      final failed = _userFailed;
+      _userFailed = false;
+      final traffic = _liveTraffic(); // taken every round: the next look counts from this one
       final retry = cur.health.fails > 0 && cur.health.fails < settings.failAfter;
       final todo = {index};
       if (!retry && !manual) {
@@ -526,6 +574,14 @@ class AutoService {
         if (settings.returnTo != ReturnTo.never) todo.addAll([for (var i = 0; i < index; i++) i]);
         if (warm) todo.addAll([for (var i = index + 1; i <= index + settings.standby && i < _routes.length; i++) i]);
       }
+      // the user's traffic through the current server proves it alive: no test of it this round (a failed request,
+      // a failed check round or a server that missed before are not proven by it)
+      final live = retry || failed || _failCheck ? null : _liveOn(cur, traffic);
+      if (live != null) {
+        todo.remove(index);
+        _liveAnswer(cur, live);
+      }
+      _ahead = _ladderWakes(todo) ? settings.ladderAhead : Duration.zero;
       await Future.wait(todo.map((i) => _checkRoute(_routes[i])));
       if (_stopped) return;
       await _decide();
@@ -533,6 +589,8 @@ class AutoService {
       if (!_routes.any((r) => r.checked && r.health.answered)) {
         // no network (or not yet sure): nobody is marked by this round
         saved.forEach((h, s) => h._load(s));
+        // the nodes of this round that missed are not dead either (the current route's own stay as they are)
+        pool.ladder.restore(ladderSaved, keep: {for (final g in cur.groups) _identity(g, g.current)});
       } else {
         noNet = false;
         _directOk = false;
@@ -555,6 +613,7 @@ class AutoService {
       }
     } finally {
       _busy = false;
+      _ahead = Duration.zero;
       final f = _routes[index].health.fails;
       // the route in use missing is a doubt about the network until something answers
       // (no route answering is one too, unless the direct path answers: the routes are at fault)
@@ -601,8 +660,13 @@ class AutoService {
   /// backup checks: it does not answer — the usual retries, `failAfter`, failover; it
   /// answers — the sites the requests went to are tried again ([_sites]).
   void onClosed(ClosedConnection c) {
-    if (_stopped || offline || !ConnOutcome.isFailure(c)) return;
+    if (_stopped || offline) return;
+    if (!ConnOutcome.isFailure(c)) {
+      _closedWithData(c);
+      return;
+    }
     if (c.chain.map(_routeOf).firstWhere((i) => i != null, orElse: () => null) != index) return;
+    if (!_isOwn(c.inbound)) _userFailed = true;
     final now = _clock();
     requestFails++;
     lastRequestFail = {'route': _routes[index].id, 'dest': c.destination, 'sent': c.up, 'at': now};
@@ -613,6 +677,85 @@ class AutoService {
     note?.call('auto: a request through ${_routes[index].id} got nothing back (${c.destination}): checking it now');
     _failCheck = true;
     _kickNow();
+  }
+
+  // The core's own tests and service requests (probe.dart, svc_in.dart) are not the user's traffic.
+  static bool _isOwn(String inbound) => inbound == probeInboundTag || inbound == svcInboundTag;
+
+  // A closed connection of the user's that got data back: what it moved since the last look is live traffic.
+  void _closedWithData(ClosedConnection c) {
+    if (_isOwn(c.inbound) || c.down <= 0) return;
+    final grew = c.down - (_downSeen.remove(c.id) ?? 0);
+    if (grew <= 0) return;
+    for (final tag in c.chain) {
+      final had = _closedLive[tag];
+      _closedLive[tag] = (conns: (had?.conns ?? 0) + 1, bytes: (had?.bytes ?? 0) + grew);
+    }
+  }
+
+  // What the user's connections got back since the last look, by the tags of their chains (the open ones by what
+  // the connections table says now against the last look, the closed ones as [_closedWithData] kept). Nothing
+  // when there was no look before or it is older than two check intervals: then "since the last check" is not known.
+  Map<String, ({int conns, int bytes})> _liveTraffic() {
+    final now = _clock();
+    final known = _lookAt != null && now - _lookAt! <= settings.checkEvery.inMilliseconds * 2;
+    final out = known ? Map.of(_closedLive) : <String, ({int conns, int bytes})>{};
+    final seen = <String, int>{};
+    for (final c in api.connections) {
+      if (_isOwn(c.c.inbound)) continue;
+      seen[c.id] = c.down;
+      final grew = c.down - (_downSeen[c.id] ?? 0);
+      if (!known || grew <= 0) continue;
+      for (final tag in c.chain) {
+        final had = out[tag];
+        out[tag] = (conns: (had?.conns ?? 0) + 1, bytes: (had?.bytes ?? 0) + grew);
+      }
+    }
+    _downSeen = seen;
+    _closedLive.clear();
+    _lookAt = now;
+    return out;
+  }
+
+  // The traffic through [r]'s servers, when it is enough to count the route as answering: every group's server in
+  // use answered its last test and did not miss since.
+  ({int conns, int bytes})? _liveOn(_Route r, Map<String, ({int conns, int bytes})> traffic) {
+    if (!r.health.answered || r.health.fails > 0) return null;
+    for (final g in r.groups) {
+      final h = g.of(g.current);
+      if (!h.answered || h.fails > 0) return null;
+    }
+    return traffic[r.main.member(r.main.current)];
+  }
+
+  // The route in use counted as answering by live traffic: the numbers of its last test stay, the answer is now.
+  void _liveAnswer(_Route r, ({int conns, int bytes}) live) {
+    final now = _clock();
+    for (final g in r.groups) {
+      final h = g.of(g.current);
+      h.record(h.ms, now);
+    }
+    r.skipped = false;
+    r.health.record(r.health.ms, now);
+    r.checked = true;
+    (trace ?? note)?.call('auto: ${r.id} not tested this round: live traffic through ${r.main.member(r.main.current)} '
+        '(${live.conns} connection${live.conns == 1 ? '' : 's'}, ${live.bytes} bytes down)');
+  }
+
+  // Whether the round has to ask some unavailable node of the routes it tests anyway (ladder.dart): then the ones due
+  // soon are asked in the same go.
+  bool _ladderWakes(Iterable<int> routes) {
+    final ladder = pool.ladder, now = _clock();
+    if (ladder.length == 0) return false;
+    for (final i in routes) {
+      if (i == index) continue;
+      for (final g in _routes[i].groups) {
+        for (final k in g.keys) {
+          if (ladder.pending(_identity(g, k), now)) return true;
+        }
+      }
+    }
+    return false;
   }
 
   // The node passes traffic, yet requests through it got nothing back: each site they went to is
@@ -762,10 +905,13 @@ class AutoService {
     return true;
   }
 
-  Future<void> _checkRoute(_Route r) async {
+  // [force]: the nodes of the route that are unavailable (ladder.dart) are asked now, whatever their step: Auto
+  // looks for a route that answers.
+  Future<void> _checkRoute(_Route r, {bool force = false}) async {
     var ms = -1;
+    r.skipped = false;
     for (final g in r.groups) {
-      ms = await _checkGroup(r, g);
+      ms = await _checkGroup(r, g, force: force);
       if (ms < 0) break;
     }
     if (_stopped) return;
@@ -773,20 +919,24 @@ class AutoService {
     r.checked = true;
   }
 
-  // The server the group uses now; when it misses, the group heals by its kind.
-  Future<int> _checkGroup(_Route r, _Group g) async {
+  // The server the group uses now; when it misses, the group heals by its kind. The server of the route in
+  // use is always tested in full; one of another route that is unavailable (ladder.dart) only on its turn.
+  Future<int> _checkGroup(_Route r, _Group g, {bool force = false}) async {
     final key = g.current;
-    final ms = await _test(g, key);
-    if (g.pinned) return ms;
+    final inUse = identical(r, _routes[index]);
+    final ms = await _test(g, key, inUse: inUse, force: force);
+    if (ms == _skipped) r.skipped = true;
+    if (g.pinned) return ms == _skipped ? -1 : ms;
     if (g.priority) {
       if (ms >= 0) return settings.returnTo == ReturnTo.never ? ms : _priorityBack(r, g, key, ms);
       if (g.of(key).fails < settings.failAfter) return -1;
-      final to = await _firstAnswering(g, [for (final k in g.keys) if (k != key) k]);
+      final to = await _firstAnswering(g, [for (final k in g.keys) if (k != key) k], force: force);
       if (to == null || !await _pick(r, g, to, 'failover')) return -1;
       _closeStalled(g.member(key), () => g.current != key);
       return g.of(to).ms;
     }
-    return ms >= 0 ? ms : _heal(g, key);
+    if (ms == _skipped) return -1; // sing-box's own tests watch a Fastest group; a group test for a node known dead is not worth it
+    return ms >= 0 ? ms : _heal(g, key, inUse);
   }
 
   /// The pool identity of a server (pool.dart): its outbound's fingerprint; a chain's exit is
@@ -811,29 +961,67 @@ class AutoService {
   /// The one test of a server: ms through the group member [key], -1 = no answer. The
   /// test URL, then the backup checks at once (withCheckers): it passes traffic when any
   /// answers. Through the pool: a fresh enough answer of the same server is the result.
-  Future<int> _ping(_Group g, String key) => pool.probe(_identity(g, key), (url) => _pingUrl(g.member(key), url),
-      url: settings.url, checkers: settings.checkers, maxAge: settings.reuseFor(g.of(key)));
+  /// [light]: the test URL alone, no backup checks (a node on the ladder, ladder.dart).
+  Future<int> _ping(_Group g, String key, {bool light = false}) => pool.probe(_identity(g, key), (url) => _pingUrl(g.member(key), url),
+      url: settings.url, checkers: light ? const [] : settings.checkers, maxAge: settings.reuseFor(g.of(key)));
 
   Future<int> _pingUrl(String tag, String url) => delay(tag, url, settings.timeoutMs);
 
-  Future<int> _test(_Group g, String key) async {
-    final ms = await _ping(g, key);
+  /// What [_test] returns for a server it did not test (unavailable, not its turn).
+  static const _skipped = -3;
+
+  // A server that missed `failAfter` times in a row and is not the one in use is unavailable (ladder.dart):
+  // the log hears of it once, not with each miss.
+  void _park(_Group g, String key, String id, [int? since]) {
+    final steps = pool.ladder.steps;
+    if (pool.ladder.enter(id, since ?? _clock())) {
+      note?.call('auto: ${g.member(key)} is unavailable (${settings.failAfter} misses in a row): '
+          'asked again after ${steps.map((d) => d.inMinutes).join(', ')} min, then every ${steps.last.inMinutes} min, by one light request');
+    }
+  }
+
+  /// One test of a server. [inUse]: the route in use (its server is tested in full, never put on the ladder
+  /// while it is the one in use); [force]: an unavailable server is asked now. An unavailable server whose turn
+  /// has not come is not tested: [_skipped].
+  Future<int> _test(_Group g, String key, {bool inUse = false, bool force = false}) async {
+    final id = _identity(g, key), h = g.of(key), ladder = pool.ladder;
+    var light = false;
+    if (!inUse) {
+      if (h.fails >= settings.failAfter) _park(g, key, id, h.at); // found dead earlier (its steps count from then), left only now
+      switch (ladder.gate(id, _clock(), force: force, ahead: _ahead)) {
+        case LadderGate.skip:
+          // unavailable from an earlier connection: this service has not tested it, but knows it is dead
+          if (h.fails < settings.failAfter) h.markDead(settings.failAfter, ladder[id]!.lastAt);
+          return _skipped;
+        case LadderGate.light:
+          light = true;
+        case LadderGate.free:
+          break;
+      }
+    }
+    final ms = await _ping(g, key, light: light);
     if (!_stopped) {
-      g.of(key).record(ms, _clock());
-      if (ms < 0) {
+      h.record(ms, _clock());
+      final back = ladder.observe(id, ms, _clock());
+      if (ms >= 0) {
+        if (back) note?.call('auto: ${g.member(key)} is back');
+      } else {
         g.missed.add(key);
-        if (onDown != null && g.of(key).fails >= settings.failAfter) onDown!(g.tag, key);
+        if (h.fails >= settings.failAfter) {
+          if (!inUse) _park(g, key, id);
+          if (onDown != null) onDown!(g.tag, key);
+        }
       }
     }
     return ms;
   }
 
   // In order, a batch at a time: the first that answers.
-  Future<String?> _firstAnswering(_Group g, List<String> keys) async {
+  Future<String?> _firstAnswering(_Group g, List<String> keys, {bool force = false}) async {
     final b = settings.batch;
     for (var i = 0; i < keys.length && !_stopped; i += b) {
       final batch = keys.sublist(i, min(i + b, keys.length));
-      await Future.wait(batch.map((k) => _test(g, k)));
+      await Future.wait(batch.map((k) => _test(g, k, force: force)));
       for (final k in batch) {
         if (g.of(k).answered) return k;
       }
@@ -874,7 +1062,7 @@ class AutoService {
 
   // Fastest: our failed test does not reach urltest's own history; it tests all its
   // servers again (the API's group test) and picks among the ones that answer.
-  Future<int> _heal(_Group g, String failed) async {
+  Future<int> _heal(_Group g, String failed, bool inUse) async {
     final res = await api.testGroup(g.tag, leaving: g.member(failed), timeout: Duration(milliseconds: settings.timeoutMs + 5000));
     if (_stopped) return -1;
     final now = _clock();
@@ -887,13 +1075,14 @@ class AutoService {
         if (k == failed) continue;
         final ms = res[g.member(k)] ?? -1;
         g.of(k).record(ms, now);
+        if (ms >= 0) pool.ladder.observe(_identity(g, k), ms, now); // answered the group test: no longer unavailable
         if (ms < 0 && onDown != null && g.of(k).fails >= settings.failAfter) onDown!(g.tag, k);
       }
     }
     await refresh();
     if (g.current == failed) return -1;
     _closeStalled(g.member(failed), () => g.current != failed);
-    return _test(g, g.current);
+    return _test(g, g.current, inUse: inUse, force: true); // sing-box picked it: asked now whatever its step
   }
 
   Future<bool> _pick(_Route r, _Group g, String key, String reason) async {
@@ -950,16 +1139,18 @@ class AutoService {
     if (cur.health.fails >= settings.failAfter) {
       // dead: the routes above and the spares at once, then the next batch by priority;
       // the first by priority that answered takes over
-      bool untested(int i) => !manual && i != index && !_routes[i].checked; // Manual: no other route is looked at
+      // (Manual: no other route is looked at.) A route skipped for its unavailable server is not known to be dead:
+      // now it is asked whatever its step (ladder.dart), by one light request.
+      bool untested(int i) => !manual && i != index && (!_routes[i].checked || _routes[i].skipped);
       final first = [for (var i = 0; i < _routes.length; i++) if (untested(i) && (i < index || i <= index + settings.standby)) i];
-      await Future.wait(first.map((i) => _checkRoute(_routes[i])));
+      await Future.wait(first.map((i) => _checkRoute(_routes[i], force: true)));
       var to = _firstAnswered();
       // the rest by priority, a batch at a time, until one answers; once in no network,
       // only the first batch (the whole list again every noNetEvery would be a waste)
       final rest = [for (var i = 0; i < _routes.length; i++) if (untested(i)) i];
       final upTo = noNet ? min(settings.batch, rest.length) : rest.length;
       for (var b = 0; to == null && b < upTo && !_stopped; b += settings.batch) {
-        await Future.wait(rest.sublist(b, min(b + settings.batch, upTo)).map((i) => _checkRoute(_routes[i])));
+        await Future.wait(rest.sublist(b, min(b + settings.batch, upTo)).map((i) => _checkRoute(_routes[i], force: true)));
         to = _firstAnswered();
       }
       if (_stopped) return;

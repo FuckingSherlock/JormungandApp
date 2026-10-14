@@ -324,20 +324,66 @@ void main() {
       expect((await fetchSubscription(dead, userAgent: 'sing-box', svc: noTunnel)).via, 'direct');
     });
 
-    test('Auto: two good answers that differ are journaled once with codes, and the tunnel one is used', () async {
+    test('Auto: two copies with different sets of servers are journaled once with the difference, the tunnel one is used', () async {
       final tunnelLinks = '$ssSip002\n$ss2022';
       final svc = await fakeSvc({'direct': body(ssSip002), 'main': body(tunnelLinks, delay: const Duration(milliseconds: 100))});
       final told = <Map<String, dynamic>>[];
       final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: told.add);
       expect(r.nodes.length, 2); // the tunnel's list
       expect(told, hasLength(1));
-      expect(told.single, containsPair('tunnelBytes', greaterThan(told.single['directBytes'] as int)));
-      expect(told.single['directHash'], isNot(told.single['tunnelHash']));
+      final d = told.single;
+      expect([d['directNodes'], d['tunnelNodes'], d['onlyDirect'], d['onlyDirectCount'], d['onlyTunnelCount']], [1, 2, isEmpty, 0, 1]);
+      expect(d['onlyTunnel'], hasLength(1));
+      expect([d['directStatus'], d['tunnelStatus'], d['used'], d['directPath'], d['tunnelPath']], [200, 200, 'tunnel', 'direct', 'main']);
+      expect(d['directMs'], isA<int>());
+      expect(d['tunnelMs'], greaterThanOrEqualTo(100));
       // the same body on both sides says nothing
       final same = await fakeSvc({'direct': body(ssSip002), 'main': body(ssSip002)});
       told.clear();
       await fetchSubscription(dead, userAgent: 'sing-box', svc: same, onDiverged: told.add);
       expect(told, isEmpty);
+    });
+
+    test('Auto: the same servers in another order or other bytes are the same answer, no event', () async {
+      final svc = await fakeSvc({'direct': body('$ssSip002\n$ss2022'), 'main': body('$ss2022\n\n$ssSip002\n')});
+      final told = <Map<String, dynamic>>[];
+      final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: told.add);
+      expect([r.nodes.length, r.via, told], [2, 'proxy', isEmpty]);
+    });
+
+    Future<void> oneSideFails(String side, FutureOr<void> Function(HttpRequest) bad, {required String why}) async {
+      final other = side == 'main' ? 'direct' : 'main';
+      final svc = await fakeSvc({side: bad, other: body('$ssSip002\n$ss2022', delay: const Duration(milliseconds: 150))});
+      final told = <Map<String, dynamic>>[];
+      final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: told.add);
+      expect(r.nodes.length, 2, reason: '$side: $why');
+      expect(r.via, other == 'main' ? 'proxy' : 'direct', reason: '$side: $why');
+      expect(told, isEmpty, reason: '$side: $why');
+    }
+
+    FutureOr<void> Function(HttpRequest) status(int code) => (req) => req.response.statusCode = code;
+
+    test('Auto: a side with an empty body is no answer, the other copy is used with no event (either side)', () async {
+      for (final side in ['main', 'direct']) {
+        await oneSideFails(side, (req) {}, why: 'empty');
+      }
+    });
+
+    test('Auto: a side whose body has no servers is no answer, the other copy is used with no event', () async {
+      for (final side in ['main', 'direct']) {
+        await oneSideFails(side, body('this is not a subscription'), why: 'zero nodes');
+      }
+    });
+
+    test('Auto: a side with an HTTP error is no answer, the other copy is used with no event', () async {
+      for (final side in ['main', 'direct']) {
+        await oneSideFails(side, status(403), why: 'HTTP 403');
+      }
+    });
+
+    test('Auto: both sides empty is a failure as before', () async {
+      final svc = await fakeSvc({'direct': (req) {}, 'main': (req) {}});
+      await expectLater(fetchSubscription(dead, userAgent: 'sing-box', svc: svc), throwsA(isA<SubscriptionFetchException>()));
     });
 
     test('the retry count is per subscription', () async {

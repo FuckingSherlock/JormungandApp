@@ -10,6 +10,8 @@
 ///   dial failed, which the closed record does not carry — a hint that refines the verdict.
 library;
 
+import 'dart:async';
+
 import 'rulenames.dart' show processEventData;
 import 'sbapi.dart' show ClosedConnection;
 
@@ -214,6 +216,19 @@ class _Entry {
   // after a suspicion that did not stand: no new one before this (ms since epoch)
   int holdUntil = 0;
 
+  // the journal event of the standing series (null while it is judged, or when none was written)
+  int? eventId;
+  bool judging = false;
+
+  // the series started after [FailureBook.maxEvents] suspicions in the window: it has no event of its own, its failures
+  // are counted on the latest `conn/failing` (the service finds it) until a success ends it
+  bool limited = false;
+
+  // failures of the series after it was reported (or inside the hold), not yet handed over: [FailureBook.repeated]
+  final againAt = <int>[];
+  int againN = 0;
+  final againKinds = <ConnKind, int>{};
+
   String get route {
     final at = outbound.indexOf('/');
     return at < 0 ? outbound : outbound.substring(0, at);
@@ -244,6 +259,20 @@ class _Group {
 
   /// The entries that joined the group while it was judged.
   final joined = <_Entry>[];
+}
+
+/// Failures of a series that was already reported ([FailureBook.repeated]): [n] of them since the last hand-over, at
+/// [at] (the newest 50) by [kinds]. [eventId]: the series' journal event, null when it has none (it did not stand,
+/// or it was judged away). [limited]: the series is one beyond [FailureBook.maxEvents] per window, it has no [eventId]:
+/// the service counts it on the latest `conn/failing` and says so in the raw log.
+class FailureRepeat {
+  const FailureRepeat({required this.key, required this.app, required this.host, required this.port, required this.outbound, required this.n, required this.at, required this.kinds, this.eventId, this.limited = false});
+  final String key, app, host, outbound;
+  final int port, n;
+  final List<int> at;
+  final Map<ConnKind, int> kinds;
+  final int? eventId;
+  final bool limited;
 }
 
 /// What the book hands to the judge (the Sentinel, in the service) when an entry's failures make a
@@ -290,9 +319,19 @@ class FailureBook {
     this.report,
     this.recovered,
     this.update,
+    this.repeated,
+    Timer Function(Duration, void Function())? timer,
   })  : _now = now ?? DateTime.now,
         _ignored = ignored,
-        _background = background;
+        _background = background,
+        _timer = timer ?? Timer.new;
+
+  /// Failures of a reported series are handed over in batches of this long ([repeated]): a browser retrying a dead
+  /// site fails dozens of times a second, one raw line and one change of the event per batch.
+  static const repeatEvery = Duration(seconds: 5);
+  final Timer Function(Duration, void Function()) _timer;
+  Timer? _repeatTimer;
+  final _again = <_Entry>{};
 
   /// The window of the «last 10 minutes» counters (10 one-minute buckets).
   static const window = Duration(minutes: 10);
@@ -304,7 +343,8 @@ class FailureBook {
   /// Entries of one app through one outbound that fail within this of the event change it in place.
   static const groupWindow = Duration(minutes: 5);
 
-  /// At most this many `conn/failing` per [window]; the rest are only counted.
+  /// At most this many `conn/failing` suspicions per [window]; the series beyond it are counted on the latest
+  /// `conn/failing` event ([FailureRepeat.limited]), never dropped.
   static const maxEvents = 6;
 
   /// An entry whose suspicion did not stand is not suspected again for this long.
@@ -333,6 +373,11 @@ class FailureBook {
   /// Changes the data of an event [report] answered with (a group's `more`).
   final void Function(int id, Map<String, dynamic> data)? update;
 
+  /// The entry of a reported series (or of one inside the hold after a suspicion that did not stand) failed again:
+  /// every failure is handed over, in a batch every [repeatEvery] (and when the series ends or [stop] comes), to be
+  /// counted on the series' event and written to the raw log. Nothing is dropped.
+  final void Function(FailureRepeat r)? repeated;
+
   bool _active = false;
   int _since = 0;
   final _entries = <String, _Entry>{}; // insertion order: the newest last
@@ -348,6 +393,9 @@ class FailureBook {
 
   /// sing-box started: the counters begin from nothing.
   void start() {
+    _repeatTimer?.cancel();
+    _repeatTimer = null;
+    _again.clear();
     _entries.clear();
     _hints.clear();
     _groups.clear();
@@ -365,8 +413,61 @@ class FailureBook {
 
   /// sing-box ended: nothing more is taken in; what was counted stays readable.
   void stop() {
+    flushRepeats(all: true);
     _active = false;
     _hints.clear();
+  }
+
+  /// Hands over the failures that wait ([repeated]); the ones of a series still being judged wait for the verdict
+  /// unless [all].
+  void flushRepeats({bool all = false}) {
+    _repeatTimer?.cancel();
+    _repeatTimer = null;
+    for (final e in _again.toList()) {
+      if (all || (!e.judging && !(e.limited && _judging))) _flush(e);
+    }
+  }
+
+  // A suspicion of this book is being judged: its event may still come, which the limited series are counted on.
+  bool get _judging => _groups.values.any((g) => g.id == null);
+
+  // Hands over the limited series that waited for the events being judged (their verdicts are in, or there are none).
+  void _flushLimited() {
+    if (_judging) return;
+    for (final e in _again.toList()) {
+      if (e.limited) _flush(e);
+    }
+  }
+
+  void _flush(_Entry e) {
+    _again.remove(e);
+    if (e.againN == 0) return;
+    final r = FailureRepeat(
+      key: _keyOf(e),
+      app: e.app,
+      host: e.host,
+      port: e.port,
+      outbound: e.outbound,
+      n: e.againN,
+      at: List.of(e.againAt),
+      kinds: Map.of(e.againKinds),
+      eventId: e.eventId,
+      limited: e.limited,
+    );
+    e.againAt.clear();
+    e.againKinds.clear();
+    e.againN = 0;
+    repeated?.call(r);
+  }
+
+  // A failure of an entry whose series was reported: it waits for the next batch.
+  void _more(_Entry e, int at, ConnKind kind) {
+    e.againN++;
+    e.againAt.add(at);
+    if (e.againAt.length > 50) e.againAt.removeAt(0);
+    e.againKinds[kind] = (e.againKinds[kind] ?? 0) + 1;
+    _again.add(e);
+    if (!e.judging) _repeatTimer ??= _timer(repeatEvery, flushRepeats);
   }
 
   /// The judge's key of a destination: one suspicion per site, whoever reports it (this book, Auto).
@@ -427,8 +528,12 @@ class FailureBook {
       _okSince++;
       e.lastOkAt = at;
       e.streak.clear();
+      _flush(e); // the failures that came before this success: counted before the series ends
       if (e.reported) {
         e.reported = false;
+        e.limited = false;
+        e.eventId = null;
+        e.judging = false;
         recovered?.call(_keyOf(e));
       }
       return;
@@ -483,7 +588,12 @@ class FailureBook {
     final from = at - streakWindow.inMilliseconds;
     e.streak.removeWhere((s) => s.$1 < from);
     e.streak.add((at, kind));
-    if (e.reported || e.streak.length < failAfter || at < e.holdUntil) return;
+    // the series was reported (or the suspicion of it did not stand a moment ago): this failure is counted, not lost
+    if (e.reported || (e.streak.length >= failAfter && at < e.holdUntil)) {
+      _more(e, at, kind);
+      return;
+    }
+    if (e.streak.length < failAfter) return;
     if (e.network == 'udp' || e.inbound == _tunnelInbound || e.inbound == _probeInbound || e.inbound == _svcInbound) return;
     e.reported = true;
     _raise(e, at, bg);
@@ -500,12 +610,26 @@ class FailureBook {
       g.hosts.add(dest);
       g.joined.add(e);
       final id = g.id;
-      if (id != null) update?.call(id, {'more': g.hosts.length - 1});
+      if (id != null) {
+        e.eventId = id;
+        update?.call(id, {'more': g.hosts.length - 1});
+      } else {
+        e.judging = true; // settled with the group
+      }
       return;
     }
     final recent = at - window.inMilliseconds;
     _emitted.removeWhere((t) => t < recent);
-    if (_emitted.length >= maxEvents) return;
+    if (_emitted.length >= maxEvents) {
+      // beyond the limit: no suspicion and no event of its own, but never silent: the failures of the streak and the
+      // ones after it are handed over as the series' repeats ([FailureRepeat.limited]), the raw log says why
+      e.limited = true;
+      for (final s in e.streak) {
+        _more(e, s.$1, s.$2);
+      }
+      _flushLimited();
+      return;
+    }
     final counts = <ConnKind, int>{};
     for (final s in e.streak) {
       counts[s.$2] = (counts[s.$2] ?? 0) + 1;
@@ -552,6 +676,12 @@ class FailureBook {
         ng.id = id;
         _events++;
         if (ng.hosts.length > 1) update?.call(id, {'more': ng.hosts.length - 1});
+        for (final x in [e, ...ng.joined]) {
+          x.eventId = id;
+          x.judging = false;
+          _flush(x); // the failures that came while it was judged are on the event now
+        }
+        _flushLimited();
         return;
       }
       // it did not stand: the group ends; its entries may be suspected again after a pause
@@ -560,9 +690,14 @@ class FailureBook {
       for (final x in [e, ...ng.joined]) {
         x.reported = false;
         x.holdUntil = hold;
+        x.eventId = null;
+        x.judging = false;
+        _flush(x); // no event to count them on: the raw log has them
       }
+      _flushLimited();
     }
 
+    e.judging = true;
     send(r).then(settle, onError: (Object _) => settle(null));
   }
 

@@ -702,6 +702,20 @@ void main() {
     });
   });
 
+  test('the same failure while its root is open: counted on the root\'s event (data.repeat, last time), a raw line each, nothing new written', () async {
+    await settledCore();
+    final v = await sentinel.suspect(failing());
+    expect(v.kind, VerdictKind.confirmed);
+    await sentinel.suspect(failing());
+    await time.advanceSeconds(10);
+    final again = await sentinel.suspect(failing());
+    expect(again.repeat, isTrue);
+    final r = (event(v.eventId!)['data'] as Map)['repeat'] as Map;
+    expect([r['count'], (r['at'] as List).length, r['lastAt']], [3, 3, time.t.millisecondsSinceEpoch]);
+    expect(notes.where((n) => n.contains('again while root')).length, 2);
+    expect(book.since(null)['events'], hasLength(1));
+  });
+
   test('concurrency: the rest wait in the queue', () async {
     sentinel.dispose();
     sentinel = Sentinel(clock: time.clock, book: book, maxActive: 2);

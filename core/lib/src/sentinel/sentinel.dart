@@ -146,6 +146,15 @@ class Sentinel {
     _sweepRoots();
     final root = roots.byKey(s.key);
     if (root != null) {
+      // the same failure again: no new event (the root's one says so), but every occurrence is counted and in the raw log
+      final at = clock.now().millisecondsSinceEpoch, id = root.eventId, b = book;
+      root.repeats++;
+      if (id == null || b == null || b.tally(id, [at]) == 0) {
+        root.unwrittenCount++;
+        root.unwritten.add(at);
+        if (root.unwritten.length > EventBook.repeatKeep) root.unwritten.removeAt(0);
+      }
+      note?.call('info', 'sentinel: ${s.key} again while root ${root.id} is open (${root.repeats + 1} times)');
       final v = Verdict(kind: VerdictKind.confirmed, key: s.key, rootId: root.id, cause: root.eventId, repeat: true);
       if (!_verdicts.isClosed) _verdicts.add(v);
       return Future.value(v);
@@ -264,6 +273,12 @@ class Sentinel {
   /// Gives a root its journal event; the consequences already written get it as their `cause`.
   void attachEvent(Root r, int eventId) {
     r.eventId = eventId;
+    if (r.unwrittenCount > 0) {
+      // the repeats that came before the root had an event: they are on it now
+      book?.tally(eventId, List.of(r.unwritten), r.unwrittenCount - r.unwritten.length);
+      r.unwritten.clear();
+      r.unwrittenCount = 0;
+    }
     for (final id in r.consequences) {
       book?.update(id, cause: eventId);
     }

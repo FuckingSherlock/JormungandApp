@@ -130,6 +130,7 @@ void main() {
       expect(client.api, isNotNull);
 
       final auto = AutoService(client.api!, plan, delay: probe.delayTest,
+          pool: ProbePool.solo(ladder: DeadLadder(steps: const [Duration.zero])), // the dead A is asked at once (the ladder: ladder_test.dart)
           settings: AutoSettings(failAfter: 1, threshold: 5000, flapGuard: false, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
       await auto.check();
       expect(auto.toJson()['now'], 'A');

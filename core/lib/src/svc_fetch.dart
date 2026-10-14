@@ -60,13 +60,16 @@ const svcPlainId = 'plain';
 /// The same request answered whole by a path of the other side (direct vs tunnel) within the grace after the
 /// winner finished ([ServiceFetch.get] with `collect`): lets the caller compare what the two ways return.
 class SvcPeer {
-  const SvcPeer(this.via, this.kind, this.status, this.headers, this.body);
+  const SvcPeer(this.via, this.kind, this.status, this.headers, this.body, [this.ms = 0]);
 
   final String via;
   final SvcKind kind;
   final int status;
   final Map<String, String> headers;
   final Uint8List body;
+
+  /// When its body ended, ms from the start of this path's request.
+  final int ms;
 
   /// SHA-256 of the body, hex.
   String get hash => sha256.convert(body).toString();
@@ -82,6 +85,7 @@ class SvcResponse {
     required this.kind,
     this.resumes = 0,
     this.took = Duration.zero,
+    this.finishedMs = 0,
     this.peers = const [],
   });
 
@@ -110,12 +114,17 @@ class SvcResponse {
   final int resumes;
   final Duration took;
 
+  /// When the body of the path that finished it ended, ms from the start of that path's request (not the wait for
+  /// the peers; 0 when unknown).
+  final int finishedMs;
+
   /// 2xx or 304: the thing asked for. Anything else is the server's own answer, not a failure of the way.
   bool get ok => (status >= 200 && status < 300) || status == 304;
 }
 
 /// What one path ran into: [code] is `timeout` (no answer), `stall`, `connect`, `refused`, `reset`, `dns`,
-/// `tls`, `tunnel` (the proxy could not open the way on), `auth`, `closed`, `range`, `changed`, `http`, `error`.
+/// `tls`, `tunnel` (the proxy could not open the way on), `auth`, `closed`, `range`, `changed`, `empty` (a 200 with no
+/// body, only when the call asked `rejectEmpty`), `http`, `error`.
 class SvcPathFailure {
   const SvcPathFailure(this.id, this.kind, this.code, this.ms, [this.detail = '']);
 
@@ -253,11 +262,14 @@ class ServiceFetch {
   /// [collect] (small answers, not with [onData] or a range): the remembered winner is not used (the whole race
   /// runs), and after the winner finished the paths of the other side (direct vs tunnel) get [collectGrace] to
   /// bring their whole answer too — it comes back in [SvcResponse.peers] to be compared with the winner's.
+  /// [rejectEmpty] (same limits): a 200 with no body at all is that path's failure (`empty`), never an answer, so
+  /// the race goes on with the other paths; a 304 is not touched.
   Future<SvcResult> get(
     Uri uri, {
     String purpose = 'misc',
     String? retryKey,
     bool collect = false,
+    bool rejectEmpty = false,
     SvcPolicy policy = const SvcPolicy.race(),
     SvcPrefer prefer = SvcPrefer.tunnel,
     SvcRange? range,
@@ -267,7 +279,9 @@ class ServiceFetch {
     Future<void>? cancel,
   }) =>
       _Call(this, uri, purpose, policy, prefer, range, maxBytes ?? (onData == null ? defaultMaxBytes : null), headers ?? const {}, onData, cancel,
-              retryKey: retryKey ?? purpose, collect: collect && onData == null && range == null)
+              retryKey: retryKey ?? purpose,
+              collect: collect && onData == null && range == null,
+              rejectEmpty: rejectEmpty && onData == null && range == null)
           .run();
 
   String _memoKey(Uri uri, SvcPrefer prefer) => '${prefer.name}|${uri.host.toLowerCase()}:${uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80)}';
@@ -324,6 +338,12 @@ class _Attempt {
   String? code;
   String detail = '';
   int ms = 0;
+
+  /// The body ended at (ms of [sw]); 0 until then.
+  int doneMs = 0;
+
+  /// A 200 with no body at all fails with `empty` (see [ServiceFetch.get]).
+  bool rejectEmpty = false;
 
   /// Told on every change of [st] (the race looks again).
   void Function()? onChange;
@@ -456,6 +476,8 @@ class _Attempt {
   void _onDone() {
     if (bodyDone) return;
     bodyDone = true;
+    doneMs = sw.elapsedMilliseconds;
+    if (rejectEmpty && status == 200 && sink == null && _taken == 0) return fail('empty', 'empty body');
     unawaited(_sub?.cancel());
     _sub = null;
     _client?.close(force: true);
@@ -499,7 +521,7 @@ class _Attempt {
 
 class _Call {
   _Call(this.f, this.uri, this.purpose, this.policy, this.prefer, this.range, this.maxBytes, this.extra, this.onData, this.cancel,
-      {required this.retryKey, required this.collect})
+      {required this.retryKey, required this.collect, required this.rejectEmpty})
       : key = f._memoKey(uri, prefer),
         net0 = f._net,
         core0 = f._core;
@@ -516,6 +538,7 @@ class _Call {
   final Future<void>? cancel;
   final String retryKey;
   final bool collect;
+  final bool rejectEmpty;
   final String key;
   final int net0, core0;
 
@@ -652,7 +675,7 @@ class _Call {
       });
       await a.finished.future.timeout(left(), onTimeout: () {});
       if (a.st != _St.ready || !a.bodyDone) return null;
-      return SvcPeer(a.path.id, a.path.kind, a.status, a.headers, b.takeBytes());
+      return SvcPeer(a.path.id, a.path.kind, a.status, a.headers, b.takeBytes(), a.doneMs);
     }
 
     final done = await Future.wait(peers.map(one));
@@ -664,6 +687,7 @@ class _Call {
 
   SvcResponse _response(_Attempt a, Uint8List body, [List<SvcPeer> peers = const []]) => SvcResponse(
         peers: peers,
+        finishedMs: a.doneMs,
         status: (_first ?? a).status,
         headers: (_first ?? a).headers,
         body: body,
@@ -697,7 +721,8 @@ class _Call {
     final ranged = range != null || got > 0;
     final rangeEnd = range?.end;
     for (final p in cands) {
-      final a = _Attempt(f, p, p.id == svcPlainId || ep == null ? 'DIRECT' : ep.proxyFor(p), Stopwatch()..start());
+      final a = _Attempt(f, p, p.id == svcPlainId || ep == null ? 'DIRECT' : ep.proxyFor(p), Stopwatch()..start())
+        ..rejectEmpty = rejectEmpty && !ranged;
       attempts.add(a);
       _live.add(a);
       if (p.tunnel) tunnelTried = true;

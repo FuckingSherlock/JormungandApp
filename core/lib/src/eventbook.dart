@@ -267,6 +267,25 @@ class EventBook {
     return count;
   }
 
+  /// The same thing happened again at [times] (ms since epoch; empty = now) and the event [id] keeps its own findings:
+  /// only `data.repeat` moves (`count` + the number of times, `lastAt`, `at`: the newest [repeatKeep]; the event's own
+  /// `at` stays the first one), `rev` moves like in [update]. For repeats that are not judged again (a series that goes
+  /// on failing, a failure a root covers, a site inside its window); [repeated] is for repeats judged anew.
+  /// [more]: occurrences whose times are not given (only counted). Returns the new count, 0 when the event is gone.
+  int tally(int id, [List<int> times = const [], int more = 0]) {
+    final e = byId(id);
+    if (e == null) return 0;
+    final at = times.isEmpty && more == 0 ? [_clock().millisecondsSinceEpoch] : times;
+    final old = (e['data'] as Map<String, dynamic>)['repeat'] as Map?;
+    final all = [...((old?['at'] as List?)?.cast<int>() ?? [e['at'] as int]), ...at];
+    if (all.length > repeatKeep) all.removeRange(0, all.length - repeatKeep);
+    final count = ((old?['count'] as num?)?.toInt() ?? 1) + at.length + more;
+    update(id, data: {
+      'repeat': {'count': count, 'firstAt': old?['firstAt'] ?? e['at'], 'lastAt': at.isEmpty ? (old?['lastAt'] ?? e['at']) : at.last, 'at': all},
+    });
+    return count;
+  }
+
   /// The event with this id, or null.
   Map<String, dynamic>? byId(int id) {
     load();

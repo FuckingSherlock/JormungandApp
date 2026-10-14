@@ -36,7 +36,12 @@ class ClosedConnection {
       this.pkg = '',
       this.network = '',
       this.inbound = '',
-      this.durationMs});
+      this.durationMs,
+      this.id = ''});
+
+  /// The connection's id as the connections table has it ('' = not told): Auto matches the bytes it had
+  /// seen of an open connection with its last total.
+  final String id;
 
   /// The server's outbound tag (the leaf, e.g. `route0/<key>`); [chain] = leaf … `proxy`.
   final String outbound;
@@ -67,6 +72,7 @@ class ClosedConnection {
         network: c.network,
         inbound: c.inbound,
         durationMs: _lived(c, nowMs),
+        id: c.id,
       );
 }
 

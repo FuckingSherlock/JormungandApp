@@ -199,6 +199,7 @@ void main() {
       final url = 'http://127.0.0.1:${target.port}/';
       svc = FallbackService(api, info.fallbacks,
           delay: probe.delayTest,
+          pool: ProbePool.solo(ladder: DeadLadder(steps: const [Duration.zero])), // the dead target is asked every round (the ladder: ladder_test.dart)
           settings: AutoSettings(failAfter: 2, flapGuard: false, url: url, timeoutMs: 2000, stallAfter: const Duration(milliseconds: 200)));
       final changes = <FallbackChange>[];
       svc.changes.listen(changes.add);

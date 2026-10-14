@@ -43,7 +43,13 @@ Map<String, dynamic> _plan(List<Map<String, dynamic>> rules, {Map<String, Map<St
 
 class _Rig {
   _Rig(Map<String, dynamic> plan, Map<String, int> alive,
-      {AutoSettings? settings, bool uncertain = false, int Function()? clock, void Function(String groupTag, String key)? onDown}) {
+      {AutoSettings? settings,
+      bool uncertain = false,
+      int Function()? clock,
+      void Function(String groupTag, String key)? onDown,
+      List<Duration> steps = const [Duration.zero]}) {
+    // a zero ladder: a dead target is asked every round (the ladder itself: ladder_test.dart and the test of its own below)
+    pool = ProbePool.solo(clock: clock, ladder: DeadLadder(steps: steps));
     final info = RoutingInfo();
     fake = FakeBox(buildConfig(plan, info: info), alive);
     this.uncertain = uncertain;
@@ -58,7 +64,7 @@ class _Rig {
 
   late final FakeBox fake;
   late final FallbackService svc;
-  final pool = ProbePool.solo(); // the network status Auto would write: a doubt / the OS offline
+  late final ProbePool pool; // the network status Auto would write: a doubt / the OS offline
   set uncertain(bool v) => pool.doubt(v);
   set offline(bool v) => pool.offline(v);
   final changes = <FallbackChange>[];
@@ -250,6 +256,35 @@ void main() {
       await r.svc.check();
       expect(r.fake.tested, containsAll(['src:a/s::a1', 'src:b/s::b1']));
       expect([for (final t in r.svc.toJson()['targets'] as List) (t as Map)['target']], ['src:a', 'src:b']);
+    });
+
+    test('a dead target is asked on the ladder: one light request per step, not every round; it answers: back', () async {
+      var t = 0;
+      final r = _Rig(two([_rule('r1', 'src:a', 'src:b')]), alive(), clock: () => t, steps: deadLadderSteps);
+      int asked() => r.fake.tested.where((x) => x.contains('s::a1')).length;
+      await r.svc.check();
+      r.fake.alive.remove('s::a1');
+      t = 1000;
+      await r.svc.check();
+      t = 2000;
+      await r.svc.check();
+      expect(sel(r), 'src:b');
+      final before = asked();
+      t = 30 * 1000;
+      await r.svc.check();
+      expect(asked(), before, reason: 'the first step (1 min) is not over');
+      t = 2000 + 60 * 1000;
+      await r.svc.check();
+      expect(asked(), before + 1, reason: 'one request on its turn');
+      r.fake.alive['s::a1'] = 20;
+      t += 60 * 1000;
+      await r.svc.check();
+      expect(asked(), before + 1, reason: 'the second step is 2 min');
+      t += 60 * 1000;
+      await r.svc.check();
+      await r.svc.check();
+      expect(sel(r), 'src:a', reason: 'it answered on its turn and goes back');
+      expect(r.pool.ladder.length, 0);
     });
 
     test('the target down: the fallback target; both down: the main flow; back step by step, journalled', () async {

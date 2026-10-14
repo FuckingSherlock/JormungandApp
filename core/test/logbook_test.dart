@@ -12,6 +12,24 @@ const _conn = '[1 5ms] inbound/mixed[mixed-in]: inbound connection to example.co
 List<Map> _lines(LogBook b, [int? from]) => (b.since(from)['lines'] as List).cast<Map>();
 
 void main() {
+  group('the core\'s own checks are marked', () {
+    test('a probe-in line is [check]; a DNS / flag check keeps the name it carries; the tester\'s tag stays', () {
+      final b = LogBook();
+      b.singBox('INFO[0001] [7 5ms] inbound/socks[probe-in]: [route0/src2::n3aa6] inbound connection from 127.0.0.1:5');
+      b.singBox('INFO[0001] [8 5ms] inbound/socks[probe-in]: [dns-check/dns-a] inbound connection from 127.0.0.1:5');
+      b.singBox('INFO[0001] [9 5ms] inbound/socks[probe-in]: [flag-check/side] inbound connection from 127.0.0.1:5');
+      b.singBox('INFO[0001] [9 5ms] inbound/socks[probe-in]: inbound connection from 127.0.0.1:5', tag: 'ping');
+      b.singBox('INFO[0001] $_conn');
+      final m = [for (final x in _lines(b)) x['msg'] as String];
+      expect(m[0], startsWith('[check] '));
+      expect(m[1], startsWith('[dns-check] '));
+      expect(m[2], startsWith('[flag-check] '));
+      expect(m[3], startsWith('[ping] '));
+      expect(m[4], isNot(contains('[check]')), reason: 'the user\'s traffic is not marked');
+      expect(m[4], startsWith('[1 5ms]'));
+    });
+  });
+
   group('log book rings', () {
     test('connection lines have a ring of their own: they never evict errors or other lines', () {
       final b = LogBook(cap: 10, noiseCap: 3);

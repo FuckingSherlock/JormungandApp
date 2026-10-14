@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'node.dart';
 import 'parse/build.dart';
@@ -210,6 +211,7 @@ Future<_Resp> _get(
         policy: w.policy,
         maxBytes: maxBytes,
         collect: w.compare,
+        rejectEmpty: true,
         cancel: cancel.future,
         headers: {
           HttpHeaders.userAgentHeader: ua,
@@ -230,33 +232,80 @@ Future<_Resp> _get(
   final r = res.response!;
   if (!r.ok) throw HttpException('HTTP ${r.status} for UA $ua', uri: uri);
   var status = r.status, body = r.body, hdrs = r.headers, kind = r.kind;
-  // Auto: both sides answered whole. When they differ the tunnel's is the one used (the provider may serve
-  // another list to the visible address of the machine, or something in the way may alter it).
+  // Auto: both sides answered whole. A copy that is no answer (no body, no servers in it, a 304) loses to the other
+  // one without a word: the data came, how does not matter. Two copies with servers: when their sets differ the
+  // tunnel's is the one used and the difference is journaled (the provider may serve another list to the visible
+  // address of the machine, or something in the way may alter it); the same set in another order or other bytes
+  // is the same answer.
   final peer = r.peers.isEmpty ? null : r.peers.first;
   if (peer != null && peer.hash != r.hash) {
-    final tunnelWon = r.kind != SvcKind.direct;
-    final (dVia, dLen, dHash) = tunnelWon ? (peer.via, peer.body.length, peer.hash) : (r.via, r.bytes, r.hash);
-    final (tVia, tLen, tHash) = tunnelWon ? (r.via, r.bytes, r.hash) : (peer.via, peer.body.length, peer.hash);
-    w.onDiverged?.call({
-      'host': uri.host.toLowerCase(),
-      'ua': ua,
-      'directBytes': dLen,
-      'tunnelBytes': tLen,
-      'directHash': dHash.substring(0, 12),
-      'tunnelHash': tHash.substring(0, 12),
-      'tunnelPath': tVia,
-      'directPath': dVia,
-    });
-    if (!tunnelWon) {
-      status = peer.status;
-      body = peer.body;
-      hdrs = peer.headers;
-      kind = peer.kind;
+    final win = _Side(r.status, r.headers, r.body, r.kind, r.via, r.finishedMs);
+    final other = _Side(peer.status, peer.headers, peer.body, peer.kind, peer.via, peer.ms);
+    final (d, t) = win.kind == SvcKind.direct ? (win, other) : (other, win);
+    final dn = d.nodes, tn = t.nodes;
+    final _Side use;
+    if (tn != null && dn != null) {
+      use = t;
+      final dk = {for (final n in dn) n.key: n}, tk = {for (final n in tn) n.key: n};
+      final onlyD = [for (final e in dk.entries) if (!tk.containsKey(e.key)) e.value];
+      final onlyT = [for (final e in tk.entries) if (!dk.containsKey(e.key)) e.value];
+      if (onlyD.isNotEmpty || onlyT.isNotEmpty) {
+        w.onDiverged?.call({
+          'host': uri.host.toLowerCase(),
+          'ua': ua,
+          'directNodes': dk.length,
+          'tunnelNodes': tk.length,
+          'onlyDirect': _nodeNames(onlyD),
+          'onlyTunnel': _nodeNames(onlyT),
+          'onlyDirectCount': onlyD.length,
+          'onlyTunnelCount': onlyT.length,
+          'directStatus': d.status,
+          'tunnelStatus': t.status,
+          'directMs': d.ms,
+          'tunnelMs': t.ms,
+          'directPath': d.via,
+          'tunnelPath': t.via,
+          'used': 'tunnel',
+        });
+      }
+    } else {
+      use = tn != null ? t : (dn != null ? d : win);
     }
+    status = use.status;
+    body = use.body;
+    hdrs = use.headers;
+    kind = use.kind;
   }
   if (kind != SvcKind.direct) w.tunnel = true;
   return _Resp(ua, status, utf8.decode(body, allowMalformed: true), hdrs);
 }
+
+/// One side's whole answer in the Auto comparison.
+class _Side {
+  _Side(this.status, this.headers, this.body, this.kind, this.via, this.ms);
+
+  final int status;
+  final Map<String, String> headers;
+  final Uint8List body;
+  final SvcKind kind;
+  final String via;
+
+  /// When its body ended, ms from the start of its request.
+  final int ms;
+
+  /// The servers in it; null when it is no copy of the list (a 304, no body, no servers).
+  late final List<Node>? nodes = status == 304 || body.isEmpty
+      ? null
+      : () {
+          final n = parseSubscription(utf8.decode(body, allowMalformed: true), contentType: headers[HttpHeaders.contentTypeHeader]).$2;
+          return n.isEmpty ? null : n;
+        }();
+}
+
+const _divergedNames = 10;
+
+/// `name (address:port)` of the first few servers, for the journal.
+List<String> _nodeNames(List<Node> l) => [for (final n in l.take(_divergedNames)) '${n.name} (${n.address}:${n.port})'];
 
 /// Fetches a subscription the way docs/subscription-parsing.md describes: discovery with
 /// several UAs on the first fetch (or every 7 days, or when the list shrank by >20%, or
@@ -269,8 +318,9 @@ Future<_Resp> _get(
 /// reach the provider ([Channel]); every request goes through [svc] (the service traffic of
 /// the core, svc_fetch.dart; without one a plain direct socket, so [Channel.proxy] has no way).
 /// [retryKey] (the source id) keeps the retry count of this subscription apart. [onDiverged]:
-/// in Auto both sides answered whole and the bodies differ (the tunnel's is used), told once per
-/// request with codes and hashes.
+/// in Auto both sides answered whole with servers and the sets of servers differ (the tunnel's copy is used), told once
+/// per request with the counts, the servers that differ, each side's status and finish time. A side with no body, no
+/// servers or a 304 is no answer: the other copy is used and nothing is told.
 Future<SubscriptionResult> fetchSubscription(
   String url, {
   String userAgent = 'Auto',

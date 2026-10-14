@@ -56,7 +56,7 @@ class EventWords {
     'sub/removed' => l10n.serversRemoved,
     'sub/back' => l10n.serversBack,
     'sub/dead' => l10n.serversDoNotRespond,
-    'sub/diverged' => l10n.subscriptionAnswersDiffer,
+    'sub/diverged' => l10n.subscriptionServersDiffer,
     'rules/fallback' => l10n.ruleTargetUnavailable,
     'rules/targetBack' => l10n.ruleTargetBack,
     'rules/ruleSetFailed' => l10n.ruleSetNotDownloaded,
@@ -282,13 +282,17 @@ class EventWords {
       ),
       ('site', 'unreachable') => () {
         final tried = d['tried'] is List ? d['tried'] as List : const [];
+        // down everywhere: the site is down, our routes are no part of it
+        final routes = !downEverywhere(d);
         return r(
           l10n.doesNotOpen(host(d)),
           _lines([
-            _entryMark('⚠️', d['entry'] ?? d['route'], d['server']),
-            for (final x in tried)
-              if (x is Map) _entryMark('⚠️', x['entry'], x['server']),
-            if (tried.isEmpty) _noRoute(d),
+            if (routes) ...[
+              _entryMark('⚠️', d['entry'] ?? d['route'], d['server']),
+              for (final x in tried)
+                if (x is Map) _entryMark('⚠️', x['entry'], x['server']),
+              if (tried.isEmpty) _noRoute(d),
+            ],
             whyText(d),
             checkText(d),
           ], '   '),
@@ -312,7 +316,10 @@ class EventWords {
         l10n.previousSettingsRestored,
       ),
       ('sub', 'dead') => r(l10n.itsServersDoNotRespond(source(d['source'], d['name'])), l10n.contactTheSubscriptionProviderSSupport),
-      ('sub', 'diverged') => r(l10n.theDirectAndTheVpnAnswers(source(d['source'], d['name'])), l10n.theVpnAnswerIsUsed),
+      ('sub', 'diverged') => r(
+        l10n.theDirectAndTheVpnCopies(source(d['source'], d['name'])),
+        d['used'] == 'direct' ? l10n.theDirectCopyIsUsed : l10n.theVpnCopyIsUsed,
+      ),
       ('rules', 'ruleSetFailed') => r(
         l10n.ruleSetNotDownloaded2('${d['tag']}'),
         _lines([d['error'] != null ? '${d['error']}' : null, l10n.theLastCopyIsUsed], ' — '),
@@ -654,6 +661,17 @@ class EventWords {
     'count' when e?.cat == 'conn' => l10n.failures,
     'code' when e?.cat == 'core' => l10n.code,
     'via' when e?.cat == 'core' => l10n.route,
+    'directNodes' when e?.cat == 'sub' => l10n.serversDirect,
+    'tunnelNodes' when e?.cat == 'sub' => l10n.serversViaVpn,
+    'onlyDirect' when e?.cat == 'sub' => l10n.onlyDirect,
+    'onlyTunnel' when e?.cat == 'sub' => l10n.onlyViaVpn,
+    'directStatus' when e?.cat == 'sub' => l10n.directStatus,
+    'tunnelStatus' when e?.cat == 'sub' => l10n.vpnStatus,
+    'directMs' when e?.cat == 'sub' => l10n.directTime,
+    'tunnelMs' when e?.cat == 'sub' => l10n.vpnTime,
+    'directPath' when e?.cat == 'sub' => l10n.directPath,
+    'tunnelPath' when e?.cat == 'sub' => l10n.vpnPath,
+    'used' when e?.cat == 'sub' => l10n.copyUsed,
     'kind' => l10n.failure,
     'stage' => l10n.stage,
     'version' => l10n.version,
@@ -742,6 +760,19 @@ class EventWords {
       }
       if (k == 'savedAt' && v is num) return stamp(v.toInt());
     }
+    if (e.cat == 'sub' && e.type == 'diverged') {
+      if ((k == 'directMs' || k == 'tunnelMs') && v is num) return duration(v);
+      if (k == 'used') return v == 'direct' ? l10n.directCopy : l10n.vpnCopy;
+      if ((k == 'onlyDirect' || k == 'onlyTunnel') && v is List) {
+        final total = e.data[k == 'onlyDirect' ? 'onlyDirectCount' : 'onlyTunnelCount'];
+        final n = total is num ? total.toInt() : v.length;
+        return [
+          '$n',
+          ...v.map((x) => '$x'),
+          if (n > v.length) l10n.andMore2(n - v.length),
+        ].join('\n');
+      }
+    }
     if (k == 'tried' && v is List) {
       if (v.isEmpty) return _noRoute(e.data);
       return v
@@ -802,11 +833,14 @@ class EventWords {
         (l10n.time, stamp(e.at)),
       (l10n.event, '${e.cat} / ${e.type}${e.own ? ' ${l10n.yours}' : ''}'),
     ];
+    final noRoutes = e.cat == 'site' && e.type == 'unreachable' && downEverywhere(e.data);
     for (final x in e.data.entries) {
       final v = x.value;
       if (v == null || (v is String && v.isEmpty)) continue;
+      if (noRoutes && const ['entry', 'server', 'tried', 'retries'].contains(x.key)) continue; // down everywhere: not our routes
       if (x.key == 'source' && e.cat == 'conn') continue; // 'closed': where the core saw it, not a subscription
       if (x.key == 'repeat') continue; // shown as the row's times
+      if (e.cat == 'sub' && (x.key == 'onlyDirectCount' || x.key == 'onlyTunnelCount')) continue; // folded into the list's value
       if (x.key == 'check' && v is Map) {
         out.addAll(checkFields(v));
         continue;
@@ -828,6 +862,14 @@ class EventWords {
       'failed' => l10n.theCheckerDidNotAnswer,
       _ => null,
     };
+  }
+
+  /// The external checker could not open the site either (`data.check.state == 'down'` of a `site/unreachable`): the
+  /// site is down for everyone, so the event shows none of our routes (entry, server, the routes tried, the retries
+  /// note); they stay in the data, the trail and the raw log for diagnosis.
+  bool downEverywhere(Map<String, dynamic> d) {
+    final c = d['check'];
+    return c is Map && c['state'] == 'down';
   }
 
   /// The checker's rows of an opened event: the verdict, then one row per node of the checker
