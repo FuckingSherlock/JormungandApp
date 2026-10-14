@@ -953,6 +953,45 @@ void main() {
       expect(same.scoutFor('route1/s1::b')?.server, 's1::a', reason: 'the same subscription before another one');
     });
 
+    test('scoutFor country: the provider flag, else the country of the last exit check, else unknown', () async {
+      // A (the failing one) and B, C of s1, no flags in the plan except where given; the exit book names countries
+      Map<String, dynamic> node(String id, String key, {String? flag}) {
+        final u = unit(id, [key]);
+        final n = ((u['main'] as Map)['nodes'] as List).cast<Map>().single..remove('flag');
+        if (flag != null) n['flag'] = flag;
+        return u;
+      }
+
+      String idOf(Map<String, dynamic> u) => serverIdentity((((u['main'] as Map)['nodes'] as List).single as Map)['outbound'] as Map);
+      final de = flagOfCountry('DE'), fr = flagOfCountry('FR');
+      Future<String?> scout(Map<String, dynamic> a, Map<String, dynamic> b, Map<String, dynamic> c, {String? detA, String? detB, String? detC}) async {
+        final p = plan([a, b, c], auto: {'standby': 5});
+        final fake = FakeBox(buildConfig(p), {'s1::a': 30, 's1::b': 60, 's1::c': 70});
+        final book = ExitBook();
+        for (final (u, code) in [(a, detA), (b, detB), (c, detC)]) {
+          if (code != null) book.record(idOf(u), ip: '203.0.113.1', country: code, at: 1);
+        }
+        final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (t, d) async => true, settings: AutoSettings.fromPlan(p), exits: book);
+        await auto.check();
+        return auto.scoutFor('route0/s1::a')?.server;
+      }
+
+      // B shares A's country, C does not: C is the scout (the list order alone would pick B)
+      var a = node('A', 's1::a', flag: de), b = node('B', 's1::b', flag: de), c = node('C', 's1::c');
+      expect(await scout(a, b, c, detC: 'FR'), 's1::c', reason: 'C has no flag: the detected FR is another country than the flag DE');
+      expect(await scout(a, b, c), 's1::b', reason: 'C has no flag and was never checked: its country is unknown, B comes first in the order');
+      expect(await scout(a, b, c, detC: 'DE'), 's1::b', reason: 'C was detected in the same country as A');
+      // the provider flag wins over what the check says
+      b = node('B', 's1::b', flag: fr);
+      c = node('C', 's1::c', flag: de);
+      expect(await scout(a, b, c, detB: 'DE', detC: 'FR'), 's1::b', reason: 'flags FR / DE stand whatever the exit checks named');
+      // the failing node itself has no flag: its detected country is the one to differ from
+      a = node('A', 's1::a');
+      b = node('B', 's1::b', flag: de);
+      c = node('C', 's1::c', flag: fr);
+      expect(await scout(a, b, c, detA: 'FR'), 's1::b', reason: 'A was detected in FR: B (DE) is another country, C (FR) is not');
+    });
+
     test('elsewhere: one working node per other subscription (the failing one\'s and exceptSubs left out), at most limit; reads nothing for Manual', () async {
       final (auto, _) = subs((tag) async => true);
       await auto.check();

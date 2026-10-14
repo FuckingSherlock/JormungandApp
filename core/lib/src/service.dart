@@ -29,6 +29,7 @@ import 'manual.dart' as manual;
 import 'node.dart';
 import 'parse/links.dart';
 import 'plan.dart';
+import 'exits.dart';
 import 'ladder.dart' show DeadLadderStore;
 import 'pool.dart';
 import 'probe.dart';
@@ -248,6 +249,10 @@ class CoreService implements CoreApi {
   /// The nodes Auto found dead and asks on a ladder (ladder.dart), kept in `<dataDir>/dead-nodes.json`.
   late final deadStore = DeadLadderStore(File(p.join(dataDir, 'dead-nodes.json')), pool.ladder, clock: () => _now().millisecondsSinceEpoch);
 
+  /// Where each node leaves to by the exit check through it (exits.dart), kept in `<dataDir>/exit-nodes.json`.
+  late final exitBook = ExitBook();
+  late final exitStore = ExitBookStore(File(p.join(dataDir, 'exit-nodes.json')), exitBook, clock: () => _now().millisecondsSinceEpoch);
+
   /// Checks a failure against the state of the world before it is reported as one (sentinel/,
   /// docs/failures.md). Its context follows [pool], the platform ([setNetwork]) and this service's own
   /// starts and stops; the detectors move onto [Sentinel.suspect] one by one.
@@ -456,6 +461,7 @@ class CoreService implements CoreApi {
     eventBook.load(); // trims an old journal at start
     final dead = deadStore.load(); // the nodes found dead before: the ladder goes on from the step each was on
     if (dead > 0) logBook.note('info', 'auto: $dead unavailable nodes from the last run, each asked once at the first round, then on the ladder as before');
+    exitStore.load(); // where the nodes leave to, as the last exit checks found
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     sentinel.changes.listen((_) {
       _syncNetEvents(); // `net.offline` opened / closed: conn/offline, conn/online
@@ -506,6 +512,7 @@ class CoreService implements CoreApi {
       logBook.close();
       eventBook.close();
       await deadStore.close();
+      await exitStore.close();
       await logBook.flush();
       await eventBook.flush(); // the journal is written behind the memory: what waits goes to the file now
     }
@@ -1084,6 +1091,7 @@ class CoreService implements CoreApi {
     pool.resetNetwork(); // a new sing-box: the network is presumed up again
     final auto = _auto = AutoService(api, plan,
         pool: pool,
+        exits: exitBook,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         onDown: serverDown,
@@ -1753,11 +1761,19 @@ class CoreService implements CoreApi {
     _changed();
     final direct = !runner.running;
     final since = Stopwatch()..start();
+    final node = direct ? null : _auto?.exitNode(); // the node the check goes through (null: not known, nothing is kept)
     Future<void> attempt() async {
       final sw = Stopwatch()..start();
       try {
         final e = await exitCheck(direct ? null : _tunnelPort ?? _mixedPort);
-        if (seq == _exitSeq) _exit = {...e, 'direct': direct, 'at': DateTime.now().millisecondsSinceEpoch};
+        if (seq == _exitSeq) {
+          _exit = {...e, 'direct': direct, 'at': DateTime.now().millisecondsSinceEpoch};
+          // the node is the check's only if Auto's server in use did not move meanwhile
+          final ip = e['ip'];
+          if (node != null && ip is String && _auto?.exitNode() == node) {
+            exitBook.record(node, ip: ip, country: e['country'] as String?, at: _now().millisecondsSinceEpoch);
+          }
+        }
       } catch (e) {
         if (seq != _exitSeq) return;
         if (!direct && sw.elapsed < const Duration(seconds: 3) && since.elapsed < const Duration(seconds: 15) && runner.running) {

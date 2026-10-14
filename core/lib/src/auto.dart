@@ -56,6 +56,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'config.dart' show defaultTestUrl, planCheckers;
+import 'exits.dart';
 import 'failures.dart' show ConnOutcome;
 import 'ladder.dart';
 import 'plan.dart';
@@ -286,8 +287,9 @@ class AltReach {
 
 /// A server of a route's main group that a site test can go through ([AutoService.workingNodes]): [route] its
 /// entry's id, [server] its key (`<subscription id>::<node id>`), [tag] its outbound tag, [sub] the subscription
-/// ('' = unknown), [country] the flag the plan knows it by ('' = unknown). The exit's real country is a later
-/// stage: it replaces [country] here, the choice below ([AutoService.reachScout]) reads nothing else.
+/// ('' = unknown), [country] the flag of its country ('' = unknown): the provider's flag from the plan, else the
+/// country the last exit check through the node named ([AutoService.exits]). The choice below ([AutoService.reachScout])
+/// reads nothing else.
 class SiteNode {
   const SiteNode({required this.route, required this.server, required this.tag, required this.sub, this.country = ''});
   final String route, server, tag, sub, country;
@@ -302,6 +304,7 @@ class _Group {
     for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
       final o = n['outbound'];
       ids['${n['key']}'] = o is Map ? serverIdentity(o) : '$tag/${n['key']}'; // no outbound: nothing to share
+      if (o is Map) real.add('${n['key']}');
       final flag = n['flag'];
       if (flag is String && flag.isNotEmpty && flag != '🌐') flags['${n['key']}'] = flag;
     }
@@ -315,6 +318,7 @@ class _Group {
   bool get pair => entry != null;
   final List<String> keys;
   final ids = <String, String>{}; // key → the server's pool identity (pool.dart)
+  final real = <String>{}; // the keys whose identity is a fingerprint of an outbound (the same on the next start), not a tag
 
   /// A server's health by [_hkey]: for a chain's exits it is the pair's (entry in use + exit).
   final health = <String, Health>{};
@@ -361,9 +365,10 @@ typedef DelayTest = Future<int> Function(String tag, String url, int timeoutMs);
 
 class AutoService {
   AutoService(this.api, Map<String, dynamic> plan,
-      {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, this.trace, this.onDown, ProbePool? pool})
+      {required this.delay, AutoSettings? settings, int Function()? clock, this.reach, this.note, this.trace, this.onDown, ProbePool? pool, ExitBook? exits})
       : settings = settings ?? AutoSettings.fromPlan(plan),
         pool = pool ?? ProbePool.solo(),
+        exits = exits ?? ExitBook(),
         manual = plan['manual'] == true,
         _clock = clock ?? _wallClock {
     final rs = planRoutes(plan);
@@ -382,6 +387,11 @@ class AutoService {
   /// goes into it for all of them. Without one given the service has its own, which reuses
   /// nothing.
   final ProbePool pool;
+
+  /// Where each node leaves to, by the last exit check through it (exits.dart): the country of a node the provider
+  /// gave no flag to ([SiteNode.country]), and `exit` of the node state ([toJson]). The owner fills it
+  /// ([exitNode] says which node a check went through) and keeps it across restarts.
+  final ExitBook exits;
 
   /// Whether a site (`host:port`) opens through an outbound tag (probe.dart probeReach);
   /// null = cannot be told. Without it the sites of failed requests are not tried again.
@@ -846,10 +856,26 @@ class AutoService {
         final p = pool.peek(id, url: settings.url, checkers: settings.checkers);
         final seen = h.answered && h.fails == 0 || p != null && p.answered && now - p.at <= workingAge.inMilliseconds;
         if (!seen || h.fails > 0) continue;
-        out.add(SiteNode(route: r.id, server: k, tag: g.member(k), sub: _subOf(k), country: g.flags[k] ?? ''));
+        out.add(SiteNode(route: r.id, server: k, tag: g.member(k), sub: _subOf(k), country: _countryOf(g, k)));
       }
     }
     return out;
+  }
+
+  /// The flag of a server's country: the provider's (the plan's `flag`), else the country the last exit check through
+  /// it named; '' = unknown.
+  String _countryOf(_Group g, String key) {
+    final flag = g.flags[key];
+    if (flag != null) return flag;
+    return g.real.contains(key) ? flagOfCountry(exits.countryOf(g.ids[key]!)) : '';
+  }
+
+  /// The identity ([exits] key) of the server the main flow leaves through now: the route in use's main group,
+  /// the server sing-box reported for it. null = not known yet (a Fastest group before urltest picked) or not shareable.
+  /// An exit check is the node's only if this is the same before and after it.
+  String? exitNode() {
+    final g = _routes[index].main, k = g.now;
+    return k != null && g.real.contains(k) ? g.ids[k] : null;
   }
 
   static String _subOf(String key) {
@@ -871,7 +897,7 @@ class AutoService {
   SiteNode? nodeOf(String outbound) {
     for (final r in _routes) {
       final tag = _serverTag(r, outbound), k = tag == null ? null : r.main.keyOf(tag);
-      if (k != null && r.main.keys.contains(k)) return SiteNode(route: r.id, server: k, tag: tag!, sub: _subOf(k), country: r.main.flags[k] ?? '');
+      if (k != null && r.main.keys.contains(k)) return SiteNode(route: r.id, server: k, tag: tag!, sub: _subOf(k), country: _countryOf(r.main, k));
     }
     return null;
   }
@@ -1320,10 +1346,11 @@ class AutoService {
       _stall.sweep(tag, away, every: settings.stallAfter, onClosed: () => stalledClosed++);
 
   /// For the app: `{now: route id, index, server, entryServer (chain), manual, routes: [{id, ms,
-  /// fails, oks, at, strikes, holdUntil, server, entryServer}], members: [{key, ms, fails, oks, at}] (every
+  /// fails, oks, at, strikes, holdUntil, server, entryServer, exit}], members: [{key, ms, fails, oks, at, exit}] (every
   /// server tested so far, not a chain's exits: those are measured through the entry),
-  /// pairs: [{entry, key, ms, fails, oks, at}] (a chain's exit [key] through the entry
-  /// server [entry]: the exits' own results, one per pair tested),
+  /// pairs: [{entry, key, ms, fails, oks, at, exit}] (a chain's exit [key] through the entry
+  /// server [entry]: the exits' own results, one per pair tested). `exit` = {ip, country (ISO, '' = never
+  /// named), at} of the last exit check through that server ([exits]); null = never checked,
   /// switches (count), switchedAt, lastSwitch ({route?, from, to, reason, at}; with
   /// `route` = a Priority server move inside that route, `from`/`to` are then server
   /// keys), unstable (count), lastUnstable ({id, strikes, hold, at}), noNet, stalledClosed,
@@ -1336,6 +1363,9 @@ class AutoService {
       return _onHold(r) && s != null ? s + settings.hold(r.strikes).inMilliseconds : null;
     }
 
+    // where the server leaves to by the last exit check through it: {ip, country (ISO, '' = never named), at}; null = never checked
+    Map<String, dynamic>? exitOf(_Group g, String? key) => key != null && g.real.contains(key) ? exits[g.ids[key]!]?.toJson() : null;
+
     return {
       'now': cur.id,
       'index': index,
@@ -1345,7 +1375,7 @@ class AutoService {
         // server / entryServer: where each route's groups stand, the standby ones too (a new plan
         // starts them there; null = not told by sing-box yet)
         for (final r in _routes)
-          {'id': r.id, ...r.health.toJson(), 'strikes': r.strikes, 'holdUntil': holdUntil(r), 'server': r.main.now, 'entryServer': r.entry?.now},
+          {'id': r.id, ...r.health.toJson(), 'strikes': r.strikes, 'holdUntil': holdUntil(r), 'server': r.main.now, 'entryServer': r.entry?.now, 'exit': exitOf(r.main, r.main.now)},
       ],
       'manual': manual,
       'members': [
@@ -1353,7 +1383,7 @@ class AutoService {
           for (final g in r.groups)
             if (!g.pair)
               for (final e in g.health.entries)
-                if (e.value.at > 0) {'key': e.key, ...e.value.toJson()},
+                if (e.value.at > 0) {'key': e.key, ...e.value.toJson(), 'exit': exitOf(g, e.key)},
       ],
       'pairs': [
         for (final r in _routes)
@@ -1364,6 +1394,7 @@ class AutoService {
                   'entry': e.key.substring(0, e.key.indexOf(_pairSep)),
                   'key': e.key.substring(e.key.indexOf(_pairSep) + 1),
                   ...e.value.toJson(),
+                  'exit': exitOf(r.main, e.key.substring(e.key.indexOf(_pairSep) + 1)),
                 },
       ],
       'switches': switchCount,
