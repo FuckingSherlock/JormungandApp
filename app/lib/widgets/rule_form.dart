@@ -21,7 +21,9 @@ import 'target_picker.dart';
 /// (Domains, IP, Ports, Source, Network, Process) with chip inputs, "except", "+ Condition"; Then:
 /// Proxy / Direct / Block with Via, Fallback and its own Via, How (block), DNS; JSON: the sing-box
 /// route rule. [id] edits a rule; otherwise a new one, which may start from a [host] (a domain or an
-/// address seen in the app), an [app] (a package) and a [via] (a catalog entry id).
+/// address seen in the app), an [app] (a package) and a [via]: a catalog entry id, or a rule target taken as it is
+/// (`node:<key>`: the node that opened the site when it is a node of the failing entry itself, the event's
+/// `viaTarget`); the rule is then named "`host` via `entry or node name`".
 Future<void> showRuleForm(
   BuildContext context, {
   String? id,
@@ -51,7 +53,12 @@ Future<void> showRuleForm(
       };
       draft.name = cat.appLabel(app);
     }
-    if (via != null && via.isNotEmpty) {
+    if (via != null && via.startsWith('node:')) {
+      // a rule target as it is (a node of the failing entry that opened the site)
+      draft.target = via;
+      final n = cat.nodeOfKey(via.substring(5));
+      if (host != null && n != null) draft.name = '$host via ${n.name}';
+    } else if (via != null && via.isNotEmpty) {
       draft.target = entryTarget(cat, via);
       final e = cat.connectEntry(via);
       if (host != null && e != null) draft.name = '$host via ${e.name}';

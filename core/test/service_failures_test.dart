@@ -175,7 +175,7 @@ void main() {
       expect([e['level'], e['verdict']], ['warn', 'confirmed']);
       expect((e['why'] as Map)['code'], 'conn.timeout');
       expect(e['data'], containsPair('count', 3));
-      expect(trailCodes(e), containsAllInOrder(['suspect', 'persist.window', 'conn.recovered', 'conn.otherRoute', 'probe.same', 'probe.alt', 'site.checker']));
+      expect(trailCodes(e), containsAllInOrder(['suspect', 'persist.window', 'conn.recovered', 'conn.otherRoute', 'probe.same', 'probe.scout', 'site.checker']));
       final same = (e['trail'] as List).cast<Map>().firstWhere((s) => s['code'] == 'probe.same');
       expect([same['outcome'], (same['params'] as Map)['opens'], (same['params'] as Map)['appFails']], ['fail', true, true]);
       expect(quiet(e), isFalse);
@@ -186,10 +186,9 @@ void main() {
       svc.probeSame = (o, d, c) async => true;
       fail(3);
       await time.advanceSeconds(11);
-      final e = events('conn', 'failing').single;
-      expect(e['verdict'], 'blip');
-      expect(trailCodes(e), containsAllInOrder(['persist.window', 'probe.same', 'blip.recovered']));
-      expect(quiet(e), isTrue);
+      // a micro-failure is the raw log only, by design (docs/failures.md → Проверки сайтов): no journal event
+      expect(events('conn', 'failing'), isEmpty);
+      expect((svc.log()['lines'] as List).cast<Map>().any((l) => '${l['msg']}'.contains('micro-failure')), isTrue);
     });
 
     test('the network goes while probe.same runs (the failure began before): the probe is cancelled, the suspicion parked, and judged again when the network is back', () async {
@@ -206,9 +205,8 @@ void main() {
       svc.setNetwork({'connected': true, 'validated': true});
       await time.advanceSeconds(2);
       expect(runs, 2);
-      final e = events('conn', 'failing').single;
-      expect(e['verdict'], 'blip');
-      expect(trailCodes(e), containsAllInOrder(['persist.window', 'probe.same', 'park', 'resume', 'probe.same', 'blip.recovered']));
+      expect(events('conn', 'failing'), isEmpty, reason: 'a micro-failure: the raw log only, no event');
+      expect((svc.log()['lines'] as List).cast<Map>().any((l) => '${l['msg']}'.contains('micro-failure')), isTrue);
     });
 
     test('it worked again inside the window: a blip that says what failed and when it recovered', () async {

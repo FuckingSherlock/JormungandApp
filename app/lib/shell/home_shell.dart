@@ -378,7 +378,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                     act(l10n.createRule, () {
                       _flyTimer?.cancel();
                       messenger.hideCurrentSnackBar();
-                      _links.newRuleFor!(host: site, via: '${d['via']}');
+                      _links.newRuleFor!(host: site, via: '${d['viaTarget'] ?? d['via']}');
                     }),
                   act(l10n.ignoreSite, () {
                     _flyTimer?.cancel();

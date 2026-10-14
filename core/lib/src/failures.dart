@@ -320,6 +320,7 @@ class FailureBook {
     this.recovered,
     this.update,
     this.repeated,
+    this.worked,
     Timer Function(Duration, void Function())? timer,
   })  : _now = now ?? DateTime.now,
         _ignored = ignored,
@@ -377,6 +378,11 @@ class FailureBook {
   /// every failure is handed over, in a batch every [repeatEvery] (and when the series ends or [stop] comes), to be
   /// counted on the series' event and written to the raw log. Nothing is dropped.
   final void Function(FailureRepeat r)? repeated;
+
+  /// A connection to [host]:[port] (lower case; the user's, not the core's own) through [outbound] closed having got
+  /// data back: «the site opens through that route». Told for every such connection; the site checks' memory of a
+  /// verdict ends by it (service.dart).
+  final void Function(String host, int port, String outbound)? worked;
 
   bool _active = false;
   int _since = 0;
@@ -527,6 +533,7 @@ class FailureBook {
       e.okSince++;
       _okSince++;
       e.lastOkAt = at;
+      worked?.call(h, port, c.outbound);
       e.streak.clear();
       _flush(e); // the failures that came before this success: counted before the series ends
       if (e.reported) {

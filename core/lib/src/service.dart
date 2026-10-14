@@ -53,6 +53,22 @@ import 'tun_check.dart';
 import 'tun_ingress.dart';
 import 'updater.dart';
 
+/// What the site checks remember of one `site/*` verdict (see `CoreService._siteMemos`).
+class _SiteMemo {
+  _SiteMemo({required this.eventId, required this.kind, required this.dead, required this.step, required this.until, required this.dest, required this.route});
+  final int eventId, step;
+
+  /// [dest] lower case; [route] the route's one identity ([CoreService._siteRoute]).
+  final String kind, dest, route;
+  final bool dead;
+
+  /// Ms since epoch: failures before it are only counted.
+  int until;
+
+  /// The checker alone is looking again (after a «dead» verdict): failures that come meanwhile are counted.
+  bool rechecking = false;
+}
+
 /// The core as an object: everything jormd's HTTP API does, without HTTP (daemon.dart is
 /// only the adapter over it). Pure Dart, one instance per process: the Flutter app creates
 /// it and calls it directly; the platform parts are injected (see below).
@@ -254,6 +270,7 @@ class CoreService implements CoreApi {
     recovered: (key) => sentinel.recovered(key),
     update: (id, data) => eventBook.update(id, data: data),
     repeated: _failedAgain,
+    worked: _siteWorked,
     timer: (d, f) => sentinel.clock.timer(d, f),
   );
 
@@ -591,26 +608,60 @@ class CoreService implements CoreApi {
   /// Settings → Auto mode → «Check with an external checker» (`plan.auto.siteCheck`, default on).
   bool get siteCheckOn => (_plan?['auto'] is Map ? (_plan!['auto'] as Map)['siteCheck'] : null) != false;
 
-  /// The probes behind the site checks (default: Auto's `reachSame` / `reachAlternates`); the tests' seam.
+  /// The probes behind the site checks (default: Auto's `reachSame` / `reachScout` / `reachElsewhere`); the tests'
+  /// seams. [probeScout]: one working node, preferably of the failing server's subscription and of another country;
+  /// [probeElsewhere]: working nodes of the other subscriptions, as many as `siteRetry` allows after the scout's.
   Future<bool?> Function(String outbound, String dest, Cancel cancel)? probeSame;
-  Future<AltReach> Function(String dest, String? skipRoute, Cancel cancel)? probeAlt;
-  /// A `site/*` event again for the same site and route within this long of the first one is that event, changed in
-  /// place (`data.repeat`, docs/failures.md → Проверки сайтов), not a second one.
-  static const siteCollapse = Duration(hours: 1);
+  Future<AltReach> Function(String outbound, String dest, Cancel cancel)? probeScout;
+  Future<AltReach> Function(String outbound, String dest, AltReach? scout, Cancel cancel)? probeElsewhere;
+
+  /// How long failures of a site whose checker said «down for everyone» are only counted on its event.
+  static const siteDeadIgnore = Duration(minutes: 90);
+
+  /// How long failures of a site with any other `site/*` verdict are only counted, by the step the verdict was on
+  /// (the last repeats): the next failure after it runs the whole check again.
+  static const siteLadder = [Duration(minutes: 5), Duration(minutes: 15), Duration(minutes: 30), Duration(minutes: 60)];
+
+  /// What the site checks remember of a verdict (docs/failures.md → Проверки сайтов), by `<dest>|<route>`: until [until]
+  /// the failures of the site through that route are only counted on the event ([eventId]); [dead] = the checker did not
+  /// open it either (then the next check, after [until], is the checker's alone), else the ladder is on its [step].
+  final _siteMemos = <String, _SiteMemo>{};
 
   bool _canAim(String outbound, String dest) => canProbeDest(dest) && (probeSame != null || (_auto?.canReachSame(outbound, dest) ?? false));
 
+  /// A connection to [host]:[port] through [outbound] got data back: the site opens through that route, so its verdict
+  /// (and the ignoring of its failures) ends.
+  void _siteWorked(String host, int port, String outbound) {
+    if (_siteMemos.isEmpty) return;
+    final dest = '$host:$port', route = _auto?.routeIdOf(outbound) ?? _routeTagOf(outbound);
+    _siteMemos.removeWhere((_, m) => m.dest == dest && m.route == route);
+  }
+
+  /// The one identity of the route a failed connection went through, whoever reports it: Auto names it by the entry id,
+  /// the connection book by the tag prefix (`route0`); both resolve to the entry id through the plan. [route] as
+  /// reported is kept where the outbound is no route's (`direct`, a test's).
+  String _siteRoute(String outbound, String route) => _auto?.routeIdOf(outbound) ?? route;
+
+  static String _routeTagOf(String outbound) {
+    final at = outbound.indexOf('/');
+    return at < 0 ? outbound : outbound.substring(0, at);
+  }
+
   /// One suspicion per destination (`site|host:port`), whoever reports it: the connection book's streak
   /// (`conn/failing`) and Auto's notice (requests through a node that passes traffic got nothing back) join and
-  /// their evidence merges. Where a test can be aimed at the site ([_canAim]) the checks, in order: the
-  /// destination worked again through the same outbound (live traffic) or a probe through the same server
-  /// (recovery); it works through another outbound (live traffic) or a probe through the other answering routes
-  /// (`siteAlternates`; a workaround); the external checker (only when nothing opened it; `siteCheckOn`). The
-  /// event by the verdict: another route opens it -> `site/blocked`; nothing does and the checker says it opens
-  /// for others -> a confirmed `site/unreachable`, down for everyone / the checker unsure or off -> an unexplained
-  /// one; a blip or a consequence -> `conn/failing`. Where no test can be aimed (a port other than 443 / 80, no
-  /// Auto) it is the plain `conn/failing` streak. A `site/*` event again for the same site and route within an hour
-  /// of the first is that event changed in place ([siteCollapse]), never dropped.
+  /// their evidence merges. Where a test can be aimed at the site ([_canAim]) the checks, in order:
+  /// 1. the site opens again through the same node (live traffic, or a probe through the same server): a micro-failure,
+  ///    the raw log only, no event;
+  /// 2. the controller's (Auto's) one working node, preferably of the same subscription and of another country
+  ///    (`probe.scout`), with the external checker asked beside it (`siteCheckOn`);
+  /// 3. the checker says it opens elsewhere (and the scout did not): the working nodes of the other subscriptions
+  ///    (`probe.elsewhere`), as many as `siteRetry` allows in all; the checker says it does not open: none.
+  /// The event by the verdict: one of our routes opens it -> `site/blocked`; none does and the checker says it opens
+  /// -> a confirmed `site/unreachable`; the checker says it does not open (dead everywhere), or is unsure / off -> an
+  /// unexplained one. Where no test can be aimed (a port other than 443 / 80, no Auto) it is the plain `conn/failing`
+  /// streak. After a `site/*` verdict the site's failures through that route are only counted on its event
+  /// ([_siteMemos]): 1.5 h after «dead» (then the checker alone looks again), else on the ladder [siteLadder]; a
+  /// connection through the route that gets data back, or (the ladder) another network, ends it. Never dropped.
   /// The direct path is never tried: that would tell the network the user's interest in the site.
   Future<Verdict?> _judgeSite({
     required String host,
@@ -627,13 +678,32 @@ class CoreService implements CoreApi {
     final dest = port == null ? host : '$host:$port';
     final aimable = _canAim(outbound, dest);
     final since = firstSeen.millisecondsSinceEpoch;
-    // the site has a verdict of this route that is still fresh: this is its repeat, it is on that event and in the
-    // raw log; nothing is probed again (no request to the site, no external checker) until the window is over
+    // the site has a verdict of this route that is still remembered ([_siteMemos]): this failure is its repeat, it is on
+    // that event and in the raw log; nothing is probed again (no request to the site, no external checker) until the
+    // timer of the verdict is over. After a «dead everywhere» one the checker alone looks again first.
+    final entry = _siteRoute(outbound, route), memoKey = '${dest.toLowerCase()}|$entry';
     if (aimable) {
-      final prev = _siteEventNow(dest, route);
-      if (prev != null) return _siteAgain(prev, FailureBook.siteKey(host, port), dest, route, evidence);
+      final m = _siteMemos[memoKey];
+      if (m != null && eventBook.byId(m.eventId) == null) {
+        _siteMemos.remove(memoKey); // its event is gone (the journal was cleared): the site is judged anew
+      } else if (m != null && (m.rechecking || _nowMs < m.until)) {
+        return _siteAgain(m, FailureBook.siteKey(host, port), dest, entry, evidence);
+      } else if (m != null && m.dead && siteCheckOn) {
+        m.rechecking = true; // the failures that come meanwhile are counted on the event
+        final r = await siteChecker.check(host, port, manual: false);
+        m.rechecking = false;
+        if (_disposed) return null;
+        if (r.state == 'down' && identical(_siteMemos[memoKey], m) && eventBook.byId(m.eventId) != null) {
+          m.until = _nowMs + siteDeadIgnore.inMilliseconds;
+          eventBook.update(m.eventId, data: {'check': r.toJson()});
+          logBook.note('warn', '$dest does not open through $entry: the checker alone looked again, it does not open for it either; failures are counted on the event for ${siteDeadIgnore.inMinutes} min more');
+          return _siteAgain(m, FailureBook.siteKey(host, port), dest, entry, evidence, say: false);
+        }
+        // it opens for the checker now (or it could not tell): the whole check runs, from the first step
+      }
     }
-    AltReach? alt;
+    AltReach? alt, scout, elsewhere;
+    Future<void>? checkerRun;
     var asked = false;
     Map<String, dynamic>? result;
     (String, String)? wrote;
@@ -651,14 +721,36 @@ class CoreService implements CoreApi {
     // the resolver the connection went through could not resolve the host either: the failure is the resolver's,
     // not the site's (a `dns.down` root of it covers the failure; this is the live check, docs/failures.md → DNS)
     var resolverDown = false;
-    final resolver = InternetAddress.tryParse(host) != null ? null : _resolverFor(outbound, evidence);
+    // the external checker, asked once per judgement beside the scout (or by its own step when the scout never ran)
+    Future<void> askChecker() => checkerRun ??= () async {
+          asked = false;
+          result = null;
+          if (diverged || resolverDown) return;
+          if (!siteCheckOn) {
+            result = {'state': 'off'};
+            return;
+          }
+          asked = true;
+          final r = await siteChecker.check(host, port, manual: false);
+          result = r.toJson();
+        }();
+    void mergeAlt() {
+      final a = scout, b = elsewhere;
+      alt = AltReach(
+          via: b?.via ?? a?.via,
+          viaServer: b?.via != null ? b?.viaServer : a?.viaServer,
+          tried: [...?a?.tried, ...?b?.tried],
+          unsure: (a?.unsure ?? false) || (b?.unsure ?? false),
+          off: (a?.off ?? false) || (b?.off ?? false));
+    }
+    final resolver =InternetAddress.tryParse(host) != null ? null : _resolverFor(outbound, evidence);
     (String, String)? pick(VerdictKind kind, Map<String, dynamic> e) {
       if (!aimable) return _siteKind('conn', 'failing');
       return switch (kind) {
         VerdictKind.confirmed || VerdictKind.unexplained when diverged || resolverDown => _siteKind('conn', 'failing'),
         VerdictKind.confirmed || VerdictKind.unexplained => _siteKind('site', 'unreachable'),
         VerdictKind.workaround when alt?.via != null => _siteKind('site', 'blocked'),
-        VerdictKind.blip when !fromConn(e) => null,
+        VerdictKind.blip => null, // a micro-failure: the same node opens it again — the raw log only (below), no event
         VerdictKind.consequence when !fromConn(e) => _siteKind('site', 'unreachable'),
         _ => _siteKind('conn', 'failing'),
       };
@@ -671,10 +763,16 @@ class CoreService implements CoreApi {
       return {
         'host': host,
         'port': ?port,
-        'entry': route,
+        'entry': entry,
         'server': n['server'] ?? outbound,
         'dest': dest,
-        if (type == 'blocked') ...{'via': alt!.via, 'viaServer': alt!.viaServer} else ...{
+        if (type == 'blocked') ...{
+          'via': alt!.via,
+          'viaServer': alt!.viaServer,
+          // the scout is another node of the failing route's own entry: a rule for the entry would send the site through
+          // the node that fails it, so the rule «Create rule» offers is for the node that opened it
+          if (alt!.via == entry && alt!.viaServer != null && '${alt!.viaServer}'.isNotEmpty) 'viaTarget': 'node:${alt!.viaServer}',
+        } else ...{
           'tried': [for (final t in tried) {'entry': t.route, 'server': t.server}],
           if (alt?.off == true) 'retries': 'off',
         },
@@ -685,15 +783,15 @@ class CoreService implements CoreApi {
     }
 
     String? siteNote(VerdictKind kind, Map<String, dynamic> e, String type) {
-      if (type == 'blocked') return '$dest does not open through $route, opens through ${alt!.via}';
+      if (type == 'blocked') return '$dest does not open through $entry, opens through ${alt!.via}${alt!.via == entry ? ' (another node)' : ''}';
       final tried = alt?.tried ?? const [];
       final t = tried.isEmpty ? '' : ' nor ${tried.map((x) => x.route).join(', ')}';
       return switch (kind) {
-        VerdictKind.confirmed => '$dest does not open through $route$t: the site is down or blocked everywhere, the checker says it opens elsewhere',
+        VerdictKind.confirmed => '$dest does not open through $entry$t: the site is down or blocked everywhere, the checker says it opens elsewhere',
         VerdictKind.unexplained => alt?.off == true
-            ? '$dest does not open through $route: retries through other routes are off'
-            : '$dest does not open through $route$t: the site is down or blocked everywhere',
-        _ => '$dest does not open through $route: because of another failure',
+            ? '$dest does not open through $entry: retries through other routes are off'
+            : '$dest does not open through $entry$t: the site is down or blocked everywhere',
+        _ => '$dest does not open through $entry: because of another failure',
       };
     }
 
@@ -742,39 +840,56 @@ class CoreService implements CoreApi {
             }
             return CheckResult('probe.same', opens ? Outcome.pass : Outcome.fail, {'outbound': outbound});
           }, timeout: const Duration(seconds: 15), level: Level.destination, via: onRoute, resolver: onRoute == null ? null : _routeResolver(onRoute)),
-          Check.alternative('probe.alt', (cancel) async {
-            alt = null; // a parked ladder runs again from the top: nothing of the last pass is left
-            if (diverged) return const CheckResult('probe.alt', Outcome.inconclusive, {'reason': 'sameOpens'});
+          // step 2: the controller's one working node (the same subscription, another country first); the checker asks beside it
+          Check.alternative('probe.scout', (cancel) async {
+            alt = scout = elsewhere = null; // a parked ladder runs again from the top: nothing of the last pass is left
+            checkerRun = null;
+            if (diverged) return const CheckResult('probe.scout', Outcome.inconclusive, {'reason': 'sameOpens'});
+            unawaited(askChecker());
             final auto = _auto;
-            if (probeAlt == null && auto == null) return const CheckResult('probe.alt', Outcome.inconclusive, {'reason': 'noAuto'});
-            final a = await (probeAlt ?? (d, r, c) => auto!.reachAlternates(d, skipRoute: r, cancel: c))(dest, route, cancel);
-            alt = a;
-            if (a.via != null) return CheckResult('probe.alt', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
+            if (probeScout == null && auto == null) return const CheckResult('probe.scout', Outcome.inconclusive, {'reason': 'noAuto'});
+            final a = await (probeScout ?? (o, d, c) => auto!.reachScout(o, d, cancel: c))(outbound, dest, cancel);
+            scout = a;
+            mergeAlt();
+            if (a.via != null) return CheckResult('probe.scout', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
             final routes = [for (final t in a.tried) t.route];
-            if (routes.isEmpty || a.unsure) return CheckResult('probe.alt', Outcome.inconclusive, {'reason': a.off ? 'off' : 'none', 'tried': routes});
-            return CheckResult('probe.alt', Outcome.fail, {'tried': routes});
-          }, timeout: const Duration(seconds: 45), level: Level.destination, via: onRoute),
+            if (routes.isEmpty || a.unsure) return CheckResult('probe.scout', Outcome.inconclusive, {'reason': a.off ? 'off' : 'none', 'tried': routes});
+            return CheckResult('probe.scout', Outcome.fail, {'tried': routes});
+          }, timeout: const Duration(seconds: 20), level: Level.destination, via: onRoute),
           Check.diagnostic('site.checker', (cancel) async {
-            asked = false;
-            result = null;
             if (diverged) return const CheckResult('site.checker', Outcome.inconclusive, {'reason': 'sameOpens'});
             if (resolverDown) return const CheckResult('site.checker', Outcome.inconclusive, {'reason': 'resolverDown'});
-            if (!siteCheckOn) {
-              result = {'state': 'off'};
-              return const CheckResult('site.checker', Outcome.inconclusive, {'state': 'off'});
-            }
-            asked = true;
-            final r = await siteChecker.check(host, port, manual: false);
-            result = r.toJson();
-            return CheckResult('site.checker', switch (r.state) { 'opens' => Outcome.fail, 'down' => Outcome.pass, _ => Outcome.inconclusive }, {'state': r.state});
+            await askChecker();
+            final r = result;
+            if (r == null || r['state'] == 'off') return const CheckResult('site.checker', Outcome.inconclusive, {'state': 'off'});
+            final state = '${r['state']}';
+            return CheckResult('site.checker', switch (state) { 'opens' => Outcome.fail, 'down' => Outcome.pass, _ => Outcome.inconclusive }, {'state': state});
           }, timeout: windows.siteChecker, level: Level.destination, via: onRoute),
+          // step 3: the checker opens it and the scout did not: the working nodes of the other subscriptions (siteRetry's allowance)
+          Check.alternative('probe.elsewhere', (cancel) async {
+            if (diverged) return const CheckResult('probe.elsewhere', Outcome.inconclusive, {'reason': 'sameOpens'});
+            if (scout == null) return const CheckResult('probe.elsewhere', Outcome.inconclusive, {'reason': 'noScout'});
+            if (result?['state'] == 'down') return const CheckResult('probe.elsewhere', Outcome.inconclusive, {'reason': 'checkerDown'});
+            final auto = _auto;
+            if (probeElsewhere == null && auto == null) return const CheckResult('probe.elsewhere', Outcome.inconclusive, {'reason': 'noAuto'});
+            final a = await (probeElsewhere ?? (o, d, s, c) => auto!.reachElsewhere(o, d, scout: s, cancel: c))(outbound, dest, scout, cancel);
+            elsewhere = a;
+            mergeAlt();
+            if (a.via != null) return CheckResult('probe.elsewhere', Outcome.pass, {'via': a.via, 'viaServer': a.viaServer});
+            final routes = [for (final t in a.tried) t.route];
+            if (routes.isEmpty || a.unsure) return CheckResult('probe.elsewhere', Outcome.inconclusive, {'reason': a.off ? 'off' : 'none', 'tried': routes});
+            return CheckResult('probe.elsewhere', Outcome.fail, {'tried': routes});
+          }, timeout: const Duration(seconds: 45), level: Level.destination, via: onRoute),
         ],
       ],
       event: SuspicionEvent('conn', 'failing',
           level: 'warn',
           bg: bg,
-          collapseBy: const {'site/blocked': ['dest', 'entry'], 'site/unreachable': ['dest', 'entry']},
-          collapseWithin: siteCollapse,
+          // a verdict again after the timer of the last one ran out: the same event, changed in place (a changed kind is its own)
+          foldOnto: (cat, type, d) {
+            final m = _siteMemos[memoKey];
+            return m != null && cat == 'site' && m.kind == type && eventBook.byId(m.eventId) != null ? m.eventId : null;
+          },
           kindFor: (kind, e) => wrote = pick(kind, e),
           dataFor: (kind, e) {
             final k = pick(kind, e);
@@ -787,11 +902,23 @@ class CoreService implements CoreApi {
           }),
     ));
     final w = wrote;
+    if (aimable && v.kind == VerdictKind.blip) {
+      logBook.note('info', '$dest failed through $entry and opens again through the same node: a micro-failure, no event');
+    }
+    // this judgement wrote its own non-site verdict (a joined report wrote none: it leaves the memory of the one it joined)
+    if (aimable && w != null && !(w.$1 == 'site' && v.eventId != null) && v.kind != VerdictKind.deferred) _siteMemos.remove(memoKey);
     if (w != null && w.$1 == 'site' && v.eventId != null) {
       final id = v.eventId!;
       if (!_disposed) {
         final check = result ?? (asked ? {'state': 'failed', 'at': _nowMs, 'error': 'timeout'} : null);
         if (check != null && w.$2 == 'unreachable') eventBook.update(id, data: {'check': check});
+        // the memory of the verdict: «dead everywhere» is ignored for 1.5 h, any other one on the ladder
+        final dead = w.$2 == 'unreachable' && check?['state'] == 'down';
+        final was = _siteMemos[memoKey];
+        final step = !dead && was != null && !was.dead && was.kind == w.$2 && was.eventId == id ? was.step + 1 : 0;
+        final wait = dead ? siteDeadIgnore : siteLadder[step < siteLadder.length ? step : siteLadder.length - 1];
+        _siteMemos[memoKey] = _SiteMemo(
+            eventId: id, kind: w.$2, dead: dead, step: step, until: _nowMs + wait.inMilliseconds, dest: dest.toLowerCase(), route: entry);
       }
       // an announcement: the event is the report, a root would swallow the next one (a repeat folds into the event)
       if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(v.key, reason: 'reported');
@@ -799,25 +926,22 @@ class CoreService implements CoreApi {
     return v;
   }
 
-  /// The `site/*` event of [dest] through [route] whose verdict is still fresh (first written less than [siteCollapse]
-  /// ago), the newest of its kinds; null = none, the site is judged anew.
-  Map<String, dynamic>? _siteEventNow(String dest, String route) {
-    final match = {'dest': dest, 'entry': route};
-    final a = eventBook.recent('site', 'blocked', match, siteCollapse), b = eventBook.recent('site', 'unreachable', match, siteCollapse);
-    if (a == null || b == null) return a ?? b;
-    return (a['id'] as int) > (b['id'] as int) ? a : b;
-  }
-
-  /// The site failed again inside the window of its verdict: the event [prev] counts it (`data.repeat`), the raw log
-  /// says so, the verdict is the event's own. No probe, no checker: they run again for a failure after the window.
-  Verdict _siteAgain(Map<String, dynamic> prev, String key, String dest, String route, Map<String, dynamic> evidence) {
-    final id = prev['id'] as int;
+  /// The site failed again while the timer of its verdict runs: the event counts it (`data.repeat`), the raw log says
+  /// so, the verdict is the event's own. No probe, no checker: they run again for a failure after the timer. [say]
+  /// false: the caller has written its own line (the checker's look-again).
+  Verdict _siteAgain(_SiteMemo m, String key, String dest, String route, Map<String, dynamic> evidence, {bool say = true}) {
+    final id = m.eventId;
+    final prev = eventBook.byId(id);
     final n = eventBook.tally(id);
     final noticed = (evidence['noticed'] as Map?) ?? const {};
     final app = '${evidence['app'] ?? (evidence['process'] as Map?)?['name'] ?? noticed['process'] ?? ''}';
-    logBook.note('${prev['level']}',
-        '$dest does not open through $route: again, $n times${app.isEmpty ? '' : ' ($app)'}; the verdict of the last check stands, the site is checked again after ${siteCollapse.inMinutes} min');
-    final kind = VerdictKind.values.asNameMap()['${prev['verdict']}'] ?? VerdictKind.confirmed;
+    if (say) {
+      final left = ((m.until - _nowMs) / 60000).ceil().clamp(1, 1 << 20);
+      logBook.note('${prev?['level'] ?? 'info'}',
+          '$dest does not open through $route: again, $n times${app.isEmpty ? '' : ' ($app)'}; the verdict of the last check stands, '
+          '${m.dead ? 'the checker alone looks again' : 'the site is checked again'} after $left min');
+    }
+    final kind = VerdictKind.values.asNameMap()['${prev?['verdict']}'] ?? VerdictKind.confirmed;
     return Verdict(kind: kind, key: key, eventId: id, repeat: true);
   }
 
@@ -969,6 +1093,7 @@ class CoreService implements CoreApi {
       netEpoch = sentinel.context.netEpoch;
       final s = sentinel.context.network.state;
       if (s != NetState.none && s != NetState.captive) auto.networkChanged();
+      _siteMemos.removeWhere((_, m) => !m.dead); // another network: the verdicts of the ladder are void, it starts over
     });
     // `lost` / `restored` are Auto's (no route answers); `offline` / `online` are the Sentinel's network
     // context (_syncNetEvents): the OS, the platform and the probes all feed one root, no second source
@@ -1286,6 +1411,7 @@ class CoreService implements CoreApi {
     _closed = null;
     unawaited(_netChanged?.cancel());
     _netChanged = null;
+    if (!park) _siteMemos.clear(); // a new session: what was remembered of the sites is void
     sentinel.dropAll(park: park); // a stop or a new connect: what was seen in this session is void, its detectors suspect again in the next; an own restart or a crash-recovery parks
     failures.stop();
     tunIngress.stop();

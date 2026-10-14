@@ -33,7 +33,9 @@ extension SiteTestWording on CoreService {
   void _fail(String route, String server, String dest, AltReach alt, String rule, String process, String pkg) {
     (_alts[this] ??= {})[dest] = alt;
     probeSame = (o, d, c) async => false;
-    probeAlt = (d, r, c) async => _alts[this]![d] ?? const AltReach(unsure: true);
+    // the scout (step 2) answers with what the case says; the other subscriptions (step 3) add nothing
+    probeScout = (o, d, c) async => _alts[this]![d] ?? const AltReach(unsure: true);
+    probeElsewhere = (o, d, s, c) async => AltReach(off: _alts[this]![d]?.off ?? false);
     siteFailed(AutoSiteFail(route: route, server: server, tag: server, dest: dest, at: 1, rule: rule, process: process, pkg: pkg));
   }
 
@@ -360,7 +362,7 @@ void main() {
     expect([check['state'], check['ok'], check['total'], check['via']], ['opens', 3, 3, 'direct']);
     expect((check['nodes'] as List).first, containsPair('country', 'Germany'));
     expect(notifies(e), isTrue, reason: 'opens from the checker\'s nodes: notify');
-    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.alt', 'site.checker']));
+    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.scout', 'site.checker']));
     expect((e['why'] as Map)['code'], 'site.checker');
     expect(svc.sentinel.roots.open, isEmpty, reason: 'an announcement: Auto repeats it at its own pace');
     expect((svc.events()['updated'] as List).single['id'], e['id'], reason: 'a reader that already has the event learns of the change');
@@ -396,7 +398,7 @@ void main() {
     expect(((byHost['retries.example']!['data'] as Map)['check'] as Map)['state'], 'off', reason: 'the switch is off: not asked, whatever the retries');
     expect((byHost['part.example']!['data'] as Map).containsKey('check'), isFalse);
     expect(byHost['part.example']!['verdict'], 'workaround');
-    expect(trailCodes(byHost['part.example']!), containsAllInOrder(['suspect', 'probe.same', 'probe.alt']));
+    expect(trailCodes(byHost['part.example']!), containsAllInOrder(['suspect', 'probe.same', 'probe.scout']));
     expect(asked, isEmpty, reason: 'nothing was sent to the checker');
   });
 
@@ -411,7 +413,7 @@ void main() {
     expect(((e['data'] as Map)['check'] as Map)['state'], 'opens');
     expect((e['data'] as Map)['retries'], 'off');
     expect(notifies(e), isTrue);
-    final alt = (e['trail'] as List).cast<Map>().firstWhere((s) => s['code'] == 'probe.alt');
+    final alt = (e['trail'] as List).cast<Map>().firstWhere((s) => s['code'] == 'probe.scout');
     expect((alt['params'] as Map)['reason'], 'off');
   });
 
@@ -468,7 +470,7 @@ void main() {
     expect(((again.single['data'] as Map)['repeat'] as Map)['count'], 2);
   });
 
-  test('a repeat of a site/* event within the hour folds into it (count, times, raw line), notifies nobody again; another kind is its own event; after the hour a new event', () async {
+  test('a repeat of a site/* event folds into it (count, times, raw line), notifies nobody again; another route is its own event; after the ladder\'s timer the verdict again is the same event', () async {
     await start(checker: fakeChecker(<Uri>[], opens: true), connected: true);
     Map repeat(Map e) => (e['data'] as Map)['repeat'] as Map;
     svc.siteUnreachable(gone('rep.example:443'));
@@ -498,23 +500,24 @@ void main() {
     expect(siteEvents().map((x) => '${x['type']} ${(x['data'] as Map)['entry']}'), ['unreachable A', 'unreachable B'],
         reason: 'a verdict is fresh for the site and route whatever its kind: no second, different event inside the window');
     expect(repeat(siteEvents().first)['count'], 3, reason: 'the blocked report is one more occurrence of the first event');
-    // after the hour the next one is a new event
+    // once the ladder's timer is over the whole check runs again and, the kind being the same, folds into the same event
     await time.advanceSeconds(3600);
     svc.siteUnreachable(gone('rep.example:443'));
     await settle();
     final all = siteEvents().where((x) => x['type'] == 'unreachable' && (x['data'] as Map)['entry'] == 'A').toList();
-    expect(all.length, 2);
-    expect((all.last['data'] as Map).containsKey('repeat'), isFalse);
+    expect(all.length, 1, reason: 'no hour window any more: the verdict again is the same event');
+    expect(repeat(all.single)['count'], 4);
   });
 
-  test('a site with a fresh verdict fails again: only the event counts it (raw line, no notification), no probe and no checker; after the window the ladder runs again', () async {
+  test('a site with a verdict under its timer fails again: only the event counts it (raw line, no notification), no probe and no checker; after the timer the check runs again', () async {
     final asked = <Uri>[];
     await start(checker: fakeChecker(asked, opens: true), connected: true);
     var same = 0, alt = 0;
     void again() => svc.siteFailed(AutoSiteFail(route: 'A', server: 's', tag: 's', dest: 'fresh.example:443', at: 1, rule: '', process: '', pkg: ''));
     svc
       ..probeSame = ((o, d, c) async { same++; return false; })
-      ..probeAlt = ((d, r, c) async { alt++; return const AltReach(tried: [], unsure: true); });
+      ..probeScout = ((o, d, c) async { alt++; return const AltReach(tried: [], unsure: true); })
+      ..probeElsewhere = ((o, d, s, c) async { alt++; return const AltReach(tried: [], unsure: true); });
     again();
     await settle();
     final id = siteEvents().single['id'] as int;
@@ -522,7 +525,7 @@ void main() {
     expect(probed.every((n) => n > 0), isTrue, reason: 'the first failure runs the whole ladder');
     final lines = (svc.log()['lines'] as List).cast<Map>().where((l) => '${l['msg']}'.contains('fresh.example')).length;
     for (var i = 0; i < 3; i++) {
-      await time.advanceSeconds(300);
+      await time.advanceSeconds(60); // inside the first step of the ladder (5 min)
       again();
       await settle();
     }
@@ -535,19 +538,20 @@ void main() {
     await time.advanceSeconds(3600);
     again();
     await settle();
-    expect(siteEvents().length, 2, reason: 'after the window a new event, judged by the full ladder');
+    expect(siteEvents().single['id'], id, reason: 'after the timer the full check runs again; the same verdict folds into the event');
+    expect(((siteEvents().single['data'] as Map)['repeat'] as Map)['count'], 5);
     expect(same, greaterThan(probed[0]));
   });
 
-  test('another route opens the site: exactly one site/blocked, a workaround; the checker is not asked', () async {
+  test('another route opens the site: exactly one site/blocked, a workaround; the checker is asked beside the scout', () async {
     final asked = <Uri>[];
     await start(checker: fakeChecker(asked, opens: true), connected: true);
     svc.siteBlocked(AutoBlocked(route: 'A', server: 's', dest: 'alt.example:443', via: 'B', viaServer: 't', at: 1, rule: 'domain=alt.example'));
     await settle();
     final e = siteEvents().single;
     expect([e['type'], e['verdict'], e['level']], ['blocked', 'workaround', 'info']);
-    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.alt']));
-    expect(asked, isEmpty);
+    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.scout']));
+    expect(asked, isNotEmpty, reason: 'the checker is asked in parallel with the scout (step 2), whatever the scout finds');
     expect(svc.sentinel.roots.open, isEmpty);
   });
 
@@ -561,7 +565,7 @@ void main() {
     final data = e['data'] as Map;
     expect((data['tried'] as List).map((t) => (t as Map)['entry']), ['B', 'C']);
     expect((data['check'] as Map)['state'], 'opens');
-    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.alt', 'site.checker']));
+    expect(trailCodes(e), containsAllInOrder(['suspect', 'probe.same', 'probe.scout', 'site.checker']));
     expect(notifies(e), isTrue);
   });
 

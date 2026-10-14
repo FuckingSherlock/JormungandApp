@@ -110,7 +110,7 @@ class SystemNotifier {
     final d = words.describe(e);
     // "does not open": Create rule (when it opens through another entry) and Ignore site
     final site = e.cat == 'site' ? words.host(e.data) : '';
-    final via = e.data['via'] == null ? '' : '${e.data['via']}';
+    final via = '${e.data['viaTarget'] ?? e.data['via'] ?? ''}';
     return io.post(
       SystemNote(
         id: e.id,

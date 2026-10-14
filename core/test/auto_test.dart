@@ -906,55 +906,117 @@ void main() {
       return (auto, asked);
     }
 
-    test('reachAlternates: opens on the 2nd other route — that route (and its server), the ones after it are not tried', () async {
-      final (auto, asked) = five((tag) async => tag == 'route2/s::c');
-      await auto.check();
-      final a = await auto.reachAlternates('blocked.example:443', skipRoute: 'A');
-      expect(asked, ['route1/s::b', 'route2/s::c']);
-      expect([a.via, a.viaServer, a.unsure, a.off], ['C', 's::c', false, false]);
-      expect(a.tried.map((t) => t.route), ['B']);
-    });
+    // Five routes of one server each: A (the failing one) and B of subscription s1 (B of another country), C of s2, D of
+    // s3, E of s4. The flags are the plan's knowledge of the country.
+    Map<String, dynamic> flagged(String id, String key, String flag) {
+      final u = unit(id, [key]);
+      ((u['main'] as Map)['nodes'] as List).cast<Map>().single['flag'] = flag;
+      return u;
+    }
 
-    test('reachAlternates: opens through none — the routes tried (at most 3)', () async {
-      final (auto, asked) = five((tag) async => false);
-      await auto.check();
-      final a = await auto.reachAlternates('blocked.example:443', skipRoute: 'A');
-      expect(asked, ['route1/s::b', 'route2/s::c', 'route3/s::d']);
-      expect(a.via, isNull);
-      expect(a.tried.map((t) => '${t.route}:${t.server}'), ['B:s::b', 'C:s::c', 'D:s::d']);
-      expect(a.unsure, isFalse);
-    });
-
-    test('reachAlternates: no other route answers — nothing tried; siteRetry off — not asked at all, off; all — up to the first that opens', () async {
-      final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
-      final fake = FakeBox(buildConfig(p), {'s::a': 30}); // B is dead
+    (AutoService, List<String>) subs(Future<bool?> Function(String) reach, {String? siteRetry, Map<String, int>? alive}) {
+      final p = plan([
+        flagged('A', 's1::a', 'DE'),
+        flagged('B', 's1::b', 'FR'),
+        flagged('C', 's2::c', 'FR'),
+        flagged('D', 's3::d', 'NL'),
+        flagged('E', 's4::e', 'PL'),
+      ], auto: {'standby': 5, 'siteRetry': ?siteRetry});
+      final fake = FakeBox(buildConfig(p), alive ?? {'s1::a': 30, 's1::b': 60, 's2::c': 70, 's3::d': 80, 's4::e': 90});
       final asked = <String>[];
-      final auto = AutoService(fake, p, delay: fake.delayTest, reach: (tag, dest) async {
+      final auto = AutoService(fake, p, delay: fake.delayTest, clock: () => 0, reach: (tag, dest) {
         asked.add(tag);
-        return false;
-      }, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+        return reach(tag);
+      }, settings: AutoSettings.fromPlan(p));
+      return (auto, asked);
+    }
+
+    test('workingNodes / routeIdOf: the answering servers in Auto\'s order, with their subscription and flag; a dead one is not listed; the entry id of an outbound', () async {
+      final (auto, _) = subs((tag) async => true, alive: {'s1::a': 30, 's1::b': 60, 's3::d': 80, 's4::e': 90});
       await auto.check();
-      final none = await auto.reachAlternates('blocked.example:443', skipRoute: 'A');
-      expect([asked, none.tried, none.off], [<String>[], isEmpty, false]);
-
-      final (off, askedOff) = five((tag) async => true, siteRetry: 'off');
-      await off.check();
-      final o = await off.reachAlternates('blocked.example:443', skipRoute: 'A');
-      expect([askedOff, o.via, o.tried, o.off], [<String>[], null, isEmpty, true]);
-
-      final (all, askedAll) = five((tag) async => tag == 'route4/s::e', siteRetry: 'all');
-      await all.check();
-      final e = await all.reachAlternates('blocked.example:443', skipRoute: 'A');
-      expect(askedAll, ['route1/s::b', 'route2/s::c', 'route3/s::d', 'route4/s::e']);
-      expect(e.via, 'E');
+      expect(auto.workingNodes().map((n) => '${n.route}:${n.server}:${n.sub}:${n.country}:${n.tag}'),
+          ['A:s1::a:s1:DE:route0/s1::a', 'B:s1::b:s1:FR:route1/s1::b', 'D:s3::d:s3:NL:route3/s3::d', 'E:s4::e:s4:PL:route4/s4::e'],
+          reason: 'C does not answer');
+      expect([auto.routeIdOf('route1/s1::b'), auto.routeIdOf('route3'), auto.routeIdOf('direct'), auto.routeIdOf('route9/x')], ['B', 'D', null, null]);
     });
 
-    test('reachAlternates: an alternate that cannot be tried (null) is unsure — tells nothing', () async {
-      final (auto, asked) = five((tag) async => null);
+    test('scoutFor: the same subscription and another country first, then the same subscription, another country, any; never the failing server; none = null', () async {
+      final (auto, _) = subs((tag) async => true);
       await auto.check();
-      final a = await auto.reachAlternates('blocked.example:443', skipRoute: 'A');
-      expect(asked.length, 3);
-      expect([a.via, a.tried, a.unsure], [null, isEmpty, true]);
+      expect(auto.scoutFor('route0/s1::a')?.server, 's1::b', reason: 'same subscription, another country');
+      expect(auto.scoutFor('route2/s2::c')?.server, 's1::a', reason: 'no one else in s2: another country (DE) in the order of Auto');
+      final (lone, _) = subs((tag) async => true, alive: {'s1::a': 30});
+      await lone.check();
+      expect(lone.scoutFor('route0/s1::a'), isNull, reason: 'only the failing server works');
+      final (same, _) = subs((tag) async => true, alive: {'s1::a': 30, 's1::b': 60, 's2::c': 70});
+      await same.check();
+      expect(same.scoutFor('route1/s1::b')?.server, 's1::a', reason: 'the same subscription before another one');
+    });
+
+    test('elsewhere: one working node per other subscription (the failing one\'s and exceptSubs left out), at most limit; reads nothing for Manual', () async {
+      final (auto, _) = subs((tag) async => true);
+      await auto.check();
+      expect(auto.elsewhere('route0/s1::a').map((n) => n.server), ['s2::c', 's3::d', 's4::e']);
+      expect(auto.elsewhere('route0/s1::a', exceptSubs: {'s3'}, limit: 1).map((n) => n.server), ['s2::c']);
+      expect(auto.elsewhere('route0/s1::a', exceptSubs: {'s2', 's3', 's4'}), isEmpty);
+    });
+
+    test('reachScout: the scout alone is probed — opens: its route and server (and subscription); does not: tried; null: unsure', () async {
+      final (auto, asked) = subs((tag) async => tag == 'route1/s1::b');
+      await auto.check();
+      final a = await auto.reachScout('route0/s1::a', 'blocked.example:443');
+      expect(asked, ['route1/s1::b']);
+      expect([a.via, a.viaServer, a.subs, a.unsure, a.off], ['B', 's1::b', ['s1'], false, false]);
+      final (no, askedNo) = subs((tag) async => false);
+      await no.check();
+      final n = await no.reachScout('route0/s1::a', 'blocked.example:443');
+      expect([askedNo, n.via, n.tried.map((t) => '${t.route}:${t.server}')], [['route1/s1::b'], null, ['B:s1::b']]);
+      final (unk, _) = subs((tag) async => null);
+      await unk.check();
+      final u = await unk.reachScout('route0/s1::a', 'blocked.example:443');
+      expect([u.via, u.tried, u.unsure], [null, isEmpty, true]);
+    });
+
+    test('siteRetry is the total of scout + elsewhere probes: 3 — the scout and two more; all — every other subscription; off — none, and off is told', () async {
+      for (final (retry, expected) in [
+        ('3', ['route1/s1::b', 'route2/s2::c', 'route3/s3::d']),
+        ('all', ['route1/s1::b', 'route2/s2::c', 'route3/s3::d', 'route4/s4::e']),
+        (null, ['route1/s1::b', 'route2/s2::c', 'route3/s3::d']),
+      ]) {
+        final (auto, asked) = subs((tag) async => false, siteRetry: retry);
+        await auto.check();
+        final s = await auto.reachScout('route0/s1::a', 'blocked.example:443');
+        final e = await auto.reachElsewhere('route0/s1::a', 'blocked.example:443', scout: s);
+        expect(asked, expected, reason: 'siteRetry $retry');
+        expect([e.via, s.tried.length + e.tried.length, e.off], [null, expected.length, false]);
+      }
+      final (off, askedOff) = subs((tag) async => true, siteRetry: 'off');
+      await off.check();
+      final s = await off.reachScout('route0/s1::a', 'blocked.example:443');
+      final e = await off.reachElsewhere('route0/s1::a', 'blocked.example:443', scout: s);
+      expect([askedOff, s.via, s.off, e.via, e.off], [<String>[], null, true, null, true]);
+    });
+
+    test('reachElsewhere: opens on the 2nd other subscription — the rest are not tried; the scout\'s subscription is not repeated; no scout budget left — nothing', () async {
+      final (auto, asked) = subs((tag) async => tag == 'route3/s3::d');
+      await auto.check();
+      final s = await auto.reachScout('route2/s2::c', 'blocked.example:443'); // the scout of s2's server is s1's A
+      expect(asked, ['route0/s1::a']);
+      final e = await auto.reachElsewhere('route2/s2::c', 'blocked.example:443', scout: s);
+      expect(asked.skip(1), ['route3/s3::d'], reason: 's1 was the scout\'s; with 2 probes left D opens on the first of s3 and s4');
+      expect([e.via, e.viaServer, e.tried, e.subs], ['D', 's3::d', isEmpty, ['s3', 's4']]);
+      const spent = AltReach(tried: [(route: 'X', server: 'x::1'), (route: 'Y', server: 'y::1'), (route: 'Z', server: 'z::1')]);
+      final none = await auto.reachElsewhere('route0/s1::a', 'blocked.example:443', scout: spent);
+      expect([none.via, none.tried, none.unsure], [null, isEmpty, false]);
+      expect(asked.length, 2, reason: 'nothing was probed for the spent budget');
+    });
+
+    test('nothing works besides the failing server: the scout and elsewhere probe nothing and tell nothing (not unsure)', () async {
+      final (auto, asked) = subs((tag) async => true, alive: {'s1::a': 30});
+      await auto.check();
+      final s = await auto.reachScout('route0/s1::a', 'blocked.example:443');
+      final e = await auto.reachElsewhere('route0/s1::a', 'blocked.example:443', scout: s);
+      expect([asked, s.via, s.tried, s.unsure, e.via, e.tried, e.unsure], [<String>[], null, isEmpty, false, null, isEmpty, false]);
     });
 
     test('reachSame: through the server a failed connection went out of; a stranger tag cannot be told', () async {
@@ -969,17 +1031,20 @@ void main() {
       expect(asked, ['route1/s::b', 'route0/s::a']);
     });
 
-    test('a Cancel stops the alternates: the probe in flight is given up, the ones after it are not started (unsure)', () async {
+    test('a Cancel stops the scout and the elsewhere probes: the probe in flight is given up, the ones after it are not started (unsure)', () async {
       final hang = Completer<bool?>();
-      final (auto, asked) = five((tag) => hang.future);
+      final (auto, asked) = subs((tag) => hang.future);
       await auto.check();
       final cancel = Cancel();
-      final f = auto.reachAlternates('blocked.example:443', skipRoute: 'A', cancel: cancel);
+      final f = auto.reachScout('route0/s1::a', 'blocked.example:443', cancel: cancel);
       await Future<void>.delayed(const Duration(milliseconds: 10));
       cancel.cancel('net.offline');
       final a = await f;
-      expect(asked, ['route1/s::b']);
+      expect(asked, ['route1/s1::b']);
       expect([a.via, a.tried, a.unsure], [null, isEmpty, true]);
+      final e = await auto.reachElsewhere('route0/s1::a', 'blocked.example:443', cancel: cancel);
+      expect(asked, ['route1/s1::b'], reason: 'cancelled before the first probe');
+      expect([e.via, e.tried, e.unsure], [null, isEmpty, true]);
     });
 
     test('node does not answer at all: no _sites lookup, just the usual retries', () async {

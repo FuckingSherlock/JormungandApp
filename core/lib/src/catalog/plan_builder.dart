@@ -70,7 +70,8 @@ extension CatalogPlan on Catalog {
       'pick': pick,
       'chosen': pick == 'priority' && chosen != null ? chosen.key : null,
       'nodes': [
-        for (final r in nodes) {'key': r.key, 'outbound': r.node.outbound},
+        // `flag`: the country as the catalog knows it (site checks prefer a node of another country; not in the mockup's plan)
+        for (final r in nodes) {'key': r.key, 'outbound': r.node.outbound, if (!mockupPlan) 'flag': r.node.flag},
       ],
     };
   }

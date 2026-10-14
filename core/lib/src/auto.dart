@@ -240,7 +240,8 @@ class AutoUnstable {
 
 /// Requests to a site ([dest], `host:port`) got nothing back through [route]'s server [server] while the node
 /// itself passes traffic: the Sentinel judges it (service.dart: one suspicion per destination, with the
-/// connection failures of the same site) with the probes [AutoService.reachSame] / [AutoService.reachAlternates].
+/// connection failures of the same site) with the probes [AutoService.reachSame] / [AutoService.reachScout] /
+/// [AutoService.reachElsewhere].
 /// [tag] is the failed connection's own outbound (as the failure book records it; a test is aimed at the server
 /// it resolves to, [AutoService.reachSame]); [rule] is the
 /// rule sing-box matched for the failed request (its text, raw; '' = none, the final route), [process] the path
@@ -267,14 +268,29 @@ class AutoNet {
   Map<String, dynamic> toJson() => {'kind': kind, 'at': at, 'downMs': ?downMs};
 }
 
-/// Where a destination opens when the failing route cannot ([AutoService.reachAlternates]): [via] the route
-/// that opens it (and its current server), else the answering routes [tried] that did not. [unsure]: one
+/// Where a destination opens when the failing server cannot ([AutoService.reachScout] / [AutoService.reachElsewhere]):
+/// [via] the route that opens it (and the server tried), else the working servers [tried] that did not. [unsure]: one
 /// could not be tried, so [tried] alone proves nothing; [off]: the setting that allows the tries is off.
 class AltReach {
-  const AltReach({this.via, this.viaServer, this.tried = const [], this.unsure = false, this.off = false});
+  const AltReach({this.via, this.viaServer, this.tried = const [], this.unsure = false, this.off = false, this.subs = const []});
   final String? via, viaServer;
   final List<({String route, String server})> tried;
   final bool unsure, off;
+
+  /// The subscriptions (source ids) the probes went through, for [AutoService.reachElsewhere] not to repeat them.
+  final List<String> subs;
+
+  /// How many routes of `siteRetry`'s allowance these probes used.
+  int get probed => tried.length + (via == null ? 0 : 1);
+}
+
+/// A server of a route's main group that a site test can go through ([AutoService.workingNodes]): [route] its
+/// entry's id, [server] its key (`<subscription id>::<node id>`), [tag] its outbound tag, [sub] the subscription
+/// ('' = unknown), [country] the flag the plan knows it by ('' = unknown). The exit's real country is a later
+/// stage: it replaces [country] here, the choice below ([AutoService.reachScout]) reads nothing else.
+class SiteNode {
+  const SiteNode({required this.route, required this.server, required this.tag, required this.sub, this.country = ''});
+  final String route, server, tag, sub, country;
 }
 
 class _Group {
@@ -286,8 +302,12 @@ class _Group {
     for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
       final o = n['outbound'];
       ids['${n['key']}'] = o is Map ? serverIdentity(o) : '$tag/${n['key']}'; // no outbound: nothing to share
+      final flag = n['flag'];
+      if (flag is String && flag.isNotEmpty && flag != '🌐') flags['${n['key']}'] = flag;
     }
   }
+
+  final flags = <String, String>{}; // key → the flag of its country, where the plan knows one
 
   final String tag;
   final bool priority, pinned;
@@ -761,7 +781,7 @@ class AutoService {
   // The node passes traffic, yet requests through it got nothing back: each site they went to is
   // told to the Sentinel ([siteFails]) with the server it went through, unless a test cannot be aimed at it.
   // What it is (one-off, blocked on this node, down) is the Sentinel's to find out with [reachSame] /
-  // [reachAlternates], together with the failures the connection book saw of the same site.
+  // [reachScout] / [reachElsewhere], together with the failures the connection book saw of the same site.
   Future<void> _sites(_Route cur) async {
     final dests = Map.of(_failDests);
     _failDests.clear();
@@ -779,40 +799,10 @@ class AutoService {
     }
   }
 
-  // The answering routes other than [skip] (an entry id), in Auto's order, at most [AutoSettings.siteAlternates].
-  List<_Route> _alternates(String? skip) =>
-      [for (var i = 0; !manual && i < _routes.length; i++) if (_routes[i].id != skip && _routes[i].health.answered) _routes[i]].take(settings.siteAlternates).toList();
-
   // A probe that gives up when [cancel] fires (null then: nothing was told; the request itself runs out by its timeout).
   Future<bool?> _reachCancellable(String tag, String dest, Cancel? cancel) {
     final r = reach!(tag, dest);
     return cancel == null ? r : Future.any<bool?>([r, cancel.done.then((_) => null)]);
-  }
-
-  // [dest] through each of [alts] up to the first that opens it, stopping between them when [cancel] fires.
-  // `unsure`: one could not be tried (tells nothing).
-  Future<({_Route? via, List<({String route, String server})> tried, bool unsure})> _tryAlternates(List<_Route> alts, String dest, [Cancel? cancel]) async {
-    _Route? via;
-    var unsure = false;
-    final tried = <({String route, String server})>[];
-    for (final alt in alts) {
-      if (_stopped) break;
-      if (cancel?.cancelled == true) {
-        unsure = true;
-        break;
-      }
-      final there = await _reachCancellable(alt.main.member(alt.main.current), dest, cancel);
-      if (there == true) {
-        via = alt;
-        break;
-      }
-      if (there == false && cancel?.cancelled != true) {
-        tried.add((route: alt.id, server: alt.main.current));
-      } else {
-        unsure = true;
-      }
-    }
-    return (via: via, tried: tried, unsure: unsure);
   }
 
   /// Whether a test can be aimed at [dest] (`host:port`) through the server a failed connection went out of
@@ -837,14 +827,135 @@ class AutoService {
     return tag == null ? null : _reachCancellable(tag, dest, cancel);
   }
 
-  /// [dest] through the answering routes other than [skipRoute] (the failing one's entry id), in Auto's order, at
-  /// most `siteAlternates` of them (the setting; Manual tries none), up to the first that opens it, stopping
-  /// between them when [cancel] fires: see [AltReach].
-  Future<AltReach> reachAlternates(String dest, {String? skipRoute, Cancel? cancel}) async {
+  /// How long an answer of the probe pool (the UI's ping, another module's test) counts as «works now» for a
+  /// server Auto has not tested itself.
+  static const workingAge = Duration(minutes: 10);
+
+  /// The servers of every route's main group that work now, in Auto's order (route, then the group's order): the last
+  /// test of Auto answered and nothing missed since, or the pool has an answer not older than [workingAge]; never one
+  /// on the dead ladder (ladder.dart). Manual lists none (it uses no other route). The controller's answer to «give me
+  /// a working node» for the Sentinel's site checks.
+  List<SiteNode> workingNodes() {
+    if (manual || _stopped) return const [];
+    final now = _clock(), out = <SiteNode>[];
+    for (final r in _routes) {
+      final g = r.main;
+      for (final k in g.keys) {
+        final id = _identity(g, k), h = g.of(k);
+        if (pool.ladder.has(id)) continue;
+        final p = pool.peek(id, url: settings.url, checkers: settings.checkers);
+        final seen = h.answered && h.fails == 0 || p != null && p.answered && now - p.at <= workingAge.inMilliseconds;
+        if (!seen || h.fails > 0) continue;
+        out.add(SiteNode(route: r.id, server: k, tag: g.member(k), sub: _subOf(k), country: g.flags[k] ?? ''));
+      }
+    }
+    return out;
+  }
+
+  static String _subOf(String key) {
+    final at = key.indexOf('::');
+    return at < 0 ? '' : key.substring(0, at);
+  }
+
+  /// The route (entry id) a connection's [outbound] belongs to (a server of its groups, or its main group's own
+  /// tag); null = not a route's outbound (`direct`, unknown). The one identity of a route for whoever reports a
+  /// failure: Auto names it by the entry id, the connection book by the tag prefix (`route0`).
+  String? routeIdOf(String outbound) {
+    for (final r in _routes) {
+      if (_serverTag(r, outbound) != null) return r.id;
+    }
+    return null;
+  }
+
+  /// The node a failed connection went out of ([outbound]); null = not a server of a route's main group.
+  SiteNode? nodeOf(String outbound) {
+    for (final r in _routes) {
+      final tag = _serverTag(r, outbound), k = tag == null ? null : r.main.keyOf(tag);
+      if (k != null && r.main.keys.contains(k)) return SiteNode(route: r.id, server: k, tag: tag!, sub: _subOf(k), country: r.main.flags[k] ?? '');
+    }
+    return null;
+  }
+
+  /// The one working node a failed site is tried through first (the user's step 2): of the same subscription as the
+  /// server it failed through and of another country; else of the same subscription; else of another country; else
+  /// any. Never the failing server itself. null = none works.
+  SiteNode? scoutFor(String outbound) {
+    final from = nodeOf(outbound);
+    int rank(SiteNode n) {
+      final sameSub = from != null && n.sub.isNotEmpty && n.sub == from.sub;
+      final other = n.country.isNotEmpty && n.country != from?.country;
+      return sameSub && other ? 0 : sameSub ? 1 : other ? 2 : 3;
+    }
+
+    SiteNode? best;
+    for (final n in workingNodes()) {
+      if (n.tag == from?.tag || n.tag == outbound) continue;
+      if (best == null || rank(n) < rank(best)) best = n;
+    }
+    return best;
+  }
+
+  /// The working nodes of the subscriptions other than the failing server's and [exceptSubs], one per subscription (in
+  /// Auto's order, one of another country first), at most [limit].
+  List<SiteNode> elsewhere(String outbound, {Set<String> exceptSubs = const {}, int limit = 1 << 20}) {
+    final from = nodeOf(outbound);
+    final skip = {?from?.sub, ...exceptSubs};
+    final bySub = <String, SiteNode>{};
+    for (final n in workingNodes()) {
+      if (n.tag == outbound || skip.contains(n.sub)) continue;
+      final had = bySub[n.sub];
+      if (had == null || (had.country.isEmpty || had.country == from?.country) && n.country.isNotEmpty && n.country != from?.country) bySub[n.sub] = n;
+    }
+    return bySub.values.take(limit).toList();
+  }
+
+  /// Step 2 of the site checks: [dest] through the [scoutFor] node. One of `siteRetry`'s allowance; Off (and Manual)
+  /// probe nothing ([AltReach.off]).
+  Future<AltReach> reachScout(String outbound, String dest, {Cancel? cancel}) async {
     final off = settings.siteAlternates == 0;
     if (reach == null || _stopped) return AltReach(off: off, unsure: true);
-    final r = await _tryAlternates(_alternates(skipRoute), dest, cancel);
-    return AltReach(via: r.via?.id, viaServer: r.via?.main.current, tried: r.tried, unsure: r.unsure, off: off);
+    if (off || manual) return AltReach(off: off);
+    final n = scoutFor(outbound);
+    if (n == null) return const AltReach();
+    final r = await _tryNodes([n], dest, cancel);
+    return AltReach(via: r.via?.route, viaServer: r.via?.server, tried: r.tried, unsure: r.unsure, subs: [n.sub]);
+  }
+
+  /// Step 3: [dest] through the working nodes of the other subscriptions ([elsewhere]), up to the first that opens it,
+  /// as many as `siteRetry` allows after the [scout]'s probes; stops between them when [cancel] fires.
+  Future<AltReach> reachElsewhere(String outbound, String dest, {AltReach? scout, Cancel? cancel}) async {
+    final off = settings.siteAlternates == 0;
+    if (reach == null || _stopped) return AltReach(off: off, unsure: true);
+    if (off || manual) return AltReach(off: off);
+    final left = settings.siteAlternates - (scout?.probed ?? 0);
+    if (left <= 0) return const AltReach();
+    final nodes = elsewhere(outbound, exceptSubs: {...?scout?.subs}, limit: left);
+    final r = await _tryNodes(nodes, dest, cancel);
+    return AltReach(via: r.via?.route, viaServer: r.via?.server, tried: r.tried, unsure: r.unsure, subs: [for (final n in nodes) n.sub]);
+  }
+
+  Future<({SiteNode? via, List<({String route, String server})> tried, bool unsure})> _tryNodes(List<SiteNode> nodes, String dest, Cancel? cancel) async {
+    SiteNode? via;
+    var unsure = false;
+    final tried = <({String route, String server})>[];
+    for (final n in nodes) {
+      if (_stopped) break;
+      if (cancel?.cancelled == true) {
+        unsure = true;
+        break;
+      }
+      final there = await _reachCancellable(n.tag, dest, cancel);
+      if (there == true) {
+        via = n;
+        break;
+      }
+      if (there == false && cancel?.cancelled != true) {
+        tried.add((route: n.route, server: n.server));
+      } else {
+        unsure = true;
+      }
+    }
+    return (via: via, tried: tried, unsure: unsure);
   }
 
   // The server tag a site test can go through for a failed connection's outbound [tag]: a

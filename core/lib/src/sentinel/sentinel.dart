@@ -729,8 +729,8 @@ class Sentinel {
       final line = e.note?.call(kind, j.evidence);
       final data = e.dataFor?.call(kind, j.evidence) ?? j.evidence;
       // the same thing again within the window: the earlier event says so (count, times) instead of a second one
-      final by = e.collapseBy['${pick.$1}/${pick.$2}'], within = e.collapseWithin;
-      final prev = by == null || within == null ? null : b.recent(pick.$1, pick.$2, {for (final k in by) k: data[k]}, within);
+      final foldId = e.foldOnto?.call(pick.$1, pick.$2, data);
+      final prev = foldId == null ? null : b.byId(foldId);
       if (line != null) {
         final n = prev == null ? 0 : ((((prev['data'] as Map)['repeat'] as Map?)?['count'] as num?)?.toInt() ?? 1) + 1;
         note?.call(level, prev == null ? line : '$line (again, $n times)');

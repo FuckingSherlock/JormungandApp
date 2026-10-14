@@ -113,6 +113,23 @@ void main() {
     expect(find.widgetWithText(TextField, 'example.org'), findsOneWidget);
   });
 
+  testWidgets('a blocked event with viaTarget (the scout is a node of the failing entry): Create rule targets that node, named "<host> via <node>"', (
+    tester,
+  ) async {
+    final host = _hostWithSimpleChain();
+    host.addEvent(
+      'site',
+      'blocked',
+      level: 'info',
+      data: {'host': 'example.org', 'entry': 's1', 'via': 's1', 'viaServer': 's1::a1', 'viaTarget': 'node:s1::a1'},
+    );
+    await pumpApp(tester, host);
+    await openLogs(tester);
+    await tester.tap(find.text('Create rule'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'example.org via Alpha one'), findsOneWidget);
+  });
+
   testWidgets('Copy site shows the toast', (tester) async {
     final host = _hostWithSimpleChain();
     host.addEvent(

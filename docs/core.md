@@ -217,7 +217,7 @@ Auto, которая может работать; в Manual — закреплё
           siteCheck?: false /* ключа нет = внешний чекер включён (CoreService.siteCheckOn) */ },
   routing: Routing }       // правила, приложения, быстрые правила, DNS — ниже
 Route = { id, kind: 'unit' | 'chain', main: Group, entry?: Group }   // entry — вход цепочки, выход идёт через него (detour)
-Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true, nodes: [{ key: 'sid::nid', outbound }] }
+Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true, nodes: [{ key: 'sid::nid', outbound, flag? }] }
 ```
 
 - Маршруты: в Auto — все записи Auto (`current` — якорь); в Manual — только якорь. Записи без пригодных серверов пропускаются. План без `routes` (старый вид:
@@ -391,12 +391,24 @@ sing-box. Ответил — сходит с лесенки сразу и дал
 
 Упавшие запросы (`onClosed`): демон подписан на поток закрытых соединений API service
 (ниже); соединение через текущий маршрут без единого байта ответа → проверка сразу (одна на
-`failWindow` 10 с). Нода живая → сайты таких запросов проверяются `reach` (`probeReach`: TLS на
-443, HEAD на 80) через неё и через другие отвечающие маршруты по порядку Auto (до первого,
-где открылся; число — `AutoSettings.siteAlternates` из `plan.auto.siteRetry`: 0 / 3 / все) →
-событие `blocked` (`AutoBlocked {route, server, dest, via, viaServer}`); не открылся нигде или
-другого маршрута нет → `unreachable` (`AutoUnreachable {route, server, dest, tried, retriesOff}`);
-оба — пара маршрут + сайт раз в час. Ответ `reach` «не знаю» (null) не считается пробой;
+`failWindow` 10 с). Нода живая → Auto лишь сообщает Sentinel уведомление о сайте (`AutoSiteFail`,
+`tag` — собственный тег соединения), а проверки (порядок — `docs/failures.md` → Проверки сайтов) идут
+пробами `reach` (`probeReach`: TLS на 443, HEAD на 80), которые Auto даёт как контроллер рабочих нод:
+- `workingNodes()` — серверы основных групп всех маршрутов (`SiteNode {route, server, tag, sub, country}`,
+  `country` = `flag` из узла группы в плане), которые работают сейчас: последний тест Auto ответил и после
+  него промахов нет, либо в пуле есть ответ не старше 10 мин (`workingAge`); узлов лестницы мёртвых нет;
+  Manual — пусто;
+- `scoutFor(outbound)` — один разведчик: той же подписки и другой страны, иначе той же подписки, иначе другой
+  страны, иначе любой; не сама упавшая нода;
+- `elsewhere(outbound, exceptSubs, limit)` — рабочие ноды других подписок (по одной на подписку);
+- `reachScout(outbound, dest)` / `reachElsewhere(outbound, dest, scout:)` — пробы через них (`AltReach`:
+  `via`, `viaServer`, `tried`, `subs`, `unsure`, `off`); сколько нод всего — `siteRetry` (0 / 3 / все),
+  разведчик входит в счёт;
+- `routeIdOf(outbound)` — id записи маршрута, которому принадлежит outbound (null — не маршрут: `direct`).
+  Единый ключ маршрута для обоих репортёров сайта: поле `entry` события — id записи и у Auto, и у книги
+  соединений (`route0` не используется).
+
+Тестовые швы `CoreService.probeScout` / `probeElsewhere` подменяют эти две пробы. Ответ `reach` «не знаю» (null) не считается пробой;
 `probeReach` отвечает null и когда проба не состоялась (`ProbeRefused`: probe inbound не принял
 имя пользователя — у групп его нет; inbound не отвечает), false — только если запрос прошёл через
 тег и не удался. Тег группы маршрута (urltest до первого раунда не называет сервер) `AutoService`
@@ -1188,8 +1200,8 @@ Raw). Событие:
 | `auto/switched` info | Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
 | `auto/fastest` info | Fastest сам сменил сервер (urltest внутри sing-box) | `{route, from, to}` |
 | `auto/unstable` warn | маршрут падает снова и снова (flap guard) | `{id, strikes, holdMs}` |
-| `site/blocked` warn | сайт не открывается через сервер, но открывается через другой маршрут (кнопка Create rule); другие отвечающие маршруты пробуются по порядку Auto до первого, где открылся (не больше `siteRetry`), он и есть `via` | `{host, port?, entry, server, dest, via, viaServer, rule, process?}` — `rule` и `process`: см. ниже |
-| `site/unreachable` warn | сайт не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); пара маршрут + сайт раз в час, как у `blocked` | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?}` — `rule` и `process`: см. ниже; `tried` пуст: нет другого рабочего маршрута, при `retries: 'off'` — повторы выключены (`siteRetry`); без `retries: 'off'` в `data` ещё `check` — `{state: 'pending'\|'off'\|'opens'\|'down'\|'failed', at, kind?, via?, ok?, total?, nodes?, error?, manual?}`, внешний чекер check-host.net (docs/connect-model.md «Внешний чекер»): событие меняется на месте (`rev`), тихое, пока нет `opens` |
+| `site/blocked` warn | сайт не открывается через сервер, но открывается через другую нашу ноду (кнопка Create rule): разведчик (рабочая нода той же подписки, другой страны), затем ноды других подписок (всего не больше `siteRetry`); где открылся — `via` / `viaServer`, `viaTarget: 'node:…'`, если это нода того же маршрута (цель правила); порядок и память вердикта — docs/failures.md | `{host, port?, entry, server, dest, via, viaServer, viaTarget?, rule, process?, repeat?}` — `rule` и `process`: см. ниже |
+| `site/unreachable` warn | сайт не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); повторы после вердикта считаются на событии (`repeat`) без проб — память вердикта в docs/failures.md | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?}` — `rule` и `process`: см. ниже; `tried` пуст: нет другого рабочего маршрута, при `retries: 'off'` — повторы выключены (`siteRetry`); без `retries: 'off'` в `data` ещё `check` — `{state: 'pending'\|'off'\|'opens'\|'down'\|'failed', at, kind?, via?, ok?, total?, nodes?, error?, manual?}`, внешний чекер check-host.net (docs/connect-model.md «Внешний чекер»): событие меняется на месте (`rev`), тихое, пока нет `opens` |
 | `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
 | `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'\|<id of the fallback target>}` — `target`: the cause (`proxy` = the main flow); `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |
@@ -1215,7 +1227,7 @@ connections) и путь приложения; ядро хранит их ряд
 {name, path}` — имя файла и полный путь; нет, если sing-box не знает приложение. `app?: string` —
 Android-пакет приложения (первое из `processInfo.packageNames` sing-box; `android` — системный uid
 1000); нет на десктопе и когда владельца не нашли. Путь с пакетом идёт той же цепочкой, что `process`:
-`ClosedConnection.pkg` / `LiveConnection.pkg` → `AutoBlocked.pkg` / `AutoUnreachable.pkg` (рядом с
+`ClosedConnection.pkg` / `LiveConnection.pkg` → `AutoSiteFail.pkg` (рядом с
 `process` в `_failDests`) → `data.app` в `siteBlocked` / `siteUnreachable`. UI только показывает (значок
 и имя, тап → диалог приложения), правил не создаёт.
 

@@ -213,7 +213,9 @@ class EventRow extends StatelessWidget {
       acts.add((asking ? l10n.checking : l10n.checkWithChecker, asking ? null : () => host.checkSite(e.id)));
       acts.add((l10n.copySite, () => copyText(context, site, l10n.site)));
       if (links.newRuleFor != null) {
-        final via = dd['via'] == null || '${dd['via']}'.isEmpty ? null : '${dd['via']}';
+        // `viaTarget`: the node that opened the site when it is a node of the failing entry itself (a rule for the entry would not help)
+        final v = dd['viaTarget'] ?? dd['via'];
+        final via = v == null || '$v'.isEmpty ? null : '$v';
         acts.add((l10n.createRule, () => links.newRuleFor!(host: site, via: via)));
       }
       acts.add((
