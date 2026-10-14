@@ -321,7 +321,9 @@ to the report server, and the VPN is off…»), `rejected` (сервер не п
 почему не удался. В `rejected` и `failed` `message` уже в самом тексте.
 
 «Download log» (⋮) от отправки не зависит: тот же отчёт (`report()` без строгого режима) как текст
-(`reportToText`) в файл `jormungand-log-<дата>.txt` через `BackupIo`.
+(`reportToText`) в файл `jormungand-log-<дата>.txt` через `BackupIo`. Сохранение — по общей схеме
+экспорта (`docs/platforms.md`, «Сохранение файлов»): системный диалог не открывается каждый раз,
+сообщение «Logs saved» называет папку и фактическое имя файла (`папка/имя`).
 
 ### Загрузчик (`HttpReportUploader`)
 

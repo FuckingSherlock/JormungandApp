@@ -1566,5 +1566,10 @@
   "Direct copy": "directCopy",
   "VPN copy": "vpnCopy",
   "{0}: the direct and the VPN copies list different servers": "theDirectAndTheVpnCopies",
-  "… and {#0} more": "andMore2"
+  "… and {#0} more": "andMore2",
+  "Choose folder": "chooseFolder",
+  "Save as…": "saveAs",
+  "The folder you saved to before is gone or no longer allowed. Choose another one.": "theFolderYouSavedToBefore",
+  "The folder you saved to before is gone. Pick where to save the file.": "theFolderYouSavedToBefore2",
+  "Save {0} to {1}?": "saveTo"
 }

@@ -8,11 +8,13 @@ import '../core/format.dart';
 import '../core/settings_model.dart';
 import '../l10n/l10n.dart';
 import '../platform/files_channel.dart';
+import '../platform/platform_caps.dart';
 import '../state/app_settings.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
+import 'save_flow.dart';
 import 'settings_parts.dart';
 
 /// Settings -> Data (mockup 59-data.js): App updates, Backup (export / restore with a confirm
@@ -146,11 +148,13 @@ Future<void> _export(BuildContext context, CoreHost host) async {
   };
   final name = 'jormungand-backup-${at.toIso8601String().substring(0, 10)}.json';
   try {
-    final saved = await BackupIo.current.save(
-      name,
-      const JsonEncoder.withIndent('  ').convert(file),
+    final saved = await saveExport(
+      context,
+      android: host.caps.folderPicker,
+      name: name,
+      text: const JsonEncoder.withIndent('  ').convert(file),
     );
-    if (saved != null) say(l10n.backupSaved2(saved));
+    if (saved != null) say(l10n.backupSaved2(saved.label));
   } catch (e) {
     say(l10n.backupFailed('$e'));
   }

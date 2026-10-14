@@ -22,6 +22,7 @@ import 'package:jormungand/widgets/settings_parts.dart' show DimWhen;
 import 'package:jormungand/widgets/form_parts.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
+import 'fake_backup_io.dart';
 import 'fake_core_host.dart';
 
 /// The Settings page (or Home) alone, 320 dp wide and tall enough that a sheet's lazy lists
@@ -95,20 +96,6 @@ const _rows = [
   'setdns',
   'setdata',
 ];
-
-class _FakeBackupIo implements BackupIo {
-  PickedFile? file;
-  String? saved;
-
-  @override
-  Future<String?> save(String name, String text) async {
-    saved = text;
-    return name;
-  }
-
-  @override
-  Future<PickedFile?> pick() async => file;
-}
 
 void main() {
   group('settings model', () {
@@ -893,9 +880,9 @@ void main() {
   });
 
   group('Data', () {
-    late _FakeBackupIo io;
+    late FakeBackupIo io;
     setUp(() {
-      io = _FakeBackupIo();
+      io = FakeBackupIo(folder: null);
       BackupIo.current = io;
     });
 
@@ -968,7 +955,7 @@ void main() {
       await _open(tester, 'setdata');
       await tester.tap(find.text('Export backup'));
       await tester.pumpAndSettle();
-      final j = jsonDecode(io.saved!) as Map;
+      final j = jsonDecode(io.text!) as Map;
       expect(j['app'], 'jormungand');
       expect((j['snapshot'] as Map).containsKey('sourcesData'), isTrue);
     });

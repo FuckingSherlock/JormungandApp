@@ -12,34 +12,19 @@ import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/platform/files_channel.dart';
 import 'package:jormungand/widgets/report_actions.dart';
 
+import 'fake_backup_io.dart';
 import 'fake_core_host.dart';
 import 'home_test.dart' show pumpApp;
 
-class _Io implements BackupIo {
-  String? name, text;
-  Object? fail;
-
-  @override
-  Future<String?> save(String name, String text) async {
-    if (fail != null) throw fail!;
-    this.name = name;
-    this.text = text;
-    return name;
-  }
-
-  @override
-  Future<PickedFile?> pick() async => null;
-}
-
 void main() {
-  late _Io io;
+  late FakeBackupIo io;
   late FakeCoreHost host;
   late LogsController logs;
   final clipboard = <String>[];
   late DateTime fakeNow;
 
   setUp(() {
-    io = _Io();
+    io = FakeBackupIo(folder: null); // no remembered folder: the system "Save as" (save_flow_test.dart has the rest)
     BackupIo.current = io;
     clipboard.clear();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -89,7 +74,7 @@ void main() {
     expect(io.text, contains('connected'));
     expect(io.text, contains('hello raw line'));
     expect(host.calls, contains('report'));
-    expect(find.text('Logs saved: ${io.name}'), findsOneWidget);
+    expect(find.text('Logs saved: Documents/${io.name}'), findsOneWidget);
     done();
   });
 

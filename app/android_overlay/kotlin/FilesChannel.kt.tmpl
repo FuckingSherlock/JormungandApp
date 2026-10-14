@@ -3,8 +3,10 @@ package __APP_ID__
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
@@ -15,9 +17,14 @@ import java.util.concurrent.Executors
  * MethodChannel `jormungand/files` (Dart side: lib/platform/files_channel.dart): the system file
  * picker for the backup, and the installer of a downloaded update.
  *
- *  save    -> String?  args {name, text}: the "save as" dialog (ACTION_CREATE_DOCUMENT); the saved
- *                      file's display name, null when the user closed the dialog
- *  pick    -> Map?     the "open" dialog (ACTION_OPEN_DOCUMENT); {name, text} of the chosen file
+ *  folder  -> String?  display name of the remembered export folder (SharedPreferences), null if none
+ *  chooseFolder -> String?  the folder picker (ACTION_OPEN_DOCUMENT_TREE): takes the persistable
+ *                      permission, remembers the tree (the old one is released), returns its name;
+ *                      null when the user closed the dialog
+ *  saveToFolder -> Map args {name, text}: creates the file in the remembered tree (the provider makes
+ *                      the name unique) -> {name: actual display name, folder}; error `folder_gone`
+ *                      when no folder is remembered, the permission was revoked or the folder is gone
+ *  pick   -> Map?     the "open" dialog (ACTION_OPEN_DOCUMENT); {name, text} of the chosen file
  *                      (UTF-8, at most 64 MB), null when cancelled
  *  install -> String?  args {path}: installs the downloaded APK (UpdateInstaller); null = the
  *                      system installer took it, else why not (`permission`, `verify`, `aborted`...)
@@ -27,14 +34,18 @@ import java.util.concurrent.Executors
 class FilesChannel(private val app: Context) {
     companion object {
         const val NAME = "jormungand/files"
-        private const val REQUEST_SAVE = 0x4A4E
+        private const val REQUEST_TREE = 0x4A4E
         private const val REQUEST_OPEN = 0x4A4F
         private const val MAX_BYTES = 64 * 1024 * 1024
+        private const val PREFS = "jormungand_files"
+        private const val KEY_TREE = "exportTree"
+        private const val KEY_TREE_NAME = "exportTreeName"
     }
 
     private val main = Handler(Looper.getMainLooper())
     private val io = Executors.newSingleThreadExecutor()
-    private var pendingSave: Pair<MethodChannel.Result, String>? = null
+    private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private var pendingTree: MethodChannel.Result? = null
     private var pendingOpen: MethodChannel.Result? = null
 
     fun register(messenger: BinaryMessenger) {
@@ -43,18 +54,33 @@ class FilesChannel(private val app: Context) {
 
     private fun onCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "save" -> {
-                if (pendingSave != null) return result.error("busy", "a save dialog is open", null)
-                val text = call.argument<String>("text") ?: ""
+            "folder" -> result.success(prefs.getString(KEY_TREE, null)?.let { prefs.getString(KEY_TREE_NAME, null) ?: "?" })
+            "chooseFolder" -> {
+                if (pendingTree != null) return result.error("busy", "a folder dialog is open", null)
                 val window = AppEngine.activity ?: return result.error("no_window", "the app is not on screen", null)
-                pendingSave = result to text
-                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "application/json"
-                    putExtra(Intent.EXTRA_TITLE, call.argument<String>("name") ?: "jormungand-backup.json")
+                pendingTree = result
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                    addFlags(
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+                    )
                 }
                 @Suppress("DEPRECATION")
-                window.startActivityForResult(intent, REQUEST_SAVE)
+                window.startActivityForResult(intent, REQUEST_TREE)
+            }
+            "saveToFolder" -> {
+                val name = call.argument<String>("name") ?: "jormungand-export.json"
+                val text = call.argument<String>("text") ?: ""
+                io.execute {
+                    try {
+                        val map = saveIntoTree(name, text)
+                        main.post { result.success(map) }
+                    } catch (e: FolderGone) {
+                        main.post { result.error("folder_gone", e.message, null) }
+                    } catch (e: Exception) {
+                        main.post { result.error("save_failed", e.message, null) }
+                    }
+                }
             }
             "pick" -> {
                 if (pendingOpen != null) return result.error("busy", "an open dialog is open", null)
@@ -84,20 +110,30 @@ class FilesChannel(private val app: Context) {
     /** Called from MainActivity.onActivityResult; true when the request code was ours. */
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         when (requestCode) {
-            REQUEST_SAVE -> {
-                val (result, text) = pendingSave ?: return true
-                pendingSave = null
+            REQUEST_TREE -> {
+                val result = pendingTree ?: return true
+                pendingTree = null
                 val uri = data?.data
                 if (resultCode != Activity.RESULT_OK || uri == null) return result.success(null).let { true }
-                io.execute {
-                    try {
-                        app.contentResolver.openOutputStream(uri, "wt")!!.use {
-                            it.write(text.toByteArray(Charsets.UTF_8))
-                        }
-                        main.post { result.success(displayName(uri) ?: "backup") }
-                    } catch (e: Exception) {
-                        main.post { result.error("save_failed", e.message, null) }
+                try {
+                    app.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                    // the previous folder is released: the system keeps only ~128 grants per app
+                    prefs.getString(KEY_TREE, null)?.let { old ->
+                        if (old != uri.toString()) try {
+                            app.contentResolver.releasePersistableUriPermission(
+                                Uri.parse(old),
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                            )
+                        } catch (_: Exception) {}
                     }
+                    val name = treeName(uri)
+                    prefs.edit().putString(KEY_TREE, uri.toString()).putString(KEY_TREE_NAME, name).apply()
+                    result.success(name)
+                } catch (e: Exception) {
+                    result.error("folder_failed", e.message, null)
                 }
                 return true
             }
@@ -120,6 +156,31 @@ class FilesChannel(private val app: Context) {
             }
         }
         return false
+    }
+
+    private class FolderGone(why: String) : Exception(why)
+
+    /** Creates [name] in the remembered tree; the provider picks a free name when it is taken. */
+    private fun saveIntoTree(name: String, text: String): Map<String, String> {
+        val tree = prefs.getString(KEY_TREE, null)?.let(Uri::parse) ?: throw FolderGone("no folder was chosen")
+        val granted = app.contentResolver.persistedUriPermissions.any { it.uri == tree && it.isWritePermission }
+        if (!granted) throw FolderGone("the permission for the folder was revoked")
+        val dir = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val mime = if (name.endsWith(".json", true)) "application/json" else "text/plain"
+        val file = try {
+            DocumentsContract.createDocument(app.contentResolver, dir, mime, name)
+        } catch (e: Exception) {
+            throw FolderGone(e.message ?: "the folder is not available")
+        } ?: throw FolderGone("the folder is not available")
+        app.contentResolver.openOutputStream(file, "wt")!!.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+        return mapOf("name" to (displayName(file) ?: name), "folder" to (treeName(tree)))
+    }
+
+    private fun treeName(tree: Uri): String {
+        val dir = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        return app.contentResolver.query(dir, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        } ?: DocumentsContract.getTreeDocumentId(tree).substringAfterLast(':').substringAfterLast('/')
     }
 
     private fun displayName(uri: android.net.Uri): String? =

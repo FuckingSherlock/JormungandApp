@@ -30,6 +30,10 @@ class PlatformCaps {
   /// Nodes -> + -> Scan QR code: the camera scanner (flutter_zxing over the `camera` plugin) is
   /// wired for Android only; on the desktop the QR of a screenshot goes through Import config file.
   bool get cameraScan => android;
+
+  /// Saving a file (exports): the second action next to "Save" is the system folder picker
+  /// ("Choose folder") on Android and the system "Save as…" dialog on the desktop.
+  bool get folderPicker => android;
 }
 
 extension HostCaps on CoreHost {

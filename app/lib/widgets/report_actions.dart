@@ -7,10 +7,11 @@ import 'package:jormungand_core/jormungand_core.dart' show reportNoteMax, report
 import '../core/logs_controller.dart';
 import '../core/report_send.dart';
 import '../l10n/l10n.dart';
-import '../platform/files_channel.dart';
+import '../platform/platform_caps.dart';
 import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
 import 'form_parts.dart';
+import 'save_flow.dart';
 
 /// ⋮ → «Download log»: the core's report (`docs/logs.md` → Отчёт) as text into a file the user picks.
 /// Everything the core keeps, not what the tab shows: the state, every event with its data and the
@@ -20,8 +21,14 @@ Future<void> downloadLog(BuildContext context, LogsController logs) async {
   try {
     final report = await logs.host.report();
     final at = DateTime.now().toIso8601String().substring(0, 10);
-    final saved = await BackupIo.current.save('jormungand-log-$at.txt', reportToText(report));
-    if (saved != null && context.mounted) showToast(context, l10n.logsSaved(saved));
+    if (!context.mounted) return;
+    final saved = await saveExport(
+      context,
+      android: logs.host.caps.folderPicker,
+      name: 'jormungand-log-$at.txt',
+      text: reportToText(report),
+    );
+    if (saved != null && context.mounted) showToast(context, l10n.logsSaved(saved.label));
   } catch (e) {
     if (context.mounted) showToast(context, l10n.exportFailed('$e'));
   }
