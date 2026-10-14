@@ -38,6 +38,7 @@ class _Rig {
     this.neverApplied = false,
     DnsVerdictBook? verdicts,
     this.nodeId,
+    bool withNodes = false,
   }) {
     this.verdicts = verdicts ?? DnsVerdictBook();
     this.uncertain = uncertain;
@@ -84,6 +85,17 @@ class _Rig {
       clock: () => time.t.millisecondsSinceEpoch,
       book: this.verdicts,
       node: () => nodeId,
+      nodes: !withNodes
+          ? null
+          : DnsNodes(
+              spare: () => spareTag == null ? null : (key: 'sub::spare', tag: spareTag!),
+              exitKey: () => 'sub::exit',
+              exitAlive: () async => exitAlive,
+              ask: (c, tag, name, t) async {
+                viaAsked.add('${c.id} via $tag');
+                return viaAnswers.containsKey(c.id) ? viaAnswers[c.id] : -1;
+              },
+            ),
       note: (level, line) => notes.add('$level $line'),
       flagWait: const Duration(milliseconds: 30),
       flagPoll: Duration.zero,
@@ -92,6 +104,13 @@ class _Rig {
   }
 
   final time = FakeTime();
+
+  /// The other nodes ([withNodes]): the spare node's outbound tag (null = no working node), whether the exit node carries
+  /// traffic, and what the same server answers through the spare node (candidate id → ms; -1 = silent, null = cannot be asked).
+  String? spareTag = 'spare';
+  bool? exitAlive = true;
+  final viaAnswers = <String, int?>{};
+  final viaAsked = <String>[];
   late final DnsVerdictBook verdicts;
   String? nodeId;
   late final Sentinel sentinel;
@@ -171,13 +190,13 @@ void main() {
     await r.round();
     expect(r.svc.active, 'a');
     r.alive['dns-a'] = -1;
-    await r.round(); // a miss: evidence, the window (1 s) has not passed
-    expect(r.svc.active, 'a');
+    await r.round(); // a miss: evidence, the window (1 s) has not passed; the traffic moves at once, in parallel
+    expect(r.svc.active, 'b', reason: 'b is higher than c; no waiting for the verdict');
     expect(r.events('failed'), isEmpty);
-    expect(r.writes, isEmpty);
+    expect(r.writes, ['a off miss']);
     await r.round(2);
-    expect(r.svc.active, 'b', reason: 'b is higher than c');
-    expect(r.writes, ['a off verdict']);
+    expect(r.svc.active, 'b');
+    expect(r.writes, ['a off miss'], reason: 'the verdict only confirms what was done (the flap guard\'s strike)');
     expect(await r.log(), ['direct a>b failover']);
     expect([r.switches.single.fromProvider, r.switches.single.toProvider], ['a', 'b']);
     final e = r.events('failed').single;
@@ -193,22 +212,25 @@ void main() {
     expect(r.sentinel.roots.byKey('dns|a')!.level, Level.dns);
     expect((r.svc.toJson()['servers'] as List).first, containsPair('ok', false));
     expect(r.notes.any((n) => n.startsWith('info dns flag check (direct): b answers after')), isTrue, reason: 'the write was verified: ${r.notes}');
-    expect(r.notes.any((n) => n.startsWith('debug dns direct: answers a; flags on [a, b 20 ms, c 20 ms]; off []')), isTrue, reason: 'one summary line per side per round: ${r.notes}');
+    expect(r.notes.any((n) => n.startsWith('debug dns direct: answers b; flags on [b 20 ms, c 20 ms]; off [a]')), isTrue, reason: 'one summary line per side per round: ${r.notes}');
     expect(r.notes.where((n) => n.startsWith('warn')), isEmpty);
     await r.dispose();
   });
 
-  test('a miss that goes by inside the window is a blip: nothing written, nothing switched', () async {
+  test('a miss that goes by inside the window is a blip: the traffic moved at once, no event, no root; it returns after failAfter answers', () async {
     final r = _Rig(direct: ['a', 'b']);
     await r.settle();
     r.alive['dns-a'] = -1;
     await r.round();
+    expect(r.svc.active, 'b');
     r.alive['dns-a'] = 30;
     await r.round(3);
-    expect(r.svc.active, 'a');
+    await r.round(3);
     expect(r.events('failed'), isEmpty);
     expect(r.sentinel.roots.open, isEmpty);
-    expect(r.writes, isEmpty);
+    expect(r.svc.active, 'a');
+    expect(r.writes, ['a off miss', 'a on back']);
+    expect(await r.log(), ['direct a>b failover', 'direct b>a back']);
     await r.dispose();
   });
 
@@ -225,7 +247,7 @@ void main() {
     expect(r.svc.active, 'b');
     await r.round();
     expect(r.svc.active, 'a');
-    expect(r.writes, ['a off verdict', 'a on back']);
+    expect(r.writes, ['a off miss', 'a on back']);
     expect(await r.log(), ['direct a>b failover', 'direct b>a back']);
     await r.dispose();
   });
@@ -239,12 +261,12 @@ void main() {
     }
     expect(r.svc.active, 'a');
     expect(r.events('failed'), hasLength(1), reason: 'b is down, written once');
-    expect(r.writes, ['b off verdict']);
+    expect(r.writes, ['b off miss']);
     r.alive['dns-a'] = -1;
     for (var i = 0; i < 3; i++) {
       await r.round(2);
     }
-    expect(r.writes, ['b off verdict', 'a off verdict']);
+    expect(r.writes, ['b off miss', 'a off miss']);
     expect(r.svc.active, 'a', reason: 'every flag off: the top candidate answers');
     expect(r.effectiveFile('direct'), 'a');
     for (var i = 0; i < 3; i++) {
@@ -264,7 +286,7 @@ void main() {
     expect(r.svc.activeOf('vpn'), 'v2');
     expect(r.svc.activeOf('direct'), 'a');
     expect(r.svc.active, 'v2', reason: '`active` is the VPN side\'s');
-    expect(r.writes, ['v1 off verdict']);
+    expect(r.writes, ['v1 off miss']);
     expect(r.checks.where((c) => c == 'v2'), isNotEmpty);
     expect(r.checks.where((c) => c == 'a' || c == 'b'), isEmpty, reason: 'only the side that changed is verified');
     expect(await r.log(), ['vpn v1>v2 failover']);
@@ -287,7 +309,7 @@ void main() {
     await r.time.advanceSeconds(61);
     await r.round();
     expect(r.svc.active, 'a');
-    expect(r.writes, ['a off verdict', 'a on back']);
+    expect(r.writes, ['a off miss', 'a on back']);
     await r.dispose();
   });
 
@@ -460,7 +482,7 @@ void main() {
       await r.svc.pingProvider('b');
       await r.time.advanceSeconds(2);
       expect(r.sentinel.roots.byKey('dns|b'), isNotNull);
-      expect(r.writes, ['b off verdict']);
+      expect(r.writes, ['b off miss']);
       await r.dispose();
     });
 
@@ -547,18 +569,18 @@ void main() {
     await d.dispose();
   });
 
-  test('the network goes down while a miss is being judged: parked behind net.offline, nothing confirmed, no flag written', () async {
+  test('the network goes down while a miss is being judged: parked behind net.offline, nothing confirmed, no further flag written', () async {
     final r = _Rig(direct: ['a', 'b']);
     await r.settle();
     r.alive['dns-a'] = -1;
-    await r.round(); // the miss: a suspicion
+    await r.round(); // the miss: a suspicion; the traffic moved at once (the network was up)
     r.sentinel.context.platform(connected: false);
     await r.time.advanceSeconds(5);
     expect(r.events('failed'), isEmpty);
     expect(r.sentinel.roots.byKey('dns|a'), isNull);
     await r.round(5); // the network is down: no round
-    expect(r.svc.active, 'a');
-    expect(r.writes, isEmpty);
+    expect(r.svc.active, 'b');
+    expect(r.writes, ['a off miss'], reason: 'nothing more while the network is down');
     await r.dispose();
   });
 
@@ -607,7 +629,7 @@ void main() {
     expect(r.events('failed').single['data'], containsPair('server', 'x'));
     expect(r.sentinel.roots.byKey('dns|x'), isNotNull);
     expect(r.svc.active, 'a');
-    expect(r.writes, ['x off verdict'], reason: 'a rule\'s chain of several transports follows its flag');
+    expect(r.writes, ['x off miss'], reason: 'a rule\'s chain of several transports follows its flag');
     expect(await r.log(), isEmpty);
     final listed = (r.svc.toJson()['servers'] as List).cast<Map>();
     expect(listed.map((s) => s['id']), ['a', 'b', 'x', 'system'], reason: 'status.dns lists the watched-only servers after the ones in use');
@@ -618,7 +640,7 @@ void main() {
     await r.round(2);
     await r.round(2);
     expect(r.events('failed').map((e) => (e['data'] as Map)['server']), containsAll(['x', 'system']));
-    expect(r.writes, ['x off verdict'], reason: 'the OS resolver has no flag');
+    expect(r.writes, ['x off miss'], reason: 'the OS resolver has no flag');
     r.alive['dns-x'] = 10;
     await r.round();
     expect(r.sentinel.roots.byKey('dns|x'), isNull);
@@ -631,7 +653,7 @@ void main() {
     r.alive['dns-p-doh'] = -1;
     await r.round(2);
     await r.round(2);
-    expect(r.writes, ['p-doh off verdict'], reason: 'the flag follows the transport');
+    expect(r.writes, ['p-doh off miss'], reason: 'the flag follows the transport');
     expect(r.svc.active, 'p-dot');
     expect(r.events('failed'), isEmpty, reason: 'the provider still answers through p-dot');
     expect(r.notes.any((n) => n.contains('p-doh (p, direct) does not answer, its provider still does through p-dot')), isTrue, reason: '${r.notes}');
@@ -688,7 +710,7 @@ void main() {
     await r.round();
     await r.round(2);
     await r.round(2);
-    expect(r.writes, ['a off verdict']);
+    expect(r.writes, ['a off miss']);
     expect(r.svc.active, 'b');
     await r.dispose();
   });
@@ -709,7 +731,7 @@ void main() {
     n.alive['dns-a'] = -1;
     await n.round(2);
     await n.round(2);
-    expect(n.writes, ['a off verdict']);
+    expect(n.writes, ['a off miss']);
     final w = n.notes.where((l) => l.startsWith('warn dns flag not applied after')).single;
     expect(w, contains('(direct): expected b, no candidate answers the flagcheck'));
     await n.dispose();
@@ -719,7 +741,7 @@ void main() {
     u.alive['dns-a'] = -1;
     await u.round(2);
     await u.round(2);
-    expect(u.writes, ['a off verdict']);
+    expect(u.writes, ['a off miss']);
     expect(u.notes.any((l) => l.startsWith('debug dns flag check (direct): cannot be told')), isTrue);
     expect(u.notes.where((l) => l.startsWith('warn')), isEmpty, reason: 'an old sing-box without flagcheck is no failure');
     await u.dispose();
@@ -779,6 +801,142 @@ void main() {
 
     expect(extra([{'id': 'g', 'addr': 'udp://127.0.0.1:5353', 'via': 'direct', 'on': true}]), ['$systemDnsId=local']);
     expect(extra([{'id': 's', 'addr': 'system', 'via': 'direct', 'on': true}]), isEmpty, reason: 'a server of its own is watched as any other');
+  });
+
+  group('DNS on the node (docs/failures.md → DNS на ноде)', () {
+    Future<_Rig> vpnRig({bool withNodes = true}) async {
+      final r = _Rig(vpn: ['v1', 'v2'], withNodes: withNodes, nodeId: 'N1');
+      await r.settle();
+      await r.round();
+      return r;
+    }
+
+    String vkey(_Rig r, String id, String? node) => dnsVerdictKey(r.members[id], node);
+
+    test('a VPN-side miss moves the traffic to the next server at once, while the check still runs', () async {
+      final r = await vpnRig();
+      r.alive['dns-v1'] = -1;
+      await r.round();
+      expect(r.svc.active, 'v2');
+      expect(r.writes, ['v1 off miss']);
+      expect(r.events('failed'), isEmpty);
+      expect(r.events('failedOnNode'), isEmpty);
+      expect((r.svc.toJson()['servers'] as List).first, containsPair('rechecking', true));
+      await r.dispose();
+    });
+
+    test('it answers through another node: dns/failedOnNode, dead on this node only', () async {
+      final r = await vpnRig();
+      r.viaAnswers['v1'] = 30;
+      r.alive['dns-v1'] = -1;
+      await r.round();
+      await r.time.advanceSeconds(3);
+      expect(r.events('failed'), isEmpty);
+      final e = r.events('failedOnNode').single;
+      expect(e['data'], containsPair('server', 'v1'));
+      expect(e['data'], containsPair('node', 'sub::exit'));
+      expect(e['data'], containsPair('via', 'sub::spare'));
+      expect(r.verdicts[vkey(r, 'v1', 'N1')]!.node, isTrue);
+      expect(r.verdicts.deadOf(dnsServerKey(r.members['v1'])!), isNull, reason: 'the server itself is not dead');
+      expect(r.viaAsked.first, 'v1 via spare');
+      expect((r.svc.toJson()['servers'] as List).first, containsPair('deadOn', 'node'));
+      // another node: the verdict of this one does not apply
+      r.nodeId = 'N2';
+      expect(dnsDeadOf(r.verdicts, r.members['v1'], 'N2'), isNull);
+      await r.dispose();
+    });
+
+    test('silent through the other node too: the server itself is dead, its verdict holds for every node', () async {
+      final r = await vpnRig();
+      r.alive['dns-v1'] = -1; // viaAnswers: silent
+      await r.round();
+      await r.time.advanceSeconds(3);
+      expect(r.events('failedOnNode'), isEmpty);
+      expect(r.events('failed').single['data'], containsPair('server', 'v1'));
+      expect(r.verdicts.deadOf(dnsServerKey(r.members['v1'])!), isTrue);
+      expect(r.verdicts[vkey(r, 'v1', 'N1')]!.node, isFalse);
+      expect(dnsDeadOf(r.verdicts, r.members['v1'], 'N2'), isTrue, reason: 'dead through every node');
+      await r.dispose();
+    });
+
+    test('the exit node carries nothing: not the server\'s doing, no event, no verdict', () async {
+      final r = await vpnRig();
+      r.exitAlive = false;
+      r.alive['dns-v1'] = -1;
+      await r.round();
+      await r.time.advanceSeconds(3);
+      expect(r.events('failed'), isEmpty);
+      expect(r.events('failedOnNode'), isEmpty);
+      expect(r.sentinel.roots.byKey('dns|v1'), isNull);
+      expect(r.verdicts.deadOf(vkey(r, 'v1', 'N1')), isNot(isTrue));
+      expect(r.viaAsked, isEmpty, reason: 'the other node is not asked about a dead exit node');
+      await r.dispose();
+    });
+
+    test('no spare node (or the transport cannot be asked): the old way, dns/failed on this node\'s key only', () async {
+      final r = await vpnRig();
+      r.spareTag = null;
+      r.alive['dns-v1'] = -1;
+      await r.round();
+      await r.time.advanceSeconds(3);
+      expect(r.events('failed').single['data'], containsPair('server', 'v1'));
+      expect(r.verdicts.deadOf(vkey(r, 'v1', 'N1')), isTrue);
+      expect(r.verdicts.deadOf(dnsServerKey(r.members['v1'])!), isNull);
+      await r.dispose();
+
+      final q = await vpnRig();
+      q.viaAnswers['v1'] = null; // cannot be asked that way
+      q.alive['dns-v1'] = -1;
+      await q.round();
+      await q.time.advanceSeconds(3);
+      expect(q.events('failed'), hasLength(1));
+      expect(q.verdicts.deadOf(dnsServerKey(q.members['v1'])!), isNull, reason: 'a silence that proves nothing is no verdict of the server');
+      await q.dispose();
+    });
+
+    test('an open root of the route explains the miss: nothing switched, no verdict', () async {
+      final r = await vpnRig();
+      r.sentinel.openRoot(
+        kind: 'route.dead',
+        key: 'route|proxy',
+        subject: {'route': 'proxy', 'path': 'proxy'},
+        scope: Scope.of({'route': 'proxy'}),
+        level: Level.route,
+      );
+      r.viaAnswers['v1'] = 30;
+      r.alive['dns-v1'] = -1;
+      await r.round();
+      await r.time.advanceSeconds(3);
+      expect(r.writes, isEmpty);
+      expect(r.svc.active, 'v1');
+      expect(r.events('failed'), isEmpty);
+      expect(r.events('failedOnNode'), isEmpty);
+      expect(r.verdicts.deadOf(vkey(r, 'v1', 'N1')), isNot(isTrue));
+      await r.dispose();
+    });
+
+    test('a dead VPN-side server is asked again every 20 minutes, a repeat miss is counted on the same event', () async {
+      final r = await vpnRig();
+      r.alive['dns-v1'] = -1;
+      await r.round();
+      await r.time.advanceSeconds(3);
+      expect(r.sentinel.roots.byKey('dns|v1'), isNotNull);
+      int askedV1() => r.asked.where((q) => q.startsWith('dns-v1 ')).length;
+      r.asked.clear();
+      await r.time.advanceSeconds(10 * 60);
+      await r.svc.checkDue();
+      expect(askedV1(), 0, reason: 'not before 20 min (the direct side\'s ladder would have asked)');
+      await r.time.advanceSeconds(10 * 60);
+      await r.svc.checkDue();
+      expect(askedV1(), greaterThan(0));
+      expect(r.events('failed'), hasLength(1), reason: 'one event; the repeat is counted on it');
+      r.alive['dns-v1'] = 20;
+      r.asked.clear();
+      await r.time.advanceSeconds(20 * 60 + 1);
+      await r.svc.checkDue();
+      expect(r.sentinel.roots.byKey('dns|v1'), isNull, reason: 'it answered');
+      await r.dispose();
+    });
   });
 
   group('verdicts that outlive a failover (dns_verdicts.dart)', () {

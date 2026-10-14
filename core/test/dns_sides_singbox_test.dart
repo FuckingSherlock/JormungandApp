@@ -496,7 +496,7 @@ void main() {
       await until('dir.test', 'd1');
       expect(await get('z0.other.test'), 'v0', reason: 'the VPN side did not notice');
       expect([await flagged('direct'), await flagged('vpn')], ['b-udp1', 'c-udp1-v']);
-      expect(notes.where((l) => l.contains('dns flag: a-udp1 (direct) off (verdict)')), hasLength(1));
+      expect(notes.where((l) => l.contains('dns flag: a-udp1 (direct) off (miss)')), hasLength(1));
       expect(notes.where((l) => l.contains('dns flag check (direct): b-udp1 answers after')), hasLength(1), reason: notes.join('\n'));
       expect(notes.where((l) => l.startsWith('warn')), isEmpty, reason: notes.join('\n'));
       final st = fo.toJson();

@@ -1362,6 +1362,15 @@ class CoreService implements CoreApi {
         off: off,
         book: dnsBook,
         node: _dnsNode,
+        nodes: DnsNodes(
+          spare: () {
+            final n = auto.spareNode();
+            return n == null ? null : (key: n.server, tag: n.tag);
+          },
+          exitKey: auto.exitNodeKey,
+          exitAlive: auto.exitAlive,
+          ask: _dnsAskVia,
+        ),
         setFlag: _setDnsFlag,
         query: _dnsAsk,
         flagCheck: _dnsFlagCheck,
@@ -1421,6 +1430,17 @@ class CoreService implements CoreApi {
     if (q != null) return q(tag, name, timeoutMs);
     final probe = _probe;
     return probe == null ? Future.value(-1) : probeDns(probe, tag, name, timeoutMs: timeoutMs);
+  }
+
+  /// The test seam of the DNS queries through another node ([probeDnsVia] by default): ms until the candidate [c] answered
+  /// [name] sent through the outbound [tag]; -1 = no answer; null = cannot be asked that way.
+  Future<int?> Function(DnsCandidate c, String tag, String name, int timeoutMs)? dnsQueryVia;
+
+  Future<int?> _dnsAskVia(DnsCandidate c, String tag, String name, int timeoutMs) {
+    final q = dnsQueryVia;
+    if (q != null) return q(c, tag, name, timeoutMs);
+    final probe = _probe;
+    return probe == null ? Future.value(null) : probeDnsVia(probe, tag, c, name, timeoutMs: timeoutMs);
   }
 
   /// The DNS server a connection resolved through (docs/rules.md §6): the user rule's own chain, the first

@@ -253,6 +253,17 @@ class _DnsSheetState extends State<DnsSheet> {
                         overflow: TextOverflow.ellipsis,
                         style: monoText.copyWith(fontSize: 12, color: c.t3),
                       ),
+                      // dead on the exit node in use only: it answers through another one
+                      if (s.on &&
+                          s.activeSides.contains('vpn') &&
+                          (health?.deadOnNode(id, 'vpn') ?? false))
+                        Text(
+                          l10n.deadOnThisNode,
+                          key: ValueKey('dns-dead-on-node-$id'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: c.danger),
+                        ),
                     ],
                   ),
                 ),

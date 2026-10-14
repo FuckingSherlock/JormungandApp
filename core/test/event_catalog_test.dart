@@ -265,7 +265,8 @@ final _implied = <String, (String cat, RegExp call)>{
 
 // `SuspicionEvent('cat', 'type', …)`: the event a detector hands to the Sentinel, which writes it with its verdict
 // `_siteKind('cat', 'type')`: the (cat, type) a verdict of the site judge (service.dart) picks for its SuspicionEvent
-final _withCat = RegExp(r'(?<![A-Za-z0-9_.])(_event|eventBook\.add|SuspicionEvent|_siteKind)\(');
+// `_dnsKind('cat', 'type')`: the same for the DNS check (dns_failover.dart)
+final _withCat = RegExp(r'(?<![A-Za-z0-9_.])(_event|eventBook\.add|SuspicionEvent|_siteKind|_dnsKind)\(');
 
 _Found _coreEmits(Directory dir) {
   final f = _Found();

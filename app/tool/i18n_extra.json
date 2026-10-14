@@ -219,5 +219,8 @@
   "Save as…": null,
   "The folder you saved to before is gone or no longer allowed. Choose another one.": null,
   "The folder you saved to before is gone. Pick where to save the file.": null,
+  "DNS server does not answer on this node": null,
+  "Does not answer through {0}; it answers through {1}": null,
+  "Dead on this node": null,
   "New version": "Новая версия",  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
 }

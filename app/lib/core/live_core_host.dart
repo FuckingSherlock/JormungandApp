@@ -427,6 +427,7 @@ class LiveCoreHost extends CoreHost {
                     ok: s['ok'] is bool ? s['ok'] as bool : null,
                     watched: s['watched'] == true,
                     rechecking: s['rechecking'] == true,
+                    deadOnNode: s['deadOn'] == 'node',
                   ),
             ],
           )

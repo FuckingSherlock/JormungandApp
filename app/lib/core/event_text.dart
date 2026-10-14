@@ -63,6 +63,7 @@ class EventWords {
     'rules/ruleSetUpdated' => l10n.ruleSetUpdated,
     'dns/switched' => l10n.dnsServerSwitched,
     'dns/failed' => l10n.dnsServerDoesNotAnswer,
+    'dns/failedOnNode' => l10n.dnsServerDoesNotAnswerOn,
     'node/addressMissing' => l10n.serverAddressDoesNotExist,
     'speed/done' => l10n.speedTestFinished,
     'speed/failed' => l10n.speedTestFailed,
@@ -346,6 +347,10 @@ class EventWords {
             : l10n.switchAutomaticallyIsOffTheFirst,
       ),
       ('dns', 'failed') => r(l10n.doesNotAnswer(dnsName(d['server']))),
+      ('dns', 'failedOnNode') => r(
+        l10n.doesNotAnswer(dnsName(d['server'])),
+        l10n.doesNotAnswerThroughItAnswers(server(d['node']), server(d['via'])),
+      ),
       ('speed', 'done') => () {
         String mbps(Object? bps) {
           final v = ((bps as num?) ?? 0) / 1e6;
@@ -740,6 +745,7 @@ class EventWords {
   String fieldValue(String k, Object? v, EventRecord e) {
     if (e.cat == 'dns') {
       if (k == 'from' || k == 'to') return dnsName(v);
+      if (e.type == 'failedOnNode' && (k == 'node' || k == 'via')) return server(v);
       if (k == 'reason') {
         return switch (v) {
           'failover' => l10n.itStoppedAnswering,

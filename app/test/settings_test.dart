@@ -641,6 +641,30 @@ void main() {
         expect(chip('google', 'vpn'), findsOneWidget);
       });
 
+      testWidgets('dead on the exit node in use only -> "Dead on this node" under the address', (
+        tester,
+      ) async {
+        final host = FakeCoreHost();
+        host.dnsHealthValue = const DnsHealth(
+          servers: [
+            DnsServerStatus(id: 'g2', provider: 'google', side: 'vpn', ok: false, deadOnNode: true),
+            DnsServerStatus(id: 'g1', provider: 'google', side: 'direct', ok: true),
+          ],
+        );
+        await openDns(tester, host);
+        expect(find.byKey(const ValueKey('dns-dead-on-node-google')), findsOneWidget);
+        expect(find.text('Dead on this node'), findsOneWidget);
+
+        // dead everywhere (no deadOn): no such line
+        host.dnsHealthValue = const DnsHealth(
+          servers: [DnsServerStatus(id: 'g2', provider: 'google', side: 'vpn', ok: false)],
+        );
+        host.changed();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(const ValueKey('dns-dead-on-node-google')), findsNothing);
+      });
+
       testWidgets('switching off the last provider of a side asks first (checkbox)', (
         tester,
       ) async {

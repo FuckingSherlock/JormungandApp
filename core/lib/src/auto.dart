@@ -1130,7 +1130,7 @@ class AutoService {
   /// The one working node a failed site is tried through first (the user's step 2): of the same subscription as the
   /// server it failed through and of another country; else of the same subscription; else of another country; else
   /// any. Never the failing server itself. null = none works.
-  SiteNode? scoutFor(String outbound) {
+  SiteNode? scoutFor(String outbound, {bool Function(SiteNode)? skip}) {
     final from = nodeOf(outbound);
     int rank(SiteNode n) {
       final sameSub = from != null && n.sub.isNotEmpty && n.sub == from.sub;
@@ -1140,7 +1140,7 @@ class AutoService {
 
     SiteNode? best;
     for (final n in workingNodes()) {
-      if (n.tag == from?.tag || n.tag == outbound) continue;
+      if (n.tag == from?.tag || n.tag == outbound || skip != null && skip(n)) continue;
       if (best == null || rank(n) < rank(best)) best = n;
     }
     return best;
@@ -1326,6 +1326,28 @@ class AutoService {
   String? exitNodeIdentity() {
     final g = _routes[index].main, k = g.now;
     return k == null ? null : g.ids[k];
+  }
+
+  /// The key (`<subscription>::<node>`) of the main group's node in use; null = not known yet. Read-only.
+  String? exitNodeKey() => _routes.isEmpty ? null : _routes[index].main.now;
+
+  /// Whether the node in use carries traffic at all: a fresh test of it (the test URL, then the backup checks; the
+  /// answer joins the pool). null = not known (no node in use, Manual's own flow, stopped).
+  Future<bool?> exitAlive() async {
+    if (_stopped || _routes.isEmpty) return null;
+    final g = _routes[index].main, k = g.now;
+    if (k == null) return null;
+    final ms = await pool.probe(_identity(g, k), (url) => _pingUrl(g.member(k), url), url: settings.url, checkers: settings.checkers);
+    return _stopped ? null : ms >= 0;
+  }
+
+  /// A node that works now and is not the one in use (nor the entry of its chain): the working node another DNS check
+  /// is asked through, ranked like the site checks' scout ([scoutFor]: the same subscription and another country first).
+  /// null = none (Manual lists none).
+  SiteNode? spareNode() {
+    if (_routes.isEmpty) return null;
+    final r = _routes[index], k = r.main.now, used = nodesInUse();
+    return scoutFor(k == null ? '' : r.main.member(k), skip: (n) => used.contains(_routes.firstWhere((x) => x.id == n.route).main.ids[n.server]));
   }
 
   /// The pool identities of the servers the main flow leaves through now: the main group's node in use and, for a chain,

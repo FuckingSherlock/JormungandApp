@@ -92,7 +92,7 @@ const eventCats = <(String, List<String>)>[
   ('site', ['blocked', 'unreachable']),
   ('sub', ['updated', 'failed', 'removed', 'back', 'dead', 'diverged']),
   ('rules', ['fallback', 'targetBack', 'ruleSetFailed', 'ruleSetUpdated']),
-  ('dns', ['switched', 'failed']),
+  ('dns', ['switched', 'failed', 'failedOnNode']),
   ('node', ['addressMissing']),
   ('speed', ['done', 'failed']),
   (
@@ -182,6 +182,7 @@ const _keyFields = <String, List<String>>{
   'rules/targetBack': ['target'],
   'dns/switched': ['from', 'to'],
   'dns/failed': ['server'],
+  'dns/failedOnNode': ['server', 'node'],
   'node/addressMissing': ['host'],
   'rules/ruleSetFailed': ['tag'],
   'rules/ruleSetUpdated': ['tag'],

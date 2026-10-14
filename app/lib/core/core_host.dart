@@ -776,6 +776,7 @@ class DnsServerStatus {
     this.ok,
     this.watched = false,
     this.rechecking = false,
+    this.deadOnNode = false,
   });
 
   final String id;
@@ -783,6 +784,9 @@ class DnsServerStatus {
 
   /// A check of this server runs; [ok] stays the stored verdict.
   final bool rechecking;
+
+  /// Dead on the exit node in use only (`deadOn: 'node'`): it answers through another node.
+  final bool deadOnNode;
 
   /// `direct` | `vpn`.
   final String side;
@@ -831,6 +835,11 @@ class DnsHealth {
     return any;
   }
 
+  /// [provider] is [dead] on [side] and only on the exit node in use (every failing candidate says so).
+  bool deadOnNode(String provider, String side) =>
+      dead(provider, side) &&
+      servers.every((s) => s.watched || s.provider != provider || s.side != side || s.deadOnNode);
+
   /// A check of a candidate of [provider] on [side] runs.
   bool rechecking(String provider, String side) => servers.any(
     (s) => !s.watched && s.provider == provider && s.side == side && s.rechecking,
@@ -838,7 +847,7 @@ class DnsHealth {
 
   /// What of it the page shows: a change rebuilds the page at once.
   String get sig => '$active|${answering.entries.map((e) => '${e.key}=${e.value}').join(',')}|'
-      '${servers.where((s) => s.ok == false).map((s) => s.id).join(',')}|'
+      '${servers.where((s) => s.ok == false).map((s) => '${s.id}${s.deadOnNode ? '@' : ''}').join(',')}|'
       '${servers.where((s) => s.rechecking).map((s) => s.id).join(',')}';
 }
 

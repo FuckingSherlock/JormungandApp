@@ -16,6 +16,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'dns_wire.dart';
+import 'routing.dart' show DnsCandidate;
+
 const probeInboundTag = 'probe-in';
 
 class Probe {
@@ -268,6 +271,59 @@ Future<int> probeDns(Probe probe, String server, String name, {int timeoutMs = 5
   }
 }
 
+/// ms until the DNS server [c] answered a query for [name] sent through the outbound [nodeTag] (the probe inbound, user
+/// = the tag: the request leaves from that node, past every user rule): DoH (GET), DoT, DNS over TCP. -1 = no usable answer;
+/// null = cannot be told: DoQ and the OS resolver have no client here, and a plain UDP server that stays silent over TCP
+/// says nothing (UDP is not carried through a SOCKS connection); an answer over TCP is an answer. A `tcp://` server is
+/// asked the same way and its silence is a miss. The test inbound being absent (nothing was asked) is null too.
+Future<int?> probeDnsVia(Probe probe, String nodeTag, DnsCandidate c, String name, {int timeoutMs = 5000}) async {
+  if (c.kind == 'doq' || c.kind == 'system') return null;
+  var addr = c.addr.trim();
+  if (!addr.contains('://')) addr = 'udp://$addr';
+  final u = Uri.tryParse(addr);
+  if (u == null || u.host.isEmpty) return null;
+  final id = Random().nextInt(65536);
+  final q = dnsQueryOf(name, dnsTypeA, id);
+  if (q == null) return null;
+  final tls = c.kind == 'dot', doh = c.kind == 'doh';
+  final port = u.hasPort ? u.port : (doh ? 443 : tls ? 853 : 53);
+  final plainUdp = !doh && !tls && u.scheme != 'tcp';
+  final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+  Duration left() => deadline.difference(DateTime.now());
+  _Wire? w;
+  try {
+    try {
+      w = await _Wire.connect(probe.port).timeout(left());
+    } catch (_) {
+      return null; // the test inbound is not there: nothing was asked
+    }
+    final sw = Stopwatch()..start();
+    await w.socks(nodeTag, probe.secret, u.host, port).timeout(left());
+    final List<int> data;
+    if (doh) {
+      await w.secure(u.host).timeout(left());
+      final path = u.path.isEmpty || u.path == '/' ? '/dns-query' : u.path;
+      final qs = {...u.queryParameters, 'dns': dohParam(q)};
+      final target = '$path?${qs.entries.map((e) => '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}').join('&')}';
+      final req = utf8.encode('GET $target HTTP/1.1\r\nHost: ${u.host}\r\nUser-Agent: Jormungand\r\nAccept: application/dns-message\r\nConnection: close\r\n\r\n');
+      final (status, body) = await w.getBytes(req).timeout(left());
+      if (status != 200) return -1;
+      data = body;
+    } else {
+      if (tls) await w.secure(u.host).timeout(left());
+      data = await w.dnsStream(q).timeout(left());
+    }
+    final a = parseDnsAnswer(data, id);
+    return a != null && a.rcode == 0 && !a.empty ? sw.elapsedMilliseconds : -1;
+  } on ProbeRefused {
+    return null; // the inbound did not take the user name: the request never ran
+  } catch (_) {
+    return plainUdp ? null : -1;
+  } finally {
+    w?.close();
+  }
+}
+
 /// Whether the DNS flags make the candidate [tag] the one that answers [name] (the side's flagcheck name,
 /// routing.dart `dnsFlagcheckName`) right now: true = it does, false = another one answers, or nothing did;
 /// null = it cannot be told (the probe inbound is not there, or it has no flagcheck user: a sing-box started
@@ -397,6 +453,12 @@ class _Wire {
 
   /// Sends a GET, reads the whole answer (a body over 256 KiB is an error): the status and the body as text.
   Future<(int, String)> get(List<int> req) async {
+    final (status, body) = await getBytes(req);
+    return (status, utf8.decode(body, allowMalformed: true));
+  }
+
+  /// [get] with the body as it came (a DNS message is binary).
+  Future<(int, List<int>)> getBytes(List<int> req) async {
     await _write(req);
     int end;
     while ((end = _headEnd()) < 0) {
@@ -432,7 +494,14 @@ class _Wire {
         _buf.clear();
       }
     }
-    return (status, utf8.decode(body, allowMalformed: true));
+    return (status, body);
+  }
+
+  /// Sends a DNS message over a stream (DoT, DNS over TCP: a 2 byte length first) and reads one answer message.
+  Future<List<int>> dnsStream(List<int> query) async {
+    await _write([query.length >> 8, query.length & 255, ...query]);
+    final len = await _take(2);
+    return _take(len[0] << 8 | len[1]);
   }
 
   Future<String> _line() async {

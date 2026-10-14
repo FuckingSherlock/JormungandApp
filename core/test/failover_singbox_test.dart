@@ -392,11 +392,12 @@ void main() {
       expect(fell, hasLength(1));
       expect([fell.single['type'], fell.single['level']], ['fallback', 'warn']);
       expect(fell.single['data'], {'rule': 'Dead rule', 'target': 'src:dead', 'to': 'block'});
-      // the Sentinel confirms the server down (dns/failed), its flag goes off and the side moves to the other (dns/switched)
-      expect(moved.map((e) => e['type']), ['failed', 'switched']);
-      expect(moved.first['data'], containsPair('server', 'a-udp1'));
-      expect(moved.first['data'], containsPair('side', 'direct'));
-      expect(moved.last['data'], {'side': 'direct', 'from': 'a-udp1', 'to': 'b-udp1', 'fromProvider': 'a', 'toProvider': 'b', 'reason': 'failover'});
+      // the miss turns the flag off and the side moves to the other at once (dns/switched), the Sentinel confirms the
+      // server down after it (dns/failed)
+      expect(moved.map((e) => e['type']), ['switched', 'failed']);
+      expect(moved.last['data'], containsPair('server', 'a-udp1'));
+      expect(moved.last['data'], containsPair('side', 'direct'));
+      expect(moved.first['data'], {'side': 'direct', 'from': 'a-udp1', 'to': 'b-udp1', 'fromProvider': 'a', 'toProvider': 'b', 'reason': 'failover'});
       var dns = (await call('/api/status'))['dns'] as Map;
       expect([dns['active'], dns['auto']], ['b-udp1', true]);
       expect((dns['sides'] as Map)['direct'], {'active': 'b-udp1', 'provider': 'b'});

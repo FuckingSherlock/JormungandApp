@@ -1574,5 +1574,8 @@
   "Save {0} to {1}?": "saveTo",
   "Server address does not exist": "serverAddressDoesNotExist",
   "Server address {0} of {1} does not exist — the provider's subscription has an error": "serverAddressOfDoesNotExist",
-  "Server address {0} of {1} and {#2} more does not exist — the provider's subscription has an error": "serverAddressOfAndMoreDoes"
+  "Server address {0} of {1} and {#2} more does not exist — the provider's subscription has an error": "serverAddressOfAndMoreDoes",
+  "DNS server does not answer on this node": "dnsServerDoesNotAnswerOn",
+  "Dead on this node": "deadOnThisNode",
+  "Does not answer through {0}; it answers through {1}": "doesNotAnswerThroughItAnswers"
 }

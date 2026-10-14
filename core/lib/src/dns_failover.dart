@@ -63,6 +63,10 @@ const dnsCheckNames = ['cp.cloudflare.com', 'www.gstatic.com', 'captive.apple.co
 /// How long a candidate with a confirmed dead verdict waits before it is asked again; the last step repeats.
 const dnsRecheckLadder = [Duration(seconds: 30), Duration(minutes: 1), Duration(minutes: 2), Duration(minutes: 5)];
 
+/// How long a dead server of the VPN side (either kind: dead on this exit node only, or dead everywhere) waits before it is
+/// asked again: a fixed interval, not the ladder (docs/failures.md → DNS на ноде).
+const dnsVpnRecheck = Duration(minutes: 20);
+
 /// How long an answer or a miss of a round counts for the Sentinel's checks of the same server (no second ask).
 const dnsFreshResult = Duration(seconds: 10);
 
@@ -101,6 +105,37 @@ class DnsSwitch {
       };
 }
 
+/// The (category, type) of a DNS verdict's event, written so that the catalog test (event_catalog_test.dart) can read it.
+(String, String) _dnsKind(String cat, String type) => (cat, type);
+
+/// What the VPN side's check needs to ask the same server through another exit node (docs/failures.md → DNS на ноде).
+class DnsNodes {
+  const DnsNodes({required this.spare, required this.exitKey, required this.exitAlive, required this.ask});
+
+  /// A node known to work that is not the exit node in use: `key` (its server key, `<subscription>::<node>`) and the
+  /// outbound `tag` a request is pinned to; null = none.
+  final ({String key, String tag})? Function() spare;
+
+  /// The server key of the exit node in use; null = not known.
+  final String? Function() exitKey;
+
+  /// Whether the exit node in use carries traffic at all (Auto's own test of it); null = not known.
+  final Future<bool?> Function() exitAlive;
+
+  /// ms until the candidate answered a query for [name] sent through the node pinned by [tag]; -1 = no answer; null = this
+  /// transport cannot be asked that way (a silence over the fallback transport proves nothing).
+  final Future<int?> Function(DnsCandidate c, String tag, String name, int timeoutMs) ask;
+}
+
+/// What the check of one VPN-side miss found out (shared by its checks and the event it writes).
+class _Finding {
+  /// `node`: it answered through another node (dead on this one only); `server`: silent through the other one too, or no
+  /// other node could be asked.
+  String kind = 'server';
+  bool nodeSilent = false;
+  String? via, exit;
+}
+
 /// Which servers a round asks: all of them, those without an open root (the timer's), the dead ones that are due,
 /// every dead one (the start).
 enum _Round { all, periodic, ladder, dead }
@@ -131,6 +166,16 @@ class _Node {
 
   /// The flag as the core wrote it last.
   bool on = true;
+
+  /// Its flag went off on a miss, before the Sentinel's verdict (the traffic moves at once); the flap guard's strike is
+  /// counted when the verdict comes.
+  bool missDropped = false;
+
+  /// The last check of its miss found it dead on this exit node only ([DnsVerdict.node]).
+  bool pairDead = false;
+
+  /// The last check of its miss found it silent through another node too: the server itself is dead ([dnsServerKey]).
+  bool serverDead = false;
 
   /// While its root is open: when it is asked next (ms since epoch) and the step of the ladder it is on.
   int? recheckAt;
@@ -180,6 +225,8 @@ class DnsFailover {
     this.fresh = dnsFreshResult,
     DnsVerdictBook? book,
     this.node,
+    this.nodes,
+    this.vpnRecheck = dnsVpnRecheck,
   })  : _clock = clock ?? _wallClock,
         book = book ?? DnsVerdictBook() {
     _sides = [
@@ -234,6 +281,13 @@ class DnsFailover {
 
   /// The exit node the VPN side is checked through now (its pool identity); null = not bound to a node.
   final String? Function()? node;
+
+  /// Asking the same server through another exit node ([DnsNodes]); null = the VPN side's misses are judged without it.
+  final DnsNodes? nodes;
+
+  /// How long a dead server of the VPN side waits before it is asked again ([dnsVpnRecheck]); the direct side has
+  /// [recheckLadder].
+  final Duration vpnRecheck;
 
   /// How long a result of a round counts for the Sentinel's checks of the same server ([dnsFreshResult]).
   final Duration fresh;
@@ -337,7 +391,7 @@ class DnsFailover {
     final now = _clock();
     for (final n in _all) {
       if (_down(n)) {
-        n.recheckAt ??= now + recheckLadder.first.inMilliseconds;
+        n.recheckAt ??= now + _recheckIn(n).inMilliseconds;
       } else if (n.recheckAt != null) {
         n.recheckAt = null;
         n.recheckStep = 0;
@@ -359,9 +413,12 @@ class DnsFailover {
       n.recheckStep = 0;
       return;
     }
-    if (advance && n.recheckStep + 1 < recheckLadder.length) n.recheckStep++;
-    n.recheckAt = now + recheckLadder[n.recheckStep].inMilliseconds;
+    if (advance && !n.vpn && n.recheckStep + 1 < recheckLadder.length) n.recheckStep++;
+    n.recheckAt = now + _recheckIn(n).inMilliseconds;
   }
+
+  // The VPN side's dead (either kind) are asked at a fixed interval, the direct side's on the ladder.
+  Duration _recheckIn(_Node n) => n.vpn ? vpnRecheck : recheckLadder[n.recheckStep];
 
   bool get _online => (pool == null || pool!.status == NetStatus.up) && sentinel.context.network.state == NetState.up;
 
@@ -486,10 +543,8 @@ class DnsFailover {
         _busyLadder = false;
       } else {
         _busy = false;
-        final retry = _sides.any((s) {
-          final a = s.effective;
-          return a != null && a.missSince != null && !_down(a);
-        });
+        // a miss not yet judged is asked again soon, wherever the traffic went meanwhile
+        final retry = _members.any((n) => n.missSince != null && !_down(n) && (n.on || n.missDropped));
         _schedule(retry ? settings.retryPause : settings.checkEvery);
       }
       _syncPark();
@@ -503,6 +558,8 @@ class DnsFailover {
         s.missSince = null;
         sentinel.recovered(dnsRootKey(s.id), reason: 'dns.answers');
         book.record(_key(s), dead: false, at: _clock());
+        final sk = dnsServerKey(s.c);
+        if (sk != null && book[sk]?.dead == true) book.record(sk, dead: false, at: _clock()); // answers: not dead everywhere
       } else if (s.w.health.ms == -1) {
         _suspect(s);
       }
@@ -553,6 +610,8 @@ class DnsFailover {
       s.okAt = now;
     }
     if (s.on) s.w.forgetIfStable(settings, now);
+    // a miss moves the traffic off the server at once, in parallel with the Sentinel's judging of it (_decide)
+    if (ms < 0) unawaited(_react());
   }
 
   // The names are tried in turn (backup names as with the node checks); [cancel] ends the wait at once.
@@ -569,10 +628,18 @@ class DnsFailover {
   bool _down(_Node s) {
     final key = _key(s), r = sentinel.roots.byKey(dnsRootKey(s.id)), v = book[key];
     if (r != null && r.parent == null && (v == null || v.dead || r.since.millisecondsSinceEpoch >= v.at)) {
-      if (v == null || !v.dead) book.record(key, dead: true, at: r.since.millisecondsSinceEpoch);
+      if (v == null || !v.dead) _recordDead(s, r.since.millisecondsSinceEpoch);
       return true;
     }
-    return v?.dead == true;
+    return dnsDeadOf(book, s.c, s.vpn ? node?.call() : null) == true;
+  }
+
+  // The verdict "dead" made by the last check of [s]: of this exit node only, or of the server itself (silent through another
+  // node too: its server-wide key, which every exit node sees).
+  void _recordDead(_Node s, int at) {
+    book.record(_key(s), dead: true, at: at, node: s.pairDead);
+    final sk = dnsServerKey(s.c);
+    if (sk != null && s.serverDead) book.record(sk, dead: true, at: at);
   }
 
   /// The other transports of the same provider on the same side.
@@ -581,30 +648,43 @@ class DnsFailover {
           if (!identical(o, s) && o.c != null && s.c != null && o.provider == s.provider && o.side == s.side) o,
       ];
 
+  // What a root made of this server's miss covers and the Sentinel's subject for it.
+  Map<String, dynamic> _subject(_Node s) => {'dns': s.id, 'path': s.path, if (s.vpn) 'route': topTag};
+
   void _suspect(_Node s, {int? from}) {
     final key = dnsRootKey(s.id);
-    if (sentinel.roots.byKey(key) != null) return;
-    if (book[_key(s)]?.dead == true) {
-      // Dead already (stored, a reconnect or a restart did not forget it): a miss re-checks it and the verdict stands, so
-      // there is nothing to judge and no new event. Only an answer changes it.
-      book.record(_key(s), dead: true, at: _clock());
+    if (sentinel.roots.byKey(key) != null) {
+      // Dead already and a check of it (the recheck, a ping) missed again: the verdict stands, nothing is judged again; the
+      // miss is counted on the root's event (repeat) and is a line of the raw log.
+      unawaited(sentinel.suspect(Suspicion(kind: 'dns.down', key: key, subject: _subject(s), evidence: {'server': s.id, 'path': s.path}, scope: Scope.of({'dns': s.id}), level: Level.dns)));
+      return;
+    }
+    if (dnsDeadOf(book, s.c, s.vpn ? node?.call() : null) == true) {
+      // Dead already (stored, a reconnect or a restart did not forget it; the server dead through every node too): a miss
+      // re-checks it and the verdict stands, so there is nothing to judge and no new event. Only an answer changes it.
+      book.record(_key(s), dead: true, at: _clock(), node: book[_key(s)]?.node ?? false);
       return;
     }
     final since = from ?? s.missSince ?? _clock();
     final others = _all.where((o) => !identical(o, s) && o.vpn == s.vpn).toList();
     final via = s.vpn ? topTag : null;
+    final nodes = s.vpn ? this.nodes : null;
+    final found = _Finding();
+    s.pairDead = s.serverDead = false;
     s.suspecting = true;
     unawaited(sentinel
         .suspect(Suspicion(
           kind: 'dns.down',
           key: key,
-          subject: {'dns': s.id, 'path': s.path, if (s.vpn) 'route': topTag},
+          subject: _subject(s),
           scope: Scope.of({'dns': s.id}),
           level: Level.dns,
           evidence: {'server': s.id, 'path': s.path, 'since': since},
           window: window,
           firstSeen: DateTime.fromMillisecondsSinceEpoch(since),
-          why: Why('dns.down', {'server': s.id, 'path': s.path}),
+          // the reading of the evidence when the checks found no cause: the server is dead; unless the exit node itself
+          // carries nothing (then it is not the server's doing, and nobody is blamed)
+          whyLate: (e) => found.nodeSilent ? null : Why('dns.down', {'server': s.id, 'path': s.path}),
           checks: [
             // it answers now: a blip. A miss of the round just made is that ask: the server is not asked a second time.
             Check.recovery('dns.answers', (cancel) async {
@@ -614,10 +694,41 @@ class DnsFailover {
               final ms = await _ask(s, cancel);
               return CheckResult('dns.answers', ms >= 0 ? Outcome.pass : Outcome.fail, {'server': s.id});
             }, timeout: const Duration(seconds: 20), level: Level.dns, via: via, resolver: s.id),
+            // the VPN side: the exit node carries traffic (else it is not the server's doing) and the same server is asked
+            // through another node that works: it answers there = dead on this node only; silent there too = dead itself
+            if (nodes != null && s.c != null)
+              Check.diagnostic('dns.node', (cancel) async {
+                if (await nodes.exitAlive() == false) {
+                  found.nodeSilent = true;
+                  return const CheckResult('dns.node', Outcome.inconclusive, {'reason': 'nodeSilent'});
+                }
+                final spare = nodes.spare();
+                if (spare == null) return const CheckResult('dns.node', Outcome.inconclusive, {'reason': 'noSpareNode'});
+                if (cancel.cancelled) return const CheckResult('dns.node', Outcome.inconclusive, {'reason': 'aborted'});
+                var unsure = false;
+                final q = withCheckers((name) async {
+                  final r = await nodes.ask(s.c!, spare.tag, name, settings.timeoutMs);
+                  if (r == null) unsure = true;
+                  return r ?? -1;
+                }, dnsCheckNames.first, dnsCheckNames);
+                final ms = await Future.any([q, cancel.done.then((_) => -1)]);
+                if (cancel.cancelled) return const CheckResult('dns.node', Outcome.inconclusive, {'reason': 'aborted'});
+                found.exit = nodes.exitKey();
+                found.via = spare.key;
+                if (ms >= 0) {
+                  found.kind = 'node';
+                  s.pairDead = true;
+                  return CheckResult('dns.node', Outcome.fail, {'server': s.id, 'node': found.exit, 'via': spare.key, 'ms': ms});
+                }
+                if (unsure) return CheckResult('dns.node', Outcome.inconclusive, {'reason': 'cannotAsk', 'via': spare.key});
+                s.serverDead = true;
+                return CheckResult('dns.node', Outcome.pass, {'server': s.id, 'node': found.exit, 'silentVia': spare.key});
+              }, timeout: const Duration(seconds: 30), level: Level.dns, via: via, resolver: s.id),
             // another server of the same path answers: it is this server, not the path. The ones known dead are not
             // asked (their verdict stands), nor the ones a round has just asked (their result stands).
             if (others.isNotEmpty)
               Check.diagnostic('dns.path', (cancel) async {
+                if (found.nodeSilent) return const CheckResult('dns.path', Outcome.inconclusive, {'reason': 'nodeSilent'});
                 final answering = <String>[], dead = <String>[], ask = <_Node>[];
                 for (final o in others) {
                   if (_down(o)) {
@@ -638,7 +749,8 @@ class DnsFailover {
               }, timeout: const Duration(seconds: 20), level: Level.dns, via: via),
           ],
           // The event is per provider and side: a transport that is down while another transport of its provider
-          // answers is a line in the log, not an entry in the journal (the provider works).
+          // answers is a line in the log, not an entry in the journal (the provider works). Dead on this exit node only:
+          // `dns/failedOnNode`; dead itself: `dns/failed`.
           event: SuspicionEvent('dns', 'failed',
               level: 'warn',
               kindFor: (kind, e) {
@@ -648,7 +760,7 @@ class DnsFailover {
                   _note('info', 'dns: ${s.id} (${s.provider}, ${s.side}) does not answer, its provider still does through ${alive.map((o) => o.id).join(', ')}: not an event');
                   return null;
                 }
-                return ('dns', 'failed');
+                return found.kind == 'node' ? _dnsKind('dns', 'failedOnNode') : _dnsKind('dns', 'failed');
               },
               dataFor: (kind, e) => {
                     'server': e['server'],
@@ -657,10 +769,17 @@ class DnsFailover {
                     'provider': s.provider,
                     'side': s.side,
                     'servers': [s.id, for (final o in _siblings(s)) o.id],
+                    if (found.kind == 'node') ...{'node': found.exit, 'via': found.via},
                   },
-              note: (kind, e) => 'DNS server ${e['server']} (${e['path'] == 'proxy' ? 'via VPN' : 'direct'}) does not answer'),
+              note: (kind, e) => found.kind == 'node'
+                  ? 'DNS server ${e['server']} (via VPN) does not answer on the exit node ${found.exit}, it answers through ${found.via}'
+                  : 'DNS server ${e['server']} (${e['path'] == 'proxy' ? 'via VPN' : 'direct'}) does not answer'),
         ))
-        .whenComplete(() => s.suspecting = false));
+        .then((v) {
+      if (found.nodeSilent && v.kind != VerdictKind.confirmed) {
+        _note('info', 'dns: ${s.id} (${s.side}) does not answer and the exit node ${node?.call()} carries no traffic either: not the server\'s doing, no verdict');
+      }
+    }).whenComplete(() => s.suspecting = false));
   }
 
   // The Sentinel's context moved (a root opened or closed, the network, the core), or a round ended.
@@ -687,6 +806,9 @@ class DnsFailover {
   /// The member of [s] the DNS rules answer with: the first whose flag is on, the top one when none is.
   _Node? _pick(_Side s) => s.members.where((n) => n.on).firstOrNull ?? s.members.firstOrNull;
 
+  // The last probe of it missed and no open root (the network, the core, the route) explains the miss.
+  bool _missed(_Node n) => n.missAt != null && sentinel.roots.covering(_subject(n), except: dnsRootKey(n.id)) == null;
+
   bool _mayReturn(_Node n, int now) => n.restored ? n.w.health.answered : n.w.mayReturn(settings, now);
 
   Future<void> _decide() async {
@@ -704,12 +826,19 @@ class DnsFailover {
       final now = _clock();
       for (final n in _flagged.toList()) {
         if (_stopped) return;
-        if (n.on && _down(n)) {
-          if (await _flag(n, false, 'verdict')) {
+        final dead = _down(n);
+        if (n.on && (dead || _missed(n))) {
+          // a miss moves the traffic at once, the Sentinel's judging of it goes on in parallel (no strike yet: it may be a
+          // blip); a verdict is the flap guard's strike
+          if (await _flag(n, false, dead ? 'verdict' : 'miss', strike: dead)) {
+            n.missDropped = !dead;
             wrote.add(n.side);
             dropped.add(n.side);
           }
-        } else if (!n.on && !_down(n) && _mayReturn(n, now)) {
+        } else if (!n.on && n.missDropped && dead) {
+          n.missDropped = false;
+          n.w.struck();
+        } else if (!n.on && !dead && _mayReturn(n, now)) {
           if (await _flag(n, true, 'back')) wrote.add(n.side);
         }
       }
@@ -754,6 +883,7 @@ class DnsFailover {
     }
     n.on = on;
     n.restored = false;
+    if (on) n.missDropped = false;
     if (on) {
       n.w.usedSince = _clock();
     } else if (strike) {
@@ -836,11 +966,12 @@ class DnsFailover {
       };
 
   Map<String, dynamic> _json(_Node s) {
-    final dead = _down(s), known = book[_key(s)] != null;
+    final dead = _down(s), known = dnsDeadOf(book, s.c, s.vpn ? node?.call() : null) != null;
     return {
       'id': s.id,
       'ok': dead ? false : known ? true : (s.w.health.ms == -2 ? null : s.w.health.answered),
       'rechecking': s.testing != null || s.suspecting,
+      if (dead && book[_key(s)]?.node == true) 'deadOn': 'node', // dead on this exit node only; the server answers through another
       'ms': s.w.health.ms,
       'provider': s.provider,
       'side': s.side,

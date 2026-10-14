@@ -25,6 +25,21 @@ String dnsVerdictKey(DnsCandidate? c, String? node) {
   return '${c.addr}|${c.kind}|${c.side}${c.vpn ? '|${node ?? ''}' : ''}';
 }
 
+/// The key of the VPN-side verdict about the SERVER itself (dead through every node that was asked, docs/failures.md → DNS на
+/// ноде): [c]'s address and transport, no node. Only the VPN side has one; null for a direct candidate and the OS resolver.
+String? dnsServerKey(DnsCandidate? c) => c != null && c.vpn ? '${c.addr}|${c.kind}|${c.side}|*' : null;
+
+/// Whether [c] is dead as the stored verdicts say, through the exit [node] (VPN side): its own key's verdict, else the
+/// server-wide one; when the node's says "answers", a newer server-wide "dead" outweighs it. True = dead, false = answers,
+/// null = never checked.
+bool? dnsDeadOf(DnsVerdictBook book, DnsCandidate? c, String? node) {
+  final v = book[dnsVerdictKey(c, node)];
+  final sk = dnsServerKey(c), w = sk == null ? null : book[sk];
+  if (v == null) return w?.dead;
+  if (v.dead || w == null) return v.dead;
+  return w.dead && w.at > v.at;
+}
+
 /// The exit node the VPN side is bound to at a connect, before Auto runs: the main group's node the plan starts on
 /// (the pick of a priority group, else the first), as its pool identity (the same as Auto's `exitNode`). Null = none.
 String? dnsPlanNode(Map<String, dynamic>? plan) {
@@ -42,9 +57,14 @@ String? dnsPlanNode(Map<String, dynamic>? plan) {
 
 /// One verdict: [dead] or answering, and when the check that made it ended (ms since epoch).
 class DnsVerdict {
-  const DnsVerdict(this.dead, this.at);
+  const DnsVerdict(this.dead, this.at, {this.node = false});
   final bool dead;
   final int at;
+
+  /// A dead verdict of the VPN side that holds for the exit node only: the same server answered through another node
+  /// (docs/failures.md → DNS на ноде). False = the server itself is dead (it did not answer through another node either,
+  /// or there was no other node to ask).
+  final bool node;
 }
 
 class DnsVerdictBook {
@@ -71,11 +91,12 @@ class DnsVerdictBook {
   bool? deadOf(String key) => _v[key]?.dead;
 
   /// A check of [key] ended: the object is [dead] or answers. Returns whether the verdict itself changed.
-  bool record(String key, {required bool dead, required int at}) {
+  bool record(String key, {required bool dead, required int at, bool node = false}) {
     final had = _v[key];
-    _v[key] = DnsVerdict(dead, at);
+    node = dead && node;
+    _v[key] = DnsVerdict(dead, at, node: node);
     final flipped = had == null || had.dead != dead;
-    if (flipped || at - had.at >= refresh.inMilliseconds) onChange?.call();
+    if (flipped || had.node != node || at - had.at >= refresh.inMilliseconds) onChange?.call();
     return flipped;
   }
 
@@ -101,15 +122,15 @@ class DnsVerdictBook {
       if (e is! Map || e['key'] is! String || e['dead'] is! bool || e['at'] is! num) continue;
       final at = (e['at'] as num).toInt();
       if (at < cut) continue;
-      _v[e['key'] as String] = DnsVerdict(e['dead'] as bool, at);
+      _v[e['key'] as String] = DnsVerdict(e['dead'] as bool, at, node: e['dead'] == true && e['node'] == true);
       taken++;
     }
     return taken;
   }
 
-  /// `[{key, dead, at}]`.
+  /// `[{key, dead, at, node?}]`.
   List<Map<String, dynamic>> toJson() => [
-        for (final e in _v.entries) {'key': e.key, 'dead': e.value.dead, 'at': e.value.at},
+        for (final e in _v.entries) {'key': e.key, 'dead': e.value.dead, 'at': e.value.at, if (e.value.node) 'node': true},
       ];
 }
 
@@ -121,14 +142,14 @@ class DnsVerdictBook {
 Map<String, bool> dnsStartFlags(Map<String, List<DnsCandidate>> sides, DnsVerdictBook book, {String? node, List<DnsCandidate> others = const []}) {
   final out = <String, bool>{};
   for (final l in sides.values) {
-    final best = l.indexWhere((c) => book.deadOf(dnsVerdictKey(c, node)) == false);
+    final best = l.indexWhere((c) => dnsDeadOf(book, c, node) == false);
     for (var i = 0; i < l.length; i++) {
-      final v = book.deadOf(dnsVerdictKey(l[i], node));
+      final v = dnsDeadOf(book, l[i], node);
       out[l[i].id] = v == true ? false : !(v == null && best > i);
     }
   }
   for (final c in others) {
-    out.putIfAbsent(c.id, () => book.deadOf(dnsVerdictKey(c, node)) != true);
+    out.putIfAbsent(c.id, () => dnsDeadOf(book, c, node) != true);
   }
   return out;
 }
