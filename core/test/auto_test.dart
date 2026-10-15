@@ -291,6 +291,20 @@ void main() {
     expect(auto.index, 0);
   });
 
+  test('refresh() on an adopted sing-box (reconcileStart off): what runs is the truth, a heal of the previous core stays', () async {
+    final p = plan([unit('A', ['s::a1', 's::a2', 's::a3'], chosen: 's::a2'), unit('B', ['s::b1'])], current: 0);
+    final (_, fake) = setup(p, {'s::a1': 40, 's::a2': 80, 's::a3': 60, 's::b1': 30});
+    final notes = <String>[];
+    final a = AutoService(fake, p, delay: fake.delayTest, pool: everyRound(), note: notes.add)..reconcileStart = false;
+    fake.groups['route0']!.now = 'route0/s::a3'; // the previous core healed the group (the record still says a2)
+    fake.groups['proxy']!.now = 'route1'; // and moved the route
+    expect(await a.refresh(), isTrue);
+    expect([fake.groups['route0']!.now, fake.groups['proxy']!.now], ['route0/s::a3', 'route1'], reason: 'nothing put back');
+    expect(notes.where((n) => n.contains('restored')), isEmpty);
+    expect(a.index, 1, reason: 'the route in use is the running one');
+    expect(a.groupServers()['route0'], 's::a3');
+  });
+
   test('refresh(): false before sing-box first answers (selected empty)', () async {
     final auto = AutoService(_Dead(), plan([unit('A', ['s::a'])]), delay: (tag, url, t) async => -1);
     expect(await auto.refresh(), isFalse);

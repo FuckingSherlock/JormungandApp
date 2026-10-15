@@ -201,8 +201,63 @@ class FallbackService {
 
   void start() {
     _started = true;
+    // sing-box's cache_file may have restored an older pick over a group's default: the server chosen for this start wins
+    if (reconcileStart) {
+      _groupsSub = api.groupsChanged.listen((_) => unawaited(_reconcile()));
+      unawaited(_reconcile());
+    }
     _schedule(settings.firstCheck);
   }
+
+  /// Whether the first look at the groups puts back what sing-box's cache restored (a connect); false for a taken-over
+  /// sing-box, whose groups stand where the core before this one left them.
+  bool reconcileStart = true;
+  StreamSubscription<void>? _groupsSub;
+  bool _startChecked = false;
+
+  /// The groups the core itself selected on since this start (marked before the `select` goes): never put back.
+  final _coreSelected = <String>{};
+
+  Future<bool> _select(String group, String outbound) async {
+    final fresh = _coreSelected.add(group);
+    final ok = await api.select(group, outbound);
+    if (!ok && fresh) _coreSelected.remove(group);
+    return ok;
+  }
+
+  /// A server chosen for the group [groupTag] after the start (the connect's check that ended late, service.dart):
+  /// false when the group is not here, was moved by the core already (that is the newer pick) or sing-box refused.
+  Future<bool> select(String groupTag, String key) async {
+    if (_stopped || _coreSelected.contains(groupTag)) return false;
+    final ok = await _select(groupTag, '$groupTag/$key');
+    if (ok) note?.call('rules: $groupTag: server $key (the check at the connect)');
+    return ok;
+  }
+
+  Future<void> _reconcile() async {
+    if (_startChecked || _stopped) return;
+    final by = {...api.selected};
+    if (by.isEmpty) return;
+    _startChecked = true;
+    for (final t in _targets) {
+      if (t.isMain) continue;
+      for (final g in [?t.entry, t.main]) {
+        final cur = by[g.tag];
+        if (cur == null || cur == g.initial || _coreSelected.contains(g.tag)) continue;
+        if (_stopped) return;
+        if (await _select(g.tag, g.initial)) note?.call('rules: ${g.tag} was restored on $cur by sing-box: put on ${g.initial}, the server chosen for this start');
+      }
+    }
+  }
+
+  /// The server every group of the rule targets is on now (group tag → key): what a restart with the same plan starts
+  /// them on, so that a server chosen by a check is not forgotten (service.dart `_continuationPlan`).
+  Map<String, String> groupServers() => {
+        for (final t in _targets)
+          if (!t.isMain)
+            for (final g in [?t.entry, t.main])
+              if (g.keyOf(api.selected[g.tag] ?? g.initial) case final k? when g.keys.contains(k)) g.tag: k,
+      };
 
   /// The device moved to another network: a round runs now, out of turn, and in it the Fastest groups look for a better
   /// server whatever the time since the last look ([_improve]), like Auto's.
@@ -221,6 +276,7 @@ class FallbackService {
     _stopped = true;
     memory.changed(); // what it learned is written (the next service goes on from it)
     _timer?.cancel();
+    _groupsSub?.cancel();
     _stall.stop();
     _changes.close();
   }
@@ -415,7 +471,7 @@ class FallbackService {
   }
 
   Future<bool> _move(_Target t, _Group g, String from, String to) async {
-    if (_stopped || !await api.select(g.tag, g.member(to))) return false;
+    if (_stopped || !await _select(g.tag, g.member(to))) return false;
     note?.call('rules: ${t.id}: server $from → $to (fastest)');
     return true;
   }

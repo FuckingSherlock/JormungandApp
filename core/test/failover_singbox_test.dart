@@ -146,6 +146,72 @@ Future<void> _untilSelected(SingBoxApi api) async {
   expect(api.selected, isNotEmpty, reason: 'sing-box never told its groups');
 }
 
+/// One sing-box "server" with a shadowsocks inbound per port.
+Map<String, dynamic> _ssServers(List<int> ports) => {
+      ..._ssServer(ports.first),
+      'inbounds': [
+        for (final port in ports) {'type': 'shadowsocks', 'listen': '127.0.0.1', 'listen_port': port, 'method': 'aes-128-gcm', 'password': 'loopback'},
+      ],
+    };
+
+/// The client sing-box that keeps the configs it was started with.
+class _Spy extends SingBoxProcess {
+  _Spy(super.binary, super.workDir);
+  final configs = <Map<String, dynamic>>[];
+
+  @override
+  Future<void> start(Map<String, dynamic> config) {
+    configs.add(config);
+    return super.start(config);
+  }
+
+  /// The server the last config starts the selector [tag] on.
+  String? defaultOf(String tag) {
+    for (final o in (configs.last['outbounds'] as List).cast<Map>()) {
+      if (o['tag'] == tag) return o['default'] as String?;
+    }
+    return null;
+  }
+}
+
+/// A runner over a [SingBoxProcess] that a second core can take over (Android's way): [leave] keeps the process
+/// alive when this core stops; [attached] false = adopt() has not found it yet.
+class _Handover implements AdoptableRunner {
+  _Handover(this.inner, this.shared, {required this.attached});
+  final SingBoxProcess inner;
+  final Map<String, dynamic> shared; // the record
+  bool attached, leave = false;
+
+  @override
+  bool get running => attached && inner.running;
+  @override
+  int? get pid => inner.pid;
+  @override
+  SingBoxApi? get api => attached ? inner.api : null;
+  @override
+  void Function(String line)? get onLog => inner.onLog;
+  @override
+  set onLog(void Function(String line)? f) => inner.onLog = f;
+  @override
+  void Function(int code)? get onExit => inner.onExit;
+  @override
+  set onExit(void Function(int code)? f) => inner.onExit = f;
+  @override
+  void note(String line) => inner.note(line);
+  @override
+  Future<void> start(Map<String, dynamic> config) => inner.start(config);
+  @override
+  Future<void> stop() => leave ? Future<void>.value() : inner.stop();
+  @override
+  Future<void> keep(Map<String, dynamic> record) async => shared['record'] = record;
+  @override
+  Future<Map<String, dynamic>?> adopt() async {
+    if (!inner.running) return null;
+    attached = true;
+    return shared['record'] as Map<String, dynamic>?;
+  }
+}
+
 void main() {
   late Directory tmp;
   setUp(() async => tmp = await Directory.systemTemp.createTemp('jorm-failover'));
@@ -600,4 +666,241 @@ void main() {
       }
     }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
   }
+
+  Map<String, dynamic> ss(int port) => {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': port, 'method': 'aes-128-gcm', 'password': 'loopback'};
+  List<String> lines(Daemon d) => [for (final l in d.service.log(since: null)['lines'] as List) '${(l as Map)['msg']}'];
+
+  test('connect: a chain whose first exit is dead — the exit is chosen through the chosen entry, traffic goes through the live one at once', () async {
+    final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    target.listen((r) => r.response
+      ..write('hello')
+      ..close());
+    final entryPort = await freePort(), exitPort = await freePort(), deadPort = await freePort(), mixed = await freePort();
+    final entry = SingBoxProcess(_bin, p.join(tmp.path, 'entry')), exit = SingBoxProcess(_bin, p.join(tmp.path, 'exit'));
+    final daemon = Daemon(singBox: _bin, dataDir: p.join(tmp.path, 'data'), uiFile: p.join(tmp.path, 'none.html'), exitCheck: (_) async => {'ip': '127.0.0.1'}, sysProxy: _FakeSysProxy());
+    try {
+      await entry.start(_ssServer(entryPort));
+      await exit.start(_ssServer(exitPort));
+      final res = await daemon.service.connect({
+        'plan': {
+          'routes': [
+            {
+              'id': 'A',
+              'kind': 'chain',
+              'entry': _group([ss(entryPort)], 'e'),
+              'main': _group([ss(deadPort), ss(exitPort)], 'x'), // priority; the app's hint: the dead one
+            },
+          ],
+          'mixedPort': mixed,
+          'global': true,
+          'urlTest': {'url': 'http://127.0.0.1:${target.port}/'},
+          'auto': {'checkers': <String>[], 'flapGuard': false},
+        },
+        'systemProxy': false,
+      });
+      expect(res['connected'], isTrue, reason: '$res');
+      expect(await _getOk(mixed, 'target.test', target.port), 'hello', reason: 'through the live exit right after connect; ${lines(daemon).where((l) => l.contains('connect:')).join(' | ')}');
+      expect(lines(daemon).where((l) => l.contains('connect: route0 priority')), isNotEmpty, reason: 'the exit group was checked');
+    } finally {
+      await daemon.shutdown();
+      await entry.stop();
+      await exit.stop();
+      await target.close(force: true);
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+
+  // grace: how long the connect waits for the rule target after the route's own pick (null = the default); zero = the
+  // target's pick is late and goes by `select` once sing-box runs
+  for (final grace in [null, Duration.zero]) {
+    test('connect: a rule target whose first server is dead ${grace == null ? 'is decided within the grace: the config starts it on the live one' : 'is picked late: `select` after the start, kept by the first look at the groups'}', () async {
+      final dns = await _FakeDns.start();
+      final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      target.listen((r) => r.response
+        ..write('hello')
+        ..close());
+      final ssPort = await freePort(), deadPort = await freePort(), mixed = await freePort();
+      final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
+      final daemon = Daemon(singBox: _bin, dataDir: p.join(tmp.path, 'data'), uiFile: p.join(tmp.path, 'none.html'), exitCheck: (_) async => {'ip': '127.0.0.1'}, sysProxy: _FakeSysProxy());
+      if (grace != null) daemon.service.targetGrace = grace;
+      try {
+        await server.start(_ssServer(ssPort));
+        final res = await daemon.service.connect({
+          'plan': {
+            'routes': [
+              {'id': 'A', 'kind': 'unit', 'main': _group([{'type': 'direct'}], 'a')},
+            ],
+            'mixedPort': mixed,
+            'urlTest': {'url': 'http://127.0.0.1:${target.port}/'},
+            'auto': {'checkers': <String>[], 'flapGuard': false},
+            'routing': {
+              'dns': {
+                'servers': [
+                  {'id': 'a', 'addr': 'udp://127.0.0.1:${dns.port}', 'via': 'direct', 'on': true},
+                ],
+              },
+              'targets': {
+                'src:x': {'kind': 'unit', 'main': _group([ss(deadPort), ss(ssPort)], 'x')}, // the app's hint: the dead one
+              },
+              'rules': [_rule('r1', {'domain_suffix': ['target.test']}, target: 'src:x', fallback: 'block')],
+              'quick': {'lan': false, 'final': 'proxy'},
+            },
+          },
+          'systemProxy': false,
+        });
+        expect(res['connected'], isTrue, reason: '$res');
+        final api = daemon.service.runner.api!;
+        String? body;
+        for (var i = 0; i < 100 && body == null; i++) {
+          body = await _get(mixed, 'target.test', target.port);
+          if (body == null) await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final log = lines(daemon);
+        expect(body, 'hello', reason: log.where((l) => l.contains('connect:')).join(' | '));
+        if (grace == null) {
+          expect(await _getOk(mixed, 'target.test', target.port), 'hello', reason: 'at once, no waiting for a later move');
+          expect(log.where((l) => l.contains('(late:')), isEmpty);
+        } else {
+          expect(log.where((l) => l.contains('connect: src:x') && l.contains('(late: applied after the start)')), isNotEmpty, reason: log.join('\n'));
+        }
+        // the first look at the groups (and later rounds) leave the pick alone
+        await Future<void>.delayed(const Duration(seconds: 2));
+        expect(api.selected['src:x'], 'src:x/x::1');
+        expect(await _getOk(mixed, 'target.test', target.port), 'hello');
+      } finally {
+        await daemon.shutdown();
+        await server.stop();
+        await target.close(force: true);
+        dns.close();
+      }
+    }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+  }
+
+  List<String> svcLines(CoreService s) => [for (final l in s.log(since: null)['lines'] as List) '${(l as Map)['msg']}'];
+
+  test('a plan change over a running tunnel: the chain exit and the rule target stay on the servers the core moved them to, a target with only the app\'s hint is checked', () async {
+    final dns = await _FakeDns.start();
+    final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    target.listen((r) => r.response
+      ..write('hello')
+      ..close());
+    final pe = await freePort(), pa = await freePort(), pb = await freePort(), pc = await freePort(), pd = await freePort();
+    final py1 = await freePort(), py2 = await freePort(), mixed = await freePort();
+    final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
+    final spy = _Spy(_bin, p.join(tmp.path, 'client'));
+    final svc = CoreService(singBox: _bin, dataDir: p.join(tmp.path, 'data'), runner: spy, sysProxy: _FakeSysProxy(), exitCheck: (_) async => {'ip': '127.0.0.1'});
+    Map<String, dynamic> body({bool withY = false}) => {
+          'plan': {
+            'routes': [
+              {'id': 'A', 'kind': 'chain', 'entry': _group([ss(pe)], 'e'), 'main': _group([ss(pa), ss(pb)], 'x')}, // the app's hint: the first exit
+            ],
+            'mixedPort': mixed,
+            'urlTest': {'url': 'http://127.0.0.1:${target.port}/'},
+            'auto': {'checkers': <String>[], 'flapGuard': false},
+            'routing': {
+              'dns': {
+                'servers': [
+                  {'id': 'a', 'addr': 'udp://127.0.0.1:${dns.port}', 'via': 'direct', 'on': true},
+                ],
+              },
+              'targets': {
+                'src:x': {'kind': 'unit', 'main': _group([ss(pc), ss(pd)], 'u')},
+                if (withY) 'src:y': {'kind': 'unit', 'main': _group([ss(py1), ss(py2)], 'v')},
+              },
+              'rules': [
+                _rule('r1', {'domain_suffix': ['target.test']}, target: 'src:x', fallback: 'block'),
+                if (withY) _rule('r2', {'domain_suffix': ['y.test']}, target: 'src:y', fallback: 'block'),
+              ],
+              'quick': {'lan': false, 'final': 'proxy'},
+            },
+          },
+          'systemProxy': false,
+        };
+    try {
+      await server.start(_ssServers([pe, pb, pd, py1, py2])); // pa, pc: nothing listens (dead)
+      await svc.init();
+      var res = await svc.connect(body());
+      expect(res['connected'], isTrue, reason: '$res');
+      final api = spy.api!;
+      await _untilSelected(api);
+      // the connect's checks put the exit and the target on the live servers (the app's hint is the dead first one)
+      for (var i = 0; i < 100 && (api.selected['route0'] != 'route0/x::1' || api.selected['src:x'] != 'src:x/u::1'); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect([api.selected['route0'], api.selected['src:x']], ['route0/x::1', 'src:x/u::1']);
+      await Future<void>.delayed(const Duration(seconds: 2));
+      final checked = svcLines(svc).where((l) => l.startsWith('connect: route0 ') || l.startsWith('connect: src:x ')).length;
+      expect(checked, greaterThan(0), reason: 'the first connect checked them');
+
+      res = await svc.connect(body(withY: true)); // the plan change: a continuation, the app's chosen is x::0 / u::0 again
+      expect(res['connected'], isTrue, reason: '$res');
+      expect(spy.configs, hasLength(2));
+      expect(spy.defaultOf('route0'), 'route0/x::1', reason: 'the exit the core is on');
+      expect(spy.defaultOf('src:x'), 'src:x/u::1', reason: 'the target the core is on');
+      expect(spy.defaultOf('route0-entry'), 'route0-entry/e::0');
+      // the new target has no server of the core's: the app's hint is checked
+      for (var i = 0; i < 100 && !svcLines(svc).any((l) => l.startsWith('connect: src:y ')); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      final log = svcLines(svc);
+      expect(log.where((l) => l.startsWith('connect: src:y ')), isNotEmpty, reason: log.where((l) => l.contains('connect:')).join('\n'));
+      expect(log.where((l) => l.startsWith('connect: route0 ') || l.startsWith('connect: src:x ')), hasLength(checked), reason: 'no new check of what the core holds');
+    } finally {
+      await svc.dispose();
+      await server.stop();
+      await target.close(force: true);
+      dns.close();
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+
+  test('adopt: the groups and the route a taken-over sing-box stands on are not put back to the recorded plan', () async {
+    final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    target.listen((r) => r.response.close());
+    final p1 = await freePort(), p2 = await freePort(), p3 = await freePort(), mixed = await freePort();
+    final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
+    final inner = SingBoxProcess(_bin, p.join(tmp.path, 'client'));
+    final shared = <String, dynamic>{};
+    final first = _Handover(inner, shared, attached: true), second = _Handover(inner, shared, attached: false);
+    CoreService make(BoxRunner r) => CoreService(singBox: _bin, dataDir: p.join(tmp.path, 'data'), runner: r, sysProxy: _FakeSysProxy(), exitCheck: (_) async => {'ip': '127.0.0.1'});
+    final a = make(first), b = make(second);
+    try {
+      await server.start(_ssServers([p1, p2, p3]));
+      await a.init();
+      final res = await a.connect({
+        'plan': {
+          'routes': [
+            {'id': 'A', 'kind': 'unit', 'main': _group([ss(p1), ss(p2)], 'a')},
+            {'id': 'B', 'kind': 'unit', 'main': _group([ss(p3)], 'b')},
+          ],
+          'mixedPort': mixed,
+          'urlTest': {'url': 'http://127.0.0.1:${target.port}/'},
+          'auto': {'checkers': <String>[], 'flapGuard': false},
+        },
+        'systemProxy': false,
+      });
+      expect(res['connected'], isTrue, reason: '$res');
+      expect(shared['record'], isNotNull);
+      final api = inner.api!;
+      await _untilSelected(api);
+      first.leave = true; // the app's engine goes, the tunnel stays
+      await a.dispose();
+      expect(inner.running, isTrue);
+      // what the core before this one left behind (a heal): the second server of the group, the second route
+      expect(await api.select('route0', 'route0/a::1'), isTrue);
+      expect(await api.select('proxy', 'route1'), isTrue);
+      for (var i = 0; i < 50 && (api.selected['route0'] != 'route0/a::1' || api.selected['proxy'] != 'route1'); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect([api.selected['route0'], api.selected['proxy']], ['route0/a::1', 'route1']);
+
+      final adopted = await b.adopt({});
+      expect(adopted['adopted'], isTrue, reason: '$adopted');
+      await Future<void>.delayed(const Duration(seconds: 3)); // the first look at the groups, and rounds after it
+      expect([api.selected['route0'], api.selected['proxy']], ['route0/a::1', 'route1'], reason: svcLines(b).where((l) => l.contains('auto:')).join('\n'));
+    } finally {
+      await b.dispose();
+      await inner.stop();
+      await server.stop();
+      await target.close(force: true);
+    }
+  }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
 }

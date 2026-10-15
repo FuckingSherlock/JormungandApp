@@ -381,16 +381,18 @@ class CoreService implements CoreApi {
   Map<String, dynamic> _continuationPlan(Map<String, dynamic> plan) {
     final a = _auto;
     if (a == null) return plan;
-    return planWithChosen({...plan, 'current': a.index}, a.groupServers());
+    return planWithChosen({...plan, 'current': a.index}, _coreServers());
   }
+
+  /// The server every group (the routes' and the rule targets') is on now, as the core's services know it.
+  Map<String, String> _coreServers() => {...?_auto?.groupServers(), ...?_fallback?.groupServers()};
 
   /// A plan sent by the app while sing-box runs: each group of it that is not pinned and has the server Auto has it on now
   /// among its members starts on that server (`chosen`), so a plan change does not check the groups again and move the
   /// node (and the exit IP) the traffic is on. A pinned group follows its pin; a group without a valid server of the core's
   /// keeps the plan's own `chosen` and is checked ([connectPicks]). Call before [_stopAuto].
   Map<String, dynamic> _keepCoreChoice(Map<String, dynamic> plan) {
-    final a = _auto;
-    return a == null ? plan : planKeepingServers(plan, a.groupServers());
+    return _auto == null ? plan : planKeepingServers(plan, _coreServers());
   }
 
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
@@ -1254,7 +1256,7 @@ class CoreService implements CoreApi {
 
   /// Auto in the core while connected (auto.dart). A move to another route or server
   /// changes where traffic leaves: the exit is checked again.
-  void _startAuto(Map<String, dynamic> plan) {
+  void _startAuto(Map<String, dynamic> plan, {bool adopted = false}) {
     _stopAuto(park: true); // a user connect has dropped already (connect)
     // what a sing-box that just started does is counted from its first line, with or without the API
     failures.start();
@@ -1336,8 +1338,9 @@ class CoreService implements CoreApi {
         routesRestored(n);
       }
     });
+    auto.reconcileStart = !adopted; // a taken-over sing-box stands where the core before this one left it
     auto.start();
-    _startFallback(api, auto);
+    _startFallback(api, auto, adopted: adopted);
     _startDnsFailover(api, auto);
     _changed();
   }
@@ -1482,7 +1485,7 @@ class CoreService implements CoreApi {
 
   /// "If unavailable" live: a target that stops answering has its rules' selectors flipped to
   /// the fallback, and back (fallback.dart). Not while Auto doubts the network.
-  void _startFallback(SingBoxApi api, AutoService auto) {
+  void _startFallback(SingBoxApi api, AutoService auto, {bool adopted = false}) {
     if (_fallbacks.isEmpty) return;
     final fb = _fallback = FallbackService(api, _fallbacks,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t, unreachedThrows: true),
@@ -1492,7 +1495,8 @@ class CoreService implements CoreApi {
         memory: autoMemory,
         onDown: serverDown,
         setFlag: (f, on) => setFallbackFlag(f, on, reason: on ? 'on Direct' : 'back', log: logBook.note),
-        note: runner.note);
+        note: runner.note)
+      ..reconcileStart = !adopted; // a taken-over sing-box's groups stand where the core before this one left them
     fb.changes.listen((c) {
       // the journal names the first rule (else the first app) and counts the rest
       final total = c.rules.length + c.apps.length;
@@ -2332,19 +2336,20 @@ class CoreService implements CoreApi {
   /// is missing resolves in the background for the next test (a test must not wait for a lookup).
   /// The pins also hold the address of the tester's resolver server ([_testerResolver]) when it is named by a host
   /// and the cache has it.
-  Future<Pins> _testerPins(Iterable<Map> nodes, Iterable<Map> pairs, String why) async {
+  /// [settings]: the DNS settings of a plan being started, read once by the caller (default: read now).
+  Future<Pins> _testerPins(Iterable<Map> nodes, Iterable<Map> pairs, String why, {AddressSettings? settings}) async {
     if (!resolveAddresses) return const {};
     try {
       final hosts = nodesHostnames([...nodes, for (final p in pairs) p['entry']]);
       if (hosts.isEmpty) return const {};
       unawaited(addresses.ensure(hosts, why: why, wait: const Duration(seconds: 30)));
-      final settings = await _addressSettings();
-      final pins = pinsFor(hosts, addressBook, ipv6: settings.ipv6);
+      final st = settings ?? await _addressSettings();
+      final pins = pinsFor(hosts, addressBook, ipv6: st.ipv6);
       _notePins(why, hosts, pins);
-      final resolver = await _testerResolver();
+      final resolver = await _testerResolver(st);
       final rj = resolver == null ? null : dnsServerJson(resolver.tag, resolver.addr);
       final rh = rj == null ? null : hostnameOf(rj['server']);
-      return rh == null ? pins : {...pins, ...pinsFor([rh], addressBook, ipv6: settings.ipv6)};
+      return rh == null ? pins : {...pins, ...pinsFor([rh], addressBook, ipv6: st.ipv6)};
     } catch (e) {
       logBook.note('warn', 'address: the addresses for $why could not be prepared ($e): the test keeps the names');
       return const {};
@@ -2379,9 +2384,9 @@ class CoreService implements CoreApi {
   /// The server a throwaway tester resolves the names of nodes not pinned in time with: the same top server of the
   /// system chain as the main config's ([nodeResolverCandidate], the saved or connected plan's DNS settings); null =
   /// the OS resolver.
-  Future<DnsCandidate?> _testerResolver() async {
+  Future<DnsCandidate?> _testerResolver([AddressSettings? settings]) async {
     try {
-      return nodeResolverCandidate((await _addressSettings()).candidates, _nodeResolverUsable);
+      return nodeResolverCandidate((settings ?? await _addressSettings()).candidates, _nodeResolverUsable);
     } catch (e) {
       logBook.note('warn', 'address: the resolver for the test could not be chosen ($e): the OS resolver is used');
       return null;
@@ -2783,7 +2788,7 @@ class CoreService implements CoreApi {
       _error = null;
       sentinel.context.starting('adopt');
       sentinel.context.started(since: _upSince);
-      _startAuto(_plan!);
+      _startAuto(_plan!, adopted: true);
       _refreshLists(_connectSeq, plan, RuleSetFetch(((rec['ruleSetFiles'] as Map?) ?? const {}).cast<String, String>(), [], []));
       logBook.note('info', 'Took over the running tunnel (${plan['kind']}, up since $_upSince)');
       _changed();
@@ -2887,7 +2892,8 @@ class CoreService implements CoreApi {
     // a connect over a running one (a plan change, an own restart): the servers its groups are on stay, only groups with
     // none are checked; a fresh connect checks the group it starts on (the app's `chosen` is a hint, kept only for Manual's pin)
     final continuation = runner.running && _plan != null;
-    if (continuation) plan = _keepCoreChoice(plan); // before _stopAuto: Auto knows where the groups are
+    final held = continuation ? _coreServers() : null; // before _stopAuto: the core knows where the groups are
+    if (continuation) plan = _keepCoreChoice(plan);
     final seq = _nextSeq();
     _wakeUp();
     _recovering = null;
@@ -2912,13 +2918,9 @@ class CoreService implements CoreApi {
         _plan = null;
         final sys = body['systemProxy'] == true;
         sentinel.context.starting(reason ?? (own ? 'userConnect' : 'refreshLists'));
+        // (the cancel stays until the next connect / disconnect: the rule targets' checks that outlast the connect end with it)
         final cancel = _pickCancel = Cancel();
-        final Map<String, String>? picks;
-        try {
-          picks = await connectPicks(plan, cancel: cancel, continuation: continuation);
-        } finally {
-          if (identical(_pickCancel, cancel)) _pickCancel = null;
-        }
+        final picks = await connectPicks(plan, cancel: cancel, held: held);
         if (picks == null || seq != _connectSeq) return; // a disconnect / newer connect came in while the servers were checked
         plan = planWithChosen(plan, picks);
         final (lists, warnings) = await _startSingBox(plan, sys: sys, why: reason ?? 'connect');
@@ -2928,6 +2930,7 @@ class CoreService implements CoreApi {
         _upSince = _now();
         _attempt = 0;
         _startAuto(plan);
+        _releaseLate(seq); // the rule targets' groups whose check outlasted the connect
         if (_sysWanted) {
           warnings.add(await _sysOn(own: own) ?? '');
         } else {
@@ -2962,78 +2965,225 @@ class CoreService implements CoreApi {
     return status();
   }
 
-  /// The connect's checks of servers: per group `{group, mode, tried, answered, chosen, ms, weak, tookMs, found}`.
+  /// The connect's checks of servers decided before sing-box started, for conn/connected: per group
+  /// `{group, mode, tried, answered, chosen, ms, weak, tookMs, found}`; the route's own group first.
   List<Map<String, dynamic>> _pickReports = const [];
 
-  /// Which server each group of the route the connect starts on starts with, by a fresh check of the group's servers
-  /// (a throwaway sing-box, [TesterSession]; the results go into the pool): `{groupTag: key}`. The route's main group
-  /// (a chain's entry group — the exit keeps the plan's chosen / first server); a pinned or single-server group is not
-  /// checked, nor a group that already has a valid `chosen` when [continuation]. Fastest and Priority by their rule
-  /// (group_pick.dart). Nobody answered: the first by rank; no network (the direct path does not answer either): the same.
-  /// null = cancelled ([_pickCancel]). A tester that cannot start is no reason to fail the connect: no pick, the plan as is.
-  Future<Map<String, String>?> connectPicks(Map<String, dynamic> plan, {Cancel? cancel, bool continuation = false}) async {
+  /// The check of the route's own group (its main group, or a chain's entry) in [_pickReports]; null when the route
+  /// was not checked (pinned, one server, the core's choice kept) — conn/connected `pick` is never a rule target's.
+  Map<String, dynamic>? _routePick;
+
+  /// How long after the route's own pick the connect still waits for the rule targets' groups; the ones not decided by
+  /// then keep being checked and are put on their server by `select` once sing-box runs ([_applyLate]).
+  Duration targetGrace = const Duration(milliseconds: 1500);
+
+  // The picks that ended after the connect stopped waiting: (group tag, key), applied when sing-box and the rule service are up
+  bool _lateReady = false;
+  final _lateQueue = <(String, String)>[];
+
+  String _connectDir() => p.join(dataDir, 'run', 'connect-${_pingSeq++ % 64}');
+
+  /// Which server each group of the route the connect starts on, and of the rule targets, starts with, by a fresh
+  /// check of the group's servers (a throwaway sing-box, [TesterSession]; the results go into the pool):
+  /// `{groupTag: key}`. The route's main group (a chain's entry group first, then its exit: the pairs through the chosen
+  /// entry on a tester of their own). The groups of the rule targets are checked in parallel on the same tester (a chain
+  /// target the same two steps): the connect waits for the route's own pick and then at most [targetGrace] more; a target
+  /// not decided by then is put on its server by `select` after the start. Standby routes of Auto are not checked. A
+  /// pinned or single-server group is not checked, nor, on a continuation, a group the core has a server for ([held]:
+  /// group tag → key of the core's own services, the plan's `chosen` is that server). A group with only the app's
+  /// `chosen` (a new route, a new rule target) is checked like on a fresh connect; null = a fresh connect.
+  /// Fastest and Priority by their rule (group_pick.dart). Nobody answered: the first by rank; no network (the direct path
+  /// does not answer either): the same. null = cancelled ([_pickCancel]). A tester that cannot start is no reason to fail
+  /// the connect: no pick, the plan as is.
+  Future<Map<String, String>?> connectPicks(Map<String, dynamic> plan, {Cancel? cancel, Map<String, String>? held}) async {
     _pickReports = const [];
+    _routePick = null;
+    _lateReady = false;
+    _lateQueue.clear();
+    final seq = _connectSeq;
     final rs = planRoutes(plan);
     final i = planCurrent(plan, rs.length), r = rs[i];
-    final chain = r['kind'] == 'chain';
-    final tag = chain ? routeEntryTag(i) : routeTag(i);
-    final g = (chain ? r['entry'] : r['main']) as Map?;
-    if (g == null) return {};
-    final byKey = <String, Map>{};
-    for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
-      if (n['outbound'] is Map) byKey.putIfAbsent('${n['key']}', () => n);
+    final route = _PickUnit.of(chain: r['kind'] == 'chain', mainTag: routeTag(i), entryTag: routeEntryTag(i), main: r['main'], entry: r['entry']);
+    final targets = <_PickUnit>[];
+    final routing = plan['routing'], specs = plan['global'] != true && routing is Map ? routing['targets'] : null;
+    if (specs is Map) {
+      for (final e in specs.entries) {
+        final spec = e.value;
+        if (spec is! Map) continue;
+        final u = _PickUnit.of(chain: spec['kind'] == 'chain', mainTag: '${e.key}', entryTag: targetEntryTag('${e.key}'), main: spec['main'], entry: spec['entry']);
+        if (u != null && u.needsPick(held)) targets.add(u);
+      }
     }
-    final keys = byKey.keys.toList();
-    if (g['pinned'] == true || keys.length < 2 || (continuation && keys.contains(g['chosen']))) return {};
+    final mine = route != null && route.needsPick(held) ? route : null;
+    if (mine == null && targets.isEmpty) return {};
     final settings = AutoSettings.fromPlan(plan);
-    final priority = g['pick'] == 'priority';
-    String idOf(String k) => serverIdentity(byKey[k]!['outbound'] as Map);
-    final ranked = priority
-        ? keys
-        : rankCandidates(keys, peek: (k) {
-            final p = pool.peek(idOf(k), url: settings.url, checkers: settings.checkers);
-            return p != null && pool.now - p.at <= AutoService.workingAge.inMilliseconds ? p : null;
-          }, dead: (k) => pool.ladder.has(idOf(k)));
     _starting = plan; // what the tester's resolver reads: the plan being started
     _addrSettings = null;
-    TesterSession? session;
+    final picks = <String, String>{}, reports = <Map<String, dynamic>>[];
+    var gateOpen = false;
+    void decided(String tag, String key, Map<String, dynamic> rep) {
+      if (!gateOpen) {
+        picks[tag] = key;
+        reports.add(rep);
+      } else if (seq == _connectSeq) {
+        if (_lateReady) {
+          unawaited(_applyLate(seq, tag, key));
+        } else {
+          _lateQueue.add((tag, key));
+        }
+      }
+    }
+
+    TesterSession? s1;
     try {
-      final nodes = byKey.values.toList();
-      final s = session = TesterSession(
+      final nodes = <Map>[
+        for (final u in [?mine, ...targets])
+          if (u.first.pickable(held)) ...u.first.byKey.values,
+      ];
+      // what the plan being started gives the testers: read once, here (a late tester starts after `_starting` is cleared)
+      final addr = await _addressSettings();
+      final resolver = await _testerResolver(addr);
+      final s = s1 = TesterSession(
           binary: singBox,
-          workDir: p.join(dataDir, 'run', 'connect-${_pingSeq++ % 8}'),
+          workDir: _connectDir(),
           nodes: nodes,
           pool: pool,
           url: settings.url,
           checkers: settings.checkers,
           timeoutMs: settings.timeoutMs,
           boxFactory: _loggedBoxes('connect'),
-          pins: await _testerPins(nodes, const [], 'connect'),
-          nodeResolver: await _testerResolver(),
+          pins: await _testerPins(nodes, const [], 'connect', settings: addr),
+          nodeResolver: resolver,
           onWarn: (l) => logBook.note('warn', 'connect: $l'));
       await s.ensure(); // a tester that cannot start is an error (the catch below), not a pool full of misses
-      Future<PoolResult> probe1(String k) => s.probe('n', k, idOf(k));
-      var noNet = false;
-      Future<bool> afterEmpty() async => noNet = await s.directAnswers() == false;
-      final pick = priority
-          ? await pickPriority(ranked, probe1, cancel: cancel, afterEmpty: afterEmpty)
-          : await pickFastest(ranked, probe1, cancel: cancel, afterEmpty: afterEmpty);
-      if (pick.cancelled || cancel?.cancelled == true) return null;
-      if (!pick.found && !noNet) await s.directAnswers(); // everybody missed: the network is told apart from dead servers
-      final chosen = pick.key ?? ranked.first;
-      final rep = {'group': tag, 'mode': priority ? 'priority' : 'fastest', ...pick.toJson(), 'chosen': chosen, 'found': pick.found}..remove('key');
-      _pickReports = [rep];
-      logBook.note(pick.found ? 'info' : 'warn',
-          'connect: $tag ${rep['mode']}: tried ${pick.tried} of ${keys.length}, ${pick.answered} answered; '
-          '${pick.found ? '$chosen ${pick.ms} ms${pick.weak ? ' (a backup check only)' : ''}' : 'nobody answered${noNet ? ' (no network)' : ''}, starts on $chosen'}; ${pick.tookMs} ms');
-      return {tag: chosen};
+      Future<void> run(_PickUnit u) => _runUnit(u, s, settings, addr, resolver, held, cancel, late: () => gateOpen, decided: decided);
+      final main = mine == null ? Future<void>.value() : run(mine);
+      final others = [for (final u in targets) run(u)];
+      // the tester lives until the last check ends, late ones included (their results go to the pool)
+      unawaited(Future.wait([main, ...others]).whenComplete(s.finish));
+      await main;
+      if (cancel?.cancelled == true) return null;
+      if (others.isNotEmpty) await Future.any([Future.wait(others), Future<void>.delayed(targetGrace), if (cancel != null) cancel.done]);
+      if (cancel?.cancelled == true) return null;
+      gateOpen = true;
+      // the route's own groups first (conn/connected `pick`), then the rule targets' in the order they were decided
+      final own = {?mine?.first.tag, ?mine?.exit?.tag};
+      _pickReports = [...reports.where((x) => own.contains(x['group'])), ...reports.where((x) => !own.contains(x['group']))];
+      _routePick = reports.where((x) => x['group'] == mine?.first.tag).firstOrNull;
+      return Map.of(picks);
     } catch (e) {
-      logBook.note('warn', 'connect: the servers of $tag could not be checked ($e): the plan is used as it is');
+      gateOpen = true;
+      s1?.finish();
+      logBook.note('warn', 'connect: the servers of ${mine == null ? 'the rule targets' : mine.first.tag} could not be checked ($e): the plan is used as it is');
       return {};
     } finally {
+      gateOpen = true;
       _starting = null;
       _addrSettings = null;
-      session?.finish();
+    }
+  }
+
+  /// One route or rule target: its first group (the main group of a unit, a chain's entry) on [s], then a chain's
+  /// exit by pairs through the chosen entry on a tester of its own. Each decided group goes to [decided]. Never throws.
+  Future<void> _runUnit(_PickUnit u, TesterSession s, AutoSettings st, AddressSettings addr, DnsCandidate? resolver, Map<String, String>? held, Cancel? cancel,
+      {required bool Function() late, required void Function(String tag, String key, Map<String, dynamic> rep) decided}) async {
+    try {
+      final first = u.first;
+      var entryKey = first.startKey, entryFound = true;
+      if (first.pickable(held)) {
+        final res = await _runPick(first, s, st, cancel, late: late, idOf: first.idOf, probe1: (k) => s.probe('n', k, first.idOf(k)));
+        if (res == null) return;
+        entryKey = res.chosen;
+        entryFound = res.rep['found'] == true;
+        decided(first.tag, res.chosen, res.rep);
+      }
+      final exit = u.exit;
+      if (exit == null || !exit.pickable(held) || cancel?.cancelled == true) return;
+      if (!entryFound) {
+        // nobody answers through the entry: the exits cannot be told apart, the first one starts (Auto heals)
+        final chosen = exit.keys.first;
+        logBook.note('warn', 'connect: ${exit.tag} ${exit.priority ? 'priority' : 'fastest'}: the entry ${first.tag} answered nobody, the exits are not checked, starts on $chosen');
+        decided(exit.tag, chosen, {'group': exit.tag, 'mode': exit.priority ? 'priority' : 'fastest', 'tried': 0, 'answered': 0, 'chosen': chosen, 'ms': -1, 'weak': false, 'tookMs': 0, 'found': false});
+        return;
+      }
+      final entryNode = first.byKey[entryKey]!, entryId = first.idOf(entryKey);
+      final pairs = [for (final k in exit.keys) {'key': k, 'entry': entryNode, 'exit': exit.byKey[k]}];
+      TesterSession? s2;
+      try {
+        final t = s2 = TesterSession(
+            binary: singBox,
+            workDir: _connectDir(),
+            nodes: const [],
+            pairs: pairs,
+            pool: pool,
+            url: st.url,
+            checkers: st.checkers,
+            timeoutMs: st.timeoutMs,
+            boxFactory: _loggedBoxes('connect'),
+            pins: await _testerPins(const [], pairs, 'connect', settings: addr),
+            nodeResolver: resolver,
+            onWarn: (l) => logBook.note('warn', 'connect: $l'));
+        await t.ensure();
+        String pid(String k) => pairIdentity(entryId, exit.idOf(k));
+        final res = await _runPick(exit, t, st, cancel, late: late, idOf: pid, probe1: (k) => t.probe('p', k, pid(k)));
+        if (res != null) decided(exit.tag, res.chosen, res.rep);
+      } catch (e) {
+        logBook.note('warn', 'connect: the exits of ${exit.tag} could not be checked ($e): the plan is used as it is');
+      } finally {
+        s2?.finish();
+      }
+    } catch (e) {
+      logBook.note('warn', 'connect: the servers of ${u.first.tag} could not be checked ($e): the plan is used as it is');
+    }
+  }
+
+  /// One pick of [g] on [s] by its rule; null = cancelled. [idOf]: the pool identity of a server ([probe1] tests it).
+  Future<({String chosen, Map<String, dynamic> rep})?> _runPick(_PickGroup g, TesterSession s, AutoSettings st, Cancel? cancel,
+      {required bool Function() late, required String Function(String key) idOf, required Probe1 probe1}) async {
+    final keys = g.keys, mode = g.priority ? 'priority' : 'fastest';
+    final ranked = g.priority
+        ? keys
+        : rankCandidates(keys, peek: (k) {
+            final p = pool.peek(idOf(k), url: st.url, checkers: st.checkers);
+            return p != null && pool.now - p.at <= AutoService.workingAge.inMilliseconds ? p : null;
+          }, dead: (k) => pool.ladder.has(idOf(k)));
+    var noNet = false;
+    Future<bool> afterEmpty() async => noNet = await s.directAnswers() == false;
+    final pick = g.priority
+        ? await pickPriority(ranked, probe1, cancel: cancel, afterEmpty: afterEmpty)
+        : await pickFastest(ranked, probe1, cancel: cancel, afterEmpty: afterEmpty);
+    if (pick.cancelled || cancel?.cancelled == true) return null;
+    if (!pick.found && !noNet) await s.directAnswers(); // everybody missed: the network is told apart from dead servers
+    final chosen = pick.key ?? ranked.first;
+    final rep = {'group': g.tag, 'mode': mode, ...pick.toJson(), 'chosen': chosen, 'found': pick.found}..remove('key');
+    final isLate = late();
+    logBook.note(pick.found ? 'info' : 'warn',
+        'connect: ${g.tag} $mode: tried ${pick.tried} of ${keys.length}, ${pick.answered} answered; '
+        '${pick.found ? '$chosen ${pick.ms} ms${pick.weak ? ' (a backup check only)' : ''}' : 'nobody answered${noNet ? ' (no network)' : ''}, starts on $chosen'}; ${pick.tookMs} ms'
+        '${isLate ? ' (late: applied after the start)' : ''}');
+    return (chosen: chosen, rep: rep);
+  }
+
+  /// The connect's pick of a rule target's group that ended after the connect stopped waiting is put in place once
+  /// sing-box and the rule service run (the service marks it as the core's own, so the first look at the groups does
+  /// not put the cache's choice back over it).
+  void _releaseLate(int seq) {
+    _lateReady = true;
+    final queued = List.of(_lateQueue);
+    _lateQueue.clear();
+    for (final (tag, key) in queued) {
+      unawaited(_applyLate(seq, tag, key));
+    }
+  }
+
+  Future<void> _applyLate(int seq, String tag, String key) async {
+    if (seq != _connectSeq || !runner.running) return;
+    try {
+      final fb = _fallback;
+      final ok = fb != null ? await fb.select(tag, key) : await runner.api?.select(tag, '$tag/$key') ?? false;
+      logBook.note(ok ? 'info' : 'warn', 'connect: $tag: ${ok ? 'late pick applied' : 'late pick not applied (the group moved since, or sing-box refused)'}: $key');
+    } catch (e) {
+      logBook.note('warn', 'connect: $tag: late pick $key not applied ($e)');
     }
   }
 
@@ -3046,7 +3196,9 @@ class CoreService implements CoreApi {
     return {
       'entry': '${routes[i]['id'] ?? routeTag(i)}',
       'server': ?server,
-      'pick': ?(_pickReports.isEmpty ? null : _pickReports.first),
+      'pick': ?_routePick, // the route's own group only
+      if (_pickReports.length > 1 || (_pickReports.isNotEmpty && _routePick == null))
+        'picks': _pickReports, // every group decided before the start: the exit of a chain, the rule targets
       'mode': planTun(plan) ? 'tun' : 'proxy',
       'route': plan['global'] == true ? 'global' : 'rules',
     };
@@ -3706,4 +3858,55 @@ class CoreService implements CoreApi {
 
   @override
   Future<void> updateInstallFailed(String reason) async => appUpdater?.installFailed(reason);
+}
+
+/// A group of the plan as the connect's pick sees it (service.dart `connectPicks`).
+class _PickGroup {
+  _PickGroup._(this.tag, this.group);
+
+  /// null = no group, or no server in it that a tester could dial.
+  static _PickGroup? of(String tag, Object? g) {
+    if (g is! Map) return null;
+    final out = _PickGroup._(tag, g);
+    for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
+      if (n['outbound'] is Map) out.byKey.putIfAbsent('${n['key']}', () => n);
+    }
+    return out.byKey.isEmpty ? null : out;
+  }
+
+  final String tag;
+  final Map group;
+  final byKey = <String, Map>{};
+
+  List<String> get keys => byKey.keys.toList();
+  bool get priority => group['pick'] == 'priority';
+
+  /// The server the config starts the group on: the plan's `chosen` when it is a member, else the first.
+  String get startKey => byKey.containsKey(group['chosen']) ? group['chosen'] as String : byKey.keys.first;
+  String idOf(String key) => serverIdentity(byKey[key]!['outbound'] as Map);
+
+  /// Whether the connect checks the group: not a pinned one, not a single server, not (on a continuation, [held] given)
+  /// one the core has on the server the plan's `chosen` names; the app's own `chosen` is only a hint.
+  bool pickable(Map<String, String>? held) =>
+      group['pinned'] != true && byKey.length >= 2 && !(held != null && byKey.containsKey(group['chosen']) && held[tag] == group['chosen']);
+}
+
+/// What the connect checks together: a route's or a rule target's [first] group (a unit's main group, a chain's entry)
+/// and a chain's [exit] group, tested by pairs through the entry chosen.
+class _PickUnit {
+  _PickUnit._(this.first, this.exit);
+
+  static _PickUnit? of({required bool chain, required String mainTag, required String entryTag, Object? main, Object? entry}) {
+    if (!chain) {
+      final g = _PickGroup.of(mainTag, main);
+      return g == null ? null : _PickUnit._(g, null);
+    }
+    final e = _PickGroup.of(entryTag, entry);
+    return e == null ? null : _PickUnit._(e, _PickGroup.of(mainTag, main));
+  }
+
+  final _PickGroup first;
+  final _PickGroup? exit;
+
+  bool needsPick(Map<String, String>? held) => first.pickable(held) || (exit?.pickable(held) ?? false);
 }

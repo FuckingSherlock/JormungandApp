@@ -4,6 +4,7 @@
 // one restart `reresolve` only when the IP set changed, once per host per 5 min, never offline / unsettled).
 // A fake BoxRunner (no sing-box); the DoH server is a loopback mock.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:jormungand_core/jormungand_core.dart';
@@ -48,6 +49,66 @@ class _Runner implements BoxRunner {
       if (o['tag'] == tag) return o['server'] as String?;
     }
     return null;
+  }
+}
+
+/// A throwaway tester box that is not sing-box: keeps its config and answers every check on the probe inbound (a
+/// SOCKS5 server that says yes and then a 204), so the connect's checks run to their end.
+class _ProbeBox implements BoxRunner {
+  final configs = <Map<String, dynamic>>[];
+  ServerSocket? _srv;
+  @override
+  void Function(String line)? onLog;
+  @override
+  void Function(int code)? onExit;
+  @override
+  bool get running => _srv != null;
+  @override
+  int? get pid => null;
+  @override
+  SingBoxApi? get api => null;
+  @override
+  void note(String line) {}
+
+  @override
+  Future<void> start(Map<String, dynamic> config) async {
+    configs.add(config);
+    final inbound = (config['inbounds'] as List).cast<Map>().firstWhere((i) => i['tag'] == probeInboundTag);
+    final srv = _srv = await ServerSocket.bind(InternetAddress.loopbackIPv4, inbound['listen_port'] as int);
+    srv.listen((s) {
+      final buf = <int>[];
+      var stage = 0;
+      s.listen((d) {
+        buf.addAll(d);
+        while (true) {
+          if (stage == 0 && buf.length >= 3) {
+            buf.removeRange(0, 3);
+            s.add([5, 2]);
+          } else if (stage == 1 && buf.length > 2 && buf.length > 2 + buf[1] && buf.length >= 3 + buf[1] + buf[2 + buf[1]]) {
+            buf.clear();
+            s.add([1, 0]);
+          } else if (stage == 2 && buf.length >= 5 && buf.length >= 7 + buf[4]) {
+            buf.clear();
+            s.add([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]);
+          } else if (stage == 3 && String.fromCharCodes(buf).contains('\r\n\r\n')) {
+            buf.clear();
+            s.add('HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'.codeUnits);
+            s.close();
+            return;
+          } else {
+            return;
+          }
+          stage++;
+        }
+      }, onError: (_) {}, cancelOnError: true);
+    });
+  }
+
+  @override
+  Future<void> stop() async {
+    final s = _srv;
+    _srv = null;
+    await s?.close();
   }
 }
 
@@ -103,7 +164,7 @@ void main() {
   _Fake? fake;
   MockDoh? fast, slow;
 
-  Future<void> boot({bool useFake = false, List<DnsCandidate> Function()? servers, Completer<void>? testerGate}) async {
+  Future<void> boot({bool useFake = false, List<DnsCandidate> Function()? servers, Completer<void>? testerGate, BoxFactory? boxes}) async {
     tmp = await Directory.systemTemp.createTemp('jorm-svc-addr');
     runner = _Runner();
     time = FakeTime();
@@ -118,7 +179,7 @@ void main() {
       runner: runner,
       // the connect's check of servers (TesterSession) cannot start its sing-box here: "tester did not start" → the plan as it is.
       // A tester that ran would find no network in a test (nobody answers) and put the core's network down, and wait the test timeout.
-      boxFactory: (_) => _Runner(failStart: true, gate: testerGate),
+      boxFactory: boxes ?? (_) => _Runner(failStart: true, gate: testerGate),
       sysProxy: NoSystemProxy(),
       exitCheck: (_) async => {'ip': '127.0.0.1'},
       siteChecker: SiteChecker(get: (_, {proxyPort, timeout = Duration.zero}) async => throw const SocketException('no network in tests'), delay: (_) async {}),
@@ -290,18 +351,20 @@ void main() {
               if ('${(l as Map)['msg']}'.contains('connect: the servers of route0')) '${l['msg']}',
           ];
       final multi = _body([_route('A', {'s::a': 'a.example', 's::b': 'b.example'})])['plan'] as Map<String, dynamic>;
-      expect(await svc.connectPicks(multi, continuation: true), isEmpty);
+      expect(await svc.connectPicks(multi, held: {'route0': 's::a'}), isEmpty);
       expect(checks(), isEmpty, reason: 'the core\'s chosen stands');
+      expect(await svc.connectPicks(multi, held: const {}), isEmpty);
+      expect(checks(), hasLength(1), reason: 'a group the core has no server for: the plan\'s chosen is only the app\'s hint, checked');
       final noChosen = {
         ...multi,
         'routes': [
           for (final r in multi['routes'] as List) {...(r as Map), 'main': {...(r['main'] as Map), 'chosen': null}},
         ],
       };
-      expect(await svc.connectPicks(noChosen, continuation: true), isEmpty);
-      expect(checks(), hasLength(1), reason: 'no chosen: checked (the tester cannot start here: the plan is used as it is)');
+      expect(await svc.connectPicks(noChosen, held: {'route0': 's::a'}), isEmpty);
+      expect(checks(), hasLength(2), reason: 'no chosen: checked (the tester cannot start here: the plan is used as it is)');
       expect(await svc.connectPicks(multi), isEmpty);
-      expect(checks(), hasLength(2), reason: 'a fresh connect checks the group even with the app\'s chosen');
+      expect(checks(), hasLength(3), reason: 'a fresh connect checks the group even with the app\'s chosen');
     });
 
     test('a plan change while running: the server the core has a group on is kept (a member, not pinned), else the plan\'s own chosen', () async {
@@ -321,11 +384,79 @@ void main() {
           ];
       final kept = planKeepingServers(plan2(), {'route0': 's::b'});
       expect(chosenOf(kept), 's::b', reason: 'the core moved the group to b: the app\'s chosen a is only a hint');
-      expect(await svc.connectPicks(kept, continuation: true), isEmpty);
+      expect(await svc.connectPicks(kept, held: {'route0': 's::b'}), isEmpty);
       expect(checks(), isEmpty, reason: 'no check of the main group on a plan change');
       expect(chosenOf(planKeepingServers(plan2(pinned: true), {'route0': 's::b'})), 's::a', reason: 'a pinned group follows its pin');
       expect(chosenOf(planKeepingServers(plan2(), {'route0': 's::gone'})), 's::a', reason: 'not a member of the new plan: no choice');
       expect(chosenOf(planKeepingServers(plan2(), const {})), 's::a');
+    });
+
+    test('planWithChosen / planKeepingServers know the rule targets\' groups (t, t>entry); connectPicks checks a target with only the app\'s hint', () async {
+      await boot(useFake: true);
+      Map<String, dynamic> grp(List<String> keys, {String? chosen, bool pinned = false}) =>
+          {'pick': 'priority', 'chosen': chosen, 'pinned': pinned, 'nodes': [for (final k in keys) _node(k, '$k.example')]};
+      final plan = {
+        ...(_body([_route('A', {'s::a': 'a.example'})])['plan'] as Map<String, dynamic>),
+        'global': false,
+        'routing': {
+          'targets': {
+            'src:x': {'kind': 'unit', 'main': grp(['x1', 'x2'], chosen: 'x1')},
+            'chain:c': {'kind': 'chain', 'entry': grp(['e1', 'e2'], chosen: 'e1'), 'main': grp(['t1', 't2'], chosen: 't1', pinned: true)},
+          },
+        },
+      };
+      String? chosenOf(Map<String, dynamic> p, String t, [String field = 'main']) => (((p['routing'] as Map)['targets'] as Map)[t] as Map)[field]['chosen'] as String?;
+      final moved = planWithChosen(plan, {'src:x': 'x2', 'chain:c>entry': 'e2', 'chain:c': 't2'});
+      expect([chosenOf(moved, 'src:x'), chosenOf(moved, 'chain:c', 'entry'), chosenOf(moved, 'chain:c')], ['x2', 'e2', 't2']);
+      expect([chosenOf(plan, 'src:x'), chosenOf(plan, 'chain:c')], ['x1', 't1'], reason: 'the plan itself is not changed');
+      final kept = planKeepingServers(plan, {'src:x': 'x2', 'chain:c>entry': 'e2', 'chain:c': 't2'});
+      expect([chosenOf(kept, 'src:x'), chosenOf(kept, 'chain:c', 'entry'), chosenOf(kept, 'chain:c')], ['x2', 'e2', 't1'], reason: 'a pinned group follows its pin');
+      expect(chosenOf(planKeepingServers(plan, {'src:x': 'gone'}), 'src:x'), 'x1', reason: 'not a member: no choice');
+      expect(planTargetGroups(plan).map((e) => e.$1), ['src:x', 'chain:c>entry', 'chain:c']);
+
+      List<String> checks() => [
+            for (final l in svc.log(since: null)['lines'] as List)
+              if ('${(l as Map)['msg']}'.contains('connect: the servers of')) '${l['msg']}',
+          ];
+      // the core holds src:x on x2 (nothing to check there); the main route is one server; only the chain target's entry
+      // (the app's hint e1, the core has none) is checked
+      await svc.connectPicks(kept, held: {'src:x': 'x2'});
+      expect(checks(), hasLength(1));
+      expect(checks().single, contains('the rule targets'), reason: 'the tester cannot start here: the plan as it is; the log names the targets');
+    });
+
+    test('connectPicks: a tester that starts after the connect stopped waiting (a late chain target\'s exits) takes the address settings of the plan being started', () async {
+      final boxes = <_ProbeBox>[];
+      await boot(useFake: true, boxes: (_) {
+        final b = _ProbeBox();
+        boxes.add(b);
+        return b;
+      });
+      svc.targetGrace = Duration.zero; // the target is always late
+      // the entry host has an IPv6 address only: pinned when the plan being started has IPv6 on, else left as a name
+      svc.addressBook.put('e1.example', AddressEntry(v4: const [], v6: const ['fd00::1'], at: time.t.millisecondsSinceEpoch, ttl: 300, via: 'seed'));
+      Map<String, dynamic> grp(List<String> keys) => {'pick': 'priority', 'chosen': null, 'nodes': [for (final k in keys) _node(k, '$k.example')]};
+      final plan = {
+        ...(_body([_route('A', {'s::a': 'a.example'})])['plan'] as Map<String, dynamic>),
+        'global': false,
+        'ipv6': true,
+        'urlTest': {'url': 'http://probe.test/'},
+        'routing': {
+          'targets': {
+            'chain:c': {'kind': 'chain', 'entry': grp(['e1', 'e2']), 'main': grp(['t1', 't2'])},
+          },
+        },
+      };
+      expect(await svc.connectPicks(plan), isEmpty, reason: 'the connect did not wait for the target');
+      List<String> log() => [for (final l in svc.log(since: null)['lines'] as List) '${(l as Map)['msg']}'];
+      for (var i = 0; i < 100 && !log().any((l) => l.startsWith('connect: chain:c priority')); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect(log().where((l) => l.startsWith('connect: chain:c')), hasLength(2), reason: log().where((l) => l.contains('connect:')).join('\n'));
+      final pairs = [for (final b in boxes) for (final c in b.configs) jsonEncode(c)].where((c) => c.contains('"p/'));
+      expect(pairs, hasLength(1), reason: 'the exits are tested by pairs on a tester of their own');
+      expect(pairs.single, contains('fd00::1'), reason: 'IPv6 of the plan being started, not of the saved settings read after it');
+      expect(pairs.single, isNot(contains('"e1.example"')));
     });
 
     test('a disconnect while the servers are checked: no sing-box is started', () async {

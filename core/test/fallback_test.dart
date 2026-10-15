@@ -230,6 +230,55 @@ void main() {
     expect(r.svc.isDown('src:x'), isFalse);
   });
 
+  test('groupServers: the server every target group is on now (a chain: entry and exit); the main flow is not a target group', () async {
+    final r = _Rig(_plan([_rule('r1', 'src:x', 'block'), _rule('r2', 'chain:c', 'default')]), {'s::x1': 40, 's::x2': 60, 's::e': 30, 's::t': 50});
+    expect(r.svc.groupServers(), {'src:x': 's::x1', 'chain:c>entry': 's::e', 'chain:c': 's::t'});
+    r.fake.groups['src:x']!.now = 'src:x/s::x2';
+    expect(r.svc.groupServers()['src:x'], 's::x2');
+  });
+
+  test('select: a pick after the start puts the group on the server and marks it the core\'s; a second one, an unknown group or a stopped service is refused', () async {
+    final r = _Rig(_plan([_rule('r1', 'src:x', 'block')]), {'s::x1': 40, 's::x2': 60});
+    expect(await r.svc.select('src:x', 's::x2'), isTrue);
+    expect(r.on('src:x'), 'src:x/s::x2');
+    expect(await r.svc.select('src:x', 's::x1'), isFalse, reason: 'the group was moved by the core already: that is the newer pick');
+    expect(r.on('src:x'), 'src:x/s::x2');
+    expect(await r.svc.select('src:nope', 's::x1'), isFalse);
+    expect(await r.svc.select('src:x', 's::none'), isFalse);
+    r.svc.stop();
+    expect(await r.svc.select('src:x', 's::x1'), isFalse);
+  });
+
+  group('the first look at the groups after the start (_reconcile)', () {
+    test('what sing-box\'s cache restored over a target group is put back on the server chosen for this start', () async {
+      final r = _Rig(_plan([_rule('r1', 'src:x', 'block')]), {'s::x1': 40, 's::x2': 60});
+      r.fake.groups['src:x']!.now = 'src:x/s::x2'; // restored by cache_file; the plan starts the group on x1
+      r.svc.start();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(r.on('src:x'), 'src:x/s::x1');
+      r.svc.stop();
+    });
+
+    test('a pick of the core made before the look stays (a late connect pick), also across a later groups change', () async {
+      final r = _Rig(_plan([_rule('r1', 'src:x', 'block')]), {'s::x1': 40, 's::x2': 60});
+      expect(await r.svc.select('src:x', 's::x2'), isTrue);
+      r.svc.start();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(r.on('src:x'), 'src:x/s::x2');
+      r.svc.stop();
+    });
+
+    test('reconcileStart off (an adopted sing-box): nothing is put back', () async {
+      final r = _Rig(_plan([_rule('r1', 'src:x', 'block')]), {'s::x1': 40, 's::x2': 60});
+      r.svc.reconcileStart = false;
+      r.fake.groups['src:x']!.now = 'src:x/s::x2';
+      r.svc.start();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(r.on('src:x'), 'src:x/s::x2');
+      r.svc.stop();
+    });
+  });
+
   test('a chain target is tested at its exit through its entry: a dead entry takes it down', () async {
     final r = _Rig(_plan([_rule('r1', 'chain:c', 'default')]), {'s::e': 30, 's::t': 50});
     await r.svc.check();

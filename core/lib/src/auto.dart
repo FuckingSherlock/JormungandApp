@@ -527,6 +527,10 @@ class AutoService {
 
   bool _startChecked = false; // the first groups answer was compared with the servers the plan starts on
 
+  /// Whether the first look at the groups puts back what sing-box's cache restored (a connect); false for a taken-over
+  /// sing-box: its groups and route stand where the core before this one left them (a heal it made), that is the truth.
+  bool reconcileStart = true;
+
   /// The groups the core itself selected on since this start (marked before the `select` goes: the groups stream can
   /// answer while it is awaited). The first look at the groups puts back what sing-box's cache restored, never a pick
   /// of the core's own; [_select] is the only way the core picks.
@@ -1367,6 +1371,7 @@ class AutoService {
   Future<bool> refresh() async {
     final by = {...api.selected};
     if (by.isEmpty || _stopped) return false;
+    if (!_startChecked && !reconcileStart) _startChecked = true;
     if (!_startChecked) {
       // sing-box's cache_file may have restored an older pick over the config's default: the choice made for this start
       // (the connect's fresh check, or the server the group was on before a restart) wins
