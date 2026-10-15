@@ -263,6 +263,12 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       members.add(t);
     }
     if (members.isEmpty) throw ArgumentError('No usable servers for "$tag"');
+    // a manual pick the group cannot hold is never replaced quietly: the user hears of it (the connection warning)
+    if (g['pinned'] == true && !members.contains('$tag/${g['chosen']}')) {
+      warnings?.add('Manual pick ${g['chosen']} is not usable: the tunnel is on ${members.first.substring(tag.length + 1)} instead');
+    } else if (g['pinLost'] != null) {
+      warnings?.add('Manual pick ${g['pinLost']} is no longer a server of its entry: the entry chooses by itself');
+    }
     if (g['pick'] == 'priority') {
       final chosen = '$tag/${g['chosen']}';
       outs.add({

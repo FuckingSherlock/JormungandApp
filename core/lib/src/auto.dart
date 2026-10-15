@@ -1129,12 +1129,11 @@ class AutoService {
         _exitStored[s.key] = n;
         _exitDoneAt[s.key] = at;
         _exitError.remove(s.key);
-        // the same IP (and country, when the check named one) as shown: only the time moves; another one replaces the answer
-        final before = _exitShown(s.key, s.id), ip = out['ip'];
-        final c = '${out['country'] ?? ''}'.trim().toUpperCase();
-        final same = before != null && before['ip'] == ip && (c.isEmpty || before['country'] == c);
+        // a good check always replaces the shown answer with the fresh one (city, org and all), the same IP or not
+        final ip = out['ip'];
         if (s.id != null && ip is String) exits.record(s.id!, ip: ip, country: out['country'] as String?, at: out['at'] as int);
-        _exitResults[s.key] = same ? {...before, 'at': out['at']} : out;
+        _exitResults[s.key] = out;
+        trace?.call('auto: exit check through ${s.tag} (node ${s.id ?? '-'}): $ip${out['country'] == null ? '' : ' ${out['country']}'}');
       } else {
         _exitFailAt[s.key] = at;
         // any failed check is shown (the user's decision 2026-10-14: the error, not the stored answer); the stored answer
@@ -1145,7 +1144,7 @@ class AutoService {
         } else {
           _exitResults[s.key] = out;
         }
-        if (_exitCur != s.key) trace?.call('auto: exit check through ${s.tag} failed: ${out['error']}');
+        trace?.call('auto: exit check through ${s.tag} (node ${s.id ?? '-'}) failed: ${out['error']}');
       }
     }
     if (loud) _exitRechecking.remove(s.key);

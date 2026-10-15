@@ -63,7 +63,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('exit card: a ring under the flag while rechecking, the answer stays', (
+  testWidgets('exit card: a ring / the check time right of the location while rechecking, the answer stays', (
     tester,
   ) async {
     final host = FakeCoreHost()..setPhase(ConnectionPhase.connected);
@@ -113,6 +113,7 @@ void main() {
     );
     await tester.pump();
     expect(find.byKey(ring), findsOneWidget);
+    expect(find.byKey(const ValueKey('exit-checked-at')), findsNothing);
     expect(find.text('203.0.113.7'), findsOneWidget);
     expect(find.text('Frankfurt, DE'), findsOneWidget);
 
@@ -121,7 +122,38 @@ void main() {
     );
     await tester.pump();
     expect(find.byKey(ring), findsNothing);
+    expect(find.byKey(const ValueKey('exit-checked-at')), findsNothing);
     expect(find.text('203.0.113.7'), findsOneWidget);
+
+    // a completed check: its time at the right of the location line, no ring
+    final at = DateTime.now();
+    host.setExit(
+      ExitState.found(ip: '203.0.113.7', country: 'DE', city: 'Frankfurt', at: at),
+    );
+    await tester.pump();
+    String two(int n) => n.toString().padLeft(2, '0');
+    expect(find.byKey(ring), findsNothing);
+    expect(find.byKey(const ValueKey('exit-checked-at')), findsOneWidget);
+    expect(find.text('${two(at.hour)}:${two(at.minute)}'), findsOneWidget);
+
+    // an older check: whole calendar days ago
+    final old = DateTime.now().subtract(const Duration(days: 3));
+    host.setExit(
+      ExitState.found(ip: '203.0.113.7', country: 'DE', city: 'Frankfurt', at: old),
+    );
+    await tester.pump();
+    expect(find.text('3d ago'), findsOneWidget);
+    host.setExit(
+      ExitState.found(
+        ip: '203.0.113.7',
+        country: 'DE',
+        city: 'Frankfurt',
+        at: DateTime.now().subtract(const Duration(days: 1)),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('1d ago'), findsOneWidget);
+    expect(tester.takeException(), isNull);
 
     // a switch to a node with a stored answer: that answer, the ring while the core checks it
     host.setExit(

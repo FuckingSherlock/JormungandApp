@@ -289,32 +289,16 @@ class _DnsSheetState extends State<DnsSheet> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          SideChip(
-                            key: ValueKey('dns-$id-$side'),
-                            label: side == 'vpn' ? 'VPN' : 'Direct',
-                            on: s.activeSides.contains(side),
-                            dead:
-                                s.on &&
-                                s.activeSides.contains(side) &&
-                                (health?.dead(id, side) ?? false),
-                            answering:
-                                s.on && (health?.answers(id, side) ?? false),
-                            onTap: s.system ? null : () => toggleSide(s, side),
-                          ),
-                          // the verdict stays as it is; a ring beside it while a check runs
-                          if (s.on &&
-                              s.activeSides.contains(side) &&
-                              (health?.rechecking(id, side) ?? false))
-                            Positioned(
-                              key: ValueKey('dns-rechecking-$id-$side'),
-                              right: -3,
-                              top: -3,
-                              child: const PingSpinner(size: 8),
-                            ),
-                        ],
+                      SideChip(
+                        key: ValueKey('dns-$id-$side'),
+                        label: side == 'vpn' ? 'VPN' : 'Direct',
+                        on: s.activeSides.contains(side),
+                        dead:
+                            s.on &&
+                            s.activeSides.contains(side) &&
+                            (health?.dead(id, side) ?? false),
+                        answering: s.on && (health?.answers(id, side) ?? false),
+                        onTap: s.system ? null : () => toggleSide(s, side),
                       ),
                       const SizedBox(height: 3),
                       GestureDetector(

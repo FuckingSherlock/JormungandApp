@@ -1578,5 +1578,6 @@
   "DNS server does not answer on this node": "dnsServerDoesNotAnswerOn",
   "Dead on this node": "deadOnThisNode",
   "Does not answer through {0}; it answers through {1}": "doesNotAnswerThroughItAnswers",
-  "Reserve": "reserve"
+  "Reserve": "reserve",
+  "{#0}d ago": "dAgo"
 }

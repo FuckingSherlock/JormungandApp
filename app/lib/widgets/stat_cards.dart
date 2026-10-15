@@ -262,6 +262,19 @@ class ExitIpCard extends StatelessWidget {
     );
   }
 
+  /// `HH:mm` for today, `<n>d ago` (whole calendar days) otherwise.
+  static String _checkedAt(BuildContext context, DateTime at) {
+    final now = DateTime.now();
+    if (at.year == now.year && at.month == now.month && at.day == now.day) {
+      String two(int n) => n.toString().padLeft(2, '0');
+      return '${two(at.hour)}:${two(at.minute)}';
+    }
+    final days = DateTime(now.year, now.month, now.day)
+        .difference(DateTime(at.year, at.month, at.day))
+        .inDays;
+    return context.l10n.dAgo(days < 1 ? 1 : days);
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -281,25 +294,12 @@ class ExitIpCard extends StatelessWidget {
               const SizedBox(width: 6),
               SizedBox(
                 width: 20,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Text(
-                      flag,
-                      textAlign: TextAlign.right,
-                      maxLines: 1,
-                      overflow: TextOverflow.clip,
-                      style: const TextStyle(fontSize: 15, height: 1),
-                    ),
-                    // a check runs while the last answer stays: a small ring under the flag
-                    if (e.rechecking)
-                      const Positioned(
-                        key: ValueKey('exit-rechecking'),
-                        right: 3,
-                        top: 14,
-                        child: PingSpinner(size: 8),
-                      ),
-                  ],
+                child: Text(
+                  flag,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.clip,
+                  style: const TextStyle(fontSize: 15, height: 1),
                 ),
               ),
             ],
@@ -321,11 +321,40 @@ class ExitIpCard extends StatelessWidget {
                     color: c.t1,
                   ),
                 ),
-                Text(
-                  loc,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, height: 16 / 12, color: c.t2),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        loc,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, height: 16 / 12, color: c.t2),
+                      ),
+                    ),
+                    // a check runs while the last answer stays: a ring; otherwise when it was made
+                    if (e.rechecking) ...[
+                      const SizedBox(width: 6),
+                      const SizedBox(
+                        height: 16,
+                        child: Center(
+                          child: PingSpinner(key: ValueKey('exit-rechecking'), size: 12),
+                        ),
+                      ),
+                    ] else if (e.at != null && !e.error) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        _checkedAt(context, e.at!),
+                        key: const ValueKey('exit-checked-at'),
+                        maxLines: 1,
+                        style: monoText.copyWith(
+                          fontSize: 11,
+                          height: 16 / 11,
+                          color: c.t3,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ],
             ),

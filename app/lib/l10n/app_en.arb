@@ -3463,6 +3463,14 @@
   },
   "deadOnThisNode": "Dead on this node",
   "reserve": "Reserve",
+  "dAgo": "{n0}d ago",
+  "@dAgo": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
   "newVersion": "New version",
   "aNewVersionOfTheApp": "A new version of the app is out, or a downloaded one waits to be installed"
 }
