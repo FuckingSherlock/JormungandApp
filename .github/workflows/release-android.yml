@@ -1,6 +1,7 @@
 # Builds the Android app (release APKs per ABI, signed with the release key) and publishes it to
 # the update feed (docs/updates.md section 13), two channels from this one workflow:
-#   beta   - every push to the default branch (touching app/, core/ or this file) and a manual run;
+#   beta   - a manual run only (`gh workflow run release-android.yml --ref <default branch>`, started by the
+#            lead on the user's explicit go-ahead); commits and merges never build a beta;
 #            version <base>-beta.<n> (n counts per base from the feed), a prerelease `v<version>` + manifest-beta.json(.sig).
 #   stable - a pushed tag `vX.Y.Z` (or a manual run with channel=stable on a tag / the default
 #            branch); version X.Y.Z, a normal release `vX.Y.Z` + manifest-stable.json(.sig).
@@ -15,10 +16,8 @@
 name: Release Android
 
 on:
+  # a stable tag push builds the tagged commit; branch pushes build nothing (a beta is a manual run)
   push:
-    branches: [claude/karing-fork-environment-a45c2c]
-    paths: ['app/**', 'core/**', '.github/workflows/release-android.yml', '.github/scripts/beta_notes.sh', 'release-notes/beta.txt']
-    # path filters are not evaluated for tag pushes: a tag always builds the tagged commit
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
     inputs:
@@ -28,11 +27,10 @@ on:
         options: [beta, stable]
         default: beta
 
-# a newer branch push cancels the older beta run of the same ref; a stable run (a tag, or a manual
-# run with channel=stable) has its own group and is never cancelled
+# one release of a ref at a time; a run is never cancelled by the next one (each was asked for)
 concurrency:
   group: release-android-${{ github.ref }}-${{ inputs.channel || 'push' }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' && inputs.channel != 'stable' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -53,38 +51,23 @@ env:
   DELTA_MAX_PERCENT: '60'
 
 jobs:
-  # A push only notes it and stops (a green run, no failure mail) instead of failing when:
-  # - the one-time secrets are not set yet (docs/updates.md section 13);
-  # - a branch push (beta) has release-notes/beta.txt not updated since the previous beta: code is merged
-  #   into the default branch between betas on purpose, the beta goes out with the push that updates the notes.
-  # A tag (stable) or a manual run is never skipped here: a missing note fails it in "Release notes".
+  # Stops with a notice (a green run) when the one-time secrets are not set yet (docs/updates.md section 13).
+  # Release notes are checked in "Release notes": a beta whose release-notes/beta.txt was not updated since the
+  # previous beta fails there (no beta with stale notes).
   gate:
     runs-on: ubuntu-latest
     outputs:
       ok: ${{ steps.c.outputs.ok }}
     steps:
-      - uses: actions/checkout@v4
-        if: github.event_name == 'push' && github.ref_type == 'branch'
-        with: { fetch-depth: 0 }
       - id: c
         env:
           A: ${{ secrets.JORM_ANDROID_KEYSTORE_B64 }}
           B: ${{ secrets.JORM_ANDROID_KS_PASS }}
           C: ${{ secrets.JORM_RELEASE_KEY }}
           D: ${{ secrets.JORM_RELEASES_TOKEN }}
-          BRANCH_PUSH: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
         run: |
           if [ -z "$A" ] || [ -z "$B" ] || [ -z "$C" ] || [ -z "$D" ]; then
             echo "::notice::Release secrets not set yet - skipping the release"; echo ok=false >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          if [ "$BRANCH_PUSH" = true ]; then
-            m="$RUNNER_TEMP/manifest-beta.json"
-            code=$(curl -sSL -o "$m" -w '%{http_code}' "https://github.com/$FEED_REPO/releases/download/feed/manifest-beta.json") || code=000
-            [ "$code" = 200 ] || : > "$m"   # no feed answer: the release job decides and reports it
-            if ! bash .github/scripts/beta_notes.sh "$m" > /dev/null; then
-              echo "::notice::release-notes/beta.txt not updated since the previous beta - no beta for this push"
-              echo ok=false >> "$GITHUB_OUTPUT"; exit 0
-            fi
           fi
           echo ok=true >> "$GITHUB_OUTPUT"
 
@@ -246,7 +229,7 @@ jobs:
             if [ -n "$(tr -d '[:space:]' < "$en" 2> /dev/null)" ]; then cp "$en" "$dist/notes.txt"; else cp "$f" "$dist/notes.txt"; fi
           else
             if ! body=$(bash .github/scripts/beta_notes.sh "$RUNNER_TEMP/manifest-beta.json"); then
-              echo "::error::release-notes/beta.txt was not updated since the previous beta - write the summary of this beta (release-notes/README.md) and push it"; exit 1
+              echo "::error::release-notes/beta.txt was not updated since the previous beta - write the summary of this beta (release-notes/README.md), push it and run the workflow again"; exit 1
             fi
             printf 'Beta %s (build %s, commit %s)\n\n%s\n' "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$body" > "$dist/notes.txt"
             printf 'Бета %s (сборка %s, коммит %s)\n\n%s\n' "$VERSION" "$BUILD" "${GITHUB_SHA:0:7}" "$body" > "$dist/notes.ru.txt"

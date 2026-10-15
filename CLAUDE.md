@@ -179,10 +179,13 @@ default branch (`git ls-remote --symref origin HEAD` shows it):
 `git push origin <branch>:<default branch>`. Before finishing a session everything is committed,
 pushed and merged into the default branch — a new session starts from it.
 
-Release notes (`release-notes/README.md`): a push to the default branch touching `app/` or `core/` builds a
-beta and announces it in Telegram — before it, overwrite `release-notes/beta.txt` with the Russian summary of
-everything since the previous published beta (cumulative: CI takes only the latest version) (the same text the lead reports to the user; an exception to "Translations"); not
-updated → no beta. One text, written once: the lead writes `beta.txt` and reports it to the user as is (or
+Beta release (`release-notes/README.md`): commits and merges never build anything. A beta (build + feed +
+Telegram announcement) starts only when the user explicitly confirms a deploy ("деплой"); then the lead overwrites
+`release-notes/beta.txt` with the Russian summary of everything since the previous published beta (cumulative: CI
+takes only the latest version; the same text the lead reports to the user; an exception to "Translations"),
+commits, pushes, fast-forwards the default branch and runs
+`gh workflow run release-android.yml --ref claude/karing-fork-environment-a45c2c -f channel=beta`. Never start it
+without that confirmation; a run with `beta.txt` not updated since the previous beta fails. One text, written once: the lead writes `beta.txt` and reports it to the user as is (or
 writes the chat summary and saves that same text) — never a second, separately composed summary. A stable tag needs `release-notes/X.Y.Z.ru.txt` (everything since
 the previous stable, briefly), written in the same pass as the Russian translation; no `.en.txt` for now.
 
