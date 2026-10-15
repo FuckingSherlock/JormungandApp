@@ -5,9 +5,8 @@
 ///
 /// - streams it keeps open while sing-box runs: connections (a live table: every open
 ///   connection with its server, app and byte counters; the closed ones as events),
-///   groups (which server each selector / urltest uses, urltest results — pushed after
-///   every urltest round) and status (speed, session totals, memory);
-/// - commands: select in a selector, urltest a group, close connections, the service
+///   groups (which server each selector uses) and status (speed, session totals, memory);
+/// - commands: select in a selector, close connections, the service
 ///   state (started / fatal with the reason) and the config's deprecation warnings;
 /// - Speed Test through one outbound (sing-box's network quality test).
 library;
@@ -123,19 +122,15 @@ class LiveConnection {
   int upRate = 0, downRate = 0; // B/s over the last interval
 }
 
-/// A group as the groups stream shows it: the member in use, urltest results per member.
+/// A group as the groups stream shows it: the member in use.
 class BoxGroup {
-  BoxGroup(this.tag, this.selected, this.members, this.results);
+  BoxGroup(this.tag, this.selected, this.members);
   BoxGroup.of(Group g)
       : tag = g.tag,
         selected = g.selected,
-        members = [for (final i in g.items) i.tag],
-        results = {for (final i in g.items) if (i.urlTestTime > 0) i.tag: (ms: i.urlTestDelay, at: i.urlTestTime.toInt())};
+        members = [for (final i in g.items) i.tag];
   final String tag, selected;
   final List<String> members;
-
-  /// member tag → the last urltest (ms, at = Unix seconds); a member that failed has none.
-  final Map<String, ({int ms, int at})> results;
 }
 
 /// What AutoService (auto.dart) asks of a running sing-box; a fake in tests.
@@ -143,16 +138,11 @@ abstract interface class BoxControl {
   /// group tag → the member it uses now; empty until the groups stream first answered.
   Map<String, String> get selected;
 
-  /// A push of the groups stream (a urltest round, a pick): [selected] may have changed.
+  /// A push of the groups stream (a pick): [selected] may have changed.
   Stream<void> get groupsChanged;
 
   /// Switches the selector [group] to [outbound]; false when sing-box refused or is gone.
   Future<bool> select(String group, String outbound);
-
-  /// Has the urltest [group] test all its members and pick again; waits until it moved off
-  /// [leaving] or every member has a fresh result, [timeout] at most. Member tag → ms of
-  /// the ones that answered this time; null when sing-box refused.
-  Future<Map<String, int>?> testGroup(String group, {String? leaving, required Duration timeout});
 
   /// The open connections now.
   Iterable<LiveConnection> get connections;
@@ -299,34 +289,12 @@ class SingBoxApi implements BoxControl {
   @override
   Future<bool> select(String group, String outbound) async {
     final ok = await _ok(_c.selectOutbound(SelectOutboundRequest(groupTag: group, outboundTag: outbound)));
-    // sing-box pushes groups on urltest results only: keep [selected] true at once
+    // keep [selected] true at once, without waiting for the groups stream
     final g = _groups[group];
     if (ok && g != null) {
-      _groups = {..._groups, group: BoxGroup(g.tag, outbound, g.members, g.results)};
+      _groups = {..._groups, group: BoxGroup(g.tag, outbound, g.members)};
     }
     return ok;
-  }
-
-  @override
-  Future<Map<String, int>?> testGroup(String group, {String? leaving, required Duration timeout}) async {
-    final from = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final members = _groups[group]?.members;
-    if (!await _ok(_c.uRLTest(URLTestRequest(outboundTag: group)))) return null;
-    Map<String, int> fresh() => {
-          for (final e in (_groups[group]?.results ?? const <String, ({int ms, int at})>{}).entries)
-            if (e.value.at >= from) e.key: e.value.ms,
-        };
-    bool done() {
-      final g = _groups[group];
-      if (g == null) return false;
-      if (leaving != null && g.selected != leaving) return true;
-      return members != null && members.isNotEmpty && members.every(fresh().containsKey);
-    }
-
-    if (!done()) {
-      await groupsChanged.firstWhere((_) => done()).timeout(timeout, onTimeout: () {});
-    }
-    return fresh();
   }
 
   @override

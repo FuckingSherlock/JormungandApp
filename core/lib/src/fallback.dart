@@ -15,8 +15,9 @@
 /// comes after `retryPause`, as with Auto) tests the server each target's group stands on
 /// now, with the backup checks (probe.dart `withCheckers`, the AutoService's settings and
 /// probe inbound): a chain's exit, through its entry. A Fastest group whose server missed
-/// has urltest test again and pick again first (as Auto does), a Priority group is never
-/// moved (its server is the user's choice; the target is down while it is). A target is
+/// `failAfter` times in a row moves to the fastest answering one of a fresh check (as Auto does,
+/// group_pick.dart), and while the server answers looks now and then for one faster by the threshold;
+/// a Priority group is never moved (its server is the user's choice; the target is down while it is). A target is
 /// down after `failAfter` misses in a row and back after `failAfter` answers in a row plus,
 /// once it dropped, the flap guard's hold (auto.dart, watched.dart), so a target that
 /// flaps does not make its rules flap.
@@ -52,6 +53,7 @@ import 'dart:async';
 
 import 'auto.dart' show AutoSettings, DelayTest;
 import 'auto_memory.dart';
+import 'group_pick.dart';
 import 'ladder.dart' show LadderGate;
 import 'plan.dart' show topTag;
 import 'pool.dart';
@@ -95,7 +97,7 @@ class _Group {
   String? keyOf(String member) => member.startsWith('$tag/') ? member.substring(tag.length + 1) : null;
 
   /// What sing-box starts the group on.
-  String get initial => member(priority && keys.contains(chosen) ? chosen : keys.first);
+  String get initial => member(keys.contains(chosen) ? chosen : keys.first);
 }
 
 class _Target {
@@ -181,6 +183,9 @@ class FallbackService {
   final _changes = StreamController<FallbackChange>.broadcast();
   Timer? _timer;
   bool _busy = false, _started = false, _stopped = false;
+  bool _kick = false; // a network change came in the middle of a round: another one follows at once
+  bool _improveNow = false; // the network moved: the next round looks for a better server out of turn
+  bool _improveForce = false; // … the running round does
   Duration _ahead = Duration.zero; // the running round asks the unavailable targets due within it too
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
@@ -197,6 +202,19 @@ class FallbackService {
   void start() {
     _started = true;
     _schedule(settings.firstCheck);
+  }
+
+  /// The device moved to another network: a round runs now, out of turn, and in it the Fastest groups look for a better
+  /// server whatever the time since the last look ([_improve]), like Auto's.
+  void networkChanged() {
+    if (_stopped) return;
+    _improveNow = true;
+    if (!_started) return;
+    if (_busy) {
+      _kick = true;
+    } else {
+      _schedule(Duration.zero);
+    }
   }
 
   void stop() {
@@ -216,6 +234,8 @@ class FallbackService {
   Future<void> check() async {
     if (_busy || _stopped) return;
     _busy = true;
+    _improveForce = _improveNow;
+    _improveNow = false;
     try {
       if (!_sync()) return; // sing-box has not told its groups yet
       // the main flow is judged unless the network is known to be down (a dead main flow looks
@@ -233,8 +253,11 @@ class FallbackService {
     } finally {
       _busy = false;
       _ahead = Duration.zero;
+      _improveForce = false;
       final retry = _targets.any((t) => !t.down && t.w.health.fails > 0 && !t.w.isDown(settings));
-      _schedule(retry ? settings.retryPause : settings.checkEvery);
+      final kick = _kick;
+      _kick = false;
+      _schedule(kick ? Duration.zero : retry ? settings.retryPause : settings.checkEvery);
     }
   }
 
@@ -333,11 +356,16 @@ class FallbackService {
 
   /// One test of [tag] through the pool: a fresh enough answer of the same server (Auto's, the
   /// UI's ping) is the result.
-  Future<int> _ping(String identity, String tag, {bool light = false}) => pool.probe(identity, (url) => delay(tag, url, settings.timeoutMs),
+  Future<int> _ping(String identity, String tag, {bool light = false}) async => (await _pingResult(identity, tag, light: light)).ms;
+
+  Future<PoolResult> _pingResult(String identity, String tag, {bool light = false}) => pool.probeResult(identity, (url) => delay(tag, url, settings.timeoutMs),
       url: settings.url, checkers: light ? const [] : settings.checkers, maxAge: settings.reuse);
 
   // A target whose server is unavailable (ladder.dart: found dead, asked on a ladder) is asked on its turn by one
-  // light request, no group test; between the turns it is not judged (null) and stays as it is.
+  // light request; between the turns it is not judged (null) and stays as it is. A Fastest group moves off a
+  // server that missed (after failAfter misses in a row, as Auto's does) to the fastest answering one of a fresh
+  // check (group_pick.dart), and looks for a better one while the server answers ([_improve]); a Priority group
+  // never moves (its server is the user's choice).
   Future<int?> _probe(_Target t) async {
     final id = _identity(t, _current(t)), ladder = pool.ladder;
     final gate = ladder.gate(id, _clock(), ahead: _ahead);
@@ -350,19 +378,105 @@ class FallbackService {
     }
     if (gate == LadderGate.light) {
       final ms = await _ping(id, _current(t), light: true);
-      if (!_stopped) ladder.observe(id, ms, _clock());
-      return ms;
+      if (_stopped) return ms;
+      ladder.observe(id, ms, _clock());
+      return ms >= 0 ? ms : _heal(t); // its turn: the other servers of a Fastest group are looked at too
     }
-    final ms = await _ping(id, _current(t));
-    if (ms >= 0 || _stopped) return ms;
-    // urltest groups have all their servers tested again and pick one that answers
-    var healed = false;
+    final r = await _pingResult(id, _current(t));
+    if (_stopped) return r.ms;
+    if (r.ms >= 0) return await _improve(t, r) ?? r.ms;
+    if (t.w.health.fails + 1 < settings.failAfter) return -1; // this miss is not yet the failAfter-th
+    return _heal(t);
+  }
+
+  // The pool identity of the server [key] of [g] (a chain's exit: with the entry server in use).
+  String _gid(_Target t, _Group g, String key) => identical(g, t.main) ? _identity(t, g.member(key)) : g.ids[key] ?? 'tag:${g.member(key)}';
+
+  // One test of the server [key] of [g] as group_pick.dart asks it.
+  Probe1 _probe1(_Target t, _Group g) => (key) async {
+        final id = _gid(t, g, key);
+        final r = await _pingResult(id, g.member(key));
+        if (r.answered && !_stopped) pool.ladder.observe(id, r.ms, _clock()); // an unavailable server that answers is back
+        return r;
+      };
+
+  // The candidates in the order the batches go by (group_pick.dart): the strong answers in the pool by ms, the group's
+  // order, the unavailable ones last. [key]: the server in use, left out.
+  List<String> _ranked(_Target t, _Group g, String? key, {bool withDead = true}) {
+    final now = _clock();
+    final keys = [
+      for (final k in g.keys)
+        if (k != key && (withDead || !pool.ladder.has(_gid(t, g, k)))) k,
+    ];
+    return rankCandidates(keys, peek: (k) {
+      final p = pool.peek(_gid(t, g, k), url: settings.url, checkers: settings.checkers);
+      return p != null && now - p.at <= const Duration(minutes: 10).inMilliseconds ? p : null;
+    }, dead: (k) => pool.ladder.has(_gid(t, g, k)));
+  }
+
+  Future<bool> _move(_Target t, _Group g, String from, String to) async {
+    if (_stopped || !await api.select(g.tag, g.member(to))) return false;
+    note?.call('rules: ${t.id}: server $from → $to (fastest)');
+    return true;
+  }
+
+  // The target missed: each Fastest group whose own server misses is moved to the fastest answering one. The first
+  // group's miss is the one just seen; a chain's exit is judged again after its entry moved. Returns the target's
+  // delay after the moves (-1 = nothing moved or nobody answered).
+  Future<int> _heal(_Target t) async {
+    var moved = false, entryMoved = false;
     for (final g in [?t.entry, t.main]) {
-      if (g.priority) continue;
-      await api.testGroup(g.tag, leaving: api.selected[g.tag], timeout: Duration(milliseconds: settings.timeoutMs + 5000));
-      healed = true;
+      if (g.priority || _stopped) continue;
+      final cur = g.keyOf(api.selected[g.tag] ?? g.initial);
+      if (cur == null) continue;
+      // (a unit's own server and a chain's exit through an entry that did not move are known to have missed just now)
+      final known = identical(g, t.main) && !entryMoved;
+      if (!known && (await _pingResult(_gid(t, g, cur), g.member(cur))).answered) continue;
+      if (_stopped) return -1;
+      final p = await pickFastest(_ranked(t, g, cur), _probe1(t, g));
+      if (_stopped || !p.found || !await _move(t, g, cur, p.key!)) continue;
+      moved = true;
+      if (identical(g, t.entry)) entryMoved = true;
     }
-    return healed && !_stopped ? _ping(_identity(t, _current(t)), _current(t)) : -1;
+    return moved && !_stopped ? _ping(_identity(t, _current(t)), _current(t)) : -1;
+  }
+
+  final _improvedAt = <String, int>{}; // group tag → when the better-server look last ran
+
+  // The server of a Fastest group answers: once per checkEvery the best of the other servers (the top
+  // [pickFirstBatch] by the ranking) are tested, and the group moves to the fastest one faster by the threshold. An
+  // answer of a backup checker alone is never «faster», and any strong answer beats a weak server in use. Returns the
+  // main group's delay when it moved, else null.
+  Future<int?> _improve(_Target t, PoolResult r) async {
+    int? out;
+    for (final g in [?t.entry, t.main]) {
+      if (g.priority || _stopped) continue;
+      final now = _clock();
+      if (!_improveForce && now - (_improvedAt[g.tag] ?? 0) < settings.checkEvery.inMilliseconds - 1000) continue;
+      final cur = g.keyOf(api.selected[g.tag] ?? g.initial);
+      if (cur == null) continue;
+      _improvedAt[g.tag] = now;
+      final others = _ranked(t, g, cur, withDead: false).take(pickFirstBatch).toList();
+      if (others.isEmpty) continue;
+      // the main group's server was just tested (the target's own test); a chain's entry alone is tested here
+      final own = identical(g, t.main) ? r : await _pingResult(_gid(t, g, cur), g.member(cur));
+      if (_stopped || !own.answered) continue;
+      final probe = _probe1(t, g);
+      final results = await Future.wait(others.map((k) async => (k, await probe(k))));
+      if (_stopped || g.keyOf(api.selected[g.tag] ?? g.initial) != cur) continue;
+      String? best;
+      var bestMs = 0;
+      for (final (k, p) in results) {
+        if (!p.answered || p.byChecker) continue;
+        if (best == null || p.ms < bestMs) {
+          best = k;
+          bestMs = p.ms;
+        }
+      }
+      if (best == null || !(own.byChecker || bestMs + settings.threshold <= own.ms)) continue;
+      if (await _move(t, g, cur, best) && identical(g, t.main)) out = bestMs;
+    }
+    return out;
   }
 
   // Every target is judged first (all the flags set), then the selectors move once to where

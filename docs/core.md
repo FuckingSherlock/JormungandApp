@@ -227,11 +227,11 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
   (`default` = `current`), `route.final = proxy`. У `proxy` и групп маршрутов
   `interrupt_exist_connections: false` (переключение Auto соединений не рвёт); у групп целей
   правил — `true`.
-- `fastest` → `urltest` (interval/tolerance из Auto mode); `priority` → `selector` с
-  `chosen`; `pinned` — сервер закреплён в Manual, AutoService его не двигает.
-- `urltest` до конца своего первого круга замеров (со сотней серверов — около минуты) шлёт
-  всё через первый сервер списка. Поэтому для `fastest` UI передаёт ноды по известному пингу:
-  живые по возрастанию, потом неизмеренные, мёртвые в конце.
+- Любая группа — `selector` (`fastest` и `priority`): `default` = `chosen`, если он среди серверов, иначе
+  первый сервер. Сервер Fastest-группы выбирает ядро (`group_pick.dart`, ниже), sing-box ничего не меряет
+  сам (`urltest` в конфиге нет). `pinned` — сервер закреплён в Manual, AutoService его не двигает.
+- Порядок серверов в плане задаёт, с кого группа стартует и в каком порядке идут пачки замеров: UI передаёт
+  ноды по известному пингу (живые по возрастанию, потом неизмеренные, мёртвые в конце).
 - Режим Rules: правила из `routing` (ниже); «через VPN», `final` и `tunnel-in` ведут в
   selector `proxy`, то есть в маршрут, на котором сейчас Auto. Global — всё в `proxy`,
   правила не применяются.
@@ -255,8 +255,10 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
 текущего — через `retryPause`, и такой раунд меряет только его; «нет сети» — раз в 10 с):
 
 1. На каких серверах стоят группы — из потока групп API service (`api.selected`, приходит
-   после каждого раунда urltest; до первого ответа раунд ничего не решает). Fastest группа
-   текущего маршрута сама сменила сервер → тоже переключение (`reason: fastest`, тост «Auto: …»).
+   после смены выбора; до первого ответа раунд ничего не решает). Выбор сервера группы
+   делает ядро (Fastest — шаги 2 и «Выбор сервера Fastest» ниже): смена сервера Fastest-группы
+   текущего маршрута — событие `auto/fastest` («Auto сменил Fastest-сервер»), смена, увиденная в
+   потоке групп (чужой `SelectOutbound`), события не даёт.
 2. Замер сервера, на котором стоит группа (`_ping`: probe, см. «Пинг» ниже): текущий маршрут, все
    выше него (не при `returnTo: never`), раз в `warmEvery` (на ближайшей проверке, не чаще) ещё `standby` ниже
    (запасные; 0 = нет) — параллельно. Цепочка: вход, потом выход
@@ -271,9 +273,19 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
      сервер до этого промахивался или ещё не мерился. Маршруты выше и запасные — как раньше (через них трафика нет).
      Раунд, пропустивший замер, пишет в лог одну строку `auto: <маршрут> not tested this round: live traffic
      through <сервер> (N connections, M bytes down)` (уровень info, `AutoService.trace`; без него — через `note`).
-   - Fastest: сервер молчит → `URLTest(<группа>)`: urltest перемеряет всех и сам берёт
-     живой; ждём, пока он уйдёт с упавшего или у всех будут свежие результаты
-     (`timeoutMs + 5 с` максимум). Ответившие засчитываются как живые (числа — наши, probe).
+   - Fastest: как и у всех — `failAfter` промахов подряд (настройка Auto mode действует и на Fastest) →
+     ядро выбирает сервер (`pickFastest`, `group_pick.dart`) и делает `SelectOutbound(<группа>)`.
+     **Выбор:** первая пачка — 5 серверов сразу (порядок: свежие сильные ответы пула по ms, остальные в
+     порядке плана, серверы «недоступных» в конце); первый сильный ответ (тест-URL ответил) открывает окно
+     1 с, побеждает самый быстрый сильный ответ окна. Ответ только запасной проверки (`byChecker`, «слабый»)
+     для Fastest не «живой с задержкой»: пачка, закончившаяся одними слабыми, получает ещё ОДНУ волну из 16
+     следующих кандидатов ради сильного ответа; нет сильного — лучший слабый из всех проверенных. Пачка без
+     единого ответа — следующая волна из 16 (параллелизм пинга) и так до первого ответа, без лимита раундов.
+     Нет ответивших — выбор не меняется. Priority — те же пачки, но по порядку пользователя (слабый ответ — ответ).
+   - **Шаг улучшения** (Fastest, сервер в работе отвечает): раз в `checkEvery` (сразу после смены сети —
+     внеочередной раунд) меряются 5 лучших из остальных по тому же порядку; переход, если
+     `ms + threshold <= ms текущего`; слабый ответ никогда не «быстрее», любой сильный лучше слабого
+     текущего. Только группа маршрута в работе (запасные и верхние маршруты не улучшаются).
    - Priority: `failAfter` таймаутов подряд → первый ответивший по порядку (пачки по 10),
      `SelectOutbound(<группа>)`; сервер выше текущего — обратно по правилу `returnTo`.
 3. Маршруты: у текущего `failAfter` таймаутов подряд → вместе меряются маршруты выше и
@@ -430,14 +442,14 @@ sing-box. Ответил — сходит с лесенки сразу и дал
 Тестовые швы `CoreService.probeScout` / `probeElsewhere` подменяют эти две пробы. Ответ `reach` «не знаю» (null) не считается пробой;
 `probeReach` отвечает null и когда проба не состоялась (`ProbeRefused`: probe inbound не принял
 имя пользователя — у групп его нет; inbound не отвечает), false — только если запрос прошёл через
-тег и не удался. Тег группы маршрута (urltest до первого раунда не называет сервер) `AutoService`
+тег и не удался. Тег группы маршрута (sing-box может ещё не назвать её сервер) `AutoService`
 сводит к серверу в работе (`_serverTag`), неизвестен — сайт пропускается. `onLog`: строка
 sing-box `missing default interface` → `offline` (раунды ничего не меряют, как `noNet`),
 `updated default interface` → снова в сети, проверка сразу.
 
 Настройки — `plan.auto` (URL — `urlTest.url`), `checkEvery` 10–3600 с. Тесты: `auto_test.dart`
 (фейковый `BoxControl`), `auto_singbox_test.dart` (настоящий sing-box
-на loopback: переключение без перезапуска, цепочка, urltest, падение процесса). Системный
+на loopback: переключение без перезапуска, цепочка, выбор Fastest ядром, падение процесса). Системный
 прокси в тестах — фейк (`Daemon(sysProxy: …)`): реестр тесты не трогают. Перезапуск, down и kill switch — `killswitch_test.dart`: фейковые sing-box (`process:`), часы и паузы (`now:`, `timer:`), ничего не ждётся.
 
 **API service sing-box** (1.14+, gRPC, `sbapi.dart`) — единственная связь ядра с sing-box
@@ -448,9 +460,9 @@ STARTED — поднялся, FATAL — ошибка с причиной от si
 открытыми (переоткрывает после ошибки) три потока:
 - соединения (раз в 1 с): таблица открытых (сервер — конечный outbound, цепочка, приложение,
   байты и скорость за секунду) и события закрытия (→ Auto `onClosed`);
-- группы: что выбрано в каждом selector / urltest и результаты urltest (→ Auto, трафик);
+- группы: что выбрано в каждом selector (→ Auto, трафик);
 - статус (раз в 1 с): скорость, итоги сессии (с уже закрытыми соединениями), память.
-Команды: `SelectOutbound`, `URLTest`, `CloseConnection` / `CloseAllConnections`,
+Команды: `SelectOutbound`, `CloseConnection` / `CloseAllConnections`,
 `SetClashMode` / `GetClashModeStatus` (DNS на них больше не держится: переключение идёт флагами,
 см. «Правила в конфиге»), `GetDeprecatedWarnings` (после старта — в лог как `warn`: что сломается в конфиге с
 новым sing-box), `StartNetworkQualityTest` (Speed Test). Тестер пинга каталога запускается
@@ -971,7 +983,7 @@ Global, hijack вкл / выкл, системные правила первым
   цели (цепочка — выход через вход); молчит `failAfter` раундов подряд → `SelectOutbound`
   на запасной, тем же путём назад после `failAfter` ответов и паузы flap guard
   (`Watched`, общий с DNS). Fastest-группа при промахе сначала перетестируется
-  (`URLTest` + повтор), Priority не двигается. Замеры — через пул (`pool.dart`, ключ — сервер
+  (выбор ядра `pickFastest`), Priority не двигается. Замеры — через пул (`pool.dart`, ключ — сервер
   и тест; свежий ответ Auto или пинга UI берётся вместо нового теста). Не судит, пока статус
   сети пула не `up` (нет сети / у текущего маршрута Auto промахи). Уход на запасной выход закрывает зависшие
   соединения через цель (`StallSweeper`, общий с Auto: байты стоят `stallAfter`). Выбор в
@@ -1057,7 +1069,7 @@ Global, hijack вкл / выкл, системные правила первым
 |---|---|
 | `GET /` | мокап, с `window.JORMD = true` → live-режим (`95-live.js`) |
 | `GET/PUT /api/state` | снимок состояния UI / статус |
-| `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via}`; `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
+| `POST /api/sources/fetch` | `{sid, source:{url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid, filter, channel}, rediscover}` → `{patch, title, notModified, via, stale?}` (`stale` — пришла копия явно старее применённой: `notModified`, в `patch` только `updatedAt`, ядро пишет строку в Raw); `patch` — серверные поля источника (`nodes`, `gone`, `count`, `uaStrategy`, `discoveredAt`, `usage`, `expire`, `format`, `providerInterval`, `webPage`, `supportUrl`, `announce`, `updatedAt`), UI кладёт их в источник как есть. См. subscription-parsing.md |
 | `POST /api/parse` | `{text}` → ноды из ссылок |
 | `POST /api/sources/import` | `{name, text}` → `{source}`: локальный источник (`kind: 'file'`, без `id` — его выдаёт владелец каталога) из текста выбранного файла (Nodes → + → Import config file). `name` — имя файла, расширение (`.json` `.yaml` `.yml` `.txt` `.conf` `.list`) отбрасывается. Формат определяется по содержимому, как у подписки (sing-box JSON, Clash YAML, список ссылок, всё это и в base64); серверы дедуплицируются и именуются как у подписки. `source`: `{kind, name, enabled, inAuto, offNodes, disabledNodes, nodes, gone, count, format, updatedAt}`. Ничего не распознано или файл > 16 МБ — 400 `{error}` (`No servers found in the file`), ядро ничего не хранит: источник кладёт в каталог и сохраняет вызывающий (`PUT /api/state`). Источник не обновляется ни таймером, ни `fetchSource` (тот отвечает 400). См. connect-model.md → «Локальный источник» |
 | `POST /api/connect` | `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?, dnsAuto?}` — kill switch, см. «Kill switch»; `dnsAuto` — Settings → DNS → Switch automatically (по умолчанию true), см. «Правила в конфиге» |
@@ -1118,8 +1130,8 @@ state, dead?, reserve?}]}`. `racing` — гонка идёт или назнач
 соединение после первого ответа → время первого. Ещё причина не брать Clash API: он молча
 заменяет любой `http://` тест-URL на gstatic (`getProxyDelay` в sing-box), probe берёт URL как есть. Каталог: временный sing-box только с
 `probe-in` (16 параллельно, запасные проверки по две за раз, таймаут 5 с), пары entry→exit — копия выхода с detour на копию
-входа. Auto: `probe-in` рабочего конфига; urltest-группы Fastest внутри sing-box по-прежнему
-выбирают по своему замеру (относительный порядок тот же).
+входа. Auto: `probe-in` рабочего конфига; Fastest-группы выбирает ядро (`group_pick.dart`),
+замеры идут тем же путём, что и пинг.
 
 Exit IP (`exitip.dart`): при подключении **проверку выхода ведёт контроллер (Auto)** и привязывает её к узлу:
 запрос идёт через `probe-in` на правило outbound именно этого узла (`checkExitVia` → `probeGet`), поэтому ответ —
@@ -1294,14 +1306,14 @@ Raw). Событие:
 
 | событие | когда | `data` |
 |---|---|---|
-| `conn/connected` info | подключились (`own: true`, если по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, mode: 'proxy'\|'tun', route: 'global'\|'rules'}` — `server` только если он уже известен (у Fastest его выбирает urltest позже) |
+| `conn/connected` info | подключились (`own: true`, если по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, mode: 'proxy'\|'tun', route: 'global'\|'rules'}` — `server` только если он уже известен (у Fastest до первого выбора ядра это первый сервер группы) |
 | `conn/connectFailed` error | подключение не вышло | `{reason}` |
 | `conn/disconnected` info / error | `by: 'user'` — по команде (`own: true`, пишется, только если было подключено); `by: 'error'` — sing-box не поднялся после всех попыток | `{by, reason?}` |
 | `conn/lost` warn | Auto: ни один маршрут не отвечает (`noNet` стал true из-за проверок) | `{}` |
 | `conn/restored` info | `noNet` снова false | `{downMs}` |
 | `conn/offline` warn / `conn/online` info | у ОС нет сети — по строке sing-box `missing default interface` / `updated default interface` (пока подключено) | `{}` / `{downMs}` |
 | `auto/switched` info | Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
-| `auto/fastest` info | Fastest сам сменил сервер (urltest внутри sing-box) | `{route, from, to}` |
+| `auto/fastest` info | Auto сменил Fastest-сервер (выбор ядра: failAfter промахов или шаг улучшения) | `{route, from, to}` |
 | `auto/unstable` warn | маршрут падает снова и снова (flap guard) | `{id, strikes, holdMs}` |
 | `site/blocked` warn | сайт не открывается через сервер, но открывается через другую нашу ноду (кнопка Create rule): разведчик (рабочая нода той же подписки, другой страны), затем ноды других подписок (всего не больше `siteRetry`); где открылся — `via` / `viaServer`, `viaTarget: 'node:…'`, если это нода того же маршрута (цель правила); порядок и память вердикта — docs/failures.md | `{host, port?, entry, server, dest, via, viaServer, viaTarget?, rule, process?, repeat?}` — `rule` и `process`: см. ниже |
 | `site/unreachable` warn | сайт не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); повторы после вердикта считаются на событии (`repeat`) без проб — память вердикта в docs/failures.md | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?}` — `rule` и `process`: см. ниже; `tried` пуст: нет другого рабочего маршрута, при `retries: 'off'` — повторы выключены (`siteRetry`); без `retries: 'off'` в `data` ещё `check` — `{state: 'pending'\|'off'\|'opens'\|'down'\|'failed', at, kind?, via?, ok?, total?, nodes?, error?, manual?}`, внешний чекер check-host.net (docs/connect-model.md «Внешний чекер»): событие меняется на месте (`rev`), тихое, пока нет `opens` |

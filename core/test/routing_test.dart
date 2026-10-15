@@ -165,7 +165,7 @@ void main() {
       }));
       final outs = (c['outbounds'] as List).cast<Map>();
       expect(outs.where((o) => o['tag'] == 'src:a'), hasLength(1));
-      expect(_out(c, 'src:a')!['type'], 'urltest');
+      expect(_out(c, 'src:a')!['type'], 'selector', reason: 'Fastest groups are selectors too: the core picks the member');
       expect(_out(c, 'src:a')!['outbounds'], ['src:a/a::0', 'src:a/a::1']);
       expect(_out(c, 'chain:c')!['type'], 'selector');
       expect(_out(c, 'chain:c/out::0')!['detour'], 'chain:c>entry');

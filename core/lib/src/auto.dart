@@ -13,9 +13,12 @@
 /// `warmEvery`, the `standby` ones below (spares; 0 = none) — one test per group (a chain:
 /// its entry, then the exit through it):
 ///
-/// - a Fastest group (urltest) whose server did not answer has urltest test again and
-///   pick again at once (sing-box itself drops a server after one miss);
-/// - a Priority group (selector) leaves its server after `failAfter` misses in a row, for
+/// - every group is a selector that only this service moves. A Fastest group leaves its server after `failAfter`
+///   misses in a row, for the fastest one of a fresh check (group_pick.dart: batches, a 1 s window after the first
+///   answer); while the server answers, once per `checkEvery` (and after a change of network) the best other ones are
+///   tested and the group moves to one faster by `threshold` ([AutoService._improve]; an answer of a backup checker
+///   alone is never «faster»);
+/// - a Priority group leaves its server after `failAfter` misses in a row, for
 ///   the first answering one in its order; a server above the current one comes back by
 ///   the return rule (`returnTo`). A pinned server (Manual on a server) is never moved;
 /// - the current route missed: the next rounds test it alone, `retryPause` apart; after
@@ -59,6 +62,7 @@ import 'auto_memory.dart';
 import 'config.dart' show defaultTestUrl, planCheckers;
 import 'exits.dart';
 import 'failures.dart' show ConnOutcome;
+import 'group_pick.dart';
 import 'ladder.dart';
 import 'plan.dart';
 import 'pool.dart';
@@ -184,11 +188,16 @@ class Health {
   int at = 0; // when, ms since epoch
   int? since; // when the answers in a row began
 
+  /// The last answer came from a backup checker alone (the test URL missed through the node, pool.dart
+  /// [PoolResult.byChecker]): it passes traffic, but is never «faster» than a node the URL answered through.
+  bool weak = false;
+
   bool get answered => ms >= 0;
 
-  void record(int delay, int now) {
+  void record(int delay, int now, {bool weak = false}) {
     ms = delay;
     at = now;
+    this.weak = delay >= 0 && weak;
     if (delay >= 0) {
       if (oks == 0) since = now;
       oks++;
@@ -207,21 +216,23 @@ class Health {
     oks = 0;
     at = when;
     since = null;
+    weak = false;
   }
 
-  List<int?> _save() => [ms, fails, oks, at, since];
+  List<int?> _save() => [ms, fails, oks, at, since, weak ? 1 : 0];
   void _load(List<int?> s) {
     ms = s[0]!;
     fails = s[1]!;
     oks = s[2]!;
     at = s[3]!;
     since = s[4];
+    weak = s[5] == 1;
   }
 
-  Map<String, dynamic> toJson() => {'ms': ms, 'fails': fails, 'oks': oks, 'at': at};
+  Map<String, dynamic> toJson() => {'ms': ms, 'fails': fails, 'oks': oks, 'at': at, if (weak) 'weak': true};
 
   /// Everything it holds, for the file ([AutoMemory]); [loadStore] takes it back.
-  Map<String, dynamic> toStore() => {'ms': ms, 'fails': fails, 'oks': oks, 'at': at, if (since != null) 'since': since};
+  Map<String, dynamic> toStore() => {'ms': ms, 'fails': fails, 'oks': oks, 'at': at, if (since != null) 'since': since, if (weak) 'weak': true};
 
   void loadStore(Map j) {
     int n(String k, int d) => j[k] is num ? (j[k] as num).toInt() : d;
@@ -230,6 +241,7 @@ class Health {
     oks = n('oks', 0);
     at = n('at', 0);
     since = j['since'] is num ? (j['since'] as num).toInt() : null;
+    weak = j['weak'] == true && ms >= 0;
   }
 }
 
@@ -319,7 +331,7 @@ class _Group {
       : priority = g['pick'] == 'priority',
         pinned = g['pinned'] == true,
         keys = {for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) '${n['key']}'}.toList() {
-    if (priority && keys.contains(g['chosen'])) now = g['chosen'] as String;
+    if (keys.contains(g['chosen'])) now = g['chosen'] as String; // the selector starts on it: the status knows the server at once
     for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
       final o = n['outbound'];
       ids['${n['key']}'] = o is Map ? serverIdentity(o) : '$tag/${n['key']}'; // no outbound: nothing to share
@@ -349,6 +361,7 @@ class _Group {
   /// memory's, so a service made anew starts from them.
   final health = <String, Health>{};
   String? now; // the server in use (key)
+  int improvedAt = 0; // when the better-server look ([AutoService._improve]) last ran, ms since epoch
   final _missedHere = <String>{}; // the ones with no memory key
 
   String? _own(String key) => memory == null || !real.contains(key) ? null : '$scope|${ids[key]}';
@@ -550,8 +563,7 @@ class AutoService {
     if (n > 0) note?.call('auto: manual: closed $n connection${n == 1 ? '' : 's'} of the route left');
   }
 
-  /// Moves so far (routes and Priority servers, as on [switches]); a Fastest group's own
-  /// re-picks inside sing-box are not counted.
+  /// Moves so far (routes and servers of the groups, as on [switches]).
   int switchCount = 0;
   int? switchedAt;
   AutoSwitch? lastSwitch;
@@ -601,6 +613,8 @@ class AutoService {
   int? _warmedAt; // when the spares were tested last
   bool _directOk = false; // no route answers, but the direct path does (see _decide)
   Duration _ahead = Duration.zero; // the running round asks the unavailable nodes due within it too (ladder.dart)
+  bool _improveNow = false; // the network moved: the next round looks for a better server out of turn ([_improve])
+  bool _improveForce = false; // … the running round does
 
   // Live traffic (see _liveTraffic): the bytes down each open connection of the user's had at the last look, what the
   // closed ones moved since (chain tag → connections, bytes), and whether a request of the user's through the current
@@ -636,6 +650,7 @@ class AutoService {
     memory.resetFlap();
     memory.netUnknown(); // «no network» was found on the old one: unknown until the round below
     pool.ladder.owe();
+    _improveNow = true; // the best server of a Fastest group may be another one on this network: looked at in that round
     // (a node's exit does not depend on the user's network: no exit check starts here, only the hourly timer asks)
     if (_started) _kickNow();
   }
@@ -643,7 +658,7 @@ class AutoService {
   /// Checks on a timer from now on (the first one after `firstCheck`).
   void start() {
     _started = true;
-    // urltest re-picks on its own after its rounds: the groups stream tells at once
+    // a pick made through the API (ours or another's) shows in the groups stream at once
     _groupsSub = api.groupsChanged.listen((_) => refresh());
     _syncExit();
     _schedule(settings.firstCheck);
@@ -693,6 +708,8 @@ class AutoService {
       final ladderSaved = pool.ladder.snapshot();
       final failed = _userFailed;
       _userFailed = false;
+      _improveForce = _improveNow;
+      _improveNow = false;
       final traffic = _liveTraffic(); // taken every round: the next look counts from this one
       final retry = cur.health.fails > 0 && cur.health.fails < settings.failAfter;
       final todo = {index};
@@ -714,6 +731,13 @@ class AutoService {
       _ahead = _ladderWakes(todo) ? settings.ladderAhead : Duration.zero;
       await Future.wait(todo.map((i) => _checkRoute(_routes[i])));
       if (_stopped) return;
+      // (a route proven alive by its traffic was not tested: its Fastest groups are still looked at for a better server)
+      if (live != null && identical(_routes[index], cur)) {
+        for (final g in cur.groups) {
+          if (!g.priority && !g.pinned) await _improve(cur, g, g.current, g.of(g.current).ms, weak: g.of(g.current).weak);
+        }
+        if (_stopped) return;
+      }
       await _decide();
       if (_stopped) return;
       if (!_routes.any((r) => r.checked && r.health.answered)) {
@@ -741,6 +765,7 @@ class AutoService {
     } finally {
       _busy = false;
       _ahead = Duration.zero;
+      _improveForce = false;
       final f = _routes[index].health.fails;
       // the route in use missing is a doubt about the network until something answers
       // (no route answering is one too, unless the direct path answers: the routes are at fault)
@@ -860,7 +885,7 @@ class AutoService {
     final now = _clock();
     for (final g in r.groups) {
       final h = g.of(g.current);
-      h.record(h.ms, now);
+      h.record(h.ms, now, weak: h.weak);
     }
     r.skipped = false;
     r.health.record(r.health.ms, now);
@@ -984,8 +1009,8 @@ class AutoService {
   int _exitSeq = 0;
 
   /// The node in use as an exit check sees it: [tag] its outbound (route's main group member), [id] its [exits] key
-  /// (null = not a shareable node), [key] what the results are kept by. null = not known yet (a Fastest group before
-  /// urltest picked).
+  /// (null = not a shareable node), [key] what the results are kept by. null = not known yet (sing-box has not
+  /// told the group's server and the plan chose none).
   ({String key, String tag, String? id})? _exitSubject() {
     final g = _routes[index].main, k = g.now;
     if (k == null || !g.keys.contains(k)) return null;
@@ -1111,8 +1136,8 @@ class AutoService {
         ok = true;
         break;
       } catch (e) {
-        // every service failing at once, fast, means the tunnel is not carrying yet (a urltest group still on an untested
-        // dead server right after the connect): ask again in a couple of seconds, for up to 15 s, while the node is in use
+        // every service failing at once, fast, means the tunnel is not carrying yet (a group still on a dead server it was
+        // started on, before a check moved it): ask again in a couple of seconds, for up to 15 s, while the node is in use
         if (!_stopped && _exitCur == s.key && sw.elapsed < const Duration(seconds: 3) && since.elapsed < const Duration(seconds: 15)) {
           await Future<void>.delayed(const Duration(seconds: 2));
           if (!_stopped && _exitRunning[s.key] == n && _exitCur == s.key) continue; // the node left meanwhile: the error stands
@@ -1281,8 +1306,7 @@ class AutoService {
 
   // The server tag a site test can go through for a failed connection's outbound [tag]: a
   // server of the route's groups as is; the route's main group itself (its connection's
-  // outbound while a urltest has not finished its first round — sing-box tells no member
-  // yet) = the member in use, when known. Anything else (the entry group, a stranger):
+  // outbound while sing-box tells no member yet) = the member in use, when known. Anything else (the entry group, a stranger):
   // null — the probe inbound has no user for a group, the test would never run.
   String? _serverTag(_Route r, String tag) {
     for (final g in r.groups) {
@@ -1313,9 +1337,9 @@ class AutoService {
     return null;
   }
 
-  /// Reads which route and servers sing-box uses now (the groups stream, sbapi.dart). A
-  /// Fastest group of the current route that moved by itself (urltest re-picked) is a
-  /// switch too (reason `fastest`). False before sing-box first told.
+  /// Reads which route and servers sing-box uses now (the groups stream, sbapi.dart). Every group is a selector
+  /// that only the core moves, so a move seen here is not news: the switches are emitted by [_pick] / [_moveTo]
+  /// alone. False before sing-box first told.
   Future<bool> refresh() async {
     final by = api.selected;
     if (by.isEmpty || _stopped) return false;
@@ -1326,11 +1350,7 @@ class AutoService {
     }
     for (final r in _routes) {
       for (final g in r.groups) {
-        final was = g.now, now = g.keyOf(by[g.tag]) ?? g.now;
-        g.now = now;
-        if (!g.priority && identical(r, _routes[index]) && was != null && now != null && now != was) {
-          _emit(AutoSwitch(route: r.id, from: was, to: now, reason: 'fastest', at: _clock()));
-        }
+        g.now = g.keyOf(by[g.tag]) ?? g.now;
       }
     }
     refreshedAt = _clock();
@@ -1370,8 +1390,69 @@ class AutoService {
       _closeStalled(g.member(key), () => g.current != key);
       return g.of(to).ms;
     }
-    if (ms == _skipped) return -1; // sing-box's own tests watch a Fastest group; a group test for a node known dead is not worth it
-    return ms >= 0 ? ms : _heal(g, key, inUse);
+    // Fastest: the same rule as Priority — the server is left after failAfter misses in a row, for the fastest
+    // answering one (group_pick.dart); while it answers, a better one is looked for now and then ([_improve])
+    if (ms >= 0) return await _improve(r, g, key, ms, weak: g.of(key).weak) ?? ms;
+    if (g.of(key).fails < settings.failAfter) return -1;
+    final to = await _pickFastest(g, [for (final k in g.keys) if (k != key) k], force: force);
+    if (to == null || !await _pick(r, g, to, 'fastest')) return -1;
+    _closeStalled(g.member(key), () => g.current != key);
+    return g.of(to).ms;
+  }
+
+  // One test of the server [k] as group_pick.dart asks it: the pool's result (an unavailable server whose turn has
+  // not come, [_skipped], is a miss).
+  Probe1 _probe1(_Group g, {bool force = false}) => (k) async {
+        final ms = await _test(g, k, force: force);
+        return PoolResult(ms < 0 ? -1 : ms, _clock(), byChecker: ms >= 0 && g.of(k).weak);
+      };
+
+  // The candidates in the order the batches go by: a strong answer in the pool by its ms (not older than
+  // [workingAge]), then the group's order, the unavailable ones last.
+  List<String> _ranked(_Group g, List<String> keys) {
+    final now = _clock();
+    return rankCandidates(keys, peek: (k) {
+      final p = pool.peek(_identity(g, k), url: settings.url, checkers: settings.checkers);
+      return p != null && now - p.at <= workingAge.inMilliseconds ? p : null;
+    }, dead: (k) => pool.ladder.has(_identity(g, k)));
+  }
+
+  // The fastest answering server of [keys] by a fresh check (group_pick.dart); null = none answered.
+  Future<String?> _pickFastest(_Group g, List<String> keys, {bool force = false}) async {
+    if (keys.isEmpty || _stopped) return null;
+    final p = await pickFastest(_ranked(g, keys), _probe1(g, force: force));
+    if (_stopped || !p.found) return null;
+    (trace ?? note)?.call('auto: ${g.member(p.key!)} picked among ${p.tried} tested (${p.answered} answered, ${p.ms} ms${p.weak ? ', by a backup check only' : ''}, ${p.tookMs} ms)');
+    return p.key;
+  }
+
+  // Fastest, the server in use [key] answered ([curMs]; [weak]: by a backup check only): once per checkEvery — or at
+  // once after a change of network — the best of the other servers (the top [pickFirstBatch] by the ranking) are
+  // tested, and the group moves to the fastest one that is faster by the threshold. A weak answer is never faster
+  // (it cannot take the traffic from a server the test URL answers through), and any strong answer beats a weak
+  // server in use. Only for the route in use: a spare is only healed. The tests go through [_test] (pool, ladder).
+  // Returns the new server's ms when it moved, else null.
+  Future<int?> _improve(_Route r, _Group g, String key, int curMs, {bool weak = false}) async {
+    if (g.priority || g.pinned || _stopped || !identical(r, _routes[index]) || curMs < 0) return null;
+    final now = _clock();
+    if (!_improveForce && now - g.improvedAt < settings.checkEvery.inMilliseconds - 1000) return null;
+    g.improvedAt = now;
+    final others = _ranked(g, [for (final k in g.keys) if (k != key && !pool.ladder.has(_identity(g, k))) k]).take(pickFirstBatch).toList();
+    if (others.isEmpty) return null;
+    final probe = _probe1(g);
+    final results = await Future.wait(others.map((k) async => (k, await probe(k))));
+    if (_stopped || g.current != key) return null;
+    String? best;
+    var bestMs = 0;
+    for (final (k, p) in results) {
+      if (!p.answered || p.byChecker) continue;
+      if (best == null || p.ms < bestMs) {
+        best = k;
+        bestMs = p.ms;
+      }
+    }
+    if (best == null || !(weak || bestMs + settings.threshold <= curMs)) return null;
+    return await _pick(r, g, best, 'fastest') ? bestMs : null;
   }
 
   /// The pool identity of a server (pool.dart): its outbound's fingerprint; a chain's exit is
@@ -1437,7 +1518,7 @@ class AutoService {
   /// test URL, then the backup checks at once (withCheckers): it passes traffic when any
   /// answers. Through the pool: a fresh enough answer of the same server is the result.
   /// [light]: the test URL alone, no backup checks (a node on the ladder, ladder.dart).
-  Future<int> _ping(_Group g, String key, {bool light = false}) => pool.probe(_identity(g, key), (url) => _pingUrl(g.member(key), url),
+  Future<PoolResult> _ping(_Group g, String key, {bool light = false}) => pool.probeResult(_identity(g, key), (url) => _pingUrl(g.member(key), url),
       url: settings.url, checkers: light ? const [] : settings.checkers, maxAge: settings.reuseFor(g.of(key)));
 
   Future<int> _pingUrl(String tag, String url) => delay(tag, url, settings.timeoutMs);
@@ -1474,10 +1555,10 @@ class AutoService {
           break;
       }
     }
-    final ms = await _ping(g, key, light: light);
+    final r = await _ping(g, key, light: light), ms = r.ms;
     if (!_stopped) {
       final failing = h.fails > 0;
-      h.record(ms, _clock());
+      h.record(ms, _clock(), weak: r.byChecker);
       if (ms < 0 || failing) memory.changed();
       final back = ladder.observe(id, ms, _clock());
       if (ms >= 0) {
@@ -1535,32 +1616,6 @@ class AutoService {
       if (_mayReturn(g.of(k), curMs) && await _pick(r, g, k, 'back')) return g.of(k).ms;
     }
     return curMs;
-  }
-
-  // Fastest: our failed test does not reach urltest's own history; it tests all its
-  // servers again (the API's group test) and picks among the ones that answer.
-  Future<int> _heal(_Group g, String failed, bool inUse) async {
-    final res = await api.testGroup(g.tag, leaving: g.member(failed), timeout: Duration(milliseconds: settings.timeoutMs + 5000));
-    if (_stopped) return -1;
-    final now = _clock();
-    // urltest's numbers are sing-box's (first request, handshakes and all). The group test
-    // covers every member: the ones missing from the answer missed too (the failed one is
-    // counted once, by its own test just before _heal was called). No fresh result at all =
-    // sing-box skipped the test (it ignores one asked too soon after its last): nothing known.
-    if (res != null && res.isNotEmpty) {
-      for (final k in g.keys) {
-        if (k == failed) continue;
-        final ms = res[g.member(k)] ?? -1;
-        g.of(k).record(ms, now);
-        if (ms < 0) memory.changed();
-        if (ms >= 0) pool.ladder.observe(_identity(g, k), ms, now); // answered the group test: no longer unavailable
-        if (ms < 0 && onDown != null && g.of(k).fails >= settings.failAfter) onDown!(g.tag, k);
-      }
-    }
-    await refresh();
-    if (g.current == failed) return -1;
-    _closeStalled(g.member(failed), () => g.current != failed);
-    return _test(g, g.current, inUse: inUse, force: true); // sing-box picked it: asked now whatever its step
   }
 
   Future<bool> _pick(_Route r, _Group g, String key, String reason) async {

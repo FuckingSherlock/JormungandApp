@@ -137,13 +137,14 @@ void main() {
     expect(down, containsAll(['src:p/s::p1', 'chain:c>entry/s::e', 'chain:c/s::t']));
   });
 
-  test('a Fastest group whose server missed is tested again first: another server answering keeps the target', () async {
+  test('a Fastest group whose server missed failAfter times moves to the fastest answering one: the target stays', () async {
     final r = _Rig(_plan([_rule('r1', 'src:x', 'block')]), {'s::x1': 40, 's::x2': 60});
     await r.svc.check();
     r.fake.alive.remove('s::x1');
     await r.svc.check();
+    expect(r.fake.groups['src:x']!.now, 'src:x/s::x1', reason: 'one miss is not enough with failAfter 2');
     await r.svc.check();
-    expect(r.fake.tested, contains('group:src:x'));
+    expect(r.fake.groups['src:x']!.now, 'src:x/s::x2', reason: 'the second miss: the core picks the fastest answering one');
     expect(r.on('src:x~block'), 'src:x');
     expect(r.svc.isDown('src:x'), isFalse);
     expect(r.changes, isEmpty);
@@ -155,7 +156,6 @@ void main() {
     r.fake.alive.remove('s::p1');
     await r.svc.check();
     await r.svc.check();
-    expect(r.fake.tested.where((t) => t.startsWith('group:')), isEmpty);
     expect(r.on('src:p~block'), 'block');
     expect(r.fake.groups['src:p']!.now, 'src:p/s::p1', reason: 'the user\'s choice stays');
   });

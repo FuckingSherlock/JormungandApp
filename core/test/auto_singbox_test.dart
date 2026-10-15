@@ -262,7 +262,7 @@ void main() {
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
 
-  test('Fastest: urltest re-picks at once when its server stops answering', () async {
+  test('Fastest: the core moves the selector off a server that stops answering after failAfter misses', () async {
     final loop = _Loop();
     await loop.up(['a', 'b']);
     final mixed = await freePort();
@@ -281,29 +281,24 @@ void main() {
         ],
         'mixedPort': mixed,
         'global': true,
-        'urlTest': {'url': loop.url, 'interval': 600},
       };
       final probe = Probe(await freePort());
       await client.start(buildConfig(plan, probe: probe));
       final auto = AutoService(client.api!, plan, delay: probe.delayTest,
           settings: AutoSettings(failAfter: 2, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
-      // urltest's own first round picks one; wait for it
-      for (var i = 0; i < 50 && auto.toJson()['server'] == null; i++) {
-        await auto.refresh();
-        if (auto.toJson()['server'] == null) await Future<void>.delayed(const Duration(milliseconds: 100));
+      // the selector stands on the first member from the start (no urltest round to wait for)
+      for (var i = 0; i < 50 && !await auto.refresh(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100)); // (sing-box tells its groups a moment after the start)
       }
-      final first = auto.toJson()['server'] as String;
-      await loop.stop(first == 's::a' ? 'a' : 'b');
-      // sing-box's URLTest RPC (testGroup) ignores a forced re-test called too soon after
-      // the previous one (an internal cooldown, observed on loopback, outside our control):
-      // retry the round for a while instead of a single check().
-      Map<String, dynamic> j = auto.toJson();
-      for (var i = 0; i < 20 && j['server'] == first; i++) {
-        await auto.check();
-        j = auto.toJson();
-        if (j['server'] == first) await Future<void>.delayed(const Duration(milliseconds: 300));
-      }
-      expect(j['server'], isNot(first));
+      expect(auto.toJson()['server'], 's::a');
+      await auto.check();
+      expect(auto.toJson()['server'], 's::a');
+      await loop.stop('a');
+      await auto.check();
+      expect(auto.toJson()['server'], 's::a', reason: 'one miss is not enough with failAfter 2');
+      await auto.check();
+      final j = auto.toJson();
+      expect(j['server'], 's::b', reason: 'the second miss: the core picked the answering one and selected it');
       expect((j['routes'] as List).first['fails'], 0);
       expect(await _get(mixed, loop.url), 'hello from target');
       auto.stop();

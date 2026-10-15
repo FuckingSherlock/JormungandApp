@@ -1,8 +1,8 @@
 // AutoService against a fake sing-box API service (BoxControl, sbapi.dart). The fake is
 // built from the real config (buildConfig), so the tags the service switches are the ones
 // sing-box would get; it acts like sing-box: a delay test goes through a group to the
-// server it uses now, a chain's exit through its entry group, a group test (testGroup) has
-// a urltest pick again.
+// server it uses now, a chain's exit through its entry group. Every group is a selector:
+// the core picks the member (group_pick.dart) and selects it.
 import 'dart:async';
 
 import 'package:fixnum/fixnum.dart';
@@ -20,23 +20,19 @@ class FakeBox implements BoxControl {
   FakeBox(Map<String, dynamic> config, this.alive) {
     for (final o in (config['outbounds'] as List).cast<Map>()) {
       final tag = o['tag'] as String;
-      if (o['type'] == 'selector' || o['type'] == 'urltest') {
+      if (o['type'] == 'selector') {
         final all = (o['outbounds'] as List).cast<String>();
-        groups[tag] = FakeGroup(o['type'] as String, all, o['type'] == 'selector' ? (o['default'] as String? ?? all.first) : null);
+        groups[tag] = FakeGroup(o['type'] as String, all, o['default'] as String? ?? all.first);
       } else if (o['type'] != 'direct') {
         detours[tag] = o['detour'] as String?;
       }
-    }
-    // sing-box's urltest tests its servers once on start and picks the fastest
-    for (final g in groups.values) {
-      if (g.type == 'urltest') _repick(g);
     }
   }
 
   final Map<String, int> alive; // node key -> ms; missing or -1 = no answer
   final groups = <String, FakeGroup>{};
   final detours = <String, String?>{};
-  final tested = <String>[]; // servers a delay test was asked for, and 'group:<tag>' for a group test
+  final tested = <String>[]; // servers a delay test was asked for
   final conns = <LiveConnection>[]; // open connections, as api.connections would list them
   final closed = <String>[];
   void Function()? onConnections; // before each read of connections (traffic moves)
@@ -65,15 +61,6 @@ class FakeBox implements BoxControl {
     return _delayOf(tag);
   }
 
-  void _repick(FakeGroup g) {
-    String? best;
-    for (final m in g.all) {
-      final d = _delayOf(m);
-      if (d >= 0 && (best == null || d < _delayOf(best))) best = m;
-    }
-    if (best != null) g.now = best;
-  }
-
   @override
   Map<String, String> get selected => {
         for (final e in groups.entries)
@@ -90,21 +77,6 @@ class FakeBox implements BoxControl {
     g.now = outbound;
     _changedCtl.add(null);
     return true;
-  }
-
-  @override
-  Future<Map<String, int>?> testGroup(String group, {String? leaving, required Duration timeout}) async {
-    final g = groups[group];
-    if (g == null) return null;
-    tested.add('group:$group');
-    final res = <String, int>{};
-    for (final m in g.all) {
-      final d = _delayOf(m);
-      if (d >= 0) res[m] = d;
-    }
-    if (g.type == 'urltest') _repick(g);
-    _changedCtl.add(null);
-    return res;
   }
 
   @override
@@ -192,56 +164,118 @@ void main() {
         [3, 0, 3, AutoSettings.allSiteAlternates, 3]);
   });
 
-  test('Fastest: a silent server is replaced inside the route at once, no route switch', () async {
-    final (auto, fake) = setup(plan([unit('A', ['s::a1', 's::a2', 's::a3']), unit('B', ['s::b1'])]), {'s::a1': 40, 's::a2': 80, 's::b1': 30});
+  test('Fastest: leaves a silent server only after failAfter misses, for the fastest answering one; no route switch', () async {
+    final (auto, fake) = setup(plan([unit('A', ['s::a1', 's::a2', 's::a3']), unit('B', ['s::b1'])]), {'s::a1': 40, 's::a2': 80, 's::a3': 60, 's::b1': 30});
     await auto.check();
     expect(auto.toJson()['server'], 's::a1');
     fake.alive.remove('s::a1');
     await auto.check();
+    expect(auto.toJson()['server'], 's::a1', reason: 'one miss is not enough with failAfter 2');
+    await auto.check();
     final j = auto.toJson();
-    // no route switch (still A), but the heal's own refresh() sees the group moved and
-    // counts it as a switch too — refresh() cannot tell a heal's own pick from sing-box
-    // re-picking on its own (the 'refresh(): a Fastest group…' test below)
-    expect([j['now'], j['server'], j['switches'], j['noNet']], ['A', 's::a2', 1, false]);
+    expect([j['now'], j['server'], j['switches'], j['noNet']], ['A', 's::a3', 1, false], reason: 'the fastest of the answering ones');
     expect((j['lastSwitch'] as Map)['reason'], 'fastest');
-    expect((j['routes'] as List).first['fails'], 0);
-    expect(fake.tested, contains('group:route0'));
-    // the group test's silent servers are misses too (the app's ping cache learns them), one each
-    final m = {for (final e in (j['members'] as List).cast<Map>()) e['key']: [e['ms'], e['fails']]};
-    expect([m['s::a1'], m['s::a2'], m['s::a3']], [[-1, 1], [80, 0], [-1, 1]]);
+    expect(fake.groups['route0']!.now, 'route0/s::a3');
   });
 
-  test('refresh(): a Fastest group that moved on its own (urltest re-pick) is a switch, reason fastest', () async {
+  test('Fastest: a faster server is moved to only by more than the threshold, and a weak answer is never faster', () async {
+    final (auto, fake) = setup(plan([unit('A', ['s::a1', 's::a2'])], auto: {'checkEvery': 10}), {'s::a1': 100, 's::a2': 70});
+    await auto.check();
+    expect(auto.toJson()['server'], 's::a1', reason: '70 + 50 > 100: not enough');
+    fake.alive['s::a2'] = 40;
+    await auto.check();
+    expect(auto.toJson()['server'], 's::a1', reason: 'looked at once per checkEvery');
+  });
+
+  group('Fastest: improvement step and weak answers', () {
+    const url = 'https://test.example/', checker = 'https://checker.example/';
+
+    // [weak]: the servers the test URL misses through while the backup checker answers (a weak answer)
+    (AutoService, FakeBox, void Function(int)) rig(Map<String, dynamic> p, Map<String, int> alive, {Set<String> weak = const {}}) {
+      final fake = FakeBox(buildConfig(p), alive);
+      var now = 1000000;
+      Future<int> delay(String tag, String u, int t) async {
+        final ms = await fake.delayTest(tag, u, t);
+        return u == url && weak.any((k) => tag.endsWith('/$k')) ? -1 : ms;
+      }
+
+      final auto = AutoService(fake, p,
+          delay: delay, clock: () => now, settings: const AutoSettings(url: url, checkers: [checker], checkEvery: Duration(seconds: 60), threshold: 50, failAfter: 2));
+      return (auto, fake, (s) => now += s * 1000);
+    }
+
+    test('a move only on ms + threshold <= the current one\'s ms, only in the route in use', () async {
+      final p = plan([unit('A', ['s::a1', 's::a2']), unit('B', ['s::b1', 's::b2'])]);
+      final (auto, fake, _) = rig(p, {'s::a1': 100, 's::a2': 51, 's::b1': 300, 's::b2': 10});
+      await auto.check();
+      expect(fake.groups['route0']!.now, 'route0/s::a1', reason: '51 + 50 > 100');
+      expect(fake.groups['route1']!.now, 'route1/s::b1', reason: 'a route not in use is not improved, however much faster');
+      final (auto2, fake2, _) = rig(p, {'s::a1': 100, 's::a2': 50, 's::b1': 300, 's::b2': 10});
+      await auto2.check();
+      expect(fake2.groups['route0']!.now, 'route0/s::a2', reason: '50 + 50 <= 100');
+      expect(fake2.groups['route1']!.now, 'route1/s::b1');
+    });
+
+    test('looked at once per checkEvery; a network change looks out of turn', () async {
+      final p = plan([unit('A', ['s::a1', 's::a2'])]);
+      final (auto, fake, advance) = rig(p, {'s::a1': 100, 's::a2': 90});
+      await auto.check();
+      expect(fake.groups['route0']!.now, 'route0/s::a1');
+      fake.alive['s::a2'] = 10;
+      advance(5);
+      await auto.check();
+      expect(fake.groups['route0']!.now, 'route0/s::a1', reason: '5 s after the last look: not yet');
+      advance(60);
+      await auto.check();
+      expect(fake.groups['route0']!.now, 'route0/s::a2', reason: 'a checkEvery later');
+      fake.alive.addAll({'s::a2': 100, 's::a1': 10});
+      advance(5);
+      auto.networkChanged();
+      await auto.check();
+      expect(fake.groups['route0']!.now, 'route0/s::a1', reason: 'the network moved: the look is out of turn');
+    });
+
+    test('a weak answer is never faster than a strong server in use', () async {
+      final p = plan([unit('A', ['s::a1', 's::a2'])]);
+      final (auto, fake, _) = rig(p, {'s::a1': 200, 's::a2': 10}, weak: {'s::a2'});
+      await auto.check();
+      await auto.check();
+      expect(fake.groups['route0']!.now, 'route0/s::a1');
+      expect(auto.toJson()['switches'], 0);
+    });
+
+    test('a dead current server goes to a strong one before a weak one; to a weak one only when nothing else answers', () async {
+      final p = plan([unit('A', ['s::a1', 's::a2', 's::a3'])]);
+      final (auto, fake, _) = rig(p, {'s::a1': 20, 's::a2': 20, 's::a3': 150}, weak: {'s::a2'});
+      await auto.check();
+      fake.alive.remove('s::a1');
+      await auto.check();
+      await auto.check();
+      expect(fake.groups['route0']!.now, 'route0/s::a3', reason: 'a3 is slower, but a2 only passed by the checker');
+      final (auto2, fake2, _) = rig(p, {'s::a1': 20, 's::a2': 20}, weak: {'s::a2'});
+      await auto2.check();
+      fake2.alive.remove('s::a1');
+      await auto2.check();
+      await auto2.check();
+      expect(fake2.groups['route0']!.now, 'route0/s::a2', reason: 'nothing else answers: the weak one beats a dead one');
+    });
+  });
+
+  test('refresh(): a move seen in the groups stream is not a switch (only a pick of the core is)', () async {
     final (auto, fake) = setup(plan([unit('A', ['s::a1', 's::a2'])]), {'s::a1': 40, 's::a2': 80});
     await auto.check();
-    expect(auto.toJson()['server'], 's::a1');
     final events = <AutoSwitch>[];
     auto.switches.listen(events.add);
-    fake.groups['route0']!.now = 'route0/s::a2'; // sing-box re-picked on its own (not through AutoService)
-    final again = await auto.refresh();
-    expect(again, isTrue);
+    fake.groups['route0']!.now = 'route0/s::a2';
+    expect(await auto.refresh(), isTrue);
     expect(auto.toJson()['server'], 's::a2');
     await Future<void>.delayed(Duration.zero);
-    expect(events, hasLength(1));
-    expect([events.single.route, events.single.from, events.single.to, events.single.reason], ['A', 's::a1', 's::a2', 'fastest']);
-    expect(events.single.isRoute, isFalse);
+    expect(events, isEmpty);
   });
 
   test('refresh(): false before sing-box first answers (selected empty)', () async {
     final auto = AutoService(_Dead(), plan([unit('A', ['s::a'])]), delay: (tag, url, t) async => -1);
     expect(await auto.refresh(), isFalse);
-  });
-
-  test('BoxControl.testGroup: only the members that answered are in the result, picks the fastest of them, notifies groupsChanged', () async {
-    final (_, fake) = setup(plan([unit('A', ['s::a1', 's::a2', 's::a3'])]), {'s::a1': 40, 's::a2': 20});
-    final changed = <void>[];
-    fake.groupsChanged.listen(changed.add);
-    final res = await fake.testGroup('route0', leaving: 'route0/s::a1', timeout: const Duration(seconds: 1));
-    expect(res, {'route0/s::a1': 40, 'route0/s::a2': 20});
-    expect(fake.groups['route0']!.now, 'route0/s::a2', reason: 'the fastest among the ones that answered');
-    await Future<void>.delayed(Duration.zero);
-    expect(changed, hasLength(1));
-    expect(await fake.testGroup('no-such-group', timeout: const Duration(seconds: 1)), isNull);
   });
 
   test('failover after failAfter misses to the first answering route by priority, back when the top answers again', () async {
@@ -460,13 +494,15 @@ void main() {
     expect([j['server'], j['entryServer'], (j['routes'] as List).first['ms']], ['s::x', 's::e1', 60]);
     fake.alive.remove('s::e1');
     await auto.check();
+    expect(auto.toJson()['entryServer'], 's::e1', reason: 'one miss is not enough with failAfter 2');
+    await auto.check();
     j = auto.toJson();
     expect([j['entryServer'], (j['routes'] as List).first['fails'], (j['routes'] as List).first['ms']], ['s::e2', 0, 70]);
     final keys = [for (final m in (j['members'] as List).cast<Map>()) m['key']];
     expect(keys, containsAll(['s::e1', 's::e2']));
     expect(keys, isNot(contains('s::x')));
     final e1 = (j['members'] as List).cast<Map>().firstWhere((m) => m['key'] == 's::e1');
-    expect([e1['ms'], e1['fails']], [-1, 1]);
+    expect([e1['ms'], e1['fails']], [-1, 2], reason: 'the two misses that moved the entry');
   });
 
   test('chain: a result of an exit belongs to its pair; the entry switching starts a count of its own; status.auto.pairs', () async {
@@ -484,6 +520,7 @@ void main() {
     fake.alive.remove('s::e1');
     fake.alive['s::x'] = 40;
     await auto.check();
+    await auto.check(); // failAfter 2: the second miss of the entry moves it
     expect(auto.toJson()['entryServer'], 's::e2');
     expect([pair('s::e2')['ms'], pair('s::e2')['fails']], [70, 0]);
     expect(pair('s::e1')['fails'], missed, reason: 'the old pair keeps its own count');
@@ -892,9 +929,9 @@ void main() {
       expect(fails, isEmpty);
     });
 
-    // Right after a start sing-box tells no member of a urltest yet, so a failed connection
-    // names the GROUP (`route0`): the probe inbound has no user for a group — the site test
-    // must go to the member in use, or not run at all, never "fail" on a refusal.
+    // A failed connection names the GROUP (`route0`): the probe inbound has no user for a group — the site test
+    // must go to the member in use (the selector's choice: the first member until the core picks another), or not run
+    // at all when sing-box tells none, never "fail" on a refusal.
     test('the failed connection names the route group: the notice has the member in use; unknown member / a stranger tag: no notice', () async {
       final reached = <String>[];
       Future<List<AutoSiteFail>> told(FakeBox Function(Map<String, dynamic> p) box, String outbound, List<String> chain) async {
@@ -917,8 +954,8 @@ void main() {
 
       final known = await told((p) => FakeBox(buildConfig(p), {'s::a': 50, 's::a2': 20, 's::b': 60}), 'route0', const ['route0', 'proxy']);
       expect(known.single.tag, 'route0', reason: 'the failed connection\'s own outbound, as the failure book records it');
-      expect(reached, ['route0/s::a2'], reason: 'the probe goes to the member in use');
-      final unknown = await told((p) => _NoUrltestNow(buildConfig(p), {'s::a': 30, 's::a2': 40, 's::b': 60}), 'route0', const ['route0', 'proxy']);
+      expect(reached, ['route0/s::a'], reason: 'the probe goes to the member in use (a2 is faster, but a is not slower by the threshold)');
+      final unknown = await told((p) => _NoMemberNow(buildConfig(p), {'s::a': 30, 's::a2': 40, 's::b': 60}), 'route0', const ['route0', 'proxy']);
       expect(unknown, isEmpty);
       final stranger = await told((p) => FakeBox(buildConfig(p), {'s::a': 30, 's::a2': 40, 's::b': 60}), 'route0/nope', const ['route0/nope', 'route0', 'proxy']);
       expect(stranger, isEmpty);
@@ -1303,14 +1340,14 @@ void main() {
   });
 }
 
-/// sing-box 1.14 before the first urltest round: `Now()` is "", so no member is reported.
-class _NoUrltestNow extends FakeBox {
-  _NoUrltestNow(super.config, super.alive);
+/// sing-box that does not tell the member of a route group (before its groups are read): no member is reported.
+class _NoMemberNow extends FakeBox {
+  _NoMemberNow(super.config, super.alive);
 
   @override
   Map<String, String> get selected => {
         for (final e in super.selected.entries)
-          if (groups[e.key]?.type != 'urltest') e.key: e.value,
+          if (!e.key.startsWith('route')) e.key: e.value,
       };
 }
 
@@ -1321,8 +1358,6 @@ class _Dead implements BoxControl {
   Stream<void> get groupsChanged => const Stream.empty();
   @override
   Future<bool> select(String group, String outbound) async => false;
-  @override
-  Future<Map<String, int>?> testGroup(String group, {String? leaving, required Duration timeout}) async => null;
   @override
   Iterable<LiveConnection> get connections => const [];
   @override

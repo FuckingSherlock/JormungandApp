@@ -206,6 +206,7 @@ class CoreService implements CoreApi {
     svc: () => svcFetch,
     onSvcFailed: _subFailed,
     onDiverged: _subDiverged,
+    onStale: _subStale,
     onNodes: (sid, nodes) {
       _warmNodes(nodes, 'subscription update');
       _exitSourceRefreshed(sid, nodes);
@@ -1292,6 +1293,7 @@ class CoreService implements CoreApi {
       final s = sentinel.context.network.state;
       if (s != NetState.none && s != NetState.captive) {
         auto.networkChanged(); // (also starts the flap guard over)
+        _fallback?.networkChanged(); // the rule targets' Fastest groups look for a better server out of turn
         autoMemory.network(_directNetKey(), netEpoch);
         unawaited(_dns?.networkChanged()); // the DNS in use is asked at once, in parallel
       }
@@ -1954,7 +1956,7 @@ class CoreService implements CoreApi {
   /// start and after a disconnect, and on demand. A check that finishes after a newer one
   /// started is dropped.
   /// Every service failing at once, fast, means the tunnel itself is not carrying yet (a
-  /// urltest group still on an untested dead server right after connect): ask again in a
+  /// group still on a server that died since it was chosen, right after connect): ask again in a
   /// couple of seconds, for up to 15 s, before reporting the error.
   ///
   /// The direct check (no tunnel) is not repeated while the network is the one the stored result was taken on
@@ -2074,6 +2076,7 @@ class CoreService implements CoreApi {
         rediscover: body['rediscover'] == true,
         onDiverged: _subDiverged,
       );
+      if (r['stale'] case final Map stale) _subStale(stale.cast<String, dynamic>());
       final nodes = (r['patch'] as Map?)?['nodes'];
       if (nodes is List) {
         _warmNodes(nodes, 'subscription update');
@@ -2104,6 +2107,16 @@ class CoreService implements CoreApi {
     _event('sub', 'diverged', 'warn', data,
         note: 'Subscription ${data['name']} (${data['ua']}): the direct (${data['directNodes']} servers) and the tunnel (${data['tunnelNodes']}) '
             'copies have different servers, $used is used (${data['why']}); direct: ${fresh(data['directFresh'])}; tunnel: ${fresh(data['tunnelFresh'])}');
+  }
+
+  /// A subscription answered with a copy clearly older than the one applied before (a stale CDN edge): left out, the
+  /// list stays, the update counts as done. A Raw line (warn) every time, with both moments and the UA; no event.
+  void _subStale(Map<String, dynamic> data) {
+    String moments(Object? m) => m is Map && m.isNotEmpty ? m.entries.map((e) => '${e.key} ${e.value}').join(', ') : 'unknown';
+    logBook.note(
+        'warn',
+        'sub: ${data['name']} (${data['ua']}): the received copy (${data['nodes']} servers; ${moments(data['received'])}) is older than the applied one '
+        '(${moments(data['applied'])}), ${data['why']}: not applied, the list stays; the next update asks again');
   }
 
   /// `sub/failed` of the timer's update when no path brought the subscription: the Sentinel judges it and the event
@@ -2903,8 +2916,8 @@ class CoreService implements CoreApi {
     return status();
   }
 
-  // conn/connected: the entry Auto starts on and its server when known (a Fastest group
-  // has none until urltest picked), the mode (tun / proxy) and the routing.
+  // conn/connected: the entry Auto starts on and its server (the group's chosen member),
+  // the mode (tun / proxy) and the routing.
   Map<String, dynamic> _connectedData(Map<String, dynamic> plan) {
     final routes = planRoutes(plan);
     final i = planCurrent(plan, routes.length);

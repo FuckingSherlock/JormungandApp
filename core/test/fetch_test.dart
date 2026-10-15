@@ -488,6 +488,98 @@ void main() {
       expect(copyFreshness(h('soon', t0), h(t1, t2)), (tunnelNewer: true, why: 'newer: age'));
     });
 
+    group('a copy older than the applied one', () {
+      const lm0 = 'Thu, 15 Oct 2026 10:00:00 GMT', lm1 = 'Thu, 15 Oct 2026 10:00:10 GMT';
+      final big = '$ssSip002\n$ss2022\n$trojanGrpc', small = ssSip002;
+
+      // the answer of the direct side alone (the tunnel is down or late)
+      Future<SubscriptionResult> fetchWith(String links, Map<String, String> headers, SubscriptionResult? applied,
+          {String filter = '', bool rediscover = false, String? url}) async {
+        final svc = await fakeSvc({'direct': body(links, headers: headers)});
+        return fetchSubscription(url ?? dead,
+            userAgent: 'sing-box', svc: svc, filter: filter, rediscover: rediscover, strategy: applied?.strategy ?? const []);
+      }
+
+      test('is left out: nothing to apply, a notModified answer with both moments and the UA', () async {
+        final first = await fetchWith(big, {'last-modified': lm1}, null);
+        expect(first.nodes, hasLength(3));
+        expect(first.strategy.single['fresh'], {'lastModified': DateTime.utc(2026, 10, 15, 10, 0, 10).millisecondsSinceEpoch});
+        final r = await fetchWith(small, {'last-modified': lm0}, first);
+        expect([r.notModified, r.nodes, r.hasUserInfo], [true, isEmpty, false]);
+        expect(r.stale, {
+          'ua': 'sing-box/1.14.2',
+          'why': 'older: lastModified',
+          'applied': {'lastModified': '2026-10-15T10:00:10.000Z'},
+          'received': {'lastModified': '2026-10-15T10:00:00.000Z'},
+          'nodes': 1,
+        });
+      });
+
+      test('newer, equal and unknown are applied (unknown remembers nothing)', () async {
+        final first = await fetchWith(big, {'last-modified': lm1}, null);
+        for (final h in [
+          {'last-modified': 'Thu, 15 Oct 2026 10:00:20 GMT'}, // newer
+          {'last-modified': lm1}, // the same version
+          <String, String>{}, // no way to tell (the test server adds a Date, but no Last-Modified to compare)
+        ]) {
+          final r = await fetchWith(small, h, first);
+          expect([r.stale, r.nodes.length], [isNull, 1], reason: '$h');
+        }
+        final none = await fetchWith(small, {'date': 'Thu, 15 Oct 2026 10:00:20 GMT'}, first);
+        expect(none.strategy.single['fresh'], {'origin': DateTime.utc(2026, 10, 15, 10, 0, 20).millisecondsSinceEpoch});
+      });
+
+      test('Date - Age decides when Last-Modified is not on both, with the margin of 2 s', () async {
+        final first = await fetchWith(big, {'date': 'Thu, 15 Oct 2026 10:01:00 GMT', 'age': '10'}, null); // left the origin 10:00:50
+        expect((await fetchWith(small, {'date': 'Thu, 15 Oct 2026 10:01:30 GMT', 'age': '100'}, first)).stale?['why'], 'older: age'); // left it at 09:59:50
+        expect((await fetchWith(small, {'date': 'Thu, 15 Oct 2026 10:01:00 GMT', 'age': '11'}, first)).stale, isNull); // 1 s: not clear
+      });
+
+      test('a manual reread, another filter and a source with no strategy (new address) compare with nothing', () async {
+        final first = await fetchWith(big, {'last-modified': lm1}, null);
+        expect((await fetchWith(small, {'last-modified': lm0}, first, rediscover: true)).stale, isNull);
+        expect((await fetchWith(small, {'last-modified': lm0}, first, filter: '.')).stale, isNull);
+        expect((await fetchWith(small, {'last-modified': lm0}, null)).stale, isNull);
+        expect((await fetchWith(small, {'last-modified': lm0}, first)).stale, isNotNull);
+      });
+
+      test('two merged copies remember the later known moments', () async {
+        final svc = await fakeSvc({
+          'direct': body(directLinks, headers: {'last-modified': lm1, 'date': 'Thu, 15 Oct 2026 10:02:00 GMT'}),
+          'main': body(tunnelLinks, headers: {'last-modified': lm1, 'date': 'Thu, 15 Oct 2026 10:03:00 GMT'}, delay: const Duration(milliseconds: 100)),
+        });
+        final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: (_) {});
+        expect(r.strategy.single['fresh'], {
+          'lastModified': DateTime.utc(2026, 10, 15, 10, 0, 10).millisecondsSinceEpoch,
+          'origin': DateTime.utc(2026, 10, 15, 10, 3).millisecondsSinceEpoch,
+        });
+      });
+
+      test('updateSubscription: the list and gone stay, only the time moves, the stale data goes up; the memory survives a reload of the state', () async {
+        final dir = await Directory.systemTemp.createTemp('jorm-stale');
+        addTearDown(() => dir.delete(recursive: true));
+        var store = SnapshotStore(File(p.join(dir.path, 'ui-state.json')));
+        final s = <String, dynamic>{'url': dead, 'name': 'Sub', 'userAgent': 'sing-box', 'nodes': [], 'gone': []};
+        final t0 = DateTime(2026, 10, 15, 12);
+        final a = await updateSubscription(s,
+            svc: await fakeSvc({'direct': body(big, headers: {'last-modified': lm1})}), sid: 'src1', now: t0);
+        expect(a, isNot(contains('stale')));
+        s.addAll((a['patch'] as Map).cast<String, dynamic>());
+        expect(s['nodes'], hasLength(3));
+        // the state is written and read again (a restart): the memory is in the strategy
+        await store.save({'sourcesData': {'src1': s}, 'sourceOrder': ['src1']});
+        store = SnapshotStore(File(p.join(dir.path, 'ui-state.json')));
+        final loaded = ((await store.read())!['sourcesData'] as Map)['src1'] as Map<String, dynamic>;
+        final b = await updateSubscription(loaded,
+            svc: await fakeSvc({'direct': body(small, headers: {'last-modified': lm0})}), sid: 'src1', now: t0.add(const Duration(hours: 12)));
+        expect(b['notModified'], isTrue);
+        expect((b['patch'] as Map).keys.toSet(), {'updatedAt'});
+        expect(b['stale'], containsPair('source', 'src1'));
+        expect(b['stale'], containsPair('name', 'Sub'));
+        expect(b['stale'], containsPair('why', 'older: lastModified'));
+      });
+    });
+
     Future<void> oneSideFails(String side, FutureOr<void> Function(HttpRequest) bad, {required String why}) async {
       final other = side == 'main' ? 'direct' : 'main';
       final svc = await fakeSvc({side: bad, other: body('$ssSip002\n$ss2022', delay: const Duration(milliseconds: 150))});

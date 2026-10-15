@@ -25,7 +25,12 @@
   системной цепочки), `probe.dart` `withCheckers` / `probeDelay` (запасные чекеры только если до ноды соединились —
   провал на стадии `socks` = нода не ответила), `pool.dart` (результат помнит «ответил только запасной»),
   `runtime.dart` `measureLatency` (порядок: отвечавшие раньше / верх Auto первыми), `service.dart` `ping`, тесты, `docs/core.md`.
-- Этап 2 (ядро): connect по свежей проверке верха списка, селектор вместо `urltest`, выбор Fastest — ядро.
+- Этап 2 (ядро): connect по свежей проверке верха списка, селектор вместо `urltest`, выбор Fastest — ядро. Схема и
+  решения пользователя — `stage2_design.md`; передача между подэтапами — `stage2a_handover.md`. **2a сделан**
+  (`group_pick.dart`, селектор, `failAfter` на Fastest, шаг улучшения, слабые ответы, цели правил). Дальше 2b
+  (проверка до connect), 2c (цепочки, цели правил при connect). Тест на `FallbackService.networkChanged()` — в 2b.
+- Сделано вне этапов: `sub/diverged` по свежести / объединение, защита от замены подписки старой копией, свои
+  соединения вне книги сбоев.
 - Этап 3: приложение + docs.
 
 ## Сессия 2026-10-14, вечер — итог
@@ -98,6 +103,8 @@
 - Нестабильные под нагрузкой полного прогона (по отдельности проходят): `killjob_test:50` (sing-box пережил ядро), `delta_test` (50 МБ), `report_crypto_test`,
   `exitip_test` (тайминг), `address_test` race, `failover_singbox_test`, `pair_udp_test` (hy2 по UDP на loopback),
   `app/test/live_core_host_test.dart:275`. Разобрать прогоном `--concurrency=1`.
+- `auto_singbox_test.dart:141` (переход между маршрутами, ждёт 'B', получил 'A') один раз упал в наборе файлов агента
+  2a; 3 одиночных прогона и полный набор — зелёные.
 - `dns_sides_singbox_test.dart:47` `_MockDns.start`: UDP bind на порт от `freePort` → errno 10013 (вероятно,
   зарезервированный Windows диапазон: `freePort` проверяет только TCP); по отдельности проходит. `freePort` для UDP —
   проверять и UDP-bind.

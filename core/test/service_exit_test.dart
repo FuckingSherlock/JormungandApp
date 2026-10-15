@@ -23,8 +23,6 @@ class _Api extends SingBoxApi {
   @override
   Future<bool> select(String group, String outbound) => box.select(group, outbound);
   @override
-  Future<Map<String, int>?> testGroup(String group, {String? leaving, required Duration timeout}) => box.testGroup(group, leaving: leaving, timeout: timeout);
-  @override
   Iterable<LiveConnection> get connections => box.connections;
   @override
   Future<bool> closeConnection(String id) => box.closeConnection(id);

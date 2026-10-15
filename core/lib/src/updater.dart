@@ -15,6 +15,10 @@ import 'svc_fetch.dart';
 /// source, `title` is a name suggestion (not applied here). One path for a tap on Update
 /// in the UI and for the timer ([SubscriptionUpdater]).
 ///
+/// An answer clearly older than the copy applied before (by the freshness the strategy entries keep, see
+/// [Freshness]) changes nothing but `updatedAt`: the result is `notModified` and has `stale`, the data for the
+/// journal line (the caller writes it).
+///
 /// A full answer replaces the provider's page / support / announce / interval (one that
 /// stopped sending an announce clears it); a 304 only adds what it carries. Usage and
 /// expiry are taken whenever `subscription-userinfo` came, 304 included.
@@ -81,7 +85,14 @@ Future<Map<String, dynamic>> updateSubscription(
   put('webPage', r.webPage);
   put('supportUrl', r.supportUrl);
   put('announce', r.announce);
-  return {'patch': patch, 'title': r.title, 'notModified': r.notModified, 'via': r.via};
+  return {
+    'patch': patch,
+    'title': r.title,
+    'notModified': r.notModified,
+    'via': r.via,
+    // an older copy than the applied one came and was left out: {source, name, ua, why, applied, received, nodes}
+    if (r.stale != null) 'stale': {'source': sid, 'name': '${s['name'] ?? sid ?? ''}', ...r.stale!},
+  };
 }
 
 /// A failed automatic update is tried again after this (or the source's own period, if
@@ -138,6 +149,7 @@ class SubscriptionUpdater {
     this.onEvent,
     this.onSvcFailed,
     this.onDiverged,
+    this.onStale,
     this.onNodes,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
@@ -168,6 +180,9 @@ class SubscriptionUpdater {
 
   /// Auto: the direct and the tunnel's answers differ (the newer one or the merge was used, `used` says which): `{source, name, host, ua, …}`.
   final void Function(Map<String, dynamic> data)? onDiverged;
+
+  /// The answer was a clearly older copy than the applied one and was left out (`stale` of [updateSubscription]).
+  final void Function(Map<String, dynamic> data)? onStale;
 
   /// An update that landed brought a server list (not a 304): the source's id and the nodes it now holds. The
   /// core resolves their hostnames then (address_resolver.dart); the UI's own updates do the same in the service.
@@ -255,6 +270,7 @@ class SubscriptionUpdater {
         );
         final patch = Map<String, dynamic>.of((r['patch'] as Map).cast<String, dynamic>());
         if (s['lastError'] != null) patch['lastError'] = null; // the card's error strip goes
+        if (r['stale'] case final Map stale) onStale?.call(stale.cast<String, dynamic>());
         if (await store.patchSource(sid, _expect(s), patch)) {
           done.add(sid);
           _report(sid, s, patch);

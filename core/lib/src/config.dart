@@ -14,11 +14,10 @@
 ///   entry: Group }         // chain only: the exit dials through it
 /// Group = { pick: 'fastest' | 'priority', chosen: key?, pinned?: bool, nodes: [{ key, outbound }] }
 /// ```
-/// `fastest` becomes a urltest group (interval = Auto mode's checkEvery, tolerance =
-/// threshold — docs/connect-model.md → «Открытые вопросы для бэка»); `priority` a
-/// selector set to the server the UI picked. The routes sit under the selector `proxy`
-/// (the main flow: what rules send "through the VPN", and `final`); moving between routes
-/// and between Priority servers (failAfter, standby) is the AutoService (auto.dart),
+/// Every group becomes a selector, `fastest` and `priority` alike, started on `chosen` when it is a member, else on
+/// the first; the core moves it (auto.dart; `fastest` picks by a fresh check, group_pick.dart). The routes sit under
+/// the selector `proxy` (the main flow: what rules send "through the VPN", and `final`); moving between routes
+/// and between the servers of a group (failAfter, standby) is the AutoService (auto.dart),
 /// through sing-box's API service (sbapi.dart, added by runtime.dart), with no restart.
 ///
 /// `routing` (rules, apps, quick rules, DNS — routing.dart) adds route rules, the rule
@@ -249,7 +248,6 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     bool Function(DnsCandidate c)? nodeResolverUsable}) {
   final outs = <Map<String, dynamic>>[];
   final tun = planTun(plan);
-  final test = (plan['urlTest'] as Map?) ?? const {};
   final auth = mixedAuthUser(plan);
 
   // [auto]: a main-flow group the AutoService switches — a switch keeps the open
@@ -269,26 +267,16 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     } else if (g['pinLost'] != null) {
       warnings?.add('Manual pick ${g['pinLost']} is no longer a server of its entry: the entry chooses by itself');
     }
-    if (g['pick'] == 'priority') {
-      final chosen = '$tag/${g['chosen']}';
-      outs.add({
-        'type': 'selector',
-        'tag': tag,
-        'outbounds': members,
-        'default': members.contains(chosen) ? chosen : members.first,
-        'interrupt_exist_connections': !auto,
-      });
-    } else {
-      outs.add({
-        'type': 'urltest',
-        'tag': tag,
-        'outbounds': members,
-        'url': test['url'] ?? defaultTestUrl,
-        'interval': '${test['interval'] ?? 60}s',
-        'tolerance': test['tolerance'] ?? 50,
-        'interrupt_exist_connections': !auto,
-      });
-    }
+    // Every group is a selector, Fastest too: the core picks the server by its own fresh check (group_pick.dart) and
+    // starts the group on the one it chose (`chosen`), else on the first
+    final chosen = '$tag/${g['chosen']}';
+    outs.add({
+      'type': 'selector',
+      'tag': tag,
+      'outbounds': members,
+      'default': members.contains(chosen) ? chosen : members.first,
+      'interrupt_exist_connections': !auto,
+    });
   }
 
   final routes = planRoutes(plan), tags = <String>[];

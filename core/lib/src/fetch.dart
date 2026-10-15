@@ -86,7 +86,12 @@ class SubscriptionResult {
     this.supportUrl,
     this.announce,
     this.via = 'direct',
+    this.stale,
   });
+
+  /// The answer was a clearly older copy than the one applied to the source ([notModified] is set too, nothing to
+  /// apply): `{ua, why, applied, received, nodes}`, the moments as text ([Freshness.moments]) and the servers it held.
+  final Map<String, dynamic>? stale;
 
   /// After the filter.
   final List<Node> nodes;
@@ -147,6 +152,7 @@ class SubscriptionResult {
         supportUrl: supportUrl,
         announce: announce,
         via: v,
+        stale: stale,
       );
 
   Map<String, dynamic> toJson() => {
@@ -167,13 +173,16 @@ class SubscriptionResult {
 }
 
 class _Resp {
-  _Resp(this.ua, this.status, this.body, this.headers, {this.parsed, this.diverged = false});
+  _Resp(this.ua, this.status, this.body, this.headers, {this.parsed, this.diverged = false, required this.fresh});
   final String ua;
   final int status;
   final String body;
 
   /// Lower-case names.
   final Map<String, String> headers;
+
+  /// How fresh the list this answer stands for is (two merged copies: the later known moments of the two).
+  final Freshness fresh;
 
   /// The servers when they are not just what [body] holds: the merge of the two copies of Auto.
   final (SubFormat, List<Node>)? parsed;
@@ -242,6 +251,7 @@ Future<_Resp> _get(
   var status = r.status, body = r.body, hdrs = r.headers, kind = r.kind;
   (SubFormat, List<Node>)? parsed;
   var diverged = false;
+  Freshness? merged;
   // Auto: both sides answered whole. A copy that is no answer (no body, no servers in it, a 304) loses to the other
   // one without a word: the data came, how does not matter. Two copies with servers: when their sets differ, the
   // freshness headers say which copy is newer and that one is used; when they cannot tell, the two are merged (the
@@ -279,6 +289,7 @@ Future<_Resp> _get(
             use = t;
             final union = [...tk.values, ...onlyD];
             parsed = (tp.$1, union);
+            merged = Freshness.fromHeaders(d.headers).newerOf(Freshness.fromHeaders(t.headers));
             count = union.length;
         }
         w.onDiverged?.call({
@@ -312,7 +323,8 @@ Future<_Resp> _get(
     kind = use.kind;
   }
   if (kind != SvcKind.direct) w.tunnel = true;
-  return _Resp(ua, status, utf8.decode(body, allowMalformed: true), hdrs, parsed: parsed, diverged: diverged);
+  return _Resp(ua, status, utf8.decode(body, allowMalformed: true), hdrs,
+      parsed: parsed, diverged: diverged, fresh: merged ?? Freshness.fromHeaders(hdrs));
 }
 
 /// One side's whole answer in the Auto comparison.
@@ -368,31 +380,77 @@ DateTime? _httpDate(String? v) {
   }
 }
 
-/// Which of two copies with different server sets is newer by their headers (lower-case names): `tunnelNewer` true /
-/// false, null when they cannot tell; [why] is `newer: lastModified`, `newer: age` or `unknown`
-/// (docs/subscription-parsing.md). `Last-Modified` goes first when both copies have it (the file's own time; the same
-/// value on both is "cannot tell", a later fetch of the same version proves nothing); otherwise the moment each copy
-/// left the origin, `Date − Age` (no `Age` = 0; no `Date`, or a value that is not a number of seconds = unknown).
-({bool? tunnelNewer, String why}) copyFreshness(Map<String, String> direct, Map<String, String> tunnel) {
-  const unknown = (tunnelNewer: null, why: 'unknown');
-  final ld = _httpDate(direct['last-modified']), lt = _httpDate(tunnel['last-modified']);
-  if (ld != null && lt != null) {
-    final gap = lt.difference(ld);
-    if (gap.abs() >= lastModifiedMargin) return (tunnelNewer: gap > Duration.zero, why: 'newer: lastModified');
-    return unknown;
-  }
-  DateTime? origin(Map<String, String> h) {
+/// How fresh a copy of a subscription is: the file's own time (`Last-Modified`) and the moment the copy left the
+/// origin (`Date − Age`; no `Age` = 0; no `Date`, or an `Age` that is not a non-negative number of seconds = unknown).
+/// What a copy applied to a source keeps in its strategy entry (`fresh`), so a later copy can be compared with it.
+class Freshness {
+  const Freshness({this.lastModified, this.origin});
+
+  factory Freshness.fromHeaders(Map<String, String> h) {
     final date = _httpDate(h['date']);
     final raw = h['age']?.trim();
     final age = raw == null || raw.isEmpty ? 0 : int.tryParse(raw);
-    if (date == null || age == null || age < 0) return null;
-    return date.subtract(Duration(seconds: age));
+    return Freshness(
+      lastModified: _httpDate(h['last-modified']),
+      origin: date == null || age == null || age < 0 ? null : date.subtract(Duration(seconds: age)),
+    );
   }
 
-  final od = origin(direct), ot = origin(tunnel);
-  if (od == null || ot == null) return unknown;
-  final gap = ot.difference(od);
-  return gap.abs() >= originMargin ? (tunnelNewer: gap > Duration.zero, why: 'newer: age') : unknown;
+  /// From [toJson]; null when there is nothing in it.
+  static Freshness? fromJson(Object? j) {
+    if (j is! Map) return null;
+    DateTime? at(Object? v) => v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true) : null;
+    final f = Freshness(lastModified: at(j['lastModified']), origin: at(j['origin']));
+    return f.isEmpty ? null : f;
+  }
+
+  final DateTime? lastModified;
+  final DateTime? origin;
+
+  bool get isEmpty => lastModified == null && origin == null;
+
+  Map<String, dynamic> toJson() => {
+        if (lastModified != null) 'lastModified': lastModified!.millisecondsSinceEpoch,
+        if (origin != null) 'origin': origin!.millisecondsSinceEpoch,
+      };
+
+  /// The moments as text, for the journal.
+  Map<String, String> get moments => {
+        if (lastModified != null) 'lastModified': lastModified!.toUtc().toIso8601String(),
+        if (origin != null) 'origin': origin!.toUtc().toIso8601String(),
+      };
+
+  /// Of two copies merged into one list: each moment is the later of the known ones (the list is not older than either).
+  Freshness newerOf(Freshness o) {
+    DateTime? later(DateTime? a, DateTime? b) => a == null ? b : (b == null ? a : (b.isAfter(a) ? b : a));
+    return Freshness(lastModified: later(lastModified, o.lastModified), origin: later(origin, o.origin));
+  }
+}
+
+/// Which of two copies is newer: [secondNewer] true / false, null when they cannot tell; [basis] is `lastModified`,
+/// `age` or `unknown`. `Last-Modified` goes first when both copies have it (the file's own time; the same value on
+/// both is "cannot tell", a later fetch of the same version proves nothing); otherwise the moment each copy left the
+/// origin. The margins are [lastModifiedMargin] and [originMargin].
+({bool? secondNewer, String basis}) compareFreshness(Freshness first, Freshness second) {
+  const unknown = (secondNewer: null, basis: 'unknown');
+  final lf = first.lastModified, ls = second.lastModified;
+  if (lf != null && ls != null) {
+    final gap = ls.difference(lf);
+    if (gap.abs() >= lastModifiedMargin) return (secondNewer: gap > Duration.zero, basis: 'lastModified');
+    return unknown;
+  }
+  final of = first.origin, os = second.origin;
+  if (of == null || os == null) return unknown;
+  final gap = os.difference(of);
+  return gap.abs() >= originMargin ? (secondNewer: gap > Duration.zero, basis: 'age') : unknown;
+}
+
+/// Which of two copies with different server sets is newer by their headers (lower-case names): `tunnelNewer` true /
+/// false, null when they cannot tell; [why] is `newer: lastModified`, `newer: age` or `unknown`
+/// (docs/subscription-parsing.md, [compareFreshness]).
+({bool? tunnelNewer, String why}) copyFreshness(Map<String, String> direct, Map<String, String> tunnel) {
+  final c = compareFreshness(Freshness.fromHeaders(direct), Freshness.fromHeaders(tunnel));
+  return (tunnelNewer: c.secondNewer, why: c.secondNewer == null ? 'unknown' : 'newer: ${c.basis}');
 }
 
 const _divergedNames = 10;
@@ -479,8 +537,12 @@ Future<SubscriptionResult> _fetch(
   required int maxBytes,
 }) async {
   final now = DateTime.now().millisecondsSinceEpoch;
+  // What the applied list was: a manual reread (and a source with no strategy, as after a new address) has no past
+  // to compare with.
+  final prior = rediscover ? const <Map<String, dynamic>>[] : strategy;
   Future<SubscriptionResult> run(List<Map<String, dynamic>> plan, {required bool discovery, required int discoveredAt, bool keepAll = false}) =>
       _run(c, url, plan,
+          prior: prior,
           discovery: discovery,
           discoveredAt: discoveredAt,
           keepAll: keepAll,
@@ -511,6 +573,7 @@ Future<SubscriptionResult> _run(
   _Way c,
   String url,
   List<Map<String, dynamic>> plan, {
+  required List<Map<String, dynamic>> prior,
   required bool discovery,
   required int discoveredAt,
   required String filter,
@@ -585,6 +648,7 @@ Future<SubscriptionResult> _run(
         'unique': unique,
         'parser': parserVersion,
         if (filter.isNotEmpty) 'filter': filter,
+        if (!r.fresh.isEmpty) 'fresh': r.fresh.toJson(),
         if (!r.diverged && r.headers[HttpHeaders.etagHeader] != null) 'etag': r.headers[HttpHeaders.etagHeader],
         if (!r.diverged && r.headers[HttpHeaders.lastModifiedHeader] != null) 'lastModified': r.headers[HttpHeaders.lastModifiedHeader],
       });
@@ -593,6 +657,13 @@ Future<SubscriptionResult> _run(
   if (merged.isEmpty) throw const FormatException('No servers found in the subscription');
   final kept = re == null ? merged.values.toList() : merged.values.where((n) => _keep(re, n)).toList();
   if (kept.isEmpty) throw FormatException('No servers match the filter $filter');
+
+  // A copy clearly older than the applied one (a stale CDN edge) is not applied: the list stays as it is, the answer
+  // counts as a done update, and its headers (usage, announce) are not taken either.
+  final stale = _staleCopy(prior, resps, filter, kept.length);
+  if (stale != null) {
+    return SubscriptionResult(nodes: const [], strategy: plan, discoveredAt: discoveredAt, notModified: true, stale: stale);
+  }
 
   return _withMeta([...used, ...resps.whereType<_Resp>().where((r) => !used.contains(r))], (m) => SubscriptionResult(
         nodes: kept,
@@ -610,6 +681,27 @@ Future<SubscriptionResult> _run(
         supportUrl: m.supportUrl,
         announce: m.announce,
       ));
+}
+
+/// Compares each full answer with the freshness kept in the strategy entry of its UA ([prior]; an entry made by
+/// another parser or filter is another list). Not applied: some answer is clearly older and none is newer (equal,
+/// or no way to tell, is applied as before). Returns the data for the journal, null to apply.
+Map<String, dynamic>? _staleCopy(List<Map<String, dynamic>> prior, List<_Resp?> resps, String filter, int nodes) {
+  Map<String, dynamic>? older;
+  for (final r in resps) {
+    if (r == null || r.status == 304 || r.fresh.isEmpty) continue;
+    Freshness? applied;
+    for (final e in prior) {
+      if (e['ua'] == r.ua && e['parser'] == parserVersion && (e['filter'] ?? '') == filter) applied = Freshness.fromJson(e['fresh']);
+    }
+    if (applied == null) continue;
+    final c = compareFreshness(applied, r.fresh);
+    if (c.secondNewer == true) return null;
+    if (c.secondNewer == false) {
+      older ??= {'ua': r.ua, 'why': 'older: ${c.basis}', 'applied': applied.moments, 'received': r.fresh.moments, 'nodes': nodes};
+    }
+  }
+  return older;
 }
 
 typedef _Meta = ({
