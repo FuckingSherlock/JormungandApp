@@ -485,15 +485,22 @@ List<DnsCandidate> localLast(List<DnsCandidate> l) => [
       ...l.where((c) => c.kind == dnsKindSystem),
     ];
 
+/// The server [nodeResolverOf] picks among the direct side's candidates [direct], null when none qualifies (the OS
+/// resolver then). Also the choice of a throwaway tester's config (config.dart `buildTesterConfig`), which has no routing.
+DnsCandidate? nodeResolverCandidate(List<DnsCandidate> direct, bool Function(DnsCandidate c) usable) {
+  final ok = [for (final c in direct) if (c.kind != dnsKindSystem && c.kind != 'doq' && usable(c)) c];
+  final l = [...ok.where((c) => c.kind == 'doh' || c.kind == 'dot'), ...ok.where((c) => c.kind != 'doh' && c.kind != 'dot')];
+  return l.firstOrNull;
+}
+
 /// The DNS server (its tag) that resolves the names of nodes the core could not pre-resolve in time: the top of the system
 /// chain (docs/rules.md §6 → «Адреса серверов»), never the user's rule DNS. The first enabled direct-side server for
 /// which [usable] says yes (the caller keeps it to built-in servers whose stored verdict is not dead), encrypted before
 /// plain like the address resolver's ladder, DoQ left out; the OS resolver only when there is none.
 String nodeResolverOf(Routing r, bool Function(DnsCandidate c) usable) {
   final direct = r.dnsSides['direct'] ?? const <DnsCandidate>[];
-  final ok = [for (final c in direct) if (c.kind != dnsKindSystem && c.kind != 'doq' && usable(c)) c];
-  final l = [...ok.where((c) => c.kind == 'doh' || c.kind == 'dot'), ...ok.where((c) => c.kind != 'doh' && c.kind != 'dot')];
-  if (l.isNotEmpty) return l.first.tag;
+  final top = nodeResolverCandidate(direct, usable);
+  if (top != null) return top.tag;
   final local = direct.where((c) => c.kind == dnsKindSystem).firstOrNull;
   if (local != null) return local.tag;
   return r.dnsServers.any((s) => s['tag'] == 'local') ? 'local' : r.bootResolver;

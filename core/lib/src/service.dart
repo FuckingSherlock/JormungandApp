@@ -1228,7 +1228,7 @@ class CoreService implements CoreApi {
           return _pinnedExit(pr, tag);
         },
         onExit: _changed,
-        delay:(tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
+        delay:(tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t, unreachedThrows: true),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         onDown: serverDown,
         note: runner.note,
@@ -1423,7 +1423,7 @@ class CoreService implements CoreApi {
   void _startFallback(SingBoxApi api, AutoService auto) {
     if (_fallbacks.isEmpty) return;
     final fb = _fallback = FallbackService(api, _fallbacks,
-        delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t),
+        delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t, unreachedThrows: true),
         settings: auto.settings,
         pool: pool,
         mainIdentity: auto.identityOf,
@@ -2251,15 +2251,21 @@ class CoreService implements CoreApi {
 
   /// The addresses a throwaway test sing-box (ping, speed test) dials: the cache only, never waited for — what
   /// is missing resolves in the background for the next test (a test must not wait for a lookup).
+  /// The pins also hold the address of the tester's resolver server ([_testerResolver]) when it is named by a host
+  /// and the cache has it.
   Future<Pins> _testerPins(Iterable<Map> nodes, Iterable<Map> pairs, String why) async {
     if (!resolveAddresses) return const {};
     try {
       final hosts = nodesHostnames([...nodes, for (final p in pairs) p['entry']]);
       if (hosts.isEmpty) return const {};
       unawaited(addresses.ensure(hosts, why: why, wait: const Duration(seconds: 30)));
-      final pins = pinsFor(hosts, addressBook, ipv6: (await _addressSettings()).ipv6);
+      final settings = await _addressSettings();
+      final pins = pinsFor(hosts, addressBook, ipv6: settings.ipv6);
       _notePins(why, hosts, pins);
-      return pins;
+      final resolver = await _testerResolver();
+      final rj = resolver == null ? null : dnsServerJson(resolver.tag, resolver.addr);
+      final rh = rj == null ? null : hostnameOf(rj['server']);
+      return rh == null ? pins : {...pins, ...pinsFor([rh], addressBook, ipv6: settings.ipv6)};
     } catch (e) {
       logBook.note('warn', 'address: the addresses for $why could not be prepared ($e): the test keeps the names');
       return const {};
@@ -2286,6 +2292,21 @@ class CoreService implements CoreApi {
       parts.add(entry == null ? '${e.key} → ${e.value}' : '${e.key} → ${e.value} (via ${entry.via}, ${((now - entry.at) / 1000).round()} s old)');
     }
     logBook.note('info', 'address: $why: ${parts.join('; ')}${pins.length > max ? '; and ${pins.length - max} more' : ''}');
+  }
+
+  /// Whether the main config may resolve unpinned node names with [c]: a built-in server whose stored verdict is not dead.
+  bool _nodeResolverUsable(DnsCandidate c) => dnsBuiltinIds.contains(c.provider) && dnsBook.deadOf(dnsVerdictKey(c, null)) != true;
+
+  /// The server a throwaway tester resolves the names of nodes not pinned in time with: the same top server of the
+  /// system chain as the main config's ([nodeResolverCandidate], the saved or connected plan's DNS settings); null =
+  /// the OS resolver.
+  Future<DnsCandidate?> _testerResolver() async {
+    try {
+      return nodeResolverCandidate((await _addressSettings()).candidates, _nodeResolverUsable);
+    } catch (e) {
+      logBook.note('warn', 'address: the resolver for the test could not be chosen ($e): the OS resolver is used');
+      return null;
+    }
   }
 
   AddressSettings? _addrSettings;
@@ -2515,7 +2536,7 @@ class CoreService implements CoreApi {
           warnings: warnings,
           info: info,
           pins: pins,
-          nodeResolverUsable: (c) => dnsBuiltinIds.contains(c.provider) && dnsBook.deadOf(dnsVerdictKey(c, null)) != true,
+          nodeResolverUsable: _nodeResolverUsable,
           selfPaths: _selfPaths,
           selfPackages: _selfPackages);
       // every DNS server's flag file must exist before sing-box reads the config; all on at a connect, the last
@@ -3259,7 +3280,8 @@ class CoreService implements CoreApi {
             maxAge: Duration(milliseconds: (body['maxAgeMs'] as num?)?.toInt() ?? 0),
             boxFactory: _loggedBoxes('ping'),
             pins: await _testerPins(nodes, pairs, 'ping'),
-            onResult: (kind, key, ms) => line({'kind': kind, 'key': key, 'ms': ms}),
+            nodeResolver: await _testerResolver(),
+            onResult: (kind, key, ms, byChecker) => line({'kind': kind, 'key': key, 'ms': ms, if (byChecker) 'byChecker': true}),
             onFail: (tag, reason) => why[reason] = (why[reason] ?? 0) + 1,
           );
           network = r.network;
@@ -3313,6 +3335,7 @@ class CoreService implements CoreApi {
           node: node,
           pair: pair,
           pins: await _testerPins([?node], [?pair], 'speed test'),
+          nodeResolver: await _testerResolver(),
           configUrl: '${body['configUrl'] ?? ''}',
           cancel: gone.future,
           boxFactory: _loggedBoxes('speed'),

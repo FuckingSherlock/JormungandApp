@@ -10,6 +10,7 @@ import 'config.dart';
 import 'killjob.dart';
 import 'pool.dart';
 import 'probe.dart';
+import 'routing.dart' show DnsCandidate;
 import 'sbapi.dart';
 
 class SingBoxError implements Exception {
@@ -285,13 +286,14 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
   int parallel = 16,
   ProbePool? pool,
   Duration maxAge = Duration.zero,
-  void Function(String kind, String key, int ms)? onResult,
+  void Function(String kind, String key, int ms, bool byChecker)? onResult,
   void Function(String tag, String reason)? onFail,
   BoxFactory? boxFactory,
   Map<String, String> pins = const {},
+  DnsCandidate? nodeResolver,
 }) async {
   final pl = pool ?? ProbePool.solo();
-  final jobs = <(String, String, String)>[ // kind, key, pool identity
+  final requested = <(String, String, String)>[ // kind, key, pool identity
     for (final n in nodes) ('n', '${n['key']}', serverIdentity(n['outbound'] as Map)),
     for (final pr in pairs)
       (
@@ -300,13 +302,16 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
         pairIdentity(serverIdentity((pr['entry'] as Map)['outbound'] as Map), serverIdentity((pr['exit'] as Map)['outbound'] as Map))
       ),
   ];
+  // the ones that answered before go first, the rest after them; each group in the order asked (the caller puts Auto's top first)
+  bool answeredBefore((String, String, String) j) => pl.peek(j.$3, url: url, checkers: checkers)?.answered == true;
+  final jobs = [...requested.where(answeredBefore), ...requested.where((j) => !answeredBefore(j))];
   BoxRunner? sb;
   Future<Probe>? starting;
   Future<Probe> ensure() => starting ??= () async {
         final pr = Probe(await freePort())..onFail = onFail;
         final box = boxFactory != null ? boxFactory(workDir) : SingBoxProcess(binary, workDir);
         sb = box;
-        await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr, pins: pins));
+        await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr, pins: pins, nodeResolver: nodeResolver));
         return pr;
       }();
   try {
@@ -318,11 +323,13 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
       while (next < jobs.length) {
         final (kind, key, id) = jobs[next++];
         final tag = '${kind == 'n' ? 't' : 'p'}/$key';
-        final ms = await pl.probe(id, (u) async => (await ensure()).delay(tag, u, timeoutMs: timeoutMs),
+        // a node that cannot be dialled (the SOCKS stage fails) is dead at once: backup checks only for a reached node
+        final r = await pl.probeResult(id, (u) async => (await ensure()).delay(tag, u, timeoutMs: timeoutMs, unreachedThrows: true),
             url: url, checkers: checkers, maxAge: maxAge, checkerFanOut: 2);
+        final ms = r.ms;
         pl.ladder.observe(id, ms, pl.now); // a check of the user's: an unavailable node that answers is back (ladder.dart)
         (kind == 'n' ? res.nodes : res.pairs)[key] = ms;
-        onResult?.call(kind, key, ms);
+        onResult?.call(kind, key, ms, r.byChecker);
       }
     }
 
@@ -359,9 +366,10 @@ Future<void> speedTest({
   Future<void>? cancel,
   BoxFactory? boxFactory,
   Map<String, String> pins = const {},
+  DnsCandidate? nodeResolver,
 }) async {
   final sb = boxFactory != null ? boxFactory(workDir) : SingBoxProcess(binary, workDir);
-  await sb.start(buildTesterConfig(nodes: [?node], pairs: [?pair], pins: pins));
+  await sb.start(buildTesterConfig(nodes: [?node], pairs: [?pair], pins: pins, nodeResolver: nodeResolver));
   try {
     final tag = node != null ? 't/${node['key']}' : 'p/${pair!['key']}';
     final stream = sb.api!.speedTest(tag, configUrl: configUrl);

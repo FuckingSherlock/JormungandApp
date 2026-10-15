@@ -354,6 +354,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
   // 'direct' is tested too, always: the network check of the probe pool (pool.dart) tells a
   // dead network from dead routes by the direct path answering
+  probe?.relays.addAll(_relays(outs));
   final pr = probe?.inbound([..._servers(outs), 'direct'],
       dnsServers: [for (final s in [...routing.dnsEnabled, ...routing.dnsExtra]) s.tag],
       flagChecks: {for (final k in routing.dnsFlagChecks) k.candidate.tag: k.address});
@@ -527,12 +528,16 @@ List<String> tunDirectPackages(Map<String, dynamic> plan) {
 /// every node as `t/<key>`, every entry → exit pair as `p/<key>` (the exit dialing
 /// through its own copy of the entry, `pe/<key>`). [pins]: the addresses of the servers named by a host
 /// (address_pin.dart), so a test dials the same address a connect would; an exit is not pinned (it is reached
-/// through its entry).
+/// through its entry). [nodeResolver]: the top server of the system chain ([nodeResolverCandidate], what the main
+/// config resolves unpinned node names with): a server still named by a host (not pinned) gets it as its
+/// `domain_resolver`, a pair's exit none (reached through its entry); null = the OS resolver, as the main config's.
+/// The server itself is one of the tester's DNS servers, its own host pinned from [pins] or looked up by the OS resolver.
 Map<String, dynamic> buildTesterConfig({
   required List<Map> nodes,
   List<Map> pairs = const [],
   Probe? probe,
   Map<String, String> pins = const {},
+  DnsCandidate? nodeResolver,
 }) {
   final outs = <Map<String, dynamic>>[
     {'type': 'direct', 'tag': 'direct'},
@@ -544,6 +549,18 @@ Map<String, dynamic> buildTesterConfig({
     outs.add({...pinOutbound((entry['outbound'] as Map).cast<String, dynamic>(), pins), 'tag': 'pe/${p['key']}'});
     outs.add({...(exit['outbound'] as Map).cast<String, dynamic>(), 'tag': 'p/${p['key']}', 'detour': 'pe/${p['key']}'});
   }
+  final dnsServers = <Map<String, dynamic>>[];
+  final server = nodeResolver == null ? null : dnsServerJson(nodeResolver.tag, nodeResolver.addr);
+  if (nodeResolver != null && server != null) {
+    for (var i = 0; i < outs.length; i++) {
+      if (outs[i]['domain_resolver'] == null && _resolvedByCore(outs[i])) outs[i] = {...outs[i], 'domain_resolver': nodeResolver.tag};
+    }
+    if (outs.any((o) => o['domain_resolver'] == nodeResolver.tag)) {
+      // a host-named server of its own is bootstrapped by the OS resolver when it has no pinned address
+      dnsServers.add(pinDnsServer(hostnameOf(server['server']) != null ? {...server, 'domain_resolver': 'local'} : server, pins));
+    }
+  }
+  probe?.relays.addAll(_relays(outs));
   final pr = probe?.inbound([..._servers(outs), 'direct']); // direct: the network check (pool.dart)
   return {
     'log': {'level': 'warn'},
@@ -551,6 +568,7 @@ Map<String, dynamic> buildTesterConfig({
     'dns': {
       'servers': [
         {'type': 'local', 'tag': 'local'},
+        ...dnsServers,
       ],
     },
     'outbounds': outs,
@@ -562,6 +580,12 @@ Map<String, dynamic> buildTesterConfig({
     },
   };
 }
+
+/// The tags of the outbounds whose dial waits for the destination's connect ([Probe.relayTypes]).
+Iterable<String> _relays(List<Map<String, dynamic>> outs) => [
+      for (final o in outs)
+        if (Probe.relayTypes.contains(o['type'])) '${o['tag']}',
+    ];
 
 /// The outbounds that are servers (not groups, not direct / block): what a probe tests.
 Iterable<String> _servers(List<Map<String, dynamic>> outs) => [

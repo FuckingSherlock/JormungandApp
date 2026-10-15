@@ -92,4 +92,47 @@ void main() {
       expect(await withCheckers(test, 'url', ['a', 'b', 'c'], fanOut: 2), -1);
     });
   });
+
+  group('checkWithBackups: a node that was not reached', () {
+    test('NodeUnreachable: dead at once, no checker asked', () async {
+      final called = <String>[];
+      Future<int> test(String u) async {
+        called.add(u);
+        throw const NodeUnreachable('socks: reply 1');
+      }
+
+      expect(await checkWithBackups(test, 'url', ['a', 'b']), (ms: -1, byChecker: false));
+      expect(await withCheckers(test, 'url', ['a', 'b']), -1);
+      expect(called, ['url', 'url'], reason: 'one test per call, never a checker');
+    });
+
+    test('a later miss (the node was reached) runs the checkers; byChecker only when one of them answered', () async {
+      Future<int> test(String u) async => u == 'ok' ? 7 : -1;
+      expect(await checkWithBackups(test, 'url', ['bad', 'ok']), (ms: 7, byChecker: true));
+      expect(await checkWithBackups(test, 'url', ['bad']), (ms: -1, byChecker: false));
+      expect(await checkWithBackups(test, 'ok', ['bad']), (ms: 7, byChecker: false), reason: 'the test URL answered itself');
+    });
+
+    test('an ordinary error of the test is a miss (checkers run), not an unreached node', () async {
+      final called = <String>[];
+      Future<int> test(String u) async {
+        called.add(u);
+        if (u == 'url') throw StateError('boom');
+        return 3;
+      }
+
+      expect(await checkWithBackups(test, 'url', ['a']), (ms: 3, byChecker: true));
+      expect(called, ['url', 'a']);
+    });
+
+    test('the checker that fails with NodeUnreachable is only a miss of that checker', () async {
+      Future<int> test(String u) async {
+        if (u == 'url') return -1;
+        if (u == 'a') throw const NodeUnreachable('x');
+        return 5;
+      }
+
+      expect(await checkWithBackups(test, 'url', ['a', 'b']), (ms: 5, byChecker: true));
+    });
+  });
 }

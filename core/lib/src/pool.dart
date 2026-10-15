@@ -28,7 +28,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'ladder.dart';
-import 'probe.dart' show withCheckers;
+import 'probe.dart' show checkWithBackups;
 
 enum NetStatus { up, down, unknown }
 
@@ -58,13 +58,17 @@ String pairIdentity(String entry, String exit) => '$entry>$exit';
 
 /// The last result of one key.
 class PoolResult {
-  const PoolResult(this.ms, this.at);
+  const PoolResult(this.ms, this.at, {this.byChecker = false});
 
   /// Delay in ms; -1 = no answer.
   final int ms;
 
   /// When it was measured, ms since epoch.
   final int at;
+
+  /// The test URL missed and only a backup checker answered ([withCheckers]): the node passes traffic, but the URL
+  /// asked for was not answered through it. [ms] is the checker's.
+  final bool byChecker;
 
   bool get answered => ms >= 0;
 }
@@ -91,7 +95,7 @@ class ProbePool {
   final int Function() _clock;
   final bool _share;
   final _results = <String, PoolResult>{};
-  final _inflight = <String, Future<int>>{};
+  final _inflight = <String, Future<PoolResult>>{};
 
   /// The nodes found dead and asked again on a ladder instead of every round (ladder.dart). Kept for as long
   /// as the pool is (and across the app's restarts, [DeadLadderStore]), so a new connection does not start them over.
@@ -118,29 +122,41 @@ class ProbePool {
     Duration maxAge = Duration.zero,
     Duration missAge = Duration.zero,
     int checkerFanOut = 0,
+  }) async =>
+      (await probeResult(identity, one, url: url, checkers: checkers, maxAge: maxAge, missAge: missAge, checkerFanOut: checkerFanOut)).ms;
+
+  /// [probe] with the whole result ([PoolResult.byChecker]). A node that [one] says could not be reached
+  /// ([NodeUnreachable]) is a miss at once, its backup checks not asked.
+  Future<PoolResult> probeResult(
+    String identity,
+    Future<int> Function(String url) one, {
+    required String url,
+    List<String> checkers = const [],
+    Duration maxAge = Duration.zero,
+    Duration missAge = Duration.zero,
+    int checkerFanOut = 0,
   }) {
     final key = keyOf(identity, url, checkers);
     final had = _results[key];
     if (_share && had != null) {
       final age = _clock() - had.at;
       final limit = had.answered ? maxAge : (missAge < missCap ? missAge : missCap);
-      if (limit > Duration.zero && age <= limit.inMilliseconds) return Future.value(had.ms);
+      if (limit > Duration.zero && age <= limit.inMilliseconds) return Future.value(had);
     }
     final running = _inflight[key];
     if (running != null) return running;
-    final done = Completer<int>();
+    final done = Completer<PoolResult>();
     _inflight[key] = done.future;
-    withCheckers(one, url, checkers, fanOut: checkerFanOut).catchError((_) => -1).then((ms) {
+    checkWithBackups(one, url, checkers, fanOut: checkerFanOut).catchError((_) => (ms: -1, byChecker: false)).then((r) {
       _inflight.remove(key);
-      _put(key, ms);
-      done.complete(ms);
+      done.complete(_put(key, r.ms, byChecker: r.byChecker));
     });
     return done.future;
   }
 
   /// A result measured elsewhere (the UI's ping): the pool has it from now on.
-  void record(String identity, int ms, {required String url, List<String> checkers = const []}) {
-    _put(keyOf(identity, url, checkers), ms);
+  void record(String identity, int ms, {required String url, List<String> checkers = const [], bool byChecker = false}) {
+    _put(keyOf(identity, url, checkers), ms, byChecker: byChecker);
     ladder.observe(identity, ms, _clock());
   }
 
@@ -153,13 +169,14 @@ class ProbePool {
     return _share && had != null && had.answered && maxAge > Duration.zero && _clock() - had.at <= maxAge.inMilliseconds;
   }
 
-  void _put(String key, int ms) {
-    _results[key] = PoolResult(ms, _clock());
+  PoolResult _put(String key, int ms, {bool byChecker = false}) {
+    final r = _results[key] = PoolResult(ms, _clock(), byChecker: byChecker && ms >= 0);
     if (_results.length > 5000) {
       final old = _clock() - 600000;
       _results.removeWhere((_, r) => r.at < old);
     }
     if (ms >= 0) answered();
+    return r;
   }
 
   /// Whether the direct path answers ([directIdentity] through the pool; an answer is `up`).

@@ -643,5 +643,34 @@ void main() {
       expect(t['p/p']!['server'], 'one.example'); // the exit is reached through its entry
       expect(buildTesterConfig(nodes: [node('a', 'one.example')])['outbounds'][1]['server'], 'one.example');
     });
+
+    test('buildTesterConfig: the resolver of node names is the top of the system chain; none for a pinned server and a pair exit', () {
+      final top = doh('cf', 'https://cloudflare-dns.com/dns-query');
+      Map<String, Map> byTag(Map<String, dynamic> cfg) => {for (final o in cfg['outbounds'] as List) (o as Map)['tag'] as String: o};
+      List<String> dnsTags(Map<String, dynamic> cfg) => [for (final s in (cfg['dns'] as Map)['servers'] as List) (s as Map)['tag'] as String];
+
+      // an unpinned name: its outbound resolves through the server, which is one of the tester's DNS servers
+      final plain = buildTesterConfig(nodes: [node('a', 'one.example')], nodeResolver: top);
+      expect(byTag(plain)['t/a']!['domain_resolver'], 'dns-cf');
+      expect(dnsTags(plain), ['local', 'dns-cf']);
+      // a pinned one has an address: nothing to resolve, and the server is not added when nothing uses it
+      final pinned = buildTesterConfig(nodes: [node('a', 'one.example')], pins: {'one.example': '203.0.113.1'}, nodeResolver: top);
+      expect(byTag(pinned)['t/a']!.containsKey('domain_resolver'), isFalse);
+      expect(dnsTags(pinned), ['local']);
+      // a pair: the entry by name resolves like a node, the exit is reached through the entry
+      final pair = buildTesterConfig(nodes: const [], pairs: [
+        {'key': 'p', 'entry': node('e', 'entry.example'), 'exit': node('x', 'exit.example')},
+      ], nodeResolver: top);
+      expect(byTag(pair)['pe/p']!['domain_resolver'], 'dns-cf');
+      expect(byTag(pair)['p/p']!.containsKey('domain_resolver'), isFalse);
+      // no resolver given: the OS one, as before
+      final none = buildTesterConfig(nodes: [node('a', 'one.example')]);
+      expect(byTag(none)['t/a']!.containsKey('domain_resolver'), isFalse);
+      expect(dnsTags(none), ['local']);
+      // the choice itself: encrypted first, the OS resolver and DoQ never, an unusable one skipped
+      expect(nodeResolverCandidate([localC(), udp('q9', '9.9.9.9'), top], (_) => true)!.tag, 'dns-cf');
+      expect(nodeResolverCandidate([localC(), udp('q9', '9.9.9.9')], (c) => c.provider != 'cf')!.tag, 'dns-q9');
+      expect(nodeResolverCandidate([localC()], (_) => true), isNull);
+    });
   });
 }

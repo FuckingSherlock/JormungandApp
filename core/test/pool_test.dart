@@ -59,6 +59,35 @@ void main() {
       expect(asked, [_url], reason: 'the second asker took the first one\'s result');
     });
 
+    test('byChecker: kept in the pool only for an answer a backup checker gave; an unreachable node is a miss with no checker asked', () async {
+      Future<int> viaChecker(String u) async {
+        asked.add(u);
+        return u == 'https://c.example/' ? 25 : -1;
+      }
+
+      final r = await pool.probeResult('s1', viaChecker, url: _url, checkers: ['https://c.example/']);
+      expect((r.ms, r.byChecker), (25, true));
+      expect(pool.peek('s1', url: _url, checkers: ['https://c.example/'])!.byChecker, isTrue);
+      expect(await pool.probe('s1', viaChecker, url: _url, checkers: ['https://c.example/'], maxAge: const Duration(minutes: 1)), 25, reason: 'probe() still gives the ms');
+      final direct = await pool.probeResult('s2', one(10), url: _url);
+      expect(direct.byChecker, isFalse);
+
+      asked.clear();
+      Future<int> unreachable(String u) async {
+        asked.add(u);
+        throw const NodeUnreachable('socks: reply 1');
+      }
+
+      final dead = await pool.probeResult('s3', unreachable, url: _url, checkers: ['https://c.example/']);
+      expect((dead.ms, dead.byChecker), (-1, false));
+      expect(asked, [_url], reason: 'no backup checker for a node that was not reached');
+      // a result measured elsewhere (the UI's ping) keeps the flag too
+      pool.record('s4', 40, url: _url, byChecker: true);
+      expect(pool.peek('s4', url: _url)!.byChecker, isTrue);
+      pool.record('s4', -1, url: _url, byChecker: true);
+      expect(pool.peek('s4', url: _url)!.byChecker, isFalse, reason: 'a miss is never "answered by a checker"');
+    });
+
     test('another server, URL or set of checkers is another key', () async {
       final gate = Completer<void>();
       final all = [

@@ -31,6 +31,15 @@ class Probe {
   /// set by the caller that wants the reasons in the log (a UI ping), not by Auto.
   void Function(String tag, String reason)? onFail;
 
+  /// The outbound types whose dial waits for the destination's own connect (the upstream relays it: a SOCKS5 reply, an
+  /// HTTP CONNECT status, an SSH channel-open answer): a failure at the SOCKS stage through them may be the test
+  /// host's, not the node's, so it never counts as "node not reached" (the old way: the backup checks run).
+  static const relayTypes = {'socks', 'http', 'ssh'};
+
+  /// The tags of the outbounds of a [relayTypes] type (set by the config builders, config.dart); see [probeDelay]
+  /// `unreachedThrows`.
+  final relays = <String>{};
+
   /// The user name that has a name resolved through the DNS server [tag] and nothing else.
   static String dnsUser(String tag) => 'dns-check/$tag';
 
@@ -77,7 +86,11 @@ class Probe {
 
   /// ms of one round trip through [tag] to [url] on an open connection; the first
   /// request's time when the server will not keep the connection; -1 = no answer.
-  Future<int> delay(String tag, String url, {int timeoutMs = 5000}) => probeDelay(this, tag, url, timeoutMs: timeoutMs);
+  ///
+  /// [unreachedThrows]: a node that could not be dialled throws [NodeUnreachable] (see [probeDelay]) instead of -1, so
+  /// [withCheckers] skips the backup checks of a dead node; the tests that want that (the pool's) set it.
+  Future<int> delay(String tag, String url, {int timeoutMs = 5000, bool unreachedThrows = false}) =>
+      probeDelay(this, tag, url, timeoutMs: timeoutMs, unreachedThrows: unreachedThrows);
 
   /// [delay] as AutoService takes it.
   Future<int> Function(String tag, String url, int timeoutMs) get delayTest => (tag, url, t) => delay(tag, url, timeoutMs: t);
@@ -95,17 +108,45 @@ class Probe {
 /// already missed.) [fanOut] > 0 asks the checkers [fanOut] at a time (the next group only when
 /// the one before did not answer): a ping run over hundreds of servers keeps fewer connections
 /// open; 0 = all at once (Auto's way, where the answer must come at the fastest).
-Future<int> withCheckers(Future<int> Function(String url) test, String url, List<String> checkers, {int fanOut = 0}) async {
-  final ms = await test(url).catchError((_) => -1);
+///
+/// The checkers are for a node that was reached and did not answer for the test URL (one blocked host must not make a
+/// working node look dead). A [test] that throws [NodeUnreachable] (the node itself could not be dialled: [Probe.delay]
+/// with `unreachedThrows`) makes the node dead at once: no checkers, -1.
+Future<int> withCheckers(Future<int> Function(String url) test, String url, List<String> checkers, {int fanOut = 0}) async =>
+    (await checkWithBackups(test, url, checkers, fanOut: fanOut)).ms;
+
+/// [withCheckers] with how it was answered: [byChecker] = the test URL missed and a backup checker answered (the node
+/// passes traffic, but a test of the URL asked for is not proven).
+Future<({int ms, bool byChecker})> checkWithBackups(Future<int> Function(String url) test, String url, List<String> checkers, {int fanOut = 0}) async {
+  int ms;
+  try {
+    ms = await test(url);
+  } on NodeUnreachable {
+    return (ms: -1, byChecker: false);
+  } catch (_) {
+    ms = -1;
+  }
   final rest = [for (final c in checkers) if (c != url) c];
-  if (ms >= 0 || rest.isEmpty) return ms;
+  if (ms >= 0) return (ms: ms, byChecker: false);
+  if (rest.isEmpty) return (ms: -1, byChecker: false);
   final size = fanOut <= 0 ? rest.length : fanOut;
   for (var i = 0; i < rest.length; i += size) {
     final group = rest.sublist(i, i + size > rest.length ? rest.length : i + size);
     final v = await _firstAnswer(test, group);
-    if (v >= 0) return v;
+    if (v >= 0) return (ms: v, byChecker: true);
   }
-  return -1;
+  return (ms: -1, byChecker: false);
+}
+
+/// The node itself could not be reached: its test failed at the SOCKS stage of [probeDelay] (sing-box answers the SOCKS
+/// CONNECT only after its outbound dialled the server: no reply in time or a failure reply = the server did not take
+/// the connection). Thrown by [Probe.delay] with `unreachedThrows`; [withCheckers] reads it as a dead node.
+class NodeUnreachable implements Exception {
+  const NodeUnreachable(this.reason);
+  final String reason;
+
+  @override
+  String toString() => 'NodeUnreachable: $reason';
 }
 
 /// The ms of the first of [urls] that answers, all asked at once; -1 when none did.
@@ -125,7 +166,10 @@ Future<int> _firstAnswer(Future<int> Function(String url) test, List<String> url
   return done.future;
 }
 
-Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 5000}) async {
+/// [unreachedThrows]: a failure at the SOCKS stage that says the node was not reached (no reply in time, a failure
+/// reply of sing-box) throws [NodeUnreachable] instead of returning -1 (after [Probe.onFail] heard of it). Not for a
+/// tag in [Probe.relays] (socks / ssh servers pass the test host's own connect failure back as the same reply).
+Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 5000, bool unreachedThrows = false}) async {
   final Uri u;
   try {
     u = Uri.parse(url);
@@ -156,7 +200,10 @@ Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 500
       keep = await w.request(req).timeout(left());
       cold = sw.elapsedMilliseconds;
     } catch (e) {
-      probe.onFail?.call(tag, '$stage: ${e is TimeoutException ? 'no answer in ${timeoutMs ~/ 1000} s' : _why(e)}');
+      final unreached = stage.startsWith('socks') && !probe.relays.contains(tag) && (e is TimeoutException || (e is SocketException && e is! ProbeRefused && e.message.startsWith('socks: reply')));
+      final why = '$stage: ${e is TimeoutException ? 'no answer in ${timeoutMs ~/ 1000} s' : _why(e)}';
+      probe.onFail?.call(tag, unreached && unreachedThrows ? '$why (the node was not reached, backup checks skipped)' : why);
+      if (unreached && unreachedThrows) throw NodeUnreachable(why);
       return -1;
     }
     if (!keep) return cold;
