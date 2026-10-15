@@ -761,7 +761,7 @@ class WarnNote extends StatelessWidget {
 }
 
 /// The tiny tag of a line (`.conn-tag`): `chain`, `off`, `priority`.
-enum TagTone { accent, muted, warn, off }
+enum TagTone { accent, muted, warn, error, off }
 
 class ConnTag extends StatelessWidget {
   const ConnTag(this.text, {super.key, this.tone = TagTone.accent});
@@ -776,6 +776,7 @@ class ConnTag extends StatelessWidget {
       TagTone.accent => (c.accent.tint(.15), c.accent),
       TagTone.muted => (c.t1.tint(.06), c.t3),
       TagTone.warn => (c.warn.tint(.15), c.warn),
+      TagTone.error => (c.danger.tint(.15), c.danger),
       TagTone.off => (c.muted.tint(.15), c.muted),
     };
     return DecoratedBox(

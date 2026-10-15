@@ -348,6 +348,34 @@ void main() {
     expect(runner.starts, 1);
   });
 
+  test('Manual on an entry is strict: the entry made unusable while connected ends the connection with an error naming it', () async {
+    boxFails = SingBoxError('no sing-box');
+    await start();
+    host.catalog.selectConnect('b');
+    host.changed();
+    expect((await host.connect()).started, isTrue);
+    expect(runner.starts, 1);
+    final notices = <HostNotice>[];
+    final sub = host.notices.listen(notices.add);
+
+    // an edit in Nodes left the entry with no server
+    host.catalog.sourcesData['b']!.disabledNodes = [for (final n in host.catalog.sourcesData['b']!.nodes) n.id];
+    host.changed();
+    await settle();
+    await sub.cancel();
+    expect(host.phase, ConnectionPhase.disconnected);
+    expect(runner.up, isFalse);
+    expect(runner.starts, 1, reason: 'Auto\'s pick does not take its place');
+    expect(host.error, allOf(contains('Manual pick'), contains('off in Nodes'), contains('another entry')));
+    expect([for (final n in notices) n.code], ['connectFailed']);
+
+    // connecting again is refused, still nothing starts
+    final r = await host.connect();
+    expect(r.started, isFalse);
+    expect(r.code, 'pinLost');
+    expect(runner.starts, 1);
+  });
+
   test('Auto <-> Manual (the badge) and Manual on another entry reach the running core live: no reconnect', () async {
     await start();
     host.setGlobal(true); // no rule lists to fetch through the fake runner's dead port

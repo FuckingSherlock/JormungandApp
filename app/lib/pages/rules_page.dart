@@ -102,13 +102,9 @@ class _RulesPageState extends State<RulesPage> {
     ];
     Widget ruleRow(String id, int i) {
       final r = cat.rulesData[id]!;
-      final down =
-          r.action == 'proxy' &&
-          r.target.isNotEmpty &&
-          !cat.targetInfo(r.target).ok;
-      final fb = r.fallback == 'main' && (r.fallbackTarget ?? '').isNotEmpty
-          ? targetText(l10n, cat, r.fallbackTarget!)
-          : fallbackName(l10n, cat.ruleFallback(r.fallback));
+      final lostTag = r.action == 'proxy'
+          ? targetLostTag(l10n, cat, r.target, cat.planRuleFallback(r))
+          : null;
       final rank = cat.ruleOrder.indexOf(id) + 1;
       return Container(
         key: ValueKey(id),
@@ -148,8 +144,8 @@ class _RulesPageState extends State<RulesPage> {
                             ),
                             if (r.composite != null)
                               const ConnTag('JSON', tone: TagTone.muted),
-                            if (down)
-                              ConnTag(l10n.down2(fb), tone: TagTone.warn),
+                            if (lostTag != null)
+                              ConnTag(lostTag, tone: TagTone.error),
                           ],
                         ),
                         if (r.name.isNotEmpty)

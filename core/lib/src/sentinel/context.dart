@@ -138,40 +138,108 @@ class ContextTracker {
   /// connectivity (`none` / `captive` ↔ the rest): what the retry timers start over by.
   int netEpoch = 0;
 
-  /// How long after a move to another network (or the connection back) the failures count as the network's, not the
-  /// route's: the new network is still settling (DNS, routes, the transports of the nodes dialling again).
-  Duration switchGrace = const Duration(seconds: 10);
+  // A switch of the network is a disturbance that opens at the drop (the platform's own time `at`, else the moment we
+  // learned of it) and ends with an event (docs/failures.md → Смена сети): the platform reports the network
+  // connected (not a portal) AND any data came in on it after the move ([proved]: a connection with down > 0 that opened
+  // after the move, direct or through any outbound, an answered probe). Not `validated`, not a route: only the network
+  // matters. The timers below are only the safety cap.
 
-  /// A connection that was opened before the move is a casualty of the old network for this long after it (it was
-  /// closed with nothing back, or ran into the timeout of the dead link).
-  Duration oldConnGrace = const Duration(seconds: 60);
+  /// Where the platform reports the network: the longest a disturbance stays open without its event.
+  Duration switchCap = const Duration(seconds: 30);
 
-  int? _movedAt; // when [netEpoch] last counted a move (ms since epoch)
+  /// Where nothing reports the network (no platform signal: Windows / jormd, the move is sing-box's interface line):
+  /// how long after the move the network counts as settled when no request has proved it sooner.
+  Duration noSignalGrace = const Duration(seconds: 10);
 
-  /// When the device last moved to another network or got the connection back; null = not since the start.
-  DateTime? get lastMove => _movedAt == null ? null : DateTime.fromMillisecondsSinceEpoch(_movedAt!);
+  /// The connections that were opened before the drop die with the old network, the dead sockets of it time out for a
+  /// while: their failure is the network's this long after the network is stable again (a safety bound).
+  Duration oldConnTail = const Duration(seconds: 60);
 
-  /// The network is down or has just changed: a failure now is the network's. No connection / a portal (said by the
-  /// platform or the OS; the `none` of the probes is Auto's own verdict, a conclusion from the failures, not a cause of
-  /// them), or a move within [switchGrace].
-  bool get switching => (_net == NetState.captive || (_net == NetState.none && _netSource != 'probes')) || settling;
+  int? _disturbedAt; // the drop: when the open (or last) disturbance began (ms since epoch)
+  int? _eventAt; // the latest move / loss / return of the network (ms): a proof must begin after it
+  bool _proved = false; // a request went through after [_eventAt]
+  bool _stable = true;
+  int? _stableAt;
+  String? _stableBy; // `event` | `cap`
+  Timer? _capTimer;
+  bool _platformSeen = false;
+  int? _platformAt, _unconfirmedAt;
 
-  /// The device moved to another network (or got the connection back) less than [switchGrace] ago. What a round of
-  /// Auto holds by: with no connection at all its own «no network» path is the right one.
-  bool get settling {
-    final m = _movedAt;
-    return m != null && clock.now().millisecondsSinceEpoch - m < switchGrace.inMilliseconds;
+  /// When the last (or the open) disturbance began: the drop of the network or the move to another one, by the system's
+  /// own time when it told it; null = none since the start.
+  DateTime? get lastMove => _disturbedAt == null ? null : DateTime.fromMillisecondsSinceEpoch(_disturbedAt!);
+
+  /// When the last disturbance ended (null = none, or it is open) and by what: `event` / `cap`.
+  DateTime? get stableAt => _stableAt == null ? null : DateTime.fromMillisecondsSinceEpoch(_stableAt!);
+  String? get stableBy => _stableBy;
+
+  /// No disturbance is open: the network is where it was, or the new one has proved itself.
+  bool get stable => _stable;
+
+  /// The network is down or has just changed. No connection / a portal (said by the platform or the OS; the `none` of
+  /// the probes is Auto's own verdict, a conclusion from the failures, not a cause of them), or a disturbance not yet stable.
+  bool get switching => outage || !_stable;
+
+  /// No connection / a portal said by the platform or the OS.
+  bool get outage => _net == NetState.captive || (_net == NetState.none && _netSource != 'probes');
+
+  /// The platform reports the network (Android): false = nothing does (Windows / jormd).
+  bool get signalKnown => _platformSeen;
+
+  /// A move was seen by sing-box / the OS and the platform has not reported since: its state may be the old one.
+  bool get signalStale => _unconfirmedAt != null && (_platformAt == null || _platformAt! < _unconfirmedAt!);
+
+  /// A failed connection belongs to a network switch. [closedAt] / [openedAt]: sing-box's stamps (ms), else it closed now
+  /// and opened [durationMs] before that. Closed before the drop = a candidate for a real failure (false; its check waits
+  /// for [stable], sentinel.dart). Closed at or after the drop while the network is not stable = the network's (true).
+  /// A connection opened before the drop that fails up to [oldConnTail] after the network is stable is the old network's
+  /// too. Not the steady `none` / `captive`: a failure there is judged by the Sentinel as the consequence of that outage
+  /// (`conn/offline`), which is its visible record.
+  bool failureInSwitch({int? openedAt, int? closedAt, int? durationMs}) {
+    final d = _disturbedAt;
+    if (d == null || outage) return false;
+    final closed = closedAt ?? clock.now().millisecondsSinceEpoch;
+    if (closed < d) return false;
+    if (!_stable) return true;
+    final opened = openedAt ?? (durationMs == null ? null : closed - durationMs);
+    return opened != null && opened < d && _stableAt != null && closed - _stableAt! < oldConnTail.inMilliseconds;
   }
 
-  /// A failure of a connection [ageMs] old (null = not told) belongs to a network switch: [settling], or the connection
-  /// was opened before the last move and that was less than [oldConnGrace] ago. Not the steady `none` / `captive`: a
-  /// failure there is judged by the Sentinel as the consequence of that outage (`conn/offline`), which is its visible record.
-  bool failureInSwitch(int? ageMs) {
-    if (settling) return true;
-    final m = _movedAt;
-    if (m == null || ageMs == null) return false;
-    final now = clock.now().millisecondsSinceEpoch;
-    return now - ageMs < m && now - m < oldConnGrace.inMilliseconds;
+  /// Data came in on the network: a connection with data back that was [since] (ms) opened, or a probe that was
+  /// started then. It counts for the open disturbance only if it began after the latest move (a null [since] is not
+  /// told apart from an old one: the caller skips it); with the platform's `connected` and not captive (or none
+  /// reported) it ends the disturbance.
+  void proved({int? since}) {
+    if (_stable) return;
+    if (since != null && _eventAt != null && since < _eventAt!) return;
+    _proved = true;
+    if (_evalStable()) _fire();
+  }
+
+  // Whether the open disturbance ends now (by the event, or by the cap); sets the state, the caller fires.
+  bool _evalStable() {
+    if (_stable) return false;
+    _capTimer?.cancel();
+    _capTimer = null;
+    if (outage) return false; // nothing to settle while the connection is gone: the cap starts over from its return
+    final now = clock.now().millisecondsSinceEpoch, at = _eventAt ?? now;
+    // `validated` is not asked for: where the OS's validation endpoints are blocked it never comes while the network works
+    final platformOk = !_platformSeen || (_connected != false && !_captive);
+    final capMs = (_platformSeen ? switchCap : noSignalGrace).inMilliseconds;
+    final String? by = platformOk && _proved ? 'event' : (now - at >= capMs ? 'cap' : null);
+    if (by == null) {
+      _capTimer = clock.timer(Duration(milliseconds: capMs - (now - at) + 1), _capReached);
+      return false;
+    }
+    _stable = true;
+    _stableAt = now;
+    _stableBy = by;
+    return true;
+  }
+
+  void _capReached() {
+    _capTimer = null;
+    if (_evalStable()) _fire();
   }
 
   /// Counts the changes of the stored core state (a start, a stop, a crash).
@@ -199,14 +267,20 @@ class ContextTracker {
   ///
   /// `connected: false` is `none`, `captive: true` is `captive`; `validated: false` alone is only a doubt
   /// (the validation endpoints of the OS are often blocked where this app is used, while the network works).
-  void platform({bool? connected, bool? validated, bool captive = false, String? type, String? id}) {
+  ///
+  /// [at]: the system's own time of the change (ms since epoch; Android takes it in the callback): the drop is dated by
+  /// it, not by when the message got here. Null = now; one from the future is now.
+  void platform({bool? connected, bool? validated, bool captive = false, String? type, String? id, int? at}) {
     _connected = connected;
     _validated = validated;
     _captive = captive;
+    _platformSeen = true;
+    _platformAt = clock.now().millisecondsSinceEpoch;
     final moved = (id != null && _id != null && id != _id) || (type != null && _type != null && type != _type);
     _type = type;
     _id = id;
-    _deriveNet(moved: moved);
+    _deriveNet(moved: moved, at: at);
+    if (_evalStable()) _fire(); // `validated` may have come without any other change
   }
 
   /// The default interface changed (sing-box: `updated default interface`), or the device moved to
@@ -215,10 +289,11 @@ class ContextTracker {
   /// runs (or of none) is one.
   void interfaceChanged() {
     if (_core == 'starting' || _core == 'recovering' || _core == 'down') return;
+    _unconfirmedAt = clock.now().millisecondsSinceEpoch;
     _deriveNet(moved: true);
   }
 
-  void _deriveNet({bool moved = false}) {
+  void _deriveNet({bool moved = false, int? at}) {
     final NetState s;
     final String src;
     if (_captive) {
@@ -248,10 +323,23 @@ class ContextTracker {
     final realMove = moved || out(s, src) != out(_net, _netSource);
     if (realMove || ((s == NetState.none || s == NetState.captive) != (_net == NetState.none || _net == NetState.captive))) {
       netEpoch++;
-      if (realMove) _movedAt = now;
+      if (realMove) {
+        final evAt = at == null || at > now ? now : at;
+        if (_stable) {
+          _stable = false; // a new disturbance opens at the drop
+          _disturbedAt = evAt;
+          _stableAt = null;
+          _stableBy = null;
+        } else if (evAt < (_disturbedAt ?? evAt)) {
+          _disturbedAt = evAt;
+        }
+        _eventAt = evAt;
+        _proved = false; // what went through before this move proves nothing of the new network
+      }
     }
     _net = s;
     _netSource = src;
+    _evalStable();
     _fire();
   }
 
@@ -407,6 +495,8 @@ class ContextTracker {
   void dispose() {
     _settleTimer?.cancel();
     _settleTimer = null;
+    _capTimer?.cancel();
+    _capTimer = null;
     unawaited(_changes.close());
   }
 }

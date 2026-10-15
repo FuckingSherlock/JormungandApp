@@ -91,7 +91,7 @@ const eventCats = <(String, List<String>)>[
   ('auto', ['switched', 'fastest', 'unstable']),
   ('site', ['blocked', 'unreachable']),
   ('sub', ['updated', 'failed', 'removed', 'back', 'dead', 'diverged']),
-  ('rules', ['fallback', 'targetBack', 'ruleSetFailed', 'ruleSetUpdated']),
+  ('rules', ['fallback', 'targetBack', 'targetLost', 'targetFound', 'ruleSetFailed', 'ruleSetUpdated']),
   ('dns', ['switched', 'failed', 'failedOnNode']),
   ('node', ['addressMissing']),
   ('speed', ['done', 'failed']),
@@ -121,6 +121,8 @@ const eventNotifKind = <String, String>{
   'sub/failed': 'subFailed', 'sub/removed': 'subFailed', 'sub/back': 'subFailed', 'sub/dead': 'subFailed',
   'rules/ruleSetFailed': 'ruleSets',
   'rules/fallback': 'autoSwitch', 'rules/targetBack': 'autoSwitch', 'dns/switched': 'autoSwitch',
+  // a rule's target is gone / off / without servers: its traffic goes by "If unavailable" (the same family as rules/fallback)
+  'rules/targetLost': 'autoSwitch', 'rules/targetFound': 'autoSwitch',
   // the node's server name does not exist: the provider's subscription is wrong
   'node/addressMissing': 'subFailed',
 };
@@ -180,6 +182,8 @@ const _keyFields = <String, List<String>>{
   'auto/unstable': ['id'],
   'rules/fallback': ['target', 'to'],
   'rules/targetBack': ['target'],
+  'rules/targetLost': ['rule', 'app', 'target'],
+  'rules/targetFound': ['rule', 'app', 'target'],
   'dns/switched': ['from', 'to'],
   'dns/failed': ['server'],
   'dns/failedOnNode': ['server', 'node'],

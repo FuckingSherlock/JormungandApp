@@ -387,9 +387,9 @@ void main() {
       svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'net2'});
       await time.advance(Duration.zero);
       await autoFail('net.example:443');
-      expect(count('same'), before, reason: 'the move: the new network is still settling (net.switched), the failure waits the grace');
-      await time.advanceSeconds(12);
-      expect(count('same'), before + 1, reason: 'after the grace the verdict of the old network is void: judged anew');
+      expect(count('same'), before, reason: 'the move: the new network is not stable yet (net.switched), the failure waits for data on it or the cap');
+      await time.advanceSeconds(31);
+      expect(count('same'), before + 1, reason: 'once stable (the cap) the verdict of the old network is void: judged anew');
     });
   });
 

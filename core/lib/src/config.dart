@@ -332,6 +332,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   }
   warnings?.addAll(routing.warnings);
   info?.fallbacks.addAll(routing.fallbacks);
+  info?.lost.addAll(routing.lost);
+  info?.reached.addAll(routing.reached);
   info?.dnsServers.addAll(routing.dnsEnabled);
   info?.dnsSides.addAll({for (final e in routing.dnsSides.entries) e.key: [...e.value]});
   info?.dnsCandidates.addAll(routing.dnsCandidates);

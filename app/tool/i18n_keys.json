@@ -1597,5 +1597,16 @@
   "{#0} working pairs · best {#1}ms": "workingPairsBestMsPlural2",
   "{#0} working pair (stopped early) · best {#1}ms": "workingPairStoppedEarlyBestMs2",
   "{#0} working pairs (stopped early) · best {#1}ms": "workingPairsStoppedEarlyBestMsPlural2",
-  "Enter 0–{#0}ms": "enter0Ms2"
+  "Enter 0–{#0}ms": "enter0Ms2",
+  "Rule target lost": "ruleTargetLost",
+  "Rule target found": "ruleTargetFound",
+  "Target deleted": "targetDeleted",
+  "Target off in Nodes": "targetOffInNodes",
+  "Target has no servers": "targetHasNoServers",
+  "Target has no server the core can run": "targetHasNoServerTheCore",
+  "If unavailable is Default": "ifUnavailableIsDefault",
+  "Target lost: {0}": "targetLost",
+  "{0} is available again": "isAvailableAgain",
+  "Rule {0} is blocked": "ruleIsBlocked",
+  "App {0} is blocked": "appIsBlocked"
 }

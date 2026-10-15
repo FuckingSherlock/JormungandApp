@@ -296,6 +296,7 @@ const _mockupBehind = <String, String>{
   'src1-dead': 'a chain exit lives by its pair through the entry, not by its direct ping (mockup_todo.md)',
   'op-auto-off': 'a chain exit lives by its pair through the entry, not by its direct ping (mockup_todo.md)',
   'manual-pin-stale': 'a lost manual pick is strict now: livePlan throws pinLost (Catalog.pinLoss) where the mockup still builds a plan (mockup_todo.md)',
+  'manual-broken': 'Manual on an entry is strict too: effectiveConnectId keeps the pinned broken entry and livePlan throws pinLost (Catalog.pinLoss) where the mockup falls to Auto (mockup_todo.md)',
 };
 
 /// FakeIP is removed from the core until it is redesigned, the frozen mockup still has it:

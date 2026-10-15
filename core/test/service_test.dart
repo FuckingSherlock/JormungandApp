@@ -910,6 +910,72 @@ void main() {
     expect((svc.log(since: null)['lines'] as List).any((l) => '${(l as Map)['msg']}'.contains('older core')), isTrue);
   });
 
+  test('a rule whose target is lost: rules/targetLost once, again only when it changes, rules/targetFound on recovery, a disconnect forgets', () async {
+    await start();
+    Map<String, dynamic> withTarget({required bool lost, String fallback = 'block'}) {
+      final b = _body();
+      final plan = b['plan'] as Map<String, dynamic>;
+      final node = ((((plan['routes'] as List).first as Map)['main'] as Map)['nodes'] as List).first as Map;
+      plan['global'] = false;
+      plan['routing'] = {
+        'fallback': 'main',
+        'targets': {
+          'src:x': lost
+              ? null
+              : {
+                  'id': 'src:x',
+                  'kind': 'unit',
+                  'main': {
+                    'pick': 'priority',
+                    'chosen': 's::a',
+                    'nodes': [node]
+                  }
+                }
+        },
+        'rules': [
+          {
+            'id': 'r1',
+            'name': 'Video',
+            'on': true,
+            'action': 'proxy',
+            'target': 'src:x',
+            'fallback': fallback,
+            if (lost) 'targetLost': 'deleted',
+            'dns': 'auto',
+            'groups': {
+              'domain': {'not': false, 'v': {'domain_suffix': ['video.test']}},
+            },
+          }
+        ],
+      };
+      return b;
+    }
+
+    List<Map> told() => [for (final e in (svc.events()['events'] as List).cast<Map>()) if (e['cat'] == 'rules' && '${e['type']}'.startsWith('target')) e];
+    await svc.connect(withTarget(lost: true));
+    expect(told().map((e) => e['type']), ['targetLost']);
+    expect(told().single['level'], 'warn');
+    expect(told().single['data'], {'rule': 'Video', 'target': 'src:x', 'why': 'deleted', 'to': 'block'});
+    expect(((await svc.status())['rulesLost'] as List).single, containsPair('rule', 'Video'));
+    await svc.connect(withTarget(lost: true)); // a rebuild of the same state: nothing new to tell
+    expect(told(), hasLength(1));
+    await svc.connect(withTarget(lost: true, fallback: 'direct')); // where its traffic goes changed: told again
+    expect(told().map((e) => e['type']), ['targetLost', 'targetLost']);
+    expect((told().last['data'] as Map)['to'], 'direct');
+    await svc.connect(withTarget(lost: false));
+    expect(told().map((e) => e['type']), ['targetLost', 'targetLost', 'targetFound']);
+    expect(told().last['data'], {'rule': 'Video', 'target': 'src:x'});
+    expect(told().last['level'], 'info');
+    expect((await svc.status())['rulesLost'], isEmpty);
+    // a disconnect forgets: the next connect tells the loss anew
+    await svc.connect(withTarget(lost: true));
+    expect(told(), hasLength(4));
+    await svc.disconnect();
+    expect((await svc.status())['rulesLost'], isEmpty);
+    await svc.connect(withTarget(lost: true));
+    expect(told(), hasLength(5));
+  });
+
   test('dispose stops the box and ends the streams', () async {
     await start();
     await svc.connect(_body());

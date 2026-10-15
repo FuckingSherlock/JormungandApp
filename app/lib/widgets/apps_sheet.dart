@@ -252,25 +252,42 @@ class _AppState extends StatelessWidget {
       height: 1.3,
       color: actColor(c, act),
     );
-    if (r != null && r.split) {
+    if (r != null) {
+      // A lost target (deleted / off / no servers) is an error under the state, with where its traffic goes.
+      final lost = [
+        for (final (p, h) in r.halves)
+          if (h.act == 'proxy')
+            if (targetLostTag(l10n, cat, h.target, cat.planAppFallback(h)) case final tag?)
+              r.split ? '$p $tag' : tag,
+      ];
+      final state = r.split
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (final (p, h) in r.halves)
+                  Text(
+                    '$p ${appHalfText(l10n, cat, h)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: style(h.act),
+                  ),
+              ],
+            )
+          : Text(
+              appActText(l10n, cat, r),
+              textAlign: TextAlign.right,
+              style: style(appStateAct(r)),
+            );
+      if (lost.isEmpty) return state;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          for (final (p, h) in r.halves)
-            Text(
-              '$p ${appHalfText(l10n, cat, h)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: style(h.act),
-            ),
+          state,
+          for (final t in lost) ...[
+            const SizedBox(height: 3),
+            ConnTag(t, tone: TagTone.error),
+          ],
         ],
-      );
-    }
-    if (r != null) {
-      return Text(
-        appActText(l10n, cat, r),
-        textAlign: TextAlign.right,
-        style: style(appStateAct(r)),
       );
     }
     final svc = serviceOfApp(pkg);
@@ -534,6 +551,7 @@ class _AppActDialogState extends State<_AppActDialog> {
                     : h.act == 'default'
                     ? TargetRowMode.fixed
                     : TargetRowMode.inert,
+                lostFallback: own ? _cat.planAppFallback(h) : null,
                 onPick: (t) => setState(() => h.target = t),
               ),
               Divider(height: 1, thickness: 1, color: c.border),

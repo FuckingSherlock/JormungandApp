@@ -398,6 +398,7 @@ class _RuleFormState extends State<_RuleForm> {
               label: l10n.via,
               target: d.target,
               mode: proxy ? TargetRowMode.normal : TargetRowMode.inert,
+              lostFallback: proxy ? _cat.planRuleFallback(d) : null,
               onPick: (t) => _update(() => d.target = t),
             ),
             FallbackRows(

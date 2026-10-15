@@ -128,3 +128,10 @@ site/blocked and site/unreachable are no longer dropped once an hour per site + 
 
 - 2026-10-15 · DNS (js/56-dns.js): строка пинга стороны `84ms DoH`, колонка стороны фиксированной ширины (чипы не скачут); мс без пробела везде (`latMsHtml` и прочие `ms`-строки макета, включая ключи i18n `{#0} ms`, `Enter 0–{#0} ms`, `… best {#1} ms`).
 - DNS transport state suspect (ms -1, Sentinel confirming) shows warning + spinner (LatencyView.suspect); mockup strings need ms without space: workingPair(s)(StoppedEarly)BestMs, Enter 0–N ms, ms ({n} ms) (docs/rules.md §6).
+- 2026-10-15 · Strict Manual on an entry (js/20-profiles.js effectiveConnectId, docs/connect-model.md «Manual на запись»): Manual on a hidden / broken / removed / no-usable-server entry no longer falls to Auto's pick: effectiveConnectId keeps the pinned entry and the connect is refused with a pinLost error naming it (running connection: disconnect + error + connectFailed notice). Golden scenario manual-broken is skipped until the mockup follows.
+
+## Network gate (2026-10-15)
+- Смена сети — возмущение с воротами `Sentinel.networkGate` (устойчивость по входящим данным, пределы 30 с / 10 с); журнал: `... is not left yet`, шаг `net.switched` с `stable` / `stableAt` / `by`. UI не менялся; мокап: журнал и шаги вердикта в `design/src/js`; docs/failures.md (Смена сети), logs.md.
+
+## Lost rule / app target (2026-10-16)
+- A rule / app whose target is deleted / off / has no servers / unsupported gets an error tag ("<why> -> <where>", TagTone.error) in the rules list, at the Via row of the rule form and app dialog, in the apps list; events rules/targetLost + rules/targetFound (notification under autoSwitch). Routing unchanged (still by "If unavailable"). Mockup: plan has no targetLost; it keeps the "down -> X" tag. docs/rules.md §0 "Недоступная цель", logs.md, core.md.

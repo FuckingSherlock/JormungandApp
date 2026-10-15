@@ -20,7 +20,9 @@ void main() {
     book = EventBook(null, clock: () => time.t);
     notes = [];
     sentinel = Sentinel(clock: time.clock, book: book, note: (l, t) => notes.add('$l: $t'));
-    sentinel.context.switchGrace = Duration.zero; // the grace after a move has its own tests (net.switched)
+    sentinel.context
+      ..noSignalGrace = Duration.zero // the disturbance after a move has its own tests (net_switch_test.dart, net.switched)
+      ..switchCap = Duration.zero;
   });
 
   tearDown(() => sentinel.dispose());

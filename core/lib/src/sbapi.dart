@@ -36,8 +36,15 @@ class ClosedConnection {
       this.network = '',
       this.inbound = '',
       this.durationMs,
+      this.openedAt,
+      this.closedAt,
       this.id = '',
       this.address = ''});
+
+  /// When it opened and when it closed (ms since epoch, sing-box's own stamps; null = not told). The network switch
+  /// is classified by them (sentinel/context.dart `failureInSwitch`): a connection that closed before the drop of the
+  /// network is a candidate for a real failure, one that closed after it is the network's.
+  final int? openedAt, closedAt;
 
   /// The destination as dialled (`ip:port`) when [destination] shows the sniffed name instead ('' = the same /
   /// not told): the raw log says which server a connection went to when its name is only a TLS SNI.
@@ -76,6 +83,8 @@ class ClosedConnection {
         network: c.network,
         inbound: c.inbound,
         durationMs: _lived(c, nowMs),
+        openedAt: c.createdAt.toInt() > 0 ? c.createdAt.toInt() : null,
+        closedAt: c.closedAt.toInt() > 0 ? c.closedAt.toInt() : nowMs,
         id: c.id,
         address: c.domain.isNotEmpty && !c.destination.startsWith(c.domain) ? c.destination : '',
       );

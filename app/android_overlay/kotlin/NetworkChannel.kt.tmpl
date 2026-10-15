@@ -20,9 +20,10 @@ import io.flutter.plugin.common.MethodChannel
  *  metered -> Boolean   now
  *  type    -> String    wifi | ethernet | mobile | other | none (the support report's network.host)
  *  events: Boolean      every change (and the current value at once on listen)
- *  state events (`jormungand/network_state`): Map  {connected, validated, captive, type, id} of the underlying
+ *  state events (`jormungand/network_state`): Map  {connected, validated, captive, type, id, at} of the underlying
  *                       default network (DefaultNetworkMonitor.addStateListener), the current one at once on
- *                       listen; the app forwards each to the core's Sentinel (CoreApi.setNetwork)
+ *                       listen; `at` = wall-clock ms of the system's callback; the app forwards each to the
+ *                       core's Sentinel (CoreApi.setNetwork)
  *
  * Our own VPN declares itself unmetered, so `activeNetwork` would answer "unmetered" through a
  * cellular link while the tunnel is up. The answer is therefore taken from the underlying

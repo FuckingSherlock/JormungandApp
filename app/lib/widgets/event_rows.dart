@@ -154,7 +154,7 @@ String? eventOpenTarget(EventRecord e, CoreHost host) {
       final entry = '${d['entry'] ?? ''}';
       return entry.isNotEmpty && cat.connectEntry(entry) != null ? entry : null;
     case 'rules':
-      return e.type == 'fallback' || e.type == 'targetBack' ? 'rulelist' : 'rules';
+      return const ['fallback', 'targetBack', 'targetLost', 'targetFound'].contains(e.type) ? 'rulelist' : 'rules';
     case 'dns':
       return 'dns';
   }

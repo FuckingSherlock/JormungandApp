@@ -128,8 +128,11 @@ class CoreService implements CoreApi {
       failures.onLog(line);
       tunIngress.onLine(line);
       if (line.contains('updated default interface')) sentinel.context.interfaceChanged();
+      // a DNS answer that came over the network (not a cached one) is data on it
+      if (!sentinel.context.stable && _dnsAnswerRe.hasMatch(line)) sentinel.context.proved(since: sentinel.context.clock.now().millisecondsSinceEpoch);
     };
     pool.onChange = (s) => sentinel.context.pool(s, osOffline: pool.osOffline);
+    pool.onAnswer = (startedAt) => sentinel.context.proved(since: startedAt); // an answered probe is data on the network
     ruleSets.fetchSource = () => svcFetch;
     ruleSets.onFailed = _ruleSetFailed;
     ruleSets.onUpdated = (tag) => _event('rules', 'ruleSetUpdated', 'info', {'tag': tag}, note: 'Rule set $tag updated');
@@ -273,8 +276,19 @@ class CoreService implements CoreApi {
   /// Checks a failure against the state of the world before it is reported as one (sentinel/,
   /// docs/failures.md). Its context follows [pool], the platform ([setNetwork]) and this service's own
   /// starts and stops; the detectors move onto [Sentinel.suspect] one by one.
-  late final sentinel = Sentinel(clock: _sentinelClock ?? SentinelClock(now: _now), book: eventBook, note: logBook.note);
+  late final sentinel = Sentinel(clock: _sentinelClock ?? SentinelClock(now: _now), book: eventBook, note: logBook.note, netProbe: _gateProbe);
+
+  /// The Sentinel's own look at the network (the gate, sentinel.dart `networkGate`): the direct path asked through the
+  /// probe pool with the connection's test settings. true = it answers, false = silent (the pool then says `down`),
+  /// null = it cannot be tested.
+  Future<bool?> _gateProbe() async {
+    final s = _auto?.settings ?? AutoSettings.fromPlan(_plan ?? const {});
+    final up = await pool.directAnswers(url: s.url, checkers: s.checkers, timeoutMs: s.timeoutMs);
+    if (up == false && !_disposed) pool.silent(true);
+    return up;
+  }
   final SentinelClock? _sentinelClock;
+  static final _dnsAnswerRe = RegExp(r'\bdns(?:/\S+)?: (?:exchanged|refreshed|lookup succeed for) ');
 
   /// How long each detector's failure must last before it is called real (sentinel/windows.dart): the
   /// tests use [FailureWindows.instant].
@@ -295,7 +309,7 @@ class CoreService implements CoreApi {
     update: (id, data) => eventBook.update(id, data: data),
     repeated: _failedAgain,
     worked: _siteWorked,
-    netSwitch: (c) => sentinel.context.failureInSwitch(c.durationMs),
+    netSwitch: _failedInSwitchNow,
     netHeld: _failedInSwitch,
     timer: (d, f) => sentinel.clock.timer(d, f),
   );
@@ -329,6 +343,10 @@ class CoreService implements CoreApi {
         'through ${c.outbound.isEmpty ? 'direct' : c.outbound}): the app\'s own traffic, skipped from the failing-apps book; '
         'the request that made it reports its result itself');
   }
+
+  /// Whether a failed connection is the network switch's, by its own open / close stamps (sentinel/context.dart `failureInSwitch`).
+  bool _failedInSwitchNow(ClosedConnection c) =>
+      sentinel.context.failureInSwitch(openedAt: c.openedAt, closedAt: c.closedAt, durationMs: c.durationMs);
 
   /// A connection got nothing back while the network changed (opened on the old one, or in the window of the new one
   /// settling): the network's, not the app's or the route's ([FailureBook.netSwitch]). No entry, no streak, but counted
@@ -426,6 +444,25 @@ class CoreService implements CoreApi {
   FallbackService? _fallback;
   DnsFailover? _dns;
   List<TargetFallback> _fallbacks = const [];
+
+  /// The rules / apps whose target is lost now, by [LostTarget.id] (told once when it happens, again when it changes or
+  /// ends; cleared by a disconnect so the next connect tells them anew). docs/rules.md §0 «Потерянная цель».
+  Map<String, LostTarget> _lostTargets = const {};
+
+  void _noteLostTargets(RoutingInfo info, {bool silent = false}) {
+    final now = {for (final l in info.lost) l.id: l};
+    if (!silent) {
+      for (final l in now.values) {
+        if (_lostTargets[l.id]?.state == l.state) continue;
+        eventBook.add('rules', 'targetLost', 'warn', data: l.toJson());
+      }
+      for (final l in _lostTargets.values) {
+        if (now.containsKey(l.id) || !info.reached.contains(l.id)) continue;
+        eventBook.add('rules', 'targetFound', 'info', data: {if (l.app) 'app': l.label else 'rule': l.label, 'target': l.target});
+      }
+    }
+    _lostTargets = now;
+  }
   RuleNames? _ruleNames; // the running config's rules by name (Live connections)
 
   /// Sites the user wants no events / notifications / raw failed-connection lines about
@@ -1309,12 +1346,17 @@ class CoreService implements CoreApi {
         delay:(tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t, unreachedThrows: true),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         onDown: serverDown,
-        netSwitch: sentinel.context.failureInSwitch,
-        netSettling: () => sentinel.context.settling,
+        ownConnection: _isOwnConnection,
+        netSwitch: _failedInSwitchNow,
+        netGate: ({bool suspicious = false}) => sentinel.networkGate(suspicious: suspicious),
+        netProved: (startedAt) => sentinel.context.proved(since: startedAt),
         note: runner.note,
         trace: (l) => logBook.note('info', l));
     // requests that failed: sing-box's API service streams every closed connection
     _closed = api.closedConnections().listen((c) {
+      // any data that came in on the new network (a connection with down > 0 that opened after the move: direct, any
+      // outbound, our own probes and service requests too): the network works. Only the network matters, not a route.
+      if (c.down > 0 && c.openedAt != null) sentinel.context.proved(since: c.openedAt);
       failures.onClosed(c);
       auto.onClosed(c);
     }, onError: (Object e) => runner.note('auto: connection events stopped: $e'));
@@ -1511,7 +1553,7 @@ class CoreService implements CoreApi {
         mainIdentity: auto.identityOf,
         memory: autoMemory,
         onDown: serverDown,
-        netSwitching: () => sentinel.context.switching,
+        netGate: ({bool suspicious = false}) => sentinel.networkGate(suspicious: suspicious),
         setFlag: (f, on) => setFallbackFlag(f, on, reason: on ? 'on Direct' : 'back', log: logBook.note),
         note: runner.note)
       ..reconcileStart = !adopted; // a taken-over sing-box's groups stand where the core before this one left them
@@ -1978,6 +2020,7 @@ class CoreService implements CoreApi {
         'context': sentinel.contextJson(), // the Sentinel's view: network state, core phase, open root causes (docs/failures.md)
         'dns': runner.running && _dns?.isEmpty == false ? _dns!.toJson() : null,
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
+        'rulesLost': [for (final l in _lostTargets.values) l.toJson()], // rules / apps whose target is lost (docs/rules.md §0)
         'speed': _lastSpeed, // last Speed Test of the connection: {down, up (bit/s), latency (ms), rpm, at (ms)}
       };
 
@@ -2672,6 +2715,7 @@ class CoreService implements CoreApi {
     _probe = probe;
     _svc = svc;
     _fallbacks = info.fallbacks;
+    _noteLostTargets(info);
     _ruleNames = info.ruleNames;
     _takeDns(info);
     _mixedPort = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
@@ -2790,6 +2834,7 @@ class CoreService implements CoreApi {
       _probe = probe;
       _svc = svc;
       _fallbacks = info.fallbacks;
+      _noteLostTargets(info, silent: true); // the core before this one told them
       _ruleNames = info.ruleNames;
       _takeDns(info);
       // the files of the core before this one are not relied on: every flag on, the failover starts from there
@@ -3303,6 +3348,7 @@ class CoreService implements CoreApi {
     _wakeUp(); // ends the restart's retries
     final was = runner.running || _plan != null || _recovering != null;
     _plan = null;
+    _lostTargets = const {};
     _recovering = null;
     _downSince = null;
     _released = false;
@@ -3369,6 +3415,7 @@ class CoreService implements CoreApi {
       captive: body['captive'] == true,
       type: body['type'] is String ? body['type'] as String : null,
       id: id is String || id is num ? '$id' : null,
+      at: body['at'] is num ? (body['at'] as num).toInt() : null,
     );
     // another network, or the connection back: what was found out on the old one (a «down» of the probes) is not known
     // of this one, so the direct path is asked at once, connected or not. Not while the platform itself says there is

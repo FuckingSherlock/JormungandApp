@@ -15,7 +15,8 @@ abstract interface class NetworkPort {
   Future<String> type();
 
   /// The identity of the underlying default network (never our own VPN) as the core's Sentinel takes it
-  /// (`CoreApi.setNetwork`, docs/failures.md → network context): `{connected, validated, captive, type, id}`,
+  /// (`CoreApi.setNetwork`, docs/failures.md → network context): `{connected, validated, captive, type, id, at}`
+  /// (`at`: wall-clock ms at which the system called back, the time of the drop / the move for the core),
   /// each state whole; the current one comes at once on listen, then every change (another Wi-Fi is
   /// another `id`, `connected: false` when the network is gone).
   Stream<Map<String, dynamic>> get states;

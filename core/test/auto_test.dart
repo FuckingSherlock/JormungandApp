@@ -965,6 +965,56 @@ void main() {
       expect(auto.toJson()['siteFails'], 1);
     });
 
+    test('the core\'s own failed connections (probe / svc inbound, the app\'s own) are no request of the user\'s: no count, no site, no check', () async {
+      final p = plan([unit('A', ['s::a'])]);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30});
+      final fails = <AutoSiteFail>[];
+      final auto = AutoService(fake, p,
+          delay: fake.delayTest,
+          clock: () => 0,
+          reach: (tag, dest) async => false,
+          ownConnection: (c) => c.pkg == 'dev.jormungand.app',
+          settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      auto.siteFails.listen(fails.add);
+      await auto.check();
+      for (final inbound in ['probe-in', 'svc-in']) {
+        auto.onClosed(ClosedConnection(
+            outbound: 'route0/s::a', chain: const ['route0/s::a', 'route0', 'proxy'], destination: 'blocked.example:443', up: 0, down: 0, inbound: inbound, rule: 'Latency check', pkg: 'dev.jormungand.app'));
+      }
+      auto.onClosed(cc(pkg: 'dev.jormungand.app')); // the app's own request in the TUN
+      expect(auto.requestFails, 0);
+      expect(auto.lastRequestFail, isNull);
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(fails, isEmpty);
+      expect(auto.siteFailCount, 0);
+    });
+
+    test('a user\'s failure is checked: one site notice with the user\'s rule and app; the check\'s own failed re-test does not make another or take its attribution', () async {
+      final p = plan([unit('A', ['s::a'])]);
+      final fake = FakeBox(buildConfig(p), {'s::a': 30});
+      final fails = <AutoSiteFail>[];
+      late AutoService auto;
+      var t = 7;
+      auto = AutoService(fake, p, delay: fake.delayTest, clock: () => t, reach: (tag, dest) async => false, settings: const AutoSettings(failWindow: Duration(seconds: 10)));
+      auto.siteFails.listen((f) {
+        fails.add(f);
+        t += 20000; // past the failure window: a failure that counted would start a new check
+        // the Sentinel's re-test of the site through the probe inbound fails: sing-box closes that connection
+        auto.onClosed(ClosedConnection(
+            outbound: 'route0/s::a', chain: const ['route0/s::a', 'route0', 'proxy'], destination: f.dest, up: 0, down: 0, inbound: 'probe-in', rule: 'Latency check', pkg: 'dev.jormungand.app'));
+      });
+      await auto.check();
+      auto.onClosed(cc(rule: 'domain_suffix=blocked.example', process: r'C:\Apps\Discord\Discord.exe', pkg: 'org.x'));
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await auto.check();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(fails, hasLength(1));
+      expect([fails.single.rule, fails.single.process, fails.single.pkg], ['domain_suffix=blocked.example', r'C:\Apps\Discord\Discord.exe', 'org.x']);
+      expect(auto.requestFails, 1, reason: 'only the user\'s request');
+    });
+
     test('a site a test cannot be aimed at (another port, an IP on 443) is not told', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
       final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 60});

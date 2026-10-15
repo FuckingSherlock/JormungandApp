@@ -43,6 +43,26 @@ String fallbackName(AppLocalizations l10n, String v) => switch (v) {
   _ => '',
 };
 
+/// Why a rule / app target is lost (`rules/targetLost` `why`, the plan's `targetLost`): `deleted` | `off` | `noServers` | `unsupported`.
+String lostWhyText(AppLocalizations l10n, String why) => switch (why) {
+  'deleted' => l10n.targetDeleted,
+  'off' => l10n.targetOffInNodes,
+  'noServers' => l10n.targetHasNoServers,
+  _ => l10n.targetHasNoServerTheCore,
+};
+
+/// Where the traffic of a lost target goes (`to`): `Block` / `Direct` / `Main flow` / the target's name.
+String lostWhereText(AppLocalizations l10n, Catalog c, String to) =>
+    fallbackName(l10n, to).isNotEmpty ? fallbackName(l10n, to) : targetText(l10n, c, to);
+
+/// The error tag of a lost target, "Target off in Nodes → Block"; null when the target is usable (or not a proxy target).
+/// [planFallback] is the rule's / half's "If unavailable" in the plan's form ([Catalog.planRuleFallback]).
+String? targetLostTag(AppLocalizations l10n, Catalog c, String target, String planFallback) {
+  final lost = c.targetLost(target, planFallback);
+  if (lost == null) return null;
+  return '${lostWhyText(l10n, lost.why)} → ${lostWhereText(l10n, c, lost.to)}';
+}
+
 const _fieldPrefix = {
   'domain_keyword': 'kw ',
   'domain_regex': 're ',

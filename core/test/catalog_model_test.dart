@@ -884,7 +884,54 @@ void main() {
       c.pinnedNode = 'b::gone';
       expect(c.pinLoss(), contains('no longer has it'));
       c.pinnedNode = null;
+      // Manual on the entry itself: it has nothing sing-box can run, the same kind of loss
+      expect(c.pinLoss(), allOf(contains('"${c.sourcesData['b']!.name}"'), contains('XHTTP is not in sing-box')));
+      c.selectConnect('a');
       expect(c.pinLoss(), isNull);
+    });
+
+    test('Manual on an entry is strict: hidden / broken / removed / unusable is pinLost naming the entry, never Auto\'s pick', () {
+      final c = make();
+      c.selectConnect('b'); // Manual on the entry, no server
+      expect(c.pinLoss(), isNull);
+      expect(c.livePlan()['current'], 1);
+      // switched off in Nodes: its servers all off -> broken
+      c.sourcesData['b']!.disabledNodes = ['b1', 'b2'];
+      expect(c.isBroken('b'), isTrue);
+      expect(c.effectiveConnectId(), 'b', reason: 'the pin stays, nothing takes Auto\'s pick');
+      expect(c.effectiveConnectId(true), 'b');
+      expect(c.pinLoss(), allOf(contains('"${c.sourcesData['b']!.name}"'), contains('off in Nodes'), contains('not moved')));
+      expect(() => c.livePlan(),
+          throwsA(isA<CatalogException>().having((e) => e.code, 'code', 'pinLost').having((e) => e.message, 'm', contains('"${c.sourcesData['b']!.name}"'))));
+      expect(c.checkBeforeConnect()!.code, 'pinLost');
+      // the source itself off: hidden
+      c.sourcesData['b']!.disabledNodes = [];
+      c.sourcesData['b']!.enabled = false;
+      expect(c.pinLoss(), contains('switched off in Nodes'));
+      // a chain whose entry is broken
+      c.sourcesData['b']!.enabled = true;
+      c.selectConnect('c1');
+      expect(c.pinLoss(), isNull);
+      c.sourcesData['b']!.disabledNodes = ['b1', 'b2'];
+      expect(c.pinLoss(), contains('"${c.chainsData['c1']!.name}"'));
+      // a removed entry
+      c.sourcesData['b']!.disabledNodes = [];
+      c.chainsData.remove('c1');
+      expect(c.pinLoss(), contains('removed'));
+      expect(() => c.livePlan(), throwsA(isA<CatalogException>().having((e) => e.code, 'code', 'pinLost')));
+      // Auto is untouched: it passes over a broken entry as before
+      c.syncCatalog();
+      c.sourcesData['b']!.disabledNodes = ['b1', 'b2'];
+      c.setAutoConnect(true);
+      expect(c.pinLoss(), isNull);
+      expect(c.effectiveConnectId(), 'a');
+      // Manual on an entry that merely does not answer is not a loss
+      c.selectConnect('a');
+      for (final k in ['a::a1', 'a::a2', 'a::a3']) {
+        ping(c, k, -1, fails: 9);
+      }
+      expect(c.pinLoss(), isNull);
+      expect(c.livePlan()['current'], 0);
     });
 
     test('Auto lists every Auto entry as a route, Manual too (`manual`, current = the anchor); the mockup\'s plan only the pinned one', () {

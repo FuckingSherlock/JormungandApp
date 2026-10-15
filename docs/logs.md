@@ -33,12 +33,12 @@ to …` — раньше такие строки не распознавалис
 
 ### Сбои при смене сети в Raw
 
-Сбой, который сделала смена сети (`docs/failures.md` → «Смена сети: окно переключения»), события не создаёт, но не
+Сбой, который сделала смена сети (`docs/failures.md` → «Смена сети: возмущение, ворота, устойчивость»), события не создаёт, но не
 пропадает: строка info на каждое соединение — `Connection … got nothing back (kind, opened Nms before; through …) while
 the network changed: counted as the network's …` (книга сбоев, поле статуса `failures.netSwitch`, входит в `failed10m`);
 `auto: a request through <маршрут> got nothing back (<адрес>) while the network changes: not the route's` (Auto,
 `requestFailsNet`); `auto: the network is changing: <маршрут> is not judged yet, asked again in Nms` (раунд не судился,
-`netHeldRounds`). В шагах вердикта — `net.switched`.
+`netHeldRounds`; перед самим переключением — `… is not left yet`). В шагах вердикта — `net.switched`.
 
 ### Свои проверки ядра в Raw
 
@@ -90,7 +90,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 |---|---|---|
 | conn | connected | план подключения (режим, маршрут, сервер) |
 | conn | disconnected | `by` |
-| conn | connectFailed | `reason` (Manual на сервер, который пропал / выключен / не поддержан: текст `Manual pick "…" is unavailable: …` — подключение не идёт через другой сервер, запущенное завершается этой же ошибкой; см. connect-model.md → Manual на сервер) |
+| conn | connectFailed | `reason` (Manual на сервер или на запись, которые пропали / выключены / не поддержаны: текст `Manual pick "…" is unavailable: …` — подключение не идёт через другой сервер, запущенное завершается этой же ошибкой; см. connect-model.md → Manual на сервер) |
 | conn | lost / restored | `downMs?` — сеть пропала / вернулась на живом подключении |
 | conn | offline / online | `downMs?` — нет интернета вообще / вернулся |
 | conn | failing | соединения массово не удаются (детектор неудавшихся соединений, `failures.dart`) |
@@ -105,6 +105,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | sub | removed / back | `count`, `source`, `name` — серверы пропали из подписки / вернулись |
 | sub | dead | только мокап (серверы подписки не отвечают); ядро и приложение его не пишут |
 | rules | fallback / targetBack | `target`, `to?` — «If unavailable» сработал / цель вернулась |
+| rules | targetLost / targetFound | `rule` или `app`, `target`, `why` (`deleted` / `off` / `noServers` / `unsupported`), `to` (`block` / `direct` / `main` / id цели), `default?` — цель правила или приложения потеряна (warn, уведомление под `autoSwitch`) / вернулась (info). `docs/rules.md` §0 «Недоступная цель» |
 | rules | ruleSetFailed | `tag`, `url`, `error` |
 | rules | ruleSetUpdated | `tag` |
 | dns | switched | `side` (`direct` / `vpn`), `from`, `to` (id кандидатов), `fromProvider`, `toProvider`, `reason` (`failover` — отвечавший упал, в том числе протокол, взятый гонкой после отказа победителя; `back` — вернулся более приоритетный; `node` — сменилась нода выхода, применились вердикты новой; `off` — выключили «Switch automatically»); `own` у `off`. На сторону, когда меняется её отвечающий кандидат. Победитель гонки протоколов (старт, смена сети или ноды) — обычный выбор: события нет, только строка гонки в Raw |

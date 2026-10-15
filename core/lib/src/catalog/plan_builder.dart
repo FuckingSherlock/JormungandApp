@@ -37,6 +37,20 @@ class TargetInfo {
   final bool ok;
 }
 
+/// A rule / app target that cannot carry traffic ([CatalogPlan.targetLost]).
+class TargetLost {
+  const TargetLost(this.why, this.to, this.byDefault);
+
+  /// `deleted` | `off` | `noServers` | `unsupported`.
+  final String why;
+
+  /// Where the traffic goes now: `block` | `direct` | `main` | a target id.
+  final String to;
+
+  /// The rule's "If unavailable" is Default: the global Rules → Target unavailable decided.
+  final bool byDefault;
+}
+
 /// JS `String.slice(a)` / `slice(a, b)` for the one place that cuts with `-1`.
 String _slice(String s, int a, [int? b]) {
   int clamp(int i) => i < 0 ? (s.length + i).clamp(0, s.length) : i.clamp(0, s.length);
@@ -336,6 +350,61 @@ extension CatalogPlan on Catalog {
     return TargetInfo(kind: kind, name: e?.name ?? '', gone: e == null, ok: ok);
   }
 
+  /// Why the rule / app target [t] cannot carry traffic now, null = it can (or it is the main flow): `deleted`,
+  /// `off` (switched off in Nodes, its source or servers), `noServers` (nothing left to connect through) or
+  /// `unsupported` (only servers sing-box cannot run, e.g. XHTTP). docs/rules.md §0 «Потерянная цель».
+  String? targetLoss(String t) {
+    if (t.isEmpty) return null;
+    if (!t.contains(':')) t = _entryTarget(t) ?? t;
+    final i = targetInfo(t);
+    if (i.gone) return 'deleted';
+    final at = t.indexOf(':'), kind = _slice(t, 0, at), ref = _slice(t, at + 1);
+    if (!i.ok) {
+      return switch (kind) {
+        'src' => sourcesData[ref]!.enabled && brokenBy(ref).isEmpty ? 'noServers' : 'off',
+        'node' => 'off',
+        _ => brokenBy(ref).isNotEmpty ? 'off' : 'noServers',
+      };
+    }
+    final bool usable;
+    if (kind == 'src') {
+      usable = liveNodes(sourcesData[ref]!).any((n) => n.usable);
+    } else if (kind == 'node') {
+      final parts = ref.split('::');
+      usable = sourcesData[parts[0]]!.nodes.any((n) => n.id == parts[1] && n.usable);
+    } else if (kind == 'profile') {
+      usable = unitPickRefs(ref).any((r) => r.node.usable);
+    } else {
+      final c = chainsData[ref]!;
+      usable = chainEntryRefs(c).any((r) => r.node.usable) && chainExitRefs(c).any((r) => r.node.usable);
+    }
+    return usable ? null : 'unsupported';
+  }
+
+  /// A proxy rule / app half whose target [target] is lost ([targetLoss]): why, and where its traffic goes now by its
+  /// "If unavailable" [planFallback] (the plan's form: `default` / `main` / `block` / `direct` / a target id): `to` is
+  /// `block` | `direct` | `main` | a target id; [TargetLost.byDefault]: the global Rules → Target unavailable decided.
+  /// The same answer as the config's (routing.dart `_proxyAction`). Null when the target is usable.
+  TargetLost? targetLost(String target, String planFallback) {
+    final why = targetLoss(target);
+    if (why == null) return null;
+    const keywords = ['main', 'block', 'direct'];
+    final global = keywords.contains(quickCfg.fallback) ? quickCfg.fallback : 'main';
+    if (planFallback.isEmpty || planFallback == 'default') return TargetLost(why, global, true);
+    if (keywords.contains(planFallback)) return TargetLost(why, planFallback, false);
+    if (planFallback == target) return TargetLost(why, 'main', false);
+    return targetLoss(planFallback) == null ? TargetLost(why, planFallback, false) : TargetLost(why, global, true);
+  }
+
+  /// An app half's "If unavailable" as the plan holds it (same form as [planRuleFallback]).
+  String planAppFallback(AppHalf h) =>
+      h.fallback == 'main' && h.fallbackTarget.isNotEmpty ? h.fallbackTarget : (h.fallback.isNotEmpty ? h.fallback : 'default');
+
+  /// A rule's "If unavailable" as the plan holds it ("Proxy via X" is the target id X).
+  String planRuleFallback(UserRule r) => r.action == 'proxy'
+      ? (r.fallback == 'main' && truthy(r.fallbackTarget) ? r.fallbackTarget! : (r.fallback.isNotEmpty ? r.fallback : 'default'))
+      : 'default';
+
   /// A rule / app target as groups (same shape as the main flow's), or null = unavailable:
   /// off in Nodes, no server the core can use, deleted (`routingTarget`).
   Json? routingTarget(String t) {
@@ -377,15 +446,15 @@ extension CatalogPlan on Catalog {
       if (r == null || !r.enabled) continue;
       // a rule's Fallback only means something for Proxy (a target of its own or the main flow);
       // "Proxy via X" (fallback 'main' + fallbackTarget) goes as the target id X
-      final fb = r.action == 'proxy'
-          ? (r.fallback == 'main' && truthy(r.fallbackTarget) ? r.fallbackTarget! : (r.fallback.isNotEmpty ? r.fallback : 'default'))
-          : 'default';
+      final fb = planRuleFallback(r);
       final o = <String, dynamic>{
         'id': r.id,
         if (r.name.isNotEmpty || r.had.contains('name')) 'name': r.name,
         'action': r.action,
         'target': r.target,
         'fallback': fb,
+        // the target is lost (deleted / off / no servers / unsupported): the rule goes by its "If unavailable", loudly (not in the mockup's plan, [mockupPlan])
+        'targetLost': ?(r.action == 'proxy' && !mockupPlan ? targetLoss(r.target) : null),
         if (r.block != null || r.had.contains('block')) 'block': r.block,
         'dns': truthy(r.dns) ? r.dns : 'auto',
         if (r.groups != null) 'groups': deepCopy(r.groups),
@@ -405,13 +474,14 @@ extension CatalogPlan on Catalog {
     // 'main' alone = no fallback. Only Proxy and Default (= the main flow) have one: on Default or
     // Proxy with the main flow an explicit block / direct / target id gives the main flow its own
     // "If unavailable"; 'default' / 'main' there = none (Default without one has no rule)
-    String fb(AppHalf h) => h.fallback == 'main' && h.fallbackTarget.isNotEmpty ? h.fallbackTarget : (h.fallback.isNotEmpty ? h.fallback : 'default');
+    String fb(AppHalf h) => planAppFallback(h);
     Json half(AppHalf h) {
       final act = h.act.isNotEmpty ? h.act : 'default';
       return {
         'act': act,
         'target': h.act == 'proxy' ? h.target : '',
         'fallback': h.act == 'proxy' || h.act.isEmpty || h.act == 'default' ? fb(h) : 'default',
+        'targetLost': ?(h.act == 'proxy' && !mockupPlan ? targetLoss(h.target) : null),
       };
     }
 

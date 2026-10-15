@@ -419,7 +419,8 @@ sing-box. Ответил — сходит с лесенки сразу и дал
 - **Внеочередная проверка**: после переподключения (и после перезапуска приложения) каждый недоступный
   узел получает одну проверку вне срока, в ближайшем раунде; ответил — вернулся, промахнулся — остаётся
   на том же шаге. Смена сети (Sentinel: контекст сети сменился, сеть не «нет» и не captive) делает то же
-  сразу: внеочередной раунд.
+  сразу: внеочередной раунд. Решения о переключении (уход Auto, промах цели) он при этом не принимает, пока
+  `Sentinel.networkGate` не скажет, что сеть устойчива (см. `failures.md` → «Смена сети»).
 - **Пачки.** У лесенки нет своего таймера: узел спрашивает раунд того модуля, что за ним следит (Auto,
   «If unavailable»), — то есть вместе с остальными замерами раунда, радио просыпается и так. Если в раунде
   есть узел, чей срок пришёл (или должна внеочередная проверка), то узлы, чей срок наступит в ближайшие 2 мин
@@ -485,7 +486,8 @@ sing-box. Ответил — сходит с лесенки сразу и дал
   ответил, а прямой путь проверить нечем. Переключения ждут, замеры продолжаются.
 - Нет данных — `up` (как предполагали модули раньше). Подключение / отключение (`resetNetwork`) статус **не
   меняют**: «up» ставит только ответ пробы. Смена сети (`setNetwork`: другой `type|id`, возврат связи) «down» тоже
-  не снимает: сервис сразу спрашивает прямой путь (без sing-box — простым HEAD без прокси, шов
+  не снимает (а открывает возмущение сети: пока по новой сети не пошли входящие данные, Auto и «Если недоступно» ничего не
+  переключают, `failures.md` → «Смена сети»): сервис сразу спрашивает прямой путь (без sing-box — простым HEAD без прокси, шов
   `CoreService(directProbe:)`, по умолчанию `directDelay`), его ответ даёт `up`, молчание — `down`; без подключения
   вопрос повторяется каждые `noNetEvery`. `disconnect()` при `down` (или открытом `lostAt` Auto) спрашивает так же.
 
@@ -1158,7 +1160,7 @@ Global, hijack вкл / выкл, системные правила первым
 | `POST /api/killswitch` | `{killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — сменить на ходу, без переподключения → status |
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |
-| `POST /api/network` | `{connected?, validated?, captive?, type?, id?}` — что платформа знает о сети (Android); заменяет прошлый отчёт → контекст `Sentinel` (`{network, core, roots}`, он же `context` в status). См. `failures.md` |
+| `POST /api/network` | `{connected?, validated?, captive?, type?, id?, at?}` — что платформа знает о сети (Android; `at` — мс от эпохи, когда система сообщила о смене: время падения сети); заменяет прошлый отчёт → контекст `Sentinel` (`{network, core, roots}`, он же `context` в status). См. `failures.md` |
 | `POST /api/auto` | `{auto?, manual?, entry?}` — новые настройки Auto mode (как `plan.auto`) работающему AutoService, без переподключения. `manual` (bool) — Auto ↔ Manual вживую: план уже держит все маршруты Auto (`plan.manual` — режим на старте), контроллер лишь перестаёт/начинает ходить между ними; `entry` (id записи) — маршрут, на котором стоит Manual: селектор `proxy` переключается туда без перезапуска и без события `auto/switched`. Записи нет в плане — режим применён, маршрут не двигается (хост шлёт новый план). `status.auto`: `manual`, `routes[].server` / `entryServer` — где стоят группы **каждого** маршрута → status |
 | `POST /api/disconnect`, `GET /api/status` | status: `{connected, mode: 'tun'\|'proxy'\|null, systemProxy, sysPort, error, warning, exit, recovering, down, blocking, restarts, auto, network, dns, sourcesRev}` — `network: {status: 'up'\|'down'\|'unknown', since, lastAnswer, offline, silent, doubt}` — общее состояние сети пула замеров (см. «Пул замеров»); `connected` true и пока sing-box перезапускается (`recovering: {attempt, code, next}`, `down: {since, attempt, proxy: 'kept'\|'removed'\|'released'}` — после 30 с; null, когда нет), `blocking: {since, reason: 'disconnect'\|'closed', proxy: 'kept'\|'released'}` — не подключено, прокси оставлен kill switch'ем (см. «Падение sing-box», «Kill switch»); `auto` см. ниже; `sourcesRev` растёт, когда ядро само обновило подписку в снимке (или записало `lastError` неудачного обновления) |
 | `GET /api/log?since=N&conns=0` | `{lines:[{n, t, src: "sing-box" или "core", lvl: debug/info/warn/error, msg}], next, hidden?}` — строки с номером ≥ N (без `since` — все хранимые: до 5000 + 500 шума); UI опрашивает с `next` прошлого ответа. `conns=0` — шум-кольцо (успешные соединения, `found package name`) не отдаётся, `hidden` = сколько строк пропущено; нумерация и `next` те же. `DELETE /api/log` — очистить (нумерация продолжается). Подробно — `docs/logs.md` |
@@ -1185,6 +1187,10 @@ at}], pairs: [{entry, key, ms, fails, oks, at}], switches, switchedAt, lastSwitc
 запись на пару; UI кладёт в кэш пар `PairBook`, `snapshot.pairs`, см. connect-model.md «Пинг»);
 `switches` — счёт переключений маршрутов и Priority-серверов (`lastSwitch.route` есть у второго,
 тогда `from`/`to` — ключи серверов). UI опрашивает status раз в 4 с.
+
+`status.rulesLost` (пока подключено): список потерянных целей правил и приложений, по элементу на
+правило / приложение + цель, в форме `data` события `rules/targetLost` (`{rule|app, target, why, to, default?}`);
+пуст, когда терять нечего (`rules.md` §0 «Недоступная цель»).
 
 `status.dns` (пока подключено и есть DNS-серверы; иначе `null`): `{active: id сервера в работе,
 auto, servers: [{id, ok, ms}]}` в порядке приоритета. `ok`: `null` не мерили, `false` — упал
@@ -1401,6 +1407,8 @@ Raw). Событие:
 | `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
 | `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'\|<id of the fallback target>}` — `target`: the cause (`proxy` = the main flow); `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |
 | `rules/targetBack` info | цель снова отвечает, трафик вернулся | `{rule?, app?, more?, target}` |
+| `rules/targetLost` warn | цель правила или приложения потеряна (удалена / выключена / нет серверов / не поддерживается); трафик идёт по её «If unavailable», маршрутизация не меняется. Одно событие на правило / приложение + цель; при подключении и при смене `why` / `to`; при отключении забывается; при `adopt` молчит | `{rule?, app?, target, why: 'deleted'\|'off'\|'noServers'\|'unsupported', to: 'block'\|'direct'\|'main'\|<id цели>, default?: true}` — `rule`: имя (безымянного — `rule <id>`); `default`: решил глобальный Target unavailable |
+| `rules/targetFound` info | потерянная цель снова годна | `{rule?, app?, target}` |
 | `dns/switched` info | DNS-сервер в работе сменился (Switch automatically); `own: true` при `reason: 'off'` | `{from, to, reason: 'failover'\|'back'\|'node'\|'off'}` — id серверов из UI; `node` — сменилась нода выхода, применились вердикты новой |
 | `rules/ruleSetFailed` warn | скачивание списка не удалось. Ни один путь не ответил → через Sentinel (`svc.fetch`), событие только при `confirmed` (с `verdict`); ответ сервера, не похожий на список — сразу. Сбой нашего перезапуска не пишется (повтор после `settled`). Повтор — по `RetryPolicy` (1 → 2 → 5 → 15 мин) | `{tag, url, error, hasCopy}` — `url` последний из пробованных; `hasCopy`: прошлая копия на диске и используется |
 | `rules/ruleSetUpdated` info | старая копия списка заменена новой, или список скачан после сбоя (первая закачка отсутствующего списка — не новость) | `{tag}` |

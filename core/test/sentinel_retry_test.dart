@@ -12,7 +12,9 @@ void main() {
 
   setUp(() {
     time = FakeTime();
-    ctx = ContextTracker(clock: time.clock);
+    ctx = ContextTracker(clock: time.clock)
+      ..noSignalGrace = Duration.zero // the disturbance after a move has its own tests (net_switch_test.dart)
+      ..switchCap = Duration.zero;
     policy = RetryPolicy(ctx);
   });
 

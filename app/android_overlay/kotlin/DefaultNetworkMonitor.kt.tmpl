@@ -145,16 +145,21 @@ object DefaultNetworkMonitor {
     private var stateLast: Map<String, Any?>? = null
 
     private val stateCallback = object : ConnectivityManager.NetworkCallback() {
+        // `at`: the moment the system called back (wall-clock ms), taken first thing: the core classifies the failures of
+        // connections by it (a connection that closed after it is the network's), not by when this message reaches it.
         override fun onAvailable(network: Network) {
+            val at = System.currentTimeMillis()
             synchronized(stateLock) { stateNetwork = network }
-            publishState()
+            publishState(at)
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            if (network == stateNetwork) publishState()
+            val at = System.currentTimeMillis()
+            if (network == stateNetwork) publishState(at)
         }
 
         override fun onLost(network: Network) {
+            val at = System.currentTimeMillis()
             val mine = synchronized(stateLock) {
                 if (network == stateNetwork) {
                     stateNetwork = null
@@ -163,17 +168,20 @@ object DefaultNetworkMonitor {
                     false
                 }
             }
-            if (mine) publishState()
+            if (mine) publishState(at)
         }
     }
 
     /**
      * Starts [listener] on the state of the underlying default network, the current one at once, then on
-     * every change: `{connected, validated, captive, type (wifi | cellular | ethernet | vpn | other), id}`.
-     * `id` is `Network.getNetworkHandle()` as a string: another Wi-Fi is another id on the same `wlan0`.
+     * every change: `{connected, validated, captive, type (wifi | cellular | ethernet | vpn | other), id, at}`.
+     * `id` is `Network.getNetworkHandle()` as a string: another Wi-Fi is another id on the same `wlan0`. `at` is the
+     * wall-clock ms at which the system called back (`onLost` / `onAvailable` / `onCapabilitiesChanged`); for the first
+     * answer, the moment of the call. It is not part of the state compared for repeats.
      * The first answer comes on the caller's thread, the later ones on the monitor's own thread.
      */
     fun addStateListener(context: Context, listener: (Map<String, Any?>) -> Unit) {
+        val at = System.currentTimeMillis()
         val now: Map<String, Any?>
         synchronized(stateLock) {
             val cm = stateConnectivity ?: context.applicationContext
@@ -188,7 +196,7 @@ object DefaultNetworkMonitor {
             now = stateNow()
             if (stateLast == null) stateLast = now
         }
-        listener(now)
+        listener(now + ("at" to at))
     }
 
     fun removeStateListener(listener: (Map<String, Any?>) -> Unit) {
@@ -203,7 +211,7 @@ object DefaultNetworkMonitor {
         }
     }
 
-    private fun publishState() {
+    private fun publishState(at: Long) {
         val targets: List<(Map<String, Any?>) -> Unit>
         val now: Map<String, Any?>
         synchronized(stateLock) {
@@ -212,8 +220,9 @@ object DefaultNetworkMonitor {
             stateLast = now
             targets = stateListeners.toList()
         }
-        VpnBridge.log("debug", "network: state $now")
-        for (l in targets) l(now)
+        val told = now + ("at" to at)
+        VpnBridge.log("debug", "network: state $told")
+        for (l in targets) l(told)
     }
 
     /** Under [stateLock]. No network (or one that has just gone) = `connected: false`. */

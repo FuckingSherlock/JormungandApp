@@ -69,6 +69,7 @@ import 'pool.dart';
 import 'probe.dart' show canProbeDest, probeInboundTag;
 import 'sbapi.dart' show BoxControl, ClosedConnection;
 import 'sentinel/model.dart' show Cancel;
+import 'sentinel/sentinel.dart' show NetGate;
 import 'stall.dart';
 import 'svc_in.dart' show svcInboundTag;
 
@@ -447,8 +448,10 @@ class AutoService {
       this.note,
       this.trace,
       this.onDown,
+      this.ownConnection,
       this.netSwitch,
-      this.netSettling,
+      this.netGate,
+      this.netProved,
       ProbePool? pool,
       ExitBook? exits,
       AutoMemory? memory,
@@ -515,6 +518,10 @@ class AutoService {
   /// (`route0`, `route1-entry`) and the server's key. The owner decides what a dead server asks for (the core
   /// looks at its address, service.dart); Auto's own failover does not wait for it.
   final void Function(String groupTag, String key)? onDown;
+
+  /// Whether a closed connection is the app's own (service.dart `_isOwnConnection`: the self rule, the app's package or
+  /// process), besides the probe / svc inbounds ([_isOwn]). A failed one is not a failed request of the user's.
+  final bool Function(ClosedConnection c)? ownConnection;
 
   /// Replaceable while running (Settings → Auto mode changed): the next round uses it.
   AutoSettings settings;
@@ -613,15 +620,21 @@ class AutoService {
   /// is tested, moved or marked until it is back.
   bool offline = false;
 
-  /// Whether a failed request belongs to a network switch (the Sentinel context's `failureInSwitch`): [ageMs] = how old the
-  /// failed connection was (null = not told). A failed request is then the network's, not the route's: counted
-  /// ([requestFailsNet]) and told, never a check of the route or a site to try again.
-  final bool Function(int? ageMs)? netSwitch;
+  /// Whether a failed request belongs to a network switch (the Sentinel context's `failureInSwitch`, told by the closed
+  /// connection's own stamps). A failed request is then the network's, not the route's: counted ([requestFailsNet]) and
+  /// told, never a check of the route or a site to try again.
+  final bool Function(ClosedConnection c)? netSwitch;
 
-  /// Whether the device moved to another network (or got the connection back) a moment ago (the context's `settling`).
-  /// While it holds and the route in use does not answer, the round does not judge: nobody is marked, no route is left,
-  /// and the route is asked again a retry pause later ([netHeldRounds]).
-  final bool Function()? netSettling;
+  /// The Sentinel's answer about the network at this moment (`Sentinel.networkGate`): asked before the route in use is
+  /// judged missing and before a failover; [suspicious]: every route tested this round failed (the Sentinel then checks
+  /// the network itself). While a switch of the network is not settled (`NetGate.switching`) and the route in use does
+  /// not answer, the round does not judge: nobody is marked, no route is left, and the route is asked again a retry pause
+  /// later ([netHeldRounds]). An outage (no connection) is not a switch: Auto's own «no network» path handles it.
+  final Future<NetGate> Function({bool suspicious})? netGate;
+
+  /// The route in use answered a test that began at [startedAt] (ms): a proof the network works again
+  /// (`ContextTracker.proved`).
+  final void Function(int startedAt)? netProved;
 
   /// Requests through the current route that could not open (see [onLog]) and the last.
   int requestFails = 0;
@@ -757,6 +770,7 @@ class AutoService {
       _userFailed = false;
       _improveForce = _improveNow;
       _improveNow = false;
+      final roundStart = _clock();
       final traffic = _liveTraffic(); // taken every round: the next look counts from this one
       final retry = cur.health.fails > 0 && cur.health.fails < settings.failAfter;
       final todo = {index};
@@ -778,10 +792,20 @@ class AutoService {
       _ahead = _ladderWakes(todo) ? settings.ladderAhead : Duration.zero;
       await Future.wait(todo.map((i) => _checkRoute(_routes[i])));
       if (_stopped) return;
-      // the network moved (or just came back) and the route in use does not answer yet: its connections, its transport
-      // and the DNS are still on the old network. Nobody is marked, no route is left; a retry pause later it is asked again,
-      // and what it says after the window is judged as usual
-      if (netSettling?.call() == true && !cur.health.answered) {
+      if (cur.health.answered) netProved?.call(roundStart);
+      // the route in use does not answer: before it is judged the Sentinel is asked about the network at this moment. A
+      // switch that is not settled (the platform's signal may have come after the failures; the first requests have not
+      // gone through yet): its connections, its transport and the DNS are still on the old network. Nobody is marked, no
+      // route is left; a retry pause later it is asked again, and what it says once the network is stable is judged as usual
+      var hold = false;
+      if (!cur.health.answered && netGate != null) {
+        final others = todo.where((i) => i != index).toList();
+        final allMissed = others.isNotEmpty && others.every((i) => !_routes[i].health.answered);
+        final g = await netGate!(suspicious: allMissed);
+        if (_stopped) return;
+        hold = g.switching;
+      }
+      if (hold) {
         saved.forEach((h, s) => h._load(s));
         savedKeep.forEach((h, s) => h._load(s));
         pool.ladder.restore(ladderSaved, keep: const <String>{});
@@ -881,16 +905,20 @@ class AutoService {
       _closedWithData(c);
       return;
     }
+    // the core's own tests and requests (a site re-test of [_sites] among them) failing is the check's result, told by
+    // whoever ran it and kept in the raw log: never a failed request of the user's, a site to try again or a check
+    // (else a check of a failure would make the next failure, and report it with its own rule and app)
+    if (_isOwn(c.inbound) || ownConnection?.call(c) == true) return;
     if (c.chain.map(_routeOf).firstWhere((i) => i != null, orElse: () => null) != index) return;
     final now = _clock();
     // a connection the network switch closed (opened on the old network, or opened in the window of the new one settling) is
     // the network's: not a failed request of the route, no check of it, no site to try again (counted, never dropped)
-    if (netSwitch?.call(c.durationMs) == true) {
+    if (netSwitch?.call(c) == true) {
       requestFailsNet++;
       note?.call('auto: a request through ${_routes[index].id} got nothing back (${c.destination}) while the network changes: not the route\'s');
       return;
     }
-    if (!_isOwn(c.inbound)) _userFailed = true;
+    _userFailed = true;
     requestFails++;
     lastRequestFail = {'route': _routes[index].id, 'dest': c.destination, 'sent': c.up, 'at': now};
     // every failed site is remembered, those that sent nothing too (instant rejects are most of them); they are tried
@@ -1812,6 +1840,15 @@ class AutoService {
         final direct = await pool.directAnswers(url: settings.url, checkers: settings.checkers, timeoutMs: settings.timeoutMs);
         _directOk = direct == true;
         if (!_stopped && direct == false) pool.silent(true);
+        return;
+      }
+      // the Sentinel is asked once more at the moment of the switch: the network may have moved while the routes were tested
+      final g = await netGate?.call();
+      if (_stopped) return;
+      if (g != null && g.switching) {
+        _netHeld = true;
+        netHeldRounds++;
+        note?.call('auto: the network is changing: ${cur.id} is not left yet, asked again in ${settings.retryPause.inMilliseconds}ms');
         return;
       }
       final old = cur.tag;

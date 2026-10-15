@@ -602,6 +602,7 @@ class TargetRow extends StatelessWidget {
     this.onPick,
     this.exclude = '',
     this.mode = TargetRowMode.normal,
+    this.lostFallback,
   });
 
   final String label;
@@ -609,6 +610,11 @@ class TargetRow extends StatelessWidget {
   final ValueChanged<String>? onPick;
   final String exclude;
   final TargetRowMode mode;
+
+  /// The owner's "If unavailable" in the plan's form ([Catalog.planRuleFallback]); set on the Via row of a
+  /// rule / app half that sends traffic through [target]: a lost target then shows the error tag with where
+  /// its traffic goes. Null = not such a row (the plain "unavailable" tag).
+  final String? lostFallback;
 
   @override
   Widget build(BuildContext context) {
@@ -621,6 +627,9 @@ class TargetRow extends StatelessWidget {
       fontWeight: FontWeight.w600,
       color: c.accent,
     );
+    final lostTag = lostFallback == null || mode != TargetRowMode.normal
+        ? null
+        : targetLostTag(l10n, cat, target, lostFallback!);
     final Widget value;
     if (mode == TargetRowMode.inert) {
       value = Text('—', style: valStyle.copyWith(color: c.t3));
@@ -637,7 +646,7 @@ class TargetRow extends StatelessWidget {
         ],
       );
     } else {
-      value = Row(
+      final line = Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Flexible(
@@ -660,7 +669,7 @@ class TargetRow extends StatelessWidget {
               ),
             ),
           ],
-          if (!i.ok) ...[
+          if (!i.ok && lostTag == null) ...[
             const SizedBox(width: 6),
             ConnTag(l10n.unavailable4, tone: TagTone.warn),
           ],
@@ -668,6 +677,18 @@ class TargetRow extends StatelessWidget {
           Icon(Icons.chevron_right, size: 16, color: c.t3),
         ],
       );
+      // The lost-target tag is a sentence ("Target off in Nodes → Block"): under the value, wrapping.
+      value = lostTag == null
+          ? line
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                line,
+                const SizedBox(height: 4),
+                ConnTag(lostTag, tone: TagTone.error),
+              ],
+            );
     }
     final row = SetRow(
       label: label,

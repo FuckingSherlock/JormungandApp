@@ -3529,5 +3529,44 @@
     }
   },
   "newVersion": "New version",
-  "aNewVersionOfTheApp": "A new version of the app is out, or a downloaded one waits to be installed"
+  "aNewVersionOfTheApp": "A new version of the app is out, or a downloaded one waits to be installed",
+  "ruleTargetLost": "Rule target lost",
+  "ruleTargetFound": "Rule target found",
+  "targetLost": "Target lost: {s0}",
+  "@targetLost": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "isAvailableAgain": "{s0} is available again",
+  "@isAvailableAgain": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "targetDeleted": "Target deleted",
+  "targetOffInNodes": "Target off in Nodes",
+  "targetHasNoServers": "Target has no servers",
+  "targetHasNoServerTheCore": "Target has no server the core can run",
+  "ruleIsBlocked": "Rule {s0} is blocked",
+  "@ruleIsBlocked": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appIsBlocked": "App {s0} is blocked",
+  "@appIsBlocked": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ifUnavailableIsDefault": "If unavailable is Default"
 }

@@ -59,6 +59,7 @@ import 'plan.dart' show topTag;
 import 'pool.dart';
 import 'routing.dart' show TargetFallback;
 import 'sbapi.dart' show BoxControl;
+import 'sentinel/sentinel.dart' show NetGate;
 import 'stall.dart';
 import 'watched.dart';
 
@@ -125,7 +126,7 @@ class _Target {
 
 class FallbackService {
   FallbackService(this.api, Iterable<TargetFallback> fallbacks,
-      {required this.delay, required this.settings, ProbePool? pool, this.mainIdentity, int Function()? clock, this.note, this.onDown, this.setFlag, this.netSwitching, AutoMemory? memory})
+      {required this.delay, required this.settings, ProbePool? pool, this.mainIdentity, int Function()? clock, this.note, this.onDown, this.setFlag, this.netGate, AutoMemory? memory})
       : pool = pool ?? ProbePool.solo(),
         memory = memory ?? AutoMemory(),
         _clock = clock ?? _wallClock {
@@ -169,11 +170,12 @@ class FallbackService {
   /// like Auto's: the core may look at its address again (service.dart `_serverDown`). Not for the main flow.
   final void Function(String groupTag, String key)? onDown;
 
-  /// The network is down or has just changed (the Sentinel context's `switching`): a miss now is the network's, so a
-  /// target that does not answer is not judged (no miss counted, no server left, no fallback), asked again a retry pause
-  /// later. null = never.
-  final bool Function()? netSwitching;
-  bool _netHeld = false; // a target was not judged in the running round for [netSwitching]
+  /// The network gate (the Sentinel's `networkGate`): asked before a miss is judged. A network that is down or has just
+  /// changed (`!allow`) makes the miss the network's, so a target that does not answer is not judged (no miss counted,
+  /// no server left, no fallback), asked again a retry pause later. [suspicious]: the direct path and every other
+  /// target missed too. null = never held.
+  final Future<NetGate> Function({bool suspicious})? netGate;
+  bool _netHeld = false; // a target was not judged in the running round for [netGate]
 
   /// Writes the flag of a selector that falls back to Direct (service.dart: the file); null = none.
   final void Function(TargetFallback s, bool on)? setFlag;
@@ -376,9 +378,13 @@ class FallbackService {
     }
   }
 
-  // A miss while the network is down or has just changed ([netSwitching]) is not judged: the round says so and is repeated.
-  bool _heldByNetwork() {
-    if (netSwitching?.call() != true) return false;
+  // A miss while the network is down or has just changed (the [netGate] does not allow) is not judged: the round says so
+  // and is repeated.
+  Future<bool> _heldByNetwork({bool suspicious = false}) async {
+    final gate = netGate;
+    if (gate == null) return false;
+    final g = await gate(suspicious: suspicious);
+    if (_stopped || g.allow) return _stopped;
     _netHeld = true;
     return true;
   }
@@ -400,7 +406,7 @@ class FallbackService {
     final leaf = _mainLeaf();
     final ms = await _ping(mainIdentity?.call(leaf) ?? 'tag:$leaf', leaf);
     if (ms >= 0 || _stopped) return ms;
-    if (_heldByNetwork()) return null;
+    if (await _heldByNetwork()) return null;
     // missed: only counts when the network is up: the direct path or a fallback target answers
     final fbs = {for (final s in t.selectors) if (s.fallbackTarget != null) s.fallbackTarget!};
     final answers = await Future.wait([
@@ -450,14 +456,14 @@ class FallbackService {
     if (gate == LadderGate.light) {
       final ms = await _ping(id, _current(t), light: true);
       if (_stopped) return ms;
-      if (ms < 0 && _heldByNetwork()) return null;
+      if (ms < 0 && await _heldByNetwork()) return null;
       ladder.observe(id, ms, _clock());
       return ms >= 0 ? ms : _heal(t); // its turn: the other servers of a Fastest group are looked at too
     }
     final r = await _pingResult(id, _current(t));
     if (_stopped) return r.ms;
     if (r.ms >= 0) return await _improve(t, r) ?? r.ms;
-    if (_heldByNetwork()) return null;
+    if (await _heldByNetwork()) return null;
     if (t.w.health.fails + 1 < settings.failAfter) return -1; // this miss is not yet the failAfter-th
     return _heal(t);
   }

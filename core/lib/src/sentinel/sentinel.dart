@@ -25,6 +25,22 @@ export 'retry.dart';
 export 'roots.dart';
 export 'windows.dart';
 
+/// The network at the moment a switch is about to be made ([Sentinel.networkGate]). [stable]: no disturbance is open
+/// (nothing moved, or the new network proved itself); [outage]: no connection / a portal / the probe was silent (the
+/// network's own state, not a switch: Auto's «no network» path judges it); [reason] says what decided it.
+class NetGate {
+  const NetGate({required this.stable, this.outage = false, this.reason = ''});
+
+  final bool stable, outage;
+  final String reason;
+
+  /// Switching is allowed: the network is stable.
+  bool get allow => stable && !outage;
+
+  /// Switching waits: a move is not yet settled (an outage is not a switch, [allow] is false for it too).
+  bool get switching => !stable && !outage;
+}
+
 class _Running {
   _Running(this.check, this.cancel, this.done);
 
@@ -88,6 +104,7 @@ class Sentinel {
     this.checkTimeout = const Duration(seconds: 10),
     this.maxActive = 32,
     this.parkMax = parkLimit,
+    this.netProbe,
     RootRegistry? roots,
   })  : clock = clock ?? context?.clock ?? SentinelClock(),
         roots = roots ?? RootRegistry() {
@@ -118,6 +135,10 @@ class Sentinel {
 
   /// The longest a suspicion waits parked behind a failed node (all parks together); then `deferred`.
   final Duration parkMax;
+
+  /// The network probe the gate uses ([networkGate]; the service: the direct path asked through the probe pool): true =
+  /// the network answers, false = it is silent, null = cannot be tested. null = no probe (the context decides alone).
+  final Future<bool?> Function()? netProbe;
 
   final _queue = Queue<_Job>();
   final _byKey = <String, _Job>{};
@@ -330,6 +351,36 @@ class Sentinel {
     }
   }
 
+  // ── the network gate ──
+
+  /// Asked before anything switches (Auto's failover, a rule target marked missed or sent to its fallback): what is the
+  /// network at this moment. Answered from the context; when nothing reports the network (no platform signal: Windows /
+  /// jormd), the report is stale (a move seen by sing-box that the platform has not confirmed), the failures are
+  /// [suspicious] (every route failing at once), or the platform says it is fine but the requests have not yet proved
+  /// the new network, the Sentinel checks the network itself ([netProbe]) before answering. A probe that answers is a
+  /// proof of the network (it ends a disturbance whose platform state is fine); one that does not is an outage.
+  Future<NetGate> networkGate({bool suspicious = false}) async {
+    final c = context;
+    if (c.outage) return NetGate(stable: false, outage: true, reason: c.network.state.name);
+    final probe = netProbe;
+    final needs = probe != null && (!c.signalKnown || c.signalStale || suspicious || (!c.stable && _platformFine(c)));
+    if (!needs) return NetGate(stable: c.stable, reason: c.stable ? 'stable' : 'switching');
+    final from = clock.now().millisecondsSinceEpoch;
+    final up = await (_gateProbe ??= probe().whenComplete(() => _gateProbe = null));
+    if (up == true) c.proved(since: from); // (the pool's hook, service.dart `pool.onAnswer`, says the same for a real probe)
+    if (up == false) return const NetGate(stable: false, outage: true, reason: 'probe');
+    return NetGate(stable: c.stable, reason: c.stable ? (up == true ? 'probed' : 'stable') : 'switching');
+  }
+
+  Future<bool?>? _gateProbe;
+
+  // The platform reports the network connected, not a portal (validated or not: the OS's validation endpoints are often
+  // blocked), or says nothing: only the first data coming in is awaited.
+  static bool _platformFine(ContextTracker c) {
+    final s = c.network.state;
+    return s == NetState.up || s == NetState.unknown;
+  }
+
   // ── context ──
 
   void _onContext() {
@@ -493,15 +544,19 @@ class Sentinel {
       final net = context.network;
       _step(j, 'ctx.net', net.state == NetState.up ? Outcome.pass : Outcome.inconclusive, {'state': net.state.name, 'since': net.since}, true);
 
-      // a2. the network moved (or came back) within the grace before / during the failure: the new network is still
-      // settling, so the failure must last the window after it
-      final moved = context.lastMove;
-      if (moved != null) {
-        final settledAt = moved.add(context.switchGrace);
-        if (settledAt.isAfter(since)) {
-          _step(j, 'net.switched', Outcome.info, {'movedAt': moved.millisecondsSinceEpoch, 'graceMs': context.switchGrace.inMilliseconds}, true);
-          since = settledAt;
-        }
+      // a2. the network is switching (a move, a loss, the connection back) and not yet stable (the platform reports it
+      // validated and the first requests went through, or the safety cap): the check waits for that event. A failure
+      // that began before the drop stays what it is (its window counts from its own start, the checks run at once
+      // when the network is stable); one that began during the disturbance must last its window after it.
+      if (!context.stable) {
+        _step(j, 'net.switched', Outcome.info, {'movedAt': context.lastMove?.millisecondsSinceEpoch, 'stable': false}, true);
+        await j.sleep(clock, context.switchCap + const Duration(seconds: 1));
+        continue;
+      }
+      final moved = context.lastMove, stableAt = context.stableAt;
+      if (moved != null && stableAt != null && since.isAfter(moved) && stableAt.isAfter(since)) {
+        _step(j, 'net.switched', Outcome.info, {'movedAt': moved.millisecondsSinceEpoch, 'stableAt': stableAt.millisecondsSinceEpoch, 'by': context.stableBy}, true);
+        since = stableAt;
       }
 
       // b. ourselves

@@ -235,6 +235,39 @@ class TargetFallback {
   String get to => fallbackTarget ?? (fallbackTag == 'block' ? 'block' : (fallbackTag == topTag ? 'main' : 'direct'));
 }
 
+/// A rule / app whose target is lost (deleted, off in Nodes, no servers, none sing-box can run) and goes by its "If
+/// unavailable" from the start (docs/rules.md §0 «Потерянная цель»). Not a target that stops answering later: that is
+/// [TargetFallback], the core's live switch.
+class LostTarget {
+  LostTarget({required this.label, required this.app, required this.target, required this.why, required this.to, required this.byDefault});
+
+  /// The rule's name (`rule <id>` when it has none) or the app's.
+  final String label;
+  final bool app;
+
+  /// The UI's target id.
+  final String target;
+
+  /// `deleted` | `off` | `noServers` | `unsupported`.
+  final String why;
+
+  /// Where its traffic goes now: `block` | `direct` | `main` | a target id.
+  final String to;
+
+  /// "If unavailable" is Default: the global Rules → Target unavailable decided [to].
+  final bool byDefault;
+
+  /// Who it is: the same rule / app with the same target is the same loss.
+  String get id => lostId(label, app, target);
+
+  /// The loss as it is told: what changed in it makes it a new event.
+  String get state => '$why|$to|$byDefault';
+
+  Map<String, dynamic> toJson() => {if (app) 'app': label else 'rule': label, 'target': target, 'why': why, 'to': to, if (byDefault) 'default': true};
+}
+
+String lostId(String label, bool app, String target) => '${app ? 'app' : 'rule'}|$label|$target';
+
 /// Transport kinds of a DNS provider (not `system`), in the order the defaults list them.
 const dnsKinds = ['doh', 'dot', 'doq', 'udp'];
 
@@ -332,6 +365,11 @@ class RoutingInfo {
   /// One per selector, in the order the rules use them.
   final fallbacks = <TargetFallback>[];
 
+  /// The rules and apps whose target is lost, with where their traffic goes ([LostTarget]), and the [LostTarget.id]s
+  /// of the proxy rules / apps whose target is in the config (so a loss that ended can be told from a rule that went).
+  final lost = <LostTarget>[];
+  final reached = <String>{};
+
   /// The config's route rules by the text sing-box reports for a connection (rulenames.dart):
   /// Live connections name the rule a connection went by with it.
   final ruleNames = RuleNames();
@@ -399,6 +437,10 @@ class Routing {
 
   /// The "If unavailable" selectors rules and apps route to (see [TargetFallback]).
   final fallbacks = <TargetFallback>[];
+
+  /// See [RoutingInfo.lost] / [RoutingInfo.reached].
+  final lost = <LostTarget>[];
+  final reached = <String>{};
   String finalOutbound = topTag;
   final dnsServers = <Map<String, dynamic>>[];
   final dnsRules = <Map<String, dynamic>>[];
@@ -905,14 +947,17 @@ class _Builder {
   /// another target: see the library comment). Unavailable now = the config's choice; a target
   /// that goes down later is the core's (fallback.dart): the route leads to a selector
   /// [target, fallback outbound] it flips. [label] names the rule / app ([app]) in the journal.
-  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String label, {bool app = false}) {
+  ({Map<String, dynamic> action, bool direct}) _proxyAction(String target, String fallback, String label,
+      {bool app = false, String? lostWhy, bool top = true}) {
     final tag = _target(target);
     if (tag == topTag) return (action: _mainFlowAction(fallback, label, app), direct: false);
     // default = the global one; a target that is not usable now = the global one too; the
     // target itself (a fallback to itself) or empty = the main flow
     String? fbTarget;
+    var byDefault = false;
     if (fallback.isEmpty || fallback == 'default') {
       fallback = _fallback;
+      byDefault = true;
     } else if (!_keywords.contains(fallback)) {
       if (fallback == target) {
         fallback = 'main';
@@ -921,11 +966,21 @@ class _Builder {
       } else {
         out.warnings.add('$label: "If unavailable" target $fallback is not available, the default applies');
         fallback = _fallback;
+        byDefault = true;
+      }
+    }
+    if (top) {
+      if (tag != null) {
+        out.reached.add(lostId(label, app, target));
+      } else {
+        // the target is lost: the rule goes by its own "If unavailable" — told, never silent (docs/rules.md §0)
+        final l = LostTarget(label: label, app: app, target: target, why: lostWhy ?? 'noServers', to: fbTarget ?? fallback, byDefault: byDefault);
+        if (!out.lost.any((x) => x.id == l.id && x.state == l.state)) out.lost.add(l);
       }
     }
     if (tag == null && fbTarget != null) {
       // the target is out now: straight to the fallback target (the main flow behind it)
-      return _proxyAction(fbTarget, 'main', label, app: app);
+      return _proxyAction(fbTarget, 'main', label, app: app, top: false);
     }
     if (tag != null) {
       final fb = fbTarget ??
@@ -1029,7 +1084,7 @@ class _Builder {
               return _route('direct');
             }(),
           'proxy' => () {
-              final p = _proxyAction('${h['target'] ?? ''}', fallback, label, app: true);
+              final p = _proxyAction('${h['target'] ?? ''}', fallback, label, app: true, lostWhy: h['targetLost'] as String?);
               direct = p.direct;
               return p.action;
             }(),
@@ -1079,7 +1134,8 @@ class _Builder {
           act = _route('direct');
           direct = true;
         default:
-          final p = _proxyAction('${rule['target'] ?? ''}', fallback, '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}');
+          final p = _proxyAction('${rule['target'] ?? ''}', fallback, '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}',
+              lostWhy: rule['targetLost'] as String?);
           act = p.action;
           direct = p.direct;
       }

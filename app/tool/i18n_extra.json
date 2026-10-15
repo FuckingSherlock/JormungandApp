@@ -242,5 +242,16 @@
   "{#0} working pair (stopped early) · best {#1}ms": "{0} рабочая пара (остановлено раньше) · лучшая {1} мс",
   "{#0} working pairs (stopped early) · best {#1}ms": ["{0} рабочая пара (остановлено раньше) · лучшая {1} мс", "{0} рабочие пары (остановлено раньше) · лучшая {1} мс", "{0} рабочих пар (остановлено раньше) · лучшая {1} мс"],
   "Enter 0–{#0}ms": "Введите 0–{0} мс",
-  "New version": "Новая версия",  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
+  "New version": "Новая версия",  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки",
+  "Rule target lost": null,
+  "Rule target found": null,
+  "Target lost: {0}": null,
+  "{0} is available again": null,
+  "Target deleted": null,
+  "Target off in Nodes": null,
+  "Target has no servers": null,
+  "Target has no server the core can run": null,
+  "Rule {0} is blocked": null,
+  "App {0} is blocked": null,
+  "If unavailable is Default": null
 }

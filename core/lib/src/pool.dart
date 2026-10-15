@@ -147,18 +147,23 @@ class ProbePool {
     if (running != null) return running;
     final done = Completer<PoolResult>();
     _inflight[key] = done.future;
+    final started = _clock();
     checkWithBackups(one, url, checkers, fanOut: checkerFanOut).catchError((_) => (ms: -1, byChecker: false)).then((r) {
       _inflight.remove(key);
-      done.complete(_put(key, r.ms, byChecker: r.byChecker));
+      done.complete(_put(key, r.ms, byChecker: r.byChecker, startedAt: started));
     });
     return done.future;
   }
 
   /// A result measured elsewhere (the UI's ping): the pool has it from now on.
   void record(String identity, int ms, {required String url, List<String> checkers = const [], bool byChecker = false}) {
-    _put(keyOf(identity, url, checkers), ms, byChecker: byChecker);
+    _put(keyOf(identity, url, checkers), ms, byChecker: byChecker, startedAt: _clock() - (ms < 0 ? 0 : ms));
     ladder.observe(identity, ms, _clock());
   }
+
+  /// Any probe that was answered (a route's, the direct path's, the UI's ping), with the moment it was started (ms since
+  /// epoch): data came in on the network. The Sentinel's context takes it as a proof of a new network (service.dart).
+  void Function(int startedAt)? onAnswer;
 
   /// The last result of [identity] for this kind of test, or null.
   PoolResult? peek(String identity, {required String url, List<String> checkers = const []}) => _results[keyOf(identity, url, checkers)];
@@ -169,13 +174,16 @@ class ProbePool {
     return _share && had != null && had.answered && maxAge > Duration.zero && _clock() - had.at <= maxAge.inMilliseconds;
   }
 
-  PoolResult _put(String key, int ms, {bool byChecker = false}) {
+  PoolResult _put(String key, int ms, {bool byChecker = false, int? startedAt}) {
     final r = _results[key] = PoolResult(ms, _clock(), byChecker: byChecker && ms >= 0);
     if (_results.length > 5000) {
       final old = _clock() - 600000;
       _results.removeWhere((_, r) => r.at < old);
     }
-    if (ms >= 0) answered();
+    if (ms >= 0) {
+      answered();
+      if (startedAt != null) onAnswer?.call(startedAt);
+    }
     return r;
   }
 

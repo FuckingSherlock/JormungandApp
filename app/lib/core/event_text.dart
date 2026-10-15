@@ -12,6 +12,7 @@ import 'package:jormungand_core/jormungand_core.dart'
 import '../l10n/l10n.dart';
 import '../widgets/app_mark.dart' show appDisplayName;
 import 'format.dart' show fmtBytes;
+import 'rules_text.dart' show lostWhyText;
 import '../widgets/node_row.dart' show nodeProtoLabel;
 
 /// The words of the Events journal (mockup 47-events.js `evDescribe`, `evValue`, `evWhyRows`): the
@@ -59,6 +60,8 @@ class EventWords {
     'sub/diverged' => l10n.subscriptionServersDiffer,
     'rules/fallback' => l10n.ruleTargetUnavailable,
     'rules/targetBack' => l10n.ruleTargetBack,
+    'rules/targetLost' => l10n.ruleTargetLost,
+    'rules/targetFound' => l10n.ruleTargetFound,
     'rules/ruleSetFailed' => l10n.ruleSetNotDownloaded,
     'rules/ruleSetUpdated' => l10n.ruleSetUpdated,
     'dns/switched' => l10n.dnsServerSwitched,
@@ -217,6 +220,14 @@ class EventWords {
     return '${rule ? l10n.rule : l10n.app} $who $to';
   }
 
+  /// Where a lost target's traffic goes ("If unavailable"): like [_fallbackText], a block says "is blocked".
+  String _lostText(Map<String, dynamic> d) {
+    if ('${d['to']}' == 'block') {
+      return _isRule(d) ? l10n.ruleIsBlocked(_who(d)) : l10n.appIsBlocked(_who(d));
+    }
+    return _fallbackText(d);
+  }
+
   String _modeText(Object? m) => m == 'tun' ? 'TUN' : m == 'proxy' ? 'Proxy' : '';
   String _routeText(Object? r) => r == 'global' ? l10n.global : r == 'rules' ? l10n.byRules : '';
 
@@ -351,6 +362,14 @@ class EventWords {
       ('rules', 'fallback') => r(l10n.doesNotAnswer(target(d['target'])), _fallbackText(d)),
       ('rules', 'targetBack') => r(
         l10n.answersAgain(target(d['target'])),
+        _isRule(d) ? l10n.ruleBackThroughIt(_who(d)) : l10n.appBackThroughIt(_who(d)),
+      ),
+      ('rules', 'targetLost') => r(
+        l10n.targetLost(target(d['target'])),
+        _lines([lostWhyText(l10n, '${d['why']}'), _lostText(d)], '. '),
+      ),
+      ('rules', 'targetFound') => r(
+        l10n.isAvailableAgain(target(d['target'])),
         _isRule(d) ? l10n.ruleBackThroughIt(_who(d)) : l10n.appBackThroughIt(_who(d)),
       ),
       ('dns', 'switched') => r(
@@ -698,7 +717,8 @@ class EventWords {
     'tunnelMs' when e?.cat == 'sub' => l10n.vpnTime,
     'directPath' when e?.cat == 'sub' => l10n.directPath,
     'tunnelPath' when e?.cat == 'sub' => l10n.vpnPath,
-    'why' when e?.cat == 'sub' => l10n.reason,
+    'why' when e?.cat == 'sub' || e?.cat == 'rules' => l10n.reason,
+    'default' when e?.cat == 'rules' => l10n.ifUnavailableIsDefault,
     'directFresh' when e?.cat == 'sub' => l10n.directCopyHeaders,
     'tunnelFresh' when e?.cat == 'sub' => l10n.vpnCopyHeaders,
     'used' when e?.cat == 'sub' => l10n.copyUsed,
@@ -775,6 +795,7 @@ class EventWords {
     }
     if (e.cat == 'rules') {
       if (k == 'target') return target(v);
+      if (k == 'why' && e.type == 'targetLost') return lostWhyText(l10n, '$v');
       if (k == 'to') return switch (v) { 'block' => 'Block', 'direct' => 'Direct', 'main' => l10n.mainFlow2, _ => '$v' };
     }
     if (e.cat == 'core' && (e.type == 'stateRestored' || e.type == 'stateLost')) {

@@ -521,9 +521,13 @@ class Catalog {
   /// Manual on a server is strict (docs/connect-model.md → «Auto / Manual»): when the pick cannot be used — the server
   /// is gone from its subscription, switched off, not a server sing-box can run, or its entry is gone — this says why
   /// (an English message naming the server), and nothing connects through another server. Null: no pick, or it is fine.
+  ///
+  /// Manual on an entry (no server pinned) is strict the same way: an entry that is removed, switched off in Nodes, left with
+  /// no server or only ones sing-box cannot run is the same kind of loss (the message names the entry).
   String? pinLoss() {
     final key = pinnedNode, id = activeConnectId;
-    if (autoConnect || key == null) return null;
+    if (autoConnect || id == null) return null;
+    if (key == null) return _entryLoss(id);
     final parts = key.split('::'), s = sourcesData[parts[0]];
     CatalogNode? n;
     if (s != null) {
@@ -533,13 +537,36 @@ class Catalog {
     }
     final who = n != null && n.name.isNotEmpty ? '"${n.name}"${s!.name.isNotEmpty ? ' (${s.name})' : ''}' : 'the pinned server';
     String lost(String why) => 'Manual pick $who is unavailable: $why. The tunnel is not moved to another server — choose a server in Route.';
-    if (id == null || !entryVisible(id) || isBroken(id)) return lost('its entry is gone or has no server the core can use');
+    if (!entryVisible(id) || isBroken(id)) return lost('its entry is gone or has no server the core can use');
     if (n == null) return lost('the subscription no longer has it');
     final r = pinnedRef(id);
     if (r == null) return lost('it is switched off');
     if (!r.node.usable) {
       final u = r.node.unsupported;
       return lost('sing-box cannot run it${u != null && u.isNotEmpty ? ' ($u is not in sing-box)' : ''}');
+    }
+    return null;
+  }
+
+  /// Why the Manual entry [id] cannot carry the tunnel; null = it can (an entry that answers badly or not at all still can).
+  String? _entryLoss(String id) {
+    final e = connectEntry(id);
+    final who = e != null && e.name.isNotEmpty ? '"${e.name}"' : 'the pinned entry';
+    String lost(String why) => 'Manual pick $who is unavailable: $why. The tunnel is not moved to another entry — choose an entry in Route.';
+    if (e == null) return lost('it was removed');
+    if (!entryVisible(id)) return lost('it is switched off in Nodes');
+    final off = brokenBy(id);
+    if (off.isNotEmpty) return lost(reasonsText(off));
+    final c = chainsData[id];
+    final refs = c != null ? [...chainEntryRefs(c), ...chainExitRefs(c)] : unitRefs(id);
+    final both = c == null || (chainEntryRefs(c).any((r) => r.node.usable) && chainExitRefs(c).any((r) => r.node.usable));
+    if (refs.isEmpty || !both || !refs.any((r) => r.node.usable)) {
+      String? u;
+      for (final r in refs) {
+        final x = r.node.unsupported;
+        if (x != null && x.isNotEmpty) u = x;
+      }
+      return lost(refs.isEmpty ? 'it has no server' : 'sing-box cannot run its servers${u != null ? ' ($u is not in sing-box)' : ''}');
     }
     return null;
   }
@@ -770,7 +797,9 @@ class Catalog {
   /// (`effectiveConnectId`). Null: nothing to connect through.
   String? effectiveConnectId([bool ownGuess = false]) {
     final active = activeConnectId;
-    if (!autoConnect && entryVisible(active) && (active == null || !isBroken(active))) return active;
+    // Manual is strict: the pinned entry stays the one, hidden / broken / unusable too ([pinLoss] refuses it, nothing
+    // takes Auto's pick in its place)
+    if (!autoConnect && (active == null || connectEntry(active) != null)) return active;
     final order = visibleOrder();
     final c = coreRoute;
     if (!ownGuess && c != null && order.contains(c.id) && connectEntry(c.id)!.inAuto) return c.id;
