@@ -795,6 +795,7 @@ class LiveCoreHost extends CoreHost {
       });
       final w = st['warning'];
       if (w is String && w.isNotEmpty) _notice(HostNotice('warning', w));
+      if (_connected) unawaited(_pingRoute(catalog.liveAnchor));
       return const ConnectResult(ConnectOutcome.started);
     } catch (e) {
       final (msg, code) = _explain(e);
@@ -2277,7 +2278,7 @@ class LiveCoreHost extends CoreHost {
         if (l['error'] != null) error = true;
         final i = int.tryParse('${l['key']}'), ms = l['ms'];
         if (l['kind'] != 'p' || i == null || i < 0 || i >= ok.length || ms is! num) continue;
-        if (left.remove(ok[i])) pairs.set(entry, ok[i], ms, book.now);
+        if (left.remove(ok[i])) pairs.set(entry, ok[i], ms, book.now, byChecker: l['byChecker'] == true);
         _notify();
       }
     } catch (_) {
@@ -2511,7 +2512,39 @@ class LiveCoreHost extends CoreHost {
       for (final n in nodes)
         if (n.outbound != null && n.usable) n,
     ];
-    if (ok.isEmpty) return;
+    // a node already being pinged is not pinged a second time at once: the run in flight brings its answer,
+    // and this call returns when that run has (so a caller that reads the answers afterwards sees them)
+    final fresh = [
+      for (final n in ok)
+        if (catalog.pings.entry(n)?.testing != true) n,
+    ];
+    final waitFor = fresh.length == ok.length ? const <Future<void>>[] : _pingRuns.toList();
+    if (fresh.isNotEmpty) {
+      final run = _pingRun(fresh);
+      _pingRuns.add(run);
+      try {
+        await run;
+      } finally {
+        _pingRuns.remove(run);
+      }
+    }
+    if (waitFor.isNotEmpty) await Future.wait(waitFor);
+  }
+
+  /// The ping runs in flight ([_pingNodes]).
+  final _pingRuns = <Future<void>>{};
+
+  /// After a connect: the servers of the subscriptions the route is made of are measured in the
+  /// background, the route's own top first (`routePingOrder`); a chain's exits as pairs through the
+  /// entry in use. Rows show "pinging" meanwhile, the connection does not wait for it.
+  Future<void> _pingRoute(String? routeId) async {
+    if (routeId == null || !_ready) return;
+    await _pingNodes(catalog.routePingOrder(routeId));
+    final c = catalog.chainsData[routeId];
+    if (c != null && _connected) await pingChain(c, entries: false);
+  }
+
+  Future<void> _pingRun(List<CatalogNode> ok) async {
     catalog.pings.markTesting(ok);
     _notifyNow(); // the rows show "pinging" now, the answers follow joined by [_notify]
     final left = {...ok};
@@ -2535,7 +2568,7 @@ class LiveCoreHost extends CoreHost {
         final ms = l['ms'];
         if (ms is! num) continue;
         for (final n in byId[l['key']] ?? const <CatalogNode>[]) {
-          if (left.remove(n)) catalog.pings.set(n, ms);
+          if (left.remove(n)) catalog.pings.set(n, ms, byChecker: l['byChecker'] == true);
         }
         _notify();
       }

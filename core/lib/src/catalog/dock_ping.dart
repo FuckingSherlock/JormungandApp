@@ -93,6 +93,30 @@ extension CatalogDockPing on Catalog {
     ];
   }
 
+  /// What the background ping after a connect measures, in order: the route's own servers first
+  /// (in its pick order; Fastest: best known first, a weak answer after a strong one — a chain: its
+  /// entries), then every other live server of the subscriptions the route is made of. A chain's
+  /// exits are not here: they are measured as pairs through the entry, never directly.
+  List<CatalogNode> routePingOrder(String id) {
+    final c = chainsData[id];
+    final refs = c != null ? chainEntryRefs(c) : unitPickRefs(id);
+    final top = c != null || !unitPriority(id) ? stableSorted(refs, (NodeRef r) => pings.rank(r.node)) : refs;
+    final seen = <CatalogNode>{};
+    final out = <CatalogNode>[];
+    void add(Iterable<CatalogNode> ns) {
+      for (final n in ns) {
+        if (seen.add(n)) out.add(n);
+      }
+    }
+
+    add(top.map((r) => r.node));
+    for (final sid in {for (final r in refs) r.sid}) {
+      final s = sourcesData[sid];
+      if (s != null && s.enabled) add(liveNodes(s));
+    }
+    return out;
+  }
+
   List<DockPingItem> _unitItems(String id, {required bool byRank}) {
     final refs = unitPickRefs(id);
     return [for (final r in byRank ? stableSorted(refs, (NodeRef r) => pings.rank(r.node)) : refs) DockPingItem(r.node)];

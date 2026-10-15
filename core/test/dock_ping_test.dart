@@ -105,6 +105,35 @@ void main() {
     });
   });
 
+  group('the ping after a connect', () {
+    test('the route\'s own servers first (Fastest: best known, weak after strong), then the rest of its subscriptions', () {
+      final c = build();
+      ping(c, 's1::s14', 30);
+      ping(c, 's1::s12', 90);
+      ping(c, 's1::s11', 10);
+      c.pings.set(c.nodeOfKey('s1::s11')!, 10, byChecker: true); // a weak 10 ms ranks after the strong ones
+      expect([for (final n in c.routePingOrder('s1')) n.id], ['s14', 's12', 's11', 's13', 's15']);
+    });
+
+    test('Priority: the pick order', () {
+      final c = build(over: {
+        'sourcesData': {
+          for (final s in ['s1', 's2', 's3', 's4', 's5'])
+            s: source(s, five, extra: s == 's2' ? {'pickMode': 'priority', 'pickOrder': ['s2::s25', 's2::s24']} : null),
+        },
+      });
+      ping(c, 's2::s21', 5);
+      expect([for (final n in c.routePingOrder('s2')) n.id], ['s25', 's24', 's21', 's22', 's23']);
+    });
+
+    test('a chain: its entries (and their subscription) only, the exits are pairs', () {
+      final c = build(chain: true);
+      ping(c, 's1::s13', 20);
+      final ids = [for (final n in c.routePingOrder('c1')) n.id];
+      expect(ids, ['s13', 's11', 's12', 's14', 's15']);
+    });
+  });
+
   group('the run', () {
     /// A measure that answers every server of the batch at [ms] (-1 = dead).
     Future<void> Function(List<DockPingItem>) answering(Catalog c, num ms, List<int> sizes, [void Function()? each]) => (batch) async {

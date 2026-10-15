@@ -48,9 +48,12 @@ extension CatalogPlan on Catalog {
   // ───────────────────────────── groups and routes ─────────────────────────────
 
   /// A server group of the plan: the servers the core can use, Fastest ones with the known
-  /// fastest first and the dead ones last (sing-box's urltest uses its first server until its
-  /// own first round of tests is done). Throws [CatalogException] `noUsableServer` when none
+  /// fastest first and the dead ones last (the order the core's pre-connect check goes in). Throws [CatalogException] `noUsableServer` when none
   /// can be put into a config (`planGroup`).
+  ///
+  /// [chosen] is the server the group starts on: Priority's pick, and for Fastest the app's known one, a hint
+  /// only (the core checks it before connect and uses it as the start when it cannot; `pinned` is the
+  /// separate flag that holds a group). Not in the mockup's plan ([mockupPlan]).
   Json planGroup(List<NodeRef> refs, String pick, [NodeRef? chosen, double Function(NodeRef)? rank]) {
     final ok = refs.where((r) => r.node.usable).toList();
     if (ok.isEmpty) {
@@ -68,7 +71,7 @@ extension CatalogPlan on Catalog {
     final nodes = pick == 'fastest' ? stableSorted(ok, rank ?? (NodeRef r) => pings.rank(r.node)) : ok;
     return {
       'pick': pick,
-      'chosen': pick == 'priority' && chosen != null ? chosen.key : null,
+      'chosen': (pick == 'priority' || !mockupPlan) && chosen != null ? chosen.key : null,
       'nodes': [
         // `flag`: the country as the catalog knows it (site checks prefer a node of another country; not in the mockup's plan)
         for (final r in nodes) {'key': r.key, 'outbound': r.node.outbound, if (!mockupPlan) 'flag': r.node.flag},
@@ -101,7 +104,7 @@ extension CatalogPlan on Catalog {
 
     final exitNode = coreGroupNode(c.id, 'server', exits) ?? (c.exitMode == 'priority' && !mockupPlan ? firstLive() : null) ?? chainExitNode(c);
     return {
-      'entry': planGroup(chainEntryRefs(c), 'fastest'),
+      'entry': planGroup(chainEntryRefs(c), 'fastest', _refOf(entryRefs, entry)),
       'main': planGroup(exits, c.exitMode == 'priority' ? 'priority' : 'fastest', _refOf(exits, exitNode), (r) => chainExitRank(c, r.node, entry)),
     };
   }
@@ -336,9 +339,10 @@ extension CatalogPlan on Catalog {
     final at = t.indexOf(':'), kind = _slice(t, 0, at), ref = _slice(t, at + 1);
     try {
       if (kind == 'src') {
+        final refs = [for (final n in liveNodes(sourcesData[ref]!)) NodeRef(ref, n)];
         return {
           'kind': 'unit',
-          'main': planGroup([for (final n in liveNodes(sourcesData[ref]!)) NodeRef(ref, n)], 'fastest'),
+          'main': planGroup(refs, 'fastest', _refOf(refs, bestAlive([for (final r in refs) r.node]))),
         };
       }
       if (kind == 'node') {

@@ -3364,6 +3364,31 @@
   "copyUsed": "Copy used",
   "directCopy": "Direct copy",
   "vpnCopy": "VPN copy",
+  "copiesMergedBothListsAreUsed": "Copies merged: both lists are used.",
+  "bothCopiesMerged": "Both copies merged",
+  "itIsTheNewerOneBy": "It is the newer one by Last-Modified.",
+  "itIsTheNewerOneBy2": "It is the newer one by Date and Age.",
+  "theHeadersCannotTellWhichCopy": "The headers cannot tell which copy is newer.",
+  "directCopyHeaders": "Direct copy headers",
+  "vpnCopyHeaders": "VPN copy headers",
+  "lastModified": "Last-Modified: {s0}",
+  "@lastModified": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "leftTheOrigin": "Left the origin: {s0}",
+  "@leftTheOrigin": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "noFreshnessHeaders": "No freshness headers",
+  "answeredOnlyABackupCheck": "Answered only a backup check",
   "andMore2": "… and {n0} more",
   "@andMore2": {
     "placeholders": {

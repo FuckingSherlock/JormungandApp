@@ -1579,5 +1579,16 @@
   "Dead on this node": "deadOnThisNode",
   "Does not answer through {0}; it answers through {1}": "doesNotAnswerThroughItAnswers",
   "Reserve": "reserve",
-  "{#0}d ago": "dAgo"
+  "{#0}d ago": "dAgo",
+  "Copies merged: both lists are used.": "copiesMergedBothListsAreUsed",
+  "Both copies merged": "bothCopiesMerged",
+  "It is the newer one by Last-Modified.": "itIsTheNewerOneBy",
+  "It is the newer one by Date and Age.": "itIsTheNewerOneBy2",
+  "The headers cannot tell which copy is newer.": "theHeadersCannotTellWhichCopy",
+  "Direct copy headers": "directCopyHeaders",
+  "VPN copy headers": "vpnCopyHeaders",
+  "No freshness headers": "noFreshnessHeaders",
+  "Last-Modified: {0}": "lastModified",
+  "Left the origin: {0}": "leftTheOrigin",
+  "Answered only a backup check": "answeredOnlyABackupCheck"
 }

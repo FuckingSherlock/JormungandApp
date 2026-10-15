@@ -92,6 +92,27 @@ void main() {
     expect(f['Only direct'], '0');
   });
 
+  test('sub/diverged: merged copies, the why line and the freshness headers', () async {
+    await initializeDateFormatting('en');
+    final w = EventWords(lookupAppLocalizations(const Locale('en')), FakeCoreHost().catalog);
+    EventGroup group(String used, String why, Map<String, String> tunnelFresh) => EventGroup(EventRecord(
+          id: 1, at: 0, cat: 'sub', type: 'diverged', level: 'warn', own: false, log: null,
+          data: {'name': 'Prov', 'used': used, 'why': why, 'directFresh': const <String, String>{}, 'tunnelFresh': tunnelFresh},
+        ));
+
+    final merged = group('merged', 'unknown', const {});
+    expect(w.describe(merged.ev).detail, 'Copies merged: both lists are used. The headers cannot tell which copy is newer.');
+    final f = Map.fromEntries(w.fields(merged).map((x) => MapEntry(x.$1, x.$2)));
+    expect(f['Copy used'], 'Both copies merged');
+    expect(f['Direct copy headers'], 'No freshness headers');
+
+    final newer = group('tunnel', 'newer: lastModified', const {'lastModified': '2026-10-01T10:00:00.000Z'});
+    expect(w.describe(newer.ev).detail, 'The VPN copy is used. It is the newer one by Last-Modified.');
+    final g = Map.fromEntries(w.fields(newer).map((x) => MapEntry(x.$1, x.$2)));
+    expect(g['VPN copy headers'], 'Last-Modified: 2026-10-01T10:00:00.000Z');
+    expect(w.describe(group('direct', 'newer: age', const {}).ev).detail, 'The direct copy is used. It is the newer one by Date and Age.');
+  });
+
   testWidgets('filter sheet: categories start folded, an unfolded one is remembered; no «Filtered» bar', (tester) async {
     final host = FakeCoreHost();
     host.addEvent('auto', 'unstable', level: 'warn', data: {'id': 'e0', 'strikes': 2, 'holdMs': 60000});

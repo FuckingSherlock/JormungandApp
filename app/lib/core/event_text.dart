@@ -223,6 +223,14 @@ class EventWords {
   String _lines(Iterable<String?> parts, [String sep = ' · ']) =>
       parts.where((s) => s != null && s.isNotEmpty).join(sep);
 
+  /// `sub/diverged` `why` (the core's `copyFreshness` codes) in words; null for an unknown code.
+  String? _divergedWhy(Object? why) => switch (why) {
+    'newer: lastModified' => l10n.itIsTheNewerOneBy,
+    'newer: age' => l10n.itIsTheNewerOneBy2,
+    'unknown' => l10n.theHeadersCannotTellWhichCopy,
+    _ => null,
+  };
+
   /// The line of the row: title and detail.
   ({String title, String detail}) describe(EventRecord e) {
     final d = e.data;
@@ -326,7 +334,14 @@ class EventWords {
       ('sub', 'dead') => r(l10n.itsServersDoNotRespond(source(d['source'], d['name'])), l10n.contactTheSubscriptionProviderSSupport),
       ('sub', 'diverged') => r(
         l10n.theDirectAndTheVpnCopies(source(d['source'], d['name'])),
-        d['used'] == 'direct' ? l10n.theDirectCopyIsUsed : l10n.theVpnCopyIsUsed,
+        _lines([
+          switch (d['used']) {
+            'direct' => l10n.theDirectCopyIsUsed,
+            'merged' => l10n.copiesMergedBothListsAreUsed,
+            _ => l10n.theVpnCopyIsUsed,
+          },
+          _divergedWhy(d['why']),
+        ], ' '),
       ),
       ('rules', 'ruleSetFailed') => r(
         l10n.ruleSetNotDownloaded2('${d['tag']}'),
@@ -683,6 +698,9 @@ class EventWords {
     'tunnelMs' when e?.cat == 'sub' => l10n.vpnTime,
     'directPath' when e?.cat == 'sub' => l10n.directPath,
     'tunnelPath' when e?.cat == 'sub' => l10n.vpnPath,
+    'why' when e?.cat == 'sub' => l10n.reason,
+    'directFresh' when e?.cat == 'sub' => l10n.directCopyHeaders,
+    'tunnelFresh' when e?.cat == 'sub' => l10n.vpnCopyHeaders,
     'used' when e?.cat == 'sub' => l10n.copyUsed,
     'kind' => l10n.failure,
     'stage' => l10n.stage,
@@ -775,7 +793,15 @@ class EventWords {
     }
     if (e.cat == 'sub' && e.type == 'diverged') {
       if ((k == 'directMs' || k == 'tunnelMs') && v is num) return duration(v);
-      if (k == 'used') return v == 'direct' ? l10n.directCopy : l10n.vpnCopy;
+      if (k == 'used') return v == 'direct' ? l10n.directCopy : (v == 'merged' ? l10n.bothCopiesMerged : l10n.vpnCopy);
+      if (k == 'why') return _divergedWhy(v) ?? '$v';
+      if ((k == 'directFresh' || k == 'tunnelFresh') && v is Map) {
+        final lines = [
+          if (v['lastModified'] != null) l10n.lastModified('${v['lastModified']}'),
+          if (v['origin'] != null) l10n.leftTheOrigin('${v['origin']}'),
+        ];
+        return lines.isEmpty ? l10n.noFreshnessHeaders : lines.join('\n');
+      }
       if ((k == 'onlyDirect' || k == 'onlyTunnel') && v is List) {
         final total = e.data[k == 'onlyDirect' ? 'onlyDirectCount' : 'onlyTunnelCount'];
         final n = total is num ? total.toInt() : v.length;

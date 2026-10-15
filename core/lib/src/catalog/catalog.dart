@@ -541,11 +541,12 @@ class Catalog {
     return null;
   }
 
-  /// The fastest alive server (first wins on a tie) (`bestAlive`).
+  /// The fastest alive server (first wins on a tie); a weak answer ([PingEntry.byChecker]) loses to any strong
+  /// one (`bestAlive`).
   CatalogNode? bestAlive(Iterable<CatalogNode> nodes) {
     CatalogNode? best;
     for (final n in nodes) {
-      if (pings.isAlive(n) && (best == null || pings.ping(n)! < pings.ping(best)!)) best = n;
+      if (pings.isAlive(n) && (best == null || pings.rank(n) < pings.rank(best))) best = n;
     }
     return best;
   }
@@ -638,7 +639,7 @@ class Catalog {
     for (final r in chainEntryRefs(c)) {
       final p = pairs.entry(r.node, x);
       if (p == null || p.ms == null || p.ms! < 0 || pings.now - p.at >= pingFreshMs) continue;
-      if (best == null || p.ms! < best.ms!) best = p;
+      if (best == null || p.rank < best.rank) best = p; // a weak answer loses to a strong one
     }
     return best;
   }
@@ -661,12 +662,9 @@ class Catalog {
     return v != null && v >= 0;
   }
 
-  /// Order by the chain's own measures: alive by ms, unknown, dead last (`PingBook.rank`).
-  double chainExitRank(Chain c, CatalogNode x, [CatalogNode? entry]) {
-    final v = chainExitPing(c, x, entry);
-    if (v == null) return 1e9;
-    return v >= 0 ? v.toDouble() : 2e9;
-  }
+  /// Order by the chain's own measures: strong answers by ms, weak ones (backup checker only) after them, unknown,
+  /// dead last ([PingEntry.rank]).
+  double chainExitRank(Chain c, CatalogNode x, [CatalogNode? entry]) => chainExitEntry(c, x, entry)?.rank ?? 1e9;
 
   CatalogNode? chainExitNode(Chain c) {
     final refs = chainExitRefs(c);
@@ -682,7 +680,7 @@ class Catalog {
     }
     CatalogNode? best;
     for (final x in exits) {
-      if (chainExitAlive(c, x, entry) && (best == null || chainExitPing(c, x, entry)! < chainExitPing(c, best, entry)!)) best = x;
+      if (chainExitAlive(c, x, entry) && (best == null || chainExitRank(c, x, entry) < chainExitRank(c, best, entry))) best = x;
     }
     return best;
   }

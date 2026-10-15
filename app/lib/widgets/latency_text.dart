@@ -16,12 +16,17 @@ class LatencyView extends StatelessWidget {
     super.key,
     this.ms,
     this.testing = false,
+    this.weak = false,
     this.minWidth = 44,
   });
 
   /// `-1` / any negative = no answer (timeout); null = never measured.
   final num? ms;
   final bool testing;
+
+  /// The answer came only from a backup check (the test URL missed, the server passes traffic): the number gets a
+  /// dotted underline and a tooltip.
+  final bool weak;
   final double minWidth;
 
   @override
@@ -45,7 +50,11 @@ class LatencyView extends StatelessWidget {
           : v < 400
           ? c.warn
           : c.muted;
-      content = Text('${v.round()} ms', style: _style(color));
+      final text = Text(
+        '${v.round()} ms',
+        style: weak ? _style(color).copyWith(decoration: TextDecoration.underline, decorationStyle: TextDecorationStyle.dotted) : _style(color),
+      );
+      content = weak ? Tooltip(message: l10n.answeredOnlyABackupCheck, child: text) : text;
     }
     return ConstrainedBox(
       constraints: BoxConstraints(minWidth: minWidth, minHeight: 14),
@@ -74,7 +83,7 @@ class LatencyText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = CoreHostScope.of(context).catalog.pings.entry(node);
-    return LatencyView(ms: e?.ms, testing: e?.testing ?? false);
+    return LatencyView(ms: e?.ms, testing: e?.testing ?? false, weak: e?.byChecker ?? false);
   }
 }
 
@@ -89,6 +98,6 @@ class ChainExitLatency extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = CoreHostScope.of(context).catalog.chainExitEntry(chain, node);
-    return LatencyView(ms: e?.ms, testing: e?.testing ?? false);
+    return LatencyView(ms: e?.ms, testing: e?.testing ?? false, weak: e?.byChecker ?? false);
   }
 }

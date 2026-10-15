@@ -490,12 +490,87 @@ void main() {
       expect(c.pings.ping(a2), isNull);
       expect(c.pings.ping(nodeOf(c, 'b::b1')), 33);
     });
+
+    test('a weak answer (a backup checker only) ranks after every strong one, by ms among the weak', () {
+      final c = make();
+      final a1 = nodeOf(c, 'a::a1'), a2 = nodeOf(c, 'a::a2'), a3 = nodeOf(c, 'a::a3'), b1 = nodeOf(c, 'b::b1'), b2 = nodeOf(c, 'b::b2');
+      c.pings.set(a1, 20, byChecker: true);
+      c.pings.set(a2, 900);
+      c.pings.set(a3, 15, byChecker: true);
+      c.pings.set(b1, -1);
+      // b2 never measured
+      expect([a1, a2, a3, b1, b2].map(c.pings.rank).toList()..sort(), [900, weakRankBase + 15, weakRankBase + 20, 1e9, 2e9]);
+      final sorted = [a1, a2, a3, b1, b2]..sort((x, y) => c.pings.rank(x).compareTo(c.pings.rank(y)));
+      expect(sorted.map((n) => n.id), ['a2', 'a3', 'a1', 'b2', 'b1']);
+      expect(c.bestAlive([a1, a3, a2]), a2, reason: 'the hint is the fastest strong answer, not the fastest weak one');
+      expect(c.bestAlive([a1, a3]), a3);
+      c.pings.set(a1, -1, byChecker: true);
+      expect(c.pings.entry(a1)!.byChecker, isFalse, reason: 'a miss is never weak');
+    });
+
+    test('mergeCore reads the core\'s weak flag; the flag survives a failed ping and the snapshot', () {
+      final c = make();
+      final a1 = nodeOf(c, 'a::a1'), a2 = nodeOf(c, 'a::a2');
+      c.pings.mergeCore([
+        {'key': 'a::a1', 'ms': 40, 'at': 9000, 'weak': true},
+        {'key': 'a::a2', 'ms': 50, 'at': 9000},
+      ], c.nodeOfKey);
+      expect(c.pings.entry(a1)!.byChecker, isTrue);
+      expect(c.pings.entry(a2)!.byChecker, isFalse);
+      expect(c.pings.rank(a1), weakRankBase + 40);
+      expect(c.pings.rank(a2), 50);
+      c.pings.markTesting([a1]);
+      expect(c.pings.rank(a1), 1e9, reason: 'in flight: not measured');
+      c.pings.unmarkTesting([a1]);
+      expect(c.pings.entry(a1)!.byChecker, isTrue);
+      final back = make(jsonDecode(jsonEncode(c.toJson())) as Map<String, dynamic>);
+      expect(back.pings.entry(nodeOf(back, 'a::a1'))!.byChecker, isTrue);
+      expect(back.pings.entry(nodeOf(back, 'a::a2'))!.byChecker, isFalse);
+      expect(back.pings.rank(nodeOf(back, 'a::a1')), weakRankBase + 40);
+    });
   });
 
   // A chain's exit may be unreachable on its own and fine through the entry: it lives by its pair.
   group('chain pairs', () {
-    void pair(Catalog c, String entry, String exit, num ms, {int? fails, int age = 1000}) =>
-        c.pairs.put(nodeOf(c, entry), nodeOf(c, exit), PingEntry(ms: ms, at: clock - age, fails: fails ?? (ms < 0 ? 1 : 0)));
+    void pair(Catalog c, String entry, String exit, num ms, {int? fails, int age = 1000, bool weak = false}) => c.pairs
+        .put(nodeOf(c, entry), nodeOf(c, exit), PingEntry(ms: ms, at: clock - age, fails: fails ?? (ms < 0 ? 1 : 0), byChecker: weak));
+
+    test('a weak pair (a backup checker only) ranks after every strong one: exit choice, order, borrowing, snapshot, core merge', () {
+      final c = make();
+      final ch = c.chainsData['c1']!;
+      ping(c, 'b::b1', 20);
+      ping(c, 'b::b2', 40);
+      final b1 = nodeOf(c, 'b::b1'), a1 = nodeOf(c, 'a::a1'), a2 = nodeOf(c, 'a::a2'), a3 = nodeOf(c, 'a::a3');
+      pair(c, 'b::b1', 'a::a1', 30, weak: true);
+      pair(c, 'b::b1', 'a::a2', 80);
+      expect(c.chainExitNode(ch)!.id, 'a2', reason: 'a weak 30 ms does not beat a strong 80 ms');
+      expect(c.chainExitRank(ch, a1), weakRankBase + 30);
+      expect(c.chainExitRank(ch, a2), 80);
+      expect(c.chainExitRank(ch, a3), 1e9, reason: 'not measured: after the weak one');
+      expect(c.chainExitAlive(ch, a1), isTrue);
+      pair(c, 'b::b1', 'a::a2', -1, fails: 1);
+      expect(c.chainExitNode(ch)!.id, 'a1', reason: 'a weak answer still beats no answer');
+      // another entry's fresh pair fills in, flag included
+      pair(c, 'b::b2', 'a::a3', 25, weak: true);
+      expect(c.chainPair(ch, a3)!.byChecker, isTrue);
+      // the snapshot keeps the flag; the core's pair status carries it as `weak`
+      final back = make(jsonDecode(jsonEncode(c.toJson())) as Map<String, dynamic>);
+      expect(back.pairs.entry(nodeOf(back, 'b::b1'), nodeOf(back, 'a::a1'))!.byChecker, isTrue);
+      expect(back.pairs.entry(nodeOf(back, 'b::b1'), nodeOf(back, 'a::a2'))!.byChecker, isFalse);
+      c.pairs.mergeCore([
+        {'entry': 'b::b1', 'key': 'a::a2', 'ms': 35, 'at': clock + 1, 'weak': true},
+        {'entry': 'b::b1', 'key': 'a::a3', 'ms': 36, 'at': clock + 1},
+      ], c.nodeOfKey);
+      expect(c.pairs.entry(b1, a2)!.byChecker, isTrue);
+      expect(c.pairs.entry(b1, a3)!.byChecker, isFalse);
+      // a miss is never weak; a failed ping keeps the flag with the value it falls back to
+      c.pairs.set(b1, a2, -1, clock, byChecker: true);
+      expect(c.pairs.entry(b1, a2)!.byChecker, isFalse);
+      c.pairs.set(b1, a3, 50, clock, byChecker: true);
+      c.pairs.markTesting(b1, [a3]);
+      c.pairs.unmarkTesting(b1, [a3]);
+      expect(c.pairs.entry(b1, a3)!.byChecker, isTrue);
+    });
 
     test('an exit dead directly but alive through the entry works: exit node, usable, mayWork, latency', () {
       final c = make();
@@ -722,6 +797,30 @@ void main() {
       final p = c.livePlan();
       expect(keys(p, 0), ['a::a3', 'a::a1', 'a::a2']);
       expect(((p['routes'] as List)[0]['main'] as Map)['chosen'], 'a::a1'); // the first not known dead in the order
+    });
+
+    test('a Fastest group carries the known server as a chosen hint (not pinned, not part of the plan signature)', () {
+      final c = make();
+      Map main(Plan p, int route) => (p['routes'] as List)[route]['main'] as Map;
+      expect(main(c.livePlan(), 0)['chosen'], isNull, reason: 'nothing known');
+      final sig = c.planSig();
+      ping(c, 'a::a1', 90);
+      ping(c, 'a::a2', 30);
+      var p = c.livePlan();
+      expect(main(p, 0)['pick'], 'fastest');
+      expect(main(p, 0)['chosen'], 'a::a2');
+      expect(main(p, 0).containsKey('pinned'), isFalse);
+      expect(c.planSig(), sig, reason: 'the hint moves with pings; it is no plan change');
+      // the chain: its entry group and its Fastest exit both carry a hint
+      ping(c, 'b::b1', 20);
+      p = c.livePlan();
+      expect((((p['routes'] as List)[2] as Map)['entry'] as Map)['chosen'], 'b::b1');
+      // the core's own server wins over the catalog's guess
+      c.coreGroups = {'a': const CoreRoute(id: 'a', server: 'a::a3')};
+      expect(main(c.livePlan(), 0)['chosen'], 'a::a3');
+      // the mockup's plan keeps the old shape
+      c.mockupPlan = true;
+      expect(main(c.livePlan(), 0)['chosen'], isNull);
     });
 
     test('Priority starts on the first server not known dead: one never measured is a candidate, a known-dead one is skipped', () {
