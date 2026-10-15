@@ -113,6 +113,26 @@ void main() {
     },
   );
 
+  testWidgets('route check: a weak pair is marked and ranks after every strong one', (tester) async {
+    final host = _host()..pairWeak.add('b1');
+    await _openChainEditor(tester, host);
+
+    await tester.tap(find.text('Check route'));
+    await tester.pumpAndSettle();
+    // b1 answers fastest (30 ms) but only by a backup check: the best is the strong 60 ms
+    expect(find.text('6 working pairs · best 60 ms'), findsOneWidget);
+    await tester.ensureVisible(find.text('Show all 6'));
+    await tester.tap(find.text('Show all 6'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Answered only a backup check'), findsNWidgets(2));
+    // the weak 30 ms rows come after the strong 80 ms ones
+    final ys = [
+      for (final t in ['60 ms', '80 ms', '30 ms']) tester.getTopLeft(find.text(t).last).dy,
+    ];
+    expect(ys[0] < ys[1] && ys[1] < ys[2], isTrue, reason: '$ys');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('route check: no pair answers', (tester) async {
     final host = _host();
     host.pairMs.addAll({'b1': -1, 'b2': -1, 'b3': -1});

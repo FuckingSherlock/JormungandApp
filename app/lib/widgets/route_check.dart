@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
-    show CatalogNode, Chain, PingBook, pingFreshMs;
+    show CatalogNode, Chain, PingBook, pingFreshMs, weakRankBase;
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
@@ -12,10 +12,16 @@ import 'latency_text.dart';
 const _routeTop = 4;
 
 class _Pair {
-  const _Pair(this.entry, this.exit, this.ms);
+  const _Pair(this.entry, this.exit, this.ms, {this.weak = false});
   final CatalogNode entry;
   final CatalogNode exit;
   final int ms;
+
+  /// Only a backup checker answered: ranked after every strong pair.
+  final bool weak;
+
+  /// Same key as `PingEntry.rank`: a weak answer after every strong one.
+  double get rank => weak ? weakRankBase + ms : ms.toDouble();
 }
 
 /// One run of the check (`chainTest` in the mockup).
@@ -122,10 +128,10 @@ class _RouteCheckState extends State<RouteCheck> {
         }
         for (var k = 0; k < to.length; k++) {
           // the pair book keeps what the chain lives by: every exit through this entry
-          catalog.pairs.set(entry, to[k], ms[k], catalog.pings.now);
-          if (ms[k] >= 0) t.pairs.add(_Pair(entry, to[k], ms[k]));
+          catalog.pairs.set(entry, to[k], ms[k].ms, catalog.pings.now, byChecker: ms[k].weak);
+          if (ms[k].ms >= 0) t.pairs.add(_Pair(entry, to[k], ms[k].ms, weak: ms[k].weak));
         }
-        t.pairs.sort((a, b) => a.ms.compareTo(b.ms));
+        t.pairs.sort((a, b) => a.rank.compareTo(b.rank));
         t.done = i + 1;
         setState(() {});
         if (fromCache && i == 1 && t.pairs.isEmpty) {
@@ -281,7 +287,7 @@ class _RouteCheckState extends State<RouteCheck> {
             .add(p);
       }
       final list = groups.entries.toList()
-        ..sort((a, b) => a.value.first.ms.compareTo(b.value.first.ms));
+        ..sort((a, b) => a.value.first.rank.compareTo(b.value.first.rank));
       for (final g in list) {
         final open = t.open.contains(g.key);
         final node = byEntry ? g.value.first.entry : g.value.first.exit;
@@ -321,7 +327,7 @@ class _RouteCheckState extends State<RouteCheck> {
                   ),
                   Padding(
                     padding: const EdgeInsets.only(left: 6),
-                    child: LatencyView(ms: g.value.first.ms, minWidth: 0),
+                    child: LatencyView(ms: g.value.first.ms, weak: g.value.first.weak, minWidth: 0),
                   ),
                   const SizedBox(width: 6),
                   AnimatedRotation(
@@ -359,7 +365,7 @@ class _RouteCheckState extends State<RouteCheck> {
                           ],
                           Padding(
                             padding: const EdgeInsets.only(left: 6),
-                            child: LatencyView(ms: g.value[i].ms, minWidth: 0),
+                            child: LatencyView(ms: g.value[i].ms, weak: g.value[i].weak, minWidth: 0),
                           ),
                         ],
                       ),
@@ -458,7 +464,7 @@ class _RouteCheckState extends State<RouteCheck> {
         Expanded(child: _endText(c, p.exit)),
         Padding(
           padding: const EdgeInsets.only(left: 6),
-          child: LatencyView(ms: p.ms, minWidth: 0),
+          child: LatencyView(ms: p.ms, weak: p.weak, minWidth: 0),
         ),
       ],
     ),

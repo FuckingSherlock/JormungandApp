@@ -1217,12 +1217,13 @@ class LiveCoreHost extends CoreHost {
   DnsHealth? get dnsHealth => _dnsHealth;
 
   @override
-  Future<DnsSidePing> pingDnsSides(String providerId) async {
+  Future<DnsSidePing> pingDnsSides(String providerId, {bool poll = false}) async {
     if (_connected) {
       try {
-        final r = await api.pingDnsSides({'provider': providerId});
+        final r = await api.pingDnsSides({'provider': providerId, if (poll) 'poll': true});
         if (r['live'] == true) {
           return DnsSidePing(
+            testing: r['testing'] == true,
             direct: r['direct'] as int?,
             vpn: r['vpn'] as int?,
             servers: {
@@ -1236,7 +1237,7 @@ class LiveCoreHost extends CoreHost {
         // the core could not measure: the in-process direct ping below
       }
     }
-    return super.pingDnsSides(providerId);
+    return super.pingDnsSides(providerId, poll: poll);
   }
 
   @override
@@ -2327,8 +2328,8 @@ class LiveCoreHost extends CoreHost {
   };
 
   @override
-  Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits) async {
-    final res = List<int>.filled(exits.length, -1);
+  Future<List<PairAnswer>> pingPairs(CatalogNode entry, List<CatalogNode> exits) async {
+    final res = List<PairAnswer>.filled(exits.length, const PairAnswer(-1));
     final at = [
       for (var i = 0; i < exits.length; i++)
         if (exits[i].outbound != null && exits[i].usable) i,
@@ -2339,7 +2340,7 @@ class LiveCoreHost extends CoreHost {
       await for (final l in api.ping(req)) {
         final k = int.tryParse('${l['key']}'), ms = l['ms'];
         if (l['kind'] != 'p' || k == null || k < 0 || k >= at.length || ms is! num) continue;
-        res[at[k]] = ms.round();
+        res[at[k]] = PairAnswer(ms.round(), weak: ms >= 0 && l['byChecker'] == true);
       }
     } catch (_) {
       // the tester could not run: no verdict, not "every pair is dead" (see [CoreHost.pingPairs])

@@ -826,7 +826,7 @@ void main() {
         await _open(tester, 'setdns');
         await tester.tap(find.descendant(of: find.byKey(ValueKey(id)), matching: find.text('Mine')));
         await tester.pump();
-        for (var i = 0; i < 32; i++) {
+        for (var i = 0; i < 64; i++) {
           await tester.pump(const Duration(seconds: 1));
         }
         final doh = find.byKey(ValueKey('dns-race-vpn-doh'));

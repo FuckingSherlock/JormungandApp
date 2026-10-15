@@ -384,17 +384,20 @@ class FakeCoreHost extends CoreHost {
   /// The route check's answers: `pairMs[exit.id]` (default: 50 ms); [pairGate], when set, holds
   /// every `pingPairs` call until it completes (a test can cancel meanwhile).
   final Map<String, int> pairMs = {};
+
+  /// Exit ids whose `pingPairs` answer is weak (only a backup checker answered).
+  final Set<String> pairWeak = {};
   Completer<void>? pairGate;
 
   /// A `pingPairs` call that fails as a whole (an empty list).
   bool pairCallFails = false;
 
   @override
-  Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits) async {
+  Future<List<PairAnswer>> pingPairs(CatalogNode entry, List<CatalogNode> exits) async {
     calls.add('pingPairs ${entry.id} ${exits.length}');
     await pairGate?.future;
     if (pairCallFails) return const [];
-    return [for (final x in exits) pairMs[x.id] ?? 50];
+    return [for (final x in exits) PairAnswer(pairMs[x.id] ?? 50, weak: pairWeak.contains(x.id))];
   }
 
   @override
@@ -699,7 +702,8 @@ class FakeCoreHost extends CoreHost {
 
   /// Per-side provider ping: [dnsPings] of the provider's address on each active side.
   @override
-  Future<DnsSidePing> pingDnsSides(String providerId) async {
+  Future<DnsSidePing> pingDnsSides(String providerId, {bool poll = false}) async {
+    calls.add(poll ? 'pingDnsSides $providerId poll' : 'pingDnsSides $providerId');
     final p = catalog.dnsServers[providerId];
     if (p == null) return const DnsSidePing();
     final ms = await pingDns(p.addr);
@@ -712,6 +716,7 @@ class FakeCoreHost extends CoreHost {
       direct: p.activeSides.contains('direct') ? ms : null,
       vpn: p.activeSides.contains('vpn') ? ms : null,
       races: races,
+      testing: races.any((r) => r.transports.any((t) => t.testing)),
     );
   }
 

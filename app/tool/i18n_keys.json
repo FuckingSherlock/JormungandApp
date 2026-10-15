@@ -1590,5 +1590,6 @@
   "No freshness headers": "noFreshnessHeaders",
   "Last-Modified: {0}": "lastModified",
   "Left the origin: {0}": "leftTheOrigin",
-  "Answered only a backup check": "answeredOnlyABackupCheck"
+  "Answered only a backup check": "answeredOnlyABackupCheck",
+  "The VPN side is measured only while connected: it needs a tunnel": "theVpnSideIsMeasuredOnly"
 }

@@ -312,6 +312,15 @@ class DockSummary {
   bool get hasEntry => none == null && name.isNotEmpty;
 }
 
+/// One exit's answer of [CoreHost.pingPairs]: [ms] (`-1` = none) and whether only a backup checker
+/// answered it ([weak], like `PingEntry.byChecker`).
+class PairAnswer {
+  const PairAnswer(this.ms, {this.weak = false});
+
+  final int ms;
+  final bool weak;
+}
+
 enum AddSourceOutcome { added, emptyUrl, failed }
 
 class AddSourceResult {
@@ -528,11 +537,12 @@ abstract class CoreHost extends ChangeNotifier {
   Future<void> pingEntry(String id);
 
   /// The route check's pair ping (`backend.pingPair`): every one of [exits] through [entry] (the
-  /// exit's outbound detoured via the entry's), in one core call. Latency per exit in order,
-  /// `-1` = no answer (also for a server with no usable outbound). An EMPTY list = the call itself
+  /// exit's outbound detoured via the entry's), in one core call. Answer per exit in order,
+  /// ms `-1` = no answer (also for a server with no usable outbound), `weak` = only a backup
+  /// checker answered. An EMPTY list = the call itself
   /// failed (the tester could not run): no verdict on any pair, the caller writes nothing. Nothing
   /// goes to the pair book (the caller writes what it keeps: `catalog.pairs`).
-  Future<List<int>> pingPairs(CatalogNode entry, List<CatalogNode> exits);
+  Future<List<PairAnswer>> pingPairs(CatalogNode entry, List<CatalogNode> exits);
 
   /// A chain measured the way it connects: its entries directly (always with [entries], else only
   /// when none is in use yet), then [exits] (default: all of the chain's) through the entry in
@@ -648,14 +658,41 @@ abstract class CoreHost extends ChangeNotifier {
   /// Latency of the DNS provider [providerId] per side by the core's own dns-check (the sing-box in use, so the side
   /// chip's colour and the ping agree): `direct` / `vpn` = best ms of the side's transports, -1 no answer, null =
   /// "—" (side not configured, or nothing could measure it). Without a running core the direct side is measured in
-  /// process (`dnsLatency`, one query per transport, the best counts) and the VPN side is null.
-  Future<DnsSidePing> pingDnsSides(String providerId) async {
+  /// process (`pingDns`, one query per transport, the best counts; `races` carries each transport's own result as
+  /// the `direct` side of the provider) and the VPN side is null. The core answers at once with `testing` while its
+  /// checks run and is asked again with [poll] (only reads, starts nothing); this in-process measure is one awaited
+  /// call, so it never says `testing`, and a [poll] has nothing to read.
+  Future<DnsSidePing> pingDnsSides(String providerId, {bool poll = false}) async {
     final p = catalog.dnsServers[providerId];
-    if (p == null || !p.activeSides.contains('direct')) return const DnsSidePing();
-    final ms = await Future.wait([for (final t in p.usedTransports) dnsLatency(t.addr).catchError((_) => -1)]);
+    if (poll || p == null || !p.activeSides.contains('direct')) return const DnsSidePing();
+    final used = p.usedTransports;
+    final ms = await Future.wait([for (final t in used) pingDns(t.addr).catchError((_) => -1)]);
     final known = ms.whereType<int>();
     final ok = known.where((m) => m >= 0);
-    return DnsSidePing(direct: known.isEmpty ? null : (ok.isEmpty ? -1 : ok.reduce((a, b) => a < b ? a : b)));
+    final direct = known.isEmpty ? null : (ok.isEmpty ? -1 : ok.reduce((a, b) => a < b ? a : b));
+    if (p.system) return DnsSidePing(direct: direct);
+    // per kind (two addresses of a kind count as one): the best answer, -1 when none answered, not asked when unmeasurable
+    final byKind = <String, int?>{};
+    for (var i = 0; i < used.length; i++) {
+      byKind[used[i].kind] = dnsBetterMs(byKind[used[i].kind], ms[i]);
+    }
+    return DnsSidePing(
+      direct: direct,
+      races: [
+        DnsRace(
+          provider: providerId,
+          side: 'direct',
+          transports: [
+            for (final e in byKind.entries)
+              DnsRaceTransport(
+                kind: e.key,
+                ms: e.value ?? -2,
+                state: e.value == null ? 'untested' : (e.value! >= 0 ? 'ok' : 'miss'),
+              ),
+          ],
+        ),
+      ],
+    );
   }
 
   // App updates (docs/updates.md). The core checks and downloads; the platform installs.
@@ -808,10 +845,14 @@ class DnsServerStatus {
 /// A provider's latency per side ([CoreHost.pingDnsSides]): ms, -1 no answer, null = not configured / not measurable
 /// (the UI shows "—"). [servers]: ms per candidate id when the core measured them.
 class DnsSidePing {
-  const DnsSidePing({this.direct, this.vpn, this.servers = const {}, this.races = const []});
+  const DnsSidePing({this.direct, this.vpn, this.servers = const {}, this.races = const [], this.testing = false});
 
   final int? direct, vpn;
   final Map<String, int> servers;
+
+  /// The core's checks of the provider are still running: ask again with `poll`. While it is true the `ms` of a
+  /// transport in `testing` state is a stale one (an earlier result or -2) and `direct` / `vpn` are what has landed so far.
+  final bool testing;
 
   /// The protocol race per provider and side (`providers` of the ping answer); empty without a core.
   final List<DnsRace> races;
@@ -865,6 +906,26 @@ class DnsRace {
     return null;
   }
 
+  /// The side's best answer by the transports that are not `testing` (their `ms` is stale): the lowest ms, -1 when
+  /// none answered, null when nothing was asked.
+  int? get bestMs {
+    int? best;
+    for (final t in transports) {
+      if (t.testing) continue;
+      best = dnsBetterMs(best, t.ms == -2 ? null : t.ms);
+    }
+    return best;
+  }
+
+  /// The kind of the lowest answer: the protocol to name when the core reports no winner (no tunnel, a ping only).
+  String? get bestKind {
+    DnsRaceTransport? best;
+    for (final t in transports) {
+      if (!t.testing && t.ms >= 0 && (best == null || t.ms < best.ms)) best = t;
+    }
+    return best?.kind;
+  }
+
   /// `providers` of `status.dns` / the ping answer; malformed entries are skipped.
   static List<DnsRace> parseAll(Object? json) => [
     for (final p in (json is List ? json : const []))
@@ -889,6 +950,14 @@ class DnsRace {
           ],
         ),
   ];
+}
+
+/// The better of two answers (ms, -1 = none answered, null = not asked): the lower ms, else -1, else null.
+int? dnsBetterMs(int? a, int? b) {
+  if (a == null) return b;
+  if (b == null) return a;
+  if (a >= 0 && b >= 0) return a < b ? a : b;
+  return a >= 0 ? a : (b >= 0 ? b : -1);
 }
 
 DnsRace? dnsRaceOf(List<DnsRace> races, String provider, String side) {

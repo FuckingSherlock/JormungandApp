@@ -234,6 +234,7 @@
   "Does not answer through {0}; it answers through {1}": null,
   "Dead on this node": null,
   "Reserve": null,
+  "The VPN side is measured only while connected: it needs a tunnel": null,
   "{#0}d ago": null,
   "New version": "Новая версия",  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
 }

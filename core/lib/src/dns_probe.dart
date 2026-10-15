@@ -47,13 +47,19 @@ Future<int?> dnsLatency(String addr, {Duration timeout = const Duration(seconds:
       case 'https':
         final uri = Uri.parse(a);
         final path = uri.path.isEmpty ? '/dns-query' : uri.path;
-        final c = HttpClient()..connectionTimeout = timeout;
+        // DIRECT: the measure is of this machine's own path, not of an HTTPS_PROXY the environment may name
+        final c = HttpClient()
+          ..connectionTimeout = timeout
+          ..findProxy = ((_) => 'DIRECT');
         try {
           final req = await c.postUrl(uri.replace(path: path)).timeout(timeout);
+          final q = dnsQuery(name, id);
           req.headers
             ..set('content-type', 'application/dns-message')
             ..set('accept', 'application/dns-message');
-          req.add(dnsQuery(name, id));
+          // a known length: without it the body goes out chunked and Cloudflare's DoH answers 400 to it
+          req.contentLength = q.length;
+          req.add(q);
           final res = await req.close().timeout(timeout);
           final body = await res.fold<List<int>>([], (p, e) => p..addAll(e)).timeout(timeout);
           return res.statusCode == 200 && isDnsAnswer(body, id) ? sw.elapsedMilliseconds : -1;

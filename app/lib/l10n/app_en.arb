@@ -3488,6 +3488,7 @@
   },
   "deadOnThisNode": "Dead on this node",
   "reserve": "Reserve",
+  "theVpnSideIsMeasuredOnly": "The VPN side is measured only while connected: it needs a tunnel",
   "dAgo": "{n0}d ago",
   "@dAgo": {
     "placeholders": {

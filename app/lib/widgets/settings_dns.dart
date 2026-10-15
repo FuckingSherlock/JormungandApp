@@ -47,6 +47,59 @@ String dnsKindName(String kind) => switch (kind) {
   _ => 'UDP',
 };
 
+/// The polls a provider's ping may take (one per second): a dead transport costs the core ~10 s and more per
+/// check name, so a full ping of a provider with several of them is long.
+const dnsPingPollEvery = Duration(seconds: 1);
+const dnsPingPollCap = 60;
+
+/// Starts the core's check of provider [id] and asks again (`poll`: only reads) until it says `testing: false`;
+/// [onAnswer] sees every answer as it comes. Returns the last one: its `testing` still true = [cap] polls passed.
+/// [alive] false (the page is gone) ends the loop. A poll that reads nothing (the core went away, the in-process
+/// fallback has no run) ends it with the earlier answer, its transports no longer `testing`.
+Future<DnsSidePing> pingDnsUntilDone(
+  CoreHost host,
+  String id, {
+  void Function(DnsSidePing r)? onAnswer,
+  bool Function()? alive,
+  Duration every = dnsPingPollEvery,
+  int cap = dnsPingPollCap,
+}) async {
+  var r = await host.pingDnsSides(id);
+  for (var i = 0;; i++) {
+    if (alive != null && !alive()) return r;
+    onAnswer?.call(r);
+    if (!r.testing || i >= cap) return r;
+    await Future<void>.delayed(every);
+    if (alive != null && !alive()) return r;
+    final next = await host.pingDnsSides(id, poll: true);
+    if (next.races.isEmpty && next.direct == null && next.vpn == null && !next.testing) {
+      r = DnsSidePing(
+        direct: r.direct,
+        vpn: r.vpn,
+        servers: r.servers,
+        races: [
+          for (final race in r.races)
+            DnsRace(
+              provider: race.provider,
+              side: race.side,
+              winnerKind: race.winnerKind,
+              winnerMs: race.winnerMs,
+              transports: [
+                for (final t in race.transports)
+                  t.testing
+                      ? DnsRaceTransport(kind: t.kind, ms: t.ms, state: 'untested', dead: t.dead, reserve: t.reserve)
+                      : t,
+              ],
+            ),
+        ],
+      );
+      onAnswer?.call(r);
+      return r;
+    }
+    r = next;
+  }
+}
+
 /// Settings row: `2 on · hijack`.
 String dnsSettingsSub(BuildContext context, CoreHost host) {
   final l10n = context.l10n;
@@ -111,17 +164,23 @@ class _DnsSheetState extends State<DnsSheet> {
     });
   }
 
+  /// The last known ms of a side: the status the core reports while connected (the transports it has an answer
+  /// of), else the last ping's.
   int? _sideMs(String id, String side) {
     final r = _res[id];
-    return r == null ? null : (side == 'vpn' ? r.vpn : r.direct);
+    final own = r == null ? null : (side == 'vpn' ? r.vpn : r.direct);
+    return CoreHostScope.read(context).dnsHealth?.race(id, side)?.bestMs ?? own;
   }
 
-  /// The race of the provider on a side: the last ping's, else the status the core reports while connected.
+  /// The race of the provider on a side: the status the core reports while connected, else the last ping's.
   DnsRace? raceOf(String id, String side) =>
-      _res[id]?.race(id, side) ?? CoreHostScope.read(context).dnsHealth?.race(id, side);
+      CoreHostScope.read(context).dnsHealth?.race(id, side) ?? _res[id]?.race(id, side);
 
-  /// What the edit form shows as the already known ping: the direct side, else the VPN one.
-  int? _formPing(String id) => _sideMs(id, 'direct') ?? _sideMs(id, 'vpn');
+  /// The protocol to name under a side's ping: the one the core uses, else the fastest that answered.
+  String? kindOf(String id, String side) {
+    final r = raceOf(id, side);
+    return r?.winnerKind ?? r?.bestKind;
+  }
 
   Future<void> _ping(String id) async {
     final host = CoreHostScope.read(context);
@@ -130,7 +189,7 @@ class _DnsSheetState extends State<DnsSheet> {
     setState(() => _testing.add(id));
     DnsSidePing r;
     try {
-      r = await host.pingDnsSides(id);
+      r = await pingDnsUntilDone(host, id, alive: () => mounted);
     } catch (_) {
       r = DnsSidePing(
         direct: s.activeSides.contains('direct') ? -1 : null,
@@ -243,8 +302,10 @@ class _DnsSheetState extends State<DnsSheet> {
                   onTap: () => showDnsForm(
                     context,
                     id: id,
-                    ping: _formPing(id),
-                    testing: _testing.contains(id),
+                    last: _res[id],
+                    onPinged: (r) {
+                      if (mounted) setState(() => _res[id] = r);
+                    },
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -310,17 +371,19 @@ class _DnsSheetState extends State<DnsSheet> {
                           ms: s.activeSides.contains(side)
                               ? _sideMs(id, side)
                               : null,
+                          // the VPN side is measured by the core only: no spinner without a tunnel
                           testing:
                               _testing.contains(id) &&
-                              s.activeSides.contains(side),
+                              s.activeSides.contains(side) &&
+                              (side == 'direct' || health != null),
                         ),
                       ),
                       // the protocol the side answers with, a second line so the ms never truncates
                       if (s.activeSides.contains(side) &&
                           !s.system &&
-                          raceOf(id, side)?.winnerKind != null)
+                          kindOf(id, side) != null)
                         Text(
-                          dnsKindName(raceOf(id, side)!.winnerKind!),
+                          dnsKindName(kindOf(id, side)!),
                           key: ValueKey('dns-race-$id-$side'),
                           maxLines: 1,
                           style: TextStyle(fontSize: 10, color: c.t3),
@@ -755,23 +818,24 @@ class _DnsDeadBlockState extends State<DnsDeadBlock> {
 
 // ───────────────────────────── add / edit a server ─────────────────────────────
 
-/// The form over the DNS sheet. [id] null = a new server; [ping] = what the list already knows.
+/// The form over the DNS sheet. [id] null = a new server; [last] = the list's last ping of it, [onPinged] gets every
+/// finished ping the form makes (the list shows it too).
 Future<void> showDnsForm(
   BuildContext context, {
   String? id,
-  int? ping,
-  bool testing = false,
+  DnsSidePing? last,
+  ValueChanged<DnsSidePing>? onPinged,
 }) => showAppSheet<void>(
   context,
-  builder: (_) => DnsForm(id: id, ping: ping, testing: testing),
+  builder: (_) => DnsForm(id: id, last: last, onPinged: onPinged),
 );
 
 class DnsForm extends StatefulWidget {
-  const DnsForm({super.key, this.id, this.ping, this.testing = false});
+  const DnsForm({super.key, this.id, this.last, this.onPinged});
 
   final String? id;
-  final int? ping;
-  final bool testing;
+  final DnsSidePing? last;
+  final ValueChanged<DnsSidePing>? onPinged;
 
   @override
   State<DnsForm> createState() => _DnsFormState();
@@ -791,17 +855,22 @@ class _DnsFormState extends State<DnsForm> {
   /// switched off by hand.
   Set<String> _seen = {};
   DnsServerCfg? _cfg;
-  int? _ping;
-  bool _testing = false;
 
-  /// The provider's protocol race per side, as the last core answer gave it.
-  List<DnsRace> _races = const [];
+  /// The last ping answer of a saved provider (the list's, then this form's own): its races are the rows' values
+  /// unless the status of a connected core has newer ones.
+  DnsSidePing? _last;
   bool _raceRunning = false;
+
+  /// The first ask of a run is out and has not answered (the in-process measure takes seconds): the rows spin.
+  bool _asking = false;
 
   /// The cap was reached with checks still `testing`: they show "No answer", never a spinner for ever.
   bool _raceGaveUp = false;
-  static const _racePoll = Duration(seconds: 1);
-  static const _raceCap = 30;
+
+  /// An unsaved draft's Ping: the best ms of each enabled kind's address, measured in this process (direct path).
+  final Map<String, int?> _draft = {};
+  bool _draftTesting = false;
+  bool _draftPinged = false;
 
   /// An own server: its addresses are a list of fields. The built-in ones and Local show theirs.
   bool get _own => _cfg == null || (!_cfg!.system && !_cfg!.builtin);
@@ -825,7 +894,7 @@ class _DnsFormState extends State<DnsForm> {
     _cfg = s;
     _name = TextEditingController(text: s?.name ?? '');
     _sides = {...(s?.activeSides ?? const ['vpn'])};
-    _ping = widget.ping;
+    _last = widget.last;
     if (_own) {
       for (final t in s?.transports ?? const <DnsTransport>[]) {
         _rows.add(TextEditingController(text: t.addr));
@@ -840,43 +909,93 @@ class _DnsFormState extends State<DnsForm> {
     });
   }
 
-  bool get _raceTesting => !_raceGaveUp && _raceRows.any((r) => r.$3?.testing ?? false);
+  /// Whether a core is running (its status carries `dns`): only then the VPN side can be measured.
+  bool get _viaCore => CoreHostScope.read(context).dnsHealth != null;
 
-  /// (side, kind, the transport's race entry) for each enabled side and transport of a saved provider.
-  List<(String, String, DnsRaceTransport?)> get _raceRows {
-    final id = widget.id;
-    if (id == null || _cfg?.system == true) return const [];
+  /// The (side, kind) rows of a saved provider: every enabled side x enabled kind, whether or not anything is known.
+  List<(String, String)> get _slots {
+    if (widget.id == null || _cfg?.system == true) return const [];
     return [
       for (final side in const ['vpn', 'direct'])
-        if (_sides.contains(side) && dnsRaceOf(_races, id, side) != null)
+        if (_sides.contains(side))
           for (final kind in dnsKinds)
-            if (_use.contains(kind) && _seen.contains(kind))
-              (side, kind, dnsRaceOf(_races, id, side)!.transport(kind)),
+            if (_use.contains(kind) && _seen.contains(kind)) (side, kind),
     ];
   }
 
-  /// Asks the core again until no transport of the provider is `testing`; at the cap the rest is "No answer".
+  /// The race of the provider on a side: this form's own run while it goes, else the status of a connected core,
+  /// else the last ping (this form's, or the list's).
+  DnsRace? _raceOn(String side) {
+    final id = widget.id!;
+    final own = _last?.race(id, side);
+    final live = CoreHostScope.read(context).dnsHealth?.race(id, side);
+    return _raceRunning ? (own ?? live) : (live ?? own);
+  }
+
+  /// A row's value: ms (null = unknown, -1 = no answer) and whether it still spins.
+  ({int? ms, bool testing}) _valueOf(String side, String kind) {
+    final t = _raceOn(side)?.transport(kind);
+    final testing = !_raceGaveUp && ((t?.testing ?? false) || (_asking && (side == 'direct' || _viaCore)));
+    if (testing || t == null) return (ms: null, testing: testing);
+    if (t.dead || (t.testing && _raceGaveUp)) return (ms: -1, testing: false);
+    return (ms: t.ms == -2 ? null : t.ms, testing: false);
+  }
+
+  /// The Ping summary: the best answer of any transport on any side; "no answer" only when none answered.
+  ({int? ms, bool testing}) get _summary {
+    if (widget.id == null) {
+      final ms = _draft.values.fold<int?>(null, dnsBetterMs);
+      return (ms: ms, testing: _draftTesting);
+    }
+    int? best;
+    var testing = false;
+    for (final (side, kind) in _slots) {
+      final v = _valueOf(side, kind);
+      testing = testing || v.testing;
+      best = dnsBetterMs(best, v.ms);
+    }
+    // no rows (Local) or nothing per transport (a core that gave only sides): the sides' own ms
+    best ??= dnsBetterMs(
+      _sides.contains('direct') || _cfg?.system == true ? _last?.direct : null,
+      _sides.contains('vpn') ? _last?.vpn : null,
+    );
+    return (ms: best, testing: testing || _asking);
+  }
+
+  /// Starts the core's check (or joins the one under way) and follows it by polling until it says `testing: false`;
+  /// at the cap the transports still `testing` read "No answer".
   Future<void> _raceLoop() async {
     final id = widget.id;
-    if (id == null || _cfg?.system == true || _raceRunning) return;
+    if (id == null || _raceRunning) return;
     _raceRunning = true;
     final host = CoreHostScope.read(context);
     try {
-      setState(() => _raceGaveUp = false);
-      for (var i = 0; i < _raceCap; i++) {
-        final DnsSidePing r;
-        try {
-          r = await host.pingDnsSides(id);
-        } catch (_) {
-          break;
-        }
-        if (!mounted) return;
-        setState(() => _races = r.races);
-        if (!_raceTesting) return;
-        await Future<void>.delayed(_racePoll);
-        if (!mounted) return;
+      setState(() {
+        _raceGaveUp = false;
+        _asking = true;
+      });
+      final DnsSidePing r;
+      try {
+        r = await pingDnsUntilDone(
+          host,
+          id,
+          alive: () => mounted,
+          onAnswer: (a) {
+            if (mounted) {
+              setState(() {
+                _asking = false;
+                _last = a;
+              });
+            }
+          },
+        );
+      } catch (_) {
+        if (mounted) setState(() => _asking = false);
+        return;
       }
-      if (mounted) setState(() => _raceGaveUp = true);
+      if (!mounted) return;
+      setState(() => _raceGaveUp = r.testing);
+      if (!r.testing) widget.onPinged?.call(r);
     } finally {
       _raceRunning = false;
     }
@@ -915,37 +1034,37 @@ class _DnsFormState extends State<DnsForm> {
     _ => 'UDP',
   };
 
-  /// The address a ping tries: the first one of an enabled kind (Local: `system`); null = none valid.
-  String? get _pingAddr {
-    if (_cfg?.system == true) return _cfg!.addr;
-    final addrs = _own
-        ? [for (final c in _rows) c.text.trim()]
-        : [for (final t in _cfg!.transports) t.addr];
-    for (final a in addrs) {
-      if (_validAddr(a) && _use.contains(dnsKindOf(a))) return a;
-    }
-    return null;
-  }
+  /// The addresses an unsaved draft's ping tries: every valid one of an enabled kind.
+  List<String> get _draftAddrs => [
+    for (final c in _rows)
+      if (_validAddr(c.text.trim()) && _use.contains(dnsKindOf(c.text.trim()))) c.text.trim(),
+  ];
 
+  /// The Ping of an unsaved draft (nothing for the core to race yet): each enabled kind's address is measured in
+  /// this process, on the direct path; two addresses of a kind count as the better one.
   Future<void> _pingDraft() async {
     final l10n = context.l10n;
     final host = CoreHostScope.read(context);
-    final addr = _pingAddr;
-    if (addr == null) {
+    final addrs = _draftAddrs;
+    if (addrs.isEmpty) {
       showToast(context, l10n.enterAValidAddressFirst);
       return;
     }
-    setState(() => _testing = true);
-    int? ms;
-    try {
-      ms = await host.pingDns(addr);
-    } catch (_) {
-      ms = -1;
-    }
+    setState(() {
+      _draftTesting = true;
+      _draftPinged = true;
+    });
+    final ms = await Future.wait([
+      for (final a in addrs) host.pingDns(a).then<int?>((v) => v, onError: (Object _) => -1),
+    ]);
     if (!mounted) return;
     setState(() {
-      _testing = false;
-      _ping = ms;
+      _draftTesting = false;
+      _draft.clear();
+      for (var i = 0; i < addrs.length; i++) {
+        final k = dnsKindOf(addrs[i]);
+        _draft[k] = dnsBetterMs(_draft[k], ms[i]);
+      }
     });
   }
 
@@ -999,19 +1118,20 @@ class _DnsFormState extends State<DnsForm> {
 
   /// One transport on one side: its result (spinner while the core still asks), "In use" for the
   /// winner, "Reserve" for a transport that answers but is not the one working.
-  Widget _raceRow(String side, String kind, DnsRaceTransport? t) {
+  Widget _raceRow(String side, String kind) {
     final l10n = context.l10n;
     final c = context.colors;
-    final race = dnsRaceOf(_races, widget.id!, side);
-    final testing = (t?.testing ?? false) && !_raceGaveUp;
-    final miss = t != null && !testing && (t.dead || t.ms == -1 || (t.testing && _raceGaveUp));
+    final draft = widget.id == null;
+    final race = draft ? null : _raceOn(side);
+    final t = race?.transport(kind);
+    final v = draft ? (ms: _draft[kind], testing: _draftTesting) : _valueOf(side, kind);
     final Widget result;
-    if (testing) {
+    if (v.testing) {
       result = const LatencyView(testing: true, minWidth: 0);
-    } else if (miss) {
+    } else if (v.ms != null && v.ms! < 0) {
       result = Text(l10n.noAnswer2, style: TextStyle(fontSize: 12, color: c.muted));
     } else {
-      result = LatencyView(ms: t == null || t.ms == -2 ? null : t.ms, minWidth: 0);
+      result = LatencyView(ms: v.ms, minWidth: 0);
     }
     final tag = race?.winnerKind == kind
         ? l10n.inUse
@@ -1053,6 +1173,16 @@ class _DnsFormState extends State<DnsForm> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    CoreHostScope.of(context); // the status of a connected core refreshes the rows
+    final summary = _summary;
+    // a saved provider's rows always exist; a draft's appear after its Ping (direct, per enabled kind)
+    final rows = widget.id == null
+        ? [
+            if (_draftPinged)
+              for (final k in dnsKinds)
+                if (_use.contains(k) && _seen.contains(k)) ('direct', k),
+          ]
+        : _slots;
     return SheetFrame(
       title: widget.id == null ? l10n.addDnsServer : l10n.editDnsServer,
       footer: [
@@ -1191,27 +1321,35 @@ class _DnsFormState extends State<DnsForm> {
               children: [
                 SecondaryButton(
                   label: l10n.ping,
-                  onPressed: () {
-                    _pingDraft();
-                    _raceLoop();
-                  },
+                  onPressed: widget.id == null ? _pingDraft : _raceLoop,
                 ),
                 const SizedBox(width: 12),
-                LatencyView(
-                  ms: _ping,
-                  testing: _testing,
-                  minWidth: 0,
-                ),
+                if (summary.testing)
+                  const LatencyView(testing: true, minWidth: 0)
+                else if (summary.ms != null && summary.ms! < 0)
+                  Text(
+                    l10n.noAnswer2,
+                    key: const ValueKey('dns-ping-summary'),
+                    style: TextStyle(fontSize: 12, color: context.colors.muted),
+                  )
+                else
+                  LatencyView(key: const ValueKey('dns-ping-summary'), ms: summary.ms, minWidth: 0),
               ],
             ),
           ),
-          if (_raceRows.isNotEmpty)
+          if (rows.isNotEmpty)
             FormGroup(
               child: Column(
                 key: const ValueKey('dns-race'),
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final (side, kind, t) in _raceRows) _raceRow(side, kind, t),
+                  for (final (side, kind) in rows) _raceRow(side, kind),
+                  // the VPN side is measured by the running core only
+                  if (widget.id != null && rows.any((r) => r.$1 == 'vpn') && !_viaCore)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: HintText(l10n.theVpnSideIsMeasuredOnly),
+                    ),
                 ],
               ),
             ),
