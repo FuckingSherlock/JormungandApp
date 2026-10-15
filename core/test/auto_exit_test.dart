@@ -1,6 +1,6 @@
 // The controller's exit checks (auto.dart): pinned to the node's own outbound, the answer is that node's by
 // construction; a switch does not cancel a running check; the status' exit is the node in use's; the stored answer is
-// shown at once and a node is asked in the background at most once an hour.
+// shown at once and a node is asked in the background at most once per AutoService.exitEvery.
 import 'dart:async';
 
 import 'package:jormungand_core/jormungand_core.dart';
@@ -72,7 +72,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
     }
 
-    test('working nodes with no flag and no known country: once an hour, at most 3 a round; the network does not matter', () async {
+    test('working nodes with no flag and no known country: once per interval, at most 3 a round; the network does not matter', () async {
       final p = scoutPlan();
       var now = 1000000000000;
       final book = ExitBook()..record(_idOf(p, 1), ip: '198.51.100.2', country: 'FR', at: 1);
@@ -89,23 +89,23 @@ void main() {
       expect(scoutsOf(asked), hasLength(5), reason: 'the rest of the unknown ones');
       expect(scoutsOf(asked).toSet(), hasLength(5), reason: 'the asked are not asked again');
       await round(auto);
-      expect(scoutsOf(asked), hasLength(5), reason: 'once an hour');
+      expect(scoutsOf(asked), hasLength(5), reason: 'once per interval');
       expect([for (var i = 2; i <= 6; i++) book[_idOf(p, i)]], everyElement(isNotNull), reason: 'the answers are recorded per node');
 
       auto.networkChanged(); // a node's exit does not depend on the network
       await round(auto);
       expect(scoutsOf(asked), hasLength(5), reason: 'another network asks nothing');
 
-      now += const Duration(minutes: 59).inMilliseconds;
+      now += AutoService.exitEvery.inMilliseconds - const Duration(minutes: 1).inMilliseconds;
       await round(auto);
-      expect(scoutsOf(asked), hasLength(5), reason: 'not yet an hour');
+      expect(scoutsOf(asked), hasLength(5), reason: 'not yet the interval');
       now += const Duration(minutes: 2).inMilliseconds;
       await round(auto);
-      expect(scoutsOf(asked), hasLength(8), reason: 'an hour passed: asked again, 3 of them');
+      expect(scoutsOf(asked), hasLength(8), reason: 'the interval passed: asked again, 3 of them');
       auto.stop();
     });
 
-    test('a failed scout is not asked again within the hour', () async {
+    test('a failed scout is not asked again within the interval', () async {
       final p = scoutPlan();
       var now = 1000000000000;
       final asked = <String>[];
@@ -118,9 +118,9 @@ void main() {
       }
       expect(scoutsOf(asked), hasLength(6));
       expect(scoutsOf(asked).toSet(), hasLength(6), reason: 'a failure is no reason to ask a node again');
-      now += const Duration(minutes: 61).inMilliseconds;
+      now += AutoService.exitEvery.inMilliseconds + const Duration(minutes: 1).inMilliseconds;
       await round(auto);
-      expect(scoutsOf(asked), hasLength(9), reason: 'an hour later it is asked again');
+      expect(scoutsOf(asked), hasLength(9), reason: 'an interval later it is asked again');
       auto.stop();
     });
 
@@ -177,7 +177,7 @@ void main() {
   });
 
   group('schedule', () {
-    const hour = Duration(hours: 1);
+    const hour = AutoService.exitEvery;
     var now = 1000000000000;
     late Map<String, dynamic> p;
     late ExitBook book;
@@ -254,14 +254,14 @@ void main() {
     test('the timer runs from the last completed check', () async {
       make();
       auto.start();
-      now += 30 * 60 * 1000;
-      gates[0].complete({'ip': '203.0.113.1', 'country': 'DE'}); // answered half an hour in
+      now += AutoService.exitEvery.inMilliseconds * 3 ~/ 4;
+      gates[0].complete({'ip': '203.0.113.1', 'country': 'DE'}); // answered three quarters of the interval in
       await settle();
-      now += 40 * 60 * 1000; // 70 minutes from the start, 40 from the answer
+      now += AutoService.exitEvery.inMilliseconds ~/ 2; // more than the interval from the start, half of it from the answer
       await auto.setManual(true, entry: 'B');
       await auto.setManual(true, entry: 'A');
       expect(asked.where((t) => t.endsWith('s::a')), hasLength(1));
-      now += 21 * 60 * 1000;
+      now += AutoService.exitEvery.inMilliseconds ~/ 2 + 1000;
       await auto.setManual(true, entry: 'B');
       await auto.setManual(true, entry: 'A');
       expect(asked.where((t) => t.endsWith('s::a')), hasLength(2));

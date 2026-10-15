@@ -138,14 +138,18 @@ class DnsVerdictBook {
 /// as dead starts off (it is checked at once, [DnsFailover.start]); a side answers with the best candidate that worked
 /// last time, so the ones above it that were never checked start off too until they answer; the rest are on. [sides]: the
 /// candidates of each side in priority order; [others]: candidates outside the sides (a rule's own), off only when dead.
-/// [node]: the exit node the VPN side is bound to. Id → on.
-Map<String, bool> dnsStartFlags(Map<String, List<DnsCandidate>> sides, DnsVerdictBook book, {String? node, List<DnsCandidate> others = const []}) {
+/// [node]: the exit node the VPN side is bound to. [reserve]: the ids that were in reserve when the flags were last written
+/// (a working transport another of its provider's replaced, [DnsFailover.reserve]): they start off, are not dead, and count as
+/// having worked (the ones above them do not start off for lack of a verdict). Id → on.
+Map<String, bool> dnsStartFlags(Map<String, List<DnsCandidate>> sides, DnsVerdictBook book,
+    {String? node, List<DnsCandidate> others = const [], Set<String> reserve = const {}}) {
   final out = <String, bool>{};
   for (final l in sides.values) {
-    final best = l.indexWhere((c) => dnsDeadOf(book, c, node) == false);
+    bool? verdict(DnsCandidate c) => dnsDeadOf(book, c, node) ?? (reserve.contains(c.id) ? false : null);
+    final best = l.indexWhere((c) => verdict(c) == false);
     for (var i = 0; i < l.length; i++) {
-      final v = dnsDeadOf(book, l[i], node);
-      out[l[i].id] = v == true ? false : !(v == null && best > i);
+      final v = verdict(l[i]);
+      out[l[i].id] = v == true ? false : reserve.contains(l[i].id) ? false : !(v == null && best > i);
     }
   }
   for (final c in others) {

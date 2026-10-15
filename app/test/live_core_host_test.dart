@@ -520,6 +520,31 @@ void main() {
   );
 
   test(
+    'a node the core cannot test (unsupported, no outbound) is never probed: it stays "not checked", not dead',
+    () async {
+      final snap = snapshot();
+      final a = (snap['sourcesData'] as Map)['a'] as Map;
+      (a['nodes'] as List)
+        ..add({...node('a3'), 'unsupported': 'transport not supported by sing-box'})
+        ..add({'id': 'a4', 'name': 'Server a4', 'address': 'a4.example', 'port': 443});
+      await start(snap: snap);
+      final nodes = host.catalog.sourcesData['a']!.nodes;
+      expect(nodes.where((n) => !n.usable).map((n) => n.id), ['a3', 'a4']);
+      boxFails = SingBoxError('no sing-box');
+
+      await host.pingNodes(nodes);
+
+      final pings = host.catalog.pings;
+      for (final n in nodes.where((n) => !n.usable)) {
+        expect(pings.ping(n), isNull, reason: '${n.id}: no probe, no verdict');
+        expect(pings.entry(n), isNull);
+      }
+      expect(pings.anyTesting, isFalse);
+      boxFails = null;
+    },
+  );
+
+  test(
     'a chain ping goes to the pair book (exits through the entry), never to the exits\' own pings; one that cannot run keeps the old pair',
     () async {
       await start();

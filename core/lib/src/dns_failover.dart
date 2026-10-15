@@ -77,9 +77,11 @@ String dnsRootKey(String id) => 'dns|$id';
 const dnsSideNames = ['direct', 'vpn'];
 
 /// The DNS server a side answers with changed. [from] / [to] are the candidates' ids (the Sentinel's node ids),
-/// [fromProvider] / [toProvider] their providers'; [reason]: `failover` (the one in use is down), `back` (a higher one
-/// answers again), `node` (another exit node: its stored verdicts apply) or `off` (Switch automatically was turned
-/// off: every flag is on, the top candidate answers).
+/// [fromProvider] / [toProvider] their providers'; [reason]: `failover` (the one in use is down, also the protocol the
+/// race picks after the winner failed), `back` (a higher one answers again), `node` (another exit node: its stored
+/// verdicts apply) or `off` (Switch automatically was turned off: every flag is on, the top candidate answers). The winner
+/// of a protocol race at the start, on another network or on another exit node is an ordinary choice, not a switch: no
+/// [DnsSwitch] (the raw log has the race's line with every transport's result).
 class DnsSwitch {
   const DnsSwitch({
     required this.side,
@@ -185,6 +187,9 @@ class _Node {
   /// answer, the verdict that put it off is not known any more.
   bool restored = false;
 
+  /// The provider's transports on its side this one belongs to (a member of a side only).
+  _Group? group;
+
   String get id => entry.id;
   String get side => c?.side ?? 'direct';
   String get provider => c?.provider ?? 'system';
@@ -203,6 +208,40 @@ class _Side {
   _Node? effective;
 }
 
+/// The transports of one provider on one side, in the provider's own order: they take part in the protocol race
+/// (docs/rules.md §6 → Гонка протоколов). Of the group only [winner] has its flag on once the group has raced; the others
+/// are in reserve (flag off, not dead) until the winner fails or a new race is owed.
+class _Group {
+  _Group(this.side, this.provider, this.members);
+
+  final String side, provider;
+  final List<_Node> members;
+
+  /// The member put to work (chosen, its flag follows in the next decision); null = none answers fit to be.
+  _Node? winner;
+
+  /// A race has settled the group at least once: the winner (or its absence) is decided by it, not by the flags'
+  /// priority order. The VPN side's groups lose it when the exit node changes.
+  bool raced = false;
+
+  /// The winner was just chosen by a race and its flags are not written yet; [freshWhy] is the race's cause (`failure`: the
+  /// winner before it failed, so the move is a `failover`).
+  bool fresh = false;
+  String? freshWhy;
+
+  /// Why a race is owed (`start`, `network`, `node`, `failure`); run once the network is up.
+  String? owed;
+
+  /// The race in flight (one per group at a time).
+  Future<void>? racing;
+
+  /// A group of one has nothing to choose between.
+  bool get multi => members.length > 1;
+
+  /// The winner is chosen by the race (not by the order of the flags).
+  bool get holds => multi && (raced || racing != null);
+}
+
 class DnsFailover {
   DnsFailover({
     required Map<String, List<DnsCandidate>> sides,
@@ -214,6 +253,7 @@ class DnsFailover {
     List<DnsEntry> watch = const [],
     List<DnsCandidate> candidates = const [],
     Set<String> off = const {},
+    Set<String> reserve = const {},
     this.window = Duration.zero,
     this.auto = true,
     this.pool,
@@ -233,6 +273,16 @@ class DnsFailover {
       for (final name in dnsSideNames)
         _Side(name, [for (final c in sides[name] ?? const <DnsCandidate>[]) _Node(c.entry, c, member: true)]),
     ];
+    _groups = [
+      for (final s in _sides)
+        for (final p in {for (final n in s.members) n.provider})
+          _Group(s.name, p, [for (final n in s.members) if (n.provider == p) n]),
+    ];
+    for (final g in _groups) {
+      for (final n in g.members) {
+        n.group = g;
+      }
+    }
     final byTag = {for (final c in candidates) c.tag: c};
     final inSides = {for (final s in _sides) for (final n in s.members) n.id};
     _watch = [
@@ -247,11 +297,25 @@ class DnsFailover {
     }
     _lastNode = node?.call();
     // the flags by the verdicts of the last time: the dead ones off, the best that worked answers
-    final stored = dnsStartFlags(sides, this.book, node: _lastNode, others: [for (final n in _watch) ?n.c]);
+    // a reserve (a working transport another of its provider's replaced) is off but not dead: it is not "restored", it
+    // stays the ready fallback of its provider's winner, which is the one of the group still on
+    for (final n in _members) {
+      if (reserve.contains(n.id)) {
+        n.on = false;
+        n.restored = false;
+      }
+    }
+    final stored = dnsStartFlags(sides, this.book, node: _lastNode, others: [for (final n in _watch) ?n.c], reserve: reserve);
     for (final n in _flagged) {
       if (stored[n.id] == false && n.on) {
         n.on = false;
         n.restored = true;
+      }
+    }
+    for (final g in _groups) {
+      if (g.multi && g.members.any((n) => reserve.contains(n.id))) {
+        g.raced = true;
+        g.winner = g.members.where((n) => n.on).firstOrNull;
       }
     }
     for (final s in _sides) {
@@ -309,11 +373,12 @@ class DnsFailover {
   final List<Duration> recheckLadder;
   final int Function() _clock;
   late final List<_Side> _sides;
+  late final List<_Group> _groups;
   late final List<_Node> _watch;
   final _switches = StreamController<DnsSwitch>.broadcast();
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _timer, _recheckTimer;
-  bool _busy = false, _busyLadder = false, _started = false, _stopped = false, _again = false;
+  bool _busy = false, _busyLadder = false, _started = false, _stopped = false, _again = false, _writeFailed = false;
   String? _lastNode, _hintNext;
 
   /// The ladder's timer does not fire before this (ms since epoch): a tick found the network down or a round busy.
@@ -337,11 +402,22 @@ class DnsFailover {
   String? activeOf(String side) => _sideOf(side).effective?.id;
 
   /// Whether lookups of the core's own (node addresses, address_resolver.dart) may ask the candidate [id]: its flag is
-  /// on and no root is open. A server this config does not know is not judged: true.
+  /// on (or it is a reserve: working, only another transport of its provider is at work) and no root is open. A server
+  /// this config does not know is not judged: true.
   bool alive(String id) {
     final n = _all.where((x) => x.id == id).firstOrNull;
-    return n == null || n.c == null || (n.on && !_down(n));
+    return n == null || n.c == null || ((n.on || _reserved(n)) && !_down(n));
   }
+
+  // A transport that is off only because another one of its provider's is at work: not dead, not silent, not dropped for a miss.
+  bool _reserved(_Node n) {
+    final g = n.group;
+    return g != null && g.holds && g.winner != null && !identical(g.winner, n) && !n.on && !n.missDropped && n.w.health.ms != -1 && !_down(n);
+  }
+
+  /// The ids of the transports in reserve (see [_reserved]): kept with [flags] across a restart of sing-box, where they are
+  /// the ready fallback of their provider's winner, not transports that are off.
+  Set<String> get reserve => {for (final n in _members) if (_reserved(n)) n.id};
 
   /// A lookup of the core's own (address_resolver.dart) got no answer from the candidate [id]: evidence for ITS suspicion
   /// (the server's own check decides, [_suspect]); never a verdict by itself. A server this config does not watch, and a
@@ -364,6 +440,7 @@ class DnsFailover {
     _schedule(settings.firstCheck);
     unawaited(_verifyAll('start'));
     if (_all.any(_down)) unawaited(_round(_Round.dead)); // stored as dead: checked at once, not after `firstCheck`
+    unawaited(_owe('start', _groups));
   }
 
   void stop() {
@@ -467,6 +544,12 @@ class DnsFailover {
     }
     final members = [for (final n in vpn) if (n.member) n.c!];
     final stored = dnsStartFlags({'vpn': members}, book, node: cur, others: [for (final n in vpn) if (!n.member) n.c!]);
+    // the winners of the old node mean nothing on the new one: the flags go by the stored verdicts until the race
+    final raced = _groups.where((g) => g.side == 'vpn' && g.multi).toList();
+    for (final g in raced) {
+      g.raced = false;
+      g.winner = null;
+    }
     if (auto && _ready) {
       for (final n in vpn) {
         final want = stored[n.id];
@@ -475,8 +558,18 @@ class DnsFailover {
     }
     _note('info', 'dns: exit node changed: the verdicts of the new node apply, the VPN side is checked');
     _hintNext = 'node';
+    unawaited(_owe('node', raced));
     await _react();
-    unawaited(_checkNodes(vpn));
+    unawaited(_checkNodes([for (final n in vpn) if (!(n.group?.multi ?? false)) n]));
+  }
+
+  // A race is owed to [groups] (a group of one has nothing to choose between); run at once when the network is up, else by the
+  // next round.
+  Future<void> _owe(String why, Iterable<_Group> groups) {
+    for (final g in groups) {
+      if (g.multi) g.owed = why;
+    }
+    return _raceOwed();
   }
 
   /// Another network: the servers that answer now (each side's effective one) are asked at once; the dead ones keep
@@ -485,12 +578,16 @@ class DnsFailover {
     if (_stopped || !_started) return;
     final active = {for (final s in _sides) ?s.effective}.toList();
     if (active.isEmpty) return;
+    // the providers with several transports race again (their winner is the one that answers first on this network); the
+    // others are asked as before: the server in use
+    final race = _owe('network', _groups);
+    final single = [for (final n in active) if (!(n.group?.multi ?? false)) n];
     if (!_online) {
       _note('debug', 'dns: network changed, not checked: the network is not up (the rounds will)');
       return;
     }
     _note('info', 'dns: network changed: checking ${active.map((n) => n.id).join(', ')}');
-    await _checkNodes(active);
+    await Future.wait([_checkNodes(single), race]);
   }
 
   Future<void> _checkNodes(List<_Node> list) async {
@@ -523,6 +620,7 @@ class DnsFailover {
         return;
       }
       if (!ladder && node != null && node!() != _lastNode) await nodeChanged();
+      unawaited(_raceOwed()); // a race owed while the network was down
       final now = _clock();
       final list = [
         for (final n in _all)
@@ -544,7 +642,8 @@ class DnsFailover {
       } else {
         _busy = false;
         // a miss not yet judged is asked again soon, wherever the traffic went meanwhile
-        final retry = _members.any((n) => n.missSince != null && !_down(n) && (n.on || n.missDropped));
+        final retry = _writeFailed || _members.any((n) => n.missSince != null && !_down(n) && (n.on || n.missDropped));
+        _writeFailed = false;
         _schedule(retry ? settings.retryPause : settings.checkEvery);
       }
       _syncPark();
@@ -564,6 +663,93 @@ class DnsFailover {
         _suspect(s);
       }
     }
+  }
+
+  // ── the protocol race (docs/rules.md §6 → Гонка протоколов) ──
+
+  // Plain UDP: wins only when every encrypted transport of its provider is silent.
+  bool _plain(_Node n) => n.kind == 'udp';
+
+  // No answer at its last check, or dead.
+  bool _silent(_Node n) => _down(n) || n.w.health.ms == -1;
+
+  // Fit to be its group's winner: it answered at its last check and is not dead; one that dropped out of use before (a miss, a
+  // verdict) only on the flap guard's terms ([_mayReturn]), so a blip of the winner does not bring it back at once.
+  bool _fit(_Node n, int now) {
+    if (n.w.health.ms < 0 || _down(n)) return false;
+    return n.on || (!n.missDropped && n.w.strikes == 0) || _mayReturn(n, now);
+  }
+
+  // The best transport of [g] by what is known now (the fastest at the last check): an encrypted one when any is fit, plain
+  // UDP only when every encrypted one is silent. Null = none.
+  _Node? _best(_Group g, int now) {
+    final enc = [for (final n in g.members) if (!_plain(n)) n];
+    var pool = [for (final n in enc) if (_fit(n, now)) n];
+    if (pool.isEmpty && enc.every(_silent)) pool = [for (final n in g.members) if (_plain(n) && _fit(n, now)) n];
+    if (pool.isEmpty) return null;
+    return pool.reduce((a, b) => b.w.health.ms < a.w.health.ms ? b : a);
+  }
+
+  // Runs the races that are owed, if the network is up (else they wait for the next round / event).
+  Future<void> _raceOwed() async {
+    if (_stopped || !_started || !_online) return;
+    await Future.wait([for (final g in _groups) if (g.owed != null) _race(g)]);
+  }
+
+  // One race per group at a time; a race owed meanwhile runs after it.
+  Future<void> _race(_Group g) => g.racing ??= _raceOnce(g).whenComplete(() {
+        g.racing = null;
+        if (g.owed != null && !_stopped && _started && _online) unawaited(_race(g));
+      });
+
+  /// All transports of the group are asked at once, each by the very check the rounds make; the first encrypted one that
+  /// answers is the winner, plain UDP only when every encrypted one is silent. The winner is put to work at once (its flag,
+  /// [_decide]); the others' results are still collected for the status and the verdicts. A dead transport is not asked
+  /// (its ladder is).
+  Future<void> _raceOnce(_Group g) async {
+    final why = g.owed ?? 'start';
+    g.owed = null;
+    if (_stopped || !_online) {
+      g.owed = why;
+      return;
+    }
+    final list = [for (final n in g.members) if (!_down(n)) n];
+    final encWin = Completer<_Node?>(), plainWin = Completer<_Node?>();
+    var encLeft = list.where((n) => !_plain(n)).length, plainLeft = list.where(_plain).length;
+    if (encLeft == 0) encWin.complete(null);
+    if (plainLeft == 0) plainWin.complete(null);
+    _note('info', 'dns race (${g.provider}, ${g.side}; $why): asking ${[for (final n in list) n.id].join(', ')}');
+    void ended(_Node n) {
+      if (_stopped) {
+        for (final c in [encWin, plainWin]) {
+          if (!c.isCompleted) c.complete(null);
+        }
+        return;
+      }
+      _judge([n]);
+      final plain = _plain(n), win = plain ? plainWin : encWin, left = plain ? --plainLeft : --encLeft;
+      if (win.isCompleted) return;
+      if (_fit(n, _clock())) {
+        win.complete(n);
+      } else if (left == 0) {
+        win.complete(null);
+      }
+    }
+
+    final all = Future.wait([for (final n in list) _test(n).then((_) => ended(n))]);
+    var win = await encWin.future;
+    if (win == null && g.members.where((n) => !_plain(n)).every(_silent)) win = await plainWin.future;
+    if (_stopped) return;
+    g.raced = true;
+    g.winner = win;
+    g.fresh = true;
+    g.freshWhy = why;
+    await _react();
+    await all;
+    if (_stopped) return;
+    String got(_Node n) => _down(n) ? '${n.kind} dead' : n.w.health.ms >= 0 ? '${n.kind} ${n.w.health.ms} ms' : n.w.health.ms == -1 ? '${n.kind} no answer' : '${n.kind} not asked';
+    _note('info', 'dns race (${g.provider}, ${g.side}; $why): ${[for (final n in g.members) got(n)].join(', ')}; ${win == null ? 'no transport answers: the provider is out' : 'winner ${win.id}'}');
+    _syncPark();
   }
 
   /// The latency of every candidate of [provider] in this config, on both sides, by the very check the rounds
@@ -814,7 +1000,7 @@ class DnsFailover {
   Future<void> _decide() async {
     if (_stopped) return;
     _syncPark();
-    final wrote = <String>{}, dropped = <String>{};
+    final wrote = <String>{}, dropped = <String>{}, raceMoved = <String>{};
     String? hint = _hintNext;
     _hintNext = null;
     if (!auto) {
@@ -826,7 +1012,7 @@ class DnsFailover {
       final now = _clock();
       for (final n in _flagged.toList()) {
         if (_stopped) return;
-        final dead = _down(n);
+        final dead = _down(n), g = n.group;
         if (n.on && (dead || _missed(n))) {
           // a miss moves the traffic at once, the Sentinel's judging of it goes on in parallel (no strike yet: it may be a
           // blip); a verdict is the flap guard's strike
@@ -834,14 +1020,25 @@ class DnsFailover {
             n.missDropped = !dead;
             wrote.add(n.side);
             dropped.add(n.side);
+            if (g != null && g.holds && identical(g.winner, n)) {
+              // the winner failed: another protocol of the provider takes over below (if one is known to work), and the
+              // provider races again to find the best one now
+              g.winner = null;
+              g.owed ??= 'failure';
+            }
           }
         } else if (!n.on && n.missDropped && dead) {
           n.missDropped = false;
           n.w.struck();
-        } else if (!n.on && !dead && _mayReturn(n, now)) {
+        } else if (!n.on && !dead && !(g?.holds ?? false) && _mayReturn(n, now)) {
           if (await _flag(n, true, 'back')) wrote.add(n.side);
         }
       }
+      for (final g in _groups) {
+        if (_stopped) return;
+        if (g.multi && g.raced) await _settleGroup(g, now, wrote, dropped, raceMoved);
+      }
+      if (_groups.any((g) => g.owed != null)) unawaited(_raceOwed());
     }
     for (final s in _sides) {
       if (_stopped) return;
@@ -851,7 +1048,9 @@ class DnsFailover {
       if (was == null || now == null || identical(was, now)) continue;
       // `failover`: a flag went off on this side in this pass; `back`: a flag came on again (or the side's state
       // changed without a verdict); `node`: another exit node's verdicts; `off`: automatic switching was turned off.
-      final reason = hint ?? (dropped.contains(s.name) ? 'failover' : 'back');
+      final reason = hint ?? (dropped.contains(s.name) ? 'failover' : raceMoved.contains(s.name) ? 'race' : 'back');
+      // the winner of a race that nothing failed before is an ordinary choice: the race's own log line says it, no event
+      if (reason == 'race') continue;
       _note('info', 'dns ${s.name}: ${was.id} → ${now.id} ($reason)');
       if (!_switches.isClosed) {
         _switches.add(DnsSwitch(
@@ -865,6 +1064,54 @@ class DnsFailover {
         ));
       }
     }
+  }
+
+  // The flags of a group that has raced follow its winner: the winner on, the others in reserve (off, no failure). With no
+  // winner (it failed, or the race found none) the best protocol known to work takes over; none = the provider is out and
+  // the next one by priority answers (the flags of the others are what they were).
+  Future<void> _settleGroup(_Group g, int now, Set<String> wrote, Set<String> dropped, Set<String> raceMoved) async {
+    var w = g.winner;
+    var byRace = g.fresh;
+    // a race after the winner failed moves the side like the failover does (an event); any other race is a plain choice
+    final why = g.freshWhy, moved = byRace && why != 'failure' ? raceMoved : dropped;
+    g.fresh = false;
+    if (w != null && !w.on && !_fit(w, now)) {
+      w = g.winner = null; // chosen, but gone silent meanwhile
+      byRace = false;
+    }
+    if (w == null) {
+      w = _best(g, now);
+      if (w == null) return;
+      g.winner = w;
+    }
+    if (!w.on) {
+      if (!await _flag(w, true, byRace ? (why == 'failure' ? 'failover' : 'race') : dropped.contains(g.side) ? 'failover' : 'back')) {
+        g.fresh = byRace; // the write failed (the log says so): the choice stays and is written again soon
+        _writeRetry();
+        return;
+      }
+      wrote.add(g.side);
+      if (byRace) moved.add(g.side);
+    }
+    for (final m in g.members) {
+      if (_stopped) return;
+      if (identical(m, w)) continue;
+      if (m.on && await _flag(m, false, 'reserve', strike: false)) {
+        wrote.add(g.side);
+        if (byRace) moved.add(g.side);
+      } else if (m.on) {
+        g.fresh = byRace; // the write failed (the log says so): written again soon
+        _writeRetry();
+      }
+      // a node that went off for a miss and answered `failAfter` times since: the blip is over, no strike is to come
+      if (!m.on && m.missDropped && !_down(m) && _mayReturn(m, now)) m.missDropped = false;
+    }
+  }
+
+  // A flag of a raced group could not be written: the next round (after the short pause, not the regular interval) decides again.
+  void _writeRetry() {
+    _writeFailed = true;
+    if (!_busy) _schedule(settings.retryPause);
   }
 
   Future<bool> _flag(_Node n, bool on, String reason, {bool strike = true}) async {
@@ -940,7 +1187,12 @@ class DnsFailover {
       String ms(_Node n) => n.w.health.ms >= 0 ? '${n.id} ${n.w.health.ms} ms' : n.id;
       final live = [for (final n in s.members) if (n.on) ms(n)];
       String next(_Node n) => n.recheckAt == null ? '' : ', asked again in ${((n.recheckAt! - _clock()) / 1000).ceil().clamp(0, 86400)} s';
-      final off = [for (final n in s.members) if (!n.on) '${n.id}${_down(n) ? ' (down${next(n)})' : n.w.health.answered ? ' (answers, returning)' : ''}'];
+      String why(_Node n) => _down(n)
+          ? ' (down${next(n)})'
+          : n.w.health.answered
+              ? ((n.group?.holds ?? false) ? ' (answers, in reserve)' : ' (answers, returning)')
+              : '';
+      final off = [for (final n in s.members) if (!n.on) '${n.id}${why(n)}'];
       _note('debug', 'dns ${s.name}: answers ${s.effective?.id}; flags on [${live.join(', ')}]; off [${off.join(', ')}]');
     }
   }
@@ -953,17 +1205,63 @@ class DnsFailover {
   /// (a server without a verdict falls back to its last probe); `rechecking`: a check of it is under way (the verdict
   /// shown is the old one until it ends); `ms`: the last result, -1 = no answer, -2 = not tested; `provider`, `side`,
   /// `kind` (doh / dot / doq / udp / system); `flag`: the DNS flag as written (the watched `system` has none).
+  ///
+  /// `providers`: the protocol race of every provider on every side it is on ([providersJson]).
   Map<String, dynamic> toJson() => {
         'active': active,
         'auto': auto,
         'sides': {
           for (final s in _sides) s.name: {'active': s.effective?.id, 'provider': s.effective?.provider},
         },
+        'providers': providersJson(),
         'servers': [
           for (final s in _members) _json(s),
           for (final s in _watch) {..._json(s), 'watched': true},
         ],
       };
+
+  /// The protocol race by provider and side (the ones in this config, or only [provider]): `{provider, side, racing, winner,
+  /// transports}`. `winner`: `{id, kind, ms}`, the transport the side is answered with, null = none yet (the race has not run,
+  /// or no transport answers); `racing`: a race is under way or owed. `transports`, in the provider's order, one per kind:
+  /// `{kind, ids, ms, state}` — `ms` the best last answer (-1 = no answer, -2 = not asked yet), `state`: `testing` (a check
+  /// is under way: the app shows a spinner and asks again until it ends), `ok` / `miss` (the last result), `untested`;
+  /// `dead: true` when every candidate of the kind has a dead verdict; `reserve: true` when the kind answers but another
+  /// one is at work.
+  List<Map<String, dynamic>> providersJson([String? provider]) => [
+        for (final g in _groups)
+          if (provider == null || g.provider == provider) _groupJson(g),
+      ];
+
+  Map<String, dynamic> _groupJson(_Group g) {
+    // a group of one has no race: its member is the winner while it answers
+    final _Node? w = g.multi ? (auto ? g.winner : g.members.firstOrNull) : (g.members.single.w.health.answered && !_down(g.members.single) ? g.members.single : null);
+    final kinds = {for (final n in g.members) n.kind};
+    return {
+      'provider': g.provider,
+      'side': g.side,
+      'racing': g.racing != null || g.owed != null,
+      'winner': w == null ? null : {'id': w.id, 'kind': w.kind, 'ms': w.w.health.ms},
+      'transports': [
+        for (final k in kinds) _transportJson(g, k, w),
+      ],
+    };
+  }
+
+  Map<String, dynamic> _transportJson(_Group g, String kind, _Node? winner) {
+    final ns = [for (final n in g.members) if (n.kind == kind) n];
+    final ok = [for (final n in ns) if (n.w.health.ms >= 0) n.w.health.ms];
+    final ms = ok.isNotEmpty ? ok.reduce((a, b) => a < b ? a : b) : ns.any((n) => n.w.health.ms == -1) ? -1 : -2;
+    final testing = ns.any((n) => n.testing != null || n.suspecting);
+    final dead = ns.every(_down);
+    return {
+      'kind': kind,
+      'ids': [for (final n in ns) n.id],
+      'ms': ms,
+      'state': testing ? 'testing' : ms >= 0 ? 'ok' : ms == -1 ? 'miss' : 'untested',
+      if (dead) 'dead': true,
+      if (ms >= 0 && winner != null && !ns.contains(winner)) 'reserve': true,
+    };
+  }
 
   Map<String, dynamic> _json(_Node s) {
     final dead = _down(s), known = dnsDeadOf(book, s.c, s.vpn ? node?.call() : null) != null;

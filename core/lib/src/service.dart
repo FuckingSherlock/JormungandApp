@@ -10,6 +10,7 @@ import 'address_resolver.dart';
 import 'api.dart';
 import 'appupdate.dart';
 import 'auto.dart';
+import 'auto_memory.dart';
 import 'catalog/catalog.dart' show Catalog;
 import 'catalog/rules_model.dart' show dnsBuiltinIds;
 import 'catalog/plan_builder.dart' show CatalogPlan;
@@ -49,6 +50,7 @@ import 'runtime.dart' as core_speed show speedTest;
 import 'sbapi.dart';
 import 'sentinel/sentinel.dart';
 import 'share.dart';
+import 'site_memos.dart';
 import 'sitecheck.dart';
 import 'state.dart';
 import 'sysproxy.dart';
@@ -56,22 +58,6 @@ import 'traffic.dart';
 import 'tun_check.dart';
 import 'tun_ingress.dart';
 import 'updater.dart';
-
-/// What the site checks remember of one `site/*` verdict (see `CoreService._siteMemos`).
-class _SiteMemo {
-  _SiteMemo({required this.eventId, required this.kind, required this.dead, required this.step, required this.until, required this.dest, required this.route});
-  final int eventId, step;
-
-  /// [dest] lower case; [route] the route's one identity ([CoreService._siteRoute]).
-  final String kind, dest, route;
-  final bool dead;
-
-  /// Ms since epoch: failures before it are only counted.
-  int until;
-
-  /// The checker alone is looking again (after a «dead» verdict): failures that come meanwhile are counted.
-  bool rechecking = false;
-}
 
 /// The core as an object: everything jormd's HTTP API does, without HTTP (daemon.dart is
 /// only the adapter over it). Pure Dart, one instance per process: the Flutter app creates
@@ -118,6 +104,7 @@ class CoreService implements CoreApi {
     this.resolveAddresses = true,
     this.tunCheckConnect,
     this.addressResolverFor,
+    this.directProbe = directDelay,
   })  : _singBoxVer = knownSingBoxVersion,
         _sentinelClock = sentinelClock,
         reportUploader = reportUploader ?? const NotConfiguredUploader(),
@@ -257,10 +244,20 @@ class CoreService implements CoreApi {
   /// Every server test of the core's modules and of the UI's pings (pool.dart), and the
   /// network status they share. `direct` = the direct path through the main sing-box's probe
   /// inbound (only asked while Auto runs, so while it is up).
-  late final pool = ProbePool(direct: (url, t) async => _probe == null ? -1 : _probe!.delay('direct', url, timeoutMs: t));
+  late final pool = ProbePool(
+      direct: (url, t) async => runner.running && _probe != null ? _probe!.delay('direct', url, timeoutMs: t) : directProbe(url, t));
+
+  /// The direct path with no sing-box running (nothing to ask through; a stopped core's probe inbound is gone): the
+  /// process asks itself ([directDelay]); the tests' seam.
+  final Future<int> Function(String url, int timeoutMs) directProbe;
 
   /// The nodes Auto found dead and asks on a ladder (ladder.dart), kept in `<dataDir>/dead-nodes.json`.
   late final deadStore = DeadLadderStore(File(p.join(dataDir, 'dead-nodes.json')), pool.ladder, clock: () => _now().millisecondsSinceEpoch);
+
+  /// What Auto and "If unavailable" know of their servers, routes and targets outside the ladder (health, flap guard,
+  /// «already failed»; auto_memory.dart), kept in `<dataDir>/auto-state.json`: a service made anew goes on from it.
+  final autoMemory = AutoMemory();
+  late final autoStore = AutoMemoryStore(File(p.join(dataDir, 'auto-state.json')), autoMemory, clock: () => _now().millisecondsSinceEpoch);
 
   /// Where each node leaves to by the exit check through it (exits.dart), kept in `<dataDir>/exit-nodes.json`.
   late final exitBook = ExitBook();
@@ -330,6 +327,9 @@ class CoreService implements CoreApi {
   TunCheck? _tunCheck;
   final TunCheckConnect? tunCheckConnect;
   bool? _tunCheckPassed; // the last test's outcome
+  int _tunStartRun = 0; // changes with every start / stop of Auto: the start test (and its «dead») of an earlier run is void
+  Cancel? _tunStartCancel;
+  Timer? _tunStartTimer;
   final _tunAppReported = <String, ({int at, int? id})>{}; // apps of a passed test → when and as which event it was written last
   int _connectSeq = 0;
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
@@ -379,6 +379,9 @@ class CoreService implements CoreApi {
   /// started by the core itself (a crash, a restart for new lists), so the verdicts are not lost with it. Empty
   /// after a connect the user asked for and after a disconnect: flags start on.
   Map<String, bool> _dnsFlagMemory = const {};
+
+  /// The ones of [_dnsFlagMemory] that were in reserve (off, but working: a transport another of its provider's replaced).
+  Set<String> _dnsReserveMemory = const {};
 
   /// Where the DNS flag files live (dns_flags.dart): the same path for every config of this core, so a sing-box
   /// taken over after the core restarted reads the files the new core writes.
@@ -485,6 +488,9 @@ class CoreService implements CoreApi {
     if (dead > 0) logBook.note('info', 'auto: $dead unavailable nodes from the last run, each asked once at the first round, then on the ladder as before');
     exitStore.load(); // where the nodes leave to, as the last exit checks found
     dnsStore.load(); // which DNS servers answered / were dead at the last check
+    autoStore.load(); // what Auto and "If unavailable" knew of the servers, routes and targets
+    await _retainAutoMemory(); // … without the nodes that are gone from the catalog
+    _siteStore.load(); // the site verdicts whose events are still in the journal: their failures go on being counted
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     sentinel.changes.listen((_) {
       _syncNetEvents(); // `net.offline` opened / closed: conn/offline, conn/online
@@ -512,6 +518,7 @@ class CoreService implements CoreApi {
   @override
   Future<void> dispose() async {
     _connectSeq++;
+    _netProbeSeq++; // the direct-path probe stops
     _exitSeq++; // an exit check still in flight is dropped when it ends: nothing is saved after the dispose
     _wakeUp();
     _stopAuto();
@@ -540,6 +547,8 @@ class CoreService implements CoreApi {
       await deadStore.close();
       await exitStore.close();
       await dnsStore.close();
+      await autoStore.close();
+      await _siteStore.close();
       await _directWrite;
       await logBook.flush();
       await eventBook.flush(); // the journal is written behind the memory: what waits goes to the file now
@@ -660,7 +669,17 @@ class CoreService implements CoreApi {
   /// What the site checks remember of a verdict (docs/failures.md → Проверки сайтов), by `<dest>|<route>`: until [until]
   /// the failures of the site through that route are only counted on the event ([eventId]); [dead] = the checker did not
   /// open it either (then the next check, after [until], is the checker's alone), else the ladder is on its [step].
-  final _siteMemos = <String, _SiteMemo>{};
+  /// Kept in `<dataDir>/site-verdicts.json` (site_memos.dart): a reconnect or a restart does not forget it.
+  final _siteMemos = SiteMemoBook();
+  late final _siteStore = SiteMemoStore(File(p.join(dataDir, 'site-verdicts.json')), _siteMemos, alive: (id) => eventBook.byId(id) != null);
+
+  /// A verdict of the ladder (not «dead everywhere») taken on another network than the one now is void, also when the
+  /// network changed while the core did not run (the listener in [_startAuto] sees only the changes of a running session).
+  bool _siteMemoStale(SiteMemo m) {
+    if (m.dead || m.net.isEmpty || m.net == '|') return false;
+    final now = _directNetKey();
+    return now != '|' && now != m.net;
+  }
 
   bool _canAim(String outbound, String dest) => canProbeDest(dest) && (probeSame != null || (_auto?.canReachSame(outbound, dest) ?? false));
 
@@ -721,6 +740,8 @@ class CoreService implements CoreApi {
       final m = _siteMemos[memoKey];
       if (m != null && eventBook.byId(m.eventId) == null) {
         _siteMemos.remove(memoKey); // its event is gone (the journal was cleared): the site is judged anew
+      } else if (m != null && _siteMemoStale(m)) {
+        _siteMemos.remove(memoKey); // another network than the one the ladder's verdict was taken on: the ladder starts over
       } else if (m != null && (m.rechecking || _nowMs < m.until)) {
         return _siteAgain(m, FailureBook.siteKey(host, port), dest, entry, evidence);
       } else if (m != null && m.dead && siteCheckOn) {
@@ -730,6 +751,7 @@ class CoreService implements CoreApi {
         if (_disposed) return null;
         if (r.state == 'down' && identical(_siteMemos[memoKey], m) && eventBook.byId(m.eventId) != null) {
           m.until = _nowMs + siteDeadIgnore.inMilliseconds;
+          _siteMemos.touch();
           eventBook.update(m.eventId, data: {'check': r.toJson()});
           logBook.note('warn', '$dest does not open through $entry: the checker alone looked again, it does not open for it either; failures are counted on the event for ${siteDeadIgnore.inMinutes} min more');
           return _siteAgain(m, FailureBook.siteKey(host, port), dest, entry, evidence, say: false);
@@ -974,8 +996,8 @@ class CoreService implements CoreApi {
         final was = _siteMemos[memoKey];
         final step = !dead && was != null && !was.dead && was.kind == w.$2 && was.eventId == id ? was.step + 1 : 0;
         final wait = dead ? siteDeadIgnore : siteLadder[step < siteLadder.length ? step : siteLadder.length - 1];
-        _siteMemos[memoKey] = _SiteMemo(
-            eventId: id, kind: w.$2, dead: dead, step: step, until: _nowMs + wait.inMilliseconds, dest: dest.toLowerCase(), route: entry);
+        _siteMemos[memoKey] = SiteMemo(
+            eventId: id, kind: w.$2, dead: dead, step: step, until: _nowMs + wait.inMilliseconds, dest: dest.toLowerCase(), route: entry, net: _directNetKey());
       }
       // an announcement: the event is the report, a root would swallow the next one (a repeat folds into the event)
       if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(v.key, reason: 'reported');
@@ -986,7 +1008,7 @@ class CoreService implements CoreApi {
   /// The site failed again while the timer of its verdict runs: the event counts it (`data.repeat`), the raw log says
   /// so, the verdict is the event's own. No probe, no checker: they run again for a failure after the timer. [say]
   /// false: the caller has written its own line (the checker's look-again).
-  Verdict _siteAgain(_SiteMemo m, String key, String dest, String route, Map<String, dynamic> evidence, {bool say = true}) {
+  Verdict _siteAgain(SiteMemo m, String key, String dest, String route, Map<String, dynamic> evidence, {bool say = true}) {
     final id = m.eventId;
     final prev = eventBook.byId(id);
     final n = eventBook.tally(id);
@@ -1022,6 +1044,7 @@ class CoreService implements CoreApi {
   /// `core/tunTcpDead` from the TUN detector: the first orphaned look-up of the dead window is when it began.
   void _tunDead(Map<String, dynamic> d) {
     final first = (d['firstSeen'] as num?)?.toInt();
+    final run = _tunStartRun; // the session this «dead» belongs to
     String? wroteKey; // the apps of the event this suspicion wrote as the 15 min one
     unawaited(sentinel.suspect(Suspicion(
       kind: 'tun.tcpDead',
@@ -1044,6 +1067,12 @@ class CoreService implements CoreApi {
           }, level: Level.core, timeout: tc.limit),
       ],
       event: SuspicionEvent('core', 'tunTcpDead', level: 'error', kindFor: (kind, e) {
+        // the test at the start failed, the Sentinel's second test passed: the tunnel was only late, nothing to say
+        // in the journal (a blip of the start); the raw log has it
+        if (e['probe'] == true && kind == VerdictKind.blip) {
+          logBook.note('info', 'TUN (${e['stack']}): the start test failed (${e['probeReason']}), passed on the second test: the tunnel was only late');
+          return null;
+        }
         // a passed test: one event per 15 min per apps; the repeats within it are counted on that event (its
         // `data.repeat`) and are in the raw log (an app that pings every 5 s must not fill the journal)
         if (kind != VerdictKind.blip || e['accepted'] != 0 || _tunCheckPassed != true) return ('core', 'tunTcpDead');
@@ -1062,13 +1091,68 @@ class CoreService implements CoreApi {
         return ('core', 'tunTcpDead');
       }, note: (kind, e) {
         final apps = (e['apps'] as List?) ?? const [];
+        if (e['probe'] == true) {
+          return 'TUN (${e['stack']}): TCP does not reach sing-box: a test connection through the tunnel at the start (${e['probeReason']}) and '
+              'again after ${windows.tunTcpDead.inSeconds} s did not get through${kind == VerdictKind.confirmed ? '' : ' [${kind.name}]'}';
+        }
         return 'TUN (${e['stack']}): TCP does not reach sing-box: ${e['synSeen']} connection attempts in ${(e['windowMs'] as int) ~/ 1000} s, none accepted'
             '${apps.isEmpty ? '' : ' (${apps.join(', ')})'}${kind == VerdictKind.confirmed ? '' : ' [${kind.name}]'}';
       }),
     )).then((v) {
+      // the start test's «dead» that turned out a blip (or was let go): the log judges the tunnel again
+      if (d['probe'] == true && run == _tunStartRun && (v.kind == VerdictKind.blip || v.kind == VerdictKind.deferred)) tunIngress.probeCleared();
       final k = wroteKey, at = k == null ? null : _tunAppReported[k]?.at;
       if (k != null && at != null && v.eventId != null) _tunAppReported[k] = (at: at, id: v.eventId);
     }));
+  }
+
+  /// The waits before the tries of the test at the start: the tunnel comes up a moment after sing-box does.
+  static const _tunStartWaits = [Duration(seconds: 1), Duration(seconds: 2), Duration(seconds: 2)];
+
+  /// The active TUN test (tun_check.dart) at the start: a tunnel that came up broken has no traffic for the log
+  /// detector to read. A try that passes ends it silently (the raw log says so); every try failing →
+  /// [TunIngressDetector.probeDead], and the Sentinel confirms it by the same test after its window (a verdict only
+  /// after a recheck). Ends with the run (stop / new start of Auto) or when the log detector found the tunnel dead first.
+  void _tunStartCheck(String stack) {
+    final tc = _tunCheck;
+    if (tc == null || !tunIngress.active) return;
+    final run = _tunStartRun;
+    bool live() => run == _tunStartRun && _tunCheck == tc && tunIngress.active && !tunIngress.dead;
+    unawaited(() async {
+      var reason = 'unrouted';
+      for (var i = 0; i < _tunStartWaits.length; i++) {
+        final wait = Completer<void>();
+        _tunStartTimer = sentinel.clock.timer(_tunStartWaits[i], () {
+          if (!wait.isCompleted) wait.complete();
+        });
+        await wait.future;
+        if (!live()) return;
+        final cancel = _tunStartCancel = Cancel();
+        CheckResult r;
+        try {
+          r = await tc.run(cancel);
+        } catch (e) {
+          r = CheckResult(tunCheckCode, Outcome.fail, {'reason': 'error', 'error': '$e'});
+        }
+        if (!live()) return;
+        if (r.outcome == Outcome.pass) {
+          logBook.note('info', 'TUN ($stack): the start test passed (try ${i + 1}, ${r.params['ms']} ms): TCP goes through the tunnel');
+          return;
+        }
+        reason = '${r.params['reason'] ?? 'unknown'}';
+        logBook.note('info', 'TUN ($stack): the start test failed (try ${i + 1} of ${_tunStartWaits.length}): $reason');
+      }
+      logBook.note('warn', 'TUN ($stack): the start test failed every try ($reason): TCP does not go through the tunnel; the Sentinel tests again after ${windows.tunTcpDead.inSeconds} s');
+      tunIngress.probeDead(reason);
+    }());
+  }
+
+  void _tunStartStop() {
+    _tunStartRun++;
+    _tunStartTimer?.cancel();
+    _tunStartTimer = null;
+    _tunStartCancel?.cancel('session.ended');
+    _tunStartCancel = null;
   }
 
   /// A TCP connection arrived through the TUN again: the suspicion under way is a blip; a standing one closes
@@ -1113,14 +1197,29 @@ class CoreService implements CoreApi {
     _stopAuto(park: true); // a user connect has dropped already (connect)
     // what a sing-box that just started does is counted from its first line, with or without the API
     failures.start();
-    if (planTun(plan)) tunIngress.start(planTunStack(plan), ownRejects: [if (!planIpv6(plan)) 'ipv6Off']);
+    if (planTun(plan)) {
+      final stack = planTunStack(plan);
+      tunIngress.start(stack, ownRejects: [if (!planIpv6(plan)) 'ipv6Off']);
+      _tunStartCheck(stack); // the log of a tunnel that came up broken is silent: ask it with a test connection
+    }
     final api = runner.api;
     if (api == null) {
       _recheckExit(); // no controller (a test's fake process): the exit is asked of the tunnel port, unattributed
       return;
     }
-    pool.resetNetwork(); // a new sing-box: the network is presumed up again
+    // another network since the last look (also while no service ran): the flap guard starts over and Auto's «no
+    // network» is void (unknown until a round); the pool's «down» stays until an answer (the move asked the direct
+    // path at once, [_probeNetwork]); a new sing-box says nothing of the network
+    autoMemory.network(_directNetKey(), sentinel.context.netEpoch);
+    pool.resetNetwork();
+    // the outage that began in an earlier session goes on (its `conn.lost` root is not a session's, so it is still
+    // open); one that never got to be a root (the stop came inside the window) is suspected again from its first moment
+    final lostAt = autoMemory.lostAt;
+    if (lostAt != null && sentinel.roots.byKey('conn.lost') == null) {
+      routesLost(AutoNet(kind: 'lost', at: lostAt), planRoutes(plan).length);
+    }
     final auto = _auto = AutoService(api, plan,
+        memory: autoMemory,
         pool: pool,
         exits: exitBook,
         exitCheck: (tag) async {
@@ -1160,7 +1259,8 @@ class CoreService implements CoreApi {
       netEpoch = sentinel.context.netEpoch;
       final s = sentinel.context.network.state;
       if (s != NetState.none && s != NetState.captive) {
-        auto.networkChanged();
+        auto.networkChanged(); // (also starts the flap guard over)
+        autoMemory.network(_directNetKey(), netEpoch);
         unawaited(_dns?.networkChanged()); // the DNS in use is asked at once, in parallel
       }
       _siteMemos.removeWhere((_, m) => !m.dead); // another network: the verdicts of the ladder are void, it starts over
@@ -1212,6 +1312,7 @@ class CoreService implements CoreApi {
       firstSeen: DateTime.fromMillisecondsSinceEpoch(n.at),
       why: const Why('routes.silent'),
       scope: Scope.of(const {'path': 'proxy'}),
+      session: false, // the outage is not the connection's: a restart or a reconnect does not end it, a route that answers does
       event: SuspicionEvent('conn', 'lost', level: 'warn', note: (kind, e) => switch (kind) {
             VerdictKind.confirmed => 'No route answers (${e['routes']} tried)',
             VerdictKind.blip => 'No route answered for a moment (${e['routes']} tried), then one did',
@@ -1326,6 +1427,7 @@ class CoreService implements CoreApi {
         settings: auto.settings,
         pool: pool,
         mainIdentity: auto.identityOf,
+        memory: autoMemory,
         onDown: serverDown,
         setFlag: (f, on) => setFallbackFlag(f, on, reason: on ? 'on Direct' : 'back', log: logBook.note),
         note: runner.note);
@@ -1354,12 +1456,14 @@ class CoreService implements CoreApi {
     final probe = _probe;
     if (probe == null) return;
     final byId = {for (final c in _dnsCandidates) c.id: c};
-    final off = {for (final e in _dnsFlagMemory.entries) if (!e.value && byId.containsKey(e.key)) e.key};
+    final reserve = {for (final id in _dnsReserveMemory) if (byId.containsKey(id)) id};
+    final off = {for (final e in _dnsFlagMemory.entries) if (!e.value && byId.containsKey(e.key) && !reserve.contains(e.key)) e.key};
     final dns = _dns = DnsFailover(
         sides: _dnsSides,
         candidates: _dnsCandidates,
         watch: _dnsExtra,
         off: off,
+        reserve: reserve,
         book: dnsBook,
         node: _dnsNode,
         nodes: DnsNodes(
@@ -1496,19 +1600,22 @@ class CoreService implements CoreApi {
     _closed = null;
     unawaited(_netChanged?.cancel());
     _netChanged = null;
-    if (!park) _siteMemos.clear(); // a new session: what was remembered of the sites is void
     sentinel.dropAll(park: park); // a stop or a new connect: what was seen in this session is void, its detectors suspect again in the next; an own restart or a crash-recovery parks
     failures.stop();
     tunIngress.stop();
+    _tunStartStop();
     _auto?.stop();
     _auto = null;
     _fallback?.stop();
     _fallback = null;
     final dns = _dns;
-    if (dns != null) _dnsFlagMemory = dns.flags; // a sing-box the core starts next is given these flags again
+    if (dns != null) {
+      _dnsFlagMemory = dns.flags; // a sing-box the core starts next is given these flags again
+      _dnsReserveMemory = dns.reserve;
+    }
     dns?.stop();
     _dns = null;
-    pool.resetNetwork(); // no sing-box, no status to hold on to
+    pool.resetNetwork(); // a stop does not make the network «up» (only an answer does)
     _changed();
   }
 
@@ -2046,6 +2153,25 @@ class CoreService implements CoreApi {
     }
   }
 
+  /// At the start, before a service holds the objects: what Auto's memory (auto_memory.dart) kept of a node that is no
+  /// longer in any source of the catalog goes. A catalog that cannot be read or has no nodes at all leaves it as it is
+  /// (the entries unseen for a month go anyway).
+  Future<void> _retainAutoMemory() async {
+    try {
+      final c = Catalog.fromJson(await store.read());
+      final known = <String>{
+        for (final s in c.sourcesData.values)
+          for (final n in s.nodes)
+            if (n.outbound != null) serverIdentity(n.outbound!),
+      };
+      if (known.isEmpty) return;
+      final n = autoMemory.retainNodes(known);
+      if (n > 0) logBook.note('info', 'auto: $n remembered servers of nodes that are gone from the catalog were dropped');
+    } catch (e) {
+      logBook.note('warn', 'auto: the catalog could not be read to tidy the remembered servers ($e)');
+    }
+  }
+
   Set<String> _nodesInUse() => _auto?.nodesInUse() ?? {?dnsPlanNode(_plan)};
 
   Future<List<({String name, String source, String id})>> _hostNodes(String host) async {
@@ -2396,7 +2522,7 @@ class CoreService implements CoreApi {
       // state again at a restart of ours (the files of the run before hold nothing we rely on)
       // the stored verdicts (dns_verdicts.dart): the dead ones start off, the best that worked answers
       final memory = _dnsFlagMemory;
-      final stored = dnsStartFlags(info.dnsSides, dnsBook, node: dnsPlanNode(plan), others: info.dnsCandidates);
+      final stored = dnsStartFlags(info.dnsSides, dnsBook, node: dnsPlanNode(plan), others: info.dnsCandidates, reserve: _dnsReserveMemory);
       writeDnsFlags(info.dnsCandidates,
           on: (c) => memory[c.id] ?? stored[c.id] ?? true, reason: memory.isEmpty ? 'connect' : 'restart re-apply', log: logBook.note);
       // the files of the "If unavailable → Direct" flags must exist too; off until the fallback service has seen the selectors
@@ -2539,6 +2665,7 @@ class CoreService implements CoreApi {
       _takeDns(info);
       // the files of the core before this one are not relied on: every flag on, the failover starts from there
       _dnsFlagMemory = const {};
+      _dnsReserveMemory = const {};
       try {
         writeDnsFlags(info.dnsCandidates, reason: 'adopt', log: logBook.note);
       } catch (e) {
@@ -2662,7 +2789,10 @@ class CoreService implements CoreApi {
     _applyKill(body);
     if (body['dnsAuto'] is bool) _dnsAuto = body['dnsAuto'] as bool;
     _stopAuto();
-    if (own) _dnsFlagMemory = const {}; // a connect the user asked for: every DNS flag starts on; a restart of ours keeps them
+    if (own) {
+      _dnsFlagMemory = const {}; // a connect the user asked for: every DNS flag starts on; a restart of ours keeps them
+      _dnsReserveMemory = const {};
+    }
     _closeCrashRoot('reconnected');
     _error = null;
     _warning = null;
@@ -2792,6 +2922,7 @@ class CoreService implements CoreApi {
       'direct': best('direct'),
       'vpn': best('vpn'),
       'servers': [for (final g in got) {'id': g.id, 'side': g.side, 'kind': g.kind, 'ms': g.ms}],
+      'providers': got.isEmpty ? const [] : _dns?.providersJson(provider) ?? const [], // the protocol race: winner and each transport's last result
     };
   }
 
@@ -2806,6 +2937,7 @@ class CoreService implements CoreApi {
     _released = false;
     _stopAuto();
     _dnsFlagMemory = const {};
+    _dnsReserveMemory = const {};
     _closeCrashRoot('disconnected');
     await _locked(() async {
       if (seq == _connectSeq) {
@@ -2826,6 +2958,9 @@ class CoreService implements CoreApi {
       await _sysOff(own: true);
     }
     _recheckExit(); // now the direct IP
+    // no sing-box and no Auto from here: a «down» (or an outage of the routes) found while connected is asked again on
+    // the direct path, or nobody would until the platform reports a change
+    if (pool.status == NetStatus.down || autoMemory.lostAt != null) unawaited(_probeNetwork());
     _error = null;
     _warning = null;
     _changed();
@@ -2856,6 +2991,7 @@ class CoreService implements CoreApi {
   @override
   Map<String, dynamic> setNetwork(Map<String, dynamic> body) {
     final id = body['id'];
+    final epoch = sentinel.context.netEpoch;
     sentinel.context.platform(
       connected: body['connected'] is bool ? body['connected'] as bool : null,
       validated: body['validated'] is bool ? body['validated'] as bool : null,
@@ -2863,7 +2999,44 @@ class CoreService implements CoreApi {
       type: body['type'] is String ? body['type'] as String : null,
       id: id is String || id is num ? '$id' : null,
     );
+    // another network, or the connection back: what was found out on the old one (a «down» of the probes) is not known
+    // of this one, so the direct path is asked at once, connected or not. Not while the platform itself says there is
+    // no connection or a portal (nothing to ask).
+    final n = sentinel.context.network;
+    if (sentinel.context.netEpoch != epoch && n.state != NetState.captive && !(n.state == NetState.none && n.source == 'platform')) {
+      unawaited(_probeNetwork());
+    }
     return sentinel.contextJson();
+  }
+
+  int _netProbeSeq = 0;
+
+  /// Asks the direct path (`AutoSettings` url and checkers of the connection, else the defaults) until it answers: the
+  /// answer is `up` (the pool, anything that answers) and ends a `net.offline` of the probes and an outage of Auto's
+  /// (`conn/online`, `conn/restored`); silence is `down`. The status stays as it was until then, so a root is closed by
+  /// the answer and by nothing else. With a connection Auto's rounds go on asking (every `noNetEvery`): this asks once;
+  /// with none, nobody else does, so it repeats every `noNetEvery` while the pool is down. A newer call takes over.
+  Future<void> _probeNetwork() async {
+    final seq = ++_netProbeSeq;
+    while (!_disposed && seq == _netProbeSeq) {
+      final s = _auto?.settings ?? AutoSettings.fromPlan(_plan ?? const {});
+      final up = await pool.directAnswers(url: s.url, checkers: s.checkers, timeoutMs: s.timeoutMs);
+      if (_disposed || seq != _netProbeSeq) return;
+      if (up == true) {
+        if (_auto == null) {
+          // no connection to tell it: the routes' outage that stood is over with the network (a connect asks them again)
+          final since = autoMemory.answered();
+          if (since != null) routesRestored(AutoNet(kind: 'restored', at: _nowMs, downMs: _nowMs - since));
+        }
+        return;
+      }
+      if (up == null) return;
+      pool.silent(true);
+      if (_auto != null) return;
+      final wait = Completer<void>();
+      _timer(s.noNetEvery, wait.complete);
+      await wait.future;
+    }
   }
 
   /// The sing-box version when there is no binary to ask (Android: libbox in the process).

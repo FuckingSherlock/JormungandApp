@@ -129,15 +129,40 @@ class AddressBook {
     if (_m.remove(key(host)) != null) save();
   }
 
+  // When the last lookup of a host that nobody answered ended (ms since epoch): the resolver leaves the name alone for a
+  // while after it (AddressResolver.negativeFor). Kept in the same file, so a restart of the app does not ask earlier than due.
+  final _failed = <String, int>{};
+
+  /// When the last lookup of [host] that nobody answered ended; null = it did not fail (or the failure was forgotten).
+  int? failedAt(String host) => _failed[key(host)];
+
+  void markFailed(String host, int at) {
+    _failed[key(host)] = at;
+    save();
+  }
+
+  void clearFailed(String host) {
+    if (_failed.remove(key(host)) != null) save();
+  }
+
   void _load() {
     try {
       final j = jsonDecode(file.readAsStringSync());
       final hosts = j is Map ? j['hosts'] : null;
-      if (hosts is! Map) return;
-      final cutoff = _now().millisecondsSinceEpoch - maxAge.inMilliseconds;
-      for (final e in hosts.entries) {
-        final v = AddressEntry.fromJson(e.value);
-        if (v != null && v.at >= cutoff) _m['${e.key}'] = v;
+      final now = _now().millisecondsSinceEpoch;
+      if (hosts is Map) {
+        final cutoff = now - maxAge.inMilliseconds;
+        for (final e in hosts.entries) {
+          final v = AddressEntry.fromJson(e.value);
+          if (v != null && v.at >= cutoff) _m['${e.key}'] = v;
+        }
+      }
+      final failed = j is Map ? j['failed'] : null;
+      if (failed is Map) {
+        for (final e in failed.entries) {
+          final at = e.value;
+          if (at is num && now - at.toInt() < const Duration(days: 1).inMilliseconds) _failed['${e.key}'] = at.toInt();
+        }
       }
     } catch (_) {} // no file yet, or a damaged one: the book starts empty and fills again
   }
@@ -146,7 +171,7 @@ class AddressBook {
   void save() {
     try {
       file.parent.createSync(recursive: true);
-      writeFileDurableSync(file, jsonEncode({'v': 1, 'hosts': {for (final e in _m.entries) e.key: e.value.toJson()}}));
+      writeFileDurableSync(file, jsonEncode({'v': 1, 'hosts': {for (final e in _m.entries) e.key: e.value.toJson()}, if (_failed.isNotEmpty) 'failed': _failed}));
     } catch (_) {}
   }
 }

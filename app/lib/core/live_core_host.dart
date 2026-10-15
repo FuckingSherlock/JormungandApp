@@ -430,6 +430,7 @@ class LiveCoreHost extends CoreHost {
                     deadOnNode: s['deadOn'] == 'node',
                   ),
             ],
+            races: DnsRace.parseAll(dns['providers']),
           )
         : null;
     _syncTrafficTimer();
@@ -1202,6 +1203,7 @@ class LiveCoreHost extends CoreHost {
               for (final s in (r['servers'] as List? ?? const []))
                 if (s is Map && s['ms'] is int) '${s['id']}': s['ms'] as int,
             },
+            races: DnsRace.parseAll(r['providers']),
           );
         }
       } catch (_) {
@@ -2500,20 +2502,13 @@ class LiveCoreHost extends CoreHost {
 
   /// Latency of [nodes] by the core, results into the ping book as they come (`backend.ping`).
   Future<void> _pingNodes(List<CatalogNode> nodes) async {
-    final ok = <CatalogNode>[];
-    var unusable = false;
-    for (final n in nodes) {
-      if (n.outbound != null && n.usable) {
-        ok.add(n);
-      } else {
-        catalog.pings.set(n, -1);
-        unusable = true;
-      }
-    }
-    if (ok.isEmpty) {
-      if (unusable) _notify();
-      return;
-    }
+    // a node the core cannot test (no outbound, unusable) is never probed: it stays "not checked", not dead
+    // (dead is a verdict of a probe, docs/connect-model.md → Ping)
+    final ok = <CatalogNode>[
+      for (final n in nodes)
+        if (n.outbound != null && n.usable) n,
+    ];
+    if (ok.isEmpty) return;
     catalog.pings.markTesting(ok);
     _notifyNow(); // the rows show "pinging" now, the answers follow joined by [_notify]
     final left = {...ok};

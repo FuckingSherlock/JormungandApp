@@ -694,15 +694,24 @@ class FakeCoreHost extends CoreHost {
     return dnsPings.containsKey(addr) ? dnsPings[addr] : 24;
   }
 
+  /// What [pingDnsSides] answers as `races`, one entry per call (the last repeats); empty = none.
+  final Map<String, List<List<DnsRace>>> raceReplies = {};
+
   /// Per-side provider ping: [dnsPings] of the provider's address on each active side.
   @override
   Future<DnsSidePing> pingDnsSides(String providerId) async {
     final p = catalog.dnsServers[providerId];
     if (p == null) return const DnsSidePing();
     final ms = await pingDns(p.addr);
+    // a scripted race answer per call; the last one repeats
+    final q = raceReplies[providerId];
+    final races = q == null || q.isEmpty
+        ? const <DnsRace>[]
+        : (q.length > 1 ? q.removeAt(0) : q.first);
     return DnsSidePing(
       direct: p.activeSides.contains('direct') ? ms : null,
       vpn: p.activeSides.contains('vpn') ? ms : null,
+      races: races,
     );
   }
 

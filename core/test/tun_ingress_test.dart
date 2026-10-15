@@ -336,4 +336,39 @@ void main() {
       expect(r.d.toJson()['tcp'], 20000);
     });
   });
+
+  group('the test at the start', () {
+    test('probeDead says dead with probe evidence once, with no traffic; TCP arriving is back', () {
+      final r = _Rig()..d.start('system');
+      expect(r.d.probeDead('refused'), isTrue);
+      expect(r.d.probeDead('refused'), isFalse, reason: 'already dead');
+      final e = r.events.single;
+      expect([e.kind, e.data['probe'], e.data['probeReason'], e.data['synSeen'], e.data['apps']], ['dead', true, 'refused', 0, isEmpty]);
+      expect(r.d.toJson()['state'], 'dead');
+      expect(r.d.toJson()['byProbe'], isTrue);
+      r.orphans(12); // the log's own judgement is not repeated on top of it
+      r.advance(const Duration(seconds: 10));
+      r.other();
+      expect(r.events.length, 1);
+      r.tcp('org.telegram.messenger.web');
+      expect(r.events.map((e) => e.kind), ['dead', 'back']);
+      expect(r.d.toJson()['state'], 'ok');
+    });
+
+    test('probeCleared takes back a dead of the test but not one of the log; not active: not taken', () {
+      final r = _Rig();
+      expect(r.d.probeDead('silent'), isFalse);
+      r.d.start('system');
+      r.d.probeDead('silent');
+      r.d.probeCleared();
+      expect(r.d.toJson()['state'], 'ok');
+      r.orphans(10);
+      r.advance(const Duration(seconds: 6));
+      r.other();
+      expect(r.events.map((e) => e.kind), ['dead', 'dead'], reason: 'the log judges again');
+      expect(r.events.last.data.containsKey('probe'), isFalse);
+      r.d.probeCleared();
+      expect(r.d.toJson()['state'], 'dead');
+    });
+  });
 }

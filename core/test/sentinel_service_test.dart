@@ -61,6 +61,7 @@ void main() {
     svc = CoreService(
       singBox: 'none',
       resolveAddresses: false, // hermetic: no real DoH
+      directProbe: (_, _) async => 5, // hermetic: the direct path answers
       dataDir: p.join(tmp.path, 'data'),
       runner: runner,
       boxFactory: (_) => _Runner(),

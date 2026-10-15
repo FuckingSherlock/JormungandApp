@@ -175,6 +175,11 @@ void main() {
       pool.doubt(true);
       expect(seen.last, NetStatus.unknown);
       pool.resetNetwork();
+      expect(seen.last, NetStatus.unknown, reason: 'a start / stop does not make the network up, only an answer does');
+      pool.silent(true);
+      pool.resetNetwork();
+      expect(seen.last, NetStatus.down, reason: 'down stays through a start / stop (no conn/online without a probe)');
+      pool.answered();
       expect(seen.last, NetStatus.up);
     });
 

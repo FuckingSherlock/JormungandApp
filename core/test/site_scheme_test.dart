@@ -102,20 +102,20 @@ void main() {
 
   int count(String what) => calls.where((c) => c == what).length;
 
-  Future<void> start() async {
-    tmp = await Directory.systemTemp.createTemp('jorm-scheme');
-    time = FakeTime();
+  Future<void> connectSettled() async {
+    await svc.connect(_body());
+    await time.advanceSeconds(6); // settled
+    calls.clear();
+  }
+
+  /// A core on the test's data dir (a second one after [svc] was disposed is the app's next start); [connectNow] false
+  /// leaves the connect to the test.
+  Future<void> boot({bool connectNow = true}) async {
     calls = [];
-    sameOpens = false;
-    scoutSays = const AltReach(unsure: true);
-    elsewhereSays = const AltReach();
-    checkerOpens = true;
-    scoutGiven = null;
-    polls = 0;
-    pollGate = null;
     svc = CoreService(
       singBox: 'none',
       resolveAddresses: false, // hermetic: no real DoH
+      directProbe: (_, _) async => 5, // hermetic: the direct path answers
       dataDir: p.join(tmp.path, 'data'),
       runner: _Runner(),
       boxFactory: (_) => _Runner(),
@@ -154,9 +154,20 @@ void main() {
       scoutGiven = s;
       return elsewhereSays;
     };
-    await svc.connect(_body());
-    await time.advanceSeconds(6); // settled
-    calls.clear();
+    if (connectNow) await connectSettled();
+  }
+
+  Future<void> start() async {
+    tmp = await Directory.systemTemp.createTemp('jorm-scheme');
+    time = FakeTime();
+    sameOpens = false;
+    scoutSays = const AltReach(unsure: true);
+    elsewhereSays = const AltReach();
+    checkerOpens = true;
+    scoutGiven = null;
+    polls = 0;
+    pollGate = null;
+    await boot();
   }
 
   tearDown(() async {
@@ -408,6 +419,79 @@ void main() {
       await autoFail('rev.example:443');
       expect(count('same'), same);
       expect(repeats(siteEvents().single), 2);
+    });
+  });
+
+  group('the memo is kept (site-verdicts.json)', () {
+    Future<void> restart({bool connectNow = true}) async {
+      await svc.dispose();
+      await boot(connectNow: connectNow);
+    }
+
+    test('a reconnect: the next failure is a repeat on the same event, nothing is asked', () async {
+      await start();
+      await autoFail('again.example:443');
+      final id = siteEvents().single['id'];
+      await svc.disconnect();
+      await connectSettled();
+      await autoFail('again.example:443');
+      expect(calls, isEmpty, reason: 'the verdict was remembered through the new session');
+      expect(siteEvents().length, 1);
+      expect(siteEvents().single['id'], id);
+      expect(repeats(siteEvents().single), 2);
+    });
+
+    test('a restart of the app (a new core on the same data dir): the same, also for «dead everywhere»', () async {
+      await start();
+      await autoFail('ladder.example:443');
+      checkerOpens = false;
+      await autoFail('dead.example:443');
+      final ids = {for (final e in siteEvents()) '${(e['data'] as Map)['host']}': e['id']};
+      expect(ids.length, 2);
+      await restart();
+      await autoFail('ladder.example:443');
+      await autoFail('dead.example:443');
+      expect(calls, isEmpty, reason: 'both are still under their timers');
+      expect(siteEvents().length, 2);
+      for (final e in siteEvents()) {
+        expect(e['id'], ids['${(e['data'] as Map)['host']}']);
+        expect(repeats(e), 2);
+      }
+    });
+
+    test('a connection that worked ends the remembered verdict also after a restart', () async {
+      await start();
+      await autoFail('worked.example:443');
+      await restart();
+      svc.failures.worked!('worked.example', 443, 'route0/s::a');
+      await autoFail('worked.example:443');
+      expect(count('same'), 1, reason: 'judged anew');
+    });
+
+    test('another network between two runs voids the ladder\'s verdict and keeps «dead everywhere»', () async {
+      await start();
+      svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'net1'});
+      await autoFail('ladder.example:443');
+      checkerOpens = false;
+      await autoFail('dead.example:443');
+      await restart(connectNow: false);
+      svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'net2'}); // while the core did not run
+      await connectSettled();
+      await autoFail('dead.example:443');
+      expect(calls, isEmpty, reason: 'a site dead on every node stays dead on another network');
+      await autoFail('ladder.example:443');
+      expect(count('same'), 1, reason: 'the ladder starts over: the whole check runs');
+    });
+
+    test('the same network after a restart keeps the ladder\'s verdict', () async {
+      await start();
+      svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'net1'});
+      await autoFail('ladder.example:443');
+      await restart(connectNow: false);
+      svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'net1'});
+      await connectSettled();
+      await autoFail('ladder.example:443');
+      expect(calls, isEmpty);
     });
   });
 }

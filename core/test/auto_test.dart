@@ -573,6 +573,40 @@ void main() {
     expect(net.last.downMs, 20000);
   });
 
+  test('«no network» outlives the service: a reconnect while offline tells no second lost; only an answer ends it (restored once, for the first)', () async {
+    final p = plan([unit('A', ['s::a'])], auto: {'standby': 0});
+    var t = 0;
+    final mem = AutoMemory();
+    final fake = FakeBox(buildConfig(p), {'s::a': -1});
+    final first = AutoService(fake, p, delay: fake.delayTest, clock: () => t, memory: mem);
+    final net1 = <AutoNet>[];
+    first.net.listen(net1.add);
+    await first.check();
+    await first.check();
+    await Future<void>.delayed(Duration.zero);
+    expect([first.noNet, [for (final n in net1) n.kind]], [true, ['lost']]);
+    first.stop();
+
+    t += 5000;
+    final second = AutoService(fake, p, delay: fake.delayTest, clock: () => t, memory: mem);
+    final net2 = <AutoNet>[];
+    second.net.listen(net2.add);
+    expect(second.noNet, isTrue, reason: 'a new service does not presume the network back: nothing answered yet');
+    await second.check();
+    await Future<void>.delayed(Duration.zero);
+    expect([second.noNet, net2], [true, isEmpty], reason: 'still the same outage: no second lost');
+
+    mem.netUnknown(); // another network: unknown, not «no network», not online
+    expect(second.noNet, isFalse);
+    expect(mem.lostAt, isNotNull, reason: 'the event written for the outage is still owed its end');
+
+    fake.alive['s::a'] = 20;
+    t += 5000;
+    await second.check();
+    await Future<void>.delayed(Duration.zero);
+    expect([second.noNet, [for (final n in net2) n.kind], net2.single.downMs], [false, ['restored'], 10000]);
+  });
+
   test('flap guard: a strike only when another route answered; the hold doubles up to flapMax, stable work forgets it', () async {
     var t = 0;
     final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])], auto: {'flapGuard': true, 'flapMax': 3, 'flapReset': 5, 'failAfter': 1});

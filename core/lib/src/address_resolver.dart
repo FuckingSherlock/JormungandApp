@@ -145,7 +145,6 @@ class AddressResolver {
   final DateTime Function() _now;
 
   final _inflight = <String, Future<AddressEntry?>>{};
-  final _failedAt = <String, int>{};
   final _skippedKinds = <String>{};
   int _active = 0;
   final _queue = <Completer<void>>[];
@@ -239,7 +238,7 @@ class AddressResolver {
   }
 
   bool _recentlyFailed(String h) {
-    final t = _failedAt[h];
+    final t = book.failedAt(h);
     return t != null && _now().millisecondsSinceEpoch - t < negativeFor.inMilliseconds;
   }
 
@@ -279,7 +278,7 @@ class AddressResolver {
             final e = _store(host, g, t.id);
             best = i;
             bestEntry = e;
-            _failedAt.remove(host);
+            book.clearFailed(host);
             onResolved?.call(host);
             _note('info', 'address: $host → ${e.ips(st.ipv6).join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds} ms [fresh, $why, parallel]');
           } else {
@@ -318,7 +317,7 @@ class AddressResolver {
         e = await _walk(host, why, off, st, Stopwatch()..start(), seen, check: true);
         if (e != null) return e;
       }
-      _failedAt[host] = _now().millisecondsSinceEpoch;
+      book.markFailed(host, _now().millisecondsSinceEpoch);
       _note('warn', 'address: $host not resolved by any server in ${sw.elapsedMilliseconds} ms [$why]${book.get(host) == null ? '' : ': the cached address stays'}');
       if (seen.nx > 0 && seen.other == 0) {
         // every server that answered says the name has no address: the name is wrong, not the DNS
@@ -345,7 +344,7 @@ class AddressResolver {
       try {
         final g = await t.run().timeout(left < attempt ? left : attempt, onTimeout: () => throw _Fail('timeout', dead: true));
         final e = _store(host, g, t.id);
-        _failedAt.remove(host);
+        book.clearFailed(host);
         onResolved?.call(host);
         if (check) _alive(t);
         final ips = e.ips(st.ipv6);

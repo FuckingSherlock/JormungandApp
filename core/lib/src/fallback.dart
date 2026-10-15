@@ -51,6 +51,7 @@ library;
 import 'dart:async';
 
 import 'auto.dart' show AutoSettings, DelayTest;
+import 'auto_memory.dart';
 import 'ladder.dart' show LadderGate;
 import 'plan.dart' show topTag;
 import 'pool.dart';
@@ -116,14 +117,15 @@ class _Target {
   final _Group? entry;
   final selectors = <TargetFallback>[]; // the ones it is the target of
   final asFallback = <TargetFallback>[]; // the ones it is the fallback target of
-  final w = Watched();
+  Watched w = Watched(); // the memory's (auto_memory.dart) once the service is made: a service made anew goes on from it
   bool down = false; // its selectors sit on the fallback
 }
 
 class FallbackService {
   FallbackService(this.api, Iterable<TargetFallback> fallbacks,
-      {required this.delay, required this.settings, ProbePool? pool, this.mainIdentity, int Function()? clock, this.note, this.onDown, this.setFlag})
+      {required this.delay, required this.settings, ProbePool? pool, this.mainIdentity, int Function()? clock, this.note, this.onDown, this.setFlag, AutoMemory? memory})
       : pool = pool ?? ProbePool.solo(),
+        memory = memory ?? AutoMemory(),
         _clock = clock ?? _wallClock {
     final by = <String, _Target>{};
     for (final f in fallbacks) {
@@ -134,11 +136,19 @@ class FallbackService {
     _by = by;
     _flagged = [for (final f in fallbacks) if (f.flagPath != null) f];
     _targets = by.values.toList();
+    for (final t in _targets) {
+      t.w = this.memory.target(t.id);
+    }
     _stall = StallSweeper(api);
   }
 
   final BoxControl api;
   final DelayTest delay;
+
+  /// A target's health and strikes live here, outside the service (auto_memory.dart): a service made anew (a connect, a
+  /// restart) goes on from what the checks found, a target returns by the hold its drops earned. Without one given the
+  /// service has its own. Keyed by the UI's target id (the main flow: `proxy`).
+  final AutoMemory memory;
 
   /// Replaceable while running (Settings → Auto mode changed): the next round uses it.
   AutoSettings settings;
@@ -191,6 +201,7 @@ class FallbackService {
 
   void stop() {
     _stopped = true;
+    memory.changed(); // what it learned is written (the next service goes on from it)
     _timer?.cancel();
     _stall.stop();
     _changes.close();
@@ -258,7 +269,9 @@ class FallbackService {
     final ms = t.isMain ? await _probeMain(t) : await _probe(t);
     if (_stopped || ms == null) return;
     final now = _clock();
+    final failing = t.w.health.fails > 0, strikes = t.w.strikes;
     t.w.health.record(ms, now);
+    if (ms < 0 || failing) memory.changed();
     if (!t.isMain) {
       final id = _identity(t, _current(t));
       if (ms >= 0) {
@@ -268,6 +281,7 @@ class FallbackService {
       }
     }
     if (!t.down) t.w.forgetIfStable(settings, now);
+    if (t.w.strikes != strikes) memory.changed();
     if (ms < 0 && !t.isMain && onDown != null && t.w.health.fails >= settings.failAfter) {
       for (final g in [?t.entry, t.main]) {
         final key = g.keyOf(api.selected[g.tag] ?? g.initial);
@@ -430,6 +444,7 @@ class FallbackService {
     } else {
       t.w.usedSince = _clock();
     }
+    memory.changed();
     for (final (tag, x) in left) {
       _stall.sweep(tag, () => x.down, every: settings.stallAfter);
     }

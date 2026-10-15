@@ -230,11 +230,11 @@ class ProbePool {
     _refresh();
   }
 
-  /// A new connection starts from a clean slate (results are kept: servers are the same).
-  void resetNetwork() {
-    _offline = _silent = _doubt = false;
-    _refresh();
-  }
+  /// A connection starts or stops (sing-box made anew or gone). The network verdict stays as it is: «up» comes only from
+  /// an answer ([answered]), a start or a stop says nothing about the network (the old one made `up` out of it, so an
+  /// offline reconnect closed `net.offline`, wrote `conn/online` and opened it again). Nor does a move to another
+  /// network clear a «down»: the service asks the direct path at once and the answer ends it (service.dart `_probeNetwork`).
+  void resetNetwork() => _refresh();
 
   /// `{status, since (ms), lastAnswer (ms), offline, silent, doubt}` for /api/status.
   Map<String, dynamic> toJson() => {

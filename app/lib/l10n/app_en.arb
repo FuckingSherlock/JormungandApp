@@ -3462,6 +3462,7 @@
     }
   },
   "deadOnThisNode": "Dead on this node",
+  "reserve": "Reserve",
   "newVersion": "New version",
   "aNewVersionOfTheApp": "A new version of the app is out, or a downloaded one waits to be installed"
 }

@@ -11,9 +11,37 @@ import 'package:test/test.dart';
 
 import 'sentinel_fakes.dart';
 
+/// An API service that is not sing-box's: no groups, no connections (so `_startAuto` runs past its `api == null` exit).
+class _Api extends SingBoxApi {
+  _Api() : super(0, '');
+  @override
+  Map<String, String> get selected => const {};
+  @override
+  Stream<void> get groupsChanged => const Stream.empty();
+  @override
+  Future<bool> select(String group, String outbound) async => true;
+  @override
+  Future<Map<String, int>?> testGroup(String group, {String? leaving, required Duration timeout}) async => null;
+  @override
+  Iterable<LiveConnection> get connections => const [];
+  @override
+  Future<bool> closeConnection(String id) async => true;
+  @override
+  Future<bool> closeAllConnections() async => true;
+  @override
+  Stream<ClosedConnection> closedConnections() => const Stream.empty();
+  @override
+  void watch() {}
+  @override
+  Future<void> close() async {}
+}
+
 class _Runner implements BoxRunner {
   bool up = false;
   int failStarts = 0;
+  /// A running core has an API service (Auto exists); off = the old harness, where `_startAuto` returns at once.
+  bool withApi = false;
+  final _api = _Api();
   @override
   void Function(String line)? onLog;
   @override
@@ -24,7 +52,7 @@ class _Runner implements BoxRunner {
   @override
   int? get pid => null;
   @override
-  SingBoxApi? get api => null;
+  SingBoxApi? get api => up && withApi ? _api : null;
   @override
   void note(String line) => onLog?.call('[jormd] $line');
   @override
@@ -97,15 +125,18 @@ void main() {
   late CoreService svc;
   late _Runner runner;
   late FakeTime time;
+  var directMs = 5;
 
   Future<void> start(
-      {FailureWindows windows = const FailureWindows(), bool connected = true, Map<String, dynamic>? routing, String server = '127.0.0.1', bool global = true, String? exitServer}) async {
+      {FailureWindows windows = const FailureWindows(), bool connected = true, Map<String, dynamic>? routing, String server = '127.0.0.1', bool global = true, String? exitServer, bool api = false}) async {
     tmp = await Directory.systemTemp.createTemp('jorm-sfail');
-    runner = _Runner();
+    runner = _Runner()..withApi = api;
     time = FakeTime();
+    directMs = 5;
     svc = CoreService(
       singBox: 'none',
       resolveAddresses: false, // hermetic: no real DoH
+      directProbe: (_, _) async => directMs, // hermetic: what the direct path answers (ms, -1 = silent)
       dataDir: p.join(tmp.path, 'data'),
       runner: runner,
       boxFactory: (_) => _Runner(),
@@ -282,6 +313,96 @@ void main() {
       await time.advanceSeconds(1);
       final online = events('conn', 'online').single;
       expect(online['data'], containsPair('downMs', greaterThan(10000)));
+    });
+
+    test('a move to another network while the probes say down: the root stays until the direct path answers, then conn/online once', () async {
+      await start(connected: false);
+      svc.pool.silent(true);
+      await time.advanceSeconds(11);
+      expect(events('conn', 'offline').single['verdict'], 'confirmed');
+      directMs = -1;
+      svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'a'});
+      svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'b'}); // another network: the direct path is asked at once
+      await time.advanceSeconds(1);
+      expect(svc.sentinel.roots.byKind('net.offline'), isNotNull, reason: 'silent: nothing closes the root');
+      expect(events('conn', 'online'), isEmpty);
+      await time.advanceSeconds(10);
+      expect(events('conn', 'online'), isEmpty, reason: 'asked again every noNetEvery, still silent');
+      directMs = 7;
+      await time.advanceSeconds(10);
+      expect(svc.sentinel.roots.byKind('net.offline'), isNull);
+      expect(events('conn', 'online').single['data'], containsPair('downMs', greaterThan(20000)));
+    });
+
+    test('the outage survives a reconnect: the same conn/lost event stays open, one conn/restored with the whole time', () async {
+      await start();
+      final t0 = time.t.millisecondsSinceEpoch;
+      svc.routesLost(AutoNet(kind: 'lost', at: t0), 1);
+      await time.advanceSeconds(40);
+      expect(events('conn', 'lost').single['verdict'], 'confirmed');
+      await svc.disconnect();
+      await svc.connect(_body());
+      await time.advanceSeconds(6);
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNotNull, reason: 'a restart does not end it');
+      expect(events('conn', 'lost').length, 1, reason: 'no new event');
+      svc.routesRestored(AutoNet(kind: 'restored', at: t0 + 50000, downMs: 50000));
+      await time.advanceSeconds(1);
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
+      expect(events('conn', 'restored').single['data'], containsPair('downMs', 50000));
+    });
+
+    test('Auto starting and stopping while the network is down says nothing of it: no conn/online without a probe that answered', () async {
+      await start(connected: false, api: true);
+      svc.pool.silent(true);
+      await time.advanceSeconds(11);
+      expect(events('conn', 'offline').single['verdict'], 'confirmed');
+      directMs = -1; // the direct path stays silent
+      await svc.connect(_body()); // Auto starts (the API service exists)
+      await time.advanceSeconds(6);
+      expect(runner.api, isNotNull);
+      expect(svc.sentinel.roots.byKind('net.offline'), isNotNull, reason: 'a new sing-box says nothing of the network');
+      expect(events('conn', 'online'), isEmpty);
+      await svc.disconnect();
+      await time.advanceSeconds(30);
+      expect(svc.sentinel.roots.byKind('net.offline'), isNotNull);
+      expect(events('conn', 'online'), isEmpty, reason: 'the stop probed the direct path, which is silent: nothing written');
+    });
+
+    test('disconnect() while the pool is down asks the direct path: its answer closes the root (conn/online once, the real time); silence asks again every noNetEvery', () async {
+      await start(connected: false, api: true);
+      svc.pool.silent(true);
+      await time.advanceSeconds(11);
+      directMs = -1;
+      await svc.connect(_body());
+      await time.advanceSeconds(6);
+      await svc.disconnect(); // no sing-box and no Auto from here: nobody else would ask
+      await time.advanceSeconds(25);
+      expect(events('conn', 'online'), isEmpty);
+      expect(svc.sentinel.roots.byKind('net.offline'), isNotNull);
+      directMs = 7;
+      await time.advanceSeconds(10);
+      expect(svc.sentinel.roots.byKind('net.offline'), isNull);
+      final online = events('conn', 'online').single;
+      expect(online['data'], containsPair('downMs', greaterThan(40000)));
+      await time.advanceSeconds(30);
+      expect(events('conn', 'online').length, 1);
+    });
+
+    test('Auto started again re-suspects an outage that never became a root (the stop came inside the window): one conn/lost, one conn/restored', () async {
+      await start(connected: false, api: true);
+      final t0 = time.t.millisecondsSinceEpoch;
+      svc.autoMemory.lostAt = t0; // Auto's owed `lost` of the earlier session
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
+      await svc.connect(_body());
+      await time.advanceSeconds(40);
+      final lost = events('conn', 'lost').single;
+      expect(lost['verdict'], 'confirmed');
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNotNull);
+      svc.routesRestored(AutoNet(kind: 'restored', at: time.t.millisecondsSinceEpoch, downMs: 41000));
+      await time.advanceSeconds(1);
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
+      expect(events('conn', 'lost').length, 1);
+      expect(events('conn', 'restored').single['data'], containsPair('downMs', 41000));
     });
 
     test('the network gone for a moment: conn/offline is a blip with how long, no conn/online', () async {

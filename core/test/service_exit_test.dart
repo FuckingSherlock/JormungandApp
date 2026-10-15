@@ -98,6 +98,7 @@ void main() {
     gates.clear();
     asked.clear();
     svc = CoreService(
+      directProbe: (_, _) async => 5, // hermetic: the direct path answers
       sentinelClock: time.clock,
       now: () => time.t,
       isElevated: () => true,
@@ -196,6 +197,7 @@ void main() {
     // a new core over the same data directory (a restart) on the same network id
     await svc.dispose();
     svc = CoreService(
+      directProbe: (_, _) async => 5, // hermetic: the direct path answers
       sentinelClock: time.clock,
       now: () => time.t,
       isElevated: () => true,

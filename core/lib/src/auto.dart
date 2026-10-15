@@ -55,6 +55,7 @@ library;
 import 'dart:async';
 import 'dart:math';
 
+import 'auto_memory.dart';
 import 'config.dart' show defaultTestUrl, planCheckers;
 import 'exits.dart';
 import 'failures.dart' show ConnOutcome;
@@ -161,6 +162,12 @@ class AutoSettings {
   /// The pool answer age a test of a server with [h] accepts.
   Duration reuseFor(Health h) => h.ms == -2 ? startAge : reuse;
 
+  /// How long after its last check an unfinished series of misses (below [failAfter]) of a server, route or target still
+  /// counts as one with the next miss: two of the slower cadence (the round, the spares' [warmEvery]) — the same two
+  /// intervals after which Auto takes «since the last look» as not known. Older ones are dropped when a service starts
+  /// ([AutoMemory.dropStaleStreaks]).
+  Duration get streakGap => (checkEvery > warmEvery ? checkEvery : warmEvery) * 2;
+
   /// The hold after [strikes] drops: 1, 2, 4 … minutes, up to [flapMax].
   Duration hold(int strikes) {
     if (!flapGuard || strikes <= 0) return Duration.zero;
@@ -212,6 +219,18 @@ class Health {
   }
 
   Map<String, dynamic> toJson() => {'ms': ms, 'fails': fails, 'oks': oks, 'at': at};
+
+  /// Everything it holds, for the file ([AutoMemory]); [loadStore] takes it back.
+  Map<String, dynamic> toStore() => {'ms': ms, 'fails': fails, 'oks': oks, 'at': at, if (since != null) 'since': since};
+
+  void loadStore(Map j) {
+    int n(String k, int d) => j[k] is num ? (j[k] as num).toInt() : d;
+    ms = n('ms', -2);
+    fails = n('fails', 0);
+    oks = n('oks', 0);
+    at = n('at', 0);
+    since = j['since'] is num ? (j['since'] as num).toInt() : null;
+  }
 }
 
 /// A move the service made: between routes ([route] null, [from] / [to] = route ids), or
@@ -296,7 +315,7 @@ class SiteNode {
 }
 
 class _Group {
-  _Group(this.tag, Map g, {this.entry})
+  _Group(this.tag, Map g, {this.entry, this.memory, this.scope = ''})
       : priority = g['pick'] == 'priority',
         pinned = g['pinned'] == true,
         keys = {for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) '${n['key']}'}.toList() {
@@ -320,10 +339,41 @@ class _Group {
   final ids = <String, String>{}; // key → the server's pool identity (pool.dart)
   final real = <String>{}; // the keys whose identity is a fingerprint of an outbound (the same on the next start), not a tag
 
-  /// A server's health by [_hkey]: for a chain's exits it is the pair's (entry in use + exit).
+  /// Where what the checks learn outlives this service (auto_memory.dart), and the route + role (`<id>|m` / `<id>|e`)
+  /// this group is in: the key of a server there is `<scope>|<pool identity>` (a chain's exit: the pair). A server without
+  /// an outbound is not remembered.
+  final AutoMemory? memory;
+  final String scope;
+
+  /// A server's health by [_hkey]: for a chain's exits it is the pair's (entry in use + exit). The objects are the
+  /// memory's, so a service made anew starts from them.
   final health = <String, Health>{};
   String? now; // the server in use (key)
-  final missed = <String>{}; // servers that missed a test here: a move up to one is a `back`
+  final _missedHere = <String>{}; // the ones with no memory key
+
+  String? _own(String key) => memory == null || !real.contains(key) ? null : '$scope|${ids[key]}';
+
+  String? _memKey(String key) {
+    final own = _own(key), e = entry;
+    if (own == null || e == null) return own;
+    return e.real.contains(e.current) ? '$scope|${pairIdentity(e.ids[e.current]!, ids[key]!)}' : null;
+  }
+
+  /// A server missed a test here: a move up to it later is a `back`. [at]: now, ms.
+  void markMissed(String key, int at) {
+    final m = _own(key);
+    if (m == null) {
+      _missedHere.add(key);
+    } else {
+      memory!.markMissed(m, at);
+    }
+  }
+
+  /// Whether the server had missed here (and takes the mark off).
+  bool takeMissed(String key) {
+    final m = _own(key);
+    return m == null ? _missedHere.remove(key) : memory!.takeMissed(m);
+  }
 
   String get current => now ?? keys.first;
   String member(String key) => '$tag/$key';
@@ -332,27 +382,37 @@ class _Group {
   /// A chain's exit is measured through the entry server in use, so its misses are that
   /// pair's: when the entry switches the exit starts a count of its own (the old pair keeps its).
   String _hkey(String key) => entry == null ? key : '${entry!.current}$_pairSep$key';
-  Health of(String key) => health.putIfAbsent(_hkey(key), Health.new);
+  Health of(String key) => health.putIfAbsent(_hkey(key), () {
+        final m = _memKey(key);
+        return m == null ? Health() : memory!.server(m);
+      });
 }
 
 const _pairSep = '\n';
 
 class _Route {
-  _Route(int i, Map<String, dynamic> r)
-      : id = '${r['id'] ?? routeTag(i)}',
-        tag = routeTag(i),
-        entry = r['kind'] == 'chain' ? _Group(routeEntryTag(i), r['entry'] as Map) : null {
-    main = _Group(routeTag(i), r['main'] as Map, entry: entry);
+  _Route(int i, Map<String, dynamic> r, AutoMemory memory) : this._(i, r, memory, '${r['id'] ?? routeTag(i)}');
+
+  _Route._(int i, Map<String, dynamic> r, AutoMemory memory, this.id)
+      : tag = routeTag(i),
+        mark = memory.route(id),
+        entry = r['kind'] == 'chain' ? _Group(routeEntryTag(i), r['entry'] as Map, memory: memory, scope: '$id|e') : null {
+    main = _Group(routeTag(i), r['main'] as Map, entry: entry, memory: memory, scope: '$id|m');
   }
 
   final String id, tag;
   final _Group? entry;
   late final _Group main;
-  final health = Health();
+
+  /// The route's health and flap guard are the memory's (auto_memory.dart): a service made anew goes on from them.
+  final RouteMark mark;
+  Health get health => mark.health;
   bool checked = false; // tested in the running round
   bool skipped = false; // … but its server is unavailable and was not asked (ladder.dart): it is not known to be dead right now
-  bool up = false; // answered since its last strike: a drop from here is a strike
-  int strikes = 0; // drops (flap guard)
+  bool get up => mark.up; // answered since its last strike: a drop from here is a strike
+  set up(bool v) => mark.up = v;
+  int get strikes => mark.strikes; // drops (flap guard)
+  set strikes(int v) => mark.strikes = v;
   int inUseSince = 0; // when it became the current route
 
   List<_Group> get groups => [?entry, main];
@@ -374,22 +434,30 @@ class AutoService {
       this.onDown,
       ProbePool? pool,
       ExitBook? exits,
+      AutoMemory? memory,
       this.exitCheck,
       this.onExit})
       : settings = settings ?? AutoSettings.fromPlan(plan),
+        memory = memory ?? AutoMemory(),
         pool = pool ?? ProbePool.solo(),
         exits = exits ?? ExitBook(),
         manual = plan['manual'] == true,
         _clock = clock ?? _wallClock {
     final rs = planRoutes(plan);
-    _routes = [for (var i = 0; i < rs.length; i++) _Route(i, rs[i])];
+    _routes = [for (var i = 0; i < rs.length; i++) _Route(i, rs[i], this.memory)];
     index = planCurrent(plan, _routes.length);
     _routes[index].inUseSince = _clock();
+    this.memory.dropStaleStreaks(_clock(), this.settings.streakGap, this.settings.failAfter);
     this.pool.ladder.owe(); // a new connection: each unavailable node is asked once out of turn (the ladder itself goes on)
   }
 
   final BoxControl api;
   final DelayTest delay;
+
+  /// What the checks know of the servers and routes (health, flap guard, «already failed»), outside this service: the
+  /// owner keeps one for the life of the core, so a service made anew (a connect, a restart) goes on from it
+  /// (auto_memory.dart). Without one given the service has its own.
+  final AutoMemory memory;
 
   /// The probe pool (pool.dart): every test of a server goes through it, so what the other
   /// modules or the UI's ping measured recently is not measured again, and the network
@@ -413,7 +481,7 @@ class AutoService {
   /// The least time between two background exit checks of one node (from the last completed check, kept with the
   /// [exits] entry): a switch to a node, the start and the scouts ask only when it has passed. The user's re-check
   /// ([recheckExit]) and an update of the node's subscription ([exitSourceRefreshed]) do not wait for it.
-  static const exitEvery = Duration(hours: 1);
+  static const exitEvery = Duration(minutes: 20);
 
   /// Whether a site (`host:port`) opens through an outbound tag (probe.dart probeReach);
   /// null = cannot be told. Without it the sites of failed requests are not tried again.
@@ -488,13 +556,16 @@ class AutoService {
   int? switchedAt;
   AutoSwitch? lastSwitch;
 
-  /// Routes found unstable so far (as on [unstable]) and the last one.
-  int unstableCount = 0;
-  AutoUnstable? lastUnstable;
+  /// Routes found unstable so far (as on [unstable]) and the last one: the memory's ([memory]), counted from the last
+  /// change of the network.
+  int get unstableCount => memory.unstableCount;
+  AutoUnstable? get lastUnstable => memory.lastUnstable;
 
   /// The current route is dead and no other route answers (the next batch silent too):
-  /// everything stays as it is, a round every `noNetEvery`.
-  bool noNet = false;
+  /// everything stays as it is, a round every `noNetEvery`. The memory's ([memory]): a service made anew starts with it,
+  /// and only a round in which a route answered ends it (the network change makes it unknown, [networkChanged]).
+  bool get noNet => memory.noNet;
+  set noNet(bool v) => memory.noNet = v;
 
   /// The OS has no network (sing-box: `missing default interface`): like [noNet], nothing
   /// is tested, moved or marked until it is back.
@@ -518,7 +589,7 @@ class AutoService {
   final _unstable = StreamController<AutoUnstable>.broadcast();
   final _siteFails = StreamController<AutoSiteFail>.broadcast();
   final _net = StreamController<AutoNet>.broadcast();
-  int? _lostAt, _offlineAt; // since when: no route answers / the OS has no network
+  int? _offlineAt; // since when the OS has no network (the time no route answers is the memory's [AutoMemory.lostAt])
   Timer? _timer;
   StreamSubscription<void>? _groupsSub;
   late final _stall = StallSweeper(api);
@@ -558,9 +629,12 @@ class AutoService {
   }
 
   /// The device moved to another network: the unavailable nodes (ladder.dart) are asked once out of turn,
-  /// in a round now. The ladder itself goes on from the step each is on.
+  /// in a round now. The ladder itself goes on from the step each is on. The flap guard starts over (the strikes
+  /// of a route say how it behaved on the old network); the answers and misses stay.
   void networkChanged() {
     if (_stopped) return;
+    memory.resetFlap();
+    memory.netUnknown(); // «no network» was found on the old one: unknown until the round below
     pool.ladder.owe();
     // (a node's exit does not depend on the user's network: no exit check starts here, only the hourly timer asks)
     if (_started) _kickNow();
@@ -577,6 +651,7 @@ class AutoService {
 
   void stop() {
     _stopped = true;
+    memory.changed(); // what it learned is written (the next service goes on from it)
     _timer?.cancel();
     _groupsSub?.cancel();
     _stall.stop();
@@ -647,13 +722,9 @@ class AutoService {
         // the nodes of this round that missed are not dead either (the current route's own stay as they are)
         pool.ladder.restore(ladderSaved, keep: {for (final g in cur.groups) _identity(g, g.current)});
       } else {
-        noNet = false;
+        final since = memory.answered();
         _directOk = false;
-        if (_lostAt != null) {
-          final since = _lostAt;
-          _lostAt = null;
-          _emitNet('restored', since);
-        }
+        if (since != null) _emitNet('restored', since);
         _judge();
       }
       checkedAt = _clock();
@@ -1278,7 +1349,9 @@ class AutoService {
       if (ms < 0) break;
     }
     if (_stopped) return;
+    final failing = r.health.fails > 0;
     r.health.record(ms, _clock());
+    if (ms < 0 || failing) memory.changed();
     r.checked = true;
   }
 
@@ -1404,12 +1477,14 @@ class AutoService {
     }
     final ms = await _ping(g, key, light: light);
     if (!_stopped) {
+      final failing = h.fails > 0;
       h.record(ms, _clock());
+      if (ms < 0 || failing) memory.changed();
       final back = ladder.observe(id, ms, _clock());
       if (ms >= 0) {
         if (back) note?.call('auto: ${g.member(key)} is back');
       } else {
-        g.missed.add(key);
+        g.markMissed(key, _clock());
         if (h.fails >= settings.failAfter) {
           if (!inUse) _park(g, key, id);
           if (onDown != null) onDown!(g.tag, key);
@@ -1478,6 +1553,7 @@ class AutoService {
         if (k == failed) continue;
         final ms = res[g.member(k)] ?? -1;
         g.of(k).record(ms, now);
+        if (ms < 0) memory.changed();
         if (ms >= 0) pool.ladder.observe(_identity(g, k), ms, now); // answered the group test: no longer unavailable
         if (ms < 0 && onDown != null && g.of(k).fails >= settings.failAfter) onDown!(g.tag, k);
       }
@@ -1496,7 +1572,7 @@ class AutoService {
     // `back` = it failed here before; a higher server that never missed was just not the
     // one the plan started on (nothing "came back")
     if (reason == 'back') {
-      if (!g.missed.remove(key)) reason = 'preferred';
+      if (!g.takeMissed(key)) reason = 'preferred';
     }
     // a route traffic does not use (a spare, one above): housekeeping, not a switch the
     // user sees — a log note only (judged after the await: `index` may have moved)
@@ -1560,8 +1636,8 @@ class AutoService {
       if (_stopped) return;
       if (to == null) {
         noNet = true; // no route answers: no network, not this route
-        if (_lostAt == null) {
-          _lostAt = _clock();
+        if (memory.lostAt == null) {
+          memory.lostAt = _clock();
           note?.call('auto: no route answers: nothing is moved until one does');
           _emitNet('lost', null);
         }
@@ -1590,20 +1666,25 @@ class AutoService {
     for (final r in _routes) {
       if (!r.checked) continue;
       if (r.health.answered) {
+        if (!r.up) memory.changed();
         r.up = true;
       } else if (r.up && r.health.fails >= settings.failAfter && _routes.any((o) => o != r && o.checked && o.health.answered)) {
         r.up = false;
         r.strikes++;
+        memory.changed();
         if (settings.flapGuard && r.strikes >= 2) {
           final u = AutoUnstable(id: r.id, strikes: r.strikes, holdMs: settings.hold(r.strikes).inMilliseconds, at: now);
-          unstableCount++;
-          lastUnstable = u;
+          memory.unstableCount++;
+          memory.lastUnstable = u;
           if (!_unstable.isClosed) _unstable.add(u);
         }
       }
     }
     final cur = _routes[index], since = cur.health.since;
-    if (cur.strikes > 0 && since != null && now - max(since, cur.inUseSince) >= settings.flapReset.inMilliseconds) cur.strikes = 0;
+    if (cur.strikes > 0 && since != null && now - max(since, cur.inUseSince) >= settings.flapReset.inMilliseconds) {
+      cur.strikes = 0;
+      memory.changed();
+    }
   }
 
   /// Connections left on [tag] (a route or a server Auto just left because it stopped

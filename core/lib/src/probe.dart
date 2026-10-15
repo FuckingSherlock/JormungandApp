@@ -172,6 +172,31 @@ Future<int> probeDelay(Probe probe, String tag, String url, {int timeoutMs = 500
   }
 }
 
+/// The direct path tested from this process, no sing-box (nothing runs: a disconnected core): one HEAD request to
+/// [url] outside every proxy (the system proxy a kill switch leaves set is not used). ms until the answer (any
+/// HTTP status: the server is there); -1 = no answer in [timeoutMs] or the connection failed.
+Future<int> directDelay(String url, int timeoutMs) async {
+  final Uri u;
+  try {
+    u = Uri.parse(url);
+  } on FormatException {
+    return -1;
+  }
+  final client = HttpClient()
+    ..findProxy = ((_) => 'DIRECT')
+    ..connectionTimeout = Duration(milliseconds: timeoutMs);
+  try {
+    final sw = Stopwatch()..start();
+    final res = await (await client.openUrl('HEAD', u)).close().timeout(Duration(milliseconds: timeoutMs));
+    await res.drain<void>().timeout(Duration(milliseconds: timeoutMs));
+    return sw.elapsedMilliseconds;
+  } catch (_) {
+    return -1;
+  } finally {
+    client.close(force: true);
+  }
+}
+
 /// The probe inbound turned the test down before any request was made (no such SOCKS user =
 /// no such outbound to test, or no password method): says nothing about the path under test.
 class ProbeRefused extends SocketException {

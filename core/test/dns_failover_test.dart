@@ -29,10 +29,12 @@ class _Rig {
     List<String> extra = const [],
     bool system = false,
     Map<String, String> providers = const {},
+    Map<String, String> kinds = const {},
     AutoSettings? settings,
     bool auto = true,
     bool uncertain = false,
     Set<String> off = const {},
+    Set<String> reserve = const {},
     this.refuseMode = false,
     this.flagNull = false,
     this.neverApplied = false,
@@ -42,14 +44,14 @@ class _Rig {
   }) {
     this.verdicts = verdicts ?? DnsVerdictBook();
     this.uncertain = uncertain;
-    DnsCandidate make(String id, String side, {bool inUse = true}) => _c(id, side: side, provider: providers[id], inUse: inUse);
+    DnsCandidate make(String id, String side, {bool inUse = true}) => _c(id, side: side, provider: providers[id], kind: kinds[id] ?? 'udp', inUse: inUse);
     final d = [for (final id in direct) make(id, 'direct')], v = [for (final id in vpn) make(id, 'vpn')];
     final x = [for (final id in extra) make(id, 'direct', inUse: false)];
     members = {for (final c in [...d, ...v]) c.id: c};
     cands = [...d, ...v, ...x];
     alive = {for (final c in cands) c.tag: 20, if (system) 'local': 20};
     for (final c in cands) {
-      fileOn[c.id] = !off.contains(c.id);
+      fileOn[c.id] = !off.contains(c.id) && !reserve.contains(c.id);
     }
     book = EventBook(null, clock: () => time.t);
     sentinel = Sentinel(clock: time.clock, book: book);
@@ -59,6 +61,7 @@ class _Rig {
       candidates: cands,
       watch: [for (final c in x) c.entry, if (system) (id: systemDnsId, tag: 'local')],
       off: off,
+      reserve: reserve,
       setFlag: (c, on, reason) async {
         if (refuseMode) return false;
         writes.add('${c.id} ${on ? 'on' : 'off'} $reason');
@@ -73,8 +76,9 @@ class _Rig {
       },
       query: (tag, name, t) async {
         asked.add('$tag $name');
-        final g = gate;
+        final g = gate, h = hold[tag];
         if (g != null) await g.future;
+        if (h != null) await h.future; // the answer of this server arrives when the test says (the order of a race)
         return alive[tag] ?? -1;
       },
       settings: settings ?? const AutoSettings(failAfter: 2, flapGuard: false),
@@ -130,7 +134,9 @@ class _Rig {
   final asked = <String>[];
   final switches = <DnsSwitch>[];
   Completer<void>? gate;
-  final bool refuseMode, flagNull, neverApplied;
+  final hold = <String, Completer<void>>{};
+  bool refuseMode;
+  final bool flagNull, neverApplied;
   final pool = ProbePool.solo();
   set uncertain(bool v) => pool.doubt(v); // Auto doubting the network: the status is `unknown`
 
@@ -529,6 +535,18 @@ void main() {
         'direct': {'active': 'a', 'provider': 'a'},
         'vpn': {'active': null, 'provider': null},
       },
+      'providers': [
+        for (final p in ['a', 'b'])
+          {
+            'provider': p,
+            'side': 'direct',
+            'racing': false,
+            'winner': null,
+            'transports': [
+              {'kind': 'udp', 'ids': [p], 'ms': -2, 'state': 'untested'},
+            ],
+          },
+      ],
       'servers': [
         {'id': 'a', 'ok': null, 'rechecking': false, 'ms': -2, 'provider': 'a', 'side': 'direct', 'kind': 'udp', 'flag': true},
         {'id': 'b', 'ok': null, 'rechecking': false, 'ms': -2, 'provider': 'b', 'side': 'direct', 'kind': 'udp', 'flag': true},
@@ -555,6 +573,7 @@ void main() {
         'direct': {'active': null, 'provider': null},
         'vpn': {'active': null, 'provider': null},
       },
+      'providers': <Object>[],
       'servers': <Object>[],
     });
     await r.dispose();
@@ -1037,6 +1056,230 @@ void main() {
       expect(back.deadOf('y|doh|vpn|N1'), isFalse);
       expect(back.deadOf('z|doh|direct'), isNull);
       dir.deleteSync(recursive: true);
+    });
+  });
+
+  group('protocol race (docs/rules.md §6 → Гонка протоколов)', () {
+    _Rig rig({bool vpn = false, String? nodeId, bool auto = true, Set<String> reserve = const {}}) {
+      final ids = vpn ? ['v-doh', 'v-dot', 'v-udp'] : ['p-doh', 'p-dot', 'p-udp', 'q-doh'];
+      final prov = {for (final i in ids) i: i.startsWith('q') ? 'q' : i.split('-').first};
+      final kind = {for (final i in ids) i: i.split('-').last};
+      return vpn
+          ? _Rig(vpn: ids, providers: prov, kinds: kind, nodeId: nodeId, auto: auto, reserve: reserve)
+          : _Rig(direct: ids, providers: prov, kinds: kind, auto: auto, reserve: reserve);
+    }
+
+    // The answers of the servers [tags] arrive in this order.
+    Future<void> arrive(_Rig r, List<String> tags) async {
+      for (final t in tags) {
+        r.hold[t]!.complete();
+        await pumpEventQueue();
+      }
+    }
+
+    void held(_Rig r, List<String> tags) {
+      r.hold.clear();
+      for (final t in tags) {
+        r.hold[t] = Completer<void>();
+      }
+    }
+
+    Future<_Rig> raced() async {
+      final r = rig();
+      await r.settle();
+      r.alive.addAll({'dns-p-doh': 40, 'dns-p-dot': 20, 'dns-p-udp': 5});
+      held(r, ['dns-p-doh', 'dns-p-dot', 'dns-p-udp']);
+      r.svc.start();
+      await pumpEventQueue();
+      await arrive(r, ['dns-p-udp', 'dns-p-dot', 'dns-p-doh']); // the winner was chosen at the dot's answer, the doh arrives later
+      r.hold.clear();
+      return r;
+    }
+
+    test('the first encrypted answer wins (plain UDP answered earlier); the others go to reserve; the status says so', () async {
+      final r = await raced();
+      expect(r.svc.activeOf('direct'), 'p-dot');
+      expect(r.writes.toSet(), {'p-doh off reserve', 'p-udp off reserve'});
+      expect(await r.log(), isEmpty, reason: 'the winner of a race is an ordinary choice: no switch event');
+      expect(r.notes.any((n) => n.contains('dns race (p, direct; start): doh 40 ms, dot 20 ms, udp 5 ms; winner p-dot')), isTrue, reason: '${r.notes}');
+      final p = (r.svc.toJson()['providers'] as List).cast<Map>().firstWhere((x) => x['provider'] == 'p');
+      expect(p['winner'], {'id': 'p-dot', 'kind': 'dot', 'ms': 20});
+      expect(p['racing'], isFalse);
+      expect([for (final t in (p['transports'] as List).cast<Map>()) '${t['kind']} ${t['ms']} ${t['state']} ${t['reserve'] ?? false}'],
+          ['doh 40 ok true', 'dot 20 ok false', 'udp 5 ok true']);
+      await r.dispose();
+    });
+
+    test('plain UDP wins only when every encrypted transport is silent', () async {
+      final r = rig();
+      await r.settle();
+      r.alive.addAll({'dns-p-doh': -1, 'dns-p-dot': -1, 'dns-p-udp': 5});
+      held(r, ['dns-p-doh', 'dns-p-dot', 'dns-p-udp']);
+      r.svc.start();
+      await pumpEventQueue();
+      await arrive(r, ['dns-p-udp']);
+      expect(r.writes, isEmpty, reason: 'UDP answered, but the encrypted ones are not silent yet');
+      expect(((r.svc.toJson()['providers'] as List).first as Map)['winner'], isNull);
+      await arrive(r, ['dns-p-doh', 'dns-p-dot']);
+      expect(r.svc.activeOf('direct'), 'p-udp');
+      expect(r.writes.where((w) => w.startsWith('p-udp')), isEmpty);
+      await r.dispose();
+    });
+
+    test('a ping asks every transport but does not choose again', () async {
+      final r = await raced();
+      r.alive['dns-p-doh'] = 3; // now the fastest
+      r.asked.clear();
+      final got = await r.svc.pingProvider('p');
+      expect({for (final q in r.asked) q.split(' ').first}, {'dns-p-doh', 'dns-p-dot', 'dns-p-udp'});
+      expect([for (final g in got) '${g.kind} ${g.ms}'], ['doh 3', 'dot 20', 'udp 5']);
+      await pumpEventQueue();
+      expect(r.svc.activeOf('direct'), 'p-dot', reason: 'no flapping over a few ms');
+      expect(r.writes, hasLength(2));
+      await r.dispose();
+    });
+
+    test('a network change races again: the fastest now is put to work', () async {
+      final r = await raced();
+      r.alive.addAll({'dns-p-doh': 10, 'dns-p-dot': 50});
+      held(r, ['dns-p-doh', 'dns-p-dot', 'dns-p-udp']);
+      final done = r.svc.networkChanged();
+      await pumpEventQueue();
+      await arrive(r, ['dns-p-doh', 'dns-p-dot', 'dns-p-udp']);
+      await done;
+      expect(r.svc.activeOf('direct'), 'p-doh');
+      expect(r.writes, containsAll(['p-doh on race', 'p-dot off reserve']));
+      expect(await r.log(), isEmpty);
+      await r.dispose();
+    });
+
+    test('another exit node races the VPN side again', () async {
+      final r = rig(vpn: true, nodeId: 'N1');
+      await r.settle();
+      r.alive.addAll({'dns-v-doh': 40, 'dns-v-dot': 20, 'dns-v-udp': 5});
+      held(r, ['dns-v-doh', 'dns-v-dot', 'dns-v-udp']);
+      r.svc.start();
+      await pumpEventQueue();
+      await arrive(r, ['dns-v-dot', 'dns-v-doh', 'dns-v-udp']);
+      expect(r.svc.activeOf('vpn'), 'v-dot');
+      r.alive.addAll({'dns-v-doh': 8, 'dns-v-dot': 30});
+      held(r, ['dns-v-doh', 'dns-v-dot', 'dns-v-udp']);
+      r.nodeId = 'N2';
+      await r.svc.nodeChanged();
+      await pumpEventQueue();
+      await arrive(r, ['dns-v-doh', 'dns-v-dot', 'dns-v-udp']);
+      expect(r.svc.activeOf('vpn'), 'v-doh');
+      await r.dispose();
+    });
+
+    test('the winner fails: another protocol of the same provider, then plain UDP, then the next provider', () async {
+      final r = await raced();
+      r.alive['dns-p-dot'] = -1;
+      await r.round();
+      await pumpEventQueue();
+      expect(r.svc.activeOf('direct'), 'p-doh', reason: 'known to work, same provider: not q');
+      expect(r.writes, containsAllInOrder(['p-dot off miss', 'p-doh on failover']));
+      r.alive['dns-p-doh'] = -1;
+      await r.round();
+      await pumpEventQueue();
+      expect(r.svc.activeOf('direct'), 'p-udp', reason: 'every encrypted one is silent now');
+      r.alive['dns-p-udp'] = -1;
+      await r.round();
+      await pumpEventQueue();
+      expect(r.svc.activeOf('direct'), 'q-doh', reason: 'the provider is out: the next one by priority');
+      await r.dispose();
+    });
+
+    test('a restart keeps the reserve: not off, not dead; it stays quiet and is the fallback of its provider when the winner fails', () async {
+      // p-dot was at work, p-doh and p-udp in reserve when sing-box was restarted
+      final r = rig(reserve: {'p-doh', 'p-udp'});
+      await r.settle();
+      expect(r.svc.reserve, {'p-doh', 'p-udp'});
+      expect(r.svc.flags, containsPair('p-doh', false));
+      expect(r.svc.alive('p-doh'), isTrue, reason: 'a reserve works: it may be asked');
+      expect(r.svc.activeOf('direct'), 'p-dot');
+      await r.round();
+      await pumpEventQueue();
+      expect(r.writes, isEmpty, reason: 'a reserve does not return on its own over the winner');
+      expect(r.svc.reserve, {'p-doh', 'p-udp'});
+      r.alive['dns-p-dot'] = -1;
+      await r.round();
+      await pumpEventQueue();
+      expect(r.svc.activeOf('direct'), 'p-doh', reason: 'the reserve took over: same provider, not q');
+      expect(r.writes, containsAllInOrder(['p-dot off miss', 'p-doh on failover']));
+      expect(await r.log(), ['direct p-dot>p-doh failover']);
+      await r.dispose();
+    });
+
+    test('Switch automatically off with a race: the winner is tracked, every flag stays on; turning it on applies the choice', () async {
+      final r = rig(auto: false);
+      await r.settle();
+      r.alive.addAll({'dns-p-doh': 40, 'dns-p-dot': 20, 'dns-p-udp': 5});
+      held(r, ['dns-p-doh', 'dns-p-dot', 'dns-p-udp']);
+      r.svc.start();
+      await pumpEventQueue();
+      await arrive(r, ['dns-p-udp', 'dns-p-dot', 'dns-p-doh']);
+      r.hold.clear();
+      expect(r.writes, isEmpty, reason: 'auto off: no flag is turned off');
+      expect(r.svc.flags.values.every((on) => on), isTrue);
+      expect(r.svc.activeOf('direct'), 'p-doh', reason: 'the top candidate answers while every flag is on');
+      expect(r.svc.reserve, isEmpty);
+      await r.svc.setAuto(true);
+      await pumpEventQueue();
+      expect(r.svc.activeOf('direct'), 'p-dot');
+      expect(r.writes.toSet(), {'p-doh off reserve', 'p-udp off reserve'});
+      expect(await r.log(), isEmpty, reason: 'the winner of a race is a plain choice');
+      await r.dispose();
+    });
+
+    test('a failed flag write during a race is visible and written again at the next round', () async {
+      final r = rig();
+      await r.settle();
+      r.alive.addAll({'dns-p-doh': 40, 'dns-p-dot': 20, 'dns-p-udp': 5});
+      held(r, ['dns-p-doh', 'dns-p-dot', 'dns-p-udp']);
+      r.refuseMode = true;
+      r.svc.start();
+      await pumpEventQueue();
+      await arrive(r, ['dns-p-udp', 'dns-p-dot', 'dns-p-doh']);
+      r.hold.clear();
+      expect(r.writes, isEmpty);
+      expect(r.notes.any((n) => n.startsWith('warn dns flag: p-doh stays on (reserve): the write failed')), isTrue, reason: '${r.notes}');
+      expect(r.svc.activeOf('direct'), 'p-doh', reason: 'the flags did not change: the old one answers');
+      r.refuseMode = false;
+      await r.round();
+      await pumpEventQueue();
+      expect(r.writes.toSet(), {'p-doh off reserve', 'p-udp off reserve'});
+      expect(r.svc.activeOf('direct'), 'p-dot');
+      await r.dispose();
+    });
+
+    test('a dead transport is not asked by the race and cannot win', () async {
+      final r = rig();
+      r.verdicts.record(dnsVerdictKey(r.members['p-dot'], null), dead: true, at: 1);
+      await r.settle();
+      r.alive.addAll({'dns-p-doh': 40, 'dns-p-dot': -1, 'dns-p-udp': 5});
+      held(r, ['dns-p-doh', 'dns-p-udp']);
+      r.svc.start();
+      await pumpEventQueue();
+      await arrive(r, ['dns-p-udp', 'dns-p-doh']);
+      expect(r.svc.activeOf('direct'), 'p-doh', reason: 'dot is dead; plain UDP does not win while doh answers');
+      expect(r.notes.any((n) => n.contains('dns race (p, direct; start): asking p-doh, p-udp')), isTrue, reason: '${r.notes}');
+      expect(r.notes.any((n) => n.contains('dot dead') && n.contains('winner p-doh')), isTrue, reason: '${r.notes}');
+      await r.dispose();
+    });
+
+    test('a race owed while the network is down runs when it is up', () async {
+      final r = rig();
+      r.uncertain = true;
+      await r.settle();
+      r.svc.start();
+      await pumpEventQueue();
+      expect(r.asked.where((q) => q.startsWith('dns-p-')), isEmpty);
+      r.uncertain = false;
+      await r.round();
+      await pumpEventQueue();
+      expect(r.notes.any((n) => n.contains('dns race (p, direct; start)')), isTrue, reason: '${r.notes}');
+      await r.dispose();
     });
   });
 }

@@ -378,6 +378,40 @@ void main() {
       expect(good.count('gone.invalid', 1), greaterThan(before));
     });
 
+    test('ensure: a failed name is left alone for the 2 min also after a restart (addresses.json); later or after an answer it is asked again', () async {
+      final file = File(p.join(tmp.path, 'addresses.json'));
+      await resolver([doh('g', good.url)]).ensure(['gone.invalid'], why: 'connect');
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(book.failedAt('gone.invalid'), clock.millisecondsSinceEpoch);
+      final before = good.count('gone.invalid', 1);
+      expect(before, greaterThan(0));
+
+      // the app is closed and started again a minute later: a new book on the same file, a new resolver
+      clock = clock.add(const Duration(minutes: 1));
+      book = AddressBook(file, now: () => clock);
+      expect(book.failedAt('gone.invalid'), isNotNull);
+      await resolver([doh('g', good.url)]).ensure(['gone.invalid'], why: 'connect');
+      expect(good.count('gone.invalid', 1), before, reason: 'a minute after the failure: not asked');
+
+      clock = clock.add(const Duration(minutes: 2));
+      book = AddressBook(file, now: () => clock);
+      good.answers['gone.invalid'] = ['198.51.100.5'];
+      await resolver([doh('g', good.url)]).ensure(['gone.invalid'], why: 'connect');
+      expect(good.count('gone.invalid', 1), greaterThan(before), reason: 'three minutes after: asked again');
+      expect(book.get('gone.invalid')!.v4, ['198.51.100.5']);
+      expect(book.failedAt('gone.invalid'), isNull, reason: 'an answer ends the failure');
+      expect(AddressBook(file, now: () => clock).failedAt('gone.invalid'), isNull, reason: 'also in the file');
+    });
+
+    test('a failure older than a day is forgotten at load', () {
+      final file = File(p.join(tmp.path, 'addresses.json'));
+      book.markFailed('old.example', clock.millisecondsSinceEpoch - const Duration(days: 2).inMilliseconds);
+      book.markFailed('new.example', clock.millisecondsSinceEpoch - const Duration(hours: 2).inMilliseconds);
+      final again = AddressBook(file, now: () => clock);
+      expect(again.failedAt('old.example'), isNull);
+      expect(again.failedAt('new.example'), isNotNull);
+    });
+
     group('race (the connect wait)', () {
       late MockDoh slow, fast;
       setUp(() async {

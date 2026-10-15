@@ -62,7 +62,7 @@ class TunIngressDetector {
   final DateTime Function() _now;
 
   /// `tunTcpDead`'s data: `{stack, synSeen, accepted, windowMs, apps, appCounts, firstSeen, ownRejects, ownRejected,
-  /// udp, dns, ownReject?}`; `ownReject: true` = the own reject rules alone explain the unpaired look-ups
+  /// udp, dns, ownReject?, probe?, probeReason?}`; `probe: true` = from the start test ([probeDead]); `ownReject: true` = the own reject rules alone explain the unpaired look-ups
   /// (not dead; said once per such period).
   final void Function(Map<String, dynamic> data)? onDead;
 
@@ -86,6 +86,7 @@ class TunIngressDetector {
   // the session's totals, for the report
   int _tcpTotal = 0, _udpTotal = 0, _dnsTotal = 0, _orphanTotal = 0, _unpairedTotal = 0;
   bool _dead = false;
+  bool _deadByProbe = false; // «dead» came from the active test at the start ([probeDead]), not from the log
   DateTime? _deadAt;
   int _deadEvents = 0;
 
@@ -103,8 +104,48 @@ class TunIngressDetector {
     _line = 0;
     _tcpTotal = _udpTotal = _dnsTotal = _orphanTotal = _unpairedTotal = _ownTotal = 0;
     _dead = false;
+    _deadByProbe = false;
     _deadAt = null;
     _deadEvents = 0;
+  }
+
+  /// The active test run at the start (tun_check.dart) found that no TCP connection gets through the tunnel:
+  /// the same «dead» as the log's, found before any app has tried (a tunnel that came up broken has no traffic to
+  /// read). [onDead] gets the data with `probe: true` and the test's [reason] (`silent` / `refused` / `unrouted`),
+  /// no look-ups; the Sentinel judges it like any other (the window, then the same test again). The first TCP
+  /// connection that arrives is [onBack] as usual. False = not taken (stopped, or already dead).
+  bool probeDead(String reason) {
+    if (!_active || _dead) return false;
+    final now = _now();
+    _dead = true;
+    _deadByProbe = true;
+    _deadAt = now;
+    _deadEvents++;
+    onDead?.call({
+      'stack': _stack,
+      'synSeen': 0,
+      'accepted': 0,
+      'windowMs': window.inMilliseconds,
+      'apps': const <String>[],
+      'appCounts': const <String, int>{},
+      'firstSeen': now.millisecondsSinceEpoch,
+      if (_ownRejects.isNotEmpty) 'ownRejects': _ownRejects,
+      'ownRejected': 0,
+      'udp': _udpTotal,
+      'dns': _dnsTotal,
+      'probe': true,
+      'probeReason': reason,
+    });
+    return true;
+  }
+
+  /// The suspicion that [probeDead] began ended as a blip (the test passed when the Sentinel asked again): the
+  /// tunnel is judged by the log again. Does nothing for a «dead» that came from the log.
+  void probeCleared() {
+    if (!_dead || !_deadByProbe) return;
+    _dead = false;
+    _deadByProbe = false;
+    _deadAt = null;
   }
 
   void stop() {
@@ -293,6 +334,7 @@ class TunIngressDetector {
   void _back(DateTime now) {
     final at = _deadAt;
     _dead = false;
+    _deadByProbe = false;
     _deadAt = null;
     for (final o in _unpaired) {
       o.counted = false;
@@ -342,6 +384,7 @@ class TunIngressDetector {
       'deadEvents': _deadEvents,
       if (_dead && _deadAt != null) 'deadForMs': now.difference(_deadAt!).inMilliseconds,
       if (_dead) 'apps': _topApps(),
+      if (_dead && _deadByProbe) 'byProbe': true,
       'thresholds': {'minUnpaired': minUnpaired, 'windowMs': window.inMilliseconds, 'pairLines': pairLines, 'graceMs': grace.inMilliseconds},
     };
   }

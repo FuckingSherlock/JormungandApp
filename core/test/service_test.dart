@@ -117,6 +117,10 @@ void main() {
   late Future<Socket> Function(String host, int port, Duration timeout) tunDial;
   final dialed = <String>[];
 
+  /// How many of the first dials go through the responder whatever [tunDial] says: the TUN test at the start (tun_check
+  /// is asked once a connect) passes by default, so the tests of the log detector see only their own checks.
+  late int startTries;
+
   int responderPort() {
     final rules = ((runner.config!['route'] as Map)['rules'] as List).cast<Map>();
     return (rules.firstWhere((r) => r['override_port'] != null && r['ip_cidr'] != null && '${r['ip_cidr']}'.contains(tunCheckAddress))['override_port'] as num).toInt();
@@ -145,6 +149,7 @@ void main() {
     runner = _Runner();
     time = FakeTime();
     dialed.clear();
+    startTries = 1;
     tunDial = (h, p, t) async => throw const SocketException('no TUN in tests');
     svc = CoreService(
       sentinelClock: time.clock,
@@ -152,6 +157,10 @@ void main() {
       isElevated: () => true,
       tunCheckConnect: (h, p, t) {
         dialed.add('$h:$p');
+        if (startTries > 0) {
+          startTries--;
+          return dialThroughResponder(h, p, t);
+        }
         return tunDial(h, p, t);
       },
       windows: windows,
@@ -707,7 +716,8 @@ void main() {
     tunDial = dialThroughResponder;
     await deadWindowPassed();
     await untilReal(() => tunEvents('tunTcpDead').isNotEmpty);
-    expect(dialed, [contains('$tunCheckAddress:$tunCheckPort')]);
+    expect(dialed, hasLength(2), reason: 'the start test and the Sentinel\'s');
+    expect(dialed, everyElement('$tunCheckAddress:$tunCheckPort'));
     final e = tunEvents('tunTcpDead').single;
     expect([e['verdict'], e['level']], ['blip', 'info']);
     expect(trailCodes(e), contains(tunCheckCode));
@@ -739,6 +749,91 @@ void main() {
     expect([e['verdict'], e['level']], ['confirmed', 'error']);
     final step = ((e['trail'] as List).cast<Map>()).firstWhere((t) => t['code'] == tunCheckCode);
     expect([step['outcome'], (step['params'] as Map)['reason']], ['fail', 'refused']);
+  });
+
+  bool logHas(String text) => ((svc.logBook.since(null)['lines'] as List).cast<Map>()).any((l) => '${l['msg']}'.contains(text));
+
+  test('the TUN test at the start fails every try: dead without traffic, the Sentinel confirms by the same test; TCP arriving closes it', () async {
+    await start();
+    startTries = 0; // the default dial is refused
+    await svc.connect(tunBody());
+    await time.advanceSeconds(6);
+    expect(dialed, hasLength(3), reason: 'three tries, 1 / 3 / 5 s after the start');
+    expect(svc.tunIngressSnapshot()['state'], 'dead');
+    expect(svc.tunIngressSnapshot()['byProbe'], isTrue);
+    expect(tunEvents('tunTcpDead'), isEmpty, reason: 'a verdict only after a recheck: the window first');
+    expect(logHas('the start test failed every try'), isTrue);
+    await time.advanceSeconds(10);
+    await untilReal(() => tunEvents('tunTcpDead').isNotEmpty);
+    final e = tunEvents('tunTcpDead').single;
+    expect([e['verdict'], e['level']], ['confirmed', 'error']);
+    final d = e['data'] as Map;
+    expect([d['probe'], d['probeReason'], d['synSeen'], d['apps']], [true, 'refused', 0, isEmpty]);
+    expect(dialed, hasLength(4), reason: 'the Sentinel asked again');
+    final step = ((e['trail'] as List).cast<Map>()).firstWhere((t) => t['code'] == tunCheckCode);
+    expect(step['outcome'], 'fail');
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNotNull);
+    tcpThroughTun();
+    await settle();
+    expect(tunEvents('tunTcpBack').length, 1);
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+  });
+
+  test('the TUN test at the start passes on a later try: nothing is said but the raw log', () async {
+    await start();
+    startTries = 0;
+    var n = 0;
+    tunDial = (h, p, t) => ++n < 3 ? throw const SocketException('not yet') : dialThroughResponder(h, p, t);
+    await svc.connect(tunBody());
+    await time.advanceSeconds(6);
+    await untilReal(() => logHas('the start test passed'));
+    expect(logHas('the start test failed (try 1 of 3)'), isTrue);
+    expect(logHas('the start test passed (try 3'), isTrue);
+    await time.advanceSeconds(30);
+    expect(tunEvents('tunTcpDead'), isEmpty);
+    expect(svc.tunIngressSnapshot()['state'], 'ok');
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+  });
+
+  test('the TUN test at the start failed, the Sentinel\'s second test passes: a blip with no journal entry, the raw log says it; the detector judges by the log again', () async {
+    await start();
+    startTries = 0;
+    var n = 0;
+    tunDial = (h, p, t) => ++n <= 3 ? throw const SocketException('not yet') : dialThroughResponder(h, p, t);
+    await svc.connect(tunBody());
+    await time.advanceSeconds(16);
+    await untilReal(() => logHas('the tunnel was only late'));
+    expect(tunEvents('tunTcpDead'), isEmpty);
+    expect(tunEvents('tunTcpBack'), isEmpty);
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+    expect(svc.tunIngressSnapshot()['state'], 'ok');
+  });
+
+  test('the TUN test at the start failed, TCP arrives inside the window: a blip, no journal entry, no tunTcpBack', () async {
+    await start();
+    startTries = 0;
+    await svc.connect(tunBody());
+    await time.advanceSeconds(7);
+    expect(svc.tunIngressSnapshot()['state'], 'dead');
+    tcpThroughTun();
+    await time.advanceSeconds(1);
+    await time.advanceSeconds(10);
+    expect(tunEvents('tunTcpDead'), isEmpty);
+    expect(tunEvents('tunTcpBack'), isEmpty, reason: 'it never stood');
+    expect(svc.tunIngressSnapshot()['state'], 'ok');
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+  });
+
+  test('a stop while the TUN test at the start is under way: no more tries, nothing judged', () async {
+    await start();
+    startTries = 0;
+    await svc.connect(tunBody());
+    await time.advanceSeconds(2);
+    await svc.disconnect();
+    await time.advanceSeconds(60);
+    expect(dialed, hasLength(1));
+    expect(tunEvents('tunTcpDead'), isEmpty);
+    expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
   });
 
   test('look-ups that our own reject rule took are not a dead TUN: no event, the state stays ok, the log says it was let go', () async {

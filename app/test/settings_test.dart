@@ -744,6 +744,96 @@ void main() {
         expect(host.catalog.dnsServers[id]!.activeSides, {'vpn'});
       });
 
+      DnsRace race(String id, String side, {String? win, int? winMs, required List<DnsRaceTransport> ts}) =>
+          DnsRace(provider: id, side: side, winnerKind: win, winnerMs: winMs, transports: ts);
+
+      testWidgets('the row names the protocol that answers each side, at 320 / 120 %', (tester) async {
+        final host = FakeCoreHost();
+        final id = host.catalog.dnsSave(
+          null,
+          name: 'Mine',
+          transports: [DnsTransport('dot', 'tls://9.9.9.9'), DnsTransport('udp', '9.9.9.9')],
+          sides: ['direct', 'vpn'],
+        );
+        host.raceReplies[id] = [
+          [
+            race(id, 'direct', win: 'dot', winMs: 24, ts: const [DnsRaceTransport(kind: 'dot', ms: 24, state: 'ok')]),
+            race(id, 'vpn', win: 'udp', winMs: 30, ts: const [DnsRaceTransport(kind: 'udp', ms: 30, state: 'ok')]),
+          ],
+        ];
+        await _pump(tester, host, textScale: 1.2);
+        await _open(tester, 'setdns');
+        expect(find.byKey(ValueKey('dns-race-$id-direct')), findsOneWidget);
+        expect((tester.widget(find.byKey(ValueKey('dns-race-$id-direct'))) as Text).data, 'DoT');
+        expect((tester.widget(find.byKey(ValueKey('dns-race-$id-vpn'))) as Text).data, 'UDP');
+        expect(find.descendant(of: find.byKey(ValueKey('dns-ping-$id-direct')), matching: find.text('24 ms')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('the card spins per transport and side until the core answers, then shows the result', (
+        tester,
+      ) async {
+        final host = FakeCoreHost();
+        final id = host.catalog.dnsSave(
+          null,
+          name: 'Mine',
+          transports: [DnsTransport('doh', 'https://9.9.9.9/dns-query'), DnsTransport('udp', '9.9.9.9')],
+          sides: ['vpn'],
+        );
+        DnsRace at(List<DnsRaceTransport> ts, {String? win}) => race(id, 'vpn', win: win, ts: ts);
+        const testingRace = [
+          DnsRaceTransport(kind: 'doh', state: 'testing'),
+          DnsRaceTransport(kind: 'udp', ms: 12, state: 'ok', reserve: true),
+        ];
+        host.raceReplies[id] = [
+          [at(testingRace)], // the list's own ping on opening
+          [at(testingRace)],
+          [
+            at(const [
+              DnsRaceTransport(kind: 'doh', ms: 31, state: 'ok'),
+              DnsRaceTransport(kind: 'udp', ms: 12, state: 'ok', reserve: true),
+            ], win: 'doh'),
+          ],
+        ];
+        await _pump(tester, host);
+        await _open(tester, 'setdns');
+        await tester.tap(find.descendant(of: find.byKey(ValueKey(id)), matching: find.text('Mine')));
+        await tester.pump();
+        await tester.pump();
+        final doh = find.byKey(ValueKey('dns-race-vpn-doh'));
+        expect(doh, findsOneWidget);
+        expect(find.descendant(of: doh, matching: find.byType(PingSpinner)), findsOneWidget);
+        expect(find.descendant(of: find.byKey(ValueKey('dns-race-vpn-udp')), matching: find.text('Reserve')), findsOneWidget);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pump();
+        expect(find.descendant(of: doh, matching: find.byType(PingSpinner)), findsNothing);
+        expect(find.descendant(of: doh, matching: find.text('31 ms')), findsOneWidget);
+        expect(find.descendant(of: doh, matching: find.text('In use')), findsOneWidget);
+      });
+
+      testWidgets('a check that stays testing past the cap ends as "No answer"', (tester) async {
+        final host = FakeCoreHost();
+        final id = host.catalog.dnsSave(
+          null,
+          name: 'Mine',
+          transports: [DnsTransport('doh', 'https://9.9.9.9/dns-query')],
+          sides: ['vpn'],
+        );
+        host.raceReplies[id] = [
+          [race(id, 'vpn', ts: const [DnsRaceTransport(kind: 'doh', state: 'testing')])],
+        ];
+        await _pump(tester, host);
+        await _open(tester, 'setdns');
+        await tester.tap(find.descendant(of: find.byKey(ValueKey(id)), matching: find.text('Mine')));
+        await tester.pump();
+        for (var i = 0; i < 32; i++) {
+          await tester.pump(const Duration(seconds: 1));
+        }
+        final doh = find.byKey(ValueKey('dns-race-vpn-doh'));
+        expect(find.descendant(of: doh, matching: find.byType(PingSpinner)), findsNothing);
+        expect(find.descendant(of: doh, matching: find.text('No answer')), findsOneWidget);
+      });
+
       testWidgets('the confirm text says which side is left empty', (tester) async {
         const direct = 'DNS for direct traffic will go through the VPN servers.';
         const vpn =

@@ -39,6 +39,14 @@ String dnsKindLabel(AppLocalizations l10n, String addr) =>
       _ => 'UDP',
     };
 
+/// Short protocol label of a race kind (`doh` -> DoH).
+String dnsKindName(String kind) => switch (kind) {
+  'doh' => 'DoH',
+  'dot' => 'DoT',
+  'doq' => 'DoQ',
+  _ => 'UDP',
+};
+
 /// Settings row: `2 on · hijack`.
 String dnsSettingsSub(BuildContext context, CoreHost host) {
   final l10n = context.l10n;
@@ -107,6 +115,10 @@ class _DnsSheetState extends State<DnsSheet> {
     final r = _res[id];
     return r == null ? null : (side == 'vpn' ? r.vpn : r.direct);
   }
+
+  /// The race of the provider on a side: the last ping's, else the status the core reports while connected.
+  DnsRace? raceOf(String id, String side) =>
+      _res[id]?.race(id, side) ?? CoreHostScope.read(context).dnsHealth?.race(id, side);
 
   /// What the edit form shows as the already known ping: the direct side, else the VPN one.
   int? _formPing(String id) => _sideMs(id, 'direct') ?? _sideMs(id, 'vpn');
@@ -319,6 +331,16 @@ class _DnsSheetState extends State<DnsSheet> {
                               s.activeSides.contains(side),
                         ),
                       ),
+                      // the protocol the side answers with, a second line so the ms never truncates
+                      if (s.activeSides.contains(side) &&
+                          !s.system &&
+                          raceOf(id, side)?.winnerKind != null)
+                        Text(
+                          dnsKindName(raceOf(id, side)!.winnerKind!),
+                          key: ValueKey('dns-race-$id-$side'),
+                          maxLines: 1,
+                          style: TextStyle(fontSize: 10, color: c.t3),
+                        ),
                     ],
                   ),
                 ),
@@ -788,6 +810,15 @@ class _DnsFormState extends State<DnsForm> {
   int? _ping;
   bool _testing = false;
 
+  /// The provider's protocol race per side, as the last core answer gave it.
+  List<DnsRace> _races = const [];
+  bool _raceRunning = false;
+
+  /// The cap was reached with checks still `testing`: they show "No answer", never a spinner for ever.
+  bool _raceGaveUp = false;
+  static const _racePoll = Duration(seconds: 1);
+  static const _raceCap = 30;
+
   /// An own server: its addresses are a list of fields. The built-in ones and Local show theirs.
   bool get _own => _cfg == null || (!_cfg!.system && !_cfg!.builtin);
 
@@ -820,6 +851,51 @@ class _DnsFormState extends State<DnsForm> {
     _seen = _present;
     _use = {...?s?.use.where(_seen.contains)};
     if (_use.isEmpty) _use = {..._seen};
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _raceLoop();
+    });
+  }
+
+  bool get _raceTesting => !_raceGaveUp && _raceRows.any((r) => r.$3?.testing ?? false);
+
+  /// (side, kind, the transport's race entry) for each enabled side and transport of a saved provider.
+  List<(String, String, DnsRaceTransport?)> get _raceRows {
+    final id = widget.id;
+    if (id == null || _cfg?.system == true) return const [];
+    return [
+      for (final side in const ['vpn', 'direct'])
+        if (_sides.contains(side) && dnsRaceOf(_races, id, side) != null)
+          for (final kind in dnsKinds)
+            if (_use.contains(kind) && _seen.contains(kind))
+              (side, kind, dnsRaceOf(_races, id, side)!.transport(kind)),
+    ];
+  }
+
+  /// Asks the core again until no transport of the provider is `testing`; at the cap the rest is "No answer".
+  Future<void> _raceLoop() async {
+    final id = widget.id;
+    if (id == null || _cfg?.system == true || _raceRunning) return;
+    _raceRunning = true;
+    final host = CoreHostScope.read(context);
+    try {
+      setState(() => _raceGaveUp = false);
+      for (var i = 0; i < _raceCap; i++) {
+        final DnsSidePing r;
+        try {
+          r = await host.pingDnsSides(id);
+        } catch (_) {
+          break;
+        }
+        if (!mounted) return;
+        setState(() => _races = r.races);
+        if (!_raceTesting) return;
+        await Future<void>.delayed(_racePoll);
+        if (!mounted) return;
+      }
+      if (mounted) setState(() => _raceGaveUp = true);
+    } finally {
+      _raceRunning = false;
+    }
   }
 
   @override
@@ -935,6 +1011,59 @@ class _DnsFormState extends State<DnsForm> {
     if (!host.catalog.dnsDelete(id)) return;
     host.changed();
     Navigator.of(context).pop();
+  }
+
+  /// One transport on one side: its result (spinner while the core still asks), "In use" for the
+  /// winner, "Reserve" for a transport that answers but is not the one working.
+  Widget _raceRow(String side, String kind, DnsRaceTransport? t) {
+    final l10n = context.l10n;
+    final c = context.colors;
+    final race = dnsRaceOf(_races, widget.id!, side);
+    final testing = (t?.testing ?? false) && !_raceGaveUp;
+    final miss = t != null && !testing && (t.dead || t.ms == -1 || (t.testing && _raceGaveUp));
+    final Widget result;
+    if (testing) {
+      result = const LatencyView(testing: true, minWidth: 0);
+    } else if (miss) {
+      result = Text(l10n.noAnswer2, style: TextStyle(fontSize: 12, color: c.muted));
+    } else {
+      result = LatencyView(ms: t == null || t.ms == -2 ? null : t.ms, minWidth: 0);
+    }
+    final tag = race?.winnerKind == kind
+        ? l10n.inUse
+        : (t?.reserve ?? false)
+        ? l10n.reserve
+        : null;
+    return Padding(
+      key: ValueKey('dns-race-$side-$kind'),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '${side == 'vpn' ? 'VPN' : 'Direct'} · ${_kindName(kind)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: c.t2),
+            ),
+          ),
+          if (tag != null)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: c.accent.tint(.14),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                tag,
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: c.accent),
+              ),
+            ),
+          result,
+        ],
+      ),
+    );
   }
 
   @override
@@ -1076,7 +1205,13 @@ class _DnsFormState extends State<DnsForm> {
           FormGroup(
             child: Row(
               children: [
-                SecondaryButton(label: l10n.ping, onPressed: _pingDraft),
+                SecondaryButton(
+                  label: l10n.ping,
+                  onPressed: () {
+                    _pingDraft();
+                    _raceLoop();
+                  },
+                ),
                 const SizedBox(width: 12),
                 LatencyView(
                   ms: _ping,
@@ -1086,6 +1221,16 @@ class _DnsFormState extends State<DnsForm> {
               ],
             ),
           ),
+          if (_raceRows.isNotEmpty)
+            FormGroup(
+              child: Column(
+                key: const ValueKey('dns-race'),
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final (side, kind, t) in _raceRows) _raceRow(side, kind, t),
+                ],
+              ),
+            ),
         ],
       ),
     );

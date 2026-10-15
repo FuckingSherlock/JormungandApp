@@ -802,10 +802,94 @@ class DnsServerStatus {
 /// A provider's latency per side ([CoreHost.pingDnsSides]): ms, -1 no answer, null = not configured / not measurable
 /// (the UI shows "—"). [servers]: ms per candidate id when the core measured them.
 class DnsSidePing {
-  const DnsSidePing({this.direct, this.vpn, this.servers = const {}});
+  const DnsSidePing({this.direct, this.vpn, this.servers = const {}, this.races = const []});
 
   final int? direct, vpn;
   final Map<String, int> servers;
+
+  /// The protocol race per provider and side (`providers` of the ping answer); empty without a core.
+  final List<DnsRace> races;
+
+  /// The race of [provider] on [side], null = none.
+  DnsRace? race(String provider, String side) => dnsRaceOf(races, provider, side);
+}
+
+/// One transport of a provider in the protocol race (`status.dns.providers[].transports[]`).
+class DnsRaceTransport {
+  const DnsRaceTransport({
+    required this.kind,
+    this.ms = -2,
+    this.state = 'untested',
+    this.dead = false,
+    this.reserve = false,
+  });
+
+  /// `doh` | `dot` | `doq` | `udp`.
+  final String kind;
+
+  /// Best last answer: -1 no answer, -2 not asked.
+  final int ms;
+
+  /// `testing` | `ok` | `miss` | `untested`.
+  final String state;
+  final bool dead, reserve;
+
+  bool get testing => state == 'testing';
+}
+
+/// A provider's protocol race on one side: the [winner] kind answering it and every transport's result.
+class DnsRace {
+  const DnsRace({
+    required this.provider,
+    required this.side,
+    this.winnerKind,
+    this.winnerMs,
+    this.transports = const [],
+  });
+
+  final String provider, side;
+  final String? winnerKind;
+  final int? winnerMs;
+  final List<DnsRaceTransport> transports;
+
+  DnsRaceTransport? transport(String kind) {
+    for (final t in transports) {
+      if (t.kind == kind) return t;
+    }
+    return null;
+  }
+
+  /// `providers` of `status.dns` / the ping answer; malformed entries are skipped.
+  static List<DnsRace> parseAll(Object? json) => [
+    for (final p in (json is List ? json : const []))
+      if (p is Map && p['provider'] != null && p['side'] != null)
+        DnsRace(
+          provider: '${p['provider']}',
+          side: '${p['side']}',
+          winnerKind: p['winner'] is Map ? '${(p['winner'] as Map)['kind']}' : null,
+          winnerMs: p['winner'] is Map && (p['winner'] as Map)['ms'] is int
+              ? (p['winner'] as Map)['ms'] as int
+              : null,
+          transports: [
+            for (final t in (p['transports'] as List? ?? const []))
+              if (t is Map && t['kind'] != null)
+                DnsRaceTransport(
+                  kind: '${t['kind']}',
+                  ms: t['ms'] is int ? t['ms'] as int : -2,
+                  state: '${t['state'] ?? 'untested'}',
+                  dead: t['dead'] == true,
+                  reserve: t['reserve'] == true,
+                ),
+          ],
+        ),
+  ];
+}
+
+DnsRace? dnsRaceOf(List<DnsRace> races, String provider, String side) {
+  for (final r in races) {
+    if (r.provider == provider && r.side == side) return r;
+  }
+  return null;
 }
 
 class DnsHealth {
@@ -813,9 +897,15 @@ class DnsHealth {
     this.active,
     this.answering = const {},
     this.servers = const [],
+    this.races = const [],
   });
 
   final String? active;
+
+  /// The protocol race per provider and side.
+  final List<DnsRace> races;
+
+  DnsRace? race(String provider, String side) => dnsRaceOf(races, provider, side);
 
   /// side (`direct` / `vpn`) -> the provider answering it now; a side with nobody is absent.
   final Map<String, String> answering;
@@ -848,7 +938,8 @@ class DnsHealth {
   /// What of it the page shows: a change rebuilds the page at once.
   String get sig => '$active|${answering.entries.map((e) => '${e.key}=${e.value}').join(',')}|'
       '${servers.where((s) => s.ok == false).map((s) => '${s.id}${s.deadOnNode ? '@' : ''}').join(',')}|'
-      '${servers.where((s) => s.rechecking).map((s) => s.id).join(',')}';
+      '${servers.where((s) => s.rechecking).map((s) => s.id).join(',')}|'
+      '${races.map((r) => '${r.provider}/${r.side}=${r.winnerKind}:${r.winnerMs}').join(',')}';
 }
 
 /// The host for the widgets below. [listenTo] (default: the host itself) is what rebuilds the
