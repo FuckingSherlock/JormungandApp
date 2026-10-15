@@ -541,4 +541,63 @@ void main() {
       b.close();
     }
   }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+
+  for (final pick in ['fastest', 'priority']) {
+    test('connect: $pick group whose first server is dead — right after connect the traffic goes through the live one', () async {
+      final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      target.listen((r) => r.response
+        ..write('hello')
+        ..close());
+      final ssPort = await freePort(), deadPort = await freePort(), mixed = await freePort();
+      final server = SingBoxProcess(_bin, p.join(tmp.path, 'server'));
+      final daemon = Daemon(
+        singBox: _bin,
+        dataDir: p.join(tmp.path, 'data'),
+        uiFile: p.join(tmp.path, 'none.html'),
+        exitCheck: (_) async => {'ip': '127.0.0.1'},
+        sysProxy: _FakeSysProxy(),
+      );
+      final api = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      api.listen(daemon.handle);
+      try {
+        await server.start(_ssServer(ssPort));
+        final c = HttpClient()..findProxy = (_) => 'DIRECT';
+        final req = await c.openUrl('POST', Uri.parse('http://127.0.0.1:${api.port}/api/connect'));
+        req.headers.set('X-Jorm', '1');
+        req.write(jsonEncode({
+          'plan': {
+            'routes': [
+              {
+                'id': 'A',
+                'kind': 'unit',
+                'main': {
+                  'pick': pick,
+                  'chosen': 'a::0', // the app's hint: the dead one
+                  'nodes': [
+                    {'key': 'a::0', 'outbound': {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': deadPort, 'method': 'aes-128-gcm', 'password': 'x'}},
+                    {'key': 'a::1', 'outbound': {'type': 'shadowsocks', 'server': '127.0.0.1', 'server_port': ssPort, 'method': 'aes-128-gcm', 'password': 'loopback'}},
+                  ],
+                },
+              },
+            ],
+            'mixedPort': mixed,
+            'global': true,
+            'urlTest': {'url': 'http://127.0.0.1:${target.port}/'},
+            'auto': {'checkers': <String>[], 'flapGuard': false},
+          },
+          'systemProxy': false,
+        }));
+        final res = jsonDecode(await (await req.close()).transform(utf8.decoder).join()) as Map;
+        c.close(force: true);
+        expect(res['connected'], isTrue, reason: '$res');
+        // no waiting for Auto's first round: the connect itself found the live server
+        expect(await _getOk(mixed, 'target.test', target.port), 'hello', reason: 'traffic through the live server right after connect');
+      } finally {
+        await daemon.shutdown();
+        await api.close(force: true);
+        await server.stop();
+        await target.close(force: true);
+      }
+    }, skip: _skip, timeout: const Timeout(Duration(seconds: 90)));
+  }
 }

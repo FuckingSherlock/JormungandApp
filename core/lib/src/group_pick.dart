@@ -84,15 +84,18 @@ List<String> rankCandidates(List<String> keys, {required PoolResult? Function(St
   return [...sorted, ...rest, ...gone];
 }
 
-Future<GroupPick> pickPriority(List<String> ordered, Probe1 probe, {Cancel? cancel, int first = pickFirstBatch, int parallel = pickParallel}) =>
-    _run(ordered, probe, fastest: false, window: Duration.zero, cancel: cancel, first: first, parallel: parallel);
+/// [afterEmpty] (both): asked once, when the first batch ended with no answer and servers are left; true = stop here
+/// (nothing was decided: no [GroupPick.key]). The connect tests the direct path there, no network = no point in testing on.
+Future<GroupPick> pickPriority(List<String> ordered, Probe1 probe,
+        {Cancel? cancel, int first = pickFirstBatch, int parallel = pickParallel, Future<bool> Function()? afterEmpty}) =>
+    _run(ordered, probe, fastest: false, window: Duration.zero, cancel: cancel, first: first, parallel: parallel, afterEmpty: afterEmpty);
 
 Future<GroupPick> pickFastest(List<String> keys, Probe1 probe,
-        {Duration window = pickWindow, Cancel? cancel, int first = pickFirstBatch, int parallel = pickParallel}) =>
-    _run(keys, probe, fastest: true, window: window, cancel: cancel, first: first, parallel: parallel);
+        {Duration window = pickWindow, Cancel? cancel, int first = pickFirstBatch, int parallel = pickParallel, Future<bool> Function()? afterEmpty}) =>
+    _run(keys, probe, fastest: true, window: window, cancel: cancel, first: first, parallel: parallel, afterEmpty: afterEmpty);
 
 Future<GroupPick> _run(List<String> keys, Probe1 probe,
-    {required bool fastest, required Duration window, Cancel? cancel, required int first, required int parallel}) async {
+    {required bool fastest, required Duration window, Cancel? cancel, required int first, required int parallel, Future<bool> Function()? afterEmpty}) async {
   final sw = Stopwatch()..start();
   final n = keys.length;
   final res = List<PoolResult?>.filled(n, null);
@@ -184,6 +187,8 @@ Future<GroupPick> _run(List<String> keys, Probe1 probe,
           launch();
         }
       } else {
+        // the first batch ended with no answer and servers are left: the caller may know why (the network is gone)
+        if (!streaming && afterEmpty != null && await afterEmpty()) return done(null, cancelled: cancel?.cancelled == true);
         streaming = true;
       }
     }

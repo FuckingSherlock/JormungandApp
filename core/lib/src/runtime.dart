@@ -288,11 +288,26 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
   Duration maxAge = Duration.zero,
   void Function(String kind, String key, int ms, bool byChecker)? onResult,
   void Function(String tag, String reason)? onFail,
+  void Function(String line)? onWarn,
   BoxFactory? boxFactory,
   Map<String, String> pins = const {},
   DnsCandidate? nodeResolver,
 }) async {
   final pl = pool ?? ProbePool.solo();
+  final session = TesterSession(
+      binary: binary,
+      workDir: workDir,
+      nodes: nodes,
+      pairs: pairs,
+      pool: pl,
+      url: url,
+      checkers: checkers,
+      timeoutMs: timeoutMs,
+      boxFactory: boxFactory,
+      pins: pins,
+      nodeResolver: nodeResolver,
+      onFail: onFail,
+      onWarn: onWarn);
   final requested = <(String, String, String)>[ // kind, key, pool identity
     for (final n in nodes) ('n', '${n['key']}', serverIdentity(n['outbound'] as Map)),
     for (final pr in pairs)
@@ -305,31 +320,17 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
   // the ones that answered before go first, the rest after them; each group in the order asked (the caller puts Auto's top first)
   bool answeredBefore((String, String, String) j) => pl.peek(j.$3, url: url, checkers: checkers)?.answered == true;
   final jobs = [...requested.where(answeredBefore), ...requested.where((j) => !answeredBefore(j))];
-  BoxRunner? sb;
-  Future<Probe>? starting;
-  Future<Probe> ensure() => starting ??= () async {
-        final pr = Probe(await freePort())..onFail = onFail;
-        final box = boxFactory != null ? boxFactory(workDir) : SingBoxProcess(binary, workDir);
-        sb = box;
-        await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr, pins: pins, nodeResolver: nodeResolver));
-        return pr;
-      }();
   try {
     // a sing-box that cannot start is an error of the call, not a pool full of misses
-    if (jobs.any((j) => !pl.fresh(j.$3, url: url, checkers: checkers, maxAge: maxAge))) await ensure();
+    if (jobs.any((j) => !pl.fresh(j.$3, url: url, checkers: checkers, maxAge: maxAge))) await session.ensure();
     final res = (nodes: <String, int>{}, pairs: <String, int>{});
     var next = 0;
     Future<void> worker() async {
       while (next < jobs.length) {
         final (kind, key, id) = jobs[next++];
-        final tag = '${kind == 'n' ? 't' : 'p'}/$key';
-        // a node that cannot be dialled (the SOCKS stage fails) is dead at once: backup checks only for a reached node
-        final r = await pl.probeResult(id, (u) async => (await ensure()).delay(tag, u, timeoutMs: timeoutMs, unreachedThrows: true),
-            url: url, checkers: checkers, maxAge: maxAge, checkerFanOut: 2);
-        final ms = r.ms;
-        pl.ladder.observe(id, ms, pl.now); // a check of the user's: an unavailable node that answers is back (ladder.dart)
-        (kind == 'n' ? res.nodes : res.pairs)[key] = ms;
-        onResult?.call(kind, key, ms, r.byChecker);
+        final r = await session.probe(kind, key, id, maxAge: maxAge);
+        (kind == 'n' ? res.nodes : res.pairs)[key] = r.ms;
+        onResult?.call(kind, key, r.ms, r.byChecker);
       }
     }
 
@@ -337,18 +338,110 @@ Future<({Map<String, int> nodes, Map<String, int> pairs, NetStatus network})> me
     var network = pl.status;
     final all = [...res.nodes.values, ...res.pairs.values];
     if (all.isNotEmpty && all.every((ms) => ms < 0)) {
-      final up = await pl.directAnswers(
-        url: url,
-        checkers: checkers,
-        timeoutMs: timeoutMs,
-        runner: (u) async => (await ensure()).delay('direct', u, timeoutMs: timeoutMs),
-      );
-      if (up == false) pl.silent(true);
+      await session.directAnswers();
       network = pl.status;
     }
     return (nodes: res.nodes, pairs: res.pairs, network: network);
   } finally {
-    await sb?.stop();
+    await session.stop();
+  }
+}
+
+/// A throwaway sing-box that tests servers one at a time through the probe pool ([measureLatency]'s tester, and the
+/// connect's pick, service.dart `connectPicks`): [nodes] as `t/<key>`, [pairs] as `p/<key>`, started on the first test
+/// ([ensure]). Every result goes into [pool] under the server's identity ([serverIdentity]); a node that cannot be
+/// dialled (the SOCKS stage fails) is dead at once, backup checks only for a reached node.
+///
+/// [finish] ends it without cutting a test short: it stops when the tests already started have ended (their results
+/// go to the pool for Auto and the background ping); [stop] stops it now.
+class TesterSession {
+  TesterSession({
+    required this.binary,
+    required this.workDir,
+    required this.nodes,
+    this.pairs = const [],
+    required this.pool,
+    this.url = defaultTestUrl,
+    this.checkers = const [],
+    this.timeoutMs = 5000,
+    this.boxFactory,
+    this.pins = const {},
+    this.nodeResolver,
+    this.onFail,
+    this.onWarn,
+  });
+
+  final String binary, workDir, url;
+  final List<Map> nodes, pairs;
+  final ProbePool pool;
+  final List<String> checkers;
+  final int timeoutMs;
+  final BoxFactory? boxFactory;
+  final Map<String, String> pins;
+  final DnsCandidate? nodeResolver;
+  final void Function(String tag, String reason)? onFail;
+
+  /// A line for the journal (a warn) when the throwaway sing-box could not be stopped.
+  final void Function(String line)? onWarn;
+
+  BoxRunner? _sb;
+  Future<Probe>? _starting;
+  var _active = 0;
+  var _finishing = false;
+  var _stopped = false;
+
+  /// Starts the throwaway sing-box (once); a start that fails throws.
+  Future<Probe> ensure() => _starting ??= () async {
+        final pr = Probe(await freePort())..onFail = onFail;
+        final box = boxFactory != null ? boxFactory!(workDir) : SingBoxProcess(binary, workDir);
+        _sb = box;
+        await box.start(buildTesterConfig(nodes: nodes, pairs: pairs, probe: pr, pins: pins, nodeResolver: nodeResolver));
+        return pr;
+      }();
+
+  /// One test of a node (`kind` `n`, tag `t/<key>`) or a pair (`p`) of pool identity [id]; the answer joins the pool.
+  /// [maxAge]: a pool answer younger than that stands for the test.
+  Future<PoolResult> probe(String kind, String key, String id, {Duration maxAge = Duration.zero}) async {
+    final tag = '${kind == 'n' ? 't' : 'p'}/$key';
+    _active++;
+    try {
+      final r = await pool.probeResult(id, (u) async => (await ensure()).delay(tag, u, timeoutMs: timeoutMs, unreachedThrows: true),
+          url: url, checkers: checkers, maxAge: maxAge, checkerFanOut: 2);
+      pool.ladder.observe(id, r.ms, pool.now); // a check of the user's: an unavailable node that answers is back (ladder.dart)
+      return r;
+    } finally {
+      _active--;
+      if (_finishing && _active == 0) unawaited(stop());
+    }
+  }
+
+  /// The direct path tested through this sing-box (pool.dart): not answering writes a silent network into the pool
+  /// (any answer anywhere takes it back). null = it could not be tested.
+  Future<bool?> directAnswers() async {
+    final up = await pool.directAnswers(
+      url: url,
+      checkers: checkers,
+      timeoutMs: timeoutMs,
+      runner: (u) async => (await ensure()).delay('direct', u, timeoutMs: timeoutMs),
+    );
+    if (up == false) pool.silent(true);
+    return up;
+  }
+
+  /// Ends the session once the tests already started have ended (now, when none is running).
+  void finish() {
+    _finishing = true;
+    if (_active == 0) unawaited(stop());
+  }
+
+  Future<void> stop() async {
+    if (_stopped) return;
+    _stopped = true;
+    try {
+      await _sb?.stop();
+    } catch (e) {
+      onWarn?.call('the throwaway test sing-box ($workDir) could not be stopped: $e');
+    }
   }
 }
 

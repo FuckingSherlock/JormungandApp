@@ -255,6 +255,7 @@ void main() {
   });
 
   test('a change that makes another plan reconnects', () async {
+    boxFails = SingBoxError('no sing-box'); // the connect's check of servers has no tester here: skipped at once, not 5 s of timeouts
     await start();
     await host.connect();
     expect(runner.starts, 1);

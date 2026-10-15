@@ -10,6 +10,7 @@ import 'address_resolver.dart';
 import 'api.dart';
 import 'appupdate.dart';
 import 'auto.dart';
+import 'group_pick.dart';
 import 'auto_memory.dart';
 import 'catalog/catalog.dart' show Catalog;
 import 'catalog/rules_model.dart' show dnsBuiltinIds;
@@ -365,6 +366,23 @@ class CoreService implements CoreApi {
   Timer? _tunStartTimer;
   final _tunAppReported = <String, ({int at, int? id})>{}; // apps of a passed test → when and as which event it was written last
   int _connectSeq = 0;
+
+  /// The connect's pick of servers under way ([connectPicks]): a disconnect or a newer connect cancels it.
+  Cancel? _pickCancel;
+
+  /// A new connect / disconnect generation: the pick of the one before is cancelled.
+  int _nextSeq() {
+    _pickCancel?.cancel('superseded');
+    return ++_connectSeq;
+  }
+
+  /// [plan] to start sing-box again on (an own restart, a reconnect for lists or addresses): the route Auto is on and,
+  /// per group, the server it is on now — a server found by a check is not forgotten. Call before [_stopAuto].
+  Map<String, dynamic> _continuationPlan(Map<String, dynamic> plan) {
+    final a = _auto;
+    if (a == null) return plan;
+    return planWithChosen({...plan, 'current': a.index}, a.groupServers());
+  }
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
@@ -550,7 +568,7 @@ class CoreService implements CoreApi {
 
   @override
   Future<void> dispose() async {
-    _connectSeq++;
+    _nextSeq();
     _netProbeSeq++; // the direct-path probe stops
     _exitSeq++; // an exit check still in flight is dropped when it ends: nothing is saved after the dispose
     _wakeUp();
@@ -1661,7 +1679,7 @@ class CoreService implements CoreApi {
   void _crashed(int code) {
     final plan = _plan;
     if (plan == null) return;
-    final seq = _connectSeq, at = _auto?.index;
+    final seq = _connectSeq, next = _continuationPlan(plan);
     _stopAuto(park: true);
     sentinel.context.crashed();
     runner.note('sing-box stopped on its own (exit code $code)');
@@ -1672,7 +1690,7 @@ class CoreService implements CoreApi {
     if (_now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
     _downSince = null;
     _released = false;
-    _recover(seq, at == null ? plan : {...plan, 'current': at}, code);
+    _recover(seq, next, code);
   }
 
   Future<void> _recover(int seq, Map<String, dynamic> plan, int code) async {
@@ -2540,8 +2558,7 @@ class CoreService implements CoreApi {
         return;
       }
       logBook.note('info', 'address: restarting sing-box for $what');
-      final at = _auto?.index;
-      unawaited(_connect({'plan': at == null ? plan : {...plan, 'current': at}, 'systemProxy': _sysWanted}, own: false, reason: 'reresolve').then((_) {}, onError: (_) {}));
+      unawaited(_connect({'plan': _continuationPlan(plan), 'systemProxy': _sysWanted}, own: false, reason: 'reresolve').then((_) {}, onError: (_) {}));
     });
   }
 
@@ -2642,6 +2659,7 @@ class CoreService implements CoreApi {
           'pins': pins,
           'ruleSetFiles': lists.files,
           'upSince': _now().millisecondsSinceEpoch,
+          'selectorGroups': true, // every group is a selector (a record without it is of a core with urltest groups: not adopted)
         });
       } catch (e) {
         runner.note('the record for taking this sing-box over was not kept: $e');
@@ -2674,6 +2692,12 @@ class CoreService implements CoreApi {
         return {'adopted': false, 'stopped': true};
       }
       if (rec == null) return {'adopted': false};
+      if (rec['selectorGroups'] != true) {
+        // a sing-box of a core whose Fastest groups were urltest: Auto here could not move them; the app connects anew
+        logBook.note('warn', 'A running tunnel of an older core (urltest groups) is not taken over: stopped');
+        await r.stop();
+        return {'adopted': false, 'stopped': true};
+      }
       final Map<String, dynamic> plan;
       final Probe probe;
       final SvcIn? svc;
@@ -2835,8 +2859,7 @@ class CoreService implements CoreApi {
       if (seq != _connectSeq || !runner.running) return;
       if (now.files.keys.any((t) => !_listTags.contains(t))) {
         // only a list that is new to the config needs a restart (its _connect starts the timer again)
-        final at = _auto?.index;
-        unawaited(_connect({'plan': at == null ? plan : {...plan, 'current': at}, 'systemProxy': _sysWanted}, own: false).then((_) {}, onError: (_) {}));
+        unawaited(_connect({'plan': _continuationPlan(plan), 'systemProxy': _sysWanted}, own: false).then((_) {}, onError: (_) {}));
         return;
       }
     } catch (_) {}
@@ -2849,9 +2872,12 @@ class CoreService implements CoreApi {
   /// body: {plan (see config.dart), systemProxy: bool}. [own]: the user asked (the journal
   /// marks it so no notification comes of it); the reconnect that picks up lists is not.
   Future<Map<String, dynamic>> _connect(Map<String, dynamic> body, {bool own = true, String? reason}) async {
-    final plan = (body['plan'] as Map).cast<String, dynamic>();
+    var plan = (body['plan'] as Map).cast<String, dynamic>();
     if (own) _triedAddrs.clear(); // the addresses a node was tried on belong to the run the user started
-    final seq = ++_connectSeq;
+    // a connect over a running one (a plan change, an own restart): the servers its groups are on stay, only groups with
+    // none are checked; a fresh connect checks the group it starts on (the app's `chosen` is a hint, kept only for Manual's pin)
+    final continuation = runner.running && _plan != null;
+    final seq = _nextSeq();
     _wakeUp();
     _recovering = null;
     _downSince = null;
@@ -2875,6 +2901,15 @@ class CoreService implements CoreApi {
         _plan = null;
         final sys = body['systemProxy'] == true;
         sentinel.context.starting(reason ?? (own ? 'userConnect' : 'refreshLists'));
+        final cancel = _pickCancel = Cancel();
+        final Map<String, String>? picks;
+        try {
+          picks = await connectPicks(plan, cancel: cancel, continuation: continuation);
+        } finally {
+          if (identical(_pickCancel, cancel)) _pickCancel = null;
+        }
+        if (picks == null || seq != _connectSeq) return; // a disconnect / newer connect came in while the servers were checked
+        plan = planWithChosen(plan, picks);
         final (lists, warnings) = await _startSingBox(plan, sys: sys, why: reason ?? 'connect');
         sentinel.context.started();
         _plan = plan;
@@ -2916,8 +2951,83 @@ class CoreService implements CoreApi {
     return status();
   }
 
+  /// The connect's checks of servers: per group `{group, mode, tried, answered, chosen, ms, weak, tookMs, found}`.
+  List<Map<String, dynamic>> _pickReports = const [];
+
+  /// Which server each group of the route the connect starts on starts with, by a fresh check of the group's servers
+  /// (a throwaway sing-box, [TesterSession]; the results go into the pool): `{groupTag: key}`. The route's main group
+  /// (a chain's entry group — the exit keeps the plan's chosen / first server); a pinned or single-server group is not
+  /// checked, nor a group that already has a valid `chosen` when [continuation]. Fastest and Priority by their rule
+  /// (group_pick.dart). Nobody answered: the first by rank; no network (the direct path does not answer either): the same.
+  /// null = cancelled ([_pickCancel]). A tester that cannot start is no reason to fail the connect: no pick, the plan as is.
+  Future<Map<String, String>?> connectPicks(Map<String, dynamic> plan, {Cancel? cancel, bool continuation = false}) async {
+    _pickReports = const [];
+    final rs = planRoutes(plan);
+    final i = planCurrent(plan, rs.length), r = rs[i];
+    final chain = r['kind'] == 'chain';
+    final tag = chain ? routeEntryTag(i) : routeTag(i);
+    final g = (chain ? r['entry'] : r['main']) as Map?;
+    if (g == null) return {};
+    final byKey = <String, Map>{};
+    for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
+      if (n['outbound'] is Map) byKey.putIfAbsent('${n['key']}', () => n);
+    }
+    final keys = byKey.keys.toList();
+    if (g['pinned'] == true || keys.length < 2 || (continuation && keys.contains(g['chosen']))) return {};
+    final settings = AutoSettings.fromPlan(plan);
+    final priority = g['pick'] == 'priority';
+    String idOf(String k) => serverIdentity(byKey[k]!['outbound'] as Map);
+    final ranked = priority
+        ? keys
+        : rankCandidates(keys, peek: (k) {
+            final p = pool.peek(idOf(k), url: settings.url, checkers: settings.checkers);
+            return p != null && pool.now - p.at <= AutoService.workingAge.inMilliseconds ? p : null;
+          }, dead: (k) => pool.ladder.has(idOf(k)));
+    _starting = plan; // what the tester's resolver reads: the plan being started
+    _addrSettings = null;
+    TesterSession? session;
+    try {
+      final nodes = byKey.values.toList();
+      final s = session = TesterSession(
+          binary: singBox,
+          workDir: p.join(dataDir, 'run', 'connect-${_pingSeq++ % 8}'),
+          nodes: nodes,
+          pool: pool,
+          url: settings.url,
+          checkers: settings.checkers,
+          timeoutMs: settings.timeoutMs,
+          boxFactory: _loggedBoxes('connect'),
+          pins: await _testerPins(nodes, const [], 'connect'),
+          nodeResolver: await _testerResolver(),
+          onWarn: (l) => logBook.note('warn', 'connect: $l'));
+      await s.ensure(); // a tester that cannot start is an error (the catch below), not a pool full of misses
+      Future<PoolResult> probe1(String k) => s.probe('n', k, idOf(k));
+      var noNet = false;
+      Future<bool> afterEmpty() async => noNet = await s.directAnswers() == false;
+      final pick = priority
+          ? await pickPriority(ranked, probe1, cancel: cancel, afterEmpty: afterEmpty)
+          : await pickFastest(ranked, probe1, cancel: cancel, afterEmpty: afterEmpty);
+      if (pick.cancelled || cancel?.cancelled == true) return null;
+      if (!pick.found && !noNet) await s.directAnswers(); // everybody missed: the network is told apart from dead servers
+      final chosen = pick.key ?? ranked.first;
+      final rep = {'group': tag, 'mode': priority ? 'priority' : 'fastest', ...pick.toJson(), 'chosen': chosen, 'found': pick.found}..remove('key');
+      _pickReports = [rep];
+      logBook.note(pick.found ? 'info' : 'warn',
+          'connect: $tag ${rep['mode']}: tried ${pick.tried} of ${keys.length}, ${pick.answered} answered; '
+          '${pick.found ? '$chosen ${pick.ms} ms${pick.weak ? ' (a backup check only)' : ''}' : 'nobody answered${noNet ? ' (no network)' : ''}, starts on $chosen'}; ${pick.tookMs} ms');
+      return {tag: chosen};
+    } catch (e) {
+      logBook.note('warn', 'connect: the servers of $tag could not be checked ($e): the plan is used as it is');
+      return {};
+    } finally {
+      _starting = null;
+      _addrSettings = null;
+      session?.finish();
+    }
+  }
+
   // conn/connected: the entry Auto starts on and its server (the group's chosen member),
-  // the mode (tun / proxy) and the routing.
+  // the mode (tun / proxy) and the routing; `pick`: the check of the servers made for this start (connectPicks).
   Map<String, dynamic> _connectedData(Map<String, dynamic> plan) {
     final routes = planRoutes(plan);
     final i = planCurrent(plan, routes.length);
@@ -2925,6 +3035,7 @@ class CoreService implements CoreApi {
     return {
       'entry': '${routes[i]['id'] ?? routeTag(i)}',
       'server': ?server,
+      'pick': ?(_pickReports.isEmpty ? null : _pickReports.first),
       'mode': planTun(plan) ? 'tun' : 'proxy',
       'route': plan['global'] == true ? 'global' : 'rules',
     };
@@ -3000,7 +3111,7 @@ class CoreService implements CoreApi {
 
   @override
   Future<Map<String, dynamic>> disconnect() async {
-    final seq = ++_connectSeq;
+    final seq = _nextSeq();
     _wakeUp(); // ends the restart's retries
     final was = runner.running || _plan != null || _recovering != null;
     _plan = null;
@@ -3334,6 +3445,7 @@ class CoreService implements CoreApi {
             nodeResolver: await _testerResolver(),
             onResult: (kind, key, ms, byChecker) => line({'kind': kind, 'key': key, 'ms': ms, if (byChecker) 'byChecker': true}),
             onFail: (tag, reason) => why[reason] = (why[reason] ?? 0) + 1,
+            onWarn: (l) => logBook.note('warn', 'Ping: $l'),
           );
           network = r.network;
           final missed = [...r.nodes.values, ...r.pairs.values].where((ms) => ms < 0).length;

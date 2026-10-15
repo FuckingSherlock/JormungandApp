@@ -24,6 +24,7 @@ class AdoptRunner implements AdoptableRunner {
   bool up = false;
   bool adopted = false;
   Object? adoptFails;
+  Object? startFails; // a throwaway test box that cannot start: the connect's check of servers is skipped (no sing-box here)
   @override
   void Function(String line)? onLog;
   @override
@@ -39,6 +40,7 @@ class AdoptRunner implements AdoptableRunner {
   void note(String line) => onLog?.call('[jormd] $line');
   @override
   Future<void> start(Map<String, dynamic> config) async {
+    if (startFails != null) throw startFails!;
     platform
       ..running = true
       ..record = null
@@ -153,7 +155,7 @@ void main() {
       singBox: '',
       dataDir: dir.path,
       runner: runner,
-      boxFactory: (_) => AdoptRunner(HeldTunnel()),
+      boxFactory: (_) => AdoptRunner(HeldTunnel())..startFails = SingBoxError('no sing-box'),
       sysProxy: NoSystemProxy(),
       isElevated: () => true,
       resolveAddresses: false, // hermetic: no real DoH

@@ -14,6 +14,9 @@ import 'address_test.dart' show MockDoh, doh;
 import 'sentinel_fakes.dart';
 
 class _Runner implements BoxRunner {
+  _Runner({this.failStart = false, this.gate});
+  final bool failStart;
+  final Completer<void>? gate; // start waits for it
   final configs = <Map<String, dynamic>>[];
   bool up = false;
   @override
@@ -30,6 +33,8 @@ class _Runner implements BoxRunner {
   void note(String line) => onLog?.call('[jormd] $line');
   @override
   Future<void> start(Map<String, dynamic> config) async {
+    await gate?.future;
+    if (failStart) throw StateError('no sing-box in this test');
     configs.add(config);
     up = true;
   }
@@ -98,7 +103,7 @@ void main() {
   _Fake? fake;
   MockDoh? fast, slow;
 
-  Future<void> boot({bool useFake = false, List<DnsCandidate> Function()? servers}) async {
+  Future<void> boot({bool useFake = false, List<DnsCandidate> Function()? servers, Completer<void>? testerGate}) async {
     tmp = await Directory.systemTemp.createTemp('jorm-svc-addr');
     runner = _Runner();
     time = FakeTime();
@@ -111,7 +116,9 @@ void main() {
       singBox: 'none',
       dataDir: p.join(tmp.path, 'data'),
       runner: runner,
-      boxFactory: (_) => _Runner(),
+      // the connect's check of servers (TesterSession) cannot start its sing-box here: "tester did not start" → the plan as it is.
+      // A tester that ran would find no network in a test (nobody answers) and put the core's network down, and wait the test timeout.
+      boxFactory: (_) => _Runner(failStart: true, gate: testerGate),
       sysProxy: NoSystemProxy(),
       exitCheck: (_) async => {'ip': '127.0.0.1'},
       siteChecker: SiteChecker(get: (_, {proxyPort, timeout = Duration.zero}) async => throw const SocketException('no network in tests'), delay: (_) async {}),
@@ -258,6 +265,59 @@ void main() {
       expect(runner.configs, hasLength(3));
       expect(runner.serverOf('route0/s::a'), '10.0.0.9');
       expect(fake!.whys.last, 'reresolve');
+    });
+
+    test('startHostnames: a group that starts on its chosen server waits for that server\'s host only', () async {
+      await boot(useFake: true); // the group's tearDown expects a booted service
+      Map<String, dynamic> two(String? chosen) => {
+            'routes': [
+              {
+                'id': 'A',
+                'kind': 'unit',
+                'main': {'pick': 'fastest', 'chosen': chosen, 'nodes': [_node('s::a', 'a.example'), _node('s::b', 'b.example'), _node('s::c', 'c.example')]},
+              },
+            ],
+          };
+      expect(startHostnames(two('s::b')), {'b.example'});
+      expect(startHostnames(two(null)), {'a.example', 'b.example', 'c.example'}, reason: 'no chosen: the group starts on its first, any of them may be needed');
+      expect(startHostnames(two('s::gone')), {'a.example', 'b.example', 'c.example'}, reason: 'a chosen that is not a member is no choice');
+    });
+
+    test('connectPicks: a continuation keeps a valid chosen (no check); a group without one is checked', () async {
+      await boot(useFake: true);
+      List<String> checks() => [
+            for (final l in svc.log(since: null)['lines'] as List)
+              if ('${(l as Map)['msg']}'.contains('connect: the servers of route0')) '${l['msg']}',
+          ];
+      final multi = _body([_route('A', {'s::a': 'a.example', 's::b': 'b.example'})])['plan'] as Map<String, dynamic>;
+      expect(await svc.connectPicks(multi, continuation: true), isEmpty);
+      expect(checks(), isEmpty, reason: 'the core\'s chosen stands');
+      final noChosen = {
+        ...multi,
+        'routes': [
+          for (final r in multi['routes'] as List) {...(r as Map), 'main': {...(r['main'] as Map), 'chosen': null}},
+        ],
+      };
+      expect(await svc.connectPicks(noChosen, continuation: true), isEmpty);
+      expect(checks(), hasLength(1), reason: 'no chosen: checked (the tester cannot start here: the plan is used as it is)');
+      expect(await svc.connectPicks(multi), isEmpty);
+      expect(checks(), hasLength(2), reason: 'a fresh connect checks the group even with the app\'s chosen');
+    });
+
+    test('a disconnect while the servers are checked: no sing-box is started', () async {
+      final gate = Completer<void>();
+      await boot(useFake: true, testerGate: gate);
+      svc.addressBook.put('a.example', seeded(['10.0.0.1']));
+      svc.addressBook.put('b.example', seeded(['10.0.0.2']));
+      final c = svc.connect(_body([_route('A', {'s::a': 'a.example', 's::b': 'b.example'})]));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(gate.isCompleted, isFalse);
+      final d = svc.disconnect(); // cancels the pick; waits for the connect's lock
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      gate.complete();
+      await Future.wait([c, d]);
+      expect(runner.configs, isEmpty, reason: 'the cancelled connect never started sing-box');
+      expect(runner.up, isFalse);
     });
 
     test('not while the core is not settled, the network is not up, or sing-box is down', () async {

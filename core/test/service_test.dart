@@ -72,6 +72,28 @@ class _Runner implements BoxRunner {
   Future<void> stop() async => up = false;
 }
 
+/// A runner that can take over a running sing-box and hands back [record] for it.
+class _AdoptRunner extends _Runner implements AdoptableRunner {
+  _AdoptRunner(this.record);
+  final Map<String, dynamic> record;
+  bool stopped = false;
+
+  @override
+  Future<void> keep(Map<String, dynamic> record) async {}
+
+  @override
+  Future<Map<String, dynamic>?> adopt() async {
+    up = true; // a sing-box was running; adopting attaches to it
+    return record;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopped = true;
+    up = false;
+  }
+}
+
 /// A throwaway box (latency test) that comes up and complains once.
 class _NoisyRunner extends _Runner {
   @override
@@ -864,6 +886,28 @@ void main() {
     await time.advanceSeconds(60);
     expect(tunEvents('tunTcpDead'), isEmpty, reason: 'the session ended: nothing was confirmed');
     expect(svc.sentinel.roots.byKey('tun.tcpDead'), isNull);
+  });
+
+  test('adopt: a record without the selectorGroups marker (a core with urltest groups) is not taken over: stopped', () async {
+    tmp = await Directory.systemTemp.createTemp('jorm-svc');
+    time = FakeTime();
+    final old = _AdoptRunner({'plan': _body()['plan'], 'tunnelPort': 1, 'probePort': 2, 'probeSecret': 'x'});
+    svc = CoreService(
+      sentinelClock: time.clock,
+      now: () => time.t,
+      isElevated: () => true,
+      singBox: 'none',
+      resolveAddresses: false,
+      dataDir: p.join(tmp.path, 'data'),
+      runner: old,
+      sysProxy: NoSystemProxy(),
+      exitCheck: (_) async => {'ip': '127.0.0.1'},
+    );
+    await svc.init();
+    expect(await svc.adopt({}), {'adopted': false, 'stopped': true});
+    expect(old.stopped, isTrue);
+    expect(old.running, isFalse);
+    expect((svc.log(since: null)['lines'] as List).any((l) => '${(l as Map)['msg']}'.contains('older core')), isTrue);
   });
 
   test('dispose stops the box and ends the streams', () async {

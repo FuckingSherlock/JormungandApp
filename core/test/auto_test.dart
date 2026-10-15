@@ -273,6 +273,24 @@ void main() {
     expect(events, isEmpty);
   });
 
+  test('refresh(): the first read puts the groups and the route selector back on the plan\'s start (sing-box\'s cache_file may restore older picks)', () async {
+    final p = plan([unit('A', ['s::a1', 's::a2', 's::a3'], chosen: 's::a2'), unit('B', ['s::b1'])], current: 0);
+    final (auto, fake) = setup(p, {'s::a1': 40, 's::a2': 80, 's::a3': 60, 's::b1': 30});
+    final notes = <String>[];
+    final a = AutoService(fake, p, delay: fake.delayTest, pool: everyRound(), note: notes.add);
+    expect(fake.groups['route0']!.now, 'route0/s::a2');
+    fake.groups['route0']!.now = 'route0/s::a1'; // restored by cache_file
+    fake.groups['proxy']!.now = 'route1';
+    expect(await a.refresh(), isTrue);
+    expect([fake.groups['route0']!.now, fake.groups['proxy']!.now], ['route0/s::a2', 'route0']);
+    expect(a.toJson()['server'], 's::a2');
+    expect(notes.where((n) => n.contains('restored')), hasLength(2));
+    fake.groups['route0']!.now = 'route0/s::a3'; // a later move is the core's own business: not undone
+    await a.refresh();
+    expect(fake.groups['route0']!.now, 'route0/s::a3');
+    expect(auto.index, 0);
+  });
+
   test('refresh(): false before sing-box first answers (selected empty)', () async {
     final auto = AutoService(_Dead(), plan([unit('A', ['s::a'])]), delay: (tag, url, t) async => -1);
     expect(await auto.refresh(), isFalse);

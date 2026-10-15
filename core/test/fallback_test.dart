@@ -260,6 +260,20 @@ void main() {
     r.svc.stop();
   });
 
+  test('networkChanged() runs a round out of turn (the first check is far away)', () async {
+    final r = _Rig(_plan([_rule('r1', 'src:x', 'main')]), {'s::x1': 20, 's::x2': 30, 's::a': 10},
+        settings: const AutoSettings(failAfter: 2, flapGuard: false, firstCheck: Duration(minutes: 10), stallAfter: Duration(milliseconds: 30)));
+    r.svc.start();
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(r.fake.tested, isEmpty, reason: 'nothing before the first check');
+    r.svc.networkChanged();
+    for (var i = 0; i < 50 && r.fake.tested.isEmpty; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(r.fake.tested, isNotEmpty, reason: 'the round ran at once');
+    r.svc.stop();
+  });
+
   test('a config with no target to fall back from has nothing to watch', () {
     final info = RoutingInfo();
     buildConfig(_plan([_rule('r1', '', 'default')]), info: info);

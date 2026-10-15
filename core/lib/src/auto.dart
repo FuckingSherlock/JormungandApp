@@ -331,7 +331,8 @@ class _Group {
       : priority = g['pick'] == 'priority',
         pinned = g['pinned'] == true,
         keys = {for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) '${n['key']}'}.toList() {
-    if (keys.contains(g['chosen'])) now = g['chosen'] as String; // the selector starts on it: the status knows the server at once
+    // the selector starts on it: the status knows the server at once ([start]: what the first groups answer is checked against)
+    if (keys.contains(g['chosen'])) now = start = g['chosen'] as String;
     for (final n in (g['nodes'] as List? ?? const []).cast<Map>()) {
       final o = n['outbound'];
       ids['${n['key']}'] = o is Map ? serverIdentity(o) : '$tag/${n['key']}'; // no outbound: nothing to share
@@ -361,6 +362,7 @@ class _Group {
   /// memory's, so a service made anew starts from them.
   final health = <String, Health>{};
   String? now; // the server in use (key)
+  String? start; // the server the config starts the group on (the plan's `chosen`), null = the first one
   int improvedAt = 0; // when the better-server look ([AutoService._improve]) last ran, ms since epoch
   final _missedHere = <String>{}; // the ones with no memory key
 
@@ -523,6 +525,16 @@ class AutoService {
   /// The route in use (index into the plan's routes).
   late int index;
 
+  bool _startChecked = false; // the first groups answer was compared with the servers the plan starts on
+
+  /// The server every group is on now (group tag → key): what a restart with the same plan starts the groups on, so
+  /// that a server chosen by a check is not forgotten (service.dart `_continuationPlan`).
+  Map<String, String> groupServers() => {
+        for (final r in _routes)
+          for (final g in r.groups)
+            if (g.now != null && g.keys.contains(g.now)) g.tag: g.now!,
+      };
+
   /// Manual (`plan.manual`): the plan holds every Auto route, but this one stays on the route in
   /// use — nothing is tested or moved between routes (servers inside the route still heal, a
   /// pinned one never moves). Switched live by [setManual]: no sing-box restart.
@@ -540,6 +552,9 @@ class AutoService {
     var ok = true;
     final i = entry == null ? -1 : _routes.indexWhere((r) => r.id == entry);
     if (on && entry != null && i != index) {
+      // the first look puts the groups back on this start's choice: it must not run over the user's move (the select
+      // below makes the groups stream fire it while `index` still names the old route)
+      if (!_startChecked) await refresh();
       final old = _routes[index].tag;
       ok = i >= 0 && !_stopped && await api.select(topTag, _routes[i].tag);
       if (ok) {
@@ -1341,8 +1356,30 @@ class AutoService {
   /// that only the core moves, so a move seen here is not news: the switches are emitted by [_pick] / [_moveTo]
   /// alone. False before sing-box first told.
   Future<bool> refresh() async {
-    final by = api.selected;
+    final by = {...api.selected};
     if (by.isEmpty || _stopped) return false;
+    if (!_startChecked) {
+      // sing-box's cache_file may have restored an older pick over the config's default: the choice made for this start
+      // (the connect's fresh check, or the server the group was on before a restart) wins
+      _startChecked = true;
+      // the route selector the same way: the plan's `current` is the route this start is on
+      final want = _routes[index].tag;
+      if (by.containsKey(topTag) && by[topTag] != want && await api.select(topTag, want)) {
+        note?.call('auto: $topTag was restored on ${by[topTag]} by sing-box: put on $want, the route of this start');
+        by[topTag] = want;
+      }
+      for (final r in _routes) {
+        for (final g in r.groups) {
+          final want = g.start;
+          if (want == null || !by.containsKey(g.tag) || g.keyOf(by[g.tag]) == want) continue;
+          if (await api.select(g.tag, g.member(want))) {
+            note?.call('auto: ${g.tag} was restored on ${by[g.tag]} by sing-box: put on ${g.member(want)}, the server chosen for this start');
+            by[g.tag] = g.member(want);
+          }
+        }
+      }
+      if (_stopped) return false;
+    }
     final i = _routes.indexWhere((r) => r.tag == by[topTag]);
     if (i >= 0 && i != index) {
       index = i;

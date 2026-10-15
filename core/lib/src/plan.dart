@@ -22,6 +22,26 @@ List<Map<String, dynamic>> planRoutes(Map<String, dynamic> plan) {
   return [plan];
 }
 
+/// A copy of [plan] whose groups start on [chosen] (group tag → server key; tags as above, a missing tag keeps the
+/// group as it is). A plan without `routes` is one route: its own `main` / `entry` are changed.
+Map<String, dynamic> planWithChosen(Map<String, dynamic> plan, Map<String, String> chosen) {
+  if (chosen.isEmpty) return plan;
+  Map<String, dynamic> route(Map<String, dynamic> r, int i) {
+    final out = {...r};
+    for (final (field, tag) in [('main', routeTag(i)), ('entry', routeEntryTag(i))]) {
+      final g = r[field], key = chosen[tag];
+      if (g is Map && key != null) out[field] = {...g.cast<String, dynamic>(), 'chosen': key};
+    }
+    return out;
+  }
+
+  final rs = plan['routes'];
+  if (rs is List && rs.isNotEmpty) {
+    return {...plan, 'routes': [for (var i = 0; i < rs.length; i++) route((rs[i] as Map).cast<String, dynamic>(), i)]};
+  }
+  return {...plan, ...route(plan, 0)};
+}
+
 /// The route the top selector starts on.
 int planCurrent(Map<String, dynamic> plan, int count) => ((plan['current'] as num?)?.toInt() ?? 0).clamp(0, count - 1);
 
