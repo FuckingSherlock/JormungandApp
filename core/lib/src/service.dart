@@ -286,6 +286,8 @@ class CoreService implements CoreApi {
     now: _now,
     ignored: (host) => ignoredSites.matches(host),
     background: () => !screenOn,
+    own: _isOwnConnection,
+    ownFailed: _ownConnectionFailed,
     report: _reportFailing,
     recovered: (key) => sentinel.recovered(key),
     update: (id, data) => eventBook.update(id, data: data),
@@ -293,6 +295,36 @@ class CoreService implements CoreApi {
     worked: _siteWorked,
     timer: (d, f) => sentinel.clock.timer(d, f),
   );
+
+  /// A connection of this app's own process that entered the TUN: it went by the self rule ("Core and speed tests",
+  /// config.dart → selfRules), or its owner is the app's package (Android) / one of [_selfPaths] (desktop). It is not a
+  /// failure of an app the user runs: whoever made it reports its result (the ping, the check).
+  bool _isOwnConnection(ClosedConnection c) {
+    if (c.rule.isNotEmpty) {
+      final o = _ruleNames?.of(c.rule);
+      if (o != null && o.kind == 'system' && o.id == 'core') return true;
+    }
+    if (c.pkg.isNotEmpty && _selfPackages.contains(c.pkg)) return true;
+    if (c.process.isNotEmpty && _selfPaths.isNotEmpty) {
+      String norm(String s) => Platform.isWindows ? s.replaceAll('/', '\\').toLowerCase() : s;
+      final p = norm(c.process);
+      return _selfPaths.any((s) => norm(s) == p);
+    }
+    return false;
+  }
+
+  /// A connection of the app itself got nothing back: not counted as an app's failure ([FailureBook.own]), but told
+  /// in the raw log with everything needed to find who made it.
+  void _ownConnectionFailed(ClosedConnection c, ConnOutcome o) {
+    final ip = c.address.isEmpty ? '' : ' (dialled ${c.address})';
+    final who = c.pkg.isNotEmpty ? c.pkg : (processEventData(c.process)?['name'] ?? 'this app');
+    logBook.note(
+        'info',
+        'Own connection of $who to ${c.destination}$ip got nothing back (${o.kind.name}'
+        '${o.durationMs == null ? '' : ', ${o.durationMs} ms'}; ${c.network.isEmpty ? 'tcp' : c.network} from ${c.inbound.isEmpty ? '?' : c.inbound} '
+        'through ${c.outbound.isEmpty ? 'direct' : c.outbound}): the app\'s own traffic, skipped from the failing-apps book; '
+        'the request that made it reports its result itself');
+  }
 
   /// The series of `conn/failing` went on failing (or failed inside the hold after a suspicion that did not stand): the
   /// series' event counts the failures (`data.repeat`), the raw log says so, once per batch (failures.dart →
@@ -2064,9 +2096,15 @@ class CoreService implements CoreApi {
   }
 
   /// `sub/diverged`: in Auto the direct and the tunnel's copies of a subscription have different sets of servers;
-  /// `used` says which copy was applied. Counts, the servers that differ, statuses and times; the journal, no notification.
-  void _subDiverged(Map<String, dynamic> data) => _event('sub', 'diverged', 'warn', data,
-      note: 'Subscription ${data['name']}: the direct and the tunnel copies have different servers, the ${data['used']} one is used');
+  /// `used` (`tunnel` / `direct` / `merged`) and `why` say which copy was applied and on what ground. Counts, the servers
+  /// that differ, statuses, times and freshness headers; the journal, no notification.
+  void _subDiverged(Map<String, dynamic> data) {
+    String fresh(Object? m) => m is Map && m.isNotEmpty ? m.entries.map((e) => '${e.key}: ${e.value}').join(', ') : 'no freshness headers';
+    final used = data['used'] == 'merged' ? 'the two merged' : 'the ${data['used']} one';
+    _event('sub', 'diverged', 'warn', data,
+        note: 'Subscription ${data['name']} (${data['ua']}): the direct (${data['directNodes']} servers) and the tunnel (${data['tunnelNodes']}) '
+            'copies have different servers, $used is used (${data['why']}); direct: ${fresh(data['directFresh'])}; tunnel: ${fresh(data['tunnelFresh'])}');
+  }
 
   /// `sub/failed` of the timer's update when no path brought the subscription: the Sentinel judges it and the event
   /// is written only for a `confirmed` verdict (as for the rule sets). A failure of our own restart never gets here.

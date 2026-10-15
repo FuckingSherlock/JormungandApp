@@ -92,6 +92,7 @@ to …` — раньше такие строки не распознавалис
 | site | unreachable | `host`, `entry`, `check?` — не открылся нигде (+ результат чекера) |
 | sub | updated | `source`, `name`, `added`, `removed`, `total` |
 | sub | failed | `source`, `name`, `error` |
+| sub | diverged | Auto: прямая и туннельная копии подписки с разными наборами серверов. `source`, `name`, `host`, `ua`, `directNodes` / `tunnelNodes`, `onlyDirect` / `onlyTunnel` (≤ 10 имён) и `…Count`, `directStatus` / `tunnelStatus`, `directMs` / `tunnelMs`, `directPath` / `tunnelPath`, `directFresh` / `tunnelFresh` (заголовки свежести обеих копий: `Age`, `Date`, `Last-Modified`, `ETag`, `Cache-Control`, `Expires` — какие были), `used` (`tunnel` / `direct` / `merged`), `why` (`newer: lastModified` / `newer: age` / `unknown`), `usedNodes`. warn, без уведомления; три записи подряд при discovery (по одной на UA) — норма. `docs/subscription-parsing.md` → «Download via» |
 | sub | removed / back | `count`, `source`, `name` — серверы пропали из подписки / вернулись |
 | sub | dead | только мокап (серверы подписки не отвечают); ядро и приложение его не пишут |
 | rules | fallback / targetBack | `target`, `to?` — «If unavailable» сработал / цель вернулась |

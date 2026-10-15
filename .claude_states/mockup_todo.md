@@ -84,6 +84,10 @@
 
 Auto subscription download: a side with an empty body, no servers, a 304 or an HTTP error is no answer (the other copy is used, no event). `sub/diverged` (warn) only when both copies have servers and the node sets differ; data: directNodes/tunnelNodes, onlyDirect/onlyTunnel (<=10 names) + counts, directStatus/tunnelStatus, directMs/tunnelMs, directPath/tunnelPath, used. The mockup's sub/diverged event text still says "answers differ / the VPN answer is used"; details stay collapsed. docs/subscription-parsing.md "Download via".
 
+## sub/diverged: the newer copy is used, else merged (2026-10-15)
+
+`sub/diverged` data gains `used` = `tunnel` / `direct` / `merged` (was always `tunnel`), `why` (`newer: lastModified` / `newer: age` / `unknown`), `usedNodes`, `directFresh` / `tunnelFresh` (freshness headers of both copies). The mockup's event text should say which copy was used (the newer one, or both merged) instead of "the VPN copy is used". docs/subscription-parsing.md "Download via" (Какая копия свежее), docs/logs.md.
+
 ## Site events fold repeats (2026-10-14)
 
 site/blocked and site/unreachable are no longer dropped once an hour per site + route: a repeat within the hour of the first occurrence changes the event in place (data.repeat = {count, firstAt, lastAt, at[<=50]}, newest verdict/trail/check, rev bump, a raw line each time). The Events row shows the sum as x N and the last time; the detail rows list every time (design/src/js/47-events.js, docs/failures.md "Проверки сайтов", docs/connect-model.md "Проверка сайта"). A notification fires once per event id (EventFeed.markNotified), not on every rev bump.

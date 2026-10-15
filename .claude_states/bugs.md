@@ -29,6 +29,9 @@
   NL. Сделано (`15dac96`): предупреждение соединения при такой подмене, `main.pinLost`, строка лога на каждую проверку
   выхода (тег, id ноды, IP). Повторится — смотреть эти строки. Открыт вопрос пользователю: строгий Manual (туннель
   только через выбор, иначе ошибка соединения).
+- **`sub/diverged` в приложении** (ядро сделано 2026-10-15): `event_text.dart` знает только `used == 'direct'`; нужно
+  `merged` («Copies merged: both lists are used»), строка `why` (newer by Last-Modified / by Age / cannot tell),
+  заголовки `directFresh`/`tunnelFresh` в подробностях. С этапом приложения beta.11.
 - **Цепочки remna: HY2-выходы «недоступны»** — строка `Ping: N of M did not answer …` и вход (`pair_udp_test.dart`).
 
 ## Android

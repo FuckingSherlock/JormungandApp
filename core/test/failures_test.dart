@@ -359,6 +359,40 @@ void main() {
       expect(r.book.toJson()['entries'], 0);
     });
 
+    test('the app\'s own process is not an app of the user: its failures make no suspicion, no entry, no count; each is told for the raw log', () {
+      var t = DateTime.utc(2026, 10, 10, 12);
+      final told = <(String, ConnKind)>[];
+      final reported = <FailureReport>[];
+      final b = FailureBook(
+        now: () => t,
+        own: (c) => c.pkg == 'dev.jormungand.app',
+        ownFailed: (c, o) => told.add((c.destination, o.kind)),
+        report: (r) async {
+          reported.add(r);
+          return 1;
+        },
+      )..start();
+      for (var i = 0; i < 5; i++) {
+        b.onClosed(cc(dest: 'amd.com:9882', pkg: 'dev.jormungand.app', outbound: 'direct', ms: 5000));
+        t = t.add(const Duration(seconds: 1));
+      }
+      b.onClosed(cc(dest: 'ok.example:443', pkg: 'dev.jormungand.app', outbound: 'direct', down: 900, ms: 200));
+      expect(reported, isEmpty);
+      expect(told.length, 5);
+      expect(told.first, ('amd.com:9882', ConnKind.timeout));
+      var j = b.toJson();
+      expect([j['failed'], j['ok'], j['entries'], j['ownFailed'], j['ownOk']], [0, 0, 0, 5, 1]);
+      // another app through the same destination is still the user's
+      for (var i = 0; i < 3; i++) {
+        b.onClosed(cc(dest: 'amd.com:9882', pkg: 'org.example.app', outbound: 'route0/s::a', ms: 5000));
+        t = t.add(const Duration(seconds: 1));
+      }
+      expect(reported.length, 1);
+      j = b.toJson();
+      expect([j['failed'], j['ownFailed']], [3, 5]);
+      b.stop();
+    });
+
     test('the report is keyed by the destination (the key Auto\'s notice of the same site uses), not by the entry', () {
       final r = _Rig();
       r.fail(3, dest: 'Blocked.Example:443');

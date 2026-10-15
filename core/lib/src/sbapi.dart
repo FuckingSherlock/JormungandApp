@@ -37,7 +37,12 @@ class ClosedConnection {
       this.network = '',
       this.inbound = '',
       this.durationMs,
-      this.id = ''});
+      this.id = '',
+      this.address = ''});
+
+  /// The destination as dialled (`ip:port`) when [destination] shows the sniffed name instead ('' = the same /
+  /// not told): the raw log says which server a connection went to when its name is only a TLS SNI.
+  final String address;
 
   /// The connection's id as the connections table has it ('' = not told): Auto matches the bytes it had
   /// seen of an open connection with its last total.
@@ -73,6 +78,7 @@ class ClosedConnection {
         inbound: c.inbound,
         durationMs: _lived(c, nowMs),
         id: c.id,
+        address: c.domain.isNotEmpty && !c.destination.startsWith(c.domain) ? c.destination : '',
       );
 }
 

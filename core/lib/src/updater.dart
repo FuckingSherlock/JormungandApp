@@ -166,7 +166,7 @@ class SubscriptionUpdater {
   /// tick, nothing told).
   final void Function(SvcFailure failure, Map<String, dynamic> data)? onSvcFailed;
 
-  /// Auto: the direct and the tunnel's answers differ (the tunnel's was used): `{source, name, host, ua, …}`.
+  /// Auto: the direct and the tunnel's answers differ (the newer one or the merge was used, `used` says which): `{source, name, host, ua, …}`.
   final void Function(Map<String, dynamic> data)? onDiverged;
 
   /// An update that landed brought a server list (not a 304): the source's id and the nodes it now holds. The

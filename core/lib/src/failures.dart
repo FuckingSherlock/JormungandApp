@@ -163,6 +163,9 @@ const _svcInbound = 'svc-in';
 /// The core's own requests through the tunnel (subscriptions, the exit check): counted, never an event.
 const _tunnelInbound = 'tunnel-in';
 
+// NB: a connection of this app's own process that entered the TUN (the self rule, config.dart → selfRules) is
+// not a user's app either: the book takes it out through [FailureBook.own] before anything is counted.
+
 // The ring of 10 one-minute buckets: «the last 10 minutes» without a timestamp per request.
 class _Buckets {
   static const n = 10;
@@ -306,8 +309,9 @@ class FailureReport {
 /// fresh change it in place (`more`) instead of making new ones; at most [maxEvents] suspicions per
 /// [window] overall; an entry whose suspicion did not stand waits [recheckAfter] before the next. Not
 /// raised for UDP, for the core's own requests (`probe-in`, Auto's checks of the spare routes among them,
-/// `svc-in` and `tunnel-in`) and for an ignored site. The judge key is the destination's ([siteKey]): Auto's
-/// notice of the same site joins the same suspicion.
+/// `svc-in` and `tunnel-in`), for an ignored site and for the app's own process ([own]: its connections that entered
+/// the TUN under the self rule are not counted at all, a failed one is told to [ownFailed] for the raw log). The
+/// judge key is the destination's ([siteKey]): Auto's notice of the same site joins the same suspicion.
 ///
 /// The caller owns the clock and the lifetime: [start] when sing-box starts (counters begin), [stop]
 /// when it ends; nothing here runs on a timer.
@@ -316,6 +320,8 @@ class FailureBook {
     DateTime Function()? now,
     bool Function(String host)? ignored,
     bool Function()? background,
+    bool Function(ClosedConnection c)? own,
+    this.ownFailed,
     this.report,
     this.recovered,
     this.update,
@@ -325,6 +331,7 @@ class FailureBook {
   })  : _now = now ?? DateTime.now,
         _ignored = ignored,
         _background = background,
+        _own = own,
         _timer = timer ?? Timer.new;
 
   /// Failures of a reported series are handed over in batches of this long ([repeated]): a browser retrying a dead
@@ -364,6 +371,15 @@ class FailureBook {
   final bool Function(String host)? _ignored;
   final bool Function()? _background;
 
+  /// Whether the connection was made by this app's own process (the self rule's match: the Dart HTTP clients, a
+  /// socket of a measurement that was not kept out of the tunnel). Such a connection is the maker's business (the ping
+  /// result, the check that asked), never a failure of an app the user runs: not counted in the book, no `conn/failing`.
+  final bool Function(ClosedConnection c)? _own;
+
+  /// A connection of the app's own process closed with nothing back ([_own]): skipped by the book, handed over to be
+  /// written to the raw log (it is never silent), every one.
+  final void Function(ClosedConnection c, ConnOutcome outcome)? ownFailed;
+
   /// A suspicion for the judge; completes with the id of the journal event when the failure stands (the
   /// event a group's `more` goes to), null otherwise.
   final Future<int?> Function(FailureReport report)? report;
@@ -391,7 +407,7 @@ class FailureBook {
   final _groups = <String, _Group>{};
   final _emitted = <int>[];
   final _total = _Buckets();
-  int _okSince = 0, _failedSince = 0, _bgSince = 0, _events = 0;
+  int _okSince = 0, _failedSince = 0, _bgSince = 0, _events = 0, _ownOkSince = 0, _ownFailedSince = 0;
   final _kindsSince = <ConnKind, int>{};
   final _dns = <String, (int, int)>{}; // host → (count, last at)
 
@@ -408,7 +424,7 @@ class FailureBook {
     _emitted.clear();
     _dns.clear();
     _kindsSince.clear();
-    _okSince = _failedSince = _bgSince = _events = 0;
+    _okSince = _failedSince = _bgSince = _events = _ownOkSince = _ownFailedSince = 0;
     for (var i = 0; i < _Buckets.n; i++) {
       _total.ok[i] = _total.bad[i] = 0;
       _total.stamp[i] = -1;
@@ -517,6 +533,17 @@ class FailureBook {
   /// A connection sing-box closed.
   void onClosed(ClosedConnection c) {
     if (!_active || c.inbound == _probeInbound || c.inbound == _svcInbound) return;
+    if (_own?.call(c) == true) {
+      final out = ConnOutcome.of(c);
+      if (out.idle) return;
+      if (out.ok) {
+        _ownOkSince++;
+      } else {
+        _ownFailedSince++;
+        ownFailed?.call(c, out);
+      }
+      return;
+    }
     final (host, port) = splitDest(c.destination);
     final h = host.toLowerCase();
     if (_ignored?.call(h) == true) return;
@@ -772,6 +799,8 @@ class FailureBook {
       'failed10m': _total.badIn(minute),
       'bgFailed': _bgSince,
       'byKind': {for (final k in _kindsSince.entries) k.key.name: k.value},
+      'ownOk': _ownOkSince, // the app's own process: not in the numbers above (see [own])
+      'ownFailed': _ownFailedSince,
       'events': _events,
       'entries': _entries.length,
       'apps': appList.take(top).toList(),

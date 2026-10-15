@@ -167,13 +167,21 @@ class SubscriptionResult {
 }
 
 class _Resp {
-  _Resp(this.ua, this.status, this.body, this.headers);
+  _Resp(this.ua, this.status, this.body, this.headers, {this.parsed, this.diverged = false});
   final String ua;
   final int status;
   final String body;
 
   /// Lower-case names.
   final Map<String, String> headers;
+
+  /// The servers when they are not just what [body] holds: the merge of the two copies of Auto.
+  final (SubFormat, List<Node>)? parsed;
+
+  /// The two copies of Auto had different servers: the validators (ETag / Last-Modified) are not kept, so the next
+  /// request is a full one and both copies are compared again (a 304 of one side would let the other side's stale copy
+  /// win without a word).
+  final bool diverged;
 }
 
 /// How the requests of one [fetchSubscription] go: the service traffic, the paths [policy] allows, whether a second
@@ -232,24 +240,47 @@ Future<_Resp> _get(
   final r = res.response!;
   if (!r.ok) throw HttpException('HTTP ${r.status} for UA $ua', uri: uri);
   var status = r.status, body = r.body, hdrs = r.headers, kind = r.kind;
+  (SubFormat, List<Node>)? parsed;
+  var diverged = false;
   // Auto: both sides answered whole. A copy that is no answer (no body, no servers in it, a 304) loses to the other
-  // one without a word: the data came, how does not matter. Two copies with servers: when their sets differ the
-  // tunnel's is the one used and the difference is journaled (the provider may serve another list to the visible
-  // address of the machine, or something in the way may alter it); the same set in another order or other bytes
-  // is the same answer.
+  // one without a word: the data came, how does not matter. Two copies with servers: when their sets differ, the
+  // freshness headers say which copy is newer and that one is used; when they cannot tell, the two are merged (the
+  // tunnel's servers first, then the ones only the direct copy has). The difference is journaled either way (the
+  // provider may serve another list to the visible address of the machine, a CDN edge may hold an older version of
+  // the file, or something in the way may alter it); the same set in another order or other bytes is the same answer.
   final peer = r.peers.isEmpty ? null : r.peers.first;
   if (peer != null && peer.hash != r.hash) {
     final win = _Side(r.status, r.headers, r.body, r.kind, r.via, r.finishedMs);
     final other = _Side(peer.status, peer.headers, peer.body, peer.kind, peer.via, peer.ms);
     final (d, t) = win.kind == SvcKind.direct ? (win, other) : (other, win);
-    final dn = d.nodes, tn = t.nodes;
-    final _Side use;
-    if (tn != null && dn != null) {
+    final dp = d.parsed, tp = t.parsed;
+    _Side use;
+    if (tp != null && dp != null) {
       use = t;
+      final dn = dp.$2, tn = tp.$2;
       final dk = {for (final n in dn) n.key: n}, tk = {for (final n in tn) n.key: n};
       final onlyD = [for (final e in dk.entries) if (!tk.containsKey(e.key)) e.value];
       final onlyT = [for (final e in tk.entries) if (!dk.containsKey(e.key)) e.value];
       if (onlyD.isNotEmpty || onlyT.isNotEmpty) {
+        diverged = true;
+        final (:tunnelNewer, :why) = copyFreshness(d.headers, t.headers);
+        final String usedName;
+        var count = tk.length;
+        switch (tunnelNewer) {
+          case true:
+            usedName = 'tunnel';
+            use = t;
+          case false:
+            usedName = 'direct';
+            use = d;
+            count = dk.length;
+          case null:
+            usedName = 'merged';
+            use = t;
+            final union = [...tk.values, ...onlyD];
+            parsed = (tp.$1, union);
+            count = union.length;
+        }
         w.onDiverged?.call({
           'host': uri.host.toLowerCase(),
           'ua': ua,
@@ -265,11 +296,15 @@ Future<_Resp> _get(
           'tunnelMs': t.ms,
           'directPath': d.via,
           'tunnelPath': t.via,
-          'used': 'tunnel',
+          'directFresh': _freshness(d.headers),
+          'tunnelFresh': _freshness(t.headers),
+          'used': usedName,
+          'why': why,
+          'usedNodes': count,
         });
       }
     } else {
-      use = tn != null ? t : (dn != null ? d : win);
+      use = tp != null ? t : (dp != null ? d : win);
     }
     status = use.status;
     body = use.body;
@@ -277,7 +312,7 @@ Future<_Resp> _get(
     kind = use.kind;
   }
   if (kind != SvcKind.direct) w.tunnel = true;
-  return _Resp(ua, status, utf8.decode(body, allowMalformed: true), hdrs);
+  return _Resp(ua, status, utf8.decode(body, allowMalformed: true), hdrs, parsed: parsed, diverged: diverged);
 }
 
 /// One side's whole answer in the Auto comparison.
@@ -293,13 +328,71 @@ class _Side {
   /// When its body ended, ms from the start of its request.
   final int ms;
 
-  /// The servers in it; null when it is no copy of the list (a 304, no body, no servers).
-  late final List<Node>? nodes = status == 304 || body.isEmpty
+  /// The format and the servers in it; null when it is no copy of the list (a 304, no body, no servers).
+  late final (SubFormat, List<Node>)? parsed = status == 304 || body.isEmpty
       ? null
       : () {
-          final n = parseSubscription(utf8.decode(body, allowMalformed: true), contentType: headers[HttpHeaders.contentTypeHeader]).$2;
-          return n.isEmpty ? null : n;
+          final p = parseSubscription(utf8.decode(body, allowMalformed: true), contentType: headers[HttpHeaders.contentTypeHeader]);
+          return p.$2.isEmpty ? null : p;
         }();
+}
+
+/// The headers that say how fresh a copy is, as they are written in a response.
+const _freshHeaders = ['Age', 'Date', 'Last-Modified', 'ETag', 'Cache-Control', 'Expires'];
+
+/// The freshness headers a response has (original names), for the journal.
+Map<String, String> _freshness(Map<String, String> h) {
+  final out = <String, String>{};
+  for (final name in _freshHeaders) {
+    final v = h[name.toLowerCase()]?.trim();
+    if (v != null && v.isNotEmpty) out[name] = v;
+  }
+  return out;
+}
+
+/// `Last-Modified` values (exact seconds) that differ by this much are two versions of the file; a smaller gap is
+/// the same moment.
+const lastModifiedMargin = Duration(seconds: 1);
+
+/// The moment a copy left the origin is `Date − Age`, and both are whole seconds rounded down, so each estimate is off
+/// by less than a second either way and the gap of two estimates by less than two: a gap this large cannot have the
+/// wrong sign.
+const originMargin = Duration(seconds: 2);
+
+DateTime? _httpDate(String? v) {
+  if (v == null || v.trim().isEmpty) return null;
+  try {
+    return HttpDate.parse(v.trim());
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Which of two copies with different server sets is newer by their headers (lower-case names): `tunnelNewer` true /
+/// false, null when they cannot tell; [why] is `newer: lastModified`, `newer: age` or `unknown`
+/// (docs/subscription-parsing.md). `Last-Modified` goes first when both copies have it (the file's own time; the same
+/// value on both is "cannot tell", a later fetch of the same version proves nothing); otherwise the moment each copy
+/// left the origin, `Date − Age` (no `Age` = 0; no `Date`, or a value that is not a number of seconds = unknown).
+({bool? tunnelNewer, String why}) copyFreshness(Map<String, String> direct, Map<String, String> tunnel) {
+  const unknown = (tunnelNewer: null, why: 'unknown');
+  final ld = _httpDate(direct['last-modified']), lt = _httpDate(tunnel['last-modified']);
+  if (ld != null && lt != null) {
+    final gap = lt.difference(ld);
+    if (gap.abs() >= lastModifiedMargin) return (tunnelNewer: gap > Duration.zero, why: 'newer: lastModified');
+    return unknown;
+  }
+  DateTime? origin(Map<String, String> h) {
+    final date = _httpDate(h['date']);
+    final raw = h['age']?.trim();
+    final age = raw == null || raw.isEmpty ? 0 : int.tryParse(raw);
+    if (date == null || age == null || age < 0) return null;
+    return date.subtract(Duration(seconds: age));
+  }
+
+  final od = origin(direct), ot = origin(tunnel);
+  if (od == null || ot == null) return unknown;
+  final gap = ot.difference(od);
+  return gap.abs() >= originMargin ? (tunnelNewer: gap > Duration.zero, why: 'newer: age') : unknown;
 }
 
 const _divergedNames = 10;
@@ -318,8 +411,9 @@ List<String> _nodeNames(List<Node> l) => [for (final n in l.take(_divergedNames)
 /// reach the provider ([Channel]); every request goes through [svc] (the service traffic of
 /// the core, svc_fetch.dart; without one a plain direct socket, so [Channel.proxy] has no way).
 /// [retryKey] (the source id) keeps the retry count of this subscription apart. [onDiverged]:
-/// in Auto both sides answered whole with servers and the sets of servers differ (the tunnel's copy is used), told once
-/// per request with the counts, the servers that differ, each side's status and finish time. A side with no body, no
+/// in Auto both sides answered whole with servers and the sets of servers differ (the newer copy by the freshness headers
+/// is used, the two merged when they cannot tell: [copyFreshness]), told once per request with the counts, the servers
+/// that differ, each side's status, finish time and freshness headers, and `used` / `why`. A side with no body, no
 /// servers or a 304 is no answer: the other copy is used and nothing is told.
 Future<SubscriptionResult> fetchSubscription(
   String url, {
@@ -477,7 +571,7 @@ Future<SubscriptionResult> _run(
   String? format;
   for (final r in resps) {
     if (r == null) continue;
-    final (fmt, nodes) = parseSubscription(r.body, contentType: r.headers[HttpHeaders.contentTypeHeader]);
+    final (fmt, nodes) = r.parsed ?? parseSubscription(r.body, contentType: r.headers[HttpHeaders.contentTypeHeader]);
     var unique = 0;
     for (final n in nodes) {
       // First UA wins a conflict: sing-box is asked first, its outbounds are the fullest.
@@ -491,8 +585,8 @@ Future<SubscriptionResult> _run(
         'unique': unique,
         'parser': parserVersion,
         if (filter.isNotEmpty) 'filter': filter,
-        if (r.headers[HttpHeaders.etagHeader] != null) 'etag': r.headers[HttpHeaders.etagHeader],
-        if (r.headers[HttpHeaders.lastModifiedHeader] != null) 'lastModified': r.headers[HttpHeaders.lastModifiedHeader],
+        if (!r.diverged && r.headers[HttpHeaders.etagHeader] != null) 'etag': r.headers[HttpHeaders.etagHeader],
+        if (!r.diverged && r.headers[HttpHeaders.lastModifiedHeader] != null) 'lastModified': r.headers[HttpHeaders.lastModifiedHeader],
       });
     }
   }

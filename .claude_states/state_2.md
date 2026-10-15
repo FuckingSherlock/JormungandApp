@@ -14,6 +14,9 @@
    `urltest`, проверка кандидатов) → конфиг пинга / ускорение пинга → приложение, docs.
 2. Затем beta.11: `release-notes/beta.txt` (всё с beta.10), пуш. `claude/exit-card-fixes` влита 2026-10-15.
 
+Решено 2026-10-15: нормализация событий (`features.md` «Единый вид событий о сбоях» + этап 4 Sentinel) — в beta.12,
+отдельным этапом сразу после beta.11 (не смешивать с переделкой подключения при тестах).
+
 ## В работе (2026-10-15)
 
 Этапы п. 1, по порядку, каждый — отдельный агент `coder-deep`:
@@ -95,6 +98,11 @@
 - Нестабильные под нагрузкой полного прогона (по отдельности проходят): `killjob_test:50` (sing-box пережил ядро), `delta_test` (50 МБ), `report_crypto_test`,
   `exitip_test` (тайминг), `address_test` race, `failover_singbox_test`, `pair_udp_test` (hy2 по UDP на loopback),
   `app/test/live_core_host_test.dart:275`. Разобрать прогоном `--concurrency=1`.
+- `dns_sides_singbox_test.dart:47` `_MockDns.start`: UDP bind на порт от `freePort` → errno 10013 (вероятно,
+  зарезервированный Windows диапазон: `freePort` проверяет только TCP); по отдельности проходит. `freePort` для UDP —
+  проверять и UDP-bind.
+- Защита сокетов временных боксов на Android: `LibboxPlatform.kt.tmpl:57` пропускает `protect()` при `tunFd == null`
+  (окно в микросекунды при `establish()`); утечка не доказана — смотреть строку Raw «Own connection of …» при повторе.
 - `ladder_test.dart`: имя/комментарий теста пачек Auto ещё говорят о 60 с (окно теперь 2 мин; числа теста подходят).
 - `svc_fetch.dart:684` — info `use_null_aware_elements`.
 - Хвосты этапа 3c Sentinel (из state_1): нет тестов «`sub/failed` только подтверждённый» и «свой перезапуск — тихо» на

@@ -279,8 +279,9 @@ void main() {
       return ServiceFetch(endpoint: () => svcIn, tieGrace: const Duration(milliseconds: 300), collectGrace: const Duration(milliseconds: 800));
     }
 
-    FutureOr<void> Function(HttpRequest) body(String links, {Duration delay = Duration.zero}) => (req) async {
+    FutureOr<void> Function(HttpRequest) body(String links, {Duration delay = Duration.zero, Map<String, String> headers = const {}}) => (req) async {
           if (delay > Duration.zero) await Future<void>.delayed(delay);
+          headers.forEach(req.response.headers.set);
           req.response.write(_b64(links));
         };
     const dead = 'http://sub.test/sub';
@@ -324,17 +325,18 @@ void main() {
       expect((await fetchSubscription(dead, userAgent: 'sing-box', svc: noTunnel)).via, 'direct');
     });
 
-    test('Auto: two copies with different sets of servers are journaled once with the difference, the tunnel one is used', () async {
+    test('Auto: two copies with different sets of servers are journaled once with the difference; no word on freshness merges them', () async {
       final tunnelLinks = '$ssSip002\n$ss2022';
       final svc = await fakeSvc({'direct': body(ssSip002), 'main': body(tunnelLinks, delay: const Duration(milliseconds: 100))});
       final told = <Map<String, dynamic>>[];
       final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: told.add);
-      expect(r.nodes.length, 2); // the tunnel's list
+      expect(r.nodes.length, 2); // the union (here the tunnel's list holds the direct one)
       expect(told, hasLength(1));
       final d = told.single;
       expect([d['directNodes'], d['tunnelNodes'], d['onlyDirect'], d['onlyDirectCount'], d['onlyTunnelCount']], [1, 2, isEmpty, 0, 1]);
       expect(d['onlyTunnel'], hasLength(1));
-      expect([d['directStatus'], d['tunnelStatus'], d['used'], d['directPath'], d['tunnelPath']], [200, 200, 'tunnel', 'direct', 'main']);
+      expect([d['directStatus'], d['tunnelStatus'], d['used'], d['why'], d['usedNodes'], d['directPath'], d['tunnelPath']],
+          [200, 200, 'merged', 'unknown', 2, 'direct', 'main']);
       expect(d['directMs'], isA<int>());
       expect(d['tunnelMs'], greaterThanOrEqualTo(100));
       // the same body on both sides says nothing
@@ -349,6 +351,141 @@ void main() {
       final told = <Map<String, dynamic>>[];
       final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: told.add);
       expect([r.nodes.length, r.via, told], [2, 'proxy', isEmpty]);
+    });
+
+    // direct: ssSip002 + trojanGrpc, tunnel: ssSip002 + ss2022 (one shared server, one of its own on each side)
+    final directLinks = '$ssSip002\n$trojanGrpc', tunnelLinks = '$ssSip002\n$ss2022';
+    String names(SubscriptionResult r) => r.nodes.map((n) => n.address).join(' ');
+
+    Future<(SubscriptionResult, Map<String, dynamic>)> diverge(Map<String, String> direct, Map<String, String> tunnel) async {
+      final svc = await fakeSvc({
+        'direct': body(directLinks, headers: direct),
+        'main': body(tunnelLinks, headers: tunnel, delay: const Duration(milliseconds: 100)),
+      });
+      final told = <Map<String, dynamic>>[];
+      final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: told.add);
+      expect(told, hasLength(1));
+      return (r, told.single);
+    }
+
+    test('Auto: the copy with the later Last-Modified is used (either side), the freshness headers of both go to the event', () async {
+      final (r, d) = await diverge({
+        'last-modified': 'Thu, 15 Oct 2026 10:00:05 GMT',
+        'etag': '"d1"',
+        'cache-control': 'max-age=300',
+        'date': 'Thu, 15 Oct 2026 10:01:00 GMT',
+      }, {
+        'last-modified': 'Thu, 15 Oct 2026 10:00:00 GMT',
+        'etag': '"t1"',
+      });
+      expect(names(r), '192.0.2.10 se1.example');
+      expect([d['used'], d['why'], d['usedNodes'], r.via], ['direct', 'newer: lastModified', 2, 'direct']);
+      expect(d['directFresh'], containsPair('Last-Modified', 'Thu, 15 Oct 2026 10:00:05 GMT'));
+      expect(d['directFresh'], containsPair('ETag', '"d1"'));
+      expect(d['directFresh'], containsPair('Cache-Control', 'max-age=300'));
+      expect(d['directFresh'], containsPair('Date', 'Thu, 15 Oct 2026 10:01:00 GMT'));
+      expect(d['tunnelFresh'], containsPair('Last-Modified', 'Thu, 15 Oct 2026 10:00:00 GMT'));
+      expect(d['tunnelFresh'], isNot(contains('Cache-Control')));
+      // the other way round: a one-second difference is enough (the header counts whole seconds)
+      final (r2, d2) = await diverge({'last-modified': 'Thu, 15 Oct 2026 10:00:00 GMT'}, {'last-modified': 'Thu, 15 Oct 2026 10:00:01 GMT'});
+      expect(names(r2), '192.0.2.10 192.0.2.11');
+      expect([d2['used'], d2['why']], ['tunnel', 'newer: lastModified']);
+    });
+
+    test('Auto: with no Last-Modified on both, the moment a copy left the origin (Date - Age) decides', () async {
+      // direct: left the origin at 10:00:00, tunnel at 10:00:50 (Date 10:01:00, Age 10)
+      final (r, d) = await diverge({'date': 'Thu, 15 Oct 2026 10:01:40 GMT', 'age': '100'}, {'date': 'Thu, 15 Oct 2026 10:01:00 GMT', 'age': '10'});
+      expect(names(r), '192.0.2.10 192.0.2.11');
+      expect([d['used'], d['why']], ['tunnel', 'newer: age']);
+      expect(d['directFresh'], containsPair('Age', '100'));
+      // no Age = 0: direct is the fresh one
+      final (r2, d2) = await diverge({'date': 'Thu, 15 Oct 2026 10:01:00 GMT'}, {'date': 'Thu, 15 Oct 2026 10:01:00 GMT', 'age': '30'});
+      expect(names(r2), '192.0.2.10 se1.example');
+      expect([d2['used'], d2['why']], ['direct', 'newer: age']);
+      // Last-Modified on one side only does not count: Date - Age is used
+      final (_, d3) = await diverge({'last-modified': 'Thu, 15 Oct 2026 12:00:00 GMT', 'date': 'Thu, 15 Oct 2026 10:00:00 GMT', 'age': '60'},
+          {'date': 'Thu, 15 Oct 2026 10:00:00 GMT'});
+      expect([d3['used'], d3['why']], ['tunnel', 'newer: age']);
+    });
+
+    test('Auto: copies that cannot be told apart by freshness are merged: the tunnel servers first, then the direct-only ones, once each', () async {
+      for (final (direct, tunnel) in [
+        (<String, String>{}, <String, String>{}), // no freshness headers at all
+        // the same Last-Modified: the same version, the gap of the fetch times says nothing
+        ({'last-modified': 'Thu, 15 Oct 2026 10:00:00 GMT', 'age': '500'}, {'last-modified': 'Thu, 15 Oct 2026 10:00:00 GMT'}),
+        // under the margin of 2 s
+        ({'date': 'Thu, 15 Oct 2026 10:00:01 GMT'}, {'date': 'Thu, 15 Oct 2026 10:00:00 GMT'}),
+        ({'date': 'Thu, 15 Oct 2026 10:00:00 GMT', 'age': '1'}, {'date': 'Thu, 15 Oct 2026 10:00:00 GMT'}),
+        // Age that is no number of seconds
+        ({'date': 'Thu, 15 Oct 2026 10:00:00 GMT', 'age': 'soon'}, {'date': 'Thu, 15 Oct 2026 10:05:00 GMT'}),
+      ]) {
+        final (r, d) = await diverge(direct, tunnel);
+        expect(names(r), '192.0.2.10 192.0.2.11 se1.example', reason: '$direct / $tunnel'); // shared server once
+        expect([d['used'], d['why'], d['usedNodes'], d['directNodes'], d['tunnelNodes']], ['merged', 'unknown', 3, 2, 2], reason: '$direct / $tunnel');
+        expect([d['onlyDirectCount'], d['onlyTunnelCount']], [1, 1]);
+      }
+    });
+
+    test('Auto: after a divergence the validators are not kept, so the next request is a full one', () async {
+      final svc = await fakeSvc({
+        'direct': body(directLinks, headers: {'etag': '"d"', 'last-modified': 'Thu, 15 Oct 2026 10:00:05 GMT'}),
+        'main': body(tunnelLinks, headers: {'etag': '"t"', 'last-modified': 'Thu, 15 Oct 2026 10:00:00 GMT'}, delay: const Duration(milliseconds: 100)),
+      });
+      final r = await fetchSubscription(dead, userAgent: 'sing-box', svc: svc, onDiverged: (_) {});
+      expect(r.strategy.single, isNot(contains('etag')));
+      expect(r.strategy.single, isNot(contains('lastModified')));
+      // the same set on both sides keeps them
+      final same = await fakeSvc({
+        'direct': body(tunnelLinks, headers: {'etag': '"x"'}),
+        'main': body('$ss2022\n$ssSip002', headers: {'etag': '"x"'}, delay: const Duration(milliseconds: 100)),
+      });
+      expect((await fetchSubscription(dead, userAgent: 'sing-box', svc: same)).strategy.single['etag'], '"x"');
+    });
+
+    test('Auto discovery asks every UA over both sides: one event per UA with its own ua, the applied list is what they say was used', () async {
+      Future<(SubscriptionResult, List<Map<String, dynamic>>)> discover(Map<String, String> direct, Map<String, String> tunnel) async {
+        final svc = await fakeSvc({
+          'direct': body(directLinks, headers: direct),
+          'main': body(tunnelLinks, headers: tunnel, delay: const Duration(milliseconds: 100)),
+        });
+        final told = <Map<String, dynamic>>[];
+        final r = await fetchSubscription(dead, svc: svc, onDiverged: told.add); // Auto UA: discovery
+        return (r, told);
+      }
+
+      // nothing says which is newer: each UA's copy is the merge, so is the applied list
+      var (r, told) = await discover({}, {});
+      expect({for (final d in told) d['ua']}, discoveryAgents.toSet());
+      expect(told.every((d) => d['used'] == 'merged'), isTrue);
+      expect(names(r), '192.0.2.10 192.0.2.11 se1.example');
+      // the tunnel is newer for every UA: its copy is applied, the direct-only server does not come in
+      (r, told) = await discover({'last-modified': 'Thu, 15 Oct 2026 10:00:00 GMT'}, {'last-modified': 'Thu, 15 Oct 2026 10:00:09 GMT'});
+      expect(told, hasLength(discoveryAgents.length));
+      expect(told.every((d) => d['used'] == 'tunnel'), isTrue);
+      expect(names(r), '192.0.2.10 192.0.2.11');
+      // the other UAs brought nothing new, so the strategy keeps one of them
+      expect(r.strategy, hasLength(1));
+    });
+
+    test('copyFreshness: Last-Modified first, then Date - Age; what is missing or garbled is unknown', () {
+      Map<String, String> h(String? lm, String? date, [String? age]) =>
+          {'last-modified': ?lm, 'date': ?date, 'age': ?age};
+      const t0 = 'Thu, 15 Oct 2026 10:00:00 GMT', t1 = 'Thu, 15 Oct 2026 10:00:01 GMT', t2 = 'Thu, 15 Oct 2026 10:00:02 GMT';
+      expect(copyFreshness(h(t0, null), h(t1, null)), (tunnelNewer: true, why: 'newer: lastModified'));
+      expect(copyFreshness(h(t1, null), h(t0, null)), (tunnelNewer: false, why: 'newer: lastModified'));
+      expect(copyFreshness(h(t0, null), h(t0, null)).tunnelNewer, isNull);
+      // 2 s apart is the margin of Date - Age; 1 s is not enough
+      expect(copyFreshness(h(null, t0), h(null, t2)), (tunnelNewer: true, why: 'newer: age'));
+      expect(copyFreshness(h(null, t2), h(null, t0)), (tunnelNewer: false, why: 'newer: age'));
+      expect(copyFreshness(h(null, t0), h(null, t1)).why, 'unknown');
+      expect(copyFreshness(h(null, t2, '5'), h(null, t2, '3')), (tunnelNewer: true, why: 'newer: age'));
+      // no Date, a Date nobody can read, a negative or a non-numeric Age
+      expect(copyFreshness(h(null, null), h(null, t2)).why, 'unknown');
+      expect(copyFreshness(h(null, 'yesterday'), h(null, t2)).why, 'unknown');
+      expect(copyFreshness(h(null, t2, '-5'), h(null, t0)).why, 'unknown');
+      expect(copyFreshness(h(null, t2, '5, 7'), h(null, t0)).why, 'unknown');
+      // an unreadable Last-Modified counts as missing
+      expect(copyFreshness(h('soon', t0), h(t1, t2)), (tunnelNewer: true, why: 'newer: age'));
     });
 
     Future<void> oneSideFails(String side, FutureOr<void> Function(HttpRequest) bad, {required String why}) async {
