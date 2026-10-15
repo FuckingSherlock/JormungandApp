@@ -1,6 +1,6 @@
 # Фичи — новые запланированные (решено делать)
 
-Приоритет — Android; Windows — после. Каждый пункт живёт ровно в одном файле плана (`features` / `bugs` / `unfinished` /
+Приоритет — Android; Windows — отдельно, в `windows.md`. Каждый пункт живёт ровно в одном файле плана (`features` / `bugs` / `unfinished` /
 `apk_losted` / `to_think`); сделан — удаляется. Id `S..` — история в `archive/_work/inventory_states.md`.
 
 ## Следующая сессия — первым (обсуждено и решено с пользователем 2026-10-14, можно реализовывать)
@@ -95,13 +95,3 @@
 - Android 8–9: procfs-владелец соединения; на API < 31 монитор сети не берёт VPN как «сеть по умолчанию» (S58).
 - Kotlin: `registerMyInterface` — пустышка (`LibboxPlatform.kt.tmpl:195`); не лежит ли секрет API sing-box открыто в
   `filesDir/libbox/configuration.json` (S63).
-
-## Windows (после Android)
-
-- **Flutter-приложение для Windows** (S60): Visual Studio C++, сборка, системный прокси из приложения, трей, TUN (админ).
-- **Апдейтер Windows: zip + `jorm-updater.exe`, сторож, откат** (S44, `docs/updates.md` §9).
-- **CI/релиз для Windows** (S45).
-- **Детектор TUN-TCP на Windows TUN не проверен** (S41, `docs/core.md:509`).
-- **dev-jormd: `dart.exe` vs `dartvm.exe` в `selfProcessPaths`** (S59, `config.dart:99`).
-- **Ядро не знает сеть на Windows**: jormd/десктоп не шлют `setNetwork` — Sentinel видит только пробы и
-  `updated default interface` sing-box. Нужен наблюдатель сети (NotifyIpInterfaceChange / NLM) → `POST /api/network`.

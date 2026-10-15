@@ -1,6 +1,6 @@
 # Недоделанное — запланировано ещё в эпоху мокапа, не сделано или сделано частично
 
-Решения до 2026-10-03 (мокап был ведущим продуктом). Каждый пункт только здесь. Приоритет — Android; Windows-пункты в конце.
+Решения до 2026-10-03 (мокап был ведущим продуктом). Каждый пункт только здесь. Приоритет — Android; Windows-пункты — в `windows.md`.
 Id `S..` — из `archive/_work/inventory_states.md`.
 
 ## Auto, ноды, проверки (ядро — общее для платформ)
@@ -32,10 +32,3 @@ Id `S..` — из `archive/_work/inventory_states.md`.
 - **Синхронизация мокапа одним проходом из `mockup_todo.md`** (S66): golden `core/test/golden/catalog.json`, очистить
   `_mockupBehind` (`core/test/catalog_golden_test.dart:265`), создать `app/SYNCED_FROM`. Заодно баги мокапа (S67):
   `42-apps.js targetImpact` на неизвестном пакете; сид `quickCfg` ≠ первый запуск liveApply; flaky `liveApply is not defined`.
-
-## Windows (после Android)
-
-- **Kill switch для TUN на Windows (WFP)** (S26): непостоянные WFP-фильтры; текст шторки «In TUN mode a reboot also lifts the block».
-- **«Запуск с системой»: Выкл / При входе / До входа + kill switch с загрузки + «Блок до старта VPN»** (S27, `rules.md:520–558`).
-- **Приложения на ПК: процессы, «Add .exe», иконки, «Survive updates»** (S28); **пикер файла для Process** (S35, `rules.md:6–8`).
-- **Собственные всплывающие окна уведомлений (`desktopStyle: own`)** (S55, `connect-model.md:745–749`).
