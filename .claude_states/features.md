@@ -102,3 +102,6 @@
 - **Апдейтер Windows: zip + `jorm-updater.exe`, сторож, откат** (S44, `docs/updates.md` §9).
 - **CI/релиз для Windows** (S45).
 - **Детектор TUN-TCP на Windows TUN не проверен** (S41, `docs/core.md:509`).
+- **dev-jormd: `dart.exe` vs `dartvm.exe` в `selfProcessPaths`** (S59, `config.dart:99`).
+- **Ядро не знает сеть на Windows**: jormd/десктоп не шлют `setNetwork` — Sentinel видит только пробы и
+  `updated default interface` sing-box. Нужен наблюдатель сети (NotifyIpInterfaceChange / NLM) → `POST /api/network`.
