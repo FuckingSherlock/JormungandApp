@@ -766,7 +766,7 @@ void main() {
         expect(find.byKey(ValueKey('dns-race-$id-direct')), findsOneWidget);
         expect((tester.widget(find.byKey(ValueKey('dns-race-$id-direct'))) as Text).data, 'DoT');
         expect((tester.widget(find.byKey(ValueKey('dns-race-$id-vpn'))) as Text).data, 'UDP');
-        expect(find.descendant(of: find.byKey(ValueKey('dns-ping-$id-direct')), matching: find.text('24 ms')), findsOneWidget);
+        expect(find.descendant(of: find.byKey(ValueKey('dns-ping-$id-direct')), matching: find.text('24ms')), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
 
@@ -807,7 +807,7 @@ void main() {
         await tester.pump(const Duration(seconds: 1));
         await tester.pump();
         expect(find.descendant(of: doh, matching: find.byType(PingSpinner)), findsNothing);
-        expect(find.descendant(of: doh, matching: find.text('31 ms')), findsOneWidget);
+        expect(find.descendant(of: doh, matching: find.text('31ms')), findsOneWidget);
         expect(find.descendant(of: doh, matching: find.text('In use')), findsOneWidget);
       });
 
@@ -1294,7 +1294,7 @@ void main() {
       host.changed();
       await tester.pump();
       expect(find.textContaining('↓ 87.4 · ↑ 22.1 Mbps'), findsOneWidget);
-      expect(find.textContaining('34 ms'), findsOneWidget);
+      expect(find.textContaining('34ms'), findsOneWidget);
     });
 
     testWidgets('Speed Test card: disabled while disconnected, a tap says so', (

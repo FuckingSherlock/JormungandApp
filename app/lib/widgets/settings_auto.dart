@@ -135,7 +135,7 @@ class AutoModeBody extends StatelessWidget {
                     onCommit: (t) {
                       final v = parseThreshold(t);
                       if (v == null) {
-                        toast(l10n.enter0Ms(autoThresholdMax));
+                        toast(l10n.enter0Ms2(autoThresholdMax));
                         return;
                       }
                       a.threshold = v;

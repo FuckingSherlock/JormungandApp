@@ -18,6 +18,9 @@ class _Net implements NetworkPort {
   Stream<bool> get meteredChanges => const Stream<bool>.empty();
 
   @override
+  Stream<Map<String, dynamic>> get states => const Stream<Map<String, dynamic>>.empty();
+
+  @override
   Future<String> type() async => 'mobile';
 }
 

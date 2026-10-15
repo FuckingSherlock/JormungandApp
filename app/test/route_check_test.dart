@@ -83,7 +83,7 @@ void main() {
         'pingPairs a1 3',
         'pingPairs a2 3',
       ]);
-      expect(find.text('6 working pairs · best 30 ms'), findsOneWidget);
+      expect(find.text('6 working pairs · best 30ms'), findsOneWidget);
       // every measured pair is kept in the pair book: what the chain's exits live by
       final cat = host.catalog;
       final a1 = cat.sourcesData['s1']!.nodes[0], a2 = cat.sourcesData['s1']!.nodes[1];
@@ -92,11 +92,11 @@ void main() {
       expect(find.text('Check again'), findsOneWidget);
       // the top four of six, the rest behind "Show all"
       expect(find.text('Show all 6'), findsOneWidget);
-      expect(find.text('30 ms'), findsNWidgets(2));
+      expect(find.text('30ms'), findsNWidgets(2));
       await tester.ensureVisible(find.text('Show all 6'));
       await tester.tap(find.text('Show all 6'));
       await tester.pumpAndSettle();
-      expect(find.text('80 ms'), findsNWidgets(2));
+      expect(find.text('80ms'), findsNWidgets(2));
       expect(find.textContaining('Show top'), findsOneWidget);
 
       // grouped by entry: one row per entry with its count, unfolding to the exits
@@ -120,14 +120,14 @@ void main() {
     await tester.tap(find.text('Check route'));
     await tester.pumpAndSettle();
     // b1 answers fastest (30 ms) but only by a backup check: the best is the strong 60 ms
-    expect(find.text('6 working pairs · best 60 ms'), findsOneWidget);
+    expect(find.text('6 working pairs · best 60ms'), findsOneWidget);
     await tester.ensureVisible(find.text('Show all 6'));
     await tester.tap(find.text('Show all 6'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Answered only a backup check'), findsNWidgets(2));
     // the weak 30 ms rows come after the strong 80 ms ones
     final ys = [
-      for (final t in ['60 ms', '80 ms', '30 ms']) tester.getTopLeft(find.text(t).last).dy,
+      for (final t in ['60ms', '80ms', '30ms']) tester.getTopLeft(find.text(t).last).dy,
     ];
     expect(ys[0] < ys[1] && ys[1] < ys[2], isTrue, reason: '$ys');
     expect(tester.takeException(), isNull);

@@ -923,7 +923,7 @@ class EventWords {
       for (final n in nodes) {
         if (n is! Map) continue;
         final where = [for (final k in ['country', 'city']) if (n[k] != null && '${n[k]}'.isNotEmpty) '${n[k]}'].join(', ');
-        final ms = n['ms'] is num ? l10n.ms(n['ms'] as num) : null;
+        final ms = n['ms'] is num ? '${(n['ms'] as num).round()}${l10n.ms2}' : null;
         final what = n['ok'] == true
             ? ['OK', if (n['code'] != null) '${n['code']}', if (ms != null) '· $ms'].join(' ')
             : '${n['error'] ?? l10n.error}';

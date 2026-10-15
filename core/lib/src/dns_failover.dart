@@ -751,7 +751,7 @@ class DnsFailover {
     await _react();
     await all;
     if (_stopped) return;
-    String got(_Node n) => _down(n) ? '${n.kind} dead' : n.w.health.ms >= 0 ? '${n.kind} ${n.w.health.ms} ms' : n.w.health.ms == -1 ? '${n.kind} no answer' : '${n.kind} not asked';
+    String got(_Node n) => _down(n) ? '${n.kind} dead' : n.w.health.ms >= 0 ? '${n.kind} ${n.w.health.ms}ms' : n.w.health.ms == -1 ? '${n.kind} no answer' : '${n.kind} not asked';
     _note('info', 'dns race (${g.provider}, ${g.side}; $why): ${[for (final n in g.members) got(n)].join(', ')}; ${win == null ? 'no transport answers: the provider is out' : 'winner ${win.id}'}');
     _syncPark();
   }
@@ -1194,7 +1194,7 @@ class DnsFailover {
         return;
       }
       if (r) {
-        _note('info', 'dns flag check (${s.name}): ${want.id} answers after ${t.elapsedMilliseconds} ms ($why)');
+        _note('info', 'dns flag check (${s.name}): ${want.id} answers after ${t.elapsedMilliseconds}ms ($why)');
         return;
       }
       if (t.elapsed >= flagWait) {
@@ -1224,7 +1224,7 @@ class DnsFailover {
   void _summary() {
     for (final s in _sides) {
       if (s.members.isEmpty) continue;
-      String ms(_Node n) => n.w.health.ms >= 0 ? '${n.id} ${n.w.health.ms} ms' : n.id;
+      String ms(_Node n) => n.w.health.ms >= 0 ? '${n.id} ${n.w.health.ms}ms' : n.id;
       final live = [for (final n in s.members) if (n.on) ms(n)];
       String next(_Node n) => n.recheckAt == null ? '' : ', asked again in ${((n.recheckAt! - _clock()) / 1000).ceil().clamp(0, 86400)} s';
       String why(_Node n) => _down(n)
@@ -1291,13 +1291,24 @@ class DnsFailover {
     final ns = [for (final n in g.members) if (n.kind == kind) n];
     final ok = [for (final n in ns) if (_msOf(n) >= 0) _msOf(n)];
     final ms = ok.isNotEmpty ? ok.reduce((a, b) => a < b ? a : b) : ns.any((n) => _msOf(n) == -1) ? -1 : -2;
-    final testing = ns.any((n) => n.testing != null || n.measuring != null || n.suspecting);
+    final probing = ns.any((n) => n.testing != null || n.measuring != null);
+    final suspecting = ns.any((n) => n.suspecting);
     final dead = ns.every(_down);
+    // a miss the Sentinel is still confirming: "no answer" is known, the verdict is not (`suspect`, `ms: -1`)
+    final state = !probing && suspecting && ms == -1
+        ? 'suspect'
+        : probing || suspecting
+            ? 'testing'
+            : ms >= 0
+                ? 'ok'
+                : ms == -1
+                    ? 'miss'
+                    : 'untested';
     return {
       'kind': kind,
       'ids': [for (final n in ns) n.id],
       'ms': ms,
-      'state': testing ? 'testing' : ms >= 0 ? 'ok' : ms == -1 ? 'miss' : 'untested',
+      'state': state,
       if (dead) 'dead': true,
       if (ms >= 0 && winner != null && !ns.contains(winner)) 'reserve': true,
     };

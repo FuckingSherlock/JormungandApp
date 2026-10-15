@@ -218,7 +218,7 @@ void main() {
     expect(r.sentinel.roots.byKey('dns|a')!.level, Level.dns);
     expect((r.svc.toJson()['servers'] as List).first, containsPair('ok', false));
     expect(r.notes.any((n) => n.startsWith('info dns flag check (direct): b answers after')), isTrue, reason: 'the write was verified: ${r.notes}');
-    expect(r.notes.any((n) => n.startsWith('debug dns direct: answers b; flags on [b 20 ms, c 20 ms]; off [a]')), isTrue, reason: 'one summary line per side per round: ${r.notes}');
+    expect(r.notes.any((n) => n.startsWith('debug dns direct: answers b; flags on [b 20ms, c 20ms]; off [a]')), isTrue, reason: 'one summary line per side per round: ${r.notes}');
     expect(r.notes.where((n) => n.startsWith('warn')), isEmpty);
     await r.dispose();
   });
@@ -418,6 +418,19 @@ void main() {
     await r.round();
     await r.round();
     expect(r.svc.alive('a'), isTrue, reason: 'the root closed and the flag is back');
+    await r.dispose();
+  });
+
+  test('a transport that missed while the Sentinel still confirms it reads suspect (ms -1), then miss', () async {
+    final r = _Rig(direct: ['a', 'b']);
+    await r.settle();
+    r.alive['dns-a'] = -1;
+    await r.round(); // the round's miss opens the suspicion; its checks are still running
+    var t = (r.svc.providersJson('a').single['transports'] as List).single as Map;
+    expect([t['state'], t['ms']], ['suspect', -1], reason: 'no answer is known, the verdict is not');
+    await r.time.advanceSeconds(5);
+    t = (r.svc.providersJson('a').single['transports'] as List).single as Map;
+    expect(t['state'], 'miss');
     await r.dispose();
   });
 
@@ -1125,7 +1138,7 @@ void main() {
       expect(r.svc.activeOf('direct'), 'p-dot');
       expect(r.writes.toSet(), {'p-doh off reserve', 'p-udp off reserve'});
       expect(await r.log(), isEmpty, reason: 'the winner of a race is an ordinary choice: no switch event');
-      expect(r.notes.any((n) => n.contains('dns race (p, direct; start): doh 40 ms, dot 20 ms, udp 5 ms; winner p-dot')), isTrue, reason: '${r.notes}');
+      expect(r.notes.any((n) => n.contains('dns race (p, direct; start): doh 40ms, dot 20ms, udp 5ms; winner p-dot')), isTrue, reason: '${r.notes}');
       final p = (r.svc.toJson()['providers'] as List).cast<Map>().firstWhere((x) => x['provider'] == 'p');
       expect(p['winner'], {'id': 'p-dot', 'kind': 'dot', 'ms': 20});
       expect(p['racing'], isFalse);

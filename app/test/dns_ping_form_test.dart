@@ -103,7 +103,7 @@ void main() {
     );
     host.raceReplies[id] = [const []];
     await _form(t, host, id: id);
-    expect(find.descendant(of: find.byKey(const ValueKey('dns-race-vpn-doh')), matching: find.text('55 ms')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('dns-race-vpn-doh')), matching: find.text('55ms')), findsOneWidget);
     expect(find.text('The VPN side is measured only while connected: it needs a tunnel'), findsNothing);
   });
 
@@ -118,7 +118,7 @@ void main() {
       ],
     ];
     await _form(t, host, id: id);
-    expect(find.descendant(of: find.byKey(const ValueKey('dns-ping-summary')), matching: find.text('12 ms')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('dns-ping-summary')), matching: find.text('12ms')), findsOneWidget);
 
     final all = FakeCoreHost();
     final id2 = _own(all);
@@ -150,8 +150,8 @@ void main() {
     await t.pump();
     expect(host.calls, containsAll(['pingDns https://1.1.1.1/dns-query', 'pingDns tls://1.1.1.1']));
     expect(find.descendant(of: find.byKey(const ValueKey('dns-race-direct-doh')), matching: find.text('No answer')), findsOneWidget);
-    expect(find.descendant(of: find.byKey(const ValueKey('dns-race-direct-dot')), matching: find.text('30 ms')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('dns-race-direct-dot')), matching: find.text('30ms')), findsOneWidget);
     expect(find.descendant(of: find.byKey(const ValueKey('dns-ping-summary')), matching: find.byType(LatencyView)), findsNothing);
-    expect(find.text('30 ms'), findsWidgets);
+    expect(find.text('30ms'), findsWidgets);
   });
 }

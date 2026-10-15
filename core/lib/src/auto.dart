@@ -447,6 +447,8 @@ class AutoService {
       this.note,
       this.trace,
       this.onDown,
+      this.netSwitch,
+      this.netSettling,
       ProbePool? pool,
       ExitBook? exits,
       AutoMemory? memory,
@@ -611,10 +613,25 @@ class AutoService {
   /// is tested, moved or marked until it is back.
   bool offline = false;
 
+  /// Whether a failed request belongs to a network switch (the Sentinel context's `failureInSwitch`): [ageMs] = how old the
+  /// failed connection was (null = not told). A failed request is then the network's, not the route's: counted
+  /// ([requestFailsNet]) and told, never a check of the route or a site to try again.
+  final bool Function(int? ageMs)? netSwitch;
+
+  /// Whether the device moved to another network (or got the connection back) a moment ago (the context's `settling`).
+  /// While it holds and the route in use does not answer, the round does not judge: nobody is marked, no route is left,
+  /// and the route is asked again a retry pause later ([netHeldRounds]).
+  final bool Function()? netSettling;
+
   /// Requests through the current route that could not open (see [onLog]) and the last.
   int requestFails = 0;
   Map<String, dynamic>? lastRequestFail;
 
+  /// Failed requests held to the network switch (not counted in [requestFails]), and rounds in which a route that did not
+  /// answer was not judged for the same reason.
+  int requestFailsNet = 0;
+  int netHeldRounds = 0;
+  bool _netHeld = false; // the round that ran held: the next one is a retry pause away
   /// Sites that got nothing back through a node that passes traffic (as on [siteFails]) and the last.
   int siteFailCount = 0;
   AutoSiteFail? lastSiteFail;
@@ -726,6 +743,7 @@ class AutoService {
       // the misses of this round that may be put back (no route answered): all but the
       // current route's own and its servers'
       final keep = <Health>{cur.health, for (final g in cur.groups) g.of(g.current)};
+      final savedKeep = {for (final h in keep) h: h._save()};
       final saved = {
         for (final r in _routes) ...{
           r.health: r.health._save(),
@@ -734,6 +752,7 @@ class AutoService {
         },
       }..removeWhere((h, _) => keep.contains(h));
       final ladderSaved = pool.ladder.snapshot();
+      final warmedBefore = _warmedAt, improveBefore = _improveNow;
       final failed = _userFailed;
       _userFailed = false;
       _improveForce = _improveNow;
@@ -759,6 +778,21 @@ class AutoService {
       _ahead = _ladderWakes(todo) ? settings.ladderAhead : Duration.zero;
       await Future.wait(todo.map((i) => _checkRoute(_routes[i])));
       if (_stopped) return;
+      // the network moved (or just came back) and the route in use does not answer yet: its connections, its transport
+      // and the DNS are still on the old network. Nobody is marked, no route is left; a retry pause later it is asked again,
+      // and what it says after the window is judged as usual
+      if (netSettling?.call() == true && !cur.health.answered) {
+        saved.forEach((h, s) => h._load(s));
+        savedKeep.forEach((h, s) => h._load(s));
+        pool.ladder.restore(ladderSaved, keep: const <String>{});
+        _netHeld = true;
+        _userFailed |= failed; // a failed request is judged by the round that is not held
+        _improveNow = improveBefore;
+        _warmedAt = warmedBefore;
+        netHeldRounds++;
+        note?.call('auto: the network is changing: ${cur.id} is not judged yet, asked again in ${settings.retryPause.inMilliseconds}ms');
+        return;
+      }
       // (a route proven alive by its traffic was not tested: its Fastest groups are still looked at for a better server)
       if (live != null && identical(_routes[index], cur)) {
         for (final g in cur.groups) {
@@ -787,7 +821,7 @@ class AutoService {
         if (identical(_routes[index], cur) && cur.health.answered) {
           unawaited(_sites(cur));
         } else if (identical(_routes[index], cur) && !noNet) {
-          note?.call('auto: ${cur.id} does not pass traffic: tests again every ${settings.retryPause.inMilliseconds} ms');
+          note?.call('auto: ${cur.id} does not pass traffic: tests again every ${settings.retryPause.inMilliseconds}ms');
         }
       }
     } finally {
@@ -797,12 +831,14 @@ class AutoService {
       final f = _routes[index].health.fails;
       // the route in use missing is a doubt about the network until something answers
       // (no route answering is one too, unless the direct path answers: the routes are at fault)
-      if (!_stopped && !offline) pool.doubt(noNet ? !_directOk : f > 0);
+      final held = _netHeld;
+      _netHeld = false;
+      if (!_stopped && !offline) pool.doubt(held || (noNet ? !_directOk : f > 0));
       _schedule(_kick
           ? Duration.zero
           : noNet
               ? settings.noNetEvery
-              : f > 0
+              : f > 0 || held
                   ? settings.retryPause
                   : settings.checkEvery);
       _kick = false;
@@ -846,11 +882,22 @@ class AutoService {
       return;
     }
     if (c.chain.map(_routeOf).firstWhere((i) => i != null, orElse: () => null) != index) return;
-    if (!_isOwn(c.inbound)) _userFailed = true;
     final now = _clock();
+    // a connection the network switch closed (opened on the old network, or opened in the window of the new one settling) is
+    // the network's: not a failed request of the route, no check of it, no site to try again (counted, never dropped)
+    if (netSwitch?.call(c.durationMs) == true) {
+      requestFailsNet++;
+      note?.call('auto: a request through ${_routes[index].id} got nothing back (${c.destination}) while the network changes: not the route\'s');
+      return;
+    }
+    if (!_isOwn(c.inbound)) _userFailed = true;
     requestFails++;
     lastRequestFail = {'route': _routes[index].id, 'dest': c.destination, 'sent': c.up, 'at': now};
-    if (c.up > 0 && _failDests.length < 20) _failDests[c.destination] = (tag: c.outbound, rule: c.rule, process: c.process, pkg: c.pkg);
+    // every failed site is remembered, those that sent nothing too (instant rejects are most of them); they are tried
+    // again only if the route turns out to work ([_sites])
+    if (_failDests.length < 20 || _failDests.containsKey(c.destination)) {
+      _failDests[c.destination] = (tag: c.outbound, rule: c.rule, process: c.process, pkg: c.pkg);
+    }
     if (_failAt != null && now - _failAt! < settings.failWindow.inMilliseconds) return;
     _failAt = now;
     _failDests.removeWhere((d, _) => d != c.destination);
@@ -1395,6 +1442,18 @@ class AutoService {
       }
       if (_stopped) return false;
     }
+    // Manual on a server is strict: a pinned group stands on its pin whatever put it elsewhere (a cache restored by
+    // sing-box on a taken-over start, a stray select) — the core never moves it, and says so when it has to put it back
+    for (final r in _routes) {
+      for (final g in r.groups) {
+        final pin = g.start;
+        if (!g.pinned || pin == null || !by.containsKey(g.tag) || g.keyOf(by[g.tag]) == pin || _stopped) continue;
+        if (await api.select(g.tag, g.member(pin))) {
+          note?.call('auto: ${g.tag} was on ${by[g.tag]}: put back on the pinned ${g.member(pin)} (Manual on a server is never moved)');
+          by[g.tag] = g.member(pin);
+        }
+      }
+    }
     final i = _routes.indexWhere((r) => r.tag == by[topTag]);
     if (i >= 0 && i != index) {
       index = i;
@@ -1474,7 +1533,7 @@ class AutoService {
     if (keys.isEmpty || _stopped) return null;
     final p = await pickFastest(_ranked(g, keys), _probe1(g, force: force));
     if (_stopped || !p.found) return null;
-    (trace ?? note)?.call('auto: ${g.member(p.key!)} picked among ${p.tried} tested (${p.answered} answered, ${p.ms} ms${p.weak ? ', by a backup check only' : ''}, ${p.tookMs} ms)');
+    (trace ?? note)?.call('auto: ${g.member(p.key!)} picked among ${p.tried} tested (${p.answered} answered, ${p.ms}ms${p.weak ? ', by a backup check only' : ''}, ${p.tookMs}ms)');
     return p.key;
   }
 
@@ -1859,6 +1918,8 @@ class AutoService {
       'noNet': noNet,
       'offline': offline,
       'requestFails': requestFails,
+      'requestFailsNet': requestFailsNet,
+      'netHeldRounds': netHeldRounds,
       'lastRequestFail': lastRequestFail,
       'siteFails': siteFailCount,
       'lastSiteFail': lastSiteFail?.toJson(),

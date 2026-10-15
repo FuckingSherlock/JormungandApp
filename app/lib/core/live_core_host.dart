@@ -127,6 +127,7 @@ class LiveCoreHost extends CoreHost {
   AppUpdate _upd = const AppUpdate();
   StreamSubscription<Map<String, dynamic>>? _updSub;
   StreamSubscription<bool>? _meteredSub, _screenSub;
+  StreamSubscription<Map<String, dynamic>>? _netStateSub;
   String? _updSettingsSig;
   bool _metered = false;
   Object? _sourcesRev;
@@ -157,6 +158,13 @@ class LiveCoreHost extends CoreHost {
   Future<void> _start() async {
     try {
       await api.init();
+      // the identity of the real network goes to the Sentinel before anything runs on it (the stream says the
+      // current one at once on listen), then on every change: a Wi-Fi switch is a move, not a route failure
+      _netStateSub = network?.states.listen((s) {
+        try {
+          api.setNetwork(s);
+        } catch (_) {}
+      }, onError: (_) {});
       final r = await api.state();
       final snap = r['snapshot'];
       catalog = Catalog.fromJson(
@@ -261,8 +269,9 @@ class LiveCoreHost extends CoreHost {
     await _updSub?.cancel();
     await _meteredSub?.cancel();
     await _screenSub?.cancel();
+    await _netStateSub?.cancel();
     _statusSub = _eventSub = _updSub = null;
-    _meteredSub = _screenSub = null;
+    _meteredSub = _screenSub = _netStateSub = null;
     if (_ready) {
       try {
         await api.dispose();
@@ -284,6 +293,7 @@ class LiveCoreHost extends CoreHost {
     _updSub?.cancel();
     _meteredSub?.cancel();
     _screenSub?.cancel();
+    _netStateSub?.cancel();
     _events.close();
     _notices.close();
     super.dispose();
@@ -1702,6 +1712,21 @@ class LiveCoreHost extends CoreHost {
 
   Future<void> _reconnect() async {
     if (_reconnecting || !_connected || _connecting || _planSig == null) return;
+    // Manual on a server is strict: the pick was removed / switched off (a subscription update, an edit) — the connection
+    // ends in an error naming it, the tunnel is not moved to another server
+    final lost = catalog.pinLoss();
+    if (lost != null) {
+      _reconnecting = true;
+      try {
+        await disconnect();
+        _error = lost;
+        _notice(HostNotice('connectFailed', lost));
+        _notifyNow();
+      } finally {
+        _reconnecting = false;
+      }
+      return;
+    }
     final sig = catalog.planSig();
     if (sig == null || sig == _planSig) return;
     _reconnecting = true;

@@ -481,7 +481,7 @@ void main() {
         final r = await up(stallTimeout: const Duration(milliseconds: 500), responseTimeout: const Duration(seconds: 1))
             .upload(big, meta: _meta, proxyPort: proxy.port);
         expect(r.via, 'direct');
-        expect(r.firstError, allOf(startsWith('via VPN:'), contains('the upload stalled: no bytes accepted for 500 ms')));
+        expect(r.firstError, allOf(startsWith('via VPN:'), contains('the upload stalled: no bytes accepted for 500ms')));
         expect(sw.elapsed, lessThan(const Duration(seconds: 6)));
       });
 

@@ -31,6 +31,15 @@ to …` — раньше такие строки не распознавалис
 Предупреждения и ошибки основного кольца дополнительно лежат в `problems.jsonl` (переживают перезапуск).
 Строки шум-кольца на диск не пишутся.
 
+### Сбои при смене сети в Raw
+
+Сбой, который сделала смена сети (`docs/failures.md` → «Смена сети: окно переключения»), события не создаёт, но не
+пропадает: строка info на каждое соединение — `Connection … got nothing back (kind, opened Nms before; through …) while
+the network changed: counted as the network's …` (книга сбоев, поле статуса `failures.netSwitch`, входит в `failed10m`);
+`auto: a request through <маршрут> got nothing back (<адрес>) while the network changes: not the route's` (Auto,
+`requestFailsNet`); `auto: the network is changing: <маршрут> is not judged yet, asked again in Nms` (раунд не судился,
+`netHeldRounds`). В шагах вердикта — `net.switched`.
+
 ### Свои проверки ядра в Raw
 
 Проверки ядра (замеры Auto, «If unavailable», сайты, DNS, флаги) идут через служебный вход sing-box `probe-in`
@@ -81,7 +90,7 @@ to …` — раньше такие строки не распознавалис
 |---|---|---|
 | conn | connected | план подключения (режим, маршрут, сервер) |
 | conn | disconnected | `by` |
-| conn | connectFailed | `reason` |
+| conn | connectFailed | `reason` (Manual на сервер, который пропал / выключен / не поддержан: текст `Manual pick "…" is unavailable: …` — подключение не идёт через другой сервер, запущенное завершается этой же ошибкой; см. connect-model.md → Manual на сервер) |
 | conn | lost / restored | `downMs?` — сеть пропала / вернулась на живом подключении |
 | conn | offline / online | `downMs?` — нет интернета вообще / вернулся |
 | conn | failing | соединения массово не удаются (детектор неудавшихся соединений, `failures.dart`) |
@@ -130,7 +139,7 @@ to …` — раньше такие строки не распознавалис
   отвечает именем кандидата, что должен отвечать); `dns flag not applied after N s (<сторона>): expected X, Y answers`
   (warn) — не подхватил за `flagWait` (3 с); `… cannot be told, this sing-box has no flagcheck` (debug) — старый sing-box.
   Проверка идёт после записи, одна — после старта для обеих сторон.
-- `dns race (<провайдер>, <сторона>; start|network|node|failure): doh 31 ms, dot no answer, udp dead, …; winner <id>` (info) —
+- `dns race (<провайдер>, <сторона>; start|network|node|failure): doh 31ms, dot no answer, udp dead, …; winner <id>` (info) —
   итог гонки протоколов, одна строка со всеми транспортами (`no answer` — молчит, `dead` — мёртв по вердикту, `not asked`);
   перед ней `… asking <id, …>`. Выбор победителя события не даёт.
 - `dns <сторона>: A → B (failover|back|node|off)` (info) — смена отвечающего кандидата (рядом событие `dns/switched`;
@@ -149,14 +158,14 @@ to …` — раньше такие строки не распознавалис
 **Строки журнала предрезолва адресов** (основное кольцо ядра, `logBook.note`; событий нет, `rules.md` §6):
 - `address: N hosts for <причина>: K from the cache, M stale (refreshed in the background), …` (info) — итог
   подготовки списка имён; `address: config for <причина>: N of M hostnames pinned to an address …` (info) — что
-  легло в конфиг и какие имена остались именами (резерв: домен + `domain_resolver`); `address: connect waited N ms (up to 1500 ms) for K hosts …` (info; warn, если часть не успела) — ожидание connect. Причина: `connect`, `reresolve`, `recover`, `node down`, `subscription update`, `ping`, `speed test`, суффиксы `, refresh` и `, background`.
+  легло в конфиг и какие имена остались именами (резерв: домен + `domain_resolver`); `address: connect waited Nms (up to 1500ms) for K hosts …` (info; warn, если часть не успела) — ожидание connect. Причина: `connect`, `reresolve`, `recover`, `node down`, `subscription update`, `ping`, `speed test`, суффиксы `, refresh` и `, background`.
 - `address: <имя> → <IP…> via <сервер> (<метка>) in N ms [fresh, <причина>] (параллельный опрос: `[fresh, <причина>, parallel]`; поздний ответ — `answered late … not used`)` (info) — имя разрешено;
   `address: <имя> via <сервер> failed: <причина> (N ms), next` (info) — один сервер не ответил, пробуется
   следующий; `address: <имя>: <сервер> skipped (judged dead)` (info); `address: DoQ servers are not used …` (info,
   один раз).
 - Не разрешилось: `address: <имя> not resolved by any server in N ms [<причина>]` (warn; «the cached address
   stays», если кэш есть), `address: <имя>: out of time (N ms), K servers not tried` (warn),
-  `address: not everything resolved within 1500 ms for <причина>; the config keeps the names …` (warn — резерв
+  `address: not everything resolved within 1500ms for <причина>; the config keeps the names …` (warn — резерв
   на старое поведение для этих имён), `address: the saved DNS settings could not be read …` /
   `the addresses could not be prepared …` (warn — только системный резолвер / имена в конфиге).
 - Сбой узла: `address: <имя> (<группа>/<узел> is down) on <IP>: another cached address <IP> is tried (N of M

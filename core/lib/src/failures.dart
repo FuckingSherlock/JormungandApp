@@ -327,6 +327,8 @@ class FailureBook {
     this.update,
     this.repeated,
     this.worked,
+    this.netSwitch,
+    this.netHeld,
     Timer Function(Duration, void Function())? timer,
   })  : _now = now ?? DateTime.now,
         _ignored = ignored,
@@ -400,6 +402,16 @@ class FailureBook {
   /// verdict ends by it (service.dart).
   final void Function(String host, int port, String outbound)? worked;
 
+  /// Whether a failed connection belongs to a network switch (the network is down or just changed; the connection was
+  /// opened on the old one): it is the network's, not the app's or the route's. Counted ([netSince]), never a streak.
+  final bool Function(ClosedConnection c)? netSwitch;
+
+  /// Told for each such failure, so the raw log has it (service.dart): held, never dropped.
+  final void Function(ClosedConnection c, ConnOutcome out)? netHeld;
+
+  /// Failures held to a network switch since the start.
+  int netSince = 0;
+
   bool _active = false;
   int _since = 0;
   final _entries = <String, _Entry>{}; // insertion order: the newest last
@@ -424,7 +436,7 @@ class FailureBook {
     _emitted.clear();
     _dns.clear();
     _kindsSince.clear();
-    _okSince = _failedSince = _bgSince = _events = _ownOkSince = _ownFailedSince = 0;
+    _okSince = _failedSince = _bgSince = _events = _ownOkSince = _ownFailedSince = netSince = 0;
     for (var i = 0; i < _Buckets.n; i++) {
       _total.ok[i] = _total.bad[i] = 0;
       _total.stamp[i] = -1;
@@ -551,6 +563,12 @@ class FailureBook {
     final out = ConnOutcome.of(c, hint: hint?.kind);
     if (out.idle) return;
     final at = _now().millisecondsSinceEpoch, minute = at ~/ 60000;
+    if (out.failed && netSwitch?.call(c) == true) {
+      netSince++;
+      netHeld?.call(c, out);
+      _total.add(minute, failed: true);
+      return;
+    }
     final e = _entryFor(c, h, port, at);
     e.lastAt = at;
     if (c.rule.isNotEmpty) e.rule = c.rule;
@@ -801,6 +819,7 @@ class FailureBook {
       'byKind': {for (final k in _kindsSince.entries) k.key.name: k.value},
       'ownOk': _ownOkSince, // the app's own process: not in the numbers above (see [own])
       'ownFailed': _ownFailedSince,
+      'netSwitch': netSince, // failed in a network switch: counted in failed10m, no entry, no streak
       'events': _events,
       'entries': _entries.length,
       'apps': appList.take(top).toList(),

@@ -299,6 +299,10 @@ BoxRunner, `withCacheFile`). Правила `process_path → direct` для с�
   Для отчёта поддержки тот же канал отвечает на `type` (wifi / ethernet / mobile / other / none / unknown —
   по тем же нижележащим сетям), а `VpnChannel` — на `device` (модель, производитель, API Android);
   из этого `core/report_info.dart` собирает `appInfo` (`docs/logs.md` → Отправка).
+- **Личность сети для Sentinel**: поток `jormungand/network_state` (тот же `NetworkChannel`, наблюдатель
+  `DefaultNetworkMonitor.addStateListener` — отдельный от слушателей libbox, живёт, пока Dart слушает, с туннелем
+  или без) → `LiveCoreHost` → `CoreApi.setNetwork`. Детали и поля — `docs/failures.md` (контекст сети). На Windows
+  такого источника нет (ядро видит только пробы и смену интерфейса).
 - **Экран** (фоновые ошибки при выключенном экране): канал `jormungand/screen` (`ScreenChannel.kt.tmpl`,
   Dart — `ScreenPort`): метод `on` (`PowerManager.isInteractive`) и поток смен. `ACTION_SCREEN_ON/OFF` нельзя
   объявить в манифесте — приёмник регистрируется в рантайме на application-контексте, пока Dart слушает поток

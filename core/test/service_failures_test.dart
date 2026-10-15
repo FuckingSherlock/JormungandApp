@@ -245,6 +245,8 @@ void main() {
       expect(runs, 1, reason: 'not started again behind the network root');
       svc.setNetwork({'connected': true, 'validated': true});
       await time.advanceSeconds(2);
+      expect(runs, 1, reason: 'the network just came back: the new one is still settling (net.switched), the probe waits the grace');
+      await time.advanceSeconds(30);
       expect(runs, 2);
       expect(events('conn', 'failing'), isEmpty, reason: 'a micro-failure: the raw log only, no event');
       expect((svc.log()['lines'] as List).cast<Map>().any((l) => '${l['msg']}'.contains('micro-failure')), isTrue);

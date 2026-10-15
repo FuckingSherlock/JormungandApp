@@ -92,7 +92,7 @@
   "Speed test finished": "Проверка скорости завершена",
   "Speed test failed": "Проверка скорости не удалась",
   "Speed test: ↓ {0} · ↑ {1} Mbps": "Скорость: ↓ {0} · ↑ {1} Мбит/с",
-  "Latency {0} ms": "Задержка {0} мс",
+  "Latency {0}ms": "Задержка {0}мс",
   "Close connections on route switch": "Закрывать соединения при смене маршрута",
   "Picking another route by hand closes the open connections of the old one, so apps reconnect the new way. Off: they finish on the old route": "Выбор другого маршрута вручную закрывает открытые соединения прежнего, и приложения переподключаются уже по новому. Выкл: они доживают на прежнем маршруте",
   "Connections are failing": "Соединения не удаются",
@@ -236,5 +236,11 @@
   "Reserve": null,
   "The VPN side is measured only while connected: it needs a tunnel": null,
   "{#0}d ago": null,
+  "No answer, re-checking": null,
+  "{#0} working pair · best {#1}ms": "{0} рабочая пара · лучшая {1} мс",
+  "{#0} working pairs · best {#1}ms": ["{0} рабочая пара · лучшая {1} мс", "{0} рабочие пары · лучшая {1} мс", "{0} рабочих пар · лучшая {1} мс"],
+  "{#0} working pair (stopped early) · best {#1}ms": "{0} рабочая пара (остановлено раньше) · лучшая {1} мс",
+  "{#0} working pairs (stopped early) · best {#1}ms": ["{0} рабочая пара (остановлено раньше) · лучшая {1} мс", "{0} рабочие пары (остановлено раньше) · лучшая {1} мс", "{0} рабочих пар (остановлено раньше) · лучшая {1} мс"],
+  "Enter 0–{#0}ms": "Введите 0–{0} мс",
   "New version": "Новая версия",  "A new version of the app is out, or a downloaded one waits to be installed": "Вышла новая версия приложения или скачанная ждёт установки"
 }

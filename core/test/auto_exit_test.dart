@@ -446,21 +446,19 @@ void main() {
     });
   });
 
-  test('a manual pick the group cannot hold is a connection warning, never a quiet fallback to the first server', () {
+  test('a manual pick the group cannot hold fails the connect, never a quiet fallback to the first server', () {
     final p = plan([unit('A', ['s::a', 's::b'], pick: 'priority', chosen: 's::gone')]);
     ((p['routes'] as List)[0]['main'] as Map)['pinned'] = true;
-    final warnings = <String>[];
-    buildConfig(p, warnings: warnings);
-    expect(warnings, [contains('s::gone')], reason: 'the pick is named, with the server the tunnel is on instead');
+    expect(() => buildConfig(p), throwsA(predicate((e) => '$e'.contains('s::gone'))));
     final ok = plan([unit('A', ['s::a', 's::b'], pick: 'priority', chosen: 's::b')]);
     ((ok['routes'] as List)[0]['main'] as Map)['pinned'] = true;
-    final none = <String>[];
-    buildConfig(ok, warnings: none);
-    expect(none, isEmpty);
-    final lost = plan([unit('A', ['s::a', 's::b'])]);
-    ((lost['routes'] as List)[0]['main'] as Map)['pinLost'] = 's::x';
-    final w2 = <String>[];
-    buildConfig(lost, warnings: w2);
-    expect(w2, [contains('s::x')]);
+    final cfg = buildConfig(ok);
+    final sel = (cfg['outbounds'] as List).cast<Map>().firstWhere((o) => o['tag'] == 'route0');
+    expect(sel['default'], 'route0/s::b', reason: 'the selector default is the pin, so a restart cannot land on the first member');
+    // sing-box's cache_file restores a pick by cache_id (a hash of the defaults): a pick the core's Auto made on the same
+    // default earlier must not come back over a pin
+    final auto = buildConfig(plan([unit('A', ['s::a', 's::b'], pick: 'priority', chosen: 's::b')]));
+    String cacheId(Map<String, dynamic> c) => (c['experimental'] as Map)['cache_file']['cache_id'] as String;
+    expect(cacheId(cfg), isNot(cacheId(auto)));
   });
 }

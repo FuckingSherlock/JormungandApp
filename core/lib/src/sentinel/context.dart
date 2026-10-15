@@ -138,6 +138,42 @@ class ContextTracker {
   /// connectivity (`none` / `captive` ↔ the rest): what the retry timers start over by.
   int netEpoch = 0;
 
+  /// How long after a move to another network (or the connection back) the failures count as the network's, not the
+  /// route's: the new network is still settling (DNS, routes, the transports of the nodes dialling again).
+  Duration switchGrace = const Duration(seconds: 10);
+
+  /// A connection that was opened before the move is a casualty of the old network for this long after it (it was
+  /// closed with nothing back, or ran into the timeout of the dead link).
+  Duration oldConnGrace = const Duration(seconds: 60);
+
+  int? _movedAt; // when [netEpoch] last counted a move (ms since epoch)
+
+  /// When the device last moved to another network or got the connection back; null = not since the start.
+  DateTime? get lastMove => _movedAt == null ? null : DateTime.fromMillisecondsSinceEpoch(_movedAt!);
+
+  /// The network is down or has just changed: a failure now is the network's. No connection / a portal (said by the
+  /// platform or the OS; the `none` of the probes is Auto's own verdict, a conclusion from the failures, not a cause of
+  /// them), or a move within [switchGrace].
+  bool get switching => (_net == NetState.captive || (_net == NetState.none && _netSource != 'probes')) || settling;
+
+  /// The device moved to another network (or got the connection back) less than [switchGrace] ago. What a round of
+  /// Auto holds by: with no connection at all its own «no network» path is the right one.
+  bool get settling {
+    final m = _movedAt;
+    return m != null && clock.now().millisecondsSinceEpoch - m < switchGrace.inMilliseconds;
+  }
+
+  /// A failure of a connection [ageMs] old (null = not told) belongs to a network switch: [settling], or the connection
+  /// was opened before the last move and that was less than [oldConnGrace] ago. Not the steady `none` / `captive`: a
+  /// failure there is judged by the Sentinel as the consequence of that outage (`conn/offline`), which is its visible record.
+  bool failureInSwitch(int? ageMs) {
+    if (settling) return true;
+    final m = _movedAt;
+    if (m == null || ageMs == null) return false;
+    final now = clock.now().millisecondsSinceEpoch;
+    return now - ageMs < m && now - m < oldConnGrace.inMilliseconds;
+  }
+
   /// Counts the changes of the stored core state (a start, a stop, a crash).
   int coreEpoch = 0;
 
@@ -174,8 +210,13 @@ class ContextTracker {
   }
 
   /// The default interface changed (sing-box: `updated default interface`), or the device moved to
-  /// another network: timers that wait for the network start over.
-  void interfaceChanged() => _deriveNet(moved: true);
+  /// another network: timers that wait for the network start over. The line sing-box writes while it starts (and
+  /// restarts) names the interface it began on: not a move, so it opens no switch window; the line of a core that
+  /// runs (or of none) is one.
+  void interfaceChanged() {
+    if (_core == 'starting' || _core == 'recovering' || _core == 'down') return;
+    _deriveNet(moved: true);
+  }
 
   void _deriveNet({bool moved = false}) {
     final NetState s;
@@ -200,7 +241,15 @@ class ContextTracker {
     if (!changed && !moved && src == _netSource) return;
     if (changed) _netSince = now;
     if (changed || moved) _netChangedAt = now;
-    if (moved || ((s == NetState.none || s == NetState.captive) != (_net == NetState.none || _net == NetState.captive))) netEpoch++;
+    // A loss or return of connectivity counts for the timers that start over by [netEpoch]; only a real move opens the
+    // switch window ([_movedAt]): the platform's / the OS's `none` ↔ the rest, or another network. The `none` of the probes is
+    // Auto's own verdict, its recovery is not the device arriving on a network.
+    bool out(NetState st, String from) => st == NetState.captive || (st == NetState.none && from != 'probes');
+    final realMove = moved || out(s, src) != out(_net, _netSource);
+    if (realMove || ((s == NetState.none || s == NetState.captive) != (_net == NetState.none || _net == NetState.captive))) {
+      netEpoch++;
+      if (realMove) _movedAt = now;
+    }
     _net = s;
     _netSource = src;
     _fire();

@@ -218,8 +218,8 @@ class _RouteCheckState extends State<RouteCheck> {
       final n = t.pairs.length, best = t.pairs.first.ms;
       sum = _sum(
         t.stopped
-            ? l10n.workingPairsStoppedEarlyBestMsPlural(n, best)
-            : l10n.workingPairsBestMsPlural(n, best),
+            ? l10n.workingPairsStoppedEarlyBestMsPlural2(n, best)
+            : l10n.workingPairsBestMsPlural2(n, best),
         c.active,
       );
     } else {

@@ -58,7 +58,7 @@ void main() {
     expect(find.text('Entry'), findsNothing);
     expect(find.textContaining('No other working route to try'), findsNothing);
     expect(find.text('Germany, Frankfurt'), findsOneWidget);
-    expect(find.text('OK 200 · 200 ms'), findsOneWidget);
+    expect(find.text('OK 200 · 200ms'), findsOneWidget);
     expect(find.text('Connection timed out'), findsOneWidget);
     await tester.pumpAndSettle(const Duration(seconds: 5));
   });

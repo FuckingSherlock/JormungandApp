@@ -44,6 +44,46 @@
 (Android: `NET_CAPABILITY_VALIDATED` / `CAPTIVE_PORTAL`, транспорт, id сети) присылает отчёт целиком; он заменяет
 предыдущий. Ответ — снимок контекста.
 
+Кто и когда шлёт `setNetwork` на Android: `LiveCoreHost` подписывается на `NetworkPort.states` (канал
+`jormungand/network_state`) сразу после `api.init()`, до усыновления и подключения, — текущее состояние приходит
+сразу при подписке, дальше каждое изменение. Источник — `DefaultNetworkMonitor` (`NetworkChannel.kt.tmpl` только
+передаёт): запрос `NOT_VPN` + `INTERNET` + `NOT_RESTRICTED`, то есть **нижележащая** сеть, а не наш VPN, и при
+поднятом туннеле тоже. Поля: `connected` (есть ли такая сеть; `onLost` → `false`, остальных полей тогда нет),
+`validated` (`NET_CAPABILITY_VALIDATED`), `captive` (`NET_CAPABILITY_CAPTIVE_PORTAL`), `type`
+(`wifi` / `cellular` / `ethernet` / `vpn` / `other`), `id` (`Network.getNetworkHandle()` строкой: другая сеть
+Wi-Fi — другой id при том же `wlan0`, чего строка sing-box `updated default interface` не видит). Одинаковые
+подряд состояния не повторяются. SSID не нужен (нужны разрешения). На Windows приложение `setNetwork` не шлёт.
+
+### Смена сети: окно переключения
+
+Переход на другую сеть (Wi-Fi → Wi-Fi, Wi-Fi → мобильная, возврат связи) — это **не поломка маршрута**: старые
+соединения и транспорты узлов умирают, DNS и маршруты новой сети ещё устаканиваются. Ход (`netEpoch++`, `lastMove`) —
+другой `id` или `type` от платформы (без промежуточного `none`), строка sing-box `updated default interface` у
+работающего ядра, любой переход `none`/`captive` ↔ остальное, **кроме `none` от проб** (в том числе возврат после
+`none` от платформы/ОС). Первый отчёт платформы ходом не считается; строка `updated default interface`, которую
+sing-box пишет при собственном старте (старт, перезапуск после падения), — тоже: это интерфейс, на котором он начал, а
+не переезд. `none` от проб и его снятие — собственный вывод Auto, а не приход устройства в сеть: окно не открывают
+(`netEpoch` они двигают, как и раньше, — таймеры повторов начинают заново).
+
+- **`settling`** — с хода прошло меньше **`switchGrace`** (10 с). **`switching`** = `settling`, или состояние `captive`,
+  или `none` от платформы/ОС (`none` от проб — собственный вывод Auto из сбоев, не причина: окном не считается).
+- **`failureInSwitch(ageMs)`** — сбой соединения возраста `ageMs` (`durationMs` закрытого соединения) принадлежит
+  переключению, если `settling`, **или** соединение открыто до последнего хода и ход был меньше **`oldConnGrace`**
+  (60 с) назад: оно умерло вместе со старой сетью. Стационарные `none`/`captive` сюда не входят — сбои там судит
+  Sentinel как следствие `conn/offline` (видимая запись).
+- **Что держится окном** (всё считается и пишется в сырой журнал, ничего не отбрасывается; после окна всё судится как
+  обычно, мёртвый маршрут и после окна уходит в failover):
+  - `FailureBook` (`netSwitch`/`netHeld`): сбой считается (`failed10m`, поле статуса `netSwitch`), строка в журнале
+    `... while the network changed: counted as the network's ...`, но записи в книге, серии `conn/failing` и подозрения нет;
+  - Auto: закрытое соединение маршрута — `requestFailsNet` (не `requestFails`), строка `auto: a request through … while
+    the network changes`, без проверки маршрута и без запоминания сайта; раунд, в котором текущий маршрут не ответил в
+    `settling`, **не судится** (`netHeldRounds`, строка `auto: the network is changing: … is not judged yet`): никто не
+    помечен, маршрут не оставлен, повтор через `retryPause`, `pool.doubt(true)`; ответил маршрут — раунд обычный;
+  - «Если недоступно» (`netSwitching`): промах цели/основного потока в `switching` не засчитывается (ни промаха, ни
+    сервера, ни fallback), раунд повторяется через `retryPause`;
+  - Sentinel: шаг **`net.switched`** — сбой, начавшийся до хода (или во время него), должен продлиться окно **после**
+    `lastMove + switchGrace` (окно сбоя отсчитывается заново, как после `self.restarted`).
+
 ### Ядро (`CoreContext`)
 
 `phase`: `stopped` / `starting` / `settling` / `settled` / `recovering` / `down`; `since`; `restartReason`
@@ -352,6 +392,7 @@ appendTrail)` дополняет событие задним числом, `Even
 | `ctx.net` | pass / inconclusive / fail | `state`, `since`, `source?` (fail — сети нет, лестница кончается) |
 | `ctx.core` | pass / fail | `phase`, `reason?`, `since?` |
 | `self.restarted` | info | `reason?`, `settledAt` — окно пошло заново |
+| `net.switched` | info | `movedAt`, `graceMs` — сеть сменилась (или вернулась) раньше, чем прошёл `switchGrace`: окно идёт заново после него |
 | `self.reject` | fail | — |
 | `defer.timeout` | fail | `maxMs` |
 | `root.covers` | fail | `root`, `kind` |

@@ -13,15 +13,22 @@ abstract interface class NetworkPort {
   /// What the phone is really on, for the support report: `wifi` | `ethernet` | `mobile` | `other` |
   /// `none` | `unknown`.
   Future<String> type();
+
+  /// The identity of the underlying default network (never our own VPN) as the core's Sentinel takes it
+  /// (`CoreApi.setNetwork`, docs/failures.md → network context): `{connected, validated, captive, type, id}`,
+  /// each state whole; the current one comes at once on listen, then every change (another Wi-Fi is
+  /// another `id`, `connected: false` when the network is gone).
+  Stream<Map<String, dynamic>> get states;
 }
 
-/// Android: MethodChannel `jormungand/network` + EventChannel `jormungand/network_events`
-/// (Kotlin: android_overlay/kotlin/NetworkChannel.kt.tmpl).
+/// Android: MethodChannel `jormungand/network` + EventChannels `jormungand/network_events` and
+/// `jormungand/network_state` (Kotlin: android_overlay/kotlin/NetworkChannel.kt.tmpl).
 class NetworkChannel implements NetworkPort {
   const NetworkChannel();
 
   static const MethodChannel _channel = MethodChannel('jormungand/network');
   static const EventChannel _events = EventChannel('jormungand/network_events');
+  static const EventChannel _state = EventChannel('jormungand/network_state');
 
   @override
   Future<bool> metered() async {
@@ -46,4 +53,10 @@ class NetworkChannel implements NetworkPort {
   @override
   Stream<bool> get meteredChanges =>
       _events.receiveBroadcastStream().where((e) => e is bool).cast<bool>();
+
+  @override
+  Stream<Map<String, dynamic>> get states => _state
+      .receiveBroadcastStream()
+      .where((e) => e is Map)
+      .map((e) => Map<String, dynamic>.from(e as Map));
 }

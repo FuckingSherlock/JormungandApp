@@ -47,7 +47,7 @@ Map<String, dynamic> planWithChosen(Map<String, dynamic> plan, Map<String, Strin
   Map<String, dynamic> targets(Map<String, dynamic> p) {
     final routing = p['routing'], specs = routing is Map ? routing['targets'] : null;
     if (specs is! Map) return p;
-    Object? withKey(Object? g, String? key) => g is Map && key != null ? {...g.cast<String, dynamic>(), 'chosen': key} : g;
+    Object? withKey(Object? g, String? key) => g is Map && key != null && g['pinned'] != true ? {...g.cast<String, dynamic>(), 'chosen': key} : g;
     final out = {
       for (final e in specs.entries)
         e.key: e.value is Map
@@ -65,7 +65,7 @@ Map<String, dynamic> planWithChosen(Map<String, dynamic> plan, Map<String, Strin
     final out = {...r};
     for (final (field, tag) in [('main', routeTag(i)), ('entry', routeEntryTag(i))]) {
       final g = r[field], key = chosen[tag];
-      if (g is Map && key != null) out[field] = {...g.cast<String, dynamic>(), 'chosen': key};
+      if (g is Map && key != null && g['pinned'] != true) out[field] = {...g.cast<String, dynamic>(), 'chosen': key};
     }
     return out;
   }

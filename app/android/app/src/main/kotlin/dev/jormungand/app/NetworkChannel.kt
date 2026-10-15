@@ -20,6 +20,9 @@ import io.flutter.plugin.common.MethodChannel
  *  metered -> Boolean   now
  *  type    -> String    wifi | ethernet | mobile | other | none (the support report's network.host)
  *  events: Boolean      every change (and the current value at once on listen)
+ *  state events (`jormungand/network_state`): Map  {connected, validated, captive, type, id} of the underlying
+ *                       default network (DefaultNetworkMonitor.addStateListener), the current one at once on
+ *                       listen; the app forwards each to the core's Sentinel (CoreApi.setNetwork)
  *
  * Our own VPN declares itself unmetered, so `activeNetwork` would answer "unmetered" through a
  * cellular link while the tunnel is up. The answer is therefore taken from the underlying
@@ -30,6 +33,7 @@ class NetworkChannel(private val app: Context) {
     companion object {
         const val NAME = "jormungand/network"
         const val EVENTS = "jormungand/network_events"
+        const val STATE = "jormungand/network_state"
 
         /** [metered] without a channel: the background update job asks it when it runs (no Dart app to ask). */
         fun isMetered(app: Context): Boolean = isMetered(app.getSystemService(ConnectivityManager::class.java))
@@ -54,6 +58,8 @@ class NetworkChannel(private val app: Context) {
     private val cm: ConnectivityManager = app.getSystemService(ConnectivityManager::class.java)
     private var sink: EventChannel.EventSink? = null
     private var last: Boolean? = null
+    private var stateSink: EventChannel.EventSink? = null
+    private var stateListener: ((Map<String, Any?>) -> Unit)? = null
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = recheck()
@@ -78,6 +84,22 @@ class NetworkChannel(private val app: Context) {
             override fun onCancel(arguments: Any?) {
                 runCatching { cm.unregisterNetworkCallback(callback) }
                 sink = null
+            }
+        })
+        EventChannel(messenger, STATE).setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                val e = events ?: return
+                stateListener?.let { DefaultNetworkMonitor.removeStateListener(it) }
+                stateSink = e
+                val l: (Map<String, Any?>) -> Unit = { s -> main.post { if (stateSink === e) e.success(s) } }
+                stateListener = l
+                DefaultNetworkMonitor.addStateListener(app, l)
+            }
+
+            override fun onCancel(arguments: Any?) {
+                stateListener?.let { DefaultNetworkMonitor.removeStateListener(it) }
+                stateListener = null
+                stateSink = null
             }
         })
     }

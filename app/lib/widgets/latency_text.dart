@@ -7,7 +7,7 @@ import '../theme/app_colors.g.dart';
 import 'app_card.dart';
 import 'form_parts.dart';
 
-/// A measured latency as the mockup's `latMsHtml` shows it: `123 ms` coloured by speed
+/// A measured latency as the mockup's `latMsHtml` shows it: `123ms` coloured by speed
 /// (< 150 good, < 400 mid, else muted), a warning sign for no answer, a ring while pinging,
 /// a dash when never measured. The slot is at least 44 px wide, text right-aligned, so a column
 /// of them lines up.
@@ -17,6 +17,7 @@ class LatencyView extends StatelessWidget {
     this.ms,
     this.testing = false,
     this.weak = false,
+    this.suspect = false,
     this.minWidth = 44,
   });
 
@@ -27,6 +28,9 @@ class LatencyView extends StatelessWidget {
   /// The answer came only from a backup check (the test URL missed, the server passes traffic): the number gets a
   /// dotted underline and a tooltip.
   final bool weak;
+
+  /// No answer is known but the core is still confirming it: the warning sign with a small spinner.
+  final bool suspect;
   final double minWidth;
 
   @override
@@ -34,7 +38,19 @@ class LatencyView extends StatelessWidget {
     final c = context.colors;
     final l10n = context.l10n;
     final Widget content;
-    if (testing) {
+    if (suspect && !testing) {
+      content = Tooltip(
+        message: l10n.noAnswerReChecking,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.warning_amber_rounded, size: 14, color: c.muted),
+            const SizedBox(width: 3),
+            const PingSpinner(size: 10),
+          ],
+        ),
+      );
+    } else if (testing) {
       content = Tooltip(message: l10n.pinging, child: const PingSpinner());
     } else if (ms == null) {
       content = Text('—', style: _style(c.t3));
@@ -51,7 +67,7 @@ class LatencyView extends StatelessWidget {
           ? c.warn
           : c.muted;
       final text = Text(
-        '${v.round()} ms',
+        '${v.round()}ms',
         style: weak ? _style(color).copyWith(decoration: TextDecoration.underline, decorationStyle: TextDecorationStyle.dotted) : _style(color),
       );
       content = weak ? Tooltip(message: l10n.answeredOnlyABackupCheck, child: text) : text;
@@ -65,6 +81,9 @@ class LatencyView extends StatelessWidget {
       ),
     );
   }
+
+  /// The text style of the number (for measuring a slot that must hold the widest one).
+  static TextStyle textStyle(Color color) => _style(color);
 
   static TextStyle _style(Color color) => monoText.copyWith(
     fontSize: 12,

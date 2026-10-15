@@ -407,7 +407,16 @@ void main() {
       };
       String? chosenOf(Map<String, dynamic> p, String t, [String field = 'main']) => (((p['routing'] as Map)['targets'] as Map)[t] as Map)[field]['chosen'] as String?;
       final moved = planWithChosen(plan, {'src:x': 'x2', 'chain:c>entry': 'e2', 'chain:c': 't2'});
-      expect([chosenOf(moved, 'src:x'), chosenOf(moved, 'chain:c', 'entry'), chosenOf(moved, 'chain:c')], ['x2', 'e2', 't2']);
+      expect([chosenOf(moved, 'src:x'), chosenOf(moved, 'chain:c', 'entry'), chosenOf(moved, 'chain:c')], ['x2', 'e2', 't1'], reason: 'a pinned group (Manual on a server) is never moved: its pin stays');
+      final pinnedRoutes = planWithChosen({
+        ...plan,
+        'routes': [
+          {'id': 'A', 'kind': 'unit', 'main': grp(['a1', 'a2'], chosen: 'a1', pinned: true)},
+          {'id': 'B', 'kind': 'unit', 'main': grp(['b1', 'b2'], chosen: 'b1')},
+        ],
+      }, {'route0': 'a2', 'route1': 'b2'});
+      expect([for (final r in pinnedRoutes['routes'] as List) (r['main'] as Map)['chosen']], ['a1', 'b2'],
+          reason: 'a continuation (crash restart, re-resolve, lists refresh) keeps the pin');
       expect([chosenOf(plan, 'src:x'), chosenOf(plan, 'chain:c')], ['x1', 't1'], reason: 'the plan itself is not changed');
       final kept = planKeepingServers(plan, {'src:x': 'x2', 'chain:c>entry': 'e2', 'chain:c': 't2'});
       expect([chosenOf(kept, 'src:x'), chosenOf(kept, 'chain:c', 'entry'), chosenOf(kept, 'chain:c')], ['x2', 'e2', 't1'], reason: 'a pinned group follows its pin');

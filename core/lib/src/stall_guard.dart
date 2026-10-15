@@ -7,7 +7,7 @@ library;
 import 'dart:async';
 
 /// A span for a message: whole seconds as «3 s», else milliseconds.
-String spanText(Duration d) => d.inMilliseconds % 1000 == 0 ? '${d.inSeconds} s' : '${d.inMilliseconds} ms';
+String spanText(Duration d) => d.inMilliseconds % 1000 == 0 ? '${d.inSeconds} s' : '${d.inMilliseconds}ms';
 
 /// [step] (one flush of an upload, one read of a download) must end within [stall]; else a
 /// [TimeoutException] with [message].

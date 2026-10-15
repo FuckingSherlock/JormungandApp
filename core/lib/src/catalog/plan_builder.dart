@@ -117,9 +117,9 @@ extension CatalogPlan on Catalog {
     }
     final refs = unitPickRefs(id), n = coreGroupNode(id, 'server', refs) ?? unitNode(id), pin = pinnedRef(id);
     final main = planGroup(refs, pin != null || unitPriority(id) ? 'priority' : 'fastest', pin ?? _refOf(refs, n));
-    if (pin != null) main['pinned'] = true; // Manual on a server: held there, the core never moves it
-    // the pick is no longer a server of the entry (off, gone, renamed by a refresh): the entry chooses by itself, and says so
-    if (pin == null && !autoConnect && id == activeConnectId && pinnedNode != null) main['pinLost'] = pinnedNode;
+    // Manual on a server: held there, the core never moves it. A pick that is no longer a server of the entry never gets
+    // here: [livePlan] refuses it ([pinLoss]), nothing takes another server in its place
+    if (pin != null) main['pinned'] = true;
     return {'id': id, 'kind': 'unit', 'main': main};
   }
 
@@ -175,6 +175,10 @@ extension CatalogPlan on Catalog {
               ? CatalogException('nothingInAuto', 'Nothing in Auto — turn on Use in Auto in Route')
               : CatalogException('nothingToConnect', 'Nothing to connect — add a subscription in Nodes');
         }
+        // Manual on a server is the user's choice, working or not: a pick that is gone / off / unusable is an error, never
+        // a plan on another server (the app also ends a running connection on it)
+        final lost = pinLoss();
+        if (lost != null) throw CatalogException('pinLost', lost);
         // mixedAuth: the port asks for a login; with the system proxy on the core opens a second, open port for it
         final plan = <String, dynamic>{
           'mode': segState.tun ? 'tun' : 'proxy',

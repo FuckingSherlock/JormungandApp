@@ -875,11 +875,16 @@ void main() {
       final routes = c.livePlan()['routes'] as List;
       expect(routes.map((r) => r['id']), ['a']); // b and the chain have nothing usable: not routes
       c.pinRouteNode('b', 'b::b1');
+      // Manual on a server is strict: a pick sing-box cannot run is an error naming it, never another server
       expect(
           () => c.livePlan(),
           throwsA(isA<CatalogException>()
-              .having((e) => e.code, 'code', 'noUsableServer')
-              .having((e) => e.message, 'message', 'No server here the core can use (XHTTP is not in sing-box)')));
+              .having((e) => e.code, 'code', 'pinLost')
+              .having((e) => e.message, 'message', allOf(contains('Server b1'), contains('XHTTP is not in sing-box')))));
+      c.pinnedNode = 'b::gone';
+      expect(c.pinLoss(), contains('no longer has it'));
+      c.pinnedNode = null;
+      expect(c.pinLoss(), isNull);
     });
 
     test('Auto lists every Auto entry as a route, Manual too (`manual`, current = the anchor); the mockup\'s plan only the pinned one', () {

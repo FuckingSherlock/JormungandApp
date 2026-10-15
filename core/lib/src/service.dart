@@ -295,6 +295,8 @@ class CoreService implements CoreApi {
     update: (id, data) => eventBook.update(id, data: data),
     repeated: _failedAgain,
     worked: _siteWorked,
+    netSwitch: (c) => sentinel.context.failureInSwitch(c.durationMs),
+    netHeld: _failedInSwitch,
     timer: (d, f) => sentinel.clock.timer(d, f),
   );
 
@@ -323,9 +325,22 @@ class CoreService implements CoreApi {
     logBook.note(
         'info',
         'Own connection of $who to ${c.destination}$ip got nothing back (${o.kind.name}'
-        '${o.durationMs == null ? '' : ', ${o.durationMs} ms'}; ${c.network.isEmpty ? 'tcp' : c.network} from ${c.inbound.isEmpty ? '?' : c.inbound} '
+        '${o.durationMs == null ? '' : ', ${o.durationMs}ms'}; ${c.network.isEmpty ? 'tcp' : c.network} from ${c.inbound.isEmpty ? '?' : c.inbound} '
         'through ${c.outbound.isEmpty ? 'direct' : c.outbound}): the app\'s own traffic, skipped from the failing-apps book; '
         'the request that made it reports its result itself');
+  }
+
+  /// A connection got nothing back while the network changed (opened on the old one, or in the window of the new one
+  /// settling): the network's, not the app's or the route's ([FailureBook.netSwitch]). No entry, no streak, but counted
+  /// and told here, one line each.
+  void _failedInSwitch(ClosedConnection c, ConnOutcome o) {
+    if (_disposed) return;
+    final who = c.pkg.isNotEmpty ? c.pkg : (processEventData(c.process)?['name'] ?? '');
+    logBook.note(
+        'info',
+        '${who.isEmpty ? 'Connection' : 'Connection of $who'} to ${c.destination} got nothing back (${o.kind.name}'
+        '${o.durationMs == null ? '' : ', opened ${o.durationMs}ms before'}; through ${c.outbound.isEmpty ? 'direct' : c.outbound}) '
+        'while the network changed: counted as the network\'s, not held against the app or the route');
   }
 
   /// The series of `conn/failing` went on failing (or failed inside the hold after a suspicion that did not stand): the
@@ -1199,7 +1214,7 @@ class CoreService implements CoreApi {
         }
         if (!live()) return;
         if (r.outcome == Outcome.pass) {
-          logBook.note('info', 'TUN ($stack): the start test passed (try ${i + 1}, ${r.params['ms']} ms): TCP goes through the tunnel');
+          logBook.note('info', 'TUN ($stack): the start test passed (try ${i + 1}, ${r.params['ms']}ms): TCP goes through the tunnel');
           return;
         }
         reason = '${r.params['reason'] ?? 'unknown'}';
@@ -1294,6 +1309,8 @@ class CoreService implements CoreApi {
         delay:(tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t, unreachedThrows: true),
         reach: (tag, dest) async => _probe == null ? null : probeReach(_probe!, tag, dest),
         onDown: serverDown,
+        netSwitch: sentinel.context.failureInSwitch,
+        netSettling: () => sentinel.context.settling,
         note: runner.note,
         trace: (l) => logBook.note('info', l));
     // requests that failed: sing-box's API service streams every closed connection
@@ -1494,6 +1511,7 @@ class CoreService implements CoreApi {
         mainIdentity: auto.identityOf,
         memory: autoMemory,
         onDown: serverDown,
+        netSwitching: () => sentinel.context.switching,
         setFlag: (f, on) => setFallbackFlag(f, on, reason: on ? 'on Direct' : 'back', log: logBook.note),
         note: runner.note)
       ..reconcileStart = !adopted; // a taken-over sing-box's groups stand where the core before this one left them
@@ -2480,7 +2498,7 @@ class CoreService implements CoreApi {
         if (missing.isNotEmpty) {
           final left = [for (final h in missing) if (addressBook.get(h) == null) h];
           logBook.note(left.isEmpty ? 'info' : 'warn',
-              'address: connect waited ${sw.elapsedMilliseconds} ms (up to ${connectWait.inMilliseconds} ms) for ${missing.length} host${missing.length == 1 ? '' : 's'} '
+              'address: connect waited ${sw.elapsedMilliseconds}ms (up to ${connectWait.inMilliseconds}ms) for ${missing.length} host${missing.length == 1 ? '' : 's'} '
               'of the servers it starts with: ${missing.length - left.length} resolved'
               '${left.isEmpty ? '' : ', not in time (kept as names, resolved in the background for the next start): ${left.join(', ')}'}');
         }
@@ -3159,7 +3177,7 @@ class CoreService implements CoreApi {
     final isLate = late();
     logBook.note(pick.found ? 'info' : 'warn',
         'connect: ${g.tag} $mode: tried ${pick.tried} of ${keys.length}, ${pick.answered} answered; '
-        '${pick.found ? '$chosen ${pick.ms} ms${pick.weak ? ' (a backup check only)' : ''}' : 'nobody answered${noNet ? ' (no network)' : ''}, starts on $chosen'}; ${pick.tookMs} ms'
+        '${pick.found ? '$chosen ${pick.ms}ms${pick.weak ? ' (a backup check only)' : ''}' : 'nobody answered${noNet ? ' (no network)' : ''}, starts on $chosen'}; ${pick.tookMs}ms'
         '${isLate ? ' (late: applied after the start)' : ''}');
     return (chosen: chosen, rep: rep);
   }
@@ -3471,7 +3489,7 @@ class CoreService implements CoreApi {
         final way = receipt.via == 'vpn' ? ' via VPN' : ' direct';
         final via = first == null ? way : '$way, after the first way failed ($first)';
         logBook.note('info',
-            'Report sent: ${receipt.id} (${packed.gzipped.length} bytes, built in $built ms, sent in ${sw.elapsedMilliseconds - built} ms)$via');
+            'Report sent: ${receipt.id} (${packed.gzipped.length} bytes, built in ${built}ms, sent in ${sw.elapsedMilliseconds - built}ms)$via');
         return {'ok': true, 'id': receipt.id, 'bytes': packed.gzipped.length, 'via': receipt.via, 'firstError': ?first};
       } on ReportUploadException catch (e) {
         if (e.code == 'cancelled') {
@@ -3724,7 +3742,7 @@ class CoreService implements CoreApi {
         _lastSpeed = r;
         unawaited(_speedFile.writeAsString(jsonEncode(r)).catchError((Object _) => _speedFile));
         _event('speed', 'done', 'info', r,
-            note: 'Speed test of the connection: down ${((m['down'] as num) / 1e6).toStringAsFixed(1)} Mbps, up ${(((m['up'] as num?) ?? 0) / 1e6).toStringAsFixed(1)} Mbps, latency ${m['latency']} ms');
+            note: 'Speed test of the connection: down ${((m['down'] as num) / 1e6).toStringAsFixed(1)} Mbps, up ${(((m['up'] as num?) ?? 0) / 1e6).toStringAsFixed(1)} Mbps, latency ${m['latency']}ms');
         _changed();
       } else {
         final why = error.isNotEmpty ? error : 'the test ended without a result';

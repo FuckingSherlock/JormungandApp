@@ -78,7 +78,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('no working server'), findsNothing);
       expect(find.textContaining('Beta two'), findsOneWidget);
-      expect(find.text('70 ms'), findsOneWidget);
+      expect(find.text('70ms'), findsOneWidget);
       expect(cat.isUsable('c1'), isTrue);
       expect(cat.mayWork('c1'), isTrue);
       expect(cat.chainLatency(chain), 70);
@@ -86,7 +86,7 @@ void main() {
       // unfolded, the exit rows show the pair, not the direct miss; a tap measures through the entry
       await tester.tap(find.text('Alpha via Beta'));
       await tester.pumpAndSettle();
-      expect(find.text('70 ms'), findsNWidgets(2));
+      expect(find.text('70ms'), findsNWidgets(2));
       await tester.ensureVisible(find.textContaining('Beta one'));
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('Beta one'));

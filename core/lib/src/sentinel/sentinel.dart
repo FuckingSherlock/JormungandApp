@@ -493,6 +493,17 @@ class Sentinel {
       final net = context.network;
       _step(j, 'ctx.net', net.state == NetState.up ? Outcome.pass : Outcome.inconclusive, {'state': net.state.name, 'since': net.since}, true);
 
+      // a2. the network moved (or came back) within the grace before / during the failure: the new network is still
+      // settling, so the failure must last the window after it
+      final moved = context.lastMove;
+      if (moved != null) {
+        final settledAt = moved.add(context.switchGrace);
+        if (settledAt.isAfter(since)) {
+          _step(j, 'net.switched', Outcome.info, {'movedAt': moved.millisecondsSinceEpoch, 'graceMs': context.switchGrace.inMilliseconds}, true);
+          since = settledAt;
+        }
+      }
+
       // b. ourselves
       if (j.evidence['ownReject'] == true) {
         _step(j, 'self.reject', Outcome.fail, const {});

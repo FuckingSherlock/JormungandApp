@@ -113,23 +113,132 @@ object DefaultNetworkMonitor {
         }
     }
 
-    private fun register(cm: ConnectivityManager) {
+    private fun register(cm: ConnectivityManager, cb: ConnectivityManager.NetworkCallback = callback) {
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
             .build()
         when {
-            Build.VERSION.SDK_INT >= 31 -> registerBestMatching(cm, request)
+            Build.VERSION.SDK_INT >= 31 -> registerBestMatching(cm, request, cb)
             // REQUEST, not LISTEN: only the network that is THE default (needs CHANGE_NETWORK_STATE).
             // Not registerDefaultNetworkCallback below 28: the app is inside the VPN, so the default
             // network is the VPN itself for it; the NOT_VPN request names the underlying one.
-            else -> cm.requestNetwork(request, callback, handler)
+            else -> cm.requestNetwork(request, cb, handler)
         }
     }
 
     @android.annotation.TargetApi(31)
-    private fun registerBestMatching(cm: ConnectivityManager, request: NetworkRequest) {
-        cm.registerBestMatchingNetworkCallback(request, callback, handler)
+    private fun registerBestMatching(cm: ConnectivityManager, request: NetworkRequest, cb: ConnectivityManager.NetworkCallback) {
+        cm.registerBestMatchingNetworkCallback(request, cb, handler)
+    }
+
+    // ── the network's identity for the core (CoreApi.setNetwork, docs/failures.md → network context) ──
+    // A watcher of its own, apart from the libbox listeners above: it runs while Dart listens (NetworkChannel
+    // `jormungand/network_state`), tunnel up or not. The same NOT_VPN request: the underlying network, never our VPN.
+
+    private val stateLock = Any()
+    private val stateListeners = LinkedHashSet<(Map<String, Any?>) -> Unit>()
+    private var stateConnectivity: ConnectivityManager? = null
+    private var stateRegistered = false
+    @Volatile
+    private var stateNetwork: Network? = null
+    private var stateLast: Map<String, Any?>? = null
+
+    private val stateCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            synchronized(stateLock) { stateNetwork = network }
+            publishState()
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            if (network == stateNetwork) publishState()
+        }
+
+        override fun onLost(network: Network) {
+            val mine = synchronized(stateLock) {
+                if (network == stateNetwork) {
+                    stateNetwork = null
+                    true
+                } else {
+                    false
+                }
+            }
+            if (mine) publishState()
+        }
+    }
+
+    /**
+     * Starts [listener] on the state of the underlying default network, the current one at once, then on
+     * every change: `{connected, validated, captive, type (wifi | cellular | ethernet | vpn | other), id}`.
+     * `id` is `Network.getNetworkHandle()` as a string: another Wi-Fi is another id on the same `wlan0`.
+     * The first answer comes on the caller's thread, the later ones on the monitor's own thread.
+     */
+    fun addStateListener(context: Context, listener: (Map<String, Any?>) -> Unit) {
+        val now: Map<String, Any?>
+        synchronized(stateLock) {
+            val cm = stateConnectivity ?: context.applicationContext
+                .getSystemService(ConnectivityManager::class.java).also { stateConnectivity = it }
+            stateListeners.add(listener)
+            if (!stateRegistered) {
+                register(cm, stateCallback)
+                stateRegistered = true
+                stateNetwork = underlyingActive(cm)
+                stateLast = null
+            }
+            now = stateNow()
+            if (stateLast == null) stateLast = now
+        }
+        listener(now)
+    }
+
+    fun removeStateListener(listener: (Map<String, Any?>) -> Unit) {
+        synchronized(stateLock) {
+            stateListeners.remove(listener)
+            if (stateListeners.isEmpty() && stateRegistered) {
+                runCatching { stateConnectivity?.unregisterNetworkCallback(stateCallback) }
+                stateRegistered = false
+                stateNetwork = null
+                stateLast = null
+            }
+        }
+    }
+
+    private fun publishState() {
+        val targets: List<(Map<String, Any?>) -> Unit>
+        val now: Map<String, Any?>
+        synchronized(stateLock) {
+            now = stateNow()
+            if (now == stateLast) return
+            stateLast = now
+            targets = stateListeners.toList()
+        }
+        VpnBridge.log("debug", "network: state $now")
+        for (l in targets) l(now)
+    }
+
+    /** Under [stateLock]. No network (or one that has just gone) = `connected: false`. */
+    private fun stateNow(): Map<String, Any?> {
+        val network = stateNetwork
+        val caps = if (network == null) null else try {
+            stateConnectivity?.getNetworkCapabilities(network)
+        } catch (e: Exception) {
+            null
+        }
+        if (network == null || caps == null) return mapOf("connected" to false)
+        val type = when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
+            else -> "other"
+        }
+        return mapOf(
+            "connected" to true,
+            "validated" to caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            "captive" to caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+            "type" to type,
+            "id" to network.networkHandle.toString(),
+        )
     }
 
     private fun publish(network: Network?) {

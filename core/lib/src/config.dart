@@ -71,6 +71,7 @@ import 'plan.dart';
 import 'probe.dart';
 import 'routing.dart';
 import 'rulenames.dart';
+import 'runtime.dart' show SingBoxError;
 import 'svc_in.dart';
 import 'tun_check.dart';
 
@@ -247,6 +248,7 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     Map<String, String> pins = const {},
     bool Function(DnsCandidate c)? nodeResolverUsable}) {
   final outs = <Map<String, dynamic>>[];
+  final pinnedGroups = <String>{}; // Manual on a server: part of the cache_id below
   final tun = planTun(plan);
   final auth = mixedAuthUser(plan);
 
@@ -261,15 +263,17 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
       members.add(t);
     }
     if (members.isEmpty) throw ArgumentError('No usable servers for "$tag"');
-    // a manual pick the group cannot hold is never replaced quietly: the user hears of it (the connection warning)
-    if (g['pinned'] == true && !members.contains('$tag/${g['chosen']}')) {
-      warnings?.add('Manual pick ${g['chosen']} is not usable: the tunnel is on ${members.first.substring(tag.length + 1)} instead');
-    } else if (g['pinLost'] != null) {
-      warnings?.add('Manual pick ${g['pinLost']} is no longer a server of its entry: the entry chooses by itself');
+    // Manual on a server is strict (docs/connect-model.md → «Auto / Manual»): a pinned group the pick is not a member of
+    // is never started on another server, the connect fails
+    final chosen = '$tag/${g['chosen']}';
+    if (g['pinned'] == true) {
+      if (!members.contains(chosen)) {
+        throw SingBoxError('Manual pick ${g['chosen']} is not usable (not a server the core can use): the tunnel is not moved to another server. Choose a server in Route.');
+      }
+      pinnedGroups.add(tag);
     }
     // Every group is a selector, Fastest too: the core picks the server by its own fresh check (group_pick.dart) and
-    // starts the group on the one it chose (`chosen`), else on the first
-    final chosen = '$tag/${g['chosen']}';
+    // starts the group on the one it chose (`chosen`), else on the first; a pinned group's `default` is its pin
     outs.add({
       'type': 'selector',
       'tag': tag,
@@ -338,8 +342,9 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
   info?.ruleChains.addAll(routing.ruleChains);
   if (info != null) info.domainResolver = routing.domainResolver;
   // cache_file keeps a selector's pick made over the API across restarts, over the
-  // config's `default`: keyed by the defaults, a new pick from the UI starts clean.
-  final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}'].join(' ');
+  // config's `default`: keyed by the defaults, a new pick from the UI starts clean. A pinned group (Manual on a server)
+  // is part of the key: a pick the core's Auto made on the same default earlier is never restored over a pin.
+  final picks = [for (final o in outs) if (o['type'] == 'selector') '${o['tag']}=${o['default']}${pinnedGroups.contains(o['tag']) ? '!' : ''}'].join(' ');
   // 'direct' is tested too, always: the network check of the probe pool (pool.dart) tells a
   // dead network from dead routes by the direct path answering
   probe?.relays.addAll(_relays(outs));

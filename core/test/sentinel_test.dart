@@ -20,6 +20,7 @@ void main() {
     book = EventBook(null, clock: () => time.t);
     notes = [];
     sentinel = Sentinel(clock: time.clock, book: book, note: (l, t) => notes.add('$l: $t'));
+    sentinel.context.switchGrace = Duration.zero; // the grace after a move has its own tests (net.switched)
   });
 
   tearDown(() => sentinel.dispose());
@@ -100,6 +101,7 @@ void main() {
       await time.advanceSeconds(30);
       expect(book.length, 0, reason: 'parked: nothing is written');
       sentinel.context.pool(NetStatus.up, osOffline: false);
+      await time.advanceSeconds(21); // the failure lasts its window after the move (net.switched)
       final v = await f;
       expect(v.kind, VerdictKind.confirmed, reason: 'the network is back and the failure is still there');
       expect(codes(v), containsAllInOrder(['suspect', 'ctx.net', 'park', 'resume', 'persist.window']));
@@ -265,6 +267,7 @@ void main() {
       sentinel.context.pool(NetStatus.down, osOffline: true);
       await time.advance(parkLimit - const Duration(minutes: 1));
       sentinel.context.pool(NetStatus.up, osOffline: false);
+      await time.advanceSeconds(21); // the failure lasts its window after the move (net.switched)
       final v = await f;
       expect(v.kind, VerdictKind.confirmed, reason: 'back inside the bound');
 
@@ -300,7 +303,7 @@ void main() {
       sentinel.dropAll(park: true);
       await time.advanceSeconds(1);
       sentinel.context.pool(NetStatus.up, osOffline: false);
-      await time.advanceSeconds(20); // the rest of the window
+      await time.advanceSeconds(21); // the rest of the window (counted from the return of the network, net.switched)
       final k = await kept;
       expect(k.kind, VerdictKind.confirmed, reason: "${k.why?.code} ${codes(k)}");
       sentinel.context.pool(NetStatus.down, osOffline: true);

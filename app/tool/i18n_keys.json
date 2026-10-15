@@ -1444,7 +1444,7 @@
   "Speed test finished": "speedTestFinished",
   "Speed test failed": "speedTestFailed",
   "Speed test: ↓ {0} · ↑ {1} Mbps": "speedTestMbps",
-  "Latency {0} ms": "latencyMs",
+  "Latency {0}ms": "latencyMs",
   "Close connections on route switch": "closeConnectionsOnRouteSwitch",
   "Picking another route by hand closes the open connections of the old one, so apps reconnect the new way. Off: they finish on the old route": "pickingAnotherRouteByHandCloses",
   "Connections are failing": "connectionsAreFailing",
@@ -1591,5 +1591,11 @@
   "Last-Modified: {0}": "lastModified",
   "Left the origin: {0}": "leftTheOrigin",
   "Answered only a backup check": "answeredOnlyABackupCheck",
-  "The VPN side is measured only while connected: it needs a tunnel": "theVpnSideIsMeasuredOnly"
+  "The VPN side is measured only while connected: it needs a tunnel": "theVpnSideIsMeasuredOnly",
+  "No answer, re-checking": "noAnswerReChecking",
+  "{#0} working pair · best {#1}ms": "workingPairBestMs2",
+  "{#0} working pairs · best {#1}ms": "workingPairsBestMsPlural2",
+  "{#0} working pair (stopped early) · best {#1}ms": "workingPairStoppedEarlyBestMs2",
+  "{#0} working pairs (stopped early) · best {#1}ms": "workingPairsStoppedEarlyBestMsPlural2",
+  "Enter 0–{#0}ms": "enter0Ms2"
 }

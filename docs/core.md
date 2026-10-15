@@ -93,7 +93,9 @@ JS мокапа. Без Flutter, без IO, без таймеров; время 
   (`routes`, `current`, `routing`, `auto`, `urlTest`, `mixedAuth`…; порядок ключей тоже), `planSigOf` /
   `planSig` — строка-подпись, не меняющаяся от порядка пингов и ходов Auto, `routingPlan`,
   `routingTarget`, `targetInfo`. Нет чем подключаться — `CatalogException` с `code`
-  (`nothingInAuto` | `nothingToConnect` | `noUsableServer`) и английским текстом мокапа.
+  (`nothingInAuto` | `nothingToConnect` | `noUsableServer` | `pinLost`) и английским текстом мокапа.
+  `pinLost` — Manual на сервер, а сервер пропал / выключен / не поддержан (`Catalog.pinLoss()`): текст называет сервер
+  и причину, подключение отклоняется, запись другого сервера не подставляет (`docs/connect-model.md` → Manual на сервер).
 - **Проверки и удаление**: `checkBeforeConnect`, `profileProblem`, `chainProblems`; `deleteSourceImpact` /
   `deleteNodeImpact` / `deleteEntryImpact` (список «This will affect» в виде `ImpactLine`).
 - **Операции** (`ops.dart`): `syncCatalog` (звать после любой правки), `selectConnect`,
@@ -229,7 +231,11 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
   правил — `true`.
 - Любая группа — `selector` (`fastest` и `priority`): `default` = `chosen`, если он среди серверов, иначе
   первый сервер. Сервер Fastest-группы выбирает ядро (`group_pick.dart`, ниже), sing-box ничего не меряет
-  сам (`urltest` в конфиге нет). `pinned` — сервер закреплён в Manual, AutoService его не двигает.
+  сам (`urltest` в конфиге нет). `pinned` — сервер закреплён в Manual, AutoService его не двигает; `chosen` закреплённой группы обязан быть её
+  членом, иначе `buildConfig` бросает `SingBoxError` (подключение не удаётся, группа не стартует на первом сервере);
+  `default` селектора = закрепление, `cache_id` включает признак закрепления, `planWithChosen` закреплённую группу не
+  меняет, а `AutoService.refresh()` кладёт сдвинувшуюся закреплённую группу обратно на закрепление (в т. ч. на
+  усыновлённом sing-box; строка журнала `auto: <группа> was on …: put back on the pinned …`).
   `chosen` у Fastest-группы — подсказка (лучший известный по пингу, слабый ответ после сильного), не закрепление:
   ядро перед стартом проверяет группу и выбирает само; в сигнатуру плана подсказка не входит.
 - Порядок серверов в плане задаёт, с кого группа стартует и в каком порядке идут пачки замеров: UI передаёт

@@ -518,6 +518,32 @@ class Catalog {
     return null;
   }
 
+  /// Manual on a server is strict (docs/connect-model.md → «Auto / Manual»): when the pick cannot be used — the server
+  /// is gone from its subscription, switched off, not a server sing-box can run, or its entry is gone — this says why
+  /// (an English message naming the server), and nothing connects through another server. Null: no pick, or it is fine.
+  String? pinLoss() {
+    final key = pinnedNode, id = activeConnectId;
+    if (autoConnect || key == null) return null;
+    final parts = key.split('::'), s = sourcesData[parts[0]];
+    CatalogNode? n;
+    if (s != null) {
+      for (final x in s.nodes) {
+        if (parts.length > 1 && x.id == parts[1]) n = x;
+      }
+    }
+    final who = n != null && n.name.isNotEmpty ? '"${n.name}"${s!.name.isNotEmpty ? ' (${s.name})' : ''}' : 'the pinned server';
+    String lost(String why) => 'Manual pick $who is unavailable: $why. The tunnel is not moved to another server — choose a server in Route.';
+    if (id == null || !entryVisible(id) || isBroken(id)) return lost('its entry is gone or has no server the core can use');
+    if (n == null) return lost('the subscription no longer has it');
+    final r = pinnedRef(id);
+    if (r == null) return lost('it is switched off');
+    if (!r.node.usable) {
+      final u = r.node.unsupported;
+      return lost('sing-box cannot run it${u != null && u.isNotEmpty ? ' ($u is not in sing-box)' : ''}');
+    }
+    return null;
+  }
+
   /// The server the core's Auto is on, when it is one of [refs] (`coreNode`).
   /// [which]: `server` or `entryServer`.
   CatalogNode? coreNode(String? id, String which, List<NodeRef> refs) {

@@ -305,6 +305,24 @@ void main() {
     expect(a.groupServers()['route0'], 's::a3');
   });
 
+  test('refresh(): a pinned group (Manual on a server) is put back on its pin whatever moved it, an adopted sing-box and later reads included', () async {
+    final p = plan([unit('A', ['s::a1', 's::a2', 's::a3'], pick: 'priority', chosen: 's::a2', pinned: true)], current: 0);
+    for (final adopted in [false, true]) {
+      final fake = FakeBox(buildConfig(p), {'s::a1': 40, 's::a2': 80, 's::a3': 60});
+      final notes = <String>[];
+      final a = AutoService(fake, p, delay: fake.delayTest, pool: everyRound(), note: notes.add)..reconcileStart = !adopted;
+      fake.groups['route0']!.now = 'route0/s::a1'; // restored by cache_file / left there by the previous core
+      expect(await a.refresh(), isTrue, reason: 'adopted: $adopted');
+      expect(fake.groups['route0']!.now, 'route0/s::a2', reason: 'adopted: $adopted');
+      expect(a.groupServers()['route0'], 's::a2');
+      expect(notes.where((n) => n.contains('route0') && n.contains('route0/s::a2')), hasLength(1), reason: 'one line, naming the pin');
+      fake.groups['route0']!.now = 'route0/s::a3'; // a later stray select: put back too, the core never moves a pin
+      await a.refresh();
+      expect(fake.groups['route0']!.now, 'route0/s::a2', reason: 'adopted: $adopted');
+      expect(a.groupServers()['route0'], 's::a2');
+    }
+  });
+
   test('refresh(): false before sing-box first answers (selected empty)', () async {
     final auto = AutoService(_Dead(), plan([unit('A', ['s::a'])]), delay: (tag, url, t) async => -1);
     expect(await auto.refresh(), isFalse);

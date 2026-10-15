@@ -106,7 +106,7 @@ extension on NavCards {
           '$day${m.formatTimeOfDay(TimeOfDay.fromDateTime(last.at), alwaysUse24HourFormat: true)}';
       sub =
           '↓ ${mbps(last.downMbps)} · ↑ ${mbps(last.upMbps)} Mbps\n'
-          '${last.latencyMs > 0 ? '${last.latencyMs} ms · ' : ''}$time';
+          '${last.latencyMs > 0 ? '${last.latencyMs}ms ·' : ''}$time';
       lines = 2;
     }
     return _NavCard(

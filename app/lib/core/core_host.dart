@@ -877,11 +877,12 @@ class DnsRaceTransport {
   /// Best last answer: -1 no answer, -2 not asked.
   final int ms;
 
-  /// `testing` | `ok` | `miss` | `untested`.
+  /// `testing` | `suspect` (no answer, the Sentinel still confirms it; `ms` -1) | `ok` | `miss` | `untested`.
   final String state;
   final bool dead, reserve;
 
   bool get testing => state == 'testing';
+  bool get suspect => state == 'suspect';
 }
 
 /// A provider's protocol race on one side: the [winner] kind answering it and every transport's result.
@@ -916,6 +917,9 @@ class DnsRace {
     }
     return best;
   }
+
+  /// Nothing answered on the side and some miss is still being confirmed (the warning sign with a spinner).
+  bool get suspect => bestMs == -1 && transports.any((t) => t.suspect);
 
   /// The kind of the lowest answer: the protocol to name when the core reports no winner (no tunnel, a ping only).
   String? get bestKind {

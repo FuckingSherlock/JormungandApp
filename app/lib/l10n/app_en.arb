@@ -3119,7 +3119,7 @@
       }
     }
   },
-  "latencyMs": "Latency {s0} ms",
+  "latencyMs": "Latency {s0}ms",
   "@latencyMs": {
     "placeholders": {
       "s0": {
@@ -3491,6 +3491,37 @@
   "theVpnSideIsMeasuredOnly": "The VPN side is measured only while connected: it needs a tunnel",
   "dAgo": "{n0}d ago",
   "@dAgo": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "noAnswerReChecking": "No answer, re-checking",
+  "workingPairsBestMsPlural2": "{n0, plural, one{{n0} working pair · best {n1}ms} other{{n0} working pairs · best {n1}ms}}",
+  "@workingPairsBestMsPlural2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "workingPairsStoppedEarlyBestMsPlural2": "{n0, plural, one{{n0} working pair (stopped early) · best {n1}ms} other{{n0} working pairs (stopped early) · best {n1}ms}}",
+  "@workingPairsStoppedEarlyBestMsPlural2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "enter0Ms2": "Enter 0–{n0}ms",
+  "@enter0Ms2": {
     "placeholders": {
       "n0": {
         "type": "num"

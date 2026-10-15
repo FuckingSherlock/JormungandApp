@@ -365,9 +365,9 @@ class _DnsSheetState extends State<DnsSheet> {
                       GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onTap: () => _ping(id),
-                        child: LatencyView(
-                          key: ValueKey('dns-ping-$id-$side'),
-                          minWidth: 0,
+                        child: DnsSidePingLine(
+                          latencyKey: ValueKey('dns-ping-$id-$side'),
+                          raceKey: ValueKey('dns-race-$id-$side'),
                           ms: s.activeSides.contains(side)
                               ? _sideMs(id, side)
                               : null,
@@ -376,18 +376,15 @@ class _DnsSheetState extends State<DnsSheet> {
                               _testing.contains(id) &&
                               s.activeSides.contains(side) &&
                               (side == 'direct' || health != null),
+                          suspect:
+                              s.activeSides.contains(side) &&
+                              (raceOf(id, side)?.suspect ?? false),
+                          // the protocol the side answers with
+                          kind: s.activeSides.contains(side) && !s.system
+                              ? kindOf(id, side)
+                              : null,
                         ),
                       ),
-                      // the protocol the side answers with, a second line so the ms never truncates
-                      if (s.activeSides.contains(side) &&
-                          !s.system &&
-                          kindOf(id, side) != null)
-                        Text(
-                          dnsKindName(kindOf(id, side)!),
-                          key: ValueKey('dns-race-$id-$side'),
-                          maxLines: 1,
-                          style: TextStyle(fontSize: 10, color: c.t3),
-                        ),
                     ],
                   ),
                 ),
@@ -637,6 +634,80 @@ Future<bool> _confirmNoDns(
     ],
   );
   return ok == true;
+}
+
+/// The ping line under a side chip: `84ms DoH`, a spinner, `—` or the no-answer sign, in a slot of one fixed width
+/// (the longest variant, measured with the real text styles and the current text scale) so the chips of all rows
+/// stay in one column whatever each row shows.
+class DnsSidePingLine extends StatelessWidget {
+  const DnsSidePingLine({
+    super.key,
+    this.latencyKey,
+    this.raceKey,
+    this.ms,
+    this.testing = false,
+    this.suspect = false,
+    this.kind,
+  });
+
+  final Key? latencyKey;
+  final Key? raceKey;
+  final int? ms;
+  final bool testing;
+
+  /// No answer, still being confirmed by the core: the warning sign with a spinner.
+  final bool suspect;
+
+  /// Race kind (`doh`...) named after the number; null = none.
+  final String? kind;
+
+  static const _gap = 4.0;
+  static const _kindSize = 10.0;
+
+  /// The widest line: a three-digit number, the widest protocol name (a longer number is scaled down to fit).
+  static double slotWidth(TextScaler scaler) {
+    double w(String text, TextStyle style) {
+      final p = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      return p.width;
+    }
+
+    final kindStyle = const TextStyle(fontSize: _kindSize);
+    final kinds = [for (final k in const ['doh', 'dot', 'doq', 'udp']) w(dnsKindName(k), kindStyle)];
+    return (w('999ms', LatencyView.textStyle(Colors.black)) + _gap + kinds.reduce(math.max)).ceilToDouble();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    // capped by the screen so two slots never push the name out on a very narrow one
+    final width = math.min(slotWidth(MediaQuery.textScalerOf(context)), MediaQuery.sizeOf(context).width * .2);
+    return SizedBox(
+      width: width,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LatencyView(key: latencyKey, minWidth: 0, ms: ms, testing: testing, suspect: suspect),
+            if (kind != null) ...[
+              const SizedBox(width: _gap),
+              Text(
+                dnsKindName(kind!),
+                key: raceKey,
+                maxLines: 1,
+                style: TextStyle(fontSize: _kindSize, color: c.t3),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// A side of a DNS provider (Direct / VPN): lit when the provider is asked on that side, muted
@@ -933,12 +1004,12 @@ class _DnsFormState extends State<DnsForm> {
   }
 
   /// A row's value: ms (null = unknown, -1 = no answer) and whether it still spins.
-  ({int? ms, bool testing}) _valueOf(String side, String kind) {
+  ({int? ms, bool testing, bool suspect}) _valueOf(String side, String kind) {
     final t = _raceOn(side)?.transport(kind);
     final testing = !_raceGaveUp && ((t?.testing ?? false) || (_asking && (side == 'direct' || _viaCore)));
-    if (testing || t == null) return (ms: null, testing: testing);
-    if (t.dead || (t.testing && _raceGaveUp)) return (ms: -1, testing: false);
-    return (ms: t.ms == -2 ? null : t.ms, testing: false);
+    if (testing || t == null) return (ms: null, testing: testing, suspect: false);
+    if (t.dead || (t.testing && _raceGaveUp)) return (ms: -1, testing: false, suspect: false);
+    return (ms: t.ms == -2 ? null : t.ms, testing: false, suspect: t.suspect);
   }
 
   /// The Ping summary: the best answer of any transport on any side; "no answer" only when none answered.
@@ -1124,10 +1195,12 @@ class _DnsFormState extends State<DnsForm> {
     final draft = widget.id == null;
     final race = draft ? null : _raceOn(side);
     final t = race?.transport(kind);
-    final v = draft ? (ms: _draft[kind], testing: _draftTesting) : _valueOf(side, kind);
+    final v = draft ? (ms: _draft[kind], testing: _draftTesting, suspect: false) : _valueOf(side, kind);
     final Widget result;
     if (v.testing) {
       result = const LatencyView(testing: true, minWidth: 0);
+    } else if (v.suspect) {
+      result = const LatencyView(ms: -1, suspect: true, minWidth: 0);
     } else if (v.ms != null && v.ms! < 0) {
       result = Text(l10n.noAnswer2, style: TextStyle(fontSize: 12, color: c.muted));
     } else {

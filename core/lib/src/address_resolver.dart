@@ -216,7 +216,7 @@ class AddressResolver {
     }
     if (all.isNotEmpty) {
       _note('info', 'address: ${all.length} host${all.length == 1 ? '' : 's'} for $why: $cached from the cache, ${stale.length} stale (refreshed in the background), '
-          '${missing.length} to resolve${missing.isEmpty ? '' : ' (waiting up to ${wait.inMilliseconds} ms)'}'
+          '${missing.length} to resolve${missing.isEmpty ? '' : ' (waiting up to ${wait.inMilliseconds}ms)'}'
           '${later.isEmpty ? '' : ', ${later.length} more in the background'}');
     }
     final window = race ? wait : null;
@@ -233,7 +233,7 @@ class AddressResolver {
       await Future.wait([for (final h in missing) if (!firstKeys.contains(h)) lookup(h, why: why, race: window)]);
     })();
     await work.timeout(wait, onTimeout: () {
-      _note('warn', 'address: not everything resolved within ${wait.inMilliseconds} ms for $why; the config keeps the names that are still unresolved');
+      _note('warn', 'address: not everything resolved within ${wait.inMilliseconds}ms for $why; the config keeps the names that are still unresolved');
     });
   }
 
@@ -273,24 +273,24 @@ class AddressResolver {
           final g = await t.run().timeout(per, onTimeout: () => throw _Fail('timeout', dead: true));
           pending.remove(i);
           if (done.isCompleted) {
-            _note('info', 'address: $host via ${t.id} (${t.label}) answered late (${ts.elapsedMilliseconds} ms): not used [$why]');
+            _note('info', 'address: $host via ${t.id} (${t.label}) answered late (${ts.elapsedMilliseconds}ms): not used [$why]');
           } else if (bestEntry == null || i < best) {
             final e = _store(host, g, t.id);
             best = i;
             bestEntry = e;
             book.clearFailed(host);
             onResolved?.call(host);
-            _note('info', 'address: $host → ${e.ips(st.ipv6).join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds} ms [fresh, $why, parallel]');
+            _note('info', 'address: $host → ${e.ips(st.ipv6).join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds}ms [fresh, $why, parallel]');
           } else {
-            _note('info', 'address: $host via ${t.id} (${t.label}) answered in ${ts.elapsedMilliseconds} ms, a higher-priority server already did');
+            _note('info', 'address: $host via ${t.id} (${t.label}) answered in ${ts.elapsedMilliseconds}ms, a higher-priority server already did');
           }
         } on _Fail catch (f) {
           pending.remove(i);
           _judged(t, f, seen, check: false);
-          _note('info', 'address: $host via ${t.id} (${t.label}) failed: ${f.reason} (${ts.elapsedMilliseconds} ms)');
+          _note('info', 'address: $host via ${t.id} (${t.label}) failed: ${f.reason} (${ts.elapsedMilliseconds}ms)');
         } catch (e) {
           pending.remove(i);
-          _note('info', 'address: $host via ${t.id} (${t.label}) failed: $e (${ts.elapsedMilliseconds} ms)');
+          _note('info', 'address: $host via ${t.id} (${t.label}) failed: $e (${ts.elapsedMilliseconds}ms)');
         }
         finish();
       }();
@@ -318,7 +318,7 @@ class AddressResolver {
         if (e != null) return e;
       }
       book.markFailed(host, _now().millisecondsSinceEpoch);
-      _note('warn', 'address: $host not resolved by any server in ${sw.elapsedMilliseconds} ms [$why]${book.get(host) == null ? '' : ': the cached address stays'}');
+      _note('warn', 'address: $host not resolved by any server in ${sw.elapsedMilliseconds}ms [$why]${book.get(host) == null ? '' : ': the cached address stays'}');
       if (seen.nx > 0 && seen.other == 0) {
         // every server that answered says the name has no address: the name is wrong, not the DNS
         _note('warn', 'address: $host: every server that answered says the name does not exist (${seen.nx} answer${seen.nx == 1 ? '' : 's'}): a problem with the node\'s address, not with DNS');
@@ -336,7 +336,7 @@ class AddressResolver {
     for (final t in tries) {
       final left = budget - sw.elapsed;
       if (left <= Duration.zero) {
-        _note('warn', 'address: $host: out of time (${budget.inMilliseconds} ms), ${tries.length - n} server${tries.length - n == 1 ? '' : 's'} not tried');
+        _note('warn', 'address: $host: out of time (${budget.inMilliseconds}ms), ${tries.length - n} server${tries.length - n == 1 ? '' : 's'} not tried');
         break;
       }
       n++;
@@ -348,14 +348,14 @@ class AddressResolver {
         onResolved?.call(host);
         if (check) _alive(t);
         final ips = e.ips(st.ipv6);
-        _note('info', 'address: $host → ${ips.join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds} ms [fresh, $why]'
+        _note('info', 'address: $host → ${ips.join(', ')} via ${t.id} (${t.label}) in ${ts.elapsedMilliseconds}ms [fresh, $why]'
             '${n > 1 ? ', after $n tries' : ''}');
         return e;
       } on _Fail catch (f) {
         _judged(t, f, seen, check: check);
-        _note('info', 'address: $host via ${t.id} (${t.label}) failed: ${f.reason} (${ts.elapsedMilliseconds} ms)${n < tries.length ? ', next' : ''}');
+        _note('info', 'address: $host via ${t.id} (${t.label}) failed: ${f.reason} (${ts.elapsedMilliseconds}ms)${n < tries.length ? ', next' : ''}');
       } catch (e) {
-        _note('info', 'address: $host via ${t.id} (${t.label}) failed: $e (${ts.elapsedMilliseconds} ms)${n < tries.length ? ', next' : ''}');
+        _note('info', 'address: $host via ${t.id} (${t.label}) failed: $e (${ts.elapsedMilliseconds}ms)${n < tries.length ? ', next' : ''}');
       }
     }
     return null;

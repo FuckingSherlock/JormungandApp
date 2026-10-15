@@ -110,6 +110,20 @@ class _RecCore extends CoreService {
   }
 }
 
+/// A core that remembers what the app told its Sentinel about the network (`POST /api/network`).
+class _NetRecCore extends CoreService {
+  _NetRecCore({required super.dataDir, required super.runner})
+    : super(singBox: '', boxFactory: testBoxes, sysProxy: NoSystemProxy(), isElevated: () => true, resolveAddresses: false);
+
+  final netBodies = <Map<String, dynamic>>[];
+
+  @override
+  Map<String, dynamic> setNetwork(Map<String, dynamic> body) {
+    netBodies.add(Map<String, dynamic>.from(body));
+    return super.setNetwork(body);
+  }
+}
+
 /// A core that remembers what the app told its running Auto (`POST /api/auto`).
 class _AutoRecCore extends CoreService {
   _AutoRecCore({
@@ -135,6 +149,10 @@ class _AutoRecCore extends CoreService {
 class _FakeNetwork implements NetworkPort {
   bool isMetered = true;
   final changes = StreamController<bool>.broadcast();
+  final netStates = StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get states => netStates.stream;
 
   @override
   Future<bool> metered() async => isMetered;
@@ -300,6 +318,34 @@ void main() {
     await settle();
     expect(runner.starts, 3);
     expect(host.autoMode, isFalse);
+  });
+
+  test('Manual on a server is strict: the pick lost while connected ends the connection with an error naming it, no other server', () async {
+    boxFails = SingBoxError('no sing-box');
+    await start();
+    host.pinRouteNode('a', 'a::a1');
+    expect((await host.connect()).started, isTrue);
+    expect(runner.starts, 1);
+    final notices = <HostNotice>[];
+    final sub = host.notices.listen(notices.add);
+
+    // a subscription update took the server away
+    host.catalog.pinnedNode = 'a::gone';
+    host.changed();
+    await settle();
+    await sub.cancel();
+    expect(host.phase, ConnectionPhase.disconnected);
+    expect(runner.up, isFalse);
+    expect(runner.starts, 1, reason: 'no restart on another server');
+    expect(host.error, allOf(contains('Manual pick'), contains('no longer has it')));
+    expect([for (final n in notices) n.code], ['connectFailed']);
+    expect(notices.single.text, host.error);
+
+    // connecting again is refused with the same message, still nothing starts
+    final r = await host.connect();
+    expect(r.started, isFalse);
+    expect(r.code, 'pinLost');
+    expect(runner.starts, 1);
   });
 
   test('Auto <-> Manual (the badge) and Manual on another entry reach the running core live: no reconnect', () async {
@@ -663,6 +709,37 @@ void main() {
     expect(rec.closeOnSwitch, isFalse);
     expect(host.phase, isNot(ConnectionPhase.connecting));
     await net.changes.close();
+  });
+
+  test('the platform\'s network states (id, validated, captive) are forwarded to the core\'s setNetwork', () async {
+    await start();
+    await host.shutdown();
+    host.dispose();
+    final rec = _NetRecCore(dataDir: dir.path, runner: runner);
+    final net = _FakeNetwork();
+    host = LiveCoreHost(
+      api: rec,
+      isAndroid: false,
+      network: net,
+      saveDelay: const Duration(milliseconds: 20),
+      reconnectDelay: const Duration(milliseconds: 20),
+      trafficEvery: const Duration(milliseconds: 50),
+    );
+    await host.init();
+
+    final a = {'connected': true, 'validated': true, 'captive': false, 'type': 'wifi', 'id': '111'};
+    final b = {...a, 'id': '222'};
+    net.netStates.add(a);
+    await settle(20);
+    net.netStates.add(b);
+    await settle(20);
+    net.netStates.add({'connected': false});
+    await settle(20);
+    expect(rec.netBodies, [a, b, {'connected': false}]);
+    // the Sentinel took them: the last report is what its context holds
+    expect(rec.sentinel.context.network.state, NetState.none);
+
+    await net.netStates.close();
   });
 
   test('the background update check gets its settings at start and on every real change', () async {
