@@ -304,6 +304,30 @@ void main() {
       expect(checks(), hasLength(2), reason: 'a fresh connect checks the group even with the app\'s chosen');
     });
 
+    test('a plan change while running: the server the core has a group on is kept (a member, not pinned), else the plan\'s own chosen', () async {
+      await boot(useFake: true);
+      Map<String, dynamic> plan2({bool pinned = false, String chosen = 's::a'}) {
+        final r = _route('A', {'s::a': 'a.example', 's::b': 'b.example', 's::c': 'c.example'});
+        return {
+          ...(_body([r])['plan'] as Map<String, dynamic>),
+          'routes': [{...r, 'main': {...(r['main'] as Map), 'chosen': chosen, 'pinned': pinned}}],
+        };
+      }
+
+      String? chosenOf(Map<String, dynamic> p) => ((p['routes'] as List).first['main'] as Map)['chosen'] as String?;
+      List<String> checks() => [
+            for (final l in svc.log(since: null)['lines'] as List)
+              if ('${(l as Map)['msg']}'.contains('connect: the servers of route0')) '${l['msg']}',
+          ];
+      final kept = planKeepingServers(plan2(), {'route0': 's::b'});
+      expect(chosenOf(kept), 's::b', reason: 'the core moved the group to b: the app\'s chosen a is only a hint');
+      expect(await svc.connectPicks(kept, continuation: true), isEmpty);
+      expect(checks(), isEmpty, reason: 'no check of the main group on a plan change');
+      expect(chosenOf(planKeepingServers(plan2(pinned: true), {'route0': 's::b'})), 's::a', reason: 'a pinned group follows its pin');
+      expect(chosenOf(planKeepingServers(plan2(), {'route0': 's::gone'})), 's::a', reason: 'not a member of the new plan: no choice');
+      expect(chosenOf(planKeepingServers(plan2(), const {})), 's::a');
+    });
+
     test('a disconnect while the servers are checked: no sing-box is started', () async {
       final gate = Completer<void>();
       await boot(useFake: true, testerGate: gate);

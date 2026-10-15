@@ -42,6 +42,21 @@ Map<String, dynamic> planWithChosen(Map<String, dynamic> plan, Map<String, Strin
   return {...plan, ...route(plan, 0)};
 }
 
+/// [plan] with each group that is not pinned and has the server of [now] (group tag → key; Auto's `groupServers`)
+/// among its members started on it (`chosen`): a plan change while running keeps the servers the core's checks found.
+Map<String, dynamic> planKeepingServers(Map<String, dynamic> plan, Map<String, String> now) {
+  final keep = <String, String>{};
+  final rs = planRoutes(plan);
+  for (var i = 0; i < rs.length; i++) {
+    for (final (field, tag) in [('main', routeTag(i)), ('entry', routeEntryTag(i))]) {
+      final g = rs[i][field], key = now[tag];
+      if (g is! Map || key == null || g['pinned'] == true) continue;
+      if ((g['nodes'] as List? ?? const []).any((n) => n is Map && '${n['key']}' == key)) keep[tag] = key;
+    }
+  }
+  return planWithChosen(plan, keep);
+}
+
 /// The route the top selector starts on.
 int planCurrent(Map<String, dynamic> plan, int count) => ((plan['current'] as num?)?.toInt() ?? 0).clamp(0, count - 1);
 

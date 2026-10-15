@@ -26,7 +26,10 @@
   (цепочки и цели правил при connect пока на выборе плана — до 2c). `rules.md` / `subscription-parsing.md` — на этапе 3.
 
 ## Для 2c
-- **Первым — гонка сверки после старта:** `auto_singbox_test.dart:141` («Auto moves between routes and back…», ждёт
+- **СДЕЛАНО (2c часть 1):** гонка (`_coreSelected` / `_select` в auto.dart; реальная причина флака `auto_singbox_test` —
+  тест звал `check()` до первого ответа групп, `_groupsUp` в тесте), `_keepCoreChoice` / `planKeepingServers` (план при
+  работе), `testBoxes` в app/test (тестер connect не стартует). Остаётся ниже: выход цепочки и цели правил (часть 2).
+- (сделано) **Первым — гонка сверки после старта:** `auto_singbox_test.dart:141` («Auto moves between routes and back…», ждёт
   'B', получил 'A') падает в полном прогоне второй раз подряд (по отдельности проходит). Тот же признак, что у
   исправленной гонки `setManual` (2b): первый `refresh()` (`_startChecked`) возвращает `proxy` / группы к стартовому
   выбору и откатывает переход, сделанный до первого обновления групп (Auto `_moveTo`, `_pick`, fallback). Сверка должна

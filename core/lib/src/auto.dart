@@ -527,6 +527,18 @@ class AutoService {
 
   bool _startChecked = false; // the first groups answer was compared with the servers the plan starts on
 
+  /// The groups the core itself selected on since this start (marked before the `select` goes: the groups stream can
+  /// answer while it is awaited). The first look at the groups puts back what sing-box's cache restored, never a pick
+  /// of the core's own; [_select] is the only way the core picks.
+  final _coreSelected = <String>{};
+
+  Future<bool> _select(String group, String outbound) async {
+    final fresh = _coreSelected.add(group);
+    final ok = await api.select(group, outbound);
+    if (!ok && fresh) _coreSelected.remove(group);
+    return ok;
+  }
+
   /// The server every group is on now (group tag → key): what a restart with the same plan starts the groups on, so
   /// that a server chosen by a check is not forgotten (service.dart `_continuationPlan`).
   Map<String, String> groupServers() => {
@@ -552,11 +564,8 @@ class AutoService {
     var ok = true;
     final i = entry == null ? -1 : _routes.indexWhere((r) => r.id == entry);
     if (on && entry != null && i != index) {
-      // the first look puts the groups back on this start's choice: it must not run over the user's move (the select
-      // below makes the groups stream fire it while `index` still names the old route)
-      if (!_startChecked) await refresh();
       final old = _routes[index].tag;
-      ok = i >= 0 && !_stopped && await api.select(topTag, _routes[i].tag);
+      ok = i >= 0 && !_stopped && await _select(topTag, _routes[i].tag);
       if (ok) {
         index = i;
         _routes[i].inUseSince = _clock();
@@ -1362,16 +1371,17 @@ class AutoService {
       // sing-box's cache_file may have restored an older pick over the config's default: the choice made for this start
       // (the connect's fresh check, or the server the group was on before a restart) wins
       _startChecked = true;
+      // (a group the core has itself moved since the start is left alone: [_coreSelected], its pick is the newer one)
       // the route selector the same way: the plan's `current` is the route this start is on
       final want = _routes[index].tag;
-      if (by.containsKey(topTag) && by[topTag] != want && await api.select(topTag, want)) {
+      if (by.containsKey(topTag) && by[topTag] != want && !_coreSelected.contains(topTag) && await api.select(topTag, want)) {
         note?.call('auto: $topTag was restored on ${by[topTag]} by sing-box: put on $want, the route of this start');
         by[topTag] = want;
       }
       for (final r in _routes) {
         for (final g in r.groups) {
           final want = g.start;
-          if (want == null || !by.containsKey(g.tag) || g.keyOf(by[g.tag]) == want) continue;
+          if (want == null || !by.containsKey(g.tag) || g.keyOf(by[g.tag]) == want || _coreSelected.contains(g.tag)) continue;
           if (await api.select(g.tag, g.member(want))) {
             note?.call('auto: ${g.tag} was restored on ${by[g.tag]} by sing-box: put on ${g.member(want)}, the server chosen for this start');
             by[g.tag] = g.member(want);
@@ -1658,7 +1668,7 @@ class AutoService {
   Future<bool> _pick(_Route r, _Group g, String key, String reason) async {
     // `from` before the await: sing-box's groups stream can call refresh() meanwhile
     final from = g.current;
-    if (_stopped || !await api.select(g.tag, g.member(key))) return false;
+    if (_stopped || !await _select(g.tag, g.member(key))) return false;
     g.now = key;
     // `back` = it failed here before; a higher server that never missed was just not the
     // one the plan started on (nothing "came back")
@@ -1683,7 +1693,7 @@ class AutoService {
 
   Future<bool> _moveTo(int i, String reason) async {
     final from = _routes[index].id; // before the await: refresh() may move `index` meanwhile
-    if (_stopped || !await api.select(topTag, _routes[i].tag)) return false;
+    if (_stopped || !await _select(topTag, _routes[i].tag)) return false;
     index = i;
     _routes[i].inUseSince = _clock();
     _emit(AutoSwitch(from: from, to: _routes[i].id, reason: reason, at: _clock()));

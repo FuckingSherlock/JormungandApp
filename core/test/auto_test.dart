@@ -1219,6 +1219,17 @@ void main() {
       expect(auto.toJson()['now'], 'B');
     });
 
+    test('a pick of the core before the first look at the groups is not put back (the stream answers while the select is awaited)', () async {
+      final p = three(manual: false);
+      final fake = _SlowSelectBox(buildConfig(p), {'s::a': 30, 's::b': 40, 's::c': 50});
+      final auto = AutoService(fake, p, delay: fake.delayTest);
+      auto.start(); // the groups stream is listened to: its first answer is the first look
+      expect(await auto.setManual(true, entry: 'C'), isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect([fake.groups['proxy']!.now, auto.index, auto.toJson()['now']], ['route2', 2, 'C'], reason: 'the first look ran inside the select');
+      auto.stop();
+    });
+
     test('setManual(on, entry) moves the selector to that route: no switch event; a stranger entry is refused', () async {
       final p = three(manual: false);
       final fake = FakeBox(buildConfig(p), {'s::a': 30, 's::b': 40, 's::c': 50});
@@ -1367,6 +1378,19 @@ class _NoMemberNow extends FakeBox {
         for (final e in super.selected.entries)
           if (!e.key.startsWith('route')) e.key: e.value,
       };
+}
+
+/// sing-box whose `select` answers a little after the groups stream told the new pick: the owner's code after the
+/// await runs when the stream's listeners already did.
+class _SlowSelectBox extends FakeBox {
+  _SlowSelectBox(super.config, super.alive);
+
+  @override
+  Future<bool> select(String group, String outbound) async {
+    final ok = await super.select(group, outbound);
+    await Future<void>.delayed(Duration.zero);
+    return ok;
+  }
 }
 
 class _Dead implements BoxControl {

@@ -107,6 +107,15 @@ Future<String> _get(int mixedPort, String url) async {
   }
 }
 
+/// sing-box tells its groups a moment after the start; before that a round has nothing to judge (refresh() is false)
+/// and moves nothing, however loaded the machine is.
+Future<void> _groupsUp(SingBoxProcess client) async {
+  for (var i = 0; i < 100 && client.api!.selected.isEmpty; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+  expect(client.api!.selected, isNotEmpty);
+}
+
 void main() {
   test('Auto moves between routes and back through the Clash API, with no restart', () async {
     final loop = _Loop();
@@ -132,6 +141,7 @@ void main() {
       final auto = AutoService(client.api!, plan, delay: probe.delayTest,
           pool: ProbePool.solo(ladder: DeadLadder(steps: const [Duration.zero])), // the dead A is asked at once (the ladder: ladder_test.dart)
           settings: AutoSettings(failAfter: 1, threshold: 5000, flapGuard: false, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
+      await _groupsUp(client);
       await auto.check();
       expect(auto.toJson()['now'], 'A');
       expect(await _get(mixed, loop.url), 'hello from target');
@@ -209,6 +219,7 @@ void main() {
       expect(await _get(mixed, 'http://127.0.0.1:${side.port}/'), 'side');
 
       final auto = AutoService(client.api!, plan, delay: probe.delayTest, settings: AutoSettings(failAfter: 1, url: loop.url, timeoutMs: 1500, firstCheck: const Duration(days: 1)));
+      await _groupsUp(client);
       await auto.check();
       expect(auto.toJson()['now'], 'B');
       expect(await _get(mixed, loop.hostUrl), 'hello from target');

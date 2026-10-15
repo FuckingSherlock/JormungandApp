@@ -14,6 +14,10 @@ import 'package:jormungand/platform/update_job_channel.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
 /// A runner that is not sing-box: starts when told to, counts the starts, has no API service.
+/// The default boxes of a test core: a fake main runner, and a connect's throwaway tester (`run/connect-N`) that cannot
+/// start — the check of the servers is skipped with a warning instead of waiting for probes that never answer (~5 s each).
+BoxRunner testBoxes(String dir) => FakeRunner()..failWith = dir.contains('connect-') ? StateError('no tester in this test') : null;
+
 class FakeRunner implements BoxRunner {
   bool up = false;
   int starts = 0;
@@ -95,7 +99,7 @@ Map<String, dynamic> snapshot() => {
 /// A core that remembers what the app told its updater.
 class _RecCore extends CoreService {
   _RecCore({required super.dataDir, required super.runner})
-    : super(singBox: '', boxFactory: (_) => FakeRunner(), sysProxy: NoSystemProxy(), isElevated: () => true, resolveAddresses: false);
+    : super(singBox: '', boxFactory: testBoxes, sysProxy: NoSystemProxy(), isElevated: () => true, resolveAddresses: false);
 
   final updateBodies = <Map<String, dynamic>>[];
 

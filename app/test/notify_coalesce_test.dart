@@ -10,12 +10,12 @@ import 'package:jormungand/core/core_host.dart';
 import 'package:jormungand/core/live_core_host.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
-import 'live_core_host_test.dart' show FakeRunner, snapshot, source;
+import 'live_core_host_test.dart' show FakeRunner, snapshot, source, testBoxes;
 
 /// A core whose ping answers at once for every server, and whose traffic changes every call.
 class _ScriptCore extends CoreService {
   _ScriptCore({required super.dataDir, required super.runner})
-    : super(singBox: '', boxFactory: (_) => FakeRunner(), sysProxy: NoSystemProxy(), isElevated: () => true, resolveAddresses: false);
+    : super(singBox: '', boxFactory: testBoxes, sysProxy: NoSystemProxy(), isElevated: () => true, resolveAddresses: false);
 
   int ticks = 0;
 

@@ -383,6 +383,16 @@ class CoreService implements CoreApi {
     if (a == null) return plan;
     return planWithChosen({...plan, 'current': a.index}, a.groupServers());
   }
+
+  /// A plan sent by the app while sing-box runs: each group of it that is not pinned and has the server Auto has it on now
+  /// among its members starts on that server (`chosen`), so a plan change does not check the groups again and move the
+  /// node (and the exit IP) the traffic is on. A pinned group follows its pin; a group without a valid server of the core's
+  /// keeps the plan's own `chosen` and is checked ([connectPicks]). Call before [_stopAuto].
+  Map<String, dynamic> _keepCoreChoice(Map<String, dynamic> plan) {
+    final a = _auto;
+    return a == null ? plan : planKeepingServers(plan, a.groupServers());
+  }
+
   final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
@@ -2877,6 +2887,7 @@ class CoreService implements CoreApi {
     // a connect over a running one (a plan change, an own restart): the servers its groups are on stay, only groups with
     // none are checked; a fresh connect checks the group it starts on (the app's `chosen` is a hint, kept only for Manual's pin)
     final continuation = runner.running && _plan != null;
+    if (continuation) plan = _keepCoreChoice(plan); // before _stopAuto: Auto knows where the groups are
     final seq = _nextSeq();
     _wakeUp();
     _recovering = null;
