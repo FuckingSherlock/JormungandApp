@@ -139,9 +139,12 @@ abstract interface class CoreApi {
   Future<Map<String, dynamic>> dnsAutoSetting(Map<String, dynamic> body);
 
   /// `{provider}`: the latency of a DNS provider per side, measured by the failover's own check through the running
-  /// sing-box (the colour of the side chips and the ping agree) → `{provider, live, direct, vpn, servers: [{id,
-  /// side, kind, ms}]}`: `direct` / `vpn` = best ms of the provider's candidates on the side, -1 none answered, null
-  /// no candidate there; `live: false` = not measured (sing-box off, or the provider is not in the running config).
+  /// sing-box (the colour of the side chips and the ping agree) → `{provider, live, testing, direct, vpn, servers: [{id,
+  /// side, kind, ms}], providers}`: it does not wait for the checks (they are started, a run in flight is joined) and
+  /// answers at once; `testing` = some are still asked (`providers[].transports[].state`), `poll: true` reads without
+  /// starting. `direct` / `vpn` = best ms of the provider's answering candidates on the side, -1 asked and none answered,
+  /// null no candidate there or not asked yet; `live: false` = not measured (sing-box off, or the provider is not in the
+  /// running config).
   Future<Map<String, dynamic>> pingDnsSides(Map<String, dynamic> body);
 
   /// Checks where traffic leaves again; the result arrives in `status.exit`.

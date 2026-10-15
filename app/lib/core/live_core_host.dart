@@ -761,11 +761,33 @@ class LiveCoreHost extends CoreHost {
     return connect();
   }
 
+  /// The connect in flight, from its first step (the VPN consent included) to its end.
+  Future<ConnectResult>? _connectFlight;
+
+  /// Idempotent (docs/core.md, "Подключение идемпотентно"): a call while a connect is in flight joins
+  /// it (same result, one start of the core); a call while the VPN is on with the plan the catalog
+  /// makes now does nothing. Several places ask for a connect at the app's start (the resume after
+  /// an update, "Connect on launch", the tile) and none of them may restart the tunnel the other
+  /// one is bringing up.
   @override
-  Future<ConnectResult> connect() async {
-    if (!_ready || _connecting || _disconnecting) {
-      return const ConnectResult(ConnectOutcome.busy);
+  Future<ConnectResult> connect() {
+    if (!_ready || _disconnecting) {
+      return Future.value(const ConnectResult(ConnectOutcome.busy));
     }
+    return _connectFlight ??= _connectOnce().whenComplete(
+      () => _connectFlight = null,
+    );
+  }
+
+  /// The connect that is already on, with the plan the catalog makes now (`_planSig` is the one the
+  /// core runs): nothing to send.
+  bool get _alreadyConnected =>
+      phase == ConnectionPhase.connected &&
+      _planSig != null &&
+      catalog.planSig() == _planSig;
+
+  Future<ConnectResult> _connectOnce() async {
+    if (_alreadyConnected) return const ConnectResult(ConnectOutcome.started);
     final check = catalog.checkBeforeConnect();
     if (check != null) {
       switch (check.code) {

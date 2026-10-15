@@ -25,7 +25,8 @@ import java.util.concurrent.Executors
  *
  * Lifecycle: VpnChannel `start` leaves a request in [VpnBridge] and starts the service; the
  * service starts libbox on its worker thread and answers the request (null = up, else the
- * reason). A second `start` while it runs restarts libbox inside the same service. `stop`
+ * reason). A second `start` while it runs restarts libbox inside the same service, with the tun held
+ * across the restart (the next one replaces it, see [startTunnel]: no moment without a tun). `stop`
  * ([stopTunnel]) and the system revoking the VPN ([onRevoke]) close libbox, the tun and the
  * service; the revoke is also reported to Dart (event `stopped`).
  *
@@ -69,7 +70,10 @@ class JormungandVpnService : VpnService() {
     var isUp = false
         private set
 
-    /** The tun is established (openTunInternal .. closeBoxLocked): only then does [protect] take a socket out of it. */
+    /**
+     * The tun is established (openTunInternal .. the full close in closeBoxLocked; a restart holds it
+     * throughout): only then does [protect] take a socket of a throwaway libbox out of it.
+     */
     internal val tunOpen: Boolean get() = tunFd != null
 
     /** Guards [started] / [onShade] with the calls into startForeground / stopForeground. */
@@ -144,10 +148,22 @@ class JormungandVpnService : VpnService() {
     private fun startTunnel(request: VpnBridge.Pending) {
         try {
             synchronized(lock) {
-                closeBoxLocked()
+                // A restart (new plan, a rule list, a reconnect) keeps the old tun up: libbox works on a dup
+                // of the descriptor, so stopping the box does not remove the interface, and the new box's
+                // openTun establishes the next interface while this one is still up (the system swaps them
+                // atomically, [openTunInternal] closes the old descriptor after). Between the two boxes
+                // nobody reads the held tun: packets are dropped there, not sent past the VPN.
+                val held = tunFd
+                closeBoxLocked(keepTun = true)
+                if (held != null) VpnBridge.log("info", "tunnel: restart, the tun (fd ${held.fd}) is held until the next one is open")
                 val b = LibboxBox(applicationContext, VpnPlatform(this), "tunnel")
                 box = b
                 b.start(request.config)
+                // the new config opened no tun (openTun not called): the held one is of no use any more
+                if (held != null && tunFd === held) {
+                    runCatching { held.close() }
+                    tunFd = null
+                }
                 isUp = true
             }
             TileBridge.refresh(this)
@@ -162,12 +178,18 @@ class JormungandVpnService : VpnService() {
         }
     }
 
-    private fun closeBoxLocked() {
+    /**
+     * Stops libbox and, unless [keepTun] (the restart in [startTunnel]), closes the tun: closing it is
+     * what ends the VPN interface, so every full stop (Disconnect, revoke, a failed start, the service
+     * going away) takes the default and the restart alone holds it.
+     */
+    private fun closeBoxLocked(keepTun: Boolean = false) {
         isUp = false
         VpnBridge.record = null // what Dart kept for taking this tunnel over is void with it
         TileBridge.refresh(this) // the Quick Settings tile follows the tunnel, Dart or not
         box?.stop()
         box = null
+        if (keepTun) return
         runCatching { tunFd?.close() }
         tunFd = null
     }
@@ -315,6 +337,9 @@ class JormungandVpnService : VpnService() {
             }
         }
 
+        // With a previous tun still open (a restart, see [startTunnel]) establish() replaces that interface
+        // in one step; only after that is the old descriptor closed. A failed establish leaves it held,
+        // and the failed start closes it.
         val pfd = builder.establish() ?: error("android: the application is not prepared or is revoked")
         runCatching { tunFd?.close() }
         tunFd = pfd

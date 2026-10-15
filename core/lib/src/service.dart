@@ -3247,17 +3247,23 @@ class CoreService implements CoreApi {
     return status();
   }
 
-  /// body: `{provider}` — the latency of a DNS provider per side by the failover's own check (docs/rules.md §6):
-  /// `{provider, live, direct, vpn, servers: [{id, side, kind, ms}]}`. `direct` / `vpn`: the best ms of the provider's
-  /// candidates on that side, -1 = none answered, null = no candidate there. `live: false` (sing-box not running, or
-  /// the provider is not in its config: off, not named by a rule): nothing was measured, both sides null.
+  /// body: `{provider, poll?}` — the latency of a DNS provider per side by the failover's own check (docs/rules.md §6):
+  /// `{provider, live, testing, direct, vpn, servers: [{id, side, kind, ms}], providers}`. It does not wait for the
+  /// checks: it starts them (a ping of the provider already under way is joined) and answers at once with what is known,
+  /// the transports still asked read `state: testing` in `providers`; the caller asks again (`poll: true` only reads, it
+  /// starts nothing) until `testing` is false. `direct` / `vpn`: the best ms of the provider's candidates on that side
+  /// that answered, -1 = asked and none answered, null = no candidate there or not asked yet. `servers[].ms`: -2 = not asked
+  /// yet. `live: false` (sing-box not running, or the provider is not in its config: off, not named by a rule): nothing was
+  /// measured, both sides null.
   @override
   Future<Map<String, dynamic>> pingDnsSides(Map<String, dynamic> body) async {
     final provider = '${body['provider'] ?? ''}';
-    final got = runner.running ? await _dns?.pingProvider(provider) ?? const [] : const <({String id, String side, String kind, int ms})>[];
+    final dns = runner.running ? _dns : null;
+    if (dns != null && body['poll'] != true) unawaited(dns.startPing(provider) ?? Future<void>.value());
+    final got = dns?.pingResults(provider) ?? const <({String id, String side, String kind, int ms})>[];
     int? best(String side) {
       final ms = [for (final g in got) if (g.side == side) g.ms];
-      if (ms.isEmpty) return null;
+      if (ms.isEmpty || ms.every((m) => m == -2)) return null;
       final ok = ms.where((m) => m >= 0);
       return ok.isEmpty ? -1 : ok.reduce((a, b) => a < b ? a : b);
     }
@@ -3265,10 +3271,11 @@ class CoreService implements CoreApi {
     return {
       'provider': provider,
       'live': got.isNotEmpty,
+      'testing': got.isNotEmpty && dns!.pinging(provider),
       'direct': best('direct'),
       'vpn': best('vpn'),
       'servers': [for (final g in got) {'id': g.id, 'side': g.side, 'kind': g.kind, 'ms': g.ms}],
-      'providers': got.isEmpty ? const [] : _dns?.providersJson(provider) ?? const [], // the protocol race: winner and each transport's last result
+      'providers': got.isEmpty ? const [] : dns!.providersJson(provider), // the protocol race: winner and each transport's last result
     };
   }
 

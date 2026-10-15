@@ -258,6 +258,27 @@ void main() {
     expect(runner.up, isFalse);
   });
 
+  test('connect is idempotent: a call in flight joins it, a call while on with the same plan does nothing', () async {
+    boxFails = SingBoxError('no sing-box'); // no tester here: the connect's check of servers is skipped at once
+    await start();
+    final first = host.connect();
+    final second = host.connect(); // before the first has finished
+    expect((await first).started, isTrue);
+    expect((await second).started, isTrue);
+    expect(runner.starts, 1);
+
+    expect((await host.connect()).started, isTrue); // already on with this plan
+    await settle();
+    expect(runner.starts, 1);
+    expect(host.phase, ConnectionPhase.connected);
+
+    // not a no-op once the plan moved: that is a reconnect, one restart
+    host.setGlobal(true);
+    expect((await host.connect()).started, isTrue);
+    await settle();
+    expect(runner.starts, 2);
+  });
+
   test('a change that makes another plan reconnects', () async {
     boxFails = SingBoxError('no sing-box'); // the connect's check of servers has no tester here: skipped at once, not 5 s of timeouts
     await start();

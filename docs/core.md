@@ -249,6 +249,21 @@ Group = { pick: 'fastest' | 'priority', chosen: 'sid::nid' | null, pinned?: true
   `current`: пинг и переключения AutoService — не повод рвать соединения. `chosen` цели правила
   сравнивается: её Priority никто, кроме нового плана, не двигает. Пока идёт пинг, проверка
   ждёт его конца.
+- Подключение идемпотентно (на стороне хоста, `LiveCoreHost.connect`): вызов, пока подключение уже идёт
+  (от согласия на VPN до ответа ядра), присоединяется к нему — тот же результат, одна загрузка ядра;
+  вызов при включённом VPN с тем же планом ничего не делает. Просят подключиться в одно время несколько
+  мест — возобновление после обновления (`resumeAfterUpdate`), «Connect on launch» (`runLaunchActions`),
+  плитка; ни одно не перезапускает туннель, который поднимает другое. Другой план при включённом VPN
+  — это переподключение, один перезапуск. Само `CoreService.connect` по-прежнему перезапускает ядро
+  на каждый вызов: гарантия держится на хосте.
+- Перезапуск ядра на Android (новый план, список правил, который не был в конфиге, переподключение)
+  удерживает tun: `JormungandVpnService.startTunnel` останавливает старый libbox, но не закрывает
+  дескриптор (libbox работает с `dup` — интерфейс живёт, пока открыт дескриптор службы); `openTun`
+  нового libbox вызывает `establish()` при ещё открытом старом (система заменяет интерфейс разом) и
+  только потом закрывает старый дескриптор. Между остановкой старого и стартом нового (≈ 0,3–0,7 с)
+  пакеты на удерживаемом tun никто не читает — они пропадают, а не уходят мимо VPN. Если новый конфиг
+  tun не открыл, удерживаемый закрывается после старта. Закрывают tun только полная остановка
+  (Disconnect, отзыв VPN, неудачный старт, конец службы). `protect()` в окне работает: tun открыт.
 
 ### Подключение: проверка перед стартом (`connectPicks`, `group_pick.dart`)
 
@@ -1133,7 +1148,7 @@ Global, hijack вкл / выкл, системные правила первым
 | `POST /api/sources/import` | `{name, text}` → `{source}`: локальный источник (`kind: 'file'`, без `id` — его выдаёт владелец каталога) из текста выбранного файла (Nodes → + → Import config file). `name` — имя файла, расширение (`.json` `.yaml` `.yml` `.txt` `.conf` `.list`) отбрасывается. Формат определяется по содержимому, как у подписки (sing-box JSON, Clash YAML, список ссылок, всё это и в base64); серверы дедуплицируются и именуются как у подписки. `source`: `{kind, name, enabled, inAuto, offNodes, disabledNodes, nodes, gone, count, format, updatedAt}`. Ничего не распознано или файл > 16 МБ — 400 `{error}` (`No servers found in the file`), ядро ничего не хранит: источник кладёт в каталог и сохраняет вызывающий (`PUT /api/state`). Источник не обновляется ни таймером, ни `fetchSource` (тот отвечает 400). См. connect-model.md → «Локальный источник» |
 | `POST /api/connect` | `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?, dnsAuto?}` — kill switch, см. «Kill switch»; `dnsAuto` — Settings → DNS → Switch automatically (по умолчанию true), см. «Правила в конфиге» |
 | `POST /api/dns/auto` | `{auto: bool}` — Switch automatically на ходу, без переподключения (выкл — первый сервер сразу) → status |
-| `POST /api/dns/ping` | `{provider}` — задержка DNS-провайдера по сторонам тем же dns-check (`CoreApi.pingDnsSides`): `{provider, live, direct, vpn, servers:[{id,side,kind,ms}]}`; `-1` не ответил, `null` нет стороны; `live:false` — не измерено (`rules.md` §6) |
+| `POST /api/dns/ping` | `{provider, poll?}` — задержка DNS-провайдера по сторонам тем же dns-check (`CoreApi.pingDnsSides`): `{provider, live, testing, direct, vpn, servers:[{id,side,kind,ms}], providers}`; **отвечает сразу**, не дожидаясь проверок: запускает их (идущий пинг провайдера — общий), транспорты в работе имеют `state: testing`, результаты ложатся по мере прихода; `poll: true` только читает, опрашивать до `testing: false`. `-1` не ответил, `-2` не спрашивали, `null` нет стороны или ещё не спрашивали; `live:false` — не измерено (`rules.md` §6) |
 | `POST /api/killswitch` | `{killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?}` — сменить на ходу, без переподключения → status |
 | `POST /api/sysproxy/release` | вернуть системный прокси сейчас (Disable sys proxy при down / Remove при блоке) → status |
 | `POST /api/retry` | перезапустить sing-box сейчас, не дожидаясь паузы → status |

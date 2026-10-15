@@ -508,6 +508,30 @@ void main() {
       await r.dispose();
     });
 
+    test('startPing does not wait: the answers land one by one, the slow one reads testing, a second ask joins the run', () async {
+      final r = _Rig(direct: ['a', 'a2', 'b'], providers: {'a2': 'a'});
+      await r.settle();
+      r.alive['dns-a'] = 25;
+      r.alive['dns-a2'] = 60;
+      r.hold['dns-a2'] = Completer<void>();
+      r.asked.clear();
+      final run = r.svc.startPing('a')!;
+      expect(identical(r.svc.startPing('a'), run), isTrue, reason: 'a ping of the provider in flight is joined');
+      await pumpEventQueue();
+      expect(r.svc.pinging('a'), isTrue);
+      expect(r.asked.where((q) => q.startsWith('dns-a ')), hasLength(1), reason: 'asked once');
+      final mid = [for (final t in (r.svc.providersJson('a').single['transports'] as List)) '${t['ids']} ${t['ms']} ${t['state']}'];
+      expect(r.svc.pingResults('a').firstWhere((g) => g.id == 'a').ms, 25, reason: 'the fast one is in before the slow one ends');
+      expect(r.svc.pingResults('a').firstWhere((g) => g.id == 'a2').ms, anyOf(-2, -1), reason: 'the slow one has no answer yet');
+      expect(mid.any((s) => s.endsWith('testing')), isTrue, reason: 'the slow transport reads testing');
+      r.hold['dns-a2']!.complete();
+      await run;
+      expect(r.svc.pinging('a'), isFalse);
+      expect([for (final g in r.svc.pingResults('a')) '${g.id} ${g.ms}'], ['a 25', 'a2 60']);
+      expect(r.svc.providersJson('a').single['transports'], everyElement(containsPair('state', 'ok')));
+      await r.dispose();
+    });
+
     test('a provider this config does not hold, or a stopped failover: nothing', () async {
       final r = _Rig(direct: ['a']);
       await r.settle();

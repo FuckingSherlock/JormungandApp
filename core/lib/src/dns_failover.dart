@@ -163,6 +163,10 @@ class _Node {
   /// The one check in flight; a second ask joins it.
   Future<void>? testing;
 
+  /// A ping's measure while the network is not up (it only measures, nothing is recorded); [measured] is its last answer.
+  Future<void>? measuring;
+  int? measured;
+
   /// The Sentinel is judging a miss of it.
   bool suspecting = false;
 
@@ -752,31 +756,67 @@ class DnsFailover {
     _syncPark();
   }
 
-  /// The latency of every candidate of [provider] in this config, on both sides, by the very check the rounds
-  /// make (the probe inbound, the candidate's own path, the check names in turn): `(id, side, kind, ms)`, -1 =
-  /// no answer. Empty when the config has no such provider. While the network is up the answers count as a round's:
-  /// an answer closes a dead candidate's root, a miss is evidence like any other (so the list's colour and the ping
-  /// agree, and a provider just switched on is checked at once); otherwise it only measures.
-  Future<List<({String id, String side, String kind, int ms})>> pingProvider(String provider) async {
+  /// The ping of [provider]: the very check the rounds make (the probe inbound, the candidate's own path, the check names in
+  /// turn) of every candidate on both sides at once. It does not wait for the checks: it starts them (a second ask joins the
+  /// run in flight) and returns the run. Each candidate's answer is in [pingResults] / [providersJson] the moment it lands;
+  /// the ones still asked read `testing`. Null when the config has no such provider (or the failover is stopped). While the
+  /// network is up the answers count as a round's: an answer closes a dead candidate's root, a miss is evidence like any
+  /// other (so the list's colour and the ping agree, and a provider just switched on is checked at once); otherwise it only
+  /// measures.
+  Future<void>? startPing(String provider) {
+    if (_stopped) return null;
     final nodes = [for (final n in _all) if (n.c != null && n.provider == provider) n];
-    if (nodes.isEmpty || _stopped) return const [];
-    if (_online) {
-      final now = _clock();
-      final parked = [for (final n in nodes) if (_down(n)) n];
-      await Future.wait(nodes.map(_test));
-      if (!_stopped) {
-        _judge(nodes);
-        for (final n in parked) {
-          _stepped(n, now, advance: false); // asked just now: the next one counts from here, the step stays
-        }
-        await _react();
-        _syncPark();
-      }
-      return [for (final n in nodes) (id: n.id, side: n.side, kind: n.kind, ms: n.w.health.ms)];
-    }
-    final ms = await Future.wait(nodes.map((n) => _ask(n, null)));
-    return [for (var i = 0; i < nodes.length; i++) (id: nodes[i].id, side: nodes[i].side, kind: nodes[i].kind, ms: ms[i])];
+    if (nodes.isEmpty) return null;
+    return _pings[provider] ??= _pingRun(nodes).whenComplete(() {
+      _pings.remove(provider); // (a block: remove returns this very future, which whenComplete would wait for)
+    });
   }
+
+  /// A ping of [provider] is under way, or one of its candidates is being asked.
+  bool pinging(String provider) =>
+      _pings.containsKey(provider) || _all.any((n) => n.c != null && n.provider == provider && (n.testing != null || n.measuring != null));
+
+  /// The latest answer of every candidate of [provider]: `(id, side, kind, ms)`, -1 = no answer, -2 = not asked yet.
+  List<({String id, String side, String kind, int ms})> pingResults(String provider) =>
+      [for (final n in _all) if (n.c != null && n.provider == provider) (id: n.id, side: n.side, kind: n.kind, ms: _msOf(n))];
+
+  /// [startPing] awaited: the answer of every candidate. Empty when the config has no such provider.
+  Future<List<({String id, String side, String kind, int ms})>> pingProvider(String provider) async {
+    final run = startPing(provider);
+    if (run == null) return const [];
+    await run;
+    return pingResults(provider);
+  }
+
+  final Map<String, Future<void>> _pings = {};
+
+  Future<void> _pingRun(List<_Node> nodes) async {
+    if (!_online) {
+      await Future.wait(nodes.map(_measure));
+      return;
+    }
+    final now = _clock();
+    final parked = {for (final n in nodes) if (_down(n)) n};
+    // each answer is judged as it lands, not when the slowest one has ended
+    await Future.wait([
+      for (final n in nodes)
+        _test(n).then((_) {
+          if (_stopped) return;
+          _judge([n]);
+          if (parked.contains(n)) _stepped(n, now, advance: false); // asked just now: the next one counts from here, the step stays
+        }),
+    ]);
+    if (_stopped) return;
+    await _react();
+    _syncPark();
+  }
+
+  Future<void> _measure(_Node n) => n.measuring ??= _ask(n, null).then((ms) {
+        if (!_stopped) n.measured = ms;
+      }).whenComplete(() => n.measuring = null);
+
+  // What the node answered last; a ping that only measured (the network is not up) counts while the network is not up.
+  int _msOf(_Node n) => !_online && n.measured != null ? n.measured! : n.w.health.ms;
 
   // One check per server at a time: a second ask joins the one in flight.
   Future<void> _test(_Node s) => s.testing ??= _testOnce(s).whenComplete(() => s.testing = null);
@@ -1249,9 +1289,9 @@ class DnsFailover {
 
   Map<String, dynamic> _transportJson(_Group g, String kind, _Node? winner) {
     final ns = [for (final n in g.members) if (n.kind == kind) n];
-    final ok = [for (final n in ns) if (n.w.health.ms >= 0) n.w.health.ms];
-    final ms = ok.isNotEmpty ? ok.reduce((a, b) => a < b ? a : b) : ns.any((n) => n.w.health.ms == -1) ? -1 : -2;
-    final testing = ns.any((n) => n.testing != null || n.suspecting);
+    final ok = [for (final n in ns) if (_msOf(n) >= 0) _msOf(n)];
+    final ms = ok.isNotEmpty ? ok.reduce((a, b) => a < b ? a : b) : ns.any((n) => _msOf(n) == -1) ? -1 : -2;
+    final testing = ns.any((n) => n.testing != null || n.measuring != null || n.suspecting);
     final dead = ns.every(_down);
     return {
       'kind': kind,

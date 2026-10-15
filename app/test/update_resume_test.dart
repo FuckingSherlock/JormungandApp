@@ -81,8 +81,14 @@ class _Port implements ResumePort {
 class _Vpn extends VpnChannel {
   _Vpn();
   bool consent = true;
+
+  /// How long the system's consent check takes (a platform channel call).
+  Duration prepareTakes = Duration.zero;
   @override
-  Future<bool> prepare() async => consent;
+  Future<bool> prepare() async {
+    await Future<void>.delayed(prepareTakes);
+    return consent;
+  }
 }
 
 /// A core whose update is downloaded and ready (the real updater needs a feed to get there).
@@ -119,7 +125,8 @@ Map<String, dynamic> _node(String id) => {
   },
 };
 
-Map<String, dynamic> _snapshot() => {
+Map<String, dynamic> _snapshot({bool connectOnLaunch = false}) => {
+  if (connectOnLaunch) 'genCfg': {'connectOnLaunch': true},
   'sourcesData': {
     'a': {
       'id': 'a',
@@ -188,8 +195,12 @@ void main() {
     } catch (_) {}
   });
 
-  Future<LiveCoreHost> host({bool ready = false, Future<bool> Function(String)? installer}) async {
-    File('${dir.path}/ui-state.json').writeAsStringSync(jsonEncode(_snapshot()));
+  Future<LiveCoreHost> host({
+    bool ready = false,
+    bool connectOnLaunch = false,
+    Future<bool> Function(String)? installer,
+  }) async {
+    File('${dir.path}/ui-state.json').writeAsStringSync(jsonEncode(_snapshot(connectOnLaunch: connectOnLaunch)));
     final CoreService core = ready
         ? _ReadyCore(dataDir: dir.path, runner: runner)
         : CoreService(
@@ -301,6 +312,40 @@ void main() {
     expect((await h.connect()).started, isTrue);
     port.rec = record();
     expect(await h.resumeAfterUpdate(), ResumeOutcome.alreadyOn);
+    expect(runner.starts, 1);
+  });
+
+  // The app's start after an update has two askers of a connect: the resume (main(), no window) and
+  // "Connect on launch" (the window's first frame). They land while the VPN consent check is still
+  // out; neither may restart the tunnel the other is bringing up.
+  test('the resume and "Connect on launch" asking together start the core once (launch first)', () async {
+    final h = await host(connectOnLaunch: true);
+    vpn.prepareTakes = const Duration(milliseconds: 50);
+    port.rec = record();
+
+    final launch = h.runLaunchActions();
+    final outcome = await h.resumeAfterUpdate();
+    await launch;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    expect(outcome, ResumeOutcome.resumed);
+    expect(h.phase, ConnectionPhase.connected);
+    expect(runner.starts, 1);
+  });
+
+  test('the resume and "Connect on launch" asking together start the core once (resume first)', () async {
+    final h = await host(connectOnLaunch: true);
+    vpn.prepareTakes = const Duration(milliseconds: 50);
+    port.rec = record();
+
+    final resumed = h.resumeAfterUpdate();
+    await Future<void>.delayed(const Duration(milliseconds: 10)); // the resume is at the consent check
+    await h.runLaunchActions();
+    final outcome = await resumed;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    expect(outcome, ResumeOutcome.resumed);
+    expect(h.phase, ConnectionPhase.connected);
     expect(runner.starts, 1);
   });
 
