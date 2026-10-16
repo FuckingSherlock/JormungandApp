@@ -135,3 +135,8 @@ site/blocked and site/unreachable are no longer dropped once an hour per site + 
 
 ## Lost rule / app target (2026-10-16)
 - A rule / app whose target is deleted / off / has no servers / unsupported gets an error tag ("<why> -> <where>", TagTone.error) in the rules list, at the Via row of the rule form and app dialog, in the apps list; events rules/targetLost + rules/targetFound (notification under autoSwitch). Routing unchanged (still by "If unavailable"). Mockup: plan has no targetLost; it keeps the "down -> X" tag. docs/rules.md §0 "Недоступная цель", logs.md, core.md.
+
+## App update card: release notes collapse (2026-10-17)
+- Карточка обновления (Settings → Data): «WHAT'S NEW» стала строкой-переключателем с шевроном, заметки свёрнуты по умолчанию (AnimatedSize 200 мс). Мокап не обновлён: разметка карточки обновления в `design/src` всё ещё показывает заметки всегда раскрытыми; docs/updates.md §11.
+- Settings → Data → App updates → Channel: подпись канала stable — «Release» / «Релиз» (было Stable / «Стабильный»); внутреннее имя `stable` не менялось. Мокап: селектор канала в design/src; docs/updates.md (получение beta).
+- Home: бейдж подключения в шапке (`.conn-badge`) не переводится — всегда английский. Мокап: убрать его строки из перевода (04-i18n-ru.js / data-notr). docs/i18n.md «Что не переводится».

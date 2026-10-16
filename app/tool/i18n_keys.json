@@ -1608,5 +1608,6 @@
   "Target lost: {0}": "targetLost",
   "{0} is available again": "isAvailableAgain",
   "Rule {0} is blocked": "ruleIsBlocked",
-  "App {0} is blocked": "appIsBlocked"
+  "App {0} is blocked": "appIsBlocked",
+  "Release": "release"
 }

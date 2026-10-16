@@ -1139,6 +1139,8 @@ void main() {
       host.changed();
       await tester.pumpAndSettle();
       expect(find.text('Update 0.2.0 available'), findsOneWidget);
+      await tester.tap(find.text("WHAT'S NEW"));
+      await tester.pumpAndSettle();
       expect(find.text('Faster Auto'), findsOneWidget);
       await tester.tap(find.text('Download & install'));
       await tester.pump();
@@ -1166,6 +1168,29 @@ void main() {
       await tester.tap(find.text('Install'));
       await tester.pump();
       expect(host.calls, contains('installUpdate'));
+    });
+
+    testWidgets('updates: release notes are collapsed until the caption is tapped', (tester) async {
+      final host = FakeCoreHost();
+      host.update = const AppUpdate(
+        phase: UpdPhase.available,
+        current: '0.1.0',
+        offer: UpdOffer(
+          version: '0.2.0',
+          channel: 'stable',
+          size: 40 * 1024 * 1024,
+          notes: {'en': 'Faster Auto'},
+        ),
+      );
+      await _pump(tester, host, textScale: 1.2);
+      await _open(tester, 'setdata');
+      expect(find.text('Faster Auto'), findsNothing);
+      await tester.tap(find.text("WHAT'S NEW"));
+      await tester.pumpAndSettle();
+      expect(find.text('Faster Auto'), findsOneWidget);
+      await tester.tap(find.text("WHAT'S NEW"));
+      await tester.pumpAndSettle();
+      expect(find.text('Faster Auto'), findsNothing);
     });
 
     testWidgets('updates: an offer with a delta shows the patch size, not the installer\'s', (tester) async {

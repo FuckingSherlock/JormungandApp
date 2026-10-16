@@ -618,6 +618,7 @@ Settings → Data, а не Logs.
 
 Блок «App updates» — Settings → Data (над Backup): версия, Check now, Auto-check, Auto-download, Channel. Строка
 «Check for app updates» убрана из General (это был тот же `genCfg.updates`).
+В карточке обновления заметки («WHAT'S NEW») свёрнуты по умолчанию: тап по строке-заголовку с шевроном раскрывает и сворачивает их.
 
 ## 12. Макет
 
@@ -800,7 +801,8 @@ $env:JORM_ANDROID_KS_PASS | gh secret set JORM_ANDROID_KS_PASS --repo FuckingShe
 gh secret set JORM_RELEASES_TOKEN --repo FuckingSherlock/JormungandApp        # спросит значение токена
 ```
 
-Получение beta на устройстве: Settings → Data → App updates → Channel = **Beta** (по умолчанию stable;
+Получение beta на устройстве: Settings → Data → App updates → Channel = **Beta** (по умолчанию stable — в интерфейсе он подписан **Release** / «Релиз»,
+внутреннее имя канала, файлы ленты и `updChannel` остаются `stable`;
 бета-пользователь смотрит оба канала, раздел 5). Локальные сборки и CI-релизы подписаны одним
 ключом и сосуществуют: локальная (`<версия CI>.dev`, раздел 5) ставится поверх CI-сборки, а следующий
 CI-релиз — поверх локальной. Старый debug-подписанный APK (до перехода на единый ключ) поверх не

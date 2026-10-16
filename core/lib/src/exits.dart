@@ -22,7 +22,12 @@ String flagOfCountry(String code) {
 
 /// What the exit check found about one node.
 class NodeExit {
-  const NodeExit(this.ip, this.country, this.at, {this.refresh = false});
+  const NodeExit(this.ip, this.country, this.at, {this.refresh = false, this.city = '', this.org = ''});
+
+  /// The city and the organisation of the last answer ('' = it named none): shown with the answer at once after a
+  /// reconnect, so the stored answer looks like the fresh one. Kept in the file, not in [toJson] (the status' view of the entry).
+  final String city;
+  final String org;
 
   /// The node's subscription was updated since the last check: the next background check ignores the hourly timer
   /// ([ExitBook.markRefresh]). Kept in the file, not in [toJson] (the status' view of the entry).
@@ -62,10 +67,11 @@ class ExitBook {
 
   /// An exit check through node [id] answered with [ip] and, maybe, a [country]. A check that names no country
   /// keeps the last one named earlier (the geo services all missed this time; the IP is still the fresh fact).
-  void record(String id, {required String ip, String? country, required int at}) {
+  /// [city] and [org] are the answer's own (the fresh answer replaces the stored one whole, none named = none kept).
+  void record(String id, {required String ip, String? country, String? city, String? org, required int at}) {
     final c = (country ?? '').trim().toUpperCase(), had = _nodes[id];
     final code = RegExp(r'^[A-Z]{2}$').hasMatch(c) ? c : had?.country ?? '';
-    _nodes[id] = NodeExit(ip, code, at, refresh: had?.refresh ?? false);
+    _nodes[id] = NodeExit(ip, code, at, refresh: had?.refresh ?? false, city: (city ?? '').trim(), org: (org ?? '').trim());
     onChange?.call();
   }
 
@@ -74,7 +80,7 @@ class ExitBook {
   void markRefresh(String id) {
     final e = _nodes[id];
     if (e == null || e.refresh) return;
-    _nodes[id] = NodeExit(e.ip, e.country, e.at, refresh: true);
+    _nodes[id] = NodeExit(e.ip, e.country, e.at, refresh: true, city: e.city, org: e.org);
     onChange?.call();
   }
 
@@ -82,7 +88,7 @@ class ExitBook {
   bool takeRefresh(String id) {
     final e = _nodes[id];
     if (e == null || !e.refresh) return false;
-    _nodes[id] = NodeExit(e.ip, e.country, e.at);
+    _nodes[id] = NodeExit(e.ip, e.country, e.at, city: e.city, org: e.org);
     onChange?.call();
     return true;
   }
@@ -111,15 +117,23 @@ class ExitBook {
       final at = (e['at'] as num).toInt();
       if (at < cut) continue;
       final c = '${e['country'] ?? ''}';
-      _nodes[e['id'] as String] = NodeExit(e['ip'] as String, RegExp(r'^[A-Z]{2}$').hasMatch(c) ? c : '', at, refresh: e['refresh'] == true);
+      _nodes[e['id'] as String] = NodeExit(e['ip'] as String, RegExp(r'^[A-Z]{2}$').hasMatch(c) ? c : '', at,
+          refresh: e['refresh'] == true, city: e['city'] is String ? e['city'] as String : '', org: e['org'] is String ? e['org'] as String : '');
       taken++;
     }
     return taken;
   }
 
-  /// `[{id, ip, country, at, refresh?}]`.
+  /// `[{id, ip, country, at, city?, org?, refresh?}]`.
   List<Map<String, dynamic>> toJson() => [
-        for (final e in _nodes.entries) {'id': e.key, ...e.value.toJson(), if (e.value.refresh) 'refresh': true},
+        for (final e in _nodes.entries)
+          {
+            'id': e.key,
+            ...e.value.toJson(),
+            if (e.value.city.isNotEmpty) 'city': e.value.city,
+            if (e.value.org.isNotEmpty) 'org': e.value.org,
+            if (e.value.refresh) 'refresh': true,
+          },
       ];
 }
 

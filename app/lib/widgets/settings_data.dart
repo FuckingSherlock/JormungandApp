@@ -311,6 +311,9 @@ class _UpdatesBlockState extends State<_UpdatesBlock> {
   /// before the app closes, so the card says so instead of looking frozen.
   bool _installing = false;
 
+  /// The release notes under the offer are collapsed until the caption is tapped.
+  bool _notesOpen = false;
+
   Future<void> _install(CoreHost host) async {
     setState(() => _installing = true);
     try {
@@ -399,20 +402,43 @@ class _UpdatesBlockState extends State<_UpdatesBlock> {
               ],
             ),
             if (notes.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                l10n.whatSNew.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: .6,
-                  color: c.t3,
+              const SizedBox(height: 4),
+              InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: () => setState(() => _notesOpen = !_notesOpen),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          l10n.whatSNew.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: .6,
+                            color: c.t3,
+                          ),
+                        ),
+                      ),
+                      AnimatedRotation(
+                        turns: _notesOpen ? .5 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Icon(Icons.expand_more, size: 16, color: c.t3),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                notes,
-                style: TextStyle(fontSize: 13, height: 1.4, color: c.t2),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                alignment: Alignment.topCenter,
+                child: _notesOpen
+                    ? Text(
+                        notes,
+                        style: TextStyle(fontSize: 13, height: 1.4, color: c.t2),
+                      )
+                    : const SizedBox(width: double.infinity),
               ),
             ],
             const SizedBox(height: 10),
@@ -560,7 +586,7 @@ class _UpdatesBlockState extends State<_UpdatesBlock> {
               label: l10n.channel,
               hint: l10n.betaGetsNewVersionsEarlier,
               trailing: SetValueButton(
-                text: gen.updChannel == 'beta' ? l10n.beta : l10n.stable,
+                text: gen.updChannel == 'beta' ? l10n.beta : l10n.release,
                 onTap: () => _pickChannel(context, host),
               ),
             ),
@@ -607,7 +633,7 @@ class _UpdatesBlockState extends State<_UpdatesBlock> {
     final gen = host.gen;
     showMenuSheet<void>(context, l10n.updateChannel, (sheet) => [
       PickRow(
-        label: l10n.stable,
+        label: l10n.release,
         sub: l10n.testedReleases,
         selected: gen.updChannel == 'stable',
         onTap: () => closeThen(sheet, () {

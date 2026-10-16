@@ -260,6 +260,41 @@ void main() {
       expect(auto.exitInUse(), allOf(containsPair('city', 'Berlin'), containsPair('org', 'Example')));
     });
 
+    test('a reconnect inside the window shows the stored answer whole (city, org), also after a restart of the app', () async {
+      make();
+      auto.start();
+      gates[0].complete({'ip': '203.0.113.1', 'country': 'DE', 'city': 'Berlin', 'org': 'Example'});
+      await settle();
+      auto.stop();
+      expect(asked, ['route0/s::a']);
+
+      // the file: what the book keeps across a restart of the app
+      final reloaded = ExitBook()..load(book.toJson(), now);
+      for (final b in [book, reloaded]) {
+        now += const Duration(minutes: 5).inMilliseconds;
+        final asked2 = <String>[];
+        final again = AutoService(fake, p, delay: fake.delayTest, pool: everyRound(), clock: () => now, exits: b, exitCheck: (tag) {
+          asked2.add(tag);
+          return Completer<Map<String, dynamic>>().future;
+        });
+        again.start(); // a new controller (a reconnect): nothing asked within the window, the stored answer is the whole one
+        expect(asked2, isEmpty, reason: 'checked 5 minutes ago');
+        expect(again.exitInUse(), allOf(containsPair('ip', '203.0.113.1'), containsPair('country', 'DE'), containsPair('city', 'Berlin'), containsPair('org', 'Example')));
+        again.stop();
+      }
+    });
+
+    test('a fresh answer without a city replaces the stored one whole', () async {
+      make(storedAgo: hour.inMilliseconds + 1);
+      book.record(idA(), ip: '203.0.113.1', country: 'DE', city: 'Berlin', at: now - hour.inMilliseconds - 1);
+      auto.start();
+      expect(auto.exitInUse(), containsPair('city', 'Berlin'), reason: 'the stored one meanwhile');
+      gates[0].complete({'ip': '203.0.113.1', 'country': 'DE'});
+      await settle();
+      expect(auto.exitInUse(), isNot(contains('city')));
+      expect(book[idA()]!.city, '');
+    });
+
     test('nodes of one host: each check is asked through its own tag and its answer stays with its node (Manual picks, rechecks)', () async {
       // three nodes behind one bridge host (as the Remnawave "HY2 NL / HY2 DE / REALITY DE"): different outbounds, one address
       final p = plan([for (final k in ['s::hy2nl', 's::hy2de', 's::realde']) unit(k.split('::')[1], [k], pick: 'priority', chosen: k)]);

@@ -1140,7 +1140,16 @@ class AutoService {
   /// What the [exits] book holds for [id] as a status answer; null = nothing.
   Map<String, dynamic>? _exitKnown(String? id) {
     final e = id == null ? null : exits[id];
-    return e == null ? null : {'ip': e.ip, if (e.country.isNotEmpty) 'country': e.country, 'direct': false, 'at': e.at};
+    return e == null
+        ? null
+        : {
+            'ip': e.ip,
+            if (e.country.isNotEmpty) 'country': e.country,
+            if (e.city.isNotEmpty) 'city': e.city,
+            if (e.org.isNotEmpty) 'org': e.org,
+            'direct': false,
+            'at': e.at,
+          };
   }
 
   /// The answer shown for a node now (not an error): this run's latest, else the book's.
@@ -1259,7 +1268,7 @@ class AutoService {
         _exitError.remove(s.key);
         // a good check always replaces the shown answer with the fresh one (city, org and all), the same IP or not
         final ip = out['ip'];
-        if (s.id != null && ip is String) exits.record(s.id!, ip: ip, country: out['country'] as String?, at: out['at'] as int);
+        if (s.id != null && ip is String) exits.record(s.id!, ip: ip, country: out['country'] as String?, city: out['city'] is String ? out['city'] as String : null, org: out['org'] is String ? out['org'] as String : null, at: out['at'] as int);
         _exitResults[s.key] = out;
         trace?.call('auto: exit check through ${s.tag} (node ${s.id ?? '-'}): $ip${out['country'] == null ? '' : ' ${out['country']}'}');
       } else {
