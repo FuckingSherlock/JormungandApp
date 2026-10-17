@@ -146,16 +146,18 @@ below is how it applies here.
     since the previous release and `archive/done.md`; the lead reports its text as is (one text, see "Git").
 - **Workflow `code-task`:** a feature or plan item whose requirement is settled with the user, whose doc section
   is already written (that section is `plan`) and whose files are known.
+  - Always `rules: 'G:/DEV/JormungandApp/.claude/agent-rules.md'` (reaches coders, test-writer and reviewer).
   - One run per layer: core first, then app once the core API is fixed — this replaces hand-made stages.
   - `check`: core — `cd core; dart analyze; dart test`; app — `cd app; flutter analyze --no-fatal-infos; flutter test`.
   - Tiers: Sentinel, Auto, runtime, DNS race, TUN, state machines → `deep`, `review: true`, tests by
     `test-writer-deep`; plain app UI → `fast` / `lite`, `review: 'auto'`.
   - Shared files (`i18n_extra.json`, generated ARB, `core_host.dart`) belong to exactly one unit, which also runs
     `gen_all.mjs`. Files that cannot be split cleanly go into one `fast` / `deep` unit, not out of the workflow.
-  - One unit with known files and risky logic still goes through the workflow (check → fix → review loop).
+  - Anything big goes through the workflow, even a single unit: it restarts and re-routes agents by itself
+    (continuations, fix ladder, review), so the lead spends no turns on it.
 - **Never in a workflow:** diagnosis, a requirement still open, phone / TUN checks (the user), APK builds, deploy,
   visual acceptance (the lead looks at `event_shots` / golden shots after the run).
-- **Briefs:** agents do not see CLAUDE.md. Coders and test-writers get the line "Repo rules: `.claude/agent-rules.md`"
+- **Briefs:** agents do not see CLAUDE.md. Coders, test-writers and the reviewer (it writes and runs tests too) get the line "Repo rules: `.claude/agent-rules.md`"
   (repo layout, frozen `design/`, English-only strings, generators, check commands, fixtures); other agents get
   only what their job needs. Point to doc sections by line range, not whole docs. Report format: ≤ 15 lines —
   changed (files), checked (commands + result), noticed out of scope.

@@ -1,4 +1,4 @@
-# Jormungand — rules for coding agents
+# Jormungand — rules for coding agents (coders, test-writers, reviewer)
 
 Read this when your brief points here. Only what you need to edit code and tests in this repo.
 
