@@ -1,12 +1,14 @@
 package dev.jormungand.app
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -19,6 +21,7 @@ import io.flutter.plugin.common.MethodChannel
  *
  *  metered -> Boolean   now
  *  type    -> String    wifi | ethernet | mobile | other | none (the support report's network.host)
+ *  openSettings -> null  Settings -> Wireless (Wi-Fi, mobile data), a new task (the "Network settings" button)
  *  events: Boolean      every change (and the current value at once on listen)
  *  state events (`jormungand/network_state`): Map  {connected, validated, captive, type, id, at} of the underlying
  *                       default network (DefaultNetworkMonitor.addStateListener), the current one at once on
@@ -109,8 +112,18 @@ class NetworkChannel(private val app: Context) {
         when (call.method) {
             "metered" -> result.success(metered())
             "type" -> result.success(networkType())
+            "openSettings" -> {
+                openSettings()
+                result.success(null)
+            }
             else -> result.notImplemented()
         }
+    }
+
+    /** Settings -> Wireless. From the app context, so FLAG_ACTIVITY_NEW_TASK is required; a failure is ignored. */
+    private fun openSettings() {
+        val intent = Intent(Settings.ACTION_WIRELESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { app.startActivity(intent) }
     }
 
     /**

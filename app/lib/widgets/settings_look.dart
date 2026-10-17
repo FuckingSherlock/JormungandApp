@@ -355,6 +355,11 @@ class NotifSheet extends StatelessWidget {
           l10n.siteDoesNotOpen,
           l10n.itDoesNotOpenThroughThe,
         ),
+        (
+          'dnsFailed',
+          l10n.dnsServerDoesNotAnswer,
+          l10n.aDnsServerStopsAnsweringOn,
+        ),
       ]),
       (l10n.subscriptionsAndRules, [
         (
@@ -378,6 +383,13 @@ class NotifSheet extends StatelessWidget {
           'updateAvailable',
           l10n.newVersion,
           l10n.aNewVersionOfTheApp,
+        ),
+      ]),
+      (l10n.app, [
+        (
+          'appData',
+          l10n.appData,
+          l10n.savedDataWasDamagedAndRestored,
         ),
       ]),
     ];

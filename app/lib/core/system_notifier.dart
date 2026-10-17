@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
-import 'package:jormungand_core/jormungand_core.dart' show EventRecord;
+import 'package:jormungand_core/jormungand_core.dart' show EventGroup, EventRecord;
 
 import '../platform/notify_channel.dart';
 import '../platform/power_channel.dart';
@@ -106,28 +106,68 @@ class SystemNotifier {
   Future<void> _disconnectFromShade() => host.disconnect();
 
   /// An event that passed the journal's filter: the shade, with its own words.
+  ///
+  /// The words are the row's ([EventWords.describeGroup], [EventWords.reasonLine]); up to two bold buttons
+  /// of the row. The notification's id is the event's, except: the closer of a pair (`opens`) replaces the
+  /// opener's, a step of the core's crash chain (`core/*` with a `cause`) updates the root's in place; any
+  /// other consequence (`cause`) is the root's business and stays silent.
   Future<void> postEvent(EventRecord e, EventWords words) {
-    final d = words.describe(e);
+    final cause = e.cause;
+    if (cause != null && e.cat != 'core') return Future.value();
+    final id = e.opens ?? cause ?? e.id;
+    final g = EventGroup(e);
+    final (title, detail) = words.describeGroup(g);
+    final reason = words.reasonLine(g);
     // "does not open": Create rule (when it opens through another entry) and Ignore site
-    final site = e.cat == 'site' ? words.host(e.data) : '';
-    final via = '${e.data['viaTarget'] ?? e.data['via'] ?? ''}';
+    final site = e.cat == 'site' || e.key == 'conn/failing' ? words.host(e.data) : '';
+    final via = e.cat == 'site' ? '${e.data['viaTarget'] ?? e.data['via'] ?? ''}' : '';
     return io.post(
       SystemNote(
-        id: e.id,
-        title: d.title,
-        text: d.detail,
+        id: id,
+        title: title,
+        text: [detail, reason ?? ''].where((s) => s.isNotEmpty).join('\n'),
         site: site,
         via: via,
         // what «Ignore site» turns the notification into (done natively, in the app's language)
-        ignoredText: site.isEmpty ? '' : words.l10n.addedToIgnoredSites(site),
-        undoLabel: site.isEmpty ? '' : words.l10n.undo,
-        actions: [
-          if (site.isNotEmpty && e.type == 'blocked' && via.isNotEmpty)
-            ('rule', words.l10n.createRule),
-          if (site.isNotEmpty) ('ignore', words.l10n.ignoreSite),
-        ],
+        ignoredText: e.cat != 'site' || site.isEmpty ? '' : words.l10n.addedToIgnoredSites(site),
+        undoLabel: e.cat != 'site' || site.isEmpty ? '' : words.l10n.undo,
+        actions: e.opens != null ? const [] : eventActions(e, words, host),
       ),
     );
+  }
+
+  /// The bold buttons of an event (docs/logs.md → «По типам»; the plain ones live in the row only), two at
+  /// most: `(id, label)`, the ids are what the shell's `_actFromShade` understands.
+  static List<(String, String)> eventActions(EventRecord e, EventWords words, CoreHost host) {
+    final l = words.l10n, d = e.data;
+    final site = e.cat == 'site' || e.key == 'conn/failing' ? words.host(d) : '';
+    final isSub = host.catalog.sourcesData['${d['source']}']?.kind == 'sub';
+    final out = switch (e.key) {
+      // Connect is bold for every `by: error` (logs.md «По типам»); Choose server of a lost pin stays in the row
+      'conn/disconnected' when d['by'] == 'error' => [('connect', l.connect)],
+      // `retry` of a failed connect connects again (the shell routes it by the event: the same call as the row's Retry)
+      'conn/connectFailed' => [('retry', l.retry)],
+      'conn/lost' => [('checkNow', l.checkNow)],
+      'conn/offline' => [('networkSettings', l.networkSettings)],
+      'conn/failing' => [if (site.isNotEmpty) ('rule', l.createRule)],
+      'auto/unstable' => [('open', l.open)],
+      'dns/failed' => [('open', l.open)],
+      'sub/updated' || 'sub/removed' || 'sub/back' => [('open', l.open)],
+      'sub/failed' => [if (isSub) ('retrySub', l.retry)],
+      'node/addressMissing' => [if (isSub) ('retrySub', l.updateSubscription)],
+      'rules/targetLost' || 'rules/targetFound' || 'rules/fallback' => [('open', l.openRule)],
+      'rules/ruleSetFailed' => [('retryRuleSets', l.retry)],
+      'core/crashed' || 'core/restartFailed' || 'core/down' when host.phase != ConnectionPhase.connected => [('retry', l.retry)],
+      'core/tunNeedsAdmin' => [('open', l.openSettings)],
+      'core/tunTcpDead' => [('reconnect', l.reconnect)],
+      'core/sysProxy' when d['error'] != null => [('retry', l.retry)],
+      _ when site.isNotEmpty => [
+        if (e.type == 'blocked' && '${d['viaTarget'] ?? d['via'] ?? ''}'.isNotEmpty) ('rule', l.createRule),
+        ('ignore', l.ignoreSite),
+      ],
+      _ => <(String, String)>[],
+    };
+    return out.take(2).toList();
   }
 
   /// The app came to the front: what was posted meanwhile is stale.

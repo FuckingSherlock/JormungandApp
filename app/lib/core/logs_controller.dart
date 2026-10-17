@@ -12,8 +12,7 @@ import 'package:jormungand_core/jormungand_core.dart'
         LogFeed,
         LogLine,
         eventCats,
-        eventNotifies,
-        foldEvents;
+        eventNotifies;
 
 import '../l10n/l10n.dart';
 import 'core_host.dart';
@@ -140,6 +139,9 @@ class LogsController extends ChangeNotifier {
   Timer? _timer, _debounce, _rawDebounce;
   List<EventGroup>? _groups;
   List<EventRecord>? _shown;
+
+  /// The search changed: the next fold opens the rows that hold a hit ([EventGroup.hitInside]).
+  bool _openHits = false;
 
   /// How long a burst of events is gathered before one read of the core.
   static const pollDelay = Duration(milliseconds: 300);
@@ -321,8 +323,24 @@ class LogsController extends ChangeNotifier {
   List<EventRecord> get shownEvents =>
       _shown ??= [for (final e in feed.list) if (_visible(e)) e];
 
-  /// The rows: repeats folded. Rebuilt once per [evVersion], not per frame.
-  List<EventGroup> get groups => _groups ??= foldEvents(shownEvents);
+  /// The rows: repeats folded over the whole journal under the filter (a search that hits a consequence keeps its
+  /// root's row, and that row opens). Rebuilt once per [evVersion], not per frame.
+  List<EventGroup> get groups => _groups ??= _foldRows();
+
+  List<EventGroup> _foldRows() {
+    final rows = filter.fold(feed.list, showOwn: cfg.showOwn, text: (x) => words.searchText(x));
+    // rows with a hit inside open when the query changes, not on every rebuild (a row the user folded stays folded)
+    if (_openHits) {
+      _openHits = false;
+      for (final g in rows) {
+        if (g.hitInside) openRows.add(g.key);
+      }
+    }
+    // the place of a row is its `at`; the fold order breaks a tie
+    final order = {for (var i = 0; i < rows.length; i++) rows[i]: i};
+    rows.sort((a, b) => a.at != b.at ? a.at.compareTo(b.at) : order[a]! - order[b]!);
+    return rows;
+  }
 
   int get shownCount => shownEvents.length;
 
@@ -364,6 +382,7 @@ class LogsController extends ChangeNotifier {
 
   void setQuery(String v) {
     filter.q = v.trim().toLowerCase();
+    _openHits = true;
     _refilter();
   }
 
@@ -731,6 +750,7 @@ class LogsController extends ChangeNotifier {
   void toggleSearch([bool? on]) {
     if (tab == 'events') {
       evSearching = on ?? !evSearching;
+      if (evSearching) _openHits = true;
       if (!evSearching && filter.q.isNotEmpty) {
         filter.q = '';
         _dropGroups();

@@ -6,6 +6,8 @@ import 'package:jormungand_core/jormungand_core.dart';
 
 import '../platform/apps_io.dart';
 import '../platform/network_channel.dart';
+// the top-level call under its own prefix: a bare `openNetworkSettings()` in this class is the method below
+import '../platform/network_channel.dart' as net show openNetworkSettings;
 import '../platform/resume_channel.dart';
 import '../platform/screen_channel.dart';
 import '../platform/update_job_channel.dart';
@@ -1067,6 +1069,30 @@ class LiveCoreHost extends CoreHost {
       // the event itself says it did not get an answer (or the core has no such event any more)
     }
   }
+
+  @override
+  Future<bool> checkNow(int eventId) async {
+    try {
+      // {ok: true} or {ok: false, error: notConnected | gone}: the core says so itself, it does not throw for it
+      final r = await api.checkNow(eventId);
+      return r['ok'] == true;
+    } catch (_) {
+      // no such event or nothing to check there: the event keeps what it said
+      return false;
+    }
+  }
+
+  @override
+  Future<void> retryRuleSets(int eventId) async {
+    try {
+      await api.retryRuleSets(eventId);
+    } catch (_) {
+      // the event itself says what failed (or the core has no such event any more)
+    }
+  }
+
+  @override
+  Future<void> openNetworkSettings() => net.openNetworkSettings();
 
   @override
   void clearLog() => api.clearLog();

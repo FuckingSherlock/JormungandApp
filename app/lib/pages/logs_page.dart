@@ -223,7 +223,7 @@ class _LogsPageState extends State<LogsPage> {
         scroll: _ev.scroll,
         orders: _evOrders,
       );
-      _evAnchor.check(groups.lastOrNull?.ev.id);
+      _evAnchor.check(_evOrders.lastOrNull);
     } else {
       _rawGroupsNow();
       final groups = _rawGroups;
@@ -362,19 +362,26 @@ class _LogsPageState extends State<LogsPage> {
     final index = <String, int>{};
     int? day;
     final groups = _c.groups;
+    var prev = 0; // the order of the row before
     for (var gi = 0; gi < groups.length; gi++) {
       final g = groups[gi];
+      // the rows are in `at` order (LogsController.groups); rows of one millisecond still get orders of their own
+      // (strictly ascending), or a list pivoted on one of them could not put it at the origin. A day header takes the
+      // order of the row before it, so all of `orders` never decreases (AnchoredList.orderAt); a pivot on a row
+      // (its own order, not `at`) cuts right before it, whatever drift `prev + 1` adds to the orders
+      final order = gi == 0 || g.at > prev ? g.at : prev + 1;
       final dk = dayStart(g.at);
       if (dk != day) {
         day = dk;
         index['d$dk'] = out.length;
         out.add(_Day(_c.words.dayLabel(g.at, now), dk));
         // the header belongs before its first row: a list pivoted on that row keeps it in place
-        orders.add(gi == 0 ? g.ev.id - 1 : groups[gi - 1].ev.id);
+        orders.add(gi == 0 ? order - 1 : prev);
       }
       index['e${g.key}'] = out.length;
       out.add(g);
-      orders.add(g.ev.id);
+      orders.add(order);
+      prev = order;
     }
     _itemsFor = key;
     _evOrders = orders;

@@ -106,6 +106,13 @@ void main() {
     await pumpApp(tester, host);
     await openLogs(tester);
 
+    // the folded row holds three buttons: Check with checker, Create rule, Ignore site; Copy site waits in the opened one
+    expect(find.text('Check with checker'), findsOneWidget);
+    expect(find.text('Create rule'), findsOneWidget);
+    expect(find.text('Ignore site'), findsOneWidget);
+    expect(find.text('Copy site'), findsNothing);
+    await tester.tap(find.textContaining('example.org').first);
+    await tester.pumpAndSettle();
     expect(find.text('Copy site'), findsOneWidget);
     expect(find.text('Create rule'), findsOneWidget);
     await tester.tap(find.text('Create rule'));
@@ -140,6 +147,11 @@ void main() {
     );
     await pumpApp(tester, host);
     await openLogs(tester);
+    // Copy site is in the opened row only
+    await tester.tap(find.textContaining('example.org').first);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Copy site'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Copy site'));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pump();
@@ -150,11 +162,12 @@ void main() {
 
   testWidgets('Open on a Simple chain goes to the Simple tab, not Profiles', (tester) async {
     final host = _hostWithSimpleChain();
+    // «Open» belongs to the entry's own events (auto/unstable), not to a «does not open» site (т1 «По типам»)
     host.addEvent(
-      'site',
-      'unreachable',
+      'auto',
+      'unstable',
       level: 'warn',
-      data: {'host': 'example.org', 'entry': 'c1', 'tried': const []},
+      data: {'id': 'c1', 'strikes': 2, 'holdMs': 60000},
     );
     await pumpApp(tester, host);
     await openLogs(tester);

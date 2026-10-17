@@ -569,6 +569,30 @@ class FakeCoreHost extends CoreHost {
     _changeEvent(e, {...checkAnswer, 'at': DateTime.now().millisecondsSinceEpoch, 'manual': true});
   }
 
+  /// «Check now» / «Retry» / «Network settings» presses, in order (`calls` has them too).
+  final checkedNow = <int>[];
+  final retriedRuleSets = <int>[];
+  int networkSettingsOpened = 0;
+
+  @override
+  Future<bool> checkNow(int eventId) async {
+    checkedNow.add(eventId);
+    calls.add('checkNow $eventId');
+    return true;
+  }
+
+  @override
+  Future<void> retryRuleSets(int eventId) async {
+    retriedRuleSets.add(eventId);
+    calls.add('retryRuleSets $eventId');
+  }
+
+  @override
+  Future<void> openNetworkSettings() async {
+    networkSettingsOpened++;
+    calls.add('openNetworkSettings');
+  }
+
   @override
   Map<String, dynamic> eventsPage({int? since}) => {
     'events': [

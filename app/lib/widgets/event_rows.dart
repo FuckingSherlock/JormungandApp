@@ -13,7 +13,9 @@ import 'follow_list.dart' show HitFlash;
 import 'form_parts.dart';
 import 'ignored_sites.dart';
 import 'nodes_menus.dart' show copyText;
+import 'report_actions.dart' show showSendReport;
 import 'rules_parts.dart' show AppIcon;
+import 'settings_data.dart' show showDataSheet;
 
 /// Rows of the Events journal (mockup 47-events.js: `evRowHtml`, `evBlockedHtml`, `evWhyHtml`,
 /// the filter sheet): one row per event, repeats folded, the title, the reason, the actions and
@@ -142,14 +144,34 @@ class EventDay extends StatelessWidget {
 enum EventActKind { rule, retry, open, raw }
 
 /// The tap target of "Open" (`evOpenTarget`): a catalog entry id, or `rules` (the rule sets),
-/// `rulelist` (the rules), `dns`; null = nothing to open.
+/// `rulelist` (the rules), `dns`, `route` (the Route sheet), `app:<package>` (the app's route in Per-app);
+/// null = nothing to open.
 String? eventOpenTarget(EventRecord e, CoreHost host) {
   final d = e.data, cat = host.catalog;
   switch (e.cat) {
+    case 'conn':
+      switch (e.type) {
+        case 'lost' || 'restored':
+          return 'route';
+        case 'failing':
+          final app = d['app'];
+          return app is String && app.isNotEmpty ? 'app:$app' : null;
+      }
+      return null;
+    case 'auto' when e.type == 'switched' || e.type == 'fastest':
+      // the route's own entry; a switch of the main flow names the entries (`to` is the one in use now)
+      final route = '${d['route'] ?? ''}', to = '${d['to'] ?? ''}';
+      if (route.isNotEmpty && cat.connectEntry(route) != null) return route;
+      if (route.isEmpty && to.isNotEmpty && cat.connectEntry(to) != null) return to;
+      return 'route';
+    case 'core' when e.type == 'tunNeedsAdmin':
+      return 'route';
     case 'sub':
       return cat.sourcesData['${d['source']}'] != null ? '${d['source']}' : null;
     case 'auto' when e.type == 'unstable':
       return cat.connectEntry('${d['id']}') != null ? '${d['id']}' : null;
+    case 'node':
+      return cat.sourcesData['${d['source']}'] != null ? '${d['source']}' : null;
     case 'site':
       final entry = '${d['entry'] ?? ''}';
       return entry.isNotEmpty && cat.connectEntry(entry) != null ? entry : null;
@@ -183,14 +205,24 @@ class EventRow extends StatelessWidget {
     final host = CoreHostScope.read(context);
     final links = AppLinksScope.of(context);
     final g = group, e = g.ev;
-    final d = words.describe(e);
+    final (title, detail) = words.describeGroup(g);
+    final reason = words.reasonLine(g, find: (id) => logs.feed.list.where((x) => x.id == id).firstOrNull);
+    final related = words.relatedLine(g);
+    final closedLine = words.closedLine(g);
+    final resolved = g.closed;
     final open = logs.openRows.contains(g.key);
+    final trail = open ? words.trailRows(g.worst.trail != null ? g.worst : e) : const <TrailRow>[];
+    final repeatsLine = open ? words.repeatsLine(g) : null;
+    final repeatTimes = open ? [for (final x in g.repeats) ...x.occurrences] : const <int>[];
     final rep = g.times;
     final hit = logs.hitEvent != null && g.items.any((x) => x.id == logs.hitEvent!.id)
         ? logs.hitEvent!.token
         : null;
     final tone = eventColor(c, e.cat);
-    final lvlColor = g.level == 'warn'
+    // a pair that has ended is "resolved": the colour of a good state instead of the level's
+    final lvlColor = resolved
+        ? c.active
+        : g.level == 'warn'
         ? c.warn
         : g.level == 'error'
         ? c.danger
@@ -199,49 +231,155 @@ class EventRow extends StatelessWidget {
 
     // what a tap on an action does; each one that leaves the journal remembers the row
     void leave() => logs.returnId = e.id;
-    final acts = <(String, VoidCallback?)>[];
     final dd = e.data;
+    // the buttons by the table "По типам" (docs/logs.md); the first three stand in the folded row, the rest in the opened
+    final acts = <(String, VoidCallback?)>[];
+    void add(String label, VoidCallback? fn) => acts.add((label, fn));
+    VoidCallback? link(VoidCallback? f) => f == null ? null : () { f(); leave(); };
+    void addOpen() {
+      final target = e.cat == 'site' ? null : eventOpenTarget(e, host);
+      final go = target == null ? null : _openAction(links, target, leave);
+      if (go != null) add(l10n.open, go);
+    }
+
+    // "Check now": the core checks again what the event is about; while it does, the button says so
+    void addCheckNow() {
+      final r = dd['recheck'];
+      final pending = r is Map && r['state'] == 'pending';
+      add(pending ? l10n.checking : l10n.checkNow, pending ? null : () => host.checkNow(e.id));
+    }
+
+    // "Open update": the Data sheet, where the update card is
+    void addOpenUpdate() => add(l10n.openUpdate, () => showDataSheet(context));
+
+    // Retry/Connect/... only mean something while the pair is not closed
+    final live = !resolved;
+    // the crash chain is worded by its last event
+    final ce = g.opKind == null && e.cat == 'core' && const ['crashed', 'restartFailed', 'down', 'restarted'].contains(e.type) ? g.last : e;
+    bool inUseOf(Map<String, dynamic> d) => d['inUse'] == true || d['inUse'] == 'true';
+    final inUse = inUseOf(dd);
+    final pinLost = eventPinLost(e);
+    void addChooseServer() => add(l10n.chooseServer, link(links.openRoute == null ? null : () => links.openRoute!()));
+    switch ('${e.cat}/${e.type}') {
+      case 'conn/disconnected' when live && dd['by'] == 'error' && !host.isOn:
+        add(l10n.connect, () => host.connect());
+        if (pinLost) addChooseServer();
+      case 'conn/connectFailed' when live:
+        add(l10n.retry, () => host.connect());
+        if (pinLost) addChooseServer();
+        if (eventCauseInSettings(e)) add(l10n.openSettings, link(links.openRoute == null ? null : () => links.openRoute!()));
+      case 'conn/lost' || 'conn/restored':
+        if (live && e.type == 'lost') addCheckNow();
+        addOpen();
+      case 'conn/offline' when live:
+        add(l10n.networkSettings, () => host.openNetworkSettings());
+      case 'conn/failing':
+        final h = words.host(dd);
+        if (h.isNotEmpty && links.newRuleFor != null) add(l10n.createRule, () => links.newRuleFor!(host: h));
+        addOpen();
+      case 'auto/switched' || 'auto/fastest':
+        addOpen();
+        final route = '${dd['route'] ?? ''}', to = '${dd['to'] ?? ''}';
+        if (live && route.isNotEmpty && to.isNotEmpty && host.catalog.connectEntry(route) != null) {
+          add(l10n.pin, () => host.pinRouteNode(route, to));
+        }
+      case 'auto/unstable':
+        addOpen();
+        if (live) addCheckNow();
+      case 'dns/failed' || 'dns/failedOnNode':
+        if (live) addCheckNow();
+        addOpen();
+      case 'sub/failed':
+        if (live && host.catalog.sourcesData['${dd['source']}']?.kind == 'sub') {
+          add(l10n.retry, () => host.updateSource('${dd['source']}'));
+        }
+        addOpen();
+      case 'sub/removed' || 'sub/back':
+        addOpen();
+        if (inUse) addChooseServer();
+      case 'sub/updated':
+        addOpen();
+        // the removed / returned servers of the same update sit in this row: one of them in use needs a new pick
+        if (g.items.any((x) => x.cat == 'sub' && (x.type == 'removed' || x.type == 'back') && inUseOf(x.data))) addChooseServer();
+      case 'node/addressMissing':
+        addOpen();
+        if (live && host.catalog.sourcesData['${dd['source']}'] != null) {
+          add(l10n.updateSubscription, () => host.updateSource('${dd['source']}'));
+        }
+      case 'rules/targetLost' || 'rules/targetFound':
+        add(l10n.openRule, link(links.openRules == null ? null : () => links.openRules!()));
+        if (live && e.type == 'targetLost') add(l10n.chooseTarget, link(links.openRules == null ? null : () => links.openRules!()));
+      case 'rules/fallback' || 'rules/targetBack':
+        add(l10n.openRule, link(links.openRules == null ? null : () => links.openRules!()));
+        if (live && e.type == 'fallback') addCheckNow();
+      case 'rules/ruleSetFailed':
+        if (live) add(l10n.retry, () => host.retryRuleSets(e.id));
+        addOpen();
+      case 'core/crashed' || 'core/restartFailed' || 'core/down' || 'core/restarted':
+        // Retry only while sing-box is not running (it is back: nothing to retry)
+        if (live && ce.type != 'restarted' && host.phase != ConnectionPhase.connected) add(l10n.retry, () => host.retry());
+        // `proxy: kept` is written by the chain's `core/down`, not by the crash that roots the row
+        if (ce.type != 'restarted' && g.items.any((x) => x.key == 'core/down' && '${x.data['proxy']}' == 'kept')) add(l10n.removeSystemProxy, () => host.releaseSysProxy());
+      case 'core/tunNeedsAdmin':
+        if (live) add(l10n.retry, () => host.retry());
+        add(l10n.openSettings, link(links.openRoute == null ? null : () => links.openRoute!()));
+      case 'core/tunTcpDead' when live:
+        add(l10n.reconnect, () async {
+          await host.disconnect();
+          await host.connect();
+        });
+      case 'core/sysProxy' when dd['error'] != null:
+        add(l10n.retry, () => host.setSysProxy(true));
+        add(l10n.removeSystemProxy, () => host.releaseSysProxy());
+      case 'core/deprecated':
+        final t = '${dd['text'] ?? dd['message'] ?? ''}';
+        if (t.isNotEmpty) add(l10n.copyText, () => copyText(context, t, l10n.event));
+      case 'core/updateAvailable' || 'core/updateDownloaded' || 'core/updateDeltaFailed':
+        add(l10n.install, () => host.installUpdate());
+        addOpenUpdate();
+      case 'core/updateFailed' || 'core/updateChannelEmpty':
+        add(l10n.retry, () => host.checkUpdate());
+        addOpenUpdate();
+      case 'speed/failed':
+        // the same measure again (it runs on the connection in use)
+        if (!host.speedTesting) add(l10n.retry, () => host.toggleSpeedTest());
+      default:
+        break;
+    }
     // "does not open": the site can be copied and made a rule whenever the event names one
     final site = e.cat == 'site' ? words.host(dd) : '';
     if (site.isNotEmpty) {
+      // the table's order (logs.md «По типам»), Copy site last: the collapsed row shows the first three
       // the external checker (check-host): a check that is running now (older than 90 s = the core died meanwhile)
       final check = dd['check'];
       final asking =
           check is Map &&
           check['state'] == 'pending' &&
           DateTime.now().millisecondsSinceEpoch - ((check['at'] as num?)?.toInt() ?? 0) < 90000;
-      acts.add((asking ? l10n.checking : l10n.checkWithChecker, asking ? null : () => host.checkSite(e.id)));
-      acts.add((l10n.copySite, () => copyText(context, site, l10n.site)));
+      add(asking ? l10n.checking : l10n.checkWithChecker, asking ? null : () => host.checkSite(e.id));
+      // `viaTarget`: the node that opened the site when it is a node of the failing entry itself (a rule for the entry would not help)
       if (links.newRuleFor != null) {
-        // `viaTarget`: the node that opened the site when it is a node of the failing entry itself (a rule for the entry would not help)
         final v = dd['viaTarget'] ?? dd['via'];
         final via = v == null || '$v'.isEmpty ? null : '$v';
-        acts.add((l10n.createRule, () => links.newRuleFor!(host: site, via: via)));
+        add(l10n.createRule, () => links.newRuleFor!(host: site, via: via));
       }
-      acts.add((
-        l10n.ignoreSite,
-        () => ignoreSiteWithUndo(ScaffoldMessenger.of(context), l10n, logs, site),
-      ));
+      add(l10n.ignoreSite, () => ignoreSiteWithUndo(ScaffoldMessenger.of(context), l10n, logs, site));
+      add(l10n.copySite, () => copyText(context, site, l10n.site));
     }
-    if (e.cat == 'sub' &&
-        e.type == 'failed' &&
-        host.catalog.sourcesData['${dd['source']}']?.kind == 'sub') {
-      acts.add((l10n.retry, () => host.updateSource('${dd['source']}')));
+    // the rows whose "Open" has no button of its own above
+    if (const ['dns/switched', 'sub/diverged'].contains('${e.cat}/${e.type}')) addOpen();
+    // every error of the core can be sent to the developers with the event; some warnings name it in the table
+    final sendable = const ['core/stateLost', 'core/stateRestored', 'core/tunTcpDead', 'sub/diverged'].contains('${e.cat}/${e.type}');
+    if ((e.cat == 'core' && g.level == 'error') || sendable) {
+      add(l10n.sendReport, () => showSendReport(context, logs));
     }
-    final target = e.cat == 'site' ? null : eventOpenTarget(e, host);
-    if (target != null) {
-      final go = _openAction(links, target, leave);
-      if (go != null) acts.add((l10n.open, go));
-    }
-    if (e.log != null) {
-      acts.add((
-        l10n.inRawLog,
-        () {
-          logs.showRawLine(e.log!);
-          leave();
-        },
-      ));
-    }
+    final rawLine = e.log == null
+        ? null
+        : () {
+            logs.showRawLine(e.log!);
+            leave();
+          };
+    const folded = 3;
 
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -283,18 +421,45 @@ class EventRow extends StatelessWidget {
         Padding(
           padding: EdgeInsets.only(top: problem ? 1 : 0),
           child: Text(
-            d.title,
+            title,
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.t1),
           ),
         ),
-        if (e.cat == 'site' && (e.type == 'blocked' || e.type == 'unreachable'))
+        if (!g.isGroup && e.cat == 'site' && (e.type == 'blocked' || e.type == 'unreachable'))
           _Vias(event: e, logs: logs, words: words)
-        else if (d.detail.isNotEmpty)
+        else if (detail.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 1),
             child: Text(
-              d.detail,
+              detail,
               style: TextStyle(fontSize: 12.5, height: 1.4, color: c.t2),
+            ),
+          ),
+        if (closedLine != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              closedLine,
+              key: const ValueKey('evClosed'),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.active),
+            ),
+          ),
+        if (reason != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              reason,
+              key: const ValueKey('evReason'),
+              style: TextStyle(fontSize: 12.5, height: 1.4, color: c.t3),
+            ),
+          ),
+        if (related != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              related,
+              key: const ValueKey('evRelated'),
+              style: TextStyle(fontSize: 12.5, color: c.t3),
             ),
           ),
         if (acts.isNotEmpty)
@@ -303,7 +468,7 @@ class EventRow extends StatelessWidget {
             child: Wrap(
               spacing: 6,
               runSpacing: 6,
-              children: [for (final (label, fn) in acts) EventAct(label, onTap: fn)],
+              children: [for (final (label, fn) in acts.take(folded)) EventAct(label, onTap: fn)],
             ),
           ),
         if (open)
@@ -338,8 +503,34 @@ class EventRow extends StatelessWidget {
                   ),
                 // the type of this event: take it out of the journal, or look at it alone
                 // (`user/*` is outside the type filter: «Show my actions» rules it)
-                if (e.cat != 'user')
-                  Padding(
+                if (trail.isNotEmpty) ...[
+                  _Section(l10n.checks),
+                  for (final t in trail) _TrailLine(row: t),
+                ],
+                if (repeatsLine != null) _RepeatsBlock(summary: repeatsLine, times: repeatTimes),
+                if (g.related.isNotEmpty) ...[
+                  _Section(l10n.related(g.related.length)),
+                  for (final r in g.related)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: 44,
+                            child: Text(words.clock(r.lastAt), style: TextStyle(fontSize: 12, color: c.t3)),
+                          ),
+                          Expanded(
+                            child: Text(
+                              words.describe(r).title,
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.t1),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+                Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Align(
                     alignment: Alignment.centerLeft,
@@ -347,16 +538,22 @@ class EventRow extends StatelessWidget {
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        EventAct(
-                          l10n.hideThisType,
-                          key: const ValueKey('evHideType'),
-                          onTap: () => logs.toggleType(e.key),
-                        ),
-                        EventAct(
-                          l10n.showOnlyThisType,
-                          key: const ValueKey('evOnlyType'),
-                          onTap: () => logs.showOnlyType(e.key),
-                        ),
+                        for (final (label, fn) in acts.skip(folded)) EventAct(label, onTap: fn),
+                        if (rawLine != null) EventAct(l10n.inRawLog, key: const ValueKey('evRaw'), onTap: rawLine),
+                        // the type of this event: take it out of the journal, or look at it alone
+                        // (`user/*` is outside the type filter: «Show my actions» rules it)
+                        if (e.cat != 'user') ...[
+                          EventAct(
+                            l10n.hideThisType,
+                            key: const ValueKey('evHideType'),
+                            onTap: () => logs.toggleType(e.key),
+                          ),
+                          EventAct(
+                            l10n.showOnlyThisType,
+                            key: const ValueKey('evOnlyType'),
+                            onTap: () => logs.showOnlyType(e.key),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -407,20 +604,138 @@ class EventRow extends StatelessWidget {
 
   /// The "Open" of a row: where it leads, or null when that screen is not wired.
   VoidCallback? _openAction(AppLinks links, String target, VoidCallback leave) {
-    switch (target) {
-      case 'rules':
-        final f = links.openRuleSets;
-        return f == null ? null : () { f(); leave(); };
-      case 'rulelist':
-        final f = links.openRules;
-        return f == null ? null : () { f(); leave(); };
-      case 'dns':
-        final f = links.openDns;
-        return f == null ? null : () { f(); leave(); };
-      default:
-        final f = links.openNodesEntry;
-        return f == null ? null : () { f(target); leave(); };
-    }
+    final go = openTargetAction(links, target);
+    return go == null ? null : () { go(); leave(); };
+  }
+}
+
+/// Where an [eventOpenTarget] leads (the row's "Open" and the notification's "Open" are this one); null when that screen
+/// is not wired.
+VoidCallback? openTargetAction(AppLinks links, String target) {
+  switch (target) {
+    case 'rules':
+      final f = links.openRuleSets;
+      return f == null ? null : () => f();
+    case 'rulelist':
+      final f = links.openRules;
+      return f == null ? null : () => f();
+    case 'dns':
+      final f = links.openDns;
+      return f == null ? null : () => f();
+    case 'route':
+      final f = links.openRoute;
+      return f == null ? null : () => f();
+    case final t when t.startsWith('app:'):
+      final f = links.openAppAct;
+      return f == null ? null : () => f(t.substring(4));
+    default:
+      final f = links.openNodesEntry;
+      return f == null ? null : () => f(target);
+  }
+}
+
+/// A caption inside the opened row (Checks, Related).
+class _Section extends StatelessWidget {
+  const _Section(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 2),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: .5,
+          color: context.colors.t3,
+        ),
+      ),
+    ),
+  );
+}
+
+/// One step of the `trail`: the mark (✓ ✗ ? ·), the phrase and the time from the start of the suspicion.
+class _TrailLine extends StatelessWidget {
+  const _TrailLine({required this.row});
+
+  final TrailRow row;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final markColor = switch (row.mark) {
+      '✓' => c.active,
+      '✗' => c.warn,
+      _ => c.t3,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 18,
+            child: Text(row.mark, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: markColor)),
+          ),
+          Expanded(child: Text(row.text, style: TextStyle(fontSize: 12, color: c.t1))),
+          if (row.at != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              row.at!,
+              style: TextStyle(fontSize: 11.5, color: c.t3, fontFeatures: const [FontFeature.tabularFigures()]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// "Repeats": "N times · from HH:MM to HH:MM"; the times themselves are folded until it is tapped.
+class _RepeatsBlock extends StatefulWidget {
+  const _RepeatsBlock({required this.summary, required this.times});
+
+  final String summary;
+  final List<int> times;
+
+  @override
+  State<_RepeatsBlock> createState() => _RepeatsBlockState();
+}
+
+class _RepeatsBlockState extends State<_RepeatsBlock> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final words = EventWords(context.l10n, CoreHostScope.read(context).catalog);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Section(context.l10n.repeats),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.times.length > 1 ? () => setState(() => _open = !_open) : null,
+          child: Text(
+            widget.summary,
+            key: const ValueKey('evRepeats'),
+            style: TextStyle(fontSize: 12, color: c.t1),
+          ),
+        ),
+        if (_open)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              widget.times.map((t) => words.clock(t, seconds: true)).join(', '),
+              style: TextStyle(fontSize: 12, color: c.t3),
+            ),
+          ),
+      ],
+    );
   }
 }
 

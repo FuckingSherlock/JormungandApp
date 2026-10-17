@@ -261,6 +261,13 @@ void main() {
       });
     });
 
+    test('the notification switches appData and dnsFailed are on by default and are on the sheet', () {
+      final cfg = NotifCfg(const <String, dynamic>{});
+      expect(cfg.flag('appData'), isTrue);
+      expect(cfg.flag('dnsFailed'), isTrue);
+      expect(NotifCfg.allKeys, containsAll(['appData', 'dnsFailed']));
+    });
+
     test('what Android hides', () {
       const a = PlatformCaps(android: true);
       expect(a.systemProxy, isFalse);
@@ -1006,6 +1013,27 @@ void main() {
       await tester.tap(t);
       await tester.pumpAndSettle();
       expect(host.catalog.connCfg.closeOnSwitch, isTrue);
+    });
+
+    testWidgets('Connection: Detect network provider is on by default, the toggle lands in the catalog, is saved and survives the snapshot', (
+      tester,
+    ) async {
+      final host = FakeCoreHost();
+      await _pump(tester, host);
+      await _open(tester, 'setconn');
+      expect(host.catalog.connCfg.detectNetProvider, isTrue);
+      final t = _toggleOf(lookupAppLocalizations(const Locale('en')).detectNetworkProvider);
+      await tester.ensureVisible(t);
+      await tester.pumpAndSettle();
+      final changes = host.changes;
+      await tester.tap(t);
+      await tester.pumpAndSettle();
+      expect(host.catalog.connCfg.detectNetProvider, isFalse);
+      expect(host.changes, greaterThan(changes));
+      expect(ConnCfg.fromJson(host.catalog.connCfg.toJson()).detectNetProvider, isFalse);
+      await tester.tap(t);
+      await tester.pumpAndSettle();
+      expect(host.catalog.connCfg.detectNetProvider, isTrue);
     });
 
     testWidgets('General and Notifications: switches persist in the state', (

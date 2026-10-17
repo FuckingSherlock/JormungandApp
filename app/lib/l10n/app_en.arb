@@ -4207,5 +4207,33 @@
         "type": "String"
       }
     }
+  },
+  "failureSuspected": "Failure suspected",
+  "networkIsUp": "Network is up",
+  "networkStateIsUnclear": "Network state is unclear",
+  "coreIsRunning": "Core is running",
+  "coreIsNotRunning": "Core is not running",
+  "theCoreRestartedTheWindowStarts": "The core restarted — the window starts again",
+  "theNetworkIsSwitchingWaitingFor": "The network is switching — waiting for it to settle",
+  "theNetworkSettledAfterTheSwitch": "The network settled after the switch",
+  "notJudgedCausedByTheApp": "Not judged: caused by the app itself",
+  "gaveUpWaitingForAVerdict": "Gave up waiting for a verdict",
+  "alreadyCoveredByAnOpenCause": "Already covered by an open cause",
+  "checkSkippedACauseIsAlready": "Check skipped: a cause is already open",
+  "waitingBehindAFailedServer": "Waiting behind a failed server",
+  "theServerIsBackCheckingAgain": "The server is back — checking again",
+  "waitedTooLongBehindAFailed": "Waited too long behind a failed server",
+  "waitingToSeeWhetherItPersists": "Waiting to see whether it persists",
+  "stillFailingAfterTheWait": "Still failing after the wait",
+  "causeClosed": "Cause closed",
+  "linkedToAnotherCause": "Linked to another cause",
+  "noCauseFound": "No cause found",
+  "connectionsAreNotEstablished": "{s0}: connections are not established",
+  "@connectionsAreNotEstablished": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
   }
 }

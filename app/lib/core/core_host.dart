@@ -624,6 +624,16 @@ abstract class CoreHost extends ChangeNotifier {
   /// «Check with checker» on a site event: the core asks check-host.net about its site and changes that
   /// event in place (`data.check`, shown pending at once). Completes with the result; never throws.
   Future<void> checkSite(int eventId);
+
+  /// «Check now» on an event: the core checks again what the event is about (`data.recheck` shown pending, then
+  /// the result). True = the core took it; false = it did not (no core, not connected, nothing to check there).
+  Future<bool> checkNow(int eventId) async => false;
+
+  /// «Retry» of a `rules/ruleSetFailed` event: the core downloads its lists again. Never throws.
+  Future<void> retryRuleSets(int eventId) async {}
+
+  /// «Network settings» of a network event (Android: the system's network page); nothing elsewhere.
+  Future<void> openNetworkSettings() async {}
   void clearLog();
 
   /// An event only the UI knows (a retry's result...) into the journal.

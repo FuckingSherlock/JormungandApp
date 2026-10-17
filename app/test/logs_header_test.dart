@@ -4,11 +4,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jormungand/core/event_text.dart';
 import 'package:jormungand/core/settings_model.dart';
+import 'package:jormungand/l10n/l10n.dart';
 import 'package:jormungand/shell/home_shell.dart';
 import 'package:jormungand/widgets/log_parts.dart'
     show RawGroupView, groupRaw, rawGroupMax;
-import 'package:jormungand_core/jormungand_core.dart' show LogLine;
+import 'package:jormungand_core/jormungand_core.dart' show EventRecord, LogLine;
 
 import 'fake_core_host.dart';
 import 'home_test.dart' show pumpApp;
@@ -16,6 +18,15 @@ import 'home_test.dart' show pumpApp;
 const _conn =
     '[1 5ms] inbound/mixed[mixed-in]: inbound connection to example.com:443';
 const _t0 = 1700000000000;
+
+/// The title of the journal's `conn/lost` row: «No connection through the VPN» (docs/logs.md «Тексты»).
+String _lostTitle(FakeCoreHost host) {
+  final words = EventWords(lookupAppLocalizations(const Locale('en')), host.catalog);
+  final e = host.journal.firstWhere((e) => e['type'] == 'lost');
+  final title = words.describe(EventRecord.fromJson(e)).title;
+  expect(title, startsWith('No connection through the VPN'));
+  return title;
+}
 
 Future<void> _openLogs(WidgetTester tester, {bool raw = false}) async {
   await tester.tap(find.byIcon(AppTab.logs.icon));
@@ -347,7 +358,7 @@ void main() {
       await pumpApp(tester, host);
       await _openLogs(tester);
 
-      expect(find.text('Connection lost'), findsWidgets);
+      expect(find.text(_lostTitle(host)), findsWidgets);
       await tester.tap(find.byKey(const ValueKey('logsSearch')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('evSearch')), findsOneWidget);
@@ -357,10 +368,10 @@ void main() {
           of: find.byKey(const ValueKey('evSearch')),
           matching: find.byType(TextField),
         ),
-        'lost',
+        'no connection through',
       );
       await tester.pumpAndSettle();
-      expect(find.text('Connection lost'), findsWidgets);
+      expect(find.text(_lostTitle(host)), findsWidgets);
       expect(find.textContaining('is unstable'), findsNothing);
       // the badge counts the filter settings; the search is the button's own highlight
       expect(find.byKey(const ValueKey('logsFilterBadge')), findsNothing);
@@ -593,7 +604,7 @@ void main() {
       await _openLogs(tester);
 
       if (find.text('In raw log').evaluate().isEmpty) {
-        await tester.tap(find.text('Connection lost').first);
+        await tester.tap(find.text(_lostTitle(host)).first);
         await tester.pumpAndSettle();
       }
       await tester.tap(find.text('In raw log'));

@@ -250,7 +250,7 @@ void main() {
       expect(find.byType(SnackBar), findsNothing);
       expect(io.posted, hasLength(1));
       expect(io.posted.single.id, e['id']);
-      expect(io.posted.single.title, 'Connection lost');
+      expect(io.posted.single.title, startsWith('No connection through the VPN')); // т1 «По событиям»
     });
 
     testWidgets('only what Settings -> Notifications lets through; never own events', (
@@ -315,7 +315,8 @@ void main() {
       expect(io.posted[0].actions.map((a) => a.$1), ['rule', 'ignore']);
       expect([io.posted[0].site, io.posted[0].via], ['dead.example.com', 'nope']);
       expect(io.posted[1].actions.map((a) => a.$1), ['ignore'], reason: 'no working route: no rule to offer');
-      expect(io.posted[2].actions, isEmpty);
+      // «Check now» is the bold button of conn/lost in the table «По типам»
+      expect([for (final a in io.posted[2].actions) a.$1], ['checkNow']);
 
       comeBack(tester);
       await tester.pump();
@@ -520,8 +521,18 @@ void main() {
         for (final k in NotifCfg.allKeys) ...[k, if (k == 'blocked') 'bgErrors'],
       ];
       expect(toggles, findsNWidgets(order.length));
+      // the two switches of т1 are found by their label: the sheet groups them, so their place is not pinned here
+      const newLabels = {'appData': 'App data', 'dnsFailed': 'DNS server does not answer'};
       Future<void> tap(String key) async {
-        await tester.tap(toggles.at(order.indexOf(key)));
+        final label = newLabels[key];
+        final target = label == null
+            ? toggles.at(order.indexOf(key))
+            : find.descendant(
+                of: find.ancestor(of: find.text(label), matching: find.byType(SetRow)).first,
+                matching: find.byType(MiniToggle),
+              );
+        await tester.ensureVisible(target);
+        await tester.tap(target);
         await tester.pumpAndSettle();
       }
 
@@ -534,6 +545,8 @@ void main() {
         'subUpdated': ('sub', 'updated'),
         'subFailed': ('sub', 'failed'),
         'ruleSets': ('rules', 'ruleSetFailed'),
+        'appData': ('core', 'stateLost'),
+        'dnsFailed': ('dns', 'failed'),
       };
       // how many notifications the kind's event makes now, in the background
       Future<int> fire(String key) async {

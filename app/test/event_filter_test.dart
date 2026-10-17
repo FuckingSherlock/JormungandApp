@@ -42,7 +42,10 @@ void main() {
       'count': 3,
       'windowMs': 60000,
     }));
-    expect(failing.title, contains('api.telegram.org:443'));
+    // «<приложение>: соединения не устанавливаются» — the app, not the host (т1 «По событиям»)
+    expect(failing.title, matches(RegExp('telegram', caseSensitive: false)));
+    expect(failing.title, isNot(contains('api.telegram.org')));
+    expect(failing.title, contains('connections are not established'));
     expect(failing.detail, contains('No answer in time'));
     expect(failing.detail, contains('3'));
     final dead = w.describe(ev('core', 'tunTcpDead', {'stack': 'system', 'apps': ['org.telegram.messenger']}));
@@ -81,7 +84,8 @@ void main() {
     }
 
     final tunnel = group('tunnel').ev;
-    expect(w.describe(tunnel).title, contains('different servers'));
+    // «Подписка <имя>: прямая и туннельная копии различаются» (т1 «По событиям»)
+    expect(w.describe(tunnel).title, allOf(contains('direct'), contains('VPN'), contains('differ')));
     expect(w.describe(tunnel).detail, 'The VPN copy is used.');
     expect(w.describe(group('direct').ev).detail, 'The direct copy is used.');
     final f = Map.fromEntries(w.fields(group('tunnel')).map((x) => MapEntry(x.$1, x.$2)));
@@ -168,6 +172,7 @@ void main() {
     String count(String key) => tester.widget<Text>(find.byKey(ValueKey('evCount:$key'))).data!;
     // categories start folded; unfold the two used here
     final words = EventWords(lookupAppLocalizations(const Locale('en')), host.catalog);
+    final lost = words.describe(EventRecord.fromJson(host.journal.firstWhere((e) => e['type'] == 'lost'))).title;
     expect(find.byKey(const ValueKey('evCount:auto/unstable')), findsNothing);
     for (final cat in ['auto', 'conn']) {
       await tester.tap(find.text(words.catLabel(cat)).last);
@@ -183,7 +188,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // an opened event: "Show only this type"
-    await tester.tap(find.text('Connection lost').first);
+    await tester.tap(find.text(lost).first);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('evHideType')), findsOneWidget);
     await tester.ensureVisible(find.byKey(const ValueKey('evOnlyType')));
@@ -191,13 +196,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('evOnlyType')));
     await tester.pumpAndSettle();
     expect(find.textContaining('is unstable'), findsNothing);
-    expect(find.text('Connection lost'), findsWidgets);
+    expect(find.text(lost), findsWidgets);
 
     // "Hide this type" takes it away again (the row stays open)
     await tester.ensureVisible(find.byKey(const ValueKey('evHideType')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('evHideType')));
     await tester.pumpAndSettle();
-    expect(find.text('Connection lost'), findsNothing);
+    expect(find.text(lost), findsNothing);
   });
 }

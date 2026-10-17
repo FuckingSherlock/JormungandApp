@@ -19,11 +19,14 @@ import '../platform/notify_channel.dart';
 import '../theme/app_colors.g.dart';
 import '../platform/tile_channel.dart';
 import '../widgets/apps_sheet.dart';
+import '../widgets/event_rows.dart' show eventOpenTarget, openTargetAction;
 import '../widgets/ignored_sites.dart';
 import '../widgets/rule_form.dart';
 import '../widgets/rules_extras.dart';
 import '../widgets/settings_data.dart';
+import '../widgets/report_actions.dart';
 import '../widgets/settings_dns.dart';
+import '../widgets/sub_wait_popup.dart';
 import 'app_links.dart';
 
 /// The bottom-nav tabs, in the mockup's order (markup/40-bottomnav.html).
@@ -179,23 +182,74 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
-  /// A button of an event notification: Create rule (the editor, prefilled). `ignore` only comes from a
-  /// notification posted by an older build (its button opened the app); the current ones never get here.
+  /// A button of an event notification (ids: `SystemNotifier.eventActions`): Create rule (the editor,
+  /// prefilled), or the row's own button done by the same host calls (`connect`, `retry`, `checkNow`,
+  /// `retrySub`, `retryRuleSets`, `networkSettings`, `removeProxy`, `reconnect`, `report`, `open`). `ignore`
+  /// only comes from a notification posted by an older build (its button opened the app); the current ones
+  /// never get here. [NoteActionTap.id] is the id of the notification: the event the row stands for.
   void _actFromShade(NoteActionTap t) {
-    if (t.site.isEmpty) return;
     _whenReady(() {
+      final host = CoreHostScope.read(context);
+      final e = _logs?.feed.list.where((x) => x.id == t.id).firstOrNull;
       switch (t.action) {
-        case 'rule':
+        case 'rule' when t.site.isNotEmpty:
           _links.newRuleFor?.call(host: t.site, via: t.via.isEmpty ? null : t.via);
-        case 'ignore':
+        case 'ignore' when t.site.isNotEmpty:
           ignoreSiteWithUndo(
             ScaffoldMessenger.of(context),
             context.l10n,
             _logs!,
             t.site,
           );
+        case 'connect':
+          unawaited(host.connect());
+        case 'retry':
+          // the same call as the Retry of the row of that event: a failed connect connects again, a failed system proxy
+          // is switched on again, the core is restarted
+          switch (e?.key) {
+            case 'conn/connectFailed':
+              unawaited(host.connect());
+            case 'core/sysProxy':
+              host.setSysProxy(true);
+            default:
+              unawaited(host.retry());
+          }
+        case 'checkNow':
+          unawaited(host.checkNow(t.id));
+        case 'retryRuleSets':
+          unawaited(host.retryRuleSets(t.id));
+        case 'networkSettings':
+          unawaited(host.openNetworkSettings());
+        case 'removeProxy':
+          unawaited(host.releaseSysProxy());
+        case 'reconnect':
+          unawaited(() async {
+            await host.disconnect();
+            await host.connect();
+          }());
+        case 'retrySub':
+          final sid = '${e?.data['source'] ?? ''}';
+          if (sid.isNotEmpty) unawaited(host.updateSource(sid));
+        case 'report':
+          if (_logs != null) unawaited(showSendReport(_ctx, _logs!));
+        case 'open':
+          Navigator.of(context).popUntil((r) => r.isFirst);
+          _openSubject(e, t.id);
       }
     });
+  }
+
+  /// «Open» of a notification: the event's subject (the entry, the rules, the rule sets, DNS), else the event
+  /// in Logs.
+  void _openSubject(EventRecord? e, int id) {
+    // the row's own "Open" (eventOpenTarget), so the button of the shade leads where the one of the row does
+    final target = e == null ? null : eventOpenTarget(e, CoreHostScope.read(context));
+    final go = target == null ? null : openTargetAction(_links, target);
+    if (go != null) {
+      go();
+      return;
+    }
+    _links.openLogsEvent?.call(id);
   }
 
   /// Runs [then] once the host has loaded its state (now, when it has).
@@ -533,6 +587,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   _tabBody(AppTab.nodes, NodesPage(key: _nodesKey)),
                   _tabBody(AppTab.logs, LogsPage(controller: _logs!)),
                   _tabBody(AppTab.settings, const SettingsPage()),
+                  const SubWaitPopup(),
                 ],
               ),
               bottomNavigationBar: DecoratedBox(

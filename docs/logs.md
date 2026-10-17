@@ -208,8 +208,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 
 ## Событие в приложении: что, почему, что делать (т1)
 
-> **Согласовано 2026-10-17, реализуется** (ядро → приложение, `.claude_states/events_plan.md` т1). Пока эта
-> пометка стоит, код разделу ещё не соответствует.
+> **Согласовано 2026-10-17, сделано 2026-10-18** (ядро → приложение, `.claude_states/events_plan.md` т1).
 
 Событие о проблеме (warn / error) отвечает на три вопроса: **что** случилось и с чем, **почему** (Sentinel или
 детектор), **что делать** (кнопки). Нет «почему» (`why.unknown`, `unexplained`) — только журнал, без уведомления
@@ -285,7 +284,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `auto/fastest` | ×N на маршрут | Open, Pin | `autoSwitch` |
 | `auto/unstable` | корень для переключений той же записи | **Open**, Check now | `unstable` |
 | `dns/switched` | пара failover → back | Open (DNS) | `autoSwitch` |
-| `dns/failed` | корень для `failedOnNode` того же сервера | Check now, **Switch server**, Open | `dnsFailed` + (новый переключатель «DNS-сервер не отвечает», вкл.) |
+| `dns/failed` | корень для `failedOnNode` того же сервера | Check now, **Open** (DNS этой стороны; кнопки «сменить сервер» нет — запасные перебирает failover, решение 2026-10-17) | `dnsFailed` + (новый переключатель «DNS-сервер не отвечает», вкл.) |
 | `dns/failedOnNode` | следствие `dns/failed` | Check now, Open | журнал: работает через запасную ноду |
 
 **Подписки, правила**

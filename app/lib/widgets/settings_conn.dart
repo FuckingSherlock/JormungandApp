@@ -334,6 +334,11 @@ class _ConnBody extends StatelessWidget {
               hint: l10n.pickingAnotherRouteByHandCloses,
               trailing: toggle(cfg.closeOnSwitch, (v) => cfg.closeOnSwitch = v),
             ),
+            SetRow(
+              label: l10n.detectNetworkProvider,
+              hint: l10n.showsTheProviderInTheNetwork,
+              trailing: toggle(cfg.detectNetProvider, (v) => cfg.detectNetProvider = v),
+            ),
           ],
         ),
       ],

@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// The seam to what the platform knows about the network the phone really uses (not our own VPN
@@ -60,4 +63,17 @@ class NetworkChannel implements NetworkPort {
       .receiveBroadcastStream()
       .where((e) => e is Map)
       .map((e) => Map<String, dynamic>.from(e as Map));
+}
+
+/// Opens the system's wireless settings (Wi-Fi, mobile data), where a lost or offline network is fixed.
+/// A no-op off Android; without the channel (tests, an old build) it does nothing too.
+Future<void> openNetworkSettings() async {
+  if (kIsWeb || !Platform.isAndroid) return;
+  try {
+    await NetworkChannel._channel.invokeMethod<void>('openSettings');
+  } on MissingPluginException {
+    return;
+  } on PlatformException {
+    return;
+  }
 }

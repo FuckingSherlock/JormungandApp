@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/app.dart';
+import 'package:jormungand/core/event_text.dart';
 import 'package:jormungand/core/logs_controller.dart';
 import 'package:jormungand/core/settings_model.dart';
 import 'package:jormungand/l10n/l10n.dart';
@@ -14,6 +15,7 @@ import 'package:jormungand/platform/notify_channel.dart';
 import 'package:jormungand/platform/power_channel.dart';
 import 'package:jormungand/shell/home_shell.dart';
 import 'package:jormungand/widgets/form_parts.dart';
+import 'package:jormungand_core/jormungand_core.dart' show EventRecord;
 
 import 'fake_core_host.dart';
 import 'home_test.dart' show pumpApp;
@@ -35,7 +37,16 @@ void _lifecycle(AppLifecycleState s) {
   }
 }
 
-const _gone = {'host': 'dead.example.org', 'entry': 'x', 'tried': <Object>[]};
+/// The title of the journal's `conn/lost` row: «No connection through the VPN» (docs/logs.md «Тексты»).
+String _lostTitle(FakeCoreHost host) {
+  final words = EventWords(lookupAppLocalizations(const Locale('en')), host.catalog);
+  final e = host.journal.firstWhere((e) => e['type'] == 'lost');
+  final title = words.describe(EventRecord.fromJson(e)).title;
+  expect(title, startsWith('No connection through the VPN'));
+  return title;
+}
+
+const _gone ={'host': 'dead.example.org', 'entry': 'x', 'tried': <Object>[]};
 
 void main() {
   testWidgets('the controller: a bg event notifies only with «Errors while screen is off»; a normal one always', (
@@ -175,7 +186,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('evBg')), findsOneWidget, reason: 'shown by default, marked');
     expect(find.text('background'), findsOneWidget);
-    expect(find.text('Connection lost'), findsOneWidget);
+    expect(find.text(_lostTitle(host)), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.filter_alt_outlined));
     await tester.pumpAndSettle();
@@ -185,7 +196,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('evBg')), findsNothing, reason: 'hidden');
     // the sheet's categories start folded: only the row in the list behind it
-    expect(find.text('Connection lost'), findsOneWidget);
+    expect(find.text(_lostTitle(host)), findsOneWidget);
     expect(find.textContaining('no background'), findsNothing, reason: 'no «Filtered» bar any more');
 
     await tester.tap(find.descendant(of: row, matching: find.byType(MiniToggle)));

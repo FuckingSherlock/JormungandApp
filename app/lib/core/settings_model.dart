@@ -91,14 +91,16 @@ class NotifCfg {
     'connLost': true,
     'coreCrash': false,
     'blocked': true,
+    'dnsFailed': true,
     'subUpdated': false,
     'subFailed': true,
     'ruleSets': true,
     'updateAvailable': true,
+    'appData': true,
     'bgErrors': false,
   };
 
-  /// The toggles of the three groups, in the order of the sheet.
+  /// The toggles of the groups, in the order of the sheet.
   static const List<String> statusKeys = ['status'];
   static const List<String> connectionKeys = [
     'autoSwitch',
@@ -106,6 +108,7 @@ class NotifCfg {
     'connLost',
     'coreCrash',
     'blocked',
+    'dnsFailed',
   ];
   static const List<String> subscriptionKeys = [
     'subUpdated',
@@ -114,11 +117,14 @@ class NotifCfg {
   ];
   /// «Update available» / «Update ready»: the app's own update (docs/updates.md, section 6).
   static const List<String> appKeys = ['updateAvailable'];
+  /// «App data»: the saved data was damaged and restored (or could not be restored).
+  static const List<String> dataKeys = ['appData'];
   static const List<String> allKeys = [
     ...statusKeys,
     ...connectionKeys,
     ...subscriptionKeys,
     ...appKeys,
+    ...dataKeys,
   ];
 
   bool flag(String key) => _m[key] is bool ? _m[key] as bool : (defaults[key] ?? false);

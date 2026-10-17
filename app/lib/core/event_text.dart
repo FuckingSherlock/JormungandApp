@@ -266,28 +266,76 @@ class EventWords {
           _routeText(d['route']),
         ]),
       ),
-      ('conn', 'disconnected') => r(
-        l10n.disconnected,
-        d['by'] == 'error' ? '${d['reason'] ?? l10n.theConnectionDropped}' : l10n.youDisconnected,
-      ),
+      ('conn', 'disconnected') => () {
+        if (d['by'] != 'error') return r(l10n.disconnected, l10n.youDisconnected);
+        if (d['reason'] == 'pinLost') {
+          return r(l10n.disconnectedTheSelectedServerIsUnavailab('${d['pick'] ?? ''}', _pinLostWhy(d['why'])));
+        }
+        if (d['reason'] == 'down' && d['attempts'] is num) {
+          return r(l10n.disconnectedTheCoreDidNotStart(d['attempts'] as num));
+        }
+        return r(l10n.disconnected, '${d['reason'] ?? l10n.theConnectionDropped}');
+      }(),
+      ('conn', 'reconnected') => () {
+        final tookMs = d['tookMs'];
+        final took = tookMs is num ? duration(tookMs) : '';
+        switch (d['reason']) {
+          case 'settings':
+            final ch = d['changed'];
+            final parts = <String>[
+              if (ch is Map && ch['mode'] is Map)
+                l10n.mode2(_modeText(ch['mode']['from']), _modeText(ch['mode']['to'])),
+              if (ch is Map && ch['route'] is Map)
+                l10n.route2(_routeText(ch['route']['from']), _routeText(ch['route']['to'])),
+            ];
+            return parts.isEmpty
+                ? r(l10n.reconnected, took)
+                : r(l10n.reconnectedSettingsChanged(parts.join(', ')), took);
+          case 'lists':
+            return r(l10n.reconnectedRuleListsLoaded, took);
+          case 'reresolve':
+            return r(l10n.reconnectedServerAddressesChanged, took);
+          case 'user':
+            final down = d['downMs'] ?? d['tookMs'];
+            return down is num ? r(l10n.reconnectedByCommandABreakOf(duration(down)), took) : r(l10n.reconnected, took);
+        }
+        return r(l10n.reconnected, took);
+      }(),
+      ('net', 'switched') => () {
+        final from = _netSide(d['from']), to = _netSide(d['to']);
+        final down = d['downMs'];
+        return r(
+          down is num && down > 0
+              ? l10n.networkSwitchedNoNetworkFor(from, to, duration(down))
+              : l10n.networkSwitched2(from, to),
+        );
+      }(),
       ('conn', 'connectFailed') => r(l10n.couldNotConnect, '${d['reason'] ?? ''}'),
-      ('conn', 'lost') => r(l10n.connectionLost, l10n.noRouteAnswersWaitingForThe),
-      ('conn', 'restored') => r(l10n.connectionRestored, d['downMs'] is num ? l10n.downFor2(duration(d['downMs'] as num)) : ''),
-      ('conn', 'offline') => r(l10n.noNetwork, l10n.theSystemReportsNoConnection),
-      ('conn', 'online') => r(l10n.networkIsBack, d['downMs'] is num ? l10n.downFor2(duration(d['downMs'] as num)) : ''),
+      ('conn', 'lost') => r(
+        e.verdict == 'confirmed' ? l10n.noConnectionThroughTheVpnThe : l10n.noConnectionThroughTheVpnInternet,
+      ),
+      ('conn', 'restored') => d['downMs'] is num
+          ? r(l10n.connectionRestoredBreakOf(duration(d['downMs'] as num)))
+          : r(l10n.connectionRestored),
+      ('conn', 'offline') => r(
+        d['source'] == null || d['source'] == 'system'
+            ? l10n.noInternetConnectionTheSystemReports2
+            : l10n.noInternetConnectionDirectChecksFail,
+      ),
+      ('conn', 'online') => d['downMs'] is num
+          ? r(l10n.internetRestoredBreakOf(duration(d['downMs'] as num)))
+          : r(l10n.networkIsBack),
       ('auto', 'switched') => () {
         final (f, t) = serverPair(d['from'], d['to']);
         final hasRoute = d['route'] != null && '${d['route']}'.isNotEmpty;
         return r(
-          hasRoute
-              ? 'Auto: ${entry(d['route'])} — $f → $t'
-              : 'Auto: ${entry(d['from'])} → ${entry(d['to'])}',
-          _reason(d),
+          hasRoute ? l10n.auto5(f, t) : l10n.auto5(entry(d['from']), entry(d['to'])),
+          _lines([hasRoute ? entry(d['route']) : null, _reason(d)]),
         );
       }(),
       ('auto', 'fastest') => () {
         final (f, t) = serverPair(d['from'], d['to']);
-        return r('Fastest: ${entry(d['route'])} — $f → $t', l10n.isNowTheFastest(t));
+        return r(l10n.fastest2(f, t), _lines([entry(d['route']), l10n.isNowTheFastest(t)]));
       }(),
       ('auto', 'unstable') => r(
         l10n.isUnstable2(entry(d['id'])),
@@ -296,26 +344,27 @@ class EventWords {
           d['holdMs'] is num ? ((d['holdMs'] as num) / 60000).round().clamp(1, 1 << 30) : 1,
         ),
       ),
-      ('node', 'addressMissing') => r(() {
-        final more = d['nodes'] is num ? (d['nodes'] as num) - 1 : 0;
-        return more > 0
-            ? l10n.serverAddressOfAndMoreDoes('${d['host'] ?? ''}', '${d['node'] ?? ''}', more)
-            : l10n.serverAddressOfDoesNotExist('${d['host'] ?? ''}', '${d['node'] ?? ''}');
-      }()),
-      ('site', 'blocked') => r(
-        l10n.doesNotOpen(host(d)),
-        _lines([
-          _entryMark('⚠️', d['entry'] ?? d['route'], d['server']),
-          d['via'] != null && '${d['via']}'.isNotEmpty ? _entryMark('✅', d['via'], d['viaServer']) : null,
-          whyText(d),
-        ], '   '),
+      ('node', 'addressMissing') => r(
+        l10n.domainDoesNotExistServers(
+          source(d['source'], d['name'] ?? d['node']),
+          '${d['host'] ?? ''}',
+          d['nodes'] is num ? d['nodes'] as num : 1,
+        ),
       ),
+      ('site', 'blocked') => () {
+        final via = d['via'] != null && '${d['via']}'.isNotEmpty ? _entryMark('', d['via'], d['viaServer']).trim() : '';
+        final route = _entryMark('', d['entry'] ?? d['route'], d['server']).trim();
+        return r(
+          route.isEmpty ? l10n.doesNotOpen(host(d)) : l10n.doesNotOpenThrough2(host(d), route),
+          _lines([via.isEmpty ? null : l10n.throughItOpens(via), whyText(d)], '   '),
+        );
+      }(),
       ('site', 'unreachable') => () {
         final tried = d['tried'] is List ? d['tried'] as List : const [];
         // down everywhere: the site is down, our routes are no part of it
         final routes = !downEverywhere(d);
         return r(
-          l10n.doesNotOpen(host(d)),
+          routes ? l10n.doesNotOpenThroughAnyServer(host(d)) : l10n.doesNotOpen(host(d)),
           _lines([
             if (routes) ...[
               _entryMark('⚠️', d['entry'] ?? d['route'], d['server']),
@@ -329,14 +378,14 @@ class EventWords {
         );
       }(),
       ('sub', 'updated') => r(
-        l10n.updated3(source(d['source'], d['name'])),
-        _lines([
-          d['total'] is num ? l10n.serversPlural(d['total'] as num) : null,
-          d['added'] is num && (d['added'] as num) > 0 ? l10n.newText(d['added'] as num) : null,
-          d['removed'] is num && (d['removed'] as num) > 0 ? l10n.removed2(d['removed'] as num) : null,
-        ]),
+        l10n.subscriptionUpdated2(
+          source(d['source'], d['name']),
+          d['added'] is num ? d['added'] as num : 0,
+          d['removed'] is num ? d['removed'] as num : 0,
+        ),
+        d['total'] is num ? l10n.serversPlural(d['total'] as num) : '',
       ),
-      ('sub', 'failed') => r(l10n.updateFailed2(source(d['source'], d['name'])), '${d['error'] ?? ''}'),
+      ('sub', 'failed') => r(l10n.couldNotUpdateSubscription(source(d['source'], d['name'])), '${d['error'] ?? ''}'),
       ('sub', 'removed') => r(
         l10n.theProviderRemovedServersPlural(d['count'] is num ? d['count'] as num : 0, source(d['source'], d['name'])),
         l10n.seeUnavailableInNodesTheirSettings,
@@ -358,8 +407,12 @@ class EventWords {
         ], ' '),
       ),
       ('rules', 'ruleSetFailed') => r(
-        l10n.ruleSetNotDownloaded2('${d['tag']}'),
-        _lines([d['error'] != null ? '${d['error']}' : null, l10n.theLastCopyIsUsed], ' — '),
+        l10n.couldNotLoadRuleList('${d['tag']}'),
+        d['hasCopy'] == true
+            ? (d['copyAt'] is num ? l10n.usingTheCopyFrom(stamp((d['copyAt'] as num).toInt())) : l10n.theLastCopyIsUsed)
+            : d['hasCopy'] == false
+            ? l10n.noCopyRulesWithThisList
+            : l10n.theLastCopyIsUsed,
       ),
       ('rules', 'ruleSetUpdated') => r(l10n.ruleSetUpdated2('${d['tag']}')),
       ('rules', 'fallback') => r(l10n.doesNotAnswer(target(d['target'])), _fallbackText(d)),
@@ -376,17 +429,18 @@ class EventWords {
         _isRule(d) ? l10n.ruleBackThroughIt(_who(d)) : l10n.appBackThroughIt(_who(d)),
       ),
       ('dns', 'switched') => r(
-        l10n.dns(dnsName(d['from']), dnsName(d['to'])),
+        l10n.dns3('${d['side'] ?? ''}', dnsName(d['from']), dnsName(d['to'])),
         d['reason'] == 'failover'
             ? l10n.doesNotAnswer(dnsName(d['from']))
             : d['reason'] == 'back'
             ? l10n.answersAgainReturnedToIt(dnsName(d['to']))
             : l10n.switchAutomaticallyIsOffTheFirst,
       ),
-      ('dns', 'failed') => r(l10n.doesNotAnswer(dnsName(d['server']))),
+      ('dns', 'failed') => r(l10n.dnsServerDoesNotAnswer2(dnsName(d['server']))),
       ('dns', 'failedOnNode') => r(
-        l10n.doesNotAnswer(dnsName(d['server'])),
-        l10n.doesNotAnswerThroughItAnswers(server(d['node']), server(d['via'])),
+        d['via'] != null && '${d['via']}'.isNotEmpty
+            ? l10n.dnsServerDoesNotAnswerThrough(dnsName(d['server']), server(d['node']), server(d['via']))
+            : l10n.dnsServerDoesNotAnswer2(dnsName(d['server'])),
       ),
       ('speed', 'done') => () {
         String mbps(Object? bps) {
@@ -401,21 +455,15 @@ class EventWords {
         );
       }(),
       ('speed', 'failed') => r(l10n.speedTestFailed, '${d['error'] ?? ''}'),
-      ('core', 'crashed') => r(
-        l10n.singBoxStopped,
-        d['code'] is num ? l10n.exitCodeStartingItAgain(d['code'] as num) : l10n.startingItAgain,
-      ),
-      ('core', 'restarted') => r(
-        l10n.singBoxStartedAgain,
-        _lines([
-          d['attempt'] is num ? l10n.attempt2(d['attempt'] as num) : null,
-          d['downMs'] is num ? l10n.wasDown2(duration(d['downMs'] as num)) : null,
-        ]),
-      ),
-      ('core', 'down') => r(
-        l10n.vpnIsDown,
-        d['proxy'] == 'kept' ? l10n.internetIsBlockedTheSystemProxy : l10n.trafficGoesDirectStillTrying,
-      ),
+      ('core', 'crashed') => d['code'] is num
+          ? r(l10n.singBoxCrashedCode(d['code'] as num))
+          : r(l10n.singBoxStopped, l10n.startingItAgain),
+      ('core', 'restarted') => d['downMs'] is num
+          ? r(l10n.coreIsRunningAgainDownFor(duration(d['downMs'] as num)), d['attempt'] is num ? l10n.attempt2(d['attempt'] as num) : '')
+          : r(l10n.singBoxStartedAgain, d['attempt'] is num ? l10n.attempt2(d['attempt'] as num) : ''),
+      ('core', 'down') => d['proxy'] == 'kept'
+          ? r(l10n.coreNotRunningFor30S)
+          : r(l10n.vpnIsDown, l10n.trafficGoesDirectStillTrying),
       ('core', 'tunNeedsAdmin') => r(l10n.tunNeedsAdministratorRights, l10n.runTheAppAsAdministratorOr),
       ('core', 'restartFailed') => r(
         l10n.singBoxCouldNotStartAgain,
@@ -446,8 +494,9 @@ class EventWords {
         final win = d['windowMs'] is num ? ((d['windowMs'] as num) / 1000).round() : 60;
         final out = _outbound(d);
         return r(
-          who.isEmpty ? l10n.connectionsToAreFailing(dest) : l10n.connectionsToAreFailing2(who, dest),
+          who.isEmpty ? l10n.connectionsToAreFailing(dest) : l10n.connectionsAreNotEstablished(who),
           _lines([
+            who.isEmpty ? null : dest,
             _failKind(d['kind']),
             d['count'] is num ? l10n.failuresInS(d['count'] as num, win) : null,
             out.isEmpty ? null : l10n.through(out),
@@ -561,7 +610,308 @@ class EventWords {
   /// words of the type and the category ("Unstable entry", "Subscriptions") so that a type is found
   /// by the name the filter sheet shows.
   String searchText(EventRecord e) =>
-      '${text(e)} ${typeLabel(e.cat, e.type)} ${catLabel(e.cat)} ${e.cat} ${e.type} ${e.data.values.join(' ')}';
+      '${text(e)} ${typeLabel(e.cat, e.type)} ${catLabel(e.cat)} ${e.cat} ${e.type} ${e.data.values.join(' ')} '
+      '${reasonOf(e) ?? ''} ${[for (final r in trailRows(e)) r.text].join(' ')}';
+
+  // ── rows of the Events list: groups, the reason, the status lines, the checks ──
+
+  /// Title and detail of a whole row (a plain event, an operation's result, a group of consequences).
+  (String, String) describeGroup(EventGroup g) {
+    if (g.isGroup) {
+      final code = g.whyCode ?? '';
+      if (code == 'net.captive') return (l10n.theNetworkRequiresSignInLogin2(g.times), '');
+      return (whyPhrase(g.ev.why) ?? code, '');
+    }
+    final first = g.head!;
+    switch (g.opKind) {
+      case 'subUpdateAll':
+        final all = <String>{}, ok = <String>{};
+        for (final x in g.items) {
+          if (x.cat != 'sub') continue;
+          final s = '${x.data['source']}';
+          if (x.type == 'updated') ok.add(s);
+          if (x.type == 'updated' || x.type == 'failed') all.add(s);
+        }
+        return (l10n.subscriptionsUpdatedOf(ok.length, all.length), '');
+      case 'appUpdate':
+        final last = g.items.last;
+        String ver = '';
+        for (final x in g.items.reversed) {
+          final v = x.data['version'] ?? x.data['to'];
+          if (v != null && '$v'.isNotEmpty) {
+            ver = '$v';
+            break;
+          }
+        }
+        switch ('${last.cat}/${last.type}') {
+          case 'core/updateAvailable':
+            return (l10n.updateAvailable2(ver), '');
+          case 'core/updateDownloaded':
+            return (l10n.updateDownloaded(ver), '');
+          case 'core/updateInstalled':
+            return (l10n.updateInstalled(ver), '');
+          case 'core/updateFailed':
+            final stage = switch (last.data['stage']) {
+              'check' => l10n.check,
+              'verify' => l10n.signatureCheck,
+              'install' => l10n.installation,
+              _ => l10n.download2,
+            };
+            return (l10n.updateFailedAt(ver, stage), '');
+        }
+        final d = describe(last);
+        return (d.title, d.detail);
+      case 'reconnect':
+        final r = g.items.where((x) => x.key == 'conn/reconnected');
+        final d = describe(r.isEmpty ? g.ev : r.last);
+        return (d.title, d.detail);
+      case 'ruleSets':
+        final ok = g.items.where((x) => x.key == 'rules/ruleSetUpdated').length;
+        final bad = g.items.where((x) => x.key == 'rules/ruleSetFailed').length;
+        if (bad > 1) return (l10n.couldNotLoadRuleLists(bad), '');
+        if (bad == 0 && ok > 0) return (l10n.ruleListsUpdated(ok), '');
+    }
+    final e = g.ev;
+    if (first.key == 'core/crashed' && g.items.length > 1) {
+      final last = g.last;
+      if (last.key == 'core/restartFailed' && last.data['attempt'] is num) {
+        return (l10n.restartingAttempt(last.data['attempt'] as num), '');
+      }
+      final d = describe(last.key == 'core/crashed' ? first : last);
+      return (d.title, d.detail);
+    }
+    if (e.key == 'auto/switched' && g.closed && e.data['route'] == null) {
+      return (
+        l10n.autoInsteadOfThenBackTo(entry(e.data['to']), entry(e.data['from']), duration(g.closedAfter!)),
+        '',
+      );
+    }
+    if (e.key == 'dns/switched' && g.closed) {
+      return (
+        l10n.dnsInsteadOfThenBack(
+          '${e.data['side'] ?? ''}',
+          dnsName(e.data['from']),
+          dnsName(e.data['to']),
+          duration(g.closedAfter!),
+        ),
+        '',
+      );
+    }
+    if (e.key == 'auto/fastest' && g.times > 1) {
+      final (_, t) = serverPair(e.data['from'], e.data['to']);
+      return (l10n.fastestSwitchesNow(g.times, t), '');
+    }
+    if (e.key == 'core/deprecated' && g.times > 1) return (l10n.singBoxDeprecatedConfigOptions(g.times), '');
+    final d = describe(e);
+    return (d.title, d.detail);
+  }
+
+  /// The reason line of a row; null = none. [find] looks an event up by id when the root of a consequence is not
+  /// in the row (the feed); the line never repeats the title or a line of the detail (detail = what, reason = why).
+  String? reasonLine(EventGroup g, {EventRecord? Function(int id)? find}) {
+    if (g.isGroup) return null;
+    final r = reasonOf(g.ev, find: (id) => g.items.where((x) => x.id == id).firstOrNull ?? find?.call(id));
+    if (r == null) return null;
+    final (title, detail) = describeGroup(g);
+    // the detail (or the title) already says it: once is enough
+    final t = r.trim();
+    return title.contains(t) || detail.contains(t) ? null : r;
+  }
+
+  /// The reason of one event: what the Sentinel found (`verdict`, `why`), else the reason the type carries in its data.
+  /// A consequence reads «Cause: <title of its root>» ([find] gets the root by its id); with no root at hand, its own `why`.
+  String? reasonOf(EventRecord e, {EventRecord? Function(int id)? find}) {
+    final why = whyPhrase(e.why);
+    final shown = describe(e);
+    bool known(String s) => s.isEmpty || shown.title.contains(s) || shown.detail.contains(s);
+    switch (e.verdict) {
+      case 'consequence':
+        final root = e.cause == null ? null : find?.call(e.cause!);
+        if (root != null) return l10n.cause(describe(root).title);
+        return why == null ? null : l10n.cause(why);
+      case 'blip':
+        // «Recovered on its own · after N s»: the time is in `why.params` (`recovered`) and in the trail step
+        final wp = e.why?['params'];
+        if (wp is Map && wp['afterMs'] is num) return l10n.recoveredOnItsOwnAfter(duration(wp['afterMs'] as num));
+        for (final s in e.trail ?? const <Map<String, dynamic>>[]) {
+          final p = s['params'];
+          if (s['code'] == 'blip.recovered' && p is Map && p['afterMs'] is num) {
+            return l10n.recoveredOnItsOwnAfter(duration(p['afterMs'] as num));
+          }
+        }
+        return l10n.recoveredBeforeAVerdictWasReached;
+      case 'workaround':
+        // `via` is the route the event names; `by` is the check that found the way
+        final p = e.why?['params'];
+        final raw = [if (p is Map) p['via'], e.data['via'], if (p is Map) p['by']].firstWhere(
+          (x) => x != null && '$x'.isNotEmpty,
+          orElse: () => null,
+        );
+        final via = raw == null ? '' : nameOf(raw);
+        return via.isEmpty ? null : l10n.opensThrough(via);
+      case 'unexplained':
+        return l10n.causeNotEstablishedSeeTheChecks;
+    }
+    if (e.whyCode == 'why.unknown') return l10n.causeNotEstablishedSeeTheChecks;
+    if (why != null && !known(why)) return why;
+    // these say their `reason` in the detail already (a code like `failover` / `down` is no reason line)
+    if (e.cat == 'auto' || e.key == 'dns/switched' || e.key == 'conn/disconnected') return null;
+    for (final k in const ['reason', 'why', 'error']) {
+      final v = e.data[k];
+      if (v == null || '$v'.isEmpty || v is Map || v is List) continue;
+      final s = fieldValue(k, v, e);
+      if (s.isNotEmpty) return s;
+    }
+    return null;
+  }
+
+  /// The phrase of a `why.code`; null = a code with no phrase of its own (the title says it).
+  String? whyPhrase(Map<String, dynamic>? why) {
+    if (why == null) return null;
+    final p = why['params'];
+    switch (why['code']) {
+      case 'net.offline':
+        return l10n.noInternetConnectionTheSystemReports;
+      case 'net.captive':
+        return l10n.theNetworkRequiresSignInLogin;
+      case 'core.down':
+        return l10n.theSingBoxCoreIsNot;
+      case 'svc.fetch':
+        final ms = p is Map ? (p['ms'] ?? p['afterMs'] ?? p['elapsedMs']) : null;
+        return l10n
+            .noAnswerEitherDirectlyOrThrough(ms is num ? duration(ms) : '')
+            .replaceFirst(RegExp(r'\s*·\s*$'), '');
+      case 'dns.down':
+        return l10n.theDnsServerDoesNotAnswer;
+      case 'dns.node':
+        return l10n.theDnsServerDoesNotAnswer2;
+      case 'node.addressMissing':
+        return l10n.theServerSDomainDoesNot;
+      case 'recovered':
+        return l10n.recoveredBeforeAVerdictWasReached;
+      case 'why.unknown':
+        return l10n.causeNotEstablishedSeeTheChecks;
+    }
+    return null;
+  }
+
+  /// «+N related» (+ the time of the last one); null = none.
+  String? relatedLine(EventGroup g) {
+    if (g.isGroup || g.relatedCount == 0) return null;
+    return _lines([l10n.related2(g.relatedCount), g.relatedLastAt > 0 ? clock(g.relatedLastAt) : null]);
+  }
+
+  /// «Finished at HH:MM · lasted N» of a closed pair; null = not closed.
+  String? closedLine(EventGroup g) {
+    final c = g.closer;
+    if (c == null) return null;
+    return l10n.finishedAtLasted(clock(c.at), duration(g.closedAfter ?? 0));
+  }
+
+  /// «N times · from HH:MM to HH:MM»; null = once.
+  String? repeatsLine(EventGroup g) {
+    if (g.times <= 1) return null;
+    final from = g.isGroup ? g.items.first.at : g.repeats.first.at;
+    return l10n.timesFromTo(g.times, clock(from), clock(g.lastAt));
+  }
+
+  /// The checks of an event (`trail`) as rows; over 8 steps: the first 3, «N more», the last 3.
+  List<TrailRow> trailRows(EventRecord e) {
+    final t = e.trail;
+    if (t == null || t.isEmpty) return const [];
+    final start = (t.first['at'] as num?)?.toInt();
+    TrailRow row(Map<String, dynamic> s) {
+      final at = (s['at'] as num?)?.toInt();
+      return TrailRow(
+        switch (s['outcome']) {
+          'pass' => '✓',
+          'fail' => '✗',
+          'inconclusive' => '?',
+          _ => '·',
+        },
+        _trailText(s),
+        at != null && start != null ? '+${((at - start) / 1000).toStringAsFixed(1)} ${l10n.s3}' : null,
+      );
+    }
+
+    if (t.length <= 8) return [for (final s in t) row(s)];
+    return [
+      for (final s in t.take(3)) row(s),
+      TrailRow('·', l10n.more2(t.length - 6), null),
+      for (final s in t.skip(t.length - 3)) row(s),
+    ];
+  }
+
+  String _trailText(Map<String, dynamic> s) {
+    final code = '${s['code']}', pass = s['outcome'] == 'pass', p = s['params'];
+    final params = p is Map ? p : const {};
+    switch (code) {
+      case 'suspect':
+        return l10n.failureSuspected;
+      case 'ctx.net':
+        return pass
+            ? l10n.networkIsUp
+            : s['outcome'] == 'inconclusive'
+            ? l10n.networkStateIsUnclear
+            : l10n.noNetwork;
+      case 'ctx.core':
+        return pass ? l10n.coreIsRunning : l10n.coreIsNotRunning;
+      case 'self.restarted':
+        return l10n.theCoreRestartedTheWindowStarts;
+      case 'net.switched':
+        return params['stable'] == false ? l10n.theNetworkIsSwitchingWaitingFor : l10n.theNetworkSettledAfterTheSwitch;
+      case 'self.reject':
+        return l10n.notJudgedCausedByTheApp;
+      case 'defer.timeout':
+        return l10n.gaveUpWaitingForAVerdict;
+      case 'root.covers':
+        return l10n.alreadyCoveredByAnOpenCause;
+      case 'check.skipped':
+        return l10n.checkSkippedACauseIsAlready;
+      case 'park':
+        return l10n.waitingBehindAFailedServer;
+      case 'resume':
+        return l10n.theServerIsBackCheckingAgain;
+      case 'park.expired':
+        return l10n.waitedTooLongBehindAFailed;
+      case 'persist.wait':
+        return l10n.waitingToSeeWhetherItPersists;
+      case 'persist.window':
+        return l10n.stillFailingAfterTheWait;
+      case 'blip.recovered':
+        return params['afterMs'] is num
+            ? l10n.recoveredOnItsOwnAfter(duration(params['afterMs'] as num))
+            : l10n.recoveredBeforeAVerdictWasReached;
+      case 'why.unknown':
+        return l10n.noCauseFound;
+      case 'root.closed':
+        return l10n.causeClosed;
+      case 'root.relinked':
+        return l10n.linkedToAnotherCause;
+    }
+    // a code with no phrase: the code and its parameters
+    return params.isEmpty ? code : '$code ${params.entries.map((x) => '${x.key}=${x.value}').join(' ')}';
+  }
+
+  /// A side of `net/switched` (`{type, provider?, operator?}`): "Wi-Fi (ISP)".
+  String _netSide(Object? s) {
+    if (s is! Map) return '';
+    final label = switch (s['type']) {
+      'wifi' => l10n.wiFi,
+      'ethernet' => l10n.ethernet,
+      'mobile' || 'cellular' => l10n.mobile,
+      final t => '${t ?? ''}',
+    };
+    final who = s['type'] == 'mobile' || s['type'] == 'cellular' ? s['operator'] : s['provider'];
+    return who is String && who.isNotEmpty ? l10n.nameWithDetail(label, who) : label;
+  }
+
+  /// `why` of a lost Manual pin (`deleted` / `off` / `unsupported`).
+  String _pinLostWhy(Object? w) => switch (w) {
+    'off' => l10n.switchedOff,
+    'unsupported' => l10n.notSupported,
+    _ => l10n.deleted2,
+  };
 
   // ── why: the rule that decided a request ──
 
@@ -956,6 +1306,30 @@ class EventWords {
     }
     return out;
   }
+}
+
+/// The event says the Manual pick was lost (`conn/disconnected` by an error: `reason: pinLost`; `conn/connectFailed`: the
+/// catalog's "Manual pick … is unavailable" text): the one way out is to choose a server (docs/logs.md → «По типам»).
+bool eventPinLost(EventRecord e) {
+  final d = e.data, err = d['error'], why = d['reason'];
+  return d['pinLost'] == true ||
+      why == 'pinLost' ||
+      (err is Map && err['reason'] == 'pinLost') ||
+      (e.key == 'conn/connectFailed' && why is String && why.startsWith('Manual pick ') && why.contains(' is unavailable'));
+}
+
+/// The cause of a failed connect lies in the settings (the mode, the port): there the row offers «Open settings».
+bool eventCauseInSettings(EventRecord e) {
+  final why = e.data['reason'];
+  return e.key == 'conn/connectFailed' && !eventPinLost(e) && why is String && RegExp(r'settings|\bport\b', caseSensitive: false).hasMatch(why);
+}
+
+/// A step of the checks of an event: [mark] is ✓ ✗ ? or ·, [at] the time since the first step ("+1.2 s").
+class TrailRow {
+  const TrailRow(this.mark, this.text, this.at);
+
+  final String mark, text;
+  final String? at;
 }
 
 enum WhyGo { none, route, user, app, rules }
