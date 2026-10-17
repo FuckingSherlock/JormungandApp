@@ -4,29 +4,6 @@
 `cd app; flutter test test/_shots/event_shots_test.dart --run-skipped` → `app/build/event_shots/` (перегенерировать после
 изменений). Порядок: т1 → т1.5 → т2 → т3. Пункт сделан — строкой в `archive/done.md` и удаляется отсюда.
 
-## т1 — неполные события (аудит §2, «делать всё»), вместе с доками (§3)
-
-1. «Почему» в UI: показывать `verdict` / `cause` / `why` / `trail` (в модель приложения `why`/`trail` сейчас не читаются),
-   следствия сворачивать под корень (F «Этап 4 Sentinel», F «Единый вид событий о сбоях»).
-2. Слабые тексты: `conn/lost` (одна фраза), `conn/offline` (не учитывает `data.source`), `core/crashed` (не различает
-   отзыв VPN), `ruleSetFailed` «last copy» без `hasCopy`, l10n подписей Auto/Proxy/Direct.
-3. Действия: `conn/failing` (нет кнопок), `node/addressMissing` (нет Open), `conn/connectFailed` / `core/tunNeedsAdmin` /
-   `core/down` / `core/crashed` (Retry, Open settings, Remove system proxy при `proxy:'kept'`), `rules/ruleSetFailed`
-   (Retry), `core/stateLost` / `stateRestored` (Send report), `dns/failed` (Switch server / Check now), `sub/removed`
-   (список пропавших, отметка «используемый»), кнопки в системных уведомлениях не только у `site/*`.
-4. Категории уведомлений для error/warn-событий без неё (`conn/connectFailed`, `core/tunNeedsAdmin`, `core/stateLost`,
-   `stateRestored`, `core/sysProxy` с ошибкой, `core/deprecated`, `dns/*`, `speed/failed`, `core/update*`).
-5. Один корень — одна запись: авария ядра (`crashed` → `restartFailed` ×N → `down` → `restarted`), `conn/failing` vs
-   `site/unreachable`, следствия отсутствия сети, `dns/failed` vs `dns/failedOnNode`, `rules/fallback` vs
-   `rules/targetLost` (оба под `autoSwitch`).
-6. Тихие потолки (против «не прятать проблемы»): `restartFailed` пишется только `_attempt <= _backoff.length`;
-   `sub/failed` — только первый после удачного. Повторы — видимой свёрткой.
-7. Уровни и атрибуция: `restartFailed` info (доки: error), фоновый `updateFailed` info; `conn/disconnected by:'error'`
-   описан, но не пишется — потеря Manual-пина сейчас записана как `by:'user'` (запись неверна независимо от т3 п. 1).
-8. Два автора `sub/*` (ядро с вердиктом, приложение без) — один набор полей.
-9. Доки: таблица событий `docs/core.md` (~1389–1425) — недостающие типы, устаревшие `conn/lost` / `conn/offline` /
-   `restartFailed`; `docs/logs.md` — поле `repeat` у `site/*`. Каталог-мокап: `sub/dead` пишется только мокапом.
-
 ## т1.5
 
 - Раскидать события по категориям (формулировка пользователя; уточнить с ним вид — фильтр/группы в Logs и/или категории
@@ -38,6 +15,20 @@
    приходит при поднятом VPN. Корень Sentinel `net.captive` (свёртка следствий) остаётся.
 2. VPN отозван другим VPN / системой: события не нужно; убрать попытки перезапуска после отзыва (сейчас `onRevoke` →
    `core/crashed {code:0}` → `restartFailed` ×N → `core/down`, аудит §1.3). Бывший `to_think.md` S7.
+   Разведка 2026-10-17: Kotlin `onRevoke` шлёт в Dart `{type:'stopped', reason:'revoked'}` и уже ставит
+   `ResumeStore.tunnelDown("revoked")`. Дальше причина теряется: `LibboxRunner._gone(reason)` (app/lib/core/libbox_runner.dart:227)
+   вызывает `onExit(0)`, а ядро (`CoreService._crashed`, core/lib/src/service.dart:2231) считает это аварией и запускает
+   `_recover`. План:
+   - контракт раннера (core/lib/src/runtime.dart:50, 108): кроме `onExit(code)` отдельный сигнал «туннель отняли»
+     (например, `onRevoked`). `LibboxRunner` вызывает его при `reason == 'revoked'`, а `onExit(0)` — при остальных причинах;
+   - ядро на отзыв: полная остановка, как по Disconnect (план снят, Auto и Sentinel остановлены, без `_recover`, без
+     `core/crashed` и `restartFailed`). В журнал — `conn/disconnected {by:'system', reason:'revoked'}`: это существующий тип
+     события, не новый; `by:'system'` описать в docs/logs.md;
+   - сначала доки (docs/core.md: runtime и раннер; docs/logs.md: `conn/disconnected`), потом ядро (тесты на фейковом раннере:
+     отзыв → ни одного перезапуска, состояние off, одна запись), потом приложение (`LibboxRunner`, тест на `_gone`).
+     Уровень deep: состояние и Sentinel.
+   - Открыто, спросить пользователя до брифа: нужно ли уведомление «VPN выключил другой VPN или система» (тумблер
+     категории, по умолчанию вкл?) или хватит записи в журнале и погасшей шторки.
 
 ## т3
 
