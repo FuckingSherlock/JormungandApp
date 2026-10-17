@@ -104,7 +104,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `site/unreachable` | warn. Не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); повторы после вердикта — на событии (`repeat`) без проб | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?, app?}`; `tried` пуст — нет другого рабочего маршрута; без `retries: 'off'` ещё `check` — `{state: 'pending'\|'off'\|'opens'\|'down'\|'failed', at, kind?, via?, ok?, total?, nodes?, error?, manual?}`, внешний чекер check-host.net (`connect-model.md` → «Внешний чекер»): событие меняется на месте (`rev`), тихое, пока нет `opens` |
 
 | `sub/updated` | info. Автообновление по таймеру ядра изменило список серверов (без изменений — события нет); ручное — тоже ядро, `own: true` («Один автор `sub/*`») | `{source, name, added, removed, total, own?}` |
-| `sub/failed` | error. Автообновление не вышло — через Sentinel (`svc.fetch`), только `confirmed`; каждый подтверждённый сбой: пока на карточке та же ошибка — `repeated` на одном событии, другая — новое событие. Ручное — тоже ядро, `own: true`, без Sentinel («Один автор `sub/*`») | `{source, name, error, code?, path?, own}` |
+| `sub/failed` | error. Автообновление не вышло — через Sentinel (`svc.fetch`), только `confirmed`; каждый подтверждённый сбой: пока на карточке та же ошибка — `repeated` на одном событии, другая — новое событие. Ручное — тоже ядро, `own: true`, сразу после ожидания пути (сеть ≤ 5 с, конец своего переподключения; «Один автор `sub/*`») | `{source, name, error, code?, path?, own}` |
 | `sub/diverged` | warn, без уведомления. Auto: прямая и туннельная копии подписки с разными наборами серверов; три записи подряд при discovery (по одной на UA) — норма. `subscription-parsing.md` → «Download via» | `source`, `name`, `host`, `ua`, `directNodes` / `tunnelNodes`, `onlyDirect` / `onlyTunnel` (≤ 10 имён) и `…Count`, `directStatus` / `tunnelStatus`, `directMs` / `tunnelMs`, `directPath` / `tunnelPath`, `directFresh` / `tunnelFresh` (заголовки свежести обеих копий: `Age`, `Date`, `Last-Modified`, `ETag`, `Cache-Control`, `Expires` — какие были), `used` (`tunnel` / `direct` / `merged`), `why` (`newer: lastModified` / `newer: age` / `unknown`), `usedNodes` |
 | `sub/removed` / `back` | Серверы пропали из подписки / вернулись | `{count, source, name}` |
 | `sub/dead` | Только мокап (серверы подписки не отвечают); ядро и приложение его не пишут | — |
@@ -423,14 +423,25 @@ the network changed: counted as the network's …` (книга сбоев, по�
 
 ### Один автор `sub/*`
 
-Пишет только ядро — и автообновление, и ручное (сейчас ручное: приложение зовёт `POST /api/sources/fetch`, само
-сливает и пишет `sub/*` через `_journal`). Ручное: `own: true`, без Sentinel, сразу (пользователь ждёт). Поля одни:
+Пишет только ядро — и автообновление, и ручное; приложение `sub/*` не пишет (одно обновление — одно событие). Поля одни:
 `sub/updated` `{source, name, added, removed, total, own}`, `sub/failed` `{source, name, error, code?, path?, own}`,
 `sub/removed` / `back` `{source, name, count, names, inUse}` — `names`: до 10 имён, `inUse`: среди них сервер
 основного потока или цели правила.
 
-Сбой из-за **своего переподключения** (`RetryPolicy.ownRestart`) — не сбой: ни события, ни ошибки на карточке;
-загрузка повторяется, когда ядро устоялось (`settled`) (`bugs.md`, 2026-10-17).
+**Ручное обновление** (`own: true`) — тоже через Sentinel, но не ждёт подтверждения сбоя: пользователь ждёт ответа.
+Перед загрузкой оно спрашивает Sentinel о пути, который выбрал загрузчик:
+- **прямой путь** — сеть есть: сразу;
+- **путь через VPN** — идёт своё переподключение / перезапуск ядра: ждёт, пока ядро устоится (`settled`), затем
+  грузит; ядро так и не поднялось (`core/down`) — `sub/failed` с причиной `core.down`;
+- **сети нет** (`net.offline`, любой путь) — ждёт её возвращения до 5 с; вернулась — грузит, нет — обычный
+  `sub/failed` (`code: 'offline'`, на карточке «Нет сети»).
+
+Пока ждёт, карточка показывает «Ожидает подключения» / «Ожидает сеть»; ответ `POST /api/sources/fetch` приходит после
+загрузки (или ошибки), промежуточного `notModified` нет. Сбой самой загрузки после этого — `sub/failed` сразу, без
+повторов и лестницы.
+
+Сбой автообновления из-за **своего переподключения** (`RetryPolicy.ownRestart`) — не сбой: ни события, ни ошибки на
+карточке; загрузка повторяется, когда ядро устоялось (`settled`) (`bugs.md`, 2026-10-17).
 
 ## Отчёт
 
