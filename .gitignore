@@ -7,6 +7,8 @@ design/.artifact/
 .claude/worktrees/
 
 .claude/agent-memory-local/
+# workflow calls saved by the launch hook until the user confirms
+.claude_states/pending-workflows/
 
 # Android build: libbox built locally, release keystore config
 app/android_overlay/app/libs/
