@@ -988,6 +988,12 @@ class DnsFailover {
                 }
                 return found.kind == 'node' ? _dnsKind('dns', 'failedOnNode') : _dnsKind('dns', 'failed');
               },
+              // dead on the exit node only, while the server itself was found dead earlier: that event is the root
+              causeFor: (cat, type, kind, d) {
+                if (type != 'failedOnNode') return null;
+                final root = sentinel.book?.recent('dns', 'failed', {'server': s.id}, const Duration(hours: 6));
+                return root == null ? null : (root['cause'] as num?)?.toInt() ?? root['id'] as int;
+              },
               dataFor: (kind, e) => {
                     'server': e['server'],
                     'path': e['path'],

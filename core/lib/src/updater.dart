@@ -95,6 +95,59 @@ Future<Map<String, dynamic>> updateSubscription(
   };
 }
 
+/// The fetch failed because of our own restart of sing-box (`RetryKind.ownRestart`): not a failure of the subscription,
+/// so nothing is told and nothing is noted on the card; the load is asked again when the core has settled.
+bool isOwnRestartFailure(Object e) =>
+    e is SubscriptionFetchException && e.failure.code == 'allFailed' && e.failure.advice?.waitFor == RetryWait.settled;
+
+/// The `sub/*` events one update of source [s] (as it was before) with [patch] (what [updateSubscription] put together)
+/// makes, as `(type, data)` in the order they are written: `updated` `{source, name, added, removed, total}` (only when the
+/// servers changed, or [always]: the manual update tells even a no-change one), then `removed` / `back`
+/// `{source, name, count, names, inUse}` for the servers the provider dropped / brought back (the `gone` list moved).
+/// Servers are told apart by `key ?? id`. [inUse]: is this server the main flow's or a rule target's now; the events
+/// then say so (`inUse`, and `inUseNames`). `names`: at most [subEventNames].
+List<(String, Map<String, dynamic>)> subUpdateEvents(String sid, Map<String, dynamic> s, Map<String, dynamic> patch,
+    {bool always = false, bool Function(Map<String, dynamic> node)? inUse}) {
+  List<Map<String, dynamic>> maps(Object? l) => [for (final x in (l as List? ?? const [])) if (x is Map) x.cast<String, dynamic>()];
+  String keyOf(Map n) => '${n['key'] ?? n['id']}';
+  final prev = maps(s['nodes']);
+  final fresh = patch['nodes'] is List;
+  if (!fresh && !always) return const [];
+  final nodes = fresh ? maps(patch['nodes']) : prev;
+  final name = '${s['name'] ?? sid}';
+  final was = {for (final n in prev) keyOf(n)}, nowKeys = {for (final n in nodes) keyOf(n)};
+  final added = nowKeys.difference(was).length, removed = was.difference(nowKeys).length;
+  final out = <(String, Map<String, dynamic>)>[];
+  if (always || added != 0 || removed != 0) {
+    out.add(('updated', {'source': sid, 'name': name, 'added': added, 'removed': removed, 'total': nodes.length}));
+  }
+  if (!fresh || patch['gone'] is! List) return out;
+  Map<String, dynamic> listOf(List<Map<String, dynamic>> l) {
+    final used = inUse == null ? const <Map<String, dynamic>>[] : [for (final n in l) if (inUse(n)) n];
+    String label(Map n) => '${n['name'] ?? n['rawName'] ?? n['id']}';
+    return {
+      'source': sid,
+      'name': name,
+      'count': l.length,
+      'names': [for (final n in l.take(subEventNames)) label(n)],
+      'inUse': used.isNotEmpty,
+      if (used.isNotEmpty) 'inUseNames': [for (final n in used.take(subEventNames)) label(n)],
+    };
+  }
+
+  final prevGone = maps(s['gone']), goneNow = maps(patch['gone']);
+  final nowIds = {for (final n in nodes) '${n['id']}'};
+  final wasGone = {for (final g in prevGone) '${g['id']}'};
+  final dropped = [for (final g in goneNow) if (!wasGone.contains('${g['id']}')) g];
+  final back = [for (final g in prevGone) if (nowIds.contains('${g['id']}') || nowKeys.contains(keyOf(g))) g];
+  if (dropped.isNotEmpty) out.add(('removed', listOf(dropped)));
+  if (back.isNotEmpty) out.add(('back', listOf(back)));
+  return out;
+}
+
+/// How many server names `sub/removed` / `back` carry.
+const subEventNames = 10;
+
 /// A failed automatic update is tried again after this (or the source's own period, if
 /// shorter).
 const retryAfterFailure = Duration(minutes: 30);
@@ -151,6 +204,9 @@ class SubscriptionUpdater {
     this.onDiverged,
     this.onStale,
     this.onNodes,
+    this.onFetched,
+    this.newOp,
+    this.nodeInUse,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
@@ -188,10 +244,26 @@ class SubscriptionUpdater {
   /// core resolves their hostnames then (address_resolver.dart); the UI's own updates do the same in the service.
   final void Function(String sid, List<Map<String, dynamic>> nodes)? onNodes;
 
+  /// The source's fetch came through (whatever it changed): its last failure, if any, is over.
+  final void Function(String sid)? onFetched;
+
+  /// A new operation of [kind] (`subUpdate`, `subUpdateAll`): the events of one update share its `{id, kind}`. A tick
+  /// that updates several sources is one `subUpdateAll`, a single source is its own `subUpdate`. [op] is the current one.
+  final Map<String, Object?> Function(String kind)? newOp;
+
+  /// Is this server of a subscription in use now (the main flow's or a rule target's): for `sub/removed` / `back`.
+  final bool Function(Map<String, dynamic> node)? nodeInUse;
+
+  Map<String, Object?>? _op;
+
+  /// The operation of the update under way; read by [onEvent] / [onSvcFailed] while they run.
+  Map<String, Object?>? get op => _op;
+
   /// What the timer's updates did, for the events journal: `('updated', {source, name,
-  /// added, removed, total})` when the server list changed, `('failed', {source, name,
-  /// error})` on the first failure after a good update (not on every retry). The UI's own
-  /// updates are the UI's to report.
+  /// added, removed, total})` when the server list changed, `('removed' | 'back', {source, name, count, names, inUse})`
+  /// when the provider dropped / brought back servers ([subUpdateEvents]), `('failed', {source, name, error})` on every
+  /// failure (the owner of the hook folds the same error of the same source into one event, ×N). The manual update of
+  /// the UI is told by [CoreService.fetchSource] with the same helper.
   final void Function(String type, Map<String, dynamic> data)? onEvent;
 
   final _busy = <String>{};
@@ -231,19 +303,25 @@ class SubscriptionUpdater {
     }
   }
 
+  /// [sid] was not fetched because of our own restart: the timer asks again at its next tick, not after the retry wait,
+  /// and whether the source is due by its period or not (a manual update of a fresh source is not due).
+  void askAgain(String sid) {
+    _triedAt.remove(sid);
+    _again.add(sid);
+  }
+
+  final _again = <String>{};
+
   // What the source must still have for a result to land (the user did not edit, update or
   // delete it meanwhile).
   static Map<String, dynamic> _expect(Map<String, dynamic> s) =>
       {for (final k in const ['url', 'userAgent', 'filter', 'hwid', 'gone', 'updatedAt']) k: s[k]};
 
   void _report(String sid, Map<String, dynamic> s, Map<String, dynamic> patch) {
-    final now = patch['nodes'];
-    if (onEvent == null || now is! List) return;
-    Set<String> keys(Object? l) => {for (final n in (l as List? ?? const [])) '${(n as Map)['key'] ?? n['id']}'};
-    final was = keys(s['nodes']), nowKeys = keys(now);
-    final added = nowKeys.difference(was).length, removed = was.difference(nowKeys).length;
-    if (added == 0 && removed == 0) return;
-    onEvent!('updated', {'source': sid, 'name': '${s['name'] ?? sid}', 'added': added, 'removed': removed, 'total': now.length});
+    if (onEvent == null) return;
+    for (final (type, data) in subUpdateEvents(sid, s, patch, inUse: nodeInUse)) {
+      onEvent!(type, data);
+    }
   }
 
   /// Updates every due subscription now; the ids updated (a failure only notes
@@ -252,12 +330,26 @@ class SubscriptionUpdater {
 
   Future<List<String>> _runDue() async {
     final done = <String>[];
-    final due = dueSubscriptions(await store.read(), clock().millisecondsSinceEpoch, triedAt: _triedAt);
+    final snap = await store.read();
+    final due = [...dueSubscriptions(snap, clock().millisecondsSinceEpoch, triedAt: _triedAt)];
+    final asked = _again.toList();
+    for (final sid in asked) {
+      final src = snap?['sourcesData'];
+      if (src is! Map || src[sid] is! Map) {
+        _again.remove(sid); // deleted meanwhile
+      } else if (!due.contains(sid)) {
+        due.add(sid);
+      }
+    }
+    // several sources due at one tick are one operation, a single one is its own
+    final batch = due.length > 1 ? newOp?.call('subUpdateAll') : null;
     for (final sid in due) {
       if (_busy.contains(sid)) continue;
       final s = await store.source(sid);
       if (s == null) continue;
       _busy.add(sid);
+      _op = batch ?? newOp?.call('subUpdate');
+      final wasAsked = _again.remove(sid);
       var retrySoon = false;
       try {
         final r = await update(
@@ -269,6 +361,7 @@ class SubscriptionUpdater {
           onDiverged: onDiverged,
         );
         final patch = Map<String, dynamic>.of((r['patch'] as Map).cast<String, dynamic>());
+        onFetched?.call(sid);
         if (s['lastError'] != null) patch['lastError'] = null; // the card's error strip goes
         if (r['stale'] case final Map stale) onStale?.call(stale.cast<String, dynamic>());
         if (await store.patchSource(sid, _expect(s), patch)) {
@@ -281,14 +374,15 @@ class SubscriptionUpdater {
         stderr.writeln('[updater] ${s['name'] ?? sid}: $e');
         final data = {'source': sid, 'name': '${s['name'] ?? sid}', 'error': '$e'};
         final svcFail = e is SubscriptionFetchException && e.failure.code == 'allFailed' ? e.failure : null;
-        if (svcFail?.advice?.waitFor == RetryWait.settled) {
+        if (isOwnRestartFailure(e)) {
           // our own restart cut it: nothing is told, no error on the card, the next tick asks again
           retrySoon = true;
+          if (wasAsked) _again.add(sid);
         } else {
           if (svcFail != null && onSvcFailed != null) {
             onSvcFailed!(svcFail, data); // the Sentinel judges every failure (a standing root says nothing twice)
-          } else if (s['lastError'] == null) {
-            onEvent?.call('failed', data);
+          } else {
+            onEvent?.call('failed', data); // every failure: no ceiling (the same error of a source is ×N on one event)
           }
           // the card shows it with Retry (33-source-error.js); updatedAt stays, so the UI's
           // own save still wins over it
@@ -297,6 +391,7 @@ class SubscriptionUpdater {
           });
         }
       } finally {
+        _op = null;
         _busy.remove(sid);
         if (!retrySoon) _triedAt[sid] = clock().millisecondsSinceEpoch;
       }

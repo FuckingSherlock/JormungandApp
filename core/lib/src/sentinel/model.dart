@@ -162,7 +162,7 @@ class Scope {
 /// verdict, why, trail and cause; the evidence is its `data`).
 class SuspicionEvent {
   const SuspicionEvent(this.cat, this.type,
-      {this.level = 'warn', this.own = false, this.bg = false, this.link = true, this.note, this.kindFor, this.dataFor, this.foldOnto});
+      {this.level = 'warn', this.own = false, this.bg = false, this.link = true, this.note, this.kindFor, this.dataFor, this.foldOnto, this.causeFor});
 
   final String cat;
   final String type;
@@ -190,6 +190,12 @@ class SuspicionEvent {
   /// verdict and trail) instead of writing another; the raw line is written either way. Nothing is dropped. The
   /// detector owns the memory of its verdicts (the site checks: a timer per site, service.dart).
   final int? Function(String cat, String type, Map<String, dynamic> data)? foldOnto;
+
+  /// The `cause` of an entry of a verdict that is no consequence of a root of the Sentinel's (a `conn/failing` under the
+  /// `site/*` of the same address, a `dns/failedOnNode` under the `dns/failed` of its server, anything in the window of a
+  /// network switch under `net/switched`): the id of the earlier event, or null = none. A consequence's cause is its
+  /// root's event.
+  final int? Function(String cat, String type, VerdictKind kind, Map<String, dynamic> data)? causeFor;
 }
 
 /// A detector's report: "something failed, find out whether it is real".

@@ -789,11 +789,11 @@ class Sentinel {
         VerdictKind.unexplained => 'warn',
         _ => 'info',
       };
-      final cause = kind == VerdictKind.consequence ? root?.eventId : null;
       final pick = e.kindFor == null ? (e.cat, e.type) : e.kindFor!(kind, j.evidence);
       if (pick == null) return _verdict(j, kind, why, root: root);
       final line = e.note?.call(kind, j.evidence);
       final data = e.dataFor?.call(kind, j.evidence) ?? j.evidence;
+      final cause = kind == VerdictKind.consequence ? root?.eventId : e.causeFor?.call(pick.$1, pick.$2, kind, data);
       // the same thing again within the window: the earlier event says so (count, times) instead of a second one
       final foldId = e.foldOnto?.call(pick.$1, pick.$2, data);
       final prev = foldId == null ? null : b.byId(foldId);

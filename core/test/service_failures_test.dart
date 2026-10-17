@@ -666,7 +666,7 @@ void main() {
       await time.advanceSeconds(1); // the first try fails
       await untilEvent('core', 'restartFailed');
       final failed = events('core', 'restartFailed').single;
-      expect([failed['level'], failed['verdict'], failed['cause']], ['info', 'consequence', crashed['id']]);
+      expect([failed['level'], failed['verdict'], failed['cause']], ['error', 'consequence', crashed['id']]);
       expect(quiet(failed), isTrue);
       await untilEvent('core', 'restarted', step: const Duration(seconds: 1)); // the second works
       expect(types(), containsAllInOrder(['core/crashed', 'core/restartFailed', 'core/restarted']));

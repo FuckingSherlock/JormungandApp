@@ -48,7 +48,7 @@ class RuleSetFetch {
 
 /// A download that failed, as the journal and the Sentinel get it.
 class RuleSetFailure {
-  RuleSetFailure(this.tag, this.url, this.error, {required this.hasCopy, this.svc});
+  RuleSetFailure(this.tag, this.url, this.error, {required this.hasCopy, this.copyAt, this.svc});
 
   final String tag;
 
@@ -58,6 +58,9 @@ class RuleSetFailure {
 
   /// A previous copy of the list is on disk (and is used).
   final bool hasCopy;
+
+  /// When that copy was downloaded (ms since epoch, the file's mtime); null without a copy.
+  final int? copyAt;
 
   /// Set when no path brought an answer: the suspicion to judge ([SvcFailure.suspicion]) comes from it.
   /// Null = the server answered, with something that is no rule set (the failure is the list's own).
@@ -166,7 +169,9 @@ class RuleSetCache {
       _hold[s.tag] = api.retryFor('ruleset:${s.tag}').wait(advice).whenComplete(() => _hold.remove(s.tag));
       // our own restart cut it: the settle brings the retry, nothing is told
       if (advice.waitFor != RetryWait.settled) {
-        onFailed?.call(RuleSetFailure(s.tag, d.url, '${d.cause}', hasCopy: await f.exists(), svc: d.svc));
+        final has = await f.exists();
+        final copyAt = has ? (await f.lastModified()).millisecondsSinceEpoch : null;
+        onFailed?.call(RuleSetFailure(s.tag, d.url, '${d.cause}', hasCopy: has, copyAt: copyAt, svc: d.svc));
       }
       throw d;
     }

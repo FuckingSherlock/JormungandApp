@@ -24,6 +24,7 @@ import 'durable.dart';
 import 'elevation.dart';
 import 'eventbook.dart';
 import 'exitip.dart';
+import 'netswitch.dart';
 import 'failures.dart';
 import 'fallback.dart';
 import 'ignored_sites.dart';
@@ -38,6 +39,7 @@ import 'exits.dart';
 import 'ladder.dart' show DeadLadderStore;
 import 'pool.dart';
 import 'probe.dart';
+import 'fetch.dart' show SubscriptionFetchException;
 import 'svc_fetch.dart';
 import 'svc_in.dart';
 import 'redact.dart';
@@ -135,7 +137,7 @@ class CoreService implements CoreApi {
     pool.onAnswer = (startedAt) => sentinel.context.proved(since: startedAt); // an answered probe is data on the network
     ruleSets.fetchSource = () => svcFetch;
     ruleSets.onFailed = _ruleSetFailed;
-    ruleSets.onUpdated = (tag) => _event('rules', 'ruleSetUpdated', 'info', {'tag': tag}, note: 'Rule set $tag updated');
+    ruleSets.onUpdated = (tag) => _event('rules', 'ruleSetUpdated', 'info', {'tag': tag}, note: 'Rule set $tag updated', op: _listsOp);
   }
 
   /// The sing-box binary (desktop): its version, the programs TUN lets go direct, the
@@ -204,7 +206,7 @@ class CoreService implements CoreApi {
   // A damaged ui-state.json is replaced by its backup (or the state starts empty): the journal says so.
   late final store = SnapshotStore(_snapshot, onRecovery: (type, level, data, note) => _event('core', type, level, data, note: note));
   // Subscriptions update themselves on their periods, also with the UI closed.
-  late final updater = SubscriptionUpdater(
+  late final SubscriptionUpdater updater = SubscriptionUpdater(
     store: store,
     hwid: () => _hwid,
     svc: () => svcFetch,
@@ -215,14 +217,78 @@ class CoreService implements CoreApi {
       _warmNodes(nodes, 'subscription update');
       _exitSourceRefreshed(sid, nodes);
     },
-    onEvent: (type, data) {
-      _event('sub', type, type == 'failed' ? 'error' : 'info', data,
-          note: type == 'failed'
-              ? 'Subscription ${data['name']} not updated: ${data['error']}'
-              : 'Subscription ${data['name']} updated: +${data['added']} -${data['removed']}, ${data['total']} servers');
-      _changed(); // sourcesRev moved
-    },
+    onEvent: (type, data) => _subEvent(type, data, op: updater.op),
+    onFetched: _subFetched,
+    newOp: _newOp,
+    nodeInUse: _nodeInUse,
   );
+
+  /// The last `sub/failed` of each source and its error: the same error again is a repeat on that event (×N), another
+  /// error is a new event. Ends when the source's fetch comes through. `sub/back` closes the earlier `sub/removed`.
+  final _subFailedIds = <String, ({int id, String error})>{};
+  final _subRemovedIds = <String, List<int>>{};
+
+  void _subFetched(String sid) => _subFailedIds.remove(sid);
+
+  /// The open `sub/removed` of [sid] a `sub/back` with [back] closes: the one that names a server of it, else the
+  /// oldest. The others stay open for the next `back`.
+  int? _takeRemoved(String sid, Map<String, dynamic> back) {
+    final open = _subRemovedIds[sid];
+    if (open == null) return null;
+    open.removeWhere((id) => eventBook.byId(id) == null);
+    if (open.isEmpty) {
+      _subRemovedIds.remove(sid);
+      return null;
+    }
+    final names = {for (final n in (back['names'] as List? ?? const [])) '$n'};
+    final id = open.firstWhere(
+      (id) => ((eventBook.byId(id)?['data'] as Map?)?['names'] as List? ?? const []).any((n) => names.contains('$n')),
+      orElse: () => open.first,
+    );
+    open.remove(id);
+    if (open.isEmpty) _subRemovedIds.remove(sid);
+    return id;
+  }
+
+  /// Is this server of a subscription the main flow's or a rule target's now.
+  bool _nodeInUse(Map<String, dynamic> n) => _coreServers().values.contains('${n['key'] ?? n['id']}');
+
+  /// The one author of `sub/*` (docs/logs.md → «Один автор sub/*»): the timer's updates and the manual one. [own]: the
+  /// user asked. The verdict / why / trail / cause are the Sentinel's, for a judged timer failure.
+  void _subEvent(String type, Map<String, dynamic> data,
+      {bool own = false, Map<String, Object?>? op, String? verdict, Why? why, List<TrailStep>? trail, int? cause}) {
+    final sid = '${data['source']}';
+    switch (type) {
+      case 'failed':
+        final note = 'Subscription ${data['name']} not updated: ${data['error']}';
+        final error = '${data['error']}';
+        final prev = _subFailedIds[sid];
+        if (prev != null && prev.error == error && eventBook.byId(prev.id) != null) {
+          logBook.note('error', note);
+          eventBook.repeated(prev.id,
+              data: data,
+              level: 'error',
+              verdict: verdict,
+              why: why?.toJson(),
+              trail: trail == null ? null : [for (final t in trail) t.toJson()],
+              cause: cause);
+        } else {
+          final id = _event('sub', 'failed', 'error', data, own: own, note: note, verdict: verdict, why: why, trail: trail, cause: cause, op: op);
+          _subFailedIds[sid] = (id: id, error: error);
+        }
+      case 'removed':
+        // every removal stays open (a second one while the first is open does not hide it): each `back` closes one
+        (_subRemovedIds[sid] ??= []).add(_event('sub', 'removed', 'warn', data,
+            own: own, note: 'Subscription ${data['name']}: ${data['count']} servers removed by the provider', op: op));
+      case 'back':
+        _event('sub', 'back', 'info', data,
+            own: own, note: 'Subscription ${data['name']}: ${data['count']} servers back', op: op, opens: _takeRemoved(sid, data));
+      default:
+        _event('sub', 'updated', 'info', data,
+            own: own, note: 'Subscription ${data['name']} updated: +${data['added']} -${data['removed']}, ${data['total']} servers', op: op);
+    }
+    _changed(); // sourcesRev moved
+  }
   late final Future<Map<String, String>> _hwid = deviceHeaders(dataDir);
   String? _error;
   String? _warning;
@@ -428,7 +494,7 @@ class CoreService implements CoreApi {
     return _auto == null ? plan : planKeepingServers(plan, _coreServers());
   }
 
-  final _deprecatedSeen = <String>{}; // the journal says each once per run; the raw log every time
+  final _deprecatedIds = <String, int>{}; // the event of each text of this run: the same text again is a repeat on it
   // Where traffic leaves: the tunnel's exit, or the machine's own IP while disconnected
   // (direct: true). null while checking, {ip, country…, direct} or {error, direct}.
   Map<String, dynamic>? _exit;
@@ -445,6 +511,31 @@ class CoreService implements CoreApi {
   DnsFailover? _dns;
   List<TargetFallback> _fallbacks = const [];
 
+  // The events a closing event of a pair names in `opens`: the last failover of a route (key `''` = Auto's route move) /
+  // of a DNS side, the fallback of a rule target, the lost target of a rule / app (by [LostTarget.id]).
+  final _autoFailoverIds = <String, int>{}, _dnsFailoverIds = <String, int>{}, _fallbackIds = <String, int>{}, _lostIds = <String, int>{};
+
+  // What puts the events of one trouble under its first (`cause`): the failovers of a route in a row (key `''` = Auto's
+  // route move) up to [_seriesWithin] apart, the failure of one node (key: the server) — its first event is the root of the
+  // failover, the fallbacks of the targets on it and the DNS move to another exit node — and the flap guard's `auto/unstable`.
+  final _autoSeries = <String, ({int id, int at})>{};
+  final _nodeIncidents = <String, ({int id, int at})>{};
+  final _unstableIds = <String, ({int id, int until})>{};
+  static const _seriesWithin = Duration(minutes: 10), _incidentWithin = Duration(minutes: 10);
+
+  /// The first event of the failure of [node] still going on, or null.
+  int? _nodeIncident(String node) {
+    final i = _nodeIncidents[node];
+    if (i == null || _nowMs - i.at > _incidentWithin.inMilliseconds || eventBook.byId(i.id) == null) return null;
+    return _rootOf(i.id);
+  }
+
+  /// The `auto/unstable` of route [route] while its hold runs.
+  int? _unstableOf(String route) {
+    final u = _unstableIds[route];
+    return u == null || _nowMs > u.until || eventBook.byId(u.id) == null ? null : _rootOf(u.id);
+  }
+
   /// The rules / apps whose target is lost now, by [LostTarget.id] (told once when it happens, again when it changes or
   /// ends; cleared by a disconnect so the next connect tells them anew). docs/rules.md §0 «Потерянная цель».
   Map<String, LostTarget> _lostTargets = const {};
@@ -454,11 +545,12 @@ class CoreService implements CoreApi {
     if (!silent) {
       for (final l in now.values) {
         if (_lostTargets[l.id]?.state == l.state) continue;
-        eventBook.add('rules', 'targetLost', 'warn', data: l.toJson());
+        _lostIds[l.id] = eventBook.add('rules', 'targetLost', 'warn', data: l.toJson());
       }
       for (final l in _lostTargets.values) {
         if (now.containsKey(l.id) || !info.reached.contains(l.id)) continue;
-        eventBook.add('rules', 'targetFound', 'info', data: {if (l.app) 'app': l.label else 'rule': l.label, 'target': l.target});
+        eventBook.add('rules', 'targetFound', 'info',
+            data: {if (l.app) 'app': l.label else 'rule': l.label, 'target': l.target}, opens: _lostIds.remove(l.id));
       }
     }
     _lostTargets = now;
@@ -479,6 +571,10 @@ class CoreService implements CoreApi {
   /// default on): a live route move made by the user (Manual) closes the main flow's connections of
   /// the route left. Auto's own moves keep their stalled-connection sweep.
   bool closeOnSwitch = true;
+
+  /// Settings → Connection → Detect the network provider (`updateSettings {detectNetProvider}`, default on): the Wi-Fi /
+  /// Ethernet network a switch lands on is asked for its provider (one direct request, `net/switched` `provider`).
+  bool detectNetProvider = true;
   List<DnsEntry> _dnsServers = const [];
   List<DnsEntry> _dnsExtra = const []; // servers a rule names that are not in use: watched, never switched to
   Set<String> _dnsVpn = const {}; // ids of the servers set «via VPN»
@@ -609,6 +705,7 @@ class CoreService implements CoreApi {
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     sentinel.changes.listen((_) {
       _syncNetEvents(); // `net.offline` opened / closed: conn/offline, conn/online
+      _syncNetSwitch(); // the network settled: net/switched
       _changed(); // the network and the core phase are in the status (`context`)
     });
     await store.read(); // a damaged snapshot is recovered (and journaled) now, not at the UI's first request
@@ -709,13 +806,86 @@ class CoreService implements CoreApi {
 
   /// One journal entry; [note] also goes to the raw log first, so the event links to it.
   int _event(String cat, String type, String level, Map<String, dynamic> data,
-      {bool own = false, String? note, String? verdict, Why? why, List<TrailStep>? trail, int? cause}) {
+      {bool own = false, String? note, String? verdict, Why? why, List<TrailStep>? trail, int? cause, Map<String, Object?>? op, int? opens}) {
     if (note != null) logBook.note(level, note);
     return eventBook.add(cat, type, level,
-        data: data, own: own, verdict: verdict, why: why?.toJson(), trail: trail == null ? null : [for (final t in trail) t.toJson()], cause: cause);
+        data: data,
+        own: own,
+        verdict: verdict,
+        why: why?.toJson(),
+        trail: trail == null ? null : [for (final t in trail) t.toJson()],
+        cause: cause,
+        op: op,
+        opens: opens);
   }
 
+  int _opSeq = 0;
+
+  /// A new operation of [kind] (`reconnect`, `connection`, `subUpdate`, …): the events one operation writes share its
+  /// `{id, kind}` (docs/logs.md → «Свёртки»). The id is unique for the life of the journal.
+  Map<String, Object?> _newOp(String kind) => {'id': '$kind-$_nowMs-${++_opSeq}', 'kind': kind};
+
+  /// The operation under way that writes events with no argument of their own: a reconnect of the live connection
+  /// (its `core/sysProxy`, `core/deprecated`, `rules/ruleSetUpdated`), the lists' round (`ruleSets`).
+  Map<String, Object?>? _connectOp, _ruleSetsOp;
+  Map<String, Object?>? get _listsOp => _connectOp ?? _ruleSetsOp;
+
+  /// The user's disconnect a connect within [_userReconnectWithin] turns into a `conn/reconnected` (`reason: user`).
+  ({Map<String, Object?> op, int at})? _userDisconnect;
+  static const _userReconnectWithin = Duration(seconds: 7);
+
   int get _nowMs => _now().millisecondsSinceEpoch;
+
+  // ---- causes (docs/logs.md → «Свёртки»: an event under a root is its consequence, only the root notifies) ----
+
+  /// The root [id] is under: its own `cause` when it has one, else itself (the journal keeps one level).
+  int _rootOf(int id) => (eventBook.byId(id)?['cause'] as num?)?.toInt() ?? id;
+
+  /// The `site/*` event of [dest] (`host:port`) a `conn/failing` of the same address is the consequence of.
+  int? _siteEventOf(String dest) {
+    final a = eventBook.recent('site', 'unreachable', {'dest': dest}, siteDeadIgnore);
+    final b = eventBook.recent('site', 'blocked', {'dest': dest}, siteDeadIgnore);
+    final id = [a?['id'], b?['id']].whereType<int>().fold<int?>(null, (m, i) => m == null || i > m ? i : m);
+    return id == null ? null : _rootOf(id);
+  }
+
+  // ---- net/switched: the network the platform reports settled on another one ----
+
+  late final _netSwitches = NetSwitchTracker(lookup: () => directIsp(), providerEnabled: () => detectNetProvider);
+  var _netStable = true;
+  var _netBaseline = false; // the first network was told to the tracker as settled (it is not a switch)
+  ({int id, int epoch, int at})? _netSwitch;
+
+  /// The `net/switched` event the events of the window after the switch are the consequence of: written less than
+  /// [ContextTracker.oldConnTail] ago, and the network has not moved since.
+  int? _netCause() {
+    final s = _netSwitch;
+    if (s == null || s.epoch != sentinel.context.netEpoch || _nowMs - s.at > sentinel.context.oldConnTail.inMilliseconds) return null;
+    return eventBook.byId(s.id) == null ? null : s.id;
+  }
+
+  /// The Sentinel's context became stable again after a disturbance: the tracker says whether the network switched.
+  void _syncNetSwitch() {
+    final stable = sentinel.context.stable;
+    if (stable == _netStable) return;
+    _netStable = stable;
+    if (stable) unawaited(_netSettled());
+  }
+
+  Future<void> _netSettled() async {
+    final epoch = sentinel.context.netEpoch;
+    try {
+      // told at once (the events of the gap get its cause); the new network's provider joins when the lookup returns
+      final sw = _netSwitches.onSettled();
+      if (sw == null || _disposed) return;
+      final id = eventBook.add('net', 'switched', 'info', data: sw.data);
+      _netSwitch = (id: id, epoch: epoch, at: _nowMs);
+      final full = await sw.completed;
+      if (full != null && !_disposed) eventBook.update(id, data: full);
+    } catch (e) {
+      logBook.note('warn', 'net: the network switch could not be told: $e');
+    }
+  }
 
   // ---- the detectors that go through the Sentinel (docs/failures.md → Перенос детекторов) ----
 
@@ -1085,6 +1255,9 @@ class CoreService implements CoreApi {
             return m != null && cat == 'site' && m.kind == type && eventBook.byId(m.eventId) != null ? m.eventId : null;
           },
           kindFor: (kind, e) => wrote = pick(kind, e),
+          // a `conn/failing` of an address a `site/*` was written for is its consequence; a confirmed failure is never put
+          // under a network switch (net/switched does not notify; the Sentinel already waited for the network to settle)
+          causeFor: (cat, type, kind, d) => cat == 'conn' ? _siteEventOf(dest) : null,
           dataFor: (kind, e) {
             final k = pick(kind, e);
             return k == null || k.$1 == 'conn' ? connData(e) : siteData(e, k.$2);
@@ -1273,10 +1446,11 @@ class CoreService implements CoreApi {
   /// A TCP connection arrived through the TUN again: the suspicion under way is a blip; a standing one closes
   /// and `core/tunTcpBack` says so.
   void _tunBack(Map<String, dynamic> d) {
-    final stood = sentinel.roots.byKey('tun.tcpDead') != null;
+    final root = sentinel.roots.byKey('tun.tcpDead');
     sentinel.recovered('tun.tcpDead');
-    if (stood) {
-      _event('core', 'tunTcpBack', 'info', d, note: 'TUN (${d['stack']}): TCP reaches sing-box again after ${((d['deadMs'] as int) / 1000).round()} s');
+    if (root != null) {
+      _event('core', 'tunTcpBack', 'info', d,
+          note: 'TUN (${d['stack']}): TCP reaches sing-box again after ${((d['deadMs'] as int) / 1000).round()} s', opens: root.eventId);
     }
   }
 
@@ -1287,10 +1461,10 @@ class CoreService implements CoreApi {
     try {
       final port = _sysPort ?? _mixedPort; // with a password on the user port: the open sys-in
       final w = await sysProxy.enable(port);
-      if (sysProxy.isSet) _event('core', 'sysProxy', 'info', {'on': true}, own: own, note: 'System proxy on 127.0.0.1:$port');
+      if (sysProxy.isSet) _event('core', 'sysProxy', 'info', {'on': true}, own: own, note: 'System proxy on 127.0.0.1:$port', op: _connectOp);
       return w; // not set (no system proxy on this platform): the warning says so
     } catch (e) {
-      _event('core', 'sysProxy', 'warn', {'on': true, 'error': '$e'}, own: own, note: 'System proxy not set: $e');
+      _event('core', 'sysProxy', 'warn', {'on': true, 'error': '$e'}, own: own, note: 'System proxy not set: $e', op: _connectOp);
       rethrow;
     }
   }
@@ -1300,10 +1474,10 @@ class CoreService implements CoreApi {
     try {
       await sysProxy.restore();
     } catch (e) {
-      _event('core', 'sysProxy', 'warn', {'on': false, 'by': ?by, 'error': '$e'}, own: own, note: 'System proxy not restored: $e');
+      _event('core', 'sysProxy', 'warn', {'on': false, 'by': ?by, 'error': '$e'}, own: own, note: 'System proxy not restored: $e', op: _connectOp);
       rethrow;
     }
-    if (was) _event('core', 'sysProxy', 'info', {'on': false, 'by': ?by}, own: own, note: 'System proxy back off');
+    if (was) _event('core', 'sysProxy', 'info', {'on': false, 'by': ?by}, own: own, note: 'System proxy back off', op: _connectOp);
   }
 
   /// Auto in the core while connected (auto.dart). A move to another route or server
@@ -1362,10 +1536,36 @@ class CoreService implements CoreApi {
     }, onError: (Object e) => runner.note('auto: connection events stopped: $e'));
     auto.switches.listen((s) {
       runner.note(s.isRoute ? 'auto: ${s.from} → ${s.to} (${s.reason})' : 'auto: ${s.route}: server ${s.from} → ${s.to} (${s.reason})');
+      final entry = s.route ?? s.from; // the route (id) the move is about: the one a server moves in, the one left
       if (s.reason == 'fastest') {
-        eventBook.add('auto', 'fastest', 'info', data: {'route': s.route, 'from': s.from, 'to': s.to});
+        // ×N per route: the later moves are counted on the first (its `from` stays, `to` is where it is now)
+        final prev = eventBook.recent('auto', 'fastest', {'route': s.route}, const Duration(hours: 1));
+        if (prev != null) {
+          final d = prev['data'] as Map<String, dynamic>;
+          eventBook.repeated(prev['id'] as int, data: {'route': s.route, 'from': d['from'] ?? s.from, 'to': s.to}, level: 'info', cause: (prev['cause'] as num?)?.toInt());
+        } else {
+          eventBook.add('auto', 'fastest', 'info', data: {'route': s.route, 'from': s.from, 'to': s.to}, cause: _netCause());
+        }
       } else {
-        eventBook.add('auto', 'switched', 'info', data: {'route': ?s.route, 'from': s.from, 'to': s.to, 'reason': s.reason});
+        // a move back closes the failover of the same route (or, for a route move, the same Auto)
+        final key = s.route ?? '';
+        final failover = s.reason == 'failover';
+        final series = _autoSeries[key];
+        final inSeries = failover && series != null && _nowMs - series.at <= _seriesWithin.inMilliseconds && eventBook.byId(series.id) != null;
+        final cause = failover || s.reason == 'back'
+            ? ((inSeries ? _rootOf(series.id) : null) ?? _unstableOf(entry) ?? (failover && s.route != null ? _nodeIncident(s.from) : null) ?? _netCause())
+            : null;
+        final id = eventBook.add('auto', 'switched', 'info',
+            data: {'route': ?s.route, 'from': s.from, 'to': s.to, 'reason': s.reason},
+            opens: s.reason == 'back' ? _autoFailoverIds.remove(key) : null,
+            cause: s.reason == 'back' ? null : cause);
+        if (failover) {
+          _autoFailoverIds[key] = id;
+          _autoSeries[key] = (id: cause ?? id, at: _nowMs);
+          if (s.route != null) _nodeIncidents[s.from] = (id: cause ?? id, at: _nowMs);
+        } else if (s.reason == 'back') {
+          _autoSeries.remove(key); // the trouble is over
+        }
       }
       unawaited(_dns?.nodeChanged()); // another node: its stored DNS verdicts apply (no-op when the identity did not change)
     });
@@ -1420,7 +1620,17 @@ class CoreService implements CoreApi {
       level: Level.route,
       event: SuspicionEvent('auto', 'unstable', level: 'warn'),
     ));
-    if (v.kind == VerdictKind.confirmed) sentinel.closeRoot(key, reason: 'reported');
+    if (v.kind == VerdictKind.confirmed) {
+      sentinel.closeRoot(key, reason: 'reported');
+      final id = v.eventId;
+      if (id != null) {
+        _unstableIds[u.id] = (id: id, until: _nowMs + u.holdMs);
+        // the move off the route came first (Auto emits the drop, then moves): it is under the announcement
+        final moved = _autoFailoverIds[u.id] ?? _autoFailoverIds[''];
+        final e = moved == null ? null : eventBook.byId(moved);
+        if (e != null && e['cause'] == null && (e['at'] as int) >= u.at - 5000) eventBook.update(moved!, cause: id);
+      }
+    }
   }
 
   /// `conn/lost`: no route answers. A suspicion: it is a consequence of `net.offline` when the direct path is
@@ -1447,9 +1657,9 @@ class CoreService implements CoreApi {
   }
 
   void routesRestored(AutoNet n) {
-    final stood = sentinel.roots.byKey('conn.lost') != null;
+    final root = sentinel.roots.byKey('conn.lost');
     sentinel.recovered('conn.lost');
-    if (stood) eventBook.add('conn', 'restored', 'info', data: {'downMs': ?n.downMs});
+    if (root != null) eventBook.add('conn', 'restored', 'info', data: {'downMs': ?n.downMs}, opens: root.eventId);
   }
 
   // `conn/offline` / `conn/online`: written from the Sentinel's `net.offline` root, so the OS, the platform and
@@ -1479,7 +1689,7 @@ class CoreService implements CoreApi {
       _netRoot = null;
       final downMs = _nowMs - mine.since.millisecondsSinceEpoch;
       if (_netStanding) {
-        _event('conn', 'online', 'info', {'downMs': downMs});
+        _event('conn', 'online', 'info', {'downMs': downMs, 'source': mine.subject['source']}, opens: mine.eventId);
       } else {
         final id = _event('conn', 'offline', 'info', {'downMs': downMs, 'source': mine.subject['source']},
             verdict: 'blip',
@@ -1566,9 +1776,17 @@ class CoreService implements CoreApi {
         'target': c.target,
       };
       if (c.back) {
-        eventBook.add('rules', 'targetBack', 'info', data: data);
+        eventBook.add('rules', 'targetBack', 'info', data: data, opens: _fallbackIds.remove(c.target));
       } else {
-        eventBook.add('rules', 'fallback', 'warn', data: {...data, 'to': c.to});
+        // under the loss of the same target, else under the failure of the node the target is (an incident); never under a
+        // network switch: net/switched does not notify, a failure that stands after the switch must
+        final lost = _lostTargets.values.where((l) => l.target == c.target).map((l) => _lostIds[l.id]).whereType<int>().firstOrNull;
+        final node = c.target.startsWith('node:') ? c.target.substring(5) : null;
+        // an incident whose root is a network switch (its failover was written under it) is not a root for a fallback
+        final inc = node == null ? null : _nodeIncident(node);
+        final cause = lost ?? (inc == null || eventBook.byId(inc)?['cat'] == 'net' ? null : inc);
+        final id = _fallbackIds[c.target] = eventBook.add('rules', 'fallback', 'warn', data: {...data, 'to': c.to}, cause: cause);
+        if (cause == null && node != null) _nodeIncidents[node] = (id: id, at: _nowMs);
       }
     });
     fb.start();
@@ -1613,14 +1831,24 @@ class CoreService implements CoreApi {
         flagWait: dnsFlagWait,
         flagPoll: dnsFlagPoll);
     if (off.isNotEmpty) logBook.note('info', 'dns: flags off again after the restart: ${off.join(', ')}');
-    dns.switches.listen((s) => _event('dns', 'switched', 'info', {
-          'side': s.side,
-          'from': s.from,
-          'to': s.to,
-          'fromProvider': s.fromProvider,
-          'toProvider': s.toProvider,
-          'reason': s.reason,
-        }, own: s.reason == 'off'));
+    dns.switches.listen((s) {
+      // a move back closes the failover of the same side
+      final id = _event('dns', 'switched', 'info', {
+        'side': s.side,
+        'from': s.from,
+        'to': s.to,
+        'fromProvider': s.fromProvider,
+        'toProvider': s.toProvider,
+        'reason': s.reason,
+      },
+          own: s.reason == 'off',
+          opens: s.reason == 'back' ? _dnsFailoverIds.remove(s.side) : null,
+          // another exit node is the failure of the node left (its incident), a failover in the window of a switch is the switch's
+          cause: s.reason == 'node'
+              ? (_nodeIncidents.values.where((i) => _nowMs - i.at <= 120000).map((i) => i.id).firstOrNull ?? _netCause())
+              : s.reason == 'failover' ? _netCause() : null);
+      if (s.reason == 'failover') _dnsFailoverIds[s.side] = id;
+    });
     dns.start();
   }
 
@@ -1761,6 +1989,7 @@ class CoreService implements CoreApi {
     final id = _event('core', 'crashed', 'error', {'code': code},
         verdict: 'confirmed', why: Why('core.exit', {'code': code}), trail: [TrailStep('core.exit', Outcome.fail, _nowMs, {'code': code})]);
     _crashRoot = sentinel.openRoot(kind: 'core.crashed', subject: const {'core': 'sing-box'}, scope: Scope.none, eventId: id, session: false);
+    _restartFailedId = null; // the tries of this crash are one event
     if (_now().difference(_upSince) > const Duration(minutes: 1)) _attempt = 0;
     _downSince = null;
     _released = false;
@@ -1806,15 +2035,23 @@ class CoreService implements CoreApi {
           sentinel.context.started();
         } catch (e) {
           runner.note('restart $_attempt failed: $e');
-          // the journal gets the first ones only: a dead server retried every 30 s would fill it
-          if (_attempt <= _backoff.length) {
-            // our own restart that failed, after the crash: a consequence of it (cause = the crash event)
-            final crash = _crashRoot;
-            _event('core', 'restartFailed', 'info', {'attempt': _attempt, 'error': '$e'},
+          // every try is told ("Never hide problems"): the first one writes the event, the next ones are repeats on it
+          // (`data.repeat`, ×N); our own restart that failed, after the crash, is a consequence of it (cause = the crash event)
+          final crash = _crashRoot;
+          final why = Why('core.crashed', {'attempt': _attempt});
+          final trail = [TrailStep('restart.failed', Outcome.fail, _nowMs, {'attempt': _attempt, 'reason': 'recover'})];
+          final prev = _restartFailedId;
+          if (prev != null && eventBook.byId(prev) != null) {
+            eventBook.repeated(prev,
+                data: {'attempt': _attempt, 'error': '$e'},
+                level: 'error',
                 verdict: 'consequence',
-                why: Why('core.crashed', {'attempt': _attempt}),
-                trail: [TrailStep('restart.failed', Outcome.fail, _nowMs, {'attempt': _attempt, 'reason': 'recover'})],
+                why: why.toJson(),
+                trail: [for (final t in trail) t.toJson()],
                 cause: crash?.eventId);
+          } else {
+            _restartFailedId = _event('core', 'restartFailed', 'error', {'attempt': _attempt, 'error': '$e'},
+                verdict: 'consequence', why: why, trail: trail, cause: crash?.eventId);
           }
           return false;
         }
@@ -1826,9 +2063,11 @@ class CoreService implements CoreApi {
         final downMs = _now().difference(crashed).inMilliseconds;
         _downSince = null;
         _released = false;
+        final crashId = _crashRoot?.eventId;
         _closeCrashRoot('restarted');
+        _restartFailedId = null;
         _event('core', 'restarted', 'info', {'attempt': _attempt, if (wasDown) 'downMs': downMs},
-            note: 'sing-box started again (attempt $_attempt)');
+            note: 'sing-box started again (attempt $_attempt)', opens: crashId);
         if (_sysWanted && !sysProxy.isSet) {
           // it was taken off while down (or released by the user): the connection is back in full
           try {
@@ -1890,6 +2129,7 @@ class CoreService implements CoreApi {
   }
 
   Root? _crashRoot;
+  int? _restartFailedId; // the `core/restartFailed` event of the crash under way: the next tries repeat on it
 
   void _closeCrashRoot(String reason) {
     final r = _crashRoot;
@@ -2160,24 +2400,60 @@ class CoreService implements CoreApi {
   @override
   Future<Map<String, dynamic>> fetchSource(Map<String, dynamic> body) async {
     final s = ((body['source'] as Map?) ?? const {}).cast<String, dynamic>();
-    return updater.guard(body['sid'] as String?, () async {
-      final r = await updateSubscription(
-        s,
-        hwid: s['hwid'] == true ? await _hwid : null,
-        svc: svcFetch,
-        sid: body['sid'] as String?,
-        rediscover: body['rediscover'] == true,
-        onDiverged: _subDiverged,
-      );
-      if (r['stale'] case final Map stale) _subStale(stale.cast<String, dynamic>());
-      final nodes = (r['patch'] as Map?)?['nodes'];
-      if (nodes is List) {
-        _warmNodes(nodes, 'subscription update');
-        final sid = body['sid'];
-        if (sid is String) _exitSourceRefreshed(sid, nodes);
+    final sid = body['sid'] as String?;
+    // the app's request carries no name (a fixed set of fields): the stored copy of the source has it
+    final given0 = s['name'] ?? body['name'];
+    Object? stored;
+    if (given0 == null && sid != null) stored = (await store.source(sid))?['name'];
+    final name = '${given0 ?? stored ?? sid ?? ''}';
+    // the user's operation (the app's "update all" names its own in the body), else this source's own
+    final given = body['op'];
+    final op = given is Map && given['id'] is String && given['kind'] is String ? {'id': given['id'], 'kind': given['kind']} : _newOp('subUpdate');
+    final r = await updater.guard<Map<String, dynamic>?>(sid, () async {
+      try {
+        final r = await updateSubscription(
+          s,
+          hwid: s['hwid'] == true ? await _hwid : null,
+          svc: svcFetch,
+          sid: sid,
+          rediscover: body['rediscover'] == true,
+          onDiverged: _subDiverged,
+        );
+        if (r['stale'] case final Map stale) _subStale(stale.cast<String, dynamic>());
+        final nodes = (r['patch'] as Map?)?['nodes'];
+        if (nodes is List) {
+          _warmNodes(nodes, 'subscription update');
+          if (sid != null) _exitSourceRefreshed(sid, nodes);
+        }
+        if (sid != null) {
+          _subFetched(sid);
+          // the user waits: written at once, whatever changed, no Sentinel
+          for (final (type, data) in subUpdateEvents(sid, {...s, 'name': name}, (r['patch'] as Map).cast<String, dynamic>(), always: true, inUse: _nodeInUse)) {
+            _subEvent(type, data, own: true, op: op);
+          }
+        }
+        return r;
+      } catch (e) {
+        if (isOwnRestartFailure(e)) return null; // our own restart cut it: not a failure, asked again when settled
+        if (sid != null) {
+          final f = e is SubscriptionFetchException ? e.failure : null;
+          _subEvent('failed', {
+            'source': sid,
+            'name': name,
+            'error': e is FormatException ? e.message : '$e',
+            'code': ?f?.code,
+            'path': ?(f == null || f.paths.isEmpty ? null : [for (final p in f.paths) '${p.id}:${p.code}'].join(' ')),
+          }, own: true, op: op);
+        }
+        rethrow;
       }
-      return r;
     });
+    if (r == null) {
+      if (sid != null) updater.askAgain(sid);
+      // the answer keeps its shape; `waiting` tells the app the load follows when the connection is up again
+      return {'patch': <String, dynamic>{}, 'title': null, 'notModified': true, 'via': null, 'waiting': 'connection'};
+    }
+    return r;
   }
 
   /// A subscription was updated: its nodes are asked where they leave to, whatever the hourly timer says. The mark is
@@ -2215,18 +2491,17 @@ class CoreService implements CoreApi {
   /// `sub/failed` of the timer's update when no path brought the subscription: the Sentinel judges it and the event
   /// is written only for a `confirmed` verdict (as for the rule sets). A failure of our own restart never gets here.
   void _subFailed(SvcFailure f, Map<String, dynamic> data) {
-    final note = 'Subscription ${data['name']} not updated: ${data['error']}';
+    final op = updater.op; // taken now: the verdict comes later
     final s = f.suspicion(why: Why('svc.fetch', {'purpose': 'subscription', 'source': data['source']}));
     if (s == null) {
-      _event('sub', 'failed', 'error', data, note: note);
-      _changed();
+      _subEvent('failed', data, op: op);
       return;
     }
     s.evidence.addAll({'source': data['source'], 'name': data['name']});
+    // every confirmed failure is told: the same error of the source is a repeat on the earlier event (×N), a standing root included
     unawaited(sentinel.suspect(s).then((v) {
-      if (v.kind != VerdictKind.confirmed || v.repeat) return;
-      _event('sub', 'failed', 'error', data, note: note, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause);
-      _changed();
+      if (v.kind != VerdictKind.confirmed) return;
+      _subEvent('failed', data, op: op, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause);
     }));
   }
 
@@ -2646,7 +2921,7 @@ class CoreService implements CoreApi {
   Future<(RuleSetFetch, List<String>)> _startSingBox(Map<String, dynamic> plan, {required bool sys, String why = 'connect', bool waitAddresses = true}) async {
     // TUN needs administrator rights: said before anything starts (a connect and a restart alike)
     if (planTun(plan) && !_isElevated()) throw TunNeedsAdmin();
-    final lists = await ruleSets.ensureFor(plan, tunnel: runner.running);
+    final lists = await _inRuleSetsOp(() => ruleSets.ensureFor(plan, tunnel: runner.running));
     final pins = await _pinsFor(plan, why: why, wait: waitAddresses);
     final warnings = <String>[];
     final mixed = (plan['mixedPort'] as num?)?.toInt() ?? 2080;
@@ -2709,7 +2984,13 @@ class CoreService implements CoreApi {
     try {
       for (final w in await runner.api!.deprecatedWarnings()) {
         logBook.note('warn', 'sing-box: $w');
-        if (_deprecatedSeen.add(w)) eventBook.add('core', 'deprecated', 'warn', data: {'text': w});
+        // the same text again in this run is a repeat on its event (×N), not silence; one connect's texts are one operation
+        final seen = _deprecatedIds[w];
+        if (seen != null && eventBook.byId(seen) != null) {
+          eventBook.repeated(seen, data: {'text': w}, level: 'warn');
+        } else {
+          _deprecatedIds[w] = eventBook.add('core', 'deprecated', 'warn', data: {'text': w}, op: _connectOp);
+        }
       }
     } catch (_) {}
     _probe = probe;
@@ -2883,18 +3164,30 @@ class CoreService implements CoreApi {
   /// server's answer that is no rule set is the list's own failure: told at once. `hasCopy`: the list on
   /// disk, from an earlier download, is the one in use. A failure of an own restart never gets here.
   void _ruleSetFailed(RuleSetFailure f) {
-    final data = {'tag': f.tag, 'url': f.url, 'error': f.error, 'hasCopy': f.hasCopy};
+    final data = {'tag': f.tag, 'url': f.url, 'error': f.error, 'hasCopy': f.hasCopy, if (f.hasCopy) 'copyAt': f.copyAt};
     final note = 'Rule set ${f.tag} not downloaded (${f.url}): ${f.error}';
+    final op = _listsOp; // taken now: the verdict comes later, when the round may be over
     final s = f.svc?.suspicion(why: Why('svc.fetch', {'purpose': 'ruleset', 'tag': f.tag}));
     if (s == null) {
-      _event('rules', 'ruleSetFailed', 'warn', data, note: note);
+      _event('rules', 'ruleSetFailed', 'warn', data, note: note, op: op);
       return;
     }
     s.evidence.addAll({'tag': f.tag, 'url': f.url, 'hasCopy': f.hasCopy});
     unawaited(sentinel.suspect(s).then((v) {
       if (v.kind != VerdictKind.confirmed || v.repeat) return;
-      _event('rules', 'ruleSetFailed', 'warn', data, note: note, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause);
+      _event('rules', 'ruleSetFailed', 'warn', data, note: note, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause, op: op);
     }));
+  }
+
+  /// Runs [f] (a round of the lists) as one `ruleSets` operation unless one is under way (or a reconnect, whose op it is).
+  Future<T> _inRuleSetsOp<T>(Future<T> Function() f) async {
+    final mine = _ruleSetsOp == null;
+    if (mine) _ruleSetsOp = _newOp('ruleSets');
+    try {
+      return await f();
+    } finally {
+      if (mine) _ruleSetsOp = null;
+    }
   }
 
   Timer? _listsTimer;
@@ -2933,7 +3226,7 @@ class CoreService implements CoreApi {
   Future<void> _listsRound(int seq, Map<String, dynamic> plan, {required bool refresh}) async {
     if (seq != _connectSeq || !runner.running) return;
     try {
-      final now = await ruleSets.ensureFor(plan, tunnel: true, refresh: refresh);
+      final now = await _inRuleSetsOp(() => ruleSets.ensureFor(plan, tunnel: true, refresh: refresh));
       if (seq != _connectSeq || !runner.running) return;
       if (now.files.keys.any((t) => !_listTags.contains(t))) {
         // only a list that is new to the config needs a restart (its _connect starts the timer again)
@@ -2955,6 +3248,15 @@ class CoreService implements CoreApi {
     // a connect over a running one (a plan change, an own restart): the servers its groups are on stay, only groups with
     // none are checked; a fresh connect checks the group it starts on (the app's `chosen` is a hint, kept only for Manual's pin)
     final continuation = runner.running && _plan != null;
+    final oldPlan = _plan;
+    final startedAt = _nowMs;
+    // a connect within 7 s of the user's own disconnect is the second half of one operation (`conn/reconnected`, `user`)
+    // (kept until a connect writes its event: a superseded connect — a double tap — leaves the window to the next one)
+    final ud = _userDisconnect;
+    final userOp = own && !continuation && ud != null && startedAt - ud.at <= _userReconnectWithin.inMilliseconds ? ud : null;
+    // the core's own reconnect of the live connection (a plan change, the lists, the addresses) is `conn/reconnected`
+    final reconnect = continuation ? (reason == 'reresolve' ? 'reresolve' : (own ? 'settings' : 'lists')) : null;
+    final reconnectOp = reconnect == null ? null : _newOp('reconnect');
     final held = continuation ? _coreServers() : null; // before _stopAuto: the core knows where the groups are
     if (continuation) plan = _keepCoreChoice(plan);
     final seq = _nextSeq();
@@ -2977,6 +3279,7 @@ class CoreService implements CoreApi {
     _changed();
     await _locked(() async {
       if (seq != _connectSeq) return; // a newer connect / disconnect came in
+      _connectOp = reconnectOp; // the events written while the live connection is started again belong to its operation
       try {
         _plan = null;
         final sys = body['systemProxy'] == true;
@@ -3003,7 +3306,23 @@ class CoreService implements CoreApi {
         logBook.note('info', 'Connected: ${plan['kind']}, ${planTun(plan) ? 'TUN (${planTunStack(plan)}), ' : ''}proxy on 127.0.0.1:$_mixedPort${_sysWanted ? ', system proxy on' : ''}');
         if (_warning != null) logBook.note('warn', _warning!);
         _refreshLists(seq, plan, lists);
-        eventBook.add('conn', 'connected', 'info', own: own, data: _connectedData(plan));
+        final tookMs = _nowMs - startedAt;
+        if (reconnect != null) {
+          // what the plan changed (settings only): the mode, the routing, the entry
+          final changed = <String, Object?>{
+            if (oldPlan != null && planTun(oldPlan) != planTun(plan)) 'mode': {'from': planTun(oldPlan) ? 'tun' : 'proxy', 'to': planTun(plan) ? 'tun' : 'proxy'},
+            if (oldPlan != null && (oldPlan['global'] == true) != (plan['global'] == true))
+              'route': {'from': oldPlan['global'] == true ? 'global' : 'rules', 'to': plan['global'] == true ? 'global' : 'rules'},
+          };
+          eventBook.add('conn', 'reconnected', 'info',
+              own: own, op: reconnectOp, cause: _netCause(), data: {'reason': reconnect, if (reconnect == 'settings' && changed.isNotEmpty) 'changed': changed, 'tookMs': tookMs});
+        } else if (userOp != null) {
+          _userDisconnect = null; // consumed
+          eventBook.add('conn', 'reconnected', 'info',
+              own: true, op: userOp.op, data: {'reason': 'user', 'tookMs': tookMs, 'downMs': startedAt - userOp.at});
+        } else {
+          eventBook.add('conn', 'connected', 'info', own: own, data: _connectedData(plan));
+        }
       } catch (e) {
         _error = '$e';
         if (!runner.running) sentinel.context.stopped();
@@ -3022,6 +3341,7 @@ class CoreService implements CoreApi {
         }
         rethrow;
       } finally {
+        _connectOp = null;
         _changed();
       }
     });
@@ -3343,7 +3663,7 @@ class CoreService implements CoreApi {
   }
 
   @override
-  Future<Map<String, dynamic>> disconnect() async {
+  Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error}) async {
     final seq = _nextSeq();
     _wakeUp(); // ends the restart's retries
     final was = runner.running || _plan != null || _recovering != null;
@@ -3366,7 +3686,23 @@ class CoreService implements CoreApi {
     unawaited(_tunCheck?.close());
     _tunCheck = null;
     logBook.note('info', 'Disconnected');
-    if (was) eventBook.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'});
+    if (was) {
+      if (error != null) {
+        // the host ended the connection because of an error (a lost Manual pin: `{reason: 'pinLost', pick?, why?}`): not the user's
+        final reason = '${error['reason'] ?? 'down'}';
+        eventBook.add('conn', 'disconnected', 'warn', data: {
+          'by': 'error',
+          'reason': reason,
+          'pick': ?error['pick'],
+          'why': ?error['why'],
+        });
+      } else {
+        // the second half of the user's "disconnect → connect" within 7 s is one `conn/reconnected` with this op
+        final op = _newOp('connection');
+        _userDisconnect = (op: op, at: _nowMs);
+        eventBook.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'}, op: op);
+      }
+    }
     if (_killSwitch && _killOnDisconnect && sysProxy.isSet && (was || _blocking != null)) {
       // kill switch, "also after I disconnect": the proxy stays, nothing gets out
       _blocking ??= {'since': _now().millisecondsSinceEpoch, 'reason': 'disconnect', 'proxy': 'kept'};
@@ -3409,6 +3745,20 @@ class CoreService implements CoreApi {
   Map<String, dynamic> setNetwork(Map<String, dynamic> body) {
     final id = body['id'];
     final epoch = sentinel.context.netEpoch;
+    // the tracker first: the context may settle inside `platform` and ask it whether the network switched
+    final at = body['at'] is num ? DateTime.fromMillisecondsSinceEpoch((body['at'] as num).toInt()) : _now();
+    final type = body['type'] is String ? (body['type'] == 'cellular' ? 'mobile' : body['type'] as String) : null;
+    if (body['connected'] == false) {
+      _netSwitches.onNetwork(null, at);
+    } else if (type != null) {
+      _netSwitches.onNetwork(
+          NetInfo(
+              type: type,
+              id: id is String || id is num ? '$id' : null,
+              operator: body['operator'] is String ? body['operator'] as String : null,
+              metered: body['metered'] is bool ? body['metered'] as bool : null),
+          at);
+    }
     sentinel.context.platform(
       connected: body['connected'] is bool ? body['connected'] as bool : null,
       validated: body['validated'] is bool ? body['validated'] as bool : null,
@@ -3420,6 +3770,10 @@ class CoreService implements CoreApi {
     // another network, or the connection back: what was found out on the old one (a «down» of the probes) is not known
     // of this one, so the direct path is asked at once, connected or not. Not while the platform itself says there is
     // no connection or a portal (nothing to ask).
+    if (!_netBaseline && sentinel.context.stable && body['connected'] != false && type != null) {
+      _netBaseline = true; // the first network of this run: remembered as the one a switch leaves (not itself a switch)
+      unawaited(_netSettled());
+    }
     final n = sentinel.context.network;
     if (sentinel.context.netEpoch != epoch && n.state != NetState.captive && !(n.state == NetState.none && n.source == 'platform')) {
       unawaited(_probeNetwork());
@@ -3600,6 +3954,7 @@ class CoreService implements CoreApi {
         'killWhileClosed': _killWhileClosed,
         'downProxy': _downProxyMode,
         'closeOnSwitch': closeOnSwitch,
+        'detectNetProvider': detectNetProvider,
         'dnsAuto': _dnsAuto,
         'ignoredSites': ignoredSites.hosts.length,
         'screenOn': screenOn,
@@ -3835,21 +4190,36 @@ class CoreService implements CoreApi {
           publicKeys: updatePublicKeys,
           get: updateGet,
           svc: svcFetch,
-          onEvent: (type, level, data) => _event('core', type, level, data),
+          onEvent: _appUpdateEvent,
           onSvcFailed: _updateCheckFailed,
         );
+
+  /// The operation of the app update under way (`appUpdate`): the events of one cycle (offer, download, install or
+  /// failure) share it. It starts with the first of them and ends with the offer the cycle ended on (a failure,
+  /// the install, an empty channel); the next event opens a new one.
+  Map<String, Object?>? _appUpdateOp;
+
+  /// An event of the app updater: `core/<type>` with the cycle's `op`. A failure of the update is `warn` however
+  /// it was found (a scheduled check too), it is the user's to know that the app does not update.
+  void _appUpdateEvent(String type, String level, Map<String, dynamic> data) {
+    final op = _appUpdateOp ??= _newOp('appUpdate');
+    if (type == 'updateFailed' || type == 'updateInstalled' || type == 'updateChannelEmpty') _appUpdateOp = null;
+    _event('core', type, type == 'updateFailed' ? 'warn' : level, data, op: op);
+  }
 
   /// `core/updateFailed` (stage check) of a scheduled check that no path answered: the Sentinel judges it and
   /// the event is written only for a `confirmed` verdict (as `sub/failed`). A failure of our own restart never gets here.
   void _updateCheckFailed(SvcFailure f, Map<String, dynamic> data) {
     final s = f.suspicion(why: Why('svc.fetch', {'purpose': 'appupdate'}));
     if (s == null) {
-      _event('core', 'updateFailed', 'info', data);
+      _appUpdateEvent('updateFailed', 'warn', data);
       return;
     }
+    final op = _appUpdateOp ??= _newOp('appUpdate');
     unawaited(sentinel.suspect(s).then((v) {
       if (v.kind != VerdictKind.confirmed || v.repeat) return;
-      _event('core', 'updateFailed', 'info', data, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause);
+      if (identical(_appUpdateOp, op)) _appUpdateOp = null;
+      _event('core', 'updateFailed', 'warn', data, verdict: 'confirmed', why: v.why, trail: v.trail, cause: v.cause, op: op);
     }));
   }
   bool _updAuto = true;
@@ -3909,6 +4279,7 @@ class CoreService implements CoreApi {
     }
     if (body['screenOn'] is bool) screenOn = body['screenOn'] as bool;
     if (body['closeOnSwitch'] is bool) closeOnSwitch = body['closeOnSwitch'] as bool;
+    if (body['detectNetProvider'] is bool) detectNetProvider = body['detectNetProvider'] as bool;
     if (body.containsKey('autoCheck')) _updAuto = body['autoCheck'] != false;
     if (body.containsKey('channel')) _updChannel = _channelOf(body['channel']);
     if (body.containsKey('autoDownload')) _updAutoDownload = _autoDownloadOf(body['autoDownload']);

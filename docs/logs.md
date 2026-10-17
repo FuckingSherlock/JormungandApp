@@ -92,7 +92,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | событие | когда, уровень | `data` |
 |---|---|---|
 | `conn/connected` | info. Подключились (`own: true` по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, pick?, picks?, mode: 'proxy'\|'tun', route: 'global'\|'rules'}` — `server`: выбранный при подключении сервер группы; `pick`: выбор проверки перед стартом для группы маршрута (у цепочки — вход), нет, если маршрут не проверялся: `{group, mode, tried, answered, chosen, ms, weak, tookMs, found}`; `picks`: все выборы до старта (маршрут первым), если их больше одного или проверялись только цели правил (`core.md` → «Подключение: проверка перед стартом») |
-| `conn/disconnected` | info. `by: 'user'` — по команде (`own: true`, только если было подключено). Потеря Manual-пина сейчас тоже пишется так (неверно; `by: 'error'` — т1) | `{by, reason?}` |
+| `conn/disconnected` | info. `by: 'user'` — по команде (`own: true`, только если было подключено). `by: 'error'` (warn) — отключило не пользователь: `reason: 'pinLost'` (приходит от приложения в `disconnect {error}`), `'down'`. Ручное отключение — `op {kind: connection}` (ручное «отключить → подключить» за ≤ 7 с — `conn/reconnected`) | `{by, reason?, pick?, why?}` |
 | `conn/connectFailed` | error. Подключение не вышло. Manual на сервер или запись, которые пропали / выключены / не поддержаны: `Manual pick "…" is unavailable: …` — через другой сервер не идёт, запущенное завершается этой же ошибкой (`connect-model.md` → Manual на сервер) | `{reason}` |
 | `conn/lost` / `restored` | warn / info. Auto: ни один маршрут не отвечает — корень Sentinel `conn.lost` (`why: routes.silent`, не сессионный); `restored` — `noNet` снова false | `{routes}` + поля Sentinel / `{downMs}` |
 | `conn/offline` / `online` | warn / info. Нет интернета вообще — корень Sentinel `net.offline` (`failures.md` → «Сеть»); закрывает только успешная прямая проба | `{source}` / `{downMs, source}` — `source`: что решило (`platform` / `os` / `probes` / …) |
@@ -103,8 +103,8 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `site/blocked` | warn. Сайт не открывается через сервер, но открывается через другую нашу ноду (кнопка Create rule): разведчик (рабочая нода той же подписки, другой страны), затем ноды других подписок (всего не больше `siteRetry`); где открылся — `via` / `viaServer`, `viaTarget: 'node:…'`, если это нода того же маршрута (цель правила); порядок и память вердикта — `failures.md` | `{host, port?, entry, server, dest, via, viaServer, viaTarget?, rule, process?, app?, repeat?}` — `rule`, `process`, `app`: `core.md` → «`rule` и `process`» |
 | `site/unreachable` | warn. Не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); повторы после вердикта — на событии (`repeat`) без проб | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?, app?}`; `tried` пуст — нет другого рабочего маршрута; без `retries: 'off'` ещё `check` — `{state: 'pending'\|'off'\|'opens'\|'down'\|'failed', at, kind?, via?, ok?, total?, nodes?, error?, manual?}`, внешний чекер check-host.net (`connect-model.md` → «Внешний чекер»): событие меняется на месте (`rev`), тихое, пока нет `opens` |
 
-| `sub/updated` | info. Автообновление по таймеру ядра изменило список серверов (без изменений — события нет); ручное пишет приложение (т1: один автор) | `{source, name, added, removed, total}` |
-| `sub/failed` | error. Автообновление не вышло — через Sentinel (`svc.fetch`), только `confirmed`; только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат — тихий потолок, т1 заменяет счётчиком). Ручное пишет приложение, без вердикта | `{source, name, error}` |
+| `sub/updated` | info. Автообновление по таймеру ядра изменило список серверов (без изменений — события нет); ручное — тоже ядро, `own: true` («Один автор `sub/*`») | `{source, name, added, removed, total, own?}` |
+| `sub/failed` | error. Автообновление не вышло — через Sentinel (`svc.fetch`), только `confirmed`; каждый подтверждённый сбой: пока на карточке та же ошибка — `repeated` на одном событии, другая — новое событие. Ручное — тоже ядро, `own: true`, без Sentinel («Один автор `sub/*`») | `{source, name, error, code?, path?, own}` |
 | `sub/diverged` | warn, без уведомления. Auto: прямая и туннельная копии подписки с разными наборами серверов; три записи подряд при discovery (по одной на UA) — норма. `subscription-parsing.md` → «Download via» | `source`, `name`, `host`, `ua`, `directNodes` / `tunnelNodes`, `onlyDirect` / `onlyTunnel` (≤ 10 имён) и `…Count`, `directStatus` / `tunnelStatus`, `directMs` / `tunnelMs`, `directPath` / `tunnelPath`, `directFresh` / `tunnelFresh` (заголовки свежести обеих копий: `Age`, `Date`, `Last-Modified`, `ETag`, `Cache-Control`, `Expires` — какие были), `used` (`tunnel` / `direct` / `merged`), `why` (`newer: lastModified` / `newer: age` / `unknown`), `usedNodes` |
 | `sub/removed` / `back` | Серверы пропали из подписки / вернулись | `{count, source, name}` |
 | `sub/dead` | Только мокап (серверы подписки не отвечают); ядро и приложение его не пишут | — |
@@ -118,7 +118,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `node/addressMissing` | Имя сервера узла не существует: все ответившие DNS сказали «имени нет» и в перепроверке через минуту — то же (Sentinel, `node.addressMissing`). Одно событие на **имя**; повтор, пока вердикт стоит, — счётчик. Уведомление — только при `inUse`, выключатель `subFailed` | `{host, node, source, nodes, inUse}` — `node`: один из узлов имени, `nodes`: сколько их; `inUse`: узел основного потока |
 | `speed/done` / `failed` | Замер скорости | результат / `{error}` |
 | `core/crashed` | error. sing-box вышел сам (перезапуск идёт в фоне) | `{code}` |
-| `core/restartFailed` | info. Попытка перезапуска не удалась; следствие `core/crashed` (`verdict: consequence`, `cause`). Сейчас только первые `_backoff.length` попыток — тихий потолок, т1 его снимает (и уровень → error) | `{attempt, error}` |
+| `core/restartFailed` | error. Попытка перезапуска не удалась; следствие `core/crashed` (`verdict: consequence`, `cause`). Каждая попытка, повторы — `repeated` на одном событии | `{attempt, error}` |
 | `core/down` | error. Перезапуск не удался за 30 с от падения (`core.md` → «Down») | `{proxy: 'kept'\|'removed'\|'released'}` |
 | `core/restarted` | info. После падения запущен снова | `{attempt, downMs?}` — `downMs` (от падения), только если успел быть down |
 | `core/tunNeedsAdmin` | error. TUN не поднялся: нет прав администратора (проверка до запуска) или sing-box отказал по правам. Вместо `conn/connectFailed`; `own: true` при connect по команде | `{stage: 'check'\|'start', error?}` — `error` только при `start`: слова sing-box |
@@ -273,7 +273,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `conn/connectFailed` | ×N (автоподключение, Retry) | **Retry**; при `pinLost` Choose server; Open settings, если причина в настройках | `connLost` + |
 | `conn/lost` / `restored` | пара; без сети — под `conn/offline` | **Check now** (раунд Auto вне очереди), Open | `connLost` |
 | `conn/offline` / `online` | пара; корень для `conn/lost`, `site/*`, `conn/failing`, `sub/failed`, `ruleSetFailed` | **Network settings** | `connLost` |
-| `net/switched` (новое) | корень всего, что вызвала смена (переподключение, гонки DNS, Auto, сбои в окне смены) | — | журнал: сведения |
+| `net/switched` (новое) | корень сведений в окне смены (переподключение, `dns/switched`, `auto/switched`, `auto/fastest`); подтверждённые сбои (`site/*`, `conn/failing`, `rules/fallback`) под неё не идут — смена не уведомляет, а сбой, устоявший после неё, должен | — | журнал: сведения |
 | `conn/failing` | следствие `site/*` про тот же адрес в том же окне | **Create rule**, Open (приложение в Per-app) | `blocked` |
 | `site/blocked` / `unreachable` | ×N: один сайт из разных приложений — одна строка, приложения внутри | Check with checker, Copy site, **Create rule**, **Ignore site** | `blocked` |
 
@@ -409,7 +409,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 ### Смена сети (`net/switched`)
 
 Решение пользователя 2026-10-17: своё событие и своя категория `net` в фильтре Events (`eventCats`); info, корень
-для всего, что смена вызвала (аудит §1.13).
+для сведений в окне смены (аудит §1.13); подтверждённый сбой — своей строкой, с уведомлением.
 
 - **Когда:** сменился тип сети (Wi-Fi / мобильная / Ethernet) или id сети при том же типе, и новая сеть устоялась
   (`failures.md` → «Смена сети: возмущение, ворота, устойчивость»). Провал с возвратом в ту же сеть — пара

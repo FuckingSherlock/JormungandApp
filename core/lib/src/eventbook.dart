@@ -23,6 +23,10 @@ import 'logbook.dart';
 /// `[{code, params, outcome, at}]`) and `cause` (the id of the root event it is a consequence of).
 /// All four are absent on an event nobody judged, and on every event written before they existed.
 ///
+/// Two more top-level fields, absent when not set: `op` (`{id, kind}`: the operation the event belongs to, events of
+/// one operation share the id) and `opens` (on the closing event of a pair: the id of the event it closes). Both
+/// survive [update] and [repeated].
+///
 /// Kept: the last [maxAge] and at most [cap] events (in memory strictly). With a [file] the
 /// journal is a JSON Lines file written behind the memory: new events are collected and
 /// appended in one write [flushEvery] after the first of them (and by [flush], which the
@@ -58,7 +62,7 @@ class EventBook {
   final int cap;
   final DateTime Function() _clock;
 
-  static const cats = {'conn', 'auto', 'site', 'sub', 'rules', 'dns', 'node', 'speed', 'core', 'user'};
+  static const cats = {'conn', 'net', 'auto', 'site', 'sub', 'rules', 'dns', 'node', 'speed', 'core', 'user'};
   static const levels = {'info', 'warn', 'error'};
 
   /// What the Sentinel can say of a failure it looked into (docs/failures.md → Вердикты).
@@ -139,7 +143,9 @@ class EventBook {
       String? verdict,
       Map<String, dynamic>? why,
       List<Map<String, dynamic>>? trail,
-      int? cause}) {
+      int? cause,
+      Map<String, Object?>? op,
+      int? opens}) {
     load();
     final n = link ? log?.last : null;
     final e = <String, dynamic>{
@@ -155,6 +161,8 @@ class EventBook {
       'why': ?why,
       'trail': ?trail,
       'cause': ?cause,
+      'op': ?op,
+      'opens': ?opens,
       'data': data,
     };
     _events.add(e);

@@ -89,6 +89,66 @@ Future<Map<String, dynamic>> checkExitIp(
   }
 }
 
+/// Services of [exitProbes] that also say who owns the address (the ISP / organisation).
+const _orgProbeNames = {'ipwho.is', 'ipinfo.io', 'ip-api.com'};
+
+/// The machine's own public IP and its ISP, asked strictly directly (never through the tunnel).
+/// The services that know the organisation go at once; the first answer with an org wins. When
+/// none has one, an IP-only answer comes back with a null org; null when nobody answers within
+/// [timeout]. [probes] replaces the default set (tests).
+Future<({String ip, String? org})?> directIsp({
+  Duration timeout = const Duration(seconds: 7),
+  List<ExitProbe>? probes,
+}) async {
+  final list = probes ?? [for (final p in exitProbes) if (_orgProbeNames.contains(p.name)) p];
+  if (list.isEmpty) return null;
+  final client = HttpClient()
+    ..findProxy = ((_) => 'DIRECT')
+    ..connectionTimeout = timeout;
+  final abort = Completer<void>();
+  final done = Completer<({String ip, String? org})?>();
+  String? ipOnly;
+  var left = list.length;
+
+  void finish() {
+    if (done.isCompleted) return;
+    final ip = ipOnly;
+    done.complete(ip == null ? null : (ip: ip, org: null));
+  }
+
+  Future<String> get(Uri uri, Future<void> _) async {
+    final req = await client.getUrl(uri);
+    final res = await req.close();
+    if (res.statusCode != 200) {
+      await res.drain<void>();
+      throw HttpException('HTTP ${res.statusCode}', uri: uri);
+    }
+    return const Utf8Decoder(allowMalformed: true).bind(res).join();
+  }
+
+  final deadline = Timer(timeout, finish);
+  for (final p in list) {
+    _ask(get, abort.future, p, timeout).then((r) {
+      final ip = r['ip'] as String;
+      final org = r['org'] as String?;
+      if (org == null) {
+        ipOnly ??= ip;
+      } else if (!done.isCompleted) {
+        done.complete((ip: ip, org: org));
+      }
+    }, onError: (Object _) {}).whenComplete(() {
+      if (--left == 0) finish();
+    });
+  }
+  try {
+    return await done.future;
+  } finally {
+    deadline.cancel();
+    abort.complete();
+    client.close(force: true);
+  }
+}
+
 /// [checkExitIp] pinned to one node: asked through the probe inbound's rule of the outbound [tag] (probe.dart
 /// [probeGet]), so the answer is that node's exit by construction, whatever the main flow or the user's rules do.
 /// A pinned check is system traffic: it is never subject to the user's rules.

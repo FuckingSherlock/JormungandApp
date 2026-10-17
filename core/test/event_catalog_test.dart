@@ -14,7 +14,10 @@ import 'package:test/test.dart';
 /// The catalog types the app has no words for yet (`typeLabel` in app/lib/core/event_text.dart):
 /// a debt for the Flutter stage (label + ARB en / ru + the sentence of the event), not a state to
 /// keep. A type that gets its label must leave this list (the test says so).
-const pendingLabels = <String>{};
+const pendingLabels = <String>{
+  // t1 core stage: the app reads the new types in its own stage (.claude_states/t1_core_plan.md)
+  'conn/reconnected', 'net/switched',
+};
 
 /// Types in the catalog that no code of this repository writes: the mockup writes them.
 const mockupOnly = <String>{'sub/dead'};
@@ -25,8 +28,6 @@ const mockupOnly = <String>{'sub/dead'};
 const dynamicSites = <String, String>{
   // the snapshot store's recovery notes (state.dart `_report('stateRestored' | 'stateLost')`)
   'service.dart|_event|core|type': 'state.dart _report(…) and appupdate.dart _event(…): category core',
-  // the subscription updater's `onEvent('updated' | 'failed', …)` (updater.dart)
-  'service.dart|_event|sub|type': 'updater.dart onEvent(…): category sub',
   // what the app / the page posts (POST /api/events): validated at run time (EventBook.cats, level, shape)
   'service.dart|eventBook.add|cat|type': 'postEvent: whatever the UI posted',
 };
@@ -116,6 +117,40 @@ void main() {
       expect(gone, isEmpty, reason: 'not in eventCats any more: remove from `pendingLabels`: ${gone.join(', ')}');
     });
 
+    test('t1 types are in the catalog: conn/reconnected, net/switched (category net after conn)', () {
+      expect(catalog, containsAll(['conn/reconnected', 'net/switched']));
+      final cats = [for (final (c, _) in eventCats) c];
+      expect(cats.indexOf('net'), cats.indexOf('conn') + 1);
+    });
+
+    test('every warn / error type is either a notification kind or journalOnly (a silent gap is a decision)', () {
+      final found = _coreEmits(coreSrc);
+      final missing = <String>[];
+      found.levelsOf.forEach((k, lv) {
+        final key = '${k.$1}/${k.$2}';
+        if (!lv.any((l) => l == 'warn' || l == 'error')) return;
+        if (!catalog.contains(key)) return; // user/* and the like
+        if (!eventNotifKind.containsKey(key) && !journalOnly.containsKey(key)) missing.add(key);
+      });
+      expect(missing, isEmpty,
+          reason: 'A warn / error event with no notification kind (eventNotifKind) and not in journalOnly: '
+              'decide — notify (eventNotifKind) or journal only with a reason (journalOnly)');
+    });
+
+    test('journalOnly: real catalog types, never also a notification kind, each with a reason', () {
+      for (final e in journalOnly.entries) {
+        expect(catalog, contains(e.key), reason: 'stale journalOnly entry');
+        expect(eventNotifKind.containsKey(e.key), isFalse, reason: '${e.key} is both journal only and a notification');
+        expect(e.value.trim(), isNotEmpty, reason: '${e.key} has no reason');
+      }
+      expect(
+          journalOnly.keys,
+          containsAll([
+            'dns/failedOnNode', 'core/deprecated', 'speed/failed', 'core/updateFailed', 'core/updateDeltaFailed',
+            'core/updateChannelEmpty', 'sub/diverged', 'net/switched',
+          ]));
+    });
+
     test('the catalog itself: no repeats, every cat is one the journal accepts', () {
       expect(catalog.length, eventCats.fold(0, (a, c) => a + c.$2.length), reason: 'a type listed twice');
       for (final (cat, _) in eventCats) {
@@ -152,13 +187,17 @@ class _Found {
   /// (cat, type) → where (file:line).
   final pairs = <(String, String), List<String>>{};
 
+  /// (cat, type) → the literal levels it is written with (a level in a variable is not read).
+  final levelsOf = <(String, String), Set<String>>{};
+
   /// `file|call|first|second` of calls whose type or category is a variable.
   final dynamicSites = <String>{};
   int sites = 0;
 
-  void add(String cat, String type, String where) {
+  void add(String cat, String type, String where, [String? level]) {
     sites++;
     (pairs[(cat, type)] ??= []).add(where);
+    if (level != null) (levelsOf[(cat, type)] ??= {}).add(level);
   }
 }
 
@@ -292,21 +331,22 @@ _Found _coreEmits(Directory dir) {
       final first = _literal(a[0]);
       // appupdate.dart: `_event('type', 'level', data)`
       if (implied != null && first != null && a.length > 1 && _levels.contains(_literal(a[1]))) {
-        f.add(implied.$1, first, where);
+        f.add(implied.$1, first, where, _literal(a[1]));
         continue;
       }
       if (a.length < 2) continue;
       final second = _literal(a[1]);
       if (first != null && second != null) {
-        f.add(first, second, where);
+        final lv = a.length > 2 ? _literal(a[2]) : null;
+        f.add(first, second, where, _levels.contains(lv) ? lv : null);
       } else if (first != null && _isIdent(a[1])) {
         final key = '$name|${m[1]}|$first|${a[1]}';
         f.dynamicSites.add(key);
         f.sites++;
         // the (type, level) tuples written in front of the call (`'lost' => ('lost', 'warn')`)
         final win = src.substring((m.start - 600).clamp(0, m.start), m.start);
-        for (final t in RegExp(r"=>\s*\(\s*'([A-Za-z]+)'\s*,\s*'(?:info|warn|error)'\s*\)").allMatches(win)) {
-          f.add(first, t[1]!, where);
+        for (final t in RegExp(r"=>\s*\(\s*'([A-Za-z]+)'\s*,\s*'(info|warn|error)'\s*\)").allMatches(win)) {
+          f.add(first, t[1]!, where, t[2]);
         }
       } else if (_isIdent(a[0]) && _isIdent(a[1])) {
         f.dynamicSites.add('$name|${m[1]}|cat|type');

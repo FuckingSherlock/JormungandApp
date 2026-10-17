@@ -505,7 +505,7 @@ appendTrail)` дополняет событие задним числом, `Even
 | `conn/offline` / `online` | сам корень `net.offline` контекста | — | событие корня пишет сервис по `sentinel.changes`: через `netBlip` — `confirmed` + `attachEvent`; раньше вернулась — `blip` (`info`, `downMs`); `conn/online {downMs}` — только после «стоявшего» `offline` |
 | `core/tunTcpDead` | `tun.tcpDead`, `Scope.none` | `recovery tun.test` (`Level.core`): активное TCP-соединение через TUN (см. «TUN» ниже); нет ответчика — проверок нет | `confirmed` (корень; тест не прошёл, причина в шаге следа), `blip` (тест прошёл или TCP вернулся в окно), `deferred` (`ownReject`) |
 | `core/crashed` | — (факт) | — | `confirmed`, открывает корень `core.crashed` (не сессионный, с `eventId`) |
-| `core/restartFailed` | — (факт) | — | `consequence`, `info`, `cause` = событие падения, `why core.crashed {attempt}` |
+| `core/restartFailed` | — (факт) | — | `consequence`, `error`, `cause` = событие падения, `why core.crashed {attempt}` |
 | `core/restarted` | — | — | без вердикта (это восстановление); закрывает `core.crashed` |
 | `core/down` | корень `core.down` контекста | — | `confirmed`, `attachEvent` к корню; покрывает всё, что идёт через ядро (`Scope.all`) |
 | `auto/unstable` | `auto.unstable\|<route>` | — | `confirmed` (корень закрывается сразу — это объявление, а не стоячий сбой) или `consequence` |

@@ -55,6 +55,7 @@ class ConnCfg with RoundTrip {
     this.tunStack = 'mixed',
     this.ipv6 = false,
     this.closeOnSwitch = true,
+    this.detectNetProvider = true,
   }) : checkers = checkers ?? [...defaultCheckers];
 
   factory ConnCfg.fromJson(Json j) {
@@ -73,6 +74,7 @@ class ConnCfg with RoundTrip {
       tunStack: _get(j, 'tunStack', 'mixed'),
       ipv6: _get(j, 'ipv6', false),
       closeOnSwitch: _get(j, 'closeOnSwitch', true),
+      detectNetProvider: _get(j, 'detectNetProvider', true),
     );
     c.capture(j, _known);
     return c;
@@ -80,7 +82,7 @@ class ConnCfg with RoundTrip {
 
   static const _known = {
     'sysProxy', 'killSwitch', 'killOnDisconnect', 'killWhileClosed', 'downProxy', 'port', 'proxyAuth', 'proxyUser', 'proxyPass', //
-    'testUrl', 'checkers', 'tunStack', 'ipv6', 'closeOnSwitch',
+    'testUrl', 'checkers', 'tunStack', 'ipv6', 'closeOnSwitch', 'detectNetProvider',
   };
 
   bool sysProxy;
@@ -107,6 +109,10 @@ class ConnCfg with RoundTrip {
   /// on by default. Reaches the core through `updateSettings {closeOnSwitch}`.
   bool closeOnSwitch;
 
+  /// Detect the provider of the network (operator / ISP) for `net/switched`; on by default. Reaches the core through
+  /// `updateSettings {detectNetProvider}`.
+  bool detectNetProvider;
+
   Json toJson() => {
         'sysProxy': sysProxy,
         'killSwitch': killSwitch,
@@ -122,6 +128,7 @@ class ConnCfg with RoundTrip {
         'tunStack': tunStack,
         'ipv6': ipv6,
         if (!closeOnSwitch) 'closeOnSwitch': false, // only off is written: the mockup's snapshots do not know the key
+        if (!detectNetProvider) 'detectNetProvider': false,
         ...deepCopy(unknown) as Json,
       };
 }

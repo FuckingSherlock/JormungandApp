@@ -54,7 +54,7 @@ void main() {
     f.toggleType('conn/lost');
     expect(vis(warn), isFalse);
     expect(f.offCats.map((c) => c.$1), ['conn']);
-    expect(f.typesOn(f.offCats.first), 7, reason: 'conn has seven types in the catalog (failing among them)');
+    expect(f.typesOn(f.offCats.first), 8, reason: 'conn has nine types in the catalog (failing among them); lost is off here');
     f.q = 'alph';
     expect(vis(info), isTrue);
     expect(f.count, 2);

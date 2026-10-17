@@ -22,6 +22,8 @@ class EventRecord {
     this.rev = 0,
     this.verdict,
     this.cause,
+    this.op,
+    this.opens,
   });
 
   factory EventRecord.fromJson(Map m) => EventRecord(
@@ -37,6 +39,8 @@ class EventRecord {
     data: m['data'] is Map ? Map<String, dynamic>.from(m['data'] as Map) : <String, dynamic>{},
     verdict: m['verdict'] is String ? m['verdict'] as String : null,
     cause: (m['cause'] as num?)?.toInt(),
+    op: m['op'] is Map ? Map<String, dynamic>.from(m['op'] as Map) : null,
+    opens: (m['opens'] as num?)?.toInt(),
   );
 
   final int id, at;
@@ -56,6 +60,11 @@ class EventRecord {
   /// What the Sentinel found (docs/failures.md): null = not judged; [cause] = the root event of a consequence.
   final String? verdict;
   final int? cause;
+
+  /// The operation the event belongs to (`{id, kind}`) and, on the closing event of a pair, the id of the event it
+  /// closes (eventbook.dart).
+  final Map<String, dynamic>? op;
+  final int? opens;
 
   String get key => '$cat/$type';
   bool get isProblem => level != 'info';
@@ -87,7 +96,8 @@ class EventRecord {
 /// actions) is outside the catalog by design. `sub/dead` is written by the mockup only (a source
 /// that stopped answering, see docs/logs.md).
 const eventCats = <(String, List<String>)>[
-  ('conn', ['connected', 'disconnected', 'connectFailed', 'lost', 'restored', 'offline', 'online', 'failing']),
+  ('conn', ['connected', 'reconnected', 'disconnected', 'connectFailed', 'lost', 'restored', 'offline', 'online', 'failing']),
+  ('net', ['switched']),
   ('auto', ['switched', 'fastest', 'unstable']),
   ('site', ['blocked', 'unreachable']),
   ('sub', ['updated', 'failed', 'removed', 'back', 'dead', 'diverged']),
@@ -125,6 +135,25 @@ const eventNotifKind = <String, String>{
   'rules/targetLost': 'autoSwitch', 'rules/targetFound': 'autoSwitch',
   // the node's server name does not exist: the provider's subscription is wrong
   'node/addressMissing': 'subFailed',
+  // the connection ended by an error / the system proxy failed (eventNotifies narrows both down)
+  'conn/connectFailed': 'connLost', 'conn/disconnected': 'connLost', 'core/tunNeedsAdmin': 'connLost', 'core/sysProxy': 'connLost',
+  'core/stateLost': 'appData', 'core/stateRestored': 'appData',
+  'dns/failed': 'dnsFailed',
+};
+
+/// Warnings and errors that are a journal entry only, never a notification, with the reason. The guard test
+/// (`core/test/event_catalog_test.dart`) checks that every warn / error type of the catalog is either in
+/// [eventNotifKind] or here, so a new problem type must decide on purpose. `net/switched` is info but listed so the
+/// choice is explicit.
+const journalOnly = <String, String>{
+  'dns/failedOnNode': 'a consequence of dns/failed, the node is only named',
+  'core/deprecated': 'a hint about the config, nothing the user can fix right now',
+  'speed/failed': 'the user ran the test and sees the result',
+  'core/updateFailed': 'a background update check; the user is not waiting for it',
+  'core/updateDeltaFailed': 'the full download follows',
+  'core/updateChannelEmpty': 'nothing to update to',
+  'sub/diverged': 'a note about two copies of a subscription',
+  'net/switched': 'the network changed; the journal explains what followed',
 };
 
 /// Settings → Notifications as they start (`notifCfg` of the snapshot, names as in the mockup).
@@ -140,6 +169,8 @@ const notifDefaults = <String, bool>{
   'subFailed': true,
   'ruleSets': true,
   'updateAvailable': true,
+  'appData': true,
+  'dnsFailed': true,
   // not one of the toggles of the three groups: failures while the screen is off notify like the others
   'bgErrors': false,
 };
@@ -157,6 +188,9 @@ bool notifAllows(Object? cfg, String kind) {
 bool eventNotifies(Object? cfg, EventRecord e) {
   final kind = eventNotifKind[e.key];
   if (kind == null || !notifAllows(cfg, kind)) return false;
+  // only a disconnect by an error is news; the system proxy only when it failed
+  if (e.key == 'conn/disconnected' && e.data['by'] != 'error') return false;
+  if (e.key == 'core/sysProxy' && e.data['error'] == null) return false;
   // judged by the Sentinel: only a confirmed root cause notifies (a blip, a consequence, a workaround, an unexplained failure stay
   // in the journal); site/blocked is always a workaround and notifies as before: it offers a rule for the route that opens it
   final v = e.verdict;

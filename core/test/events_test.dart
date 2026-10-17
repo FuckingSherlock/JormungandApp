@@ -447,11 +447,10 @@ void main() {
       expect(ev.every((e) => e['own'] == false && e['log'] != null), isTrue);
     });
 
-    test('the updater tells the first failure only, not every retry; nothing when the servers are the same', () async {
-      final fail = [false];
+    test('the timer tells a change of the servers, not the same list; every failure of a subscription is told, the same error folds into its event (×N), another error is a new one', () async {
       final got = <String>[];
       var runs = 0; // a store of its own each time: a save over a newer timer result keeps the timer's servers
-      Map<String, dynamic> src({Object? lastError, List<String> keys = const ['a', 'b']}) => {
+      Map<String, dynamic> src({List<String> keys = const ['a', 'b']}) => {
             'id': 's1',
             'kind': 'sub',
             'name': 'Sub',
@@ -465,7 +464,6 @@ void main() {
             'offNodes': <String>[],
             'nodes': [for (final k in keys) {'id': k, 'key': k}],
             'gone': <Object>[],
-            'lastError': ?lastError,
           };
       Future<void> run(Map<String, dynamic> s) async {
         final store = SnapshotStore(File(p.join(tmp.path, 'other-state${runs++}.json')));
@@ -474,7 +472,6 @@ void main() {
           store: store,
           clock: () => DateTime.fromMillisecondsSinceEpoch(1000 * 3600 * 1000),
           update: (s, {hwid, svc, sid, rediscover = false, now, onDiverged}) async {
-            if (fail[0]) throw const SocketException('refused');
             return {
               'patch': {
                 'nodes': [for (final k in ['b', 'c']) {'id': k, 'key': k}],
@@ -482,7 +479,7 @@ void main() {
               },
             };
           },
-          onEvent: (type, data) => got.add('$type ${data['added'] ?? data['error']}'),
+          onEvent: (type, data) => got.add('$type ${data['added']}'),
         ).runDue();
       }
 
@@ -490,10 +487,43 @@ void main() {
       expect(got, isEmpty);
       await run(src()); // a, b -> b, c
       expect(got, ['updated 1']);
-      fail[0] = true;
-      await run(src());
-      await run(src(lastError: {'msg': 'refused', 'at': 1})); // the card already shows the error
-      expect(got, ['updated 1', 'failed SocketException: refused']);
+
+      // a failing subscription in the daemon (the Sentinel's and the journal's path): the sink folds, see Service._subEvent
+      Map<String, dynamic> failing(String path) => {
+            'id': 's2',
+            'kind': 'sub',
+            'name': 'S2',
+            'enabled': true,
+            'url': 'http://127.0.0.1:${origin.port}$path',
+            'userAgent': 'Auto',
+            'updateInterval': 3600,
+            'updatedAt': 0,
+            'hwid': false,
+            'filter': '',
+            'offNodes': <String>[],
+            'nodes': <Object>[],
+            'gone': <Object>[],
+          };
+      await d.store.save({
+        'sourcesData': {'s2': failing('/bad')},
+        'sourceOrder': ['s2'],
+      });
+      await d.updater.runDue(); // the timer: the first failure is told
+      var ev = types((await call('GET', '/api/events')).$2);
+      expect([for (final e in ev) '${e['cat']}/${e['type']}/${e['level']}'], ['sub/failed/error']);
+
+      // the app's own try, the same error: a repeat on that event (×2)
+      expect((await call('POST', '/api/sources/fetch', {'sid': 's2', 'source': failing('/bad')})).$1, 500);
+      ev = types((await call('GET', '/api/events')).$2);
+      expect(ev, hasLength(1), reason: 'the same error folds into one event');
+      expect(((ev.single['data'] as Map)['repeat'] as Map)['count'], 2);
+
+      // another error of the same source: a new event, no repeat
+      hit = 404;
+      expect((await call('POST', '/api/sources/fetch', {'sid': 's2', 'source': failing('/gone')})).$1, 500);
+      ev = types((await call('GET', '/api/events')).$2);
+      expect([for (final e in ev) '${e['cat']}/${e['type']}'], ['sub/failed', 'sub/failed']);
+      expect(ev[1]['data'] as Map, isNot(contains('repeat')));
     });
   });
 }

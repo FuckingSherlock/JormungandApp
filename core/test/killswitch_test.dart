@@ -291,13 +291,15 @@ void main() {
         'conn/connected',
         'core/crashed',
         'core/restartFailed',
-        'core/restartFailed',
-        'core/restartFailed',
         'core/down',
         'core/restarted',
       ]);
-      expect([ev[6]['level'], ev[6]['own'], ev[6]['data']], ['error', false, {'proxy': 'kept'}]);
-      expect(ev[7]['data'], {'attempt': 6, 'downMs': r.timers.now.difference(crashAt).inMilliseconds});
+      // the five failed tries are one event: the first writes it, the others are repeats (data.repeat.count, ×5)
+      final restart = ev[3];
+      expect([restart['level'], restart['verdict'], restart['cause'], ((restart['data'] as Map)['repeat'] as Map)['count']],
+          ['error', 'consequence', ev[2]['id'], 5]);
+      expect([ev[4]['level'], ev[4]['own'], ev[4]['data']], ['error', false, {'proxy': 'kept'}]);
+      expect(ev[5]['data'], {'attempt': 6, 'downMs': r.timers.now.difference(crashAt).inMilliseconds});
       expect(ev.sublist(2).every((e) => e['own'] == false && e['log'] is int), isTrue);
     } finally {
       await r.close();

@@ -121,7 +121,9 @@ abstract interface class CoreApi {
   /// runners that cannot adopt answer `{adopted: false}`.
   Future<Map<String, dynamic>> adopt(Map<String, dynamic> body);
 
-  Future<Map<String, dynamic>> disconnect();
+  /// [error]: the host ends the connection because of an error, not the user's command (`{reason: 'pinLost', pick?, why?}`):
+  /// the journal then says `conn/disconnected` `by: 'error'`.
+  Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error});
 
   /// Takes the system proxy off now (down alert, blocked plaque).
   Future<Map<String, dynamic>> releaseSysProxy();
@@ -190,6 +192,8 @@ abstract interface class CoreApi {
   /// event found while it is false is marked `bg: true` in the journal. Never reported = on.
   /// Also `{closeOnSwitch: bool}` (default true): a live route move in Manual (`autoSettings {manual,
   /// entry}`) closes the main flow's open connections of the route left; false = they finish there.
+  /// Also `{detectNetProvider: bool}` (default true): `net/switched` names the Wi-Fi / Ethernet ISP by a direct
+  /// request to the Exit IP services; false = only the network type (and the operator the platform reports).
   void updateSettings(Map<String, dynamic> body);
 
   /// The platform calls it right before it hands the downloaded file to the installer / after the
