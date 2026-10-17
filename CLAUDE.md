@@ -101,7 +101,7 @@ Design rules:
 ## Core
 
 In `core/`: `dart analyze` + `dart test` (sing-box tests run on loopback only; a couple are flaky
-under parallel load — rerun singly before concluding). sing-box binary in `core/tool/bin/` (not in
+under parallel load — rerun singly before concluding; agent-side test rules: `.claude/agent-rules.md`). sing-box binary in `core/tool/bin/` (not in
 git). Live UI: preview_start `jormd` → http://127.0.0.1:7788. After core changes restart the dev jormd
 yourself (standing permission): stop the old `dart … jormd.dart` and its sing-box child, then
 preview_start `jormd`. While the user is testing the live UI, don't drive it with browser tools.
@@ -128,32 +128,41 @@ release signing key) are never written to the repo or read by the agent.
 
 ## Working method (lead + agents)
 
-- The lead plans, talks to the user, keeps the architecture, reviews diffs and grids, commits.
-  Implementation goes to background agents by brief: `coder-fast` (clear UI work), `coder-deep` (core
-  logic, state, tricky bugs, screen ports), `tests` (`.claude/agents/tests.md`; runs, fixes and
-  extends checks), `general-purpose` for mixed jobs.
-- A brief states: goal, files to start from (with line hints), constraints (no commit, never read
-  `main_screen.html`, CSS vars / theme extension only, 320 px / 120 % fit, new strings in English only — see "Translations"),
-  checks to add, docs to update, the exact verify command, "report briefly".
-  Agents already get CLAUDE.md — never write "read CLAUDE.md"; point to doc sections by line range, not whole docs.
-  Report format: ≤ 15 lines — changed (files), checked (commands + result), noticed out of scope; details live in the diff.
-- Parallel agents get told which files the others edit; shared files (`check.mjs`, `04-i18n-ru.js`,
-  ARB files, `i18n_extra.json`, `core_host.dart`, `CLAUDE.md`) — small Edit-tool edits only, re-read
-  the region first, never rewrite.
-- After an agent reports, the lead runs the full checks (`npm run verify`; `dart analyze` / `dart test`
-  for core; `flutter analyze` / `flutter test` for app), looks at the grid, commits, pushes and
-  fast-forwards the default branch. A failing check is investigated (app or check wrong?), not
-  retried until green.
-- Token economy: batch edits, then one verify; grep first, then read only the needed lines; look at
-  the grid, not single screenshots.
-- Agent size: an agent re-reads its whole growing context on every tool call, so cost grows ~quadratically.
-  Split big work into stages of ~40–60 tool calls (core → app → CI), each a fresh agent with a short summary
-  of the previous stage; never one agent for a multi-layer feature.
-- Diagnose + fix in one agent: for a bug with a known search area give `coder-deep` "verify the hypothesis,
-  then fix" instead of an `analyzer` report followed by a coder re-reading the same code. `analyzer` only
-  for real design questions or unfamiliar code.
-- Checks in briefs: the coder runs only the tests of what it touched (+ `analyze`); the full suites and
-  gradle run once, by the lead via the Haiku `test-runner`, before the commit.
+The lead plans, talks to the user, keeps the architecture, writes docs, reviews diffs and shots, commits.
+General routing (own edit / single agent / workflow) is in the global rules and `~/.claude/docs/agent-pipeline.md`;
+below is how it applies here.
+
+- **The lead itself:** `docs/`, state and plan files, `mockup_todo.md`; release notes and `beta.txt` when the lead
+  has the full picture of what went in (otherwise see below); small code edits at a known place (≤ ~2 files,
+  ~30 lines), point edits of shared files (`core_host.dart`, `i18n_extra.json`) between stages. TUN, network
+  limits, killing orphaned sing-box, restarting jormd — the lead's own job, never in a brief.
+- **One agent by hand:**
+  - a bug from `bugs.md` with a known search area → `coder-deep` "verify the hypothesis, then fix" (files are not
+    known up front, so not a workflow; one unit — it may write its own test);
+  - a design question, sing-box internals, Karing reference → `analyzer`;
+  - Raw logs / reports from the phone → `log-analyzer`; `build_apk.ps1`, `build_libbox.ps1`, adb install →
+    `ops-runner`; full suites before a commit → `test-runner`; the Russian pass before a stable → `translator`;
+  - release notes / `beta.txt` when the lead's context lacks part of the period → `coder-fast` from `git log`
+    since the previous release and `archive/done.md`; the lead reports its text as is (one text, see "Git").
+- **Workflow `code-task`:** a feature or plan item whose requirement is settled with the user, whose doc section
+  is already written (that section is `plan`) and whose files are known.
+  - One run per layer: core first, then app once the core API is fixed — this replaces hand-made stages.
+  - `check`: core — `cd core; dart analyze; dart test`; app — `cd app; flutter analyze --no-fatal-infos; flutter test`.
+  - Tiers: Sentinel, Auto, runtime, DNS race, TUN, state machines → `deep`, `review: true`, tests by
+    `test-writer-deep`; plain app UI → `fast` / `lite`, `review: 'auto'`.
+  - Shared files (`i18n_extra.json`, generated ARB, `core_host.dart`) belong to exactly one unit, which also runs
+    `gen_all.mjs`. Files that cannot be split cleanly go into one `fast` / `deep` unit, not out of the workflow.
+  - One unit with known files and risky logic still goes through the workflow (check → fix → review loop).
+- **Never in a workflow:** diagnosis, a requirement still open, phone / TUN checks (the user), APK builds, deploy,
+  visual acceptance (the lead looks at `event_shots` / golden shots after the run).
+- **Briefs:** agents do not see CLAUDE.md. Coders and test-writers get the line "Repo rules: `.claude/agent-rules.md`"
+  (repo layout, frozen `design/`, English-only strings, generators, check commands, fixtures); other agents get
+  only what their job needs. Point to doc sections by line range, not whole docs. Report format: ≤ 15 lines —
+  changed (files), checked (commands + result), noticed out of scope.
+- **Acceptance:** `PASS` / `DONE_UNREVIEWED` → the lead reads a small diff itself, the full core + app suites run
+  once via `test-runner`, then commit, push, fast-forward. `FIX_REMAINS` with an unclear cause → `coder-deep` with
+  the workflow report. A failing check is investigated (code or check wrong?), not retried until green.
+- Token economy: batch edits, then one check; grep first, then read only the needed lines.
 - At most 4 Sonnet agents at once (2 when the 5-hour limit is near its end — a parallel burst ends in several
   agents cut mid-task, and resuming them after the cache expired costs full price); avoid parallel agents in the
   same files. An agent stopped by a limit is resumed with SendMessage (its context survives), not restarted.
@@ -185,7 +194,7 @@ Telegram announcement) starts only when the user explicitly confirms a deploy ("
 takes only the latest version; the same text the lead reports to the user; an exception to "Translations"),
 commits, pushes, fast-forwards the default branch and runs
 `gh workflow run release-android.yml --ref claude/karing-fork-environment-a45c2c -f channel=beta`. Never start it
-without that confirmation; a run with `beta.txt` not updated since the previous beta fails. One text, written once: the lead writes `beta.txt` and reports it to the user as is (or
+without that confirmation; a run with `beta.txt` not updated since the previous beta fails. One text, written once: the lead (or an agent, see "Working method") writes `beta.txt` and the lead reports it to the user as is (or
 writes the chat summary and saves that same text) — never a second, separately composed summary. A stable tag needs `release-notes/X.Y.Z.ru.txt` (everything since
 the previous stable, briefly), written in the same pass as the Russian translation; no `.en.txt` for now.
 
