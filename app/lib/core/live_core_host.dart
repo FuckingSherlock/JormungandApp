@@ -118,6 +118,7 @@ class LiveCoreHost extends CoreHost {
   String? _error;
   VpnDown? _down;
   KillBlock? _blocking;
+  List<({String source, String name, String forWhat})> _subWaits = const [];
   ExitState _exit = const ExitState.checking();
   DnsHealth? _dnsHealth;
   SpeedResult? _lastSpeed;
@@ -399,6 +400,18 @@ class LiveCoreHost extends CoreHost {
             proxy: '${b['proxy'] ?? 'kept'}',
           )
         : null;
+    // the manual updates the core holds back (no network / its own reconnect); no field = nothing waits
+    final sw = st['subWaits'];
+    _subWaits = sw is List
+        ? [
+            for (final w in sw.whereType<Map>())
+              (
+                source: '${w['source'] ?? ''}',
+                name: '${w['name'] ?? ''}',
+                forWhat: '${w['for'] ?? ''}',
+              ),
+          ]
+        : const [];
     final e = st['exit'];
     if (e is! Map) {
       _exit = const ExitState.checking();
@@ -463,8 +476,12 @@ class LiveCoreHost extends CoreHost {
     final e = _exit, d = _down, b = _blocking, r = catalog.coreRoute, h = _dnsHealth;
     return '$_connected|${d?.since}|${d?.proxy}|${b?.since}|${b?.proxy}|${b?.reason}|'
         '${e.checking}|${e.error}|${e.rechecking}|${e.ip}|${e.country}|${e.city}|${e.at?.millisecondsSinceEpoch}|$_error|'
-        '${r?.id}|${r?.server}|${r?.entryServer}|${h?.sig}';
+        '${r?.id}|${r?.server}|${r?.entryServer}|${h?.sig}|'
+        '${_subWaits.map((w) => '${w.source}:${w.forWhat}').join(',')}';
   }
+
+  @override
+  List<({String source, String name, String forWhat})> get subWaits => _subWaits;
 
   /// `sid::nid` -> the server, like `catalog.nodeOfKey` but one map per source, built when the
   /// first key of that source asks (a status carries a key per Auto member).
@@ -879,7 +896,7 @@ class LiveCoreHost extends CoreHost {
   };
 
   @override
-  Future<void> disconnect() async {
+  Future<void> disconnect({Map<String, dynamic>? error}) async {
     if (_disconnecting || !_ready) return;
     _disconnecting = true;
     _planSig = null;
@@ -888,10 +905,11 @@ class LiveCoreHost extends CoreHost {
     _reconnectTimer?.cancel();
     _error = null;
     _notifyNow();
-    _journal('disconnect', {'action': 'disconnect'});
+    // ended by an error: not the user's action, the core writes `conn/disconnected by: error`
+    if (error == null) _journal('disconnect', {'action': 'disconnect'});
     try {
       _applyStatus(
-        Map<String, dynamic>.from(await api.disconnect()),
+        Map<String, dynamic>.from(await api.disconnect(error: error)),
         notify: false,
       );
       // the dock shows the answer of the direct check the core starts itself
@@ -1435,7 +1453,8 @@ class LiveCoreHost extends CoreHost {
     final g = gen;
     final ignored = notif.ignoredSites;
     final closeOnSwitch = catalog.connCfg.closeOnSwitch;
-    final sig = '${g.updates}|${g.updChannel}|${g.updAutoDownload}|$_metered|${ignored.join(',')}|$closeOnSwitch';
+    final detectNetProvider = catalog.connCfg.detectNetProvider;
+    final sig = '${g.updates}|${g.updChannel}|${g.updAutoDownload}|$_metered|${ignored.join(',')}|$closeOnSwitch|$detectNetProvider';
     if (sig == _updSettingsSig) return;
     _updSettingsSig = sig;
     try {
@@ -1446,6 +1465,7 @@ class LiveCoreHost extends CoreHost {
         'metered': _metered,
         'ignoredSites': ignored,
         'closeOnSwitch': closeOnSwitch,
+        'detectNetProvider': detectNetProvider,
       });
     } catch (_) {}
   }
@@ -1714,13 +1734,13 @@ class LiveCoreHost extends CoreHost {
     if (_reconnecting || !_connected || _connecting || _planSig == null) return;
     // Manual on a server is strict: the pick was removed / switched off (a subscription update, an edit) — the connection
     // ends in an error naming it, the tunnel is not moved to another server
-    final lost = catalog.pinLoss();
+    final lost = catalog.pinLossInfo();
     if (lost != null) {
       _reconnecting = true;
       try {
-        await disconnect();
-        _error = lost;
-        _notice(HostNotice('connectFailed', lost));
+        await disconnect(error: {'reason': 'pinLost', 'pick': lost.pick, 'why': lost.why});
+        _error = lost.text;
+        _notice(HostNotice('connectFailed', lost.text));
         _notifyNow();
       } finally {
         _reconnecting = false;
@@ -1805,16 +1825,8 @@ class LiveCoreHost extends CoreHost {
       await _fetchInto(id);
       final s = catalog.sourcesData[id];
       loaded = s != null;
-      if (s != null) {
-        s.unknown.remove('lastError');
-        _journal('updated', {
-          'source': id,
-          'name': s.name,
-          'added': s.nodes.length,
-          'removed': 0,
-          'total': s.nodes.length,
-        }, cat: 'sub');
-      }
+      // `sub/updated` is the core's: it writes it when the fetch answers
+      s?.unknown.remove('lastError');
       return AddSourceResult(AddSourceOutcome.added, name: s?.name ?? shown);
     } catch (e) {
       final s = catalog.sourcesData[id];
@@ -1829,12 +1841,6 @@ class LiveCoreHost extends CoreHost {
           'Could not load $shown: $msg',
           args: [shown, msg],
         ),
-      );
-      _journal(
-        'failed',
-        {'source': id, 'name': shown, 'error': msg},
-        cat: 'sub',
-        level: 'error',
       );
       return AddSourceResult(AddSourceOutcome.failed, name: shown, error: msg);
     } finally {
@@ -1873,6 +1879,8 @@ class LiveCoreHost extends CoreHost {
           k: sent[k],
       },
       'rediscover': rediscover,
+      // for the core's `sub/*` event: a source added a moment ago may not be in its store yet
+      'name': before.name,
     });
     final cur = catalog.sourcesData[sid];
     if (cur == null) return;
@@ -1927,9 +1935,8 @@ class LiveCoreHost extends CoreHost {
     }
     _updating.add(sid);
     _notifyNow();
-    final before = {for (final n in s.nodes) n.id};
-    final gone0 = s.gone.length;
     var ok = false;
+    // the `sub/*` events of this update are the core's (it writes them when the fetch answers)
     try {
       await _fetchInto(sid, rediscover: rediscover);
       final cur = catalog.sourcesData[sid];
@@ -1953,45 +1960,14 @@ class LiveCoreHost extends CoreHost {
           args: [shown, msg],
         ),
       );
-      _journal(
-        'failed',
-        {'source': sid, 'name': shown, 'error': msg},
-        cat: 'sub',
-        level: 'error',
-      );
     } finally {
       _updating.remove(sid);
       catalog.purgeExpiredGone();
       final cur = catalog.sourcesData[sid];
-      if (ok && cur != null) _subResultEvents(cur, before, gone0);
       changed();
       if (ok && cur != null && cur.unknown['testAfterUpdate'] != false) {
         unawaited(_pingNodes(catalog.liveNodes(cur)));
       }
-    }
-  }
-
-  /// The events of a finished update: updated (new / removed servers, total), and the provider
-  /// removing servers or bringing them back (`subResultEvents`).
-  void _subResultEvents(Source s, Set<String> before, int gone0) {
-    final now = {for (final n in s.nodes) n.id};
-    final data = {'source': s.id, 'name': s.name};
-    _journal('updated', {
-      'added': now.difference(before).length,
-      'removed': before.difference(now).length,
-      'total': s.nodes.length,
-      ...data,
-    }, cat: 'sub');
-    final g = s.gone.length;
-    if (g > gone0) {
-      _journal(
-        'removed',
-        {'count': g - gone0, ...data},
-        cat: 'sub',
-        level: 'warn',
-      );
-    } else if (g < gone0) {
-      _journal('back', {'count': gone0 - g, ...data}, cat: 'sub');
     }
   }
 

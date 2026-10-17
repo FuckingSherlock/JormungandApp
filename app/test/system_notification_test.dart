@@ -261,7 +261,7 @@ void main() {
       host.notif.setFlag('connLost', false);
       host.addEvent('conn', 'lost', level: 'warn');
       host.addEvent('conn', 'lost', level: 'warn', own: true);
-      host.addEvent('core', 'stateRestored'); // a kind that never notifies
+      host.addEvent('core', 'deprecated'); // journalOnly: a kind that never notifies
       await settle(tester);
       expect(io.posted, isEmpty);
 

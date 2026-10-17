@@ -13,7 +13,15 @@
    ⚠️ ✅ → рисуются шрифтами Segoe (на Android — цветные), системное уведомление — схемой.
    Т1 — многослойная работа (ядро → приложение → доки): резать на этапы по ~40–60 вызовов, по возможности workflow `code-task`.
 2. **т1, этап ядра — сделан (2026-10-18)** по `.claude_states/t1_core_plan.md`, ревью пройдено, полный прогон ядра зелёный.
-   **Следующий — этап приложения т1** (workflow `code-task`, спецификация `docs/logs.md` «Событие в приложении»). Обязательно в нём:
+   **Следующий — этап приложения т1** (workflow `code-task`, спецификация `docs/logs.md` «Событие в приложении»).
+   **Прогон A сделан (2026-10-17)** по `.claude_states/t1_app_plan.md`: свёртка в `log_view.dart` (`foldEvents(list,
+   {shown, matches})`, поля `EventGroup`; `why`/`trail` — поля верхнего уровня `EventRecord`), хост (свои `sub/*` убраны,
+   `subWaits`, `disconnect(error: pinLost)` через `Catalog.pinLossInfo()`, `detectNetProvider`, `operator` из Kotlin;
+   `cellular` → `mobile` маппит ядро), ~117 английских строк. API и ключи — `.claude_states/t1_app_runA_notes.md`.
+   **Следующий — прогон B (UI)**, план пишется по notes; нарезка под coder-lite. В него же: `logs_controller` перевести на
+   `foldEvents` по всему журналу; `pick` пустой при удалённой записи — брать имя подключённой записи; сверить текст
+   ошибки на карточке с `sub/failed` (ручное обновление: `lastError` ставит приложение); проверка тумблера `appData` в
+   `system_notification_test`. Пункты ниже — исходный список этапа:
    - убрать свои `sub/*` из `_journal` (`live_core_host.dart` ~1810/1833/1956/1979–1994): ядро уже пишет их само — сейчас
      ручное обновление даёт дубли;
    - читать `waiting` в ответе `POST /api/sources/fetch` (свой перезапуск ядра): сейчас приложение видит `notModified` и

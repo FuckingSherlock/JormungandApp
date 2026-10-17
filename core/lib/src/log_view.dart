@@ -24,6 +24,8 @@ class EventRecord {
     this.cause,
     this.op,
     this.opens,
+    this.why,
+    this.trail,
   });
 
   factory EventRecord.fromJson(Map m) => EventRecord(
@@ -41,6 +43,8 @@ class EventRecord {
     cause: (m['cause'] as num?)?.toInt(),
     op: m['op'] is Map ? Map<String, dynamic>.from(m['op'] as Map) : null,
     opens: (m['opens'] as num?)?.toInt(),
+    why: m['why'] is Map ? Map<String, dynamic>.from(m['why'] as Map) : null,
+    trail: m['trail'] is List ? [for (final s in m['trail'] as List) if (s is Map) Map<String, dynamic>.from(s)] : null,
   );
 
   final int id, at;
@@ -66,7 +70,22 @@ class EventRecord {
   final Map<String, dynamic>? op;
   final int? opens;
 
+  /// The reason the Sentinel gave (`{code, params}`) and the checks it ran (`[{code, params, outcome, at}]`); null =
+  /// none (top-level fields of the event, like [verdict]).
+  final Map<String, dynamic>? why;
+  final List<Map<String, dynamic>>? trail;
+
   String get key => '$cat/$type';
+
+  /// The code of [why] (`net.offline`, `core.down` ...), null = no reason.
+  String? get whyCode {
+    final c = why?['code'];
+    return c is String && c.isNotEmpty ? c : null;
+  }
+
+  /// The operation's id and kind (`reconnect`, `subUpdate` ...), null = not part of one.
+  String? get opId => op?['id'] is String ? op!['id'] as String : null;
+  String? get opKind => op?['kind'] is String ? op!['kind'] as String : null;
   bool get isProblem => level != 'info';
 
   /// The times the same thing happened (`data.repeat.at`, the newest 50: eventbook.dart → `repeated`), [at] alone for
@@ -240,48 +259,261 @@ String eventFoldKey(EventRecord e) {
   return '${e.key}|$tail';
 }
 
-/// A row of the Events list: one event, or the same event again within 10 minutes of its last time.
+/// A row of the Events list (docs/logs.md → «Свёртки»). Four mechanisms put events into one row:
+///
+/// - **repeats** ([repeats]): the same event again within 10 minutes of its last time (only events with no `cause`,
+///   `op` or `opens` of their own; the core's own repeats are one event with `data.repeat`, see [EventRecord.times]);
+/// - **consequences** ([related]): events whose `cause` is the row's event (the root);
+/// - **closing** ([closers]): events whose `opens` is the row's event ([closer], [closed]);
+/// - **operation** ([parts]): events with the same `op.id` (the first of them is the [head] of the row).
+///
+/// A row of consequences whose root is not in the journal (`net.captive` is never written, or the root was pruned) has
+/// no [head]: [isGroup], [whyCode] is its heading. [items] is every event of the row, oldest first.
+///
+/// The place of a row in the list is [at]: an anchored row (it has consequences, a closer or operation parts, or it is
+/// a group) stays where it first appeared; a row of plain repeats sits where its last time puts it.
 class EventGroup {
-  EventGroup(EventRecord e) : items = [e], at = e.at, ev = e, level = e.level;
+  EventGroup(EventRecord e)
+      : head = e,
+        whyCode = null,
+        items = [e],
+        repeats = [e],
+        related = [],
+        closers = [],
+        parts = [],
+        at = e.at,
+        level = e.level,
+        lastAt = e.lastAt,
+        opId = e.opId,
+        opKind = e.opKind;
 
+  EventGroup._noRoot(EventRecord e, String code)
+      : head = null,
+        whyCode = code,
+        items = [e],
+        repeats = [],
+        related = [e],
+        closers = [],
+        parts = [],
+        at = e.at,
+        level = e.level,
+        lastAt = e.lastAt,
+        opId = null,
+        opKind = null;
+
+  /// The event the row stands for: the root, the opening event of a pair, the first event of an operation, the first
+  /// of the repeats. Null for a group row ([isGroup]).
+  final EventRecord? head;
+
+  /// A row of consequences without a root event; [whyCode] is the `why.code` they share.
+  bool get isGroup => head == null;
+  final String? whyCode;
+
+  /// Every event of the row, oldest first.
   final List<EventRecord> items;
 
-  /// The last time and the last event of the row.
-  int at;
-  EventRecord ev;
+  /// [head] and its repeats (empty for a group row).
+  final List<EventRecord> repeats;
 
-  /// The worst level among the repeats.
+  /// The consequences (`cause`) of [head]; for a group row all of its events.
+  final List<EventRecord> related;
+
+  /// The events that close a pair (`opens`): of [head] (see [closer]) or of another event of the row (`sub/back` of a
+  /// `sub/removed` inside). May overlap [parts].
+  final List<EventRecord> closers;
+
+  /// The other events of the same operation as [head] (`op.id`), the user's `user/*` that started it among them.
+  final List<EventRecord> parts;
+
+  /// The operation of the row (set when [head] has one): `reconnect`, `subUpdate`, `subUpdateAll`, `ruleSets`,
+  /// `connection`, `appUpdate`.
+  final String? opId, opKind;
+
+  /// The place of the row in the list (see above) and the last time of anything in it ([EventRecord.lastAt]).
+  int at;
+  int lastAt;
+
+  /// The worst level of all the events of the row.
   String level;
+
+  /// For a search: the row is shown because of an event other than [head] (the UI unfolds it).
+  bool hitInside = false;
 
   int get key => items.first.id;
   bool get problem => level != 'info';
 
-  /// How often the row's events happened in all (a repeated event counts its repeats) and the last time of it.
-  int get times => items.fold(0, (n, x) => n + x.times);
-  int get lastAt => items.last.lastAt;
+  /// The event that words the row: the last of the repeats of [head]; the last event of an `appUpdate` operation
+  /// (the status is the last stage); the first event of a group row. [head] and [last] are there for the UI to choose.
+  EventRecord get ev {
+    if (head == null) return related.first;
+    return opKind == 'appUpdate' ? items.last : repeats.last;
+  }
+
+  /// The newest event of the row (a crash chain: its status is that of the last event).
+  EventRecord get last => items.last;
+
+  /// The worst event of the row, the newest on a tie.
+  EventRecord get worst => items.reversed.reduce((a, b) => _rank(b.level) > _rank(a.level) ? b : a);
+
+  /// How often the row's events happened in all (a repeated event counts its repeats): [head]'s repeats; the events of
+  /// a group row.
+  int get times => (head == null ? items : repeats).fold(0, (n, x) => n + x.times);
+
+  /// «+N связанных»: how many consequences, a repeated one counted by its repeats.
+  int get relatedCount => related.fold(0, (n, x) => n + x.times);
+
+  /// The time of the newest consequence (0 = none).
+  int get relatedLastAt => related.isEmpty ? 0 : related.map((x) => x.lastAt).reduce((a, b) => a > b ? a : b);
+
+  /// The event that closed [head], the newest if several; null = not closed (or a group row).
+  EventRecord? get closer {
+    for (var i = closers.length - 1; i >= 0; i--) {
+      final o = closers[i].opens;
+      if (o != null && _isHead(o)) return closers[i];
+    }
+    return null;
+  }
+
+  /// [head] is closed («завершилось»: the UI colours the row «resolved»).
+  bool get closed => closer != null;
+
+  /// How long [head] lasted until [closer], null = not closed.
+  int? get closedAfter => closer == null ? null : closer!.at - head!.at;
+
+  /// Event [id] of this row was closed by another event of it.
+  bool isClosed(int id) => closers.any((c) => c.opens == id);
+
+  /// Whether the row keeps its place (see the class comment).
+  bool get anchored => head == null || related.isNotEmpty || closers.isNotEmpty || parts.isNotEmpty || (opId != null);
+
+  bool _isHead(int id) => repeats.any((r) => r.id == id);
+
+  void _take(EventRecord e) {
+    items.add(e);
+    if (_rank(e.level) > _rank(level)) level = e.level;
+    if (e.lastAt > lastAt) lastAt = e.lastAt;
+  }
+
+  void _repeat(EventRecord e) {
+    if (!anchored) at = e.at;
+    _take(e);
+    repeats.add(e);
+  }
+
+  void _relate(EventRecord e) {
+    _take(e);
+    related.add(e);
+  }
+
+  void _close(EventRecord e) {
+    _take(e);
+    closers.add(e);
+  }
+
+  void _part(EventRecord e) {
+    _take(e);
+    parts.add(e);
+    final o = e.opens;
+    if (o != null && _isHead(o)) closers.add(e);
+  }
 }
 
 int _rank(String l) => l == 'error' ? 2 : l == 'warn' ? 1 : 0;
 
-/// Folds [list] (oldest first) into rows; a repeated row sits where its last time puts it.
-List<EventGroup> foldEvents(Iterable<EventRecord> list) {
-  final groups = <EventGroup>[], last = <String, EventGroup>{};
+/// Folds [list] (oldest first) into rows (see [EventGroup]).
+///
+/// [shown]: whether the filter lets an event stand as a row of its own (type, level, Own, Background). An event the
+/// filter hides never makes a row, but still joins the row of its root / pair / operation when that row exists (the
+/// status of a row stays true under a filter). A consequence whose root is hidden is a row of its own (not a group row:
+/// the root is not missing); so is a closing event whose opening one is hidden or gone.
+/// [matches]: the text search, apart from [shown] on purpose: a row stays when its [EventGroup.head] or any event of it
+/// matches, and [EventGroup.hitInside] says that it was an event other than the head. The caller passes the whole
+/// journal here (`EventFilter.fold` does it); a list already narrowed by the filter folds as before, without the
+/// consequences of a hidden root.
+List<EventGroup> foldEvents(
+  Iterable<EventRecord> list, {
+  bool Function(EventRecord e)? shown,
+  bool Function(EventRecord e)? matches,
+}) {
+  final window = eventRepeatWindow.inMilliseconds;
+  final rows = <EventGroup>[];
+  final plain = <String, EventGroup>{}, byOp = <String, EventGroup>{}, byCode = <String, EventGroup>{};
+  final byId = <int, EventGroup>{};
+  final hidden = <int>{};
   for (final e in list) {
-    final k = eventFoldKey(e), g = last[k];
-    if (g != null && e.at - g.at <= eventRepeatWindow.inMilliseconds) {
-      g.items.add(e);
-      g.at = e.at;
-      g.ev = e;
-      if (_rank(e.level) > _rank(g.level)) g.level = e.level;
-      groups.remove(g);
-      groups.add(g);
-    } else {
-      final n = EventGroup(e);
-      groups.add(n);
-      last[k] = n;
+    final opId = e.opId;
+    // the operation's row, if it started: a `user/*` that started it, `core/sysProxy` inside a reconnect ...
+    final inOp = opId == null ? null : byOp[opId];
+    if (inOp != null) {
+      inOp._part(e);
+      byId[e.id] = inOp;
+      continue;
     }
+    // the closing event lies in the row of the event it closes
+    final opened = e.opens == null ? null : byId[e.opens!];
+    if (opened != null) {
+      opened._close(e);
+      byId[e.id] = opened;
+      if (opId != null) byOp[opId] = opened;
+      continue;
+    }
+    // a consequence lies in the row of its root
+    final root = e.cause == null ? null : byId[e.cause!];
+    if (root != null) {
+      root._relate(e);
+      byId[e.id] = root;
+      if (opId != null) byOp[opId] = root;
+      continue;
+    }
+    if (shown != null && !shown(e)) {
+      hidden.add(e.id);
+      continue;
+    }
+    // a consequence of a root that is not in the journal: a group row by the reason (a hidden root is not missing)
+    final code = e.verdict == 'consequence' ? e.whyCode : null;
+    if (code != null && (e.cause == null || !hidden.contains(e.cause))) {
+      final k = '$code|${e.cause ?? ''}', h = byCode[k];
+      if (h != null && e.at - h.lastAt <= window) {
+        h._relate(e);
+        byId[e.id] = h;
+      } else {
+        final n = EventGroup._noRoot(e, code);
+        rows.add(n);
+        byCode[k] = n;
+        byId[e.id] = n;
+      }
+      continue;
+    }
+    final linked = e.cause != null || opId != null || e.opens != null;
+    final k = linked ? '' : eventFoldKey(e), p = linked ? null : plain[k];
+    if (p != null && p.closer == null && e.at - p.repeats.last.at <= window) {
+      final moves = !p.anchored;
+      p._repeat(e);
+      byId[e.id] = p;
+      if (moves) {
+        rows.remove(p);
+        rows.add(p);
+      }
+      continue;
+    }
+    final n = EventGroup(e);
+    rows.add(n);
+    byId[e.id] = n;
+    if (!linked) plain[k] = n;
+    if (opId != null) byOp[opId] = n;
   }
-  return groups;
+  if (matches == null) return rows;
+  return [
+    for (final g in rows)
+      if (_searchHit(g, matches)) g,
+  ];
+}
+
+bool _searchHit(EventGroup g, bool Function(EventRecord e) matches) {
+  if (g.repeats.any(matches)) return true;
+  if (!g.items.any((e) => !g.repeats.contains(e) && matches(e))) return false;
+  g.hitInside = true;
+  return true;
 }
 
 int dayStart(int ms) {
@@ -318,14 +550,26 @@ class EventFilter {
   int typesOn((String, List<String>) c) => c.$2.where((t) => !off.contains('${c.$1}/$t')).length;
 
   /// [text] is the sentence of the event plus its data values, lower case (the UI words it).
-  bool visible(EventRecord e, {required bool showOwn, required String Function(EventRecord e) text}) {
+  bool visible(EventRecord e, {required bool showOwn, required String Function(EventRecord e) text}) =>
+      shown(e, showOwn: showOwn) && matches(e, text);
+
+  /// Everything of the filter but the text: [e] may stand as a row of its own (what [foldEvents] asks as `shown`).
+  bool shown(EventRecord e, {required bool showOwn}) {
     if (e.cat == 'user' && !showOwn) return false;
     if (problems && e.level == 'info') return false;
     if (hideBg && e.bg) return false;
     if (off.contains(e.key)) return false;
-    if (q.isNotEmpty && !text(e).toLowerCase().contains(q)) return false;
     return true;
   }
+
+  /// The text search alone: [text] words [e] ([visible]); true when the search is empty.
+  bool matches(EventRecord e, String Function(EventRecord e) text) => q.isEmpty || text(e).toLowerCase().contains(q);
+
+  /// The rows of the Events list for the whole journal [all] (oldest first) under this filter: a consequence whose root
+  /// the filter hides is a row of its own, a search that hits a consequence keeps the root's row
+  /// ([EventGroup.hitInside]). Prefer it to `foldEvents` of an already filtered list.
+  List<EventGroup> fold(Iterable<EventRecord> all, {required bool showOwn, required String Function(EventRecord e) text}) =>
+      foldEvents(all, shown: (e) => shown(e, showOwn: showOwn), matches: q.isEmpty ? null : (e) => matches(e, text));
 
   void reset() {
     q = '';

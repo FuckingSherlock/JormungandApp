@@ -3569,5 +3569,643 @@
     }
   },
   "ifUnavailableIsDefault": "If unavailable is Default",
-  "release": "Release"
+  "release": "Release",
+  "connect": "Connect",
+  "chooseServer": "Choose server",
+  "networkSettings": "Network settings",
+  "pin": "Pin",
+  "switchServer": "Switch server",
+  "chooseTarget": "Choose target",
+  "updateSubscription": "Update subscription",
+  "removeSystemProxy": "Remove system proxy",
+  "reconnect": "Reconnect",
+  "copyText": "Copy text",
+  "openUpdate": "Open update",
+  "checks": "Checks",
+  "related": "Related ({n0})",
+  "@related": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "repeats": "Repeats",
+  "reconnected": "Reconnected",
+  "networkSwitched": "Network switched",
+  "appData": "App data",
+  "savedDataWasDamagedAndRestored": "Saved data was damaged and restored from a backup, or could not be restored",
+  "aDnsServerStopsAnsweringOn": "A DNS server stops answering on every checked node",
+  "detectNetworkProvider": "Detect network provider",
+  "showsTheProviderInTheNetwork": "Shows the provider in the network switch event. On Wi-Fi and Ethernet it is found by the direct IP address, on mobile it is the SIM operator. The network name (SSID) is never read.",
+  "waitingForConnection": "Waiting for connection…",
+  "waitingForNetwork": "Waiting for network…",
+  "auto4": "Auto",
+  "proxy2": "Proxy",
+  "direct3": "Direct",
+  "cause": "Cause: {s0}",
+  "@cause": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "recoveredOnItsOwnAfter": "Recovered on its own · after {s0}",
+  "@recoveredOnItsOwnAfter": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "opensThrough": "Opens through {s0}",
+  "@opensThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "causeNotEstablishedSeeTheChecks": "Cause not established — see the checks",
+  "related2": "+{n0} related",
+  "@related2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "finishedAtLasted": "Finished at {s0} · lasted {s1}",
+  "@finishedAtLasted": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "timesFromTo": "{n0} times · from {s1} to {s2}",
+  "@timesFromTo": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "theNetworkRequiresSignInLogin": "The network requires sign-in (login page)",
+  "theNetworkRequiresSignInLogin2": "The network requires sign-in (login page) · events: {n0}",
+  "@theNetworkRequiresSignInLogin2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "noInternetConnectionTheSystemReports": "No internet connection: the system reports no network, or direct checks fail",
+  "theSingBoxCoreIsNot": "The sing-box core is not running",
+  "noAnswerEitherDirectlyOrThrough": "No answer either directly or through the VPN · {s0}",
+  "@noAnswerEitherDirectlyOrThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "theDnsServerDoesNotAnswer": "The DNS server does not answer on any checked node",
+  "theDnsServerDoesNotAnswer2": "The DNS server does not answer through the current exit node",
+  "theServerSDomainDoesNot": "The server's domain does not exist: every DNS server answered \"no such name\"",
+  "doesNotOpenThrough": "Does not open through {s0}",
+  "@doesNotOpenThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "throughItOpens": "Through {s0} it opens",
+  "@throughItOpens": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "throughItDoesNotOpenEither": "Through {s0} it does not open either",
+  "@throughItDoesNotOpenEither": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "fromOtherCountriesItIsReachable": "From other countries it is reachable",
+  "fromOtherCountriesItIsDown": "From other countries it is down",
+  "recoveredBeforeAVerdictWasReached": "Recovered before a verdict was reached",
+  "disconnectedTheCoreDidNotStart": "Disconnected: the core did not start after {n0} attempts",
+  "@disconnectedTheCoreDidNotStart": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "disconnectedTheSelectedServerIsUnavailab": "Disconnected: the selected server {s0} is unavailable ({s1})",
+  "@disconnectedTheSelectedServerIsUnavailab": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "deleted2": "deleted",
+  "switchedOff": "switched off",
+  "notSupported": "not supported",
+  "reconnectedSettingsChanged": "Reconnected — settings changed: {s0}",
+  "@reconnectedSettingsChanged": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "reconnectedRuleListsLoaded": "Reconnected — rule lists loaded",
+  "reconnectedServerAddressesChanged": "Reconnected — server addresses changed",
+  "reconnectedByCommandABreakOf": "Reconnected — by command, a break of {s0}",
+  "@reconnectedByCommandABreakOf": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "mode2": "mode: {s0} → {s1}",
+  "@mode2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "route2": "route: {s0} → {s1}",
+  "@route2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "pin2": "pin",
+  "systemProxy2": "system proxy",
+  "dns2": "DNS",
+  "noConnectionThroughTheVpnThe": "No connection through the VPN — the internet works directly, no route answers",
+  "noConnectionThroughTheVpnInternet": "No connection through the VPN — internet availability is not confirmed",
+  "connectionRestoredBreakOf": "Connection restored · break of {s0}",
+  "@connectionRestoredBreakOf": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "noInternetConnectionTheSystemReports2": "No internet connection — the system reports no network",
+  "noInternetConnectionDirectChecksFail": "No internet connection — direct checks fail",
+  "internetRestoredBreakOf": "Internet restored · break of {s0}",
+  "@internetRestoredBreakOf": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "wiFi": "Wi-Fi",
+  "ethernet": "Ethernet",
+  "mobile": "Mobile",
+  "nameWithDetail": "{s0} ({s1})",
+  "@nameWithDetail": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "networkSwitched2": "Network switched: {s0} → {s1}",
+  "@networkSwitched2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "networkSwitchedNoNetworkFor": "Network switched: {s0} → {s1} · no network for {s2}",
+  "@networkSwitchedNoNetworkFor": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "doesNotOpenThrough2": "{s0} does not open through {s1}",
+  "@doesNotOpenThrough2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "doesNotOpenThroughAnyServer": "{s0} does not open through any server",
+  "@doesNotOpenThroughAnyServer": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "auto5": "Auto: {s0} → {s1}",
+  "@auto5": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "autoVia": "Auto: {s0} → {s1} (via {s2})",
+  "@autoVia": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "autoInsteadOfThenBackTo": "Auto: {s0} instead of {s1} · {s2}, then back to {s1}",
+  "@autoInsteadOfThenBackTo": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "serverDoesNotAnswer": "Server {s0} does not answer",
+  "@serverDoesNotAnswer": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "switchedRoutesRuleTargets": "Switched: routes {n0}, rule targets {n1}",
+  "@switchedRoutesRuleTargets": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "switchedRoutesRuleTargetsDns": "Switched: routes {n0}, rule targets {n1}, DNS",
+  "@switchedRoutesRuleTargetsDns": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "fastest2": "Fastest: {s0} → {s1}",
+  "@fastest2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "fastestSwitchesNow": "Fastest: {n0} switches · now {s1}",
+  "@fastestSwitchesNow": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "dns3": "DNS ({s0}): {s1} → {s2}",
+  "@dns3": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "dnsInsteadOfThenBack": "DNS ({s0}): {s2} instead of {s1} · {s3}, then back",
+  "@dnsInsteadOfThenBack": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s3": {
+        "type": "String"
+      }
+    }
+  },
+  "dnsServerDoesNotAnswer2": "DNS server {s0} does not answer",
+  "@dnsServerDoesNotAnswer2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "dnsServerDoesNotAnswerThrough": "DNS server {s0} does not answer through {s1} — works through the spare node {s2}",
+  "@dnsServerDoesNotAnswerThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "subscriptionUpdated2": "Subscription {s0} updated: +{n1} −{n2}",
+  "@subscriptionUpdated2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      },
+      "n2": {
+        "type": "num"
+      }
+    }
+  },
+  "removedServerInUse": "removed server in use {s0}",
+  "@removedServerInUse": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "subscriptionsUpdatedOf": "Subscriptions updated: {n0} of {n1}",
+  "@subscriptionsUpdatedOf": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "couldNotUpdateSubscription": "Could not update subscription {s0}",
+  "@couldNotUpdateSubscription": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "inUse2": "in use",
+  "domainDoesNotExistServers": "{s0}: domain {s1} does not exist · servers: {n2}",
+  "@domainDoesNotExistServers": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "n2": {
+        "type": "num"
+      }
+    }
+  },
+  "targetIsUnavailable": "Target {s0} is unavailable",
+  "@targetIsUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleTrafficRules": "Rule traffic: {s0} · rules: {n1}",
+  "@ruleTrafficRules": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "ruleTrafficMovedTo": "Rule traffic moved to {s0}",
+  "@ruleTrafficMovedTo": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleTrafficIsBack": "Rule traffic is back",
+  "couldNotLoadRuleList": "Could not load rule list {s0}",
+  "@couldNotLoadRuleList": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "usingTheCopyFrom": "using the copy from {s0}",
+  "@usingTheCopyFrom": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "noCopyRulesWithThisList": "no copy — rules with this list do not apply",
+  "couldNotLoadRuleLists": "Could not load rule lists: {n0}",
+  "@couldNotLoadRuleLists": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "ruleListsUpdated": "Rule lists updated: {n0}",
+  "@ruleListsUpdated": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "singBoxCrashedCode": "sing-box crashed (code {n0})",
+  "@singBoxCrashedCode": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "restartingAttempt": "Restarting · attempt {n0}",
+  "@restartingAttempt": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "coreNotRunningFor30S": "Core not running for 30 s — traffic is blocked, system proxy kept",
+  "coreIsRunningAgainDownFor": "Core is running again · down for {s0}",
+  "@coreIsRunningAgainDownFor": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "singBoxDeprecatedConfigOptions": "sing-box: deprecated config options · {n0}",
+  "@singBoxDeprecatedConfigOptions": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "updateAvailable2": "Update {s0}: available",
+  "@updateAvailable2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "updateDownloaded": "Update {s0}: downloaded",
+  "@updateDownloaded": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "updateInstalled": "Update {s0}: installed",
+  "@updateInstalled": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "updateFailedAt": "Update {s0}: failed at {s1}",
+  "@updateFailedAt": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "check": "check",
+  "download2": "download",
+  "signatureCheck": "signature check",
+  "installation": "installation",
+  "updateChannelIsEmpty": "Update channel {s0} is empty",
+  "@updateChannelIsEmpty": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "speedTestServersBestMbps": "Speed test: servers {n0}, best {s1}, {s2} Mbps",
+  "@speedTestServersBestMbps": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  }
 }

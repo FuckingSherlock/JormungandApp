@@ -397,7 +397,14 @@ abstract class CoreHost extends ChangeNotifier {
 
   Future<ConnectResult> connect();
 
-  Future<void> disconnect();
+  /// [error] set: the connection is ended not by the user but by an error the app found — the core's
+  /// `disconnect {error}` (`{reason: 'pinLost', pick, why}`: a lost Manual pin; `why`: `deleted` | `off` |
+  /// `unsupported`); the core writes `conn/disconnected by: error`, the app writes no user event.
+  Future<void> disconnect({Map<String, dynamic>? error});
+
+  /// The manual subscription updates that wait now (`status.subWaits`): [forWhat] `network` (no network, up to
+  /// 5 s) or `connection` (the core's own reconnect). Empty when nothing waits.
+  List<({String source, String name, String forWhat})> get subWaits;
 
   /// "Retry" of the down alert: a restart of sing-box now.
   Future<void> retry();

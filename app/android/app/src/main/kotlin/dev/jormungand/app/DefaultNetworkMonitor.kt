@@ -139,6 +139,7 @@ object DefaultNetworkMonitor {
     private val stateLock = Any()
     private val stateListeners = LinkedHashSet<(Map<String, Any?>) -> Unit>()
     private var stateConnectivity: ConnectivityManager? = null
+    @Volatile private var stateContext: Context? = null
     private var stateRegistered = false
     @Volatile
     private var stateNetwork: Network? = null
@@ -174,7 +175,9 @@ object DefaultNetworkMonitor {
 
     /**
      * Starts [listener] on the state of the underlying default network, the current one at once, then on
-     * every change: `{connected, validated, captive, type (wifi | cellular | ethernet | vpn | other), id, at}`.
+     * every change: `{connected, validated, captive, type (wifi | cellular | ethernet | vpn | other), id, operator?, at}`.
+     * `operator` (mobile only): the name of the SIM that carries mobile data. The core takes `cellular` as it is and
+     * names it `mobile` in `net/switched` (service.dart `setNetwork`).
      * `id` is `Network.getNetworkHandle()` as a string: another Wi-Fi is another id on the same `wlan0`. `at` is the
      * wall-clock ms at which the system called back (`onLost` / `onAvailable` / `onCapabilitiesChanged`); for the first
      * answer, the moment of the call. It is not part of the state compared for repeats.
@@ -186,6 +189,7 @@ object DefaultNetworkMonitor {
         synchronized(stateLock) {
             val cm = stateConnectivity ?: context.applicationContext
                 .getSystemService(ConnectivityManager::class.java).also { stateConnectivity = it }
+            stateContext = context.applicationContext
             stateListeners.add(listener)
             if (!stateRegistered) {
                 register(cm, stateCallback)
@@ -241,13 +245,35 @@ object DefaultNetworkMonitor {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
             else -> "other"
         }
-        return mapOf(
+        val state = mapOf(
             "connected" to true,
             "validated" to caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
             "captive" to caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
             "type" to type,
             "id" to network.networkHandle.toString(),
         )
+        // the SIM operator of a mobile network, for `net/switched`; no field when the system does not tell
+        val operator = if (type == "cellular") dataOperator() else null
+        return if (operator != null) state + ("operator" to operator) else state
+    }
+
+    /**
+     * The operator name of the SIM that carries mobile data (the default data subscription). Needs no
+     * permission; null when there is none, the name is empty or the system refuses.
+     */
+    private fun dataOperator(): String? {
+        val context = stateContext ?: return null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null
+        return try {
+            val id = android.telephony.SubscriptionManager.getDefaultDataSubscriptionId()
+            if (id == android.telephony.SubscriptionManager.INVALID_SUBSCRIPTION_ID) return null
+            val tm = context.getSystemService(android.telephony.TelephonyManager::class.java)
+                ?.createForSubscriptionId(id) ?: return null
+            listOf(tm.simOperatorName, tm.networkOperatorName)
+                .firstOrNull { !it.isNullOrBlank() }?.trim()
+        } catch (e: Throwable) {
+            null
+        }
     }
 
     private fun publish(network: Network?) {

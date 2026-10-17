@@ -126,7 +126,23 @@ class FakeCoreHost extends CoreHost {
   }
 
   @override
-  Future<void> disconnect() async => setPhase(ConnectionPhase.disconnected);
+  Future<void> disconnect({Map<String, dynamic>? error}) async {
+    if (error != null) disconnectErrors.add(error);
+    setPhase(ConnectionPhase.disconnected);
+  }
+
+  /// The `error` of every `disconnect(error: ...)` (a connection ended by an error, not by the user).
+  final disconnectErrors = <Map<String, dynamic>>[];
+
+  List<({String source, String name, String forWhat})> _subWaits = const [];
+
+  @override
+  List<({String source, String name, String forWhat})> get subWaits => _subWaits;
+
+  void setSubWaits(List<({String source, String name, String forWhat})> w) {
+    _subWaits = w;
+    notifyListeners();
+  }
 
   @override
   Future<void> retry() async {}

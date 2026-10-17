@@ -709,7 +709,7 @@ void main() {
     );
     await host.init();
     // the first push already knows the network and the default (Wi-Fi only)
-    expect(rec.updateBodies.last, {'autoCheck': true, 'channel': 'stable', 'autoDownload': 'wifi', 'metered': true, 'ignoredSites': [], 'closeOnSwitch': true});
+    expect(rec.updateBodies.last, {'autoCheck': true, 'channel': 'stable', 'autoDownload': 'wifi', 'metered': true, 'ignoredSites': [], 'closeOnSwitch': true, 'detectNetProvider': true});
 
     net.isMetered = false;
     net.changes.add(false);

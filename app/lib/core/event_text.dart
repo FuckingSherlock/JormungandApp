@@ -29,6 +29,7 @@ class EventWords {
 
   String catLabel(String cat) => switch (cat) {
     'conn' => l10n.connection,
+    'net' => l10n.network,
     'auto' => 'Auto',
     'site' => l10n.sites,
     'sub' => l10n.subscriptions,
@@ -41,6 +42,8 @@ class EventWords {
 
   String typeLabel(String cat, String type) => switch ('$cat/$type') {
     'conn/connected' => l10n.connected,
+    'conn/reconnected' => l10n.reconnected,
+    'net/switched' => l10n.networkSwitched,
     'conn/disconnected' => l10n.disconnected,
     'conn/connectFailed' => l10n.connectFailed,
     'conn/lost' => l10n.connectionLost,

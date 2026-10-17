@@ -881,11 +881,19 @@ void main() {
           throwsA(isA<CatalogException>()
               .having((e) => e.code, 'code', 'pinLost')
               .having((e) => e.message, 'message', allOf(contains('Server b1'), contains('XHTTP is not in sing-box')))));
+      final b1 = c.sourcesData['b']!.nodes.firstWhere((n) => n.id == 'b1').name;
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('unsupported', b1));
+      // the same pick switched off in Nodes: not in the pinned route any more, so `off` (b2 still stays, so the entry is not broken)
+      c.sourcesData['b']!.disabledNodes = ['b1'];
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('off', b1));
+      c.sourcesData['b']!.disabledNodes = [];
       c.pinnedNode = 'b::gone';
       expect(c.pinLoss(), contains('no longer has it'));
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('deleted', c.sourcesData['b']!.name));
       c.pinnedNode = null;
       // Manual on the entry itself: it has nothing sing-box can run, the same kind of loss
       expect(c.pinLoss(), allOf(contains('"${c.sourcesData['b']!.name}"'), contains('XHTTP is not in sing-box')));
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('unsupported', c.sourcesData['b']!.name));
       c.selectConnect('a');
       expect(c.pinLoss(), isNull);
     });
@@ -904,20 +912,25 @@ void main() {
       expect(() => c.livePlan(),
           throwsA(isA<CatalogException>().having((e) => e.code, 'code', 'pinLost').having((e) => e.message, 'm', contains('"${c.sourcesData['b']!.name}"'))));
       expect(c.checkBeforeConnect()!.code, 'pinLost');
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('off', c.sourcesData['b']!.name));
       // the source itself off: hidden
       c.sourcesData['b']!.disabledNodes = [];
       c.sourcesData['b']!.enabled = false;
       expect(c.pinLoss(), contains('switched off in Nodes'));
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('off', c.sourcesData['b']!.name));
       // a chain whose entry is broken
       c.sourcesData['b']!.enabled = true;
       c.selectConnect('c1');
       expect(c.pinLoss(), isNull);
+      expect(c.pinLossInfo(), isNull);
       c.sourcesData['b']!.disabledNodes = ['b1', 'b2'];
       expect(c.pinLoss(), contains('"${c.chainsData['c1']!.name}"'));
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('off', c.chainsData['c1']!.name));
       // a removed entry
       c.sourcesData['b']!.disabledNodes = [];
       c.chainsData.remove('c1');
       expect(c.pinLoss(), contains('removed'));
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('deleted', ''));
       expect(() => c.livePlan(), throwsA(isA<CatalogException>().having((e) => e.code, 'code', 'pinLost')));
       // Auto is untouched: it passes over a broken entry as before
       c.syncCatalog();
