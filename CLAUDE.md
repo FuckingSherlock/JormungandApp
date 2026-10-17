@@ -172,6 +172,18 @@ below is how it applies here.
   current, and the next stage starts in a fresh session from them — a long lead session re-reads its whole
   context every turn and loses facts at each compaction. Before spawning agents, note in-flight work
   (what, which files) in `state_N.md` so a compaction or a new session can see it.
+- Parent and child sessions (desktop app). A beta has one parent session (general plan, translations, deploy, service
+  work, accepting stage reports); each stage runs in a child session, which does the concrete work.
+  - A child is created **only on the user's explicit command** ("создай дочку для X"). The parent never proposes or
+    starts one by itself, not even as a card. On the command: the brief goes to `.claude_states/stages/<stage>.md`,
+    then a `start_session` card with `initiation: "own_initiative"`, context `fresh`. The parent sets `model` / `effort`
+    there (default Opus medium; Sonnet or Haiku for mechanical stages). The user starts it with Start.
+  - The parent does not watch the child. The child's first turn wakes the parent once: answer it with nothing, check
+    nothing. Turns the user drives in the child do not wake the parent. Any message from the child does.
+  - The child asks the user directly. It writes to the parent only when the user says so: either "спроси у родителя"
+    (one short question) or a go-ahead for the stage report. The rule rests on the brief alone; the app does not
+    enforce it. Report: commits, what was checked (commands + result), what is left. On a report the parent checks the
+    commits and updates the plan and state files.
 - Never hide a problem to cut noise: no throttling, "once per N", silent dedupe or muting of events, errors or log
   lines. Repeats are collapsed visibly (one entry, counter, last time, every occurrence in the journal) and the cause is
   fixed; anything that shows the user less needs the user's explicit approval.
