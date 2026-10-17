@@ -14,7 +14,9 @@ Flutter or build work):
 
 Where things stand: the newest `.claude_states/state_N.md` (counted from `state_0.md`). The plan:
 `features.md` (decided new features), `bugs.md` (found bugs to fix), `events_plan.md` (events rework by tiers т1…т3), `unfinished.md` (planned in the mockup era, not done), `apk_losted.md`
-(in the mockup, lost on Android), `to_think.md` (needs the user's decision), `windows.md` (everything Windows/PC-only, not soon); old states in `archive/`.
+(in the mockup, lost on Android), `to_think.md` (needs the user's decision), `to_check.md` (point checks only the user can do by hand —
+phone, TUN, real network — whose answer decides whether code is needed; every such item goes there, not a
+version's full feature run), `windows.md` (everything Windows/PC-only, not soon); old states in `archive/`.
 
 ## Priorities (the user's, above everything below)
 

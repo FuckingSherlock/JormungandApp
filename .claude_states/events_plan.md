@@ -11,8 +11,7 @@
 
 ## т2
 
-1. Captive portal: своего события не нужно — у Android есть системное уведомление. Проверить на телефоне, что оно
-   приходит при поднятом VPN. Корень Sentinel `net.captive` (свёртка следствий) остаётся.
+1. Captive portal — перенесён в `to_check.md` (проверка на телефоне; от неё зависит, нужен ли код).
 2. VPN отозван другим VPN / системой: события не нужно; убрать попытки перезапуска после отзыва (сейчас `onRevoke` →
    `core/crashed {code:0}` → `restartFailed` ×N → `core/down`, аудит §1.3). Бывший `to_think.md` S7.
    Разведка 2026-10-17: Kotlin `onRevoke` шлёт в Dart `{type:'stopped', reason:'revoked'}` и уже ставит
