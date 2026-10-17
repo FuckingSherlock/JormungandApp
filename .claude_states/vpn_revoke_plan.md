@@ -9,6 +9,13 @@
 (`app/lib/core/libbox_runner.dart:227`) → `onExit(0)` → `CoreService._crashed` (`core/lib/src/service.dart:2231`) →
 `_recover` → `core/crashed {code:0}` → `restartFailed` ×N → `conn/vpnDown`.
 
+## Непроверено (разведка лида без скаута)
+
+- Как connect обрабатывает выход раннера во время старта — ветку «отзыв во время connect» кодер выясняет сам.
+- Все места, где берётся вид уведомления из `eventNotifKind` (видел `log_view.dart` и `app/test/_shots/event_shots_test.dart`).
+- Прогон 2: как сделаны Android-only строки в `settings_look.dart`; есть ли уже Connect у `by: error` в `event_rows.dart` /
+  `system_notifier.dart`. Перед прогоном 2 — скаут по этим местам, срез в бриф.
+
 ## Прогон 1 — ядро (`cd core; dart analyze; dart test`)
 
 Кусок A (deep), файлы `core/lib/src/runtime.dart`, `core/lib/src/service.dart`, `core/lib/src/log_view.dart`:
