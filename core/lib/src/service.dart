@@ -316,6 +316,7 @@ class CoreService implements CoreApi {
   /// network status they share. `direct` = the direct path through the main sing-box's probe
   /// inbound (only asked while Auto runs, so while it is up).
   late final pool = ProbePool(
+      clock: () => _nowMs,
       direct: (url, t) async => runner.running && _probe != null ? _probe!.delay('direct', url, timeoutMs: t) : directProbe(url, t));
 
   /// The direct path with no sing-box running (nothing to ask through; a stopped core's probe inbound is gone): the
@@ -1508,6 +1509,7 @@ class CoreService implements CoreApi {
       routesLost(AutoNet(kind: 'lost', at: lostAt), planRoutes(plan).length);
     }
     final auto = _auto = AutoService(api, plan,
+        clock: () => _nowMs,
         memory: autoMemory,
         pool: pool,
         exits: exitBook,
@@ -1747,6 +1749,104 @@ class CoreService implements CoreApi {
 
   final _checking = <int>{};
 
+  // «Check now» runs under way by subject (a second command for it joins): true = it works, false = it does not, null = the
+  // subject is not in the live config.
+  final _checkRuns = <String, Future<bool?>>{};
+  // the events that carry the run's `recheck` (each gets its pending and its result once, however many commands came for it)
+  final _checkEvents = <String, Set<int>>{};
+
+  /// «Check now» (api.dart): the event's subject is checked by the code of its scheduled round (auto.dart `roundNow` /
+  /// `routeNow`, fallback.dart `checkTarget`, dns_failover.dart `checkServer`), which closes the pair itself. The event
+  /// carries `data.recheck` (pending → ok / fail).
+  @override
+  Future<Map<String, dynamic>> checkNow(int eventId) async {
+    final ev = eventBook.byId(eventId);
+    final d = ev?['data'];
+    if (ev == null || d is! Map) throw const FormatException('No such event');
+    final key = switch ('${ev['cat']}/${ev['type']}') {
+      'conn/lost' => 'round',
+      'auto/unstable' when d['id'] is String => 'route:${d['id']}',
+      'rules/fallback' when d['target'] is String => 'target:${d['target']}',
+      'dns/failed' || 'dns/failedOnNode' when d['server'] is String => 'dns:${d['server']}',
+      _ => null,
+    };
+    if (key == null) throw const FormatException('Nothing to check for this event');
+    final auto = _auto;
+    if (!runner.running || _plan == null || auto == null) return {'ok': false, 'error': 'notConnected'};
+    // a second command for the event already waiting on the run joins it silently (the first one writes the result)
+    final joined = _checkEvents[key]?.contains(eventId) ?? false;
+    if (!joined) {
+      (_checkEvents[key] ??= {}).add(eventId);
+      eventBook.update(eventId, data: {'recheck': {'state': 'pending', 'at': _nowMs}});
+    }
+    final run = _checkRuns[key] ??= (switch (key.split(':').first) {
+      'round' => auto.roundNow(),
+      'route' => auto.routeNow(key.substring(6)),
+      'target' => _fallback?.checkTarget(key.substring(7)) ?? Future<bool?>.value(null),
+      _ => _dns?.checkServer(key.substring(4)) ?? Future<bool?>.value(null),
+    }).whenComplete(() {
+      _checkRuns.remove(key);
+      _checkEvents.remove(key);
+    });
+    bool? ok;
+    try {
+      ok = await run;
+    } catch (_) {
+      ok = false;
+    }
+    // the service ended or Auto was stopped (a reconnect) under the run: nothing was judged, so the event goes back to no
+    // `recheck` (the Check now button returns) instead of staying pending or recording a fail
+    if (_disposed || !identical(_auto, auto)) {
+      if (!joined) _dropRecheck(eventId);
+      return {'ok': false, 'error': 'notConnected'};
+    }
+    // the subject left the live config: nothing was judged either
+    if (ok == null) {
+      if (!joined) _dropRecheck(eventId);
+      return {'ok': false, 'error': 'gone'};
+    }
+    if (!joined) eventBook.update(eventId, data: {'recheck': {'state': ok ? 'ok' : 'fail', 'at': _nowMs}});
+    return {'ok': true};
+  }
+
+  void _dropRecheck(int eventId) {
+    final d = eventBook.byId(eventId)?['data'];
+    if (d is! Map<String, dynamic> || !d.containsKey('recheck')) return;
+    eventBook.update(eventId, data: {...d}..remove('recheck'), replaceData: true);
+  }
+
+  /// «Retry» on `rules/ruleSetFailed` (api.dart): the lists of the event's `ruleSets` operation (else its own) are loaded
+  /// again, forced, by the path of the automatic update (its events under the lists' operation, the reconnect that picks
+  /// a new list up). Not connected: nothing is loaded, every list is `failed`.
+  @override
+  Future<Map<String, dynamic>> retryRuleSets(int eventId) async {
+    final ev = eventBook.byId(eventId);
+    final d = ev?['data'];
+    if (ev == null || ev['cat'] != 'rules' || ev['type'] != 'ruleSetFailed' || d is! Map || d['tag'] is! String) {
+      throw const FormatException('No such rule set event');
+    }
+    final tags = <String>{'${d['tag']}'};
+    final opId = (ev['op'] as Map?)?['id'];
+    if (opId != null) {
+      for (final e in (eventBook.since(0)['events'] as List).cast<Map<String, dynamic>>()) {
+        final t = (e['data'] as Map?)?['tag'];
+        if (e['cat'] == 'rules' && (e['type'] == 'ruleSetFailed' || e['type'] == 'ruleSetUpdated') && (e['op'] as Map?)?['id'] == opId && t is String) tags.add(t);
+      }
+    }
+    final plan = _plan;
+    if (plan == null || !runner.running) return {'updated': <String>[], 'failed': tags.toList()..sort()};
+    final seq = _connectSeq;
+    final sources = [for (final s in ruleSetsNeeded(plan)) if (tags.contains(s.tag)) s];
+    final r = await _inRuleSetsOp(() => ruleSets.ensure(sources, tunnel: runner.running, force: true));
+    final live = _plan;
+    if (!_disposed && seq == _connectSeq && live != null && runner.running && r.files.keys.any((t) => !_listTags.contains(t))) {
+      // a list new to the config needs the restart that picks it up (as in [_listsRound])
+      unawaited(_connect({'plan': _continuationPlan(live), 'systemProxy': _sysWanted}, own: false).then((_) {}, onError: (_) {}));
+    }
+    final failed = {...r.failedTags, for (final t in tags) if (!sources.any((s) => s.tag == t)) t};
+    return {'updated': r.downloaded.toList()..sort(), 'failed': failed.toList()..sort()};
+  }
+
   static (String, int?) _hostPort(String dest) {
     final at = dest.lastIndexOf(':'), port = at < 0 ? null : int.tryParse(dest.substring(at + 1));
     return (port == null ? dest : dest.substring(0, at), port);
@@ -1757,6 +1857,7 @@ class CoreService implements CoreApi {
   void _startFallback(SingBoxApi api, AutoService auto, {bool adopted = false}) {
     if (_fallbacks.isEmpty) return;
     final fb = _fallback = FallbackService(api, _fallbacks,
+        clock: () => _nowMs,
         delay: (tag, url, t) async => _probe == null ? -1 : _probe!.delay(tag, url, timeoutMs: t, unreachedThrows: true),
         settings: auto.settings,
         pool: pool,
@@ -1803,6 +1904,7 @@ class CoreService implements CoreApi {
     final reserve = {for (final id in _dnsReserveMemory) if (byId.containsKey(id)) id};
     final off = {for (final e in _dnsFlagMemory.entries) if (!e.value && byId.containsKey(e.key) && !reserve.contains(e.key)) e.key};
     final dns = _dns = DnsFailover(
+        clock: () => _nowMs,
         sides: _dnsSides,
         candidates: _dnsCandidates,
         watch: _dnsExtra,

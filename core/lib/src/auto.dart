@@ -739,10 +739,75 @@ class AutoService {
     if (_started && !_stopped) _timer = Timer(d, () => unawaited(check()));
   }
 
+  bool _manual = false; // the busy flag is a check by hand ([routeNow]), not a round
+  bool _due = false; // a round came due in the middle of it: it follows at once
+  bool _roundOk = false; // the last round found a route that answers (set by [check])
+  final _roundWaiters = <Completer<void>>[];
+
+  // Ends when the round under way has (at once when none is).
+  Future<void> _idle() {
+    if (!_busy) return Future.value();
+    final w = Completer<void>();
+    _roundWaiters.add(w);
+    return w.future;
+  }
+
+  /// «Check now» on a lost connection (service.dart `checkNow`): a round out of turn, by the very code of the scheduled
+  /// one (a round already under way is joined, not started twice); a route that answers closes the outage as usual
+  /// ([_emitNet] `restored`). True = a route answers. False also when the round could not judge (no network, held).
+  Future<bool> roundNow() async {
+    if (_stopped) return false;
+    if (_busy && !_manual) {
+      await _idle();
+    } else {
+      // (a check by hand under way is waited for: it is no round to join)
+      while (_busy) {
+        await _idle();
+        if (_stopped) return false;
+      }
+      _timer?.cancel();
+      await check();
+    }
+    return !_stopped && _roundOk;
+  }
+
+  /// «Check now» on an unstable route: the route [id] is tested out of turn, as a round tests it (an unavailable server
+  /// is asked at once). A round (or another check) under way is waited for first, and a round that comes due meanwhile
+  /// waits for the check: one decision on the state at a time. True = it answers; null = no such route here.
+  Future<bool?> routeNow(String id) async {
+    final r = _routes.where((x) => x.id == id).firstOrNull;
+    if (r == null || _stopped) return null;
+    while (_busy) {
+      await _idle();
+      if (_stopped) return false;
+    }
+    _busy = true;
+    _manual = true;
+    try {
+      await _checkRoute(r, force: true);
+      return !_stopped && r.health.answered;
+    } finally {
+      _busy = false;
+      _manual = false;
+      for (final w in _roundWaiters.toList()) {
+        if (!w.isCompleted) w.complete();
+      }
+      _roundWaiters.clear();
+      final due = _due || _kick;
+      _due = _kick = false;
+      if (due) _schedule(Duration.zero);
+    }
+  }
+
   /// One round: test, heal inside the routes, move between them.
   Future<void> check() async {
-    if (_busy || _stopped) return;
+    if (_busy) {
+      if (_manual) _due = true; // a check by hand is under way: this round follows it
+      return;
+    }
+    if (_stopped) return;
     _busy = true;
+    _roundOk = false;
     try {
       if (!await refresh()) return; // sing-box not answering: nothing to judge
       if (offline) {
@@ -834,6 +899,7 @@ class AutoService {
       } else {
         final since = memory.answered();
         _directOk = false;
+        _roundOk = true;
         if (since != null) _emitNet('restored', since);
         _judge();
       }
@@ -850,6 +916,10 @@ class AutoService {
       }
     } finally {
       _busy = false;
+      for (final w in _roundWaiters.toList()) {
+        if (!w.isCompleted) w.complete();
+      }
+      _roundWaiters.clear();
       _ahead = Duration.zero;
       _improveForce = false;
       final f = _routes[index].health.fails;

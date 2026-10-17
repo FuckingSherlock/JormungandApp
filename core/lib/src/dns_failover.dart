@@ -610,6 +610,8 @@ class DnsFailover {
       if (ladder) {
         _recheckNotBefore = _clock() + 1000;
         _syncPark();
+      } else if (_manual) {
+        _roundDue = true; // a check by hand is under way: this round follows it
       }
       return;
     }
@@ -650,7 +652,47 @@ class DnsFailover {
         _writeFailed = false;
         _schedule(retry ? settings.retryPause : settings.checkEvery);
       }
+      _wakeChecks();
       _syncPark();
+    }
+  }
+
+  final _checkWaiters = <Completer<void>>[];
+  bool _manual = false; // the busy flags are a check by hand ([_manualRun]), not a round
+  bool _roundDue = false; // a round came due in the middle of it: it follows at once
+
+  void _wakeChecks() {
+    for (final w in _checkWaiters.toList()) {
+      if (!w.isCompleted) w.complete();
+    }
+    _checkWaiters.clear();
+  }
+
+  // A check by hand («Check now», the provider's ping) judges the state like a round, so a round and a check never run
+  // at the same time: it waits for the round (and the ladder's tick) under way, then holds both busy flags; a round
+  // that comes due meanwhile returns at once and follows the check. While the network is not up the ask only measures
+  // (nothing is judged): no wait.
+  Future<void> _manualRun(List<_Node> nodes) async {
+    if (!_online) return _pingRun(nodes);
+    while (_busy || _busyLadder) {
+      final w = Completer<void>();
+      _checkWaiters.add(w);
+      await w.future;
+      if (_stopped) return;
+    }
+    _busy = _busyLadder = _manual = true;
+    try {
+      await _pingRun(nodes);
+    } finally {
+      _busy = _busyLadder = _manual = false;
+      _wakeChecks();
+      final due = _roundDue;
+      _roundDue = false;
+      if (due) {
+        _schedule(Duration.zero);
+      } else if (_writeFailed) {
+        _schedule(settings.retryPause); // (_writeRetry did not, the check held the flag)
+      }
     }
   }
 
@@ -762,12 +804,13 @@ class DnsFailover {
   /// the ones still asked read `testing`. Null when the config has no such provider (or the failover is stopped). While the
   /// network is up the answers count as a round's: an answer closes a dead candidate's root, a miss is evidence like any
   /// other (so the list's colour and the ping agree, and a provider just switched on is checked at once); otherwise it only
-  /// measures.
+  /// measures. It judges, so it is a check by hand like [checkServer]: it waits for a round under way, a round that
+  /// comes due meanwhile follows it ([_manualRun]).
   Future<void>? startPing(String provider) {
     if (_stopped) return null;
     final nodes = [for (final n in _all) if (n.c != null && n.provider == provider) n];
     if (nodes.isEmpty) return null;
-    return _pings[provider] ??= _pingRun(nodes).whenComplete(() {
+    return _pings[provider] ??= _manualRun(nodes).whenComplete(() {
       _pings.remove(provider); // (a block: remove returns this very future, which whenComplete would wait for)
     });
   }
@@ -789,6 +832,26 @@ class DnsFailover {
   }
 
   final Map<String, Future<void>> _pings = {};
+
+  /// «Check now» on a DNS server (service.dart `checkNow`): the very check of a ping, one server — an answer closes its
+  /// root and the flags follow as in a round, a miss is evidence like any other. A check under way is joined. True = it
+  /// answers; false also when the network is not up (the ask only measures); null = this config has no such server. A
+  /// round (or another check, a ping) under way is waited for first, and a round that comes due meanwhile waits for the
+  /// check: one decision on the state at a time ([_manualRun]).
+  Future<bool?> checkServer(String id) async {
+    final n = _all.where((x) => x.id == id).firstOrNull;
+    if (n == null || _stopped) return null;
+    if (!_online) {
+      await _measure(n);
+      return false;
+    }
+    await (_checks[id] ??= _manualRun([n]).whenComplete(() {
+      _checks.remove(id); // (a block: remove returns this very future, which whenComplete would wait for)
+    }));
+    return !_stopped && n.w.health.answered;
+  }
+
+  final Map<String, Future<void>> _checks = {};
 
   Future<void> _pingRun(List<_Node> nodes) async {
     if (!_online) {

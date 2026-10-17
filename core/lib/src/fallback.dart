@@ -296,7 +296,11 @@ class FallbackService {
 
   /// One round: test every target, move the ones that changed.
   Future<void> check() async {
-    if (_busy || _stopped) return;
+    if (_busy) {
+      if (_manual) _due = true; // a check by hand is under way: this round follows it
+      return;
+    }
+    if (_stopped) return;
     _busy = true;
     _improveForce = _improveNow;
     _improveNow = false;
@@ -316,6 +320,10 @@ class FallbackService {
       await _decide(judged);
     } finally {
       _busy = false;
+      for (final w in _roundWaiters.toList()) {
+        if (!w.isCompleted) w.complete();
+      }
+      _roundWaiters.clear();
       _ahead = Duration.zero;
       _improveForce = false;
       final retry = _netHeld || _targets.any((t) => !t.down && t.w.health.fails > 0 && !t.w.isDown(settings));
@@ -323,6 +331,46 @@ class FallbackService {
       final kick = _kick;
       _kick = false;
       _schedule(kick ? Duration.zero : retry ? settings.retryPause : settings.checkEvery);
+    }
+  }
+
+  final _roundWaiters = <Completer<void>>[];
+  bool _manual = false; // the busy flag is a check by hand ([checkTarget]), not a round
+  bool _due = false; // a round came due in the middle of it: it follows at once
+
+  /// «Check now» on a rule target (service.dart `checkNow`): [target] (the UI's id) is tested out of turn by the very test
+  /// of a round, an unavailable one at once, and judged as a round judges it (a target that answers again goes back: the
+  /// `changes` say so). A round (or another check) under way is waited for first, and a round that comes due meanwhile
+  /// waits for the check: one decision on the state at a time. True = it answers; false also when it could not be judged
+  /// (the network does not allow it); null = no such target here.
+  Future<bool?> checkTarget(String target) async {
+    final t = _targets.where((x) => x.id == target).firstOrNull;
+    if (t == null || _stopped) return null;
+    while (_busy) {
+      final w = Completer<void>();
+      _roundWaiters.add(w);
+      await w.future;
+      if (_stopped) return false;
+    }
+    _busy = true;
+    _manual = true;
+    try {
+      final since = _clock();
+      await _test(t, force: true);
+      if (_stopped) return false;
+      final judged = t.w.health.at >= since;
+      if (judged) await _decide([t]);
+      return !_stopped && judged && t.w.health.answered;
+    } finally {
+      _busy = false;
+      _manual = false;
+      for (final w in _roundWaiters.toList()) {
+        if (!w.isCompleted) w.complete();
+      }
+      _roundWaiters.clear();
+      final due = _due || _kick;
+      _due = _kick = false;
+      if (due) _schedule(Duration.zero);
     }
   }
 
@@ -353,8 +401,8 @@ class FallbackService {
     }
   }
 
-  Future<void> _test(_Target t) async {
-    final ms = t.isMain ? await _probeMain(t) : await _probe(t);
+  Future<void> _test(_Target t, {bool force = false}) async {
+    final ms = t.isMain ? await _probeMain(t) : await _probe(t, force: force);
     if (_stopped || ms == null) return;
     final now = _clock();
     final failing = t.w.health.fails > 0, strikes = t.w.strikes;
@@ -443,9 +491,9 @@ class FallbackService {
   // server that missed (after failAfter misses in a row, as Auto's does) to the fastest answering one of a fresh
   // check (group_pick.dart), and looks for a better one while the server answers ([_improve]); a Priority group
   // never moves (its server is the user's choice).
-  Future<int?> _probe(_Target t) async {
+  Future<int?> _probe(_Target t, {bool force = false}) async {
     final id = _identity(t, _current(t)), ladder = pool.ladder;
-    final gate = ladder.gate(id, _clock(), ahead: _ahead);
+    final gate = ladder.gate(id, _clock(), force: force, ahead: _ahead);
     if (gate == LadderGate.skip) {
       // unavailable from an earlier connection: this service has not tested it, but knows it is dead
       for (var i = t.w.health.fails; i < settings.failAfter; i++) {

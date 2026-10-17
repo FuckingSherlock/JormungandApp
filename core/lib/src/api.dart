@@ -70,6 +70,21 @@ abstract interface class CoreApi {
   /// `events()` then carries it in `updated`). A bad id is a [FormatException].
   Future<Map<String, dynamic>> siteCheck(Map<String, dynamic> body);
 
+  /// `{event}` → `{ok: true}` or `{ok: false, error}`: «Check now» on an event. The core checks the event's subject
+  /// out of turn by the very check of its scheduled round — `conn/lost`: Auto's round of the main flow; `auto/unstable`:
+  /// the route; `rules/fallback`: the rule target; `dns/failed` / `failedOnNode`: the DNS server — and the pair is closed
+  /// by the same code as the round's. The event shows `data.recheck: {state: 'pending'}` meanwhile and `{state: 'ok' /
+  /// 'fail', at}` after (it changes in place). A second command for the same subject joins the check under way. `error`:
+  /// `notConnected`; `gone` = the subject is not in the live config any more. No such event / a type with no check is
+  /// a [FormatException].
+  Future<Map<String, dynamic>> checkNow(int eventId);
+
+  /// `{event}` (a `rules/ruleSetFailed`) → `{updated: [tag], failed: [tag]}`: «Retry». The lists of the event's operation
+  /// (every `tag` of its `op` `ruleSets`, else the event's own) are loaded again under a new `ruleSets` operation, by the
+  /// path of the automatic update (its events, the reconnect that picks a new list up); answers after the load. Not
+  /// such an event is a [FormatException].
+  Future<Map<String, dynamic>> retryRuleSets(int eventId);
+
   /// `{core, singBox, dataDir, dart, os}`.
   Future<Map<String, dynamic>> version();
 

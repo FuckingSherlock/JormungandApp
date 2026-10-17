@@ -34,7 +34,10 @@ import 'svc_fetch.dart';
 import 'svc_in.dart';
 
 class RuleSetFetch {
-  RuleSetFetch(this.files, this.errors, this.pending);
+  RuleSetFetch(this.files, this.errors, this.pending, {this.downloaded = const [], this.failedTags = const []});
+
+  /// Lists downloaded by this call / lists whose download failed in it (tags).
+  final List<String> downloaded, failedTags;
 
   /// tag → path of every list on disk (fresh or stale): buildConfig's `ruleSetFiles`.
   final Map<String, String> files;
@@ -121,26 +124,33 @@ class RuleSetCache {
 
   /// [tunnel]: the core's sing-box runs, so the way "via VPN" exists; lists via VPN download only
   /// through it and stay pending without it. Direct lists prefer the direct path.
-  Future<RuleSetFetch> ensure(List<RuleSetSource> sets, {bool tunnel = false, bool refresh = false}) async {
-    final files = <String, String>{}, errors = <String>[], pending = <String>[];
+  ///
+  /// [force]: the user asked to load them again ("Retry"): a list is downloaded whatever its age and a failed one does
+  /// not wait for its retry advice (the same download, the same events).
+  Future<RuleSetFetch> ensure(List<RuleSetSource> sets, {bool tunnel = false, bool refresh = false, bool force = false}) async {
+    final files = <String, String>{}, errors = <String>[], pending = <String>[], downloaded = <String>[], failedTags = <String>[];
     if (sets.isEmpty) return RuleSetFetch(files, errors, pending);
     await Directory(dir).create(recursive: true);
     await Future.wait(
       sets.map((s) async {
         final f = File(pathOf(s));
         final have = await f.exists();
-        final stale = !have || _now().difference(await f.lastModified()) >= s.every;
+        final stale = force || !have || _now().difference(await f.lastModified()) >= s.every;
         final canFetch = !s.viaVpn || tunnel;
-        if (stale && canFetch && !_hold.containsKey(s.tag) && (!have || refresh)) {
+        if (stale && canFetch && (force || !_hold.containsKey(s.tag)) && (!have || refresh || force)) {
           try {
-            await (_running[s.tag] ??= _fetch(s, f, notable: have || _failed.contains(s.tag)).whenComplete(() {
+            await (_running[s.tag] ??= _fetch(s, f, notable: have || force || _failed.contains(s.tag)).whenComplete(() {
               _running.remove(s.tag); // not returned: whenComplete would wait on this very future
             }));
             _failed.remove(s.tag);
+            downloaded.add(s.tag);
           } catch (e) {
             _failed.add(s.tag);
             errors.add('${s.tag}: $e');
+            failedTags.add(s.tag);
           }
+        } else if (force && !canFetch) {
+          failedTags.add(s.tag); // via VPN without a tunnel: nothing could be asked
         }
         if (await f.exists()) {
           files[s.tag] = f.path;
@@ -149,7 +159,7 @@ class RuleSetCache {
         }
       }),
     );
-    return RuleSetFetch(files, errors, pending);
+    return RuleSetFetch(files, errors, pending, downloaded: downloaded, failedTags: failedTags);
   }
 
   /// [ensure] for everything [plan]'s routing uses.

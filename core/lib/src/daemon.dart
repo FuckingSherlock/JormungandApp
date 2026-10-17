@@ -115,6 +115,8 @@ class Daemon {
             return {'ok': true};
           }),
         'POST /api/site-check' => service.siteCheck(body),
+        'POST /api/check-now' => service.checkNow(_eventId(body)),
+        'POST /api/rule-sets/retry' => service.retryRuleSets(_eventId(body)),
         'GET /api/version' => service.version(),
         // the support report (report.dart); POST may carry {appInfo} (what only the page knows)
         'GET /api/report' => service.report(),
@@ -202,4 +204,11 @@ class Daemon {
     res.write(html.replaceFirst('<script>', '<script>window.JORMD = true;</script>\n<script>'));
     await res.close();
   }
+}
+
+// The `event` of a command body (an id of the journal); a body without one is a bad request.
+int _eventId(Map<String, dynamic> body) {
+  final id = body['event'];
+  if (id is! int) throw const FormatException('No such event');
+  return id;
 }
