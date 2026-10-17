@@ -39,7 +39,7 @@ import 'exits.dart';
 import 'ladder.dart' show DeadLadderStore;
 import 'pool.dart';
 import 'probe.dart';
-import 'fetch.dart' show SubscriptionFetchException;
+import 'fetch.dart' show Channel, SubscriptionFetchException;
 import 'svc_fetch.dart';
 import 'svc_in.dart';
 import 'redact.dart';
@@ -2260,6 +2260,8 @@ class CoreService implements CoreApi {
         'context': sentinel.contextJson(), // the Sentinel's view: network state, core phase, open root causes (docs/failures.md)
         'dns': runner.running && _dns?.isEmpty == false ? _dns!.toJson() : null,
         'sourcesRev': store.rev, // moves when the timer updated a subscription: the UI reloads them
+        // manual subscription updates that wait for the network / the connection; absent when none
+        if (_subWaits.isNotEmpty) 'subWaits': [for (final w in _subWaits) {...w}],
         'rulesLost': [for (final l in _lostTargets.values) l.toJson()], // rules / apps whose target is lost (docs/rules.md §0)
         'speed': _lastSpeed, // last Speed Test of the connection: {down, up (bit/s), latency (ms), rpm, at (ms)}
       };
@@ -2396,7 +2398,9 @@ class CoreService implements CoreApi {
   }
 
   /// body: {sid, source: {url, userAgent, uaStrategy, discoveredAt, nodes, gone, hwid,
-  /// filter, channel}, rediscover} → {patch, title, notModified, via} (updater.dart).
+  /// filter, channel}, rediscover} → {patch, title, notModified, via} (updater.dart). The answer comes after the load (or
+  /// the error): no network waits up to 5 s (`sub/failed` `offline`), our own reconnect waits for the core to settle
+  /// (the core down: `sub/failed` `core.down`); `status.subWaits` shows the wait.
   @override
   Future<Map<String, dynamic>> fetchSource(Map<String, dynamic> body) async {
     final s = ((body['source'] as Map?) ?? const {}).cast<String, dynamic>();
@@ -2409,16 +2413,38 @@ class CoreService implements CoreApi {
     // the user's operation (the app's "update all" names its own in the body), else this source's own
     final given = body['op'];
     final op = given is Map && given['id'] is String && given['kind'] is String ? {'id': given['id'], 'kind': given['kind']} : _newOp('subUpdate');
-    final r = await updater.guard<Map<String, dynamic>?>(sid, () async {
+    return updater.guard<Map<String, dynamic>>(sid, () async {
       try {
-        final r = await updateSubscription(
-          s,
-          hwid: s['hwid'] == true ? await _hwid : null,
-          svc: svcFetch,
-          sid: sid,
-          rediscover: body['rediscover'] == true,
-          onDiverged: _subDiverged,
-        );
+        final ctx = sentinel.context;
+        // no network: waited for up to 5 s, whatever the path (a captive portal is no network for this)
+        bool offline() => ctx.network.state == NetState.none || ctx.network.state == NetState.captive;
+        if (offline()) {
+          final back = await _subWaiting(sid, name, 'network', () => ctx.waitFor(() => !offline(), timeout: _subNetWait));
+          if (!back && offline()) throw _SubAbort('No network', 'offline');
+        }
+        // a load that can only go through the VPN waits for our own reconnect / restart to be over
+        if (Channel.of(s['channel'] as String?) == Channel.proxy && _coreRestarting) await _subSettle(sid, name);
+        Map<String, dynamic> r;
+        int? retriedAt;
+        while (true) {
+          try {
+            r = await updateSubscription(
+              s,
+              hwid: s['hwid'] == true ? await _hwid : null,
+              svc: svcFetch,
+              sid: sid,
+              rediscover: body['rediscover'] == true,
+              onDiverged: _subDiverged,
+            );
+            break;
+          } catch (e) {
+            if (!isOwnRestartFailure(e)) rethrow;
+            // our own restart cut it: once the core has settled, the load is made again (once per settle)
+            await _subSettle(sid, name);
+            if (retriedAt == ctx.coreEpoch) rethrow;
+            retriedAt = ctx.coreEpoch;
+          }
+        }
         if (r['stale'] case final Map stale) _subStale(stale.cast<String, dynamic>());
         final nodes = (r['patch'] as Map?)?['nodes'];
         if (nodes is List) {
@@ -2434,26 +2460,52 @@ class CoreService implements CoreApi {
         }
         return r;
       } catch (e) {
-        if (isOwnRestartFailure(e)) return null; // our own restart cut it: not a failure, asked again when settled
         if (sid != null) {
           final f = e is SubscriptionFetchException ? e.failure : null;
+          final abort = e is _SubAbort ? e : null;
           _subEvent('failed', {
             'source': sid,
             'name': name,
-            'error': e is FormatException ? e.message : '$e',
-            'code': ?f?.code,
+            'error': e is FormatException ? e.message : (abort?.message ?? '$e'),
+            'code': ?(abort?.code ?? f?.code),
             'path': ?(f == null || f.paths.isEmpty ? null : [for (final p in f.paths) '${p.id}:${p.code}'].join(' ')),
-          }, own: true, op: op);
+          }, own: true, op: op, verdict: abort?.why == null ? null : 'confirmed', why: abort?.why, cause: abort?.cause);
         }
         rethrow;
       }
     });
-    if (r == null) {
-      if (sid != null) updater.askAgain(sid);
-      // the answer keeps its shape; `waiting` tells the app the load follows when the connection is up again
-      return {'patch': <String, dynamic>{}, 'title': null, 'notModified': true, 'via': null, 'waiting': 'connection'};
+  }
+
+  static const _subNetWait = Duration(seconds: 5);
+
+  /// Our own start / restart of sing-box is under way (not settled, not down, not stopped).
+  bool get _coreRestarting => const {CorePhase.starting, CorePhase.settling, CorePhase.recovering}.contains(sentinel.context.phase);
+
+  /// The manual updates that wait now, for `status.subWaits`.
+  final _subWaits = <Map<String, String>>[];
+
+  /// Runs [wait] with the source on the status' `subWaits` ([forWhat]: `network` | `connection`); pushed at both ends.
+  Future<T> _subWaiting<T>(String? sid, String name, String forWhat, Future<T> Function() wait) async {
+    final w = {'source': sid ?? '', 'name': name, 'for': forWhat};
+    _subWaits.add(w);
+    _changed();
+    try {
+      return await wait();
+    } finally {
+      _subWaits.remove(w);
+      _changed();
     }
-    return r;
+  }
+
+  /// Waits until the core has settled (or stopped: the load then goes without it). The core down meanwhile (or already)
+  /// is a [_SubAbort] with the cause `core.down`.
+  Future<void> _subSettle(String? sid, String name) async {
+    final ctx = sentinel.context;
+    bool over() => ctx.settled || ctx.phase == CorePhase.down || ctx.phase == CorePhase.stopped;
+    if (!over()) await _subWaiting(sid, name, 'connection', () => ctx.waitFor(over));
+    if (ctx.phase == CorePhase.down) {
+      throw _SubAbort('The connection is down', 'core.down', why: const Why('core.down'), cause: sentinel.roots.byKind(rootCoreDown)?.eventId);
+    }
   }
 
   /// A subscription was updated: its nodes are asked where they leave to, whatever the hourly timer says. The mark is
@@ -4301,6 +4353,16 @@ class CoreService implements CoreApi {
 
   @override
   Future<void> updateInstallFailed(String reason) async => appUpdater?.installFailed(reason);
+}
+
+/// A manual subscription update the core ends itself, with no load (no network in time, the core down): the user's
+/// call fails with [message]; `sub/failed` gets [code] (and the Sentinel's [why] / [cause] when it has them).
+class _SubAbort extends HttpException {
+  _SubAbort(super.message, this.code, {this.why, this.cause});
+
+  final String code;
+  final Why? why;
+  final int? cause;
 }
 
 /// A group of the plan as the connect's pick sees it (service.dart `connectPicks`).

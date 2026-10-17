@@ -124,6 +124,26 @@ class ContextTracker {
     if (!_changes.isClosed) _changes.add(null);
   }
 
+  /// Completes with true as soon as [test] holds (at once when it does now), judged again on every change of the context
+  /// (a settle too). With [timeout]: false when it has not held by then. false also when the tracker is disposed first.
+  Future<bool> waitFor(bool Function() test, {Duration? timeout}) {
+    if (test()) return Future.value(true);
+    final c = Completer<bool>();
+    Timer? timer;
+    StreamSubscription<void>? sub;
+    void finish(bool v) {
+      timer?.cancel();
+      unawaited(sub?.cancel());
+      if (!c.isCompleted) c.complete(v);
+    }
+
+    sub = _changes.stream.listen((_) {
+      if (test()) finish(true);
+    }, onDone: () => finish(false));
+    if (timeout != null) timer = clock.timer(timeout, () => finish(false));
+    return c.future;
+  }
+
   // ── network ──
 
   bool _poolDown = false, _poolDoubt = false, _osOffline = false;

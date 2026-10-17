@@ -99,7 +99,11 @@ abstract interface class CoreApi {
   /// `{outbound, name, flag, unsupported?}` → the share link, or null (share.dart).
   String? share(Map<String, dynamic> body);
 
-  /// `{sid, source, rediscover}` → `{patch, title, notModified, via}` (updater.dart).
+  /// `{sid, source, rediscover}` → `{patch, title, notModified, via}` (updater.dart). The answer comes only after the
+  /// load (or the error): there is no intermediate `notModified`. While the core waits for the network (up to 5 s) or
+  /// for its own reconnect to settle, `status()` carries `subWaits: [{source, name, for: 'network' | 'connection'}]`
+  /// (absent when none), pushed through [statusChanges]; the wait ends in the load, or in a failure (`sub/failed` with
+  /// code `offline` / `core.down`) that throws.
   Future<Map<String, dynamic>> fetchSource(Map<String, dynamic> body);
 
   /// `{text}` → `{nodes}` parsed from links.
