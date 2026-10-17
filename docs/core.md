@@ -1389,37 +1389,9 @@ Raw). Событие:
 диск до вызывающего не доходит (журнал остаётся в памяти). Ядро пишет сначала строку в сырой лог,
 потом событие — `log` указывает на неё.
 
-Что и где пишет ядро (`cat/type`, уровень, `data`):
-
-| событие | когда | `data` |
-|---|---|---|
-| `conn/connected` info | подключились (`own: true`, если по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, pick?, picks?, mode: 'proxy'\|'tun', route: 'global'\|'rules'}` — `server` — выбранный при подключении сервер группы; `pick` — выбор проверки перед стартом для группы маршрута (у цепочки — вход); нет, если маршрут не проверялся: `{group, mode, tried, answered, chosen, ms, weak, tookMs, found}`; `picks` — список всех выборов до старта (маршрут первым), если их больше одного или проверялись только цели правил (см. «Подключение: проверка перед стартом») |
-| `conn/connectFailed` error | подключение не вышло | `{reason}` |
-| `conn/disconnected` info / error | `by: 'user'` — по команде (`own: true`, пишется, только если было подключено); `by: 'error'` — sing-box не поднялся после всех попыток | `{by, reason?}` |
-| `conn/lost` warn | Auto: ни один маршрут не отвечает (`noNet` стал true из-за проверок) | `{}` |
-| `conn/restored` info | `noNet` снова false | `{downMs}` |
-| `conn/offline` warn / `conn/online` info | у ОС нет сети — по строке sing-box `missing default interface` / `updated default interface` (пока подключено) | `{}` / `{downMs}` |
-| `auto/switched` info | Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
-| `auto/fastest` info | Auto сменил Fastest-сервер (выбор ядра: failAfter промахов или шаг улучшения) | `{route, from, to}` |
-| `auto/unstable` warn | маршрут падает снова и снова (flap guard) | `{id, strikes, holdMs}` |
-| `site/blocked` warn | сайт не открывается через сервер, но открывается через другую нашу ноду (кнопка Create rule): разведчик (рабочая нода той же подписки, другой страны), затем ноды других подписок (всего не больше `siteRetry`); где открылся — `via` / `viaServer`, `viaTarget: 'node:…'`, если это нода того же маршрута (цель правила); порядок и память вердикта — docs/failures.md | `{host, port?, entry, server, dest, via, viaServer, viaTarget?, rule, process?, repeat?}` — `rule` и `process`: см. ниже |
-| `site/unreachable` warn | сайт не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); повторы после вердикта считаются на событии (`repeat`) без проб — память вердикта в docs/failures.md | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?}` — `rule` и `process`: см. ниже; `tried` пуст: нет другого рабочего маршрута, при `retries: 'off'` — повторы выключены (`siteRetry`); без `retries: 'off'` в `data` ещё `check` — `{state: 'pending'\|'off'\|'opens'\|'down'\|'failed', at, kind?, via?, ok?, total?, nodes?, error?, manual?}`, внешний чекер check-host.net (docs/connect-model.md «Внешний чекер»): событие меняется на месте (`rev`), тихое, пока нет `opens` |
-| `sub/updated` info | автообновление по таймеру ядра изменило список серверов (без изменений — события нет) | `{source, name, added, removed, total}` |
-| `sub/failed` error | автообновление не вышло — только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат) | `{source, name, error}` |
-| `rules/fallback` warn | цель правил перестала отвечать, их трафик ушёл на запасной выход («If unavailable»); одно событие на пару цель + запасной выход | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'\|<id of the fallback target>}` — `target`: the cause (`proxy` = the main flow); `rule`: имя первого правила (безымянного — `rule <id>`); `app`: имя первого приложения, когда через selector нет правил; `more` — сколько ещё правил / приложений через тот же selector |
-| `rules/targetBack` info | цель снова отвечает, трафик вернулся | `{rule?, app?, more?, target}` |
-| `rules/targetLost` warn | цель правила или приложения потеряна (удалена / выключена / нет серверов / не поддерживается); трафик идёт по её «If unavailable», маршрутизация не меняется. Одно событие на правило / приложение + цель; при подключении и при смене `why` / `to`; при отключении забывается; при `adopt` молчит | `{rule?, app?, target, why: 'deleted'\|'off'\|'noServers'\|'unsupported', to: 'block'\|'direct'\|'main'\|<id цели>, default?: true}` — `rule`: имя (безымянного — `rule <id>`); `default`: решил глобальный Target unavailable |
-| `rules/targetFound` info | потерянная цель снова годна | `{rule?, app?, target}` |
-| `dns/switched` info | DNS-сервер в работе сменился (Switch automatically); `own: true` при `reason: 'off'` | `{from, to, reason: 'failover'\|'back'\|'node'\|'off'}` — id серверов из UI; `node` — сменилась нода выхода, применились вердикты новой |
-| `rules/ruleSetFailed` warn | скачивание списка не удалось. Ни один путь не ответил → через Sentinel (`svc.fetch`), событие только при `confirmed` (с `verdict`); ответ сервера, не похожий на список — сразу. Сбой нашего перезапуска не пишется (повтор после `settled`). Повтор — по `RetryPolicy` (1 → 2 → 5 → 15 мин) | `{tag, url, error, hasCopy}` — `url` последний из пробованных; `hasCopy`: прошлая копия на диске и используется |
-| `rules/ruleSetUpdated` info | старая копия списка заменена новой, или список скачан после сбоя (первая закачка отсутствующего списка — не новость) | `{tag}` |
-| `core/crashed` error | sing-box вышел сам (перезапуск идёт в фоне; уведомление — по решению UI) | `{code}` |
-| `core/down` error | перезапуск не удался за 30 с от падения (см. «Down») | `{proxy: 'kept'\|'removed'\|'released'}` |
-| `core/restarted` info | после падения запущен снова | `{attempt, downMs?}` — `downMs` (мс от падения) только если успел быть down |
-| `core/tunNeedsAdmin` error | TUN не поднялся: у процесса нет прав администратора (проверка до запуска) или sing-box отказал по правам. Вместо `conn/connectFailed`; `own: true` при connect по команде пользователя | `{stage: 'check'\|'start', error?}` — `error` только при `start`: слова sing-box |
-| `core/restartFailed` error | попытка перезапуска не удалась (только первые три) | `{attempt, error}` |
-| `core/sysProxy` info / warn | системный прокси включён / возвращён (`own: true` при команде пользователя); при остановке jormd тоже; `warn` — не вышло. Прокси, оставленный kill switch'ем, события не пишет | `{on, by?, error?}`, `on` — что хотели получить; `by: 'user'` — кнопка Remove / Disable sys proxy (`POST /api/sysproxy/release`) |
-| `core/deprecated` warn | sing-box сообщил, что конфиг перестанет работать в новой версии; каждый текст — раз за запуск демона (в сыром логе — при каждом подключении) | `{text}` |
+Что и где пишет ядро (`cat/type`, когда, уровень, `data`) — единый каталог `docs/logs.md` → «Каталог типов»; поля
+Sentinel (`verdict`, `why`, `trail`, `cause`) — `docs/failures.md` → «Модель события»; что меняет переделка событий
+т1 — `docs/logs.md` → «Событие в приложении».
 
 **`rule` и `process` у `site/blocked` / `site/unreachable`** — почему запрос пошёл этим маршрутом и кто его
 послал: sing-box присылает в закрытом соединении текст сработавшего правила (`rule`, как в Live

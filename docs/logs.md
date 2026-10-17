@@ -86,50 +86,55 @@ the network changed: counted as the network's …` (книга сбоев, по�
 (действия пользователя: `connect`, `disconnect`, `mode`, `route`, `sysProxy`, `pin`, …) в каталоге не
 перечислена — это явный список-исключение сторожевого теста.
 
-| cat | type | data |
-|---|---|---|
-| conn | connected | план подключения (режим, маршрут, сервер) |
-| conn | disconnected | `by` |
-| conn | connectFailed | `reason` (Manual на сервер или на запись, которые пропали / выключены / не поддержаны: текст `Manual pick "…" is unavailable: …` — подключение не идёт через другой сервер, запущенное завершается этой же ошибкой; см. connect-model.md → Manual на сервер) |
-| conn | lost / restored | `downMs?` — сеть пропала / вернулась на живом подключении |
-| conn | offline / online | `downMs?` — нет интернета вообще / вернулся |
-| conn | failing | соединения массово не удаются (детектор неудавшихся соединений, `failures.dart`) |
-| auto | switched | `route?`, `from`, `to`, `reason` |
-| auto | fastest | `route`, `from`, `to` |
-| auto | unstable | `id`, `strikes`, `holdMs` |
-| site | blocked | `host`, `entry`, … — не открывается на маршруте, открывается на другом |
-| site | unreachable | `host`, `entry`, `check?` — не открылся нигде (+ результат чекера) |
-| sub | updated | `source`, `name`, `added`, `removed`, `total` |
-| sub | failed | `source`, `name`, `error` |
-| sub | diverged | Auto: прямая и туннельная копии подписки с разными наборами серверов. `source`, `name`, `host`, `ua`, `directNodes` / `tunnelNodes`, `onlyDirect` / `onlyTunnel` (≤ 10 имён) и `…Count`, `directStatus` / `tunnelStatus`, `directMs` / `tunnelMs`, `directPath` / `tunnelPath`, `directFresh` / `tunnelFresh` (заголовки свежести обеих копий: `Age`, `Date`, `Last-Modified`, `ETag`, `Cache-Control`, `Expires` — какие были), `used` (`tunnel` / `direct` / `merged`), `why` (`newer: lastModified` / `newer: age` / `unknown`), `usedNodes`. warn, без уведомления; три записи подряд при discovery (по одной на UA) — норма. `docs/subscription-parsing.md` → «Download via» |
-| sub | removed / back | `count`, `source`, `name` — серверы пропали из подписки / вернулись |
-| sub | dead | только мокап (серверы подписки не отвечают); ядро и приложение его не пишут |
-| rules | fallback / targetBack | `target`, `to?` — «If unavailable» сработал / цель вернулась |
-| rules | targetLost / targetFound | `rule` или `app`, `target`, `why` (`deleted` / `off` / `noServers` / `unsupported`), `to` (`block` / `direct` / `main` / id цели), `default?` — цель правила или приложения потеряна (warn, уведомление под `autoSwitch`) / вернулась (info). `docs/rules.md` §0 «Недоступная цель» |
-| rules | ruleSetFailed | `tag`, `url`, `error` |
-| rules | ruleSetUpdated | `tag` |
-| dns | switched | `side` (`direct` / `vpn`), `from`, `to` (id кандидатов), `fromProvider`, `toProvider`, `reason` (`failover` — отвечавший упал, в том числе протокол, взятый гонкой после отказа победителя; `back` — вернулся более приоритетный; `node` — сменилась нода выхода, применились вердикты новой; `off` — выключили «Switch automatically»); `own` у `off`. На сторону, когда меняется её отвечающий кандидат. Победитель гонки протоколов (старт, смена сети или ноды) — обычный выбор: события нет, только строка гонки в Raw |
-| dns | failed | `server`, `path` (`direct` / `proxy`), `since`, `provider`, `side`, `servers` (id упавших транспортов) — DNS-сервер подтверждённо не отвечает (Sentinel, `dns.down`), причины выше нет. На стороне VPN — и через запасную ноду он молчит (или спросить нельзя: нет запасной ноды, DoQ / системный). На провайдера и сторону: упал один транспорт, а провайдер на этой стороне ещё отвечает — только строка журнала |
-| dns | failedOnNode | те же поля, что у `failed`, плюс `node` (ключ узла выхода), `via` (ключ узла, через который сервер ответил) — сервер стороны VPN не отвечает на ноде выхода в использовании, но отвечает через запасную (`dns.node`, `docs/failures.md` «DNS на ноде»). Корень и свёртка те же, что у `failed`; уведомления нет (как у `failed`) |
-| node | addressMissing | `host`, `node`, `source`, `nodes`, `inUse` — имя сервера узла не существует: все ответившие DNS-серверы сказали «имени нет» и в перепроверке через минуту сказали то же (Sentinel, `node.addressMissing`, `docs/failures.md`). Одно событие на **имя** (`node` — один из его узлов, `nodes` — сколько узлов на этом имени); повтор, пока вердикт стоит, — счётчик на событии. Уведомление — только при `inUse` (узел основного потока), выключатель — «ошибки подписок» (`subFailed`) |
-| speed | done / failed | результат / `error` |
-| core | crashed | `code` |
-| core | restarted | `attempt`, `downMs?` |
-| core | restartFailed | `attempt`, `error` |
-| core | tunNeedsAdmin | `stage`, `error?` |
-| core | down | `proxy` |
-| core | sysProxy | `on`, `by?`, `error?` |
-| core | deprecated | `text` |
-| core | stateRestored / stateLost | `from`, `savedAt`, `reason`, `kept?` |
-| core | updateAvailable | `version`, `build`, `channel`, `forced`, `via` |
-| core | updateFailed | `stage` (check/download/verify/install), `code`, `error`, `attempts?` |
-| core | updateChannelEmpty | `channel`, `attempts` |
-| core | updateDownloaded | `version`, `build`, `size`, `via`, `delta?`, `downloaded?` |
-| core | updateDeltaFailed | `code`, `error`, `from`, `attempts?` |
-| core | updateInstalled | `from`, `to` |
-| core | tunTcpDead / tunTcpBack | TCP через TUN не доходит до маршрутизации / снова идёт (детектор «осиротевших» SYN) |
+Единственный каталог: кто и когда пишет, уровень, `data` (раньше часть жила в `core.md`). Поля Sentinel (`verdict`,
+`why`, `trail`, `cause`) — `docs/failures.md` → «Модель события»; что меняет т1 — раздел «Событие в приложении» ниже.
 
-(Поля `data` у `conn/failing`, `core/tunTcpDead`, `core/tunTcpBack` описывает `failures.dart`.)
+| событие | когда, уровень | `data` |
+|---|---|---|
+| `conn/connected` | info. Подключились (`own: true` по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, pick?, picks?, mode: 'proxy'\|'tun', route: 'global'\|'rules'}` — `server`: выбранный при подключении сервер группы; `pick`: выбор проверки перед стартом для группы маршрута (у цепочки — вход), нет, если маршрут не проверялся: `{group, mode, tried, answered, chosen, ms, weak, tookMs, found}`; `picks`: все выборы до старта (маршрут первым), если их больше одного или проверялись только цели правил (`core.md` → «Подключение: проверка перед стартом») |
+| `conn/disconnected` | info. `by: 'user'` — по команде (`own: true`, только если было подключено). Потеря Manual-пина сейчас тоже пишется так (неверно; `by: 'error'` — т1) | `{by, reason?}` |
+| `conn/connectFailed` | error. Подключение не вышло. Manual на сервер или запись, которые пропали / выключены / не поддержаны: `Manual pick "…" is unavailable: …` — через другой сервер не идёт, запущенное завершается этой же ошибкой (`connect-model.md` → Manual на сервер) | `{reason}` |
+| `conn/lost` / `restored` | warn / info. Auto: ни один маршрут не отвечает — корень Sentinel `conn.lost` (`why: routes.silent`, не сессионный); `restored` — `noNet` снова false | `{routes}` + поля Sentinel / `{downMs}` |
+| `conn/offline` / `online` | warn / info. Нет интернета вообще — корень Sentinel `net.offline` (`failures.md` → «Сеть»); закрывает только успешная прямая проба | `{source}` / `{downMs, source}` — `source`: что решило (`platform` / `os` / `probes` / …) |
+| `conn/failing` | Соединения массово не удаются (детектор неудавшихся соединений) | `failures.dart` |
+| `auto/switched` | info. Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
+| `auto/fastest` | info. Auto сменил Fastest-сервер (выбор ядра: failAfter промахов или шаг улучшения) | `{route, from, to}` |
+| `auto/unstable` | warn. Маршрут падает снова и снова (flap guard) | `{id, strikes, holdMs}` |
+| `site/blocked` | warn. Сайт не открывается через сервер, но открывается через другую нашу ноду (кнопка Create rule): разведчик (рабочая нода той же подписки, другой страны), затем ноды других подписок (всего не больше `siteRetry`); где открылся — `via` / `viaServer`, `viaTarget: 'node:…'`, если это нода того же маршрута (цель правила); порядок и память вердикта — `failures.md` | `{host, port?, entry, server, dest, via, viaServer, viaTarget?, rule, process?, app?, repeat?}` — `rule`, `process`, `app`: `core.md` → «`rule` и `process`» |
+| `site/unreachable` | warn. Не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); повторы после вердикта — на событии (`repeat`) без проб | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?, app?}`; `tried` пуст — нет другого рабочего маршрута; без `retries: 'off'` ещё `check` — `{state: 'pending'\|'off'\|'opens'\|'down'\|'failed', at, kind?, via?, ok?, total?, nodes?, error?, manual?}`, внешний чекер check-host.net (`connect-model.md` → «Внешний чекер»): событие меняется на месте (`rev`), тихое, пока нет `opens` |
+
+| `sub/updated` | info. Автообновление по таймеру ядра изменило список серверов (без изменений — события нет); ручное пишет приложение (т1: один автор) | `{source, name, added, removed, total}` |
+| `sub/failed` | error. Автообновление не вышло — через Sentinel (`svc.fetch`), только `confirmed`; только первый сбой после удачного (пока на карточке висит `lastError`, повторы молчат — тихий потолок, т1 заменяет счётчиком). Ручное пишет приложение, без вердикта | `{source, name, error}` |
+| `sub/diverged` | warn, без уведомления. Auto: прямая и туннельная копии подписки с разными наборами серверов; три записи подряд при discovery (по одной на UA) — норма. `subscription-parsing.md` → «Download via» | `source`, `name`, `host`, `ua`, `directNodes` / `tunnelNodes`, `onlyDirect` / `onlyTunnel` (≤ 10 имён) и `…Count`, `directStatus` / `tunnelStatus`, `directMs` / `tunnelMs`, `directPath` / `tunnelPath`, `directFresh` / `tunnelFresh` (заголовки свежести обеих копий: `Age`, `Date`, `Last-Modified`, `ETag`, `Cache-Control`, `Expires` — какие были), `used` (`tunnel` / `direct` / `merged`), `why` (`newer: lastModified` / `newer: age` / `unknown`), `usedNodes` |
+| `sub/removed` / `back` | Серверы пропали из подписки / вернулись | `{count, source, name}` |
+| `sub/dead` | Только мокап (серверы подписки не отвечают); ядро и приложение его не пишут | — |
+| `rules/fallback` / `targetBack` | warn / info. Цель правил перестала отвечать, их трафик ушёл на «If unavailable» (одно событие на пару цель + запасной выход) / цель снова отвечает | `{rule?, app?, more?, target, to: 'block'\|'direct'\|'main'\|<id запасной цели>}` / `{rule?, app?, more?, target}` — `target`: причина (`proxy` = основной поток); `rule`: имя первого правила (безымянного — `rule <id>`); `app`: первое приложение, когда через selector нет правил; `more`: сколько ещё правил / приложений через тот же selector |
+| `rules/targetLost` / `targetFound` | warn (уведомление под `autoSwitch`) / info. Цель правила или приложения потеряна (удалена / выключена / нет серверов / не поддерживается), трафик идёт по её «If unavailable», маршрутизация не меняется / снова годна. Одно событие на правило или приложение + цель; при подключении и при смене `why` / `to`; при отключении забывается; при `adopt` молчит. `rules.md` §0 «Недоступная цель» | `{rule?, app?, target, why: 'deleted'\|'off'\|'noServers'\|'unsupported', to: 'block'\|'direct'\|'main'\|<id цели>, default?: true}` / `{rule?, app?, target}` — `default`: решил глобальный Target unavailable |
+| `rules/ruleSetFailed` | warn. Скачивание списка не удалось. Ни один путь не ответил → через Sentinel (`svc.fetch`), только `confirmed`; ответ, не похожий на список, — сразу. Сбой нашего перезапуска не пишется (повтор после `settled`). Повтор — по `RetryPolicy` (1 → 2 → 5 → 15 мин) | `{tag, url, error, hasCopy}` — `url`: последний из пробованных; `hasCopy`: прошлая копия на диске и используется |
+| `rules/ruleSetUpdated` | info. Старая копия заменена новой или список скачан после сбоя (первая закачка отсутствующего — не новость) | `{tag}` |
+| `dns/switched` | info. На сторону, когда меняется её отвечающий кандидат (Switch automatically); `own` у `off`. Победитель гонки протоколов (старт, смена сети или ноды) — обычный выбор: события нет, только строка гонки в Raw | `{side: 'direct'\|'vpn', from, to, fromProvider, toProvider, reason}` — `from` / `to`: id кандидатов; `reason`: `failover` (отвечавший упал, в том числе протокол, взятый гонкой после отказа победителя), `back` (вернулся более приоритетный), `node` (сменилась нода выхода, применились вердикты новой), `off` (выключили «Switch automatically») |
+| `dns/failed` | DNS-сервер подтверждённо не отвечает (Sentinel, `dns.down`), причины выше нет. На стороне VPN — и через запасную ноду молчит (или спросить нельзя: нет запасной ноды, DoQ / системный). На провайдера и сторону; упал один транспорт, а провайдер на этой стороне ещё отвечает, — только строка журнала | `{server, path: 'direct'\|'proxy', since, provider, side, servers}` — `servers`: id упавших транспортов |
+| `dns/failedOnNode` | Сервер стороны VPN не отвечает на ноде выхода в использовании, но отвечает через запасную (`dns.node`, `failures.md` «DNS на ноде»). Корень и свёртка те же, что у `failed` | поля `failed` + `node` (ключ узла выхода), `via` (через какой узел ответил) |
+| `node/addressMissing` | Имя сервера узла не существует: все ответившие DNS сказали «имени нет» и в перепроверке через минуту — то же (Sentinel, `node.addressMissing`). Одно событие на **имя**; повтор, пока вердикт стоит, — счётчик. Уведомление — только при `inUse`, выключатель `subFailed` | `{host, node, source, nodes, inUse}` — `node`: один из узлов имени, `nodes`: сколько их; `inUse`: узел основного потока |
+| `speed/done` / `failed` | Замер скорости | результат / `{error}` |
+| `core/crashed` | error. sing-box вышел сам (перезапуск идёт в фоне) | `{code}` |
+| `core/restartFailed` | info. Попытка перезапуска не удалась; следствие `core/crashed` (`verdict: consequence`, `cause`). Сейчас только первые `_backoff.length` попыток — тихий потолок, т1 его снимает (и уровень → error) | `{attempt, error}` |
+| `core/down` | error. Перезапуск не удался за 30 с от падения (`core.md` → «Down») | `{proxy: 'kept'\|'removed'\|'released'}` |
+| `core/restarted` | info. После падения запущен снова | `{attempt, downMs?}` — `downMs` (от падения), только если успел быть down |
+| `core/tunNeedsAdmin` | error. TUN не поднялся: нет прав администратора (проверка до запуска) или sing-box отказал по правам. Вместо `conn/connectFailed`; `own: true` при connect по команде | `{stage: 'check'\|'start', error?}` — `error` только при `start`: слова sing-box |
+| `core/sysProxy` | info / warn. Системный прокси включён / возвращён (`own: true` по команде; при остановке jormd тоже); warn — не вышло. Прокси, оставленный kill switch'ем, события не пишет | `{on, by?, error?}` — `on`: что хотели получить; `by: 'user'`: кнопка Remove / Disable sys proxy (`POST /api/sysproxy/release`) |
+| `core/deprecated` | warn. sing-box сообщил, что конфиг перестанет работать в новой версии; каждый текст — раз за запуск демона (в сыром логе — при каждом подключении) | `{text}` |
+| `core/stateRestored` / `stateLost` | | `{from, savedAt, reason, kept?}` |
+| `core/tunTcpDead` / `tunTcpBack` | TCP через TUN не доходит до маршрутизации / снова идёт (детектор «осиротевших» SYN) | `failures.dart` |
+| `core/updateAvailable` | | `{version, build, channel, forced, via}` |
+| `core/updateDownloaded` | | `{version, build, size, via, delta?, downloaded?}` |
+| `core/updateDeltaFailed` | | `{code, error, from, attempts?}` |
+| `core/updateFailed` | | `{stage: check / download / verify / install, code, error, attempts?}` |
+| `core/updateChannelEmpty` | | `{channel, attempts}` |
+| `core/updateInstalled` | | `{from, to}` |
+
+Повторы любого события, свёрнутые на нём (`EventBook.repeated` / `repeatedQuiet`; у `site/*` — сбои того же
+адреса, пока стоит вердикт), — `data.repeat`: `{count, firstAt, lastAt, at}` (`at` — времена, последние 50).
 
 **Строки журнала DNS-флагов** (основное кольцо ядра, `logBook.note`; события выше — только итог, ход дела — здесь):
 - `dns flag: <кандидат> (<сторона>) on|off (<причина>): written to <файл>` — каждая запись флага (info; при старте
@@ -200,6 +205,231 @@ the network changed: counted as the network's …` (книга сбоев, по�
 каталога нет подписи в `event_text.dart` и он не в явном списке `pendingLabels` (долг, который надо погасить
 на этапе Flutter, а не копить). Динамические места записи (тип из переменной) тест знает поимённо — новое
 такое место добавляется в его таблицу `dynamicSites`.
+
+## Событие в приложении: что, почему, что делать (т1)
+
+> **Согласовано 2026-10-17, реализуется** (ядро → приложение, `.claude_states/events_plan.md` т1). Пока эта
+> пометка стоит, код разделу ещё не соответствует.
+
+Событие о проблеме (warn / error) отвечает на три вопроса: **что** случилось и с чем, **почему** (Sentinel или
+детектор), **что делать** (кнопки). Нет «почему» (`why.unknown`, `unexplained`) — только журнал, без уведомления
+(`failures.md` → «Что уведомляет»).
+
+### Строка в Logs → Events
+
+**Свёрнутая:** мета (время · уровень · `×N` · «в фоне») → заголовок — **что** (предмет и его состояние) → деталь
+(факт, как сейчас) → **строка причины** (новая) → до трёх кнопок.
+
+**Раскрытая** добавляет: поля `data`; **Проверки** — `trail` по шагам (✓ `pass`, ✗ `fail`, ? `inconclusive`,
+· `info`, время от начала подозрения `+1,2 с`; больше 8 шагов — первые 3, «ещё N», последние 3); **Повторы** —
+«N раз · с HH:MM по HH:MM» и времена (`data.repeat.at`, свёрнуты); **Связанные (N)** у корня; остальные кнопки;
+«Скрыть этот тип» / «Показывать только этот тип», «В Raw».
+
+**Строка причины** — у всего, что рассматривал Sentinel, по `verdict`; у остальных — причина типа из `data`
+(`reason`, `why`, `error`), если есть. Фразы — «Тексты» ниже. Коды `trail` — `failures.md` → «Коды в `trail`», у
+каждого есть фраза; код без фразы показывается как `code` + параметры, сторожевой тест ловит это как тип без подписи.
+
+### Свёртки
+
+Одна беда — одна строка. Четыре механизма (что куда ложится — таблица «По типам»):
+
+1. **Корень → следствия** (`cause`). Следствие отдельной строкой не выводится: корень показывает «+N связанных»
+   и время последнего, раскрытый — их список. Корень стоит на месте в ленте (`AnchoredList`), новое следствие
+   меняет только счётчик; уровень строки — худший из корня и следствий. Корень без события (`net.captive` — нарочно,
+   решение 2026-10-17; или корень выпал из журнала) — **строка-группа** с заголовком по `why.code` следствий, без
+   уведомления. Корень скрыт фильтром, а следствие подходит — следствие отдельной строкой со строкой причины; поиск
+   по следствию находит корень и раскрывает его.
+2. **Пара «началось / кончилось»**. Закрывающее событие пишется в журнал, а в ленте ложится в строку
+   открывающего: статус «завершилось», цвет «решено». Уведомление о закрытии заменяет уведомление об открытии
+   (тот же id).
+3. **Операция** — новое поле `op: {id, kind}`: всё, что написала одна операция, — одна строка с итогом, события
+   внутри. `op` ставит тот, кто начал (ядро; действие пользователя передаёт свой `op` в запросе). `user/*`,
+   начавшее операцию, — её причина (смена режима в строке переподключения); отдельной строкой — только действие
+   без последствий в журнале.
+4. **Повторы** — `data.repeat`, `×N`. Тихих потолков нет («Never hide problems»): `core/restartFailed` — каждая
+   попытка, не только первые `_backoff.length`; `sub/failed` — каждый подтверждённый сбой (та же ошибка на карточке
+   — `×N`, другая — новое событие); `core/deprecated` — счётчик на тексте за запуск; `conn/failing` сворачивает
+   остаток окна на последнее событие, как сейчас.
+
+«Сервер не открывает N сайтов» (S11) — не событие, а постоянный статус сервера (решение 2026-10-17, таблица
+состояний в `to_think.md`).
+
+### По типам
+
+- **Свёртка** — механизм выше. **Кнопки** — в строке; **жирные** — и в системном уведомлении (до двух, тап по
+  уведомлению открывает событие). Кнопка видна, пока действие имеет смысл; «Open» ведёт к предмету события.
+  У всех с `log` — ещё «In raw log», у каждого error ядра — «Send report» (лист отправки с этим событием).
+- **Уведомление** — переключатель Settings → Notifications (`eventNotifKind`) или «журнал» с причиной (список
+  `journalOnly` в `log_view.dart`; сторожевой тест падает на warn / error, которого нет ни там, ни там).
+  «+» — новое против текущего кода; «—» — info-событие, не уведомляет.
+
+**Подключение и сеть**
+
+| событие | свёртка | кнопки | уведомление |
+|---|---|---|---|
+| `conn/reconnected` (новое) | операция. Заменяет `conn/connected` на живом подключении (сменился план: настройки, режим, маршрут, пин, DNS; докачаны списки; `reresolve`) и ручное «отключить → подключить» за ≤ 7 с. `{reason: settings / lists / reresolve / user, changed?, tookMs}`, `changed` — что поменялось в плане; `user/mode`, `route`, `pin`, `sysProxy` — причина | Open (что изменилось) при `settings` | — |
+| `conn/connected` / `disconnected` | операция: нажатие пользователя + событие — одна строка `own: true` (сейчас две); `core/sysProxy` on / off — внутри | `by: error`: **Connect**, при `pinLost` Choose server | `by: error` — `connLost` + |
+| `conn/connectFailed` | ×N (автоподключение, Retry) | **Retry**; при `pinLost` Choose server; Open settings, если причина в настройках | `connLost` + |
+| `conn/lost` / `restored` | пара; без сети — под `conn/offline` | **Check now** (раунд Auto вне очереди), Open | `connLost` |
+| `conn/offline` / `online` | пара; корень для `conn/lost`, `site/*`, `conn/failing`, `sub/failed`, `ruleSetFailed` | **Network settings** | `connLost` |
+| `net/switched` (новое) | корень всего, что вызвала смена (переподключение, гонки DNS, Auto, сбои в окне смены) | — | журнал: сведения |
+| `conn/failing` | следствие `site/*` про тот же адрес в том же окне | **Create rule**, Open (приложение в Per-app) | `blocked` |
+| `site/blocked` / `unreachable` | ×N: один сайт из разных приложений — одна строка, приложения внутри | Check with checker, Copy site, **Create rule**, **Ignore site** | `blocked` |
+
+**Auto, DNS**
+
+| событие | свёртка | кнопки | уведомление |
+|---|---|---|---|
+| `auto/switched` | пара failover → back; серия за одну беду — под первым переключением; отказ сервера — корень «сервер не отвечает» для `auto/switched`, `rules/fallback` целей на нём и `dns/switched node` | Open, Pin (закрепить новый сервер) | `autoSwitch` |
+| `auto/fastest` | ×N на маршрут | Open, Pin | `autoSwitch` |
+| `auto/unstable` | корень для переключений той же записи | **Open**, Check now | `unstable` |
+| `dns/switched` | пара failover → back | Open (DNS) | `autoSwitch` |
+| `dns/failed` | корень для `failedOnNode` того же сервера | Check now, **Switch server**, Open | `dnsFailed` + (новый переключатель «DNS-сервер не отвечает», вкл.) |
+| `dns/failedOnNode` | следствие `dns/failed` | Check now, Open | журнал: работает через запасную ноду |
+
+**Подписки, правила**
+
+| событие | свёртка | кнопки | уведомление |
+|---|---|---|---|
+| `sub/updated` | операция: `updated` + `removed` + `back` одного обновления; «Обновить все» / тик по нескольким подпискам — одна строка, подписки внутри | **Open**, список изменений по именам | `subUpdated` |
+| `sub/failed` | ×N, пока на карточке та же ошибка | **Retry**, Open | `subFailed` |
+| `sub/removed` / `back` | пара; внутри `sub/updated` | **Open**, `names` с отметкой «используется», при `inUse` Choose server | `subFailed` |
+| `sub/diverged` | — | Open, Send report | журнал: диагностика |
+| `node/addressMissing` | одна строка на источник, имена внутри | Open (источник), **Update subscription** | `subFailed` при `inUse` |
+| `rules/targetLost` / `targetFound` | пара; одна строка на цель, правила внутри; корень для `rules/fallback` той же цели | **Open rule**, Choose target | `autoSwitch` |
+| `rules/fallback` / `targetBack` | пара | **Open rule**, Check now (проверить цель) | `autoSwitch` |
+| `rules/ruleSetFailed` | несколько списков с одной причиной — одна строка | **Retry**, Open | `ruleSets` |
+| `rules/ruleSetUpdated` | операция: пачка — одна строка | — | — |
+
+**Ядро, обновление, прочее**
+
+| событие | свёртка | кнопки | уведомление |
+|---|---|---|---|
+| `core/crashed`, `restartFailed`, `down`, `restarted` | одна строка, статус по последнему; `restartFailed` (×N) и `down` — следствия, `restarted` закрывает; уведомление одно, обновляется на месте | **Retry** (пока не запущено), Remove system proxy при `proxy: kept`, Send report | `coreCrash`; `down` — `connLost` |
+| `core/tunNeedsAdmin` | — | Retry, **Open settings** (режим) | `connLost` + |
+| `core/tunTcpDead` / `tunTcpBack` | пара | **Reconnect**, Send report | `connLost` |
+| `core/sysProxy` | on / off — внутри `conn/*`; отдельной строкой — только ошибка или ручное Remove | с `error`: **Retry**, Remove system proxy | с `error` — `connLost` + |
+| `core/stateLost` / `stateRestored` | — | Send report | `appData` + (новый переключатель «Данные приложения», вкл.) |
+| `core/deprecated` | операция: тексты одного подключения — одна строка | Copy text | журнал: для разработчика |
+| `core/updateAvailable` → `updateDownloaded` (→ `updateDeltaFailed`) → `updateInstalled` | операция, статус по последней стадии | Install / Open update | журнал: своя поверхность (`UpdateFlow`) |
+| `core/updateFailed` / `updateChannelEmpty` | ×N по расписанию | Retry, Open update | журнал: своя поверхность |
+| `speed/done` / `failed` | операция при замере группы | `failed`: Retry | журнал: пользователь сам запустил |
+
+### Тексты
+
+Русский смысл фраз; показывается английский текст из `event_text.dart` (русский — к стейблу, `docs/i18n.md`), в
+данных фраз нет. Правила:
+
+- Заголовок — предмет и его состояние, без оценок и разговорного («упал», «лежал», «сломалось»). Одно состояние —
+  один глагол везде: сервер и DNS **не отвечает**, сайт **не открывается**, цель правила **недоступна**, операция —
+  **не удалось …**, возврат — **снова отвечает / доступна**.
+- Причина — установленный факт, не догадка; неизвестна — так и сказано.
+- Время и длительность — в конце через « · »: «· 3 мин», «· с 14:02 по 14:20». `<…>` — подстановка из `data`.
+
+**Общие строки**
+
+| где | текст |
+|---|---|
+| причина `consequence` | Причина: <заголовок корня> |
+| причина `blip` | Восстановилось само · через N с |
+| причина `workaround` | Открывается через <via> |
+| причина `unexplained` / `why.unknown` | Причина не установлена — см. проверки |
+| корень | +N связанных |
+| закрытая пара | Завершилось в HH:MM · длилось N |
+| повторы | N раз · с HH:MM по HH:MM |
+| строка-группа `net.captive` | Сеть требует входа (страница авторизации) · событий: N |
+
+**Фразы `why.code`**
+
+| код | текст |
+|---|---|
+| `net.offline` | Нет подключения к интернету: система сообщает, что сети нет / прямые проверки не проходят |
+| `net.captive` | Сеть требует входа (страница авторизации) |
+| `core.down` | Ядро sing-box не запущено |
+| `svc.fetch` | Нет ответа ни напрямую, ни через VPN · N с |
+| `dns.down` | DNS-сервер не отвечает ни на одной проверенной ноде |
+| `dns.node` | DNS-сервер не отвечает через текущую ноду выхода |
+| `node.addressMissing` | Домен сервера не существует: все DNS-серверы ответили «нет такого имени» |
+| коды сайтов | Не открывается через <маршрут>; через <нода> — открывается / тоже нет; из других стран — доступен / недоступен |
+| `recovered` | Восстановилось до вынесения вердикта |
+
+**По событиям** (заголовок; после « — » — деталь или причина)
+
+| событие | текст |
+|---|---|
+| `conn/connected` | Подключено: <запись> — <режим>, <маршрут> |
+| `conn/disconnected` | Отключено; `by: error`: Отключено: ядро не запустилось после N попыток / Отключено: выбранный сервер <X> недоступен (удалён / выключен / не поддерживается) |
+| `conn/reconnected` | Переподключено — изменены настройки: <что> (например «режим: TUN → Proxy») / загружены списки правил / изменились адреса серверов / по команде, перерыв N с; в конце «· N с» (`tookMs`) |
+| `conn/connectFailed` | Не удалось подключиться — <причина> |
+| `conn/lost` / `restored` | Нет связи через VPN — интернет доступен напрямую, ни один маршрут не отвечает / доступность интернета не подтверждена; закрыто: Связь восстановлена · перерыв N |
+| `conn/offline` / `online` | Нет подключения к интернету — система сообщает, что сети нет / прямые проверки не проходят; закрыто: Интернет восстановлен · перерыв N |
+| `net/switched` | Смена сети: Wi-Fi (Ростелеком) → мобильная (МТС); с провалом — «· без сети N с»; провайдер не определён или настройка выключена — только тип |
+| `conn/failing` | <приложение>: соединения не устанавливаются |
+| `site/blocked` | <host> не открывается через <маршрут> — открывается через <via>; из нескольких приложений — «· <app>, <app>» |
+| `site/unreachable` | <host> не открывается — ни через один сервер; из других стран доступен / недоступен ни из одной проверенной страны |
+| `auto/switched` | Auto: <A> → <B> — <A> не отвечает; пара: Auto: <B> вместо <A> · N мин, затем возврат на <A>; серия: Auto: <A> → <C> (через <B>) |
+| отказ сервера (корень) | Сервер <X> не отвечает — переключены: маршруты N, цели правил N, DNS |
+| `auto/fastest` | Fastest: <A> → <B>; ×N: Fastest: N смен · сейчас <X> |
+| `auto/unstable` | <X> работает нестабильно — отказов: N, исключён на N мин |
+| `dns/switched` | DNS (<сторона>): <A> → <B> — <причина>; пара: DNS (<сторона>): <B> вместо <A> · N мин, затем возврат |
+| `dns/failed` | DNS-сервер <X> не отвечает |
+| `dns/failedOnNode` | DNS-сервер <X> не отвечает через <нода> — работает через запасную ноду <via> |
+| `sub/updated` | Подписка <имя> обновлена: +N −M; удалён используемый — «· удалён используемый сервер <X>»; пачка: Подписки обновлены: N из M |
+| `sub/failed` | Не удалось обновить подписку <имя> — <ошибка> |
+| `sub/removed` / `back` | Из подписки <имя> удалены серверы: N / В подписку <имя> вернулись серверы: N |
+| `sub/diverged` | Подписка <имя>: прямая и туннельная копии различаются |
+| `node/addressMissing` | <источник>: домен <host> не существует · серверов: N |
+| `rules/targetLost` / `targetFound` | Цель <X> недоступна (удалена / выключена / нет серверов / не поддерживается) — трафик правил: блокируется / напрямую / основной поток / <цель> · правил: N; закрыто: Цель <X> снова доступна |
+| `rules/fallback` / `targetBack` | <X> не отвечает — трафик правил переведён на <запасной выход>; закрыто: <X> снова отвечает, трафик правил вернулся |
+| `rules/ruleSetFailed` | Не удалось загрузить список <tag> — используется копия от <дата> / копии нет, правила с этим списком не действуют; группа: Не удалось загрузить списки правил: N — <причина> |
+| `rules/ruleSetUpdated` | Списки правил обновлены: N |
+| `core/crashed` … `restarted` | Ядро sing-box остановилось аварийно (код N) → Перезапуск · попытка N → Ядро не запущено 30 с — трафик заблокирован, системный прокси сохранён (`proxy: kept`) → Ядро снова работает · простой N |
+| `core/tunNeedsAdmin` | TUN не запущен: нужны права администратора |
+| `core/tunTcpDead` / `tunTcpBack` | TCP через TUN не проходит / TCP через TUN снова проходит |
+| `core/sysProxy` с `error` | Не удалось включить / отключить системный прокси — <ошибка> |
+| `core/stateLost` / `stateRestored` | Сохранённое состояние не восстановлено — <причина> / Состояние восстановлено из копии от <дата> |
+| `core/deprecated` | sing-box: устаревшие параметры конфигурации · N |
+| `core/update*` (операция) | Обновление <версия>: доступно / загружено / установлено / не удалось на этапе <проверка / загрузка / проверка подписи / установка> |
+| `core/updateChannelEmpty` | Канал обновлений <канал> пуст |
+| `speed/*` (операция) | Замер скорости: серверов N, лучший — <X>, M Мбит/с |
+
+Ручное обновление подписки во время своего переподключения ядра — на карточке «Ожидает подключения», затем
+результат. Подписи путей подписки Auto / Proxy / Direct — через l10n.
+
+### Уровни и атрибуция
+
+- `core/restartFailed` — error (тихий: следствие). Фоновый `core/updateFailed` — warn (сейчас info).
+- `conn/disconnected by: 'error'` — отключило не пользователь: `reason: 'down'` (sing-box не поднялся после всех
+  попыток) или `'pinLost'` (`pick`, `why`: `deleted` / `off` / `unsupported`). Сейчас потеря пина пишется как
+  `by: 'user'` — неверно. Отдельное событие потери пина — т3.
+- `core/crashed` несёт `reason`, если ядро его знает (отзыв VPN — т2, там события нет); `rules/ruleSetFailed` —
+  новое поле `copyAt` (дата прошлой копии при `hasCopy`).
+
+### Смена сети (`net/switched`)
+
+Решение пользователя 2026-10-17: своё событие и своя категория `net` в фильтре Events (`eventCats`); info, корень
+для всего, что смена вызвала (аудит §1.13).
+
+- **Когда:** сменился тип сети (Wi-Fi / мобильная / Ethernet) или id сети при том же типе, и новая сеть устоялась
+  (`failures.md` → «Смена сети: возмущение, ворота, устойчивость»). Провал с возвратом в ту же сеть — пара
+  `conn/offline` → `online`; пропала совсем — `conn/offline`.
+- **`data`:** `{from, to}`, каждое `{type, provider?, operator?, metered?}`; `downMs`, если между сетями был провал.
+- **Провайдер** — настройка «Определять провайдера сети» (Settings → Connection), вкл. / выкл., по умолчанию
+  вкл. Мобильная: `operator` — оператор SIM передачи данных от системы (разрешений не нужно). Wi-Fi / Ethernet:
+  `provider` — организация (ISP) по прямому публичному IP: тот же запрос к сервисам Exit IP, что и без туннеля,
+  после устойчивости сети; помнится по id сети, пока не сменится публичный IP. Имя Wi-Fi (SSID) не берётся: на
+  Android ему нужно разрешение геолокации.
+
+### Один автор `sub/*`
+
+Пишет только ядро — и автообновление, и ручное (сейчас ручное: приложение зовёт `POST /api/sources/fetch`, само
+сливает и пишет `sub/*` через `_journal`). Ручное: `own: true`, без Sentinel, сразу (пользователь ждёт). Поля одни:
+`sub/updated` `{source, name, added, removed, total, own}`, `sub/failed` `{source, name, error, code?, path?, own}`,
+`sub/removed` / `back` `{source, name, count, names, inUse}` — `names`: до 10 имён, `inUse`: среди них сервер
+основного потока или цели правила.
+
+Сбой из-за **своего переподключения** (`RetryPolicy.ownRestart`) — не сбой: ни события, ни ошибки на карточке;
+загрузка повторяется, когда ядро устоялось (`settled`) (`bugs.md`, 2026-10-17).
 
 ## Отчёт
 
