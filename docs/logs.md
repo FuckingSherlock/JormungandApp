@@ -92,7 +92,9 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | событие | когда, уровень | `data` |
 |---|---|---|
 | `conn/connected` | info. Подключились (`own: true` по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, pick?, picks?, mode: 'proxy'\|'tun', route: 'global'\|'rules'}` — `server`: выбранный при подключении сервер группы; `pick`: выбор проверки перед стартом для группы маршрута (у цепочки — вход), нет, если маршрут не проверялся: `{group, mode, tried, answered, chosen, ms, weak, tookMs, found}`; `picks`: все выборы до старта (маршрут первым), если их больше одного или проверялись только цели правил (`core.md` → «Подключение: проверка перед стартом») |
-| `conn/disconnected` | info. `by: 'user'` — по команде (`own: true`, только если было подключено). `by: 'error'` (warn) — отключило не пользователь: `reason: 'pinLost'` (приходит от приложения в `disconnect {error}`), `'down'`. Ручное отключение — `op {kind: connection}` (ручное «отключить → подключить» за ≤ 7 с — `conn/reconnected`) | `{by, reason?, pick?, why?}` |
+| `conn/disconnected` | info. `by: 'user'` — по команде (`own: true`, только если было подключено). `by: 'error'` (warn) — отключило не пользователь: `reason: 'pinLost'` (приходит от приложения в `disconnect {error}`), `'down'`. `by: 'system'` (warn) — VPN отняла система (Android:
+другой VPN, выключение в системных настройках), `reason: 'revoked'`; ядро остановлено полностью, без перезапусков
+(`core.md` → «Отзыв туннеля»). Ручное отключение — `op {kind: connection}` (ручное «отключить → подключить» за ≤ 7 с — `conn/reconnected`) | `{by, reason?, pick?, why?}` |
 | `conn/connectFailed` | error. Подключение не вышло. Manual на сервер или запись, которые пропали / выключены / не поддержаны: `Manual pick "…" is unavailable: …` — через другой сервер не идёт, запущенное завершается этой же ошибкой (`connect-model.md` → Manual на сервер) | `{reason, fix?}` — `fix`: где исправлять, если ядро это знает: `settings` — занят порт прокси (Settings → Connection → порт; sing-box не смог слушать свой `mixed-in`), `pick` — Manual-пин не годится (выбрать сервер в Route). Без `fix` — причина не в настройках |
 | `conn/lost` / `restored` | warn / info. Auto: ни один маршрут не отвечает — корень Sentinel `conn.lost` (`why: routes.silent`, не сессионный); `restored` — `noNet` снова false | `{routes}` + поля Sentinel / `{downMs}` |
 | `conn/vpnDown` / `vpnUp` | error / info. «VPN не работает»: при подключении ядро не поднялось за 30 с или нет сети — одно событие на сбой, причины меняются на месте; `vpnUp` закрывает (`opens`). Раздел «„VPN не работает“» ниже | `{causes: ['core'\|'network'], proxy?, source?}` + `joins?` / `{downMs, causes, by?}` — `proxy` при `core` (как был у `core/down`), `source` при `network` |
@@ -310,7 +312,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | событие | свёртка | кнопки | уведомление |
 |---|---|---|---|
 | `conn/reconnected` (новое) | операция. Заменяет `conn/connected` на живом подключении (сменился план: настройки, режим, маршрут, пин, DNS; докачаны списки; `reresolve`) и ручное «отключить → подключить» за ≤ 7 с. `{reason: settings / lists / reresolve / user, changed?, tookMs}`, `changed` — что поменялось в плане; `user/mode`, `route`, `pin`, `sysProxy` — причина | Open (что изменилось) при `settings` | — |
-| `conn/connected` / `disconnected` | операция: нажатие пользователя + событие — одна строка `own: true` (сейчас две); `core/sysProxy` on / off — внутри | `by: error`: **Connect**, при `pinLost` Choose server | `by: error` — `connLost` + |
+| `conn/connected` / `disconnected` | операция: нажатие пользователя + событие — одна строка `own: true` (сейчас две); `core/sysProxy` on / off — внутри | `by: error`: **Connect**, при `pinLost` Choose server; `by: system`: **Connect** | `by: error` — `connLost` +; `by: system` — `vpnRevoked` + (новый переключатель «VPN выключен системой», вкл.) |
 | `conn/connectFailed` | ×N (автоподключение, Retry) | **Retry**; при `fix: pick` Choose server; при `fix: settings` Open settings (Settings → Connection) — по полю, не по тексту `reason` | `connLost` + |
 | `conn/vpnDown` / `vpnUp` | пара; корень для всего, что зависит от VPN (`conn/lost`, `site/*`, `conn/failing`, `sub/failed`, `ruleSetFailed`, `dns/*`…); вливает падение ядра (`joins`); уведомление одно, текст меняется на месте | `core`: **Retry** (пока не запущено), Remove system proxy при `proxy: kept`, Send report; `network`: **Network settings** | `connLost` |
 | `conn/lost` / `restored` | пара; при открытом «VPN не работает» — под ним | **Check now** (раунд Auto вне очереди), Open | `connLost` |
@@ -401,7 +403,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | событие | текст |
 |---|---|
 | `conn/connected` | Подключено: <запись> — <режим>, <маршрут> |
-| `conn/disconnected` | Отключено; `by: error`: Отключено: ядро не запустилось после N попыток / Отключено: выбранный сервер <X> недоступен (удалён / выключен / не поддерживается) |
+| `conn/disconnected` | Отключено; `by: error`: Отключено: ядро не запустилось после N попыток / Отключено: выбранный сервер <X> недоступен (удалён / выключен / не поддерживается); `by: system`: VPN выключил другой VPN или система (EN: «VPN turned off by another VPN or the system») |
 | `conn/reconnected` | Переподключено — изменены настройки: <что> (например «режим: TUN → Proxy») / загружены списки правил / изменились адреса серверов / по команде, перерыв N с; в конце «· N с» (`tookMs`) |
 | `conn/connectFailed` | Не удалось подключиться — <причина> |
 | `conn/lost` / `restored` | Нет связи через VPN — интернет доступен напрямую, ни один маршрут не отвечает / доступность интернета не подтверждена; закрыто: Связь восстановлена · перерыв N |
@@ -448,7 +450,9 @@ the network changed: counted as the network's …` (книга сбоев, по�
   запись — имя записи; сервер пропал из подписки и его имени уже нет — пусто, текст тогда без имени, имя записи вместо
   сервера не подставляется). Сейчас потеря пина пишется как
   `by: 'user'` — неверно. Отдельное событие потери пина — т3.
-- `core/crashed` несёт `reason`, если ядро его знает (отзыв VPN — т2, там события нет); `rules/ruleSetFailed` —
+- `conn/disconnected by: 'system'` — VPN отняла система, `reason: 'revoked'` (т2; до него отзыв шёл как
+  `core/crashed {code: 0}` → `restartFailed` ×N → `down`).
+- `core/crashed` несёт `reason`, если ядро его знает (отзыв VPN — не падение, `core/crashed` не пишет); `rules/ruleSetFailed` —
   новое поле `copyAt` (дата прошлой копии при `hasCopy`).
 
 ### Смена сети (`net/switched`)

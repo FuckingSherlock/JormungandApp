@@ -816,7 +816,8 @@ updates, см. `updates.md` (раз в день, без установки бе�
   нестабильна (flap guard); `connLost` [вкл] «VPN не работает» (`conn/vpnDown`: ядро не поднялось за 30 с после
   падения или нет сети — одно уведомление, причина меняется на месте, «VPN снова работает» в конце) / не отвечает
   ни один маршрут (`status.auto.noNet`) и возврат. Переключателя `coreCrash` нет (решение 2026-10-17): падение,
-  поднявшееся за 30 с, — только журнал; `blocked` [вкл] «сайт не открывается через запись» с кнопкой Create rule.
+  поднявшееся за 30 с, — только журнал; `vpnRevoked` [вкл] (только Android) «VPN выключил другой VPN или
+  система» (`conn/disconnected by: 'system'`, `core.md` → «Отзыв туннеля»; решение 2026-10-17); `blocked` [вкл] «сайт не открывается через запись» с кнопкой Create rule.
 - **Subscriptions and rules**: `subUpdated` [выкл] фоновое обновление прошло (имя, число серверов);
   `subFailed` [вкл] фоновое обновление не удалось / провайдер убрал серверы / серверы вернулись /
   серверы подписки не отвечают → обратитесь в поддержку; `ruleSets` [вкл] набор правил не скачался
@@ -845,7 +846,7 @@ updates, см. `updates.md` (раз в день, без установки бе�
 события журнала: `id` больше последнего, увиденного при загрузке страницы (история не
 уведомляет никогда), `own: false`. Соответствие тип → переключатель: `auto/switched|fastest` →
 `autoSwitch`; `rules/targetLost|targetFound` → `autoSwitch` (цель правила или приложения потеряна / вернулась, `rules.md` §0 «Недоступная цель»); `auto/unstable` → `unstable`; `conn/vpnDown|vpnUp|lost|restored` → `connLost` (`conn/offline|online` без
-подключения и `core/crashed|restarted|restartFailed` — только журнал); `site/blocked` → `blocked` (кнопки Create rule и Ignore site), `site/unreachable` → тот же `blocked` (только Ignore site; хост игнорируемого сайта уведомлений не даёт никогда);
+подключения и `core/crashed|restarted|restartFailed` — только журнал); `conn/disconnected` `by: system` → `vpnRevoked`; `site/blocked` → `blocked` (кнопки Create rule и Ignore site), `site/unreachable` → тот же `blocked` (только Ignore site; хост игнорируемого сайта уведомлений не даёт никогда);
 `sub/updated` → `subUpdated`; `sub/failed|removed|back|dead` → `subFailed`; `rules/ruleSetFailed`
 → `ruleSets`. Остальные события уведомлений не дают. Текст — та же строка, что заголовок и
 пояснение строки события. Счётчики статуса ядра (`switches`, `unstable`, `blocked`, `restarts`)
