@@ -69,21 +69,22 @@ void main() {
 
   group('the buttons of a notification come from the table «По типам»', () {
     const cases = {
-      'conn/lost': ('conn', 'lost', <String, dynamic>{}, ['checkNow']),
-      'rules/ruleSetFailed': ('rules', 'ruleSetFailed', <String, dynamic>{'tag': 'geo'}, ['retryRuleSets']),
-      'conn/offline': ('conn', 'offline', <String, dynamic>{}, ['networkSettings']),
-      'dns/failed': ('dns', 'failed', <String, dynamic>{}, ['open']),
+      'conn/lost': ('conn', 'lost', 'warn', <String, dynamic>{}, ['checkNow']),
+      'rules/ruleSetFailed': ('rules', 'ruleSetFailed', 'warn', <String, dynamic>{'tag': 'geo'}, ['retryRuleSets']),
+      'conn/vpnDown by network': ('conn', 'vpnDown', 'error', <String, dynamic>{'causes': ['network']}, ['networkSettings']),
+      'conn/vpnDown by core, not running': ('conn', 'vpnDown', 'error', <String, dynamic>{'causes': ['core']}, ['retry']),
+      'dns/failed': ('dns', 'failed', 'warn', <String, dynamic>{}, ['open']),
     };
     cases.forEach((name, c) {
       testWidgets('$name: the bold button of the table, and never more than two', (tester) async {
         final host = await open(tester);
         _lifecycleTo(AppLifecycleState.paused);
-        host.addEvent(c.$1, c.$2, level: 'warn', data: c.$3);
+        host.addEvent(c.$1, c.$2, level: c.$3, data: c.$4)['verdict'] = 'confirmed';
         await settle(tester);
 
         expect(io.posted, hasLength(1));
         final ids = [for (final a in io.posted.single.actions) a.$1];
-        expect(ids, c.$4);
+        expect(ids, c.$5);
         expect(ids.length, lessThanOrEqualTo(2));
       });
     });
@@ -103,11 +104,10 @@ void main() {
     expect(io.posted.last.title, isNot(io.posted.first.title));
   });
 
-  testWidgets('a crash chain is one notification: the crash, its failed restarts, the down and the restart update it in place', (
+  testWidgets('a crash that turns into a VPN failure: the crash and its failed restarts post nothing; the failure joins them, one id', (
     tester,
   ) async {
     final host = await open(tester);
-    host.notif.setFlag('coreCrash', true);
     _lifecycleTo(AppLifecycleState.paused);
     final crash = host.addEvent('core', 'crashed', level: 'error', data: const {'code': 2})..['verdict'] = 'confirmed';
     for (var n = 1; n <= 2; n++) {
@@ -115,41 +115,41 @@ void main() {
         ..['verdict'] = 'consequence'
         ..['cause'] = crash['id'];
     }
-    host.addEvent('core', 'down', level: 'error')
-      ..['verdict'] = 'consequence'
-      ..['cause'] = crash['id'];
-    final restarted = host.addEvent('core', 'restarted', level: 'info');
-    restarted['opens'] = crash['id'];
+    final down = host.addEvent('conn', 'vpnDown', level: 'error', data: const {'causes': ['core'], 'proxy': 'kept'})
+      ..['verdict'] = 'confirmed'
+      ..['joins'] = [crash['id']];
+    host.addEvent('core', 'restarted', level: 'info')['opens'] = crash['id'];
     await settle(tester);
 
-    expect(io.posted, isNotEmpty);
-    expect(idsPosted(), {crash['id']});
+    expect(io.posted, hasLength(1));
+    expect(idsPosted(), {down['id']}, reason: 'the notification is the one of conn/vpnDown');
   });
 
-  testWidgets('a core/* step with a cause that passes the filter updates the root\'s notification in place', (tester) async {
+  testWidgets('a step of the core does not notify, even when its root is shown: no update of the root\'s notification', (
+    tester,
+  ) async {
     final host = await open(tester);
-    host.notif
-      ..setFlag('coreCrash', true)
-      ..setFlag('connLost', true);
+    host.notif.setFlag('connLost', true);
     _lifecycleTo(AppLifecycleState.paused);
-    final crash = host.addEvent('core', 'crashed', level: 'error', data: const {'code': 2})..['verdict'] = 'confirmed';
+    final down = host.addEvent('conn', 'vpnDown', level: 'error', data: const {'causes': ['core']})..['verdict'] = 'confirmed';
     await settle(tester);
     expect(io.posted, hasLength(1));
     final first = io.posted.single;
 
-    // no verdict: the journal's filter lets it through; its `cause` points at the crash
-    host.addEvent('core', 'down', level: 'error', data: const {'proxy': 'kept'})['cause'] = crash['id'];
+    host.addEvent('core', 'restartFailed', level: 'error', data: const {'attempt': 1, 'error': 'boom'})
+      ..['verdict'] = 'consequence'
+      ..['cause'] = down['id'];
     await settle(tester);
 
-    expect(io.posted, hasLength(2), reason: 'the step is posted');
-    expect(idsPosted(), {crash['id']}, reason: 'under the root\'s id: the same notification, updated');
-    expect('${io.posted.last.title}\n${io.posted.last.text}', isNot('${first.title}\n${first.text}'), reason: 'with the new words');
+    expect(io.posted, hasLength(1), reason: 'nothing is posted for the step');
+    expect('${first.title}\n${first.text}', '${io.posted.single.title}\n${io.posted.single.text}');
   });
 
   testWidgets('a consequence does not notify; a group row of a missing root does not either', (tester) async {
     final host = await open(tester);
     _lifecycleTo(AppLifecycleState.paused);
-    final root = host.addEvent('conn', 'offline', level: 'warn');
+    final root = host.addEvent('conn', 'vpnDown', level: 'error', data: const {'causes': ['network']})
+      ..['verdict'] = 'confirmed';
     host.addEvent('conn', 'lost', level: 'warn')
       ..['verdict'] = 'consequence'
       ..['cause'] = root['id']

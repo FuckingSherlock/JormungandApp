@@ -90,7 +90,7 @@ interface`, которую sing-box пишет при собственном с�
   отсчитывается заново от неё;
 - соединение, открытое до падения, и после устойчивости ещё **`oldConnTail`** (60 с) умирает вместе со старой сетью:
   тоже сбой сети (страховая граница). Стационарные `none`/`captive` сюда не входят — сбои там судит Sentinel как
-  следствие `conn/offline` (видимая запись).
+  следствие корня `net.offline` (видимая запись: `conn/vpnDown` при подключении, иначе `conn/offline`).
 
 Сбой сети **считается и пишется в сырой журнал** (по строке на соединение), ничего не отбрасывается; после устойчивости
 всё судится как обычно, мёртвый маршрут и после неё уходит в failover.
@@ -400,7 +400,9 @@ TUN переведён: проверка при старте (см. «TUN», «�
   уже открытые некорневые записи в его `scope` **перепривязываются**: их события получают `cause`, вердикт
   `consequence` и шаг `root.relinked` в trail.
 - `Sentinel.attachEvent(rootId, eventId)` — детектор сам пишет событие корня (например, `net.offline` пишет
-  `conn/offline`): уже записанные следствия получают его как `cause`.
+  `conn/offline`): уже записанные следствия получают его как `cause`. Одно событие может быть событием двух корней:
+  `conn/vpnDown` — и `core.down`, и `net.offline` (`logs.md` → «„VPN не работает“»); корень, открывшийся при уже
+  открытом сбое, получает то же событие сразу.
 - Открытые корни — в `context.roots` статуса (`openJson`).
 
 ## Модель события
@@ -491,7 +493,7 @@ appendTrail)` дополняет событие задним числом, `Even
 | `connFailing` | 10 с | `conn/failing`: сбой должен длиться столько от первой неудачи серии (до этого сама серия — 3 неудачи за 60 с, `FailureBook.failAfter` / `streakWindow`) |
 | `connLost` | 12 с | `conn/lost`: ни один маршрут не отвечает |
 | `tunTcpDead` | 10 с | `core/tunTcpDead`: от первого необработанного запроса окна детектора |
-| `netBlip` | 10 с | `conn/offline`: сети нет меньше этого — запись-`blip`, дольше — `warn` и `conn/online` потом |
+| `netBlip` | 10 с | сети нет меньше этого — запись `conn/offline` `blip`; дольше — причина `network` у `conn/vpnDown` (при подключении) или пара `conn/offline` / `online` (info, без подключения) |
 | `autoUnstable`, `siteBlocked`, `siteUnreachable` | 0 | Auto уже сам выдержал свой срок; шлюз только проверяет и записывает |
 | `siteChecker` | 40 с | потолок внешней проверки сайта (`site.checker`) |
 | `dnsDown` | 1 с | `dns/failed`: DNS-сервер промахивается; от первого промаха (как прежние `failAfter` 2 × `retryPause` 0,5 с) |
@@ -502,12 +504,13 @@ appendTrail)` дополняет событие задним числом, `Even
 |---|---|---|---|
 | `conn/failing`, `site/blocked`, `site/unreachable` | одно подозрение на назначение, ключ `site\|host:port` — и серия книги сбоев, и замеченный Auto сбой сайта; `scope {host, port, outbound}` | все `Level.destination`, `via` = маршрут: `recovery conn.recovered` (живой трафик через тот же outbound), `alternative conn.otherRoute`, `recovery probe.same` (тот же сервер; проходит, только если после начала пробы соединения приложения к host:port не падали — иначе fail `{opens, appFails}`), `alternative probe.scout` (рабочая нода контроллера), `diagnostic site.checker` (внешний чекер, параллельно разведчику), `alternative probe.elsewhere` (рабочие ноды других подписок, в пределах `siteRetry`; пропускается, если чекер «не открывается»). Назначение, на которое пробу не нацелить, — только первые две | событие по вердикту: `workaround` через `probe.scout` / `probe.elsewhere` — `site/blocked` (уведомляет: приложение предлагает правило); `confirmed` / `unexplained` — `site/unreachable` (чекер `opens` — `confirmed`), а если проба открывает, но приложение падает — `conn/failing`; `blip` — только Raw, `consequence` — `conn/failing`; память вердикта вместо окна (см. «Проверки сайтов») |
 | `conn/lost` | `conn.lost` (корень над путём `proxy`) | — | `consequence` (сети нет), `blip`, `confirmed`; `conn/restored` пишется, только если корень стоял |
-| `conn/offline` / `online` | сам корень `net.offline` контекста | — | событие корня пишет сервис по `sentinel.changes`: через `netBlip` — `confirmed` + `attachEvent`; раньше вернулась — `blip` (`info`, `downMs`); `conn/online {downMs}` — только после «стоявшего» `offline` |
+| `conn/vpnDown` / `vpnUp` | корни `core.down` и `net.offline` контекста (при подключении) | — | пишет сервис: первая устоявшая причина — `confirmed`, `attachEvent` к обоим корням (второй — когда откроется); причины меняются на месте; все ушли — `vpnUp` (`opens`). Падение ядра вливается (`joins`) |
+| `conn/offline` / `online` | корень `net.offline` контекста (без подключения) | — | событие корня пишет сервис по `sentinel.changes`: через `netBlip` — `info`, `confirmed` + `attachEvent`; раньше вернулась — `blip` (`info`, `downMs`); `conn/online {downMs}` — только после «стоявшего» `offline`. Подключение при стоящем `offline` закрывает пару без `online` и открывает `vpnDown` |
 | `core/tunTcpDead` | `tun.tcpDead`, `Scope.none` | `recovery tun.test` (`Level.core`): активное TCP-соединение через TUN (см. «TUN» ниже); нет ответчика — проверок нет | `confirmed` (корень; тест не прошёл, причина в шаге следа), `blip` (тест прошёл или TCP вернулся в окно), `deferred` (`ownReject`) |
 | `core/crashed` | — (факт) | — | `confirmed`, открывает корень `core.crashed` (не сессионный, с `eventId`) |
 | `core/restartFailed` | — (факт) | — | `consequence`, `error`, `cause` = событие падения, `why core.crashed {attempt}` |
 | `core/restarted` | — | — | без вердикта (это восстановление); закрывает `core.crashed` |
-| `core/down` | корень `core.down` контекста | — | `confirmed`, `attachEvent` к корню; покрывает всё, что идёт через ядро (`Scope.all`) |
+| `core/down` | — | — | больше не пишется: корень `core.down` (`Scope.all`, покрывает всё через ядро) получает событие `conn/vpnDown` |
 | `auto/unstable` | `auto.unstable\|<route>` | — | `confirmed` (корень закрывается сразу — это объявление, а не стоячий сбой) или `consequence` |
 
 Подробности:
@@ -560,12 +563,17 @@ appendTrail)` дополняет событие задним числом, `Even
 - **Сессия.** `_stopAuto` вызывает `Sentinel.dropAll()`: подозрения прошлой сессии sing-box отпускаются как `deferred`
   (шаг `session.dropped`) без записи; что всё ещё сломано, детектор заподозрит заново. Подозрение, пришедшее при
   `settling` после нашего (пере)запуска, ждёт устоявшегося и отсчитывает окно заново (шаг `self.restarted`).
-- **Сеть.** `conn/offline` берётся только из корня `net.offline` (ОС, платформа, пробы — один источник, второго
-  нет). `captive` события не имеет (в каталоге нет такого типа): все подозрения под ним — `consequence` корня
+- **Сеть.** `conn/offline` и причина `network` у `conn/vpnDown` берутся только из корня `net.offline` (ОС,
+  платформа, пробы — один источник, второго нет). `captive` события не имеет (в каталоге нет такого типа): все подозрения под ним — `consequence` корня
   `net.captive` без `cause`.
 - **Падение ядра.** `core/crashed` открывает корень `core.crashed` (`Scope.none`, не сессионный), `restartFailed` —
-  его следствие; корень закрывается при `restarted` / новом подключении / отключении. Через 30 с `core/down` —
-  событие корня `core.down`, который покрывает всё через ядро.
+  его следствие; корень закрывается при `restarted` / новом подключении / отключении. Через 30 с открывается корень
+  `core.down` (покрывает всё через ядро); его событие — `conn/vpnDown` с причиной `core` (новое или уже открытое по
+  сети), падение вливается в его строку (`joins`). Сам `core/crashed` не уведомляет никогда.
+- **«VPN не работает» поверх корней.** Пока сбой открыт, всё уведомляющее warn / error ядра без `cause` (кроме
+  `own: true` и `core/stateLost` / `stateRestored` / `deprecated`) пишется с `cause` = `vpnDown` и
+  `verdict: consequence`, даже то, что идёт мимо шлюза (`rules/ruleSetFailed` с ответом не-списком,
+  `core/sysProxy` с ошибкой при «down», `conn/disconnected` по ошибке…).
 
 ### Дополнения к API шлюза
 

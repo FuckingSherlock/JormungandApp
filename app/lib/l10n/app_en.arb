@@ -4243,5 +4243,25 @@
         "type": "String"
       }
     }
+  },
+  "singBoxStoppedAndDoesNot": "sing-box stopped and does not start",
+  "singBoxStoppedAndDoesNot3": "sing-box stopped and does not start ({n0} attempts)",
+  "@singBoxStoppedAndDoesNot3": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "noInternetConnection": "No internet connection",
+  "systemProxyLeftOnProgramsHave": "system proxy left on, programs have no internet",
+  "vpnWorksAgain": "VPN works again",
+  "vpnWorksAgainDown": "VPN works again · down {s0}",
+  "@vpnWorksAgainDown": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
   }
 }

@@ -540,7 +540,6 @@ void main() {
         'autoSwitch': ('auto', 'switched'),
         'unstable': ('auto', 'unstable'),
         'connLost': ('conn', 'lost'),
-        'coreCrash': ('core', 'crashed'),
         'blocked': ('site', 'blocked'),
         'subUpdated': ('sub', 'updated'),
         'subFailed': ('sub', 'failed'),

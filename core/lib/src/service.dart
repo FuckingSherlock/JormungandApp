@@ -200,7 +200,7 @@ class CoreService implements CoreApi {
   late final logBook = LogBook(file: File(p.join(dataDir, 'problems.jsonl')));
 
   /// What happened, structured (eventbook.dart): the Events tab and the notifications.
-  late final eventBook = EventBook(File(p.join(dataDir, 'events.jsonl')), log: logBook, clock: _now);
+  late final eventBook = EventBook(File(p.join(dataDir, 'events.jsonl')), log: logBook, clock: _now)..incident = _incidentOf;
 
   File get _snapshot => File(p.join(dataDir, 'ui-state.json'));
   // A damaged ui-state.json is replaced by its backup (or the state starts empty): the journal says so.
@@ -705,7 +705,8 @@ class CoreService implements CoreApi {
     _siteStore.load(); // the site verdicts whose events are still in the journal: their failures go on being counted
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     sentinel.changes.listen((_) {
-      _syncNetEvents(); // `net.offline` opened / closed: conn/offline, conn/online
+      _syncNetEvents(); // `net.offline` opened / closed: conn/vpnDown (connected), conn/offline, conn/online
+      _attachVpnRoots(); // a root that opened during the failure gets its event
       _syncNetSwitch(); // the network settled: net/switched
       _changed(); // the network and the core phase are in the status (`context`)
     });
@@ -807,7 +808,15 @@ class CoreService implements CoreApi {
 
   /// One journal entry; [note] also goes to the raw log first, so the event links to it.
   int _event(String cat, String type, String level, Map<String, dynamic> data,
-      {bool own = false, String? note, String? verdict, Why? why, List<TrailStep>? trail, int? cause, Map<String, Object?>? op, int? opens}) {
+      {bool own = false,
+      String? note,
+      String? verdict,
+      Why? why,
+      List<TrailStep>? trail,
+      int? cause,
+      Map<String, Object?>? op,
+      int? opens,
+      List<int>? joins}) {
     if (note != null) logBook.note(level, note);
     return eventBook.add(cat, type, level,
         data: data,
@@ -817,7 +826,8 @@ class CoreService implements CoreApi {
         trail: trail == null ? null : [for (final t in trail) t.toJson()],
         cause: cause,
         op: op,
-        opens: opens);
+        opens: opens,
+        joins: joins);
   }
 
   int _opSeq = 0;
@@ -1664,9 +1674,10 @@ class CoreService implements CoreApi {
     if (root != null) eventBook.add('conn', 'restored', 'info', data: {'downMs': ?n.downMs}, opens: root.eventId);
   }
 
-  // `conn/offline` / `conn/online`: written from the Sentinel's `net.offline` root, so the OS, the platform and
-  // the probes are one source. The root stands for [FailureWindows.netBlip] before it is an event; gone
-  // sooner, the journal gets a `blip` that says how long. Consequences written meanwhile get the event as `cause`.
+  // The network, written from the Sentinel's `net.offline` root, so the OS, the platform and the probes are one
+  // source. The root stands for [FailureWindows.netBlip] before it is an event; gone sooner, the journal gets a `blip`
+  // that says how long. Once it stands: connected — the cause `network` of `conn/vpnDown` ([_vpnSync]); not connected —
+  // the pair `conn/offline` / `conn/online` (info). Consequences written meanwhile get the event as `cause`.
   Root? _netRoot;
   bool _netStanding = false;
   Timer? _netTimer;
@@ -1690,8 +1701,15 @@ class CoreService implements CoreApi {
       _netTimer = null;
       _netRoot = null;
       final downMs = _nowMs - mine.since.millisecondsSinceEpoch;
-      if (_netStanding) {
-        _event('conn', 'online', 'info', {'downMs': downMs, 'source': mine.subject['source']}, opens: mine.eventId);
+      final stood = _netStanding;
+      _netStanding = false;
+      if (stood) {
+        // the standing offline event of a pair is closed here; one taken over by `conn/vpnDown` (or by a `vpnDown` that
+        // ended already) is closed by `vpnUp`, no `online`
+        final open = mine.eventId == null ? null : eventBook.byId(mine.eventId!);
+        if (open == null || open['type'] != 'vpnDown') {
+          _event('conn', 'online', 'info', {'downMs': downMs, 'source': mine.subject['source']}, opens: mine.eventId);
+        }
       } else {
         final id = _event('conn', 'offline', 'info', {'downMs': downMs, 'source': mine.subject['source']},
             verdict: 'blip',
@@ -1701,21 +1719,151 @@ class CoreService implements CoreApi {
               TrailStep('blip.recovered', Outcome.pass, _nowMs, {'afterMs': downMs, 'by': 'net.restored'}),
             ],
             note: 'The network was gone for ${(downMs / 1000).round()} s');
-        sentinel.attachEvent(mine, id);
+        // (the consequences of a root that `vpnDown` took stay under the `vpnDown`)
+        if (_vpnId == null || mine.eventId != _vpnId) sentinel.attachEvent(mine, id);
       }
-      _netStanding = false;
+      _vpnSync(); // the cause `network` is over
     }
   }
 
   void _netOfflineStands(Root root) {
     _netStanding = true;
+    if (_connected) {
+      _vpnSync(); // the cause `network` of `conn/vpnDown`
+      return;
+    }
     final src = root.subject['source'];
-    final id = _event('conn', 'offline', 'warn', {'source': src},
+    final id = _event('conn', 'offline', 'info', {'source': src},
         verdict: 'confirmed',
         why: Why('net.offline', {'source': src}),
         trail: [TrailStep('ctx.net', Outcome.fail, root.since.millisecondsSinceEpoch, {'state': 'none', 'source': src})],
         note: 'The network is gone ($src)');
     sentinel.attachEvent(root, id);
+  }
+
+  // ---- «VPN не работает» (docs/logs.md): conn/vpnDown / conn/vpnUp ----
+  // While the user is connected (sing-box up or being restarted) the internet through the VPN does not work for one of
+  // two causes: `core` (sing-box did not come back in 30 s, [_downSince]) or `network` (the net.offline root stands).
+  // One event for the whole failure: written at the first cause, changed in place when the causes change, closed by
+  // `vpnUp` when none is left or the user disconnects. The state is derived from [_downSince] / [_netRoot] by
+  // [_vpnSync], which every place that changes either calls.
+
+  int? _vpnId; // the open `conn/vpnDown`
+  var _vpnCauses = <String>[]; // the causes now, in order of appearance
+  final _vpnAllCauses = <String>[]; // every cause of this failure
+  var _vpnAt = 0;
+  var _vpnJoins = <int>[];
+  String? _vpnLastData;
+
+  bool get _connected => runner.running || _recovering != null;
+
+  // Events with no cause of their own that stay out of the failure: the crash's own (they fold into `vpnDown` by
+  // `joins`) and the ones that do not depend on the VPN.
+  static const _vpnFree = {'crashed', 'restartFailed', 'restarted', 'stateLost', 'stateRestored', 'deprecated'};
+
+  /// [EventBook.incident]: the open failure is the cause of every warn / error written with none.
+  int? _incidentOf(String cat, String type, String level) {
+    final id = _vpnId;
+    if (id == null) return null;
+    if (cat == 'conn' && (type == 'vpnDown' || type == 'vpnUp')) return null;
+    if (cat == 'core' && _vpnFree.contains(type)) return null;
+    return id;
+  }
+
+  void _vpnSync({String? by}) {
+    if (_disposed) return;
+    final core = _downSince != null;
+    final netRoot = _netRoot;
+    final net = _connected && netRoot != null && _netStanding;
+    final causes = [
+      for (final c in _vpnCauses)
+        if (c == 'core' ? core : net) c,
+      for (final c in [if (core) 'core', if (net) 'network'])
+        if (!_vpnCauses.contains(c)) c,
+    ];
+    final id = _vpnId;
+    if (causes.isEmpty) {
+      if (id != null) _vpnClose(id, by);
+      return;
+    }
+    final src = netRoot?.subject['source'];
+    final data = <String, dynamic>{
+      'causes': causes,
+      if (causes.contains('core')) 'proxy': _downProxy,
+      if (causes.contains('network')) 'source': ?src,
+    };
+    final crash = causes.contains('core') ? _crashRoot?.eventId : null;
+    // connected while the network was already gone: the standing `conn/offline` (written while disconnected) folds in too
+    final offId = net ? netRoot.eventId : null;
+    final offline = offId != null && offId != id && eventBook.byId(offId)?['type'] == 'offline' ? offId : null;
+    final add = [
+      for (final j in [crash, offline])
+        if (j != null && !_vpnJoins.contains(j)) j,
+    ];
+    final joins = add.isEmpty ? null : [..._vpnJoins, ...add];
+    if (joins != null) _vpnJoins = joins;
+    for (final c in causes) {
+      if (!_vpnAllCauses.contains(c)) _vpnAllCauses.add(c);
+    }
+    // `downMs` of `vpnUp` counts from when the first cause began (the crash, the network gone), not from the event
+    final began = [
+      if (core) (_crashRoot?.since ?? _downSince!).millisecondsSinceEpoch,
+      if (net) netRoot.since.millisecondsSinceEpoch,
+    ];
+    if (id == null || began.any((t) => t < _vpnAt)) _vpnAt = began.reduce((a, b) => a < b ? a : b);
+    final json = jsonEncode(data);
+    if (id == null) {
+      _vpnCauses = causes;
+      _vpnLastData = json;
+      final Why why;
+      final TrailStep step;
+      final String note;
+      if (causes.first == 'core') {
+        why = const Why('core.down');
+        step = TrailStep('ctx.core', Outcome.fail, _downSince!.millisecondsSinceEpoch, const {'phase': 'down'});
+        note = 'Connection down: sing-box does not start (system proxy $_downProxy)';
+      } else {
+        why = Why('net.offline', {'source': src});
+        step = TrailStep('ctx.net', Outcome.fail, netRoot!.since.millisecondsSinceEpoch, {'state': 'none', 'source': src});
+        note = 'The network is gone ($src)';
+      }
+      _vpnId = _event('conn', 'vpnDown', 'error', data, verdict: 'confirmed', why: why, trail: [step], note: note, joins: joins);
+      _attachVpnRoots();
+      return;
+    }
+    _vpnCauses = causes;
+    if (json == _vpnLastData && joins == null) return;
+    _vpnLastData = json;
+    // the fields of the causes that are gone leave; what others wrote into `data` (`repeat`) stays
+    final old = (eventBook.byId(id)?['data'] as Map?)?.cast<String, dynamic>() ?? const {};
+    eventBook.update(id, data: {...old}..removeWhere((k, _) => k == 'proxy' || k == 'source')..addAll(data), replaceData: true, joins: joins);
+    _attachVpnRoots();
+  }
+
+  void _vpnClose(int id, String? by) {
+    final downMs = _nowMs - _vpnAt;
+    final all = [..._vpnAllCauses];
+    _event('conn', 'vpnUp', 'info', {'downMs': downMs, 'causes': all, 'by': ?by},
+        opens: id, note: 'The connection works again (down for ${(downMs / 1000).round()} s)');
+    _vpnId = null;
+    _vpnCauses = [];
+    _vpnAllCauses.clear();
+    _vpnJoins = [];
+    _vpnLastData = null;
+  }
+
+  // Both roots of the failure (`core.down`, `net.offline`) carry the `vpnDown` event; one that opens later gets it at once.
+  void _attachVpnRoots() {
+    final id = _vpnId;
+    if (id == null) return;
+    for (final kind in const [rootCoreDown, rootNetOffline]) {
+      final r = sentinel.roots.byKind(kind);
+      if (r == null || r.eventId == id) continue;
+      // the crash is not a consequence of the failure: it is folded into it by `joins`
+      final crash = _crashRoot?.eventId;
+      if (crash != null) r.consequences.remove(crash);
+      sentinel.attachEvent(r, id);
+    }
   }
 
   // Asks the checker and writes the answer into the event [id].
@@ -2170,6 +2318,7 @@ class CoreService implements CoreApi {
         _restartFailedId = null;
         _event('core', 'restarted', 'info', {'attempt': _attempt, if (wasDown) 'downMs': downMs},
             note: 'sing-box started again (attempt $_attempt)', opens: crashId);
+        _vpnSync(); // the cause `core` is over
         if (_sysWanted && !sysProxy.isSet) {
           // it was taken off while down (or released by the user): the connection is back in full
           try {
@@ -2220,14 +2369,9 @@ class CoreService implements CoreApi {
     _downSince = _now();
     sentinel.context.down();
     _downProxy = _released ? 'released' : (sysProxy.isSet ? 'kept' : 'removed');
-    // `core.down` (the Sentinel's context root) covers every failure through the core: the event is its event
-    final id = _event('core', 'down', 'error', {'proxy': _downProxy},
-        verdict: 'confirmed',
-        why: const Why('core.down'),
-        trail: [TrailStep('ctx.core', Outcome.fail, _nowMs, const {'phase': 'down'})],
-        note: 'Connection down: sing-box does not start (system proxy $_downProxy)');
-    final root = sentinel.roots.byKind(rootCoreDown);
-    if (root != null) sentinel.attachEvent(root, id);
+    // `core.down` (the Sentinel's context root) covers every failure through the core: its event is `conn/vpnDown`
+    // (the cause `core`; the crash folds into it)
+    _vpnSync();
   }
 
   Root? _crashRoot;
@@ -2259,6 +2403,7 @@ class CoreService implements CoreApi {
           _recheckExit(); // traffic goes direct now
         }
         _downProxy = sysProxy.isSet ? 'kept' : 'removed';
+        _vpnSync(); // `proxy` of the failure
       }
       final b = _blocking;
       if (b != null && b['proxy'] == 'kept') {
@@ -2282,7 +2427,10 @@ class CoreService implements CoreApi {
     if (_recovering != null || _downSince != null) {
       _released = true;
       await _sysOff(own: true, by: 'user');
-      if (_downSince != null) _downProxy = 'released';
+      if (_downSince != null) {
+        _downProxy = 'released';
+        _vpnSync(); // `proxy` of the failure
+      }
     } else if (_blocking != null && _blocking!['proxy'] == 'kept') {
       await _sysOff(own: true, by: 'user');
       _blocking = {..._blocking!, 'proxy': 'released'};
@@ -3499,6 +3647,8 @@ class CoreService implements CoreApi {
         rethrow;
       } finally {
         _connectOp = null;
+        // a connect ended the core's failure; connected over a network that is gone — the failure is the network's
+        if (seq == _connectSeq) _vpnSync();
         _changed();
       }
     });
@@ -3860,6 +4010,7 @@ class CoreService implements CoreApi {
         eventBook.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'}, op: op);
       }
     }
+    _vpnSync(by: error == null ? 'user' : null); // no connection, no failure of it: the open `vpnDown` ends
     if (_killSwitch && _killOnDisconnect && sysProxy.isSet && (was || _blocking != null)) {
       // kill switch, "also after I disconnect": the proxy stays, nothing gets out
       _blocking ??= {'since': _now().millisecondsSinceEpoch, 'reason': 'disconnect', 'proxy': 'kept'};

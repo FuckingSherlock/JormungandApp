@@ -56,6 +56,8 @@ class EventWords {
     'conn/connectFailed' => l10n.connectFailed,
     'conn/lost' => l10n.connectionLost,
     'conn/restored' => l10n.connectionRestored,
+    'conn/vpnDown' => l10n.vpnIsDown,
+    'conn/vpnUp' => l10n.connectionRestored,
     'conn/offline' => l10n.noNetwork,
     'conn/online' => l10n.networkBack,
     'auto/switched' => l10n.entryOrServerSwitched,
@@ -476,6 +478,10 @@ class EventWords {
       ('core', 'down') => d['proxy'] == 'kept'
           ? r(l10n.coreNotRunningFor30S)
           : r(l10n.vpnIsDown, l10n.trafficGoesDirectStillTrying),
+      ('conn', 'vpnDown') => r(l10n.vpnIsDown, _vpnDownReason(d)),
+      ('conn', 'vpnUp') => r(
+        d['downMs'] is num ? l10n.vpnWorksAgainDown(duration(d['downMs'] as num)) : l10n.vpnWorksAgain,
+      ),
       ('core', 'tunNeedsAdmin') => r(l10n.tunNeedsAdministratorRights, l10n.runTheAppAsAdministratorOr),
       ('core', 'restartFailed') => r(
         l10n.singBoxCouldNotStartAgain,
@@ -566,6 +572,18 @@ class EventWords {
       _ => r('${e.cat} / ${e.type}'),
     };
     return (title: title, detail: detail);
+  }
+
+  /// The reason line of `conn/vpnDown`: the causes (core, network) joined with " · ", then the system proxy left on.
+  /// [attempts] — the newest `restartFailed` attempt among the events joined into the row, when the caller has them.
+  String _vpnDownReason(Map<String, dynamic> d, {int? attempts}) {
+    final causes = d['causes'] is List ? [for (final c in d['causes'] as List) '$c'] : <String>[];
+    return [
+      if (causes.contains('core'))
+        attempts != null && attempts > 0 ? l10n.singBoxStoppedAndDoesNot3(attempts) : l10n.singBoxStoppedAndDoesNot,
+      if (causes.contains('network')) l10n.noInternetConnection,
+      if (d['proxy'] == 'kept') l10n.systemProxyLeftOnProgramsHave,
+    ].join(' · ');
   }
 
   /// How a request of `conn/failing` ended (`ConnKind.name`).
@@ -684,6 +702,19 @@ class EventWords {
         if (bad == 0 && ok > 0) return (l10n.ruleListsUpdated(ok), '');
     }
     final e = g.ev;
+    // a crash merged into «VPN is down» (joins): the row takes its title and status from vpnDown / vpnUp
+    // (a lone vpnUp, its vpnDown pruned or filtered out, is worded by itself below)
+    final down = g.items.where((x) => x.key == 'conn/vpnDown').toList();
+    if (down.isNotEmpty) {
+      // closed by vpnUp: the row is still «VPN is down», the closing is its status (closedLine)
+      final src = down.last;
+      var attempts = 0;
+      for (final x in g.items) {
+        final a = x.key == 'core/restartFailed' ? x.data['attempt'] : null;
+        if (a is num && a > attempts) attempts = a.toInt();
+      }
+      return (l10n.vpnIsDown, _vpnDownReason(src.data, attempts: attempts));
+    }
     if (first.key == 'core/crashed' && g.items.length > 1) {
       final last = g.last;
       if (last.key == 'core/restartFailed' && last.data['attempt'] is num) {

@@ -202,7 +202,7 @@ class EventRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final l10n = context.l10n;
-    final host = CoreHostScope.read(context);
+    final host = CoreHostScope.of(context); // Retry follows the core's state
     final links = AppLinksScope.of(context);
     final g = group, e = g.ev;
     final (title, detail) = words.describeGroup(g);
@@ -259,6 +259,7 @@ class EventRow extends StatelessWidget {
     bool inUseOf(Map<String, dynamic> d) => d['inUse'] == true || d['inUse'] == 'true';
     final inUse = inUseOf(dd);
     final pinLost = eventPinLost(e);
+    final vpnCauses = e.key == 'conn/vpnDown' && dd['causes'] is List ? (dd['causes'] as List).map((c) => '$c').toList() : const <String>[];
     void addChooseServer() => add(l10n.chooseServer, link(links.openRoute == null ? null : () => links.openRoute!()));
     switch ('${e.cat}/${e.type}') {
       case 'conn/disconnected' when live && dd['by'] == 'error' && !host.isOn:
@@ -273,6 +274,10 @@ class EventRow extends StatelessWidget {
         addOpen();
       case 'conn/offline' when live:
         add(l10n.networkSettings, () => host.openNetworkSettings());
+      case 'conn/vpnDown' when live:
+        // Retry: the core is the cause and sing-box is not running; the rest goes below (Send report, Network settings)
+        if (vpnCauses.contains('core') && host.phase != ConnectionPhase.connected) add(l10n.retry, () => host.retry());
+        if ('${dd['proxy']}' == 'kept') add(l10n.removeSystemProxy, () => host.releaseSysProxy());
       case 'conn/failing':
         final h = words.host(dd);
         if (h.isNotEmpty && links.newRuleFor != null) add(l10n.createRule, () => links.newRuleFor!(host: h));
@@ -370,8 +375,11 @@ class EventRow extends StatelessWidget {
     if (const ['dns/switched', 'sub/diverged'].contains('${e.cat}/${e.type}')) addOpen();
     // every error of the core can be sent to the developers with the event; some warnings name it in the table
     final sendable = const ['core/stateLost', 'core/stateRestored', 'core/tunTcpDead', 'sub/diverged'].contains('${e.cat}/${e.type}');
-    if ((e.cat == 'core' && g.level == 'error') || sendable) {
+    if ((e.cat == 'core' && g.level == 'error') || sendable || e.key == 'conn/vpnDown') {
       add(l10n.sendReport, () => showSendReport(context, logs));
+    }
+    if (e.key == 'conn/vpnDown' && live && vpnCauses.contains('network')) {
+      add(l10n.networkSettings, () => host.openNetworkSettings());
     }
     final rawLine = e.log == null
         ? null

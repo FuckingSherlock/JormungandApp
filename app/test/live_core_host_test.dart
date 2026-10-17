@@ -430,12 +430,11 @@ void main() {
     await start();
     host.notif
       ..setFlag('enabled', false)
-      ..setFlag('autoSwitch', false)
-      ..setFlag('coreCrash', true);
+      ..setFlag('autoSwitch', false);
     host.changed();
     await settle();
     final saved = (await core.state())['snapshot'] as Map<String, dynamic>;
-    expect(saved['notifCfg'], {'enabled': false, 'autoSwitch': false, 'coreCrash': true});
+    expect(saved['notifCfg'], {'enabled': false, 'autoSwitch': false});
 
     // the same data dir, a new host (the app started again)
     await host.shutdown();
@@ -450,12 +449,24 @@ void main() {
     await host.init();
     expect(host.notif.enabled, isFalse);
     expect(host.notif.flag('autoSwitch'), isFalse);
-    expect(host.notif.flag('coreCrash'), isTrue);
     expect(host.notif.flag('connLost'), isTrue); // never touched: the default
-    expect(notifAllows(host.catalog.unknown['notifCfg'], 'coreCrash'), isFalse); // the master is off
+    expect(notifAllows(host.catalog.unknown['notifCfg'], 'connLost'), isFalse); // the master is off
     host.notif.setFlag('enabled', true);
-    expect(notifAllows(host.catalog.unknown['notifCfg'], 'coreCrash'), isTrue);
+    expect(notifAllows(host.catalog.unknown['notifCfg'], 'connLost'), isTrue);
     expect(notifAllows(host.catalog.unknown['notifCfg'], 'autoSwitch'), isFalse);
+  });
+
+  test('a coreCrash switch saved by an older build is ignored; the rest reads as saved', () async {
+    final old = snapshot()
+      ..['notifCfg'] = {'enabled': true, 'autoSwitch': true, 'coreCrash': true};
+    await start(snap: old);
+    expect(host.ready, isTrue);
+    expect(host.initError, isNull);
+    expect(host.notif.enabled, isTrue);
+    expect(host.notif.flag('autoSwitch'), isTrue);
+    // no coreCrash switch in the Connection group any more
+    expect(NotifCfg.connectionKeys, contains('connLost'));
+    expect(NotifCfg.connectionKeys, isNot(contains('coreCrash')));
   });
 
   test(

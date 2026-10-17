@@ -89,7 +89,6 @@ class NotifCfg {
     'autoSwitch': true,
     'unstable': true,
     'connLost': true,
-    'coreCrash': false,
     'blocked': true,
     'dnsFailed': true,
     'subUpdated': false,
@@ -106,7 +105,6 @@ class NotifCfg {
     'autoSwitch',
     'unstable',
     'connLost',
-    'coreCrash',
     'blocked',
     'dnsFailed',
   ];

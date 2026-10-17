@@ -11,8 +11,7 @@ import 'package:jormungand_core/jormungand_core.dart'
         LogCfg,
         LogFeed,
         LogLine,
-        eventCats,
-        eventNotifies;
+        eventCats;
 
 import '../l10n/l10n.dart';
 import 'core_host.dart';
@@ -126,6 +125,9 @@ class LogsController extends ChangeNotifier {
   /// Settings -> Notifications): the shell shows them as toasts.
   Stream<EventRecord> get notifications => _notify.stream;
   final _notify = StreamController<EventRecord>.broadcast();
+
+  /// The `rev` of each notified `conn/vpnDown` at its last notification: a newer one re-posts it in place.
+  final _vpnDownRev = <int, int>{};
 
   /// A row to bring into view and flash (an event id / a raw line number), with a counter so the
   /// same one can be asked again.
@@ -263,11 +265,20 @@ class LogsController extends ChangeNotifier {
       cfg.seen.removeWhere((id) => id < first);
       if (cfg.seen.length != n) _save();
       for (final e in r.notify) {
+        // the failure ended: its in-place change that comes in the same read must not post it again over the closing
+        if (e.key == 'conn/vpnUp' && e.opens != null) _vpnDownRev.remove(e.opens);
         // an event of a site ignored a moment ago (the core was not told yet) stays silent too
         if (e.cat == 'site' && _ign.matches('${e.data['host'] ?? ''}')) continue;
         // a background event (found while the screen was off) goes by its own flag, not by the screen now
         // once per event: a repeat of it, or a finished check, changes it in place and does not notify again
-        if (eventNotifies(host.catalog.unknown['notifCfg'], e) && feed.markNotified(e.id)) _notify.add(e);
+        if (feed.notify(host.catalog.unknown['notifCfg'], e)) {
+          if (e.key == 'conn/vpnDown') _vpnDownRev[e.id] = e.rev;
+          _notify.add(e);
+        } else if (e.key == 'conn/vpnDown' && e.rev > (_vpnDownRev[e.id] ?? e.rev)) {
+          // a cause that came while the failure is open: the same notification, new words
+          _vpnDownRev[e.id] = e.rev;
+          _notify.add(e);
+        }
       }
       if (visible && tab == 'events' && !evFollow) {
         evUnseen += r.fresh.where(_visible).length;

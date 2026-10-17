@@ -54,7 +54,7 @@ void main() {
     f.toggleType('conn/lost');
     expect(vis(warn), isFalse);
     expect(f.offCats.map((c) => c.$1), ['conn']);
-    expect(f.typesOn(f.offCats.first), 8, reason: 'conn has nine types in the catalog (failing among them); lost is off here');
+    expect(f.typesOn(f.offCats.first), 10, reason: 'conn has eleven types in the catalog (failing, vpnDown, vpnUp among them); lost is off here');
     f.q = 'alph';
     expect(vis(info), isTrue);
     expect(f.count, 2);
@@ -160,9 +160,11 @@ void main() {
 
   test('notifications: the master switch and the kind decide; defaults as in Settings', () {
     expect(notifAllows(null, 'autoSwitch'), isTrue);
-    expect(notifAllows(null, 'coreCrash'), isFalse);
+    expect(notifDefaults.containsKey('coreCrash'), isFalse, reason: 'one toggle, connLost, since «VPN не работает»');
+    expect(eventNotifKind.values, isNot(contains('coreCrash')));
+    expect(notifAllows(null, 'connLost'), isTrue);
     expect(notifAllows({'enabled': false}, 'autoSwitch'), isFalse);
-    expect(notifAllows({'coreCrash': true}, 'coreCrash'), isTrue);
+    expect(notifAllows({'connLost': false}, 'connLost'), isFalse);
     expect(notifAllows({'autoSwitch': false}, 'autoSwitch'), isFalse);
     expect(eventNotifKind['site/blocked'], 'blocked');
     expect(eventNotifKind['conn/failing'], 'blocked');

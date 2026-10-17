@@ -293,12 +293,13 @@ void main() {
       expect(svc.failuresSnapshot()['failed'], 0, reason: 'not even counted');
     });
 
-    test('no network: nothing is confirmed; after the blip window the failure is a consequence of conn/offline', () async {
+    test('no network: nothing is confirmed; after the blip window the failure is a consequence of conn/vpnDown (network)', () async {
       await start();
       svc.setNetwork({'connected': false});
       await time.advanceSeconds(11);
-      final offline = events('conn', 'offline').single;
-      expect([offline['level'], offline['verdict']], ['warn', 'confirmed']);
+      expect(events('conn', 'offline'), isEmpty, reason: 'connected: the standing offline is the vpnDown event now');
+      final offline = events('conn', 'vpnDown').single;
+      expect([offline['level'], offline['verdict']], ['error', 'confirmed']);
       fail(3);
       await time.advanceSeconds(1);
       final e = events('conn', 'failing').single;
@@ -308,18 +309,20 @@ void main() {
       expect(quiet(e), isTrue);
       expect(svc.sentinel.roots.byKey('site|example.org:443'), isNull, reason: 'a consequence opens no root');
       expect(types().where((t) => t == 'conn/failing').length, 1);
-      // the network is back: conn/online with the time
+      // the network is back: conn/vpnUp with the time (no conn/online while connected)
       svc.setNetwork({'connected': true, 'validated': true});
       await time.advanceSeconds(1);
-      final online = events('conn', 'online').single;
+      final online = events('conn', 'vpnUp').single;
+      expect(online['opens'], offline['id']);
       expect(online['data'], containsPair('downMs', greaterThan(10000)));
+      expect(events('conn', 'online'), isEmpty);
     });
 
     test('a move to another network while the probes say down: the root stays until the direct path answers, then conn/online once', () async {
       await start(connected: false);
       svc.pool.silent(true);
       await time.advanceSeconds(11);
-      expect(events('conn', 'offline').single['verdict'], 'confirmed');
+      expect(events('conn', 'offline').single['level'], 'info', reason: 'not connected: the offline / online pair is info');
       directMs = -1;
       svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'a'});
       svc.setNetwork({'connected': true, 'validated': true, 'type': 'wifi', 'id': 'b'}); // another network: the direct path is asked at once
@@ -355,7 +358,7 @@ void main() {
       await start(connected: false, api: true);
       svc.pool.silent(true);
       await time.advanceSeconds(11);
-      expect(events('conn', 'offline').single['verdict'], 'confirmed');
+      expect(events('conn', 'offline'), hasLength(1));
       directMs = -1; // the direct path stays silent
       await svc.connect(_body()); // Auto starts (the API service exists)
       await time.advanceSeconds(6);
@@ -382,10 +385,14 @@ void main() {
       directMs = 7;
       await time.advanceSeconds(10);
       expect(svc.sentinel.roots.byKind('net.offline'), isNull);
-      final online = events('conn', 'online').single;
-      expect(online['data'], containsPair('downMs', greaterThan(40000)));
+      // the connect closed the offline pair without `online` and opened vpnDown; the disconnect closed that with by: user
+      expect(events('conn', 'online'), isEmpty, reason: 'the pair was closed by the connect');
+      final up = events('conn', 'vpnUp').single;
+      expect(up['data'], containsPair('by', 'user'));
+      expect(up['opens'], events('conn', 'vpnDown').single['id']);
       await time.advanceSeconds(30);
-      expect(events('conn', 'online').length, 1);
+      expect(events('conn', 'vpnUp').length, 1);
+      expect(events('conn', 'vpnDown').length, 1);
     });
 
     test('Auto started again re-suspects an outage that never became a root (the stop came inside the window): one conn/lost, one conn/restored', () async {
@@ -672,15 +679,17 @@ void main() {
       expect(types(), containsAllInOrder(['core/crashed', 'core/restartFailed', 'core/restarted']));
       expect(svc.sentinel.roots.byKind('core.crashed'), isNull, reason: 'closed when sing-box is back');
       expect(events('core', 'restarted').single.containsKey('verdict'), isFalse, reason: 'a recovery, not a failure');
+      expect(events('conn', 'vpnDown'), isEmpty, reason: 'restarted inside 30 s: not a VPN failure');
     });
 
-    test('down: core/down is the event of the core.down root; a failure through the core meanwhile is its consequence', () async {
+    test('down: conn/vpnDown is the event of the core.down root; a failure through the core meanwhile is its consequence', () async {
       await start();
       runner.failStarts = 99;
       runner.up = false;
       runner.onExit!(9);
-      await untilEvent('core', 'down', step: const Duration(seconds: 1));
-      final down = events('core', 'down').single;
+      await untilEvent('conn', 'vpnDown', step: const Duration(seconds: 1));
+      expect(events('core', 'down'), isEmpty, reason: 'core/down is not written any more');
+      final down = events('conn', 'vpnDown').single;
       expect([down['level'], down['verdict']], ['error', 'confirmed']);
       expect(svc.sentinel.roots.byKind(rootCoreDown)!.eventId, down['id']);
       // the failure book is not fed by a dead core, but a late record still is judged against the root
@@ -759,11 +768,11 @@ void main() {
       expect(events('conn', 'restored'), isEmpty);
     });
 
-    test('conn/lost with the network gone is a consequence of conn/offline', () async {
+    test('conn/lost with the network gone is a consequence of conn/vpnDown', () async {
       await start();
       svc.setNetwork({'connected': false});
       await time.advanceSeconds(11);
-      final offline = events('conn', 'offline').single;
+      final offline = events('conn', 'vpnDown').single;
       svc.routesLost(lost(), 2);
       await time.advanceSeconds(1);
       final e = events('conn', 'lost').single;

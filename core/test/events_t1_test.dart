@@ -115,6 +115,28 @@ void main() {
       expect(eventNotifKind.containsKey('net/switched'), isFalse);
     });
 
+    test('«VPN не работает»: vpnDown / vpnUp are connLost; the crash events, offline / online and core/down are not kinds any more', () {
+      expect(eventNotifKind['conn/vpnDown'], 'connLost');
+      expect(eventNotifKind['conn/vpnUp'], 'connLost');
+      for (final k in ['core/crashed', 'core/restarted', 'core/restartFailed', 'conn/offline', 'conn/online', 'core/down']) {
+        expect(eventNotifKind.containsKey(k), isFalse, reason: k);
+      }
+      for (final k in ['core/crashed', 'core/restartFailed', 'core/down']) {
+        expect(journalOnly[k], isNotNull, reason: '$k: an error with a reason, journal only');
+        expect(journalOnly[k]!.trim(), isNotEmpty);
+      }
+      expect(journalOnly['core/down'], contains('conn/vpnDown'));
+      expect(eventCats.firstWhere((c) => c.$1 == 'conn').$2, containsAll(['vpnDown', 'vpnUp']));
+      expect(eventCats.firstWhere((c) => c.$1 == 'core').$2, contains('down'), reason: 'old journals keep core/down');
+      expect(notifDefaults.containsKey('coreCrash'), isFalse);
+      expect(notifDefaults['connLost'], isTrue);
+      expect(eventNotifies(null, ev('conn', 'vpnDown', level: 'error', data: {'causes': ['core']})), isTrue);
+      expect(eventNotifies({'connLost': false}, ev('conn', 'vpnDown', level: 'error')), isFalse);
+      expect(eventNotifies(null, ev('core', 'crashed', level: 'error')), isFalse);
+      expect(eventNotifies(null, ev('core', 'restartFailed', level: 'error')), isFalse);
+      expect(eventNotifies(null, ev('core', 'down', level: 'error')), isFalse);
+    });
+
     test('defaults: appData and dnsFailed are on', () {
       expect(notifDefaults['appData'], isTrue);
       expect(notifDefaults['dnsFailed'], isTrue);

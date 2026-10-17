@@ -346,11 +346,6 @@ class NotifSheet extends StatelessWidget {
           l10n.noNetworkOrNoServerAnswers,
         ),
         (
-          'coreCrash',
-          l10n.singBoxStopped,
-          l10n.backgroundRestartsAreSilentThisShows,
-        ),
-        (
           'blocked',
           l10n.siteDoesNotOpen,
           l10n.itDoesNotOpenThroughThe,

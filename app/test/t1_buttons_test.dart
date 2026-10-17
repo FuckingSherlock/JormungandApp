@@ -160,17 +160,90 @@ void main() {
       expect(find.text(_en.retry), findsNothing, reason: 'running again');
     });
 
-    testWidgets('a crash chain whose core/down kept the system proxy offers Remove system proxy until «restarted»', (
+    // «VPN не работает»: the buttons come from the causes (docs/logs.md → «Кнопки»)
+    for (final (label, data, shown, hidden) in [
+      (
+        'core',
+        const {'causes': ['core']},
+        [_en.retry, _en.sendReport],
+        [_en.networkSettings, _en.removeSystemProxy],
+      ),
+      (
+        'core kept proxy',
+        const {'causes': ['core'], 'proxy': 'kept'},
+        [_en.retry, _en.removeSystemProxy, _en.sendReport],
+        [_en.networkSettings],
+      ),
+      (
+        'core removed proxy',
+        const {'causes': ['core'], 'proxy': 'removed'},
+        [_en.retry],
+        [_en.removeSystemProxy, _en.networkSettings],
+      ),
+      (
+        'network',
+        const {'causes': ['network'], 'source': 'probes'},
+        [_en.networkSettings],
+        [_en.retry, _en.removeSystemProxy],
+      ),
+      (
+        'core and network',
+        const {'causes': ['core', 'network']},
+        [_en.retry, _en.networkSettings],
+        [_en.removeSystemProxy],
+      ),
+    ]) {
+      testWidgets('conn/vpnDown, $label: shows ${shown.join(', ')}; not ${hidden.join(', ')}', (tester) async {
+        final host = FakeCoreHost();
+        final down = host.addEvent('conn', 'vpnDown', level: 'error', data: data)..['verdict'] = 'confirmed';
+        await pumpApp(tester, host);
+        await _openLogs(tester);
+        await _expand(tester, _titleOf(host, down));
+
+        for (final label in shown) {
+          expect(find.text(label), findsOneWidget);
+        }
+        for (final label in hidden) {
+          expect(find.text(label), findsNothing);
+        }
+      });
+    }
+
+    testWidgets('conn/vpnDown Retry is live: it goes once the core runs, and the closing vpnUp takes the buttons away', (
       tester,
     ) async {
       final host = FakeCoreHost();
-      final crash = host.addEvent('core', 'crashed', level: 'error', data: const {'code': 2});
-      _consequenceOf(crash, 'core.down', host.addEvent('core', 'down', level: 'error', data: const {'proxy': 'kept'}));
+      final down = host.addEvent('conn', 'vpnDown', level: 'error', data: const {'causes': ['core'], 'proxy': 'kept'})
+        ..['verdict'] = 'confirmed';
+      await pumpApp(tester, host);
+      await _openLogs(tester);
+      await _expand(tester, _titleOf(host, down));
+      expect(find.text(_en.retry), findsOneWidget, reason: 'not connected to the core');
+
+      host.setPhase(ConnectionPhase.connected);
+      await tester.pumpAndSettle();
+      expect(find.text(_en.retry), findsNothing, reason: 'the core runs now');
+
+      host.addEvent('conn', 'vpnUp', level: 'info', data: const {'downMs': 4000, 'causes': ['core']})['opens'] = down['id'];
+      await tester.pump(const Duration(milliseconds: 600)); // the feed reads the journal after its debounce
+      await tester.pumpAndSettle();
+      expect(find.text(_en.removeSystemProxy), findsNothing, reason: 'closed: the proxy is back');
+      expect(find.text(_en.retry), findsNothing);
+    });
+
+    testWidgets('a crash chain joined into conn/vpnDown keeps Remove system proxy until the vpnUp closes it', (
+      tester,
+    ) async {
+      final host = FakeCoreHost();
+      final crash = host.addEvent('core', 'crashed', level: 'error', data: const {'code': 2})..['verdict'] = 'confirmed';
+      final down = host.addEvent('conn', 'vpnDown', level: 'error', data: const {'causes': ['core'], 'proxy': 'kept'})
+        ..['verdict'] = 'confirmed'
+        ..['joins'] = [crash['id']];
       await pumpApp(tester, host);
       await _openLogs(tester);
       expect(find.text(_en.removeSystemProxy), findsOneWidget);
 
-      host.addEvent('core', 'restarted', level: 'info')['opens'] = crash['id'];
+      host.addEvent('conn', 'vpnUp', level: 'info', data: const {'downMs': 4000, 'causes': ['core']})['opens'] = down['id'];
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pumpAndSettle();
       expect(find.text(_en.removeSystemProxy), findsNothing);
@@ -254,6 +327,23 @@ void main() {
       );
       final actions = SystemNotifier.eventActions(EventRecord.fromJson(e), _words(host), host);
       expect([for (final a in actions) a.$2], ['Open']);
+    });
+
+    test('conn/vpnDown: Retry while the core is not running, Network settings for a network cause; two at most', () {
+      final host = FakeCoreHost();
+      List<String> bold(List<String> causes) {
+        final e = EventRecord.fromJson(host.addEvent('conn', 'vpnDown', level: 'error', data: {'causes': causes}));
+        final actions = SystemNotifier.eventActions(e, _words(host), host);
+        expect(actions.length, lessThanOrEqualTo(2));
+        return [for (final a in actions) a.$1];
+      }
+
+      expect(bold(['core']), ['retry']);
+      expect(bold(['network']), ['networkSettings']);
+      expect(bold(['core', 'network']).toSet(), {'retry', 'networkSettings'});
+
+      host.setPhase(ConnectionPhase.connected);
+      expect(bold(['core']), isNot(contains('retry')), reason: 'the core runs: nothing to retry');
     });
 
     testWidgets('the notification Retry of conn/connectFailed makes the same host call as the row Retry', (

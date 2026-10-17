@@ -95,7 +95,8 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `conn/disconnected` | info. `by: 'user'` — по команде (`own: true`, только если было подключено). `by: 'error'` (warn) — отключило не пользователь: `reason: 'pinLost'` (приходит от приложения в `disconnect {error}`), `'down'`. Ручное отключение — `op {kind: connection}` (ручное «отключить → подключить» за ≤ 7 с — `conn/reconnected`) | `{by, reason?, pick?, why?}` |
 | `conn/connectFailed` | error. Подключение не вышло. Manual на сервер или запись, которые пропали / выключены / не поддержаны: `Manual pick "…" is unavailable: …` — через другой сервер не идёт, запущенное завершается этой же ошибкой (`connect-model.md` → Manual на сервер) | `{reason, fix?}` — `fix`: где исправлять, если ядро это знает: `settings` — занят порт прокси (Settings → Connection → порт; sing-box не смог слушать свой `mixed-in`), `pick` — Manual-пин не годится (выбрать сервер в Route). Без `fix` — причина не в настройках |
 | `conn/lost` / `restored` | warn / info. Auto: ни один маршрут не отвечает — корень Sentinel `conn.lost` (`why: routes.silent`, не сессионный); `restored` — `noNet` снова false | `{routes}` + поля Sentinel / `{downMs}` |
-| `conn/offline` / `online` | warn / info. Нет интернета вообще — корень Sentinel `net.offline` (`failures.md` → «Сеть»); закрывает только успешная прямая проба | `{source}` / `{downMs, source}` — `source`: что решило (`platform` / `os` / `probes` / …) |
+| `conn/vpnDown` / `vpnUp` | error / info. «VPN не работает»: при подключении ядро не поднялось за 30 с или нет сети — одно событие на сбой, причины меняются на месте; `vpnUp` закрывает (`opens`). Раздел «„VPN не работает“» ниже | `{causes: ['core'\|'network'], proxy?, source?}` + `joins?` / `{downMs, causes, by?}` — `proxy` при `core` (как был у `core/down`), `source` при `network` |
+| `conn/offline` / `online` | info. Без подключения: нет интернета вообще — корень Sentinel `net.offline` (`failures.md` → «Сеть»), только журнал; при подключении — причина `network` у `conn/vpnDown`. Короткий обрыв — `offline` `blip` | `{source}` / `{downMs, source}` — `source`: что решило (`platform` / `os` / `probes` / …) |
 | `conn/failing` | Соединения массово не удаются (детектор неудавшихся соединений) | `failures.dart` |
 | `auto/switched` | info. Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
 | `auto/fastest` | info. Auto сменил Fastest-сервер (выбор ядра: failAfter промахов или шаг улучшения) | `{route, from, to}` |
@@ -117,9 +118,9 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `dns/failedOnNode` | Сервер стороны VPN не отвечает на ноде выхода в использовании, но отвечает через запасную (`dns.node`, `failures.md` «DNS на ноде»). Корень и свёртка те же, что у `failed` | поля `failed` + `node` (ключ узла выхода), `via` (через какой узел ответил) |
 | `node/addressMissing` | Имя сервера узла не существует: все ответившие DNS сказали «имени нет» и в перепроверке через минуту — то же (Sentinel, `node.addressMissing`). Одно событие на **имя**; повтор, пока вердикт стоит, — счётчик. Уведомление — только при `inUse`, выключатель `subFailed` | `{host, node, source, nodes, inUse}` — `node`: один из узлов имени, `nodes`: сколько их; `inUse`: узел основного потока |
 | `speed/done` / `failed` | Замер скорости | результат / `{error}` |
-| `core/crashed` | error. sing-box вышел сам (перезапуск идёт в фоне) | `{code}` |
+| `core/crashed` | error. sing-box вышел сам (перезапуск идёт в фоне); не поднялся за 30 с — вливается в `conn/vpnDown` (`joins`) | `{code}` |
 | `core/restartFailed` | error. Попытка перезапуска не удалась; следствие `core/crashed` (`verdict: consequence`, `cause`). Каждая попытка, повторы — `repeated` на одном событии | `{attempt, error}` |
-| `core/down` | error. Перезапуск не удался за 30 с от падения (`core.md` → «Down») | `{proxy: 'kept'\|'removed'\|'released'}` |
+| `core/down` | Больше не пишется (с 2026-10-17 — причина `core` у `conn/vpnDown`); в старом журнале — error «перезапуск не удался за 30 с» | `{proxy: 'kept'\|'removed'\|'released'}` |
 | `core/restarted` | info. После падения запущен снова | `{attempt, downMs?}` — `downMs` (от падения), только если успел быть down |
 | `core/tunNeedsAdmin` | error. TUN не поднялся: нет прав администратора (проверка до запуска) или sing-box отказал по правам. Вместо `conn/connectFailed`; `own: true` при connect по команде | `{stage: 'check'\|'start', error?}` — `error` только при `start`: слова sing-box |
 | `core/sysProxy` | info / warn. Системный прокси включён / возвращён (`own: true` по команде; при остановке jormd тоже); warn — не вышло. Прокси, оставленный kill switch'ем, события не пишет | `{on, by?, error?}` — `on`: что хотели получить; `by: 'user'`: кнопка Remove / Disable sys proxy (`POST /api/sysproxy/release`) |
@@ -230,7 +231,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 
 ### Свёртки
 
-Одна беда — одна строка. Четыре механизма (что куда ложится — таблица «По типам»):
+Одна беда — одна строка. Пять механизмов (что куда ложится — таблица «По типам»):
 
 1. **Корень → следствия** (`cause`). Следствие отдельной строкой не выводится: корень показывает «+N связанных»
    и время последнего, раскрытый — их список. Корень стоит на месте в ленте (`AnchoredList`), новое следствие
@@ -241,7 +242,9 @@ the network changed: counted as the network's …` (книга сбоев, по�
 2. **Пара «началось / кончилось»**. Закрывающее событие пишется в журнал с `opens` (id открывающего, поле
    верхнего уровня, как `cause`), а в ленте ложится в строку открывающего: статус «завершилось», цвет «решено».
    Открывающее выпало из журнала — закрывающее показывается своей строкой. Уведомление о закрытии заменяет уведомление об открытии
-   (тот же id).
+   (тот же id). Если уведомление с этим id уже показано (открывающим или его следствием, обновившим его на месте),
+   закрывающее заменяет его **всегда**, при любом своём переключателе: в шторке не остаётся «VPN не работает» после
+   восстановления (решение 2026-10-17). Не показано — закрывающее решает его собственный переключатель.
 3. **Операция** — новое поле `op: {id, kind}`: всё, что написала одна операция, — одна строка с итогом, события
    внутри. `op` ставит тот, кто начал (ядро; действие пользователя передаёт свой `op` в запросе). `user/*`,
    начавшее операцию, — её причина (смена режима в строке переподключения); отдельной строкой — только действие
@@ -250,6 +253,45 @@ the network changed: counted as the network's …` (книга сбоев, по�
    попытка, не только первые `_backoff.length`; `sub/failed` — каждый подтверждённый сбой (та же ошибка на карточке
    — `×N`, другая — новое событие); `core/deprecated` — счётчик на тексте за запуск; `conn/failing` сворачивает
    остаток окна на последнее событие, как сейчас.
+5. **Вливание** — `joins: [id]` (поле верхнего уровня, как `cause`): строки перечисленных событий (с их
+   следствиями, повторами и закрытием) вливаются в строку этого события, позже написанного. Место строки — место
+   вливающего; закрывающее влитого события (`opens`) внутри — шаг, строку не закрывает. Влитое событие выпало из
+   журнала — вливать нечего. Сейчас только `conn/vpnDown` ← `core/crashed` и стоявший без подключения
+   `conn/offline` («VPN не работает» ниже).
+
+### «VPN не работает» (`conn/vpnDown` / `vpnUp`)
+
+Решение 2026-10-17. Интернет через VPN не идёт по одной из двух причин — одно событие, одна строка, одно
+уведомление, один переключатель (`connLost`; переключателя `coreCrash` больше нет):
+
+- **Причины** (`data.causes`, порядок появления): `core` — sing-box упал и не поднялся за 30 с (момент «down»,
+  `core.md` → «Down»); `network` — сети нет дольше `netBlip` (корень `net.offline` устоял, `failures.md` → «Сеть»).
+  Падение, поднявшееся раньше 30 с, и короткий обрыв сети (`conn/offline` `blip`, info) — только журнал, своими
+  строками, без уведомления.
+- **Открытие.** Первая устоявшая причина пишет `conn/vpnDown` (error, `confirmed`, `why` = `core.down` /
+  `net.offline` по первой причине, `trail` её шаг). Оба корня Sentinel — `core.down` и `net.offline` — получают это
+  событие (`attachEvent`): их следствия (`sub/failed`, `site/*`, `conn/failing`, `rules/ruleSetFailed`, `dns/*`,
+  `conn/lost`…) — `cause` = `vpnDown`, тихие, «+N» в его строке.
+- **Пока открыто**, вторая причина появилась или одна из двух ушла — событие меняется на месте (`update`, `rev`):
+  `causes`, `proxy` (при `core`), `source` (при `network`). Уведомление меняет текст без нового сигнала. Любое
+  уведомляющее warn / error, написанное ядром за это время без `cause` (кроме действий пользователя `own: true` и
+  независимых от VPN `core/stateLost`, `core/stateRestored`, `core/deprecated`), получает `cause` = `vpnDown` и
+  `verdict: consequence` — зависящее от VPN не уведомляет.
+- **Падение внутри.** Если причина `core`, события падения (`core/crashed`, `restartFailed` ×N, позже
+  `restarted`) лежат в строке `vpnDown`: при открытии / добавлении причины `core` событие падения указывается в
+  `vpnDown` полем верхнего уровня `joins: [id]` — строка падения вливается в его строку (механизм свёртки 5).
+  `restarted` внутри влитой строки — шаг, а не закрытие сбоя.
+- **Закрытие.** Ни одной причины не осталось — `conn/vpnUp` (info, `opens` = `vpnDown`, `{downMs, causes}` —
+  все причины за время сбоя): строка «завершилось», уведомление заменяется на «VPN снова работает» (тот же id).
+  Отключение пользователем при открытом сбое — тоже `vpnUp` (`by: user`; заменяет уведомление, если оно показано).
+- **Только при подключении.** Сбой бывает, пока пользователь подключён (`connected`, в том числе во время
+  перезапуска). Без подключения сети нет — пара `conn/offline` / `online` (info), только журнал; подключение при
+  уже пропавшей сети, устоявшем корне `net.offline`, сразу открывает `vpnDown` с причиной `network` и вливает в
+  него стоявший `conn/offline` (`joins`).
+- **Кнопки** по текущим причинам: `core` — **Retry** (пока не запущено), Remove system proxy при `proxy: kept`,
+  Send report; `network` — **Network settings**.
+- Прежние `core/down`, стоячий `conn/offline` (warn) и `conn/online` ядро больше не пишет; в старом журнале они
+  показываются, как раньше.
 
 «Сервер не открывает N сайтов» (S11) — не событие, а постоянный статус сервера (решение 2026-10-17, таблица
 состояний в `to_think.md`).
@@ -270,8 +312,9 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `conn/reconnected` (новое) | операция. Заменяет `conn/connected` на живом подключении (сменился план: настройки, режим, маршрут, пин, DNS; докачаны списки; `reresolve`) и ручное «отключить → подключить» за ≤ 7 с. `{reason: settings / lists / reresolve / user, changed?, tookMs}`, `changed` — что поменялось в плане; `user/mode`, `route`, `pin`, `sysProxy` — причина | Open (что изменилось) при `settings` | — |
 | `conn/connected` / `disconnected` | операция: нажатие пользователя + событие — одна строка `own: true` (сейчас две); `core/sysProxy` on / off — внутри | `by: error`: **Connect**, при `pinLost` Choose server | `by: error` — `connLost` + |
 | `conn/connectFailed` | ×N (автоподключение, Retry) | **Retry**; при `fix: pick` Choose server; при `fix: settings` Open settings (Settings → Connection) — по полю, не по тексту `reason` | `connLost` + |
-| `conn/lost` / `restored` | пара; без сети — под `conn/offline` | **Check now** (раунд Auto вне очереди), Open | `connLost` |
-| `conn/offline` / `online` | пара; корень для `conn/lost`, `site/*`, `conn/failing`, `sub/failed`, `ruleSetFailed` | **Network settings** | `connLost` |
+| `conn/vpnDown` / `vpnUp` | пара; корень для всего, что зависит от VPN (`conn/lost`, `site/*`, `conn/failing`, `sub/failed`, `ruleSetFailed`, `dns/*`…); вливает падение ядра (`joins`); уведомление одно, текст меняется на месте | `core`: **Retry** (пока не запущено), Remove system proxy при `proxy: kept`, Send report; `network`: **Network settings** | `connLost` |
+| `conn/lost` / `restored` | пара; при открытом «VPN не работает» — под ним | **Check now** (раунд Auto вне очереди), Open | `connLost` |
+| `conn/offline` / `online` | пара, без подключения | Network settings | журнал: VPN выключен, сообщать не о чем |
 | `net/switched` (новое) | корень сведений в окне смены (переподключение, `dns/switched`, `auto/switched`, `auto/fastest`); подтверждённые сбои (`site/*`, `conn/failing`, `rules/fallback`) под неё не идут — смена не уведомляет, а сбой, устоявший после неё, должен | — | журнал: сведения |
 | `conn/failing` | следствие `site/*` про тот же адрес в том же окне | **Create rule**, Open (приложение в Per-app) | `blocked` |
 | `site/blocked` / `unreachable` | ×N: один сайт из разных приложений — одна строка, приложения внутри | Check with checker, Copy site, **Create rule**, **Ignore site** | `blocked` |
@@ -305,7 +348,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 
 | событие | свёртка | кнопки | уведомление |
 |---|---|---|---|
-| `core/crashed`, `restartFailed`, `down`, `restarted` | одна строка, статус по последнему; `restartFailed` (×N) и `down` — следствия, `restarted` закрывает; уведомление одно, обновляется на месте | **Retry** (пока не запущено), Remove system proxy при `proxy: kept`, Send report | `coreCrash`; `down` — `connLost` |
+| `core/crashed`, `restartFailed`, `restarted` | одна строка, статус по последнему; `restartFailed` (×N) — следствие, `restarted` закрывает; не поднялся за 30 с — строка вливается в `conn/vpnDown` | **Retry** (пока не запущено), Send report | журнал: уведомляет «VPN не работает», если ядро не поднялось за 30 с |
 | `core/tunNeedsAdmin` | — | Retry, **Open settings** (режим) | `connLost` + |
 | `core/tunTcpDead` / `tunTcpBack` | пара | **Reconnect**, Send report | `connLost` |
 | `core/sysProxy` | on / off — внутри `conn/*`; отдельной строкой — только ошибка или ручное Remove | с `error`: **Retry**, Remove system proxy | с `error` — `connLost` + |
@@ -362,6 +405,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `conn/reconnected` | Переподключено — изменены настройки: <что> (например «режим: TUN → Proxy») / загружены списки правил / изменились адреса серверов / по команде, перерыв N с; в конце «· N с» (`tookMs`) |
 | `conn/connectFailed` | Не удалось подключиться — <причина> |
 | `conn/lost` / `restored` | Нет связи через VPN — интернет доступен напрямую, ни один маршрут не отвечает / доступность интернета не подтверждена; закрыто: Связь восстановлена · перерыв N |
+| `conn/vpnDown` / `vpnUp` | VPN не работает — sing-box остановился и не запускается (N попыток) / нет подключения к интернету / обе причины; при `proxy: kept` — «· системный прокси оставлен, программы без интернета»; закрыто: VPN снова работает · перерыв N |
 | `conn/offline` / `online` | Нет подключения к интернету — система сообщает, что сети нет / прямые проверки не проходят; закрыто: Интернет восстановлен · перерыв N |
 | `net/switched` | Смена сети: Wi-Fi (Ростелеком) → мобильная (МТС); с провалом — «· без сети N с»; провайдер не определён или настройка выключена — только тип |
 | `conn/failing` | <приложение>: соединения не устанавливаются |
@@ -414,7 +458,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 
 - **Когда:** сменился тип сети (Wi-Fi / мобильная / Ethernet) или id сети при том же типе, и новая сеть устоялась
   (`failures.md` → «Смена сети: возмущение, ворота, устойчивость»). Провал с возвратом в ту же сеть — пара
-  `conn/offline` → `online`; пропала совсем — `conn/offline`.
+  `conn/offline` → `online`; пропала совсем — `conn/offline` (при подключении — «VPN не работает», причина `network`).
 - **`data`:** `{from, to}`, каждое `{type, provider?, operator?, metered?}`; `downMs`, если между сетями был провал.
 - **Провайдер** — настройка «Определять провайдера сети» (Settings → Connection), вкл. / выкл., по умолчанию
   вкл. Мобильная: `operator` — оператор SIM передачи данных от системы (разрешений не нужно). Wi-Fi / Ethernet:
@@ -433,7 +477,8 @@ the network changed: counted as the network's …` (книга сбоев, по�
 Перед загрузкой оно спрашивает Sentinel о пути, который выбрал загрузчик:
 - **прямой путь** — сеть есть: сразу;
 - **путь через VPN** — идёт своё переподключение / перезапуск ядра: ждёт, пока ядро устоится (`settled`), затем
-  грузит; ядро так и не поднялось (`core/down`) — `sub/failed` с причиной `core.down`;
+  грузит; ядро так и не поднялось («VPN не работает», причина `core`) — `sub/failed` с `why` `core.down`, `cause` =
+  событие `conn/vpnDown`;
 - **сети нет** (`net.offline`, любой путь) — ждёт её возвращения до 5 с; вернулась — грузит, нет — обычный
   `sub/failed` (`code: 'offline'`, на карточке «Нет сети»).
 

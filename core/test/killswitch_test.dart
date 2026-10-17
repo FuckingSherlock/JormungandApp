@@ -291,16 +291,24 @@ void main() {
         'conn/connected',
         'core/crashed',
         'core/restartFailed',
-        'core/down',
+        'conn/vpnDown',
         'core/restarted',
+        'conn/vpnUp',
       ]);
       // the five failed tries are one event: the first writes it, the others are repeats (data.repeat.count, ×5)
       final restart = ev[3];
       expect([restart['level'], restart['verdict'], restart['cause'], ((restart['data'] as Map)['repeat'] as Map)['count']],
           ['error', 'consequence', ev[2]['id'], 5]);
-      expect([ev[4]['level'], ev[4]['own'], ev[4]['data']], ['error', false, {'proxy': 'kept'}]);
+      // «VPN не работает»: one event instead of core/down; the crash row is poured into it (joins)
+      expect([ev[4]['level'], ev[4]['own'], ev[4]['verdict']], ['error', false, 'confirmed']);
+      expect(ev[4]['data'], containsPair('causes', ['core']));
+      expect(ev[4]['data'], containsPair('proxy', 'kept'));
+      expect(ev[4]['joins'], [ev[2]['id']]);
       expect(ev[5]['data'], {'attempt': 6, 'downMs': r.timers.now.difference(crashAt).inMilliseconds});
-      expect(ev.sublist(2).every((e) => e['own'] == false && e['log'] is int), isTrue);
+      expect([ev[6]['level'], ev[6]['opens']], ['info', ev[4]['id']]);
+      expect(ev[6]['data'], containsPair('causes', ['core']));
+      expect(ev[6]['data'], containsPair('downMs', greaterThan(0)));
+      expect([for (final i in [2, 3, 5]) ev[i]['own'] == false && ev[i]['log'] is int], [true, true, true]);
     } finally {
       await r.close();
     }
@@ -333,8 +341,11 @@ void main() {
           expect(s['systemProxy'], c.$3 == 'kept');
           expect(s['connected'], isTrue);
           expect(r.sys.calls, c.$4);
-          final down = (await r.events()).lastWhere((e) => e['type'] == 'down');
-          expect(down['data'], {'proxy': c.$3});
+          final all = await r.events();
+          expect(all.any((e) => e['type'] == 'down'), isFalse, reason: 'core/down is not written any more');
+          final down = all.lastWhere((e) => e['type'] == 'vpnDown');
+          expect(down['data'], containsPair('proxy', c.$3));
+          expect(down['data'], containsPair('causes', ['core']));
           if (c.$3 == 'removed') {
             final off = (await r.events()).lastWhere((e) => e['type'] == 'sysProxy');
             expect([off['data'], off['level']], [{'on': false}, 'info']);

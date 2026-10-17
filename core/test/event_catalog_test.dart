@@ -19,6 +19,9 @@ const pendingLabels = <String>{};
 /// Types in the catalog that no code of this repository writes: the mockup writes them.
 const mockupOnly = <String>{'sub/dead'};
 
+/// Types the core no longer writes but old journals hold (so they stay in the catalog).
+const legacyOnly = <String>{'core/down'};
+
 /// Emit sites whose type (or category) is a variable, by `file|call|first argument|second argument`.
 /// What they can write is found by the other patterns (below), so the entry only says "known":
 /// a new variable site must be added here on purpose, with where its values come from.
@@ -73,10 +76,16 @@ void main() {
         for (final k in _coreEmits(coreSrc).pairs.keys) '${k.$1}/${k.$2}',
         for (final k in _appEmits(appLib).pairs.keys) '${k.$1}/${k.$2}',
       };
-      final never = [for (final k in catalog) if (!written.contains(k) && !mockupOnly.contains(k)) k];
+      final never = [for (final k in catalog) if (!written.contains(k) && !mockupOnly.contains(k) && !legacyOnly.contains(k)) k];
       expect(never, isEmpty, reason: 'in eventCats but written by no code here: a stale entry, or an emit site the scan cannot read');
       final stale = [for (final k in mockupOnly) if (written.contains(k)) k];
       expect(stale, isEmpty, reason: 'now written by the core: remove it from mockupOnly');
+      final back = [for (final k in legacyOnly) if (written.contains(k)) k];
+      expect(back, isEmpty, reason: 'core/down is written again: the single conn/vpnDown replaced it');
+    });
+
+    test('«VPN не работает»: conn/vpnDown, conn/vpnUp are in the catalog; core/down stays for old journals', () {
+      expect(catalog, containsAll(['conn/vpnDown', 'conn/vpnUp', 'core/down', 'conn/offline', 'conn/online']));
     });
 
     test('every event the app posts is in eventCats', () {
@@ -144,7 +153,7 @@ void main() {
           journalOnly.keys,
           containsAll([
             'dns/failedOnNode', 'core/deprecated', 'speed/failed', 'core/updateFailed', 'core/updateDeltaFailed',
-            'core/updateChannelEmpty', 'sub/diverged', 'net/switched',
+            'core/updateChannelEmpty', 'sub/diverged', 'net/switched', 'core/down', 'core/crashed', 'core/restartFailed',
           ]));
     });
 

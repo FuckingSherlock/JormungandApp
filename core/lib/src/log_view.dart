@@ -24,6 +24,7 @@ class EventRecord {
     this.cause,
     this.op,
     this.opens,
+    this.joins,
     this.why,
     this.trail,
   });
@@ -43,6 +44,7 @@ class EventRecord {
     cause: (m['cause'] as num?)?.toInt(),
     op: m['op'] is Map ? Map<String, dynamic>.from(m['op'] as Map) : null,
     opens: (m['opens'] as num?)?.toInt(),
+    joins: m['joins'] is List ? [for (final x in m['joins'] as List) if (x is num) x.toInt()] : null,
     why: m['why'] is Map ? Map<String, dynamic>.from(m['why'] as Map) : null,
     trail: m['trail'] is List ? [for (final s in m['trail'] as List) if (s is Map) Map<String, dynamic>.from(s)] : null,
   );
@@ -69,6 +71,10 @@ class EventRecord {
   /// closes (eventbook.dart).
   final Map<String, dynamic>? op;
   final int? opens;
+
+  /// The events whose rows this event takes into its own (top-level, like [cause]; docs/logs.md → «Свёртки», 5): the crash
+  /// of a `conn/vpnDown`. Null = none.
+  final List<int>? joins;
 
   /// The reason the Sentinel gave (`{code, params}`) and the checks it ran (`[{code, params, outcome, at}]`); null =
   /// none (top-level fields of the event, like [verdict]).
@@ -115,7 +121,7 @@ class EventRecord {
 /// actions) is outside the catalog by design. `sub/dead` is written by the mockup only (a source
 /// that stopped answering, see docs/logs.md).
 const eventCats = <(String, List<String>)>[
-  ('conn', ['connected', 'reconnected', 'disconnected', 'connectFailed', 'lost', 'restored', 'offline', 'online', 'failing']),
+  ('conn', ['connected', 'reconnected', 'disconnected', 'connectFailed', 'lost', 'restored', 'offline', 'online', 'failing', 'vpnDown', 'vpnUp']),
   ('net', ['switched']),
   ('auto', ['switched', 'fastest', 'unstable']),
   ('site', ['blocked', 'unreachable']),
@@ -139,9 +145,10 @@ const eventCats = <(String, List<String>)>[
 /// Which Settings → Notifications toggle an event type answers to (none: never a notification).
 const eventNotifKind = <String, String>{
   'auto/switched': 'autoSwitch', 'auto/fastest': 'autoSwitch', 'auto/unstable': 'unstable',
-  'conn/lost': 'connLost', 'conn/restored': 'connLost', 'conn/offline': 'connLost', 'conn/online': 'connLost',
-  'core/crashed': 'coreCrash', 'core/restarted': 'coreCrash', 'core/restartFailed': 'coreCrash',
-  'core/down': 'connLost',
+  'conn/lost': 'connLost', 'conn/restored': 'connLost',
+  // «VPN не работает»: the one notification of a sing-box that does not come up or a network that is gone (docs/logs.md);
+  // the crash events, conn/offline / online and the old core/down are the journal's
+  'conn/vpnDown': 'connLost', 'conn/vpnUp': 'connLost',
   // TCP through the TUN is dead / back: the same family as a lost connection
   'core/tunTcpDead': 'connLost', 'core/tunTcpBack': 'connLost',
   // many failing connections of one app: what «Site does not open» is, one level up
@@ -173,6 +180,10 @@ const journalOnly = <String, String>{
   'core/updateChannelEmpty': 'nothing to update to',
   'sub/diverged': 'a note about two copies of a subscription',
   'net/switched': 'the network changed; the journal explains what followed',
+  'core/crashed': 'joins conn/vpnDown when sing-box does not come back in 30 s, which is the notification',
+  'core/restartFailed': 'joins conn/vpnDown when sing-box does not come back in 30 s, which is the notification',
+  'core/down': 'no longer written; replaced by conn/vpnDown',
+  'conn/offline': 'only a journal entry; a network that stays gone while connected is conn/vpnDown',
 };
 
 /// Settings → Notifications as they start (`notifCfg` of the snapshot, names as in the mockup).
@@ -182,7 +193,6 @@ const notifDefaults = <String, bool>{
   'autoSwitch': true,
   'unstable': true,
   'connLost': true,
-  'coreCrash': false,
   'blocked': true,
   'subUpdated': false,
   'subFailed': true,
@@ -259,13 +269,15 @@ String eventFoldKey(EventRecord e) {
   return '${e.key}|$tail';
 }
 
-/// A row of the Events list (docs/logs.md → «Свёртки»). Four mechanisms put events into one row:
+/// A row of the Events list (docs/logs.md → «Свёртки»). Five mechanisms put events into one row:
 ///
 /// - **repeats** ([repeats]): the same event again within 10 minutes of its last time (only events with no `cause`,
 ///   `op` or `opens` of their own; the core's own repeats are one event with `data.repeat`, see [EventRecord.times]);
 /// - **consequences** ([related]): events whose `cause` is the row's event (the root);
 /// - **closing** ([closers]): events whose `opens` is the row's event ([closer], [closed]);
-/// - **operation** ([parts]): events with the same `op.id` (the first of them is the [head] of the row).
+/// - **operation** ([parts]): events with the same `op.id` (the first of them is the [head] of the row);
+/// - **joining** ([EventRecord.joins]): the rows of the listed events (their consequences, repeats and closing too) are
+///   steps in [related] of the joining event's row; a closing event of a joined event is a step, it does not close the row.
 ///
 /// A row of consequences whose root is not in the journal (`net.captive` is never written, or the root was pruned) has
 /// no [head]: [isGroup], [whyCode] is its heading. [items] is every event of the row, oldest first.
@@ -339,7 +351,8 @@ class EventGroup {
   /// For a search: the row is shown because of an event other than [head] (the UI unfolds it).
   bool hitInside = false;
 
-  int get key => items.first.id;
+  /// The row's identity: [head]'s id (rows that took others in, [_join], keep it), the first event of a group row.
+  int get key => head?.id ?? items.first.id;
   bool get problem => level != 'info';
 
   /// The event that words the row: the last of the repeats of [head]; the last event of an `appUpdate` operation
@@ -410,6 +423,19 @@ class EventGroup {
     closers.add(e);
   }
 
+  /// Takes the row [g] of an event listed in [EventRecord.joins] into this one: all its events are steps (`related`),
+  /// whatever they were there; [items] stay oldest first.
+  void _join(EventGroup g) {
+    related.addAll(g.items);
+    items.addAll(g.items);
+    related.sort((a, b) => a.id.compareTo(b.id));
+    items.sort((a, b) => a.id.compareTo(b.id));
+    for (final x in g.items) {
+      if (_rank(x.level) > _rank(level)) level = x.level;
+      if (x.lastAt > lastAt) lastAt = x.lastAt;
+    }
+  }
+
   void _part(EventRecord e) {
     _take(e);
     parts.add(e);
@@ -440,21 +466,48 @@ List<EventGroup> foldEvents(
   final plain = <String, EventGroup>{}, byOp = <String, EventGroup>{}, byCode = <String, EventGroup>{};
   final byId = <int, EventGroup>{};
   final hidden = <int>{};
-  for (final e in list) {
+  final events = list.toList();
+  // joined event -> the event that joins it; an id the journal does not have joins nothing
+  final present = {for (final e in events) e.id};
+  final joinedBy = <int, int>{};
+  for (final e in events) {
+    for (final id in e.joins ?? const <int>[]) {
+      if (id != e.id && present.contains(id)) joinedBy.putIfAbsent(id, () => e.id);
+    }
+  }
+  // [e] has landed in [row]: the rows of the events it joins (when they already stand) become steps of [row]
+  void join(EventRecord e, EventGroup row) {
+    for (final id in e.joins ?? const <int>[]) {
+      final g = byId[id];
+      // only a row that stands for the joined event itself; one it is merely a part of is not taken whole
+      if (g == null || identical(g, row) || g.head?.id != id) continue;
+      row._join(g);
+      rows.remove(g);
+      byId.updateAll((_, v) => identical(v, g) ? row : v);
+      byOp.updateAll((_, v) => identical(v, g) ? row : v);
+      // a later crash of the same kind must not repeat into this row
+      plain.removeWhere((_, v) => identical(v, g));
+      byCode.removeWhere((_, v) => identical(v, g));
+    }
+  }
+
+  for (final e in events) {
     final opId = e.opId;
     // the operation's row, if it started: a `user/*` that started it, `core/sysProxy` inside a reconnect ...
     final inOp = opId == null ? null : byOp[opId];
     if (inOp != null) {
       inOp._part(e);
       byId[e.id] = inOp;
+      join(e, inOp);
       continue;
     }
-    // the closing event lies in the row of the event it closes
+    // the closing event lies in the row of the event it closes; the closing of a joined event is a step there
     final opened = e.opens == null ? null : byId[e.opens!];
     if (opened != null) {
-      opened._close(e);
+      joinedBy.containsKey(e.opens) ? opened._relate(e) : opened._close(e);
       byId[e.id] = opened;
       if (opId != null) byOp[opId] = opened;
+      join(e, opened);
       continue;
     }
     // a consequence lies in the row of its root
@@ -463,6 +516,16 @@ List<EventGroup> foldEvents(
       root._relate(e);
       byId[e.id] = root;
       if (opId != null) byOp[opId] = root;
+      join(e, root);
+      continue;
+    }
+    // an event the row of its joiner (written earlier) takes in, the filter or not
+    final joiner = joinedBy[e.id];
+    final into = joiner == null ? null : byId[joiner];
+    if (into != null) {
+      into._relate(e);
+      byId[e.id] = into;
+      if (opId != null) byOp[opId] = into;
       continue;
     }
     if (shown != null && !shown(e)) {
@@ -476,15 +539,17 @@ List<EventGroup> foldEvents(
       if (h != null && e.at - h.lastAt <= window) {
         h._relate(e);
         byId[e.id] = h;
+        join(e, h);
       } else {
         final n = EventGroup._noRoot(e, code);
         rows.add(n);
         byCode[k] = n;
         byId[e.id] = n;
+        join(e, n);
       }
       continue;
     }
-    final linked = e.cause != null || opId != null || e.opens != null;
+    final linked = e.cause != null || opId != null || e.opens != null || (e.joins?.isNotEmpty ?? false);
     final k = linked ? '' : eventFoldKey(e), p = linked ? null : plain[k];
     if (p != null && p.closer == null && e.at - p.repeats.last.at <= window) {
       final moves = !p.anchored;
@@ -501,6 +566,7 @@ List<EventGroup> foldEvents(
     byId[e.id] = n;
     if (!linked) plain[k] = n;
     if (opId != null) byOp[opId] = n;
+    join(e, n);
   }
   if (matches == null) return rows;
   return [
@@ -723,6 +789,22 @@ class EventFeed {
   /// [eventNotifies] said yes.
   bool markNotified(int id) => _told.add(id);
 
+  // The ids of the notifications shown (`opens ?? cause ?? id` of a notified event: what a closing event replaces).
+  final _shown = <int>{};
+
+  /// Whether [e] notifies now (the caller shows it when true): [eventNotifies] says yes, or [e] is a closing event
+  /// (`opens`) and the notification it replaces was already shown, whatever the closing event's own toggle says (nothing
+  /// stays in the shade after the recovery; docs/logs.md → «Свёртки», 2). True once per event, whatever changes it in
+  /// place afterwards. Replaces `eventNotifies(cfg, e) && markNotified(e.id)`.
+  bool notify(Object? cfg, EventRecord e) {
+    if (_told.contains(e.id)) return false;
+    final opens = e.opens;
+    if (!eventNotifies(cfg, e) && !(opens != null && _shown.contains(opens))) return false;
+    _told.add(e.id);
+    _shown.add(opens ?? e.cause ?? e.id);
+    return true;
+  }
+
   /// Applies an `events()` answer. Returns the events that are new (to notify: not own, from
   /// [notifyFrom]); `reset` = the numbering started over, the list was dropped (ask again).
   ({List<EventRecord> fresh, List<EventRecord> notify, bool reset, bool changed}) apply(Map r) {
@@ -732,6 +814,7 @@ class EventFeed {
       next = null;
       list.clear();
       _told.clear();
+      _shown.clear();
       return (fresh: const [], notify: const [], reset: true, changed: true);
     }
     final n0 = list.length;
@@ -739,6 +822,7 @@ class EventFeed {
     if (firstId is num) {
       list.removeWhere((e) => e.id < firstId.toInt());
       _told.removeWhere((id) => id < firstId.toInt());
+      _shown.removeWhere((id) => id < firstId.toInt());
     }
     final fresh = [
       for (final m in (r['events'] as List? ?? const []))
@@ -766,6 +850,7 @@ class EventFeed {
   void clear() {
     list.clear();
     _told.clear();
+    _shown.clear();
   }
 }
 

@@ -393,5 +393,11 @@
   "Cause closed": null,
   "Linked to another cause": null,
   "No cause found": null,
-  "{0}: connections are not established": null
+  "{0}: connections are not established": null,
+  "sing-box stopped and does not start": null,
+  "sing-box stopped and does not start ({#0} attempts)": null,
+  "No internet connection": null,
+  "system proxy left on, programs have no internet": null,
+  "VPN works again": null,
+  "VPN works again · down {0}": null
 }

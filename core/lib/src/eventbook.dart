@@ -23,9 +23,10 @@ import 'logbook.dart';
 /// `[{code, params, outcome, at}]`) and `cause` (the id of the root event it is a consequence of).
 /// All four are absent on an event nobody judged, and on every event written before they existed.
 ///
-/// Two more top-level fields, absent when not set: `op` (`{id, kind}`: the operation the event belongs to, events of
-/// one operation share the id) and `opens` (on the closing event of a pair: the id of the event it closes). Both
-/// survive [update] and [repeated].
+/// Three more top-level fields, absent when not set: `op` (`{id, kind}`: the operation the event belongs to, events of
+/// one operation share the id), `opens` (on the closing event of a pair: the id of the event it closes) and `joins`
+/// (the ids of earlier events whose rows fold into this one's, docs/logs.md → «Свёртки» 5). All survive [update] and
+/// [repeated]; [update] can set `joins`.
 ///
 /// Kept: the last [maxAge] and at most [cap] events (in memory strictly). With a [file] the
 /// journal is a JSON Lines file written behind the memory: new events are collected and
@@ -61,6 +62,11 @@ class EventBook {
   final Duration maxAge;
   final int cap;
   final DateTime Function() _clock;
+
+  /// Asked by [add] for every warn / error written without a `cause` and not `own`: the id of the incident
+  /// (docs/logs.md → «VPN не работает») it is a consequence of, or null for none. The owner sets it; the event
+  /// then gets that `cause` and `verdict: consequence`. One place for every writer of the journal.
+  int? Function(String cat, String type, String level)? incident;
 
   static const cats = {'conn', 'net', 'auto', 'site', 'sub', 'rules', 'dns', 'node', 'speed', 'core', 'user'};
   static const levels = {'info', 'warn', 'error'};
@@ -145,9 +151,17 @@ class EventBook {
       List<Map<String, dynamic>>? trail,
       int? cause,
       Map<String, Object?>? op,
-      int? opens}) {
+      int? opens,
+      List<int>? joins}) {
     load();
     final n = link ? log?.last : null;
+    if (cause == null && !own && level != 'info') {
+      final inc = incident?.call(cat, type, level);
+      if (inc != null) {
+        cause = inc;
+        verdict = 'consequence';
+      }
+    }
     final e = <String, dynamic>{
       'id': _next++,
       'at': _clock().millisecondsSinceEpoch,
@@ -163,6 +177,7 @@ class EventBook {
       'cause': ?cause,
       'op': ?op,
       'opens': ?opens,
+      if (joins != null && joins.isNotEmpty) 'joins': joins,
       'data': data,
     };
     _events.add(e);
@@ -182,7 +197,7 @@ class EventBook {
   /// own, [level] replaces the level when given. The event keeps its id and place, gets `rev`
   /// (the number of changes, absent = 0), is pushed on [stream] again and rides in [since]'s
   /// `updated` for [updatedFor]; the file is rewritten behind the memory like after a prune.
-  /// [verdict], [why], [cause] replace the event's own when given; [appendTrail] is put after its trail.
+  /// [verdict], [why], [cause], [joins] replace the event's own when given; [appendTrail] is put after its trail.
   /// Returns false when the event is not there any more.
   bool update(int id,
       {Map<String, dynamic> data = const {},
@@ -190,6 +205,7 @@ class EventBook {
       String? verdict,
       Map<String, dynamic>? why,
       int? cause,
+      List<int>? joins,
       List<Map<String, dynamic>>? trail,
       List<Map<String, dynamic>>? appendTrail,
       bool replaceData = false}) {
@@ -202,6 +218,7 @@ class EventBook {
     if (verdict != null) e['verdict'] = verdict;
     if (why != null) e['why'] = why;
     if (cause != null) e['cause'] = cause;
+    if (joins != null) e['joins'] = joins;
     if (trail != null) e['trail'] = trail;
     if (appendTrail != null && appendTrail.isNotEmpty) e['trail'] = [...((e['trail'] as List?) ?? const []), ...appendTrail];
     e['rev'] = ((e['rev'] as int?) ?? 0) + 1;

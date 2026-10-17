@@ -165,12 +165,15 @@ final _events = <String, List<Ev>>{
     Ev('conn', 'connectFailed', {'reason': 'Manual pick "Frankfurt 1" (Remnawave) is unavailable: the subscription no longer has it. The tunnel is not moved to another server — choose a server in Route.', 'fix': 'pick'}, level: 'error', variant: 'pinLost'),
     Ev('conn', 'connected', {'entry': 's1', 'server': 's1::n1', 'mode': 'tun', 'route': 'rules'}, level: 'info'),
     Ev('conn', 'disconnected', {'by': 'error', 'reason': 'sing-box exited'}, level: 'warn'),
+    Ev('conn', 'vpnDown', {'causes': ['core'], 'proxy': 'kept'}, level: 'error', variant: 'sing-box не поднялся, системный прокси оставлен'),
+    Ev('conn', 'vpnDown', {'causes': ['network'], 'source': 'platform'}, level: 'error', variant: 'нет сети'),
+    Ev('conn', 'vpnDown', {'causes': ['core', 'network'], 'proxy': 'kept'}, level: 'error', variant: 'обе причины: core и network'),
+    Ev('conn', 'vpnUp', {'downMs': 185000, 'causes': ['core']}, level: 'info', variant: 'закрыто: VPN снова работает'),
   ],
   'core': [
     Ev('core', 'crashed', {'code': 2}, level: 'error'),
     Ev('core', 'restarted', {'attempt': 1, 'downMs': 4200}, level: 'info'),
     Ev('core', 'restartFailed', {'attempt': 3, 'error': 'start service: listen tcp 127.0.0.1:2080: bind: address already in use'}, level: 'error'),
-    Ev('core', 'down', {'proxy': 'kept'}, level: 'error'),
     Ev('core', 'tunNeedsAdmin', {'stage': 'start', 'error': 'Access is denied'}, level: 'error'),
     Ev('core', 'sysProxy', {'on': true, 'by': 'core', 'error': 'access denied'}),
     Ev('core', 'deprecated', {'text': 'legacy DNS server format is deprecated in sing-box 1.12'}),
@@ -233,10 +236,12 @@ const _when = {
   'conn/connectFailed': 'Подключение не удалось. Для Manual на потерянный сервер/запись (pinLost) — ошибка без подмены, работающее подключение завершается.',
   'conn/connected': 'Туннель поднят (журнальная запись).',
   'conn/disconnected': 'Туннель остановлен (по ошибке или пользователем).',
-  'core/crashed': 'sing-box упал; ядро запускает его заново (по умолчанию не уведомляет).',
+  'core/crashed': 'sing-box упал; ядро запускает его заново. Не уведомляет: если не поднялся за 30 с, строка вливается в conn/vpnDown.',
   'core/restarted': 'sing-box запущен заново после падения.',
   'core/restartFailed': 'Перезапуск sing-box не удался.',
-  'core/down': 'sing-box не вернулся за 30 с: VPN лежит. Показывается ещё плашкой на Home.',
+  'conn/vpnDown': 'VPN не работает: sing-box не поднялся за 30 с (причина core) и/или нет сети (причина network). Одно событие на сбой, причины меняются на месте; уведомляет (connLost), плашка на Home.',
+  'conn/vpnUp': 'VPN снова работает: закрывает conn/vpnDown, уведомление заменяется; перерыв — downMs.',
+  'core/down': 'Больше не пишется (причина core у conn/vpnDown); в старом журнале — error.',
   'core/tunNeedsAdmin': 'TUN требует прав администратора (Windows).',
   'core/sysProxy': 'Системный прокси не удалось выставить/снять (или пользователь переключил).',
   'core/deprecated': 'sing-box предупредил об устаревшей настройке.',
@@ -260,7 +265,6 @@ final _kindRu = {
   'autoSwitch': _en.whenAutoSwitches,
   'unstable': _en.unstableEntry,
   'connLost': _en.connectionLost,
-  'coreCrash': _en.singBoxStopped,
   'blocked': _en.siteDoesNotOpen,
   'dnsFailed': _en.dnsServerDoesNotAnswer,
   'subUpdated': _en.subscriptionUpdated,
@@ -708,8 +712,8 @@ void main() {
 
     // other surfaces
     add('other', await captioned([
-      ('Плашка VPN down на Home (core/down)', true),
-      ('Форма: красная плашка вверху Home, пока sing-box не вернулся (down) — сопровождает событие core/down. Кнопки: «Retry» — повторить запуск ядра (host.retry); «Disable system proxy» — снять системный прокси, чтобы вернуть интернет (host.releaseSysProxy).', false),
+      ('Плашка VPN down на Home (conn/vpnDown)', true),
+      ('Форма: красная плашка вверху Home, пока VPN не работает (причина core: sing-box не вернулся) — сопровождает событие conn/vpnDown. Кнопки: «Retry» — повторить запуск ядра (host.retry); «Disable system proxy» — снять системный прокси, чтобы вернуть интернет (host.releaseSysProxy).', false),
     ], VpnAlert(host: host..setPhase(ConnectionPhase.connected, down: VpnDown(since: _now - 40000, proxy: 'kept')))));
     host.setPhase(ConnectionPhase.disconnected);
     final failedSrc = host.catalog.sourcesData['s1']!..unknown['lastError'] = {'msg': 'HTTP 403: request blocked', 'at': _now - 120000};

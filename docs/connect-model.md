@@ -813,10 +813,10 @@ updates, см. `updates.md` (раз в день, без установки бе�
   состояния остаётся — он от Android. Кнопки «Disconnect» тогда нет: отключаются кнопкой дока или плиткой.
   Под переключателем на Android подсказка об этом. *Mockup TODO:* мокап (заморожен) подсказки не знает.
 - **Connection**: `autoSwitch` [вкл] Auto перешёл на другую запись или сменил сервер в текущей (не в запасной — это только строка журнала); `unstable` [вкл] запись
-  нестабильна (flap guard); `connLost` [вкл] нет сети / не отвечает ни один маршрут и возврат сети
-  (`status.auto.noNet`: ни один маршрут не отвечает); `coreCrash` [**выкл**] sing-box остановился сам и запущен снова
-  (фоновые перезапуски тихие, переключатель их показывает; подсказка «Background restarts are silent;
-  this shows them»). Событие `core/down` («VPN is down», ядро не поднялось 30 с) идёт под `connLost`; `blocked` [вкл] «сайт не открывается через запись» с кнопкой Create rule.
+  нестабильна (flap guard); `connLost` [вкл] «VPN не работает» (`conn/vpnDown`: ядро не поднялось за 30 с после
+  падения или нет сети — одно уведомление, причина меняется на месте, «VPN снова работает» в конце) / не отвечает
+  ни один маршрут (`status.auto.noNet`) и возврат. Переключателя `coreCrash` нет (решение 2026-10-17): падение,
+  поднявшееся за 30 с, — только журнал; `blocked` [вкл] «сайт не открывается через запись» с кнопкой Create rule.
 - **Subscriptions and rules**: `subUpdated` [выкл] фоновое обновление прошло (имя, число серверов);
   `subFailed` [вкл] фоновое обновление не удалось / провайдер убрал серверы / серверы вернулись /
   серверы подписки не отвечают → обратитесь в поддержку; `ruleSets` [вкл] набор правил не скачался
@@ -844,8 +844,8 @@ updates, см. `updates.md` (раз в день, без установки бе�
 **Источник уведомлений — журнал событий** (Logs → Events). Фоновое уведомление рождается из НОВОГО
 события журнала: `id` больше последнего, увиденного при загрузке страницы (история не
 уведомляет никогда), `own: false`. Соответствие тип → переключатель: `auto/switched|fastest` →
-`autoSwitch`; `rules/targetLost|targetFound` → `autoSwitch` (цель правила или приложения потеряна / вернулась, `rules.md` §0 «Недоступная цель»); `auto/unstable` → `unstable`; `conn/lost|restored|offline|online` → `connLost`;
-`core/crashed|restarted|restartFailed` → `coreCrash`; `core/down` → `connLost`; `site/blocked` → `blocked` (кнопки Create rule и Ignore site), `site/unreachable` → тот же `blocked` (только Ignore site; хост игнорируемого сайта уведомлений не даёт никогда);
+`autoSwitch`; `rules/targetLost|targetFound` → `autoSwitch` (цель правила или приложения потеряна / вернулась, `rules.md` §0 «Недоступная цель»); `auto/unstable` → `unstable`; `conn/vpnDown|vpnUp|lost|restored` → `connLost` (`conn/offline|online` без
+подключения и `core/crashed|restarted|restartFailed` — только журнал); `site/blocked` → `blocked` (кнопки Create rule и Ignore site), `site/unreachable` → тот же `blocked` (только Ignore site; хост игнорируемого сайта уведомлений не даёт никогда);
 `sub/updated` → `subUpdated`; `sub/failed|removed|back|dead` → `subFailed`; `rules/ruleSetFailed`
 → `ruleSets`. Остальные события уведомлений не дают. Текст — та же строка, что заголовок и
 пояснение строки события. Счётчики статуса ядра (`switches`, `unstable`, `blocked`, `restarts`)

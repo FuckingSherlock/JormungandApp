@@ -1748,5 +1748,12 @@
   "Linked to another cause": "linkedToAnotherCause",
   "No cause found": "noCauseFound",
   "{0}: connections are not established": "connectionsAreNotEstablished",
-  "Disconnected: the selected server is unavailable ({0})": "disconnectedTheSelectedServerIsUnavailab2"
+  "Disconnected: the selected server is unavailable ({0})": "disconnectedTheSelectedServerIsUnavailab2",
+  "sing-box stopped and does not start": "singBoxStoppedAndDoesNot",
+  "No internet connection": "noInternetConnection",
+  "system proxy left on, programs have no internet": "systemProxyLeftOnProgramsHave",
+  "VPN works again": "vpnWorksAgain",
+  "sing-box stopped and does not start (attempts: {#0})": "singBoxStoppedAndDoesNot2",
+  "VPN works again · down {0}": "vpnWorksAgainDown",
+  "sing-box stopped and does not start ({#0} attempts)": "singBoxStoppedAndDoesNot3"
 }

@@ -109,15 +109,17 @@ class SystemNotifier {
   ///
   /// The words are the row's ([EventWords.describeGroup], [EventWords.reasonLine]); up to two bold buttons
   /// of the row. The notification's id is the event's, except: the closer of a pair (`opens`) replaces the
-  /// opener's, a step of the core's crash chain (`core/*` with a `cause`) updates the root's in place; any
-  /// other consequence (`cause`) is the root's business and stays silent.
+  /// opener's; any consequence (`cause`) is the root's business and stays silent.
   Future<void> postEvent(EventRecord e, EventWords words) {
     final cause = e.cause;
-    if (cause != null && e.cat != 'core') return Future.value();
+    if (cause != null) return Future.value();
     final id = e.opens ?? cause ?? e.id;
     final g = EventGroup(e);
-    final (title, detail) = words.describeGroup(g);
-    final reason = words.reasonLine(g);
+    // the closing of «VPN is down» speaks for itself (a lone group of it would read as the failure)
+    final (title, detail) = e.key == 'conn/vpnUp'
+        ? (words.describe(e).title, words.describe(e).detail)
+        : words.describeGroup(g);
+    final reason = e.key == 'conn/vpnUp' ? null : words.reasonLine(g);
     // "does not open": Create rule (when it opens through another entry) and Ignore site
     final site = e.cat == 'site' || e.key == 'conn/failing' ? words.host(e.data) : '';
     final via = e.cat == 'site' ? '${e.data['viaTarget'] ?? e.data['via'] ?? ''}' : '';
@@ -136,6 +138,11 @@ class SystemNotifier {
     );
   }
 
+  static List<String> _vpnCauses(Map<String, dynamic> d) {
+    final c = d['causes'];
+    return c is List ? [for (final x in c) '$x'] : const [];
+  }
+
   /// The bold buttons of an event (docs/logs.md → «По типам»; the plain ones live in the row only), two at
   /// most: `(id, label)`, the ids are what the shell's `_actFromShade` understands.
   static List<(String, String)> eventActions(EventRecord e, EventWords words, CoreHost host) {
@@ -149,6 +156,10 @@ class SystemNotifier {
       'conn/connectFailed' => [('retry', l.retry)],
       'conn/lost' => [('checkNow', l.checkNow)],
       'conn/offline' => [('networkSettings', l.networkSettings)],
+      'conn/vpnDown' => [
+        if (_vpnCauses(d).contains('core') && host.phase != ConnectionPhase.connected) ('retry', l.retry),
+        if (_vpnCauses(d).contains('network')) ('networkSettings', l.networkSettings),
+      ],
       'conn/failing' => [if (site.isNotEmpty) ('rule', l.createRule)],
       'auto/unstable' => [('open', l.open)],
       'dns/failed' => [('open', l.open)],
