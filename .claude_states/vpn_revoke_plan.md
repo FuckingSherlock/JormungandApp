@@ -82,10 +82,20 @@ connect → нет `connectFailed`, одно `disconnected`; отзыв посл
 Прогон 1 сделан 2026-10-18 (PASS, коммит «Core: VPN revoke…»). API: `RevocableRunner.onRevoked`,
 `eventNotifKindOf(EventRecord)` (log_view.dart) — вид уведомления по событию; порядок при отзыве — `vpnUp {by: system}`,
 затем `disconnected`. Для прогона 2: `app/test/_shots/event_shots_test.dart:514` перевести на `eventNotifKindOf`;
-`vpnUp` в приложении всегда «VPN снова работает» (`event_text.dart:60, 482-484`) — при `by: user/system` это неверно,
-решение пользователя ждёт (варианты в чате 2026-10-18).
+`vpnUp` в приложении всегда «VPN снова работает» (`event_text.dart:60, 482-484`) — при `by: user/system` это неверно.
+Решение пользователя 2026-10-18 (вариант 2, доки обновлены — `logs.md` «Закрытие» в «„VPN не работает“», «Тексты»):
+`vpnUp` с `by: user/system` — строка «Outage ended: VPN disconnected», своего уведомления нет; показанное «VPN не работает»
+при `by: user` снимается, при `by: system` его заменяет уведомление `disconnected by: system` (тот же id). Текст
+`disconnected by: system` — «VPN turned off by the system or another app».
 
-## Прогон 2 — приложение (`cd app; flutter analyze --no-fatal-infos; flutter test`), после прогона 1
+Прогон 2 ждёт решения по аудиту формулировок (`wording_audit.md`, пользователь просил заменить «юзер-френдли» тексты на
+понятные и технически верные): одобренные замены идут в тот же прогон — те же файлы (`event_text.dart`, `i18n_extra.json`).
+
+## Прогон 2 — приложение (`cd core; dart test test/log_view_test.dart test/vpn_down_fold_test.dart; cd ../app; flutter analyze --no-fatal-infos; flutter test`), после прогона 1
+
+Кусок C (lite), `core/lib/src/log_view.dart` (`EventFeed.notify`, правило закрывающего): `conn/vpnUp` с `by: user` /
+`system` не уведомляет никогда (правило «закрывающее заменяет всегда» на него не действует). Снятие / замену уведомления
+`vpnDown` делает приложение (кусок B).
 
 Кусок A (lite), `app/lib/core/libbox_runner.dart`: `LibboxRunner` реализует `RevocableRunner`; `_gone(reason)`:
 `reason == 'revoked'` → `onRevoked`, иначе `onExit(0)` (остальное в `_gone` — как есть).
@@ -93,7 +103,10 @@ connect → нет `connectFailed`, одно `disconnected`; отзыв посл
 `app/lib/widgets/event_rows.dart`, `app/lib/core/system_notifier.dart`, `app/lib/platform/platform_caps.dart`, `app/tool/i18n_extra.json` (+ `node app/tool/gen_all.mjs`):
 `vpnRevoked` в `NotifCfg` (умолчание true, в `connectionKeys`), строка в Settings → Notifications → Connection только на
 Android (как прочие platform-only строки), подпись «VPN turned off by system» и пояснение; текст события
-`conn/disconnected by: system` — «Disconnected: VPN turned off by another VPN or the system»; кнопка **Connect** в строке и
-жирная в системном уведомлении — как у `by: error`. Строки только английские.
+`conn/disconnected by: system` — «VPN turned off by the system or another app»; `vpnUp` с `by: user/system` — «Outage
+ended: VPN disconnected»; кнопка **Connect** в строке и жирная в системном уведомлении — как у `by: error`; уведомление
+`disconnected by: system` берёт id показанного `vpnDown` (его `vpnUp` пришёл перед ним, `opens`), `vpnUp by: user`
+снимает показанное (`app/lib/core/logs_controller.dart:267-269` — добавить в файлы куска). Плюс одобренные строки
+`wording_audit.md`. Строки только английские.
 Тесты (test-writer): `app/test/libbox_runner_test.dart` (`_gone('revoked')` → `onRevoked`, не `onExit`; другая причина →
 `onExit(0)`), тесты настроек/текста события/кнопок по месту.
