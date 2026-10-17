@@ -36,7 +36,12 @@ void ignoreSiteWithUndo(
         duration: const Duration(seconds: 6),
         action: h == null
             ? null
-            : SnackBarAction(label: l10n.undo, onPressed: () => logs.unignoreSite(h)),
+            : SnackBarAction(
+                label: l10n.undo,
+                // the default (inversePrimary) does not read on the toast's light background
+                textColor: Theme.of(messenger.context).colorScheme.onInverseSurface,
+                onPressed: () => logs.unignoreSite(h),
+              ),
       ),
     );
 }

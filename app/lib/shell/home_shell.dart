@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:jormungand_core/jormungand_core.dart' show EventRecord, IgnoredSites;
 
 import '../core/core_host.dart';
+import '../core/event_text.dart' show EventWords;
 import '../l10n/l10n.dart';
 import '../pages/home_page.dart';
 import '../pages/logs_page.dart';
@@ -379,7 +380,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
-    final text = _logs!.words.text(e);
+    final words = _logs!.words;
+    final desc = words.describe(e);
+    // a detail of several lines (a site event: rule, app, the routes that failed, the checker) is shown as lines, not
+    // as one run of text; a one-line detail stays "title — detail"
+    final lines = words.detailLines(desc.detail);
+    final text = lines.length > 1 ? desc.title : words.text(e);
     final textKey = GlobalKey();
     _flyTimer?.cancel();
     messenger.hideCurrentSnackBar();
@@ -393,16 +399,39 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         d['via'] != null &&
         _links.newRuleFor != null;
     // a snackbar has room for one action: the two of a site event sit under its text
-    final inverse = Theme.of(context).colorScheme.inversePrimary;
+    // the toast sits on inverseSurface: its own text colour is the one that reads there
+    final onToast = Theme.of(context).colorScheme.onInverseSurface;
     Widget act(String label, VoidCallback onTap) => TextButton(
       onPressed: onTap,
       style: TextButton.styleFrom(
-        foregroundColor: inverse,
+        foregroundColor: onToast,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         minimumSize: const Size(0, 36),
+        textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
       ),
       child: Text(label),
     );
+    // ⚠️ of a failed route is an icon here: the toast's font has no glyph for it on every device
+    Widget line(String s) {
+      final warn = s.startsWith(EventWords.warnMark);
+      final t = warn ? s.substring(EventWords.warnMark.length).trimLeft() : s;
+      return Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (warn) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(Icons.warning_amber_rounded, size: 14, color: onToast),
+              ),
+              const SizedBox(width: 4),
+            ],
+            Expanded(child: Text(t, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))),
+          ],
+        ),
+      );
+    }
     final ctl = messenger.showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
@@ -421,7 +450,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               },
               child: SizedBox(
                 width: double.infinity,
-                child: Text(text, key: textKey),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(text, key: textKey),
+                    if (lines.length > 1) for (final s in lines.take(5)) line(s),
+                  ],
+                ),
               ),
             ),
             if (site.isNotEmpty)

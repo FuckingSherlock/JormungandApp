@@ -25,6 +25,14 @@ class EventWords {
   final AppLocalizations l10n;
   final Catalog catalog;
 
+  /// The mark in front of a route that failed, in a detail line.
+  static const warnMark = '⚠️';
+
+  /// A detail as lines: the parts a [describe] joins with three spaces (rule, app, routes, the checker's verdict).
+  List<String> detailLines(String detail) => [
+    for (final s in detail.split('   ')) if (s.trim().isNotEmpty) s.trim(),
+  ];
+
   // ── labels ──
 
   String catLabel(String cat) => switch (cat) {
@@ -367,9 +375,9 @@ class EventWords {
           routes ? l10n.doesNotOpenThroughAnyServer(host(d)) : l10n.doesNotOpen(host(d)),
           _lines([
             if (routes) ...[
-              _entryMark('⚠️', d['entry'] ?? d['route'], d['server']),
+              _entryMark(warnMark, d['entry'] ?? d['route'], d['server']),
               for (final x in tried)
-                if (x is Map) _entryMark('⚠️', x['entry'], x['server']),
+                if (x is Map) _entryMark(warnMark, x['entry'], x['server']),
               if (tried.isEmpty) _noRoute(d),
             ],
             whyText(d),
@@ -1232,7 +1240,23 @@ class EventWords {
       return k == 'from' ? a : b;
     }
     if (const ['entry', 'server', 'route', 'from', 'to', 'via', 'id'].contains(k) && v is String) return nameOf(v);
-    return v is Map || v is List ? '$v' : '$v';
+    return _plain(v, e);
+  }
+
+  /// A value no rule above knows, in words and never as Dart's own text: an epoch in ms is a time, a list is its
+  /// items joined, a map is its `key: value` pairs (`from`/`to` of a change: «a → b»).
+  String _plain(Object? v, EventRecord e) {
+    if (v is num && v >= 1e12 && v < 1e14) return stamp(v.toInt()); // epoch ms (2001 … 5138)
+    if (v is List) return v.map((x) => _plain(x, e)).where((s) => s.isNotEmpty).join(', ');
+    if (v is Map) {
+      if (v.length == 2 && v.containsKey('from') && v.containsKey('to')) return '${_plain(v['from'], e)} → ${_plain(v['to'], e)}';
+      final name = v['name'];
+      if (name is String && name.isNotEmpty) return name;
+      return v.entries.where((x) => x.value != null).map((x) => '${x.key}: ${_plain(x.value, e)}').join(', ');
+    }
+    if (v is String && e.cat == 'dns') return dnsName(v); // `servers` of a dns event: ids of DNS servers
+    if (v is String && v.contains('::')) return server(v);
+    return '$v';
   }
 
   /// Every field of the event in words: time(s), the event's name, then its data.
@@ -1247,6 +1271,9 @@ class EventWords {
       (l10n.event, '${e.cat} / ${e.type}${e.own ? ' ${l10n.yours}' : ''}'),
     ];
     final noRoutes = e.cat == 'site' && e.type == 'unreachable' && downEverywhere(e.data);
+    // a field whose text repeats a field shown above is left out («Server cloudflare» / «Provider cloudflare»);
+    // only text values: two flags both «Yes», or two equal counts, are not a repeat
+    final seen = <String>{};
     for (final x in e.data.entries) {
       final v = x.value;
       if (v == null || (v is String && v.isEmpty)) continue;
@@ -1258,7 +1285,10 @@ class EventWords {
         out.addAll(checkFields(v));
         continue;
       }
-      out.add((fieldLabel(x.key, e), fieldValue(x.key, v, e)));
+      final text = fieldValue(x.key, v, e);
+      if (text.isEmpty) continue;
+      if (v is! num && v is! bool && !seen.add(text.trim().toLowerCase())) continue;
+      out.add((fieldLabel(x.key, e), text));
     }
     return out;
   }

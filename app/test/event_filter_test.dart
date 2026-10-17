@@ -96,6 +96,35 @@ void main() {
     expect(f['Only direct'], '0');
   });
 
+  test('opened fields: no epoch ms, no Dart list/map text, a field that repeats another is dropped', () async {
+    await initializeDateFormatting('en');
+    final w = EventWords(lookupAppLocalizations(const Locale('en')), FakeCoreHost().catalog);
+    final at = DateTime(2026, 10, 17, 12, 30, 15).millisecondsSinceEpoch;
+    List<(String, String)> fields(String cat, String type, Map<String, dynamic> data) => w.fields(EventGroup(
+          EventRecord(id: 1, at: at, cat: cat, type: type, level: 'warn', own: false, log: null, data: data),
+        ));
+
+    final f = fields('dns', 'failed', {
+      'server': 'cloudflare',
+      'since': at - 60000,
+      'provider': 'cloudflare',
+      'servers': ['cloudflare', 'google'],
+      'changed': {'from': 'a', 'to': 'b'},
+    });
+    final m = {for (final x in f) x.$1: x.$2};
+    expect(m['Since'], '${w.stamp(at - 60000)}');
+    expect(m.values.any((v) => v.contains('$at') || v.contains('[') || v.contains('{')), isFalse, reason: '$m');
+    expect(m['Servers']!.toLowerCase(), 'cloudflare, google');
+    expect(m.keys, isNot(contains('Provider')));
+    expect(m['Changed'], 'a → b');
+
+    final s = fields('sub', 'failed', {'source': 's1', 'name': 'Remnawave'});
+    expect(s.where((x) => x.$2 == 'Remnawave').length, 1);
+    // two equal counts or flags are not a repeat
+    final c = fields('conn', 'failing', {'count': 3, 'more': 3});
+    expect(c.where((x) => x.$2 == '3').length, 2);
+  });
+
   test('sub/diverged: merged copies, the why line and the freshness headers', () async {
     await initializeDateFormatting('en');
     final w = EventWords(lookupAppLocalizations(const Locale('en')), FakeCoreHost().catalog);

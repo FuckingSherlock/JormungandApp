@@ -254,15 +254,20 @@ const _when = {
   'core/updateInstalled': 'Приложение обновлено.',
 };
 
-const _kindRu = {
-  'autoSwitch': 'Auto switch',
-  'unstable': 'Unstable',
-  'connLost': 'Connection lost',
-  'coreCrash': 'Core crash',
-  'blocked': 'Site does not open',
-  'subUpdated': 'Subscription updated',
-  'subFailed': 'Subscription errors',
-  'ruleSets': 'Rule sets',
+// the labels of the switches of Settings → Notifications (settings_look.dart), by switch key
+final _kindRu = {
+  'status': _en.statusNotification,
+  'autoSwitch': _en.whenAutoSwitches,
+  'unstable': _en.unstableEntry,
+  'connLost': _en.connectionLost,
+  'coreCrash': _en.singBoxStopped,
+  'blocked': _en.siteDoesNotOpen,
+  'dnsFailed': _en.dnsServerDoesNotAnswer,
+  'subUpdated': _en.subscriptionUpdated,
+  'subFailed': _en.subscriptionProblems,
+  'ruleSets': _en.ruleSets,
+  'updateAvailable': _en.newVersion,
+  'appData': _en.appData,
 };
 
 String _help(String label, EventRecord e, CoreHost host) {
@@ -272,7 +277,20 @@ String _help(String label, EventRecord e, CoreHost host) {
   if (label == l.copySite) return 'копирует хост сайта в буфер, тост «copied».';
   if (label == l.createRule) return 'открывает форму нового правила с хостом; цель правила — маршрут via/viaTarget, через который сайт открылся.';
   if (label == l.ignoreSite) return 'добавляет сайт в игнорируемые (его сбои уходят из журнала), снекбар «… ignored» с Undo.';
-  if (label == l.retry) return 'обновляет подписку заново (updateSource).';
+  if (label == l.retry) {
+    return switch (e.key) {
+      'conn/connectFailed' => 'подключается заново (host.connect).',
+      'sub/failed' => 'обновляет подписку заново (updateSource).',
+      'rules/ruleSetFailed' => 'заново скачивает наборы правил (retryRuleSets).',
+      'core/sysProxy' => 'снова включает системный прокси (setSysProxy(true)).',
+      'core/updateFailed' || 'core/updateChannelEmpty' => 'заново проверяет обновление приложения (checkUpdate).',
+      'speed/failed' => 'повторяет замер скорости (toggleSpeedTest).',
+      _ when e.cat == 'core' => 'перезапускает ядро sing-box (host.retry); кнопки нет, пока ядро уже работает.',
+      _ => 'повторяет действие события.',
+    };
+  }
+  if (label == l.checkNow) return 'просит ядро заново проверить то, о чём событие (host.checkNow); пока идёт проверка, кнопка «Checking…» неактивна.';
+  if (label == l.sendReport) return 'открывает экран «Send report»: отчёт разработчикам с этим событием.';
   if (label == l.inRawLog) return 'переключает на вкладку Raw и подсвечивает строку лога, записанную в тот же момент.';
   if (label == l.hideThisType) return 'скрывает этот тип событий фильтром журнала.';
   if (label == l.showOnlyThisType) return 'оставляет в журнале только события этого типа.';
@@ -288,6 +306,27 @@ String _help(String label, EventRecord e, CoreHost host) {
   }
   return '';
 }
+
+/// What the button of a system notification does (id as in `SystemNotifier.eventActions`), per `_actFromShade` of home_shell.dart.
+String _shadeHelp(String id, EventRecord e) => switch (id) {
+  'rule' => 'приложение открывается на форме нового правила для сайта (via/viaTarget — цель)',
+  'ignore' => 'сайт добавляется в игнорируемые, уведомление заменяется на «… added to ignored sites» с кнопкой Undo',
+  'connect' => 'подключается (host.connect)',
+  'retry' => switch (e.key) {
+    'conn/connectFailed' => 'подключается заново (host.connect)',
+    'core/sysProxy' => 'снова включает системный прокси (setSysProxy(true))',
+    _ => 'перезапускает ядро (host.retry)',
+  },
+  'checkNow' => 'ядро заново проверяет то, о чём событие (host.checkNow по id события)',
+  'retryRuleSets' => 'заново скачиваются наборы правил (host.retryRuleSets)',
+  'networkSettings' => 'открываются системные настройки сети (host.openNetworkSettings)',
+  'removeProxy' => 'снимается системный прокси (host.releaseSysProxy)',
+  'reconnect' => 'отключается и подключается заново (disconnect + connect)',
+  'retrySub' => 'обновляется подписка из data.source (host.updateSource); без source ничего не делает',
+  'report' => 'открывается экран «Send report» с этим событием',
+  'open' => 'приложение открывается на субъекте события (запись в Nodes, Rules, наборы правил, DNS), иначе на событии в Logs → Events',
+  _ => 'id «$id»',
+};
 
 // ───────────────────────────── harness widgets ─────────────────────────────
 
@@ -624,7 +663,7 @@ void main() {
               (head(e), true),
               ('Форма: СИСТЕМНОЕ УВЕДОМЛЕНИЕ (Android, приложение не на экране; в тексте уведомления только заголовок и деталь, схема — не нативный вид). Тап — открывает Logs → Events на событии.', false),
               ('Заголовок = title строки журнала, текст = detail.', false),
-              for (final a in n.actions) ('• кнопка «${a.$2}» — ${a.$1 == 'rule' ? 'открывает форму нового правила для сайта (via/viaTarget — цель)' : 'делается без запуска приложения: уведомление заменяется на «… added to ignored sites» с кнопкой Undo (${n.undoLabel})'}.', false),
+              for (final a in n.actions) ('• кнопка «${a.$2}» — ${_shadeHelp(a.$1, r)}.', false),
             ];
             add(fam, await captioned(sl, _Shade(n)));
           }
