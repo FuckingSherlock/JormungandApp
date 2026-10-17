@@ -76,6 +76,15 @@ abstract interface class AdoptableRunner implements BoxRunner {
   Future<Map<String, dynamic>?> adopt();
 }
 
+/// A [BoxRunner] whose tunnel the system can take away (Android: another VPN started, ours turned
+/// off in the system settings, `VpnService.onRevoke`). That is not a crash: the core stops fully and
+/// does not restart ([CoreService]'s revoke handling), so it is a signal of its own, not [onExit].
+/// Not called for [stop] or a failed start.
+abstract interface class RevocableRunner implements BoxRunner {
+  /// The system took the tunnel away.
+  void Function()? onRevoked;
+}
+
 /// Makes a runner for a throwaway sing-box (latency tests, Speed Test) working in [workDir].
 typedef BoxFactory = BoxRunner Function(String workDir);
 

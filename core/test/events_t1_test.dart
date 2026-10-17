@@ -158,6 +158,17 @@ void main() {
       expect(eventNotifies({'connLost': false}, ev('conn', 'disconnected', data: {'by': 'error'})), isFalse);
     });
 
+    test('conn/disconnected by: system notifies under its own vpnRevoked toggle, independent of connLost', () {
+      expect(notifDefaults['vpnRevoked'], isTrue);
+      final e = ev('conn', 'disconnected', level: 'warn', data: {'by': 'system', 'reason': 'revoked'});
+      expect(eventNotifies(null, e), isTrue);
+      expect(eventNotifies({'vpnRevoked': false}, e), isFalse);
+      expect(eventNotifies({'connLost': false}, e), isTrue, reason: 'connLost does not govern a revoke');
+      expect(eventNotifies({'enabled': false}, e), isFalse);
+      expect(eventNotifies({'vpnRevoked': false}, ev('conn', 'disconnected', data: {'by': 'error'})), isTrue, reason: 'by: error stays under connLost');
+      expect(eventNotifies({'vpnRevoked': true}, ev('conn', 'disconnected', data: {'by': 'user'})), isFalse);
+    });
+
     test('core/sysProxy notifies only with an error', () {
       expect(eventNotifies(null, ev('core', 'sysProxy', level: 'warn', data: {'on': true, 'error': 'denied'})), isTrue);
       expect(eventNotifies(null, ev('core', 'sysProxy', data: {'on': true})), isFalse);

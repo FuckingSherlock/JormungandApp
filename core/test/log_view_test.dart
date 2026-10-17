@@ -175,6 +175,18 @@ void main() {
     }
   });
 
+  test('conn/disconnected: by system under vpnRevoked, by error under connLost, by user silent', () {
+    EventRecord d(String by) => e(ev(1, 'conn', 'disconnected', level: 'warn', data: {'by': by}));
+    expect(notifDefaults['vpnRevoked'], isTrue);
+    expect(eventNotifies(null, d('system')), isTrue);
+    expect(eventNotifies({'vpnRevoked': false}, d('system')), isFalse);
+    expect(eventNotifies({'connLost': false}, d('system')), isTrue);
+    expect(eventNotifies(null, d('user')), isFalse);
+    expect(eventNotifies(null, d('error')), isTrue);
+    expect(eventNotifies({'connLost': false}, d('error')), isFalse);
+    expect(eventNotifies({'vpnRevoked': false}, d('error')), isTrue);
+  });
+
   test('judged events: only a confirmed root notifies; site/blocked (a workaround) as before', () {
     EventRecord j(String type, String? verdict, {int? cause}) =>
         e({...ev(1, type == 'blocked' ? 'site' : 'conn', type, level: 'warn'), 'verdict': ?verdict, 'cause': ?cause});

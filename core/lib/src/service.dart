@@ -124,6 +124,7 @@ class CoreService implements CoreApi {
     runner ??= this.boxFactory(p.join(dataDir, 'run', 'main'));
     this.runner = runner;
     runner.onExit = _crashed;
+    if (runner case final RevocableRunner r) r.onRevoked = () => unawaited(_revoked());
     runner.onLog = (line) {
       logBook.singBox(line);
       _auto?.onLog(line);
@@ -3581,6 +3582,7 @@ class CoreService implements CoreApi {
     _error = null;
     _warning = null;
     _changed();
+    _connectingSeq = seq; // until the lock's work ends: a revoke now cuts this connect ([_revoked])
     await _locked(() async {
       if (seq != _connectSeq) return; // a newer connect / disconnect came in
       _connectOp = reconnectOp; // the events written while the live connection is started again belong to its operation
@@ -3594,6 +3596,7 @@ class CoreService implements CoreApi {
         if (picks == null || seq != _connectSeq) return; // a disconnect / newer connect came in while the servers were checked
         plan = planWithChosen(plan, picks);
         final (lists, warnings) = await _startSingBox(plan, sys: sys, why: reason ?? 'connect');
+        if (_revokedSeq == seq) return; // the system took the tunnel while it started: the revoke stops it and writes the event
         sentinel.context.started();
         _plan = plan;
         _sysWanted = sys;
@@ -3628,6 +3631,12 @@ class CoreService implements CoreApi {
           eventBook.add('conn', 'connected', 'info', own: own, data: _connectedData(plan));
         }
       } catch (e) {
+        if (_revokedSeq == seq) {
+          // the system took the tunnel while it started: not a failed connect, the revoke writes the event
+          if (!runner.running) sentinel.context.stopped();
+          logBook.note('warn', 'Connect ended: the system took the tunnel away ($e)');
+          return;
+        }
         _error = '$e';
         if (!runner.running) sentinel.context.stopped();
         logBook.note('error', 'Connect failed: $e');
@@ -3651,6 +3660,8 @@ class CoreService implements CoreApi {
         if (seq == _connectSeq) _vpnSync();
         _changed();
       }
+    }).whenComplete(() {
+      if (_connectingSeq == seq) _connectingSeq = null;
     });
     return status();
   }
@@ -3971,6 +3982,33 @@ class CoreService implements CoreApi {
 
   @override
   Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error}) async {
+    final was = await _stopAll();
+    if (was) {
+      if (error != null) {
+        // the host ended the connection because of an error (a lost Manual pin: `{reason: 'pinLost', pick?, why?}`): not the user's
+        final reason = '${error['reason'] ?? 'down'}';
+        eventBook.add('conn', 'disconnected', 'warn', data: {
+          'by': 'error',
+          'reason': reason,
+          'pick': ?error['pick'],
+          'why': ?error['why'],
+        });
+      } else {
+        // the second half of the user's "disconnect → connect" within 7 s is one `conn/reconnected` with this op
+        final op = _newOp('connection');
+        _userDisconnect = (op: op, at: _nowMs);
+        eventBook.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'}, op: op);
+      }
+    }
+    _vpnSync(by: error == null ? 'user' : null); // no connection, no failure of it: the open `vpnDown` ends
+    await _settleStopped(was, keepProxy: true);
+    return status();
+  }
+
+  /// The full stop, the same for the user's Disconnect and the system's revoke: the plan, the restart's retries, Auto,
+  /// the crash root, sing-box and the Sentinel's context end; no event yet. True when there was a connection (or a restart
+  /// of one) to end.
+  Future<bool> _stopAll() async {
     final seq = _nextSeq();
     _wakeUp(); // ends the restart's retries
     final was = runner.running || _plan != null || _recovering != null;
@@ -3993,30 +4031,18 @@ class CoreService implements CoreApi {
     unawaited(_tunCheck?.close());
     _tunCheck = null;
     logBook.note('info', 'Disconnected');
-    if (was) {
-      if (error != null) {
-        // the host ended the connection because of an error (a lost Manual pin: `{reason: 'pinLost', pick?, why?}`): not the user's
-        final reason = '${error['reason'] ?? 'down'}';
-        eventBook.add('conn', 'disconnected', 'warn', data: {
-          'by': 'error',
-          'reason': reason,
-          'pick': ?error['pick'],
-          'why': ?error['why'],
-        });
-      } else {
-        // the second half of the user's "disconnect → connect" within 7 s is one `conn/reconnected` with this op
-        final op = _newOp('connection');
-        _userDisconnect = (op: op, at: _nowMs);
-        eventBook.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'}, op: op);
-      }
-    }
-    _vpnSync(by: error == null ? 'user' : null); // no connection, no failure of it: the open `vpnDown` ends
-    if (_killSwitch && _killOnDisconnect && sysProxy.isSet && (was || _blocking != null)) {
+    return was;
+  }
+
+  /// What follows the event and the `vpnUp` of a full stop. [keepProxy]: the kill switch's "also after I disconnect" may
+  /// leave the system proxy on (the user's Disconnect; not a revoke, which holds nothing back).
+  Future<void> _settleStopped(bool was, {required bool keepProxy}) async {
+    if (keepProxy && _killSwitch && _killOnDisconnect && sysProxy.isSet && (was || _blocking != null)) {
       // kill switch, "also after I disconnect": the proxy stays, nothing gets out
       _blocking ??= {'since': _now().millisecondsSinceEpoch, 'reason': 'disconnect', 'proxy': 'kept'};
     } else {
       _blocking = null;
-      await _sysOff(own: true);
+      await _sysOff(own: keepProxy); // own: the user's Disconnect, not the system's revoke
     }
     _recheckExit(); // now the direct IP
     // no sing-box and no Auto from here: a «down» (or an outage of the routes) found while connected is asked again on
@@ -4025,8 +4051,28 @@ class CoreService implements CoreApi {
     _error = null;
     _warning = null;
     _changed();
-    return status();
   }
+
+  /// The system took the tunnel away ([RevocableRunner.onRevoked]): a full stop, no restart (`docs/core.md` → «Отзыв
+  /// туннеля»). Connected or restarting — the stop, one `conn/disconnected` by the system; a connect under way ends
+  /// without connecting (no `conn/connectFailed`); disconnected / disconnecting — nothing (the late signal after our own stop).
+  Future<void> _revoked() async {
+    final connecting = _connectingSeq == _connectSeq;
+    if (!connecting && _plan == null && _recovering == null) return; // disconnected, or our own Disconnect is under way
+    if (connecting) _revokedSeq = _connectSeq; // the connect in flight ends quietly
+    try {
+      final was = await _stopAll() || connecting;
+      _vpnSync(by: 'system'); // the open `vpnDown` ends: its notification is replaced by the `disconnected`'s
+      if (was) eventBook.add('conn', 'disconnected', 'warn', data: {'by': 'system', 'reason': 'revoked'});
+      await _settleStopped(was, keepProxy: false);
+    } catch (e) {
+      runner.note('after the revoke: $e');
+      _changed();
+    }
+  }
+
+  int? _connectingSeq; // the generation of the connect that has not ended; it is "in flight" while it is also [_connectSeq]
+  int? _revokedSeq; // the connect of this generation was cut by a revoke: it ends without `connectFailed`
 
   static final _eventType = RegExp(r'^[A-Za-z][A-Za-z0-9_]{0,47}$');
   static const _eventDataMax = 4096; // JSON characters

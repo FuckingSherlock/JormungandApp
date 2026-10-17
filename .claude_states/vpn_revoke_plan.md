@@ -79,6 +79,12 @@ connect → нет `connectFailed`, одно `disconnected`; отзыв посл
 молчит при выкл., `by: user` молчит, `by: error` — по `connLost` как раньше; `notifDefaults['vpnRevoked'] == true`.
 Обновить сторожевые тесты каталога/уведомлений, если ломаются.
 
+Прогон 1 сделан 2026-10-18 (PASS, коммит «Core: VPN revoke…»). API: `RevocableRunner.onRevoked`,
+`eventNotifKindOf(EventRecord)` (log_view.dart) — вид уведомления по событию; порядок при отзыве — `vpnUp {by: system}`,
+затем `disconnected`. Для прогона 2: `app/test/_shots/event_shots_test.dart:514` перевести на `eventNotifKindOf`;
+`vpnUp` в приложении всегда «VPN снова работает» (`event_text.dart:60, 482-484`) — при `by: user/system` это неверно,
+решение пользователя ждёт (варианты в чате 2026-10-18).
+
 ## Прогон 2 — приложение (`cd app; flutter analyze --no-fatal-infos; flutter test`), после прогона 1
 
 Кусок A (lite), `app/lib/core/libbox_runner.dart`: `LibboxRunner` реализует `RevocableRunner`; `_gone(reason)`:

@@ -161,11 +161,17 @@ const eventNotifKind = <String, String>{
   'rules/targetLost': 'autoSwitch', 'rules/targetFound': 'autoSwitch',
   // the node's server name does not exist: the provider's subscription is wrong
   'node/addressMissing': 'subFailed',
-  // the connection ended by an error / the system proxy failed (eventNotifies narrows both down)
+  // the connection ended by an error / the system proxy failed (eventNotifies narrows both down); a disconnect by the
+  // system (a revoked VPN) is `vpnRevoked`, see [eventNotifKindOf]
   'conn/connectFailed': 'connLost', 'conn/disconnected': 'connLost', 'core/tunNeedsAdmin': 'connLost', 'core/sysProxy': 'connLost',
   'core/stateLost': 'appData', 'core/stateRestored': 'appData',
   'dns/failed': 'dnsFailed',
 };
+
+/// The toggle [e] answers to: [eventNotifKind] by its type, except `conn/disconnected` by the system (the VPN was
+/// revoked), which has a toggle of its own.
+String? eventNotifKindOf(EventRecord e) =>
+    e.key == 'conn/disconnected' && e.data['by'] == 'system' ? 'vpnRevoked' : eventNotifKind[e.key];
 
 /// Warnings and errors that are a journal entry only, never a notification, with the reason. The guard test
 /// (`core/test/event_catalog_test.dart`) checks that every warn / error type of the catalog is either in
@@ -193,6 +199,7 @@ const notifDefaults = <String, bool>{
   'autoSwitch': true,
   'unstable': true,
   'connLost': true,
+  'vpnRevoked': true,
   'blocked': true,
   'subUpdated': false,
   'subFailed': true,
@@ -215,10 +222,10 @@ bool notifAllows(Object? cfg, String kind) {
 /// happened while the screen was off (`bg`), «Errors while the screen is off» is on too. Judged by
 /// the event's own flag, never by the screen as it is when the notification would be shown.
 bool eventNotifies(Object? cfg, EventRecord e) {
-  final kind = eventNotifKind[e.key];
+  final kind = eventNotifKindOf(e);
   if (kind == null || !notifAllows(cfg, kind)) return false;
-  // only a disconnect by an error is news; the system proxy only when it failed
-  if (e.key == 'conn/disconnected' && e.data['by'] != 'error') return false;
+  // only a disconnect by an error or by the system is news (not the user's own); the system proxy only when it failed
+  if (e.key == 'conn/disconnected' && e.data['by'] != 'error' && e.data['by'] != 'system') return false;
   if (e.key == 'core/sysProxy' && e.data['error'] == null) return false;
   // judged by the Sentinel: only a confirmed root cause notifies (a blip, a consequence, a workaround, an unexplained failure stay
   // in the journal); site/blocked is always a workaround and notifies as before: it offers a rule for the route that opens it
