@@ -304,6 +304,7 @@
   "Recovered before a verdict was reached": null,
   "Disconnected: the core did not start after {#0} attempts": null,
   "Disconnected: the selected server {0} is unavailable ({1})": null,
+  "Disconnected: the selected server is unavailable ({0})": null,
   "deleted": null,
   "switched off": null,
   "not supported": null,

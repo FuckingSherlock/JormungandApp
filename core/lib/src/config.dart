@@ -268,7 +268,8 @@ Map<String, dynamic> buildConfig(Map<String, dynamic> plan,
     final chosen = '$tag/${g['chosen']}';
     if (g['pinned'] == true) {
       if (!members.contains(chosen)) {
-        throw SingBoxError('Manual pick ${g['chosen']} is not usable (not a server the core can use): the tunnel is not moved to another server. Choose a server in Route.');
+        throw SingBoxError('Manual pick ${g['chosen']} is not usable (not a server the core can use): the tunnel is not moved to another server. Choose a server in Route.',
+            fix: 'pick');
       }
       pinnedGroups.add(tag);
     }

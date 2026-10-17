@@ -24,6 +24,7 @@ import '../widgets/event_rows.dart' show eventOpenTarget, openTargetAction;
 import '../widgets/ignored_sites.dart';
 import '../widgets/rule_form.dart';
 import '../widgets/rules_extras.dart';
+import '../widgets/settings_conn.dart' show showConnSheet;
 import '../widgets/settings_data.dart';
 import '../widgets/report_actions.dart';
 import '../widgets/settings_dns.dart';
@@ -337,6 +338,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     openRuleForm: (id) => showRuleForm(_ctx, id: id),
     openAppAct: (pkg) => showAppAct(_ctx, pkg),
     openDns: () => showDnsSheet(_ctx),
+    openConn: () => showConnSheet(_ctx),
     openRuleSets: () => showRuleSets(_ctx),
     newRuleFor: ({host, app, via}) =>
         showRuleForm(_ctx, host: host, app: app, via: via),

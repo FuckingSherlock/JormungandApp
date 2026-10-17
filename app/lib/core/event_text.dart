@@ -277,7 +277,11 @@ class EventWords {
       ('conn', 'disconnected') => () {
         if (d['by'] != 'error') return r(l10n.disconnected, l10n.youDisconnected);
         if (d['reason'] == 'pinLost') {
-          return r(l10n.disconnectedTheSelectedServerIsUnavailab('${d['pick'] ?? ''}', _pinLostWhy(d['why'])));
+          // a server gone from its subscription has no name left (`pick` empty): the text names none
+          final pick = '${d['pick'] ?? ''}';
+          return r(pick.isEmpty
+              ? l10n.disconnectedTheSelectedServerIsUnavailab2(_pinLostWhy(d['why']))
+              : l10n.disconnectedTheSelectedServerIsUnavailab(pick, _pinLostWhy(d['why'])));
         }
         if (d['reason'] == 'down' && d['attempts'] is num) {
           return r(l10n.disconnectedTheCoreDidNotStart(d['attempts'] as num));
@@ -1338,21 +1342,19 @@ class EventWords {
   }
 }
 
-/// The event says the Manual pick was lost (`conn/disconnected` by an error: `reason: pinLost`; `conn/connectFailed`: the
-/// catalog's "Manual pick … is unavailable" text): the one way out is to choose a server (docs/logs.md → «По типам»).
+/// The event says the Manual pick was lost (`conn/disconnected` by an error: `reason: pinLost`; `conn/connectFailed`:
+/// `fix: pick`): the one way out is to choose a server (docs/logs.md → «По типам»).
 bool eventPinLost(EventRecord e) {
-  final d = e.data, err = d['error'], why = d['reason'];
+  final d = e.data, err = d['error'];
   return d['pinLost'] == true ||
-      why == 'pinLost' ||
+      d['reason'] == 'pinLost' ||
       (err is Map && err['reason'] == 'pinLost') ||
-      (e.key == 'conn/connectFailed' && why is String && why.startsWith('Manual pick ') && why.contains(' is unavailable'));
+      (e.key == 'conn/connectFailed' && d['fix'] == 'pick');
 }
 
-/// The cause of a failed connect lies in the settings (the mode, the port): there the row offers «Open settings».
-bool eventCauseInSettings(EventRecord e) {
-  final why = e.data['reason'];
-  return e.key == 'conn/connectFailed' && !eventPinLost(e) && why is String && RegExp(r'settings|\bport\b', caseSensitive: false).hasMatch(why);
-}
+/// The cause of a failed connect lies in the settings (`fix: settings`, the proxy port is taken): there the row offers
+/// «Open settings» (Settings → Connection).
+bool eventCauseInSettings(EventRecord e) => e.key == 'conn/connectFailed' && e.data['fix'] == 'settings';
 
 /// A step of the checks of an event: [mark] is ✓ ✗ ? or ·, [at] the time since the first step ("+1.2 s").
 class TrailRow {

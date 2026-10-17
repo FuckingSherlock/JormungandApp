@@ -372,7 +372,7 @@ class SubscriptionUpdater {
         }
       } catch (e) {
         stderr.writeln('[updater] ${s['name'] ?? sid}: $e');
-        final data = {'source': sid, 'name': '${s['name'] ?? sid}', 'error': '$e'};
+        final data = {'source': sid, 'name': '${s['name'] ?? sid}', 'error': fetchErrorText(e)};
         final svcFail = e is SubscriptionFetchException && e.failure.code == 'allFailed' ? e.failure : null;
         if (isOwnRestartFailure(e)) {
           // our own restart cut it: nothing is told, no error on the card, the next tick asks again
@@ -387,7 +387,7 @@ class SubscriptionUpdater {
           // the card shows it with Retry (33-source-error.js); updatedAt stays, so the UI's
           // own save still wins over it
           await store.patchSource(sid, _expect(s), {
-            'lastError': {'msg': '$e', 'at': clock().millisecondsSinceEpoch},
+            'lastError': {'msg': fetchErrorText(e), 'at': clock().millisecondsSinceEpoch},
           });
         }
       } finally {

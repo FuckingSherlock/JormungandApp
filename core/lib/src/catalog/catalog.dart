@@ -527,7 +527,8 @@ class Catalog {
   String? pinLoss() => pinLossInfo()?.text;
 
   /// [pinLoss] with its parts: [why] is `deleted` (the server or the entry is gone, or has no server), `off` (switched off
-  /// in Nodes) or `unsupported` (sing-box cannot run it); [pick] is the server's name, else the entry's ('' when the entry is gone too).
+  /// in Nodes) or `unsupported` (sing-box cannot run it); [pick] is the pinned server's name ('' when it is gone from its subscription), with no server pinned the entry's
+  /// ('' when the entry is gone too).
   ({String text, String why, String pick})? pinLossInfo() {
     final key = pinnedNode, id = activeConnectId;
     if (autoConnect || id == null) return null;
@@ -540,7 +541,8 @@ class Catalog {
       }
     }
     final who = n != null && n.name.isNotEmpty ? '"${n.name}"${s!.name.isNotEmpty ? ' (${s.name})' : ''}' : 'the pinned server';
-    final pick = n != null && n.name.isNotEmpty ? n.name : (connectEntry(id)?.name ?? '');
+    // the server's own name; one gone from its subscription has none left (never the entry's name in its place)
+    final pick = n != null && n.name.isNotEmpty ? n.name : '';
     ({String text, String why, String pick}) lost(String why, String reason) => (
       text: 'Manual pick $who is unavailable: $reason. The tunnel is not moved to another server — choose a server in Route.',
       why: why,

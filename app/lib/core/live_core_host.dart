@@ -1856,7 +1856,7 @@ class LiveCoreHost extends CoreHost {
       return AddSourceResult(AddSourceOutcome.added, name: s?.name ?? shown);
     } catch (e) {
       final s = catalog.sourcesData[id];
-      final msg = e is FormatException ? e.message : '$e';
+      final msg = fetchErrorText(e); // the text of the core's `sub/failed`
       s?.unknown['lastError'] = {
         'msg': msg,
         'at': _now().millisecondsSinceEpoch,
@@ -1973,7 +1973,7 @@ class LiveCoreHost extends CoreHost {
       ok = cur != null;
     } catch (e) {
       final cur = catalog.sourcesData[sid];
-      final msg = e is FormatException ? e.message : '$e';
+      final msg = fetchErrorText(e); // the text of the core's `sub/failed`
       final shown = cur?.name ?? s.name;
       cur?.unknown['lastError'] = {
         'msg': msg,

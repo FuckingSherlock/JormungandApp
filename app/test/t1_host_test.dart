@@ -229,8 +229,8 @@ void main() {
       final err = core.disconnects.single!;
       expect(err['reason'], 'pinLost');
       expect(err['why'], 'deleted');
-      expect(err['pick'], isA<String>());
-      expect(err['pick'], isNotEmpty);
+      // the server is gone with its name: none, never the entry's name in its place (docs/logs.md → pinLost `pick`)
+      expect(err['pick'], '');
 
       final d = _events(core).where((e) => e['cat'] == 'conn' && e['type'] == 'disconnected').toList();
       expect(d, hasLength(1));

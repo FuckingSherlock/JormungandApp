@@ -60,6 +60,13 @@ class SubscriptionFetchException extends HttpException {
   final SvcFailure failure;
 }
 
+/// The text of a failed subscription update, the same in `sub/failed` and in the card's `lastError` (docs/logs.md): the
+/// message alone — no class name, and no `uri` of an [HttpException] (the subscription address carries the user's token).
+String fetchErrorText(Object e) => switch (e) {
+  HttpException(:final message) || FormatException(:final message) => message,
+  _ => '$e',
+};
+
 const _rediscoverAfter = Duration(days: 7);
 
 /// A subscription bigger than this is refused (a real one is well under 1 MB).

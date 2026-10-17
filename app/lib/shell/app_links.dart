@@ -13,6 +13,7 @@ class AppLinks {
     this.openRuleForm,
     this.openAppAct,
     this.openDns,
+    this.openConn,
     this.openRuleSets,
     this.newRuleFor,
     this.openRoute,
@@ -36,6 +37,9 @@ class AppLinks {
 
   /// Settings -> DNS.
   final VoidCallback? openDns;
+
+  /// Settings -> Connection (the proxy port of a failed connect, `fix: settings`).
+  final VoidCallback? openConn;
 
   /// Rules -> Rule sets.
   final VoidCallback? openRuleSets;

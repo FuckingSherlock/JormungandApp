@@ -267,7 +267,7 @@ class EventRow extends StatelessWidget {
       case 'conn/connectFailed' when live:
         add(l10n.retry, () => host.connect());
         if (pinLost) addChooseServer();
-        if (eventCauseInSettings(e)) add(l10n.openSettings, link(links.openRoute == null ? null : () => links.openRoute!()));
+        if (eventCauseInSettings(e)) add(l10n.openSettings, link(links.openConn));
       case 'conn/lost' || 'conn/restored':
         if (live && e.type == 'lost') addCheckNow();
         addOpen();

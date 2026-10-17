@@ -3729,6 +3729,14 @@
       }
     }
   },
+  "disconnectedTheSelectedServerIsUnavailab2": "Disconnected: the selected server is unavailable ({s0})",
+  "@disconnectedTheSelectedServerIsUnavailab2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
   "deleted2": "deleted",
   "switchedOff": "switched off",
   "notSupported": "not supported",

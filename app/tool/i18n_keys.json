@@ -1747,5 +1747,6 @@
   "Cause closed": "causeClosed",
   "Linked to another cause": "linkedToAnotherCause",
   "No cause found": "noCauseFound",
-  "{0}: connections are not established": "connectionsAreNotEstablished"
+  "{0}: connections are not established": "connectionsAreNotEstablished",
+  "Disconnected: the selected server is unavailable ({0})": "disconnectedTheSelectedServerIsUnavailab2"
 }

@@ -14,11 +14,21 @@ import 'routing.dart' show DnsCandidate;
 import 'sbapi.dart';
 
 class SingBoxError implements Exception {
-  SingBoxError(this.message);
+  SingBoxError(this.message, {this.fix});
   final String message;
+
+  /// Where the user fixes it, when the core knows (`conn/connectFailed` `data.fix`, docs/logs.md): `settings` — the
+  /// proxy port of Settings → Connection is taken, `pick` — the Manual pick is not usable. Null: not a setting.
+  final String? fix;
   @override
   String toString() => message;
 }
+
+/// Whether sing-box's start error is its user inbound (`mixed-in` on 127.0.0.1:[port], the proxy port of Settings →
+/// Connection) failing to listen — the port is taken: a setting to change, not a fault of the server.
+bool userPortRefused(String error, int port) =>
+    RegExp(r'\b(listen|bind)\b', caseSensitive: false).hasMatch(error) &&
+    (error.contains('[mixed-in]') || RegExp('127\\.0\\.0\\.1:$port(?!\\d)').hasMatch(error));
 
 /// One running sing-box, as the core sees it: the seam where a platform plugs in its own way
 /// to run it (a process on desktop, [SingBoxProcess]; libbox inside the app on Android).

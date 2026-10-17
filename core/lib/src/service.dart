@@ -39,7 +39,7 @@ import 'exits.dart';
 import 'ladder.dart' show DeadLadderStore;
 import 'pool.dart';
 import 'probe.dart';
-import 'fetch.dart' show Channel, SubscriptionFetchException;
+import 'fetch.dart' show Channel, SubscriptionFetchException, fetchErrorText;
 import 'svc_fetch.dart';
 import 'svc_in.dart';
 import 'redact.dart';
@@ -2568,7 +2568,7 @@ class CoreService implements CoreApi {
           _subEvent('failed', {
             'source': sid,
             'name': name,
-            'error': e is FormatException ? e.message : (abort?.message ?? '$e'),
+            'error': fetchErrorText(e), // a _SubAbort is an HttpException: its message
             'code': ?(abort?.code ?? f?.code),
             'path': ?(f == null || f.paths.isEmpty ? null : [for (final p in f.paths) '${p.id}:${p.code}'].join(' ')),
           }, own: true, op: op, verdict: abort?.why == null ? null : 'confirmed', why: abort?.why, cause: abort?.cause);
@@ -3126,6 +3126,8 @@ class CoreService implements CoreApi {
       await runner.start(config);
     } on SingBoxError catch (e) {
       unawaited(tunCheck?.close());
+      // the proxy port is taken (before the TUN check: a refused low port says "permission denied" too)
+      if (e.fix == null && userPortRefused(e.message, mixed)) throw SingBoxError(e.message, fix: 'settings');
       // sing-box refused the TUN for a missing permission: the same advice as not being elevated
       if (planTun(plan) && tunAccessDenied(e.message)) throw TunNeedsAdmin(e.message);
       rethrow;
@@ -3486,7 +3488,8 @@ class CoreService implements CoreApi {
           // stage: `check` = the core is not elevated (nothing started), `start` = sing-box refused
           eventBook.add('core', 'tunNeedsAdmin', 'error', own: own, data: {'stage': e.detail == null ? 'check' : 'start', 'error': ?e.detail});
         } else {
-          eventBook.add('conn', 'connectFailed', 'error', own: own, data: {'reason': '$e'});
+          // `fix`: where the user changes it (docs/logs.md → `conn/connectFailed`), the app's buttons go by it
+          eventBook.add('conn', 'connectFailed', 'error', own: own, data: {'reason': '$e', 'fix': ?(e is SingBoxError ? e.fix : null)});
         }
         if (wasBlocking != null && _killSwitch && sysProxy.isSet) {
           _blocking = wasBlocking; // still blocked: only a connect that works, or Remove, ends it

@@ -591,6 +591,44 @@ void main() {
         expect([code2, res2['error']], [500, 'sing-box failed to start: address already in use']);
         events = await r.events();
         expect([for (final e in events) '${e['cat']}/${e['type']}'], ['core/tunNeedsAdmin', 'conn/connectFailed']);
+        expect((events.last['data'] as Map).containsKey('fix'), isFalse, reason: 'not the proxy port: no fix');
+      } finally {
+        await r.close();
+      }
+    });
+
+    test('conn/connectFailed says where to fix it: a taken proxy port is fix: settings, an unusable Manual pick fix: pick', () async {
+      expect(userPortRefused('start service: start inbound/mixed[mixed-in]: listen tcp 127.0.0.1:2080: bind: address already in use', 2080), isTrue);
+      expect(userPortRefused('listen tcp 127.0.0.1:2080: bind: Only one usage of each socket address is normally permitted.', 2080), isTrue);
+      expect(userPortRefused('listen tcp 127.0.0.1:20801: bind: address already in use', 2080), isFalse, reason: 'another port');
+      expect(userPortRefused('start inbound/mixed[tunnel-in]: listen tcp 127.0.0.1:51000: bind: address already in use', 2080), isFalse);
+      expect(userPortRefused('sing-box rejected the config: unknown field', 2080), isFalse);
+      final r = await _Rig.start(elevated: true);
+      try {
+        r.box.failWith = 'sing-box failed to start: start service: start inbound/mixed[mixed-in]: listen tcp 127.0.0.1:2080: bind: address already in use';
+        final (code, _) = await r.raw('POST', '/api/connect', {...r.body('tun'), 'plan': {..._plan(mode: 'proxy'), 'mixedPort': 2080}});
+        expect(code, 500);
+        var failed = (await r.events()).where((e) => e['type'] == 'connectFailed').toList();
+        expect(failed, hasLength(1));
+        expect((failed.single['data'] as Map)['fix'], 'settings');
+        expect('${(failed.single['data'] as Map)['reason']}', contains('[mixed-in]'), reason: 'the words of sing-box stay as they are');
+
+        // Manual on a server the plan has no usable outbound for: the config refuses it
+        r.box.failWith = null;
+        final plan = _plan(mode: 'proxy');
+        final main = (plan['main'] as Map).cast<String, dynamic>();
+        final (code2, _) = await r.raw('POST', '/api/connect', {
+          ...r.body('tun'),
+          'plan': {
+            ...plan,
+            'mixedPort': 2080,
+            'main': {...main, 'pinned': true, 'chosen': 'gone::x'},
+          },
+        });
+        expect(code2, 500);
+        failed = (await r.events()).where((e) => e['type'] == 'connectFailed').toList();
+        expect(failed, hasLength(2));
+        expect((failed.last['data'] as Map)['fix'], 'pick');
       } finally {
         await r.close();
       }

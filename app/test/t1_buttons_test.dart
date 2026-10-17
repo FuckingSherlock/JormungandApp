@@ -183,6 +183,63 @@ void main() {
       await _openLogs(tester);
 
       expect(find.text(_en.retry), findsOneWidget);
+      expect(find.text(_en.openSettings), findsNothing);
+      expect(find.text(_en.chooseServer), findsNothing);
+    });
+
+    testWidgets('conn/connectFailed fix: settings: Open settings leads to Settings → Connection', (tester) async {
+      final host = FakeCoreHost();
+      host.addEvent(
+        'conn',
+        'connectFailed',
+        level: 'error',
+        data: const {'reason': 'sing-box failed to start: listen tcp 127.0.0.1:2080: bind: address already in use', 'fix': 'settings'},
+      );
+      await pumpApp(tester, host);
+      await _openLogs(tester);
+      expect(find.text(_en.retry), findsOneWidget);
+      expect(find.text(_en.chooseServer), findsNothing);
+      expect(find.text(_en.proxyPort), findsNothing);
+
+      await tester.tap(find.text(_en.openSettings));
+      await tester.pumpAndSettle();
+      expect(find.text(_en.proxyPort), findsWidgets, reason: 'the Connection sheet with the proxy port');
+    });
+
+    testWidgets('conn/connectFailed fix: pick: Choose server, no Open settings', (tester) async {
+      final host = FakeCoreHost();
+      host.addEvent('conn', 'connectFailed', level: 'error', data: const {'reason': 'Manual pick x is not usable', 'fix': 'pick'});
+      await pumpApp(tester, host);
+      await _openLogs(tester);
+
+      expect(find.text(_en.chooseServer), findsOneWidget);
+      expect(find.text(_en.openSettings), findsNothing);
+    });
+
+    test('the buttons of conn/connectFailed go by `fix`, never by the words of `reason`', () {
+      final host = FakeCoreHost();
+      EventRecord ev(Map<String, dynamic> d) => EventRecord.fromJson(host.addEvent('conn', 'connectFailed', level: 'error', data: d));
+      final portWords = ev(const {'reason': 'the proxy port is busy, change it in settings'});
+      expect(eventCauseInSettings(portWords), isFalse);
+      final pickWords = ev(const {'reason': 'Manual pick "A" is unavailable: it is switched off.'});
+      expect(eventPinLost(pickWords), isFalse);
+      expect(eventCauseInSettings(ev(const {'reason': 'x', 'fix': 'settings'})), isTrue);
+      expect(eventPinLost(ev(const {'reason': 'x', 'fix': 'pick'})), isTrue);
+      expect(eventCauseInSettings(ev(const {'reason': 'x', 'fix': 'pick'})), isFalse);
+    });
+
+    test('conn/disconnected by a lost pin: a server gone without its name is not named by the entry', () {
+      final host = FakeCoreHost();
+      String detail(Map<String, dynamic> d) =>
+          _words(host).describe(EventRecord.fromJson(host.addEvent('conn', 'disconnected', level: 'warn', data: d))).title;
+      expect(
+        detail(const {'by': 'error', 'reason': 'pinLost', 'pick': 'Frankfurt 1', 'why': 'off'}),
+        _en.disconnectedTheSelectedServerIsUnavailab('Frankfurt 1', _en.switchedOff),
+      );
+      expect(
+        detail(const {'by': 'error', 'reason': 'pinLost', 'pick': '', 'why': 'deleted'}),
+        _en.disconnectedTheSelectedServerIsUnavailab2(_en.deleted2),
+      );
     });
   });
 

@@ -162,7 +162,7 @@ final _events = <String, List<Ev>>{
     Ev('conn', 'restored', {'downMs': 45000}, level: 'info'),
     Ev('conn', 'offline', {}),
     Ev('conn', 'online', {'downMs': 120000}, level: 'info'),
-    Ev('conn', 'connectFailed', {'reason': 'Manual pick "Frankfurt 1" (Remnawave) is unavailable: the subscription no longer has it. The tunnel is not moved to another server — choose a server in Route.'}, level: 'error', variant: 'pinLost'),
+    Ev('conn', 'connectFailed', {'reason': 'Manual pick "Frankfurt 1" (Remnawave) is unavailable: the subscription no longer has it. The tunnel is not moved to another server — choose a server in Route.', 'fix': 'pick'}, level: 'error', variant: 'pinLost'),
     Ev('conn', 'connected', {'entry': 's1', 'server': 's1::n1', 'mode': 'tun', 'route': 'rules'}, level: 'info'),
     Ev('conn', 'disconnected', {'by': 'error', 'reason': 'sing-box exited'}, level: 'warn'),
   ],

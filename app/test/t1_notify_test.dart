@@ -126,6 +126,26 @@ void main() {
     expect(idsPosted(), {crash['id']});
   });
 
+  testWidgets('a core/* step with a cause that passes the filter updates the root\'s notification in place', (tester) async {
+    final host = await open(tester);
+    host.notif
+      ..setFlag('coreCrash', true)
+      ..setFlag('connLost', true);
+    _lifecycleTo(AppLifecycleState.paused);
+    final crash = host.addEvent('core', 'crashed', level: 'error', data: const {'code': 2})..['verdict'] = 'confirmed';
+    await settle(tester);
+    expect(io.posted, hasLength(1));
+    final first = io.posted.single;
+
+    // no verdict: the journal's filter lets it through; its `cause` points at the crash
+    host.addEvent('core', 'down', level: 'error', data: const {'proxy': 'kept'})['cause'] = crash['id'];
+    await settle(tester);
+
+    expect(io.posted, hasLength(2), reason: 'the step is posted');
+    expect(idsPosted(), {crash['id']}, reason: 'under the root\'s id: the same notification, updated');
+    expect('${io.posted.last.title}\n${io.posted.last.text}', isNot('${first.title}\n${first.text}'), reason: 'with the new words');
+  });
+
   testWidgets('a consequence does not notify; a group row of a missing root does not either', (tester) async {
     final host = await open(tester);
     _lifecycleTo(AppLifecycleState.paused);

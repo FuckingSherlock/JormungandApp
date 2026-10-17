@@ -889,7 +889,8 @@ void main() {
       c.sourcesData['b']!.disabledNodes = [];
       c.pinnedNode = 'b::gone';
       expect(c.pinLoss(), contains('no longer has it'));
-      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('deleted', c.sourcesData['b']!.name));
+      // the server is gone, its name with it: no name, never the subscription's in its place
+      expect((c.pinLossInfo()!.why, c.pinLossInfo()!.pick), ('deleted', ''));
       c.pinnedNode = null;
       // Manual on the entry itself: it has nothing sing-box can run, the same kind of loss
       expect(c.pinLoss(), allOf(contains('"${c.sourcesData['b']!.name}"'), contains('XHTTP is not in sing-box')));
