@@ -335,6 +335,26 @@ void main() {
     expect(eventNotifies(null, r('conn', 'vpnUp', data: {'causes': ['core']})), isTrue, reason: 'a recovery: connLost, as before');
   });
 
+  test('vpnLineMarks: vpnDown with no causes and pending routes is waiting; routes cause is down; the in-place update walks pending -> routes -> up', () {
+    EventRecord down(int id, List<String> causes, {String? pending}) =>
+        e(ev(id, 'conn', 'vpnDown', level: causes.isEmpty ? 'warn' : 'error', data: {'causes': causes, 'pending': ?pending}));
+    List<VpnLine> below(List<EventRecord> j, int id) => [vpnLineMarks(j)[id]!.below];
+    final conn = e(ev(1, 'conn', 'connected'));
+    expect(below([conn, down(2, [], pending: 'routes')], 2), [VpnLine.waiting]);
+    expect(below([conn, down(2, ['routes'])], 2), [VpnLine.down]);
+    expect(below([conn, down(2, ['network'])], 2), [VpnLine.waiting]);
+    expect(below([conn, down(2, [])], 2), [VpnLine.down], reason: 'empty causes without pending is not waiting');
+    final m = vpnLineMarks([
+      conn,
+      down(2, ['network']),
+      down(3, [], pending: 'routes'),
+      down(4, ['routes']),
+      e(ev(5, 'conn', 'vpnUp', data: {'causes': ['routes', 'network']})),
+    ]);
+    expect([m[3]!.above, m[3]!.below, m[3]!.dot], [VpnLine.waiting, VpnLine.waiting, VpnDot.none]);
+    expect([m[4]!.above, m[4]!.below, m[4]!.dot], [VpnLine.waiting, VpnLine.down, VpnDot.change]);
+  });
+
   test('log text, groups and days', () {
     final l = LogLine.fromJson(line(1, 'warn', 'm', src: 'core', t: 5000));
     expect(l.groupKey, '5|warn|core');

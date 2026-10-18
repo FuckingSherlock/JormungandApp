@@ -97,7 +97,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 (`core.md` → «Отзыв туннеля»). Ручное отключение — `op {kind: connection}` (ручное «отключить → подключить» за ≤ 7 с — `conn/reconnected`) | `{by, reason?, pick?, why?}` |
 | `conn/connectFailed` | error. Подключение не вышло. Manual на сервер или запись, которые пропали / выключены / не поддержаны: `Manual pick "…" is unavailable: …` — через другой сервер не идёт, запущенное завершается этой же ошибкой (`connect-model.md` → Manual на сервер) | `{reason, fix?}` — `fix`: где исправлять, если ядро это знает: `settings` — занят порт прокси (Settings → Connection → порт; sing-box не смог слушать свой `mixed-in`), `pick` — Manual-пин не годится (выбрать сервер в Route). Без `fix` — причина не в настройках |
 | `conn/lost` / `restored` | Больше не пишутся (решение 2026-10-18: стали причиной `routes` у `conn/vpnDown`); в старом журнале показываются, как раньше. Были: warn / info, Auto — ни один маршрут не отвечает | `{routes}` + поля Sentinel / `{downMs}` |
-| `conn/vpnDown` / `vpnUp` | error (ожидание — только причина `network` — warn; уровень меняется на месте вместе с `causes`) / info. «VPN не работает»: при подключении ядро не поднялось за 30 с, нет сети или ни один маршрут не отвечает — одно событие на сбой, причины меняются на месте; `vpnUp` закрывает (`opens`). Раздел «„VPN не работает“» ниже | `{causes: ['core'\|'network'\|'routes'], proxy?, source?, routes?}` + `joins?` / `{downMs, causes, by?}` — `proxy` при `core` (как был у `core/down`), `source` при `network`, `routes` (сколько маршрутов молчат) при `routes` |
+| `conn/vpnDown` / `vpnUp` | error (ожидание — только причина `network` — warn; уровень меняется на месте вместе с `causes`) / info. «VPN не работает»: при подключении ядро не поднялось за 30 с, нет сети или ни один маршрут не отвечает — одно событие на сбой, причины меняются на месте; `vpnUp` закрывает (`opens`). Раздел «„VPN не работает“» ниже | `{causes: ['core'\|'network'\|'routes'], proxy?, source?, routes?, pending?: 'routes'}` + `joins?` / `{downMs, causes, by?}` — `proxy` при `core` (как был у `core/down`), `source` при `network`, `routes` (сколько маршрутов молчат) при `routes` |
 | `conn/offline` / `online` | info. Без подключения: нет интернета вообще — корень Sentinel `net.offline` (`failures.md` → «Сеть»), только журнал; при подключении — причина `network` у `conn/vpnDown`. Короткий обрыв — `offline` `blip` | `{source}` / `{downMs, source}` — `source`: что решило (`platform` / `os` / `probes` / …) |
 | `conn/failing` | Соединения массово не удаются (детектор неудавшихся соединений) | `failures.dart` |
 | `auto/switched` | info. Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
@@ -284,10 +284,13 @@ the network changed: counted as the network's …` (книга сбоев, по�
   сам с возвратом сети), поэтому могут стоять вместе. `routes` — ступень выше: это причина, только пока `core` и
   `network` нет. Молчание маршрутов при открытой `core` или `network` — их следствие (вердикт `consequence`), причина
   `routes` не добавляется. Открылась `network` или `core` при стоящей `routes` — `routes` уходит из причин (Sentinel
-  перевешивает корень `conn.lost` под новый как следствие). Нижние ушли, а маршруты так и молчат — `routes` снова
-  причина только после новой проверки: молчание при живых сети и ядре дольше `connLost` (то же событие, на месте;
-  непроверенное после возврата сети не показывается). Закрывает `routes` раунд Auto, в котором ответил маршрут
-  (`Sentinel.recovered('conn.lost')`). Трёх причин сразу не бывает.
+  перевешивает корень `conn.lost` под новый как следствие). Нижние ушли, а под ними стоял `conn.lost` — событие
+  **не закрывается** (решение пользователя 2026-10-18: без ложного «VPN снова работает»): причин нет, но
+  `data.pending: 'routes'` — «проверяю маршруты», новая проверка (молчание при живых сети и ядре дольше `connLost`;
+  Sentinel ждёт, пока сеть устоится, до ~45 с). Это ожидание: warn, линия жёлтая, кнопка Check now. Итог на месте:
+  маршрут ответил — `vpnUp` (закрытие по всем причинам сбоя); молчание подтвердилось — причина `routes`, error;
+  снова открылась нижняя ступень — её причина, `pending` уходит. Закрывает `routes` раунд Auto, в котором ответил
+  маршрут (`Sentinel.recovered('conn.lost')`). Трёх причин сразу не бывает.
 - **Открытие.** Первая устоявшая причина пишет `conn/vpnDown` (error, `confirmed`, `why` = `core.down` /
   `net.offline` / `routes.silent` по первой причине, `trail` её шаг). Корни Sentinel — `core.down`, `net.offline`,
   `conn.lost` — получают это событие (`attachEvent`): их следствия (`sub/failed`, `site/*`, `conn/failing`,
@@ -307,7 +310,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
   `restarted`) лежат в строке `vpnDown`: при открытии / добавлении причины `core` событие падения указывается в
   `vpnDown` полем верхнего уровня `joins: [id]` — строка падения вливается в его строку (механизм свёртки 5).
   `restarted` внутри влитой строки — шаг, а не закрытие сбоя.
-- **Закрытие.** Ни одной причины не осталось — `conn/vpnUp` (info, `opens` = `vpnDown`, `{downMs, causes}` —
+- **Закрытие.** Ни одной причины не осталось и нет `pending` — `conn/vpnUp` (info, `opens` = `vpnDown`, `{downMs, causes}` —
   все причины за время сбоя): своя строка (механизм 2), уведомление заменяется на «VPN снова работает» (тот же
   id). Текст — одно событие, без развёртки (решение 2026-10-18): по `causes` (все причины за сбой) «VPN снова работает ·
   sing-box запущен» / «· интернет доступен» / «· маршрут отвечает» и их сочетания через запятую в порядке core,
@@ -337,7 +340,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 сверху вниз, новые внизу). По ней видно, в каком состоянии случилось то, что написано в строке.
 
 - **Цвет отрезка:** зелёный сплошной — VPN подключён и работает; красный — «VPN не работает» (есть причина
-  `core` или `routes`); жёлтый — ожидание (единственная причина `network`); серый пунктир — VPN выключен. Цвета — из темы
+  `core` или `routes`); жёлтый — ожидание (единственная причина `network`, или причин нет и `pending: 'routes'`); серый пунктир — VPN выключен. Цвета — из темы
   (success / error / warning / приглушённый), не hex.
 - **Точка** — событие, на котором состояние сменилось, цвет — начавшегося состояния: `conn/connected`,
   `conn/disconnected`, `conn/vpnDown` (открытие и смена ожидание ↔ не работает), `conn/vpnUp`. **Кольцо** —
@@ -466,7 +469,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `conn/reconnected` | «Reconnected · <кратко>», без развёртки: «· settings: <что>» (например «mode: TUN → Proxy») / «· rule lists» / «· server addresses» / «· by you, VPN was off for N s»; в конце «· N s» (`tookMs`) |
 | `conn/connectFailed` | Не удалось подключиться — <причина> |
 | `conn/lost` / `restored` | Только старый журнал, тексты прежние: Нет связи через VPN — интернет доступен напрямую, ни один маршрут не отвечает / доступность интернета не подтверждена; закрыто: Связь восстановлена · перерыв N |
-| `conn/vpnDown` / `vpnUp` | Ожидание (только `network`): «Waiting for network · VPN is on, no internet connection». С причиной `core` или `routes`: «VPN is down» — по каждой причине фраза, через « · » в порядке появления: `core` — «sing-box stopped and has not restarted for 30 s» / «… (N restart attempts so far)»; `network` — «no internet connection»; `routes` — «no route answers, the internet works directly» (с `routes` > 1 — «none of N routes answers, the internet works directly»); при `proxy: kept` — «· system proxy is still set, so programs that use it have no internet». Закрыто: «VPN works again · » + по каждой причине за сбой, через запятую в порядке core, network, routes: «sing-box is running» / «internet is available» / «a route answers»; закрыто отключением (`by: user` / `system`): «VPN outage ended · VPN disconnected». Подпись типа `vpnUp` — «VPN outage ended» |
+| `conn/vpnDown` / `vpnUp` | Ожидание (только `network`): «Waiting for network · VPN is on, no internet connection». Проверка (причин нет, `pending: 'routes'`): «Checking routes · the network is back, no route has answered yet». С причиной `core` или `routes`: «VPN is down» — по каждой причине фраза, через « · » в порядке появления: `core` — «sing-box stopped and has not restarted for 30 s» / «… (N restart attempts so far)»; `network` — «no internet connection»; `routes` — «no route answers, the internet works directly» (с `routes` > 1 — «none of N routes answers, the internet works directly»); при `proxy: kept` — «· system proxy is still set, so programs that use it have no internet». Закрыто: «VPN works again · » + по каждой причине за сбой, через запятую в порядке core, network, routes: «sing-box is running» / «internet is available» / «a route answers»; закрыто отключением (`by: user` / `system`): «VPN outage ended · VPN disconnected». Подпись типа `vpnUp` — «VPN outage ended» |
 | `conn/offline` / `online` | Нет подключения к интернету — система сообщает, что сети нет / прямые проверки не проходят; закрыто: «Internet is available again · was unavailable for N» (без `downMs` — «Internet is available again»); подпись типа `online` — «Internet available again» |
 | `net/switched` | Смена сети: Wi-Fi (Ростелеком) → мобильная (МТС); с провалом — «· без сети N с»; провайдер не определён или настройка выключена — только тип |
 | `conn/failing` | <приложение>: соединения не устанавливаются |

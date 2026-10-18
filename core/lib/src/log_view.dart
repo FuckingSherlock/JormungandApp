@@ -679,7 +679,10 @@ Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
         dot = VpnDot.reconnect;
       case 'conn/vpnDown':
         final c = e.data['causes'];
-        final next = c is List && c.length == 1 && c.first == 'network' ? VpnLine.waiting : VpnLine.down;
+        // waiting (yellow): only the network is missing, or no cause is left and the routes are being checked anew
+        // (`pending: 'routes'`, the lower rungs closed over a silence of the routes)
+        final waits = c is List && ((c.length == 1 && c.first == 'network') || (c.isEmpty && e.data['pending'] == 'routes'));
+        final next = waits ? VpnLine.waiting : VpnLine.down;
         if (next != cur) dot = VpnDot.change;
         cur = next;
       case 'conn/vpnUp':

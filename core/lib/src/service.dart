@@ -523,7 +523,7 @@ class CoreService implements CoreApi {
 
   /// What Auto and "If unavailable" know of their servers, routes and targets outside the ladder (health, flap guard,
   /// «already failed»; auto_memory.dart), kept in `<dataDir>/auto-state.json`: a service made anew goes on from it.
-  final autoMemory = AutoMemory();
+  late final autoMemory = _ServiceAutoMemory(() => _routeAnswered());
   late final autoStore = AutoMemoryStore(File(p.join(dataDir, 'auto-state.json')), autoMemory, clock: () => _now().millisecondsSinceEpoch);
 
   /// Where each node leaves to by the exit check through it (exits.dart), kept in `<dataDir>/exit-nodes.json`.
@@ -1880,10 +1880,21 @@ class CoreService implements CoreApi {
   }
 
   /// A route answered (Auto's `restored`): the root `conn.lost` closes, the cause `routes` leaves `conn/vpnDown` (which
-  /// closes by `conn/vpnUp` when it was the last one). No event of its own.
+  /// closes by `conn/vpnUp` when it was the last one; a `vpnDown` held with `pending: 'routes'` closes the same way).
+  /// No event of its own.
   void routesRestored(AutoNet n) {
+    _routesDoubt = false; // a route answers: nothing is in doubt any more, no debt is owed (Auto cleared it already)
+    autoMemory.lostAt = null;
     sentinel.recovered(_routesRoot);
     _vpnSync();
+  }
+
+  // A round of Auto found a route that answers ([AutoMemory.answered]). Auto tells `restored` only when it is owed
+  // (`lostAt`), and [_syncRoutes] cleared the debt when the lower rungs closed: a held `vpnDown` (`pending: 'routes'`)
+  // would never hear that the routes work, so the answer itself ends it here (the same as [routesRestored]).
+  void _routeAnswered() {
+    if (!_routesDoubt) return;
+    routesRestored(AutoNet(kind: 'restored', at: _nowMs));
   }
 
   // A disconnect (the user's, the system's) ends the routes' outage with the connection: the root closes with no event
@@ -1973,6 +1984,13 @@ class CoreService implements CoreApi {
   var _routesStands = false; // the `conn.lost` root stood at the last change of the Sentinel ([_routesRootStanding])
   var _lowerStands = false; // `core.down` or `net.offline` stood at the last change of the Sentinel
   int? _routesSilent; // how many routes were silent when the outage began (`routes` of `conn/vpnDown`)
+  // The routes were seen silent during the failure and no route has answered since (it is not told by a root: it may be
+  // gone with the lower rung it was under, or never was one). While it stands and no cause is left (the lower rungs closed),
+  // the open `vpnDown` is not closed (no false «works again»): it is held with `data.pending: 'routes'` — the routes are
+  // checked anew ([_syncRoutes]). The hold ends in place: a route answers ([routesRestored], [_routeAnswered]) — `vpnUp`;
+  // the fresh silence is confirmed or a lower rung opens — a cause appears ([_vpnSync], `pending` leaves; the doubt stays,
+  // so the hold comes back when that cause goes without a route answering); a disconnect — `vpnUp {by}`.
+  var _routesDoubt = false;
 
   int? _vpnId; // the open `conn/vpnDown`
   var _vpnCauses = <String>[]; // the causes now, in order of appearance
@@ -2004,7 +2022,7 @@ class CoreService implements CoreApi {
   // root, or the silence never became a root, or its suspicion is parked): what was seen before is not told. The root
   // closes, the suspicion ends and Auto's debt `lostAt` is cleared, so its next silent round says `lost` again — a new
   // suspicion with its own window `connLost` from that moment; confirmed, `routes` is a cause again (the open `vpnDown`
-  // changed in place, or a new one).
+  // changed in place, or a new one). Meanwhile the open `vpnDown` is held, not closed ([_routesDoubt]).
   void _syncRoutes() {
     final roots = sentinel.roots;
     final lower = roots.byKind(rootCoreDown) != null || roots.byKind(rootNetOffline) != null;
@@ -2014,6 +2032,7 @@ class CoreService implements CoreApi {
     final closed = _lowerStands && !lower;
     _lowerStands = lower;
     if (!lower && _connected && (closed || orphan) && (lost == null || parent != null)) {
+      if (_vpnId != null && (lost != null || autoMemory.lostAt != null)) _routesDoubt = true; // the silence was seen: hold the event
       sentinel.recovered(_routesRoot, reason: 'cause.closed');
       autoMemory.lostAt = null;
     }
@@ -2052,7 +2071,20 @@ class CoreService implements CoreApi {
     ];
     final id = _vpnId;
     if (causes.isEmpty) {
-      if (id != null) _vpnClose(id, by);
+      if (id == null) {
+        _routesDoubt = false;
+        return;
+      }
+      // the last cause went (a lower rung closed) over a silence of the routes that was seen under it (the `conn.lost` root
+      // or Auto's debt): nothing is known of the routes now, the event is not closed ([_syncRoutes] suspects them anew)
+      if (by == null && _connected && _vpnCauses.isNotEmpty && (sentinel.roots.byKey(_routesRoot) != null || autoMemory.lostAt != null)) {
+        _routesDoubt = true;
+      }
+      if (by != null || !_connected || !_routesDoubt) {
+        _vpnClose(id, by);
+      } else {
+        _vpnHold(id);
+      }
       return;
     }
     final src = netRoot?.subject['source'];
@@ -2116,8 +2148,22 @@ class CoreService implements CoreApi {
     // the fields of the causes that are gone leave; what others wrote into `data` (`repeat`) stays
     final old = (eventBook.byId(id)?['data'] as Map?)?.cast<String, dynamic>() ?? const {};
     eventBook.update(id,
-        data: {...old}..removeWhere((k, _) => k == 'proxy' || k == 'source' || k == 'routes')..addAll(data), replaceData: true, joins: joins, level: level);
+        data: {...old}..removeWhere((k, _) => k == 'proxy' || k == 'source' || k == 'routes' || k == 'pending')..addAll(data), replaceData: true, joins: joins, level: level);
     _attachVpnRoots();
+  }
+
+  // The event is held: no cause, `pending: 'routes'` («checking routes», warn; the line is yellow). Changed in place; the
+  // fields of the causes that are gone leave.
+  void _vpnHold(int id) {
+    _vpnCauses = [];
+    const data = <String, dynamic>{'causes': <String>[], 'pending': 'routes'};
+    final json = jsonEncode(data);
+    final levelMoved = eventBook.byId(id)?['level'] != 'warn';
+    if (json == _vpnLastData && !levelMoved) return;
+    _vpnLastData = json;
+    final old = (eventBook.byId(id)?['data'] as Map?)?.cast<String, dynamic>() ?? const {};
+    eventBook.update(id,
+        data: {...old}..removeWhere((k, _) => k == 'proxy' || k == 'source' || k == 'routes')..addAll(data), replaceData: true, level: 'warn');
   }
 
   void _vpnClose(int id, String? by) {
@@ -2126,6 +2172,7 @@ class CoreService implements CoreApi {
     _event('conn', 'vpnUp', 'info', {'downMs': downMs, 'causes': all, 'by': ?by},
         opens: id, note: 'The connection works again (down for ${(downMs / 1000).round()} s)');
     _vpnId = null;
+    _routesDoubt = false;
     _vpnCauses = [];
     _vpnAllCauses.clear();
     _vpnJoins = [];
@@ -2208,7 +2255,7 @@ class CoreService implements CoreApi {
     if (ev == null || d is! Map) throw const FormatException('No such event');
     final key = switch ('${ev['cat']}/${ev['type']}') {
       'conn/lost' => 'round',
-      'conn/vpnDown' when d['causes'] is List && (d['causes'] as List).contains('routes') => 'round',
+      'conn/vpnDown' when (d['causes'] is List && (d['causes'] as List).contains('routes')) || d['pending'] == 'routes' => 'round',
       'auto/unstable' when d['id'] is String => 'route:${d['id']}',
       'rules/fallback' when d['target'] is String => 'target:${d['target']}',
       'dns/failed' || 'dns/failedOnNode' when d['server'] is String => 'dns:${d['server']}',
@@ -4951,6 +4998,20 @@ class CoreService implements CoreApi {
 
   @override
   Future<void> updateInstallFailed(String reason) async => appUpdater?.installFailed(reason);
+}
+
+/// Auto's memory that tells the service when a round found a route that answers ([AutoMemory.answered]; the service's own
+/// calls come when no `vpnDown` is held, so [onAnswered] does nothing then).
+class _ServiceAutoMemory extends AutoMemory {
+  _ServiceAutoMemory(this.onAnswered);
+  final void Function() onAnswered;
+
+  @override
+  int? answered() {
+    final since = super.answered();
+    onAnswered();
+    return since;
+  }
 }
 
 /// An open `node/lost` `off`: the used servers (id → name) of [sid] it switched off, [whole] = the source itself.

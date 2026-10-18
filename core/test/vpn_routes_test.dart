@@ -316,9 +316,153 @@ void main() {
     expectNoOldPair();
   });
 
-  test('LADDER: the network returns while routes are still silent: no routes cause at once; only after a fresh silent connLost window, routes is the cause again', () async {
+  /// routes stood, the network came and went while the routes stayed silent: the vpnDown is held PENDING (no vpnUp).
+  Future<Map> pendingAfterNetwork() async {
+    final first = await routesDown(2);
+    final rev0 = rev(first); // events() is the live map: read the rev before it is mutated in place
+    await networkGone();
+    await networkBack();
+    final d = downOf();
+    expect(d['id'], first['id'], reason: 'the same event, held');
+    expect(events('conn', 'vpnUp'), isEmpty, reason: 'no false «works again»');
+    expect(events('conn', 'vpnDown'), hasLength(1));
+    expect(causesOf(d), isEmpty);
+    expect((d['data'] as Map)['pending'], 'routes');
+    expect(d['level'], 'warn');
+    expect(rev(d), greaterThan(rev0));
+    expectNoOldPair();
+    return d;
+  }
+
+  test('PENDING: the network returns while routes are still silent: no vpnUp; the same vpnDown becomes causes [] + pending routes, warn; stays so inside the fresh window', () async {
     await start();
-    await routesDown(2);
+    final d = await pendingAfterNetwork();
+    expect((d['data'] as Map).containsKey('routes'), isFalse, reason: 'data.routes only while routes is a cause');
+    await time.advanceSeconds(5);
+    expect(events('conn', 'vpnUp'), isEmpty);
+    expect(causesOf(downOf()), isEmpty);
+    expect(downOf()['id'], d['id']);
+  });
+
+  test('PENDING (b): the fresh silence is confirmed: the same event, causes [routes], error, pending removed; the answer then closes with routes and network', () async {
+    await start();
+    final d = await pendingAfterNetwork();
+    silent(2);
+    await time.advanceSeconds(5);
+    expect(events('conn', 'vpnUp'), isEmpty);
+    await untilRoutesCause(5);
+    expect(events('conn', 'vpnDown'), hasLength(1));
+    final down = downOf();
+    expect(down['id'], d['id']);
+    expect(causesOf(down), ['routes']);
+    expect(down['level'], 'error');
+    expect((down['data'] as Map).containsKey('pending'), isFalse);
+    expect(down['data'], containsPair('routes', 2));
+    expect(events('conn', 'vpnUp'), isEmpty);
+    expectLadder();
+    expectNoOldPair();
+
+    await answers();
+    final up = events('conn', 'vpnUp').single;
+    expect(up['opens'], d['id']);
+    expect(causesOf(up), unorderedEquals(['routes', 'network']));
+    expect((up['data'] as Map).containsKey('pending'), isFalse);
+  });
+
+  test('PENDING (c): the network drops again: causes [network], warn, pending removed, same event; its return holds pending once more', () async {
+    await start();
+    final d = await pendingAfterNetwork();
+    await networkGone();
+    var down = downOf();
+    expect(down['id'], d['id']);
+    expect(causesOf(down), ['network']);
+    expect(down['level'], 'warn');
+    expect((down['data'] as Map).containsKey('pending'), isFalse);
+    expect(events('conn', 'vpnUp'), isEmpty);
+    await networkBack();
+    down = downOf();
+    expect(events('conn', 'vpnUp'), isEmpty);
+    expect(events('conn', 'vpnDown'), hasLength(1));
+    expect(causesOf(down), isEmpty);
+    expect((down['data'] as Map)['pending'], 'routes');
+  });
+
+  test('PENDING (c2): the core goes down while pending: causes [core], error, pending removed, same event', () async {
+    await start();
+    final d = await pendingAfterNetwork();
+    runner.failStarts = 1 << 20;
+    runner.up = false;
+    runner.onExit!(9);
+    for (var i = 0; i < 40; i++) {
+      await time.advanceSeconds(1);
+    }
+    final down = downOf();
+    expect(down['id'], d['id']);
+    expect(causesOf(down), ['core']);
+    expect(down['level'], 'error');
+    expect((down['data'] as Map).containsKey('pending'), isFalse);
+    expect(events('conn', 'vpnUp'), isEmpty);
+  });
+
+  test('PENDING (d): the user disconnects: vpnUp by user opens the held vpnDown; nothing hangs afterwards', () async {
+    await start();
+    final d = await pendingAfterNetwork();
+    await svc.disconnect();
+    await time.advanceSeconds(1);
+    final up = events('conn', 'vpnUp').single;
+    expect(up['opens'], d['id']);
+    expect(up['data'], containsPair('by', 'user'));
+    expect((up['data'] as Map).containsKey('pending'), isFalse);
+    await time.advanceSeconds(120);
+    expect(events('conn', 'vpnDown'), hasLength(1));
+    expect(events('conn', 'vpnUp'), hasLength(1));
+    expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
+  });
+
+  test('PENDING: a blip of the re-suspicion (a route answers inside the window) is a route answering: vpnUp, pending does not hang', () async {
+    await start();
+    final d = await pendingAfterNetwork();
+    silent(2);
+    await time.advanceSeconds(4);
+    await answers(downMs: 4000);
+    await time.advanceSeconds(60);
+    final up = events('conn', 'vpnUp').single;
+    expect(up['opens'], d['id']);
+    expect(causesOf(up), unorderedEquals(['routes', 'network']));
+    expect(events('conn', 'vpnDown'), hasLength(1));
+    expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
+  });
+
+  test('PENDING: the lower rung closing when no conn.lost stood (network alone) is a plain vpnUp, no pending', () async {
+    await start();
+    await networkGone();
+    final first = downOf();
+    expect(causesOf(first), ['network']);
+    await networkBack();
+    final up = events('conn', 'vpnUp').single;
+    expect(up['opens'], first['id']);
+    expect(causesOf(up), ['network']);
+    expect((downOf()['data'] as Map).containsKey('pending'), isFalse);
+    await time.advanceSeconds(40);
+    expect(events('conn', 'vpnDown'), hasLength(1));
+  });
+
+  test('PENDING: «Check now» on the held vpnDown is a round (not «Nothing to check»)', () async {
+    await start();
+    final d = await pendingAfterNetwork();
+    Object? err;
+    final f = svc.checkNow(d['id'] as int).then<Object?>((_) => null, onError: (Object e) => err = e);
+    for (var i = 0; i < 5; i++) {
+      await time.advanceSeconds(1);
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    expect(err, isNull, reason: 'pending routes is checkable like a routes cause');
+    unawaited(f);
+  });
+
+  test('LADDER: the network returns while routes are still silent (held pending): a fresh silent connLost window makes routes the cause again, the answer closes it', () async {
+    await start();
+    final first = await routesDown(2);
     await networkGone();
     await networkBack();
     expectLadder();
@@ -335,15 +479,16 @@ void main() {
     expect(currentCauses(), ['routes']);
     expectLadder();
     final down = events('conn', 'vpnDown').last;
+    expect(down['id'], first['id'], reason: 'held, not closed and reopened');
     expect(down['level'], 'error');
     expect(down['data'], containsPair('routes', 2));
-    expect(events('conn', 'vpnDown').length, lessThanOrEqualTo(2), reason: 'same event, or one new if the first had closed');
+    expect(events('conn', 'vpnDown'), hasLength(1));
     expectNoOldPair();
 
     await answers();
     expect(currentCauses(), isEmpty);
     final ups = events('conn', 'vpnUp');
-    expect(ups.last['opens'], down['id']);
+    expect(ups.single['opens'], down['id']);
     expect(causesOf(ups.last), contains('routes'));
     expectNoOldPair();
   });
