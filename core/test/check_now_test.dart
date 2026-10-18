@@ -335,7 +335,8 @@ void main() {
     _Socks socks() => box.socks;
 
     const supported = {
-      'conn/lost': <String, dynamic>{'routes': 1},
+      'conn/vpnDown': <String, dynamic>{'causes': ['routes'], 'routes': 1},
+      'conn/lost': <String, dynamic>{'routes': 1}, // an old journal entry: still checkable
       // the data the core writes: evidence of the suspicion (`id` = the route), `rule` / `target` / `to` of the fallback
       'auto/unstable': <String, dynamic>{'id': 'A', 'strikes': 3, 'holdMs': 60000},
       'rules/fallback': <String, dynamic>{'rule': 'r1', 'target': 'src:x', 'to': 'block'},
@@ -344,6 +345,7 @@ void main() {
     };
     // WHICH check ran: the SOCKS user (outbound) the fake probe inbound was asked through
     const prefix = {
+      'conn/vpnDown': 'route0/',
       'conn/lost': 'route0/',
       'auto/unstable': 'route0/',
       'rules/fallback': 'src:x/',
@@ -393,20 +395,23 @@ void main() {
       expect(recheck(id), containsPair('state', 'fail'));
     });
 
-    test('conn/lost: a route that answers closes the outage: conn/restored opens the real conn/lost', () async {
+    test('conn/vpnDown (routes): a route that answers closes the outage: conn/vpnUp opens the real vpnDown, no conn/restored', () async {
       await start();
       // the outage as the core opens it (a refused route alone does not make one: the direct path is judged too)
       final nowMs = time.t.millisecondsSinceEpoch;
       svc.autoMemory.lostAt = nowMs;
       svc.routesLost(AutoNet(kind: 'lost', at: nowMs), 1);
       await pumpEventQueue();
-      await until(() => all().any((e) => e['cat'] == 'conn' && e['type'] == 'lost'), time: time, what: 'the real conn/lost');
-      final lost = all().firstWhere((e) => e['cat'] == 'conn' && e['type'] == 'lost')['id'] as int;
-      expect(await settle(svc.checkNow(lost), time: time), {'ok': true});
-      expect(recheck(lost), containsPair('state', 'ok'));
-      final closing = all().where((e) => e['cat'] == 'conn' && e['type'] == 'restored').toList();
+      await until(() => all().any((e) => e['cat'] == 'conn' && e['type'] == 'vpnDown'), time: time, what: 'the real conn/vpnDown');
+      final down = all().firstWhere((e) => e['cat'] == 'conn' && e['type'] == 'vpnDown');
+      expect((down['data'] as Map)['causes'], ['routes']);
+      final id = down['id'] as int;
+      expect(await settle(svc.checkNow(id), time: time), {'ok': true});
+      expect(recheck(id), containsPair('state', 'ok'));
+      final closing = all().where((e) => e['cat'] == 'conn' && e['type'] == 'vpnUp').toList();
       expect(closing, hasLength(1));
-      expect(closing.single['opens'], lost, reason: 'the pair is closed on the very event the user pressed «Check now» on');
+      expect(closing.single['opens'], id, reason: 'the pair is closed on the very event the user pressed «Check now» on');
+      expect(all().where((e) => e['cat'] == 'conn' && (e['type'] == 'restored' || e['type'] == 'lost')), isEmpty);
     });
 
     test('rules/fallback: the target answering again goes back: rules/targetBack opens the rules/fallback', () async {
@@ -477,13 +482,13 @@ void main() {
 
     test('two commands on one event: exactly one run (probes counted), pending once, both answers agree', () async {
       await start();
-      final single = await freshRun(() => add('conn', 'lost', {'routes': 1}));
+      final single = await freshRun(() => add('conn', 'vpnDown', {'causes': ['routes'], 'routes': 1}));
       expect(single, greaterThan(0));
       await svc.dispose();
       disposed = true;
       await tmp.delete(recursive: true);
       await start();
-      final id = add('conn', 'lost', {'routes': 1});
+      final id = add('conn', 'vpnDown', {'causes': ['routes'], 'routes': 1});
       final updates = <String>[];
       final sub = svc.eventBook.stream.where((e) => e['id'] == id).listen((e) => updates.add('${((e['data'] as Map)['recheck'] as Map?)?['state']}'));
       addTearDown(sub.cancel);
@@ -506,13 +511,13 @@ void main() {
 
     test('two events with the same subject: one run, both events get pending and the same result, both answers agree', () async {
       await start();
-      final single = await freshRun(() => add('conn', 'lost', {'routes': 1}));
+      final single = await freshRun(() => add('conn', 'vpnDown', {'causes': ['routes'], 'routes': 1}));
       expect(single, greaterThan(0));
       await svc.dispose();
       disposed = true;
       await tmp.delete(recursive: true);
       await start();
-      final a1 = add('conn', 'lost', {'routes': 1}), a2 = add('conn', 'lost', {'routes': 1});
+      final a1 = add('conn', 'vpnDown', {'causes': ['routes'], 'routes': 1}), a2 = add('conn', 'vpnDown', {'causes': ['routes'], 'routes': 1});
       socks().asked.clear();
       socks().gate = Completer<void>();
       final fa = svc.checkNow(a1);
@@ -571,7 +576,7 @@ void main() {
 
     test('not connected: {ok: false, error: notConnected}, the event is left as it was', () async {
       await start(connected: false);
-      final id = add('conn', 'lost', {'routes': 1});
+      final id = add('conn', 'vpnDown', {'causes': ['routes'], 'routes': 1});
       final rev = ev(id)['rev'];
       expect(await svc.checkNow(id), {'ok': false, 'error': 'notConnected'});
       expect(ev(id)['rev'], rev);

@@ -382,10 +382,17 @@ void main() {
     test('a failure through the roots (conn/failing under a network failure) lands on the vpnDown id through attachEvent', () async {
       await start();
       final down = await networkGone();
-      svc.routesLost(AutoNet(kind: 'lost', at: time.t.millisecondsSinceEpoch), 2);
-      await time.advanceSeconds(1);
-      final lost = events('conn', 'lost').single;
-      expect([lost['verdict'], lost['cause']], ['consequence', down['id']]);
+      unawaited(svc.sentinel.suspect(Suspicion(
+        kind: 'conn.failing',
+        subject: const {'app': 'org.x', 'host': 'a.example', 'route': 'A'},
+        evidence: const {'count': 3, 'kind': 'timeout'},
+        window: const Duration(seconds: 5),
+        why: const Why('conn.timeout'),
+        event: const SuspicionEvent('conn', 'failing'),
+      )));
+      await time.advanceSeconds(6);
+      final failing = events('conn', 'failing').single;
+      expect([failing['verdict'], failing['cause']], ['consequence', down['id']]);
     });
   });
 

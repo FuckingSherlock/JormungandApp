@@ -907,6 +907,11 @@ class CoreService implements CoreApi {
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     sentinel.changes.listen((_) {
       _syncNetEvents(); // `net.offline` opened / closed: conn/vpnDown (connected), conn/offline, conn/online
+      final lost = sentinel.roots.byKey(_routesRoot) != null;
+      if (lost != _routesStands) {
+        _routesStands = lost;
+        _vpnSync(); // `conn.lost` opened / closed: the cause `routes` of conn/vpnDown (only then: any other change of the roots, e.g. the core root closed by a disconnect, must not close the failure before the disconnect says `by`)
+      }
       _attachVpnRoots(); // a root that opened during the failure gets its event
       _syncNetSwitch(); // the network settled: net/switched
       _changed(); // the network and the core phase are in the status (`context`)
@@ -1846,33 +1851,48 @@ class CoreService implements CoreApi {
     }
   }
 
-  /// `conn/lost`: no route answers. A suspicion: it is a consequence of `net.offline` when the direct path is
-  /// silent too, a `blip` when a route answers again inside the window; a standing one is a root that
-  /// covers every failure through the proxy (`path: proxy`) until [routesRestored]. Public for the tests.
+  /// No route answers (Auto's `lost`). A suspicion with no event of its own: it is a consequence of `core.down` /
+  /// `net.offline` when the direct path is silent too, a `blip` when a route answers again inside the window — both only
+  /// in the raw log, no cause; a standing one is a root that covers every failure through the proxy (`path: proxy`) until
+  /// [routesRestored], and is the cause `routes` of `conn/vpnDown` ([_vpnSync], which the Sentinel's change hook calls).
+  /// `conn/lost` is not written by the core any more. Public for the tests.
   void routesLost(AutoNet n, int routes) {
-    unawaited(sentinel.suspect(Suspicion(
-      kind: 'conn.lost',
-      key: 'conn.lost',
-      subject: {'path': 'proxy', 'dns': ?_routesResolver()},
-      evidence: {'routes': routes},
-      window: windows.connLost,
-      firstSeen: DateTime.fromMillisecondsSinceEpoch(n.at),
-      why: const Why('routes.silent'),
-      scope: Scope.of(const {'path': 'proxy'}),
-      session: false, // the outage is not the connection's: a restart or a reconnect does not end it, a route that answers does
-      event: SuspicionEvent('conn', 'lost', level: 'warn', note: (kind, e) => switch (kind) {
-            VerdictKind.confirmed => 'No route answers (${e['routes']} tried)',
-            VerdictKind.blip => 'No route answered for a moment (${e['routes']} tried), then one did',
-            VerdictKind.consequence => 'No route answers (${e['routes']} tried): because of another failure',
-            _ => 'No route answers (${e['routes']} tried): no reason found',
-          }),
-    )));
+    if (!_connected) return; // while disconnected nothing about the routes is written (Auto does not run then either)
+    if (sentinel.roots.byKey(_routesRoot) == null) _routesSilent = routes; // (a standing root keeps the count it began with)
+    unawaited(sentinel
+        .suspect(Suspicion(
+          kind: _routesRoot,
+          key: _routesRoot,
+          subject: {'path': 'proxy', 'dns': ?_routesResolver()},
+          evidence: {'routes': routes},
+          window: windows.connLost,
+          firstSeen: DateTime.fromMillisecondsSinceEpoch(n.at),
+          why: const Why('routes.silent'),
+          scope: Scope.of(const {'path': 'proxy'}),
+          session: false, // the outage is not the connection's: a restart or a reconnect does not end it, a route that answers does
+        ))
+        .then((v) {
+      if (_disposed || v.repeat || v.kind == VerdictKind.confirmed) return; // (a confirmed one is told by `conn/vpnDown`)
+      logBook.note('info', switch (v.kind) {
+        VerdictKind.blip => 'No route answered for a moment ($routes tried), then one did',
+        VerdictKind.consequence => 'No route answers ($routes tried): because of another failure',
+        _ => 'No route answers ($routes tried): not judged (${v.why?.code ?? v.kind.name})',
+      });
+    }));
   }
 
+  /// A route answered (Auto's `restored`): the root `conn.lost` closes, the cause `routes` leaves `conn/vpnDown` (which
+  /// closes by `conn/vpnUp` when it was the last one). No event of its own.
   void routesRestored(AutoNet n) {
-    final root = sentinel.roots.byKey('conn.lost');
-    sentinel.recovered('conn.lost');
-    if (root != null) eventBook.add('conn', 'restored', 'info', data: {'downMs': ?n.downMs}, opens: root.eventId);
+    sentinel.recovered(_routesRoot);
+    _vpnSync();
+  }
+
+  // A disconnect (the user's, the system's) ends the routes' outage with the connection: the root closes with no event
+  // (`vpnDown` has closed by `vpnUp {by}`) and Auto's debt is cleared, so the next connect counts anew.
+  void _routesDisconnected() {
+    sentinel.closeRoot(_routesRoot, reason: 'disconnected');
+    autoMemory.answered();
   }
 
   // The network, written from the Sentinel's `net.offline` root, so the OS, the platform and the probes are one
@@ -1944,10 +1964,15 @@ class CoreService implements CoreApi {
 
   // ---- «VPN не работает» (docs/logs.md): conn/vpnDown / conn/vpnUp ----
   // While the user is connected (sing-box up or being restarted) the internet through the VPN does not work for one of
-  // two causes: `core` (sing-box did not come back in 30 s, [_downSince]) or `network` (the net.offline root stands).
+  // three causes: `core` (sing-box did not come back in 30 s, [_downSince]), `network` (the net.offline root stands) or
+  // `routes` (no route answers: the `conn.lost` root stands, and stays a cause until a route answers).
   // One event for the whole failure: written at the first cause, changed in place when the causes change, closed by
-  // `vpnUp` when none is left or the user disconnects. The state is derived from [_downSince] / [_netRoot] by
-  // [_vpnSync], which every place that changes either calls.
+  // `vpnUp` when none is left or the user disconnects. The state is derived from [_downSince] / [_netRoot] / the
+  // `conn.lost` root by [_vpnSync], which every place that changes any of them calls (the roots: the Sentinel's change hook).
+
+  static const _routesRoot = 'conn.lost'; // the Sentinel's root (kind and key) of the cause `routes`
+  var _routesStands = false; // the `conn.lost` root stood at the last change of the Sentinel
+  int? _routesSilent; // how many routes were silent when the outage began (`routes` of `conn/vpnDown`)
 
   int? _vpnId; // the open `conn/vpnDown`
   var _vpnCauses = <String>[]; // the causes now, in order of appearance
@@ -1955,6 +1980,7 @@ class CoreService implements CoreApi {
   var _vpnAt = 0;
   var _vpnJoins = <int>[];
   String? _vpnLastData;
+  Why? _vpnWhy; // why of the first cause (the Sentinel's relink may overwrite it on the event, see [_attachVpnRoots])
 
   bool get _connected => runner.running || _recovering != null;
 
@@ -1976,10 +2002,15 @@ class CoreService implements CoreApi {
     final core = _downSince != null;
     final netRoot = _netRoot;
     final net = _connected && netRoot != null && _netStanding;
+    // `routes`: the `conn.lost` root stands (it is a root only once `confirmed`, a silence that `core` or `network` explains
+    // never became one). Once it is a cause it stays one beside the others (no flip «gone / back» when the network goes
+    // and returns) until a route answers: [routesRestored] closes the root.
+    final lost = _connected ? sentinel.roots.byKey(_routesRoot) : null;
+    final routes = lost != null;
     final causes = [
       for (final c in _vpnCauses)
-        if (c == 'core' ? core : net) c,
-      for (final c in [if (core) 'core', if (net) 'network'])
+        if (switch (c) { 'core' => core, 'network' => net, _ => routes }) c,
+      for (final c in [if (core) 'core', if (net) 'network', if (routes) 'routes'])
         if (!_vpnCauses.contains(c)) c,
     ];
     final id = _vpnId;
@@ -1992,6 +2023,7 @@ class CoreService implements CoreApi {
       'causes': causes,
       if (causes.contains('core')) 'proxy': _downProxy,
       if (causes.contains('network')) 'source': ?src,
+      if (causes.contains('routes')) 'routes': ?_routesSilent,
     };
     final crash = causes.contains('core') ? _crashRoot?.eventId : null;
     // connected while the network was already gone: the standing `conn/offline` (written while disconnected) folds in too
@@ -2010,10 +2042,11 @@ class CoreService implements CoreApi {
     final began = [
       if (core) (_crashRoot?.since ?? _downSince!).millisecondsSinceEpoch,
       if (net) netRoot.since.millisecondsSinceEpoch,
+      if (lost != null) lost.since.millisecondsSinceEpoch,
     ];
     if (id == null || began.any((t) => t < _vpnAt)) _vpnAt = began.reduce((a, b) => a < b ? a : b);
     final json = jsonEncode(data);
-    // waiting (only the network is missing, the VPN itself is fine) is a warn; the core down makes it an error
+    // waiting (only the network is missing, the VPN itself is fine) is a warn; the core down or the routes silent make it an error
     final level = causes.length == 1 && causes.first == 'network' ? 'warn' : 'error';
     if (id == null) {
       _vpnCauses = causes;
@@ -2025,11 +2058,16 @@ class CoreService implements CoreApi {
         why = const Why('core.down');
         step = TrailStep('ctx.core', Outcome.fail, _downSince!.millisecondsSinceEpoch, const {'phase': 'down'});
         note = 'Connection down: sing-box does not start (system proxy $_downProxy)';
-      } else {
+      } else if (causes.first == 'network') {
         why = Why('net.offline', {'source': src});
         step = TrailStep('ctx.net', Outcome.fail, netRoot!.since.millisecondsSinceEpoch, {'state': 'none', 'source': src});
         note = 'The network is gone ($src)';
+      } else {
+        why = const Why('routes.silent');
+        step = TrailStep('suspect', Outcome.fail, lost!.since.millisecondsSinceEpoch, {'kind': _routesRoot, 'facts': {'routes': ?_routesSilent}});
+        note = 'No route answers (${_routesSilent ?? '?'} tried): the connection does not work';
       }
+      _vpnWhy = why;
       _vpnId = _event('conn', 'vpnDown', level, data, verdict: 'confirmed', why: why, trail: [step], note: note, joins: joins);
       _attachVpnRoots();
       return;
@@ -2041,7 +2079,7 @@ class CoreService implements CoreApi {
     // the fields of the causes that are gone leave; what others wrote into `data` (`repeat`) stays
     final old = (eventBook.byId(id)?['data'] as Map?)?.cast<String, dynamic>() ?? const {};
     eventBook.update(id,
-        data: {...old}..removeWhere((k, _) => k == 'proxy' || k == 'source')..addAll(data), replaceData: true, joins: joins, level: level);
+        data: {...old}..removeWhere((k, _) => k == 'proxy' || k == 'source' || k == 'routes')..addAll(data), replaceData: true, joins: joins, level: level);
     _attachVpnRoots();
   }
 
@@ -2057,11 +2095,24 @@ class CoreService implements CoreApi {
     _vpnLastData = null;
   }
 
-  // Both roots of the failure (`core.down`, `net.offline`) carry the `vpnDown` event; one that opens later gets it at once.
+  // The roots of the failure (`core.down`, `net.offline`, `conn.lost`) carry the `vpnDown` event; one that opens later gets it
+  // at once.
   void _attachVpnRoots() {
     final id = _vpnId;
     if (id == null) return;
-    for (final kind in const [rootCoreDown, rootNetOffline]) {
+    // `conn.lost` that carries the event and then finds `core.down` / `net.offline` open over it is relinked under that
+    // root by the Sentinel: the event would turn into its consequence (verdict, why, a relink step) and, with the event on
+    // the new root, its own cause. The failure is not a consequence of its own cause: undone here.
+    final lost = sentinel.roots.byKey(_routesRoot);
+    final parent = lost == null || lost.eventId != id || lost.parent == null ? null : sentinel.roots.byId(lost.parent!);
+    if (parent != null && parent.consequences.remove(id)) {
+      final e = eventBook.byId(id);
+      eventBook.update(id,
+          verdict: 'confirmed',
+          why: _vpnWhy?.toJson(),
+          trail: [for (final t in (e?['trail'] as List? ?? const []).cast<Map<String, dynamic>>()) if (t['code'] != 'root.relinked') t]);
+    }
+    for (final kind in const [rootCoreDown, rootNetOffline, _routesRoot]) {
       final r = sentinel.roots.byKind(kind);
       if (r == null || r.eventId == id) continue;
       // the crash is not a consequence of the failure: it is folded into it by `joins`
@@ -2118,6 +2169,7 @@ class CoreService implements CoreApi {
     if (ev == null || d is! Map) throw const FormatException('No such event');
     final key = switch ('${ev['cat']}/${ev['type']}') {
       'conn/lost' => 'round',
+      'conn/vpnDown' when d['causes'] is List && (d['causes'] as List).contains('routes') => 'round',
       'auto/unstable' when d['id'] is String => 'route:${d['id']}',
       'rules/fallback' when d['target'] is String => 'target:${d['target']}',
       'dns/failed' || 'dns/failedOnNode' when d['server'] is String => 'dns:${d['server']}',
@@ -4204,6 +4256,7 @@ class CoreService implements CoreApi {
       }
     }
     _vpnSync(by: error == null ? 'user' : null); // no connection, no failure of it: the open `vpnDown` ends
+    _routesDisconnected();
     await _settleStopped(was, keepProxy: true);
     return status();
   }
@@ -4266,6 +4319,7 @@ class CoreService implements CoreApi {
     try {
       final was = await _stopAll() || connecting;
       _vpnSync(by: 'system'); // the open `vpnDown` ends: its notification is replaced by the `disconnected`'s
+      _routesDisconnected();
       if (was) eventBook.add('conn', 'disconnected', 'warn', data: {'by': 'system', 'reason': 'revoked'});
       await _settleStopped(was, keepProxy: false);
     } catch (e) {
@@ -4342,7 +4396,7 @@ class CoreService implements CoreApi {
 
   /// Asks the direct path (`AutoSettings` url and checkers of the connection, else the defaults) until it answers: the
   /// answer is `up` (the pool, anything that answers) and ends a `net.offline` of the probes and an outage of Auto's
-  /// (`conn/online`, `conn/restored`); silence is `down`. The status stays as it was until then, so a root is closed by
+  /// (`conn/online`; Auto's debt `lostAt` is cleared, no event); silence is `down`. The status stays as it was until then, so a root is closed by
   /// the answer and by nothing else. With a connection Auto's rounds go on asking (every `noNetEvery`): this asks once;
   /// with none, nobody else does, so it repeats every `noNetEvery` while the pool is down. A newer call takes over.
   Future<void> _probeNetwork() async {
@@ -4352,11 +4406,11 @@ class CoreService implements CoreApi {
       final up = await pool.directAnswers(url: s.url, checkers: s.checkers, timeoutMs: s.timeoutMs);
       if (_disposed || seq != _netProbeSeq) return;
       if (up == true) {
-        if (_auto == null) {
-          // no connection to tell it: the routes' outage that stood is over with the network (a connect asks them again)
-          final since = autoMemory.answered();
-          if (since != null) routesRestored(AutoNet(kind: 'restored', at: _nowMs, downMs: _nowMs - since));
-        }
+        // no connection to tell it: the routes' outage that stood is over with the network (a connect asks them again);
+        // Auto's debt is cleared, nothing is written (while disconnected nothing about the routes is). While connected (a
+        // restart has stopped Auto for a moment) the debt stays: the direct path is not a route, only a route that answers
+        // closes the `conn.lost` root, and Auto tells it only when it is owed
+        if (_auto == null && !_connected) autoMemory.answered();
         return;
       }
       if (up == null) return;

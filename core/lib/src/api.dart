@@ -71,7 +71,7 @@ abstract interface class CoreApi {
   Future<Map<String, dynamic>> siteCheck(Map<String, dynamic> body);
 
   /// `{event}` → `{ok: true}` or `{ok: false, error}`: «Check now» on an event. The core checks the event's subject
-  /// out of turn by the very check of its scheduled round — `conn/lost`: Auto's round of the main flow; `auto/unstable`:
+  /// out of turn by the very check of its scheduled round — `conn/vpnDown` with the cause `routes` (and an old `conn/lost`): Auto's round of the main flow; `auto/unstable`:
   /// the route; `rules/fallback`: the rule target; `dns/failed` / `failedOnNode`: the DNS server — and the pair is closed
   /// by the same code as the round's. The event shows `data.recheck: {state: 'pending'}` meanwhile and `{state: 'ok' /
   /// 'fail', at}` after (it changes in place). A second command for the same subject joins the check under way. `error`:

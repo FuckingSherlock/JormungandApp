@@ -20,8 +20,8 @@ const pendingLabels = <String>{};
 const mockupOnly = <String>{'sub/dead'};
 
 /// Types the core no longer writes but old journals hold (so they stay in the catalog): `sub/removed` is replaced by the
-/// warn variation of `sub/updated` and `sub/back`.
-const legacyOnly = <String>{'core/down', 'sub/removed'};
+/// warn variation of `sub/updated` and `sub/back`; `conn/lost` / `conn/restored` are the cause `routes` of `conn/vpnDown` now.
+const legacyOnly = <String>{'core/down', 'sub/removed', 'conn/lost', 'conn/restored'};
 
 /// Emit sites whose type (or category) is a variable, by `file|call|first argument|second argument`.
 /// What they can write is found by the other patterns (below), so the entry only says "known":

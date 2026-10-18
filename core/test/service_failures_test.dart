@@ -1,5 +1,5 @@
 // The connection and core detectors as CoreService runs them through the Sentinel (docs/failures.md →
-// Перенос детекторов): `conn/failing`, `conn/offline` / `online`, `conn/lost` / `restored`, `auto/unstable`
+// Перенос детекторов): `conn/failing`, `conn/offline` / `online`, the `routes` cause of `conn/vpnDown` (was `conn/lost` / `restored`), `auto/unstable`
 // and the core events (`crashed`, `restartFailed`, `down`). A fake sing-box runner (no process, no API), time
 // by hand (FakeTime): the Sentinel's clock, the service's clock and its waits are one.
 import 'dart:async';
@@ -337,21 +337,24 @@ void main() {
       expect(events('conn', 'online').single['data'], containsPair('downMs', greaterThan(20000)));
     });
 
-    test('the outage survives a reconnect: the same conn/lost event stays open, one conn/restored with the whole time', () async {
+    test('the user disconnecting ends the routes outage: vpnUp by user, the conn.lost root closed without an event, no conn/lost / restored', () async {
       await start();
       final t0 = time.t.millisecondsSinceEpoch;
       svc.routesLost(AutoNet(kind: 'lost', at: t0), 1);
       await time.advanceSeconds(40);
-      expect(events('conn', 'lost').single['verdict'], 'confirmed');
+      final down = events('conn', 'vpnDown').single;
+      expect(down['verdict'], 'confirmed');
+      expect(down['data'], containsPair('causes', ['routes']));
       await svc.disconnect();
-      await svc.connect(_body());
-      await time.advanceSeconds(6);
-      expect(svc.sentinel.roots.byKey('conn.lost'), isNotNull, reason: 'a restart does not end it');
-      expect(events('conn', 'lost').length, 1, reason: 'no new event');
-      svc.routesRestored(AutoNet(kind: 'restored', at: t0 + 50000, downMs: 50000));
       await time.advanceSeconds(1);
-      expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
-      expect(events('conn', 'restored').single['data'], containsPair('downMs', 50000));
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNull, reason: 'the disconnect closes the root');
+      final up = events('conn', 'vpnUp').single;
+      expect([up['opens'], (up['data'] as Map)['by']], [down['id'], 'user']);
+      await svc.connect(_body());
+      await time.advanceSeconds(40);
+      expect(events('conn', 'vpnDown').length, 1, reason: 'the next connection starts anew');
+      expect(events('conn', 'lost'), isEmpty);
+      expect(events('conn', 'restored'), isEmpty);
     });
 
     test('Auto starting and stopping while the network is down says nothing of it: no conn/online without a probe that answered', () async {
@@ -395,21 +398,24 @@ void main() {
       expect(events('conn', 'vpnDown').length, 1);
     });
 
-    test('Auto started again re-suspects an outage that never became a root (the stop came inside the window): one conn/lost, one conn/restored', () async {
+    test('Auto started again re-suspects an outage that never became a root (the stop came inside the window): one vpnDown (routes), one vpnUp, no conn/lost / restored', () async {
       await start(connected: false, api: true);
       final t0 = time.t.millisecondsSinceEpoch;
       svc.autoMemory.lostAt = t0; // Auto's owed `lost` of the earlier session
       expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
       await svc.connect(_body());
       await time.advanceSeconds(40);
-      final lost = events('conn', 'lost').single;
-      expect(lost['verdict'], 'confirmed');
+      final down = events('conn', 'vpnDown').single;
+      expect(down['verdict'], 'confirmed');
+      expect(down['data'], containsPair('causes', ['routes']));
       expect(svc.sentinel.roots.byKey('conn.lost'), isNotNull);
       svc.routesRestored(AutoNet(kind: 'restored', at: time.t.millisecondsSinceEpoch, downMs: 41000));
       await time.advanceSeconds(1);
       expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
-      expect(events('conn', 'lost').length, 1);
-      expect(events('conn', 'restored').single['data'], containsPair('downMs', 41000));
+      expect(events('conn', 'vpnDown').length, 1);
+      expect(events('conn', 'vpnUp').single['opens'], down['id']);
+      expect(events('conn', 'lost'), isEmpty);
+      expect(events('conn', 'restored'), isEmpty);
     });
 
     test('the network gone for a moment: conn/offline is a blip with how long, no conn/online', () async {
@@ -597,7 +603,7 @@ void main() {
       expect(events('conn', 'failing').single['verdict'], isNot('consequence'));
     });
 
-    test('a route with a domain-named server depends on the resolver of the domain: its dead root explains auto/unstable and conn/lost', () async {
+    test('a route with a domain-named server depends on the resolver of the domain: its dead root explains auto/unstable and the route silence (no routes cause)', () async {
       // the user's own server is not the node resolver (the top of the system chain is the OS resolver without a built-in one)
       await start(routing: dns, server: 'node.example.com');
       final cause = openDnsRoot('system');
@@ -605,9 +611,10 @@ void main() {
       final u = events('auto', 'unstable').single;
       expect([u['level'], u['verdict'], u['cause']], ['info', 'consequence', cause]);
       svc.routesLost(AutoNet(kind: 'lost', at: time.t.millisecondsSinceEpoch), 1);
-      await time.advanceSeconds(1);
-      final l = events('conn', 'lost').single;
-      expect([l['verdict'], l['cause']], ['consequence', cause]);
+      await time.advanceSeconds(20);
+      expect(events('conn', 'lost'), isEmpty);
+      expect(events('conn', 'vpnDown'), isEmpty, reason: 'a consequence is no routes cause and writes no event');
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
     });
 
     test('the domain-named node is blamed on the top of the system chain (the node outbounds\' domain_resolver), not on the user\'s default resolver', () async {
@@ -710,7 +717,7 @@ void main() {
     });
   });
 
-  group('conn/lost and auto/unstable', () {
+  group('routes cause (conn.lost) and auto/unstable', () {
     int at() => time.t.millisecondsSinceEpoch;
     AutoNet lost() => AutoNet(kind: 'lost', at: at());
 
@@ -736,14 +743,15 @@ void main() {
       expect([e['level'], e['verdict']], ['info', 'consequence']);
     });
 
-    test('conn/lost that stands for the window: confirmed, a root over the proxy path; conn/restored closes it with the time', () async {
+    test('routes silent for the window: conn/vpnDown (routes) confirmed, a root over the proxy path; the answer closes it with conn/vpnUp, no conn/lost / restored', () async {
       await start();
       svc.routesLost(lost(), 2);
       await time.advanceSeconds(5);
-      expect(events('conn', 'lost'), isEmpty, reason: 'a route may answer again inside the window');
+      expect(events('conn', 'vpnDown'), isEmpty, reason: 'a route may answer again inside the window');
       await time.advanceSeconds(8);
-      final e = events('conn', 'lost').single;
-      expect([e['level'], e['verdict']], ['warn', 'confirmed']);
+      final e = events('conn', 'vpnDown').single;
+      expect([e['level'], e['verdict']], ['error', 'confirmed']);
+      expect(e['data'], containsPair('causes', ['routes']));
       expect(e['data'], containsPair('routes', 2));
       expect(svc.sentinel.roots.byKey('conn.lost'), isNotNull);
       // while it stands the proxy path's failures are its consequences
@@ -752,32 +760,37 @@ void main() {
       final f = events('conn', 'failing').single;
       expect([f['verdict'], f['cause']], ['consequence', e['id']]);
       svc.routesRestored(AutoNet(kind: 'restored', at: at(), downMs: 13000));
-      final r = events('conn', 'restored').single;
-      expect(r['data'], {'downMs': 13000});
+      await time.advanceSeconds(1);
+      final up = events('conn', 'vpnUp').single;
+      expect([up['opens'], up['level']], [e['id'], 'info']);
+      expect(up['data'], containsPair('causes', ['routes']));
+      expect(events('conn', 'restored'), isEmpty);
+      expect(events('conn', 'lost'), isEmpty);
       expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
     });
 
-    test('conn/lost that ends inside the window: a blip, and no conn/restored', () async {
+    test('route silence that ends inside the window: a blip, nothing in the journal (no vpnDown, no conn/lost, no conn/restored)', () async {
       await start();
       svc.routesLost(lost(), 2);
       await time.advanceSeconds(4);
       svc.routesRestored(AutoNet(kind: 'restored', at: at(), downMs: 4000));
-      await time.advanceSeconds(1);
-      final e = events('conn', 'lost').single;
-      expect([e['level'], e['verdict']], ['info', 'blip']);
-      expect(events('conn', 'restored'), isEmpty);
+      await time.advanceSeconds(20);
+      expect(types().where((t) => t.startsWith('conn/') && t != 'conn/connected'), isEmpty, reason: types().toString());
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
     });
 
-    test('conn/lost with the network gone is a consequence of conn/vpnDown', () async {
+    test('route silence with the network gone is a consequence of conn/vpnDown (network): no event, no routes cause', () async {
       await start();
       svc.setNetwork({'connected': false});
       await time.advanceSeconds(11);
       final offline = events('conn', 'vpnDown').single;
       svc.routesLost(lost(), 2);
-      await time.advanceSeconds(1);
-      final e = events('conn', 'lost').single;
-      expect([e['verdict'], e['cause']], ['consequence', offline['id']]);
-      expect(quiet(e), isTrue);
+      await time.advanceSeconds(20);
+      expect(events('conn', 'lost'), isEmpty);
+      final now = events('conn', 'vpnDown').single;
+      expect(now['id'], offline['id']);
+      expect((now['data'] as Map)['causes'], ['network']);
+      expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
     });
   });
 }
