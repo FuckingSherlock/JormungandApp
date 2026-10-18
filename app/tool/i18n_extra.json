@@ -421,6 +421,7 @@
   "Reconnected · server addresses": null,
   "Reconnected · by you, VPN was off for {0}": null,
   "Waiting for network · VPN is on, no internet connection": null,
+  "Checking routes · the network is back, no route has answered yet": null,
   "sing-box stopped and has not restarted for 30 s": null,
   "sing-box stopped and has not restarted for 30 s ({#0} restart attempts so far)": null,
   "system proxy is still set, so programs that use it have no internet": null,

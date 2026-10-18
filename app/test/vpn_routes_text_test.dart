@@ -2,7 +2,9 @@
 // reads «VPN is down» for any routes cause; its reason gives «no route answers, the internet works directly» (or «none
 // of N routes answers …» when data.routes is above 1) in the order of `causes`, the system-proxy line last. conn/vpnUp
 // names its parts in the fixed order core, network, routes; no known cause reads «VPN works again». A live vpnDown
-// with routes offers Check now and Open, and its notification offers checkNow (at most two buttons).
+// with routes offers Check now and Open, and its notification offers checkNow (at most two buttons). A vpnDown with
+// no cause and data.pending 'routes' (the network is back, no route answered yet) reads «Checking routes …» with an
+// empty reason line and offers the same Check now / Open; with the network alone it has no Check now.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/core/event_text.dart';
@@ -11,6 +13,7 @@ import 'package:jormungand/l10n/l10n.dart';
 import 'package:jormungand/platform/notify_channel.dart';
 import 'package:jormungand/platform/power_channel.dart';
 import 'package:jormungand/shell/home_shell.dart';
+import 'package:jormungand/widgets/event_rows.dart' show eventOpenTarget;
 import 'package:jormungand_core/jormungand_core.dart';
 
 import 'fake_core_host.dart';
@@ -223,6 +226,59 @@ void main() {
       expect(buttons(['network', 'routes']), containsAll(['checkNow', 'networkSettings']));
       expect(buttons(['core', 'routes']), containsAll(['checkNow', 'retry']));
       buttons(['core', 'network', 'routes']); // the cap of two holds for all three
+    });
+  });
+
+  group('conn/vpnDown pending routes: the network is back, no route has answered yet', () {
+    const pendingTitle = 'Checking routes · the network is back, no route has answered yet';
+
+    test('the title is the pending text; the reason line is empty', () {
+      final d = words.describe(_down([], level: 'warn', data: {'pending': 'routes'}));
+      expect(d.title, pendingTitle);
+      expect(d.detail, isEmpty);
+    });
+
+    testWidgets('a live pending vpnDown has Check now and Open', (tester) async {
+      final host = FakeCoreHost();
+      final down = host.addEvent('conn', 'vpnDown', level: 'warn', data: const {'causes': [], 'pending': 'routes'})
+        ..['verdict'] = 'confirmed';
+      await pumpApp(tester, host);
+      await _openLogs(tester);
+      await _expand(tester, _titleOf(host, down));
+
+      expect(find.text(_en.checkNow), findsOneWidget);
+      expect(find.text(_en.open), findsOneWidget);
+    });
+
+    test('the open target is route for pending and for routes; the network alone is not route', () {
+      final host = FakeCoreHost();
+      expect(eventOpenTarget(_down([], level: 'warn', data: {'pending': 'routes'}), host), 'route');
+      expect(eventOpenTarget(_down(['routes']), host), 'route');
+      expect(eventOpenTarget(_down(['network'], level: 'warn'), host), isNot('route'));
+    });
+
+    test('the notification offers checkNow for pending; the network alone does not', () {
+      final host = FakeCoreHost();
+      List<String> buttons(Map<String, dynamic> data, String level) {
+        final e = EventRecord.fromJson(host.addEvent('conn', 'vpnDown', level: level, data: data));
+        final actions = SystemNotifier.eventActions(e, EventWords(_en, host.catalog), host);
+        expect(actions.length, lessThanOrEqualTo(2), reason: '$data');
+        return [for (final a in actions) a.$1];
+      }
+
+      expect(buttons({'causes': [], 'pending': 'routes'}, 'warn'), contains('checkNow'));
+      expect(buttons({'causes': ['network']}, 'warn'), isNot(contains('checkNow')));
+    });
+
+    testWidgets('the network alone: the wait row has no Check now', (tester) async {
+      final host = FakeCoreHost();
+      final wait = host.addEvent('conn', 'vpnDown', level: 'warn', data: const {'causes': ['network']})
+        ..['verdict'] = 'confirmed';
+      await pumpApp(tester, host);
+      await _openLogs(tester);
+      await _expand(tester, _titleOf(host, wait));
+
+      expect(find.text(_en.checkNow), findsNothing);
     });
   });
 }

@@ -1834,5 +1834,6 @@
   "a route answers": "aRouteAnswers",
   "no route answers, the internet works directly": "noRouteAnswersTheInternetWorks",
   "VPN works again · {0}": "vpnWorksAgain2",
-  "none of {0} routes answers, the internet works directly": "noneOfRoutesAnswersTheInternet"
+  "none of {0} routes answers, the internet works directly": "noneOfRoutesAnswersTheInternet",
+  "Checking routes · the network is back, no route has answered yet": "checkingRoutesTheNetworkIsBack"
 }

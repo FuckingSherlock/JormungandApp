@@ -185,7 +185,7 @@ String? eventOpenTarget(EventRecord e, CoreHost host) {
       switch (e.type) {
         case 'lost' || 'restored':
           return 'route';
-        case 'vpnDown' when d['causes'] is List && (d['causes'] as List).contains('routes'):
+        case 'vpnDown' when (d['causes'] is List && (d['causes'] as List).contains('routes')) || d['pending'] == 'routes':
           return 'route';
         case 'failing':
           final app = d['app'];
@@ -326,7 +326,7 @@ class EventRow extends StatelessWidget {
       case 'conn/vpnDown' when live:
         // Retry: the core is the cause and sing-box is not running; the rest goes below (Send report, Network settings)
         if (vpnCauses.contains('core') && host.phase != ConnectionPhase.connected) add(l10n.retry, () => host.retry());
-        if (vpnCauses.contains('routes')) {
+        if (vpnCauses.contains('routes') || dd['pending'] == 'routes') {
           addCheckNow();
           addOpen();
         }

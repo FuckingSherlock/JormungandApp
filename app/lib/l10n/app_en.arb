@@ -4322,6 +4322,7 @@
     }
   },
   "waitingForNetworkVpnIsOn": "Waiting for network · VPN is on, no internet connection",
+  "checkingRoutesTheNetworkIsBack": "Checking routes · the network is back, no route has answered yet",
   "singBoxStoppedAndHasNot": "sing-box stopped and has not restarted for 30 s",
   "singBoxStoppedAndHasNot2": "sing-box stopped and has not restarted for 30 s ({n0} restart attempts so far)",
   "@singBoxStoppedAndHasNot2": {

@@ -284,10 +284,12 @@ class EventWords {
       d['causes'] is List ? [for (final c in d['causes'] as List) '$c'] : <String>[];
 
   /// The row of `conn/vpnDown`: «Waiting for network» while the network is the only cause (the VPN is on, not a failure),
-  /// else «VPN is down» with the causes under it.
+  /// «Checking routes» while no cause is left but `pending: routes` (the network is back over silent routes), else
+  /// «VPN is down» with the causes under it.
   (String, String) _vpnDownRow(Map<String, dynamic> d, {int attempts = 0}) {
     final causes = _causes(d);
     if (causes.length == 1 && causes.first == 'network') return (l10n.waitingForNetworkVpnIsOn, '');
+    if (causes.isEmpty && d['pending'] == 'routes') return (l10n.checkingRoutesTheNetworkIsBack, '');
     return (l10n.vpnIsDown, _vpnDownReason(d, attempts: attempts));
   }
 
