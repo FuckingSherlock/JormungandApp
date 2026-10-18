@@ -1909,6 +1909,7 @@ class AutoService {
       if (to == null) {
         noNet = true; // no route answers: no network, not this route
         if (memory.lostAt == null) {
+          // (also again after the service cleared the debt: the lower rungs of the failure closed, the silence is checked anew)
           memory.lostAt = _clock();
           note?.call('auto: no route answers: nothing is moved until one does');
           _emitNet('lost', null);

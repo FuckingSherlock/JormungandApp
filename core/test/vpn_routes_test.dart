@@ -247,36 +247,141 @@ void main() {
     expect(events('conn', 'vpnDown'), hasLength(1));
   });
 
-  test('routes stand, the network goes: routes STAY beside network (no flip), error, same event; the network returns: routes alone; no vpnUp between', () async {
+  /// Causes of the vpnDown that is still open (no vpnUp opens it); [] when none is open.
+  List currentCauses() {
+    final downs = events('conn', 'vpnDown');
+    if (downs.isEmpty) return const [];
+    final last = downs.last;
+    final closed = events('conn', 'vpnUp').any((u) => u['opens'] == last['id']);
+    return closed ? const [] : causesOf(last);
+  }
+
+  /// Steps time until `routes` is a current cause (the Sentinel may also wait for the network / core to settle after
+  /// they returned, so the end is bounded loosely); [spent] seconds already passed since the fresh silence. The fresh
+  /// window connLost (12 s) must have elapsed first.
+  Future<void> untilRoutesCause(int spent) async {
+    var t = spent;
+    while (!currentCauses().contains('routes') && t < 150) {
+      await time.advanceSeconds(1);
+      t++;
+    }
+    expect(t, greaterThanOrEqualTo(12), reason: 'not before the fresh window connLost has elapsed');
+  }
+
+  /// The ladder: routes is never a current cause beside core / network, and there are never three.
+  void expectLadder() {
+    final c = currentCauses();
+    expect(c.length, lessThanOrEqualTo(2), reason: 'never three causes: $c');
+    if (c.contains('routes')) {
+      expect(c, ['routes'], reason: 'routes is a cause only while core and network are not: $c');
+    }
+  }
+
+  test('LADDER: routes stand, the network opens: routes LEAVE, causes [network], warn (waiting), same event updated in place', () async {
     await start();
     final first = await routesDown(2);
     final id = first['id'];
     final rev0 = rev(first);
     await networkGone();
-    var down = downOf();
+    final down = downOf();
     expect(down['id'], id, reason: 'the same event');
-    expect(causesOf(down), ['routes', 'network'], reason: 'order of appearance, routes does not leave');
-    expect(down['level'], 'error', reason: 'routes is a cause: not just waiting');
+    expect(causesOf(down), ['network'], reason: 'routes left the causes');
+    expect(down['level'], 'warn', reason: 'network alone is waiting');
     expect(rev(down), greaterThan(rev0));
-    expect(down['data'], containsPair('routes', 2));
-    expect(svc.sentinel.roots.byKey('conn.lost'), isNotNull, reason: 'the root stays');
+    expect((down['data'] as Map).containsKey('routes'), isFalse, reason: 'data.routes only while routes is a cause');
     expect(events('conn', 'vpnUp'), isEmpty);
-    final rev1 = rev(down);
+    expect(events('conn', 'vpnDown'), hasLength(1));
+    expectLadder();
+    expectNoOldPair();
+  });
 
-    await networkBack();
-    down = downOf();
+  test('LADDER: routes stand, the core goes down: causes [core], error, same event', () async {
+    await start();
+    final first = await routesDown(2);
+    final id = first['id'];
+    runner.failStarts = 1 << 20;
+    runner.up = false;
+    runner.onExit!(9);
+    for (var i = 0; i < 40; i++) {
+      await time.advanceSeconds(1);
+    }
+    final down = downOf();
     expect(down['id'], id);
-    expect(causesOf(down), ['routes']);
+    expect(causesOf(down), ['core']);
+    expect(down['level'], 'error');
+    expect((down['data'] as Map).containsKey('routes'), isFalse);
+    expect(events('conn', 'vpnDown'), hasLength(1));
+    expect(events('conn', 'vpnUp'), isEmpty);
+    expectLadder();
+    expectNoOldPair();
+  });
+
+  test('LADDER: the network returns while routes are still silent: no routes cause at once; only after a fresh silent connLost window, routes is the cause again', () async {
+    await start();
+    await routesDown(2);
+    await networkGone();
+    await networkBack();
+    expectLadder();
+    expect(currentCauses(), isNot(contains('routes')), reason: 'unchecked after the network returned: not shown');
+    expect(currentCauses(), isNot(contains('network')));
+    await time.advanceSeconds(5);
+    expect(currentCauses(), isNot(contains('routes')), reason: 'still inside the fresh window');
+
+    // a fresh check: Auto reports silence again with network and core alive
+    silent(2);
+    await time.advanceSeconds(5);
+    expect(currentCauses(), isNot(contains('routes')), reason: 'window not elapsed');
+    await untilRoutesCause(5);
+    expect(currentCauses(), ['routes']);
+    expectLadder();
+    final down = events('conn', 'vpnDown').last;
     expect(down['level'], 'error');
     expect(down['data'], containsPair('routes', 2));
-    expect(rev(down), greaterThan(rev1));
-    expect(events('conn', 'vpnUp'), isEmpty, reason: 'the failure never ended');
-    expect(events('conn', 'vpnDown'), hasLength(1));
+    expect(events('conn', 'vpnDown').length, lessThanOrEqualTo(2), reason: 'same event, or one new if the first had closed');
+    expectNoOldPair();
 
     await answers();
+    expect(currentCauses(), isEmpty);
+    final ups = events('conn', 'vpnUp');
+    expect(ups.last['opens'], down['id']);
+    expect(causesOf(ups.last), contains('routes'));
+    expectNoOldPair();
+  });
+
+  test('LADDER: the network returns and a route answers: vpnUp closes with all causes of the failure, no new vpnDown', () async {
+    await start();
+    final first = await routesDown(2);
+    await networkGone();
+    await networkBack();
+    await answers();
+    await time.advanceSeconds(40);
+    expect(currentCauses(), isEmpty);
+    expect(events('conn', 'vpnDown'), hasLength(1), reason: 'the routes answered: no re-suspicion');
     final up = events('conn', 'vpnUp').single;
-    expect(up['opens'], id);
-    expect(causesOf(up), unorderedEquals(['routes', 'network']), reason: 'all causes of the failure');
+    expect(up['opens'], first['id']);
+    expect(causesOf(up), unorderedEquals(['routes', 'network']));
+    expect(svc.sentinel.roots.byKey('conn.lost'), isNull);
+    expectNoOldPair();
+  });
+
+  test('LADDER: core and network stand together (independent rungs): both causes, error; one leaves, the event stays; routes never join', () async {
+    await start();
+    final first = await crashUntilVpnDown();
+    await networkGone();
+    var down = downOf();
+    expect(down['id'], first['id']);
+    expect(causesOf(down), ['core', 'network']);
+    expect(down['level'], 'error');
+    silent(2);
+    await time.advanceSeconds(30);
+    expect(causesOf(downOf()), ['core', 'network'], reason: 'silence over two lower rungs is a consequence');
+    expectLadder();
+    await networkBack();
+    expect(causesOf(downOf()), ['core']);
+    expect(downOf()['level'], 'error');
+    expect(events('conn', 'vpnUp'), isEmpty);
+    await recoverCore();
+    expect(events('conn', 'vpnUp').single['data']['causes'], unorderedEquals(['core', 'network']));
     expectNoOldPair();
   });
 
@@ -297,7 +402,7 @@ void main() {
     expectNoOldPair();
   });
 
-  test('routes and core together: both causes in order of appearance, error; one leaves, the event stays open; the last closes with both', () async {
+  test('routes stand, the core goes and returns, routes still silent: routes come back as a cause only after a fresh silent window; then the answer closes with both', () async {
     await start();
     final first = await routesDown(2);
     final id = first['id'];
@@ -307,25 +412,33 @@ void main() {
     for (var i = 0; i < 40; i++) {
       await time.advanceSeconds(1);
     }
-    var down = downOf();
-    expect(down['id'], id);
-    expect(causesOf(down), ['routes', 'core']);
-    expect(down['level'], 'error');
-    expect(down['joins'], [events('core', 'crashed').single['id']]);
-    expect(svc.sentinel.roots.byKey('conn.lost')!.eventId, id);
+    expect(causesOf(downOf()), ['core']);
+    expect(downOf()['joins'], [events('core', 'crashed').single['id']]);
     expect(svc.sentinel.roots.byKey(rootCoreDown)!.eventId, id);
 
     await recoverCore();
-    down = downOf();
-    expect(causesOf(down), ['routes']);
-    expect(down['level'], 'error', reason: 'routes alone is not waiting: error');
-    expect(events('conn', 'vpnUp'), isEmpty);
+    expectLadder();
+    expect(currentCauses(), isNot(contains('routes')), reason: 'unchecked right after the core returned');
 
+    silent(2);
+    await untilRoutesCause(0);
+    expect(currentCauses(), ['routes']);
+    expect(events('conn', 'vpnDown').last['level'], 'error');
+    expectLadder();
+
+    final closedBefore = events('conn', 'vpnUp').length;
     await answers();
-    final up = events('conn', 'vpnUp').single;
-    expect(up['opens'], id);
-    expect(causesOf(up), unorderedEquals(['routes', 'core']));
-    expect(events('conn', 'vpnDown'), hasLength(1));
+    expect(currentCauses(), isEmpty);
+    final ups = events('conn', 'vpnUp');
+    if (closedBefore == 0) {
+      expect(causesOf(ups.last), containsAll(['routes', 'core']), reason: 'one event for the whole failure');
+    } else {
+      // the core's return closed the failure (routes unchecked, not shown): that vpnUp has the causes it had; the fresh
+      // suspicion opened a new vpnDown, closed by the answer with [routes]
+      expect(causesOf(ups.first), containsAll(['routes', 'core']));
+      expect(causesOf(ups.last), ['routes']);
+      expect(events('conn', 'vpnDown'), hasLength(2));
+    }
     expectNoOldPair();
   });
 

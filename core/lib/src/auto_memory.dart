@@ -73,7 +73,9 @@ class AutoMemory {
   bool noNet = false;
 
   /// Since when no route answers while the `lost` of it stands (owed a `restored`); null = nothing stands. Survives the
-  /// network change too: the answer that ends the outage still closes the event written for it.
+  /// network change too: the answer that ends the outage still closes the event written for it. The service clears it
+  /// (no answer) when the lower rungs of the failure (`core.down`, `net.offline`) close while the routes are still
+  /// silent: the next silent round says `lost` again, a fresh suspicion (`logs.md` → «Лестница»).
   int? lostAt;
 
   /// Another network than the one the «no network» was found on: it is unknown now, not «no network» and not «online»

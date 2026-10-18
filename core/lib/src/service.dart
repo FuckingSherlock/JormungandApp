@@ -907,11 +907,7 @@ class CoreService implements CoreApi {
     eventBook.stream.listen((_) => _changed()); // most changes of the status are written to the journal
     sentinel.changes.listen((_) {
       _syncNetEvents(); // `net.offline` opened / closed: conn/vpnDown (connected), conn/offline, conn/online
-      final lost = sentinel.roots.byKey(_routesRoot) != null;
-      if (lost != _routesStands) {
-        _routesStands = lost;
-        _vpnSync(); // `conn.lost` opened / closed: the cause `routes` of conn/vpnDown (only then: any other change of the roots, e.g. the core root closed by a disconnect, must not close the failure before the disconnect says `by`)
-      }
+      _syncRoutes(); // `conn.lost` opened / closed / relinked, the lower rungs closed: the cause `routes` of conn/vpnDown
       _attachVpnRoots(); // a root that opened during the failure gets its event
       _syncNetSwitch(); // the network settled: net/switched
       _changed(); // the network and the core phase are in the status (`context`)
@@ -1854,7 +1850,9 @@ class CoreService implements CoreApi {
   /// No route answers (Auto's `lost`). A suspicion with no event of its own: it is a consequence of `core.down` /
   /// `net.offline` when the direct path is silent too, a `blip` when a route answers again inside the window — both only
   /// in the raw log, no cause; a standing one is a root that covers every failure through the proxy (`path: proxy`) until
-  /// [routesRestored], and is the cause `routes` of `conn/vpnDown` ([_vpnSync], which the Sentinel's change hook calls).
+  /// [routesRestored], and is the cause `routes` of `conn/vpnDown` while no lower rung (`core`, `network`) is
+  /// ([_syncRoutes], which the Sentinel's change hook calls). Auto says `lost` once per debt (`AutoMemory.lostAt`): when
+  /// the lower rungs close, [_syncRoutes] clears the debt, so the silence is suspected anew.
   /// `conn/lost` is not written by the core any more. Public for the tests.
   void routesLost(AutoNet n, int routes) {
     if (!_connected) return; // while disconnected nothing about the routes is written (Auto does not run then either)
@@ -1965,13 +1963,15 @@ class CoreService implements CoreApi {
   // ---- «VPN не работает» (docs/logs.md): conn/vpnDown / conn/vpnUp ----
   // While the user is connected (sing-box up or being restarted) the internet through the VPN does not work for one of
   // three causes: `core` (sing-box did not come back in 30 s, [_downSince]), `network` (the net.offline root stands) or
-  // `routes` (no route answers: the `conn.lost` root stands, and stays a cause until a route answers).
+  // `routes` (no route answers: the `conn.lost` root stands). A ladder: `core` and `network` are the lower rungs (they may
+  // stand together), `routes` is a cause only while neither is ([_syncRoutes]).
   // One event for the whole failure: written at the first cause, changed in place when the causes change, closed by
   // `vpnUp` when none is left or the user disconnects. The state is derived from [_downSince] / [_netRoot] / the
   // `conn.lost` root by [_vpnSync], which every place that changes any of them calls (the roots: the Sentinel's change hook).
 
   static const _routesRoot = 'conn.lost'; // the Sentinel's root (kind and key) of the cause `routes`
-  var _routesStands = false; // the `conn.lost` root stood at the last change of the Sentinel
+  var _routesStands = false; // the `conn.lost` root stood at the last change of the Sentinel ([_routesRootStanding])
+  var _lowerStands = false; // `core.down` or `net.offline` stood at the last change of the Sentinel
   int? _routesSilent; // how many routes were silent when the outage began (`routes` of `conn/vpnDown`)
 
   int? _vpnId; // the open `conn/vpnDown`
@@ -1997,15 +1997,52 @@ class CoreService implements CoreApi {
     return id;
   }
 
+  // The cause `routes` and the Sentinel's roots (called by its change hook). `core.down` / `net.offline` opened over a
+  // standing `conn.lost`: the Sentinel relinks it under that root as a consequence; `routes` leaves the causes when that
+  // rung is a cause itself ([_vpnSync]; a network gone for less than `netBlip` is not).
+  // The lower rungs closed while the routes are still silent (the `conn.lost` root is still a consequence of the closed
+  // root, or the silence never became a root, or its suspicion is parked): what was seen before is not told. The root
+  // closes, the suspicion ends and Auto's debt `lostAt` is cleared, so its next silent round says `lost` again — a new
+  // suspicion with its own window `connLost` from that moment; confirmed, `routes` is a cause again (the open `vpnDown`
+  // changed in place, or a new one).
+  void _syncRoutes() {
+    final roots = sentinel.roots;
+    final lower = roots.byKind(rootCoreDown) != null || roots.byKind(rootNetOffline) != null;
+    final lost = roots.byKey(_routesRoot);
+    final parent = lost?.parent;
+    final orphan = parent != null && roots.byId(parent) == null;
+    final closed = _lowerStands && !lower;
+    _lowerStands = lower;
+    if (!lower && _connected && (closed || orphan) && (lost == null || parent != null)) {
+      sentinel.recovered(_routesRoot, reason: 'cause.closed');
+      autoMemory.lostAt = null;
+    }
+    final standing = _routesRootStanding() != null;
+    if (standing != _routesStands) {
+      _routesStands = standing;
+      _vpnSync(); // only then: any other change of the roots, e.g. the core root closed by a disconnect, must not close the failure before the disconnect says `by`
+    }
+  }
+
+  // The `conn.lost` root when it stands for the cause `routes`: it is a root only once `confirmed`, and it is not the
+  // consequence of a root that is closed since (the lower rungs went away while the routes were silent: unchecked, not
+  // shown until [_syncRoutes] has suspected the silence anew). Under an open `core.down` / `net.offline` it still stands
+  // until that rung is a cause itself (the network gone for less than `netBlip` is not one).
+  Root? _routesRootStanding() {
+    final lost = sentinel.roots.byKey(_routesRoot);
+    final parent = lost?.parent;
+    return lost == null || (parent != null && sentinel.roots.byId(parent) == null) ? null : lost;
+  }
+
   void _vpnSync({String? by}) {
     if (_disposed) return;
     final core = _downSince != null;
     final netRoot = _netRoot;
     final net = _connected && netRoot != null && _netStanding;
-    // `routes`: the `conn.lost` root stands (it is a root only once `confirmed`, a silence that `core` or `network` explains
-    // never became one). Once it is a cause it stays one beside the others (no flip «gone / back» when the network goes
-    // and returns) until a route answers: [routesRestored] closes the root.
-    final lost = _connected ? sentinel.roots.byKey(_routesRoot) : null;
+    // `routes`: the `conn.lost` root stands ([_routesRootStanding]) and neither `core` nor `network` is a cause: they are
+    // the lower rungs, the silence under them is their consequence.
+    final lostRoot = _connected ? _routesRootStanding() : null;
+    final lost = lostRoot != null && !core && !net ? lostRoot : null;
     final routes = lost != null;
     final causes = [
       for (final c in _vpnCauses)
@@ -2101,8 +2138,10 @@ class CoreService implements CoreApi {
     final id = _vpnId;
     if (id == null) return;
     // `conn.lost` that carries the event and then finds `core.down` / `net.offline` open over it is relinked under that
-    // root by the Sentinel: the event would turn into its consequence (verdict, why, a relink step) and, with the event on
-    // the new root, its own cause. The failure is not a consequence of its own cause: undone here.
+    // root by the Sentinel, and `routes` leaves the causes. When the event goes on (the lower rung is a cause already, it
+    // changes in place), it would turn into its consequence (verdict, why, a relink step) and, with the event on the new
+    // root, its own cause: the failure is not a consequence of its own cause, undone here. An event that closed instead
+    // (no cause left) stays what the relink made it: a consequence of the lower failure, which gets it as `cause`.
     final lost = sentinel.roots.byKey(_routesRoot);
     final parent = lost == null || lost.eventId != id || lost.parent == null ? null : sentinel.roots.byId(lost.parent!);
     if (parent != null && parent.consequences.remove(id)) {
