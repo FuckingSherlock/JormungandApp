@@ -64,7 +64,7 @@ void main() {
     ];
     final m = vpnLineMarks(journal);
     expect(m.keys, unorderedEquals([1, 2, 3, 4, 5, 6]));
-    expect(sig(m[1]!), [VpnLine.on, VpnLine.on, VpnDot.change], reason: 'connected first: the line above it is on');
+    expect(sig(m[1]!), [VpnLine.off, VpnLine.on, VpnDot.change], reason: 'connected first: the VPN was off above it');
     expect(sig(m[2]!), [VpnLine.on, VpnLine.waiting, VpnDot.change]);
     expect(sig(m[3]!), [VpnLine.waiting, VpnLine.down, VpnDot.change]);
     expect(sig(m[4]!), [VpnLine.down, VpnLine.on, VpnDot.change]);
@@ -104,8 +104,8 @@ void main() {
     expect(sig(m[3]!), [VpnLine.waiting, VpnLine.waiting, VpnDot.reconnect]);
   });
 
-  test('before the first state event the line is inferred from it: connected, reconnected and vpnDown mean on above it', () {
-    expect(sig(vpnLineMarks([connected(1)])[1]!), [VpnLine.on, VpnLine.on, VpnDot.change]);
+  test('before the first state event the line is inferred from it: connected means off above it; reconnected and vpnDown mean on', () {
+    expect(sig(vpnLineMarks([connected(1)])[1]!), [VpnLine.off, VpnLine.on, VpnDot.change]);
     expect(sig(vpnLineMarks([reconnected(1)])[1]!), [VpnLine.on, VpnLine.on, VpnDot.reconnect]);
     expect(sig(vpnLineMarks([vpnDown(1, ['network'])])[1]!), [VpnLine.on, VpnLine.waiting, VpnDot.change]);
     expect(sig(vpnLineMarks([vpnDown(1, ['core'])])[1]!), [VpnLine.on, VpnLine.down, VpnDot.change]);

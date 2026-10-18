@@ -655,12 +655,12 @@ class VpnMark {
 Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
   const stateKeys = {'conn/connected', 'conn/disconnected', 'conn/reconnected', 'conn/vpnDown', 'conn/vpnUp'};
   final events = journal.toList();
-  // before the first state event: vpnUp first - the VPN was down; any other state event first - it was on;
-  // no state events at all - off
+  // before the first state event: connected first - the VPN was off; vpnUp first - it was down; any other state
+  // event first - it was on; no state events at all - off
   var cur = VpnLine.off;
   for (final e in events) {
     if (stateKeys.contains(e.key)) {
-      cur = e.key == 'conn/vpnUp' ? VpnLine.down : VpnLine.on;
+      cur = switch (e.key) { 'conn/connected' => VpnLine.off, 'conn/vpnUp' => VpnLine.down, _ => VpnLine.on };
       break;
     }
   }

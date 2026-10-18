@@ -1266,7 +1266,7 @@ class EventWords {
     'name' => l10n.name,
     'added' => l10n.newServers,
     'removed' => l10n.removed,
-    'total' || 'count' => l10n.servers,
+    'total' || 'count' || 'nodeCount' || 'lostCount' => l10n.servers,
     'error' => l10n.error,
     'tag' => l10n.ruleSet,
     'url' => 'URL',
@@ -1430,6 +1430,7 @@ class EventWords {
       if (x.key == 'source' && e.cat == 'conn') continue; // 'closed': where the core saw it, not a subscription
       if (x.key == 'by') continue; // who is in the title (VPN disconnected · by you …), no «By» field below
       if (x.key == 'repeat') continue; // shown as the row's times
+      if (x.key == 'affected' || x.key == 'nodeIds') continue; // the affected list is drawn as its own rows; ids are for the buttons
       if (e.cat == 'sub' && (x.key == 'onlyDirectCount' || x.key == 'onlyTunnelCount')) continue; // folded into the list's value
       if (x.key == 'check' && v is Map) {
         out.addAll(checkFields(v));

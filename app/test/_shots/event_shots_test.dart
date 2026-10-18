@@ -29,6 +29,7 @@ import 'package:jormungand/state/app_settings.dart';
 import 'package:jormungand/theme/app_colors.g.dart';
 import 'package:jormungand/widgets/event_rows.dart';
 import 'package:jormungand/widgets/source_error_strip.dart';
+import 'package:jormungand/widgets/vpn_rail.dart';
 import 'package:jormungand/widgets/vpn_alert.dart';
 import 'package:jormungand_core/jormungand_core.dart';
 
@@ -91,13 +92,28 @@ FakeCoreHost _host() {
 
 /// One event with its caption data. [id] is set when the record is made.
 class Ev {
-  const Ev(this.cat, this.type, this.data, {this.level = 'warn', this.bg = false, this.log, this.variant = ''});
+  const Ev(this.cat, this.type, this.data, {this.level = 'warn', this.bg = false, this.log, this.own = false, this.variant = ''});
   final String cat, type, level, variant;
   final Map<String, dynamic> data;
-  final bool bg;
+  final bool bg, own;
   final int? log;
   String get key => '$cat/$type';
 }
+
+/// The affected settings of a lost used server (`affected`, docs/logs.md «Задетые настройки»): connection,
+/// two rules, one app, one chain.
+final _affected = <Map<String, dynamic>>[
+  {'kind': 'connection', 'id': 's1', 'name': 'Remnawave', 'to': 'main'},
+  {'kind': 'rule', 'id': 'r1', 'name': 'Streaming', 'to': 'direct'},
+  {'kind': 'rule', 'id': 'r2', 'name': 'Work', 'to': 'block'},
+  {'kind': 'app', 'id': 'org.telegram.messenger', 'name': 'Telegram', 'to': 'src:s2'},
+  {'kind': 'chain', 'id': 'c1', 'name': 'Remnawave via Backup', 'to': 'none'},
+];
+/// A whole source deleted: the chain is not working, the app goes to the main flow.
+final _affectedSource = <Map<String, dynamic>>[
+  {'kind': 'chain', 'id': 'c1', 'name': 'Remnawave via Backup', 'to': 'none'},
+  {'kind': 'app', 'id': 'org.telegram.messenger', 'name': 'Telegram', 'to': 'main'},
+];
 
 const _chk = [
   {'cc': 'DE', 'country': 'Germany', 'city': 'Frankfurt', 'ok': true, 'code': 200, 'ms': 210},
@@ -141,11 +157,16 @@ final _events = <String, List<Ev>>{
   'sub': [
     Ev('sub', 'failed', {'source': 's1', 'name': 'Remnawave', 'error': 'HTTP 403: request blocked'}, level: 'error'),
     Ev('sub', 'diverged', {'source': 's1', 'name': 'Remnawave', 'host': 'sub.example.com', 'ua': 'sing-box', 'directNodes': 12, 'tunnelNodes': 15, 'onlyDirect': <String>[], 'onlyTunnel': ['Helsinki 1 (1.1.1.1:443)', 'Warsaw (2.2.2.2:443)'], 'onlyTunnelCount': 3, 'directStatus': 200, 'tunnelStatus': 200, 'directMs': 1200, 'tunnelMs': 300, 'directPath': 'direct', 'tunnelPath': 'proxy', 'directFresh': {'lastModified': 'Mon, 12 Oct 2026 08:00:00 GMT'}, 'tunnelFresh': {'lastModified': 'Tue, 13 Oct 2026 08:00:00 GMT'}, 'used': 'tunnel', 'why': 'newer: lastModified'}),
-    Ev('sub', 'updated', {'source': 's1', 'name': 'Remnawave', 'total': 42, 'added': 3, 'removed': 1}, level: 'info'),
-    Ev('sub', 'removed', {'source': 's1', 'name': 'Remnawave', 'count': 2}),
-    Ev('sub', 'back', {'source': 's1', 'name': 'Remnawave', 'count': 2}, level: 'info'),
+    Ev('sub', 'updated', {'source': 's1', 'name': 'Remnawave', 'total': 42, 'added': 3, 'removed': 1}, level: 'info', variant: 'автообновление: список изменился'),
+    Ev('sub', 'updated', {'source': 's1', 'name': 'Remnawave', 'total': 40, 'added': 0, 'removed': 2, 'lost': ['Helsinki 1', 'Warsaw'], 'lostCount': 2, 'affected': _affected}, variant: 'провайдер убрал используемые серверы (задетые настройки)'),
+    Ev('sub', 'back', {'source': 's1', 'name': 'Remnawave', 'count': 2, 'names': ['Helsinki 1', 'Warsaw'], 'affected': _affected}, level: 'info', variant: 'серверы вернулись (закрывает warn sub/updated)'),
+    Ev('sub', 'removed', {'source': 's1', 'name': 'Remnawave', 'count': 2}, variant: 'старый журнал: больше не пишется'),
     Ev('sub', 'dead', {'source': 's1', 'name': 'Remnawave'}),
     Ev('node', 'addressMissing', {'host': 'de1.bad-host.example', 'node': 'Frankfurt 1', 'source': 's1', 'nodes': 3, 'inUse': true}),
+    Ev('node', 'lost', {'action': 'off', 'source': 's1', 'name': 'Remnawave', 'nodes': ['Helsinki 1', 'Frankfurt 1'], 'nodeIds': ['s1::n3', 's1::n1'], 'nodeCount': 2, 'affected': _affected}, own: true, variant: 'action off: выключил два используемых сервера (Switch on, Choose for all)'),
+    Ev('node', 'lost', {'action': 'off', 'source': 's1', 'name': 'Remnawave', 'nodes': ['Warsaw'], 'nodeIds': ['s2::b1'], 'nodeCount': 1, 'affected': [_affected[3]]}, own: true, variant: 'action off: один используемый сервер (тап по строке, без Choose for all)'),
+    Ev('node', 'lost', {'action': 'deleted', 'source': 's2', 'name': 'Backup VPN', 'nodes': ['Warsaw'], 'nodeCount': 1, 'affected': _affectedSource}, own: true, variant: 'action deleted: удалил источник целиком (пары нет)'),
+    Ev('node', 'back', {'source': 's1', 'name': 'Remnawave', 'nodes': ['Helsinki 1', 'Frankfurt 1'], 'nodeCount': 2, 'affected': _affected}, level: 'info', variant: 'включил обратно (закрывает node/lost off)'),
   ],
   'dns': [
     Ev('dns', 'failed', {'server': 'cloudflare', 'path': 'proxy', 'since': _now - 60000, 'provider': 'cloudflare', 'side': 'vpn', 'servers': ['cloudflare']}),
@@ -155,7 +176,7 @@ final _events = <String, List<Ev>>{
   'auto': [
     Ev('auto', 'switched', {'route': 's1', 'from': 's1::n1', 'to': 's1::n2', 'reason': 'failover', 'fails': 3}, level: 'info'),
     Ev('auto', 'fastest', {'route': 's1', 'from': 's1::n1', 'to': 's1::n3'}, level: 'info'),
-    Ev('auto', 'unstable', {'id': 's1', 'strikes': 3, 'holdMs': 600000}),
+    Ev('auto', 'unstable', {'id': 's1', 'strikes': 3, 'holdMs': 600000}, variant: 'текст «<X> is unstable · N failures, excluded for M min»; Return once / Don\'t exclude скрыты (нет исключения на время)'),
   ],
   'conn': [
     Ev('conn', 'lost', {}),
@@ -164,11 +185,21 @@ final _events = <String, List<Ev>>{
     Ev('conn', 'online', {'downMs': 120000}, level: 'info'),
     Ev('conn', 'connectFailed', {'reason': 'Manual pick "Frankfurt 1" (Remnawave) is unavailable: the subscription no longer has it. The tunnel is not moved to another server — choose a server in Route.', 'fix': 'pick'}, level: 'error', variant: 'pinLost'),
     Ev('conn', 'connected', {'entry': 's1', 'server': 's1::n1', 'mode': 'tun', 'route': 'rules'}, level: 'info'),
-    Ev('conn', 'disconnected', {'by': 'error', 'reason': 'sing-box exited'}, level: 'warn'),
+    Ev('conn', 'disconnected', {'by': 'user'}, level: 'info', own: true, variant: 'по команде пользователя'),
+    Ev('conn', 'disconnected', {'by': 'system', 'reason': 'revoked'}, variant: 'VPN отняла система (отзыв туннеля)'),
+    Ev('conn', 'disconnected', {'by': 'error', 'reason': 'down', 'attempts': 3}, variant: 'ошибка: sing-box не поднялся после 3 попыток'),
+    Ev('conn', 'disconnected', {'by': 'error', 'reason': 'pinLost', 'pick': 'Frankfurt 1', 'why': 'deleted'}, variant: 'ошибка: пропал закреплённый сервер (Manual)'),
+    Ev('conn', 'disconnected', {'by': 'error', 'reason': 'sing-box exited'}, variant: 'ошибка: неизвестная причина'),
+    Ev('conn', 'reconnected', {'reason': 'settings', 'changed': {'mode': {'from': 'tun', 'to': 'proxy'}}, 'tookMs': 2300}, level: 'info', variant: 'настройки: режим TUN → Proxy'),
+    Ev('conn', 'reconnected', {'reason': 'lists', 'tookMs': 900}, level: 'info', variant: 'списки правил'),
+    Ev('conn', 'reconnected', {'reason': 'user', 'downMs': 6000, 'tookMs': 4100}, level: 'info', own: true, variant: 'пользователь: отключил и подключил снова'),
     Ev('conn', 'vpnDown', {'causes': ['core'], 'proxy': 'kept'}, level: 'error', variant: 'sing-box не поднялся, системный прокси оставлен'),
-    Ev('conn', 'vpnDown', {'causes': ['network'], 'source': 'platform'}, level: 'error', variant: 'нет сети'),
+    Ev('conn', 'vpnDown', {'causes': ['network'], 'source': 'platform'}, level: 'warn', variant: 'ожидание: только сеть (Waiting for network, жёлтая линия)'),
     Ev('conn', 'vpnDown', {'causes': ['core', 'network'], 'proxy': 'kept'}, level: 'error', variant: 'обе причины: core и network'),
-    Ev('conn', 'vpnUp', {'downMs': 185000, 'causes': ['core']}, level: 'info', variant: 'закрыто: VPN снова работает'),
+    Ev('conn', 'vpnUp', {'downMs': 185000, 'causes': ['core']}, level: 'info', variant: 'закрыто: VPN снова работает · sing-box запущен'),
+    Ev('conn', 'vpnUp', {'downMs': 90000, 'causes': ['network']}, level: 'info', variant: 'закрыто: VPN снова работает · интернет доступен'),
+    Ev('conn', 'vpnUp', {'downMs': 240000, 'causes': ['core', 'network']}, level: 'info', variant: 'закрыто: sing-box запущен, интернет доступен'),
+    Ev('conn', 'vpnUp', {'downMs': 60000, 'causes': ['core'], 'by': 'user'}, level: 'info', variant: 'закрыто пользователем: VPN outage ended · VPN disconnected (не восстановление, без уведомления)'),
   ],
   'core': [
     Ev('core', 'crashed', {'code': 2}, level: 'error'),
@@ -203,6 +234,7 @@ const _famTitle = {
   'conn': 'Соединение и ошибки подключения',
   'core': 'Ядро sing-box, TUN, TCP, сохранённые данные, спидтест',
   'update': 'Обновление приложения',
+  'feed': 'Лента: линия VPN и пары',
   'other': 'Прочие поверхности: тосты хоста, плашки на экранах',
 };
 
@@ -218,9 +250,11 @@ const _when = {
   'rules/ruleSetUpdated': 'Набор правил обновлён.',
   'sub/failed': 'Не удалось загрузить или обновить подписку (HTTP/формат). Серверы последней удачной загрузки продолжают работать.',
   'sub/diverged': 'В Auto прямая и туннельная копии подписки отличаются набором серверов; применена одна из них.',
-  'sub/updated': 'Подписка успешно обновилась (по умолчанию не уведомляет).',
-  'sub/removed': 'Провайдер убрал серверы из подписки.',
-  'sub/back': 'Убранные серверы вернулись.',
+  'sub/updated': 'Подписка успешно обновилась (info, по таймеру; ручное обновление успеха не пишет). Warn-вариация: провайдер убрал используемые серверы — «задетые настройки», закрывает sub/back; уведомление — subFailed.',
+  'sub/removed': 'Больше не пишется (с 2026-10-18 — warn-вариация sub/updated); в старом журнале показывается как раньше.',
+  'sub/back': 'Используемые серверы, убранные прошлым warn sub/updated, вернулись (все сразу; частичного возврата события нет). Закрывает пару, opens = sub/updated.',
+  'node/lost': 'Пользователь в Nodes выключил (action off) или удалил (deleted) используемый сервер или источник — событие own, только журнал. «Switch on» при off; «Choose for all» — если задето больше одного.',
+  'node/back': 'Пользователь включил обратно выключенные используемые серверы; закрывает node/lost (после deleted пары нет).',
   'sub/dead': 'Серверы подписки не отвечают (пишет только мокап; ядро и приложение это событие не создают).',
   'node/addressMissing': 'Имя сервера узла не существует в DNS (проверено дважды). Уведомляет только если узел используется (inUse).',
   'dns/failed': 'DNS-сервер подтверждённо не отвечает ни напрямую, ни через запасную ноду.',
@@ -235,12 +269,13 @@ const _when = {
   'conn/online': 'Интернет вернулся.',
   'conn/connectFailed': 'Подключение не удалось. Для Manual на потерянный сервер/запись (pinLost) — ошибка без подмены, работающее подключение завершается.',
   'conn/connected': 'Туннель поднят (журнальная запись).',
-  'conn/disconnected': 'Туннель остановлен (по ошибке или пользователем).',
+  'conn/disconnected': 'Туннель остановлен: пользователем (info), системой — отзыв VPN (warn, reason revoked), ошибкой (warn: sing-box не поднялся / пропал закреплённый сервер).',
   'core/crashed': 'sing-box упал; ядро запускает его заново. Не уведомляет: если не поднялся за 30 с, строка вливается в conn/vpnDown.',
   'core/restarted': 'sing-box запущен заново после падения.',
   'core/restartFailed': 'Перезапуск sing-box не удался.',
-  'conn/vpnDown': 'VPN не работает: sing-box не поднялся за 30 с (причина core) и/или нет сети (причина network). Одно событие на сбой, причины меняются на месте; уведомляет (connLost), плашка на Home.',
-  'conn/vpnUp': 'VPN снова работает: закрывает conn/vpnDown, уведомление заменяется; перерыв — downMs.',
+  'conn/vpnDown': 'VPN не работает: sing-box не поднялся за 30 с (причина core) и/или нет сети (причина network). Одно событие на сбой, причины меняются на месте. Только network — ожидание сети: warn, «Waiting for network», жёлтая линия. Уведомляет (connLost), плашка на Home.',
+  'conn/vpnUp': 'VPN снова работает: закрывает conn/vpnDown (своя строка-пара), уведомление заменяется; перерыв — downMs. По отключению (by user / system) — «VPN outage ended · VPN disconnected», не восстановление, без уведомления.',
+  'conn/reconnected': 'Подключение пересоздано на живом туннеле (план поменялся, списки, ручное «отключить → подключить» за ≤ 7 с). VPN не выключался: линия проходит сквозь (кольцо на точке).',
   'core/down': 'Больше не пишется (причина core у conn/vpnDown); в старом журнале — error.',
   'core/tunNeedsAdmin': 'TUN требует прав администратора (Windows).',
   'core/sysProxy': 'Системный прокси не удалось выставить/снять (или пользователь переключил).',
@@ -503,7 +538,7 @@ void main() {
       cat: e.cat,
       type: e.type,
       level: e.level,
-      own: false,
+      own: e.own,
       bg: e.bg,
       log: e.log,
       data: {...e.data},
@@ -575,7 +610,7 @@ void main() {
         final r = rec(e);
         recs[e] = r;
         if (!notifies(r)) continue;
-        final added = host.addEvent(e.cat, e.type, level: e.level, data: {...e.data}, bg: e.bg, log: e.log);
+        final added = host.addEvent(e.cat, e.type, level: e.level, own: e.own, data: {...e.data}, bg: e.bg, log: e.log);
         toastImg['${e.key}|${e.variant}'] = await grabToast();
         recs[e] = EventRecord.fromJson(added);
       }
@@ -735,6 +770,42 @@ void main() {
       ], RawImage(image: t.$1, scale: _ratio, fit: BoxFit.fill)));
       (covered['other'] ??= []).add('notice:$code');
     }
+
+    // the feed: the VPN line and pairs, built as logs_page.dart _eventsList does (VpnRail gutter + EventRow per group)
+    // its own host: the journal holds only the feed's events; the closing event names its opening one (`opens`)
+    final fh = FakeCoreHost();
+    fh.addEvent('conn', 'connected', level: 'info', own: true, at: _now - 600000, data: {'entry': 's1', 'server': 's1::n1', 'mode': 'tun', 'route': 'rules'});
+    final down = fh.addEvent('conn', 'vpnDown', level: 'error', at: _now - 540000, data: {'causes': ['network', 'core'], 'proxy': 'kept', 'source': 'platform'});
+    fh.addEvent('rules', 'ruleSetUpdated', level: 'info', at: _now - 480000, data: {'tag': 'geosite-ru'});
+    fh.addEvent('conn', 'vpnUp', level: 'info', at: _now - 420000, data: {'downMs': 185000, 'causes': ['network', 'core']})['opens'] = down['id'];
+    fh.addEvent('conn', 'reconnected', level: 'info', at: _now - 300000, data: {'reason': 'settings', 'changed': {'mode': {'from': 'tun', 'to': 'proxy'}}, 'tookMs': 2300});
+    fh.addEvent('conn', 'disconnected', level: 'info', own: true, at: _now - 120000, data: {'by': 'user'});
+    final feedJournal = [for (final m in fh.journal) EventRecord.fromJson(m)];
+    final feedMarks = vpnLineMarks(feedJournal);
+    final feedGroups = foldEvents(feedJournal);
+    final feedLogs = LogsController(fh)..l10n = _en;
+    feedLogs.feed.apply(fh.eventsPage()); // the controller's list of the journal (the pair link looks the opening one up in it)
+    final feed = Container(
+      color: appThemes[AppThemeId.original]!.scaffoldBackgroundColor,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        for (final (i, g) in feedGroups.indexed)
+          Stack(children: [
+            Padding(
+              padding: const EdgeInsets.only(left: VpnRail.width),
+              child: EventRow(group: g, logs: feedLogs, words: feedLogs.words, first: i == 0, onJump: (_) {}),
+            ),
+            Positioned(left: 0, top: 0, bottom: 0, width: VpnRail.width, child: VpnRail(feedMarks[g.ev.id])),
+          ]),
+      ]),
+    );
+    add('feed', await captioned([
+      ('Лента: линия VPN и пары (Logs → Events, как logs_page._eventsList)', true),
+      ('Форма: строки ленты — гуттер VpnRail слева (линия состояния VPN: зелёный — работает, красный — «не работает», жёлтый — ожидание сети, серый пунктир — выключен; точка — смена состояния, кольцо — conn/reconnected) и EventRow. Посторонний rules/ruleSetUpdated между ними — линия идёт сквозь.', false),
+      ('Пары: vpnUp — своя строка на своём месте по времени; у vpnDown статус «Завершилось … · длилось …» (тап — к vpnUp), у vpnUp — «Back to start: <заголовок vpnDown>» (тап — к началу).', false),
+      ('В журнале vpnDown одна запись, обновлённая на месте: сначала «ожидание» (network, warn), затем причина core добавилась — error. Показано текущее состояние; жёлтого отрезка в ленте нет.', false),
+      ('Тап по строке — раскрыть/свернуть; линия по всему журналу, не по видимым строкам.', false),
+    ], feed));
+    (covered['feed'] ??= []).add('conn/connected, vpnDown, vpnUp (пара), reconnected, disconnected: линия VPN и пары');
 
     // ── pages ──
     final files = <String, List<String>>{};
