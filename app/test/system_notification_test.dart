@@ -28,6 +28,7 @@ class FakeNotifyIo implements NotifyIo {
   final vpnNodes = <String?>[];
   final vpnVisible = <bool>[];
   int cancels = 0;
+  final cancelledIds = <int>[]; // the ids of the per-event cancels
   int settingsOpened = 0;
   int? launchEvent;
   final _taps = StreamController<int>.broadcast();
@@ -60,6 +61,9 @@ class FakeNotifyIo implements NotifyIo {
 
   @override
   Future<void> cancelEvents() async => cancels++;
+
+  @override
+  Future<void> cancelEvent(int id) async => cancelledIds.add(id);
 
   /// The update notifications asked for, and the version the native record says was announced.
   final updatePosted = <UpdateNote>[];
@@ -548,11 +552,13 @@ void main() {
         'dnsFailed': ('dns', 'failed'),
       };
       // how many notifications the kind's event makes now, in the background
+      // `sub/updated` is the subUpdated kind only at info; at warn it is the subFailed kind
+      const infoKeys = {'subUpdated'};
       Future<int> fire(String key) async {
         final before = io.posted.length;
         goBackground(tester);
         final (cat, type) = events[key]!;
-        host.addEvent(cat, type, level: 'warn');
+        host.addEvent(cat, type, level: infoKeys.contains(key) ? 'info' : 'warn');
         await settle(tester);
         comeBack(tester);
         await tester.pump();

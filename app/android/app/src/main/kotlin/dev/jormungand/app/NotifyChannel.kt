@@ -25,6 +25,7 @@ import io.flutter.plugin.common.MethodChannel
  *                           ([EventActionReceiver]; [ignoredText] / [undoLabel] are the texts it shows)
  *  takeIgnoreOps -> List<Map> [{op: ignore | unignore, site}] the «Ignore site» / «Undo» choices made on the shade
  *                           since the last call, in order (the queue is emptied)
+ *  cancelEvent   -> null    args {id: Int}: removes that one event's notification (the summary follows)
  *  cancelEvents  -> null    removes the event notifications (the app came to the front)
  *  setStatus     -> null    args {node: String?, visible: Boolean}, either key optional: the entry / server
  *                           shown in the VPN notification; whether it is on the shade at all (kept natively,
@@ -120,6 +121,10 @@ class NotifyChannel(private val app: Context) {
                     call.argument<String>("ignoredText") ?: "",
                     call.argument<String>("undoLabel") ?: "",
                 )
+                result.success(null)
+            }
+            "cancelEvent" -> {
+                call.argument<Int>("id")?.let { AppNotifier.cancelEvent(app, it) }
                 result.success(null)
             }
             "cancelEvents" -> {

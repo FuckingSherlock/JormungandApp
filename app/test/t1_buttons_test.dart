@@ -129,21 +129,34 @@ void main() {
       expect(find.text(_en.openUpdate), findsOneWidget);
     });
 
-    for (final type in ['removed', 'back']) {
-      testWidgets('sub/$type in use: Choose server', (tester) async {
-        final host = FakeCoreHost();
-        host.addEvent(
-          'sub',
-          type,
-          level: 'warn',
-          data: const {'source': 's1', 'name': 'Alpha', 'count': 1, 'names': ['Beta'], 'inUse': true},
-        );
-        await pumpApp(tester, host);
-        await _openLogs(tester);
+    testWidgets('sub/removed (old journal) in use: Choose server', (tester) async {
+      final host = FakeCoreHost();
+      host.addEvent(
+        'sub',
+        'removed',
+        level: 'warn',
+        data: const {'source': 's1', 'name': 'Alpha', 'count': 1, 'names': ['Beta'], 'inUse': true},
+      );
+      await pumpApp(tester, host);
+      await _openLogs(tester);
 
-        expect(find.text(_en.chooseServer), findsOneWidget);
-      });
-    }
+      expect(find.text(_en.chooseServer), findsOneWidget);
+    });
+
+    testWidgets('sub/back has no buttons (docs/logs.md «По типам»)', (tester) async {
+      final host = FakeCoreHost();
+      host.addEvent(
+        'sub',
+        'back',
+        level: 'info',
+        data: const {'source': 's1', 'name': 'Alpha', 'count': 1, 'names': ['Beta']},
+      );
+      await pumpApp(tester, host);
+      await _openLogs(tester);
+
+      expect(find.text(_en.chooseServer), findsNothing);
+      expect(find.text(_en.open), findsNothing);
+    });
 
     testWidgets('core/crashed: Retry while the core is not running; «restarted» closes the row and the Retry goes', (
       tester,
@@ -307,11 +320,11 @@ void main() {
           _words(host).describe(EventRecord.fromJson(host.addEvent('conn', 'disconnected', level: 'warn', data: d))).title;
       expect(
         detail(const {'by': 'error', 'reason': 'pinLost', 'pick': 'Frankfurt 1', 'why': 'off'}),
-        _en.disconnectedTheSelectedServerIsUnavailab('Frankfurt 1', _en.switchedOff),
+        _en.vpnDisconnectedErrorServerIsUnavailable('Frankfurt 1', _en.switchedOff),
       );
       expect(
         detail(const {'by': 'error', 'reason': 'pinLost', 'pick': '', 'why': 'deleted'}),
-        _en.disconnectedTheSelectedServerIsUnavailab2(_en.deleted2),
+        _en.vpnDisconnectedErrorServerIsUnavailable2(_en.deleted2),
       );
     });
   });

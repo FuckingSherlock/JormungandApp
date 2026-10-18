@@ -9,6 +9,7 @@ import 'package:jormungand_core/jormungand_core.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import 'catalog_model_test.dart' show snap;
 import 'fixtures.dart';
 
 const _h = 3600 * 1000;
@@ -87,11 +88,48 @@ void main() {
             ...patch,
           };
       var state = src({});
+      // The servers SE and SS2022 are used: a rule targets each (once the source knows their ids).
+      Future<void> save() async {
+        String? id(String name) {
+          for (final n in (state['nodes'] as List).cast<Map>()) {
+            if (n['name'] == name) return '${n['id']}';
+          }
+          return null;
+        }
+
+        final rules = <String, dynamic>{};
+        for (final (rid, name) in [('r1', 'SE'), ('r2', 'SS2022')]) {
+          final nid = id(name);
+          if (nid == null) continue;
+          rules[rid] = {
+            'id': rid,
+            'name': 'Rule $rid',
+            'enabled': true,
+            'action': 'proxy',
+            'target': 'node:s1::$nid',
+            'fallback': 'block',
+            'groups': {'domain': {'not': false, 'v': {'domain_suffix': ['$rid.test']}}},
+          };
+        }
+        final (code, _) = await call('PUT', '/api/state', {
+          'snapshot': snap(over: {
+            'sourcesData': {'s1': state},
+            'sourceOrder': ['s1'],
+            'connectOrder': ['s1'],
+            'catalogOrder': {'simple': ['s1'], 'profiles': <String>[]},
+            'rulesData': rules,
+            'ruleOrder': rules.keys.toList(),
+          }),
+        });
+        expect(code, 200);
+      }
+
       Future<void> fetch(List<String> links) async {
         subBody = links.join('\n');
         final (code, r) = await call('POST', '/api/sources/fetch', {'sid': 's1', 'source': state});
         expect(code, 200);
         state = src({...state, ...(r['patch'] as Map).cast<String, dynamic>()});
+        await save();
       }
 
       await fetch([vlessWs, trojanGrpc, ss2022]);
@@ -101,12 +139,13 @@ void main() {
       await fetch([vlessWs, ss2022, trojanGrpc]); // SE back
 
       final ev = ((await call('GET', '/api/events')).$2['events'] as List).cast<Map>();
-      final removed = [for (final e in ev) if (e['type'] == 'removed') e];
+      expect([for (final e in ev) if (e['type'] == 'removed') e], isEmpty, reason: 'no sub/removed any more');
+      final lost = [for (final e in ev) if (e['type'] == 'updated' && e['level'] == 'warn') e];
       final back = [for (final e in ev) if (e['type'] == 'back') e];
-      expect(removed, hasLength(2));
+      expect(lost, hasLength(2));
       expect(back, hasLength(2));
-      expect([for (final e in removed) (e['data'] as Map)['names']], [['SE'], ['SS2022']]);
-      expect([for (final e in back) e['opens']], [removed[1]['id'], removed[0]['id']], reason: 'by the names, not the order');
+      expect([for (final e in lost) (e['data'] as Map)['lost']], [['SE'], ['SS2022']]);
+      expect([for (final e in back) e['opens']], [lost[1]['id'], lost[0]['id']], reason: 'by the names, not the order');
     });
   });
 

@@ -18,6 +18,8 @@ import 'core_host.dart';
 import 'event_text.dart';
 import 'report_send.dart';
 import 'settings_model.dart';
+import 'system_notifier.dart';
+import '../platform/notify_channel.dart';
 
 /// What the Logs tab shows and keeps (mockup 46-logs.js, 47-events.js): the events journal and
 /// the raw log of the core, fed by the host's streams and a slow poll (the streams only say
@@ -266,7 +268,14 @@ class LogsController extends ChangeNotifier {
       if (cfg.seen.length != n) _save();
       for (final e in r.notify) {
         // the failure ended: its in-place change that comes in the same read must not post it again over the closing
-        if (e.key == 'conn/vpnUp' && e.opens != null) _vpnDownRev.remove(e.opens);
+        if (e.key == 'conn/vpnUp' && e.opens != null) {
+          final shown = _vpnDownRev.remove(e.opens) != null;
+          // the user ended it: the shown «VPN is down» goes off the shade (a system one is replaced by the revoke's own
+          // notification); in front there is nothing on the shade, and the closing is no toast
+          if (shown && e.data['by'] == 'user' && NotifyIo.current.available && SystemNotifier.inBackground) {
+            _notify.add(e);
+          }
+        }
         // an event of a site ignored a moment ago (the core was not told yet) stays silent too
         if (e.cat == 'site' && _ign.matches('${e.data['host'] ?? ''}')) continue;
         // a background event (found while the screen was off) goes by its own flag, not by the screen now

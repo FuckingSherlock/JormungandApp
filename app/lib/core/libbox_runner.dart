@@ -45,7 +45,7 @@ abstract interface class LibboxPort {
 /// box says nothing anyone reads there, and three gRPC streams per box, each pushing every
 /// second, only cost the UI isolate time during a ping run. Its log stays on: [CoreService]
 /// keeps the failure lines of the test boxes in the raw log.
-class LibboxRunner implements AdoptableRunner {
+class LibboxRunner implements AdoptableRunner, RevocableRunner {
   LibboxRunner(
     this._port, {
     this.upTimeout = const Duration(seconds: 8),
@@ -83,6 +83,9 @@ class LibboxRunner implements AdoptableRunner {
 
   @override
   void Function(int code)? onExit;
+
+  @override
+  void Function()? onRevoked;
 
   @override
   void note(String line) => onLog?.call('[jormd] $line');
@@ -231,7 +234,11 @@ class LibboxRunner implements AdoptableRunner {
     note('sing-box stopped: $reason');
     unawaited(_closeLocal());
     unawaited(_dropCache());
-    onExit?.call(0);
+    if (reason == 'revoked') {
+      onRevoked?.call();
+    } else {
+      onExit?.call(0);
+    }
   }
 
   @override

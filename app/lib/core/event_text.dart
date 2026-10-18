@@ -57,19 +57,21 @@ class EventWords {
     'conn/lost' => l10n.connectionLost,
     'conn/restored' => l10n.connectionRestored,
     'conn/vpnDown' => l10n.vpnIsDown,
-    'conn/vpnUp' => l10n.connectionRestored,
+    'conn/vpnUp' => l10n.vpnOutageEnded,
     'conn/offline' => l10n.noNetwork,
-    'conn/online' => l10n.networkBack,
+    'conn/online' => l10n.internetAvailableAgain,
     'auto/switched' => l10n.entryOrServerSwitched,
-    'auto/fastest' => l10n.fastestMoved,
+    'auto/fastest' => l10n.autoChangedServerFastest,
     'auto/unstable' => l10n.unstableEntry,
     'site/blocked' => l10n.siteDoesNotOpen,
     'site/unreachable' => l10n.siteDoesNotOpenOnAny,
-    'sub/updated' => l10n.updated,
-    'sub/failed' => l10n.updateFailed,
-    'sub/removed' => l10n.serversRemoved,
-    'sub/back' => l10n.serversBack,
+    'sub/updated' => l10n.subscriptionUpdated,
+    'sub/failed' => l10n.subscriptionUpdateFailed,
+    'sub/removed' => l10n.providerRemovedServers,
+    'sub/back' => l10n.serversReturnedToTheSubscription,
     'sub/dead' => l10n.serversDoNotRespond,
+    'node/lost' => l10n.serversInUseSwitchedOffOr,
+    'node/back' => l10n.serversInUseSwitchedOn,
     'sub/diverged' => l10n.subscriptionServersDiffer,
     'rules/fallback' => l10n.ruleTargetUnavailable,
     'rules/targetBack' => l10n.ruleTargetBack,
@@ -85,7 +87,7 @@ class EventWords {
     'speed/failed' => l10n.speedTestFailed,
     'core/crashed' => l10n.singBoxStopped,
     'core/restarted' => l10n.singBoxStartedAgain,
-    'core/restartFailed' => l10n.couldNotStartAgain,
+    'core/restartFailed' => l10n.singBoxRestartFailed,
     'core/tunNeedsAdmin' => l10n.tunNeedsAdministratorRights,
     'core/down' => l10n.vpnIsDown,
     'core/sysProxy' => l10n.systemProxy,
@@ -220,15 +222,15 @@ class EventWords {
     final to = '${d['to'] ?? ''}', who = _who(d), rule = _isRule(d);
     switch (to) {
       case 'block':
-        return rule ? l10n.ruleBlockedWhileItIsDown(who) : l10n.appBlockedWhileItIsDown(who);
+        return rule ? l10n.ruleTrafficIsBlockedIfUnavailable(who) : l10n.appTrafficIsBlockedIfUnavailable(who);
       case 'direct':
-        return rule ? l10n.ruleGoesDirect(who) : l10n.appGoesDirect(who);
+        return rule ? l10n.ruleTrafficGoesDirectIfUnavailable(who) : l10n.appTrafficGoesDirectIfUnavailable(who);
       case 'main':
-        return rule ? l10n.ruleGoesThroughTheMainFlow(who) : l10n.appGoesThroughTheMainFlow(who);
+        return rule ? l10n.ruleTrafficGoesThroughTheMain(who) : l10n.appTrafficGoesThroughTheMain(who);
     }
     if (to.contains(':')) {
       final t = targetName(catalog, to);
-      return rule ? l10n.ruleGoesThrough(who, t) : l10n.appGoesThrough(who, t);
+      return rule ? l10n.ruleTrafficGoesThrough(who, t) : l10n.appTrafficGoesThrough(who, t);
     }
     return '${rule ? l10n.rule : l10n.app} $who $to';
   }
@@ -240,6 +242,88 @@ class EventWords {
     }
     return _fallbackText(d);
   }
+
+  /// The traffic of a rule or an app comes back to its target («… goes through the target again»).
+  String _backThroughTarget(Map<String, dynamic> d) => _isRule(d)
+      ? l10n.ruleTrafficGoesThroughTheTarget(_who(d))
+      : l10n.appTrafficGoesThroughTheTarget(_who(d));
+
+  /// The names of a list, the rest counted by the total the event carries: «A, B and 3 more».
+  String _namesOf(Object? list, Object? total, String Function(Object?) name) {
+    final xs = list is List ? [for (final x in list) if ('$x'.isNotEmpty) name(x)] : <String>[];
+    final more = (total is num ? total.toInt() : xs.length) - xs.length;
+    return _lines([xs.join(', '), more > 0 ? l10n.and(l10n.more2(more)) : null], ' ');
+  }
+
+  /// The affected settings in short («the connection, 1 rule, 2 apps»); '' when none is affected.
+  String _affectedBrief(Object? affected) {
+    final xs = affected is List ? [for (final a in affected) if (a is Map) a] : const <Map>[];
+    int count(String kind) => xs.where((a) => a['kind'] == kind).length;
+    String counted(String kind, String one, String Function(num) many) {
+      final n = count(kind);
+      return n == 0 ? '' : (n == 1 ? one : many(n));
+    }
+
+    return _lines([
+      count('connection') > 0 ? l10n.theConnection : null,
+      counted('rule', l10n.n1Rule, l10n.rulesPlural),
+      counted('app', l10n.n1App, l10n.appsPlural),
+      counted('chain', l10n.n1Chain, l10n.chainsPlural),
+      counted('profile', l10n.n1Profile, l10n.profilesPlural),
+    ], ', ');
+  }
+
+  /// The detail of `sub/back` and `node/back`: the settings the servers carry again; '' when none is affected.
+  String _affectedBack(Object? affected) {
+    final brief = _affectedBrief(affected);
+    return brief.isEmpty ? '' : l10n.trafficOfGoesThroughThemAgain(brief);
+  }
+
+  /// The causes of a `conn/vpnDown` / `vpnUp` (`core`, `network`).
+  List<String> _causes(Map<String, dynamic> d) =>
+      d['causes'] is List ? [for (final c in d['causes'] as List) '$c'] : <String>[];
+
+  /// The row of `conn/vpnDown`: «Waiting for network» while the network is the only cause (the VPN is on, not a failure),
+  /// else «VPN is down» with the causes under it.
+  (String, String) _vpnDownRow(Map<String, dynamic> d, {int attempts = 0}) {
+    final causes = _causes(d);
+    if (causes.length == 1 && causes.first == 'network') return (l10n.waitingForNetworkVpnIsOn, '');
+    return (l10n.vpnIsDown, _vpnDownReason(d, attempts: attempts));
+  }
+
+  /// The closing row of `conn/vpnDown`: by the user or the system it is an outage that ended with a disconnect, not a
+  /// recovery; else what the outage had (`causes`): sing-box running again, internet back, or both.
+  String _vpnUpTitle(Map<String, dynamic> d) {
+    if (d['by'] == 'user' || d['by'] == 'system') return l10n.vpnOutageEndedVpnDisconnected;
+    final causes = _causes(d);
+    final core = causes.contains('core'), net = causes.contains('network');
+    return switch ((core, net)) {
+      (true, true) => l10n.vpnWorksAgainSingBoxIs2,
+      (true, false) => l10n.vpnWorksAgainSingBoxIs,
+      (false, true) => l10n.vpnWorksAgainInternetIsAvailable,
+      _ => l10n.vpnWorksAgain,
+    };
+  }
+
+  /// Kind of an affected setting (`affected[].kind`) as a label.
+  String affectedKindLabel(String kind) => switch (kind) {
+    'connection' => l10n.connection,
+    'rule' => l10n.rule,
+    'app' => l10n.app,
+    'chain' => l10n.chain,
+    'profile' => l10n.profile,
+    _ => kind,
+  };
+
+  /// Where an affected setting's traffic goes now (`affected[].to`): a target's name, or the words of the block /
+  /// direct / main flow, or «not working» for a chain or a profile that does not work.
+  String affectedToLabel(Map a) => switch ('${a['to'] ?? ''}') {
+    'block' => 'Block',
+    'direct' => 'Direct',
+    'main' => l10n.mainFlow2,
+    'none' => l10n.notWorking,
+    final to => target(to),
+  };
 
   String _modeText(Object? m) => m == 'tun' ? 'TUN' : m == 'proxy' ? 'Proxy' : '';
   String _routeText(Object? r) => r == 'global' ? l10n.global : r == 'rules' ? l10n.byRules : '';
@@ -277,43 +361,52 @@ class EventWords {
         ]),
       ),
       ('conn', 'disconnected') => () {
-        if (d['by'] != 'error') return r(l10n.disconnected, l10n.youDisconnected);
+        // who: in the title («by you» / «by the system or another app» / «error: …»), no «By» field below
+        if (d['by'] == 'user') return r(l10n.vpnDisconnectedByYou);
+        if (d['by'] != 'error') return r(l10n.vpnDisconnectedByTheSystemOr);
         if (d['reason'] == 'pinLost') {
           // a server gone from its subscription has no name left (`pick` empty): the text names none
           final pick = '${d['pick'] ?? ''}';
           return r(pick.isEmpty
-              ? l10n.disconnectedTheSelectedServerIsUnavailab2(_pinLostWhy(d['why']))
-              : l10n.disconnectedTheSelectedServerIsUnavailab(pick, _pinLostWhy(d['why'])));
+              ? l10n.vpnDisconnectedErrorServerIsUnavailable2(_pinLostWhy(d['why']))
+              : l10n.vpnDisconnectedErrorServerIsUnavailable(pick, _pinLostWhy(d['why'])));
         }
         if (d['reason'] == 'down' && d['attempts'] is num) {
-          return r(l10n.disconnectedTheCoreDidNotStart(d['attempts'] as num));
+          final n = d['attempts'] as num;
+          return r(n == 1 ? l10n.vpnDisconnectedErrorSingBoxDid : l10n.vpnDisconnectedErrorSingBoxDid2(n));
         }
-        return r(l10n.disconnected, '${d['reason'] ?? l10n.theConnectionDropped}');
+        final reason = d['reason'];
+        return r(reason == null ? l10n.vpnDisconnectedAfterAnError : l10n.vpnDisconnectedAfterAnError2('$reason'));
       }(),
       ('conn', 'reconnected') => () {
         final tookMs = d['tookMs'];
         final took = tookMs is num ? duration(tookMs) : '';
+        // the duration closes the title, after « · »: «Reconnected · rule lists · 3 s»
+        String t(String title) => _lines([title, took]);
         switch (d['reason']) {
           case 'settings':
             final ch = d['changed'];
             final parts = <String>[
+              if (ch is String && ch.isNotEmpty) ch, // the text form of what changed
               if (ch is Map && ch['mode'] is Map)
                 l10n.mode2(_modeText(ch['mode']['from']), _modeText(ch['mode']['to'])),
               if (ch is Map && ch['route'] is Map)
                 l10n.route2(_routeText(ch['route']['from']), _routeText(ch['route']['to'])),
             ];
             return parts.isEmpty
-                ? r(l10n.reconnected, took)
-                : r(l10n.reconnectedSettingsChanged(parts.join(', ')), took);
+                ? r(t(l10n.reconnected))
+                : r(t(l10n.reconnectedSettings(parts.join(', '))));
           case 'lists':
-            return r(l10n.reconnectedRuleListsLoaded, took);
+            return r(t(l10n.reconnectedRuleLists));
           case 'reresolve':
-            return r(l10n.reconnectedServerAddressesChanged, took);
+            return r(t(l10n.reconnectedServerAddresses));
           case 'user':
             final down = d['downMs'] ?? d['tookMs'];
-            return down is num ? r(l10n.reconnectedByCommandABreakOf(duration(down)), took) : r(l10n.reconnected, took);
+            return down is num
+                ? r(t(l10n.reconnectedByYouVpnWasOff(duration(down))))
+                : r(t(l10n.reconnected));
         }
-        return r(l10n.reconnected, took);
+        return r(t(l10n.reconnected));
       }(),
       ('net', 'switched') => () {
         final from = _netSide(d['from']), to = _netSide(d['to']);
@@ -337,8 +430,8 @@ class EventWords {
             : l10n.noInternetConnectionDirectChecksFail,
       ),
       ('conn', 'online') => d['downMs'] is num
-          ? r(l10n.internetRestoredBreakOf(duration(d['downMs'] as num)))
-          : r(l10n.networkIsBack),
+          ? r(l10n.internetIsAvailableAgainWasUnavailable(duration(d['downMs'] as num)))
+          : r(l10n.internetIsAvailableAgain),
       ('auto', 'switched') => () {
         final (f, t) = serverPair(d['from'], d['to']);
         final hasRoute = d['route'] != null && '${d['route']}'.isNotEmpty;
@@ -352,8 +445,8 @@ class EventWords {
         return r(l10n.fastest2(f, t), _lines([entry(d['route']), l10n.isNowTheFastest(t)]));
       }(),
       ('auto', 'unstable') => r(
-        l10n.isUnstable2(entry(d['id'])),
-        l10n.droppedBackToItAfterMin(
+        l10n.isUnstableFailuresExcludedForMin(
+          entry(d['id']),
           d['strikes'] is num ? d['strikes'] as num : 0,
           d['holdMs'] is num ? ((d['holdMs'] as num) / 60000).round().clamp(1, 1 << 30) : 1,
         ),
@@ -391,22 +484,44 @@ class EventWords {
           ], '   '),
         );
       }(),
-      ('sub', 'updated') => r(
-        l10n.subscriptionUpdated2(
-          source(d['source'], d['name']),
-          d['added'] is num ? d['added'] as num : 0,
-          d['removed'] is num ? d['removed'] as num : 0,
-        ),
-        d['total'] is num ? l10n.serversPlural(d['total'] as num) : '',
-      ),
+      // warn: the update removed servers in use (`lost`, `affected`), the traffic that used them goes elsewhere
+      ('sub', 'updated') => d['lost'] is List && (d['lost'] as List).isNotEmpty
+          ? r(
+              l10n.subscriptionRemovedServersInUse(
+                source(d['source'], d['name']),
+                _namesOf(d['lost'], d['lostCount'], (x) => '$x'),
+              ),
+              l10n.theirTrafficUsesIfUnavailableFor,
+            )
+          : r(
+              l10n.subscriptionUpdated2(
+                source(d['source'], d['name']),
+                d['added'] is num ? d['added'] as num : 0,
+                d['removed'] is num ? d['removed'] as num : 0,
+              ),
+              d['total'] is num ? l10n.serversPlural(d['total'] as num) : '',
+            ),
       ('sub', 'failed') => r(l10n.couldNotUpdateSubscription(source(d['source'], d['name'])), '${d['error'] ?? ''}'),
       ('sub', 'removed') => r(
         l10n.theProviderRemovedServersPlural(d['count'] is num ? d['count'] as num : 0, source(d['source'], d['name'])),
         l10n.seeUnavailableInNodesTheirSettings,
       ),
       ('sub', 'back') => r(
-        l10n.serversAreBackPlural(d['count'] is num ? d['count'] as num : 0, source(d['source'], d['name'])),
-        l10n.previousSettingsRestored,
+        l10n.subscriptionReturnedServersInUse(
+          source(d['source'], d['name']),
+          _namesOf(d['names'], d['count'], (x) => '$x'),
+        ),
+        _affectedBack(d['affected']),
+      ),
+      ('node', 'lost') => () {
+        final names = _namesOf(d['nodes'], d['nodeCount'], server);
+        return d['action'] == 'deleted'
+            ? r(l10n.youDeletedServersInUse(names), l10n.theirTrafficUsesIfUnavailable)
+            : r(l10n.youSwitchedOffServersInUse(names), l10n.theirTrafficUsesIfUnavailableUntil);
+      }(),
+      ('node', 'back') => r(
+        l10n.youSwitchedOnServersInUse(_namesOf(d['nodes'], d['nodeCount'], server)),
+        _affectedBack(d['affected']),
       ),
       ('sub', 'dead') => r(l10n.itsServersDoNotRespond(source(d['source'], d['name'])), l10n.contactTheSubscriptionProviderSSupport),
       ('sub', 'diverged') => r(
@@ -432,15 +547,15 @@ class EventWords {
       ('rules', 'fallback') => r(l10n.doesNotAnswer(target(d['target'])), _fallbackText(d)),
       ('rules', 'targetBack') => r(
         l10n.answersAgain(target(d['target'])),
-        _isRule(d) ? l10n.ruleBackThroughIt(_who(d)) : l10n.appBackThroughIt(_who(d)),
+        _backThroughTarget(d),
       ),
       ('rules', 'targetLost') => r(
-        l10n.targetLost(target(d['target'])),
+        l10n.targetIsUnavailable(target(d['target'])),
         _lines([lostWhyText(l10n, '${d['why']}'), _lostText(d)], '. '),
       ),
       ('rules', 'targetFound') => r(
         l10n.isAvailableAgain(target(d['target'])),
-        _isRule(d) ? l10n.ruleBackThroughIt(_who(d)) : l10n.appBackThroughIt(_who(d)),
+        _backThroughTarget(d),
       ),
       ('dns', 'switched') => r(
         l10n.dns3('${d['side'] ?? ''}', dnsName(d['from']), dnsName(d['to'])),
@@ -478,10 +593,8 @@ class EventWords {
       ('core', 'down') => d['proxy'] == 'kept'
           ? r(l10n.coreNotRunningFor30S)
           : r(l10n.vpnIsDown, l10n.trafficGoesDirectStillTrying),
-      ('conn', 'vpnDown') => r(l10n.vpnIsDown, _vpnDownReason(d)),
-      ('conn', 'vpnUp') => r(
-        d['downMs'] is num ? l10n.vpnWorksAgainDown(duration(d['downMs'] as num)) : l10n.vpnWorksAgain,
-      ),
+      ('conn', 'vpnDown') => _vpnDownRow(d),
+      ('conn', 'vpnUp') => r(_vpnUpTitle(d)),
       ('core', 'tunNeedsAdmin') => r(l10n.tunNeedsAdministratorRights, l10n.runTheAppAsAdministratorOr),
       ('core', 'restartFailed') => r(
         l10n.singBoxCouldNotStartAgain,
@@ -491,7 +604,10 @@ class EventWords {
         ]),
       ),
       ('core', 'sysProxy') => d['by'] == 'user'
-          ? r(d['on'] == true ? l10n.youSetTheSystemProxy : l10n.youRemovedTheSystemProxy, l10n.fromTheVpnIsDownKill)
+          ? r(
+              d['on'] == true ? l10n.youSetTheSystemProxy : l10n.youRemovedTheSystemProxy,
+              d['on'] == true ? '' : l10n.removedWithTheRemoveSystemProxy,
+            )
           : r(
               d['error'] != null && '${d['error']}'.isNotEmpty
                   ? (d['on'] == true ? l10n.systemProxyCouldNotBeSet : l10n.systemProxyCouldNotBeRestored)
@@ -554,7 +670,7 @@ class EventWords {
       ),
       ('core', 'updateChannelEmpty') => r(
         l10n.noReleaseInTheChannel('${d['channel'] ?? ''}'),
-        d['attempts'] is List ? l10n.feedsAsked((d['attempts'] as List).length) : '',
+        d['attempts'] is List ? l10n.updateSourcesChecked((d['attempts'] as List).length) : '',
       ),
       ('core', 'updateDownloaded') => r(
         l10n.versionDownloaded('${d['version'] ?? ''}'),
@@ -577,12 +693,12 @@ class EventWords {
   /// The reason line of `conn/vpnDown`: the causes (core, network) joined with " · ", then the system proxy left on.
   /// [attempts] — the newest `restartFailed` attempt among the events joined into the row, when the caller has them.
   String _vpnDownReason(Map<String, dynamic> d, {int? attempts}) {
-    final causes = d['causes'] is List ? [for (final c in d['causes'] as List) '$c'] : <String>[];
+    final causes = _causes(d);
     return [
       if (causes.contains('core'))
-        attempts != null && attempts > 0 ? l10n.singBoxStoppedAndDoesNot3(attempts) : l10n.singBoxStoppedAndDoesNot,
+        attempts != null && attempts > 0 ? l10n.singBoxStoppedAndHasNot2(attempts) : l10n.singBoxStoppedAndHasNot,
       if (causes.contains('network')) l10n.noInternetConnection,
-      if (d['proxy'] == 'kept') l10n.systemProxyLeftOnProgramsHave,
+      if (d['proxy'] == 'kept') l10n.systemProxyIsStillSetSo,
     ].join(' · ');
   }
 
@@ -592,7 +708,7 @@ class EventWords {
     'reset' => l10n.droppedAfterConnecting,
     'timeout' => l10n.noAnswerInTime,
     'stalled' => l10n.sentNothingCameBack,
-    'instantRefusal' => l10n.closedAtOnce,
+    'instantRefusal' => l10n.noAnswerConnectionEndedInUnder,
     'dnsFail' => l10n.theNameDidNotResolve,
     _ => k == null ? '' : '$k',
   };
@@ -713,7 +829,7 @@ class EventWords {
         final a = x.key == 'core/restartFailed' ? x.data['attempt'] : null;
         if (a is num && a > attempts) attempts = a.toInt();
       }
-      return (l10n.vpnIsDown, _vpnDownReason(src.data, attempts: attempts));
+      return _vpnDownRow(src.data, attempts: attempts);
     }
     if (first.key == 'core/crashed' && g.items.length > 1) {
       final last = g.last;
@@ -1143,7 +1259,6 @@ class EventWords {
     'from' => l10n.from,
     'to' => l10n.to,
     'reason' => l10n.reason,
-    'by' => l10n.by,
     'host' => l10n.site,
     'dest' => l10n.address,
     'via' => l10n.opensVia,
@@ -1198,7 +1313,7 @@ class EventWords {
       if (k == 'from') return switch (v) { 'bak' => l10n.lastBackup, 'bak2' => l10n.olderBackup, _ => '$v' };
       if (k == 'reason') {
         return switch (v) {
-          'nul' => l10n.theFileWasEmptyAPower,
+          'nul' => l10n.theFileContainedOnlyZeroBytes,
           'empty' => l10n.theFileWasEmpty,
           'invalid' || 'notObject' => l10n.theFileWasNotReadable,
           'unreadable' => l10n.theFileCouldNotBeOpened,
@@ -1268,7 +1383,6 @@ class EventWords {
     if ((k == 'downMs' || k == 'holdMs' || k == 'windowMs' || k == 'deadMs') && v is num) return duration(v);
     if (k == 'mode') return _modeText(v).isNotEmpty ? _modeText(v) : '$v';
     if (k == 'route' && (v == 'global' || v == 'rules')) return _routeText(v);
-    if (k == 'by') return v == 'user' ? l10n.you : l10n.anError;
     if (k == 'source') return source(v);
     if ((k == 'from' || k == 'to') && e.cat == 'auto' && e.data['route'] != null && '${e.data['route']}'.isNotEmpty && v is String) {
       final (a, b) = serverPair(e.data['from'], e.data['to']);
@@ -1314,6 +1428,7 @@ class EventWords {
       if (v == null || (v is String && v.isEmpty)) continue;
       if (noRoutes && const ['entry', 'server', 'tried', 'retries'].contains(x.key)) continue; // down everywhere: not our routes
       if (x.key == 'source' && e.cat == 'conn') continue; // 'closed': where the core saw it, not a subscription
+      if (x.key == 'by') continue; // who is in the title (VPN disconnected · by you …), no «By» field below
       if (x.key == 'repeat') continue; // shown as the row's times
       if (e.cat == 'sub' && (x.key == 'onlyDirectCount' || x.key == 'onlyTunnelCount')) continue; // folded into the list's value
       if (x.key == 'check' && v is Map) {
@@ -1334,7 +1449,7 @@ class EventWords {
     final c = d['check'];
     if (c is! Map) return null;
     return switch (c['state']) {
-      'opens' => l10n.opensElsewhereNotThroughYourRoutes,
+      'opens' => l10n.theExternalCheckerOpensItFrom,
       'down' => l10n.downEverywhereCheckHost,
       'pending' => l10n.askingCheckHost,
       'failed' => l10n.theCheckerDidNotAnswer,

@@ -13,6 +13,9 @@ import 'auto.dart';
 import 'group_pick.dart';
 import 'auto_memory.dart';
 import 'catalog/catalog.dart' show Catalog;
+import 'catalog/impact.dart' show CatalogImpact;
+import 'catalog/models.dart' show CatalogNode, Source;
+import 'catalog/ops.dart' show CatalogOps;
 import 'catalog/rules_model.dart' show dnsBuiltinIds;
 import 'catalog/plan_builder.dart' show CatalogPlan;
 import 'config.dart';
@@ -219,36 +222,234 @@ class CoreService implements CoreApi {
       _exitSourceRefreshed(sid, nodes);
     },
     onEvent: (type, data) => _subEvent(type, data, op: updater.op),
+    onReport: (sid, s, patch) => _subEvents(sid, s, patch, op: updater.op),
     onFetched: _subFetched,
     newOp: _newOp,
     nodeInUse: _nodeInUse,
   );
 
   /// The last `sub/failed` of each source and its error: the same error again is a repeat on that event (×N), another
-  /// error is a new event. Ends when the source's fetch comes through. `sub/back` closes the earlier `sub/removed`.
+  /// error is a new event. Ends when the source's fetch comes through.
   final _subFailedIds = <String, ({int id, String error})>{};
-  final _subRemovedIds = <String, List<int>>{};
 
   void _subFetched(String sid) => _subFailedIds.remove(sid);
 
-  /// The open `sub/removed` of [sid] a `sub/back` with [back] closes: the one that names a server of it, else the
-  /// oldest. The others stay open for the next `back`.
-  int? _takeRemoved(String sid, Map<String, dynamic> back) {
-    final open = _subRemovedIds[sid];
-    if (open == null) return null;
-    open.removeWhere((id) => eventBook.byId(id) == null);
-    if (open.isEmpty) {
-      _subRemovedIds.remove(sid);
+  // ---- «Задетые настройки» (docs/logs.md): warn `sub/updated` ↔ `sub/back`, `node/lost` ↔ `node/back` ----
+
+  /// The open warn `sub/updated` of each source and the ids of the servers it lost (the used ones).
+  final _subLost = <String, List<({int id, Set<String> ids, List<String> names})>>{};
+
+  /// The open `node/lost` `off` events.
+  final _nodeLostOpen = <_NodeLostOpen>[];
+
+  /// The last event that lost / brought back used servers: the `rules/targetLost` / `targetFound` the change causes
+  /// (written when the app's new plan lands, a little later) are its consequences.
+  ({int id, int at, bool found})? _lostCause;
+  static const _lostCauseWithin = Duration(seconds: 90);
+
+  void _noteCause(int id, {required bool found}) => _lostCause = (id: id, at: _nowMs, found: found);
+
+  int? _causeOfLost({required bool found}) {
+    final c = _lostCause;
+    if (c == null || c.found != found || _nowMs - c.at > _lostCauseWithin.inMilliseconds || eventBook.byId(c.id) == null) return null;
+    return c.id;
+  }
+
+  Future<Catalog?> _catalogOf() async {
+    try {
+      return Catalog.fromJson(await store.read());
+    } catch (_) {
       return null;
     }
-    final names = {for (final n in (back['names'] as List? ?? const [])) '$n'};
-    final id = open.firstWhere(
-      (id) => ((eventBook.byId(id)?['data'] as Map?)?['names'] as List? ?? const []).any((n) => names.contains('$n')),
-      orElse: () => open.first,
-    );
-    open.remove(id);
-    if (open.isEmpty) _subRemovedIds.remove(sid);
-    return id;
+  }
+
+  /// The stored catalog with source [sid] holding [servers] (`nodes`, `gone`): the state to ask the impact of.
+  Future<Catalog?> _subCatalog(String sid, Map<String, dynamic> servers, [List<Map<String, dynamic>> extra = const []]) async {
+    final c = await _catalogOf();
+    final cur = c?.sourcesData[sid];
+    if (c == null || cur == null) return null;
+    c.sourcesData[sid] = Source.fromJson({
+      ...cur.toJson(),
+      'nodes': [...((servers['nodes'] as List?) ?? const []), ...extra],
+      'gone': servers['gone'] ?? const [],
+    });
+    return c;
+  }
+
+  List<Map<String, dynamic>> _affectedOf(Catalog? c, String sid, Set<String> ids) =>
+      c == null || ids.isEmpty ? const [] : CatalogImpact.affectedOf(c.lostNodesImpact(sid, ids));
+
+  /// What one update that landed tells (own: the user asked): the timer's and the manual one. The update that dropped used
+  /// servers is a warn `sub/updated` with `lost` / `affected` (also for a manual one); any other change is an info one,
+  /// for the timer only; `sub/back` closes the warn one when its servers are all back.
+  Future<void> _subEvents(String sid, Map<String, dynamic> s, Map<String, dynamic> patch, {bool own = false, Map<String, Object?>? op}) async {
+    for (final (type, data) in subUpdateEvents(sid, s, patch, inUse: _nodeInUse)) {
+      if (_disposed) return;
+      if (type == 'back') {
+        await _subBack(sid, s, patch, own: own, op: op);
+        continue;
+      }
+      final dropped = subDropped(s, patch);
+      final affected = dropped.isEmpty ? const <Map<String, dynamic>>[] : _affectedOf(await _subCatalog(sid, s), sid, {for (final n in dropped) '${n['id']}'});
+      if (data['lost'] == null && affected.isEmpty) {
+        if (!own) _subEvent('updated', data, op: op);
+        continue;
+      }
+      String label(Map n) => '${n['name'] ?? n['rawName'] ?? n['id']}';
+      final used = [for (final n in dropped) if (_nodeInUse(n)) n];
+      final lostNodes = used.isEmpty ? dropped : used;
+      final full = {
+        ...data,
+        'lost': data['lost'] ?? [for (final n in lostNodes.take(subEventNames)) label(n)],
+        'lostCount': data['lostCount'] ?? lostNodes.length,
+        'affected': affected,
+      };
+      final id = _event('sub', 'updated', 'warn', full,
+          own: own, note: 'Subscription ${data['name']} removed servers in use: ${(full['lost'] as List).join(', ')}', op: op);
+      (_subLost[sid] ??= []).add((id: id, ids: {for (final n in lostNodes) '${n['id']}'}, names: [for (final n in lostNodes) label(n)]));
+      _noteCause(id, found: false);
+      _changed();
+    }
+  }
+
+  // The provider returned servers: every open warn update of [sid] whose servers are all back (or whose rest nothing uses
+  // any more) is closed by a `sub/back`; a partial return writes nothing.
+  Future<void> _subBack(String sid, Map<String, dynamic> s, Map<String, dynamic> patch, {bool own = false, Map<String, Object?>? op}) async {
+    final open = _subLost[sid];
+    if (open == null) return;
+    open.removeWhere((o) => eventBook.byId(o.id) == null);
+    final returned = subReturned(s, patch);
+    final retIds = {for (final g in returned) '${g['id']}'};
+    final after = {'nodes': patch['nodes'] ?? s['nodes'], 'gone': patch['gone'] ?? s['gone']};
+    for (final o in [...open]) {
+      final came = o.ids.intersection(retIds), rest = o.ids.difference(retIds);
+      if (came.isEmpty) continue;
+      var done = rest.isEmpty;
+      if (!done) {
+        // the rest is still gone: the pair stays open while a setting depends on it
+        final goneRest = [for (final g in (patch['gone'] as List? ?? const [])) if (g is Map && rest.contains('${g['id']}')) g.cast<String, dynamic>()];
+        done = _affectedOf(await _subCatalog(sid, after, goneRest), sid, rest).isEmpty;
+      }
+      if (!done) {
+        open.remove(o);
+        open.add((id: o.id, ids: rest, names: o.names));
+        continue;
+      }
+      open.remove(o);
+      final names = o.names; // all the servers the warn update lost (they are all back now, or nothing uses the rest)
+      final id = _event('sub', 'back', 'info',
+          {'source': sid, 'name': '${s['name'] ?? sid}', 'count': names.length, 'names': names.take(subEventNames).toList(), 'affected': _affectedOf(await _subCatalog(sid, after), sid, came)},
+          own: own, note: 'Subscription ${s['name'] ?? sid} returned servers in use', op: op, opens: o.id);
+      _noteCause(id, found: true);
+    }
+    if (open.isEmpty) _subLost.remove(sid);
+  }
+
+  // The servers of [nodes] a setting or the core runs on, and what a loss of [nodes] affects: asked before the change.
+  ({List<CatalogNode> used, List<Map<String, dynamic>> affected}) _lostPrep(Catalog c, String sid, List<CatalogNode> nodes) {
+    final ids = {for (final n in nodes) n.id};
+    final affected = _affectedOf(c, sid, ids);
+    final running = [for (final n in nodes) if (_nodeInUse(n.toJson())) n];
+    if (running.isNotEmpty || affected.isEmpty) return (used: running, affected: affected);
+    final one = [for (final n in nodes.take(300)) if (_affectedOf(c, sid, {n.id}).isNotEmpty) n];
+    return (used: one.isEmpty ? nodes.take(subEventNames).toList() : one, affected: affected);
+  }
+
+  // Writes the `node/lost` of used servers [used] (none and nothing affected: no event); `off` stays open for `node/back`.
+  void _nodeLost(String action, String sid, String sourceName, ({List<CatalogNode> used, List<Map<String, dynamic>> affected}) p, {bool whole = false}) {
+    if (p.used.isEmpty && p.affected.isEmpty) return;
+    final id = _event('node', 'lost', 'warn', {
+      'action': action,
+      'source': sid,
+      'name': sourceName,
+      'nodes': [for (final n in p.used.take(subEventNames)) n.name],
+      'nodeIds': [for (final n in p.used) n.id],
+      'nodeCount': p.used.length,
+      'affected': p.affected,
+    }, own: true, note: 'You ${action == 'off' ? 'switched off' : 'deleted'} servers in use of $sourceName');
+    _noteCause(id, found: false);
+    if (action == 'off') _nodeLostOpen.add(_NodeLostOpen(id, sid, whole, {for (final n in p.used) n.id: n.name}));
+    _changed();
+  }
+
+  // Servers [nids] (null: the whole source) of [sid] are on again: the `node/lost` events they were all of are closed.
+  void _nodesBack(Catalog c, String sid, Set<String>? nids) {
+    for (final o in [..._nodeLostOpen]) {
+      if (o.sid != sid) continue;
+      if (eventBook.byId(o.id) == null) {
+        _nodeLostOpen.remove(o);
+        continue;
+      }
+      if (nids == null ? !o.whole : o.whole || !o.names.keys.any(nids.contains)) continue;
+      final names = Map.of(o.names);
+      if (nids != null) {
+        o.names.removeWhere((k, _) => nids.contains(k));
+        if (o.names.isNotEmpty) continue;
+      }
+      _nodeLostOpen.remove(o);
+      final id = _event('node', 'back', 'info', {
+        'source': sid,
+        'name': c.sourcesData[sid]?.name ?? sid,
+        'nodes': names.values.take(subEventNames).toList(),
+        'affected': _affectedOf(c, sid, names.keys.toSet()),
+      }, own: true, note: 'You switched on servers in use', opens: o.id);
+      _noteCause(id, found: true);
+    }
+  }
+
+  /// Nodes tab: source [sid] of [c] on / off (the app's live catalog; the change is made here so the impact is asked
+  /// first). Switching off a source whose servers are in use writes `node/lost`, on again `node/back`.
+  void toggleSourceEnabled(Catalog c, String sid) {
+    final s = c.sourcesData[sid];
+    if (s == null) return;
+    if (!s.enabled) {
+      c.toggleSourceEnabled(sid);
+      _nodesBack(c, sid, null);
+      return;
+    }
+    final prep = _lostPrep(c, sid, c.liveNodes(s));
+    c.toggleSourceEnabled(sid);
+    _nodeLost('off', sid, s.name, prep, whole: true);
+  }
+
+  /// A server of source [sid] on / off (see [toggleSourceEnabled]).
+  void toggleNodeEnabled(Catalog c, String sid, String nid) {
+    final s = c.sourcesData[sid];
+    if (s == null) return;
+    if (c.isNodeDisabled(s, nid)) {
+      c.toggleNodeEnabled(sid, nid);
+      _nodesBack(c, sid, {nid});
+      return;
+    }
+    final nodes = [for (final n in s.nodes) if (n.id == nid) n];
+    final prep = _lostPrep(c, sid, nodes);
+    c.toggleNodeEnabled(sid, nid);
+    _nodeLost('off', sid, s.name, prep);
+  }
+
+  /// Delete source [sid] of [c]: used servers among its own write `node/lost` `deleted` (no pair).
+  void deleteSource(Catalog c, String sid) {
+    final s = c.sourcesData[sid];
+    if (s == null) return;
+    final prep = _lostPrep(c, sid, c.liveNodes(s));
+    c.deleteSource(sid);
+    _nodeLostOpen.removeWhere((o) => o.sid == sid);
+    _subLost.remove(sid);
+    _nodeLost('deleted', sid, s.name, prep);
+  }
+
+  /// Delete server [nid] of [sid] (see [deleteSource]).
+  void deleteNode(Catalog c, String sid, String nid) {
+    final s = c.sourcesData[sid];
+    if (s == null) return;
+    final prep = _lostPrep(c, sid, [for (final n in s.nodes) if (n.id == nid) n]);
+    c.deleteNode(sid, nid);
+    for (final o in [..._nodeLostOpen]) {
+      if (o.sid != sid) continue;
+      o.names.remove(nid);
+      if (o.names.isEmpty && !o.whole) _nodeLostOpen.remove(o);
+    }
+    _nodeLost('deleted', sid, s.name, prep);
   }
 
   /// Is this server of a subscription the main flow's or a rule target's now.
@@ -277,13 +478,6 @@ class CoreService implements CoreApi {
           final id = _event('sub', 'failed', 'error', data, own: own, note: note, verdict: verdict, why: why, trail: trail, cause: cause, op: op);
           _subFailedIds[sid] = (id: id, error: error);
         }
-      case 'removed':
-        // every removal stays open (a second one while the first is open does not hide it): each `back` closes one
-        (_subRemovedIds[sid] ??= []).add(_event('sub', 'removed', 'warn', data,
-            own: own, note: 'Subscription ${data['name']}: ${data['count']} servers removed by the provider', op: op));
-      case 'back':
-        _event('sub', 'back', 'info', data,
-            own: own, note: 'Subscription ${data['name']}: ${data['count']} servers back', op: op, opens: _takeRemoved(sid, data));
       default:
         _event('sub', 'updated', 'info', data,
             own: own, note: 'Subscription ${data['name']} updated: +${data['added']} -${data['removed']}, ${data['total']} servers', op: op);
@@ -547,12 +741,18 @@ class CoreService implements CoreApi {
     if (!silent) {
       for (final l in now.values) {
         if (_lostTargets[l.id]?.state == l.state) continue;
-        _lostIds[l.id] = eventBook.add('rules', 'targetLost', 'warn', data: l.toJson());
+        final cause = _causeOfLost(found: false);
+        _lostIds[l.id] = eventBook.add('rules', 'targetLost', 'warn',
+            data: l.toJson(), cause: cause, verdict: cause == null ? null : 'consequence');
       }
       for (final l in _lostTargets.values) {
         if (now.containsKey(l.id) || !info.reached.contains(l.id)) continue;
+        final cause = _causeOfLost(found: true);
         eventBook.add('rules', 'targetFound', 'info',
-            data: {if (l.app) 'app': l.label else 'rule': l.label, 'target': l.target}, opens: _lostIds.remove(l.id));
+            data: {if (l.app) 'app': l.label else 'rule': l.label, 'target': l.target},
+            opens: _lostIds.remove(l.id),
+            cause: cause,
+            verdict: cause == null ? null : 'consequence');
       }
     }
     _lostTargets = now;
@@ -1813,6 +2013,8 @@ class CoreService implements CoreApi {
     ];
     if (id == null || began.any((t) => t < _vpnAt)) _vpnAt = began.reduce((a, b) => a < b ? a : b);
     final json = jsonEncode(data);
+    // waiting (only the network is missing, the VPN itself is fine) is a warn; the core down makes it an error
+    final level = causes.length == 1 && causes.first == 'network' ? 'warn' : 'error';
     if (id == null) {
       _vpnCauses = causes;
       _vpnLastData = json;
@@ -1828,16 +2030,18 @@ class CoreService implements CoreApi {
         step = TrailStep('ctx.net', Outcome.fail, netRoot!.since.millisecondsSinceEpoch, {'state': 'none', 'source': src});
         note = 'The network is gone ($src)';
       }
-      _vpnId = _event('conn', 'vpnDown', 'error', data, verdict: 'confirmed', why: why, trail: [step], note: note, joins: joins);
+      _vpnId = _event('conn', 'vpnDown', level, data, verdict: 'confirmed', why: why, trail: [step], note: note, joins: joins);
       _attachVpnRoots();
       return;
     }
     _vpnCauses = causes;
-    if (json == _vpnLastData && joins == null) return;
+    final levelMoved = eventBook.byId(id)?['level'] != level;
+    if (json == _vpnLastData && joins == null && !levelMoved) return;
     _vpnLastData = json;
     // the fields of the causes that are gone leave; what others wrote into `data` (`repeat`) stays
     final old = (eventBook.byId(id)?['data'] as Map?)?.cast<String, dynamic>() ?? const {};
-    eventBook.update(id, data: {...old}..removeWhere((k, _) => k == 'proxy' || k == 'source')..addAll(data), replaceData: true, joins: joins);
+    eventBook.update(id,
+        data: {...old}..removeWhere((k, _) => k == 'proxy' || k == 'source')..addAll(data), replaceData: true, joins: joins, level: level);
     _attachVpnRoots();
   }
 
@@ -2705,9 +2909,8 @@ class CoreService implements CoreApi {
         if (sid != null) {
           _subFetched(sid);
           // the user waits: written at once, whatever changed, no Sentinel
-          for (final (type, data) in subUpdateEvents(sid, {...s, 'name': name}, (r['patch'] as Map).cast<String, dynamic>(), always: true, inUse: _nodeInUse)) {
-            _subEvent(type, data, own: true, op: op);
-          }
+          // awaited: the app puts the patch in right after, and what its plan then loses is a consequence of this event
+          await _subEvents(sid, {...s, 'name': name}, (r['patch'] as Map).cast<String, dynamic>(), own: true, op: op);
         }
         return r;
       } catch (e) {
@@ -4655,6 +4858,15 @@ class CoreService implements CoreApi {
 
   @override
   Future<void> updateInstallFailed(String reason) async => appUpdater?.installFailed(reason);
+}
+
+/// An open `node/lost` `off`: the used servers (id → name) of [sid] it switched off, [whole] = the source itself.
+class _NodeLostOpen {
+  _NodeLostOpen(this.id, this.sid, this.whole, this.names);
+  final int id;
+  final String sid;
+  final bool whole;
+  final Map<String, String> names;
 }
 
 /// A manual subscription update the core ends itself, with no load (no network in time, the core down): the user's

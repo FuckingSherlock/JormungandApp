@@ -143,6 +143,53 @@ extension CatalogOps on Catalog {
     u.pickOrder = mergeShown([...cur, ...shown.where((k) => !cur.contains(k))], shown, newShown);
   }
 
+  /// «Choose for all» of an event with affected settings ([affected]: `[{kind, id, name, to}]`): [target] (`''` = the main
+  /// flow; else `src:` / `node:` / `profile:` / `chain:` + id) becomes the target of every `rule` and `app` item and the
+  /// route of the `connection` item (Manual on that entry / server). `chain` / `profile` items are ignored.
+  void retargetAll(List<Map<String, dynamic>> affected, String target) {
+    var routed = false;
+    for (final a in affected) {
+      final id = '${a['id']}';
+      switch (a['kind']) {
+        case 'rule':
+          final r = rulesData[id];
+          if (r != null && r.action == 'proxy') r.target = target;
+        case 'app':
+          final app = appRules[id];
+          if (app == null) continue;
+          for (final (_, h) in app.halves) {
+            if (h.act == 'proxy' && h.target.isNotEmpty) h.target = target;
+          }
+        case 'connection':
+          if (routed || target.isEmpty) continue;
+          routed = _routeTo(target);
+      }
+    }
+  }
+
+  // Manual on the entry (or server) a picker target names; false when the route has no such entry.
+  bool _routeTo(String target) {
+    final i = target.indexOf(':');
+    if (i < 0) return false;
+    final kind = target.substring(0, i), rest = target.substring(i + 1);
+    if (kind == 'node') {
+      final sid = rest.split('::').first;
+      final entry = connectOrder.contains(sid)
+          ? sid
+          : connectOrder.cast<String?>().firstWhere((e) => unitRefs(e!).any((r) => r.key == rest), orElse: () => null);
+      if (entry == null) return false;
+      autoConnect = false;
+      activeConnectId = entry;
+      pinnedNode = rest;
+      return true;
+    }
+    if (!connectOrder.contains(rest)) return false;
+    autoConnect = false;
+    activeConnectId = rest;
+    pinnedNode = null;
+    return true;
+  }
+
   // ───────────────────────────── add ─────────────────────────────
 
   /// A new source joins the end of the Simple tab (and so of the simple-mode route)

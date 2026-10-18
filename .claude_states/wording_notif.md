@@ -2,5 +2,5 @@
 
 Строки 29–36 аудита `wording_audit.md` (разделы 3–4: системные уведомления / toast и Settings → Notifications) —
 «по уведам потом разберёмся». Таблица с текущими текстами и предложениями — в `wording_audit.md`, разделы 3–4.
-Уже решено и идёт в прогон 2 т2.2 (`vpn_revoke_plan.md`): `vpnUp` с `by: user/system` не уведомляет; тумблер
+Уже решено и идёт в прогон 2 т2.2 (`archive/vpn_revoke_plan.md`, сделано): `vpnUp` с `by: user/system` не уведомляет; тумблер
 `vpnRevoked`.

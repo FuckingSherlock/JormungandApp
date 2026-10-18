@@ -64,12 +64,15 @@ class ProcessPort implements LibboxPort {
   @override
   Stream<String> get stoppedOnItsOwn => gone.stream;
 
-  /// The system takes the VPN away: sing-box is gone, the platform says so.
-  void revoke() {
+  /// sing-box is gone on its own; the platform says why ('revoked' = the system took the VPN away).
+  void stopOn(String reason) {
     _proc?.kill();
     _proc = null;
-    gone.add('revoked');
+    gone.add(reason);
   }
+
+  /// The system takes the VPN away: sing-box is gone, the platform says so.
+  void revoke() => stopOn('revoked');
 }
 
 Map<String, dynamic> _config(int mixed) => {
@@ -245,15 +248,41 @@ void main() {
     timeout: const Timeout(Duration(seconds: 40)),
   );
 
+  for (final reason in ['error', 'stopped', 'crash', '']) {
+    test(
+      'stopped on its own ("$reason", not revoked): onExit(0) fires once, onRevoked does not; running turns false, the api is dropped',
+      () async {
+        final codes = <int>[];
+        var revoked = 0;
+        runner.onExit = codes.add;
+        runner.onRevoked = () => revoked++;
+        await runner.start(_config(await freePort()));
+        port.stopOn(reason);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(codes, [0]);
+        expect(revoked, 0);
+        expect(runner.running, isFalse);
+        expect(runner.api, isNull);
+        await runner.stop(); // nothing left on the platform side: no native stop
+        expect(port.stops, 0);
+      },
+      skip: _skip,
+      timeout: const Timeout(Duration(seconds: 40)),
+    );
+  }
+
   test(
-    'stopped on its own: onExit fires once, running turns false, the api is dropped',
+    'revoked by the system: onRevoked fires once, onExit does not; running turns false, the api is dropped',
     () async {
       final codes = <int>[];
+      var revoked = 0;
       runner.onExit = codes.add;
+      runner.onRevoked = () => revoked++;
       await runner.start(_config(await freePort()));
       port.revoke();
       await Future<void>.delayed(const Duration(milliseconds: 100));
-      expect(codes, [0]);
+      expect(revoked, 1);
+      expect(codes, isEmpty);
       expect(runner.running, isFalse);
       expect(runner.api, isNull);
       await runner.stop(); // nothing left on the platform side: no native stop

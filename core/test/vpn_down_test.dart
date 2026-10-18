@@ -198,7 +198,7 @@ void main() {
     expect(events('conn', 'vpnDown'), isEmpty, reason: 'not before the blip window');
     await time.advanceSeconds(8);
     final down = events('conn', 'vpnDown').single;
-    expect([down['level'], down['verdict']], ['error', 'confirmed']);
+    expect([down['level'], down['verdict']], ['warn', 'confirmed'], reason: 'network only: warn (error once core is added)');
     expect((down['why'] as Map)['code'], 'net.offline');
     expect(trailCodes(down), contains('ctx.net'));
     expect(down['data'], containsPair('causes', ['network']));

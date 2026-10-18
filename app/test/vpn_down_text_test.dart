@@ -1,7 +1,8 @@
 // «VPN не работает» in words (docs/logs.md «Тексты», «„VPN не работает“»): conn/vpnDown reads «VPN is down» and gives
-// the reason by its causes (core, network, or both joined by « · »); the proxy suffix shows only when the system proxy
-// was kept; conn/vpnUp closes with «VPN works again · down N». A crash merged into vpnDown by `joins` makes one row,
-// titled and closed by vpnDown / vpnUp. The texts of the old types (core/down, conn/offline, conn/online) stay.
+// the reason by its causes (core, network, or both joined by « · »; the network alone is «Waiting for network»); the
+// proxy suffix shows only when the system proxy was kept; conn/vpnUp is its own row, «VPN works again · …» by the
+// causes. A crash merged into vpnDown by `joins` is one row titled by vpnDown. The texts of the old types
+// (core/down, conn/offline, conn/online) stay.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/core/event_text.dart';
@@ -70,66 +71,80 @@ void main() {
   final words = _words();
 
   group('conn/vpnDown reads «VPN is down»', () {
-    test('the title is VPN is down, whatever the causes', () {
+    test('the title is VPN is down while the core is a cause; the network alone is «Waiting for network»', () {
       for (final causes in [
         ['core'],
-        ['network'],
         ['core', 'network'],
       ]) {
         expect(words.describe(_ev(1, 'conn', 'vpnDown', data: {'causes': causes})).title, 'VPN is down', reason: '$causes');
       }
+      expect(
+        words.describe(_ev(1, 'conn', 'vpnDown', level: 'warn', data: const {'causes': ['network']})).title,
+        'Waiting for network · VPN is on, no internet connection',
+      );
     });
 
-    test('cause core: sing-box stopped and does not start, and no internet text', () {
+    test('cause core: sing-box stopped and has not restarted, and no internet text', () {
       final s = _downText(words, ['core']);
-      expect(s, contains('sing-box stopped and does not start'));
+      expect(s, contains('sing-box stopped and has not restarted for 30 s'));
       expect(s, isNot(contains('No internet connection')));
     });
 
-    test('cause network: no internet connection, and no sing-box text', () {
+    test('cause network alone: the waiting row, no sing-box text', () {
       final s = _downText(words, ['network']);
-      expect(s, contains('No internet connection'));
+      expect(s, contains('Waiting for network · VPN is on, no internet connection'));
       expect(s, isNot(contains('sing-box')));
     });
 
     test('both causes: the core text, then the network text, joined by « · »', () {
       final s = _downText(words, ['core', 'network']);
-      expect(s, matches(RegExp(r'sing-box stopped and does not start[^\n]* · No internet connection')));
+      expect(s, matches(RegExp(r'sing-box stopped and has not restarted for 30 s[^\n]* · No internet connection')));
     });
 
-    test('the attempts are the restarts merged into the row: two failed restarts read (2 attempts)', () {
+    test('the attempts are the restarts merged into the row: two failed restarts read (2 restart attempts so far)', () {
       final rows = foldEvents(_crashChain(restarts: 2, closed: false));
-      expect(_shown(words, rows.single), contains('sing-box stopped and does not start (2 attempts)'));
+      expect(
+        _shown(words, rows.single),
+        contains('sing-box stopped and has not restarted for 30 s (2 restart attempts so far)'),
+      );
     });
 
     test('without merged restarts the core text has no number of attempts', () {
       final s = _downText(words, ['core']);
-      expect(s, contains('sing-box stopped and does not start'));
-      expect(s, isNot(matches(RegExp(r'\d+ attempts'))));
+      expect(s, contains('sing-box stopped and has not restarted for 30 s'));
+      expect(s, isNot(matches(RegExp(r'\d+ restart attempts'))));
     });
 
     test('proxy kept adds the suffix; removed or released do not', () {
       final kept = _downText(words, ['core'], data: {'proxy': 'kept'});
-      expect(kept, contains('system proxy left on, programs have no internet'));
+      expect(kept, contains('system proxy is still set, so programs that use it have no internet'));
       for (final proxy in ['removed', 'released']) {
-        expect(_downText(words, ['core'], data: {'proxy': proxy}), isNot(contains('system proxy left on')), reason: proxy);
+        expect(_downText(words, ['core'], data: {'proxy': proxy}), isNot(contains('system proxy is still set')), reason: proxy);
       }
     });
   });
 
   group('conn/vpnUp closes it', () {
-    test('the text is VPN works again · down N, N from downMs', () {
-      final text = _own(words, _ev(2, 'conn', 'vpnUp', level: 'info', data: const {'downMs': 185000, 'causes': ['core']}, opens: 1));
-      expect(text, contains('VPN works again · down '));
-      expect(text, contains(words.duration(185000)));
+    test('the text is by what the outage had (causes); the duration is the closed pair line', () {
+      String text(List<String> causes, {String? by}) =>
+          _own(words, _ev(2, 'conn', 'vpnUp', level: 'info', data: {'downMs': 185000, 'causes': causes, 'by': ?by}, opens: 1)).trim();
+      expect(text(['core']), 'VPN works again · sing-box is running');
+      expect(text(['network']), 'VPN works again · internet is available');
+      expect(text(['core', 'network']), 'VPN works again · sing-box is running, internet is available');
+      expect(text(['core'], by: 'user'), 'VPN outage ended · VPN disconnected');
+      expect(text(['core'], by: 'system'), 'VPN outage ended · VPN disconnected');
     });
   });
 
   group('a crash merged into vpnDown is one row', () {
-    test('it is titled VPN is down and closed by vpnUp: the status is Finished at …', () {
+    test('it is titled VPN is down; its closing vpnUp is its own row, the opener says Finished at …', () {
       final rows = foldEvents(_crashChain());
-      expect(rows, hasLength(1), reason: 'the crash and its restarts are steps of the vpnDown row');
-      final g = rows.single;
+      expect(rows, hasLength(2), reason: 'the crash and its restarts are steps of the vpnDown row; vpnUp is a row of its own');
+      final g = rows.first;
+      expect(g.ev.key, 'conn/vpnDown');
+      expect(g.closedById, 51);
+      expect(rows.last.ev.key, 'conn/vpnUp');
+      expect(rows.last.opensId, 50);
       final (title, _) = words.describeGroup(g);
       expect(title, 'VPN is down');
       expect(words.closedLine(g), matches(RegExp(r'^Finished at \d\d:\d\d · lasted .+')));

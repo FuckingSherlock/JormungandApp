@@ -128,7 +128,7 @@ const eventCats = <(String, List<String>)>[
   ('sub', ['updated', 'failed', 'removed', 'back', 'dead', 'diverged']),
   ('rules', ['fallback', 'targetBack', 'targetLost', 'targetFound', 'ruleSetFailed', 'ruleSetUpdated']),
   ('dns', ['switched', 'failed', 'failedOnNode']),
-  ('node', ['addressMissing']),
+  ('node', ['addressMissing', 'lost', 'back']),
   ('speed', ['done', 'failed']),
   (
     'core',
@@ -170,8 +170,16 @@ const eventNotifKind = <String, String>{
 
 /// The toggle [e] answers to: [eventNotifKind] by its type, except `conn/disconnected` by the system (the VPN was
 /// revoked), which has a toggle of its own.
-String? eventNotifKindOf(EventRecord e) =>
-    e.key == 'conn/disconnected' && e.data['by'] == 'system' ? 'vpnRevoked' : eventNotifKind[e.key];
+String? eventNotifKindOf(EventRecord e) {
+  if (e.key == 'conn/disconnected' && e.data['by'] == 'system') return 'vpnRevoked';
+  // the warn variation of a subscription update (it removed used servers) is a failure, a plain one is the news
+  if (e.key == 'sub/updated') return e.level == 'info' ? 'subUpdated' : 'subFailed';
+  return eventNotifKind[e.key];
+}
+
+/// The end of an outage by the user or the system (`conn/vpnUp` with `by: user` / `system`): not a recovery, never a
+/// notification of its own.
+bool _vpnUpEndsByDisconnect(EventRecord e) => e.key == 'conn/vpnUp' && (e.data['by'] == 'user' || e.data['by'] == 'system');
 
 /// Warnings and errors that are a journal entry only, never a notification, with the reason. The guard test
 /// (`core/test/event_catalog_test.dart`) checks that every warn / error type of the catalog is either in
@@ -190,6 +198,8 @@ const journalOnly = <String, String>{
   'core/restartFailed': 'joins conn/vpnDown when sing-box does not come back in 30 s, which is the notification',
   'core/down': 'no longer written; replaced by conn/vpnDown',
   'conn/offline': 'only a journal entry; a network that stays gone while connected is conn/vpnDown',
+  'node/lost': 'the user switched the node off or deleted it themselves',
+  'node/back': 'the user switched the node on again',
 };
 
 /// Settings → Notifications as they start (`notifCfg` of the snapshot, names as in the mockup).
@@ -224,6 +234,7 @@ bool notifAllows(Object? cfg, String kind) {
 bool eventNotifies(Object? cfg, EventRecord e) {
   final kind = eventNotifKindOf(e);
   if (kind == null || !notifAllows(cfg, kind)) return false;
+  if (_vpnUpEndsByDisconnect(e)) return false;
   // only a disconnect by an error or by the system is news (not the user's own); the system proxy only when it failed
   if (e.key == 'conn/disconnected' && e.data['by'] != 'error' && e.data['by'] != 'system') return false;
   if (e.key == 'core/sysProxy' && e.data['error'] == null) return false;
@@ -385,6 +396,13 @@ class EventGroup {
   /// The time of the newest consequence (0 = none).
   int get relatedLastAt => related.isEmpty ? 0 : related.map((x) => x.lastAt).reduce((a, b) => a > b ? a : b);
 
+  /// The row of a closing event stands on its own: the id of the event it closes (null = not a closing row, or the
+  /// opening event is not in the journal).
+  int? opensId;
+
+  /// The id of the event that closed [head] (its row is the closing event's own), null = not closed.
+  int? get closedById => closer?.id;
+
   /// The event that closed [head], the newest if several; null = not closed (or a group row).
   EventRecord? get closer {
     for (var i = closers.length - 1; i >= 0; i--) {
@@ -425,8 +443,8 @@ class EventGroup {
     related.add(e);
   }
 
+  /// Notes the closing event [e]; its row is its own, so it is not one of [items].
   void _close(EventRecord e) {
-    _take(e);
     closers.add(e);
   }
 
@@ -511,10 +529,25 @@ List<EventGroup> foldEvents(
     // the closing event lies in the row of the event it closes; the closing of a joined event is a step there
     final opened = e.opens == null ? null : byId[e.opens!];
     if (opened != null) {
-      joinedBy.containsKey(e.opens) ? opened._relate(e) : opened._close(e);
-      byId[e.id] = opened;
-      if (opId != null) byOp[opId] = opened;
-      join(e, opened);
+      if (joinedBy.containsKey(e.opens)) {
+        opened._relate(e);
+        byId[e.id] = opened;
+        if (opId != null) byOp[opId] = opened;
+        join(e, opened);
+        continue;
+      }
+      // the opening row knows its closer; the closing event is a row of its own (when the filter lets it)
+      opened._close(e);
+      if (shown != null && !shown(e)) {
+        hidden.add(e.id);
+        byId[e.id] = opened;
+        continue;
+      }
+      final n = EventGroup(e)..opensId = e.opens;
+      rows.add(n);
+      byId[e.id] = n;
+      if (opId != null) byOp[opId] = n;
+      join(e, n);
       continue;
     }
     // a consequence lies in the row of its root
@@ -569,6 +602,7 @@ List<EventGroup> foldEvents(
       continue;
     }
     final n = EventGroup(e);
+    if (e.opens != null && present.contains(e.opens)) n.opensId = e.opens;
     rows.add(n);
     byId[e.id] = n;
     if (!linked) plain[k] = n;
@@ -600,6 +634,63 @@ int daysAgo(int ms, int now) {
   return DateTime.utc(a.year, a.month, a.day).difference(DateTime.utc(b.year, b.month, b.day)).inDays;
 }
 
+/// Types the Events type filter never hides (docs/logs.md → «Линия VPN»): the rows of the VPN line.
+const Set<String> alwaysShownTypes = {'conn/connected', 'conn/disconnected', 'conn/reconnected', 'conn/vpnDown', 'conn/vpnUp'};
+
+/// The state of the VPN on the line of the Events list.
+enum VpnLine { on, down, waiting, off }
+
+/// The mark of an event on the line: none, a state change (dot), a reconnect with no change (ring).
+enum VpnDot { none, change, reconnect }
+
+/// The VPN line at one event: the state [above] it (the older side), [below] it (after it) and the mark.
+class VpnMark {
+  final VpnLine above;
+  final VpnLine below;
+  final VpnDot dot;
+  const VpnMark(this.above, this.below, this.dot);
+}
+
+/// The VPN line over the whole journal (not the filtered view), oldest first; the key is the event id.
+Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
+  const stateKeys = {'conn/connected', 'conn/disconnected', 'conn/reconnected', 'conn/vpnDown', 'conn/vpnUp'};
+  final events = journal.toList();
+  // before the first state event: vpnUp first - the VPN was down; any other state event first - it was on;
+  // no state events at all - off
+  var cur = VpnLine.off;
+  for (final e in events) {
+    if (stateKeys.contains(e.key)) {
+      cur = e.key == 'conn/vpnUp' ? VpnLine.down : VpnLine.on;
+      break;
+    }
+  }
+  final out = <int, VpnMark>{};
+  for (final e in events) {
+    final above = cur;
+    var dot = VpnDot.none;
+    switch (e.key) {
+      case 'conn/connected':
+        cur = VpnLine.on;
+        dot = VpnDot.change;
+      case 'conn/disconnected':
+        cur = VpnLine.off;
+        dot = VpnDot.change;
+      case 'conn/reconnected':
+        dot = VpnDot.reconnect;
+      case 'conn/vpnDown':
+        final c = e.data['causes'];
+        final next = c is List && c.length == 1 && c.first == 'network' ? VpnLine.waiting : VpnLine.down;
+        if (next != cur) dot = VpnDot.change;
+        cur = next;
+      case 'conn/vpnUp':
+        cur = e.data['by'] == 'user' || e.data['by'] == 'system' ? VpnLine.off : VpnLine.on;
+        dot = VpnDot.change;
+    }
+    out[e.id] = VpnMark(above, cur, dot);
+  }
+  return out;
+}
+
 /// The temporary filter of the Events tab (forgotten with the page).
 class EventFilter {
   String q = '';
@@ -616,11 +707,12 @@ class EventFilter {
   /// The categories with at least one type switched off.
   List<(String, List<String>)> get offCats => [
     for (final c in eventCats)
-      if (c.$2.any((t) => off.contains('${c.$1}/$t'))) c,
+      if (c.$2.any((t) => off.contains('${c.$1}/$t') && !alwaysShownTypes.contains('${c.$1}/$t'))) c,
   ];
 
-  /// The number of types still on in a category.
-  int typesOn((String, List<String>) c) => c.$2.where((t) => !off.contains('${c.$1}/$t')).length;
+  /// The number of types still on in a category (the always shown ones count as on).
+  int typesOn((String, List<String>) c) =>
+      c.$2.where((t) => !off.contains('${c.$1}/$t') || alwaysShownTypes.contains('${c.$1}/$t')).length;
 
   /// [text] is the sentence of the event plus its data values, lower case (the UI words it).
   bool visible(EventRecord e, {required bool showOwn, required String Function(EventRecord e) text}) =>
@@ -631,7 +723,7 @@ class EventFilter {
     if (e.cat == 'user' && !showOwn) return false;
     if (problems && e.level == 'info') return false;
     if (hideBg && e.bg) return false;
-    if (off.contains(e.key)) return false;
+    if (off.contains(e.key) && !alwaysShownTypes.contains(e.key)) return false;
     return true;
   }
 
@@ -657,7 +749,7 @@ class EventFilter {
 
   /// All of a category's types on -> all off; otherwise -> all on.
   void toggleCat(String cat) {
-    final types = [for (final t in eventCats.firstWhere((c) => c.$1 == cat).$2) '$cat/$t'];
+    final types = [for (final t in eventCats.firstWhere((c) => c.$1 == cat).$2) if (!alwaysShownTypes.contains('$cat/$t')) '$cat/$t'];
     final allOn = types.every((k) => !off.contains(k));
     for (final k in types) {
       allOn ? off.add(k) : off.remove(k);
@@ -804,7 +896,7 @@ class EventFeed {
   /// stays in the shade after the recovery; docs/logs.md → «Свёртки», 2). True once per event, whatever changes it in
   /// place afterwards. Replaces `eventNotifies(cfg, e) && markNotified(e.id)`.
   bool notify(Object? cfg, EventRecord e) {
-    if (_told.contains(e.id)) return false;
+    if (_told.contains(e.id) || _vpnUpEndsByDisconnect(e)) return false;
     final opens = e.opens;
     if (!eventNotifies(cfg, e) && !(opens != null && _shown.contains(opens))) return false;
     _told.add(e.id);

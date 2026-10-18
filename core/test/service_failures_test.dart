@@ -299,7 +299,7 @@ void main() {
       await time.advanceSeconds(11);
       expect(events('conn', 'offline'), isEmpty, reason: 'connected: the standing offline is the vpnDown event now');
       final offline = events('conn', 'vpnDown').single;
-      expect([offline['level'], offline['verdict']], ['error', 'confirmed']);
+      expect([offline['level'], offline['verdict']], ['warn', 'confirmed'], reason: 'network only: warn');
       fail(3);
       await time.advanceSeconds(1);
       final e = events('conn', 'failing').single;

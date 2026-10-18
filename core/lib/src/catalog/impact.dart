@@ -12,7 +12,7 @@ import 'rules_model.dart';
 
 /// One line of the "This will affect" list. [level]: `warn` | `bad`.
 class ImpactLine {
-  const ImpactLine(this.name, this.kind, this.what, this.level);
+  const ImpactLine(this.name, this.kind, this.what, this.level, {this.aKind, this.aId, this.aTo, this.aName});
 
   /// The entry, rule or app.
   final String name;
@@ -23,6 +23,12 @@ class ImpactLine {
   /// What happens to it (the mockup's English text).
   final String what;
   final String level;
+
+  /// The line as an `affected` item of a journal event (docs/logs.md → «Задетые настройки»): [aKind] `connection` |
+  /// `chain` | `profile` | `rule` | `app`, [aId], [aTo] (where its traffic goes now: `block` / `direct` / `main` / a
+  /// target id / `none`), [aName] when it is not [name]. Null [aKind]: the line says nothing of a setting in use (a
+  /// route entry nobody uses, a chain that only loses some servers); not part of the equality.
+  final String? aKind, aId, aTo, aName;
 
   List<String> toList() => [name, kind, what, level];
 
@@ -88,18 +94,27 @@ extension CatalogImpact on Catalog {
     for (final (i, id) in ruleOrder.indexed) {
       final r = rulesData[id];
       if (r != null && r.action == 'proxy' && r.target.isNotEmpty && gone(r.target)) {
-        lines.add(ImpactLine(ruleTitle(r), 'rule #${i + 1}', 'loses its target — traffic goes ${_fallbackText(ruleFallback(r.fallback))}', 'warn'));
+        lines.add(ImpactLine(ruleTitle(r), 'rule #${i + 1}', 'loses its target — traffic goes ${_fallbackText(ruleFallback(r.fallback))}', 'warn',
+            aKind: 'rule', aId: r.id, aTo: _fallbackTo(r.fallback, r.fallbackTarget)));
       }
     }
     for (final e in appRules.entries) {
       for (final (proto, h) in e.value.halves) {
         if (h.act == 'proxy' && h.target.isNotEmpty && gone(h.target)) {
           final name = appLabel(e.key);
-          lines.add(ImpactLine(name, 'app${proto.isNotEmpty ? ' · $proto' : ''}', 'loses its target — traffic goes ${_fallbackText(ruleFallback(h.fallback))}', 'warn'));
+          lines.add(ImpactLine(name, 'app${proto.isNotEmpty ? ' · $proto' : ''}', 'loses its target — traffic goes ${_fallbackText(ruleFallback(h.fallback))}', 'warn',
+              aKind: 'app', aId: e.key, aTo: _fallbackTo(h.fallback, h.fallbackTarget)));
         }
       }
     }
     return lines;
+  }
+
+  /// Where a rule / app with "If unavailable" [fallback] sends its traffic when its target is gone (`main` with a
+  /// [fallbackTarget] is that target).
+  String _fallbackTo(String fallback, String? fallbackTarget) {
+    final f = ruleFallback(fallback);
+    return f == 'main' && fallbackTarget != null && fallbackTarget.isNotEmpty ? fallbackTarget : f;
   }
 
   /// What deleting the servers [excl] picks (a whole source [sid], or one server) does to
@@ -143,7 +158,8 @@ extension CatalogImpact on Catalog {
       }
     }
     if (using.any(excl)) {
-      lines.add(const ImpactLine('Current connection', '', 'goes through it — will reconnect through the next working server', 'warn'));
+      lines.add(ImpactLine('Current connection', '', 'goes through it — will reconnect through the next working server', 'warn',
+          aKind: 'connection', aId: id0 ?? '', aTo: 'main', aName: id0 == null ? null : connectEntry(id0)?.name));
     }
     for (final mode in const ['simple', 'profiles']) {
       for (final id in catalogOrder[mode]!) {
@@ -152,13 +168,14 @@ extension CatalogImpact on Catalog {
         final c = chainsData[id];
         if (c != null) {
           if (sid != null && (c.inId == sid || c.outId == sid)) {
-            lines.add(ImpactLine(e.name, 'chain', 'is deleted with it', 'bad'));
+            lines.add(ImpactLine(e.name, 'chain', 'is deleted with it', 'bad', aKind: 'chain', aId: id, aTo: 'none'));
             continue;
           }
           final (ei, eo) = both(() => chainEntryRefs(c).length);
           final (xi, xo) = both(() => chainExitRefs(c).length);
           if ((ei > 0 && eo == 0) || (xi > 0 && xo == 0)) {
-            lines.add(ImpactLine(e.name, 'chain', "its ${ei > 0 && eo == 0 ? 'entry' : 'exit'} is left with no servers — won't connect until you select another", 'bad'));
+            lines.add(ImpactLine(e.name, 'chain', "its ${ei > 0 && eo == 0 ? 'entry' : 'exit'} is left with no servers — won't connect until you select another", 'bad',
+                aKind: 'chain', aId: id, aTo: 'none'));
           } else if (eo < ei || xo < xi) {
             lines.add(ImpactLine(
                 e.name,
@@ -174,7 +191,8 @@ extension CatalogImpact on Catalog {
         final (a, b) = both(() => unitRefs(id).length);
         final kind = profilesData.containsKey(id) ? 'profile' : 'entry';
         if (a > 0 && b == 0) {
-          lines.add(ImpactLine(e.name, kind, "is left with no servers — won't connect until you select another", 'bad'));
+          lines.add(ImpactLine(e.name, kind, "is left with no servers — won't connect until you select another", 'bad',
+              aKind: kind == 'profile' ? 'profile' : null, aId: id, aTo: 'none'));
         } else if (b < a && profilesData.containsKey(id)) {
           lines.add(ImpactLine(e.name, kind, 'loses ${srv(a - b)} of $a', 'warn'));
         }
@@ -197,6 +215,28 @@ extension CatalogImpact on Catalog {
         ...deleteImpact((r) => r.sid == sid && r.node.id == nid),
         ...targetImpact((t) => t == 'node:$sid::$nid'),
       ];
+
+  /// … of losing the servers [nids] of source [sid] (a provider's update, a switch-off): the same lists as deleting them.
+  /// A rule's target of the whole source is gone too when none of its servers is left.
+  List<ImpactLine> lostNodesImpact(String sid, Set<String> nids) {
+    final s = sourcesData[sid];
+    final all = s != null && liveNodes(s).every((n) => nids.contains(n.id));
+    return [
+      ...deleteImpact((r) => r.sid == sid && nids.contains(r.node.id)),
+      ...targetImpact((t) => (all && t == 'src:$sid') || nids.any((n) => t == 'node:$sid::$n')),
+    ];
+  }
+
+  /// [lines] as the `affected` of a journal event: `[{kind, id, name, to}]`, one per setting (a half-split app once).
+  static List<Map<String, dynamic>> affectedOf(Iterable<ImpactLine> lines) {
+    final out = <Map<String, dynamic>>[];
+    for (final l in lines) {
+      final kind = l.aKind;
+      if (kind == null || out.any((a) => a['kind'] == kind && a['id'] == l.aId)) continue;
+      out.add({'kind': kind, 'id': l.aId ?? '', 'name': l.aName ?? l.name, 'to': l.aTo ?? 'none'});
+    }
+    return out;
+  }
 
   /// … of deleting a profile or a chain (`confirmDeleteEntry`). Deleting a profile moves the
   /// chains that use it to the first other profile (a chain left with the same profile on both

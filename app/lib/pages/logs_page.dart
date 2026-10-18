@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:jormungand_core/jormungand_core.dart' show EventGroup, dayStart;
+import 'package:jormungand_core/jormungand_core.dart' show EventGroup, VpnMark, dayStart, vpnLineMarks;
 
 import '../core/logs_controller.dart';
 import '../l10n/l10n.dart';
@@ -15,6 +15,7 @@ import '../widgets/ignored_sites.dart';
 import '../widgets/log_parts.dart';
 import '../widgets/raw_filter_sheet.dart';
 import '../widgets/search_field.dart';
+import '../widgets/vpn_rail.dart';
 
 /// Logs tab (mockup markup/35-logs.html, js/46-logs.js, 47-events.js): Events, the journal as
 /// sentences, and Raw, the lines of sing-box and the core. Both lists open at the bottom, follow
@@ -126,6 +127,10 @@ class _LogsPageState extends State<LogsPage> {
   List<int> _evOrders = const [];
   Map<String, int> _evIndex = const {};
   (int, AppLocalizations?, int)? _itemsFor;
+
+  /// The VPN line at each event of the journal, kept until the journal changes ([LogsController.evVersion]).
+  int _marksFor = -1;
+  Map<int, VpnMark> _vpnMarks = const {};
 
   /// The lists as last built: the one behind the other tab is shown again, as the identical
   /// widget (nothing of it is rebuilt or laid out again), while its tab is not in front.
@@ -389,6 +394,15 @@ class _LogsPageState extends State<LogsPage> {
     return _items = out;
   }
 
+  /// The VPN line at every event of the whole journal (the filter does not cut it), made once per change of the journal.
+  Map<int, VpnMark> _lineMarks() {
+    if (_marksFor != _c.evVersion) {
+      _marksFor = _c.evVersion;
+      _vpnMarks = vpnLineMarks(_c.feed.list);
+    }
+    return _vpnMarks;
+  }
+
   String _summary(AppLocalizations l10n) {
     final (:warn, :err) = _c.tab == 'events' ? _c.evLevels : _c.rawLevels;
     final String head;
@@ -554,6 +568,7 @@ class _LogsPageState extends State<LogsPage> {
     final words = _c.words;
     final hit = _c.hitEvent;
     final orders = _evOrders, index = _evIndex;
+    final marks = _lineMarks();
     return AnchoredList(
       key: _evKey,
       controller: _ev.scroll,
@@ -570,6 +585,7 @@ class _LogsPageState extends State<LogsPage> {
           logs: _c,
           words: words,
           first: i == 0 || items[i - 1] is _Day,
+          onJump: _c.showEvent,
         );
         if (g.problem) {
           row = RowMark<List<int>>(value: [for (final e in g.items) e.id], child: row);
@@ -577,6 +593,20 @@ class _LogsPageState extends State<LogsPage> {
         if (hit != null && g.items.any((e) => e.id == hit.id)) {
           row = KeyedSubtree(key: _hitEvKey, child: row);
         }
+        // the VPN line in a gutter left of the row: the row keeps its width less the gutter and its height
+        row = Stack(
+          fit: StackFit.passthrough,
+          children: [
+            Padding(padding: const EdgeInsets.only(left: VpnRail.width), child: row),
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: VpnRail.width,
+              child: VpnRail(marks[g.ev.id]),
+            ),
+          ],
+        );
         return RowMark<RowAnchor>(
           key: ValueKey('e${g.key}'),
           value: RowAnchor(orders[i]),

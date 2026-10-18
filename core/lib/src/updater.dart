@@ -102,10 +102,10 @@ bool isOwnRestartFailure(Object e) =>
 
 /// The `sub/*` events one update of source [s] (as it was before) with [patch] (what [updateSubscription] put together)
 /// makes, as `(type, data)` in the order they are written: `updated` `{source, name, added, removed, total}` (only when the
-/// servers changed, or [always]: the manual update tells even a no-change one), then `removed` / `back`
-/// `{source, name, count, names, inUse}` for the servers the provider dropped / brought back (the `gone` list moved).
-/// Servers are told apart by `key ?? id`. [inUse]: is this server the main flow's or a rule target's now; the events
-/// then say so (`inUse`, and `inUseNames`). `names`: at most [subEventNames].
+/// servers changed, when the provider dropped servers in use, or [always]), with `lost` / `lostCount` when it dropped
+/// servers in use (the owner makes it a warn one and adds `affected`), then `back` `{source, name, count, names}` for the
+/// dropped servers it brought back (the `gone` list moved). Servers are told apart by `key ?? id`. [inUse]: is this
+/// server the main flow's or a rule target's now. `names` / `lost`: at most [subEventNames].
 List<(String, Map<String, dynamic>)> subUpdateEvents(String sid, Map<String, dynamic> s, Map<String, dynamic> patch,
     {bool always = false, bool Function(Map<String, dynamic> node)? inUse}) {
   List<Map<String, dynamic>> maps(Object? l) => [for (final x in (l as List? ?? const [])) if (x is Map) x.cast<String, dynamic>()];
@@ -118,31 +118,51 @@ List<(String, Map<String, dynamic>)> subUpdateEvents(String sid, Map<String, dyn
   final was = {for (final n in prev) keyOf(n)}, nowKeys = {for (final n in nodes) keyOf(n)};
   final added = nowKeys.difference(was).length, removed = was.difference(nowKeys).length;
   final out = <(String, Map<String, dynamic>)>[];
-  if (always || added != 0 || removed != 0) {
-    out.add(('updated', {'source': sid, 'name': name, 'added': added, 'removed': removed, 'total': nodes.length}));
+  final canGone = fresh && patch['gone'] is List;
+  final dropped = canGone ? subDropped(s, patch) : const <Map<String, dynamic>>[];
+  final back = canGone ? subReturned(s, patch) : const <Map<String, dynamic>>[];
+  String label(Map n) => '${n['name'] ?? n['rawName'] ?? n['id']}';
+  // the used servers the provider dropped make the update a warn one: `lost`, `lostCount` (the owner adds `affected`)
+  final used = inUse == null ? const <Map<String, dynamic>>[] : [for (final n in dropped) if (inUse(n)) n];
+  if (always || added != 0 || removed != 0 || used.isNotEmpty) {
+    out.add((
+      'updated',
+      {
+        'source': sid,
+        'name': name,
+        'added': added,
+        'removed': removed,
+        'total': nodes.length,
+        if (used.isNotEmpty) 'lost': [for (final n in used.take(subEventNames)) label(n)],
+        if (used.isNotEmpty) 'lostCount': used.length,
+      }
+    ));
   }
-  if (!fresh || patch['gone'] is! List) return out;
-  Map<String, dynamic> listOf(List<Map<String, dynamic>> l) {
-    final used = inUse == null ? const <Map<String, dynamic>>[] : [for (final n in l) if (inUse(n)) n];
-    String label(Map n) => '${n['name'] ?? n['rawName'] ?? n['id']}';
-    return {
+  if (back.isNotEmpty) {
+    out.add(('back', {
       'source': sid,
       'name': name,
-      'count': l.length,
-      'names': [for (final n in l.take(subEventNames)) label(n)],
-      'inUse': used.isNotEmpty,
-      if (used.isNotEmpty) 'inUseNames': [for (final n in used.take(subEventNames)) label(n)],
-    };
+      'count': back.length,
+      'names': [for (final n in back.take(subEventNames)) label(n)],
+    }));
   }
-
-  final prevGone = maps(s['gone']), goneNow = maps(patch['gone']);
-  final nowIds = {for (final n in nodes) '${n['id']}'};
-  final wasGone = {for (final g in prevGone) '${g['id']}'};
-  final dropped = [for (final g in goneNow) if (!wasGone.contains('${g['id']}')) g];
-  final back = [for (final g in prevGone) if (nowIds.contains('${g['id']}') || nowKeys.contains(keyOf(g))) g];
-  if (dropped.isNotEmpty) out.add(('removed', listOf(dropped)));
-  if (back.isNotEmpty) out.add(('back', listOf(back)));
   return out;
+}
+
+/// The servers update [patch] of source [s] (as it was before) drops: the `gone` list moved by them.
+List<Map<String, dynamic>> subDropped(Map<String, dynamic> s, Map<String, dynamic> patch) {
+  List<Map<String, dynamic>> maps(Object? l) => [for (final x in (l as List? ?? const [])) if (x is Map) x.cast<String, dynamic>()];
+  final wasGone = {for (final g in maps(s['gone'])) '${g['id']}'};
+  return [for (final g in maps(patch['gone'])) if (!wasGone.contains('${g['id']}')) g];
+}
+
+/// The dropped servers of [s] the update [patch] brings back (they are among its nodes again).
+List<Map<String, dynamic>> subReturned(Map<String, dynamic> s, Map<String, dynamic> patch) {
+  List<Map<String, dynamic>> maps(Object? l) => [for (final x in (l as List? ?? const [])) if (x is Map) x.cast<String, dynamic>()];
+  String keyOf(Map n) => '${n['key'] ?? n['id']}';
+  final nodes = maps(patch['nodes']);
+  final nowIds = {for (final n in nodes) '${n['id']}'}, nowKeys = {for (final n in nodes) keyOf(n)};
+  return [for (final g in maps(s['gone'])) if (nowIds.contains('${g['id']}') || nowKeys.contains(keyOf(g))) g];
 }
 
 /// How many server names `sub/removed` / `back` carry.
@@ -200,6 +220,7 @@ class SubscriptionUpdater {
     this.firstRun = const Duration(seconds: 20),
     this.update = updateSubscription,
     this.onEvent,
+    this.onReport,
     this.onSvcFailed,
     this.onDiverged,
     this.onStale,
@@ -260,11 +281,16 @@ class SubscriptionUpdater {
   Map<String, Object?>? get op => _op;
 
   /// What the timer's updates did, for the events journal: `('updated', {source, name,
-  /// added, removed, total})` when the server list changed, `('removed' | 'back', {source, name, count, names, inUse})`
-  /// when the provider dropped / brought back servers ([subUpdateEvents]), `('failed', {source, name, error})` on every
+  /// added, removed, total, lost?, lostCount?})` when the server list changed or used servers were dropped,
+  /// `('back', {source, name, count, names})` when the provider brought dropped servers back ([subUpdateEvents]), `('failed', {source, name, error})` on every
   /// failure (the owner of the hook folds the same error of the same source into one event, ×N). The manual update of
   /// the UI is told by [CoreService.fetchSource] with the same helper.
   final void Function(String type, Map<String, dynamic> data)? onEvent;
+
+  /// Set, an update that landed is told to this ([s]: the source before, [patch]: what was applied) instead of
+  /// [subUpdateEvents] being run for [onEvent]: the owner needs both to tell what the update affects. [onEvent] still
+  /// gets the failures.
+  final FutureOr<void> Function(String sid, Map<String, dynamic> s, Map<String, dynamic> patch)? onReport;
 
   final _busy = <String>{};
   final _triedAt = <String, int>{};
@@ -317,7 +343,15 @@ class SubscriptionUpdater {
   static Map<String, dynamic> _expect(Map<String, dynamic> s) =>
       {for (final k in const ['url', 'userAgent', 'filter', 'hwid', 'gone', 'updatedAt']) k: s[k]};
 
-  void _report(String sid, Map<String, dynamic> s, Map<String, dynamic> patch) {
+  Future<void> _report(String sid, Map<String, dynamic> s, Map<String, dynamic> patch) async {
+    if (onReport != null) {
+      try {
+        await onReport!(sid, s, patch);
+      } catch (e) {
+        stderr.writeln('[updater] events of ${s['name'] ?? sid}: $e'); // told wrongly is not a failed fetch
+      }
+      return;
+    }
     if (onEvent == null) return;
     for (final (type, data) in subUpdateEvents(sid, s, patch, inUse: nodeInUse)) {
       onEvent!(type, data);
@@ -366,7 +400,7 @@ class SubscriptionUpdater {
         if (r['stale'] case final Map stale) onStale?.call(stale.cast<String, dynamic>());
         if (await store.patchSource(sid, _expect(s), patch)) {
           done.add(sid);
-          _report(sid, s, patch);
+          await _report(sid, s, patch);
           final nodes = patch['nodes'];
           if (nodes is List) onNodes?.call(sid, [for (final n in nodes) if (n is Map) n.cast<String, dynamic>()]);
         }

@@ -44,6 +44,9 @@ class SystemNotifier {
   bool _nodeSent = false;
   bool? _sentShown;
 
+  /// The id of the `conn/vpnDown` notification posted and not closed yet.
+  int? _downId;
+
   /// The app is not in front (anything but `resumed`; unknown yet counts as in front).
   static bool get inBackground {
     final s = WidgetsBinding.instance.lifecycleState;
@@ -113,7 +116,24 @@ class SystemNotifier {
   Future<void> postEvent(EventRecord e, EventWords words) {
     final cause = e.cause;
     if (cause != null) return Future.value();
-    final id = e.opens ?? cause ?? e.id;
+    if (e.key == 'conn/vpnUp' && e.data['by'] != null) {
+      // ended by the user: the shown «VPN is down» comes off the shade; by the system: it stays for the revoke's
+      // notification to replace; either way the closing has no notification of its own
+      if (e.data['by'] == 'user' && _downId != null && e.opens == _downId) {
+        final shown = _downId!;
+        _downId = null;
+        return io.cancelEvent(shown);
+      }
+      return Future.value();
+    }
+    var id = e.opens ?? cause ?? e.id;
+    if (e.key == 'conn/vpnDown') _downId = e.id;
+    if (e.key == 'conn/vpnUp' && e.opens == _downId) _downId = null;
+    if (e.key == 'conn/disconnected' && e.data['by'] == 'system') {
+      // the VPN was taken away: this replaces the «VPN is down» that was on the shade (its `vpnUp` came right before)
+      id = _downId ?? id;
+      _downId = null;
+    }
     final g = EventGroup(e);
     // the closing of «VPN is down» speaks for itself (a lone group of it would read as the failure)
     final (title, detail) = e.key == 'conn/vpnUp'
@@ -151,7 +171,7 @@ class SystemNotifier {
     final isSub = host.catalog.sourcesData['${d['source']}']?.kind == 'sub';
     final out = switch (e.key) {
       // Connect is bold for every `by: error` (logs.md «По типам»); Choose server of a lost pin stays in the row
-      'conn/disconnected' when d['by'] == 'error' => [('connect', l.connect)],
+      'conn/disconnected' when d['by'] == 'error' || d['by'] == 'system' => [('connect', l.connect)],
       // `retry` of a failed connect connects again (the shell routes it by the event: the same call as the row's Retry)
       'conn/connectFailed' => [('retry', l.retry)],
       'conn/lost' => [('checkNow', l.checkNow)],
@@ -185,6 +205,7 @@ class SystemNotifier {
   void onResumed() {
     if (!io.available) return;
     io.cancelEvents();
+    _downId = null;
     io.refresh(); // back from the system settings
     drainIgnoreOps(); // a ping that came before this Dart listened
   }

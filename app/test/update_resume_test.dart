@@ -417,6 +417,9 @@ class _Notify implements NotifyIo {
   final visible = <bool>[];
   @override
   Future<void> setVpnVisible(bool v) async => visible.add(v);
+  final cancelled = <int>[];
+  @override
+  Future<void> cancelEvent(int id) async => cancelled.add(id);
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

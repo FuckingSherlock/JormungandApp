@@ -91,6 +91,7 @@ class NotifCfg {
     'connLost': true,
     'blocked': true,
     'dnsFailed': true,
+    'vpnRevoked': true,
     'subUpdated': false,
     'subFailed': true,
     'ruleSets': true,
@@ -107,6 +108,7 @@ class NotifCfg {
     'connLost',
     'blocked',
     'dnsFailed',
+    'vpnRevoked',
   ];
   static const List<String> subscriptionKeys = [
     'subUpdated',

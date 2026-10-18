@@ -127,10 +127,7 @@ void main() {
     expect((o.result!['patch'] as Map)['nodes'], isNotEmpty);
     expect(o.result!.containsKey('waiting'), isFalse);
     expect(o.result!['notModified'], isNot(true));
-    final ev = subEvents();
-    expect(ev, hasLength(1));
-    expect([ev.single['type'], ev.single['own']], ['updated', true]);
-    expect((ev.single['op'] as Map)['kind'], 'subUpdate');
+    expect(subEvents(), isEmpty, reason: 'a manual update writes no success sub/updated');
     expect(statuses.where((s) => s.containsKey('subWaits')), isEmpty);
     expect((await svc.status()).containsKey('subWaits'), isFalse);
   });
@@ -152,8 +149,7 @@ void main() {
     expect(o.error, isNull);
     expect(hits, isNotEmpty);
     expect(o.result!.containsKey('waiting'), isFalse);
-    final ev = subEvents();
-    expect([for (final e in ev) '${e['type']}:${e['own']}'], ['updated:true']);
+    expect(subEvents(), isEmpty, reason: 'no success event');
     expect(await waits(), isNull);
     expect((await svc.status()).containsKey('subWaits'), isFalse, reason: 'absent when empty');
     final last = statuses.lastWhere((s) => s.containsKey('subWaits') || s.isNotEmpty);
@@ -170,7 +166,7 @@ void main() {
     online();
     await until(() => o.done);
     expect(o.error, isNull);
-    expect(subEvents().map((e) => e['type']), ['updated']);
+    expect(subEvents(), isEmpty, reason: 'no success event');
   });
 
   test('offline for 5 s: one sub/failed own with code offline and "No network"; the call throws; nothing was loaded; the wait is cleared', () async {
@@ -200,9 +196,7 @@ void main() {
     online();
     await until(() => a.done && b.done);
     expect([a.error, b.error], [null, null]);
-    final ev = subEvents();
-    expect(ev.map((e) => e['type']), ['updated', 'updated']);
-    expect({for (final e in ev) (e['op'] as Map)['id']}, hasLength(2), reason: 'no "update all" in a manual one: each has its own op');
+    expect(subEvents(), isEmpty, reason: 'no success event for either');
     expect(await waits(), isNull);
   });
 
@@ -253,7 +247,7 @@ void main() {
       expect((o.result!['patch'] as Map)['nodes'], isNotEmpty);
       expect(o.result!.containsKey('waiting'), isFalse);
       expect(o.result!['notModified'], isNot(true));
-      expect([for (final e in subEvents()) '${e['type']}:${e['own']}'], ['updated:true']);
+      expect(subEvents(), isEmpty, reason: 'no success event');
       expect(await waits(), isNull);
       final after = hits.length;
       expect(await svc.updater.runDue(), isEmpty, reason: 'the timer was not asked to come again');

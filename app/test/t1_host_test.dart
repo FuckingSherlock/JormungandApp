@@ -122,16 +122,13 @@ void main() {
   Future<void> settle([int ms = 120]) => Future<void>.delayed(Duration(milliseconds: ms));
 
   group('one author of sub/*: the core', () {
-    test('a manual update that loads: exactly one sub/updated (own, from the core), nothing posted by the app', () async {
+    test('a manual update that loads: no success sub/updated (docs/logs.md, 2026-10-18), nothing posted by the app', () async {
       await start();
       await host.updateSource('a');
       await settle(40);
       final sub = _events(core).where((e) => e['cat'] == 'sub').toList();
-      // the fixture's servers a1 / a2 are not in the loaded list: the core also writes `removed`, once
-      final types = [for (final e in sub) e['type']];
-      expect(types.where((t) => t == 'updated'), hasLength(1), reason: '$types');
-      expect(types.toSet(), hasLength(types.length), reason: 'one update, one event per type: $types');
-      expect(sub.every((e) => e['own'] == true), isTrue);
+      // the fixture's servers a1 / a2 are not in the loaded list, but none is in use: no warn variation either
+      expect([for (final e in sub) e['type']], isEmpty, reason: 'a manual update writes only sub/failed or the warn sub/updated');
       expect(core.posted.where((b) => b['cat'] == 'sub'), isEmpty, reason: 'the app writes no sub/* (updated / removed / back)');
       expect(host.catalog.sourcesData['a']!.unknown.containsKey('lastError'), isFalse);
     });
@@ -208,7 +205,7 @@ void main() {
       await done.timeout(const Duration(seconds: 10));
       await settle(40);
       expect(host.subWaits, isEmpty);
-      expect(_events(core).where((e) => e['cat'] == 'sub' && e['type'] == 'updated'), hasLength(1));
+      expect(_events(core).where((e) => e['cat'] == 'sub'), isEmpty, reason: 'a manual update that loads writes no success event');
     });
   });
 

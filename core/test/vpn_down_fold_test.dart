@@ -39,7 +39,8 @@ EventRecord failed(int id, int at) => ev(id, 'core', 'restartFailed', at: at, le
 EventRecord vpnDown({int id = 10, List<int>? joins = const [1], int rev = 0}) =>
     ev(id, 'conn', 'vpnDown', at: 30 * sec, level: 'error', verdict: 'confirmed', joins: joins, rev: rev, data: {'causes': ['core'], 'proxy': 'kept'});
 EventRecord restarted() => ev(12, 'core', 'restarted', at: 60 * sec, opens: 1, cause: 1);
-EventRecord vpnUp({int id = 13, int opens = 10}) => ev(id, 'conn', 'vpnUp', at: 70 * sec, opens: opens, data: {'downMs': 40 * sec, 'causes': ['core']});
+EventRecord vpnUp({int id = 13, int opens = 10, String? by}) =>
+    ev(id, 'conn', 'vpnUp', at: 70 * sec, opens: opens, data: {'downMs': 40 * sec, 'causes': ['core'], 'by': ?by});
 
 List<int> ids(EventGroup g) => [for (final e in g.items) e.id];
 
@@ -69,20 +70,24 @@ void main() {
       expect(g.head!.id, 10);
       expect(ids(g), unorderedEquals([1, 2, 3, 10, 11, 14, 12, 15]));
       expect(g.closed, isFalse, reason: 'core/restarted of the merged crash does not close the failure');
-      expect(g.closer, isNull);
+      expect(g.closedById, isNull);
       expect(g.level, 'error');
     });
 
-    test('only conn/vpnUp closes the row; it is the closer of the joining event', () {
-      final g = foldEvents([...journal, vpnUp()]).single;
+    test('only conn/vpnUp closes the row: it is a row of its own, pointing at the joining event', () {
+      final rows = foldEvents([...journal, vpnUp()]);
+      expect(rows, hasLength(2));
+      final g = rows[0];
       expect(g.closed, isTrue);
-      expect(g.closer!.id, 13);
+      expect(g.closedById, 13);
       expect(g.head!.id, 10);
-      expect(ids(g), unorderedEquals([1, 2, 3, 10, 11, 14, 12, 15, 13]));
+      expect(ids(g), unorderedEquals([1, 2, 3, 10, 11, 14, 12, 15]), reason: 'the closer is not a step of the row');
       expect(g.closedAfter, 40 * sec);
+      expect(ids(rows[1]), [13]);
+      expect(rows[1].opensId, 10);
     });
 
-    test('the row stands where the joining event stands; other rows keep their places', () {
+    test('the row stands where the joining event stands; other rows and the closer keep their places', () {
       final rows = foldEvents([
         ev(0, 'sub', 'updated', at: 0, data: {'source': 's'}),
         crashed(),
@@ -91,7 +96,7 @@ void main() {
         vpnDown(),
         vpnUp(),
       ]);
-      expect([for (final g in rows) g.head!.id], [0, 2, 10]);
+      expect([for (final g in rows) g.ev.id], [0, 2, 10, 13]);
     });
 
     test('later pieces of the merged crash (a repeat, a closer) land in the same row', () {
@@ -107,9 +112,11 @@ void main() {
 
     test('a joins id that is not in the journal is ignored: the event is a row of its own, nothing throws', () {
       final rows = foldEvents([vpnDown(joins: [99, 98]), vpnUp()]);
-      expect(rows, hasLength(1));
-      expect(ids(rows.single), [10, 13]);
-      expect(rows.single.closed, isTrue);
+      expect(rows, hasLength(2));
+      expect(ids(rows[0]), [10]);
+      expect(rows[0].closedById, 13);
+      expect(ids(rows[1]), [13]);
+      expect(rows[1].opensId, 10);
     });
 
     test('a partly known list joins what is there', () {
@@ -118,15 +125,19 @@ void main() {
       expect(ids(rows.single), unorderedEquals([1, 10]));
     });
 
-    test('without joins an old-journal crash keeps its own row (core/down as before)', () {
+    test('without joins an old-journal crash keeps its own row (core/down as before); its closer is a row of its own', () {
       final rows = foldEvents([
         crashed(),
         ev(2, 'core', 'down', at: 30 * sec, level: 'error', cause: 1),
         ev(3, 'core', 'restarted', at: 60 * sec, opens: 1, cause: 1),
       ]);
-      expect(rows, hasLength(1));
-      expect(rows.single.head!.id, 1);
-      expect(rows.single.closed, isTrue);
+      expect(rows, hasLength(2));
+      expect(rows[0].head!.id, 1);
+      expect(ids(rows[0]), unorderedEquals([1, 2]));
+      expect(rows[0].closed, isTrue);
+      expect(rows[0].closedById, 3);
+      expect(ids(rows[1]), [3]);
+      expect(rows[1].opensId, 1);
     });
 
     test('folding twice gives the same rows; the input is not changed', () {
@@ -192,6 +203,14 @@ void main() {
       final unshown = EventFeed();
       expect(unshown.notify({'connLost': false}, lost()), isFalse);
       expect(unshown.notify({'connLost': false}, restored()), isFalse);
+    });
+
+    test('vpnUp by the user or the system never notifies, even over a shown vpnDown (no replacing)', () {
+      for (final by in ['user', 'system']) {
+        final feed = EventFeed();
+        expect(feed.notify(null, vpnDown()), isTrue);
+        expect(feed.notify(null, vpnUp(by: by)), isFalse, reason: 'by: $by');
+      }
     });
 
     test('a vpnUp for a different vpnDown does not ride on another failure\'s notification', () {

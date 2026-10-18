@@ -4254,14 +4254,285 @@
     }
   },
   "noInternetConnection": "No internet connection",
-  "systemProxyLeftOnProgramsHave": "system proxy left on, programs have no internet",
   "vpnWorksAgain": "VPN works again",
-  "vpnWorksAgainDown": "VPN works again · down {s0}",
-  "@vpnWorksAgainDown": {
+  "vpnOutageEnded": "VPN outage ended",
+  "internetAvailableAgain": "Internet available again",
+  "autoChangedServerFastest": "Auto changed server (Fastest)",
+  "subscriptionUpdateFailed": "Subscription update failed",
+  "providerRemovedServers": "Provider removed servers",
+  "serversReturnedToTheSubscription": "Servers returned to the subscription",
+  "serversInUseSwitchedOffOr": "Servers in use switched off or deleted",
+  "serversInUseSwitchedOn": "Servers in use switched on",
+  "singBoxRestartFailed": "sing-box restart failed",
+  "vpnDisconnectedByYou": "VPN disconnected · by you",
+  "vpnDisconnectedByTheSystemOr": "VPN disconnected · by the system or another app",
+  "vpnDisconnectedErrorServerIsUnavailable": "VPN disconnected · error: server {s0} is unavailable ({s1})",
+  "@vpnDisconnectedErrorServerIsUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "vpnDisconnectedErrorServerIsUnavailable2": "VPN disconnected · error: server is unavailable ({s0})",
+  "@vpnDisconnectedErrorServerIsUnavailable2": {
     "placeholders": {
       "s0": {
         "type": "String"
       }
     }
-  }
+  },
+  "vpnDisconnectedErrorSingBoxDid": "VPN disconnected · error: sing-box did not start after 1 attempt",
+  "vpnDisconnectedErrorSingBoxDid2": "VPN disconnected · error: sing-box did not start after {n0} attempts",
+  "@vpnDisconnectedErrorSingBoxDid2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "vpnDisconnectedAfterAnError": "VPN disconnected · after an error",
+  "vpnDisconnectedAfterAnError2": "VPN disconnected · after an error: {s0}",
+  "@vpnDisconnectedAfterAnError2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "reconnectedSettings": "Reconnected · settings: {s0}",
+  "@reconnectedSettings": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "reconnectedRuleLists": "Reconnected · rule lists",
+  "reconnectedServerAddresses": "Reconnected · server addresses",
+  "reconnectedByYouVpnWasOff": "Reconnected · by you, VPN was off for {s0}",
+  "@reconnectedByYouVpnWasOff": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "waitingForNetworkVpnIsOn": "Waiting for network · VPN is on, no internet connection",
+  "singBoxStoppedAndHasNot": "sing-box stopped and has not restarted for 30 s",
+  "singBoxStoppedAndHasNot2": "sing-box stopped and has not restarted for 30 s ({n0} restart attempts so far)",
+  "@singBoxStoppedAndHasNot2": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "systemProxyIsStillSetSo": "system proxy is still set, so programs that use it have no internet",
+  "vpnOutageEndedVpnDisconnected": "VPN outage ended · VPN disconnected",
+  "vpnWorksAgainSingBoxIs": "VPN works again · sing-box is running",
+  "vpnWorksAgainInternetIsAvailable": "VPN works again · internet is available",
+  "vpnWorksAgainSingBoxIs2": "VPN works again · sing-box is running, internet is available",
+  "internetIsAvailableAgainWasUnavailable": "Internet is available again · was unavailable for {s0}",
+  "@internetIsAvailableAgainWasUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "internetIsAvailableAgain": "Internet is available again",
+  "isUnstableFailuresExcludedForMin": "{s0} is unstable · {n1} failures, excluded for {n2} min",
+  "@isUnstableFailuresExcludedForMin": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      },
+      "n2": {
+        "type": "num"
+      }
+    }
+  },
+  "ruleTrafficIsBlockedIfUnavailable": "Rule {s0}: traffic is blocked (If unavailable: Block)",
+  "@ruleTrafficIsBlockedIfUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleTrafficGoesDirectIfUnavailable": "Rule {s0}: traffic goes direct (If unavailable: Direct)",
+  "@ruleTrafficGoesDirectIfUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleTrafficGoesThroughTheMain": "Rule {s0}: traffic goes through the main flow",
+  "@ruleTrafficGoesThroughTheMain": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleTrafficGoesThrough": "Rule {s0}: traffic goes through {s1}",
+  "@ruleTrafficGoesThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "appTrafficIsBlockedIfUnavailable": "App {s0}: traffic is blocked (If unavailable: Block)",
+  "@appTrafficIsBlockedIfUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appTrafficGoesDirectIfUnavailable": "App {s0}: traffic goes direct (If unavailable: Direct)",
+  "@appTrafficGoesDirectIfUnavailable": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appTrafficGoesThroughTheMain": "App {s0}: traffic goes through the main flow",
+  "@appTrafficGoesThroughTheMain": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appTrafficGoesThrough": "App {s0}: traffic goes through {s1}",
+  "@appTrafficGoesThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "ruleTrafficGoesThroughTheTarget": "Rule {s0}: traffic goes through the target again",
+  "@ruleTrafficGoesThroughTheTarget": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "appTrafficGoesThroughTheTarget": "App {s0}: traffic goes through the target again",
+  "@appTrafficGoesThroughTheTarget": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "noAnswerConnectionEndedInUnder": "No answer, connection ended in under 2 s",
+  "updateSourcesChecked": "Update sources checked: {n0}",
+  "@updateSourcesChecked": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "theExternalCheckerOpensItFrom": "The external checker opens it from its own servers",
+  "theFileContainedOnlyZeroBytes": "The file contained only zero bytes",
+  "removedWithTheRemoveSystemProxy": "Removed with the Remove system proxy button",
+  "subscriptionRemovedServersInUse": "Subscription {s0} removed servers in use: {s1}",
+  "@subscriptionRemovedServersInUse": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "theirTrafficUsesIfUnavailableFor": "Their traffic uses If unavailable for now and goes back by itself if the provider returns the servers. Keep it as is, or choose a new target.",
+  "youSwitchedOffServersInUse": "You switched off servers in use: {s0}",
+  "@youSwitchedOffServersInUse": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "theirTrafficUsesIfUnavailableUntil": "Their traffic uses If unavailable until you switch them on.",
+  "youDeletedServersInUse": "You deleted servers in use: {s0}",
+  "@youDeletedServersInUse": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "theirTrafficUsesIfUnavailable": "Their traffic uses If unavailable.",
+  "youSwitchedOnServersInUse": "You switched on servers in use: {s0}",
+  "@youSwitchedOnServersInUse": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "trafficOfGoesThroughThemAgain": "Traffic of {s0} goes through them again",
+  "@trafficOfGoesThroughThemAgain": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "subscriptionReturnedServersInUse": "Subscription {s0} returned servers in use: {s1}",
+  "@subscriptionReturnedServersInUse": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "theConnection": "the connection",
+  "n1Rule": "1 rule",
+  "n1App": "1 app",
+  "n1Chain": "1 chain",
+  "n1Profile": "1 profile",
+  "notWorking": "not working",
+  "chooseForAll": "Choose for all",
+  "openSubscription": "Open subscription",
+  "returnOnce": "Return once",
+  "donTExclude": "Don't exclude",
+  "alwaysShown": "Always shown",
+  "backToStart": "Back to start: {s0}",
+  "@backToStart": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "vpnTurnedOffByTheSystem": "VPN turned off by the system",
+  "anotherVpnAppTookOverOr": "Another VPN app took over, or the VPN was switched off in the system settings. sing-box is stopped and not restarted"
 }

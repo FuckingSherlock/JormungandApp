@@ -19,8 +19,9 @@ const pendingLabels = <String>{};
 /// Types in the catalog that no code of this repository writes: the mockup writes them.
 const mockupOnly = <String>{'sub/dead'};
 
-/// Types the core no longer writes but old journals hold (so they stay in the catalog).
-const legacyOnly = <String>{'core/down'};
+/// Types the core no longer writes but old journals hold (so they stay in the catalog): `sub/removed` is replaced by the
+/// warn variation of `sub/updated` and `sub/back`.
+const legacyOnly = <String>{'core/down', 'sub/removed'};
 
 /// Emit sites whose type (or category) is a variable, by `file|call|first argument|second argument`.
 /// What they can write is found by the other patterns (below), so the entry only says "known":
@@ -81,7 +82,7 @@ void main() {
       final stale = [for (final k in mockupOnly) if (written.contains(k)) k];
       expect(stale, isEmpty, reason: 'now written by the core: remove it from mockupOnly');
       final back = [for (final k in legacyOnly) if (written.contains(k)) k];
-      expect(back, isEmpty, reason: 'core/down is written again: the single conn/vpnDown replaced it');
+      expect(back, isEmpty, reason: 'a legacy type is written again: core/down is the single conn/vpnDown, sub/removed the warn sub/updated');
     });
 
     test('«VPN не работает»: conn/vpnDown, conn/vpnUp are in the catalog; core/down stays for old journals', () {
@@ -154,7 +155,18 @@ void main() {
           containsAll([
             'dns/failedOnNode', 'core/deprecated', 'speed/failed', 'core/updateFailed', 'core/updateDeltaFailed',
             'core/updateChannelEmpty', 'sub/diverged', 'net/switched', 'core/down', 'core/crashed', 'core/restartFailed',
+            'node/lost', 'node/back',
           ]));
+    });
+
+    test('node/lost and node/back are in the catalog under node, next to node/addressMissing', () {
+      expect(catalog, containsAll(['node/lost', 'node/back', 'node/addressMissing']));
+      final node = [for (final (cat, types) in eventCats) if (cat == 'node') ...types];
+      expect(node, containsAll(['addressMissing', 'lost', 'back']));
+    });
+
+    test('sub/removed stays in the catalog for old journals; sub/updated and sub/back are there', () {
+      expect(catalog, containsAll(['sub/removed', 'sub/updated', 'sub/back']));
     });
 
     test('the catalog itself: no repeats, every cat is one the journal accepts', () {

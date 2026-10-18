@@ -34,6 +34,10 @@ class PlatformCaps {
   /// Saving a file (exports): the second action next to "Save" is the system folder picker
   /// ("Choose folder") on Android and the system "Save as…" dialog on the desktop.
   bool get folderPicker => android;
+
+  /// Settings -> Notifications -> Connection: «VPN taken over by another app» (the system revokes the VPN
+  /// permission only on Android).
+  bool get vpnRevoked => android;
 }
 
 extension HostCaps on CoreHost {

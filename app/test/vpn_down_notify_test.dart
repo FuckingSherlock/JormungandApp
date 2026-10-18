@@ -41,7 +41,9 @@ Map<String, dynamic> _vpnDown(
   Map<String, dynamic> extra = const {},
   List<int> joins = const [],
 }) {
-  final e = host.addEvent('conn', 'vpnDown', level: 'error', data: {'causes': causes, ...extra})
+  // the network alone is the waiting, a warn; the core makes it an error
+  final waiting = causes.length == 1 && causes.first == 'network';
+  final e = host.addEvent('conn', 'vpnDown', level: waiting ? 'warn' : 'error', data: {'causes': causes, ...extra})
     ..['verdict'] = 'confirmed'
     ..['why'] = {'code': causes.first == 'core' ? 'core.down' : 'net.offline', 'params': <String, dynamic>{}};
   if (joins.isNotEmpty) e['joins'] = joins;
@@ -115,22 +117,33 @@ void main() {
     );
   });
 
-  for (final by in <String?>[null, 'user']) {
-    testWidgets('the closing (${by == null ? 'network back' : 'by the user'}) replaces the shown notification after its switch was turned off', (
-      tester,
-    ) async {
-      final host = await open(tester);
-      _lifecycleTo(AppLifecycleState.paused);
-      final down = _vpnDown(host, ['network'], extra: {'source': 'probes'});
-      await settle(tester);
-      expect(postedIds(), [down['id']]);
+  testWidgets('the closing (network back) replaces the shown notification after its switch was turned off', (tester) async {
+    final host = await open(tester);
+    _lifecycleTo(AppLifecycleState.paused);
+    final down = _vpnDown(host, ['network'], extra: {'source': 'probes'});
+    await settle(tester);
+    expect(postedIds(), [down['id']]);
 
-      host.notif.setFlag('connLost', false);
-      _vpnUp(host, down, {'downMs': 3000, 'causes': ['network'], 'by': ?by});
-      await settle(tester);
-      expect(postedIds(), [down['id'], down['id']], reason: 'the same id, whatever the switch says now');
-    });
-  }
+    host.notif.setFlag('connLost', false);
+    _vpnUp(host, down, {'downMs': 3000, 'causes': ['network']});
+    await settle(tester);
+    expect(postedIds(), [down['id'], down['id']], reason: 'the same id, whatever the switch says now');
+  });
+
+  testWidgets('the closing by the user posts nothing: it takes only the shown failure off the shade, by its id', (tester) async {
+    final host = await open(tester);
+    _lifecycleTo(AppLifecycleState.paused);
+    final down = _vpnDown(host, ['network'], extra: {'source': 'probes'});
+    await settle(tester);
+    expect(postedIds(), [down['id']]);
+
+    host.notif.setFlag('connLost', false);
+    _vpnUp(host, down, {'downMs': 3000, 'causes': ['network'], 'by': 'user'});
+    await settle(tester);
+    expect(postedIds(), [down['id']], reason: 'the closing of a disconnect has no notification of its own');
+    expect(io.cancelledIds, [down['id']], reason: 'the shown failure goes by its id, whatever the switch says now');
+    expect(io.cancels, 0, reason: 'cancelEvents() would take every event notification off');
+  });
 
   testWidgets('with the switch off from the start, neither the failure nor its closing posts anything', (tester) async {
     final host = await open(tester);

@@ -5,6 +5,7 @@ import '../core/settings_model.dart';
 import '../core/system_notifier.dart';
 import '../l10n/l10n.dart';
 import '../platform/notify_channel.dart';
+import '../platform/platform_caps.dart';
 import '../state/app_settings.dart';
 import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
@@ -355,6 +356,7 @@ class NotifSheet extends StatelessWidget {
           l10n.dnsServerDoesNotAnswer,
           l10n.aDnsServerStopsAnsweringOn,
         ),
+        ('vpnRevoked', l10n.vpnTurnedOffByTheSystem, l10n.anotherVpnAppTookOverOr),
       ]),
       (l10n.subscriptionsAndRules, [
         (
@@ -421,7 +423,8 @@ class NotifSheet extends StatelessWidget {
                   SetGroup(
                     card: true,
                     children: [
-                      for (final (k, l, h) in rows) row(k, l, h),
+                      for (final (k, l, h) in rows)
+                        if (k != 'vpnRevoked' || host.caps.vpnRevoked) row(k, l, h),
                       // a screen that can be off is a phone's: not on the desktop
                       if (caption == l10n.connection && NotifyIo.current.available)
                         row('bgErrors', l10n.errorsWhileScreenIsOff, l10n.aSiteThatFailsWhileThe),

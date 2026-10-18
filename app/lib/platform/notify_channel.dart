@@ -141,6 +141,9 @@ abstract class NotifyIo {
   /// Removes the event notifications (the app is in front again).
   Future<void> cancelEvents();
 
+  /// Removes the notification of one event (the others stay).
+  Future<void> cancelEvent(int id);
+
   /// The entry / server shown in the VPN notification; null = the plain text.
   Future<void> setVpnNode(String? node);
 
@@ -302,6 +305,9 @@ class PlatformNotifyIo implements NotifyIo {
 
   @override
   Future<void> cancelEvents() => _call('cancelEvents');
+
+  @override
+  Future<void> cancelEvent(int id) => _call('cancelEvent', <String, Object?>{'id': id});
 
   @override
   Future<void> postUpdate(UpdateNote note) => _call('postUpdate', <String, Object?>{

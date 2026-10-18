@@ -508,6 +508,11 @@ abstract class CoreHost extends ChangeNotifier {
   void deleteSource(String sid);
   void deleteNode(String sid, String nid);
 
+  /// «Choose for all» of an event with affected settings (`[{kind, id, name, to}]`): [target] (`''` = the main flow)
+  /// becomes the target of every `rule` / `app` item and the route of the `connection` item; `chain` / `profile`
+  /// items are ignored. Saved like a normal edit.
+  Future<void> retargetAll(List<Map<String, dynamic>> affected, String target) async {}
+
   /// A profile or a chain.
   void deleteEntry(String id);
 

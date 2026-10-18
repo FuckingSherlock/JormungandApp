@@ -132,21 +132,25 @@ void main() {
   });
 
   group('pairs (opens)', () {
-    test('the closing event lands in the row of the opening one: closed, with the duration, nothing else', () {
+    test('the closing event is a row of its own, placed by its time; the opening row is closed with the duration and points at the closer', () {
       final rows = foldEvents([
         ev(1, 'conn', 'offline', at: 10 * min, level: 'warn'),
         ev(2, 'site', 'blocked', at: 11 * min, data: {'host': 'x'}),
         ev(3, 'conn', 'online', at: 14 * min, opens: 1),
       ]);
-      expect(rows, hasLength(2));
+      expect([for (final g in rows) g.head!.id], [1, 2, 3]);
       final g = rows.first;
-      expect(g.head!.id, 1);
+      expect(ids(g), [1], reason: 'the closing event is not merged into the opening row');
       expect(g.closed, isTrue);
-      expect(g.closer!.id, 3);
+      expect(g.closedById, 3);
       expect(g.closedAfter, 4 * min);
       expect(g.level, 'warn', reason: 'the worst of its events; the UI paints a closed pair «resolved»');
       expect(g.at, 10 * min, reason: 'the pair stays where it opened');
-      expect(rows.last.closed, isFalse);
+      expect(rows[1].closed, isFalse);
+      expect(rows[2].isGroup, isFalse);
+      expect(rows[2].closed, isFalse);
+      expect(rows[2].opensId, 1);
+      expect(rows[2].closedById, isNull, reason: 'a closing event closes nothing');
     });
 
     test('an open pair is not closed', () {
@@ -162,27 +166,33 @@ void main() {
       expect(rows.single.isGroup, isFalse);
       expect(rows.single.head!.id, 9);
       expect(rows.single.closed, isFalse);
+      expect(rows.single.opensId, isNull);
     });
 
-    test('a pair with consequences under the opening event is one row: root, consequences, closer', () {
-      final g = foldEvents([
+    test('a pair with consequences under the opening event: root and consequences are one row, the closer a row of its own', () {
+      final rows = foldEvents([
         ev(1, 'conn', 'offline', at: 0, level: 'warn'),
         conseq(2, 'conn', 'lost', at: 1 * min, cause: 1),
         ev(3, 'conn', 'online', at: 2 * min, opens: 1),
-      ]).single;
-      expect(ids(g), [1, 2, 3]);
-      expect(g.closed, isTrue);
-      expect(g.relatedCount, 1);
+      ]);
+      expect(rows, hasLength(2));
+      expect(ids(rows[0]), [1, 2]);
+      expect(rows[0].closed, isTrue);
+      expect(rows[0].closedById, 3);
+      expect(rows[0].relatedCount, 1);
+      expect(ids(rows[1]), [3]);
+      expect(rows[1].opensId, 1);
     });
 
     test('the newest closer is the one that counts', () {
-      final g = foldEvents([
+      final rows = foldEvents([
         ev(1, 'rules', 'targetLost', at: 0, level: 'warn', data: {'target': 't'}),
         ev(2, 'rules', 'targetFound', at: 1 * min, opens: 1, data: {'target': 't'}),
         ev(3, 'rules', 'targetFound', at: 2 * min, opens: 1, data: {'target': 't'}),
-      ]).single;
-      expect(g.closer!.id, 3);
-      expect(g.closedAfter, 2 * min);
+      ]);
+      expect([for (final g in rows) g.head!.id], [1, 2, 3]);
+      expect(rows.first.closedById, 3);
+      expect(rows.first.closedAfter, 2 * min);
     });
   });
 
@@ -429,22 +439,24 @@ void main() {
   group('a crashed core: one row from the crash to the restart', () {
     EventRecord crashed() => ev(1, 'core', 'crashed', at: 0, level: 'error', data: {'code': 1});
 
-    test('crashed -> restartFailed x N -> down -> restarted is one row; the status is the last event, restarted closes', () {
+    test('crashed -> restartFailed x N -> down is one row, its status the last of them; restarted closes it from a row of its own', () {
       final rows = foldEvents([
         crashed(),
         for (var i = 0; i < 6; i++) ev(10 + i, 'core', 'restartFailed', at: (i + 1) * 5000, level: 'error', cause: 1, data: {'attempt': i + 1}),
         ev(20, 'core', 'down', at: 40000, level: 'error', cause: 1, data: {'proxy': 'kept'}),
         ev(21, 'core', 'restarted', at: 90000, opens: 1, cause: 1, data: {'downMs': 90000}),
       ]);
-      expect(rows, hasLength(1));
-      final g = rows.single;
+      expect(rows, hasLength(2));
+      final g = rows.first;
       expect(g.head!.id, 1);
       expect(g.relatedCount, greaterThanOrEqualTo(7));
-      expect(g.last.type, 'restarted');
+      expect(g.last.type, 'down');
       expect(g.closed, isTrue);
-      expect(g.closer!.id, 21);
+      expect(g.closedById, 21);
       expect(g.level, 'error', reason: 'the worst of the row; the UI paints it resolved by the closer');
       expect(g.at, 0);
+      expect(rows.last.head!.id, 21);
+      expect(rows.last.opensId, 1);
     });
 
     test('not restarted yet: the row is open and its last event is down; a restartFailed repeated by the core counts its times', () {
@@ -459,15 +471,19 @@ void main() {
       expect(g.relatedLastAt, 40000);
     });
 
-    test('a second crash far later is its own row', () {
+    test('a second crash far later is its own row; the restart that closes the first is a row of its own too', () {
       final rows = foldEvents([
         crashed(),
         ev(2, 'core', 'restarted', at: 1000, opens: 1, cause: 1),
         ev(3, 'core', 'crashed', at: 60 * min, level: 'error'),
       ]);
-      expect(rows, hasLength(2));
+      expect(rows, hasLength(3));
       expect(rows[0].closed, isTrue);
-      expect(rows[1].closed, isFalse);
+      expect(rows[0].closedById, 2);
+      expect(rows[1].head!.id, 2);
+      expect(rows[1].opensId, 1);
+      expect(rows[2].head!.id, 3);
+      expect(rows[2].closed, isFalse);
     });
   });
 

@@ -203,7 +203,7 @@ void main() {
       expect(tester.getTopLeft(rootTitle), before);
     });
 
-    testWidgets('a closed pair is one row: status Finished at … · lasted …, the colour of "resolved"; no button of the pair', (
+    testWidgets('a closed pair: the opener row says Finished at … · lasted …, the colour of "resolved"; the closer is a row of its own', (
       tester,
     ) async {
       final host = FakeCoreHost();
@@ -214,15 +214,17 @@ void main() {
       await _openLogs(tester);
 
       final rows = _rows(host);
-      expect(rows, hasLength(2), reason: 'the closer lives in the opener row');
+      expect(rows, hasLength(3), reason: 'the opener, the closer (its own row) and the later open one');
+      expect(rows.first.closedById, host.journal[1]['id']);
+      expect(rows[1].opensId, opener['id']);
       final closed = find.byKey(const ValueKey('evClosed'));
       expect(closed, findsOneWidget, reason: 'only the pair that ended has the status');
-      final text = tester.widget<Text>(closed);
+      final text = tester.widget<Text>(find.descendant(of: closed, matching: find.byType(Text)));
       expect(text.data, matches(RegExp(r'^Finished at \d\d:\d\d · lasted .+')));
       final c = tester.element(closed).colors;
       expect(text.style?.color, c.active);
       expect(text.style?.color, isNot(c.warn));
-      expect(find.text(_titleOf(host, host.journal[1])), findsNothing, reason: 'no row of its own for the closer');
+      expect(find.text(_titleOf(host, host.journal[1])), findsOneWidget, reason: 'the closer has a row of its own');
       expect(find.text('Check now'), findsOneWidget, reason: 'only the open one can still be checked');
     });
 
@@ -495,7 +497,7 @@ void main() {
 
     test('closedLine, relatedLine and repeatsLine', () {
       final words = _words(FakeCoreHost());
-      final pair = foldEvents([_rec(1), _rec(2, type: 'restored', extra: const {'opens': 1, 'level': 'info'})]).single;
+      final pair = foldEvents([_rec(1), _rec(2, type: 'restored', extra: const {'opens': 1, 'level': 'info'})]).first;
       expect(words.closedLine(pair), matches(RegExp(r'^Finished at \d\d:\d\d · lasted .+')));
       final repeats = foldEvents([
         for (var i = 0; i < 3; i++) _rec(10 + i, cat: 'sub', type: 'failed', extra: const {'data': {'name': 'P'}}),

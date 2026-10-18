@@ -11,6 +11,10 @@
 
 ## Ядро на Windows
 
+- **Кнопка к настройке системного прокси в «VPN не работает»** (решение 2026-10-18, `wording_audit.md` п. 8): при
+  `proxy: kept` — кнопка, ведущая к настройке «ставить / снимать системный прокси автоматически при вкл / выкл». Текст
+  «system proxy is still set, so programs that use it have no internet» уже сделан (т2).
+
 - **Ядро не знает сеть**: jormd/десктоп не шлют `setNetwork` — Sentinel видит только пробы и `updated default interface`
   sing-box. Нужен наблюдатель сети (NotifyIpInterfaceChange / NLM) → `POST /api/network`.
 - **dev-jormd: `dart.exe` vs `dartvm.exe` в `selfProcessPaths`** (S59, `config.dart:99`).

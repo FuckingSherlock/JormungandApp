@@ -54,7 +54,8 @@ void main() {
     f.toggleType('conn/lost');
     expect(vis(warn), isFalse);
     expect(f.offCats.map((c) => c.$1), ['conn']);
-    expect(f.typesOn(f.offCats.first), 10, reason: 'conn has eleven types in the catalog (failing, vpnDown, vpnUp among them); lost is off here');
+    expect(f.typesOn(f.offCats.first), 10,
+        reason: 'conn has eleven types in the catalog; lost is off; the always shown ones count as on (typesOn docstring)');
     f.q = 'alph';
     expect(vis(info), isTrue);
     expect(f.count, 2);
@@ -280,6 +281,58 @@ void main() {
     expect(f.visible(fg, showOwn: false, text: text), isTrue);
     f.reset();
     expect([f.hideBg, f.count], [false, 0]);
+  });
+
+  test('alwaysShownTypes: no type filter hides the VPN line events, not even an old saved filter; the search still narrows', () {
+    expect(alwaysShownTypes, {'conn/connected', 'conn/disconnected', 'conn/reconnected', 'conn/vpnDown', 'conn/vpnUp'});
+    final always = [
+      e(ev(1, 'conn', 'connected')),
+      e(ev(2, 'conn', 'disconnected', level: 'warn', data: {'by': 'user'})),
+      e(ev(3, 'conn', 'reconnected')),
+      e(ev(4, 'conn', 'vpnDown', level: 'error', data: {'causes': ['core']})),
+      e(ev(5, 'conn', 'vpnUp')),
+    ];
+    final allTypes = [for (final (c, ts) in eventCats) for (final t in ts) '$c/$t'];
+    String text(EventRecord x) => '';
+    final f = EventFilter();
+
+    f.off.addAll(alwaysShownTypes); // an old saved filter that lists them as hidden
+    expect([for (final x in always) f.visible(x, showOwn: false, text: text)], everyElement(isTrue));
+
+    f.off
+      ..clear()
+      ..addAll(allTypes.where((k) => k != 'sub/updated')); // «Show only this type» of sub/updated
+    expect([for (final x in always) f.visible(x, showOwn: false, text: text)], everyElement(isTrue));
+    expect(f.visible(e(ev(6, 'sub', 'updated', data: {'name': 'Alpha'})), showOwn: false, text: text), isTrue,
+        reason: 'the one type left on is shown');
+    expect(f.visible(e(ev(7, 'conn', 'lost', level: 'warn')), showOwn: false, text: text), isFalse,
+        reason: 'the other types are off, conn/lost among them');
+
+    f.off.clear();
+    f.q = 'zzz';
+    expect([for (final x in always) f.visible(x, showOwn: false, text: text)], everyElement(isFalse), reason: 'search narrows the list as usual');
+  });
+
+  test('notification kinds: sub/updated by level, sub/back, node/lost and node/back are the journal only, a VPN the user or the system ended never notifies', () {
+    EventRecord r(String cat, String type, {String level = 'info', Map<String, dynamic> data = const {}, bool own = false}) =>
+        e(ev(1, cat, type, level: level, own: own, data: data));
+    expect(notifDefaults['subUpdated'], isFalse, reason: 'success is off by default');
+    expect(notifDefaults['subFailed'], isTrue, reason: 'a failure is on by default');
+    expect(eventNotifKindOf(r('sub', 'updated')), 'subUpdated');
+    expect(eventNotifKindOf(r('sub', 'updated', level: 'warn')), 'subFailed', reason: 'the warn variation: the used servers were removed');
+    expect(eventNotifKindOf(r('sub', 'back')), 'subFailed');
+    expect(eventNotifKindOf(r('node', 'lost', level: 'warn', own: true)), isNull);
+    expect(eventNotifKindOf(r('node', 'back')), isNull);
+    expect(journalOnly.keys, containsAll(['node/lost', 'node/back']));
+    expect(eventNotifies({'subUpdated': true, 'subFailed': true, 'connLost': true}, r('node', 'lost', level: 'warn', own: true)), isFalse);
+    expect(eventNotifies(null, r('sub', 'updated')), isFalse);
+    expect(eventNotifies({'subUpdated': true}, r('sub', 'updated')), isTrue);
+    expect(eventNotifies(null, r('sub', 'updated', level: 'warn')), isTrue);
+    expect(eventNotifies({'subFailed': false}, r('sub', 'updated', level: 'warn')), isFalse);
+    for (final by in ['user', 'system']) {
+      expect(eventNotifies(null, r('conn', 'vpnUp', data: {'by': by})), isFalse, reason: 'vpnUp by $by');
+    }
+    expect(eventNotifies(null, r('conn', 'vpnUp', data: {'causes': ['core']})), isTrue, reason: 'a recovery: connLost, as before');
   });
 
   test('log text, groups and days', () {

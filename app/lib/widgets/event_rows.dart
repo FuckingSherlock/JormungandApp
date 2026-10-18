@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
-    show EventGroup, EventRecord, eventCats;
+    show EventGroup, EventRecord, alwaysShownTypes, eventCats;
 
 import '../core/core_host.dart';
 import '../core/event_text.dart';
@@ -16,6 +16,38 @@ import 'nodes_menus.dart' show copyText;
 import 'report_actions.dart' show showSendReport;
 import 'rules_parts.dart' show AppIcon;
 import 'settings_data.dart' show showDataSheet;
+import 'target_picker.dart' show showTargetPicker;
+
+/// The "Return once" / "Don't exclude" buttons of `auto/unstable`: built, hidden until the core has the
+/// time-limited exclusion (`features.md`, "Unstable entry"); the feature switches this on.
+const bool kAutoExcludeActions = false;
+
+/// The `data.affected` list of an event: `[{kind, id, name, to}]`.
+List<Map<String, dynamic>> eventAffected(EventRecord e) {
+  final a = e.data['affected'];
+  if (a is! List) return const [];
+  return [for (final x in a) if (x is Map) x.map((k, v) => MapEntry('$k', v))];
+}
+
+/// The affected items "Choose for all" changes: rules, apps and the connection (chains and profiles are not).
+bool _retargetable(Map<String, dynamic> a) => const ['rule', 'app', 'connection'].contains('${a['kind']}');
+
+/// What "Switch on" of a `node/lost` (`action: off`) still has to switch on: the source (`enabled` false) and / or the
+/// servers of `data.nodeIds` (ids; `data.nodes` are names) that are still off. Empty = nothing to do.
+({bool source, List<String> nodes}) _switchedOff(CoreHost host, Map<String, dynamic> d) {
+  final s = host.catalog.sourcesData['${d['source']}'];
+  if (s == null) return (source: false, nodes: const []);
+  final ids = d['nodeIds'] is List ? [for (final x in d['nodeIds'] as List) '$x'] : const <String>[];
+  return (source: !s.enabled, nodes: [for (final id in ids) if (s.disabledNodes.contains(id)) id]);
+}
+
+void _switchOn(CoreHost host, Map<String, dynamic> d) {
+  final off = _switchedOff(host, d), sid = '${d['source']}';
+  if (off.source) host.toggleSourceEnabled(sid);
+  for (final nid in off.nodes) {
+    host.toggleNodeEnabled(sid, nid);
+  }
+}
 
 /// Rows of the Events journal (mockup 47-events.js: `evRowHtml`, `evBlockedHtml`, `evWhyHtml`,
 /// the filter sheet): one row per event, repeats folded, the title, the reason, the actions and
@@ -191,12 +223,17 @@ class EventRow extends StatelessWidget {
     required this.logs,
     required this.words,
     required this.first,
+    this.onJump,
   });
 
   final EventGroup group;
   final LogsController logs;
   final EventWords words;
   final bool first;
+
+  /// The pair link: scroll to another event of the journal (the opening row's closing status, the closing
+  /// row's "Back to start").
+  final void Function(int eventId)? onJump;
 
   @override
   Widget build(BuildContext context) {
@@ -210,6 +247,9 @@ class EventRow extends StatelessWidget {
     final related = words.relatedLine(g);
     final closedLine = words.closedLine(g);
     final resolved = g.closed;
+    // the closing row of a pair names the opening one (tap: jump to it)
+    final opening = g.opensId == null ? null : logs.feed.list.where((x) => x.id == g.opensId).firstOrNull;
+    final backTitle = opening == null ? null : words.describe(opening).title;
     final open = logs.openRows.contains(g.key);
     final trail = open ? words.trailRows(g.worst.trail != null ? g.worst : e) : const <TrailRow>[];
     final repeatsLine = open ? words.repeatsLine(g) : null;
@@ -260,9 +300,16 @@ class EventRow extends StatelessWidget {
     final inUse = inUseOf(dd);
     final pinLost = eventPinLost(e);
     final vpnCauses = e.key == 'conn/vpnDown' && dd['causes'] is List ? (dd['causes'] as List).map((c) => '$c').toList() : const <String>[];
+    // "Choose for all": one target for every affected rule / app / connection (more than one of them)
+    final affected = eventAffected(e);
+    final affectedAll = affected.where(_retargetable).length;
+    void addChooseForAll() => add(l10n.chooseForAll, () async {
+      final picked = await showTargetPicker(context, current: '');
+      if (picked != null) await host.retargetAll(affected, picked);
+    });
     void addChooseServer() => add(l10n.chooseServer, link(links.openRoute == null ? null : () => links.openRoute!()));
     switch ('${e.cat}/${e.type}') {
-      case 'conn/disconnected' when live && dd['by'] == 'error' && !host.isOn:
+      case 'conn/disconnected' when live && (dd['by'] == 'error' || dd['by'] == 'system') && !host.isOn:
         add(l10n.connect, () => host.connect());
         if (pinLost) addChooseServer();
       case 'conn/connectFailed' when live:
@@ -291,6 +338,11 @@ class EventRow extends StatelessWidget {
       case 'auto/unstable':
         addOpen();
         if (live) addCheckNow();
+        if (kAutoExcludeActions && live) {
+          // no host call yet: the core has no exclusion to lift (the feature wires these when it adds the flag)
+          add(l10n.returnOnce, null);
+          add(l10n.donTExclude, null);
+        }
       case 'dns/failed' || 'dns/failedOnNode':
         if (live) addCheckNow();
         addOpen();
@@ -299,9 +351,22 @@ class EventRow extends StatelessWidget {
           add(l10n.retry, () => host.updateSource('${dd['source']}'));
         }
         addOpen();
-      case 'sub/removed' || 'sub/back':
+      case 'sub/removed':
         addOpen();
         if (inUse) addChooseServer();
+      case 'sub/back' || 'node/back':
+        break;
+      case 'sub/updated' when e.level == 'warn':
+        if (affectedAll > 1) addChooseForAll();
+        final subTarget = eventOpenTarget(e, host);
+        // the subscription is still there: the button stands (dimmed while Nodes is not wired, like "Open rule")
+        if (subTarget != null) add(l10n.openSubscription, _openAction(links, subTarget, leave));
+      case 'node/lost':
+        if (dd['action'] == 'off') {
+          final off = _switchedOff(host, dd);
+          if (off.source || off.nodes.isNotEmpty) add(l10n.switchOn, () => _switchOn(host, dd));
+        }
+        if (affectedAll > 1) addChooseForAll();
       case 'sub/updated':
         addOpen();
         // the removed / returned servers of the same update sit in this row: one of them in use needs a new pick
@@ -419,9 +484,12 @@ class EventRow extends StatelessWidget {
               const SizedBox(width: 6),
               Icon(Icons.nightlight_round, key: const ValueKey('evBg'), size: 12, color: c.t3),
               const SizedBox(width: 2),
-              Text(
-                l10n.background.toLowerCase(),
-                style: TextStyle(fontSize: 11.5, color: c.t3),
+              Flexible(
+                child: Text(
+                  l10n.background.toLowerCase(),
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, color: c.t3),
+                ),
               ),
             ],
           ],
@@ -444,13 +512,18 @@ class EventRow extends StatelessWidget {
             ),
           ),
         if (closedLine != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              closedLine,
-              key: const ValueKey('evClosed'),
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.active),
-            ),
+          _PairLink(
+            closedLine,
+            key: const ValueKey('evClosed'),
+            color: c.active,
+            onTap: g.closedById == null || onJump == null ? null : () => onJump!(g.closedById!),
+          ),
+        if (backTitle != null)
+          _PairLink(
+            l10n.backToStart(backTitle),
+            key: const ValueKey('evBackToStart'),
+            color: c.accent,
+            onTap: onJump == null ? null : () => onJump!(g.opensId!),
           ),
         if (reason != null)
           Padding(
@@ -470,6 +543,8 @@ class EventRow extends StatelessWidget {
               style: TextStyle(fontSize: 12.5, color: c.t3),
             ),
           ),
+        if (open && affected.isNotEmpty && (e.key == 'node/lost' || (e.key == 'sub/updated' && e.level == 'warn')))
+          _Affected(items: affected, event: e, logs: logs, words: words),
         if (acts.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 6),
@@ -639,6 +714,121 @@ VoidCallback? openTargetAction(AppLinks links, String target) {
     default:
       final f = links.openNodesEntry;
       return f == null ? null : () => f(target);
+  }
+}
+
+/// A status line of a pair row; a tap jumps to the other event of the pair.
+class _PairLink extends StatelessWidget {
+  const _PairLink(this.text, {super.key, required this.color, this.onTap});
+
+  final String text;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 2),
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+          color: color,
+          decoration: onTap == null ? null : TextDecoration.underline,
+          decorationColor: color.tint(.5),
+        ),
+      ),
+    ),
+  );
+}
+
+/// The settings an event touched (`data.affected`), rows like the "site does not open" routes: the kind, the name
+/// and "→ where it goes now"; a tap opens that item's settings.
+class _Affected extends StatelessWidget {
+  const _Affected({required this.items, required this.event, required this.logs, required this.words});
+
+  final List<Map<String, dynamic>> items;
+  final EventRecord event;
+  final LogsController logs;
+  final EventWords words;
+
+  VoidCallback? _go(AppLinks links, CoreHost host, Map<String, dynamic> a) {
+    final id = '${a['id']}';
+    void Function()? f;
+    switch ('${a['kind']}') {
+      case 'rule':
+        final h = links.openRuleForm;
+        if (h != null) f = () => h(id);
+      case 'app':
+        final h = links.openAppAct;
+        if (h != null) f = () => h(id);
+      case 'connection':
+        final h = links.openNodesEntry;
+        if (h != null && host.catalog.connectEntry(id) != null) {
+          f = () => h(id);
+        } else if (links.openRoute != null) {
+          f = () => links.openRoute!();
+        }
+      default: // chain / profile
+        final h = links.openNodesEntry;
+        if (h != null) f = () => h(id);
+    }
+    if (f == null) return null;
+    final go = f;
+    return () {
+      go();
+      logs.returnId = event.id;
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final links = AppLinksScope.of(context);
+    final host = CoreHostScope.read(context);
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: c.t1.tint(.035),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) Divider(height: 1, thickness: 1, color: c.border),
+            Builder(
+              builder: (context) {
+                final a = items[i], go = _go(links, host, a);
+                final row = _ViaRow(
+                  leading: Text(
+                    words.affectedKindLabel('${a['kind']}'),
+                    style: TextStyle(fontSize: 11, color: c.t3),
+                  ),
+                  name: '${a['name']}',
+                  sub: '→ ${words.affectedToLabel(a)}',
+                  trailing: go == null ? null : Icon(Icons.chevron_right, size: 18, color: c.t3),
+                  leadingWidth: 68,
+                );
+                return go == null
+                    ? row
+                    : InkWell(
+                        key: ValueKey('evAffected:${a['kind']}:${a['id']}'),
+                        onTap: go,
+                        splashFactory: NoSplash.splashFactory,
+                        highlightColor: c.t1.tint(.04),
+                        child: row,
+                      );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -842,9 +1032,10 @@ class _Vias extends StatelessWidget {
 }
 
 class _ViaRow extends StatelessWidget {
-  const _ViaRow({required this.leading, required this.name, this.sub, this.trailing});
+  const _ViaRow({required this.leading, required this.name, this.sub, this.trailing, this.leadingWidth = 20});
 
   final Widget leading;
+  final double leadingWidth;
   final String name;
   final String? sub;
   final Widget? trailing;
@@ -856,7 +1047,7 @@ class _ViaRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(
         children: [
-          SizedBox(width: 20, child: Center(child: leading)),
+          SizedBox(width: leadingWidth, child: Center(child: leading)),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -1201,7 +1392,8 @@ class _CatBlock extends StatelessWidget {
         if (open)
           for (final t in cat.$2)
             InkWell(
-              onTap: () => logs.toggleType('${cat.$1}/$t'),
+              // the types of the VPN line are never hidden: nothing to toggle
+              onTap: alwaysShownTypes.contains('${cat.$1}/$t') ? null : () => logs.toggleType('${cat.$1}/$t'),
               splashFactory: NoSplash.splashFactory,
               highlightColor: c.t1.tint(.03),
               child: Container(
@@ -1212,7 +1404,10 @@ class _CatBlock extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(44, 12, 14, 12),
                 child: Row(
                   children: [
-                    _Check(f.off.contains('${cat.$1}/$t') ? '' : 'on'),
+                    if (alwaysShownTypes.contains('${cat.$1}/$t'))
+                      const SizedBox(width: 20, height: 20)
+                    else
+                      _Check(f.off.contains('${cat.$1}/$t') ? '' : 'on'),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -1224,6 +1419,14 @@ class _CatBlock extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
+                    if (alwaysShownTypes.contains('${cat.$1}/$t')) ...[
+                      Text(
+                        context.l10n.alwaysShown,
+                        key: ValueKey('evAlways:${cat.$1}/$t'),
+                        style: TextStyle(fontSize: 12, color: c.t3),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     Text(
                       '${counts['${cat.$1}/$t'] ?? 0}',
                       key: ValueKey('evCount:${cat.$1}/$t'),

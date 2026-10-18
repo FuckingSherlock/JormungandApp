@@ -2039,13 +2039,33 @@ class LiveCoreHost extends CoreHost {
 
   @override
   void toggleSourceEnabled(String sid) {
-    catalog.toggleSourceEnabled(sid);
+    // the core asks what the change affects first and writes node/lost / node/back
+    final a = api;
+    if (a is CoreService) {
+      a.toggleSourceEnabled(catalog, sid);
+    } else {
+      catalog.toggleSourceEnabled(sid);
+    }
     changed();
   }
 
   @override
   void toggleNodeEnabled(String sid, String nid) {
-    catalog.toggleNodeEnabled(sid, nid);
+    final a = api;
+    if (a is CoreService) {
+      a.toggleNodeEnabled(catalog, sid, nid);
+    } else {
+      catalog.toggleNodeEnabled(sid, nid);
+    }
+    changed();
+  }
+
+  @override
+  Future<void> retargetAll(
+    List<Map<String, dynamic>> affected,
+    String target,
+  ) async {
+    catalog.retargetAll(affected, target);
     changed();
   }
 
@@ -2057,14 +2077,24 @@ class LiveCoreHost extends CoreHost {
 
   @override
   void deleteSource(String sid) {
-    catalog.deleteSource(sid);
+    final a = api;
+    if (a is CoreService) {
+      a.deleteSource(catalog, sid);
+    } else {
+      catalog.deleteSource(sid);
+    }
     _updating.remove(sid);
     changed();
   }
 
   @override
   void deleteNode(String sid, String nid) {
-    catalog.deleteNode(sid, nid);
+    final a = api;
+    if (a is CoreService) {
+      a.deleteNode(catalog, sid, nid);
+    } else {
+      catalog.deleteNode(sid, nid);
+    }
     changed();
   }
 
