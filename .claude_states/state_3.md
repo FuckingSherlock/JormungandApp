@@ -127,7 +127,8 @@
   `t2-routes-app` PASS, полный `flutter test` зелёный). Лестница (решение пользователя 2026-10-18): `routes` — причина,
   только пока нет `core` / `network`; когда они закрылись над молчанием маршрутов, событие держится с `pending: 'routes'`
   («Checking routes», warn, жёлтая линия, Check now) — ядро a81b4f4 + 6eb99cb, приложение 7bdd565; ядро +1738 ~8,
-  приложение — полный `flutter test` зелёный. Открытые мелочи: `i18n_keys.json` хранит строки трёх удалённых ключей `vpnWorksAgain*`
+  приложение — полный `flutter test` зелёный. Остатки (чистка `i18n_keys.json`, закрытая строка ожидания, Sentinel и
+  корень с событием) — в `features.md`. Было: `i18n_keys.json` хранит строки трёх удалённых ключей `vpnWorksAgain*`
   (append-only карта). Техдолг: `_attachVpnRoots` откатывает relink Sentinel для `conn.lost`,
   несущего `vpnDown` (чище — в `sentinel.dart`: не перевешивать корень с событием сервиса); обратный путь (routes,
   потом открылся `net.offline` / `core.down`) тестами не покрыт.
