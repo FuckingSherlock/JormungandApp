@@ -1828,5 +1828,11 @@
   "Subscription {0} returned servers in use: {1}": "subscriptionReturnedServersInUse",
   "Back to start: {0}": "backToStart",
   "VPN disconnected · error: server {0} is unavailable ({1})": "vpnDisconnectedErrorServerIsUnavailable",
-  "VPN disconnected · error: server is unavailable ({0})": "vpnDisconnectedErrorServerIsUnavailable2"
+  "VPN disconnected · error: server is unavailable ({0})": "vpnDisconnectedErrorServerIsUnavailable2",
+  "sing-box is running": "singBoxIsRunning",
+  "internet is available": "internetIsAvailable",
+  "a route answers": "aRouteAnswers",
+  "no route answers, the internet works directly": "noRouteAnswersTheInternetWorks",
+  "VPN works again · {0}": "vpnWorksAgain2",
+  "none of {0} routes answers, the internet works directly": "noneOfRoutesAnswersTheInternet"
 }

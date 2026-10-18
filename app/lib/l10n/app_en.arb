@@ -4333,9 +4333,26 @@
   },
   "systemProxyIsStillSetSo": "system proxy is still set, so programs that use it have no internet",
   "vpnOutageEndedVpnDisconnected": "VPN outage ended · VPN disconnected",
-  "vpnWorksAgainSingBoxIs": "VPN works again · sing-box is running",
-  "vpnWorksAgainInternetIsAvailable": "VPN works again · internet is available",
-  "vpnWorksAgainSingBoxIs2": "VPN works again · sing-box is running, internet is available",
+  "vpnWorksAgain2": "VPN works again · {s0}",
+  "@vpnWorksAgain2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "singBoxIsRunning": "sing-box is running",
+  "internetIsAvailable": "internet is available",
+  "aRouteAnswers": "a route answers",
+  "noRouteAnswersTheInternetWorks": "no route answers, the internet works directly",
+  "noneOfRoutesAnswersTheInternet": "none of {s0} routes answers, the internet works directly",
+  "@noneOfRoutesAnswersTheInternet": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
   "internetIsAvailableAgainWasUnavailable": "Internet is available again · was unavailable for {s0}",
   "@internetIsAvailableAgainWasUnavailable": {
     "placeholders": {

@@ -179,6 +179,7 @@ class SystemNotifier {
       'conn/vpnDown' => [
         if (_vpnCauses(d).contains('core') && host.phase != ConnectionPhase.connected) ('retry', l.retry),
         if (_vpnCauses(d).contains('network')) ('networkSettings', l.networkSettings),
+        if (_vpnCauses(d).contains('routes')) ('checkNow', l.checkNow),
       ],
       'conn/failing' => [if (site.isNotEmpty) ('rule', l.createRule)],
       'auto/unstable' => [('open', l.open)],

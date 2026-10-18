@@ -279,7 +279,7 @@ class EventWords {
     return brief.isEmpty ? '' : l10n.trafficOfGoesThroughThemAgain(brief);
   }
 
-  /// The causes of a `conn/vpnDown` / `vpnUp` (`core`, `network`).
+  /// The causes of a `conn/vpnDown` / `vpnUp` (`core`, `network`, `routes`).
   List<String> _causes(Map<String, dynamic> d) =>
       d['causes'] is List ? [for (final c in d['causes'] as List) '$c'] : <String>[];
 
@@ -296,13 +296,12 @@ class EventWords {
   String _vpnUpTitle(Map<String, dynamic> d) {
     if (d['by'] == 'user' || d['by'] == 'system') return l10n.vpnOutageEndedVpnDisconnected;
     final causes = _causes(d);
-    final core = causes.contains('core'), net = causes.contains('network');
-    return switch ((core, net)) {
-      (true, true) => l10n.vpnWorksAgainSingBoxIs2,
-      (true, false) => l10n.vpnWorksAgainSingBoxIs,
-      (false, true) => l10n.vpnWorksAgainInternetIsAvailable,
-      _ => l10n.vpnWorksAgain,
-    };
+    final parts = [
+      if (causes.contains('core')) l10n.singBoxIsRunning,
+      if (causes.contains('network')) l10n.internetIsAvailable,
+      if (causes.contains('routes')) l10n.aRouteAnswers,
+    ];
+    return parts.isEmpty ? l10n.vpnWorksAgain : l10n.vpnWorksAgain2(parts.join(', '));
   }
 
   /// Kind of an affected setting (`affected[].kind`) as a label.
@@ -693,13 +692,17 @@ class EventWords {
   /// The reason line of `conn/vpnDown`: the causes (core, network) joined with " · ", then the system proxy left on.
   /// [attempts] — the newest `restartFailed` attempt among the events joined into the row, when the caller has them.
   String _vpnDownReason(Map<String, dynamic> d, {int? attempts}) {
-    final causes = _causes(d);
+    final n = d['routes'];
     return [
-      if (causes.contains('core'))
-        attempts != null && attempts > 0 ? l10n.singBoxStoppedAndHasNot2(attempts) : l10n.singBoxStoppedAndHasNot,
-      if (causes.contains('network')) l10n.noInternetConnection,
+      for (final c in _causes(d))
+        switch (c) {
+          'core' => attempts != null && attempts > 0 ? l10n.singBoxStoppedAndHasNot2(attempts) : l10n.singBoxStoppedAndHasNot,
+          'network' => l10n.noInternetConnection,
+          'routes' => n is int && n > 1 ? l10n.noneOfRoutesAnswersTheInternet('$n') : l10n.noRouteAnswersTheInternetWorks,
+          _ => '',
+        },
       if (d['proxy'] == 'kept') l10n.systemProxyIsStillSetSo,
-    ].join(' · ');
+    ].where((s) => s.isNotEmpty).join(' · ');
   }
 
   /// How a request of `conn/failing` ended (`ConnKind.name`).
