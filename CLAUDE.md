@@ -182,8 +182,10 @@ below is how it applies here.
     starts one by itself, not even as a card. On the command: the brief goes to `.claude_states/stages/<stage>.md`,
     then a `start_session` card with `initiation: "own_initiative"`, context `fresh`. The parent sets `model` / `effort`
     there (default Opus medium; Sonnet or Haiku for mechanical stages). The user starts it with Start.
-  - The parent does not watch the child. The child's first turn wakes the parent once: answer it with nothing, check
-    nothing. Turns the user drives in the child do not wake the parent. Any message from the child does.
+  - The parent does not watch the child. The app wakes the parent with a turn note ("finished a turn") after the child's
+    first turn and, once the parent has messaged the child, after its later turns too. Answer every such note with
+    nothing and check nothing; it is not a report. Only a message from the child (a question or a stage report) gets an
+    answer. Message the child only when needed.
   - The child asks the user directly. It writes to the parent only when the user says so: either "спроси у родителя"
     (one short question) or a go-ahead for the stage report. The rule rests on the brief alone; the app does not
     enforce it. Report: commits, what was checked (commands + result), what is left. On a report the parent checks the
