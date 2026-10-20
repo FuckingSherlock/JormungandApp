@@ -313,8 +313,9 @@ class EventRow extends StatelessWidget {
     final trail = open ? words.trailRows(g.worst.trail != null ? g.worst : e) : const <TrailRow>[];
     final repeatsLine = open ? words.repeatsLine(g) : null;
     final earlier = open && e.data['checks'] is List && (e.data['checks'] as List).isNotEmpty ? words.earlierChecks(e) : const <String>[];
-    final repeatTimes = open ? [for (final x in g.repeats) ...x.occurrences] : const <int>[];
-    final rep = g.times;
+    // a stack lists its reconnects line by line instead of the repeats' times
+    final repeatTimes = open && !g.isStack ? [for (final x in g.repeats) ...x.occurrences] : const <int>[];
+    final rep = g.isStack ? g.stack.length : g.times;
     final hit = logs.hitEvent != null && g.items.any((x) => x.id == logs.hitEvent!.id)
         ? logs.hitEvent!.token
         : null;
@@ -345,6 +346,35 @@ class EventRow extends StatelessWidget {
       final target = e.cat == 'site' ? null : eventOpenTarget(e, host);
       final go = target == null ? null : _openAction(links, target, leave);
       if (go != null) add(l10n.open, go);
+    }
+
+    // a reconnect of a stack, opened: its time, its title and its sub
+    Widget stackLine(EventGroup m) {
+      final (title, sub, _) = words.describeGroup(m);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 44,
+              child: Text(words.clock(m.ev.at), style: TextStyle(fontSize: 12, color: c.t3)),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.t1),
+                  ),
+                  if (sub.isNotEmpty) Text(sub, style: TextStyle(fontSize: 12, color: c.t3)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
     // "Check now": the core checks again what the event is about; while it does, the button says so
@@ -687,6 +717,8 @@ class EventRow extends StatelessWidget {
                     ),
                 ],
                 if (repeatsLine != null) _RepeatsBlock(summary: repeatsLine, times: repeatTimes),
+                // a stack: every reconnect of it, oldest first (time · title · sub)
+                if (open && g.isStack) for (final m in g.stack) stackLine(m),
                 if (g.related.isNotEmpty) ...[
                   _Section(l10n.related(g.related.length)),
                   for (final r in g.related)

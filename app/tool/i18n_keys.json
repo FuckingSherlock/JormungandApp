@@ -1845,5 +1845,12 @@
   "{0} opens again through {1}": "opensAgainThrough",
   "checked {0}": "checked",
   "did not open through {0}": "didNotOpenThrough",
-  "did not open through {0}, opened through {1}": "didNotOpenThroughOpenedThrough"
+  "did not open through {0}, opened through {1}": "didNotOpenThroughOpenedThrough",
+  "Reconnected · by you": "reconnectedByYou",
+  "settings": "settings2",
+  "server unpinned": "serverUnpinned",
+  "system proxy on": "systemProxyOn2",
+  "system proxy off": "systemProxyOff2",
+  "server: {0}": "server2",
+  "{0}: server unpinned": "serverUnpinned2"
 }

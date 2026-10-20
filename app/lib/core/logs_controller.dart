@@ -11,7 +11,8 @@ import 'package:jormungand_core/jormungand_core.dart'
         LogCfg,
         LogFeed,
         LogLine,
-        eventCats;
+        eventCats,
+        stackReconnects;
 
 import '../l10n/l10n.dart';
 import 'core_host.dart';
@@ -359,17 +360,19 @@ class LogsController extends ChangeNotifier {
 
   List<EventGroup> _foldRows() {
     final rows = filter.fold(feed.list, showOwn: cfg.showOwn, text: (x) => words.searchText(x));
-    // rows with a hit inside open when the query changes, not on every rebuild (a row the user folded stays folded)
-    if (_openHits) {
-      _openHits = false;
-      for (final g in rows) {
-        if (g.hitInside) openRows.add(g.key);
-      }
-    }
     // the place of a row is its `at`; the fold order breaks a tie
     final order = {for (var i = 0; i < rows.length; i++) rows[i]: i};
     rows.sort((a, b) => a.at != b.at ? a.at.compareTo(b.at) : order[a]! - order[b]!);
-    return rows;
+    // adjacent reconnect rows are one stack row (its key is its first member's, so its open state stays)
+    final stacked = stackReconnects(rows);
+    // rows with a hit inside open when the query changes, not on every rebuild (a row the user folded stays folded)
+    if (_openHits) {
+      _openHits = false;
+      for (final g in stacked) {
+        if (g.hitInside) openRows.add(g.key);
+      }
+    }
+    return stacked;
   }
 
   int get shownCount => shownEvents.length;

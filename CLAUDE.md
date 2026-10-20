@@ -151,8 +151,10 @@ below is how it applies here.
 - **Workflow `code-task`:** a feature or plan item whose requirement is settled with the user, whose doc section
   is already written (that section is `plan`) and whose files are known.
   - Always `rules: 'G:/DEV/JormungandApp/.claude/agent-rules.md'` (reaches coders, test-writer and reviewer).
-  - One run per layer: core first, then app once the core API is fixed — this replaces hand-made stages.
-  - `check`: core — `cd core; dart analyze; dart test`; app — `cd app; flutter analyze --no-fatal-infos; flutter test`.
+  - Core and app in one run as stages: core units `stage: 1`, app units `stage: 2`, `stageCheck: {1: <core check>}`,
+    `check` = both. The brief fixes the core API the app units use. Separate runs only when the app part waits for the
+    user's decision on the core's result.
+  - Checks: core — `cd core; dart analyze; dart test`; app — `cd app; flutter analyze --no-fatal-infos; flutter test`.
   - Tiers — by complexity, not by where the code lives. `deep` only when the unit's own work has a race, timers,
     ordering of async steps, an invariant over several states at once, or a bug with an unknown cause; the unit
     then carries `whyDeep` (one concrete phrase, shown to the user in the plan; the workflow gate denies a deep

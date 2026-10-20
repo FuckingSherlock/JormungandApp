@@ -4321,6 +4321,27 @@
       }
     }
   },
+  "reconnectedByYou": "Reconnected · by you",
+  "settings2": "settings",
+  "server2": "server: {s0}",
+  "@server2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "serverUnpinned": "server unpinned",
+  "serverUnpinned2": "{s0}: server unpinned",
+  "@serverUnpinned2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "systemProxyOn2": "system proxy on",
+  "systemProxyOff2": "system proxy off",
   "waitingForNetworkVpnIsOn": "Waiting for network · VPN is on, no internet connection",
   "checkingRoutesTheNetworkIsBack": "Checking routes · the network is back, no route has answered yet",
   "singBoxStoppedAndHasNot": "sing-box stopped and has not restarted for 30 s",

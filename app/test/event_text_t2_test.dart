@@ -211,13 +211,24 @@ void main() {
       }
     });
 
-    test('settings names what changed: Reconnected · settings: <what>', () {
+    test('settings is the user\'s: Reconnected · by you, then what changed and the time', () {
       final t = _own(
         words,
-        _ev(1, 'conn', 'reconnected', level: 'info', data: const {'reason': 'settings', 'changed': 'mode: TUN → Proxy', 'tookMs': 3000}),
+        _ev(
+          1,
+          'conn',
+          'reconnected',
+          level: 'info',
+          data: const {
+            'reason': 'settings',
+            'changed': {
+              'mode': {'from': 'tun', 'to': 'proxy'},
+            },
+            'tookMs': 3000,
+          },
+        ),
       );
-      expect(t, startsWith('Reconnected · settings: mode: TUN → Proxy'));
-      expect(t, endsWith('3 s'));
+      expect(t, 'Reconnected · by you · mode: TUN → Proxy · 3 s');
     });
   });
 

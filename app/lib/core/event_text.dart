@@ -401,6 +401,37 @@ class EventWords {
     return out;
   }
 
+  /// A `conn/reconnected` of `settings` (only the user changes the plan, so «Reconnected · by you»): the sub is what
+  /// changed (`changed` of the event, then the last pin and the last system proxy tap [taps] of its operation), then the
+  /// duration; «settings» when nothing is known.
+  (String, String, String) _reconnectSettings(EventRecord e, List<EventRecord> taps) {
+    final d = e.data;
+    final ch = d['changed'];
+    final parts = <String>[
+      if (ch is String && ch.isNotEmpty) ch, // the text form of what changed
+      if (ch is Map && ch['mode'] is Map)
+        l10n.mode2(_modeText(ch['mode']['from']), _modeText(ch['mode']['to'])),
+      if (ch is Map && ch['route'] is Map)
+        l10n.route2(_routeText(ch['route']['from']), _routeText(ch['route']['to'])),
+    ];
+    final pin = taps.where((x) => x.type == 'pin').lastOrNull;
+    if (pin != null) {
+      final srv = pin.data['server'];
+      if (srv != null && '$srv'.isNotEmpty) {
+        final s = serverLabel(srv);
+        parts.add(l10n.server2(_lines([s.name, s.protocol])));
+      } else {
+        final en = entry(pin.data['entry']);
+        parts.add(en.isEmpty ? l10n.serverUnpinned : l10n.serverUnpinned2(en));
+      }
+    }
+    final sp = taps.where((x) => x.type == 'sysProxy').lastOrNull;
+    if (sp != null) parts.add(sp.data['on'] == true ? l10n.systemProxyOn2 : l10n.systemProxyOff2);
+    final tookMs = d['tookMs'];
+    final took = tookMs is num ? duration(tookMs) : '';
+    return (l10n.reconnectedByYou, _lines([parts.isEmpty ? l10n.settings2 : parts.join(', '), took]), '');
+  }
+
   /// The line of the row: title, sub (the short details under the title) and detail.
   ({String title, String sub, String detail}) describe(EventRecord e) {
     final d = e.data;
@@ -456,17 +487,7 @@ class EventWords {
         }
         switch (d['reason']) {
           case 'settings':
-            final ch = d['changed'];
-            final parts = <String>[
-              if (ch is String && ch.isNotEmpty) ch, // the text form of what changed
-              if (ch is Map && ch['mode'] is Map)
-                l10n.mode2(_modeText(ch['mode']['from']), _modeText(ch['mode']['to'])),
-              if (ch is Map && ch['route'] is Map)
-                l10n.route2(_routeText(ch['route']['from']), _routeText(ch['route']['to'])),
-            ];
-            return parts.isEmpty
-                ? t(l10n.reconnected)
-                : t(l10n.reconnectedSettings(parts.join(', ')));
+            return _reconnectSettings(e, const []);
           case 'lists':
             return t(l10n.reconnectedRuleLists);
           case 'reresolve':
@@ -862,6 +883,7 @@ class EventWords {
 
   /// Title, sub and detail of a whole row (a plain event, an operation's result, a group of consequences).
   (String, String, String) describeGroup(EventGroup g) {
+    if (g.isStack) return describeGroup(g.stack.last);
     (String, String, String) rs(String a) {
       final p = splitTitle(a);
       return (p.title, p.sub, '');
@@ -913,7 +935,14 @@ class EventWords {
         return (d.title, d.sub, d.detail);
       case 'reconnect':
         final r = g.items.where((x) => x.key == 'conn/reconnected');
-        final d = describe(r.isEmpty ? g.ev : r.last);
+        final ev = r.isEmpty ? g.ev : r.last;
+        if (ev.data['reason'] == 'settings') {
+          // the user's taps of the same operation say what else changed (pin, system proxy); mode and route are in `changed`
+          final taps = [for (final x in [...g.parts, ...g.items]) if (x.cat == 'user') x]
+            ..sort((a, b) => a.id.compareTo(b.id));
+          return _reconnectSettings(ev, taps);
+        }
+        final d = describe(ev);
         return (d.title, d.sub, d.detail);
       case 'ruleSets':
         final ok = g.items.where((x) => x.key == 'rules/ruleSetUpdated').length;
