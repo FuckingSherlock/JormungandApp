@@ -1835,5 +1835,9 @@
   "no route answers, the internet works directly": "noRouteAnswersTheInternetWorks",
   "VPN works again · {0}": "vpnWorksAgain2",
   "none of {0} routes answers, the internet works directly": "noneOfRoutesAnswersTheInternet",
-  "Checking routes · the network is back, no route has answered yet": "checkingRoutesTheNetworkIsBack"
+  "Checking routes · the network is back, no route has answered yet": "checkingRoutesTheNetworkIsBack",
+  "Auto skips them until the provider returns the servers.": "autoSkipsThemUntilTheProvider",
+  "VPN disconnected · the app was closed": "vpnDisconnectedTheAppWasClosed",
+  "Spare entry {0} is unstable · {#1} failures, excluded for {#2} min": "spareEntryIsUnstableFailuresExcluded",
+  "Subscription {0} removed {1} used by spare {2}": "subscriptionRemovedUsedBySpare"
 }

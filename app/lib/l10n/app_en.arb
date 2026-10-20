@@ -4377,6 +4377,36 @@
       }
     }
   },
+  "spareEntryIsUnstableFailuresExcluded": "Spare entry {s0} is unstable · {n1} failures, excluded for {n2} min",
+  "@spareEntryIsUnstableFailuresExcluded": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      },
+      "n2": {
+        "type": "num"
+      }
+    }
+  },
+  "subscriptionRemovedUsedBySpare": "Subscription {s0} removed {s1} used by spare {s2}",
+  "@subscriptionRemovedUsedBySpare": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      },
+      "s2": {
+        "type": "String"
+      }
+    }
+  },
+  "autoSkipsThemUntilTheProvider": "Auto skips them until the provider returns the servers.",
+  "vpnDisconnectedTheAppWasClosed": "VPN disconnected · the app was closed",
   "ruleTrafficIsBlockedIfUnavailable": "Rule {s0}: traffic is blocked (If unavailable: Block)",
   "@ruleTrafficIsBlockedIfUnavailable": {
     "placeholders": {

@@ -32,6 +32,7 @@ import 'failures.dart';
 import 'fallback.dart';
 import 'ignored_sites.dart';
 import 'localsource.dart';
+import 'log_view.dart' show EventRecord, VpnLine, vpnLineMarks;
 import 'logbook.dart';
 import 'manual.dart' as manual;
 import 'name_watch.dart';
@@ -279,6 +280,26 @@ class CoreService implements CoreApi {
   List<Map<String, dynamic>> _affectedOf(Catalog? c, String sid, Set<String> ids) =>
       c == null || ids.isEmpty ? const [] : CatalogImpact.affectedOf(c.lostNodesImpact(sid, ids));
 
+  /// [affected] with `spare: true` on each chain / profile / connection entry that is only a spare entry of the running
+  /// Auto list: in the plan's routes, not the current one (so no Manual pin either), and no rule's or app's target.
+  /// Not connected: no marks.
+  List<Map<String, dynamic>> _withSpare(List<Map<String, dynamic>> affected) {
+    final a = _auto, plan = _plan;
+    if (a == null || plan == null || affected.isEmpty) return affected;
+    final ids = a.routeIds;
+    if (a.index < 0 || a.index >= ids.length) return affected;
+    final routing = plan['routing'];
+    final targets = routing is Map && routing['targets'] is Map ? {for (final k in (routing['targets'] as Map).keys) '$k'} : const <String>{};
+    for (final x in affected) {
+      final id = '${x['id']}';
+      if (!const ['chain', 'profile', 'connection'].contains(x['kind'])) continue;
+      if (!ids.contains(id) || id == ids[a.index]) continue;
+      if (targets.any((t) => t == id || t == 'chain:$id' || t == 'profile:$id' || t == 'src:$id')) continue;
+      x['spare'] = true;
+    }
+    return affected;
+  }
+
   /// What one update that landed tells (own: the user asked): the timer's and the manual one. The update that dropped used
   /// servers is a warn `sub/updated` with `lost` / `affected` (also for a manual one); any other change is an info one,
   /// for the timer only; `sub/back` closes the warn one when its servers are all back.
@@ -290,7 +311,7 @@ class CoreService implements CoreApi {
         continue;
       }
       final dropped = subDropped(s, patch);
-      final affected = dropped.isEmpty ? const <Map<String, dynamic>>[] : _affectedOf(await _subCatalog(sid, s), sid, {for (final n in dropped) '${n['id']}'});
+      final affected = dropped.isEmpty ? const <Map<String, dynamic>>[] : _withSpare(_affectedOf(await _subCatalog(sid, s), sid, {for (final n in dropped) '${n['id']}'}));
       if (data['lost'] == null && affected.isEmpty) {
         if (!own) _subEvent('updated', data, op: op);
         continue;
@@ -304,7 +325,9 @@ class CoreService implements CoreApi {
         'lostCount': data['lostCount'] ?? lostNodes.length,
         'affected': affected,
       };
-      final id = _event('sub', 'updated', 'warn', full,
+      // only spare entries of Auto's list are affected: nothing the user runs on is lost (info, no notification)
+      final allSpare = affected.isNotEmpty && affected.every((a) => a['spare'] == true);
+      final id = _event('sub', 'updated', allSpare ? 'info' : 'warn', full,
           own: own, note: 'Subscription ${data['name']} removed servers in use: ${(full['lost'] as List).join(', ')}', op: op);
       (_subLost[sid] ??= []).add((id: id, ids: {for (final n in lostNodes) '${n['id']}'}, names: [for (final n in lostNodes) label(n)]));
       _noteCause(id, found: false);
@@ -897,6 +920,7 @@ class CoreService implements CoreApi {
     await Directory(dataDir).create(recursive: true);
     logBook.load(); // last run's warnings and errors
     eventBook.load(); // trims an old journal at start
+    _noteEndedRun(); // the last run's process ended with the VPN on: its `conn/disconnected {by: app}`
     final dead = deadStore.load(); // the nodes found dead before: the ladder goes on from the step each was on
     if (dead > 0) logBook.note('info', 'auto: $dead unavailable nodes from the last run, each asked once at the first round, then on the ladder as before');
     exitStore.load(); // where the nodes leave to, as the last exit checks found
@@ -929,6 +953,33 @@ class CoreService implements CoreApi {
     pool.ladder.onBack = _nameBack;
     updater.start();
     await _startAppUpdater();
+  }
+
+  // The previous run ended with the VPN on by the journal (the line of `vpnLineMarks`: on, down or waiting) and no
+  // `disconnected` of its own (killed by the system, an update, a crash): written now, at the time of the journal's last
+  // event, `found` = this start. An open `vpnDown` is closed by `vpnUp {by: app}` first. Once written the line is off, so
+  // a second start (or a user's disconnect before) writes nothing.
+  void _noteEndedRun() {
+    final all = [
+      for (final m in (eventBook.since(0)['events'] as List).cast<Map>()) EventRecord.fromJson(m),
+    ];
+    if (all.isEmpty) return;
+    final state = vpnLineMarks(all)[all.last.id]?.below ?? VpnLine.off;
+    if (state == VpnLine.off) return;
+    final last = all.last.at;
+    final closed = {
+      for (final e in all)
+        if (e.key == 'conn/vpnUp' && e.opens != null) e.opens,
+    };
+    final open = all.lastWhere((e) => e.key == 'conn/vpnDown' && !closed.contains(e.id), orElse: () => all.last);
+    if (state != VpnLine.on && open.key == 'conn/vpnDown') {
+      final causes = open.data['causes'];
+      final downMs = last - open.at;
+      _event('conn', 'vpnUp', 'info', {'downMs': downMs < 0 ? 0 : downMs, 'causes': causes is List ? [...causes] : <String>[], 'by': 'app'},
+          opens: open.id, at: last, note: 'The connection state of the last run is closed: its process ended');
+    }
+    _event('conn', 'disconnected', 'info', {'by': 'app', 'reason': 'ended', 'found': _nowMs},
+        at: last, note: 'The last run ended with the VPN on (the process was stopped without a disconnect)');
   }
 
   @override
@@ -1018,7 +1069,8 @@ class CoreService implements CoreApi {
       int? cause,
       Map<String, Object?>? op,
       int? opens,
-      List<int>? joins}) {
+      List<int>? joins,
+      int? at}) {
     if (note != null) logBook.note(level, note);
     return eventBook.add(cat, type, level,
         data: data,
@@ -1029,7 +1081,8 @@ class CoreService implements CoreApi {
         cause: cause,
         op: op,
         opens: opens,
-        joins: joins);
+        joins: joins,
+        at: at);
   }
 
   int _opSeq = 0;
@@ -1822,21 +1875,31 @@ class CoreService implements CoreApi {
     _changed();
   }
 
+  /// Whether route [id] is a spare entry of the running Auto list: the connection is up and is on another route.
+  bool _isSpareRoute(String id) {
+    final a = _auto;
+    if (a == null) return false;
+    final ids = a.routeIds;
+    return ids.contains(id) && a.index >= 0 && a.index < ids.length && ids[a.index] != id;
+  }
+
   /// `auto/unstable`: Auto's flap guard held a route back. An announcement, not a standing failure: the
   /// root the Sentinel opens for it is closed at once (Auto itself keeps the route on hold), so the next
   /// one for the same route is judged and written again. Public for the tests.
   Future<void> routeUnstable(AutoUnstable u) async {
     final key = 'auto.unstable|${u.id}';
+    // a spare entry: the route is not the one the connection is on now (asked before the first await: Auto moves on after)
+    final spare = _isSpareRoute(u.id);
     final v = await sentinel.suspect(Suspicion(
       kind: 'auto.unstable',
       key: key,
       subject: {'route': u.id, 'path': 'proxy', 'dns': ?_routeResolver(u.id)},
-      evidence: {'id': u.id, 'strikes': u.strikes, 'holdMs': u.holdMs},
+      evidence: {'id': u.id, 'strikes': u.strikes, 'holdMs': u.holdMs, if (spare) 'spare': true},
       window: windows.autoUnstable,
       why: Why('route.unstable', {'strikes': u.strikes, 'holdMs': u.holdMs}),
       scope: Scope.none,
       level: Level.route,
-      event: SuspicionEvent('auto', 'unstable', level: 'warn'),
+      event: SuspicionEvent('auto', 'unstable', level: spare ? 'info' : 'warn'),
     ));
     if (v.kind == VerdictKind.confirmed) {
       sentinel.closeRoot(key, reason: 'reported');

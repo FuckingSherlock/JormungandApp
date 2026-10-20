@@ -179,7 +179,16 @@ String? eventNotifKindOf(EventRecord e) {
 
 /// The end of an outage by the user or the system (`conn/vpnUp` with `by: user` / `system`): not a recovery, never a
 /// notification of its own.
-bool _vpnUpEndsByDisconnect(EventRecord e) => e.key == 'conn/vpnUp' && (e.data['by'] == 'user' || e.data['by'] == 'system');
+bool _vpnUpEndsByDisconnect(EventRecord e) => e.key == 'conn/vpnUp' && (e.data['by'] == 'user' || e.data['by'] == 'system' || e.data['by'] == 'app');
+
+/// An event about spare entries of Auto's list only (`auto/unstable` with `spare: true`; a `sub/updated` whose every
+/// `affected` entry is a `spare` one): a journal entry, never a notification (docs/logs.md, decision 2026-10-20).
+bool _spareOnly(EventRecord e) {
+  if (e.key == 'auto/unstable') return e.data['spare'] == true;
+  if (e.key != 'sub/updated') return false;
+  final a = e.data['affected'];
+  return a is List && a.isNotEmpty && a.every((x) => x is Map && x['spare'] == true);
+}
 
 /// Warnings and errors that are a journal entry only, never a notification, with the reason. The guard test
 /// (`core/test/event_catalog_test.dart`) checks that every warn / error type of the catalog is either in
@@ -234,7 +243,7 @@ bool notifAllows(Object? cfg, String kind) {
 bool eventNotifies(Object? cfg, EventRecord e) {
   final kind = eventNotifKindOf(e);
   if (kind == null || !notifAllows(cfg, kind)) return false;
-  if (_vpnUpEndsByDisconnect(e)) return false;
+  if (_vpnUpEndsByDisconnect(e) || _spareOnly(e)) return false;
   // only a disconnect by an error or by the system is news (not the user's own); the system proxy only when it failed
   if (e.key == 'conn/disconnected' && e.data['by'] != 'error' && e.data['by'] != 'system') return false;
   if (e.key == 'core/sysProxy' && e.data['error'] == null) return false;
@@ -724,7 +733,7 @@ Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
         cur = next;
       case 'conn/vpnUp':
         if (inReconnect(e)) break;
-        cur = e.data['by'] == 'user' || e.data['by'] == 'system' ? VpnLine.off : VpnLine.on;
+        cur = e.data['by'] == 'user' || e.data['by'] == 'system' || e.data['by'] == 'app' ? VpnLine.off : VpnLine.on;
         dot = VpnDot.change;
     }
     out[e.id] = VpnMark(above, cur, dot);

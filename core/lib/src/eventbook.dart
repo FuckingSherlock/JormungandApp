@@ -140,7 +140,8 @@ class EventBook {
   /// the UI's, passes false).
   ///
   /// [verdict], [why], [trail], [cause]: what the Sentinel found out (see the class comment); codes
-  /// and params only, no sentences.
+  /// and params only, no sentences. [at]: the time of the event (ms since epoch) when it is not now, e.g. the end
+  /// of a run that left no record of its own.
   int add(String cat, String type, String level,
       {Map<String, dynamic> data = const {},
       bool own = false,
@@ -152,7 +153,8 @@ class EventBook {
       int? cause,
       Map<String, Object?>? op,
       int? opens,
-      List<int>? joins}) {
+      List<int>? joins,
+      int? at}) {
     load();
     final n = link ? log?.last : null;
     if (cause == null && !own && level != 'info') {
@@ -164,7 +166,7 @@ class EventBook {
     }
     final e = <String, dynamic>{
       'id': _next++,
-      'at': _clock().millisecondsSinceEpoch,
+      'at': at ?? _clock().millisecondsSinceEpoch,
       'cat': cat,
       'type': type,
       'level': level,

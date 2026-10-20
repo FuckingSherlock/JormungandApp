@@ -272,7 +272,8 @@ class LogsController extends ChangeNotifier {
           final shown = _vpnDownRev.remove(e.opens) != null;
           // the user ended it: the shown «VPN is down» goes off the shade (a system one is replaced by the revoke's own
           // notification); in front there is nothing on the shade, and the closing is no toast
-          if (shown && e.data['by'] == 'user' && NotifyIo.current.available && SystemNotifier.inBackground) {
+          // the app's own end (`by: app`): the «VPN is down» was shown by the process that died, this one never saw it
+          if (((shown && e.data['by'] == 'user') || e.data['by'] == 'app') && NotifyIo.current.available && SystemNotifier.inBackground) {
             _notify.add(e);
           }
         }

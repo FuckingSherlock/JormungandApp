@@ -293,10 +293,14 @@ class EventWords {
     return (l10n.vpnIsDown, _vpnDownReason(d, attempts: attempts));
   }
 
+  /// Every `affected` entry of a `sub/updated` is a spare one of Auto's list (`spare: true`).
+  static bool _allSpare(Object? affected) =>
+      affected is List && affected.isNotEmpty && affected.every((a) => a is Map && a['spare'] == true);
+
   /// The closing row of `conn/vpnDown`: by the user or the system it is an outage that ended with a disconnect, not a
   /// recovery; else what the outage had (`causes`): sing-box running again, internet back, or both.
   String _vpnUpTitle(Map<String, dynamic> d) {
-    if (d['by'] == 'user' || d['by'] == 'system') return l10n.vpnOutageEndedVpnDisconnected;
+    if (d['by'] == 'user' || d['by'] == 'system' || d['by'] == 'app') return l10n.vpnOutageEndedVpnDisconnected;
     final causes = _causes(d);
     final parts = [
       if (causes.contains('core')) l10n.singBoxIsRunning,
@@ -364,6 +368,7 @@ class EventWords {
       ('conn', 'disconnected') => () {
         // who: in the title («by you» / «by the system or another app» / «error: …»), no «By» field below
         if (d['by'] == 'user') return r(l10n.vpnDisconnectedByYou);
+        if (d['by'] == 'app') return r(l10n.vpnDisconnectedTheAppWasClosed);
         if (d['by'] != 'error') return r(l10n.vpnDisconnectedByTheSystemOr);
         if (d['reason'] == 'pinLost') {
           // a server gone from its subscription has no name left (`pick` empty): the text names none
@@ -445,13 +450,14 @@ class EventWords {
         final (f, t) = serverPair(d['from'], d['to']);
         return r(l10n.fastest2(f, t), _lines([entry(d['route']), l10n.isNowTheFastest(t)]));
       }(),
-      ('auto', 'unstable') => r(
-        l10n.isUnstableFailuresExcludedForMin(
-          entry(d['id']),
-          d['strikes'] is num ? d['strikes'] as num : 0,
-          d['holdMs'] is num ? ((d['holdMs'] as num) / 60000).round().clamp(1, 1 << 30) : 1,
-        ),
-      ),
+      ('auto', 'unstable') => () {
+        final strikes = d['strikes'] is num ? d['strikes'] as num : 0;
+        final min = d['holdMs'] is num ? ((d['holdMs'] as num) / 60000).round().clamp(1, 1 << 30) : 1;
+        // a spare entry (not the route the connection is on): the same facts, said so
+        return r(d['spare'] == true
+            ? l10n.spareEntryIsUnstableFailuresExcluded(entry(d['id']), strikes, min)
+            : l10n.isUnstableFailuresExcludedForMin(entry(d['id']), strikes, min));
+      }(),
       ('node', 'addressMissing') => r(
         l10n.domainDoesNotExistServers(
           source(d['source'], d['name'] ?? d['node']),
@@ -486,6 +492,14 @@ class EventWords {
         );
       }(),
       // warn: the update removed servers in use (`lost`, `affected`), the traffic that used them goes elsewhere
+      ('sub', 'updated') when _allSpare(d['affected']) => r(
+          l10n.subscriptionRemovedUsedBySpare(
+            source(d['source'], d['name']),
+            l10n.serversPlural(d['lostCount'] is num ? d['lostCount'] as num : (d['lost'] is List ? (d['lost'] as List).length : 0)),
+            [for (final a in (d['affected'] as List)) '${(a as Map)['name'] ?? a['id']}'].join(', '),
+          ),
+          l10n.autoSkipsThemUntilTheProvider,
+        ),
       ('sub', 'updated') => d['lost'] is List && (d['lost'] as List).isNotEmpty
           ? r(
               l10n.subscriptionRemovedServersInUse(

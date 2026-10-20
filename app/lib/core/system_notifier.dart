@@ -124,6 +124,12 @@ class SystemNotifier {
         _downId = null;
         return io.cancelEvent(shown);
       }
+      // the app ended without a disconnect: the «VPN is down» shown by the process that died is still on the shade
+      // (this process knows no `_downId`, the notification's id is the opened event's)
+      if (e.data['by'] == 'app' && e.opens != null) {
+        _downId = null;
+        return io.cancelEvent(e.opens!);
+      }
       return Future.value();
     }
     var id = e.opens ?? cause ?? e.id;

@@ -94,7 +94,11 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `conn/connected` | info. Подключились (`own: true` по команде пользователя; `false` — переподключение ядра за докачанными списками) | `{entry, server?, pick?, picks?, mode: 'proxy'\|'tun', route: 'global'\|'rules'}` — `server`: выбранный при подключении сервер группы; `pick`: выбор проверки перед стартом для группы маршрута (у цепочки — вход), нет, если маршрут не проверялся: `{group, mode, tried, answered, chosen, ms, weak, tookMs, found}`; `picks`: все выборы до старта (маршрут первым), если их больше одного или проверялись только цели правил (`core.md` → «Подключение: проверка перед стартом») |
 | `conn/disconnected` | info. `by: 'user'` — по команде (`own: true`, только если было подключено). `by: 'error'` (warn) — отключило не пользователь: `reason: 'pinLost'` (приходит от приложения в `disconnect {error}`), `'down'`. `by: 'system'` (warn) — VPN отняла система (Android:
 другой VPN, выключение в системных настройках), `reason: 'revoked'`; ядро остановлено полностью, без перезапусков
-(`core.md` → «Отзыв туннеля»). Ручное отключение — `op {kind: connection}` (ручное «отключить → подключить» за ≤ 7 с — `conn/reconnected`) | `{by, reason?, pick?, why?}` |
+(`core.md` → «Отзыв туннеля»). `by: 'app'`, `reason: 'ended'` (info) — процесс прошлого запуска закончился при
+включённом VPN без своего `disconnected` (убит системой, установка обновления, краш): ядро пишет его на старте, если
+по журналу VPN был включён (последнее событие состояния линии — `connected` / `reconnected` / `vpnDown`); `at` —
+последняя запись журнала того запуска, `data.found` — время старта, когда это обнаружено; открытый `vpnDown` перед ним
+закрывается `conn/vpnUp {by: 'app'}`. Без уведомления (решение 2026-10-20). Ручное отключение — `op {kind: connection}` (ручное «отключить → подключить» за ≤ 7 с — `conn/reconnected`) | `{by, reason?, pick?, why?}` |
 | `conn/connectFailed` | error. Подключение не вышло. Manual на сервер или запись, которые пропали / выключены / не поддержаны: `Manual pick "…" is unavailable: …` — через другой сервер не идёт, запущенное завершается этой же ошибкой (`connect-model.md` → Manual на сервер) | `{reason, fix?}` — `fix`: где исправлять, если ядро это знает: `settings` — занят порт прокси (Settings → Connection → порт; sing-box не смог слушать свой `mixed-in`), `pick` — Manual-пин не годится (выбрать сервер в Route). Без `fix` — причина не в настройках |
 | `conn/lost` / `restored` | Больше не пишутся (решение 2026-10-18: стали причиной `routes` у `conn/vpnDown`); в старом журнале показываются, как раньше. Были: warn / info, Auto — ни один маршрут не отвечает | `{routes}` + поля Sentinel / `{downMs}` |
 | `conn/vpnDown` / `vpnUp` | error (ожидание — только причина `network` — warn; уровень меняется на месте вместе с `causes`) / info. «VPN не работает»: при подключении ядро не поднялось за 30 с, нет сети или ни один маршрут не отвечает — одно событие на сбой, причины меняются на месте; `vpnUp` закрывает (`opens`). Раздел «„VPN не работает“» ниже | `{causes: ['core'\|'network'\|'routes'], proxy?, source?, routes?, pending?: 'routes'}` + `joins?` / `{downMs, causes, by?}` — `proxy` при `core` (как был у `core/down`), `source` при `network`, `routes` (сколько маршрутов молчат) при `routes` |
@@ -320,7 +324,8 @@ the network changed: counted as the network's …` (книга сбоев, по�
   network, routes (EN «VPN works again · sing-box is running» / «· internet is available» / «· a route answers»,
   например «· sing-box is running, a route answers»), длительность — строкой «закрытая пара». Конец ожидания (были
   только `network`) — тот же текст.
-  Отключение при открытом сбое — пользователем (`by: user`) или системой (`by: system`, отзыв VPN) — тоже `vpnUp`,
+  Отключение при открытом сбое — пользователем (`by: user`), системой (`by: system`, отзыв VPN) или концом процесса
+  (`by: app`, пишется на следующем старте; показанное уведомление снимается) — тоже `vpnUp`,
   но это не восстановление (решение 2026-10-18): строка «Сбой закончился: VPN отключён» (EN «VPN outage ended ·
   VPN disconnected»), не «VPN снова работает», и своего уведомления у такого `vpnUp` нет. Показанное «VPN не работает»
   при `by: user` снимается, при `by: system` его заменяет уведомление `conn/disconnected by: system` (тот же id) —
@@ -349,7 +354,8 @@ the network changed: counted as the network's …` (книга сбоев, по�
   `conn/disconnected`, `conn/vpnDown` (открытие и смена ожидание ↔ не работает), `conn/vpnUp`. **Кольцо** —
   `conn/reconnected`: VPN не выключался, линия проходит сквозь. Ручное «отключить → подключить» за ≤ 7 с — тоже
   кольцо: `conn/disconnected` этой операции (и `conn/vpnUp {by: user}`, если отключение закрыло «VPN не работает»)
-  состояние не меняет, после кольца линия зелёная. Остальные события — без отметки, на линии.
+  состояние не меняет, после кольца линия зелёная. `vpnUp {by: user | system | app}` — серая точка (выключен).
+  Остальные события — без отметки, на линии.
 - **Состояние** считается проходом по журналу от старых к новым только по этим событиям; до первого из них в
   журнале — по первому найденному: `connected` — линия выше него «выключен»; `reconnected`, `vpnDown` открыт,
   `disconnected` — «включён» (подключение началось раньше начала журнала); `vpnUp` — «не работает»; событий состояния
@@ -470,7 +476,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | событие | текст |
 |---|---|
 | `conn/connected` | Подключено: <запись> — <режим>, <маршрут> |
-| `conn/disconnected` | Одно событие, кто — в заголовке (поля «By» в развёртке нет): «VPN disconnected · by you» / «· by the system or another app» / «· error: <причина>» — причины: «sing-box did not start after N attempt(s)» (plural), «server <X> is unavailable (deleted / switched off / not supported)», неизвестная — «VPN disconnected · after an error: <reason>» (без `reason` — «· after an error») |
+| `conn/disconnected` | Одно событие, кто — в заголовке (поля «By» в развёртке нет): «VPN disconnected · by you» / «· by the system or another app» / «· the app was closed» (`by: app`) / «· error: <причина>» — причины: «sing-box did not start after N attempt(s)» (plural), «server <X> is unavailable (deleted / switched off / not supported)», неизвестная — «VPN disconnected · after an error: <reason>» (без `reason` — «· after an error») |
 | `conn/reconnected` | «Reconnected · <кратко>», без развёртки: «· settings: <что>» (например «mode: TUN → Proxy») / «· rule lists» / «· server addresses» / «· by you, VPN was off for N s»; в конце «· N s» (`tookMs`) |
 | `conn/connectFailed` | Не удалось подключиться — <причина> |
 | `conn/lost` / `restored` | Только старый журнал, тексты прежние: Нет связи через VPN — интернет доступен напрямую, ни один маршрут не отвечает / доступность интернета не подтверждена; закрыто: Связь восстановлена · перерыв N |

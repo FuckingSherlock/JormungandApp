@@ -56,13 +56,11 @@
 
 ## Этап «фиксы беты» (2026-10-20, дочерняя сессия) — в работе
 
-- Линия VPN / строка операции (`bugs.md`): `coder-deep` правит `core/lib/src/{api,daemon,service,log_view}.dart`,
-  `app/lib/core/live_core_host.dart`, тесты (`core/test/user_reconnect_op_test.dart`, `app/test/t1_host_test.dart`).
-  Хост передаёт `op {id, kind}` в connect / disconnect / postEvent.
+- Сделано: линия VPN / строка операции (65f9ec5); запасные записи Auto и `disconnected {by: app, reason: ended}` на
+  старте (коммит ниже). Остальное — новые пункты `bugs.md` «Бета после переработки событий».
 - Решения пользователя 2026-10-20: при VPN on линия всегда зелёная; процесс убит без `disconnected` → ядро на старте
   пишет `conn/disconnected {by: app, reason: ended}`; запасные записи Auto — `auto/unstable` и `sub/updated`
-  (только запасные задеты) с `spare`, info, без уведомления (док уже в `logs.md`, `connect-model.md`). Последние два —
-  после линии (тот же `service.dart`).
+  (только запасные задеты) с `spare`, info, без уведомления.
 
 ## Решения пользователя 2026-10-17 (события)
 
