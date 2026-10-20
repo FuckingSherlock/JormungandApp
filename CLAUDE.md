@@ -156,7 +156,8 @@ below is how it applies here.
   - Tiers — by complexity, not by where the code lives. `deep` only when the unit's own work has a race, timers,
     ordering of async steps, an invariant over several states at once, or a bug with an unknown cause; the unit
     then carries `whyDeep` (one concrete phrase, shown to the user in the plan; the workflow gate denies a deep
-    unit without it). Areas where that is common: Sentinel, Auto, runtime, DNS race, TUN, state machines — but a
+    unit without it; any `fast` / `deep` unit also needs `args.tierAttest` — a fixed sentence signed only after
+    re-checking that the simple work went to `lite`). Areas where that is common: Sentinel, Auto, runtime, DNS race, TUN, state machines — but a
     plain edit there (a field, an event, a text, a flag) is `fast` / `lite`. `deep` → `review: true`, tests by
     `test-writer-deep`; everything else → `fast` / `lite`, `review: 'auto'`.
   - Shared files (`i18n_extra.json`, generated ARB, `core_host.dart`) belong to exactly one unit, which also runs
