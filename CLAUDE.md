@@ -153,8 +153,12 @@ below is how it applies here.
   - Always `rules: 'G:/DEV/JormungandApp/.claude/agent-rules.md'` (reaches coders, test-writer and reviewer).
   - One run per layer: core first, then app once the core API is fixed — this replaces hand-made stages.
   - `check`: core — `cd core; dart analyze; dart test`; app — `cd app; flutter analyze --no-fatal-infos; flutter test`.
-  - Tiers: Sentinel, Auto, runtime, DNS race, TUN, state machines → `deep`, `review: true`, tests by
-    `test-writer-deep`; plain app UI → `fast` / `lite`, `review: 'auto'`.
+  - Tiers — by complexity, not by where the code lives. `deep` only when the unit's own work has a race, timers,
+    ordering of async steps, an invariant over several states at once, or a bug with an unknown cause; the unit
+    then carries `whyDeep` (one concrete phrase, shown to the user in the plan; the workflow gate denies a deep
+    unit without it). Areas where that is common: Sentinel, Auto, runtime, DNS race, TUN, state machines — but a
+    plain edit there (a field, an event, a text, a flag) is `fast` / `lite`. `deep` → `review: true`, tests by
+    `test-writer-deep`; everything else → `fast` / `lite`, `review: 'auto'`.
   - Shared files (`i18n_extra.json`, generated ARB, `core_host.dart`) belong to exactly one unit, which also runs
     `gen_all.mjs`. Files that cannot be split cleanly go into one `fast` / `deep` unit, not out of the workflow.
   - Anything big goes through the workflow, even a single unit: it restarts and re-routes agents by itself
