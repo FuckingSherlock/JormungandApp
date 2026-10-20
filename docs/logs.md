@@ -268,6 +268,15 @@ the network changed: counted as the network's …` (книга сбоев, по�
    попытка, не только первые `_backoff.length`; `sub/failed` — каждый подтверждённый сбой (та же ошибка на карточке
    — `×N`, другая — новое событие); `core/deprecated` — счётчик на тексте за запуск; `conn/failing` сворачивает
    остаток окна на последнее событие, как сейчас.
+   - **Стопка переподключений** (решение 2026-10-20). Строки переподключения (строка, которую называет
+     `conn/reconnected`: операция `reconnect` или `connection`), идущие в ленте подряд — между ними нет другой
+     показанной строки — и не дальше 10 мин от последней в стопке, — одна строка. Она названа последним
+     переподключением (заголовок и вторая строка — его), в мете `×N` и время «N раз · с HH:MM по HH:MM», как у повторов.
+     Развёртка — каждое переподключение своей строкой: время · заголовок · вторая строка, новые снизу; кнопка Open
+     (при `settings`) — у каждой своя. Место стопки — её последнее переподключение; раскрыта ли она, не сбивается,
+     когда в неё входит новое. Причины не смешиваются в одну: каждая видна в развёртке. Стопка — только
+     вид: события в журнале и точки на линии VPN — каждое своё; фильтр и поиск решают по каждой строке до стопки
+     (строка, скрытая фильтром, стопку не рвёт — её в ленте нет; найденная внутри стопки — стопка раскрыта).
 5. **Вливание** — `joins: [id]` (поле верхнего уровня, как `cause`): строки перечисленных событий (с их
    следствиями, повторами и закрытием) вливаются в строку этого события, позже написанного. Место строки — место
    вливающего; закрывающее влитого события (`opens`) внутри — шаг, строку не закрывает. Влитое событие выпало из
@@ -383,7 +392,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 
 | событие | свёртка | кнопки | уведомление |
 |---|---|---|---|
-| `conn/reconnected` (новое) | операция. Заменяет `conn/connected` на живом подключении (сменился план: настройки, режим, маршрут, пин, DNS; докачаны списки; `reresolve`) и ручное «отключить → подключить» за ≤ 7 с. `{reason: settings / lists / reresolve / user, changed?, tookMs}`, `changed` — что поменялось в плане; `user/mode`, `route`, `pin`, `sysProxy` — причина | Open (что изменилось) при `settings` | — |
+| `conn/reconnected` (новое) | операция; подряд идущие — стопка (`×N`, «Повторы» → «Стопка переподключений»). Заменяет `conn/connected` на живом подключении (сменился план: настройки, режим, маршрут, пин, DNS; докачаны списки; `reresolve`) и ручное «отключить → подключить» за ≤ 7 с. `{reason: settings / lists / reresolve / user, changed?, tookMs}`, `changed` — что поменялось в плане; `user/mode`, `route`, `pin`, `sysProxy` — причина | Open (что изменилось) при `settings` | — |
 | `conn/connected` / `disconnected` | операция: нажатие пользователя + событие — одна строка `own: true` (сейчас две); `core/sysProxy` on / off — внутри; точка на линии VPN, фильтром не скрываются | `by: error`: **Connect**, при `pinLost` Choose server; `by: system`: **Connect** | `by: error` — `connLost` +; `by: system` — `vpnRevoked` + (новый переключатель «VPN выключен системой», вкл.) |
 | `conn/connectFailed` | ×N (автоподключение, Retry) | **Retry**; при `fix: pick` Choose server; при `fix: settings` Open settings (Settings → Connection) — по полю, не по тексту `reason` | `connLost` + |
 | `conn/vpnDown` / `vpnUp` | пара; корень для всего, что зависит от VPN (`site/*`, `conn/failing`, `sub/failed`, `ruleSetFailed`, `dns/*`…); вливает падение ядра (`joins`); уведомление одно, текст меняется на месте | `core`: **Retry** (пока не запущено), Remove system proxy при `proxy: kept`, Send report; `network`: **Network settings**; `routes`: **Check now**, Open | `connLost` |
@@ -484,7 +493,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 |---|---|
 | `conn/connected` | Подключено: <запись> — <режим>, <маршрут> |
 | `conn/disconnected` | Одно событие, кто — в заголовке (поля «By» в развёртке нет): «VPN disconnected · by you» / «· by the system or another app» / «· the app was closed» (`by: app`) / «· error: <причина>» — причины: «sing-box did not start after N attempt(s)» (plural), «server <X> is unavailable (deleted / switched off / not supported)», неизвестная — «VPN disconnected · after an error: <reason>» (без `reason` — «· after an error») |
-| `conn/reconnected` | «Reconnected · <кратко>», без развёртки: «· settings: <что>» (например «mode: TUN → Proxy») / «· rule lists» / «· server addresses» / «· by you, VPN was off for N s»; в конце «· N s» (`tookMs`) |
+| `conn/reconnected` | «Reconnected · <кратко>», без развёртки; вторая строка заканчивается «· N s» (`tookMs`). `settings` — всегда «Reconnected · by you» (план меняет только пользователь: `own`), вторая строка — что поменялось: из `changed` («mode: TUN → Proxy», «route: …») и из нажатий операции (`user/*` в строке): `pin` — «server: <имя · протокол>» / «<запись>: server unpinned», `sysProxy` — «system proxy on / off»; одно и то же изменение — один раз; ничего не известно (правка правил / DNS в редакторе) — «settings». `lists` — «Reconnected» / «rule lists», `reresolve` — «Reconnected» / «server addresses», `user` — «Reconnected · by you» / «VPN was off for N s» (решение 2026-10-20) |
 | `conn/connectFailed` | Не удалось подключиться — <причина> |
 | `conn/lost` / `restored` | Только старый журнал, тексты прежние: Нет связи через VPN — интернет доступен напрямую, ни один маршрут не отвечает / доступность интернета не подтверждена; закрыто: Связь восстановлена · перерыв N |
 | `conn/vpnDown` / `vpnUp` | Ожидание (только `network`): «Waiting for network · VPN is on, no internet connection». Проверка (причин нет, `pending: 'routes'`): «Checking routes · the network is back, no route has answered yet». С причиной `core` или `routes`: «VPN is down» — по каждой причине фраза, через « · » в порядке появления: `core` — «sing-box stopped and has not restarted for 30 s» / «… (N restart attempts so far)»; `network` — «no internet connection»; `routes` — «no route answers, the internet works directly» (с `routes` > 1 — «none of N routes answers, the internet works directly»); при `proxy: kept` — «· system proxy is still set, so programs that use it have no internet». Закрыто: «VPN works again · » + по каждой причине за сбой, через запятую в порядке core, network, routes: «sing-box is running» / «internet is available» / «a route answers»; закрыто отключением (`by: user` / `system`): «VPN outage ended · VPN disconnected». Подпись типа `vpnUp` — «VPN outage ended» |

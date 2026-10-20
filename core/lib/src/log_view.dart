@@ -320,6 +320,7 @@ class EventGroup {
         related = [],
         closers = [],
         parts = [],
+        stack = const <EventGroup>[],
         at = e.at,
         level = e.level,
         lastAt = e.lastAt,
@@ -334,11 +335,36 @@ class EventGroup {
         related = [e],
         closers = [],
         parts = [],
+        stack = const <EventGroup>[],
         at = e.at,
         level = e.level,
         lastAt = e.lastAt,
         opId = null,
         opKind = null;
+
+  /// A stack of reconnect rows ([stackReconnects]), oldest first: it is named by the newest of them (its [head],
+  /// consequences, closers, [opId] and [opKind]); its [items] and [repeats] are all the members', so the count and the
+  /// time span are the stack's.
+  EventGroup._stack(List<EventGroup> members)
+      : stack = members,
+        head = members.last.head,
+        whyCode = members.last.whyCode,
+        items = [for (final m in members) ...m.items]..sort((a, b) => a.id.compareTo(b.id)),
+        repeats = [for (final m in members) ...m.repeats],
+        related = members.last.related,
+        closers = members.last.closers,
+        parts = members.last.parts,
+        at = members.last.at,
+        level = members.last.level,
+        lastAt = members.last.lastAt,
+        opId = members.last.opId,
+        opKind = members.last.opKind {
+    for (final m in members) {
+      if (_rank(m.level) > _rank(level)) level = m.level;
+      if (m.lastAt > lastAt) lastAt = m.lastAt;
+      if (m.hitInside) hitInside = true;
+    }
+  }
 
   /// The event the row stands for: the root, the opening event of a pair, the first event of an operation, the first
   /// of the repeats. Null for a group row ([isGroup]).
@@ -364,6 +390,10 @@ class EventGroup {
   /// The other events of the same operation as [head] (`op.id`), the user's `user/*` that started it among them.
   final List<EventRecord> parts;
 
+  /// The reconnect rows a stack ([stackReconnects]) takes in, oldest first; empty for every other row.
+  final List<EventGroup> stack;
+  bool get isStack => stack.isNotEmpty;
+
   /// The operation of the row (set when [head] has one): `reconnect`, `subUpdate`, `subUpdateAll`, `ruleSets`,
   /// `connection`, `appUpdate`.
   final String? opId, opKind;
@@ -378,8 +408,9 @@ class EventGroup {
   /// For a search: the row is shown because of an event other than [head] (the UI unfolds it).
   bool hitInside = false;
 
-  /// The row's identity: [head]'s id (rows that took others in, [_join], keep it), the first event of a group row.
-  int get key => head?.id ?? items.first.id;
+  /// The row's identity: [head]'s id (rows that took others in, [_join], keep it), the first event of a group row; a
+  /// stack keeps the id of its first member, so it stays the same while new reconnects join it.
+  int get key => isStack ? stack.first.key : (head?.id ?? items.first.id);
   bool get problem => level != 'info';
 
   /// The event that words the row: the last of the repeats of [head]; the last event of an `appUpdate` operation
@@ -389,6 +420,7 @@ class EventGroup {
   /// `disconnected` / `reconnected` in it. A `user/*` that started an operation never words a row that has another event
   /// in it (the newest event that is not a `user/*`).
   EventRecord get ev {
+    if (isStack) return stack.last.ev;
     if (head == null) return related.first;
     if (opKind == 'appUpdate') return items.last;
     if (opKind == 'connection' || opKind == 'reconnect') {
@@ -496,6 +528,41 @@ class EventGroup {
 const _connOutcomes = {'conn/connected', 'conn/disconnected', 'conn/reconnected'};
 
 int _rank(String l) => l == 'error' ? 2 : l == 'warn' ? 1 : 0;
+
+/// The longest gap between two reconnects of one stack (see [stackReconnects]).
+const _stackGapMs = 600000;
+
+/// A reconnect row: the row of `conn/reconnected` (an operation `reconnect` or `connection`).
+bool _isReconnectRow(EventGroup g) =>
+    g.head != null && (g.opKind == 'reconnect' || g.opKind == 'connection') && g.ev.key == 'conn/reconnected';
+
+/// Stacks the reconnect rows that follow each other in [rows] (oldest first, as [foldEvents] gives them): every run of
+/// adjacent reconnect rows, each within [_stackGapMs] of the previous one, is one [EventGroup.isStack] row; a run of one
+/// row is that row itself, and every other row stays as it is. A row the filter hides is not in [rows], so it does not
+/// break a run; a row between two reconnects does.
+List<EventGroup> stackReconnects(List<EventGroup> rows) {
+  final out = <EventGroup>[];
+  var run = <EventGroup>[];
+  void flush() {
+    if (run.length == 1) out.add(run.single);
+    if (run.length > 1) out.add(EventGroup._stack(run));
+    run = [];
+  }
+
+  for (final g in rows) {
+    if (!_isReconnectRow(g)) {
+      flush();
+      out.add(g);
+    } else if (run.isNotEmpty && g.ev.at - run.last.ev.at > _stackGapMs) {
+      flush();
+      run.add(g);
+    } else {
+      run.add(g);
+    }
+  }
+  flush();
+  return out;
+}
 
 /// Folds [list] (oldest first) into rows (see [EventGroup]).
 ///
