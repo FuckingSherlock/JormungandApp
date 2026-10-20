@@ -375,9 +375,24 @@ class EventGroup {
 
   /// The event that words the row: the last of the repeats of [head]; the last event of an `appUpdate` operation
   /// (the status is the last stage); the first event of a group row. [head] and [last] are there for the UI to choose.
+  ///
+  /// An operation of the connection (`connection`, `reconnect`) is worded by its outcome: the newest `conn/connected` /
+  /// `disconnected` / `reconnected` in it. A `user/*` that started an operation never words a row that has another event
+  /// in it (the newest event that is not a `user/*`).
   EventRecord get ev {
     if (head == null) return related.first;
-    return opKind == 'appUpdate' ? items.last : repeats.last;
+    if (opKind == 'appUpdate') return items.last;
+    if (opKind == 'connection' || opKind == 'reconnect') {
+      for (var i = items.length - 1; i >= 0; i--) {
+        if (_connOutcomes.contains(items[i].key)) return items[i];
+      }
+    }
+    if (head!.cat == 'user' && opId != null) {
+      for (var i = items.length - 1; i >= 0; i--) {
+        if (items[i].cat != 'user') return items[i];
+      }
+    }
+    return repeats.last;
   }
 
   /// The newest event of the row (a crash chain: its status is that of the last event).
@@ -468,6 +483,8 @@ class EventGroup {
     if (o != null && _isHead(o)) closers.add(e);
   }
 }
+
+const _connOutcomes = {'conn/connected', 'conn/disconnected', 'conn/reconnected'};
 
 int _rank(String l) => l == 'error' ? 2 : l == 'warn' ? 1 : 0;
 
@@ -655,11 +672,29 @@ class VpnMark {
 Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
   const stateKeys = {'conn/connected', 'conn/disconnected', 'conn/reconnected', 'conn/vpnDown', 'conn/vpnUp'};
   final events = journal.toList();
+  // the user's "disconnect → connect" within 7 s (one operation): the VPN did not go off for the line, its
+  // `conn/disconnected` is no state change and the `conn/reconnected {reason: user}` is a ring on «on»
+  final userReconnects = {
+    for (final e in events)
+      if (e.key == 'conn/reconnected' && e.data['reason'] == 'user' && e.opId != null) e.opId,
+  };
+  // the `conn/vpnUp {by: user}` that such a disconnect wrote right after it (it ended an open `vpnDown`) is no change
+  // either: the line keeps red / yellow up to the ring and goes green there
+  final skipped = <int>{};
+  var afterSkipped = false;
+  for (final e in events) {
+    if (!stateKeys.contains(e.key)) continue;
+    final skip = (e.key == 'conn/disconnected' && e.opId != null && userReconnects.contains(e.opId)) ||
+        (afterSkipped && e.key == 'conn/vpnUp' && e.data['by'] == 'user');
+    if (skip) skipped.add(e.id);
+    afterSkipped = skip && e.key == 'conn/disconnected';
+  }
+  bool inReconnect(EventRecord e) => skipped.contains(e.id);
   // before the first state event: connected first - the VPN was off; vpnUp first - it was down; any other state
   // event first - it was on; no state events at all - off
   var cur = VpnLine.off;
   for (final e in events) {
-    if (stateKeys.contains(e.key)) {
+    if (stateKeys.contains(e.key) && !inReconnect(e)) {
       cur = switch (e.key) { 'conn/connected' => VpnLine.off, 'conn/vpnUp' => VpnLine.down, _ => VpnLine.on };
       break;
     }
@@ -673,10 +708,12 @@ Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
         cur = VpnLine.on;
         dot = VpnDot.change;
       case 'conn/disconnected':
+        if (inReconnect(e)) break;
         cur = VpnLine.off;
         dot = VpnDot.change;
       case 'conn/reconnected':
         dot = VpnDot.reconnect;
+        if (e.data['reason'] == 'user') cur = VpnLine.on; // the connection is up again
       case 'conn/vpnDown':
         final c = e.data['causes'];
         // waiting (yellow): only the network is missing, or no cause is left and the routes are being checked anew
@@ -686,6 +723,7 @@ Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
         if (next != cur) dot = VpnDot.change;
         cur = next;
       case 'conn/vpnUp':
+        if (inReconnect(e)) break;
         cur = e.data['by'] == 'user' || e.data['by'] == 'system' ? VpnLine.off : VpnLine.on;
         dot = VpnDot.change;
     }

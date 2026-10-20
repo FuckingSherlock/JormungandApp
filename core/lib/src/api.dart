@@ -59,8 +59,9 @@ abstract interface class CoreApi {
   /// Every journal event as it is written (the Events tab, notifications). Broadcast.
   Stream<Map<String, dynamic>> get eventStream;
 
-  /// `{cat, type, level, own?, data?}` → `{id}`: an event the UI knew first. A bad shape is
-  /// a [FormatException] with the reason.
+  /// `{cat, type, level, own?, data?, op?}` → `{id}`: an event the UI knew first. `op`: `{id, kind}`, the operation the
+  /// user's action started (the same `op` the action passes to `connect` / `disconnect`). A bad shape is a
+  /// [FormatException] with the reason.
   Map<String, dynamic> postEvent(Map<String, dynamic> body);
 
   void clearEvents();
@@ -129,8 +130,9 @@ abstract interface class CoreApi {
   /// its extension is dropped. Nothing recognised — a [FormatException] with the reason.
   Map<String, dynamic> addSourceFromText(Map<String, dynamic> body);
 
-  /// `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?, dnsAuto?}`
-  /// → the status. Throws when it did not connect (the status holds `error`).
+  /// `{plan, systemProxy, killSwitch?, killOnDisconnect?, killWhileClosed?, downProxy?, dnsAuto?, op?}`
+  /// → the status. Throws when it did not connect (the status holds `error`). `op`: `{id, kind}`, the user's operation
+  /// (docs/logs.md → «Операция»): the `conn/connected` / `conn/reconnected` this connect writes carry it.
   Future<Map<String, dynamic>> connect(Map<String, dynamic> body);
 
   /// Takes over a sing-box that outlived the previous core (Android: the engine was recreated
@@ -141,8 +143,9 @@ abstract interface class CoreApi {
   Future<Map<String, dynamic>> adopt(Map<String, dynamic> body);
 
   /// [error]: the host ends the connection because of an error, not the user's command (`{reason: 'pinLost', pick?, why?}`):
-  /// the journal then says `conn/disconnected` `by: 'error'`.
-  Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error});
+  /// the journal then says `conn/disconnected` `by: 'error'`. [op]: `{id, kind}`, the operation of the user's disconnect
+  /// (the `conn/disconnected` carries it, and the `conn/reconnected` of a connect within 7 s); none = the core's own.
+  Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error, Map<String, dynamic>? op});
 
   /// Takes the system proxy off now (down alert, blocked plaque).
   Future<Map<String, dynamic>> releaseSysProxy();

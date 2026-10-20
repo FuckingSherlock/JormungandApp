@@ -40,9 +40,9 @@ class _RecCore extends CoreService {
   }
 
   @override
-  Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error}) {
+  Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error, Map<String, dynamic>? op}) {
     disconnects.add(error == null ? null : Map<String, dynamic>.from(error));
-    return super.disconnect(error: error);
+    return super.disconnect(error: error, op: op);
   }
 
   @override
@@ -268,6 +268,42 @@ void main() {
       final d = _events(core).where((e) => e['cat'] == 'conn' && e['type'] == 'disconnected').toList();
       expect(d, hasLength(1));
       expect((d.single['data'] as Map)['by'], isNot('error'));
+    });
+  });
+
+  group('the user\'s operations (docs/logs.md → «Операция»)', () {
+    Map? opOf(Iterable<Map> l, String cat, String type) => l.lastWhere((e) => e['cat'] == cat && e['type'] == type)['op'] as Map?;
+
+    test('Disconnect then Connect within 7 s: user/disconnect, user/connect, conn/disconnected, conn/reconnected share one op', () async {
+      await start();
+      expect((await host.connect()).started, isTrue);
+      await host.disconnect();
+      expect((await host.connect()).started, isTrue);
+      await settle(40);
+      final ev = _events(core);
+      final o = opOf(ev, 'user', 'disconnect');
+      expect(o, isNotNull);
+      expect(o!['kind'], 'connection');
+      expect(opOf(ev, 'user', 'connect'), o, reason: 'a Connect within 7 s reuses the Disconnect\'s op');
+      expect(opOf(ev, 'conn', 'disconnected'), o);
+      final re = ev.lastWhere((e) => e['cat'] == 'conn' && e['type'] == 'reconnected');
+      expect((re['data'] as Map)['reason'], 'user');
+      expect(re['op'], o);
+    });
+
+    test('a route tap while connected: user/route and conn/reconnected {settings} share one reconnect op', () async {
+      await start();
+      expect((await host.connect()).started, isTrue);
+      await settle(40);
+      host.setGlobal(!host.catalog.segState.global);
+      await settle(300);
+      final ev = _events(core);
+      final u = opOf(ev, 'user', 'route');
+      expect(u, isNotNull);
+      expect(u!['kind'], 'reconnect');
+      final re = ev.lastWhere((e) => e['cat'] == 'conn' && e['type'] == 'reconnected');
+      expect((re['data'] as Map)['reason'], 'settings');
+      expect(re['op'], u);
     });
   });
 

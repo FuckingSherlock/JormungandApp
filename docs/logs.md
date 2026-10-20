@@ -102,11 +102,11 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `conn/failing` | Соединения массово не удаются (детектор неудавшихся соединений) | `failures.dart` |
 | `auto/switched` | info. Auto переключил маршрут (без `route`) или Priority-сервер внутри маршрута (`route` есть) | `{route?, from, to, reason: 'failover'\|'back'}` |
 | `auto/fastest` | info. Auto сменил Fastest-сервер (выбор ядра: failAfter промахов или шаг улучшения) | `{route, from, to}` |
-| `auto/unstable` | warn. Маршрут падает снова и снова (flap guard). Под будущее исключение на время (`features.md`, «Нестабильная запись») текст и кнопки «Return once» / «Don't exclude» уже есть в приложении; кнопки скрыты флагом в приложении, пока в ядре нет исключения на время (фича включает флаг) | `{id, strikes, holdMs}` |
+| `auto/unstable` | warn. Маршрут падает снова и снова (flap guard). Под будущее исключение на время (`features.md`, «Нестабильная запись») текст и кнопки «Return once» / «Don't exclude» уже есть в приложении; кнопки скрыты флагом в приложении, пока в ядре нет исключения на время (фича включает флаг). **Запасная запись** (не текущий маршрут подключения в момент события, `spare: true`) — info, без уведомления (решение 2026-10-20) | `{id, strikes, holdMs, spare?}` |
 | `site/blocked` | warn. Сайт не открывается через сервер, но открывается через другую нашу ноду (кнопка Create rule): разведчик (рабочая нода той же подписки, другой страны), затем ноды других подписок (всего не больше `siteRetry`); где открылся — `via` / `viaServer`, `viaTarget: 'node:…'`, если это нода того же маршрута (цель правила); порядок и память вердикта — `failures.md` | `{host, port?, entry, server, dest, via, viaServer, viaTarget?, rule, process?, app?, repeat?}` — `rule`, `process`, `app`: `core.md` → «`rule` и `process`» |
 | `site/unreachable` | warn. Не открывается ни через сервер, ни через проверенные другие маршруты (или нет другого отвечающего / повторы выключены); повторы после вердикта — на событии (`repeat`) без проб | `{host, port?, entry, server, dest, tried: [{entry, server}], retries?: 'off', rule, process?, app?}`; `tried` пуст — нет другого рабочего маршрута; без `retries: 'off'` ещё `check` — `{state: 'pending'\|'off'\|'opens'\|'down'\|'failed', at, kind?, via?, ok?, total?, nodes?, error?, manual?}`, внешний чекер check-host.net (`connect-model.md` → «Внешний чекер»): событие меняется на месте (`rev`), тихое, пока нет `opens` |
 
-| `sub/updated` | info. Автообновление по таймеру ядра изменило список серверов (без изменений — события нет). Ручное обновление события успеха не пишет — только `sub/failed` (решение 2026-10-18). **Warn-вариация** (и при ручном, тогда `own: true`): обновление убрало из подписки используемые серверы (`lost` не пуст) — что задето, в `affected` («Задетые настройки» ниже); закрывает её `sub/back` | `{source, name, added, removed, total, own?, lost?, affected?}` — `lost`: имена убранных используемых серверов (≤ 10) и `lostCount` |
+| `sub/updated` | info. Автообновление по таймеру ядра изменило список серверов (без изменений — события нет). Ручное обновление события успеха не пишет — только `sub/failed` (решение 2026-10-18). **Warn-вариация** (и при ручном, тогда `own: true`): обновление убрало из подписки используемые серверы (`lost` не пуст) — что задето, в `affected` («Задетые настройки» ниже); закрывает её `sub/back`. Задеты только запасные записи Auto (все `affected` с `spare: true`) — та же вариация, но info и без уведомления (решение 2026-10-20) | `{source, name, added, removed, total, own?, lost?, affected?}` — `lost`: имена убранных используемых серверов (≤ 10) и `lostCount` |
 | `sub/failed` | error. Автообновление не вышло — через Sentinel (`svc.fetch`), только `confirmed`; каждый подтверждённый сбой: пока на карточке та же ошибка — `repeated` на одном событии, другая — новое событие. Ручное — тоже ядро, `own: true`, сразу после ожидания пути (сеть ≤ 5 с, конец своего переподключения; «Один автор `sub/*`») | `{source, name, error, code?, path?, own}` — `error`: текст ошибки без имени класса и без адреса подписки (тот же текст ядро и приложение кладут в `lastError` карточки) |
 | `sub/diverged` | warn, без уведомления. Auto: прямая и туннельная копии подписки с разными наборами серверов; три записи подряд при discovery (по одной на UA) — норма. `subscription-parsing.md` → «Download via» | `source`, `name`, `host`, `ua`, `directNodes` / `tunnelNodes`, `onlyDirect` / `onlyTunnel` (≤ 10 имён) и `…Count`, `directStatus` / `tunnelStatus`, `directMs` / `tunnelMs`, `directPath` / `tunnelPath`, `directFresh` / `tunnelFresh` (заголовки свежести обеих копий: `Age`, `Date`, `Last-Modified`, `ETag`, `Cache-Control`, `Expires` — какие были), `used` (`tunnel` / `direct` / `merged`), `why` (`newer: lastModified` / `newer: age` / `unknown`), `usedNodes` |
 | `sub/back` | info. Используемые серверы, убранные прошлым warn `sub/updated`, вернулись в подписку — пишется, когда вернулись все (или оставшиеся больше ничем не используются); частичный возврат события не даёт. `opens` = тот `sub/updated` | `{source, name, count, names, affected}` — `affected`: что снова идёт через них |
@@ -254,7 +254,10 @@ the network changed: counted as the network's …` (книга сбоев, по�
    закрывающее заменяет его **всегда**, при любом своём переключателе: в шторке не остаётся «VPN не работает» после
    восстановления (решение 2026-10-17). Не показано — закрывающее решает его собственный переключатель.
 3. **Операция** — новое поле `op: {id, kind}`: всё, что написала одна операция, — одна строка с итогом, события
-   внутри. `op` ставит тот, кто начал (ядро; действие пользователя передаёт свой `op` в запросе). `user/*`,
+   внутри. `op` ставит тот, кто начал (ядро; действие пользователя передаёт свой `op` в запросе: `op: {id, kind}` в
+   теле `connect` / `disconnect` / `postEvent`; нажатия Mode / Route / System proxy / Pin при подключении — один
+   `reconnect`, повторное Connect за ≤ 7 с после Disconnect — `op` того отключения). Строку операции `connection` /
+   `reconnect` называет её последнее событие `conn/connected` / `disconnected` / `reconnected`. `user/*`,
    начавшее операцию, — её причина (смена режима в строке переподключения); отдельной строкой — только действие
    без последствий в журнале.
 4. **Повторы** — `data.repeat`, `×N`. Тихих потолков нет («Never hide problems»): `core/restartFailed` — каждая
@@ -344,7 +347,9 @@ the network changed: counted as the network's …` (книга сбоев, по�
   (success / error / warning / приглушённый), не hex.
 - **Точка** — событие, на котором состояние сменилось, цвет — начавшегося состояния: `conn/connected`,
   `conn/disconnected`, `conn/vpnDown` (открытие и смена ожидание ↔ не работает), `conn/vpnUp`. **Кольцо** —
-  `conn/reconnected`: VPN не выключался, линия проходит сквозь. Остальные события — без отметки, на линии.
+  `conn/reconnected`: VPN не выключался, линия проходит сквозь. Ручное «отключить → подключить» за ≤ 7 с — тоже
+  кольцо: `conn/disconnected` этой операции (и `conn/vpnUp {by: user}`, если отключение закрыло «VPN не работает»)
+  состояние не меняет, после кольца линия зелёная. Остальные события — без отметки, на линии.
 - **Состояние** считается проходом по журналу от старых к новым только по этим событиям; до первого из них в
   журнале — по первому найденному: `connected` — линия выше него «выключен»; `reconnected`, `vpnDown` открыт,
   `disconnected` — «включён» (подключение началось раньше начала журнала); `vpnUp` — «не работает»; событий состояния
@@ -388,7 +393,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 |---|---|---|---|
 | `auto/switched` | пара failover → back; серия за одну беду — под первым переключением; отказ сервера — корень «сервер не отвечает» для `auto/switched`, `rules/fallback` целей на нём и `dns/switched node` | Open, Pin (закрепить новый сервер) | `autoSwitch` |
 | `auto/fastest` | ×N на маршрут | Open, Pin | `autoSwitch` |
-| `auto/unstable` | корень для переключений той же записи | **Open**, Check now | `unstable` |
+| `auto/unstable` | корень для переключений той же записи | **Open**, Check now | `unstable`; запасная (`spare`) — журнал: трафик через неё не идёт |
 | `dns/switched` | пара failover → back | Open (DNS) | `autoSwitch` |
 | `dns/failed` | корень для `failedOnNode` того же сервера | Check now, **Open** (DNS этой стороны; кнопки «сменить сервер» нет — запасные перебирает failover, решение 2026-10-17) | `dnsFailed` + (новый переключатель «DNS-сервер не отвечает», вкл.) |
 | `dns/failedOnNode` | следствие `dns/failed` | Check now, Open | журнал: работает через запасную ноду |
@@ -397,7 +402,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 
 | событие | свёртка | кнопки | уведомление |
 |---|---|---|---|
-| `sub/updated` | info: тик по нескольким подпискам — одна строка, подписки внутри; warn-вариация — своей строкой, корень для `rules/targetLost` этого изменения, пара с `sub/back` | info: **Open**; warn: задетое строками (тап — настройка), **Choose for all** (задето > 1), Open subscription | info — `subUpdated` (выкл.); warn — `subFailed` |
+| `sub/updated` | info: тик по нескольким подпискам — одна строка, подписки внутри; warn-вариация — своей строкой, корень для `rules/targetLost` этого изменения, пара с `sub/back` | info: **Open**; warn: задетое строками (тап — настройка), **Choose for all** (задето > 1), Open subscription | info — `subUpdated` (выкл.); warn — `subFailed`; задеты только запасные — журнал |
 | `sub/failed` | ×N, пока на карточке та же ошибка | **Retry**, Open | `subFailed` |
 | `sub/back` | пара с warn `sub/updated` | — | `subFailed` (закрывающее: заменяет показанное) |
 | `node/lost` / `node/back` | пара (после `deleted` — одно событие); корень для `rules/targetLost` этого изменения | задетое строками, **Switch on** (`off`), **Choose for all** (задето > 1) | журнал: действие пользователя |
@@ -478,7 +483,7 @@ the network changed: counted as the network's …` (книга сбоев, по�
 | `auto/switched` | Auto: <A> → <B> — <A> не отвечает; пара: Auto: <B> вместо <A> · N мин, затем возврат на <A>; серия: Auto: <A> → <C> (через <B>) |
 | отказ сервера (корень) | Сервер <X> не отвечает — переключены: маршруты N, цели правил N, DNS |
 | `auto/fastest` | Fastest: <A> → <B>; ×N: Fastest: N смен · сейчас <X>; подпись типа — смена сервера Auto по настройке Fastest («Auto changed server (Fastest)», не «Fastest server changed») |
-| `auto/unstable` | «<X> is unstable · N failures, excluded for M min»; кнопки «Return once» / «Don't exclude» — скрыты до фичи исключения на время |
+| `auto/unstable` | «<X> is unstable · N failures, excluded for M min»; запасная — «Spare entry <X> is unstable · …»; кнопки «Return once» / «Don't exclude» — скрыты до фичи исключения на время |
 | `dns/switched` | DNS (<сторона>): <A> → <B> — <причина>; пара: DNS (<сторона>): <B> вместо <A> · N мин, затем возврат |
 | `dns/failed` | DNS-сервер <X> не отвечает |
 | `dns/failedOnNode` | DNS-сервер <X> не отвечает через <нода> — работает через запасную ноду <via> |
@@ -568,7 +573,9 @@ the network changed: counted as the network's …` (книга сбоев, по�
   профиль, цель правила или приложения. Список задетого считает то же, что диалог удаления в Nodes
   (`deleteImpact` / `targetImpact`, `core/lib/src/catalog/impact.dart`): `affected: [{kind: 'connection' | 'chain'
   | 'profile' | 'rule' | 'app', id, name, to}]`, `to` — куда сейчас идёт трафик этой настройки (`block` /
-  `direct` / `main` / id цели; `none` — цепочка или профиль не работают).
+  `direct` / `main` / id цели; `none` — цепочка или профиль не работают). `spare: true` — цепочка, профиль или юнит,
+  который сейчас только запасная запись Auto работающего подключения (в его списке, не текущий маршрут) и больше
+  ничем не используется (не цель правила или приложения, не Manual-пин).
 - **Источники:** провайдер убрал серверы при обновлении — warn `sub/updated` (`lost`, `affected`), закрывает
   `sub/back`, когда они вернулись; пользователь выключил или удалил сервер / источник в Nodes — `node/lost`
   (`own: true`), закрывает `node/back` при включении (после удаления пары нет). Удаление источника целиком —
@@ -576,6 +583,8 @@ the network changed: counted as the network's …` (книга сбоев, по�
 - **Тексты** (EN, точные — в `event_text.dart`):
   - провайдер: «Subscription <имя> removed servers in use: <имена>» — «Their traffic uses If unavailable for
     now and goes back by itself if the provider returns the servers. Keep it as is, or choose a new target.»;
+    задеты только запасные (info) — «Subscription <имя> removed N servers used by spare <имена задетого>» — «Auto
+    skips them until the provider returns the servers.» (имена серверов — в развёртке, не в заголовке);
   - выключил: «You switched off servers in use: <имена>» — «Their traffic uses If unavailable until you switch
     them on.»; удалил: «You deleted servers in use: <имена>» — «Their traffic uses If unavailable.»;
   - вернулись: «Subscription <имя> returned servers in use: <имена>» / «You switched on servers in use:

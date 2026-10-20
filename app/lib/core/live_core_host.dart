@@ -836,14 +836,20 @@ class LiveCoreHost extends CoreHost {
       );
     }
     _connecting = true;
+    _planOp = null; // the taps of an earlier connection
     _error = null;
     _notifyNow();
     try {
-      final st = await _sendPlan();
+      // a connect within 7 s of the user's disconnect is the second half of its operation (one `conn/reconnected`)
+      final ud = _userDisconnect;
+      final again = ud != null && DateTime.now().difference(ud.at) <= userReconnectWithin;
+      final op = again ? ud.op : _newOp('connection');
+      final st = await _sendPlan(op: op);
+      if (again) _userDisconnect = null;
       _journal('connect', {
         'action': 'connect',
         'entry': catalog.effectiveConnectId(),
-      });
+      }, op: op);
       final w = st['warning'];
       if (w is String && w.isNotEmpty) _notice(HostNotice('warning', w));
       if (_connected) unawaited(_pingRoute(catalog.liveAnchor));
@@ -862,11 +868,12 @@ class LiveCoreHost extends CoreHost {
 
   /// Builds the plan and gives it to the core (a first connect and a reconnect alike); the
   /// plan the core now runs becomes the one a later change is compared with.
-  Future<Map<String, dynamic>> _sendPlan() async {
+  Future<Map<String, dynamic>> _sendPlan({Map<String, dynamic>? op}) async {
     final plan = catalog.livePlan();
     final mode = _modeSigNow(); // as the plan was built: a switch during the await is told after it
     final kill = _killPlan();
     final st = await api.connect({
+      'op': ?op,
       'plan': plan,
       'systemProxy': !isAndroid && catalog.segState.systemProxy,
       'dnsAuto': catalog.dnsCfg.auto,
@@ -900,7 +907,9 @@ class LiveCoreHost extends CoreHost {
   @override
   Future<void> disconnect({Map<String, dynamic>? error}) async {
     if (_disconnecting || !_ready) return;
+    final wasOn = isOn;
     _disconnecting = true;
+    _planOp = null;
     _planSig = null;
     _autoSig = null;
     _modeSig = null;
@@ -908,12 +917,15 @@ class LiveCoreHost extends CoreHost {
     _error = null;
     _notifyNow();
     // ended by an error: not the user's action, the core writes `conn/disconnected by: error`
-    if (error == null) _journal('disconnect', {'action': 'disconnect'});
+    final op = error == null ? _newOp('connection') : null;
+    final startedAt = DateTime.now(); // the core counts its 7 s from the start of the disconnect too
+    if (error == null) _journal('disconnect', {'action': 'disconnect'}, op: op);
     try {
       _applyStatus(
-        Map<String, dynamic>.from(await api.disconnect(error: error)),
+        Map<String, dynamic>.from(await api.disconnect(error: error, op: op)),
         notify: false,
       );
+      _userDisconnect = op != null && wasOn ? (op: op, at: startedAt) : null;
       // the dock shows the answer of the direct check the core starts itself
       catalog.coreRoute = null;
     } catch (e) {
@@ -971,7 +983,7 @@ class LiveCoreHost extends CoreHost {
   void setTun(bool on) {
     if (isAndroid || catalog.segState.tun == on) return;
     catalog.segState.mode = on ? 'tun' : 'proxy';
-    _journal('mode', {'action': 'mode', 'value': catalog.segState.mode});
+    _journal('mode', {'action': 'mode', 'value': catalog.segState.mode}, op: _planOpForTap());
     changed();
   }
 
@@ -979,7 +991,7 @@ class LiveCoreHost extends CoreHost {
   void setGlobal(bool on) {
     if (catalog.segState.global == on) return;
     catalog.segState.route = on ? 'global' : 'rules';
-    _journal('route', {'action': 'route', 'value': catalog.segState.route});
+    _journal('route', {'action': 'route', 'value': catalog.segState.route}, op: _planOpForTap());
     changed();
   }
 
@@ -988,7 +1000,7 @@ class LiveCoreHost extends CoreHost {
     if (isAndroid || catalog.segState.systemProxy == on) return;
     catalog.segState.sys = on ? 'on' : 'off';
     catalog.connCfg.sysProxy = on;
-    _journal('sysProxy', {'action': 'sysProxy', 'on': on});
+    _journal('sysProxy', {'action': 'sysProxy', 'on': on}, op: _planOpForTap());
     changed();
   }
 
@@ -1018,7 +1030,7 @@ class LiveCoreHost extends CoreHost {
       'action': 'pin',
       'entry': id,
       'server': again ? null : key,
-    });
+    }, op: _planOpForTap());
     changed();
   }
 
@@ -1773,11 +1785,13 @@ class LiveCoreHost extends CoreHost {
       }
       return;
     }
+    final op = _planOp; // the taps that led here; a plan that did not change leaves them as plain journal rows
+    _planOp = null;
     final sig = catalog.planSig();
     if (sig == null || sig == _planSig) return;
     _reconnecting = true;
     try {
-      await _sendPlan();
+      await _sendPlan(op: op);
       _notifyNow();
     } catch (e) {
       final (msg, _) = _explain(e);
@@ -2664,12 +2678,35 @@ class LiveCoreHost extends CoreHost {
 
   // ───────────────────────────── journal ─────────────────────────────
 
+  int _opSeq = 0;
+
+  /// An operation of the user's action (docs/logs.md → «Операция»): its `user/*` tap and the core's events share it.
+  Map<String, dynamic> _newOp(String kind) => {
+    'id': '$kind-${DateTime.now().millisecondsSinceEpoch}-app${++_opSeq}',
+    'kind': kind,
+  };
+
+  /// The user's disconnect while connected: a connect within [userReconnectWithin] is its second half (the core makes
+  /// one `conn/reconnected` of the two), so it carries the same operation.
+  ({Map<String, dynamic> op, DateTime at})? _userDisconnect;
+  static const userReconnectWithin = Duration(seconds: 7);
+
+  /// The operation of the plan change the user's taps (mode, route, system proxy, pin) lead to: the taps within the
+  /// quiet before [_reconnect] share one; null while there is no live plan to change.
+  Map<String, dynamic>? _planOp;
+
+  Map<String, dynamic>? _planOpForTap() {
+    if (!_ready || !_connected || _connecting || _planSig == null) return null;
+    return _planOp ??= _newOp('reconnect');
+  }
+
   /// The user's own action into the core's Events journal (`journal('user', ...)`).
   void _journal(
     String type,
     Map<String, dynamic> data, {
     String cat = 'user',
     String level = 'info',
+    Map<String, dynamic>? op,
   }) {
     if (!_ready) return;
     try {
@@ -2679,6 +2716,7 @@ class LiveCoreHost extends CoreHost {
         'level': level,
         'own': true,
         'data': data,
+        'op': ?op,
       });
     } catch (_) {
       // a journal line must never fail an action

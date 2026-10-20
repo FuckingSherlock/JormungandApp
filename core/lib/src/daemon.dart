@@ -130,7 +130,9 @@ class Daemon {
         'POST /api/sources/import' => Future(() => service.addSourceFromText(body)),
         'POST /api/parse' => Future.value(service.parse(body)),
         'POST /api/connect' => service.connect(body),
-        'POST /api/disconnect' => service.disconnect(error: body['error'] is Map ? (body['error'] as Map).cast<String, dynamic>() : null),
+        'POST /api/disconnect' => service.disconnect(
+            error: body['error'] is Map ? (body['error'] as Map).cast<String, dynamic>() : null,
+            op: body['op'] is Map ? (body['op'] as Map).cast<String, dynamic>() : null),
         'POST /api/sysproxy/release' => service.releaseSysProxy(),
         'POST /api/retry' => service.retry(),
         'POST /api/killswitch' => service.killSwitchSettings(body),

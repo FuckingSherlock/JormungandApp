@@ -54,6 +54,16 @@
    «Что уведомляет». Каталог событий один — `logs.md` → «Каталог типов» (таблица из `core.md` влита туда, в `core.md`
    ссылка). Пользователь читает и даёт правки; после — снять пометку «Черновик», затем этапы ядро → приложение.
 
+## Этап «фиксы беты» (2026-10-20, дочерняя сессия) — в работе
+
+- Линия VPN / строка операции (`bugs.md`): `coder-deep` правит `core/lib/src/{api,daemon,service,log_view}.dart`,
+  `app/lib/core/live_core_host.dart`, тесты (`core/test/user_reconnect_op_test.dart`, `app/test/t1_host_test.dart`).
+  Хост передаёт `op {id, kind}` в connect / disconnect / postEvent.
+- Решения пользователя 2026-10-20: при VPN on линия всегда зелёная; процесс убит без `disconnected` → ядро на старте
+  пишет `conn/disconnected {by: app, reason: ended}`; запасные записи Auto — `auto/unstable` и `sub/updated`
+  (только запасные задеты) с `spare`, info, без уведомления (док уже в `logs.md`, `connect-model.md`). Последние два —
+  после линии (тот же `service.dart`).
+
 ## Решения пользователя 2026-10-17 (события)
 
 - т1 по черновику доков: ручное «отключить → подключить» за ≤ 7 с — одно переподключение; `net/switched` — своё

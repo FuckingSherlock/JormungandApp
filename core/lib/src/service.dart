@@ -1038,6 +1038,10 @@ class CoreService implements CoreApi {
   /// `{id, kind}` (docs/logs.md → «Свёртки»). The id is unique for the life of the journal.
   Map<String, Object?> _newOp(String kind) => {'id': '$kind-$_nowMs-${++_opSeq}', 'kind': kind};
 
+  /// The operation the caller names in a request (`op: {id, kind}`, the user's action), null = none or not that shape.
+  static Map<String, Object?>? _givenOp(Object? v) =>
+      v is Map && v['id'] is String && (v['id'] as String).isNotEmpty && v['kind'] is String ? {'id': v['id'], 'kind': v['kind']} : null;
+
   /// The operation under way that writes events with no argument of their own: a reconnect of the live connection
   /// (its `core/sysProxy`, `core/deprecated`, `rules/ruleSetUpdated`), the lists' round (`ruleSets`).
   Map<String, Object?>? _connectOp, _ruleSetsOp;
@@ -3902,7 +3906,11 @@ class CoreService implements CoreApi {
     final userOp = own && !continuation && ud != null && startedAt - ud.at <= _userReconnectWithin.inMilliseconds ? ud : null;
     // the core's own reconnect of the live connection (a plan change, the lists, the addresses) is `conn/reconnected`
     final reconnect = continuation ? (reason == 'reresolve' ? 'reresolve' : (own ? 'settings' : 'lists')) : null;
-    final reconnectOp = reconnect == null ? null : _newOp('reconnect');
+    // the user's own action names its operation (`op` of the body): its `user/*` tap and these events are one row; the
+    // user's reconnect keeps the disconnect's op, so a given one only serves a plan change and a fresh connect
+    final given = _givenOp(body['op']);
+    final reconnectOp = reconnect == null ? null : (given ?? _newOp('reconnect'));
+    final freshOp = reconnect == null && userOp == null ? given : null;
     final held = continuation ? _coreServers() : null; // before _stopAuto: the core knows where the groups are
     if (continuation) plan = _keepCoreChoice(plan);
     final seq = _nextSeq();
@@ -3926,7 +3934,7 @@ class CoreService implements CoreApi {
     _connectingSeq = seq; // until the lock's work ends: a revoke now cuts this connect ([_revoked])
     await _locked(() async {
       if (seq != _connectSeq) return; // a newer connect / disconnect came in
-      _connectOp = reconnectOp; // the events written while the live connection is started again belong to its operation
+      _connectOp = reconnectOp ?? freshOp ?? userOp?.op; // the events written while the live connection is started again belong to its operation
       try {
         _plan = null;
         final sys = body['systemProxy'] == true;
@@ -3969,7 +3977,7 @@ class CoreService implements CoreApi {
           eventBook.add('conn', 'reconnected', 'info',
               own: true, op: userOp.op, data: {'reason': 'user', 'tookMs': tookMs, 'downMs': startedAt - userOp.at});
         } else {
-          eventBook.add('conn', 'connected', 'info', own: own, data: _connectedData(plan));
+          eventBook.add('conn', 'connected', 'info', own: own, op: freshOp, data: _connectedData(plan));
         }
       } catch (e) {
         if (_revokedSeq == seq) {
@@ -4322,7 +4330,7 @@ class CoreService implements CoreApi {
   }
 
   @override
-  Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error}) async {
+  Future<Map<String, dynamic>> disconnect({Map<String, dynamic>? error, Map<String, dynamic>? op}) async {
     final was = await _stopAll();
     if (was) {
       if (error != null) {
@@ -4336,9 +4344,10 @@ class CoreService implements CoreApi {
         });
       } else {
         // the second half of the user's "disconnect → connect" within 7 s is one `conn/reconnected` with this op
-        final op = _newOp('connection');
-        _userDisconnect = (op: op, at: _nowMs);
-        eventBook.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'}, op: op);
+        // (the app names the operation, its `user/disconnect` tap is in it)
+        final userOp = _givenOp(op) ?? _newOp('connection');
+        _userDisconnect = (op: userOp, at: _nowMs);
+        eventBook.add('conn', 'disconnected', 'info', own: true, data: {'by': 'user'}, op: userOp);
       }
     }
     _vpnSync(by: error == null ? 'user' : null); // no connection, no failure of it: the open `vpnDown` ends
@@ -4420,7 +4429,7 @@ class CoreService implements CoreApi {
   static final _eventType = RegExp(r'^[A-Za-z][A-Za-z0-9_]{0,47}$');
   static const _eventDataMax = 4096; // JSON characters
 
-  /// body: {cat, type, level, own?, data?} → {id}: an event the UI knows first (the
+  /// body: {cat, type, level, own?, data?, op?: {id, kind}} → {id}: an event the UI knows first (the
   /// subscription updates it ran itself, the user's own actions). Not linked to a raw line.
   /// A bad shape is a [FormatException] with the reason.
   @override
@@ -4432,7 +4441,8 @@ class CoreService implements CoreApi {
     if (own != null && own is! bool) throw const FormatException('bad event own');
     if (data is! Map) throw const FormatException('event data must be an object');
     if (jsonEncode(data).length > _eventDataMax) throw const FormatException('event data too large');
-    return {'id': eventBook.add(cat, type, level, data: data.cast<String, dynamic>(), own: own == true, link: false)};
+    if (body['op'] != null && _givenOp(body['op']) == null) throw const FormatException('bad event op');
+    return {'id': eventBook.add(cat, type, level, data: data.cast<String, dynamic>(), own: own == true, link: false, op: _givenOp(body['op']))};
   }
 
   /// body: `{connected?, validated?, captive?, type?, id?}` — what the platform says of the network now
