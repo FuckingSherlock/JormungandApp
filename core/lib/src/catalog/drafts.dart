@@ -26,9 +26,21 @@ extension CatalogDrafts on Catalog {
   // ───────────────────────────── server lists ─────────────────────────────
 
   /// Server lists in the sort chosen on Nodes: `order` (as the source has them), `latency` or
-  /// `name`. [nodeOf] lets it sort [NodeRef]s as well as bare servers (`sortedNodes`).
+  /// `name`. [nodeOf] lets it sort [NodeRef]s as well as bare servers (`sortedNodes`). `latency`:
+  /// enabled ones by ping, switched-off ones (in Nodes) below all of them; a stable sort keeps the
+  /// incoming order among equal keys.
   List<T> sortedNodes<T>(List<T> list, String sort, CatalogNode Function(T) nodeOf) {
-    if (sort == 'latency') return stableSorted(list, (x) => pings.rank(nodeOf(x)));
+    if (sort == 'latency') {
+      final off = _switchedOffNodes();
+      final keys = [for (final (i, x) in list.indexed) (i, x, off.contains(nodeOf(x)) ? 1 : 0, pings.rank(nodeOf(x)))];
+      keys.sort((a, b) {
+        final c = a.$3.compareTo(b.$3);
+        if (c != 0) return c;
+        final d = a.$4.compareTo(b.$4);
+        return d != 0 ? d : a.$1.compareTo(b.$1);
+      });
+      return [for (final k in keys) k.$2];
+    }
     if (sort != 'name') return [...list];
     final xs = [for (final (i, x) in list.indexed) (i, x)];
     xs.sort((a, b) {
@@ -36,6 +48,18 @@ extension CatalogDrafts on Catalog {
       return c != 0 ? c : a.$1.compareTo(b.$1);
     });
     return [for (final x in xs) x.$2];
+  }
+
+  /// The servers switched off in Nodes, by object: the server is in its source's `disabledNodes`,
+  /// or the whole source is off (`enabled`). Identity, as the lists hold the catalog's own servers.
+  Set<CatalogNode> _switchedOffNodes() {
+    final off = Set<CatalogNode>.identity();
+    for (final s in sourcesData.values) {
+      for (final n in [...s.nodes, ...s.gone]) {
+        if (!s.enabled || isNodeDisabled(s, n.id)) off.add(n);
+      }
+    }
+    return off;
   }
 
   /// Fastest lists (profile, chain, a route entry in Fastest) read by ping, quickest first, dead

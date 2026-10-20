@@ -137,6 +137,8 @@ class Daemon {
         'POST /api/retry' => service.retry(),
         'POST /api/killswitch' => service.killSwitchSettings(body),
         'POST /api/auto' => service.autoSettings(body),
+        'POST /api/plan/order' => service.applyOrder(body),
+        'POST /api/sites/recheck' => service.recheckSite(body['id'] is int ? body['id'] as int : _eventId(body)),
         'POST /api/dns/auto' => service.dnsAutoSetting(body),
         'POST /api/dns/ping' => service.pingDnsSides(body),
         'POST /api/exit' => service.recheckExit(),

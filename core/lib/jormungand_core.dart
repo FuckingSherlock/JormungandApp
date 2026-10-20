@@ -41,6 +41,7 @@ export 'src/parse/clash.dart';
 export 'src/parse/links.dart';
 export 'src/parse/subscription.dart';
 export 'src/plan.dart';
+export 'src/plan_order.dart';
 export 'src/exits.dart';
 export 'src/ladder.dart';
 export 'src/pool.dart';

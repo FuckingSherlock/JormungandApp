@@ -349,7 +349,10 @@ class _Group {
   final bool priority, pinned;
   final _Group? entry; // its servers dial through this group: a result is the whole chain's
   bool get pair => entry != null;
-  final List<String> keys;
+
+  /// The group's servers in the plan's order. Replaced as a whole, never changed in place ([AutoService.reorder]): a loop
+  /// that took the list keeps the order it began with.
+  List<String> keys;
   final ids = <String, String>{}; // key → the server's pool identity (pool.dart)
   final real = <String>{}; // the keys whose identity is a fingerprint of an outbound (the same on the next start), not a tag
 
@@ -786,6 +789,71 @@ class AutoService {
     try {
       await _checkRoute(r, force: true);
       return !_stopped && r.health.answered;
+    } finally {
+      _busy = false;
+      _manual = false;
+      for (final w in _roundWaiters.toList()) {
+        if (!w.isCompleted) w.complete();
+      }
+      _roundWaiters.clear();
+      final due = _due || _kick;
+      _due = _kick = false;
+      if (due) _schedule(Duration.zero);
+    }
+  }
+
+  /// A new Priority order for a running group, no sing-box restart (docs/connect-model.md → Priority order, live):
+  /// [groupTag] is the group's selector tag (`route0`, `route0-entry`), [keys] its servers' keys in the new order. The set
+  /// of keys must be the group's own; an unknown group, another set or a stopped service = false and nothing changes.
+  /// Done like a check by hand ([routeNow]): a round under way is waited for, a round that comes due meanwhile follows,
+  /// so no round iterates the old order while a switch acts on the new one. In a Priority group a server that answered
+  /// and now stands above the one in use (the servers moved above are tested now, when the one in use is known to answer)
+  /// takes the traffic by the way of a `back` ([_pick], the usual switch event); a server that is dead does not move it
+  /// by itself (the rounds judge it as always).
+  Future<bool> reorder(String groupTag, List<String> keys) async {
+    if (_stopped) return false;
+    _Route? r;
+    _Group? g;
+    for (final x in _routes) {
+      for (final y in x.groups) {
+        if (y.tag == groupTag) {
+          r = x;
+          g = y;
+        }
+      }
+    }
+    if (r == null || g == null || keys.length != g.keys.length || !Set.of(g.keys).containsAll(keys)) return false;
+    while (_busy) {
+      await _idle();
+      if (_stopped) return false;
+    }
+    if (_stopped) return false;
+    _busy = true;
+    _manual = true;
+    try {
+      final cur = g.current;
+      g.now ??= cur; // the server sing-box stands on, kept when the first place changes
+      g.keys = List.of(keys);
+      note?.call('auto: ${g.tag}: new order of ${keys.length} servers');
+      if (!g.priority || g.pinned) return true;
+      // only while the server in use is known to answer: otherwise the rounds' failover decides
+      final h = g.of(cur);
+      if (!h.answered || h.fails > 0) return true;
+      // the ones moved above are asked now (a recent answer of the pool stands for the test); the first in the new order
+      // that answers takes the group
+      final grp = g;
+      final above = grp.keys.takeWhile((k) => k != cur).where((k) => !pool.ladder.has(_identity(grp, k))).toList();
+      for (var i = 0; i < above.length && !_stopped; i += settings.batch) {
+        await Future.wait(above.sublist(i, min(i + settings.batch, above.length)).map((k) => _test(grp, k)));
+      }
+      if (_stopped || g.current != cur) return true;
+      for (final k in above) {
+        if (g.of(k).answered && g.of(k).fails == 0) {
+          await _pick(r, g, k, 'back', ordered: true);
+          break;
+        }
+      }
+      return true;
     } finally {
       _busy = false;
       _manual = false;
@@ -1836,7 +1904,8 @@ class AutoService {
     return curMs;
   }
 
-  Future<bool> _pick(_Route r, _Group g, String key, String reason) async {
+  // [ordered]: the move is the user's new Priority order ([reorder]): the reason stays as given and is always news.
+  Future<bool> _pick(_Route r, _Group g, String key, String reason, {bool ordered = false}) async {
     // `from` before the await: sing-box's groups stream can call refresh() meanwhile
     final from = g.current;
     if (_stopped || !await _select(g.tag, g.member(key))) return false;
@@ -1844,7 +1913,7 @@ class AutoService {
     // `back` = it failed here before; a higher server that never missed was just not the
     // one the plan started on (nothing "came back")
     if (reason == 'back') {
-      if (!g.takeMissed(key)) reason = 'preferred';
+      if (!g.takeMissed(key) && !ordered) reason = 'preferred';
     }
     // a route traffic does not use (a spare, one above): housekeeping, not a switch the
     // user sees — a log note only (judged after the await: `index` may have moved)
@@ -1854,7 +1923,7 @@ class AutoService {
     }
     // the first rounds after the connect (the earliest a higher server has answered failAfter
     // times) putting the group on its preferred server: not news
-    if (reason == 'preferred' && _rounds < settings.failAfter) {
+    if (reason == 'preferred' && !ordered && _rounds < settings.failAfter) {
       note?.call('auto: ${r.id}: server $from → $key ($reason, right after the connect)');
       return true;
     }

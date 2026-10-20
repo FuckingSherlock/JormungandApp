@@ -159,6 +159,17 @@ abstract interface class CoreApi {
   /// `{auto}`: new Auto mode settings for the running AutoService.
   Future<Map<String, dynamic>> autoSettings(Map<String, dynamic> body);
 
+  /// `plan` (the full plan the app would send to `connect`): when only the Priority order of a group differs from the
+  /// running plan, the order is applied live (no sing-box restart, no `conn/reconnected`) -> `{applied: true}`;
+  /// anything else differs or nothing runs -> `{applied: false}`, nothing changes (the app sends the plan to `connect`).
+  Future<Map<String, dynamic>> applyOrder(Map<String, dynamic> plan);
+
+  /// «Check again» on a `site/blocked` / `site/unreachable` event: the probe ladder of its first verdict runs again and
+  /// the SAME event is changed in place (`data.checks` keeps the previous result; an opening site closes it with
+  /// `data.reopened`). -> `{ok: true, result: 'opens'|'blocked'|'unreachable'}`, or `{ok: false, reason}` (VPN off,
+  /// event gone, not a site event). A second call for the event while one runs joins it.
+  Future<Map<String, dynamic>> recheckSite(int eventId);
+
   /// `{auto: bool}`: Settings → DNS → Switch automatically, live.
   Future<Map<String, dynamic>> dnsAutoSetting(Map<String, dynamic> body);
 

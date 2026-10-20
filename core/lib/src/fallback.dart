@@ -91,7 +91,9 @@ class _Group {
   final ids = <String, String>{}; // key → the server's pool identity (pool.dart)
   final String tag;
   final bool priority;
-  final List<String> keys;
+
+  /// The group's servers in the plan's order; replaced as a whole ([FallbackService.reorder]), never changed in place.
+  List<String> keys;
   final String chosen;
 
   String member(String key) => '$tag/$key';
@@ -240,6 +242,67 @@ class FallbackService {
     final ok = await _select(groupTag, '$groupTag/$key');
     if (ok) note?.call('rules: $groupTag: server $key (the check at the connect)');
     return ok;
+  }
+
+  /// A new Priority order for a running rule-target group, no sing-box restart (docs/connect-model.md → Priority order,
+  /// live): [groupTag] is the group's selector tag (the target's id, a chain's `<id>>entry`), [keys] its servers' keys in
+  /// the new order. The set of keys must be the group's own; an unknown group, another set or a stopped service = false
+  /// and nothing changes. The service does not move a Priority group by itself: the order is what it reads from now on,
+  /// and when a server that answered lately (the pool's answer) stands above the one in use, the group is selected on it.
+  /// Done like [checkTarget]: a round under way is waited for first.
+  Future<bool> reorder(String groupTag, List<String> keys) async {
+    if (_stopped) return false;
+    _Target? t;
+    _Group? g;
+    for (final x in _targets) {
+      if (x.isMain) continue;
+      for (final y in [?x.entry, x.main]) {
+        if (y.tag == groupTag) {
+          t = x;
+          g = y;
+        }
+      }
+    }
+    if (t == null || g == null || keys.length != g.keys.length || !Set.of(g.keys).containsAll(keys)) return false;
+    while (_busy) {
+      final w = Completer<void>();
+      _roundWaiters.add(w);
+      await w.future;
+      if (_stopped) return false;
+    }
+    if (_stopped) return false;
+    _busy = true;
+    _manual = true;
+    try {
+      final cur = g.keyOf(api.selected[g.tag] ?? g.initial);
+      g.keys = List.of(keys);
+      note?.call('rules: ${g.tag}: new order of ${keys.length} servers');
+      if (!g.priority || cur == null) return true;
+      final tgt = t, grp = g;
+      final above = grp.keys.takeWhile((k) => k != cur).where((k) => !pool.ladder.has(_gid(tgt, grp, k))).toList();
+      if (above.isEmpty) return true;
+      // the ones moved above are asked now (an answer of the pool a moment ago stands for the test); the first in the new
+      // order that answers takes the group
+      final probe = _probe1(t, g);
+      final results = await Future.wait(above.map(probe));
+      if (_stopped) return false;
+      for (var i = 0; i < above.length; i++) {
+        if (!results[i].answered) continue;
+        if (await _select(g.tag, g.member(above[i]))) note?.call('rules: ${t.id}: server $cur → ${above[i]} (order)');
+        break;
+      }
+      return true;
+    } finally {
+      _busy = false;
+      _manual = false;
+      for (final w in _roundWaiters.toList()) {
+        if (!w.isCompleted) w.complete();
+      }
+      _roundWaiters.clear();
+      final due = _due || _kick;
+      _due = _kick = false;
+      if (due) _schedule(Duration.zero);
+    }
   }
 
   Future<void> _reconcile() async {

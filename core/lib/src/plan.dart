@@ -15,6 +15,16 @@ const topTag = 'proxy';
 String routeTag(int i) => 'route$i';
 String routeEntryTag(int i) => 'route$i-entry';
 
+/// The node key (`<sid>::<nid>`) of a server's outbound tag (`<groupTag>/<sid>::<nid>`, or the bare key); null for a
+/// tag that names no server (`direct`, `block`, `proxy`, '', no `::`). Same as the app's live connections name.
+String? nodeKeyOfTag(String tag) {
+  final slash = tag.indexOf('/'), at = tag.indexOf('::');
+  if (slash == 0 || at < 0) return null;
+  final key = slash > 0 && slash < at ? tag.substring(slash + 1) : tag;
+  final k = key.indexOf('::');
+  return k < 1 || k + 2 >= key.length ? null : key;
+}
+
 /// The routes of [plan] in priority order.
 List<Map<String, dynamic>> planRoutes(Map<String, dynamic> plan) {
   final rs = plan['routes'];

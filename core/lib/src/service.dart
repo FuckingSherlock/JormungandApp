@@ -39,6 +39,7 @@ import 'name_watch.dart';
 import 'node.dart';
 import 'parse/links.dart';
 import 'plan.dart';
+import 'plan_order.dart' show priorityReorder;
 import 'exits.dart';
 import 'ladder.dart' show DeadLadderStore;
 import 'pool.dart';
@@ -1256,6 +1257,124 @@ class CoreService implements CoreApi {
     return at < 0 ? outbound : outbound.substring(0, at);
   }
 
+  /// The node a raw outbound tag names, as a key (`sid::nid`); the tag itself where it names no node (`direct`).
+  String _nodeKey(String outbound) => _auto?.nodeOf(outbound)?.server ?? nodeKeyOfTag(outbound) ?? outbound;
+
+  final _rechecks = <int, Future<Map<String, dynamic>>>{};
+
+  /// «Check again» (api.dart): the probe ladder of the first verdict, run directly (no new suspicion), changes the same
+  /// event in place. One run per event: a second call joins it.
+  @override
+  Future<Map<String, dynamic>> recheckSite(int eventId) {
+    final run = _rechecks[eventId];
+    if (run != null) return run;
+    final f = _recheckSite(eventId).whenComplete(() {
+      _rechecks.remove(eventId); // not returned: it is this very future
+    });
+    return _rechecks[eventId] = f;
+  }
+
+  Future<Map<String, dynamic>> _recheckSite(int id) async {
+    if (!runner.running || _plan == null) return {'ok': false, 'reason': 'notConnected'};
+    final ev = eventBook.byId(id), d = ev?['data'];
+    if (ev == null || d is! Map) return {'ok': false, 'reason': 'gone'};
+    final was = '${ev['type']}';
+    if (ev['cat'] != 'site' || (was != 'blocked' && was != 'unreachable') || d['host'] is! String) return {'ok': false, 'reason': 'notSiteEvent'};
+    final host = '${d['host']}', port = (d['port'] as num?)?.toInt();
+    final dest = d['dest'] is String ? d['dest'] as String : (port == null ? host : '$host:$port');
+    // the failed server's outbound: stored with the event, else the raw tag it kept, else a working node of that key
+    final server = '${d['server'] ?? ''}';
+    final outbound = d['outbound'] is String && '${d['outbound']}'.isNotEmpty
+        ? '${d['outbound']}'
+        : server.contains('/')
+            ? server
+            : _auto?.workingNodes().where((n) => n.server == server).map((n) => n.tag).firstOrNull;
+    if (outbound == null) return {'ok': false, 'reason': 'noServer'};
+    if (!_canAim(outbound, dest)) return {'ok': false, 'reason': 'cannotProbe'};
+    final entry = '${d['entry'] ?? _siteRoute(outbound, _routeTagOf(outbound))}';
+    final auto = _auto, cancel = Cancel();
+    AltReach? scout, elsewhere;
+    bool? same;
+    try {
+      same = await (probeSame ?? (o, dd, c) async => auto?.reachSame(o, dd, cancel: c))(outbound, dest, cancel);
+      if (same != true) {
+        if (probeScout != null || auto != null) {
+          scout = await (probeScout ?? (o, dd, c) => auto!.reachScout(o, dd, cancel: c))(outbound, dest, cancel);
+          if (scout.via == null && (probeElsewhere != null || auto != null)) {
+            elsewhere = await (probeElsewhere ?? (o, dd, s, c) => auto!.reachElsewhere(o, dd, scout: s, cancel: c))(outbound, dest, scout, cancel);
+          }
+        }
+      }
+    } catch (e) {
+      logBook.note('warn', '$dest: checking again failed: $e');
+      return {'ok': false, 'reason': 'failed'};
+    }
+    if (_disposed || eventBook.byId(id) == null) return {'ok': false, 'reason': 'gone'};
+    if (!runner.running) return {'ok': false, 'reason': 'notConnected'}; // the VPN went off meanwhile: the probes failed for that, no verdict
+    final now = _nowMs;
+    final a = elsewhere, b = scout;
+    final via = a?.via ?? b?.via, viaServer = a?.via != null ? a?.viaServer : b?.viaServer;
+    final tried = [...?b?.tried, ...?a?.tried];
+    final off = (b?.off ?? false) || (a?.off ?? false);
+    // the previous result, compactly, goes to the earlier checks
+    final prev = <String, dynamic>{
+      'at': d['checkedAt'] ?? ev['at'],
+      'kind': was,
+      'server': d['server'],
+      if (d['via'] != null) 'via': d['via'],
+      if (d['viaServer'] != null) 'viaServer': d['viaServer'],
+      if (d['tried'] is List && (d['tried'] as List).isNotEmpty) 'tried': d['tried'],
+    };
+    final checks = [...((d['checks'] as List?) ?? const []), prev];
+    if (checks.length > 20) checks.removeRange(0, checks.length - 20);
+    final base = <String, dynamic>{...d.cast<String, dynamic>()}..removeWhere((k, _) => const {'via', 'viaServer', 'viaTarget', 'tried', 'retries'}.contains(k));
+    final from = '$entry ($server)';
+    if (same == true) {
+      _siteMemos.removeWhere((_, m) => m.eventId == id);
+      eventBook.update(id,
+          level: 'info',
+          data: {...base, 'checks': checks, 'checkedAt': now, 'reopened': {'at': now, 'entry': entry, 'server': server}},
+          replaceData: true);
+      logBook.note('info', '$dest opens again through $from: checked again');
+      return {'ok': true, 'result': 'opens'};
+    }
+    final String result;
+    if (via != null) {
+      result = 'blocked';
+      final vs = viaServer;
+      base
+        ..['via'] = via
+        ..['viaServer'] = vs;
+      if (via == entry && vs != null && vs.isNotEmpty) base['viaTarget'] = 'node:$vs';
+      logBook.note('warn', '$dest does not open through $from, opens through $via${vs != null && vs.isNotEmpty ? ' ($vs)' : ''}: checked again');
+    } else {
+      result = 'unreachable';
+      base['tried'] = [for (final t in tried) {'entry': t.route, 'server': t.server}];
+      if (off) base['retries'] = 'off';
+      final t = tried.isEmpty ? '' : ' nor ${tried.map((x) => '${x.route} (${x.server})').join(', ')}';
+      logBook.note('warn', '$dest does not open through $from$t: checked again, the site is down or blocked everywhere');
+    }
+    ev['type'] = result; // the same event, its kind follows the fresh result
+    eventBook.update(id, data: {...base, 'checks': checks, 'checkedAt': now}, replaceData: true);
+    return {'ok': true, 'result': result};
+  }
+
+  /// Priority order live (api.dart): only the order of a group changed -> Auto / Fallback reorder, no restart.
+  @override
+  Future<Map<String, dynamic>> applyOrder(Map<String, dynamic> plan) async {
+    final cur = _plan;
+    if (cur == null || !runner.running) return {'applied': false};
+    final changes = priorityReorder(cur, plan);
+    if (changes == null) return {'applied': false};
+    for (final e in changes.entries) {
+      final keys = e.value;
+      final done = await _auto?.reorder(e.key, keys) ?? false;
+      if (!done) await _fallback?.reorder(e.key, keys);
+    }
+    if (_plan != null) _plan = plan;
+    return {'applied': true};
+  }
+
   /// One suspicion per destination (`site|host:port`), whoever reports it: the connection book's streak
   /// (`conn/failing`) and Auto's notice (requests through a node that passes traffic got nothing back) join and
   /// their evidence merges. Where a test can be aimed at the site ([_canAim]) the checks, in order:
@@ -1320,11 +1439,15 @@ class CoreService implements CoreApi {
     Map<String, dynamic>? result;
     (String, String)? wrote;
 
+    // the failed node as a key (`sid::nid`), not a raw tag: what Auto noticed, else the one the tag names
+    Object serverOf(Map<String, dynamic> e) => ((e['noticed'] as Map?) ?? const {})['server'] ?? _nodeKey(outbound);
+
     // the raw rule text of the evidence becomes the event's rule (as in `site/*`)
     Map<String, dynamic> connData(Map<String, dynamic> e) => {
           for (final x in e.entries)
             if (x.key != 'noticed')
               x.key: x.key == 'rule' && x.value is String ? ruleEventData(_ruleNames, x.value as String) : x.value,
+          'server': e['server'] ?? serverOf(e),
         };
     bool fromConn(Map<String, dynamic> e) => e['count'] != null;
     // the probe opened the site through the same server while the app's own connections went on failing: not a
@@ -1391,7 +1514,8 @@ class CoreService implements CoreApi {
         'host': host,
         'port': ?port,
         'entry': entry,
-        'server': n['server'] ?? outbound,
+        'server': serverOf(e),
+        'outbound': outbound, // what «Check again» probes through ([recheckSite])
         'dest': dest,
         if (type == 'blocked') ...{
           'via': alt!.via,
@@ -1410,15 +1534,19 @@ class CoreService implements CoreApi {
     }
 
     String? siteNote(VerdictKind kind, Map<String, dynamic> e, String type) {
-      if (type == 'blocked') return '$dest does not open through $entry, opens through ${alt!.via}${alt!.via == entry ? ' (another node)' : ''}';
+      final from = '$entry (${serverOf(e)})';
+      if (type == 'blocked') {
+        final vs = alt!.viaServer;
+        return '$dest does not open through $from, opens through ${alt!.via}${vs != null && vs.isNotEmpty ? ' ($vs)' : ''}';
+      }
       final tried = alt?.tried ?? const [];
-      final t = tried.isEmpty ? '' : ' nor ${tried.map((x) => x.route).join(', ')}';
+      final t = tried.isEmpty ? '' : ' nor ${tried.map((x) => '${x.route} (${x.server})').join(', ')}';
       return switch (kind) {
-        VerdictKind.confirmed => '$dest does not open through $entry$t: the site is down or blocked everywhere, the checker says it opens elsewhere',
+        VerdictKind.confirmed => '$dest does not open through $from$t: the site is down or blocked everywhere, the checker says it opens elsewhere',
         VerdictKind.unexplained => alt?.off == true
-            ? '$dest does not open through $entry: retries through other routes are off'
-            : '$dest does not open through $entry$t: the site is down or blocked everywhere',
-        _ => '$dest does not open through $entry: because of another failure',
+            ? '$dest does not open through $from: retries through other routes are off'
+            : '$dest does not open through $from$t: the site is down or blocked everywhere',
+        _ => '$dest does not open through $from: because of another failure',
       };
     }
 
