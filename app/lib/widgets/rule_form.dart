@@ -131,7 +131,14 @@ class _RuleFormState extends State<_RuleForm> {
   Catalog get _cat => widget.host.catalog;
 
   @override
+  void initState() {
+    super.initState();
+    widget.host.holdPlan(); // one plan for the whole editing, sent when the form is closed
+  }
+
+  @override
   void dispose() {
+    widget.host.releasePlan();
     _name.dispose();
     _jsonCtl.dispose();
     super.dispose();

@@ -5,6 +5,7 @@ import 'package:jormungand_core/jormungand_core.dart'
         Catalog,
         EventGroup,
         EventRecord,
+        nodeKeyOfTag,
         ruleTitle,
         serviceTitles,
         targetName;
@@ -113,9 +114,19 @@ class EventWords {
     return catalog.connectEntry('$id')?.name ?? '$id';
   }
 
+  /// A node key, or the key a sing-box tag of that node resolves to; anything else as it is.
+  String _key(Object? k) => nodeKeyOfTag('$k') ?? '$k';
+
   String server(Object? key) {
     if (key == null || '$key'.isEmpty) return '';
-    return catalog.nodeOfKey('$key')?.name ?? '$key';
+    return catalog.nodeOfKey(_key(key))?.name ?? '$key';
+  }
+
+  /// A server for a row of an event: its name and its protocol ('' for a node the catalog no longer has).
+  ({String name, String protocol}) serverLabel(Object? keyOrTag) {
+    if (keyOrTag == null || '$keyOrTag'.isEmpty) return (name: '', protocol: '');
+    final n = catalog.nodeOfKey(_key(keyOrTag));
+    return (name: server(keyOrTag), protocol: n == null ? '' : nodeProtoLabel(n));
   }
 
   String source(Object? sid, [Object? name]) {
@@ -132,8 +143,8 @@ class EventWords {
     if (from == null || to == null || '$from'.isEmpty || '$to'.isEmpty || a != b) {
       return (a, b);
     }
-    final na = catalog.nodeOfKey('$from'), nb = catalog.nodeOfKey('$to');
-    if (na == null || nb == null || '$from' == '$to') return (a, b);
+    final na = catalog.nodeOfKey(_key(from)), nb = catalog.nodeOfKey(_key(to));
+    if (na == null || nb == null || _key(from) == _key(to)) return (a, b);
     final pa = nodeProtoLabel(na), pb = nodeProtoLabel(nb);
     return pa != pb
         ? ('$a · $pa', '$b · $pb')
@@ -141,7 +152,7 @@ class EventWords {
   }
 
   /// `sid::nid` is a server, anything else an entry.
-  String nameOf(Object? k) => '$k'.contains('::') ? server(k) : entry(k);
+  String nameOf(Object? k) => '$k'.contains('::') || nodeKeyOfTag('$k') != null ? server(k) : entry(k);
 
   String dnsName(Object? id) {
     final n = catalog.dnsServers['$id']?.name;
@@ -286,11 +297,17 @@ class EventWords {
   /// The row of `conn/vpnDown`: «Waiting for network» while the network is the only cause (the VPN is on, not a failure),
   /// «Checking routes» while no cause is left but `pending: routes` (the network is back over silent routes), else
   /// «VPN is down» with the causes under it.
-  (String, String) _vpnDownRow(Map<String, dynamic> d, {int attempts = 0}) {
+  (String, String, String) _vpnDownRow(Map<String, dynamic> d, {int attempts = 0}) {
     final causes = _causes(d);
-    if (causes.length == 1 && causes.first == 'network') return (l10n.waitingForNetworkVpnIsOn, '');
-    if (causes.isEmpty && d['pending'] == 'routes') return (l10n.checkingRoutesTheNetworkIsBack, '');
-    return (l10n.vpnIsDown, _vpnDownReason(d, attempts: attempts));
+    if (causes.length == 1 && causes.first == 'network') {
+      final p = splitTitle(l10n.waitingForNetworkVpnIsOn);
+      return (p.title, p.sub, '');
+    }
+    if (causes.isEmpty && d['pending'] == 'routes') {
+      final p = splitTitle(l10n.checkingRoutesTheNetworkIsBack);
+      return (p.title, p.sub, '');
+    }
+    return (l10n.vpnIsDown, '', _vpnDownReason(d, attempts: attempts));
   }
 
   /// Every `affected` entry of a `sub/updated` is a spare one of Auto's list (`spare: true`).
@@ -344,11 +361,56 @@ class EventWords {
     _ => null,
   };
 
-  /// The line of the row: title and detail.
-  ({String title, String detail}) describe(EventRecord e) {
+  /// A text with its details after the first « · » as the two lines of the row: the title and the sub. A «by …»
+  /// attribution stays in the title («Reconnected · by you, VPN was off for 6 s» → «Reconnected · by you» /
+  /// «VPN was off for 6 s»). Only for the templates that carry the « · » themselves.
+  ({String title, String sub}) splitTitle(String s) {
+    final i = s.indexOf(' · ');
+    if (i < 0) return (title: s, sub: '');
+    final head = s.substring(0, i), rest = s.substring(i + 3);
+    if (!rest.startsWith('by ')) return (title: head, sub: rest);
+    final c = rest.indexOf(', ');
+    return c < 0 ? (title: s, sub: '') : (title: '$head · ${rest.substring(0, c)}', sub: rest.substring(c + 2));
+  }
+
+  /// The route of an event: the entry (with its server), else the server alone.
+  String _routeName(Object? entryId, Object? srv) {
+    if (entryId != null && '$entryId'.isNotEmpty) return _entryMark('', entryId, srv).trim();
+    return server(srv);
+  }
+
+  /// The earlier results of a site's «Check again» (`data.checks`), one line each, the oldest first.
+  List<String> earlierChecks(EventRecord e) {
+    final cs = e.data['checks'];
+    if (cs is! List) return const [];
+    final out = <String>[];
+    for (final c in cs) {
+      if (c is! Map) continue;
+      final at = c['at'];
+      final time = at is num ? clock(at.toInt()) : '';
+      final String what;
+      if (c['kind'] == 'unreachable') {
+        what = l10n.didNotOpenThroughAnyServer;
+      } else {
+        final from = _routeName(c['entry'] ?? e.data['entry'], c['server']);
+        final via = _routeName(c['via'], c['viaServer']);
+        what = via.isEmpty ? l10n.didNotOpenThrough(from) : l10n.didNotOpenThroughOpenedThrough(from, via);
+      }
+      out.add(_lines([time, what]));
+    }
+    return out;
+  }
+
+  /// The line of the row: title, sub (the short details under the title) and detail.
+  ({String title, String sub, String detail}) describe(EventRecord e) {
     final d = e.data;
-    (String, String) r(String a, [String b = '']) => (a, b);
-    final (title, detail) = switch ((e.cat, e.type)) {
+    (String, String, String) r(String a, [String b = '']) => (a, '', b);
+    // a template that carries «title · sub» itself
+    (String, String, String) rs(String a, [String b = '']) {
+      final p = splitTitle(a);
+      return (p.title, p.sub, b);
+    }
+    final (title, sub, detail) = switch ((e.cat, e.type)) {
       ('user', 'connect') => r(l10n.youConnected, entry(d['entry'])),
       ('user', 'disconnect') => r(l10n.youDisconnected),
       ('user', 'pin') => d['server'] != null && '${d['server']}'.isNotEmpty
@@ -367,28 +429,31 @@ class EventWords {
       ),
       ('conn', 'disconnected') => () {
         // who: in the title («by you» / «by the system or another app» / «error: …»), no «By» field below
-        if (d['by'] == 'user') return r(l10n.vpnDisconnectedByYou);
-        if (d['by'] == 'app') return r(l10n.vpnDisconnectedTheAppWasClosed);
-        if (d['by'] != 'error') return r(l10n.vpnDisconnectedByTheSystemOr);
+        if (d['by'] == 'user') return rs(l10n.vpnDisconnectedByYou);
+        if (d['by'] == 'app') return rs(l10n.vpnDisconnectedTheAppWasClosed);
+        if (d['by'] != 'error') return rs(l10n.vpnDisconnectedByTheSystemOr);
         if (d['reason'] == 'pinLost') {
           // a server gone from its subscription has no name left (`pick` empty): the text names none
           final pick = '${d['pick'] ?? ''}';
-          return r(pick.isEmpty
+          return rs(pick.isEmpty
               ? l10n.vpnDisconnectedErrorServerIsUnavailable2(_pinLostWhy(d['why']))
               : l10n.vpnDisconnectedErrorServerIsUnavailable(pick, _pinLostWhy(d['why'])));
         }
         if (d['reason'] == 'down' && d['attempts'] is num) {
           final n = d['attempts'] as num;
-          return r(n == 1 ? l10n.vpnDisconnectedErrorSingBoxDid : l10n.vpnDisconnectedErrorSingBoxDid2(n));
+          return rs(n == 1 ? l10n.vpnDisconnectedErrorSingBoxDid : l10n.vpnDisconnectedErrorSingBoxDid2(n));
         }
         final reason = d['reason'];
-        return r(reason == null ? l10n.vpnDisconnectedAfterAnError : l10n.vpnDisconnectedAfterAnError2('$reason'));
+        return rs(reason == null ? l10n.vpnDisconnectedAfterAnError : l10n.vpnDisconnectedAfterAnError2('$reason'));
       }(),
       ('conn', 'reconnected') => () {
         final tookMs = d['tookMs'];
         final took = tookMs is num ? duration(tookMs) : '';
-        // the duration closes the title, after « · »: «Reconnected · rule lists · 3 s»
-        String t(String title) => _lines([title, took]);
+        // the duration closes the sub, after « · »: «Reconnected» / «rule lists · 3 s»
+        (String, String, String) t(String title) {
+          final p = splitTitle(title);
+          return (p.title, _lines([p.sub, took]), '');
+        }
         switch (d['reason']) {
           case 'settings':
             final ch = d['changed'];
@@ -400,24 +465,24 @@ class EventWords {
                 l10n.route2(_routeText(ch['route']['from']), _routeText(ch['route']['to'])),
             ];
             return parts.isEmpty
-                ? r(t(l10n.reconnected))
-                : r(t(l10n.reconnectedSettings(parts.join(', '))));
+                ? t(l10n.reconnected)
+                : t(l10n.reconnectedSettings(parts.join(', ')));
           case 'lists':
-            return r(t(l10n.reconnectedRuleLists));
+            return t(l10n.reconnectedRuleLists);
           case 'reresolve':
-            return r(t(l10n.reconnectedServerAddresses));
+            return t(l10n.reconnectedServerAddresses);
           case 'user':
             final down = d['downMs'] ?? d['tookMs'];
             return down is num
-                ? r(t(l10n.reconnectedByYouVpnWasOff(duration(down))))
-                : r(t(l10n.reconnected));
+                ? t(l10n.reconnectedByYouVpnWasOff(duration(down)))
+                : t(l10n.reconnected);
         }
-        return r(t(l10n.reconnected));
+        return t(l10n.reconnected);
       }(),
       ('net', 'switched') => () {
         final from = _netSide(d['from']), to = _netSide(d['to']);
         final down = d['downMs'];
-        return r(
+        return rs(
           down is num && down > 0
               ? l10n.networkSwitchedNoNetworkFor(from, to, duration(down))
               : l10n.networkSwitched2(from, to),
@@ -428,7 +493,7 @@ class EventWords {
         e.verdict == 'confirmed' ? l10n.noConnectionThroughTheVpnThe : l10n.noConnectionThroughTheVpnInternet,
       ),
       ('conn', 'restored') => d['downMs'] is num
-          ? r(l10n.connectionRestoredBreakOf(duration(d['downMs'] as num)))
+          ? rs(l10n.connectionRestoredBreakOf(duration(d['downMs'] as num)))
           : r(l10n.connectionRestored),
       ('conn', 'offline') => r(
         d['source'] == null || d['source'] == 'system'
@@ -436,7 +501,7 @@ class EventWords {
             : l10n.noInternetConnectionDirectChecksFail,
       ),
       ('conn', 'online') => d['downMs'] is num
-          ? r(l10n.internetIsAvailableAgainWasUnavailable(duration(d['downMs'] as num)))
+          ? rs(l10n.internetIsAvailableAgainWasUnavailable(duration(d['downMs'] as num)))
           : r(l10n.internetIsAvailableAgain),
       ('auto', 'switched') => () {
         final (f, t) = serverPair(d['from'], d['to']);
@@ -454,17 +519,27 @@ class EventWords {
         final strikes = d['strikes'] is num ? d['strikes'] as num : 0;
         final min = d['holdMs'] is num ? ((d['holdMs'] as num) / 60000).round().clamp(1, 1 << 30) : 1;
         // a spare entry (not the route the connection is on): the same facts, said so
-        return r(d['spare'] == true
+        return rs(d['spare'] == true
             ? l10n.spareEntryIsUnstableFailuresExcluded(entry(d['id']), strikes, min)
             : l10n.isUnstableFailuresExcludedForMin(entry(d['id']), strikes, min));
       }(),
-      ('node', 'addressMissing') => r(
+      ('node', 'addressMissing') => rs(
         l10n.domainDoesNotExistServers(
           source(d['source'], d['name'] ?? d['node']),
           '${d['host'] ?? ''}',
           d['nodes'] is num ? d['nodes'] as num : 1,
         ),
       ),
+      // the site opened again through the route that failed (Check again): the pair is closed
+      ('site', 'blocked' || 'unreachable') when d['reopened'] is Map => () {
+        final re = d['reopened'] as Map;
+        final at = re['at'];
+        return (
+          l10n.opensAgainThrough(host(d), _routeName(re['entry'], re['server'])),
+          at is num ? l10n.checked(clock(at.toInt())) : '',
+          '',
+        );
+      }(),
       ('site', 'blocked') => () {
         final via = d['via'] != null && '${d['via']}'.isNotEmpty ? _entryMark('', d['via'], d['viaServer']).trim() : '';
         final route = _entryMark('', d['entry'] ?? d['route'], d['server']).trim();
@@ -603,13 +678,13 @@ class EventWords {
           ? r(l10n.singBoxCrashedCode(d['code'] as num))
           : r(l10n.singBoxStopped, l10n.startingItAgain),
       ('core', 'restarted') => d['downMs'] is num
-          ? r(l10n.coreIsRunningAgainDownFor(duration(d['downMs'] as num)), d['attempt'] is num ? l10n.attempt2(d['attempt'] as num) : '')
+          ? rs(l10n.coreIsRunningAgainDownFor(duration(d['downMs'] as num)), d['attempt'] is num ? l10n.attempt2(d['attempt'] as num) : '')
           : r(l10n.singBoxStartedAgain, d['attempt'] is num ? l10n.attempt2(d['attempt'] as num) : ''),
       ('core', 'down') => d['proxy'] == 'kept'
           ? r(l10n.coreNotRunningFor30S)
           : r(l10n.vpnIsDown, l10n.trafficGoesDirectStillTrying),
       ('conn', 'vpnDown') => _vpnDownRow(d),
-      ('conn', 'vpnUp') => r(_vpnUpTitle(d)),
+      ('conn', 'vpnUp') => rs(_vpnUpTitle(d)),
       ('core', 'tunNeedsAdmin') => r(l10n.tunNeedsAdministratorRights, l10n.runTheAppAsAdministratorOr),
       ('core', 'restartFailed') => r(
         l10n.singBoxCouldNotStartAgain,
@@ -702,7 +777,7 @@ class EventWords {
       ('core', 'updateInstalled') => r(l10n.updatedTo('${d['to'] ?? ''}'), l10n.was('${d['from'] ?? ''}')),
       _ => r('${e.cat} / ${e.type}'),
     };
-    return (title: title, detail: detail);
+    return (title: title, sub: sub, detail: detail);
   }
 
   /// The reason line of `conn/vpnDown`: the causes (core, network) joined with " · ", then the system proxy left on.
@@ -735,12 +810,16 @@ class EventWords {
   /// The route a failing connection went through (`route`: `proxy` / `direct` / `block` / a tag).
   String _outbound(Map<String, dynamic> d) {
     final r = '${d['route'] ?? ''}';
-    if (r.isEmpty) return '${d['outbound'] ?? ''}';
+    if (r.isEmpty) {
+      final o = '${d['outbound'] ?? ''}';
+      // a sing-box tag of a node: its name; a deleted node keeps the raw text
+      return nodeKeyOfTag(o) != null ? server(o) : o;
+    }
     return switch (r) {
       'proxy' => l10n.mainFlow2,
       'direct' => 'Direct',
       'block' => 'Block',
-      _ => entry(r),
+      _ => nodeKeyOfTag(r) != null ? server(r) : entry(r),
     };
   }
 
@@ -768,7 +847,8 @@ class EventWords {
   /// One line, for a notification and the export.
   String text(EventRecord e) {
     final d = describe(e);
-    return d.detail.isEmpty ? d.title : '${d.title} — ${d.detail}';
+    final head = _lines([d.title, d.sub]);
+    return d.detail.isEmpty ? head : '$head — ${d.detail}';
   }
 
   /// What the search of the Events filter looks in: the sentence, the values of the data, and the
@@ -780,12 +860,17 @@ class EventWords {
 
   // ── rows of the Events list: groups, the reason, the status lines, the checks ──
 
-  /// Title and detail of a whole row (a plain event, an operation's result, a group of consequences).
-  (String, String) describeGroup(EventGroup g) {
+  /// Title, sub and detail of a whole row (a plain event, an operation's result, a group of consequences).
+  (String, String, String) describeGroup(EventGroup g) {
+    (String, String, String) rs(String a) {
+      final p = splitTitle(a);
+      return (p.title, p.sub, '');
+    }
+
     if (g.isGroup) {
       final code = g.whyCode ?? '';
-      if (code == 'net.captive') return (l10n.theNetworkRequiresSignInLogin2(g.times), '');
-      return (whyPhrase(g.ev.why) ?? code, '');
+      if (code == 'net.captive') return rs(l10n.theNetworkRequiresSignInLogin2(g.times));
+      return rs(whyPhrase(g.ev.why) ?? code);
     }
     final first = g.head!;
     switch (g.opKind) {
@@ -797,7 +882,7 @@ class EventWords {
           if (x.type == 'updated') ok.add(s);
           if (x.type == 'updated' || x.type == 'failed') all.add(s);
         }
-        return (l10n.subscriptionsUpdatedOf(ok.length, all.length), '');
+        return (l10n.subscriptionsUpdatedOf(ok.length, all.length), '', '');
       case 'appUpdate':
         final last = g.items.last;
         String ver = '';
@@ -810,11 +895,11 @@ class EventWords {
         }
         switch ('${last.cat}/${last.type}') {
           case 'core/updateAvailable':
-            return (l10n.updateAvailable2(ver), '');
+            return (l10n.updateAvailable2(ver), '', '');
           case 'core/updateDownloaded':
-            return (l10n.updateDownloaded(ver), '');
+            return (l10n.updateDownloaded(ver), '', '');
           case 'core/updateInstalled':
-            return (l10n.updateInstalled(ver), '');
+            return (l10n.updateInstalled(ver), '', '');
           case 'core/updateFailed':
             final stage = switch (last.data['stage']) {
               'check' => l10n.check,
@@ -822,19 +907,19 @@ class EventWords {
               'install' => l10n.installation,
               _ => l10n.download2,
             };
-            return (l10n.updateFailedAt(ver, stage), '');
+            return (l10n.updateFailedAt(ver, stage), '', '');
         }
         final d = describe(last);
-        return (d.title, d.detail);
+        return (d.title, d.sub, d.detail);
       case 'reconnect':
         final r = g.items.where((x) => x.key == 'conn/reconnected');
         final d = describe(r.isEmpty ? g.ev : r.last);
-        return (d.title, d.detail);
+        return (d.title, d.sub, d.detail);
       case 'ruleSets':
         final ok = g.items.where((x) => x.key == 'rules/ruleSetUpdated').length;
         final bad = g.items.where((x) => x.key == 'rules/ruleSetFailed').length;
-        if (bad > 1) return (l10n.couldNotLoadRuleLists(bad), '');
-        if (bad == 0 && ok > 0) return (l10n.ruleListsUpdated(ok), '');
+        if (bad > 1) return (l10n.couldNotLoadRuleLists(bad), '', '');
+        if (bad == 0 && ok > 0) return (l10n.ruleListsUpdated(ok), '', '');
     }
     final e = g.ev;
     // a crash merged into «VPN is down» (joins): the row takes its title and status from vpnDown / vpnUp
@@ -853,35 +938,31 @@ class EventWords {
     if (first.key == 'core/crashed' && g.items.length > 1) {
       final last = g.last;
       if (last.key == 'core/restartFailed' && last.data['attempt'] is num) {
-        return (l10n.restartingAttempt(last.data['attempt'] as num), '');
+        return rs(l10n.restartingAttempt(last.data['attempt'] as num));
       }
       final d = describe(last.key == 'core/crashed' ? first : last);
-      return (d.title, d.detail);
+      return (d.title, d.sub, d.detail);
     }
     if (e.key == 'auto/switched' && g.closed && e.data['route'] == null) {
-      return (
-        l10n.autoInsteadOfThenBackTo(entry(e.data['to']), entry(e.data['from']), duration(g.closedAfter!)),
-        '',
-      );
+      return rs(l10n.autoInsteadOfThenBackTo(entry(e.data['to']), entry(e.data['from']), duration(g.closedAfter!)));
     }
     if (e.key == 'dns/switched' && g.closed) {
-      return (
+      return rs(
         l10n.dnsInsteadOfThenBack(
           '${e.data['side'] ?? ''}',
           dnsName(e.data['from']),
           dnsName(e.data['to']),
           duration(g.closedAfter!),
         ),
-        '',
       );
     }
     if (e.key == 'auto/fastest' && g.times > 1) {
       final (_, t) = serverPair(e.data['from'], e.data['to']);
-      return (l10n.fastestSwitchesNow(g.times, t), '');
+      return rs(l10n.fastestSwitchesNow(g.times, t));
     }
-    if (e.key == 'core/deprecated' && g.times > 1) return (l10n.singBoxDeprecatedConfigOptions(g.times), '');
+    if (e.key == 'core/deprecated' && g.times > 1) return rs(l10n.singBoxDeprecatedConfigOptions(g.times));
     final d = describe(e);
-    return (d.title, d.detail);
+    return (d.title, d.sub, d.detail);
   }
 
   /// The reason line of a row; null = none. [find] looks an event up by id when the root of a consequence is not
@@ -890,10 +971,10 @@ class EventWords {
     if (g.isGroup) return null;
     final r = reasonOf(g.ev, find: (id) => g.items.where((x) => x.id == id).firstOrNull ?? find?.call(id));
     if (r == null) return null;
-    final (title, detail) = describeGroup(g);
+    final (title, sub, detail) = describeGroup(g);
     // the detail (or the title) already says it: once is enough
     final t = r.trim();
-    return title.contains(t) || detail.contains(t) ? null : r;
+    return title.contains(t) || sub.contains(t) || detail.contains(t) ? null : r;
   }
 
   /// The reason of one event: what the Sentinel found (`verdict`, `why`), else the reason the type carries in its data.
@@ -901,7 +982,7 @@ class EventWords {
   String? reasonOf(EventRecord e, {EventRecord? Function(int id)? find}) {
     final why = whyPhrase(e.why);
     final shown = describe(e);
-    bool known(String s) => s.isEmpty || shown.title.contains(s) || shown.detail.contains(s);
+    bool known(String s) => s.isEmpty || shown.title.contains(s) || shown.sub.contains(s) || shown.detail.contains(s);
     switch (e.verdict) {
       case 'consequence':
         final root = e.cause == null ? null : find?.call(e.cause!);

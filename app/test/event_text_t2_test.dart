@@ -55,7 +55,7 @@ List<EventRecord> _crashChain({int restarts = 2, bool closed = true}) => [
 EventWords _words() => EventWords(lookupAppLocalizations(const Locale('en')), FakeCoreHost().catalog);
 
 /// Title and detail joined as one line with « · » between them (a detail that starts with « · » does not double it).
-String _joinParts(String title, String detail) => [title, detail]
+String _joinParts(String title, String sub, String detail) => [title, sub, detail]
     .map((s) => s.replaceFirst(RegExp(r'^\s*·\s*'), '').trim())
     .where((s) => s.isNotEmpty)
     .join(' · ');
@@ -63,13 +63,13 @@ String _joinParts(String title, String detail) => [title, detail]
 /// The whole text of one event's own row.
 String _own(EventWords w, EventRecord e) {
   final d = w.describe(e);
-  return _joinParts(d.title, d.detail);
+  return _joinParts(d.title, d.sub, d.detail);
 }
 
 /// The whole text of a folded row: its title, detail and the reason line.
 String _row(EventWords w, EventGroup g) {
-  final (title, detail) = w.describeGroup(g);
-  return [_joinParts(title, detail), w.reasonLine(g) ?? ''].where((s) => s.isNotEmpty).join(' · ');
+  final (title, sub, detail) = w.describeGroup(g);
+  return [_joinParts(title, sub, detail), w.reasonLine(g) ?? ''].where((s) => s.isNotEmpty).join(' · ');
 }
 
 /// [t] is [text] on its own, or [text] followed by a « · » part (a duration, when the text carries one).
@@ -203,7 +203,7 @@ void main() {
       for (final (reason, text) in [
         ('lists', 'Reconnected · rule lists'),
         ('reresolve', 'Reconnected · server addresses'),
-        ('user', 'Reconnected · by you, VPN was off for'),
+        ('user', 'Reconnected · by you · VPN was off for'),
       ]) {
         final t = _own(words, _ev(1, 'conn', 'reconnected', level: 'info', data: {'reason': reason, 'tookMs': 3000}));
         expect(t, startsWith(text), reason: reason);

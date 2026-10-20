@@ -128,6 +128,11 @@ class LogsController extends ChangeNotifier {
   Stream<EventRecord> get notifications => _notify.stream;
   final _notify = StreamController<EventRecord>.broadcast();
 
+  /// A site event changed in place to «opens again» (`data.reopened`, the core keeps its id): the id whose
+  /// notification the shell takes off the shade.
+  Stream<int> get reopened => _reopened.stream;
+  final _reopened = StreamController<int>.broadcast();
+
   /// The `rev` of each notified `conn/vpnDown` at its last notification: a newer one re-posts it in place.
   final _vpnDownRev = <int, int>{};
 
@@ -257,6 +262,8 @@ class LogsController extends ChangeNotifier {
   /// The journal's new events; true when the list changed.
   bool _readEvents() {
     try {
+      // the site events that did not open yet, before this read may change them in place
+      final notOpen = {for (final x in feed.list) if (x.cat == 'site' && x.data['reopened'] == null) x.id};
       var r = feed.apply(host.eventsPage(since: feed.next));
       if (r.reset) r = feed.apply(host.eventsPage());
       if (!r.changed) return false;
@@ -267,6 +274,8 @@ class LogsController extends ChangeNotifier {
       cfg.seen.removeWhere((id) => id < first);
       if (cfg.seen.length != n) _save();
       for (final e in r.notify) {
+        // an open site that opens again (changed in place): its notification comes off the shade
+        if (notOpen.contains(e.id) && e.data['reopened'] != null) _reopened.add(e.opens ?? e.id);
         // the failure ended: its in-place change that comes in the same read must not post it again over the closing
         if (e.key == 'conn/vpnUp' && e.opens != null) {
           final shown = _vpnDownRev.remove(e.opens) != null;
@@ -835,6 +844,7 @@ class LogsController extends ChangeNotifier {
     _debounce?.cancel();
     host.removeListener(_onHost);
     _notify.close();
+    _reopened.close();
     reportSend.dispose();
     super.dispose();
   }

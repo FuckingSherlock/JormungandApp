@@ -58,8 +58,8 @@ EventRecord _up(List<String>? causes, {Map<String, dynamic> data = const {}}) =>
   data: {'downMs': 185000, 'causes': ?causes, ...data},
 );
 
-/// Title and detail joined as one line with « · » between them (a detail that starts with « · » does not double it).
-String _joinParts(String title, String detail) => [title, detail]
+/// Title, sub and detail joined as one line with « · » between them (a part that starts with « · » does not double it).
+String _joinParts(String title, String sub, String detail) => [title, sub, detail]
     .map((s) => s.replaceFirst(RegExp(r'^\s*·\s*'), '').trim())
     .where((s) => s.isNotEmpty)
     .join(' · ');
@@ -67,7 +67,7 @@ String _joinParts(String title, String detail) => [title, detail]
 /// The whole text of an event's own row.
 String _text(EventWords w, EventRecord e) {
   final d = w.describe(e);
-  return _joinParts(d.title, d.detail);
+  return _joinParts(d.title, d.sub, d.detail);
 }
 
 /// The title a plain event shows as its own row.
@@ -234,7 +234,7 @@ void main() {
 
     test('the title is the pending text; the reason line is empty', () {
       final d = words.describe(_down([], level: 'warn', data: {'pending': 'routes'}));
-      expect(d.title, pendingTitle);
+      expect(_joinParts(d.title, d.sub, ''), pendingTitle);
       expect(d.detail, isEmpty);
     });
 

@@ -581,6 +581,17 @@ class FakeCoreHost extends CoreHost {
     return true;
   }
 
+  /// «Check again» presses, in order, and what the core answers to them.
+  final List<int> recheckCalls = [];
+  bool recheckResult = true;
+
+  @override
+  Future<bool> recheckSite(int eventId) async {
+    recheckCalls.add(eventId);
+    calls.add('recheckSite $eventId');
+    return recheckResult;
+  }
+
   @override
   Future<void> retryRuleSets(int eventId) async {
     retriedRuleSets.add(eventId);

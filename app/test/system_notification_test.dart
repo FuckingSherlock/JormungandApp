@@ -358,6 +358,31 @@ void main() {
       expect(io.ignoreQueue, isEmpty);
     });
 
+    testWidgets('a site that opens again after Check again (changed in place) takes its notification off; other changes do not', (
+      tester,
+    ) async {
+      final host = await open(tester);
+      goBackground(tester);
+      final e = host.addEvent('site', 'blocked', level: 'warn', data: {'host': 'dead.example.com', 'via': 'nope'});
+      await settle(tester);
+      expect(io.posted.single.id, e['id']);
+
+      // a check that changed it in place without reopening it: the notification stays
+      e['rev'] = 1;
+      e['data'] = {...e['data'] as Map<String, dynamic>, 'check': {'state': 'pending'}};
+      host.addEvent('core', 'deprecated'); // journal only: it only makes the journal be read
+      await settle(tester);
+      expect(io.cancelledIds, isEmpty);
+
+      // the core says it opens again: same id, rev grows, data.reopened set
+      e['rev'] = 2;
+      e['data'] = {...e['data'] as Map<String, dynamic>, 'reopened': {'at': 1}};
+      host.addEvent('core', 'deprecated');
+      await settle(tester);
+      expect(io.cancelledIds, [e['id']]);
+      expect(io.posted, hasLength(1), reason: 'the change in place never notifies again');
+    });
+
     testWidgets('the words of the replaced notification follow the app language', (tester) async {
       final host = FakeCoreHost(android: true);
       host.gen.lang = 'ru';

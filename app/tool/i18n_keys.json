@@ -1839,5 +1839,11 @@
   "Auto skips them until the provider returns the servers.": "autoSkipsThemUntilTheProvider",
   "VPN disconnected · the app was closed": "vpnDisconnectedTheAppWasClosed",
   "Spare entry {0} is unstable · {#1} failures, excluded for {#2} min": "spareEntryIsUnstableFailuresExcluded",
-  "Subscription {0} removed {1} used by spare {2}": "subscriptionRemovedUsedBySpare"
+  "Subscription {0} removed {1} used by spare {2}": "subscriptionRemovedUsedBySpare",
+  "Earlier checks": "earlierChecks",
+  "did not open through any server": "didNotOpenThroughAnyServer",
+  "{0} opens again through {1}": "opensAgainThrough",
+  "checked {0}": "checked",
+  "did not open through {0}": "didNotOpenThrough",
+  "did not open through {0}, opened through {1}": "didNotOpenThroughOpenedThrough"
 }

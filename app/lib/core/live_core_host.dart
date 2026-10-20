@@ -145,6 +145,7 @@ class LiveCoreHost extends CoreHost {
   Timer? _trafficTimer;
   bool _trafficBusy = false;
   bool _reconnecting = false;
+  int _planHolds = 0; // editors open that cannot apply live: the plan waits for the last one to close
   bool _syncingSources = false;
   final Set<String> _updating = {};
 
@@ -1095,6 +1096,18 @@ class LiveCoreHost extends CoreHost {
   }
 
   @override
+  Future<bool> recheckSite(int eventId) async {
+    try {
+      // {ok: true, result} or {ok: false, reason}: the core says so itself, it does not throw for it
+      final r = await api.recheckSite(eventId);
+      return r['ok'] == true;
+    } catch (_) {
+      // no core answer: the event keeps what it said
+      return false;
+    }
+  }
+
+  @override
   Future<void> retryRuleSets(int eventId) async {
     try {
       await api.retryRuleSets(eventId);
@@ -1785,12 +1798,18 @@ class LiveCoreHost extends CoreHost {
       }
       return;
     }
+    if (_planHolds > 0) return; // an editor is open: the change stays pending until [releasePlan]
     final op = _planOp; // the taps that led here; a plan that did not change leaves them as plain journal rows
     _planOp = null;
     final sig = catalog.planSig();
     if (sig == null || sig == _planSig) return;
     _reconnecting = true;
     try {
+      // only the Priority order of a group moved: the core takes it live, sing-box does not restart
+      if (await _applyOrderLive()) {
+        _notifyNow();
+        return;
+      }
       await _sendPlan(op: op);
       _notifyNow();
     } catch (e) {
@@ -1802,6 +1821,42 @@ class LiveCoreHost extends CoreHost {
       _reconnecting = false;
       _syncMode(); // a switch made while the plan was going over
     }
+  }
+
+  /// The plan [_sendPlan] would send, offered to the core as a live order change (`applied: false` = it differs
+  /// by more than the order, nothing was changed; an error is the same answer: the plan goes the usual way).
+  Future<bool> _applyOrderLive() async {
+    try {
+      final plan = catalog.livePlan();
+      final r = await api.applyOrder(plan);
+      if (r['applied'] != true) return false;
+      // a disconnect during the await has cleared the plan: it stays cleared
+      if (_connected && _planSig != null) _planSig = catalog.planSigOf(plan);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  void holdPlan() => _planHolds++;
+
+  @override
+  void releasePlan() {
+    if (_planHolds == 0) return;
+    if (--_planHolds > 0) return;
+    // the editor is closed (maybe in the middle of a frame): the check runs right away, but after it
+    _reconnectTimer?.cancel();
+    scheduleMicrotask(() {
+      if (_planHolds > 0) return;
+      if (_reconnecting || _connecting) {
+        // the one in flight is not the plan of this edit: look again after it (during a connect `_scheduleReconnect`
+        // does nothing, as for any edit made while connecting — found_bugs.md)
+        _scheduleReconnect();
+      } else {
+        unawaited(_reconnect());
+      }
+    });
   }
 
   /// "Reconnect after update" off: servers a source update brought must not restart sing-box.

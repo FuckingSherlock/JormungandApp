@@ -24,7 +24,7 @@ EventRecord _ev(int id, String cat, String type, {String level = 'info', int? op
 
 String _line(EventWords w, EventRecord e) {
   final d = w.describe(e);
-  return [d.title, d.detail].map((s) => s.replaceFirst(RegExp(r'^\s*·\s*'), '').trim()).where((s) => s.isNotEmpty).join(' · ');
+  return [d.title, d.sub, d.detail].map((s) => s.replaceFirst(RegExp(r'^\s*·\s*'), '').trim()).where((s) => s.isNotEmpty).join(' · ');
 }
 
 void main() {

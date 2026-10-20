@@ -383,6 +383,12 @@ abstract class CoreHost extends ChangeNotifier {
       phase == ConnectionPhase.connecting ||
       phase == ConnectionPhase.disconnecting;
 
+  /// An editor that cannot apply live (a rule, an app, quick rules, DNS) is open: the plan does not go out after
+  /// each edit, one goes when the last editor is closed ([releasePlan]). Calls are counted, so every
+  /// [holdPlan] needs its [releasePlan] (initState / dispose).
+  void holdPlan() {}
+  void releasePlan() {}
+
   /// Last connect failure to show, or null.
   String? get error;
 
@@ -633,6 +639,10 @@ abstract class CoreHost extends ChangeNotifier {
   /// «Check now» on an event: the core checks again what the event is about (`data.recheck` shown pending, then
   /// the result). True = the core took it; false = it did not (no core, not connected, nothing to check there).
   Future<bool> checkNow(int eventId) async => false;
+
+  /// «Check again» on a site event: the core probes its site again and changes the event in place.
+  /// True = the core rechecked it; false = it did not (no core, not connected, no such event). Never throws.
+  Future<bool> recheckSite(int eventId) async => false;
 
   /// «Retry» of a `rules/ruleSetFailed` event: the core downloads its lists again. Never throws.
   Future<void> retryRuleSets(int eventId) async {}

@@ -246,7 +246,9 @@ void main() {
       await pumpApp(tester, host);
       await _openLogs(tester);
 
-      expect(find.text('The network requires sign-in (login page) · events: 2'), findsOneWidget);
+      // the title and the sub line (the number of events) are two lines of the row
+      expect(find.text('The network requires sign-in (login page)'), findsOneWidget);
+      expect(find.text('events: 2'), findsOneWidget);
       expect(find.text(_titleOf(host, host.journal[1])), findsNothing, reason: 'its events are inside the group');
       expect(_rows(host).where((g) => g.isGroup), hasLength(2), reason: 'net.captive and net.offline are two groups');
     });
@@ -479,7 +481,7 @@ void main() {
       final text = _words(FakeCoreHost()).describe(e);
       // the case of "mobile" is not fixed by the spec
       expect(
-        '${text.title} ${text.detail}'.toLowerCase(),
+        '${text.title} · ${text.sub}'.toLowerCase(),
         contains('network switched: wi-fi (isp) → mobile (operator) · no network for 3 s'),
       );
     });

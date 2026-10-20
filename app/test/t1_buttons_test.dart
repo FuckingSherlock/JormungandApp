@@ -316,8 +316,11 @@ void main() {
 
     test('conn/disconnected by a lost pin: a server gone without its name is not named by the entry', () {
       final host = FakeCoreHost();
-      String detail(Map<String, dynamic> d) =>
-          _words(host).describe(EventRecord.fromJson(host.addEvent('conn', 'disconnected', level: 'warn', data: d))).title;
+      // the text is «title · sub» (the row shows the two lines apart)
+      String detail(Map<String, dynamic> d) {
+        final t = _words(host).describe(EventRecord.fromJson(host.addEvent('conn', 'disconnected', level: 'warn', data: d)));
+        return t.sub.isEmpty ? t.title : '${t.title} · ${t.sub}';
+      }
       expect(
         detail(const {'by': 'error', 'reason': 'pinLost', 'pick': 'Frankfurt 1', 'why': 'off'}),
         _en.vpnDisconnectedErrorServerIsUnavailable('Frankfurt 1', _en.switchedOff),

@@ -476,5 +476,11 @@
   "Always shown": null,
   "Back to start: {0}": null,
   "VPN turned off by the system": null,
-  "Another VPN app took over, or the VPN was switched off in the system settings. sing-box is stopped and not restarted": null
+  "Another VPN app took over, or the VPN was switched off in the system settings. sing-box is stopped and not restarted": null,
+  "Earlier checks": null,
+  "{0} opens again through {1}": null,
+  "checked {0}": null,
+  "did not open through {0}": null,
+  "did not open through {0}, opened through {1}": null,
+  "did not open through any server": null
 }

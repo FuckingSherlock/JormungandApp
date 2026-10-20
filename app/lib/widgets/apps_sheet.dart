@@ -340,6 +340,18 @@ class _AppActDialogState extends State<_AppActDialog> {
 
   Catalog get _cat => widget.host.catalog;
 
+  @override
+  void initState() {
+    super.initState();
+    widget.host.holdPlan(); // one plan for the whole editing, sent when the dialog is closed
+  }
+
+  @override
+  void dispose() {
+    widget.host.releasePlan();
+    super.dispose();
+  }
+
   void _save() {
     _cat.saveApp(widget.pkg, _d, label: widget.name);
     widget.host.changed();

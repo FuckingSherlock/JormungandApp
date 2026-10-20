@@ -12,6 +12,7 @@ import 'app_sheet.dart';
 import 'follow_list.dart' show HitFlash;
 import 'form_parts.dart';
 import 'ignored_sites.dart';
+import 'marquee_text.dart';
 import 'nodes_menus.dart' show copyText;
 import 'report_actions.dart' show showSendReport;
 import 'rules_parts.dart' show AppIcon;
@@ -151,6 +152,62 @@ class EventAct extends StatelessWidget {
   }
 }
 
+/// "Check again": while the core runs the check the button shows progress and cannot be tapped again; the row itself
+/// is updated from the journal (same id, rev grows).
+class _RecheckAct extends StatefulWidget {
+  const _RecheckAct({super.key, required this.label, required this.run});
+
+  final String label;
+
+  /// Resolves when the core is done (or did not take it).
+  final Future<bool> Function() run;
+
+  @override
+  State<_RecheckAct> createState() => _RecheckActState();
+}
+
+class _RecheckActState extends State<_RecheckAct> {
+  bool _busy = false;
+
+  Future<void> _tap() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.run();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    if (!_busy) return EventAct(widget.label, onTap: _tap);
+    return Opacity(
+      opacity: .55,
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: c.accent.tint(.13), borderRadius: BorderRadius.circular(8)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                key: const ValueKey('evRecheckBusy'),
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 2, color: c.accent),
+              ),
+              const SizedBox(width: 6),
+              Text(widget.label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.accent)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// `.ev-day`: "TODAY", "YESTERDAY" or the date over the first row of a day.
 class EventDay extends StatelessWidget {
   const EventDay(this.label, {super.key});
@@ -244,7 +301,7 @@ class EventRow extends StatelessWidget {
     final host = CoreHostScope.of(context); // Retry follows the core's state
     final links = AppLinksScope.of(context);
     final g = group, e = g.ev;
-    final (title, detail) = words.describeGroup(g);
+    final (title, sub, detail) = words.describeGroup(g);
     final reason = words.reasonLine(g, find: (id) => logs.feed.list.where((x) => x.id == id).firstOrNull);
     final related = words.relatedLine(g);
     final closedLine = words.closedLine(g);
@@ -255,6 +312,7 @@ class EventRow extends StatelessWidget {
     final open = logs.openRows.contains(g.key);
     final trail = open ? words.trailRows(g.worst.trail != null ? g.worst : e) : const <TrailRow>[];
     final repeatsLine = open ? words.repeatsLine(g) : null;
+    final earlier = open && e.data['checks'] is List && (e.data['checks'] as List).isNotEmpty ? words.earlierChecks(e) : const <String>[];
     final repeatTimes = open ? [for (final x in g.repeats) ...x.occurrences] : const <int>[];
     final rep = g.times;
     final hit = logs.hitEvent != null && g.items.any((x) => x.id == logs.hitEvent!.id)
@@ -277,6 +335,11 @@ class EventRow extends StatelessWidget {
     // the buttons by the table "По типам" (docs/logs.md); the first three stand in the folded row, the rest in the opened
     final acts = <(String, VoidCallback?)>[];
     void add(String label, VoidCallback? fn) => acts.add((label, fn));
+    // the label of the "Check again" button, which keeps its own progress state (a stateful widget in the list)
+    String? recheckLabel;
+    Widget actWidget((String, VoidCallback?) a) => a.$1 == recheckLabel
+        ? _RecheckAct(key: ValueKey('evRecheck:${e.id}'), label: a.$1, run: () => host.recheckSite(e.id))
+        : EventAct(a.$1, onTap: a.$2);
     VoidCallback? link(VoidCallback? f) => f == null ? null : () { f(); leave(); };
     void addOpen() {
       final target = e.cat == 'site' ? null : eventOpenTarget(e, host);
@@ -425,7 +488,21 @@ class EventRow extends StatelessWidget {
     // "does not open": the site can be copied and made a rule whenever the event names one
     final site = e.cat == 'site' ? words.host(dd) : '';
     if (site.isNotEmpty) {
-      // the table's order (logs.md «По типам»), Copy site last: the collapsed row shows the first three
+      // an event that opens again (`data.reopened`) is closed: no more Check again / Create rule
+      final reopened = dd['reopened'] != null && dd['reopened'] != false;
+      // the folded row shows the first three: Create rule, Ignore site, Check again; the checker and Copy site go to the expanded row
+      // `viaTarget`: the node that opened the site when it is a node of the failing entry itself (a rule for the entry would not help)
+      if (links.newRuleFor != null && !reopened) {
+        final v = dd['viaTarget'] ?? dd['via'];
+        final via = v == null || '$v'.isEmpty ? null : '$v';
+        add(l10n.createRule, () => links.newRuleFor!(host: site, via: via));
+      }
+      add(l10n.ignoreSite, () => ignoreSiteWithUndo(ScaffoldMessenger.of(context), l10n, logs, site));
+      // "Check again" (blocked / unreachable, VPN on): the core runs the ladder again and rewrites this event in place
+      if ((e.type == 'blocked' || e.type == 'unreachable') && host.isOn && !reopened) {
+        add(l10n.checkAgain, null);
+        recheckLabel = l10n.checkAgain;
+      }
       // the external checker (check-host): a check that is running now (older than 90 s = the core died meanwhile)
       final check = dd['check'];
       final asking =
@@ -433,13 +510,6 @@ class EventRow extends StatelessWidget {
           check['state'] == 'pending' &&
           DateTime.now().millisecondsSinceEpoch - ((check['at'] as num?)?.toInt() ?? 0) < 90000;
       add(asking ? l10n.checking : l10n.checkWithChecker, asking ? null : () => host.checkSite(e.id));
-      // `viaTarget`: the node that opened the site when it is a node of the failing entry itself (a rule for the entry would not help)
-      if (links.newRuleFor != null) {
-        final v = dd['viaTarget'] ?? dd['via'];
-        final via = v == null || '$v'.isEmpty ? null : '$v';
-        add(l10n.createRule, () => links.newRuleFor!(host: site, via: via));
-      }
-      add(l10n.ignoreSite, () => ignoreSiteWithUndo(ScaffoldMessenger.of(context), l10n, logs, site));
       add(l10n.copySite, () => copyText(context, site, l10n.site));
     }
     // the rows whose "Open" has no button of its own above
@@ -507,6 +577,15 @@ class EventRow extends StatelessWidget {
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.t1),
           ),
         ),
+        if (sub.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Text(
+              sub,
+              key: const ValueKey('evSub'),
+              style: TextStyle(fontSize: 12.5, height: 1.4, color: c.t2),
+            ),
+          ),
         if (!g.isGroup && e.cat == 'site' && (e.type == 'blocked' || e.type == 'unreachable'))
           _Vias(event: e, logs: logs, words: words)
         else if (detail.isNotEmpty)
@@ -557,7 +636,7 @@ class EventRow extends StatelessWidget {
             child: Wrap(
               spacing: 6,
               runSpacing: 6,
-              children: [for (final (label, fn) in acts.take(folded)) EventAct(label, onTap: fn)],
+              children: [for (final a in acts.take(folded)) actWidget(a)],
             ),
           ),
         if (open)
@@ -596,6 +675,17 @@ class EventRow extends StatelessWidget {
                   _Section(l10n.checks),
                   for (final t in trail) _TrailLine(row: t),
                 ],
+                if (earlier.isNotEmpty) ...[
+                  _Section(l10n.earlierChecks),
+                  for (final line in earlier)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(line, style: TextStyle(fontSize: 12, color: c.t1)),
+                      ),
+                    ),
+                ],
                 if (repeatsLine != null) _RepeatsBlock(summary: repeatsLine, times: repeatTimes),
                 if (g.related.isNotEmpty) ...[
                   _Section(l10n.related(g.related.length)),
@@ -627,7 +717,7 @@ class EventRow extends StatelessWidget {
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        for (final (label, fn) in acts.skip(folded)) EventAct(label, onTap: fn),
+                        for (final a in acts.skip(folded)) actWidget(a),
                         if (rawLine != null) EventAct(l10n.inRawLog, key: const ValueKey('evRaw'), onTap: rawLine),
                         // the type of this event: take it out of the journal, or look at it alone
                         // (`user/*` is outside the type filter: «Show my actions» rules it)
@@ -966,7 +1056,7 @@ class _Vias extends StatelessWidget {
       return _ViaRow(
         leading: Text(mark, style: const TextStyle(fontSize: 14, height: 1)),
         name: words.entry(id),
-        sub: server != null && '$server'.isNotEmpty ? words.server(server) : null,
+        sub: server != null && '$server'.isNotEmpty ? _serverLine(words, server) : null,
         trailing: has
             ? EventAct(
                 l10n.open,
@@ -1037,6 +1127,12 @@ class _Vias extends StatelessWidget {
   }
 }
 
+/// A server row of an event: the name and the protocol, always both ([EventWords.serverLabel]).
+String _serverLine(EventWords words, Object? server) {
+  final s = words.serverLabel(server);
+  return s.protocol.isEmpty ? s.name : '${s.name} · ${s.protocol}';
+}
+
 class _ViaRow extends StatelessWidget {
   const _ViaRow({required this.leading, required this.name, this.sub, this.trailing, this.leadingWidth = 20});
 
@@ -1066,7 +1162,7 @@ class _ViaRow extends StatelessWidget {
                 if (sub != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 1),
-                    child: Text(sub!, style: TextStyle(fontSize: 11.5, color: c.t3)),
+                    child: MarqueeText(sub!, style: TextStyle(fontSize: 11.5, color: c.t3)),
                   ),
               ],
             ),

@@ -53,14 +53,14 @@ EventWords _words() => EventWords(lookupAppLocalizations(const Locale('en')), Fa
 
 /// The whole text a folded row shows: its title and detail, and the reason line when the detail does not say it.
 String _shown(EventWords w, EventGroup g) {
-  final (title, detail) = w.describeGroup(g);
-  return [title, detail, w.reasonLine(g) ?? ''].join('\n');
+  final (title, sub, detail) = w.describeGroup(g);
+  return [title, sub, detail, w.reasonLine(g) ?? ''].join('\n');
 }
 
 /// The title and detail of an event's own row, as one line.
 String _own(EventWords w, EventRecord e) {
   final d = w.describe(e);
-  return '${d.title} ${d.detail}';
+  return [d.title, d.sub, d.detail].where((s) => s.isNotEmpty).join(' · ');
 }
 
 /// The row of one vpnDown with the given [causes] (and [data] for the rest), on its own.
@@ -78,10 +78,9 @@ void main() {
       ]) {
         expect(words.describe(_ev(1, 'conn', 'vpnDown', data: {'causes': causes})).title, 'VPN is down', reason: '$causes');
       }
-      expect(
-        words.describe(_ev(1, 'conn', 'vpnDown', level: 'warn', data: const {'causes': ['network']})).title,
-        'Waiting for network · VPN is on, no internet connection',
-      );
+      final waiting = words.describe(_ev(1, 'conn', 'vpnDown', level: 'warn', data: const {'causes': ['network']}));
+      expect(waiting.title, 'Waiting for network');
+      expect(waiting.sub, 'VPN is on, no internet connection');
     });
 
     test('cause core: sing-box stopped and has not restarted, and no internet text', () {
@@ -92,7 +91,7 @@ void main() {
 
     test('cause network alone: the waiting row, no sing-box text', () {
       final s = _downText(words, ['network']);
-      expect(s, contains('Waiting for network · VPN is on, no internet connection'));
+      expect(s, contains('Waiting for network\nVPN is on, no internet connection'));
       expect(s, isNot(contains('sing-box')));
     });
 
@@ -145,7 +144,7 @@ void main() {
       expect(g.closedById, 51);
       expect(rows.last.ev.key, 'conn/vpnUp');
       expect(rows.last.opensId, 50);
-      final (title, _) = words.describeGroup(g);
+      final (title, _, _) = words.describeGroup(g);
       expect(title, 'VPN is down');
       expect(words.closedLine(g), matches(RegExp(r'^Finished at \d\d:\d\d · lasted .+')));
     });

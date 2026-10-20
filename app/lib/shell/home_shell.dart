@@ -71,6 +71,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   LogsController? _logs;
   StreamSubscription<EventRecord>? _notifs;
+  StreamSubscription<int>? _reopenedSub;
 
   /// Android system notifications: events while the app is behind, the permission, the VPN
   /// notification's text; a tap on one comes back through [NotifyIo.eventTaps].
@@ -133,6 +134,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ..l10n = context.l10n
       ..start();
     _notifs ??= _logs!.notifications.listen(_notify);
+    _reopenedSub ??= _logs!.reopened.listen((id) => _sys?.dropEvent(id));
     if (_sys == null) {
       final io = NotifyIo.current;
       _sys = SystemNotifier(host, io: io, onIgnoreOp: _ignoreFromShade)..start();
@@ -282,6 +284,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _sys?.dispose();
     _notices?.cancel();
     _notifs?.cancel();
+    _reopenedSub?.cancel();
     _flyTimer?.cancel();
     _logs?.dispose();
     for (final g in _gates.values) {

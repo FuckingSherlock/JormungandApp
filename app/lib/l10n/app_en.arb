@@ -4582,5 +4582,45 @@
     }
   },
   "vpnTurnedOffByTheSystem": "VPN turned off by the system",
-  "anotherVpnAppTookOverOr": "Another VPN app took over, or the VPN was switched off in the system settings. sing-box is stopped and not restarted"
+  "anotherVpnAppTookOverOr": "Another VPN app took over, or the VPN was switched off in the system settings. sing-box is stopped and not restarted",
+  "earlierChecks": "Earlier checks",
+  "opensAgainThrough": "{s0} opens again through {s1}",
+  "@opensAgainThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "checked": "checked {s0}",
+  "@checked": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "didNotOpenThrough": "did not open through {s0}",
+  "@didNotOpenThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "didNotOpenThroughOpenedThrough": "did not open through {s0}, opened through {s1}",
+  "@didNotOpenThroughOpenedThrough": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "didNotOpenThroughAnyServer": "did not open through any server"
 }

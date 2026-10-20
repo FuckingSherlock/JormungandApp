@@ -9,7 +9,8 @@ import 'package:jormungand_core/jormungand_core.dart'
         ConnSection,
         ConnSort,
         ConnView,
-        LiveConn;
+        LiveConn,
+        nodeKeyOfTag;
 
 import '../core/core_host.dart';
 import '../core/format.dart';
@@ -61,8 +62,8 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
   /// A route tag of the core (`route<i>/<sid>::<nid>`): the server's flag and name, else the tag.
   String _tag(CoreHost host, String t, {bool filter = false}) {
     if (t == 'direct') return filter ? 'Direct' : 'direct';
-    final m = RegExp(r'^[^/]+/(.+?)::(.+)$').firstMatch(t);
-    final n = m == null ? null : host.catalog.nodeOfKey('${m.group(1)}::${m.group(2)}');
+    final key = nodeKeyOfTag(t);
+    final n = key == null ? null : host.catalog.nodeOfKey(key);
     return n == null ? t : '${n.flag} ${n.name}';
   }
 

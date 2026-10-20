@@ -47,12 +47,14 @@ class _RulesPageState extends State<RulesPage> {
   String? _flash;
   Timer? _flashTimer;
   final _keys = <String, GlobalKey>{};
+  late final CoreHost _host; // kept: dispose cannot look it up
 
   GlobalKey _key(String id) => _keys.putIfAbsent(id, GlobalKey.new);
 
   @override
   void initState() {
     super.initState();
+    _host = CoreHostScope.read(context)..holdPlan(); // one plan for the whole editing, sent when the sheet is closed
     final at = widget.focus;
     if (at != null) {
       if (at.startsWith('svc:')) _svcOpen = true;
@@ -75,6 +77,7 @@ class _RulesPageState extends State<RulesPage> {
 
   @override
   void dispose() {
+    _host.releasePlan();
     _flashTimer?.cancel();
     _search.dispose();
     super.dispose();

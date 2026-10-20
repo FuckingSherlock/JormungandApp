@@ -142,8 +142,8 @@ class SystemNotifier {
     }
     final g = EventGroup(e);
     // the closing of «VPN is down» speaks for itself (a lone group of it would read as the failure)
-    final (title, detail) = e.key == 'conn/vpnUp'
-        ? (words.describe(e).title, words.describe(e).detail)
+    final (title, sub, detail) = e.key == 'conn/vpnUp'
+        ? (words.describe(e).title, words.describe(e).sub, words.describe(e).detail)
         : words.describeGroup(g);
     final reason = e.key == 'conn/vpnUp' ? null : words.reasonLine(g);
     // "does not open": Create rule (when it opens through another entry) and Ignore site
@@ -153,7 +153,7 @@ class SystemNotifier {
       SystemNote(
         id: id,
         title: title,
-        text: [detail, reason ?? ''].where((s) => s.isNotEmpty).join('\n'),
+        text: [sub, detail, reason ?? ''].where((s) => s.isNotEmpty).join('\n'),
         site: site,
         via: via,
         // what «Ignore site» turns the notification into (done natively, in the app's language)
@@ -163,6 +163,10 @@ class SystemNotifier {
       ),
     );
   }
+
+  /// A site event changed in place to «opens again» (`data.reopened`): its notification, if it is on the shade,
+  /// comes off. [id] is the one [postEvent] posted it with (`opens ?? id`).
+  Future<void> dropEvent(int id) => io.available ? io.cancelEvent(id) : Future.value();
 
   static List<String> _vpnCauses(Map<String, dynamic> d) {
     final c = d['causes'];

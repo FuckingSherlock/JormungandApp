@@ -131,9 +131,12 @@ void main() {
       data: {'host': 'example.org', 'entry': 's1', 'via': 's1', 'viaServer': 's1::a1', 'viaTarget': 'node:s1::a1'},
     );
     await pumpApp(tester, host);
-    await openLogs(tester);
+    // the node row of the event is a MarqueeText: under the test font the name overflows and scrolls for ever,
+    // so the page never "settles"; pump by time instead
+    await tester.tap(find.byIcon(AppTab.logs.icon));
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.tap(find.text('Create rule'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 600));
     expect(find.widgetWithText(TextField, 'example.org via Alpha one'), findsOneWidget);
   });
 

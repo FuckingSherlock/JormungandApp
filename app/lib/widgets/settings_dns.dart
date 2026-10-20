@@ -133,10 +133,12 @@ class _DnsSheetState extends State<DnsSheet> {
   final GlobalKey _resolveKey = GlobalKey();
   bool _hit = false;
   Timer? _hitTimer;
+  late final CoreHost _host = CoreHostScope.read(context);
 
   @override
   void initState() {
     super.initState();
+    _host.holdPlan(); // one plan for the whole editing, sent when the sheet is closed
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final cat = CoreHostScope.read(context).catalog;
@@ -150,6 +152,7 @@ class _DnsSheetState extends State<DnsSheet> {
 
   @override
   void dispose() {
+    _host.releasePlan();
     _hitTimer?.cancel();
     super.dispose();
   }
@@ -956,9 +959,12 @@ class _DnsFormState extends State<DnsForm> {
         }
       : {for (final t in _cfg!.transports) t.kind};
 
+  late final CoreHost _host = CoreHostScope.read(context);
+
   @override
   void initState() {
     super.initState();
+    _host.holdPlan(); // one plan for the whole editing, sent when the form is closed
     final s = widget.id == null
         ? null
         : CoreHostScope.read(context).catalog.dnsServers[widget.id];
@@ -1074,6 +1080,7 @@ class _DnsFormState extends State<DnsForm> {
 
   @override
   void dispose() {
+    _host.releasePlan();
     _name.dispose();
     for (final c in _rows) {
       c.dispose();

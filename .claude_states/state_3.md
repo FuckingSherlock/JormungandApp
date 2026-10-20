@@ -78,16 +78,9 @@
   - **Порядок Priority** применяется без перезапуска: ядро меняет порядок в Auto и при нужде делает `select`.
   - **Правила и DNS** — перезапуск сразу, но один на серию правок: пока открыт редактор, правки копятся и применяются
     при его закрытии.
-  - **В работе (2026-10-20):** workflow ядра `wf_e9becd1c-796` (task `beta-fixes-core`).
-    - Куски: `nodeKeyOfTag` и `priorityReorder` (`plan.dart`, `plan_order.dart`); `reorder` в Auto / Fallback;
-      `service.dart` / `api.dart` / `daemon.dart` — ключ ноды в `site/*`, `applyOrder`, `recheckSite`; сортировка
-      `drafts.dart`.
-    - Потом прогон приложения:
-      - заголовок и подробности раздельно (журнал и уведомление);
-      - протокол и бегущая строка в строке ноды; `EventText.server` через `nodeKeyOfTag`, `_tag` в Live connections;
-      - кнопка Check again и блок «Earlier checks»;
-      - хост: `applyOrder` перед полным планом; правила и DNS — план при закрытии редактора;
-      - заметки в `mockup_todo.md`.
+  - **Сделано (2026-10-20):** ядро `2e60017`, приложение — следующий коммит (см. `archive/done.md`). Auto при
+    reorder не смотрит на returnTo / threshold (поднятые выше текущего проверяются сразу). Сайт снова открылся после
+    Check again → событие закрыто (info), уведомление снято. Остаток X/X — в `bugs.md`; две находки — `found_bugs.md`.
 
 ## Решения пользователя 2026-10-17 (события)
 
