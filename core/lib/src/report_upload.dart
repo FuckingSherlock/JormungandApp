@@ -109,7 +109,7 @@ class ReportCancel {
 /// An upload that did not go through. [code] is machine-readable and shown by the app in the
 /// user's language: `not-configured` (no uploader plugged in), `network` (no connection to the
 /// receiver), `rejected` (the receiver refused it: size, rate limit, bad format), `server` (the
-/// receiver failed), `no-route` (the bulk probe found no direct path and the VPN is not up to carry it),
+/// receiver failed), `no-route` (the direct probe and upload both failed and the VPN is not up to carry it),
 /// `cancelled` (the user stopped it), `timeout` (the whole send did not end in
 /// [reportSendDeadline]), `failed` (anything else); [message] is for the log and for the developer.
 class ReportUploadException implements Exception {
@@ -152,16 +152,18 @@ class NotConfiguredUploader implements ReportUploader {
 /// Контракт). `X-Jorm-*` headers carry the plain part of `meta` (format, version, build, platform,
 /// envelope size); there is no auth header, the Worker takes anonymous uploads and limits them.
 ///
-/// The way out is picked by probes ([_probe]: POST of [reportProbeBytes] to [reportProbePath], which
-/// the Worker echoes; only an echo of the full size proves a way carries a real upload). With the
-/// tunnel up (`proxyPort != null`) both ways are probed at once — directly (outside the tunnel, by
-/// the self rule, outside_tunnel.dart → `report-upload`) and through the tunnel's local proxy; the
-/// tunnel wins when both pass (the direct path to the receiver is the one a DPI chokes). With the
-/// tunnel down only the direct probe runs, and its failure is `no-route`. The envelope goes out on
-/// the winning way (`via` = `vpn` | `direct`); an answer of the receiver, of any status, is final.
-/// A network failure of the upload (a connection error, no bytes accepted for [stallTimeout], no
-/// response in [responseTimeout] after the body, [attemptTimeout] overall) sends it once more on the
-/// other way, if that way's probe passed.
+/// The order of the ways is picked by probes ([_probe]: POST of [reportProbeBytes] to
+/// [reportProbePath], which the Worker echoes; only an echo of the full size proves a way carries a
+/// real upload). With the tunnel up (`proxyPort != null`) both ways are probed at once — directly
+/// (outside the tunnel, by the self rule, outside_tunnel.dart → `report-upload`) and through the
+/// tunnel's local proxy; the tunnel goes first when its probe passes (the direct path to the receiver
+/// is the one a DPI chokes), the direct one when only its probe passed; when neither passed, the
+/// tunnel first anyway. A failed probe never stops the send: it is "not confirmed", not "no way". With
+/// the tunnel down only the direct way exists; its upload failing after a failed probe is `no-route`.
+/// The envelope goes out on the first way (`via` = `vpn` | `direct`); an answer of the receiver, of any
+/// status, is final. A network failure of the upload (a connection error, no bytes accepted for
+/// [stallTimeout], no response in [responseTimeout] after the body, [attemptTimeout] overall) sends it
+/// once more on the other way (VPN up), its probe passed or not.
 class HttpReportUploader implements ReportUploader {
   HttpReportUploader({
     this.endpoint = reportEndpoint,
@@ -230,25 +232,36 @@ class HttpReportUploader implements ReportUploader {
     }
 
     // 1. probe the ways at once: directly, and through the tunnel when it is up
-    final directProbe = _probe(uri, null, cancel);
-    final tunnelProbe = vpnOn ? _probe(uri, proxyPort, cancel) : null;
+    // (what each probe said, as far as it has finished: a probe still running says nothing)
+    String? directErr, tunnelErr;
+    var directDone = false, tunnelDone = false;
+    final directProbe = _probe(uri, null, cancel).then((e) {
+      directDone = true;
+      directErr = e;
+      return e;
+    });
+    final tunnelProbe = vpnOn
+        ? _probe(uri, proxyPort, cancel).then((e) {
+            tunnelDone = true;
+            tunnelErr = e;
+            return e;
+          })
+        : null;
 
-    // 2. the first way: the tunnel when its probe passes (the direct probe's pass gives it only a short
-    // grace), else the direct one; with no way at all, no upload
+    // 2. the first way: the probes only choose the order, a failed one means "not confirmed", not "no
+    // way". A passed tunnel probe: the tunnel (the direct probe's pass gives it only a short grace);
+    // only the direct one passed: direct; neither: the tunnel first, direct second (VPN down: direct).
     final bool firstVpn;
     String? probeError; // why the tunnel was passed over, when it was
     if (tunnelProbe == null) {
-      final e = await directProbe;
+      await directProbe;
       checkCancel();
-      if (e != null) {
-        throw ReportUploadException('no-route', 'no direct path to the receiver ($e) and the VPN is not connected');
-      }
       firstVpn = false;
     } else {
       final t = await Future.any<({String? err})?>([
         tunnelProbe.then((e) => (err: e)),
         directProbe.then<({String? err})?>((e) async {
-          if (e != null) return Completer<({String? err})?>().future; // no direct way: only the tunnel's probe counts
+          if (e != null) return Completer<({String? err})?>().future; // no direct pass: wait for the tunnel's probe
           await Future<void>.delayed(tunnelGrace);
           return null; // the grace is over, the tunnel's probe has not passed in time
         }),
@@ -256,19 +269,24 @@ class HttpReportUploader implements ReportUploader {
       checkCancel();
       if (t != null && t.err == null) {
         firstVpn = true;
+      } else if (t == null) {
+        firstVpn = false; // the direct probe passed, the tunnel's is late: not waited for
       } else {
         final d = await directProbe;
         checkCancel();
-        if (d != null) {
-          throw ReportUploadException('network', 'via VPN: no path (${t?.err}); direct: no path ($d)');
-        }
-        firstVpn = false;
-        if (t != null) probeError = 'via VPN: no path (${t.err})';
+        firstVpn = d != null; // neither passed: the tunnel first
+        if (!firstVpn) probeError = 'via VPN: probe: ${t.err}';
       }
     }
 
     // 3. the upload on the first way; a receiver's answer, of any status, is final
     String label(bool vpn) => vpn ? 'via VPN' : 'direct';
+    // why a way failed: the reason of its probe (when that failed) with the upload's
+    String why(bool vpn, String upload) {
+      final probe = vpn ? (tunnelDone ? tunnelErr : null) : (directDone ? directErr : null);
+      return '${label(vpn)}: ${probe == null ? '' : 'probe: $probe, upload: '}$upload';
+    }
+
     ReportReceipt receipt(ReportReceipt r, bool vpn, String? first) =>
         ReportReceipt(id: r.id, at: r.at, via: vpn ? 'vpn' : 'direct', firstError: first);
     Future<ReportReceipt> go(bool vpn) =>
@@ -276,21 +294,25 @@ class HttpReportUploader implements ReportUploader {
     try {
       return receipt(await go(firstVpn), firstVpn, probeError);
     } on ReportUploadException catch (e1) {
-      if (e1.code != 'network' || !vpnOn) rethrow;
+      if (e1.code != 'network') rethrow;
       checkCancel();
-      // 4. a network failure: once on the other way, if its probe passed
-      final secondVpn = !firstVpn;
-      final otherErr = secondVpn ? await tunnelProbe : await directProbe;
-      checkCancel();
-      final firstWhy = '${label(firstVpn)}: ${e1.message}';
-      if (otherErr != null) {
-        throw ReportUploadException('network', '$firstWhy; ${label(secondVpn)}: no path ($otherErr)');
+      if (!vpnOn) {
+        final p = directErr;
+        if (p != null) {
+          throw ReportUploadException(
+              'no-route', 'no direct path to the receiver (probe: $p, upload: ${e1.message}) and the VPN is not connected');
+        }
+        rethrow;
       }
+      // 4. a network failure: once on the other way, whether its probe passed or not (a probe still
+      // running is not waited for)
+      final secondVpn = !firstVpn;
+      final firstWhy = why(firstVpn, e1.message);
       try {
         return receipt(await go(secondVpn), secondVpn, firstWhy);
       } on ReportUploadException catch (e2) {
         if (e2.code != 'network') rethrow;
-        throw ReportUploadException('network', '$firstWhy; ${label(secondVpn)}: ${e2.message}');
+        throw ReportUploadException('network', '$firstWhy; ${why(secondVpn, e2.message)}');
       }
     }
   }

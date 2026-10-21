@@ -259,6 +259,66 @@ void main() {
       expect([j['now'], j['netHeldRounds']], ['B', 4], reason: 'judged as usual: failAfter misses, then the failover');
     });
 
+    // Captive cellular, then the Wi-Fi back (the report: n44e left 2.6 s after the Wi-Fi returned, by the misses of the
+    // outage). The gate is a variable: `outage` (a portal / no connection), `switching` (a move not proved), `stable`.
+    group('an outage, then the network back', () {
+      const outage = NetGate(stable: false, outage: true, reason: 'captive');
+      const switching = NetGate(stable: false, reason: 'switching');
+      const stableGate = NetGate(stable: true);
+      late FakeBox fake;
+      late AutoService auto;
+      var gate = stableGate;
+      final events = <AutoSwitch>[];
+      final notes = <String>[];
+
+      setUp(() async {
+        gate = stableGate;
+        events.clear();
+        notes.clear();
+        final p = plan([unit('A', ['s::a1', 's::a2'], pick: 'priority', chosen: 's::a1')]);
+        fake = FakeBox(buildConfig(p), {'s::a1': 40, 's::a2': 60});
+        auto = AutoService(fake, p, delay: fake.delayTest, pool: everyRound(), netGate: ({bool suspicious = false}) async => gate, note: notes.add);
+        auto.switches.listen(events.add);
+        await auto.check();
+        gate = outage; // the platform: connected, captive
+        fake.alive.clear();
+        for (var i = 0; i < 4; i++) {
+          await auto.check();
+        }
+        expect(auto.noNet, isTrue, reason: 'the outage is Auto\'s «no network»: nothing answers');
+        expect(events, isEmpty);
+        fake.alive['s::a2'] = 60; // the Wi-Fi is back: the other server answers at once, the old one\'s transport is not yet
+        gate = switching;
+      });
+
+      test('the move is not settled and the server in use does not answer: it is not left, however many rounds', () async {
+        for (var i = 0; i < 4; i++) {
+          await auto.check();
+        }
+        await Future<void>.delayed(Duration.zero);
+        expect(fake.groups['route0']!.now, 'route0/s::a1');
+        expect(events, isEmpty, reason: 'no switch by the misses of the outage or of the unsettled move');
+        expect(auto.netHeldRounds, greaterThan(0));
+        gate = stableGate; // proved, and the server answers on the new network
+        fake.alive['s::a1'] = 40;
+        await auto.check();
+        await Future<void>.delayed(Duration.zero);
+        expect([fake.groups['route0']!.now, events.length, auto.noNet], ['route0/s::a1', 0, false]);
+      });
+
+      test('the network turned stable between the tests and the switch: the misses gathered before it still are not strikes', () async {
+        gate = stableGate; // already stable: the first rounds are judged, but from nothing
+        await auto.check();
+        await Future<void>.delayed(Duration.zero);
+        expect(fake.groups['route0']!.now, 'route0/s::a1', reason: 'one miss after the stability is only one miss');
+        expect(events, isEmpty);
+        expect(notes.where((n) => n.contains('outage')).length, 1, reason: 'the forgetting is told');
+        await auto.check();
+        await Future<void>.delayed(Duration.zero);
+        expect([for (final e in events) '${e.from}>${e.to} ${e.reason}'], ['s::a1>s::a2 failover'], reason: 'it keeps failing after the stability: judged as always');
+      });
+    });
+
     test('a dead route on a stable network fails over promptly (the gate allows)', () async {
       final p = plan([unit('A', ['s::a']), unit('B', ['s::b'])]);
       final fake = FakeBox(buildConfig(p), {'s::a': 40, 's::b': 60});

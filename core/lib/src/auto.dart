@@ -648,6 +648,10 @@ class AutoService {
   int requestFailsNet = 0;
   int netHeldRounds = 0;
   bool _netHeld = false; // the round that ran held: the next one is a retry pause away
+  /// The route in use and its servers that missed while the network was down (an outage: Auto's «no network» keeps their
+  /// misses to tell it from a dead route). Those misses are the network's: once the network is stable they are forgotten
+  /// ([_forgetOutageMisses]) and the judgement starts over, `failAfter` fresh misses.
+  final _outageMisses = <Health>{};
   /// Sites that got nothing back through a node that passes traffic (as on [siteFails]) and the last.
   int siteFailCount = 0;
   AutoSiteFail? lastSiteFail;
@@ -885,6 +889,12 @@ class AutoService {
       for (final r in _routes) {
         r.checked = false;
       }
+      // the network is stable again after an outage: the misses gathered in it do not count (before this round's tests)
+      if (_outageMisses.isNotEmpty && netGate != null) {
+        final g = await netGate!();
+        if (_stopped) return;
+        if (g.allow) _forgetOutageMisses();
+      }
       final cur = _routes[index];
       // the misses of this round that may be put back (no route answered): all but the
       // current route's own and its servers'
@@ -930,13 +940,14 @@ class AutoService {
       // switch that is not settled (the platform's signal may have come after the failures; the first requests have not
       // gone through yet): its connections, its transport and the DNS are still on the old network. Nobody is marked, no
       // route is left; a retry pause later it is asked again, and what it says once the network is stable is judged as usual
-      var hold = false;
+      var hold = false, outage = false;
       if (!cur.health.answered && netGate != null) {
         final others = todo.where((i) => i != index).toList();
         final allMissed = others.isNotEmpty && others.every((i) => !_routes[i].health.answered);
         final g = await netGate!(suspicious: allMissed);
         if (_stopped) return;
         hold = g.switching;
+        outage = g.outage;
       }
       if (hold) {
         saved.forEach((h, s) => h._load(s));
@@ -964,7 +975,11 @@ class AutoService {
         saved.forEach((h, s) => h._load(s));
         // the nodes of this round that missed are not dead either (the current route's own stay as they are)
         pool.ladder.restore(ladderSaved, keep: {for (final g in cur.groups) _identity(g, g.current)});
+        // the current route's own misses stay (they tell «no network» from a dead route), but in an outage they are the
+        // network's: remembered as such, forgotten once the network is stable
+        if (outage) _outageMisses.addAll(keep);
       } else {
+        _outageMisses.clear();
         final since = memory.answered();
         _directOk = false;
         _roundOk = true;
@@ -1671,6 +1686,7 @@ class AutoService {
     if (g.priority) {
       if (ms >= 0) return settings.returnTo == ReturnTo.never ? ms : _priorityBack(r, g, key, ms);
       if (g.of(key).fails < settings.failAfter) return -1;
+      if (await _netBlocksMove(g, key)) return -1;
       final to = await _firstAnswering(g, [for (final k in g.keys) if (k != key) k], force: force);
       if (to == null || !await _pick(r, g, to, 'failover')) return -1;
       _closeStalled(g.member(key), () => g.current != key);
@@ -1680,10 +1696,38 @@ class AutoService {
     // answering one (group_pick.dart); while it answers, a better one is looked for now and then ([_improve])
     if (ms >= 0) return await _improve(r, g, key, ms, weak: g.of(key).weak) ?? ms;
     if (g.of(key).fails < settings.failAfter) return -1;
+    if (await _netBlocksMove(g, key)) return -1;
     final to = await _pickFastest(g, [for (final k in g.keys) if (k != key) k], force: force);
     if (to == null || !await _pick(r, g, to, 'fastest')) return -1;
     _closeStalled(g.member(key), () => g.current != key);
     return g.of(to).ms;
+  }
+
+  // The server [key] of [g] missed `failAfter` tests in a row; before the group leaves it the Sentinel is asked about the
+  // network (the same gate as before the route is judged: this move is made inside the round's tests, before it). true =
+  // the server is not left: the network is down or has just changed (nobody is marked, the round is held at its end), or it
+  // is stable again and the misses so far were gathered while it was not (they are forgotten: the judgement starts over).
+  Future<bool> _netBlocksMove(_Group g, String key) async {
+    final gate = netGate;
+    if (gate == null) return false;
+    final ans = await gate();
+    if (_stopped) return true;
+    if (!ans.allow) return true;
+    if (_outageMisses.contains(g.of(key))) {
+      _forgetOutageMisses();
+      return true;
+    }
+    return false;
+  }
+
+  // The network is stable again: the misses the route in use and its servers gathered in the outage are not strikes.
+  void _forgetOutageMisses() {
+    for (final h in _outageMisses) {
+      h.fails = 0;
+    }
+    _outageMisses.clear();
+    memory.changed();
+    note?.call('auto: the network is back: the misses of the outage are not counted, ${_routes[index].id} is judged again from now');
   }
 
   // One test of the server [k] as group_pick.dart asks it: the pool's result (an unavailable server whose turn has
@@ -1994,7 +2038,9 @@ class AutoService {
       // the Sentinel is asked once more at the moment of the switch: the network may have moved while the routes were tested
       final g = await netGate?.call();
       if (_stopped) return;
-      if (g != null && g.switching) {
+      final forget = g != null && g.allow && _outageMisses.contains(cur.health);
+      if (forget) _forgetOutageMisses();
+      if (forget || (g != null && g.switching)) {
         _netHeld = true;
         netHeldRounds++;
         note?.call('auto: the network is changing: ${cur.id} is not left yet, asked again in ${settings.retryPause.inMilliseconds}ms');

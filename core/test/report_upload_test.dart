@@ -250,7 +250,11 @@ void main() {
     HttpReportUploader stalledUp({int? port}) => up(
           endpoint: 'http://127.0.0.1:${port ?? stalled.port}/v1/report',
           probeTimeout: const Duration(milliseconds: 400),
+          responseTimeout: const Duration(milliseconds: 300),
         );
+
+    // the direct receiver answers the report with nothing (a dead upload way)
+    void directUploadDead() => answer = (status: 200, body: null, headers: const {});
 
     // a port where nothing listens (connection refused)
     Future<int> deadPort() async {
@@ -278,7 +282,7 @@ void main() {
         final r = await up().upload(_gz(), meta: _meta, proxyPort: proxy.port);
         expect(r.via, 'direct');
         expect(r.id, '20261010-k3x9qa');
-        expect(r.firstError, allOf(startsWith('via VPN: no path'), contains('HTTP 503')));
+        expect(r.firstError, allOf(startsWith('via VPN: probe:'), contains('HTTP 503')));
         expect(viaProxy, isEmpty);
         final h = got.single.headers;
         expect(h.value('X-Jorm-Via'), 'direct');
@@ -310,14 +314,61 @@ void main() {
         expect(viaProxy, isEmpty);
       });
 
-      test('the tunnel is up but neither probe passes: network, both reasons, no upload', () async {
+      test('neither probe passes but the tunnel upload does: the tunnel goes first, via vpn', () async {
         proxyPing = 503;
         pingStatus = 404;
-        final e = await failure(up().upload(_gz(), meta: _meta, proxyPort: proxy.port));
-        expect(e.code, 'network');
-        expect(e.message, allOf(contains('via VPN: no path'), contains('HTTP 503'), contains('direct: no path'), contains('HTTP 404')));
+        final r = await up().upload(_gz(), meta: _meta, proxyPort: proxy.port);
+        expect(r.via, 'vpn');
+        expect(r.id, '20261010-vpn123');
+        expect(r.firstError, isNull, reason: 'nothing failed on the way that carried it');
+        expect(viaProxy, hasLength(1));
         expect(got, isEmpty);
-        expect(viaProxy, isEmpty);
+      });
+
+      test('neither probe passes, the tunnel upload fails, the direct one goes: firstError has both reasons', () async {
+        proxyPing = 503;
+        pingStatus = 404;
+        proxyStatus = null;
+        final r = await up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta, proxyPort: proxy.port);
+        expect(r.via, 'direct');
+        expect(r.id, '20261010-k3x9qa');
+        expect(r.firstError, allOf(startsWith('via VPN: probe:'), contains('HTTP 503'), contains('upload: no response within')));
+        expect(viaProxy, hasLength(1));
+        expect(got, hasLength(1));
+      });
+
+      test('neither probe passes and both uploads fail: network with probe and upload reasons of both ways', () async {
+        proxyPing = 503;
+        pingStatus = 404;
+        proxyStatus = null;
+        directUploadDead();
+        final e = await failure(up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta, proxyPort: proxy.port));
+        expect(e.code, 'network');
+        expect(
+            e.message,
+            allOf(contains('via VPN: probe:'), contains('HTTP 503'), contains('direct: probe:'), contains('HTTP 404'),
+                contains('upload: no response within')));
+      });
+
+      test('tunnel down, the probe fails, the direct upload goes', () async {
+        pingStatus = 404;
+        final r = await up().upload(_gz(), meta: _meta);
+        expect(r.via, 'direct');
+        expect(got, hasLength(1));
+      });
+
+      test('tunnel down, the probe fails and the direct upload too: no-route with both reasons', () async {
+        pingStatus = 404;
+        directUploadDead();
+        final e = await failure(up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta));
+        expect(e.code, 'no-route');
+        expect(e.message, allOf(contains('no direct path to the receiver'), contains('probe:'), contains('HTTP 404'), contains('VPN is not connected')));
+      });
+
+      test('tunnel down, the probe passes and the direct upload fails: network, not no-route', () async {
+        directUploadDead();
+        final e = await failure(up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta));
+        expect(e.code, 'network');
       });
 
       test('the tunnel refuses the connection (dead port), direct passes: direct', () async {
@@ -360,17 +411,20 @@ void main() {
         expect(proxyProbes, 1);
       });
 
-      test('a shorter echo is no path: no-route (tunnel down) with the lengths', () async {
+      test('a shorter echo is not a confirmed path: no-route (tunnel down, upload dead too) with the lengths', () async {
         pingBytes = 1000;
-        final e = await failure(up().upload(_gz(), meta: _meta));
+        directUploadDead();
+        final e = await failure(up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta));
         expect(e.code, 'no-route');
         expect(e.message, allOf(contains('echoed 1000 bytes'), contains('$reportProbeBytes')));
-        expect(got, isEmpty);
+        expect(got, hasLength(1), reason: 'the upload was tried');
       });
 
-      test('a longer echo is no path either; so is a short one of the tunnel', () async {
+      test('a longer echo is not a path either; a short one of the tunnel passes the tunnel over', () async {
         pingBytes = reportProbeBytes + 5;
-        expect((await failure(up().upload(_gz(), meta: _meta))).code, 'no-route');
+        directUploadDead();
+        expect((await failure(up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta))).code, 'no-route');
+        answer = (status: 200, body: '{"ok":true,"id":"20261010-k3x9qa"}', headers: const {});
         pingBytes = null;
         proxyPingBytes = 10;
         final r = await up().upload(_gz(), meta: _meta, proxyPort: proxy.port);
@@ -378,15 +432,15 @@ void main() {
         expect(r.firstError, contains('echoed 10 bytes'));
       });
 
-      test('any other status is no path (a 404 of an older Worker; a 200 is needed)', () async {
+      test('any other status is not a confirmed path (a 404 of an older Worker; a 200 is needed)', () async {
         pingStatus = 404;
-        final e = await failure(up().upload(_gz(), meta: _meta));
+        directUploadDead();
+        final e = await failure(up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta));
         expect(e.code, 'no-route');
         expect(e.message, contains('HTTP 404'));
-        expect(got, isEmpty);
       });
 
-      test('silence: no-route after the probe timeout, right away, no upload attempt', () async {
+      test('silence: after the probe timeout the upload is tried; both dead: no-route', () async {
         final sw = Stopwatch()..start();
         final e = await failure(stalledUp().upload(_gz(), meta: _meta));
         expect(e.code, 'no-route');
@@ -452,13 +506,24 @@ void main() {
         expect(viaProxy.single.via, 'vpn');
       });
 
-      test('direct first, no response, and the tunnel probe failed: network with both reasons, no second upload', () async {
+      test('direct first, no response, the tunnel probe failed: the tunnel is still tried once', () async {
         proxyPing = 503;
+        answer = (status: 200, body: null, headers: const {});
+        final r = await up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta, proxyPort: proxy.port);
+        expect(r.via, 'vpn');
+        expect(r.firstError, allOf(startsWith('direct:'), contains('no response within')));
+        expect(viaProxy, hasLength(1));
+        expect(got, hasLength(1));
+      });
+
+      test('direct first, no response, the tunnel probe failed and its upload too: network with both reasons', () async {
+        proxyPing = 503;
+        proxyStatus = null;
         answer = (status: 200, body: null, headers: const {});
         final e = await failure(up(responseTimeout: const Duration(milliseconds: 300)).upload(_gz(), meta: _meta, proxyPort: proxy.port));
         expect(e.code, 'network');
-        expect(e.message, allOf(contains('direct: no response within'), contains('via VPN: no path'), contains('HTTP 503')));
-        expect(viaProxy, isEmpty);
+        expect(e.message, allOf(contains('direct: no response within'), contains('via VPN: probe:'), contains('HTTP 503'), contains('upload: no response')));
+        expect(viaProxy, hasLength(1));
         expect(got, hasLength(1));
       });
 
@@ -554,7 +619,7 @@ void main() {
         expect(connects.first, startsWith('CONNECT 127.0.0.1:${receiver.port}'));
         expect(direct, greaterThan(0), reason: 'the direct probe was made');
         expect(e.code, 'network', reason: 'not rejected / server: the proxy is not the receiver');
-        expect(e.message, allOf(contains('via VPN: no path'), contains('$status'), contains('direct: no path')));
+        expect(e.message, allOf(contains('via VPN: probe:'), contains('$status'), contains('direct: probe:')));
       });
     }
 
