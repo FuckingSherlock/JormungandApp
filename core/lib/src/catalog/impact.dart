@@ -99,6 +99,12 @@ extension CatalogImpact on Catalog {
       }
     }
     for (final e in appRules.entries) {
+      for (final (i, r) in e.value.rules.indexed) {
+        if (r.action == 'proxy' && r.target.isNotEmpty && gone(r.target)) {
+          lines.add(ImpactLine(ruleTitle(r), '${appLabel(e.key)} · rule #${i + 1}', 'loses its target — traffic goes ${_fallbackText(ruleFallback(r.fallback))}', 'warn',
+              aKind: 'rule', aId: r.id, aTo: _fallbackTo(r.fallback, r.fallbackTarget)));
+        }
+      }
       for (final (proto, h) in e.value.halves) {
         if (h.act == 'proxy' && h.target.isNotEmpty && gone(h.target)) {
           final name = appLabel(e.key);

@@ -427,7 +427,7 @@ void main() {
     });
 
     for (final type in ['blocked', 'unreachable']) {
-      testWidgets('site/$type: the folded row holds Check with checker, Create rule, Ignore site; Copy site only in the opened row', (
+      testWidgets('site/$type: the folded row holds Check with checker, Create rule (blocked only), Ignore site; Copy site only in the opened row', (
         tester,
       ) async {
         final host = FakeCoreHost();
@@ -435,10 +435,13 @@ void main() {
         await pumpApp(tester, host);
         await _openLogs(tester);
 
-        for (final b in ['Check with checker', 'Create rule', 'Ignore site']) {
+        for (final b in ['Check with checker', 'Ignore site']) {
           expect(find.text(b), findsOneWidget, reason: b);
         }
-        expect(find.text('Copy site'), findsNothing);
+        // unreachable has no working target: no Create rule (decision 2026-10-21)
+        expect(find.text('Create rule'), type == 'blocked' ? findsOneWidget : findsNothing);
+        // without Create rule the third folded slot goes to Copy site
+        expect(find.text('Copy site'), type == 'blocked' ? findsNothing : findsOneWidget);
         await _expand(tester, _titleOf(host, e));
         expect(find.text('Copy site'), findsOneWidget);
       });

@@ -13,9 +13,13 @@ import 'dart:convert';
 
 /// Where a generated route rule came from.
 class RuleOrigin {
-  const RuleOrigin(this.kind, this.name, {this.id = ''});
+  const RuleOrigin(this.kind, this.name, {this.id = '', this.app = ''});
 
-  /// `user` (Rules → own rule), `app` (per-app rule), `service` (Rules → Services), `quick`
+  /// The app's key for an `appRule`; '' = none.
+  final String app;
+
+  /// `user` (Rules → own rule), `app` (per-app route rule), `appRule` (one of an app's own rules, [app] +
+  /// [id] = the rule's id), `service` (Rules → Services), `quick`
   /// (Block ads, My region direct) or `system` (the core's own: private networks, its checks).
   final String kind;
 
@@ -59,6 +63,7 @@ Map<String, dynamic> ruleEventData(RuleNames? names, String text) {
   if (text.isEmpty) return {'kind': 'final'};
   final o = names?.of(text);
   if (o == null) return {'kind': 'unknown', 'text': text};
+  if (o.kind == 'appRule') return {'kind': 'appRule', 'app': o.app, 'id': o.id, 'name': o.name};
   return {'kind': o.kind, 'name': o.name, if (o.id.isNotEmpty) 'id': o.id};
 }
 

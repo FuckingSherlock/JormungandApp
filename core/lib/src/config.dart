@@ -514,6 +514,8 @@ List<String> tunDirectPackages(Map<String, dynamic> plan) {
       if (a is Map &&
           (a['kind'] ?? 'package') == 'package' &&
           '${a['id'] ?? ''}'.isNotEmpty &&
+          // an app with its own enabled rules has to enter the tunnel for them to see its traffic
+          !(a['rules'] is List && (a['rules'] as List).isNotEmpty) &&
           a['act'] == 'direct' &&
           (a['split'] != true || (a['udp'] is Map && (a['udp'] as Map)['act'] == 'direct')))
         '${a['id']}',

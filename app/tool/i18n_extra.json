@@ -492,5 +492,8 @@
   "did not open through any server": null,
   "removed by the provider or not supported": null,
   "Not supported: {0}": null,
-  "Not supported: no outbound": null
+  "Not supported: no outbound": null,
+  "Rules in this app": null,
+  "New rule for {0}": null,
+  "Moved {#0} rules with an app condition into the apps' own rules: {1}": null
 }

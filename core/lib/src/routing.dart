@@ -1099,6 +1099,12 @@ class _Builder {
         if (act != null) out._add({...match, 'network': ?network, ...act}, RuleOrigin('app', name, id: id));
       }
 
+      // the app's own rules first, as their conditions AND the app match
+      final own = _list(a['rules']);
+      for (final rule in own) {
+        _userRule(rule, app: id, appMatch: match);
+      }
+      // an app on Default with rules emits only the rules (its Default half has no rule unless it asks for an "If unavailable")
       if (a['split'] == true) {
         half(a, ['tcp']);
         half((a['udp'] as Map?) ?? const {}, ['udp']);
@@ -1117,11 +1123,30 @@ class _Builder {
   }
 
   void _ownRules() {
-    var resolved = false;
     for (final rule in _list(r['rules'])) {
+      _userRule(rule);
+    }
+  }
+
+  // the `resolve` step for IP rules is added once, before the first rule that needs it (own or an app's)
+  bool _ipResolved = false;
+
+  /// One user rule as route rules. [app]: the rule is an app's — [appMatch] (the app's package / process
+  /// field) is ANDed into its conditions and the origin is `appRule` with the app's key.
+  void _userRule(Map rule, {String? app, Map<String, dynamic>? appMatch}) {
+    {
       final title = '${rule['name'] ?? ''}'.isNotEmpty ? '"${rule['name']}"' : 'rule ${rule['id']}';
-      final built = rule['composite'] is Map ? _composite(rule['composite'] as Map, title) : _conditions(rule, title);
-      if (built == null) continue;
+      var built = rule['composite'] is Map ? _composite(rule['composite'] as Map, title) : _conditions(rule, title);
+      if (built == null) return;
+      if (appMatch != null) {
+        final m = built.match;
+        // an `invert` on the flat rule would negate the app match with the rest: the AND is spelled out
+        final clash = m['type'] != null || m['invert'] == true || appMatch.keys.any(m.containsKey);
+        built = (
+          match: clash ? {'type': 'logical', 'mode': 'and', 'rules': [appMatch, m]} : {...m, ...appMatch},
+          domainAlts: built.domainAlts,
+        );
+      }
       final action = '${rule['action'] ?? 'proxy'}';
       final fallback = '${rule['fallback'] ?? 'default'}';
       final dns = rule['dns']?.toString();
@@ -1144,8 +1169,8 @@ class _Builder {
       // resolved address whatever their flag says (sing-box resolves once).
       // In TUN the destination IP of tun-in traffic arrives as it is: no step for it; the proxy
       // ports (mixed-in, sys-in) stay open in TUN and bring domains, so the step is limited to them.
-      if (!resolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
-        resolved = true;
+      if (!_ipResolved && rule['ipTunOnly'] != true && _needsIp(built.match)) {
+        _ipResolved = true;
         for (final step in _resolveStep([if (plan['mode'] == 'tun') {'inbound': const ['mixed-in', 'sys-in']}])) {
           out._add(step);
         }
@@ -1163,9 +1188,19 @@ class _Builder {
       }
       if (action != 'block') _resolveOnFallback(act, _dnsFor(dns, direct: true), built.match);
       out._add({...built.match, ...act, ...((rule['extra'] as Map?) ?? const {}).cast<String, dynamic>()},
-          RuleOrigin('user', '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}', id: '${rule['id'] ?? ''}'));
+          RuleOrigin(app != null ? 'appRule' : 'user', '${rule['name'] ?? ''}'.isNotEmpty ? '${rule['name']}' : 'rule ${rule['id']}',
+              id: '${rule['id'] ?? ''}', app: app ?? ''));
       if (action != 'block') {
-        _dnsRule(built.domainAlts, chain);
+        // an app's DNS rule asks about the app's own queries only: the app match is ANDed into each name
+        _dnsRule([
+          for (final alt in built.domainAlts)
+            if (appMatch == null)
+              alt
+            else if (alt['type'] != null || alt['invert'] == true || appMatch.keys.any(alt.containsKey))
+              {'type': 'logical', 'mode': 'and', 'rules': [appMatch, alt]}
+            else
+              {...alt, ...appMatch},
+        ], chain);
         final id = '${rule['id'] ?? ''}';
         if (id.isNotEmpty) {
           out.ruleDns[id] = chain?.list.first.tag ?? out.dnsFinal;

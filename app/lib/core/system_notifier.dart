@@ -178,6 +178,8 @@ class SystemNotifier {
   static List<(String, String)> eventActions(EventRecord e, EventWords words, CoreHost host) {
     final l = words.l10n, d = e.data;
     final site = e.cat == 'site' || e.key == 'conn/failing' ? words.host(d) : '';
+    // an event with an app has no Create rule: its rule is a row of the app in the event (docs/connect-model.md)
+    final withApp = words.appPkg(d).isNotEmpty;
     final isSub = host.catalog.sourcesData['${d['source']}']?.kind == 'sub';
     final out = switch (e.key) {
       // Connect is bold for every `by: error` (logs.md «По типам»); Choose server of a lost pin stays in the row
@@ -191,7 +193,7 @@ class SystemNotifier {
         if (_vpnCauses(d).contains('network')) ('networkSettings', l.networkSettings),
         if (_vpnCauses(d).contains('routes') || d['pending'] == 'routes') ('checkNow', l.checkNow),
       ],
-      'conn/failing' => [if (site.isNotEmpty) ('rule', l.createRule)],
+      'conn/failing' => [if (site.isNotEmpty && !withApp) ('rule', l.createRule)],
       'auto/unstable' => [('open', l.open)],
       'dns/failed' => [('open', l.open)],
       'sub/updated' || 'sub/removed' || 'sub/back' => [('open', l.open)],
@@ -204,7 +206,7 @@ class SystemNotifier {
       'core/tunTcpDead' => [('reconnect', l.reconnect)],
       'core/sysProxy' when d['error'] != null => [('retry', l.retry)],
       _ when site.isNotEmpty => [
-        if (e.type == 'blocked' && '${d['viaTarget'] ?? d['via'] ?? ''}'.isNotEmpty) ('rule', l.createRule),
+        if (e.type == 'blocked' && !withApp && '${d['viaTarget'] ?? d['via'] ?? ''}'.isNotEmpty) ('rule', l.createRule),
         ('ignore', l.ignoreSite),
       ],
       _ => <(String, String)>[],

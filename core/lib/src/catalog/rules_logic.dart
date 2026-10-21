@@ -528,6 +528,18 @@ extension RulesOps on Catalog {
   /// "target" of a fallback differs from the route's), then stores it: [editing] replaces the rule
   /// of that id, else it is added at the end. Returns what stopped it, or null.
   RuleProblem? saveRule(UserRule d, {String? editing}) {
+    final problem = _tidyDraft(d);
+    if (problem != null) return problem;
+    final next = editing != null && rulesData.containsKey(editing) ? editing : null;
+    final id = next ?? 'r${ruleSeq++}';
+    final saved = UserRule.fromJson({...d.toJson(), 'id': id});
+    rulesData[id] = saved;
+    if (next == null) ruleOrder.add(id);
+    return null;
+  }
+
+  /// The checks and tidying [saveRule] and [saveAppRule] share; null = the draft is fine.
+  RuleProblem? _tidyDraft(UserRule d) {
     if (d.composite == null) {
       final groups = d.groups ??= Json();
       for (final g in groups.values) {
@@ -548,11 +560,6 @@ extension RulesOps on Catalog {
     if (d.action != 'proxy') d.fallback = 'default'; // Fallback only means something for Proxy
     if (d.fallback != 'main' || d.fallbackTarget == d.target) d.fallbackTarget = '';
     if (!ruleHasIpCondition(d) || !d.ipTunOnly) d.ipTunOnly = false;
-    final next = editing != null && rulesData.containsKey(editing) ? editing : null;
-    final id = next ?? 'r${ruleSeq++}';
-    final saved = UserRule.fromJson({...d.toJson(), 'id': id});
-    rulesData[id] = saved;
-    if (next == null) ruleOrder.add(id);
     return null;
   }
 
@@ -609,8 +616,8 @@ extension RulesOps on Catalog {
 /// An app's rule is only a draft until saved: [AppRule] as the dialog edits it.
 AppRule cloneApp(AppRule? a) => a == null ? AppRule() : AppRule.fromJson(a.toJson());
 
-/// An app has an own route unless every half is Default with no Fallback.
-bool appIsDefault(AppRule a) => a.halves.every((h) => h.$2.act == 'default' && h.$2.fallback == 'default');
+/// An app has nothing of its own unless every half is Default with no Fallback and it has no rules.
+bool appIsDefault(AppRule a) => a.rules.isEmpty && a.halves.every((h) => h.$2.act == 'default' && h.$2.fallback == 'default');
 
 /// The colour class of an app row: the one action, or the first half that is not Default.
 String appStateAct(AppRule a) {
@@ -641,6 +648,54 @@ extension AppRulesOps on Catalog {
     if (!a.split) a.udp = AppHalf(); // the UDP half only lives while Split is on
     if (label.isNotEmpty && label != pkg) a.unknown['name'] = label;
     appRules[pkg] = a;
+  }
+
+  /// Checks and stores a rule of app [app] like [saveRule] (but the `process` card goes: the app
+  /// is the condition): [editing] replaces that rule of the app, else it is added at the end of the
+  /// app's list. An app that has none yet is made (default route). Returns what stopped it, or null.
+  RuleProblem? saveAppRule(String app, UserRule d, {String? editing}) {
+    d.groups?.remove('process');
+    final problem = _tidyDraft(d);
+    if (problem != null) return problem;
+    final a = appRules.putIfAbsent(app, () => AppRule());
+    final at = editing == null ? -1 : a.rules.indexWhere((r) => r.id == editing);
+    if (at >= 0) {
+      a.rules[at] = UserRule.fromJson({...d.toJson(), 'id': editing});
+    } else {
+      a.rules.add(UserRule.fromJson({...d.toJson(), 'id': _newAppRuleId()}));
+    }
+    return null;
+  }
+
+  String _newAppRuleId() {
+    final used = {for (final a in appRules.values) for (final r in a.rules) r.id};
+    var id = 'ar${appRuleSeq++}';
+    while (used.contains(id)) {
+      id = 'ar${appRuleSeq++}';
+    }
+    return id;
+  }
+
+  /// Removes a rule of [app]; an app left with the default route and no rules is no longer stored.
+  void deleteAppRule(String app, String id) {
+    final a = appRules[app];
+    if (a == null) return;
+    a.rules.removeWhere((r) => r.id == id);
+    if (appIsDefault(a)) appRules.remove(app);
+  }
+
+  /// Moves a rule of [app] from index [from] to [to] (the index it has after the move).
+  void moveAppRule(String app, int from, int to) {
+    final list = appRules[app]?.rules;
+    if (list == null || from < 0 || from >= list.length) return;
+    list.insert(to.clamp(0, list.length - 1), list.removeAt(from));
+  }
+
+  UserRule? appRuleById(String app, String id) {
+    for (final r in appRules[app]?.rules ?? const <UserRule>[]) {
+      if (r.id == id) return r;
+    }
+    return null;
   }
 
   /// The name of an app: the installed list's (through [appInfo]), else the label kept with the

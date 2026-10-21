@@ -4653,5 +4653,25 @@
       }
     }
   },
-  "notSupportedNoOutbound": "Not supported: no outbound"
+  "notSupportedNoOutbound": "Not supported: no outbound",
+  "appRulesTitle": "Rules in this app",
+  "newRuleForHost": "New rule for {s0}",
+  "@newRuleForHost": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "movedRulesWithAnAppCondition": "Moved {n0} rules with an app condition into the apps' own rules: {s1}",
+  "@movedRulesWithAnAppCondition": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  }
 }

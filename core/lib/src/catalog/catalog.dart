@@ -17,6 +17,8 @@
 /// (`killPlan`, it goes in the connect body, not the plan).
 library;
 
+import 'dart:io' show Platform;
+
 import '../routing.dart' show services;
 import 'json_util.dart';
 import 'models.dart';
@@ -59,9 +61,11 @@ class Catalog {
   }
 
   /// [s] = the snapshot, or null on a first run (nothing added yet; `liveApply(null)`).
-  factory Catalog.fromJson(Json? s, {int Function()? now}) {
+  /// [android] = the snapshot is read on Android (default: this process is): only there the old
+  /// own rules with an app condition move into the apps' rules ([appRulesMoved]).
+  factory Catalog.fromJson(Json? s, {int Function()? now, bool? android}) {
     final c = Catalog(now: now);
-    if (s != null) c._load(s);
+    if (s != null) c._load(s, android: android ?? Platform.isAndroid);
     return c;
   }
 
@@ -104,6 +108,23 @@ class Catalog {
   int ruleSeq = 1;
   late QuickCfg quickCfg;
   Map<String, AppRule> appRules = {};
+
+  /// Next id of a rule of an app (`ar<seq>`).
+  int appRuleSeq = 1;
+
+  /// Set once the own rules with an app condition were moved into the apps' rules (Android;
+  /// saved with the snapshot, so it happens once).
+  bool appRulesMigrated = false;
+
+  /// Runtime, not saved: what the migration of this load moved, as `ruleId -> packages` (empty =
+  /// nothing moved); the host writes the one journal line from it.
+  Map<String, List<String>> appRulesMoved = {};
+
+  /// Runtime, not saved: the names of the moved rules (`ruleId -> name`) for that journal line.
+  Map<String, String> appRulesMovedNames = {};
+
+  /// The ids of the own rules this load moved into the apps' rules (empty = nothing moved).
+  List<String> get movedToApps => appRulesMoved.keys.toList();
   late List<RuleSetCfg> ruleSets;
   int rsSeq = 1;
   late Map<String, DnsServerCfg> dnsServers;
@@ -157,7 +178,7 @@ class Catalog {
   static const _known = {
     'sourcesData', 'sourceOrder', 'sourceSeq', 'connectMode', 'connectOrder', 'activeConnectId', 'autoConnect', 'pinnedNode', //
     'modeState', 'profilesData', 'profileSeq', 'chainsData', 'chainSeq', 'catalogOrder', 'routeCustom', 'segState', 'connCfg', 'autoCfg',
-    'rulesData', 'ruleOrder', 'ruleSeq', 'quickCfg', 'appRules', 'ruleSets', 'rsSeq', 'dnsServers', 'dnsOrder', 'dnsSeq', 'dnsCfg', 'pings', 'pairs',
+    'rulesData', 'ruleOrder', 'ruleSeq', 'quickCfg', 'appRules', 'appRuleSeq', 'appRulesMigrated', 'ruleSets', 'rsSeq', 'dnsServers', 'dnsOrder', 'dnsSeq', 'dnsCfg', 'pings', 'pairs',
   };
 
   void _loadDefaults() {
@@ -185,7 +206,7 @@ class Catalog {
   }
 
   // `liveApply` (95-live.js) for the parts that decide the plan.
-  void _load(Json s) {
+  void _load(Json s, {bool android = false}) {
     Map<String, T> mapOf<T>(Object? m, T Function(Json) f) =>
         m is Map ? {for (final e in m.entries) '${e.key}': f(asJson(e.value))} : <String, T>{};
     int seq(Object? v) => v is num && v != 0 ? v.toInt() : 1;
@@ -225,6 +246,12 @@ class Catalog {
     ruleSeq = seq(s['ruleSeq']);
     quickCfg = QuickCfg.fromJson(asJson(s['quickCfg']));
     appRules = mapOf(s['appRules'], AppRule.fromJson);
+    appRuleSeq = seq(s['appRuleSeq']);
+    appRulesMigrated = truthy(s['appRulesMigrated']);
+    if (android && !appRulesMigrated) {
+      _moveAppConditionRules();
+      appRulesMigrated = true;
+    }
     if (s['ruleSets'] is List) {
       ruleSets = [for (final x in s['ruleSets'] as List) RuleSetCfg.fromJson(asJson(x))];
     }
@@ -260,6 +287,35 @@ class Catalog {
     unknown = {for (final e in s.entries) if (!_known.contains(e.key)) e.key: deepCopy(e.value)};
   }
 
+  /// Migration (docs/rules.md §3): an own rule whose `process` card is not negated (its values are
+  /// packages) becomes a rule of each of those apps (a copy without the card, at the end of the app's
+  /// list) and leaves the own list. A negated card or a composite rule stays as it is.
+  void _moveAppConditionRules() {
+    for (final id in [...ruleOrder]) {
+      final r = rulesData[id];
+      final g = r?.groups?['process'];
+      if (r == null || r.composite != null || g is! Map || truthy(g['not'])) continue;
+      final v = g['v'];
+      final pkgs = v is Map ? {for (final x in strList(v['process'])) x.trim()}.where((x) => x.isNotEmpty).toList() : <String>[];
+      // an app-only rule would be left with no condition (the router skips such a rule): it stays as it is
+      if (pkgs.isEmpty || r.groups!.length < 2) continue;
+      for (final pkg in pkgs) {
+        final used = {for (final a in appRules.values) for (final x in a.rules) x.id};
+        var nid = 'ar${appRuleSeq++}';
+        while (used.contains(nid)) {
+          nid = 'ar${appRuleSeq++}';
+        }
+        final copy = UserRule.fromJson({...r.toJson(), 'id': nid});
+        copy.groups!.remove('process');
+        appRules.putIfAbsent(pkg, () => AppRule()).rules.add(copy);
+      }
+      rulesData.remove(id);
+      ruleOrder.remove(id);
+      appRulesMoved[id] = pkgs;
+      appRulesMovedNames[id] = r.name.isNotEmpty ? r.name : 'rule $id';
+    }
+  }
+
   /// The snapshot, as `liveSnapshot()` writes it.
   Json toJson() => {
         'sourcesData': {for (final e in sourcesData.entries) e.key: e.value.toJson()},
@@ -285,6 +341,8 @@ class Catalog {
         'ruleSeq': ruleSeq,
         'quickCfg': quickCfg.toJson(),
         'appRules': {for (final e in appRules.entries) e.key: e.value.toJson()},
+        if (appRuleSeq != 1) 'appRuleSeq': appRuleSeq,
+        if (appRulesMigrated) 'appRulesMigrated': true,
         'ruleSets': [for (final r in ruleSets) r.toJson()],
         'rsSeq': rsSeq,
         'dnsServers': {for (final e in dnsServers.entries) e.key: e.value.toJson()},

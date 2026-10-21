@@ -16,6 +16,7 @@ class AppLinks {
     this.openConn,
     this.openRuleSets,
     this.newRuleFor,
+    this.openAppRule,
     this.openRoute,
     this.openLogsEvent,
   });
@@ -47,6 +48,10 @@ class AppLinks {
   /// The form of a new rule for a host (a domain or an address) or an app, with the target
   /// preset to the entry that opens it (the "Create rule" of a blocked site).
   final void Function({String? host, String? app, String? via})? newRuleFor;
+
+  /// A rule of an app: the sheet of the app (package) with the form over it. With [ruleId] the form of
+  /// that rule; without, a new rule (the exact domain [host], Fallback = Proxy through the node [via]).
+  final void Function({required String app, String? ruleId, String? host, String? via})? openAppRule;
 
   /// The Route sheet; [edit] opens it in edit mode (the "Nothing in Auto" alert).
   final void Function({bool edit})? openRoute;

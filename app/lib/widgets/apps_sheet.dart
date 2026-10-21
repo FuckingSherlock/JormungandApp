@@ -7,8 +7,9 @@ import '../l10n/l10n.dart';
 import '../theme/app_colors.g.dart';
 import 'app_card.dart';
 import 'app_sheet.dart';
-import 'app_view.dart';
 import 'form_parts.dart';
+import 'rule_form.dart';
+import 'rule_list.dart';
 import 'rules_parts.dart';
 import 'target_picker.dart';
 
@@ -306,15 +307,16 @@ class _AppState extends StatelessWidget {
   }
 }
 
-// ───────────────────────────── one app's route (dialog) ─────────────────────────────
+// ───────────────────────────── one app's route and rules (sheet) ─────────────────────────────
 
-/// One app's route in a small dialog: Route (Default | Proxy | Direct | Block), Via and Fallback
-/// for TCP and UDP together or each (Split). [name] is the app's name when the caller knows it.
+/// One app's sheet: Route (Default | Proxy | Direct | Block), Via and Fallback for TCP and UDP
+/// together or each (Split), and under them the app's own rules. [name] is the app's name when the
+/// caller knows it.
 Future<void> showAppAct(BuildContext context, String pkg, {String? name}) {
   final host = CoreHostScope.read(context);
   final label = name ?? host.catalog.appLabel(pkg);
-  return showDialog<void>(
-    context: context,
+  return showAppSheet<void>(
+    context,
     builder: (_) => _AppActDialog(host: host, pkg: pkg, name: label),
   );
 }
@@ -353,78 +355,103 @@ class _AppActDialogState extends State<_AppActDialog> {
   }
 
   void _save() {
+    // the rules are edited in place (each change is stored at once), the draft only has the route
+    _d.rules = _cat.appRules[widget.pkg]?.rules ?? [];
     _cat.saveApp(widget.pkg, _d, label: widget.name);
     widget.host.changed();
     Navigator.of(context).pop();
   }
 
+  /// An app made by its first rule keeps its name like one saved through the route.
+  void _rulesChanged() {
+    final a = _cat.appRules[widget.pkg];
+    if (a != null && widget.name != widget.pkg && !a.unknown.containsKey('name')) {
+      a.unknown['name'] = widget.name;
+    }
+    widget.host.changed();
+    setState(() {});
+  }
+
+  Widget _rules(BuildContext context) {
+    final l10n = context.l10n;
+    final pkg = widget.pkg;
+    final rules = _cat.appRules[pkg]?.rules ?? const <UserRule>[];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        RulesLabel(l10n.appRulesTitle),
+        SetGroup(
+          children: [
+            RuleList(
+              entries: [
+                for (final (i, r) in rules.indexed) RuleListEntry(r, i + 1),
+              ],
+              emptyText: l10n.noRulesYet,
+              onTap: (r) async {
+                await showRuleForm(context, id: r.id, appRuleOf: pkg);
+                if (mounted) _rulesChanged();
+              },
+              onToggle: (r, v) {
+                r.enabled = v;
+                _rulesChanged();
+              },
+              onReorder: (from, to) {
+                _cat.moveAppRule(pkg, from, to);
+                _rulesChanged();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        DashedAddButton(
+          l10n.newRule,
+          onTap: () async {
+            await showRuleForm(context, appRuleOf: pkg);
+            if (mounted) _rulesChanged();
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final l10n = context.l10n;
     if (!_d.split) _udp = false;
     final h = _udp ? _d.udp : _d.tcp;
     final proto = _d.split ? (_udp ? 'UDP' : 'TCP') : '';
     final svcKey = serviceOfApp(widget.pkg);
-    final act = appIsDefault(_d) ? 'default' : 'own';
-    return Dialog(
-      backgroundColor: c.sheet,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: c.borderHi),
-      ),
-      child: ContentScale(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                widget.name,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: c.t1,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: GestureDetector(
-                    onHorizontalDragEnd: (d) {
-                      final v = d.primaryVelocity ?? 0;
-                      if (!_d.split || v.abs() < 200) return;
-                      setState(() => _udp = v < 0);
-                    },
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _splitRow(context),
-                        if (_d.split) _tabs(context),
-                        _half(context, h, proto),
-                        if (svcKey != null) _svcNote(context, svcKey, act),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+    // the rules are edited in place in the catalog, so the draft's own copy of them is stale
+    final live = AppRule(tcp: _d.tcp, udp: _d.udp, split: _d.split, rules: _cat.appRules[widget.pkg]?.rules);
+    final act = appIsDefault(live) ? 'default' : 'own';
+    return SheetFrame(
+      title: widget.name,
+      full: true,
+      footer: [PrimaryButton(label: l10n.save, onPressed: _save)],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+            child: GestureDetector(
+              onHorizontalDragEnd: (d) {
+                final v = d.primaryVelocity ?? 0;
+                if (!_d.split || v.abs() < 200) return;
+                setState(() => _udp = v < 0);
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: Text(l10n.cancel),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(onPressed: _save, child: Text(l10n.save)),
+                  _splitRow(context),
+                  if (_d.split) _tabs(context),
+                  _half(context, h, proto),
+                  if (svcKey != null) _svcNote(context, svcKey, act),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
+          _rules(context),
+        ],
       ),
     );
   }

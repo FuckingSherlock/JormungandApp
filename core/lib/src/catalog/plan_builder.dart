@@ -441,9 +441,7 @@ extension CatalogPlan on Catalog {
   /// along as its server group(s), or null while it is unavailable.
   Json routingPlan() {
     final rules = <Json>[];
-    for (final id in ruleOrder) {
-      final r = rulesData[id];
-      if (r == null || !r.enabled) continue;
+    Json ruleOut(UserRule r) {
       // a rule's Fallback only means something for Proxy (a target of its own or the main flow);
       // "Proxy via X" (fallback 'main' + fallbackTarget) goes as the target id X
       final fb = planRuleFallback(r);
@@ -467,7 +465,13 @@ extension CatalogPlan on Catalog {
       }
       if (r.extra != null && r.extra!.isNotEmpty) o['extra'] = deepCopy(r.extra);
       if (r.ipTunOnly) o['ipTunOnly'] = true; // no `resolve` for its IP conditions
-      rules.add(o);
+      return o;
+    }
+
+    for (final id in ruleOrder) {
+      final r = rulesData[id];
+      if (r == null || !r.enabled) continue;
+      rules.add(ruleOut(r));
     }
     // an app: the top-level fields are all its traffic (TCP when split), udp the other half
     // "If unavailable → Proxy via X" (fallback 'main' + fallbackTarget) goes as the target id X;
@@ -496,6 +500,8 @@ extension CatalogPlan on Catalog {
         ...half(a.tcp),
         'split': a.split,
         'udp': half(a.udp),
+        // the app's own rules, in check order, enabled ones only: they go right before its route rules
+        if (a.rules.any((r) => r.enabled)) 'rules': [for (final r in a.rules) if (r.enabled) ruleOut(r)],
       });
     }
     final named = <String>{};
@@ -511,6 +517,13 @@ extension CatalogPlan on Catalog {
       }
     }
     for (final a in apps) {
+      for (final r in (a['rules'] as List?) ?? const []) {
+        r as Json;
+        if (r['action'] == 'proxy') {
+          if (truthy(r['target'])) named.add(r['target'] as String);
+          addFb(r['fallback']);
+        }
+      }
       for (final h in [a, if (a['split'] == true) asJson(a['udp'])]) {
         if (h['act'] == 'proxy' && truthy(h['target'])) named.add(h['target'] as String);
         if (h['act'] == 'proxy' || h['act'] == 'default') addFb(h['fallback']);

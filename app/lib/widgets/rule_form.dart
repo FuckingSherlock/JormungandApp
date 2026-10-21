@@ -30,19 +30,26 @@ Future<void> showRuleForm(
   String? host,
   String? app,
   String? via,
+  String? appRuleOf,
+  String? fallbackVia,
 }) {
   final core = CoreHostScope.read(context);
   final cat = core.catalog;
   UserRule draft;
-  if (id != null && cat.rulesData[id] != null) {
-    draft = cloneRule(cat.rulesData[id]!);
+  final existing = id == null
+      ? null
+      : appRuleOf != null
+      ? cat.appRuleById(appRuleOf, id)
+      : cat.rulesData[id];
+  if (existing != null) {
+    draft = cloneRule(existing);
   } else {
     id = null;
     draft = newRuleDraft();
     if (host != null && host.isNotEmpty) {
       draft.groups = hostGroup(host);
       draft.name = host;
-    } else if (app != null && app.isNotEmpty) {
+    } else if (appRuleOf == null && app != null && app.isNotEmpty) {
       draft.groups = {
         'process': {
           'not': false,
@@ -63,10 +70,25 @@ Future<void> showRuleForm(
       final e = cat.connectEntry(via);
       if (host != null && e != null) draft.name = '$host via ${e.name}';
     }
+    if (fallbackVia != null && fallbackVia.isNotEmpty) {
+      // Action Proxy through the main flow, and if that fails, through this target
+      draft.action = 'proxy';
+      draft.fallback = 'main';
+      final t = fallbackVia.contains(':')
+          ? fallbackVia
+          : entryTarget(cat, fallbackVia);
+      draft.fallbackTarget = t;
+    }
   }
   return showAppSheet<void>(
     context,
-    builder: (_) => _RuleForm(host: core, editing: id, draft: draft),
+    builder: (_) => _RuleForm(
+      host: core,
+      editing: id,
+      draft: draft,
+      appOf: appRuleOf,
+      newFor: existing == null ? host : null,
+    ),
   );
 }
 
@@ -109,11 +131,19 @@ class _RuleForm extends StatefulWidget {
     required this.host,
     required this.editing,
     required this.draft,
+    this.appOf,
+    this.newFor,
   });
 
   final CoreHost host;
   final String? editing;
   final UserRule draft;
+
+  /// A package: the rule is one of that app's (no Process card, saved with [Catalog.saveAppRule]).
+  final String? appOf;
+
+  /// The host a new rule starts from (the sheet's title).
+  final String? newFor;
 
   @override
   State<_RuleForm> createState() => _RuleFormState();
@@ -199,7 +229,10 @@ class _RuleFormState extends State<_RuleForm> {
 
   void _save() {
     if (!_applyJson()) return;
-    final problem = _cat.saveRule(_d, editing: widget.editing);
+    final app = widget.appOf;
+    final problem = app != null
+        ? _cat.saveAppRule(app, _d, editing: widget.editing)
+        : _cat.saveRule(_d, editing: widget.editing);
     if (problem != null) {
       setState(() {
         _err = problem == RuleProblem.invalidValues
@@ -215,7 +248,12 @@ class _RuleFormState extends State<_RuleForm> {
   void _delete() {
     final id = widget.editing;
     if (id == null) return;
-    _cat.deleteRule(id);
+    final app = widget.appOf;
+    if (app != null) {
+      _cat.deleteAppRule(app, id);
+    } else {
+      _cat.deleteRule(id);
+    }
     widget.host.changed();
     Navigator.of(context).pop();
   }
@@ -263,6 +301,11 @@ class _RuleFormState extends State<_RuleForm> {
   Map<String, dynamic>? _card(String key) =>
       _d.groups?[key] as Map<String, dynamic>?;
 
+  /// An app's rule has no Process card (the app is the condition); on Android no rule has one
+  /// (docs/rules.md §3: an app is never a condition there, an old one is edited through JSON).
+  bool _hideGroup(String key) =>
+      (widget.appOf != null || widget.host.isAndroid) && key == 'process';
+
   void _update(VoidCallback f) => setState(() {
     f();
     _err = null;
@@ -272,9 +315,20 @@ class _RuleFormState extends State<_RuleForm> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final editing = widget.editing;
-    final index = editing == null ? 0 : _cat.ruleOrder.indexOf(editing) + 1;
+    final app = widget.appOf;
+    final index = editing == null
+        ? 0
+        : app != null
+        ? (_cat.appRules[app]?.rules.indexWhere((r) => r.id == editing) ?? -1) +
+              1
+        : _cat.ruleOrder.indexOf(editing) + 1;
+    final newFor = widget.newFor;
     return SheetFrame(
-      title: editing != null ? l10n.rule4(index) : l10n.newRule,
+      title: editing != null
+          ? l10n.rule4(index)
+          : newFor != null && newFor.isNotEmpty
+          ? l10n.newRuleForHost(newFor)
+          : l10n.newRule,
       titleBadge: RoundHelp(onTap: _help),
       full: true,
       subHeader: SheetTabs(
@@ -381,7 +435,8 @@ class _RuleFormState extends State<_RuleForm> {
         if (comp == null) ...[
           RulesLabel(l10n.ifText, note: l10n.valuesInAFieldAnyGroups),
           for (final g in ruleGroups)
-            if (_card(g.key) != null) _groupCard(context, g),
+            if (_card(g.key) != null && !_hideGroup(g.key))
+              _groupCard(context, g),
           _addRow(context),
         ],
         if (canIpBlock) _ipBlock(context, openDns),
@@ -690,6 +745,7 @@ class _RuleFormState extends State<_RuleForm> {
     final c = context.colors;
     final avail = <(RuleGroupDef, List<String>)>[];
     for (final g in ruleGroups) {
+      if (_hideGroup(g.key)) continue;
       final fs = [
         for (final f in g.fieldKeys)
           if (!groupHasField(_card(g.key), g, f)) f,

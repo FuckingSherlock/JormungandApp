@@ -1855,5 +1855,8 @@
   "{0}: server unpinned": "serverUnpinned2",
   "Not supported: no outbound": "notSupportedNoOutbound",
   "Not supported: {0}": "notSupported2",
-  "removed by the provider or not supported": "removedByTheProviderOrNot"
+  "removed by the provider or not supported": "removedByTheProviderOrNot",
+  "Rules in this app": "appRulesTitle",
+  "New rule for {0}": "newRuleForHost",
+  "Moved {#0} rules with an app condition into the apps' own rules: {1}": "movedRulesWithAnAppCondition"
 }

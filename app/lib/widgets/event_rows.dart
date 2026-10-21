@@ -426,7 +426,8 @@ class EventRow extends StatelessWidget {
         if ('${dd['proxy']}' == 'kept') add(l10n.removeSystemProxy, () => host.releaseSysProxy());
       case 'conn/failing':
         final h = words.host(dd);
-        if (h.isNotEmpty && links.newRuleFor != null) add(l10n.createRule, () => links.newRuleFor!(host: h));
+        // an event with an app has its rule row instead of Create rule
+        if (h.isNotEmpty && links.newRuleFor != null && words.appPkg(dd).isEmpty) add(l10n.createRule, () => links.newRuleFor!(host: h));
         addOpen();
       case 'auto/switched' || 'auto/fastest':
         addOpen();
@@ -522,7 +523,9 @@ class EventRow extends StatelessWidget {
       final reopened = dd['reopened'] != null && dd['reopened'] != false;
       // the folded row shows the first three: Create rule, Ignore site, Check again; the checker and Copy site go to the expanded row
       // `viaTarget`: the node that opened the site when it is a node of the failing entry itself (a rule for the entry would not help)
-      if (links.newRuleFor != null && !reopened) {
+      // an event with an app has no Create rule: the "Rule" row under its App row does it (EventWords.whyRows)
+      // site/unreachable has no working target to make a rule to, with an app or without
+      if (links.newRuleFor != null && !reopened && e.type != 'unreachable' && words.appPkg(dd).isEmpty) {
         final v = dd['viaTarget'] ?? dd['via'];
         final via = v == null || '$v'.isEmpty ? null : '$v';
         add(l10n.createRule, () => links.newRuleFor!(host: site, via: via));
@@ -1221,8 +1224,16 @@ class _WhyRow extends StatelessWidget {
         final f = links.openRuleForm;
         return f == null ? null : () { f(row.id); leave(); };
       case WhyGo.app:
-        final f = links.openAppAct;
+        // the dialog of the app: through the app-rule link when wired, else the plain app link
+        final g = links.openAppRule, f = links.openAppAct;
+        if (g != null) return () { g(app: row.id); leave(); };
         return f == null ? null : () { f(row.id); leave(); };
+      case WhyGo.appRule:
+        final f = links.openAppRule;
+        return f == null ? null : () { f(app: row.app, ruleId: row.id); leave(); };
+      case WhyGo.newAppRule:
+        final f = links.openAppRule;
+        return f == null ? null : () { f(app: row.app, host: row.host, via: row.via.isEmpty ? null : row.via); leave(); };
       case WhyGo.rules:
         final f = links.openRules;
         return f == null ? null : () { f(row.at.isEmpty ? null : row.at); leave(); };
@@ -1238,7 +1249,7 @@ class _WhyRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final go = _go(AppLinksScope.of(context));
-    final sub = [row.to, if (row.mark != null) row.mark!].where((s) => s.isNotEmpty).join(' · ');
+    final subStyle = TextStyle(fontSize: 11.5, color: c.t3);
     final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(
@@ -1264,10 +1275,17 @@ class _WhyRow extends StatelessWidget {
                     color: row.dim ? c.t3 : c.t1,
                   ),
                 ),
-                if (sub.isNotEmpty)
+                if (row.to.isNotEmpty || row.mark != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 1),
-                    child: Text(sub, style: TextStyle(fontSize: 11.5, color: c.t3)),
+                    // the verdict mark is a text of its own
+                    child: Wrap(
+                      children: [
+                        if (row.to.isNotEmpty) Text(row.to, style: subStyle),
+                        if (row.to.isNotEmpty && row.mark != null) Text(' · ', style: subStyle),
+                        if (row.mark != null) Text(row.mark!, style: subStyle),
+                      ],
+                    ),
                   ),
               ],
             ),

@@ -559,7 +559,8 @@ class _LiveConnsSheetState extends State<LiveConnsSheet> {
                     small: true,
                     onTap: () => leave(() => links.newRuleFor!(host: x.host)),
                   ),
-                if (links.newRuleFor != null && x.process.isNotEmpty)
+                // on Android an app is never a condition of a rule (docs/rules.md §3): its rules live in its sheet
+                if (links.newRuleFor != null && x.process.isNotEmpty && !host.isAndroid)
                   AppChip(
                     label: l10n.ruleForThisApp,
                     active: false,

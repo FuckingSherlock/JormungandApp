@@ -7,6 +7,9 @@ import 'package:jormungand_core/jormungand_core.dart'
         EventRecord,
         nodeKeyOfTag,
         ruleTitle,
+        UserRule,
+        ruleCatches,
+        rulesCatching,
         serviceTitles,
         targetName;
 
@@ -450,6 +453,9 @@ class EventWords {
       ('user', 'mode') => r(d['value'] == 'tun' ? l10n.youSwitchedToTunMode : l10n.youSwitchedToProxyMode),
       ('user', 'route') => r(d['value'] == 'global' ? l10n.youSwitchedToGlobal : l10n.youSwitchedToByRules),
       ('user', 'sysProxy') => r(d['on'] == true ? l10n.youTurnedTheSystemProxyOn : l10n.youTurnedTheSystemProxyOff),
+      ('user', 'rulesMoved') => r(
+        l10n.movedRulesWithAnAppCondition((d['count'] as num?) ?? 0, ((d['names'] as List?) ?? const []).join(', ')),
+      ),
       ('conn', 'connected') => r(
         d['entry'] != null && '${d['entry']}'.isNotEmpty ? l10n.connected2(entry(d['entry'])) : l10n.connected,
         _lines([
@@ -1233,6 +1239,16 @@ class EventWords {
       case 'user':
         final x = catalog.rulesData[id];
         return WhyRow(l10n.rule, x != null ? ruleTitle(x) : (name.isNotEmpty ? name : id), go: x != null ? WhyGo.user : WhyGo.none, id: id);
+      case 'appRule':
+        final app = '${r['app'] ?? ''}';
+        final x = catalog.appRuleById(app, id);
+        return WhyRow(
+          l10n.rule,
+          x != null ? ruleTitle(x) : (name.isNotEmpty ? name : id),
+          go: x != null ? WhyGo.appRule : WhyGo.none,
+          id: id,
+          app: app,
+        );
       case 'app':
         final known = catalog.appRules.containsKey(id) || catalog.appInfo?.call(id) != null;
         return WhyRow(l10n.app, known ? catalog.appLabel(id) : (name.isNotEmpty ? name : id), go: known ? WhyGo.app : WhyGo.none, id: id, icon: eventApp(d) == id ? id : '');
@@ -1292,16 +1308,21 @@ class EventWords {
     return a != null && a.halves.any((h) => h.$2.act != 'default');
   }
 
+  String _userTo(UserRule? x) {
+    if (x == null) return '';
+    if (x.action == 'direct') return 'Direct';
+    if (x.action == 'block') return 'Block';
+    return x.target.isNotEmpty ? '→ ${targetName(catalog, x.target)}' : 'Proxy';
+  }
+
   /// Where a rule (the `data.rule` shape) leads now; '' = not known. With today's settings.
   String ruleTo(Map r) {
     final id = '${r['id'] ?? ''}';
     switch ('${r['kind']}') {
       case 'user':
-        final x = catalog.rulesData[id];
-        if (x == null) return '';
-        if (x.action == 'direct') return 'Direct';
-        if (x.action == 'block') return 'Block';
-        return x.target.isNotEmpty ? '→ ${targetName(catalog, x.target)}' : 'Proxy';
+        return _userTo(catalog.rulesData[id]);
+      case 'appRule':
+        return _userTo(catalog.appRuleById('${r['app'] ?? ''}', id));
       case 'app':
         return appActText(id);
       case 'service':
@@ -1324,9 +1345,11 @@ class EventWords {
     final w = why(d), proc = appName(d), pkg = appPkg(d);
     final r = _ruleOf(d);
     final byApp = r != null && r['kind'] == 'app';
-    if (w != null) rows.add(w.withTo(ruleTo(r!)));
+    final byAppRule = r != null && r['kind'] == 'appRule';
+    var matched = 0; // the row of what routing applied
+    if (w != null && !byAppRule) rows.add(w.withTo(ruleTo(r!)));
     if (proc.isNotEmpty && !byApp) {
-      final own = pkg.isNotEmpty && _appHasOwn(pkg);
+      final own = !byAppRule && pkg.isNotEmpty && _appHasOwn(pkg);
       rows.add(WhyRow(
         l10n.app,
         pkg.isNotEmpty ? appDisplayName(l10n, catalog, pkg) : proc,
@@ -1338,8 +1361,45 @@ class EventWords {
         dim: own,
       ));
     }
-    if (w != null && rows.any((x) => x.dim)) rows[0] = rows[0].withMark(l10n.applied);
+    if (byAppRule) {
+      // the rule of the app sits under the row of the app
+      matched = rows.length;
+      rows.add(w!.withTo(ruleTo(r)));
+    } else if (pkg.isNotEmpty) {
+      final x = _appRuleRow(d, pkg);
+      if (x != null) rows.add(x);
+    }
+    // the rules that would have caught the address but yielded to the app
+    final h = host(d);
+    if ((byApp || byAppRule) && h.isNotEmpty) {
+      final port = d['port'];
+      for (final id in rulesCatching(catalog, h, port: port is num ? port.toInt() : null)) {
+        final x = catalog.rulesData[id];
+        if (x == null) continue;
+        rows.add(WhyRow(l10n.rule, ruleTitle(x), go: WhyGo.user, id: id, to: _userTo(x), mark: l10n.overriddenByApp, dim: true));
+      }
+    }
+    if (w != null && rows.any((x) => x.dim)) rows[matched] = rows[matched].withMark(l10n.applied);
     return rows;
+  }
+
+  /// The row under the app of a site event: the rule of that app that has this host (the one routing
+  /// applied is shown by [whyRows] itself; a disabled one counts), else "New rule for HOST" — the form
+  /// of a new rule of the app with Fallback through the node that opened the site. Null for an event
+  /// that opens again.
+  WhyRow? _appRuleRow(Map<String, dynamic> d, String pkg) {
+    final h = host(d);
+    if (h.isEmpty) return null;
+    final port = d['port'] is num ? (d['port'] as num).toInt() : null;
+    for (final x in catalog.appRules[pkg]?.rules ?? const <UserRule>[]) {
+      final on = UserRule.fromJson(x.toJson())..enabled = true;
+      if (ruleCatches(on, h, port: port)) {
+        return WhyRow(l10n.rule, ruleTitle(x), go: WhyGo.appRule, id: x.id, app: pkg, to: _userTo(x));
+      }
+    }
+    if (d['reopened'] != null && d['reopened'] != false) return null;
+    final v = d['viaTarget'] ?? d['via'];
+    return WhyRow(l10n.rule, l10n.newRuleForHost(h), go: WhyGo.newAppRule, app: pkg, host: h, via: v == null ? '' : '$v');
   }
 
   // ── fields of an opened row ──
@@ -1559,6 +1619,7 @@ class EventWords {
       if (x.key == 'source' && e.cat == 'conn') continue; // 'closed': where the core saw it, not a subscription
       if (x.key == 'by') continue; // who is in the title (VPN disconnected · by you …), no «By» field below
       if (x.key == 'repeat') continue; // shown as the row's times
+      if (x.key == 'rule' && e.cat == 'site' && v is Map) continue; // the Rule row of the why block says it
       if (x.key == 'affected' || x.key == 'nodeIds') continue; // the affected list is drawn as its own rows; ids are for the buttons
       if (e.cat == 'sub' && (x.key == 'onlyDirectCount' || x.key == 'onlyTunnelCount')) continue; // folded into the list's value
       if (x.key == 'check' && v is Map) {
@@ -1640,21 +1701,40 @@ class TrailRow {
   final String? at;
 }
 
-enum WhyGo { none, route, user, app, rules }
+enum WhyGo { none, route, user, app, rules, appRule, newAppRule }
 
 /// A row of the "why" block of a site event.
 class WhyRow {
-  const WhyRow(this.key, this.name, {this.go = WhyGo.none, this.id = '', this.at = '', this.to = '', this.mark, this.dim = false, this.icon = ''});
+  const WhyRow(
+    this.key,
+    this.name, {
+    this.go = WhyGo.none,
+    this.id = '',
+    this.at = '',
+    this.to = '',
+    this.mark,
+    this.dim = false,
+    this.icon = '',
+    this.app = '',
+    this.host = '',
+    this.via = '',
+  });
 
   final String key, name;
   final WhyGo go;
   final String id, at, to;
+
+  /// [WhyGo.appRule] / [WhyGo.newAppRule]: the package of the app; the latter also the [host] of the
+  /// new rule and the node [via] which the site opened ('' = none).
+  final String app, host, via;
   final String? mark;
   final bool dim;
 
   /// The package whose icon the row shows ('' = none: a rule, or an app known only by a process name).
   final String icon;
 
-  WhyRow withTo(String t) => WhyRow(key, name, go: go, id: id, at: at, to: t, mark: mark, dim: dim, icon: icon);
-  WhyRow withMark(String m) => WhyRow(key, name, go: go, id: id, at: at, to: to, mark: m, dim: dim, icon: icon);
+  WhyRow withTo(String t) =>
+      WhyRow(key, name, go: go, id: id, at: at, to: t, mark: mark, dim: dim, icon: icon, app: app, host: host, via: via);
+  WhyRow withMark(String m) =>
+      WhyRow(key, name, go: go, id: id, at: at, to: to, mark: m, dim: dim, icon: icon, app: app, host: host, via: via);
 }

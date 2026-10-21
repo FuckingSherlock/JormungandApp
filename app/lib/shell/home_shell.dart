@@ -345,6 +345,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     openRuleSets: () => showRuleSets(_ctx),
     newRuleFor: ({host, app, via}) =>
         showRuleForm(_ctx, host: host, app: app, via: via),
+    // the sheet of the app, the form over it (Back of the form lands on the sheet)
+    openAppRule: ({required app, ruleId, host, via}) {
+      unawaited(showAppAct(_ctx, app));
+      if (ruleId == null && host == null) return; // just the dialog of the app
+      _afterTab(() => showRuleForm(_ctx, id: ruleId, host: host, appRuleOf: app, fallbackVia: via));
+    },
     openRoute: ({edit = false}) => showRouteSheet(_ctx, edit: edit),
     openLogsEvent: (id) {
       _setTab(AppTab.logs);
@@ -402,6 +408,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         e.cat == 'site' &&
         e.type == 'blocked' &&
         d['via'] != null &&
+        _logs!.words.appPkg(d).isEmpty && // an event with an app has its Rule row in the card instead
         _links.newRuleFor != null;
     // a snackbar has room for one action: the two of a site event sit under its text
     // the toast sits on inverseSurface: its own text colour is the one that reads there

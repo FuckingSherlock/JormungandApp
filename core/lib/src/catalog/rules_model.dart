@@ -130,9 +130,10 @@ class AppHalf with RoundTrip {
 /// top-level fields are the whole app's traffic, or TCP when [split]; [udp] is UDP. The
 /// old `{act, split, udpTarget}` becomes `udp: {act: 'proxy', target: udpTarget}`.
 class AppRule with RoundTrip {
-  AppRule({AppHalf? tcp, AppHalf? udp, this.split = false})
+  AppRule({AppHalf? tcp, AppHalf? udp, this.split = false, List<UserRule>? rules})
       : tcp = tcp ?? AppHalf(),
-        udp = udp ?? AppHalf();
+        udp = udp ?? AppHalf(),
+        rules = rules ?? [];
 
   factory AppRule.fromJson(Json j) {
     final tcp = AppHalf.fromJson(j);
@@ -145,17 +146,26 @@ class AppRule with RoundTrip {
     } else {
       udp = AppHalf();
     }
-    final a = AppRule(tcp: tcp, udp: udp, split: split);
+    final a = AppRule(
+      tcp: tcp,
+      udp: udp,
+      split: split,
+      rules: j['rules'] is List ? [for (final x in j['rules'] as List) if (x is Map) UserRule.fromJson(asJson(x))] : null,
+    );
     a.capture(j, _known);
     a.tcp.unknown = {}; // the app's unknown keys are the app's, not the half's
     return a;
   }
 
-  static const _known = {'split', 'act', 'target', 'fallback', 'fallbackTarget', 'udp', 'udpTarget'};
+  static const _known = {'split', 'act', 'target', 'fallback', 'fallbackTarget', 'udp', 'udpTarget', 'rules'};
 
   AppHalf tcp;
   AppHalf udp;
   bool split;
+
+  /// The app's own rules, in the order they are checked (docs/rules.md §3); each is the same
+  /// [UserRule] as a rule of the Rules list, matched together with the app.
+  List<UserRule> rules;
 
   /// [protocol label, half]: one half for the whole app, or TCP and UDP when split
   /// (`appHalves`).
@@ -165,6 +175,7 @@ class AppRule with RoundTrip {
         'split': split,
         ...tcp.toJson(),
         'udp': udp._jsonWithUnknown(),
+        if (rules.isNotEmpty) 'rules': [for (final r in rules) r.toJson()],
         ...deepCopy(unknown) as Json,
       };
 }

@@ -173,6 +173,7 @@ class LiveCoreHost extends CoreHost {
       final snap = r['snapshot'];
       catalog = Catalog.fromJson(
         snap is Map ? Map<String, dynamic>.from(snap) : null,
+        android: isAndroid,
       );
       catalog.appInfo = _appInfo;
       catalog.syncCatalog();
@@ -219,6 +220,7 @@ class LiveCoreHost extends CoreHost {
       } catch (_) {}
       _screenSub = screen?.changes.listen(screenOn, onError: (_) {});
       _ready = true;
+      _journalMovedRules(); // `_journal` is silent until ready: the migration line of this load goes now
       // a tunnel taken over with another plan than the catalog makes now: the same path as after
       // any change of settings (a reconnect after the usual pause), never a silent restart
       _scheduleReconnect();
@@ -1483,6 +1485,7 @@ class LiveCoreHost extends CoreHost {
     final snap = r['snapshot'];
     catalog = Catalog.fromJson(
       snap is Map ? Map<String, dynamic>.from(snap) : snapshot,
+      android: isAndroid,
     );
     catalog.appInfo = _appInfo;
     catalog.syncCatalog();
@@ -1492,8 +1495,20 @@ class LiveCoreHost extends CoreHost {
         ..mode = 'tun'
         ..sys = 'off';
     }
+    _journalMovedRules();
     // a running connection takes the restored state (plan, Auto, kill switch)
     changed();
+  }
+
+  /// The one journal line of the migration of the own rules with an app condition (docs/rules.md «Перенос при
+  /// обновлении»): how many rules and their names. Nothing moved = no line.
+  void _journalMovedRules() {
+    final moved = catalog.movedToApps;
+    if (moved.isEmpty) return;
+    _journal('rulesMoved', {
+      'count': moved.length,
+      'names': [for (final id in moved) catalog.appRulesMovedNames[id] ?? id],
+    });
   }
 
   /// The app's update options (auto-check, channel, auto-download, whether the network is metered)

@@ -93,7 +93,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('a "does not open" event: copy and Create rule are there even without a working route', (
+  testWidgets('a "does not open" event: copy is there, Create rule is not (no working target, decision 2026-10-21)', (
     tester,
   ) async {
     final host = _hostWithSimpleChain();
@@ -106,18 +106,15 @@ void main() {
     await pumpApp(tester, host);
     await openLogs(tester);
 
-    // the folded row holds three buttons: Check with checker, Create rule, Ignore site; Copy site waits in the opened one
+    // no Create rule: the folded row's three slots are Check with checker, Ignore site and Copy site
     expect(find.text('Check with checker'), findsOneWidget);
-    expect(find.text('Create rule'), findsOneWidget);
+    expect(find.text('Create rule'), findsNothing);
     expect(find.text('Ignore site'), findsOneWidget);
-    expect(find.text('Copy site'), findsNothing);
+    expect(find.text('Copy site'), findsOneWidget);
     await tester.tap(find.textContaining('example.org').first);
     await tester.pumpAndSettle();
     expect(find.text('Copy site'), findsOneWidget);
-    expect(find.text('Create rule'), findsOneWidget);
-    await tester.tap(find.text('Create rule'));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'example.org'), findsOneWidget);
+    expect(find.text('Create rule'), findsNothing);
   });
 
   testWidgets('a blocked event with viaTarget (the scout is a node of the failing entry): Create rule targets that node, named "<host> via <node>"', (

@@ -152,7 +152,8 @@ extension CatalogOps on Catalog {
       final id = '${a['id']}';
       switch (a['kind']) {
         case 'rule':
-          final r = rulesData[id];
+          // an own rule or a rule of an app (its id is unique among both)
+          final r = rulesData[id] ?? [for (final a in appRules.values) ...a.rules].where((x) => x.id == id).firstOrNull;
           if (r != null && r.action == 'proxy') r.target = target;
         case 'app':
           final app = appRules[id];

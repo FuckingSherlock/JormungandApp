@@ -111,7 +111,7 @@ void main() {
     },
   );
 
-  testWidgets('a tap opens the app dialog; Direct + Save stores the rule', (
+  testWidgets('a tap opens the app sheet; Direct + Save stores the rule', (
     tester,
   ) async {
     final host = FakeCoreHost()..apps = [_tg, _chrome];
@@ -120,7 +120,7 @@ void main() {
 
     await tester.tap(find.text('Telegram'));
     await tester.pumpAndSettle();
-    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.text('Save'), findsOneWidget); // the app's own sheet (it replaced the dialog)
     await tester.tap(find.text('Direct').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
@@ -130,7 +130,7 @@ void main() {
     expect(r.tcp.act, 'direct');
     expect(r.split, isFalse);
     expect(r.unknown['name'], 'Telegram'); // kept with the rule
-    // the row now says so (the sheet is still open under the dialog)
+    // the row now says so (the apps sheet is still open under the app's sheet)
     expect(find.text('Direct'), findsOneWidget);
     // and the plan carries it as a package app with its name
     final apps = host.catalog.routingPlan()['apps'] as List;

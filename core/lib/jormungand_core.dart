@@ -11,6 +11,7 @@ export 'src/delta.dart';
 export 'src/auto.dart';
 export 'src/auto_memory.dart';
 export 'src/catalog/catalog_lib.dart';
+export 'src/catalog/rule_match.dart';
 export 'src/config.dart';
 export 'src/conn_view.dart';
 export 'src/daemon.dart';
