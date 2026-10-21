@@ -495,5 +495,7 @@
   "Not supported: no outbound": null,
   "Rules in this app": null,
   "New rule for {0}": null,
-  "Moved {#0} rules with an app condition into the apps' own rules: {1}": null
+  "Moved {#0} rules with an app condition into the apps' own rules: {1}": null,
+  "Started on {0} — failed the check, switched to {1}": null,
+  "A higher server is back, switched to {0}": null
 }

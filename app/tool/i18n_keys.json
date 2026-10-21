@@ -1858,5 +1858,7 @@
   "removed by the provider or not supported": "removedByTheProviderOrNot",
   "Rules in this app": "appRulesTitle",
   "New rule for {0}": "newRuleForHost",
-  "Moved {#0} rules with an app condition into the apps' own rules: {1}": "movedRulesWithAnAppCondition"
+  "Moved {#0} rules with an app condition into the apps' own rules: {1}": "movedRulesWithAnAppCondition",
+  "Started on {0} — failed the check, switched to {1}": "startedOnFailedTheCheckSwitched",
+  "A higher server is back, switched to {0}": "aHigherServerIsBackSwitched"
 }

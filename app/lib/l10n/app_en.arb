@@ -4673,5 +4673,24 @@
         "type": "String"
       }
     }
+  },
+  "startedOnFailedTheCheckSwitched": "Started on {s0} — failed the check, switched to {s1}",
+  "@startedOnFailedTheCheckSwitched": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "s1": {
+        "type": "String"
+      }
+    }
+  },
+  "aHigherServerIsBackSwitched": "A higher server is back, switched to {s0}",
+  "@aHigherServerIsBackSwitched": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
   }
 }

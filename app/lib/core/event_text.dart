@@ -356,6 +356,19 @@ class EventWords {
   String _lines(Iterable<String?> parts, [String sep = ' · ']) =>
       parts.where((s) => s != null && s.isNotEmpty).join(sep);
 
+  /// The quick start's moves (`quick` of a `conn/connected`, core quick_start.dart): one line per group that switched
+  /// after the check. Priority's «a higher server is back» says nothing about the server it started on.
+  List<String> _quickLines(Object? quick) {
+    if (quick is! Map || quick['groups'] is! List) return const [];
+    return [
+      for (final g in quick['groups'] as List)
+        if (g is Map && g['result'] == 'switched' && g['to'] != null)
+          g['why'] == 'higherBack'
+              ? l10n.aHigherServerIsBackSwitched(server(g['to']))
+              : l10n.startedOnFailedTheCheckSwitched(server(g['started']), server(g['to'])),
+    ];
+  }
+
   /// `sub/diverged` `why` (the core's `copyFreshness` codes) in words; null for an unknown code.
   String? _divergedWhy(Object? why) => switch (why) {
     'newer: lastModified' => l10n.itIsTheNewerOneBy,
@@ -458,11 +471,14 @@ class EventWords {
       ),
       ('conn', 'connected') => r(
         d['entry'] != null && '${d['entry']}'.isNotEmpty ? l10n.connected2(entry(d['entry'])) : l10n.connected,
-        _lines([
-          d['server'] != null ? server(d['server']) : null,
-          _modeText(d['mode']),
-          _routeText(d['route']),
-        ]),
+        [
+          _lines([
+            d['server'] != null ? server(d['server']) : null,
+            _modeText(d['mode']),
+            _routeText(d['route']),
+          ]),
+          ..._quickLines(d['quick']),
+        ].where((s) => s.isNotEmpty).join('   '),
       ),
       ('conn', 'disconnected') => () {
         // who: in the title («by you» / «by the system or another app» / «error: …»), no «By» field below
@@ -486,10 +502,10 @@ class EventWords {
       ('conn', 'reconnected') => () {
         final tookMs = d['tookMs'];
         final took = tookMs is num ? duration(tookMs) : '';
-        // the duration closes the sub, after « · »: «Reconnected» / «rule lists · 3 s»
-        (String, String, String) t(String title) {
+        // the duration closes the sub, after « · »: «Reconnected» / «rule lists · 3 s»; [more] are the detail lines
+        (String, String, String) t(String title, [List<String> more = const []]) {
           final p = splitTitle(title);
-          return (p.title, _lines([p.sub, took]), '');
+          return (p.title, _lines([p.sub, took]), more.join('   '));
         }
         switch (d['reason']) {
           case 'settings':
@@ -500,9 +516,11 @@ class EventWords {
             return t(l10n.reconnectedServerAddresses);
           case 'user':
             final down = d['downMs'] ?? d['tookMs'];
+            // the quick start's line: conn/reconnected by the user takes the same `quick` field as conn/connected
+            final quick = _quickLines(d['quick']);
             return down is num
-                ? t(l10n.reconnectedByYouVpnWasOff(duration(down)))
-                : t(l10n.reconnected);
+                ? t(l10n.reconnectedByYouVpnWasOff(duration(down)), quick)
+                : t(l10n.reconnected, quick);
         }
         return t(l10n.reconnected);
       }(),
@@ -1619,6 +1637,7 @@ class EventWords {
       if (x.key == 'source' && e.cat == 'conn') continue; // 'closed': where the core saw it, not a subscription
       if (x.key == 'by') continue; // who is in the title (VPN disconnected · by you …), no «By» field below
       if (x.key == 'repeat') continue; // shown as the row's times
+      if (x.key == 'quick') continue; // the quick start's moves are the row's detail lines
       if (x.key == 'rule' && e.cat == 'site' && v is Map) continue; // the Rule row of the why block says it
       if (x.key == 'affected' || x.key == 'nodeIds') continue; // the affected list is drawn as its own rows; ids are for the buttons
       if (e.cat == 'sub' && (x.key == 'onlyDirectCount' || x.key == 'onlyTunnelCount')) continue; // folded into the list's value

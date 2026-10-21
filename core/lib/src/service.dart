@@ -44,6 +44,7 @@ import 'exits.dart';
 import 'ladder.dart' show DeadLadderStore;
 import 'pool.dart';
 import 'probe.dart';
+import 'quick_start.dart';
 import 'fetch.dart' show Channel, SubscriptionFetchException, fetchErrorText;
 import 'svc_fetch.dart';
 import 'svc_in.dart';
@@ -706,6 +707,23 @@ class CoreService implements CoreApi {
   /// The server every group (the routes' and the rule targets') is on now, as the core's services know it.
   Map<String, String> _coreServers() => {...?_auto?.groupServers(), ...?_fallback?.groupServers()};
 
+  String? _netId; // the id of the last network report of the platform (setNetwork); null = none / no id
+  File get _lastServersFile => File(p.join(dataDir, 'last-servers.json'));
+
+  /// The servers the groups are on, kept for the next quick start ([quickStartFor]): the groups whose server answered the
+  /// last check and that are not in failover, the network, the time. Call on a disconnect / the end of the service, before
+  /// [_stopAuto]; nothing is written without a running Auto (a crash's restart, a connect under way).
+  void _recordLastServers() {
+    final a = _auto;
+    if (a == null || _plan == null) return;
+    try {
+      final alive = aliveGroups(auto: a.toJson(), fallback: _fallback?.toJson());
+      lastServersRecord(network: _netId, at: _nowMs, servers: _coreServers(), alive: alive).save(_lastServersFile);
+    } catch (e) {
+      logBook.note('warn', 'disconnect: last servers not recorded ($e); the next connect checks first');
+    }
+  }
+
   /// A plan sent by the app while sing-box runs: each group of it that is not pinned and has the server Auto has it on now
   /// among its members starts on that server (`chosen`), so a plan change does not check the groups again and move the
   /// node (and the exit IP) the traffic is on. A pinned group follows its pin; a group without a valid server of the core's
@@ -989,6 +1007,7 @@ class CoreService implements CoreApi {
     _netProbeSeq++; // the direct-path probe stops
     _exitSeq++; // an exit check still in flight is dropped when it ends: nothing is saved after the dispose
     _wakeUp();
+    _recordLastServers();
     _stopAuto();
     _netTimer?.cancel();
     _listsTimer?.cancel();
@@ -4104,6 +4123,9 @@ class CoreService implements CoreApi {
     final freshOp = reconnect == null && userOp == null ? given : null;
     final held = continuation ? _coreServers() : null; // before _stopAuto: the core knows where the groups are
     if (continuation) plan = _keepCoreChoice(plan);
+    // a fresh connect of the user on the network the last connection ended on: the groups start on the servers they were
+    // on then, the usual check runs beside the start (docs/core.md → Quick start)
+    final quick = own && !continuation ? quickStartFor(LastServers.load(_lastServersFile), _netId, plan) : null;
     final seq = _nextSeq();
     _wakeUp();
     _recovering = null;
@@ -4126,13 +4148,29 @@ class CoreService implements CoreApi {
     await _locked(() async {
       if (seq != _connectSeq) return; // a newer connect / disconnect came in
       _connectOp = reconnectOp ?? freshOp ?? userOp?.op; // the events written while the live connection is started again belong to its operation
+      QuickRun? run;
       try {
         _plan = null;
         final sys = body['systemProxy'] == true;
         sentinel.context.starting(reason ?? (own ? 'userConnect' : 'refreshLists'));
         // (the cancel stays until the next connect / disconnect: the rule targets' checks that outlast the connect end with it)
         final cancel = _pickCancel = Cancel();
-        final picks = await connectPicks(plan, cancel: cancel, held: held);
+        Map<String, String>? picks;
+        _quickRun = null;
+        if (quick == null) {
+          picks = await connectPicks(plan, cancel: cancel, held: held);
+        } else {
+          // started at once on the servers of the record; the check goes on beside the start and moves a group only after
+          plan = planWithChosen(plan, quick.started);
+          final r = run = _quickRun = QuickRun(quick, _quickKeys(plan), cancel);
+          unawaited(connectPicks(plan, cancel: cancel, held: held, quick: r).then((res) {
+            if (res == null || seq != _connectSeq) return; // cancelled: its result is never applied
+            r.checked = true;
+            r.tookMs = r.sw.elapsedMilliseconds;
+            _quickFlush(seq, r);
+          }, onError: (Object e) => logBook.note('warn', 'connect: the quick start check failed ($e)')));
+          picks = const {};
+        }
         if (picks == null || seq != _connectSeq) return; // a disconnect / newer connect came in while the servers were checked
         plan = planWithChosen(plan, picks);
         final (lists, warnings) = await _startSingBox(plan, sys: sys, why: reason ?? 'connect');
@@ -4165,12 +4203,16 @@ class CoreService implements CoreApi {
               own: own, op: reconnectOp, cause: _netCause(), data: {'reason': reconnect, if (reconnect == 'settings' && changed.isNotEmpty) 'changed': changed, 'tookMs': tookMs});
         } else if (userOp != null) {
           _userDisconnect = null; // consumed
-          eventBook.add('conn', 'reconnected', 'info',
+          final id = eventBook.add('conn', 'reconnected', 'info',
               own: true, op: userOp.op, data: {'reason': 'user', 'tookMs': tookMs, 'downMs': startedAt - userOp.at});
+          run?.eventId = id;
         } else {
-          eventBook.add('conn', 'connected', 'info', own: own, op: freshOp, data: _connectedData(plan));
+          final id = eventBook.add('conn', 'connected', 'info', own: own, op: freshOp, data: _connectedData(plan));
+          run?.eventId = id;
         }
+        _quickFlush(seq, run);
       } catch (e) {
+        if (run != null && seq == _connectSeq) _pickCancel?.cancel('connect failed'); // the check of a connect that failed ends with it
         if (_revokedSeq == seq) {
           // the system took the tunnel while it started: not a failed connect, the revoke writes the event
           if (!runner.running) sentinel.context.stopped();
@@ -4236,7 +4278,7 @@ class CoreService implements CoreApi {
   /// Fastest and Priority by their rule (group_pick.dart). Nobody answered: the first by rank; no network (the direct path
   /// does not answer either): the same. null = cancelled ([_pickCancel]). A tester that cannot start is no reason to fail
   /// the connect: no pick, the plan as is.
-  Future<Map<String, String>?> connectPicks(Map<String, dynamic> plan, {Cancel? cancel, Map<String, String>? held}) async {
+  Future<Map<String, String>?> connectPicks(Map<String, dynamic> plan, {Cancel? cancel, Map<String, String>? held, QuickRun? quick}) async {
     _pickReports = const [];
     _routePick = null;
     _lateReady = false;
@@ -4261,9 +4303,11 @@ class CoreService implements CoreApi {
     _starting = plan; // what the tester's resolver reads: the plan being started
     _addrSettings = null;
     final picks = <String, String>{}, reports = <Map<String, dynamic>>[];
-    var gateOpen = false;
+    var gateOpen = quick != null; // a quick start has started already: every result is a late one
     void decided(String tag, String key, Map<String, dynamic> rep) {
-      if (!gateOpen) {
+      if (quick != null && quick.started.containsKey(tag)) {
+        if (seq == _connectSeq) quick.pending.add(_quickDecide(seq, quick, tag, rep));
+      } else if (!gateOpen) {
         picks[tag] = key;
         reports.add(rep);
       } else if (seq == _connectSeq) {
@@ -4297,11 +4341,19 @@ class CoreService implements CoreApi {
           nodeResolver: resolver,
           onWarn: (l) => logBook.note('warn', 'connect: $l'));
       await s.ensure(); // a tester that cannot start is an error (the catch below), not a pool full of misses
-      Future<void> run(_PickUnit u) => _runUnit(u, s, settings, addr, resolver, held, cancel, late: () => gateOpen, decided: decided);
+      bool lateOf(_PickUnit u) => gateOpen && (quick == null || !(quick.started.containsKey(u.first.tag) || quick.started.containsKey(u.exit?.tag)));
+      Future<void> run(_PickUnit u) => _runUnit(u, s, settings, addr, resolver, held, cancel, late: () => lateOf(u), decided: decided, quick: quick);
       final main = mine == null ? Future<void>.value() : run(mine);
       final others = [for (final u in targets) run(u)];
       // the tester lives until the last check ends, late ones included (their results go to the pool)
       unawaited(Future.wait([main, ...others]).whenComplete(s.finish));
+      if (quick != null) {
+        // nothing is waited for by the start: this ends when every group is decided (and its switch made or dropped)
+        await Future.wait([main, ...others]);
+        if (cancel?.cancelled == true) return null;
+        await Future.wait(List.of(quick.pending));
+        return const {};
+      }
       await main;
       if (cancel?.cancelled == true) return null;
       if (others.isNotEmpty) await Future.any([Future.wait(others), Future<void>.delayed(targetGrace), if (cancel != null) cancel.done]);
@@ -4319,20 +4371,24 @@ class CoreService implements CoreApi {
       return {};
     } finally {
       gateOpen = true;
-      _starting = null;
-      _addrSettings = null;
+      if (quick == null) {
+        _starting = null;
+        _addrSettings = null;
+      } // (a quick start runs beside the start of sing-box, which clears them itself)
     }
   }
 
   /// One route or rule target: its first group (the main group of a unit, a chain's entry) on [s], then a chain's
   /// exit by pairs through the chosen entry on a tester of its own. Each decided group goes to [decided]. Never throws.
   Future<void> _runUnit(_PickUnit u, TesterSession s, AutoSettings st, AddressSettings addr, DnsCandidate? resolver, Map<String, String>? held, Cancel? cancel,
-      {required bool Function() late, required void Function(String tag, String key, Map<String, dynamic> rep) decided}) async {
+      {required bool Function() late, required void Function(String tag, String key, Map<String, dynamic> rep) decided, QuickRun? quick}) async {
     try {
       final first = u.first;
       var entryKey = first.startKey, entryFound = true;
       if (first.pickable(held)) {
-        final res = await _runPick(first, s, st, cancel, late: late, idOf: first.idOf, probe1: (k) => s.probe('n', k, first.idOf(k)));
+        Probe1 p1 = (k) => s.probe('n', k, first.idOf(k));
+        if (quick != null) p1 = quick.tap(first.tag, p1);
+        final res = await _runPick(first, s, st, cancel, late: late, idOf: first.idOf, probe1: p1);
         if (res == null) return;
         entryKey = res.chosen;
         entryFound = res.rep['found'] == true;
@@ -4366,7 +4422,9 @@ class CoreService implements CoreApi {
             onWarn: (l) => logBook.note('warn', 'connect: $l'));
         await t.ensure();
         String pid(String k) => pairIdentity(entryId, exit.idOf(k));
-        final res = await _runPick(exit, t, st, cancel, late: late, idOf: pid, probe1: (k) => t.probe('p', k, pid(k)));
+        Probe1 p2 = (k) => t.probe('p', k, pid(k));
+        if (quick != null) p2 = quick.tap(exit.tag, p2);
+        final res = await _runPick(exit, t, st, cancel, late: late, idOf: pid, probe1: p2);
         if (res != null) decided(exit.tag, res.chosen, res.rep);
       } catch (e) {
         logBook.note('warn', 'connect: the exits of ${exit.tag} could not be checked ($e): the plan is used as it is');
@@ -4410,6 +4468,8 @@ class CoreService implements CoreApi {
   /// not put the cache's choice back over it).
   void _releaseLate(int seq) {
     _lateReady = true;
+    final q = _quickRun;
+    if (q != null && !q.ready.isCompleted) q.ready.complete(); // the quick start's switches may go now
     final queued = List.of(_lateQueue);
     _lateQueue.clear();
     for (final (tag, key) in queued) {
@@ -4421,11 +4481,104 @@ class CoreService implements CoreApi {
     if (seq != _connectSeq || !runner.running) return;
     try {
       final fb = _fallback;
+      // a route's group (a chain's exit) is Auto's: its first look at the groups would put the start's server back over a pick
+      if ((fb == null || !fb.groupServers().containsKey(tag)) && !await _autoReady(seq)) return;
       final ok = fb != null ? await fb.select(tag, key) : await runner.api?.select(tag, '$tag/$key') ?? false;
       logBook.note(ok ? 'info' : 'warn', 'connect: $tag: ${ok ? 'late pick applied' : 'late pick not applied (the group moved since, or sing-box refused)'}: $key');
     } catch (e) {
       logBook.note('warn', 'connect: $tag: late pick $key not applied ($e)');
     }
+  }
+
+  /// Waits (at most ~5 s) until Auto has taken its first look at the groups (it puts back what sing-box's cache restored,
+  /// and only then a select of ours stays). False = the connect ended meanwhile. No Auto: nothing to wait for.
+  Future<bool> _autoReady(int seq) async {
+    for (var i = 0; i < 50; i++) {
+      if (seq != _connectSeq || !runner.running) return false;
+      final a = _auto;
+      if (a == null || a.refreshedAt != null) return true;
+      final w = Completer<void>();
+      _timer(const Duration(milliseconds: 100), w.complete);
+      await w.future;
+    }
+    return seq == _connectSeq && runner.running;
+  }
+
+  QuickRun? _quickRun;
+
+  /// The key order (the plan's, the Priority order) of each group the quick start covers: group tag → server keys.
+  Map<String, List<String>> _quickKeys(Map<String, dynamic> plan) {
+    final rs = planRoutes(plan);
+    final i = planCurrent(plan, rs.length), r = rs[i];
+    final groups = <String, Object?>{
+      routeTag(i): r['main'],
+      routeEntryTag(i): r['entry'],
+      if (plan['global'] != true) for (final (tag, g) in planTargetGroups(plan)) tag: g,
+    };
+    return {
+      for (final e in groups.entries)
+        if (_PickGroup.of(e.key, e.value) case final g?) e.key: g.keys,
+    };
+  }
+
+  /// The check of a group started from the record ended on [rep]: nothing moves when the group is on the right server,
+  /// else the group is selected on the picked one once sing-box and Auto run, unless the core moved the group meanwhile.
+  Future<void> _quickDecide(int seq, QuickRun q, String tag, Map<String, dynamic> rep) async {
+    final ours = q.started[tag];
+    if (ours == null) return;
+    QuickGroup done(String result, {String? to, String? why, String? note}) => QuickGroup(group: tag, started: ours, result: result, to: to, why: why, note: note);
+    void put(QuickGroup g) {
+      if (seq != _connectSeq || q.cancel.cancelled) return; // a cancelled check says nothing
+      q.results.add(g);
+      logBook.note('info', g.line());
+    }
+
+    try {
+      final picked = rep['found'] == true ? '${rep['chosen']}' : null;
+      var answered = true;
+      if (rep['mode'] != 'priority' && picked != null && picked != ours) {
+        // Fastest picked another: only a started server that did not answer is left (it may not have been tested at all)
+        answered = q.answered['$tag/$ours'] ?? false;
+        if (!q.answered.containsKey('$tag/$ours')) {
+          try {
+            answered = (await q.probers[tag]!(ours)).answered;
+          } catch (e) {
+            // the probe failed itself: that says nothing of the server, so the group stays on it
+            answered = true;
+            logBook.note('warn', 'connect: $tag: quick start probe of $ours failed ($e); staying');
+          }
+        }
+      }
+      final (to, why) = quickVerdict(priority: rep['mode'] == 'priority', keys: q.keysOf[tag] ?? const [], started: ours, picked: picked, startedAnswered: answered);
+      if (to == null) {
+        put(done('same'));
+        return;
+      }
+      await Future.any([q.ready.future, q.cancel.done]);
+      if (seq != _connectSeq || q.cancel.cancelled || !runner.running || !await _autoReady(seq)) return;
+      // moved: by what Auto has the group on, or by what sing-box has it on (Auto sees a move at its next look, the
+      // select itself is in the API's groups at once)
+      final now = _coreServers()[tag], live = runner.api?.selected[tag];
+      if ((now != null && now != ours) || (live != null && live != '$tag/$ours')) {
+        put(done('dropped', to: to)); // Auto / the failover moved it: the newer pick wins
+        return;
+      }
+      final fb = _fallback;
+      final ok = fb != null && fb.groupServers().containsKey(tag) ? await fb.select(tag, to) : await runner.api?.select(tag, '$tag/$to') ?? false;
+      put(ok ? done('switched', to: to, why: why) : done('dropped', to: to, note: 'the group moved since, or sing-box refused'));
+    } catch (e) {
+      logBook.note('warn', 'connect: $tag: quick start check not applied ($e)');
+    }
+  }
+
+  /// The check ended and the event is written: the result goes into the event, once (`quick` of conn/connected).
+  void _quickFlush(int seq, QuickRun? q) {
+    final id = q?.eventId;
+    if (q == null || id == null || !q.checked || q.written || seq != _connectSeq || q.cancel.cancelled || q.results.isEmpty) return;
+    q.written = true;
+    final order = q.started.keys.toList();
+    final groups = [...q.results]..sort((a, b) => order.indexOf(a.group).compareTo(order.indexOf(b.group)));
+    eventBook.update(id, data: {'quick': quickReportJson(groups, q.tookMs)});
   }
 
   // conn/connected: the entry Auto starts on and its server (the group's chosen member),
@@ -4554,6 +4707,7 @@ class CoreService implements CoreApi {
     final seq = _nextSeq();
     _wakeUp(); // ends the restart's retries
     final was = runner.running || _plan != null || _recovering != null;
+    _recordLastServers(); // before the plan and Auto are gone
     _plan = null;
     _lostTargets = const {};
     _recovering = null;
@@ -4642,6 +4796,7 @@ class CoreService implements CoreApi {
   @override
   Map<String, dynamic> setNetwork(Map<String, dynamic> body) {
     final id = body['id'];
+    _netId = id is String && id.isNotEmpty || id is num ? '$id' : null;
     final epoch = sentinel.context.netEpoch;
     // the tracker first: the context may settle inside `platform` and ask it whether the network switched
     final at = body['at'] is num ? DateTime.fromMillisecondsSinceEpoch((body['at'] as num).toInt()) : _now();
@@ -5232,6 +5387,36 @@ class _SubAbort extends HttpException {
   final String code;
   final Why? why;
   final int? cause;
+}
+
+/// A quick start under way (service.dart `_connect`): the groups started from the record, the results of the check that
+/// runs beside the start, and the event they are written into.
+class QuickRun {
+  QuickRun(this.start, this.keysOf, this.cancel);
+
+  final QuickStart start;
+  final Map<String, List<String>> keysOf; // group tag → server keys in the user's order
+  final Cancel cancel;
+  Map<String, String> get started => start.started;
+
+  final probers = <String, Probe1>{}; // group tag → the check's own test of one server
+  final answered = <String, bool>{}; // '<group>/<key>' → whether the server answered the check
+  final results = <QuickGroup>[];
+  final pending = <Future<void>>[];
+  final ready = Completer<void>(); // sing-box and Auto run: a switch may go
+  final sw = Stopwatch()..start();
+  int tookMs = 0;
+  int? eventId;
+  bool checked = false, written = false;
+
+  Probe1 tap(String tag, Probe1 p) {
+    probers[tag] = p;
+    return (k) async {
+      final r = await p(k);
+      answered['$tag/$k'] = r.answered;
+      return r;
+    };
+  }
 }
 
 /// A group of the plan as the connect's pick sees it (service.dart `connectPicks`).
