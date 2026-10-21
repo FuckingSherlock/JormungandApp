@@ -317,6 +317,22 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         expect([for (final e in events) '${e.from}>${e.to} ${e.reason}'], ['s::a1>s::a2 failover'], reason: 'it keeps failing after the stability: judged as always');
       });
+
+      test('the misses of the outage are forgotten at the stability: one fresh miss does not leave the server, failAfter of them do', () async {
+        gate = switching;
+        await auto.check(); // a2 answers, a1 still misses while the move is not settled: held, not judged
+        await Future<void>.delayed(Duration.zero);
+        expect(fake.groups['route0']!.now, 'route0/s::a1');
+        expect(events, isEmpty, reason: 'the move is not settled: nothing is judged');
+        gate = stableGate; // proved: the outage's misses are forgotten and a1 is judged anew
+        await auto.check(); // a1 misses once more after the stability
+        await Future<void>.delayed(Duration.zero);
+        expect([fake.groups['route0']!.now, events.length], ['route0/s::a1', 0], reason: 'one fresh miss is not failAfter: no switch event');
+        await auto.check(); // the second fresh miss: failAfter after the stability
+        await Future<void>.delayed(Duration.zero);
+        expect([fake.groups['route0']!.now, for (final e in events) '${e.from}>${e.to} ${e.reason}'], ['route0/s::a2', 's::a1>s::a2 failover']);
+        expect(notes.where((n) => n.contains('the misses of the outage are not counted')).length, 1, reason: 'the forgetting is told once');
+      });
     });
 
     test('a dead route on a stable network fails over promptly (the gate allows)', () async {

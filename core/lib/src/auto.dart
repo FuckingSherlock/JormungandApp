@@ -979,7 +979,8 @@ class AutoService {
         // network's: remembered as such, forgotten once the network is stable
         if (outage) _outageMisses.addAll(keep);
       } else {
-        _outageMisses.clear();
+        // the outage's misses stay the network's until the gate says the network is stable (forgotten then): another
+        // route answering while the network still settles does not make them strikes
         final since = memory.answered();
         _directOk = false;
         _roundOk = true;
@@ -2039,8 +2040,12 @@ class AutoService {
       final g = await netGate?.call();
       if (_stopped) return;
       final forget = g != null && g.allow && _outageMisses.contains(cur.health);
-      if (forget) _forgetOutageMisses();
-      if (forget || (g != null && g.switching)) {
+      if (forget) {
+        _forgetOutageMisses(); // its own line: the route is judged again from now
+        _netHeld = true;
+        return;
+      }
+      if (g != null && g.switching) {
         _netHeld = true;
         netHeldRounds++;
         note?.call('auto: the network is changing: ${cur.id} is not left yet, asked again in ${settings.retryPause.inMilliseconds}ms');
