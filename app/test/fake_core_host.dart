@@ -357,9 +357,13 @@ class FakeCoreHost extends CoreHost {
     _changed();
   }
 
+  /// The last profile draft passed to [saveProfile].
+  ProfileDraft? savedProfile;
+
   @override
   String? saveProfile(ProfileDraft d) {
     calls.add('saveProfile');
+    savedProfile = d;
     return null;
   }
 

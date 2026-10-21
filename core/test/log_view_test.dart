@@ -59,10 +59,11 @@ void main() {
     f.q = 'alph';
     expect(vis(info), isTrue);
     expect(f.count, 2);
-    f.toggleCat('sub');
-    expect(f.off.where((k) => k.startsWith('sub/')).length, 6);
+    // sub/diverged is off by default (defaultOffTypes): the category is not all on, so the first toggle turns it on
     f.toggleCat('sub');
     expect(f.off.any((k) => k.startsWith('sub/')), isFalse);
+    f.toggleCat('sub');
+    expect(f.off.where((k) => k.startsWith('sub/')).length, 6);
     f.reset();
     expect(f.count, 0);
   });

@@ -221,7 +221,8 @@ class NodesPageState extends State<NodesPage> {
     if (_tab == 'simple') {
       final total = catalog.sourceOrder.fold<int>(
         0,
-        (sum, id) => sum + (catalog.sourcesData[id]?.nodes.length ?? 0),
+        (sum, id) =>
+            sum + (catalog.sourcesData[id]?.nodes.where((n) => n.usable).length ?? 0),
       );
       return '${l10n.sourcesPlural(catalog.sourceOrder.length)} · ${l10n.nodesPlural(total)}';
     }
@@ -470,7 +471,9 @@ class _TabList extends StatelessWidget {
             : null;
         continue;
       }
-      var nodes = s.nodes;
+      // servers the core cannot use are listed in the card's "Unavailable" block, not here
+      final usable = [for (final n in s.nodes) if (n.usable) n];
+      var nodes = usable;
       if (searching) {
         nodes = [
           for (final n in nodes)
@@ -481,7 +484,7 @@ class _TabList extends StatelessWidget {
           shown[id] = null;
           continue;
         }
-        if (nameHit && nodes.isEmpty) nodes = s.nodes;
+        if (nameHit && nodes.isEmpty) nodes = usable;
       }
       shown[id] = nodes;
     }
@@ -505,7 +508,7 @@ class _TabList extends StatelessWidget {
             ? SourceCard(
                 sliver: sliver,
                 source: s,
-                nodes: shown[id] ?? s.nodes,
+                nodes: shown[id] ?? [for (final n in s.nodes) if (n.usable) n],
                 open: isOpen,
                 edit: edit,
                 searching: searching,

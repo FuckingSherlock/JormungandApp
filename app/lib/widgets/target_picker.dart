@@ -142,7 +142,7 @@ class _TargetPickerState extends State<_TargetPicker> {
       final s = cat.sourcesData[sid];
       if (s == null) continue;
       final t = 'src:$sid';
-      final refs = [for (final n in s.nodes) NodeRef(sid, n)];
+      final refs = [for (final n in s.nodes) if (n.usable) NodeRef(sid, n)];
       final nameHit = _hit(s.name);
       if (!nameHit && !refs.any((r) => nodeHit(r.node))) continue;
       srcs.add(
@@ -277,7 +277,7 @@ class _TargetPickerState extends State<_TargetPicker> {
   List<Widget> _srcNow(BuildContext context, Catalog cat, Source s) {
     final l10n = context.l10n;
     final c = context.colors;
-    final best = cat.bestAlive(cat.liveNodes(s));
+    final best = cat.bestAlive([for (final n in cat.liveNodes(s)) if (n.usable) n]);
     final style = TextStyle(fontSize: 13, color: c.t2);
     return [
       ConnTag(

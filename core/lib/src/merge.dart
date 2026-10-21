@@ -8,10 +8,16 @@ const goneKeep = Duration(days: 15);
 /// `gone` with `goneAt` (settings naming them are kept by the UI), servers that came
 /// back leave `gone`, and gone ones older than [goneKeep] are dropped.
 ///
-/// Ids: a fresh node takes the id of the previous node with the same [Node.key]. A node
-/// whose variant changed (the provider swapped its SNI or fingerprint) keeps the old id
-/// when that is unambiguous — exactly one unmatched old node and one unmatched new node
-/// of the same server ([Node.base]). Otherwise it is a new node and the old one is gone.
+/// Ids: a fresh node takes the id of the previous node it continues. Matching goes in tiers,
+/// each seeing only the nodes the tiers before left unmatched (docs/connect-model.md):
+/// 1. same [Node.key] — the same node;
+/// 2. same [Node.base] (protocol, address, port, credentials) — the variant changed (SNI, fingerprint);
+/// 3. same protocol, address, port and variant — the credentials changed (another account of the provider);
+/// 4. same protocol, address and port — both changed.
+/// In tiers 2–4 a pair is taken only when it is unambiguous: one unmatched old and one unmatched
+/// new node in the tier's group, or in a bigger group the same name (without its «-N» number)
+/// that occurs once among the old and once among the new. Otherwise the new node is a new one
+/// and the old one is gone.
 ///
 /// Names: servers with the same name get a number ("VK-1", "VK-2"). A server keeps its
 /// number across updates; a new one takes the smallest free number of its name.
@@ -38,20 +44,57 @@ const goneKeep = Duration(days: 15);
     final p = byKey[fresh[i].key];
     if (p != null && claimed.add(p)) match[i] = p;
   }
-  final freshByBase = <String, List<int>>{}, oldByBase = <String, List<Map<String, dynamic>>>{};
-  for (var i = 0; i < fresh.length; i++) {
-    if (!match.containsKey(i)) freshByBase.putIfAbsent(fresh[i].base, () => []).add(i);
+  String variantSig(Map<String, dynamic>? ob) => ob == null ? '' : variantOf(ob);
+  String oldVariant(Map<String, dynamic> n) =>
+      variantSig(n['outbound'] is Map ? Map<String, dynamic>.from(n['outbound'] as Map) : null);
+  String hostSig(Object? protocol, Object? address, Object? port) => '$protocol|${'$address'.toLowerCase()}|$port';
+  // the provider's name: our «-N» number off (only ours: a provider's own «Name-2» stays as is)
+  String oldName(Map<String, dynamic> n) {
+    final raw = n['rawName'];
+    if (raw is String) return raw;
+    final name = '${n['name'] ?? ''}', num = n['num'];
+    return num != null && name.endsWith('-$num') ? name.substring(0, name.length - '-$num'.length) : name;
   }
-  for (final n in old) {
-    if (!claimed.contains(n)) oldByBase.putIfAbsent(baseOf(n), () => []).add(n);
-  }
-  freshByBase.forEach((base, f) {
-    final o = oldByBase[base];
-    if (f.length == 1 && o != null && o.length == 1) {
-      match[f.first] = o.first;
-      claimed.add(o.first);
+  // Pairs the unmatched of one tier by signature: a group with one old and one fresh node pairs;
+  // a bigger group pairs by name, only names that occur once among the old and once among the fresh.
+  void tier(String Function(Node) freshSig, String Function(Map<String, dynamic>) oldSig) {
+    final freshBy = <String, List<int>>{}, oldBy = <String, List<Map<String, dynamic>>>{};
+    for (var i = 0; i < fresh.length; i++) {
+      if (!match.containsKey(i)) freshBy.putIfAbsent(freshSig(fresh[i]), () => []).add(i);
     }
-  });
+    for (final n in old) {
+      if (!claimed.contains(n)) oldBy.putIfAbsent(oldSig(n), () => []).add(n);
+    }
+    freshBy.forEach((sig, f) {
+      final o = oldBy[sig];
+      if (o == null) return;
+      if (f.length == 1 && o.length == 1) {
+        match[f.first] = o.first;
+        claimed.add(o.first);
+        return;
+      }
+      final oldByName = <String, List<Map<String, dynamic>>>{}, freshByName = <String, List<int>>{};
+      for (final n in o) {
+        oldByName.putIfAbsent(oldName(n), () => []).add(n);
+      }
+      for (final i in f) {
+        freshByName.putIfAbsent(fresh[i].name, () => []).add(i);
+      }
+      freshByName.forEach((name, fs) {
+        final os = oldByName[name];
+        if (fs.length == 1 && os != null && os.length == 1) {
+          match[fs.first] = os.first;
+          claimed.add(os.first);
+        }
+      });
+    });
+  }
+
+  tier((f) => f.base, baseOf); // 2: the variant changed
+  tier((f) => '${hostSig(f.protocol, f.address, f.port)}|${variantSig(f.outbound)}',
+      (n) => '${hostSig(n['protocol'], n['address'], n['port'])}|${oldVariant(n)}'); // 3: the credentials changed
+  tier((f) => hostSig(f.protocol, f.address, f.port),
+      (n) => hostSig(n['protocol'], n['address'], n['port'])); // 4: both changed
 
   // Ids: kept from the match, else the key; never two nodes with one id.
   final used = <String>{}, ids = <String>[];

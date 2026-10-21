@@ -1852,5 +1852,8 @@
   "system proxy on": "systemProxyOn2",
   "system proxy off": "systemProxyOff2",
   "server: {0}": "server2",
-  "{0}: server unpinned": "serverUnpinned2"
+  "{0}: server unpinned": "serverUnpinned2",
+  "Not supported: no outbound": "notSupportedNoOutbound",
+  "Not supported: {0}": "notSupported2",
+  "removed by the provider or not supported": "removedByTheProviderOrNot"
 }

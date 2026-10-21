@@ -143,7 +143,11 @@ class PickRows extends StatelessWidget {
     this.protoOf,
     this.sourceNames = false,
     this.exitOf,
+    this.sliver = false,
   });
+
+  /// A sliver for a [CustomScrollView]: the rows are built as they scroll into view.
+  final bool sliver;
 
   /// The rows are this chain's exits: they show and ping the answer through the chain's entry
   /// (the pair), not the server's own.
@@ -196,6 +200,29 @@ class PickRows extends StatelessWidget {
       );
     }
 
+    void reorder(int from, int to) {
+      final keys = [for (final r in refs) r.key];
+      final moved = keys.removeAt(from);
+      keys.insert(to, moved);
+      onReorder?.call(keys);
+    }
+
+    Widget proxy(Widget child, int index, Animation<double> animation) =>
+        Material(type: MaterialType.transparency, child: child);
+
+    if (sliver) {
+      return orderable
+          ? SliverReorderableList(
+              itemCount: refs.length,
+              proxyDecorator: proxy,
+              onReorderItem: reorder,
+              itemBuilder: (context, i) => row(i),
+            )
+          : SliverList.builder(
+              itemCount: refs.length,
+              itemBuilder: (context, i) => row(i),
+            );
+    }
     if (!orderable) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -207,14 +234,8 @@ class PickRows extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       buildDefaultDragHandles: false,
       itemCount: refs.length,
-      proxyDecorator: (child, index, animation) =>
-          Material(type: MaterialType.transparency, child: child),
-      onReorderItem: (from, to) {
-        final keys = [for (final r in refs) r.key];
-        final moved = keys.removeAt(from);
-        keys.insert(to, moved);
-        onReorder?.call(keys);
-      },
+      proxyDecorator: proxy,
+      onReorderItem: reorder,
       itemBuilder: (context, i) => row(i),
     );
   }

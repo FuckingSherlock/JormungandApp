@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
-    show CatalogDrafts, CatalogNode, Chain, NodeRef, PickState, Profile, Source;
+    show
+        CatalogDrafts,
+        CatalogNode,
+        Chain,
+        NodeRef,
+        PickState,
+        Profile,
+        Source,
+        reorderKeys;
 
 import '../core/core_host.dart';
 import '../l10n/l10n.dart';
@@ -106,7 +114,10 @@ class _ProfileEditorState extends State<_ProfileEditor> {
     final editing = widget.id != null;
     final warn = profileWarn(l10n, catalog, _d);
     final priority = _d.pickMode == 'priority';
-    final refs = catalog.orderRefs(catalog.profileNodeRefs(_d), _d.pickOrder);
+    final refs = [
+      for (final r in catalog.orderRefs(catalog.profileNodeRefs(_d), _d.pickOrder))
+        if (r.node.usable) r,
+    ];
     return SheetFrame(
       title: editing ? l10n.editProfile : l10n.createProfile,
       titleBadge: const NodesHelpButton(NodesHelp.profile),
@@ -129,83 +140,126 @@ class _ProfileEditorState extends State<_ProfileEditor> {
             },
           ),
       ],
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          FormGroup(
-            label: l10n.name,
-            child: AppTextField(controller: _name, hint: l10n.newProfile),
-          ),
-          FormGroup(
-            label: l10n.subscriptionsServers,
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-            child: HintText(l10n.tickASubscriptionToTakeAll),
-          ),
-          const SizedBox(height: 8),
-          for (final sid in catalog.profileDraftSourceIds(_d))
-            _SourcePickCard(
-              source: catalog.sourcesData[sid]!,
-              draft: _d,
-              open: _open.contains(sid),
-              priority: priority,
-              onToggleOpen: () => setState(
-                () => _open.contains(sid) ? _open.remove(sid) : _open.add(sid),
-              ),
-              onOpen: () => setState(() => _open.add(sid)),
-              onTick: () =>
-                  setState(() => catalog.toggleProfileDraftSource(_d, sid)),
-              onTickNode: (nid) =>
-                  setState(() => catalog.toggleProfileDraftNode(_d, sid, nid)),
-            ),
-          FormGroup(
-            label: l10n.connectThrough,
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                PickModeSwitch(
-                  priority: priority,
-                  onChanged: (p) =>
-                      setState(() => _d.pickMode = p ? 'priority' : 'fastest'),
-                  trailing: PingAllButton(
-                    tooltip: l10n.testLatencyOfAllItsServers,
-                    onTap: () => host.pingNodes([for (final r in refs) r.node]),
+      scrolls: false,
+      // slivers: a profile can take a source with thousands of servers, only the visible rows are
+      // built (the frame keeps the sheet's swipe-down-to-close and its footer)
+      child: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            sliver: SliverMainAxisGroup(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      FormGroup(
+                        label: l10n.name,
+                        child: AppTextField(
+                          controller: _name,
+                          hint: l10n.newProfile,
+                        ),
+                      ),
+                      FormGroup(
+                        label: l10n.subscriptionsServers,
+                        padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                        child: HintText(l10n.tickASubscriptionToTakeAll),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                   ),
                 ),
-                HintText(
-                  priority
-                      ? l10n.theFirstWorkingServerFromThe3
-                      : l10n.theProfileConnectsThroughTheFastest,
+                for (final sid in catalog.profileDraftSourceIds(_d))
+                  _SourcePickCard(
+                    key: ValueKey(sid),
+                    source: catalog.sourcesData[sid]!,
+                    draft: _d,
+                    open: _open.contains(sid),
+                    priority: priority,
+                    onToggleOpen: () => setState(
+                      () => _open.contains(sid)
+                          ? _open.remove(sid)
+                          : _open.add(sid),
+                    ),
+                    onOpen: () => setState(() => _open.add(sid)),
+                    onTick: () => setState(
+                      () => catalog.toggleProfileDraftSource(_d, sid),
+                    ),
+                    onTickNode: (nid) => setState(
+                      () => catalog.toggleProfileDraftNode(_d, sid, nid),
+                    ),
+                  ),
+                SliverToBoxAdapter(
+                  child: FormGroup(
+                    label: l10n.connectThrough,
+                    padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        PickModeSwitch(
+                          priority: priority,
+                          onChanged: (p) => setState(
+                            () => _d.pickMode = p ? 'priority' : 'fastest',
+                          ),
+                          trailing: PingAllButton(
+                            tooltip: l10n.testLatencyOfAllItsServers,
+                            onTap: () => host.pingNodes([
+                              for (final r in refs) r.node,
+                            ]),
+                          ),
+                        ),
+                        HintText(
+                          priority
+                              ? l10n.theFirstWorkingServerFromThe3
+                              : l10n.theProfileConnectsThroughTheFastest,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (priority)
+                  _boxSliver(
+                    context,
+                    margin: const EdgeInsets.symmetric(horizontal: 14),
+                    slivers: [
+                      if (refs.isEmpty)
+                        SliverToBoxAdapter(
+                          child: EmptyLine(l10n.pickServersAbove),
+                        )
+                      else
+                        PickRows(
+                          sliver: true,
+                          refs: refs,
+                          orderable: true,
+                          isOn: (_) => true,
+                          onTap: (_) {},
+                          protoOf: (r) => catalog.sourcesData[r.sid]?.name,
+                          // [keys] cover only the usable rows: the unusable ones keep
+                          // their slots in the stored order
+                          onReorder: (keys) => setState(
+                            () => _d.pickOrder = reorderKeys(_d.pickOrder, [
+                              for (final r in refs) r.key,
+                            ], keys),
+                          ),
+                        ),
+                    ],
+                  ),
+                SliverToBoxAdapter(
+                  child: SetGroup(
+                    children: [
+                      SetRow(
+                        label: l10n.useInAuto,
+                        hint: l10n.autoMayConnectThisProfileIn,
+                        trailing: MiniToggle(
+                          on: _d.inAuto,
+                          onChanged: (v) => setState(() => _d.inAuto = v),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-          if (priority)
-            NodesBox(
-              child: refs.isEmpty
-                  ? EmptyLine(l10n.pickServersAbove)
-                  : PickRows(
-                      refs: refs,
-                      orderable: true,
-                      isOn: (_) => true,
-                      onTap: (_) {},
-                      protoOf: (r) => catalog.sourcesData[r.sid]?.name,
-                      onReorder: (keys) => setState(
-                        () => catalog.reorderProfileDraftPick(_d, keys),
-                      ),
-                    ),
-            ),
-          SetGroup(
-            children: [
-              SetRow(
-                label: l10n.useInAuto,
-                hint: l10n.autoMayConnectThisProfileIn,
-                trailing: MiniToggle(
-                  on: _d.inAuto,
-                  onChanged: (v) => setState(() => _d.inAuto = v),
-                ),
-              ),
-            ],
           ),
         ],
       ),
@@ -213,10 +267,35 @@ class _ProfileEditorState extends State<_ProfileEditor> {
   }
 }
 
+/// A framed card of slivers (the picker's list box): [DecoratedSliver] over [slivers], so the rows
+/// inside stay lazy. Unlike `NodesBox` it does not clip; the rows have no background of their
+/// own in the list style, so nothing paints over the rounded corners.
+Widget _boxSliver(
+  BuildContext context, {
+  required EdgeInsets margin,
+  Color? border,
+  required List<Widget> slivers,
+}) {
+  final c = context.colors;
+  return SliverPadding(
+    padding: margin,
+    sliver: DecoratedSliver(
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(c.radius),
+        border: Border.all(color: border ?? c.border),
+      ),
+      sliver: SliverMainAxisGroup(slivers: slivers),
+    ),
+  );
+}
+
 /// `.ps-card`: a source in the profile editor - tick = the whole source, tap the name for its
-/// servers and tick single ones.
+/// servers and tick single ones. A sliver: the servers (and the "Unavailable" block) of an open
+/// card are built as they scroll into view.
 class _SourcePickCard extends StatelessWidget {
   const _SourcePickCard({
+    super.key,
     required this.source,
     required this.draft,
     required this.open,
@@ -254,45 +333,47 @@ class _SourcePickCard extends StatelessWidget {
     );
 
     if (!s.enabled) {
-      return _Frame(
-        border: c.muted.tint(.55),
-        child: Row(
-          children: [
-            check,
-            Expanded(
-              child: Opacity(
-                opacity: .6,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        s.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: _nameStyle(c),
-                      ),
-                      MetaLine(
-                        parts: [
-                          Text(
-                            l10n.offInNodes,
-                            style: TextStyle(color: c.muted),
-                          ),
-                          Text(l10n.tapTheBoxToDropIt),
-                        ],
-                      ),
-                    ],
+      return SliverToBoxAdapter(
+        child: _Frame(
+          border: c.muted.tint(.55),
+          child: Row(
+            children: [
+              check,
+              Expanded(
+                child: Opacity(
+                  opacity: .6,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: _nameStyle(c),
+                        ),
+                        MetaLine(
+                          parts: [
+                            Text(
+                              l10n.offInNodes,
+                              style: TextStyle(color: c.muted),
+                            ),
+                            Text(l10n.tapTheBoxToDropIt),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
 
-    final live = catalog.liveNodes(s);
+    final live = [for (final n in catalog.liveNodes(s)) if (n.usable) n];
     final alive = live.where(catalog.pings.isAlive).length;
     final picked = state == PickState.all
         ? live.length
@@ -305,12 +386,13 @@ class _SourcePickCard extends StatelessWidget {
     bool isOn(String nid) =>
         state == PickState.all || draft.nodes.contains('${s.id}::$nid');
 
-    return _Frame(
+    return _boxSliver(
+      context,
+      margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
       border: state != PickState.none ? c.accent.tint(.45) : c.border,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Row(
             children: [
               check,
               Expanded(
@@ -394,31 +476,28 @@ class _SourcePickCard extends StatelessWidget {
               const SizedBox(width: 6),
             ],
           ),
-          if (open)
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: c.border)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final n in rows)
-                    NodeRow(
-                      node: n,
-                      framed: true,
-                      on: isOn(n.id),
-                      onTap: () => onTickNode(n.id),
-                      onPing: () => host.pingNodes([n]),
-                    ),
-                  GoneBlock(
-                    refs: catalog.goneRefs(s.id),
-                    isOn: (r) => isOn(r.node.id),
-                  ),
-                ],
-              ),
+        ),
+        if (open) ...[
+          SliverToBoxAdapter(child: Container(height: 1, color: c.border)),
+          SliverList.builder(
+            itemCount: rows.length,
+            itemBuilder: (_, i) => NodeRow(
+              key: ValueKey(rows[i].id),
+              node: rows[i],
+              framed: true,
+              on: isOn(rows[i].id),
+              onTap: () => onTickNode(rows[i].id),
+              onPing: () => host.pingNodes([rows[i]]),
             ),
+          ),
+          GoneBlock(
+            sliver: true,
+            gone: catalog.goneRefs(s.id),
+            unsupported: catalog.unsupportedRefs(s.id),
+            isOn: (r) => isOn(r.node.id),
+          ),
         ],
-      ),
+      ],
     );
   }
 
@@ -574,63 +653,93 @@ class _ChainEditorState extends State<_ChainEditor> {
             },
           ),
       ],
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          FormGroup(
-            label: l10n.name,
-            child: AppTextField(controller: _name, hint: l10n.newChain),
-          ),
-          FormGroup(
-            label: l10n.entryFirstHop,
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
-            child: const SizedBox.shrink(),
-          ),
-          _side('in'),
-          FormGroup(
-            label: l10n.exitWhereTrafficLeaves,
-            padding: const EdgeInsets.fromLTRB(18, 6, 18, 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                PickModeSwitch(
-                  priority: priority,
-                  onChanged: (p) => setState(() {
-                    _d.exitMode = p ? 'priority' : 'fastest';
-                    if (p && _d.outId != null) _open.add('out:${_d.outId}');
-                  }),
-                  trailing: PingAllButton(
-                    tooltip: l10n.testLatencyOfTheExitServers,
-                    // the exits are measured through the entry in use, not directly
-                    onTap: () => host.pingChain(_d, entries: false),
+      scrolls: false,
+      // slivers: the servers of an end are built as they scroll into view (the frame keeps the
+      // sheet's swipe-down-to-close and its footer)
+      child: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            sliver: SliverMainAxisGroup(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      FormGroup(
+                        label: l10n.name,
+                        child: AppTextField(
+                          controller: _name,
+                          hint: l10n.newChain,
+                        ),
+                      ),
+                      FormGroup(
+                        label: l10n.entryFirstHop,
+                        padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
+                        child: const SizedBox.shrink(),
+                      ),
+                    ],
                   ),
                 ),
-                HintText(
-                  priority
-                      ? l10n.theFirstWorkingServerFromThe
-                      : l10n.theFastestSelectedServerOfThe,
+                _side('in'),
+                SliverToBoxAdapter(
+                  child: FormGroup(
+                    label: l10n.exitWhereTrafficLeaves,
+                    padding: const EdgeInsets.fromLTRB(18, 6, 18, 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        PickModeSwitch(
+                          priority: priority,
+                          onChanged: (p) => setState(() {
+                            _d.exitMode = p ? 'priority' : 'fastest';
+                            if (p && _d.outId != null) {
+                              _open.add('out:${_d.outId}');
+                            }
+                          }),
+                          trailing: PingAllButton(
+                            tooltip: l10n.testLatencyOfTheExitServers,
+                            // the exits are measured through the entry in use, not directly
+                            onTap: () => host.pingChain(_d, entries: false),
+                          ),
+                        ),
+                        HintText(
+                          priority
+                              ? l10n.theFirstWorkingServerFromThe
+                              : l10n.theFastestSelectedServerOfThe,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                _side('out'),
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      FormGroup(
+                        label: l10n.routeCheck,
+                        padding: const EdgeInsets.fromLTRB(18, 6, 18, 4),
+                        child: const SizedBox.shrink(),
+                      ),
+                      RouteCheck(draft: _d),
+                      SetGroup(
+                        children: [
+                          SetRow(
+                            label: l10n.useInAuto,
+                            hint: l10n.autoMayConnectThisChainIn,
+                            trailing: MiniToggle(
+                              on: _inAuto,
+                              onChanged: (v) => setState(() => _inAuto = v),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-          _side('out'),
-          FormGroup(
-            label: l10n.routeCheck,
-            padding: const EdgeInsets.fromLTRB(18, 6, 18, 4),
-            child: const SizedBox.shrink(),
-          ),
-          RouteCheck(draft: _d),
-          SetGroup(
-            children: [
-              SetRow(
-                label: l10n.useInAuto,
-                hint: l10n.autoMayConnectThisChainIn,
-                trailing: MiniToggle(
-                  on: _inAuto,
-                  onChanged: (v) => setState(() => _inAuto = v),
-                ),
-              ),
-            ],
           ),
         ],
       ),
@@ -655,23 +764,27 @@ class _ChainEditorState extends State<_ChainEditor> {
             catalog.profilesData.containsKey(current))) {
       ids.add(current); // an end switched off in Nodes
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
+    return SliverMainAxisGroup(
+      slivers: [
         for (final id in ids)
           () {
             final taken = id == other;
             final key = '$side:$id';
             final open = _open.contains(key);
             final active = id == current;
-            final all = active
-                ? catalog.chainSideRefs(_d, side)
-                : catalog.unitRefs(id);
+            // servers the core cannot use are not offered (the Nodes tab lists them as unavailable)
+            final all = [
+              for (final r in active
+                  ? catalog.chainSideRefs(_d, side)
+                  : catalog.unitRefs(id))
+                if (r.node.usable) r,
+            ];
             // off in the source's own editor and not yet switched on for this chain
             final offRefs = active
                 ? [
                     for (final r in catalog.chainOffRefs(_d, side))
-                      if (!(side == 'in' ? _d.inOn : _d.outOn).contains(r.key))
+                      if (r.node.usable &&
+                          !(side == 'in' ? _d.inOn : _d.outOn).contains(r.key))
                         r,
                   ]
                 : const <NodeRef>[];
@@ -692,16 +805,19 @@ class _ChainEditorState extends State<_ChainEditor> {
                       : l10n.usedAsEntryTapToSwap)
                 : '${n == null ? '' : '${n.flag} '}${nOn < all.length ? l10n.ofNodes(nOn, all.length) : l10n.nodesPlural(all.length)}';
             final List<NodeRef> list = active && priority
-                ? catalog.chainExitOrder(_d)
+                ? [
+                    for (final r in catalog.chainExitOrder(_d))
+                      if (r.node.usable) r,
+                  ]
                 : active && side == 'out'
                 ? catalog.byChainPing<NodeRef>(_d, all, (r) => r.node)
                 : catalog.byPing<NodeRef>(all, (r) => r.node);
-            return Stack(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Opacity(
+            return SliverMainAxisGroup(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Stack(
+                    children: [
+                      Opacity(
                       opacity: taken ? .6 : 1,
                       child: InkWell(
                         onTap: () => setState(() {
@@ -750,90 +866,93 @@ class _ChainEditorState extends State<_ChainEditor> {
                         ),
                       ),
                     ),
-                    if (open)
-                      NodesBox(
-                        margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (active && all.isNotEmpty)
-                              Container(
-                                decoration: BoxDecoration(
-                                  border: Border(
-                                    bottom: BorderSide(color: c.border),
-                                  ),
-                                ),
-                                child: SelectionBar(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    14,
-                                    6,
-                                    10,
-                                    6,
-                                  ),
-                                  count: Text(l10n.ofSelected(nOn, all.length)),
-                                  chip: nOn == all.length
-                                      ? l10n.none
-                                      : l10n.all,
-                                  onChip: () => setState(
-                                    () => catalog.chainSetNodesAll(_d, side),
-                                  ),
-                                ),
-                              ),
-                            if (list.isEmpty)
-                              EmptyLine(l10n.noEnabledNodes)
-                            else if (active)
-                              PickRows(
-                                refs: list,
-                                orderable: priority,
-                                exitOf: side == 'out' ? _d : null,
-                                isOn: (r) => !off.contains(r.key),
-                                onTap: (r) => setState(
-                                  () =>
-                                      catalog.chainToggleNode(_d, side, r.key),
-                                ),
-                                onReorder: (keys) => setState(
-                                  () => catalog.chainReorderExit(_d, keys),
-                                ),
-                              )
-                            else
-                              for (final r in list)
-                                NodeRow(
-                                  node: r.node,
-                                  onPing: () => host.pingNodes([r.node]),
-                                ),
-                            // servers the source's own editor switched off: folded below, one
-                            // tap uses one in this chain only
-                            if (active)
-                              DisabledBlock(
-                                refs: offRefs,
-                                onSwitchOn: (r) => setState(
-                                  () =>
-                                      catalog.chainForceNode(_d, side, r.key),
-                                ),
-                              ),
-                            // servers the provider dropped are not offered here: a chain keeps
-                            // nothing for them worth showing (Nodes lists them)
-                          ],
+                      if (all.length > 1 || offRefs.isNotEmpty)
+                        Positioned(
+                          right: 8,
+                          top: 4,
+                          child: IconBtn(
+                            kind: IconBtnKind.ghost,
+                            tooltip: l10n.showNodes,
+                            onTap: () => setState(
+                              () => open ? _open.remove(key) : _open.add(key),
+                            ),
+                            icon: AnimatedRotation(
+                              turns: open ? .5 : 0,
+                              duration: const Duration(milliseconds: 200),
+                              child: const Icon(Icons.expand_more),
+                            ),
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-                if (all.length > 1 || offRefs.isNotEmpty)
-                  Positioned(
-                    right: 8,
-                    top: 4,
-                    child: IconBtn(
-                      kind: IconBtnKind.ghost,
-                      tooltip: l10n.showNodes,
-                      onTap: () => setState(
-                        () => open ? _open.remove(key) : _open.add(key),
-                      ),
-                      icon: AnimatedRotation(
-                        turns: open ? .5 : 0,
-                        duration: const Duration(milliseconds: 200),
-                        child: const Icon(Icons.expand_more),
-                      ),
-                    ),
+                if (open)
+                  _boxSliver(
+                    context,
+                    margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                    slivers: [
+                      if (active && all.isNotEmpty)
+                        SliverToBoxAdapter(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(color: c.border),
+                              ),
+                            ),
+                            child: SelectionBar(
+                              padding: const EdgeInsets.fromLTRB(14, 6, 10, 6),
+                              count: Text(l10n.ofSelected(nOn, all.length)),
+                              chip: nOn == all.length ? l10n.none : l10n.all,
+                              onChip: () => setState(
+                                () => catalog.chainSetNodesAll(_d, side),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (list.isEmpty)
+                        SliverToBoxAdapter(
+                          child: EmptyLine(l10n.noEnabledNodes),
+                        )
+                      else if (active)
+                        PickRows(
+                          sliver: true,
+                          refs: list,
+                          orderable: priority,
+                          exitOf: side == 'out' ? _d : null,
+                          isOn: (r) => !off.contains(r.key),
+                          onTap: (r) => setState(
+                            () => catalog.chainToggleNode(_d, side, r.key),
+                          ),
+                          // [keys] cover only the usable rows: the unusable ones keep
+                          // their slots in the stored order
+                          onReorder: (keys) => setState(
+                            () => _d.exitOrder = reorderKeys(_d.exitOrder, [
+                              for (final r in list) r.key,
+                            ], keys),
+                          ),
+                        )
+                      else
+                        SliverList.builder(
+                          itemCount: list.length,
+                          itemBuilder: (_, i) => NodeRow(
+                            key: ValueKey(list[i].key),
+                            node: list[i].node,
+                            onPing: () => host.pingNodes([list[i].node]),
+                          ),
+                        ),
+                      // servers the source's own editor switched off: folded below, one
+                      // tap uses one in this chain only
+                      if (active)
+                        DisabledBlock(
+                          sliver: true,
+                          refs: offRefs,
+                          onSwitchOn: (r) => setState(
+                            () => catalog.chainForceNode(_d, side, r.key),
+                          ),
+                        ),
+                      // servers the provider dropped are not offered here: a chain keeps
+                      // nothing for them worth showing (Nodes lists them)
+                    ],
                   ),
               ],
             );

@@ -808,6 +808,9 @@ Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
   return out;
 }
 
+/// Types the Events filter starts with switched off (still journaled and in Raw).
+const Set<String> defaultOffTypes = {'sub/diverged'};
+
 /// The temporary filter of the Events tab (forgotten with the page).
 class EventFilter {
   String q = '';
@@ -816,16 +819,20 @@ class EventFilter {
   /// The «Background» chip is off: events from while the screen was off are hidden.
   bool hideBg = false;
 
-  /// Switched-off types (`cat/type`).
-  final off = <String>{};
+  /// Switched-off types (`cat/type`); starts as [defaultOffTypes].
+  final off = <String>{...defaultOffTypes};
 
   int get count => (q.isEmpty ? 0 : 1) + (problems ? 1 : 0) + (hideBg ? 1 : 0) + offCats.length;
 
-  /// The categories with at least one type switched off.
+  /// The categories with at least one type whose off-state differs from [defaultOffTypes] (the always shown ones
+  /// do not count).
   List<(String, List<String>)> get offCats => [
     for (final c in eventCats)
-      if (c.$2.any((t) => off.contains('${c.$1}/$t') && !alwaysShownTypes.contains('${c.$1}/$t'))) c,
+      if (c.$2.any((t) => differsFromDefault('${c.$1}/$t') && !alwaysShownTypes.contains('${c.$1}/$t'))) c,
   ];
+
+  /// Whether the type [k] is switched off now, but is not by default, or the other way round.
+  bool differsFromDefault(String k) => off.contains(k) != defaultOffTypes.contains(k);
 
   /// The number of types still on in a category (the always shown ones count as on).
   int typesOn((String, List<String>) c) =>
@@ -857,7 +864,9 @@ class EventFilter {
     q = '';
     problems = false;
     hideBg = false;
-    off.clear();
+    off
+      ..clear()
+      ..addAll(defaultOffTypes);
   }
 
   void toggleType(String key) {

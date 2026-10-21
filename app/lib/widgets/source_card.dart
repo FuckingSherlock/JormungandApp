@@ -150,15 +150,16 @@ class SourceCard extends StatelessWidget {
         ),
     ];
 
-    final tail = <Widget>[
-      if (s.kind == 'node') _AddRow(onTap: onAddServer),
-      if (!searching)
-        GoneBlock(
-          refs: catalog.goneRefs(s.id),
-          onRowTap: (r) => onGoneMenu(r.node),
-          onForgetAll: () => host.forgetGone(s.id),
-        ),
-    ];
+    // the block is collapsed by default; in a sliver its rows are built as they scroll into view
+    // the box form is the reorder list: the block stays collapsed there
+    Widget goneBlock({required bool sliver}) => GoneBlock(
+      sliver: sliver,
+      expandable: sliver,
+      gone: catalog.goneRefs(s.id),
+      unsupported: catalog.unsupportedRefs(s.id),
+      onRowTap: (r) => onGoneMenu(r.node),
+      onForgetAll: () => host.forgetGone(s.id),
+    );
     if (sliver) {
       final at = {for (final (i, n) in sorted.indexed) n.id: i};
       Widget fade(Widget list) => s.enabled
@@ -179,14 +180,9 @@ class SourceCard extends StatelessWidget {
                     itemBuilder: (_, i) => _row(host, sorted[i], i),
                   ),
                 ),
-                fade(
-                  SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: tail,
-                    ),
-                  ),
-                ),
+                if (s.kind == 'node')
+                  fade(SliverToBoxAdapter(child: _AddRow(onTap: onAddServer))),
+                if (!searching) fade(goneBlock(sliver: true)),
               ]
             : const [],
       );
@@ -198,7 +194,8 @@ class SourceCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final (i, n) in sorted.indexed) _row(host, n, i),
-          ...tail,
+          if (s.kind == 'node') _AddRow(onTap: onAddServer),
+          if (!searching) goneBlock(sliver: false),
         ],
       ),
     );
@@ -242,9 +239,10 @@ class SourceCard extends StatelessWidget {
     final isFile = s.kind == 'file';
     // a manual group counts "servers", the others "nodes" (mockup `srcMetaHtml`)
     final nodesWord = s.kind != 'node';
-    final live = catalog.liveNodes(s).length;
+    // servers the core cannot use are not counted: they sit in the "Unavailable" block
+    final live = catalog.liveNodes(s).where((n) => n.usable).length;
     final gone = s.gone.length;
-    final total = s.nodes.length + gone;
+    final total = s.nodes.where((n) => n.usable).length + gone;
     final format = '${s.unknown['format'] ?? ''}';
     final updatedAt = s.unknown['updatedAt'];
     final TextStyle warnOrDim = TextStyle(color: gone > 0 ? c.warn : c.t3);

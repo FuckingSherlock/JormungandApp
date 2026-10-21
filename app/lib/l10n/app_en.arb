@@ -4643,5 +4643,15 @@
       }
     }
   },
-  "didNotOpenThroughAnyServer": "did not open through any server"
+  "didNotOpenThroughAnyServer": "did not open through any server",
+  "removedByTheProviderOrNot": "removed by the provider or not supported",
+  "notSupported2": "Not supported: {s0}",
+  "@notSupported2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "notSupportedNoOutbound": "Not supported: no outbound"
 }

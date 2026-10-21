@@ -27,8 +27,11 @@ Future<void> showSourceEntry(BuildContext context, String sid) async {
   );
   final s = host.catalog.sourcesData[sid];
   if (s == null) return;
-  final live = host.catalog.liveNodes(s).length;
-  if (live > 0 && live - host.catalog.offCount(s) == 0) {
+  // only the servers the core can use count: the unusable ones are not in the list
+  final liveNodes = [for (final n in host.catalog.liveNodes(s)) if (n.usable) n];
+  final live = liveNodes.length;
+  final off = liveNodes.where((n) => host.catalog.isNodeOff(s, n.id)).length;
+  if (live > 0 && live - off == 0) {
     host.setSourceOffNodes(sid, snapshot);
     if (context.mounted) showToast(context, l10n.atLeast1ServerIsNeeded);
   }
@@ -47,13 +50,16 @@ class _SourceEntrySheet extends StatelessWidget {
     final l10n = context.l10n;
     final c = context.colors;
     if (s == null) return const SizedBox.shrink();
-    final live = catalog.liveNodes(s);
-    final on = live.length - catalog.offCount(s);
-    final hidden = s.nodes.length - live.length;
+    final live = [for (final n in catalog.liveNodes(s)) if (n.usable) n];
+    final on = live.where((n) => !catalog.isNodeOff(s, n.id)).length;
+    final hidden = s.nodes.where((n) => n.usable).length - live.length;
     final none = on == 0 && live.isNotEmpty;
     final priority = s.pickMode == 'priority';
     final refs = priority
-        ? catalog.sourceEntryRefs(sid)
+        ? [
+            for (final r in catalog.sourceEntryRefs(sid))
+              if (r.node.usable) r,
+          ]
         : catalog.byPing<NodeRef>([
             for (final n in live) NodeRef(sid, n),
           ], (r) => r.node);
@@ -69,9 +75,17 @@ class _SourceEntrySheet extends StatelessWidget {
           onPressed: none ? null : () => Navigator.of(context).pop(),
         ),
       ],
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+      scrolls: false,
+      // a lazy list: a big subscription has hundreds of servers (the frame keeps the sheet's
+      // swipe-down-to-close and its footer)
+      child: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.only(top: 12),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
           SetGroup(
             children: [
               SetRow(
@@ -128,33 +142,47 @@ class _SourceEntrySheet extends StatelessWidget {
               PingAllButton(onTap: () => host.pingSource(sid)),
             ],
           ),
-          NodesBox(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (refs.isEmpty)
-                  EmptyLine(l10n.noServersYet)
-                else
-                  PickRows(
-                    refs: refs,
-                    orderable: priority,
+                ],
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+            sliver: DecoratedSliver(
+              decoration: BoxDecoration(
+                color: c.card,
+                borderRadius: BorderRadius.circular(c.radius),
+                border: Border.all(color: c.border),
+              ),
+              sliver: SliverMainAxisGroup(
+                slivers: [
+                  if (refs.isEmpty)
+                    SliverToBoxAdapter(child: EmptyLine(l10n.noServersYet))
+                  else
+                    PickRows(
+                      sliver: true,
+                      refs: refs,
+                      orderable: priority,
+                      isOn: (r) => !catalog.isNodeOff(s, r.node.id),
+                      onTap: (r) => host.setSourceOffNodes(
+                        sid,
+                        catalog.offNodesToggled(sid, r.node.id),
+                      ),
+                      onReorder: (keys) => host.setPickOrder(
+                        sid,
+                        reorderKeys(s.pickOrder, [
+                          for (final r in refs) r.key,
+                        ], keys),
+                      ),
+                    ),
+                  GoneBlock(
+                    sliver: true,
+                    gone: catalog.goneRefs(sid),
+                    unsupported: catalog.unsupportedRefs(sid),
                     isOn: (r) => !catalog.isNodeOff(s, r.node.id),
-                    onTap: (r) => host.setSourceOffNodes(
-                      sid,
-                      catalog.offNodesToggled(sid, r.node.id),
-                    ),
-                    onReorder: (keys) => host.setPickOrder(
-                      sid,
-                      reorderKeys(s.pickOrder, [
-                        for (final r in refs) r.key,
-                      ], keys),
-                    ),
                   ),
-                GoneBlock(
-                  refs: catalog.goneRefs(sid),
-                  isOn: (r) => !catalog.isNodeOff(s, r.node.id),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],

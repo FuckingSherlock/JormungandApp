@@ -14,6 +14,7 @@ CatalogNode _node(String id, String name) => CatalogNode(
   protocol: 'vless',
   address: '$id.example.com',
   port: 443,
+  outbound: const {'type': 'vless'},
 );
 
 /// A host whose catalog holds two subscriptions with two servers each.

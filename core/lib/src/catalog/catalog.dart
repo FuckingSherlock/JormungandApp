@@ -339,7 +339,8 @@ class Catalog {
 
   bool isNodeDisabled(Source s, String nid) => s.disabledNodes.contains(nid);
 
-  /// The servers the rest of the app sees (`liveNodes`).
+  /// The servers the rest of the app sees (`liveNodes`). Unusable ones stay here (the plan names them `unsupported`);
+  /// lists of the UI show them in the «Unavailable» block instead ([unsupportedRefs]).
   List<CatalogNode> liveNodes(Source s) => s.nodes.where((n) => !isNodeDisabled(s, n.id)).toList();
 
   bool isNodeOff(Source s, String nid) => s.offNodes.contains(nid);
@@ -408,6 +409,14 @@ class Catalog {
   }
 
   List<NodeRef> goneRefs(String sid) => [for (final n in sourcesData[sid]?.gone ?? <CatalogNode>[]) NodeRef(sid, n)];
+
+  /// Servers of a source that cannot go into a config (not usable), not switched off in Nodes; empty when the
+  /// source is missing.
+  List<NodeRef> unsupportedRefs(String sid) {
+    final s = sourcesData[sid];
+    if (s == null) return [];
+    return [for (final n in s.nodes) if (!n.usable && !isNodeDisabled(s, n.id)) NodeRef(sid, n)];
+  }
 
   // ───────────────────────────── off in Nodes: "broken" entries ─────────────────────────────
 
