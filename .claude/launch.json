@@ -6,6 +6,12 @@
       "runtimeExecutable": "dart",
       "runtimeArgs": ["run", "core/bin/jormd.dart", "--data", "core/.data-dev", "--lan"],
       "port": 7788
+    },
+    {
+      "name": "states",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["C:/Users/Professional/.claude/states-hub/serve.py", "8766"],
+      "port": 8766
     }
   ]
 }
