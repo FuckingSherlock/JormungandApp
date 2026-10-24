@@ -279,19 +279,7 @@ tried: [ {node: "src2::n9a3f…", opens: true}, … ]</div>
 </div>
 
 <div>
-<div class="lbl">Как это читается в новом стиле — мини-карточка (не новый дизайн site/blocked)</div>
-<div class="phone">
- <div class="ev2 warn">
-  <div class="hd"><div class="ic">🌐</div><div class="meta">19:14 <span class="tag w">WARN</span></div></div>
-  <div class="ttl">network-lc.ru does not open on this server</div>
-  <div class="box">
-   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
-   <div class="sec">Opens through</div>
-   <div class="r sp"><div class="main ok"><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
-  </div>
-  <div class="btns"><span class="b">Details ▾</span><span class="b">Create rule</span></div>
- </div>
-</div>
+<div class="lbl">Новый вид — общая карточка сайта, см. §4 (сделано 2026-10-24)</div>
 </div>
 </div>
 <div class="ba">
@@ -302,7 +290,6 @@ tried: [ {node: "src2::n9a3f…", opens: true}, … ]</div>
  <li><b>Остаток.</b> Если после исправления <code>server</code> и <code>via</code> дают <b>один</b> ключ, такого события быть не должно: <code>via</code> — всегда <i>другая</i> нода. Защита: ядро не пишет <code>via</code>, равный <code>server</code> (считать «не нашли»); приложение не рисует два одинаковых ряда. <span class="newf">Нужно проверить в ядре (не в схеме)</span>, где при записи <code>via</code> сравнивается с <code>server</code>.</li>
  <li><b>Ожидание следующего репорта:</b> Fazhzcezbdi.interkh.com (из bugs.md).</li>
  <li><b>Открытый вопрос (bugs.md):</b> почему поздние <code>site/unreachable</code> не пробовали <code>n518c…</code> — это <b>цель правила</b> (<code>viaTarget</code>), а не основной маршрут. Гипотеза: лестница «tried» берёт ноды подписок и разведчика, а ноду-цель правила пропускает как «уже известную» из <code>blocked</code>; в <code>unreachable</code> её нет ни в <code>tried</code>, ни в Checked, хотя именно она открывала сайт ранее. Нужно ядро: сверить <code>tried</code> позднего <code>unreachable</code> с <code>viaTarget</code> первого <code>blocked</code>.</li>
- <li>В новом виде: строка Route — маршрут, где упало; «Opens through» — только узел с зелёной подсветкой и переход к нему; тап по карточке ничего не делает.</li>
 </ul></div>
 </div>
 <div>
